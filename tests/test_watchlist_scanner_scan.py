@@ -1171,7 +1171,7 @@ def test_curate_discovery_playlists_uses_source_priority_for_recent_albums(monke
         "avg_daily_plays": 0.0,
         "artist_play_counts": {},
     })
-    monkeypatch.setattr(scanner.database, "get_discovery_recent_albums", lambda limit, source, profile_id: [recent_album] if source == "deezer" else [], raising=False)
+    monkeypatch.setattr(scanner.database, "get_discovery_recent_albums", lambda limit, source, profile_id, exclude_future_years=False: [recent_album] if source == "deezer" else [], raising=False)
     monkeypatch.setattr(scanner.database, "get_discovery_pool_tracks", lambda *args, **kwargs: [discovery_track] if kwargs.get("source") == "deezer" else [], raising=False)
     monkeypatch.setattr(scanner.database, "save_curated_playlist", lambda key, tracks, profile_id=1: saved_playlists.append((key, list(tracks))) or True, raising=False)
     monkeypatch.setattr(scanner.database, "get_top_artists", lambda *args, **kwargs: [], raising=False)

@@ -158,6 +158,33 @@ def clean_track_title(track_title: str, artist_name: str) -> str:
     return cleaned if cleaned else original
 
 
+# A leading track-number prefix is EITHER a zero-padded number (01, 04, 099 — no
+# real song title starts with one), OR a plain number followed by a real separator
+# AND a space ("3 - ", "12. "). Deliberately NOT a bare "number space word", so it
+# leaves "7 Rings", "99 Luftballons", "50 Ways to Leave Your Lover" and
+# "1-800-273-8255" untouched.
+_TRACK_NUM_PREFIX_RE = re.compile(r"^\s*(?:0\d{1,2}[\s._)\-]*|\d{1,3}\s*[._)\-]\s+)(?=\S)")
+
+
+def strip_leading_track_number(title: str) -> str:
+    """Conservatively remove a leading track-number prefix from a track title.
+
+    Fixes #890 — files named ``01 - Sun It Rises.flac`` whose stem leaks into the
+    title as ``01 - Sun It Rises``, which then never matches the canonical
+    ``Sun It Rises`` (false "missing"). Only strips an unambiguous track-number
+    prefix; a coincidental leading number that's part of the title is preserved, and
+    it never reduces a title to empty or a bare number."""
+    s = (title or "").strip()
+    if not s:
+        return title or ""
+    stripped = _TRACK_NUM_PREFIX_RE.sub("", s, count=1).strip()
+    # Keep the original if stripping left nothing real — empty, a bare number, or
+    # only punctuation (e.g. "01 - " → "-"). A real title has a letter/digit.
+    if stripped.isdigit() or not re.search(r"[^\W_]", stripped):
+        return s
+    return stripped
+
+
 
 
 def get_album_type_display(raw_type, track_count) -> str:

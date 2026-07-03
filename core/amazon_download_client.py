@@ -32,6 +32,8 @@ from config.settings import config_manager
 from core.amazon_client import AmazonClient, AmazonClientError
 from core.download_plugins.base import DownloadSourcePlugin
 from core.download_plugins.types import AlbumResult, DownloadStatus, TrackResult
+from core.quality.model import AudioQuality
+from core.quality.source_map import quality_tier_for_source
 from utils.logging_config import get_logger
 
 logger = get_logger("amazon_download_client")
@@ -76,9 +78,12 @@ class AmazonDownloadClient(DownloadSourcePlugin):
         if download_path is None:
             download_path = config_manager.get("soulseek.download_path", "./downloads")
         self.download_path = Path(download_path)
-        self.download_path.mkdir(parents=True, exist_ok=True)
+        try:
+            self.download_path.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            logger.warning(f"Could not verify download path {self.download_path}: {e}")
 
-        self._quality = config_manager.get("amazon_download.quality", "flac")
+        self._quality = quality_tier_for_source("amazon", default="flac")
         self._allow_fallback = config_manager.get("amazon_download.allow_fallback", True)
 
         self._client = AmazonClient(preferred_codec=self._quality)
@@ -133,11 +138,17 @@ class AmazonDownloadClient(DownloadSourcePlugin):
         album_map: Dict[str, AlbumResult] = {}
         album_order: List[str] = []
         preferred = self._client.preferred_codec
+        # Search results only carry the codec (real sample_rate arrives at
+        # stream time). Claim the format honestly — FLAC for the lossless
+        # codec, lossy otherwise — so audio_quality derives a real format
+        # instead of the display label ("Lossless"), and the post-download
+        # probe pins the actual sample_rate/bit_depth.
+        amazon_q = AudioQuality(format='flac' if _codec_key(preferred) == 'flac' else 'aac')
 
         for item in items:
             quality = _quality_label(preferred)
             if item.is_track:
-                track_results.append(TrackResult(
+                tr = TrackResult(
                     username="amazon",
                     filename=f"{item.asin}||{item.artist_name} - {item.title}",
                     size=0,
@@ -155,7 +166,9 @@ class AmazonDownloadClient(DownloadSourcePlugin):
                         "album_asin": item.album_asin,
                         "isrc": item.isrc,
                     },
-                ))
+                )
+                tr.set_quality(amazon_q)
+                track_results.append(tr)
             elif item.is_album:
                 album_asin = item.album_asin or item.asin
                 if album_asin not in album_map:
@@ -173,6 +186,7 @@ class AmazonDownloadClient(DownloadSourcePlugin):
                         title=item.title,
                         album=item.album_name,
                     )
+                    placeholder.set_quality(amazon_q)
                     album_map[album_asin] = AlbumResult(
                         username="amazon",
                         album_path=album_asin,

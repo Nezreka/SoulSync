@@ -80,14 +80,13 @@ body {
     /* Soft translucent borders */
     border-right: 1px solid rgba(255, 255, 255, 0.08);
     border-top: 1px solid rgba(255, 255, 255, 0.12);
-    border-top-right-radius: 24px;
     border-bottom-right-radius: 24px;
 
-    /* Soft floating shadow with inner glow */
+    /* Soft floating shadow with inner glow — dropped the 0 4px 16px duplicate and the
+       0 0 60px accent glow (60px blur at 6% opacity: nearly invisible but a costly
+       shadow pass). One outer + the two insets read the same. */
     box-shadow:
-        0 8px 32px rgba(0, 0, 0, 0.3),
-        0 4px 16px rgba(0, 0, 0, 0.2),
-        0 0 60px rgba(var(--accent-rgb), 0.06),
+        0 8px 30px rgba(0, 0, 0, 0.34),
         inset 0 1px 0 rgba(255, 255, 255, 0.1),
         inset 0 -1px 0 rgba(0, 0, 0, 0.2);
 
@@ -109,7 +108,10 @@ body {
     position: fixed;
     pointer-events: none;
     border-radius: 50%;
-    filter: blur(40px);
+    /* The radial-gradient already fades to transparent at 70%, so a smaller blur
+       still reads as a soft aura — but shrinks the composited (orb + feather)
+       bounding box and the blur work. 40px -> 28px: ~imperceptible, cheaper fill. */
+    filter: blur(28px);
     will-change: transform, opacity;
 }
 
@@ -136,22 +138,27 @@ body {
 /* In performance mode the aura loses its blur + animation, leaving two hard
    static circles — hide them entirely instead. */
 body.reduce-effects .sidebar::before,
-body.reduce-effects .sidebar::after {
+body.reduce-effects .sidebar::after,
+body.max-performance .sidebar::before,
+body.max-performance .sidebar::after {
     display: none !important;
 }
 
+/* translate + opacity only — NO scale(). The orbs are blur(28px); scaling a blurred
+   element re-rasterizes the blur every frame, but translating it just moves the cached
+   layer on the compositor (free). Same drifting glow, no per-frame re-blur (#935). */
 @keyframes sidebar-orb-1 {
-    0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.5; }
-    25% { transform: translate(30px, 80px) scale(1.2); opacity: 1; }
-    50% { transform: translate(-10px, 180px) scale(0.9); opacity: 0.6; }
-    75% { transform: translate(20px, 50px) scale(1.15); opacity: 0.9; }
+    0%, 100% { transform: translate(0, 0); opacity: 0.5; }
+    25% { transform: translate(30px, 80px); opacity: 1; }
+    50% { transform: translate(-10px, 180px); opacity: 0.6; }
+    75% { transform: translate(20px, 50px); opacity: 0.9; }
 }
 
 @keyframes sidebar-orb-2 {
-    0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.6; }
-    30% { transform: translate(-20px, -100px) scale(1.25); opacity: 0.4; }
-    60% { transform: translate(30px, -50px) scale(0.85); opacity: 1; }
-    80% { transform: translate(-10px, 40px) scale(1.1); opacity: 0.5; }
+    0%, 100% { transform: translate(0, 0); opacity: 0.6; }
+    30% { transform: translate(-20px, -100px); opacity: 0.4; }
+    60% { transform: translate(30px, -50px); opacity: 1; }
+    80% { transform: translate(-10px, 40px); opacity: 0.5; }
 }
 
 .sidebar > * {
@@ -166,7 +173,12 @@ body.reduce-effects .sidebar::after {
     top: 0;
     bottom: 0;
     width: 10px;
-    z-index: 100;
+    /* z:1 on purpose: the artist map/web overlays live INSIDE .page (position:relative; z-index:1),
+       so their z:100 is trapped in the page's stacking context — at root level the whole page paints
+       at z:1. The strip must TIE that (not beat it): tie -> DOM order wins -> the page (later in the
+       DOM) and any fullscreen overlay inside it paint over the strip. Anything higher (the old 100,
+       even 5) pokes through the overlays. */
+    z-index: 1;
     opacity: 0;
     transition: opacity 0.5s ease;
     pointer-events: none;
@@ -291,17 +303,16 @@ body.reduce-effects .sidebar::after {
 
 .sidebar-header {
     min-height: 115px;
-    /* Opaque base layered under the accent gradient so nav items scrolling
-       past the sticky header don't bleed through the translucent stops. */
+    /* Translucent so the backdrop-filter blur below is visible — the dark tint
+       keeps the header readable while nav items scrolling behind it read as a
+       soft frosted blur instead of a sharp bleed-through. */
     background:
         linear-gradient(180deg,
-            rgba(var(--accent-rgb), 0.14) 0%,
-            rgba(var(--accent-rgb), 0.08) 30%,
-            rgba(var(--accent-rgb), 0.03) 70%,
-            rgba(18, 18, 18, 1) 100%),
-        rgb(18, 18, 18);
+            rgba(var(--accent-rgb), 0.16) 0%,
+            rgba(var(--accent-rgb), 0.10) 30%,
+            rgba(24, 24, 24, 0.62) 70%,
+            rgba(18, 18, 18, 0.72) 100%);
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    border-top-right-radius: 20px;
     padding: 20px 24px;
     display: flex;
     flex-direction: column;
@@ -309,8 +320,21 @@ body.reduce-effects .sidebar::after {
     gap: 8px;
     position: sticky;
     top: 0;
+    /* Same stacking level as the nav (z-index:1) — sits in the normal sidebar
+       flow rather than forced above everything. */
+    z-index: 1;
     overflow: hidden;
     flex-shrink: 0;
+
+    /* Intense frosted-glass blur: nav items scrolling up behind the translucent
+       accent-gradient top now read as a soft blur instead of bleeding through
+       sharply. (Only visible where the background is translucent — the opaque
+       base toward the bottom still stops any bleed.) */
+    /* Backdrop blur is re-evaluated whenever content drifts behind it (the
+       ambient orbs do). Cost scales with radius — 28px -> 18px keeps the frosted
+       read while cutting the per-frame blur work by ~a third. */
+    backdrop-filter: blur(18px) saturate(1.3);
+    -webkit-backdrop-filter: blur(18px) saturate(1.3);
 
     /* Subtle inner glow */
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
@@ -332,14 +356,20 @@ body.reduce-effects .sidebar::after {
         rgba(var(--accent-rgb), 0.06) 60%,
         transparent 100%
     );
+    /* Animate transform (compositor-only) instead of `left` (which forced a
+       layout recalc every frame). The element width is 60% of the header, so
+       translateX(400%) = 240% of header width — the same travel `left:-100%`
+       → `left:140%` produced. Pixel-identical path, no per-frame layout. */
+    transform: translateX(0);
+    will-change: transform, opacity;
     animation: sidebar-header-sweep 8s ease-in-out infinite;
     pointer-events: none;
 }
 
 @keyframes sidebar-header-sweep {
-    0%, 100% { left: -100%; opacity: 0; }
+    0%, 100% { transform: translateX(0); opacity: 0; }
     10% { opacity: 1; }
-    50% { left: 140%; opacity: 1; }
+    50% { transform: translateX(400%); opacity: 1; }
     60% { opacity: 0; }
 }
 
@@ -477,12 +507,14 @@ body:not(.reduce-effects) .nav-button.active:hover {
    transparent border, so no layout shift). The expensive full-effects
    bits (gradient, transform/translateX, multi-layer box-shadow) stay
    off so hovering doesn't trigger compositing/repaint churn. */
-body.reduce-effects .nav-button:hover {
+body.reduce-effects .nav-button:hover,
+body.max-performance .nav-button:hover {
     background: rgba(255, 255, 255, 0.05);
     border-color: rgba(255, 255, 255, 0.08);
 }
 
-body.reduce-effects .nav-button.active:hover {
+body.reduce-effects .nav-button.active:hover,
+body.max-performance .nav-button.active:hover {
     background: rgba(var(--accent-rgb), 0.18);
     border-color: rgba(var(--accent-rgb), 0.3);
 }
@@ -3249,10 +3281,83 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 
 .settings-section-body {
     transition: all 0.2s ease;
+    /* Breathing room before the next tile header so an expanded tile's last
+       control (e.g. "+ Add Path") never sits flush against the next section. */
+    margin-bottom: 18px;
 }
 
 .settings-section-body.collapsed {
     display: none;
+    margin-bottom: 0;
+}
+
+.settings-experimental-break {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin: 28px 0 20px;
+    padding: 0 4px;
+    user-select: none;
+}
+
+.settings-experimental-break__line {
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(
+        90deg,
+        transparent,
+        rgba(245, 166, 35, 0.55) 20%,
+        rgba(245, 166, 35, 0.55) 80%,
+        transparent
+    );
+}
+
+.settings-experimental-break__label {
+    flex-shrink: 0;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(245, 180, 80, 0.92);
+    padding: 6px 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(245, 166, 35, 0.35);
+    background: rgba(245, 166, 35, 0.08);
+}
+
+.settings-experimental-intro {
+    margin: 0 0 16px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.experimental-enable-modal .confirm-modal-content p {
+    margin: 0 0 16px;
+    line-height: 1.55;
+    color: rgba(255, 255, 255, 0.82);
+}
+
+.experimental-enable-ack {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    font-size: 13px;
+    line-height: 1.45;
+    color: rgba(255, 255, 255, 0.78);
+    cursor: pointer;
+    margin: 0;
+}
+
+.experimental-enable-ack input {
+    width: auto;
+    margin: 3px 0 0;
+    flex-shrink: 0;
+}
+
+#experimental-enable-confirm-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
 }
 
 .settings-group {
@@ -3369,79 +3474,19 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     color: #a78bfa;          /* Usenet — violet */
 }
 
-/* Lidarr-style intro hero card on Indexers & Downloaders tab */
-.ind-hero {
-    padding: 18px 22px;
-    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.08), rgba(35, 35, 35, 0.6));
-    border: 1px solid rgba(var(--accent-rgb), 0.15);
-}
-
-.ind-hero-title {
-    font-size: 13px;
-    font-weight: 700;
-    letter-spacing: 0.8px;
-    text-transform: uppercase;
-    color: rgb(var(--accent-rgb));
-    margin-bottom: 12px;
-}
-
-.ind-hero-flow {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 12px;
-    font-size: 13px;
-    color: rgba(255, 255, 255, 0.85);
-}
-
-.ind-hero-step {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 12px;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 999px;
-}
-
-.ind-hero-step-num {
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    background: rgba(var(--accent-rgb), 0.2);
-    color: rgb(var(--accent-rgb));
-    font-weight: 700;
-    font-size: 11px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.ind-hero-arrow {
-    color: rgba(var(--accent-rgb), 0.55);
-    font-weight: 700;
-}
-
-.ind-hero-sub {
-    font-size: 12.5px;
-    color: rgba(255, 255, 255, 0.55);
-    line-height: 1.55;
-}
-
 .ind-hero-warning {
     margin-top: 14px;
     padding: 12px 14px;
-    background: rgba(255, 165, 0, 0.06);
-    border: 1px solid rgba(255, 165, 0, 0.2);
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid rgba(255, 255, 255, 0.07);
     border-radius: 10px;
 }
 
 .ind-hero-warning-title {
     font-size: 12px;
-    font-weight: 700;
-    color: #ffb155;
-    letter-spacing: 0.4px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.6);
+    letter-spacing: 0.3px;
     margin-bottom: 6px;
 }
 
@@ -3901,6 +3946,24 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     border: 1px solid rgba(255, 255, 255, 0.04);
 }
 
+/* Setting label + inline ⓘ info icon. The icon sits on the (fixed) label row;
+   clicking it only toggles the help text below, so the trigger never moves. */
+.setting-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+/* Kill the default .form-group label margin-bottom so the label centers on the
+   icon row instead of sitting high. */
+.setting-row > label { margin: 0; }
+/* Field-heading labels (e.g. "Search strategy") sit next to a 12px control and
+   the brighter checkbox labels — match that weight/brightness so they don't look
+   dim or undersized. */
+.setting-row > label:not(.checkbox-label) {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.85);
+}
 /* Supported Formats */
 .supported-formats {
     color: rgba(255, 255, 255, 0.7);
@@ -4089,213 +4152,764 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     box-shadow: 0 4px 12px rgba(var(--accent-rgb), 0.15);
 }
 
-/* Quality tier cards - upgraded inner cards */
-.quality-tier {
-    margin-bottom: 16px;
-    padding: 12px;
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01));
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 12px;
+/* Presets footer: explanation on the left, a tidy Reset button on the right */
+.quality-presets-footer {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 10px;
+}
+.preset-reset-btn {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 12px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.2s ease;
+}
+.preset-reset-btn:hover {
+    background: rgba(var(--accent-rgb), 0.1);
+    border-color: rgba(var(--accent-rgb), 0.35);
+    color: rgb(var(--accent-light-rgb));
+}
+.preset-reset-icon {
+    font-size: 13px;
+    line-height: 1;
+}
+
+/* Quality tab: the settings tiles stay exactly on the normal centered 920px
+   settings column. On wide screens only the profile panel protrudes into the
+   empty right margin, so the Quality tab lines up with the other tabs. */
+.qp-layout {
+    --qp-side-width: 320px;
+    --qp-side-gap: 8px;
+    display: flex;
+    align-items: flex-start;
+    gap: var(--qp-side-gap);
+    width: calc(100% + var(--qp-side-width) + var(--qp-side-gap));
+    overflow: visible;
+}
+
+.qp-main {
+    flex: 0 0 calc(100% - var(--qp-side-width) - var(--qp-side-gap));
+    width: calc(100% - var(--qp-side-width) - var(--qp-side-gap));
+    min-width: 0;
+    max-width: calc(100% - var(--qp-side-width) - var(--qp-side-gap));
+}
+
+.qp-side-panel {
+    width: var(--qp-side-width);
+    flex-shrink: 0;
+    border-left: 1px solid rgba(255, 255, 255, 0.06);
+    padding: 0 4px 0 22px;
+    margin-left: 0;
+    position: sticky;
+    top: 80px;
+    max-height: calc(100vh - 120px);
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+}
+.qp-side-panel::-webkit-scrollbar { width: 7px; }
+.qp-side-panel::-webkit-scrollbar-track { background: transparent; }
+.qp-side-panel::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.14); border-radius: 4px; }
+.qp-side-panel::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.24); }
+
+.qp-side-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.qp-side-panel-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.85);
+    margin: 0;
+    white-space: nowrap;
+}
+
+.qp-manage-btn {
+    flex-shrink: 0;
+    padding: 5px 8px;
+    border-radius: 7px;
+    border: 1px solid rgba(var(--accent-rgb), 0.22);
+    background: rgba(var(--accent-rgb), 0.09);
+    color: rgba(var(--accent-light-rgb), 0.86);
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+}
+.qp-manage-btn:hover {
+    border-color: rgba(var(--accent-rgb), 0.42);
+    background: rgba(var(--accent-rgb), 0.15);
+}
+
+.qp-side-panel-hint {
+    font-size: 11px;
+    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.4);
+    margin: 0 0 14px;
+}
+
+.qp-editing-banner {
+    font-size: 11px;
+    line-height: 1.5;
+    padding: 8px 10px;
+    margin: -6px 0 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(245, 191, 66, 0.35);
+    background: rgba(245, 191, 66, 0.08);
+    color: rgba(255, 255, 255, 0.68);
+}
+.qp-editing-banner-name {
+    color: rgb(245, 191, 66);
+}
+
+.qp-profile-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.qp-profile-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
     transition: all 0.2s ease;
 }
 
-.quality-tier:hover {
-    border-color: rgba(255, 255, 255, 0.12);
+.qp-profile-row:hover {
+    border-color: rgba(var(--accent-rgb), 0.3);
 }
 
-.quality-tier-header {
+.qp-profile-row.active {
+    background: linear-gradient(135deg,
+            rgba(var(--accent-rgb), 0.2) 0%,
+            rgba(var(--accent-light-rgb), 0.12) 100%);
+    border-color: rgba(var(--accent-rgb), 0.5);
+    box-shadow: 0 4px 12px rgba(var(--accent-rgb), 0.15);
+}
+
+/* Currently loaded into the tile editor for viewing/editing, but NOT the
+   active default — deliberately a different (amber) accent from .active
+   (accent-colored = live) so the two states are never visually confused. */
+.qp-profile-row.editing {
+    border-color: rgba(245, 191, 66, 0.5);
+    background: linear-gradient(135deg, rgba(245, 191, 66, 0.1) 0%, rgba(245, 191, 66, 0.03) 100%);
+}
+
+.qp-profile-dot {
+    flex-shrink: 0;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.15);
+    cursor: pointer;
+}
+.qp-profile-row.active .qp-profile-dot {
+    background: rgb(var(--accent-light-rgb));
+    box-shadow: 0 0 6px rgba(var(--accent-rgb), 0.6);
+}
+
+.qp-profile-text {
+    flex: 1;
+    min-width: 0;
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 10px;
+    flex-direction: column;
+    gap: 1px;
+    cursor: pointer;
 }
 
-.quality-tier-name {
+.qp-profile-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.75);
+}
+.qp-profile-row.active .qp-profile-name {
+    color: rgb(var(--accent-light-rgb));
+}
+
+.qp-profile-sub {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 9.5px;
+    color: rgba(255, 255, 255, 0.35);
+}
+.qp-profile-row.active .qp-profile-sub {
+    color: rgba(var(--accent-light-rgb), 0.6);
+}
+
+.qp-profile-name-input {
+    flex: 1;
+    min-width: 0;
+    height: 28px;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 16px;
+    padding: 5px 7px;
+    border-radius: 6px;
+    border: 1px solid rgba(var(--accent-rgb), 0.4);
+    background: rgba(0, 0, 0, 0.25);
+    color: #fff;
+}
+
+.qp-profile-tags {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.qp-profile-tag {
+    font-size: 8px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    padding: 2px 5px;
+    border-radius: 5px;
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.5);
+    white-space: nowrap;
+}
+.qp-profile-tag.qp-tag-autoimport {
+    background: rgba(var(--accent-rgb), 0.15);
+    color: rgb(var(--accent-light-rgb));
+}
+.qp-profile-tag.qp-tag-default {
+    background: rgba(74, 222, 128, 0.15);
+    color: rgb(134, 239, 172);
+}
+
+.qp-profile-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
+}
+
+.qp-profile-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 12px;
+    line-height: 1;
+    cursor: pointer;
+    background: none;
+    border: none;
+}
+.qp-profile-action:hover {
+    background: rgba(var(--accent-rgb), 0.25);
+    color: rgb(var(--accent-light-rgb));
+}
+.qp-profile-action.qp-action-delete:hover {
+    background: rgba(248, 113, 113, 0.2);
+    color: #f87171;
+}
+.qp-profile-action.qp-action-autoimport.active {
+    color: rgb(var(--accent-light-rgb));
+    background: rgba(var(--accent-rgb), 0.18);
+}
+
+.qp-profile-new {
+    margin-top: 10px;
+}
+
+.qp-profile-new-btn {
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: 10px;
+    border: 1px dashed rgba(255, 255, 255, 0.15);
+    background: transparent;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+.qp-profile-new-btn:hover {
+    border-color: rgba(var(--accent-rgb), 0.4);
+    color: rgb(var(--accent-light-rgb));
+}
+
+.qp-profile-new-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 34px;
+}
+
+.qp-profile-new-input {
+    flex: 1;
+    min-width: 0;
+    height: 32px;
+    font-size: 12px;
+    line-height: 16px;
+    padding: 7px 9px;
+    border-radius: 8px;
+    border: 1px solid rgba(var(--accent-rgb), 0.4);
+    background: rgba(0, 0, 0, 0.25);
+    color: #fff;
+}
+
+.qp-profile-list-empty {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.4);
+    font-style: italic;
+}
+
+/* Small badge on tiles governed by the active profile. */
+.qp-governed-badge {
+    flex-shrink: 0;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 9px;
+    font-weight: 600;
+    background: rgba(var(--accent-rgb), 0.12);
+    color: rgb(var(--accent-light-rgb));
+    white-space: nowrap;
+}
+
+.quality-upgrade-cutoff-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 8px;
+}
+
+.quality-upgrade-cutoff-group label {
+    flex-shrink: 0;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.quality-upgrade-cutoff-group select {
+    width: 100%;
+    max-width: 420px;
+}
+
+.qp-manager-modal {
+    width: min(720px, calc(100vw - 32px));
+    max-height: min(760px, calc(100vh - 48px));
+}
+
+.qp-manager-body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* Section titles + status rows + profile rows all render into this single
+   wrapper (see renderQualityProfileManager) — needs its own gap, or every
+   row renders flush against its neighbor with nothing but a row's own
+   padding between them. */
+.qp-manager-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+/* Info icon + collapsible body — same #settings-page .info-icon /
+   .setting-help-body look used everywhere else in Settings, reused here via
+   toggleSettingHelp(). Those rules are scoped to #settings-page though, and
+   this modal is appended straight onto <body> (outside that scope), so the
+   visuals are mirrored here rather than the giant explanation block sitting
+   permanently open and dominating the modal. */
+.qp-manager-info-row {
+    justify-content: space-between;
+}
+.qp-manager-info-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.75);
+}
+#qp-manager-overlay .info-icon {
+    cursor: pointer;
+    -webkit-user-select: none;
+    user-select: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 1px solid rgba(var(--accent-rgb), 0.45);
+    background: transparent;
+    color: rgba(var(--accent-rgb), 0.9);
+    font-family: Georgia, 'Times New Roman', serif;
+    font-style: italic;
+    font-weight: 700;
+    font-size: 11px;
+    line-height: 1;
+    text-align: center;
+    margin-left: 6px;
+    flex: 0 0 auto;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+#qp-manager-overlay .info-icon:hover {
+    background: rgba(var(--accent-rgb), 0.16);
+    border-color: rgba(var(--accent-rgb), 0.85);
+    color: rgba(var(--accent-rgb), 1);
+}
+#qp-manager-overlay .info-icon.open {
+    background: rgba(var(--accent-rgb), 0.9);
+    border-color: rgba(var(--accent-rgb), 0.9);
+    color: #0b0f14;
+}
+.qp-manager-info.setting-help-body {
+    margin: 0;
+    padding: 10px 12px;
+    background: rgba(var(--accent-rgb), 0.06);
+    border-left: 2px solid rgba(var(--accent-rgb), 0.5);
+    border-radius: 0 6px 6px 0;
+    font-size: 11.5px;
+    font-style: normal;
+    line-height: 1.55;
+    color: rgba(255, 255, 255, 0.6);
+}
+.qp-manager-info.setting-help-body strong { color: rgba(255, 255, 255, 0.82); font-weight: 600; }
+
+.qp-manager-section-title {
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: rgba(255, 255, 255, 0.4);
+    margin: 4px 2px 4px;
+}
+/* Between "Profiles" and the actual rows specifically — was reading as too
+   cramped, the rows looked glued to the heading. */
+.qp-manager-status-row + .qp-manager-section-title {
+    margin-top: 10px;
+    margin-bottom: 8px;
+}
+
+/* Read-only "what's active" rows — deliberately NOT styled like
+   .qp-manager-row below: mixing these into the same look as the actual
+   profile list is what made a user think "Auto-Import" itself was a saved
+   profile. These only ever show a name; the assignment is changed from a
+   profile's own row (Set default / Use for import), not from here. */
+.qp-manager-status-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: transparent;
+}
+
+.qp-manager-status-label {
+    flex-shrink: 0;
+    width: 130px;
+    font-size: 11.5px;
+    color: rgba(255, 255, 255, 0.45);
+}
+
+.qp-manager-status-value {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12.5px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.qp-manager-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.035);
+}
+
+.qp-manager-row-main {
+    min-width: 0;
+}
+
+.qp-manager-row-name {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.qp-manager-row-sub {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-top: 2px;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.42);
+}
+
+.qp-manager-action {
+    min-width: 94px;
+    padding: 7px 10px;
+    border-radius: 7px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.045);
+    color: rgba(255, 255, 255, 0.68);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.qp-manager-action:hover {
+    border-color: rgba(var(--accent-rgb), 0.32);
+    color: rgb(var(--accent-light-rgb));
+}
+
+.qp-manager-action.active {
+    border-color: rgba(var(--accent-rgb), 0.44);
+    background: rgba(var(--accent-rgb), 0.15);
+    color: rgb(var(--accent-light-rgb));
+}
+
+.qp-manager-action.clear {
+    min-width: 132px;
+}
+
+@media (max-width: 1800px) {
+    .qp-layout {
+        flex-direction: column-reverse;
+        width: 100%;
+    }
+
+    .qp-main {
+        flex-basis: 100%;
+        width: 100%;
+        max-width: 100%;
+    }
+
+    .qp-side-panel {
+        width: 100%;
+        border-left: none;
+        border-top: none;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        padding: 0 0 16px 0;
+        margin-left: 0;
+        margin-top: 0;
+        margin-bottom: 16px;
+        max-height: none;
+        position: static;
+    }
+}
+
+@media (max-width: 640px) {
+    .quality-upgrade-cutoff-group {
+        align-items: stretch;
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    .qp-manager-row {
+        grid-template-columns: 1fr;
+    }
+
+    .qp-manager-action {
+        width: 100%;
+    }
+}
+
+/* Quality tier cards - upgraded inner cards */
+/* ── Ranked-targets editor (v3 quality profile) ───────────────────────── */
+.ranked-targets-editor {
+    margin-bottom: 16px;
+}
+
+.ranked-targets-label {
+    display: block;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 11px;
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+/* The label now sits in a .setting-row (alongside the ⓘ), whose label margin is
+   zeroed — restore a healthy gap before the draggable target list below. */
+.ranked-targets-editor > .setting-row { margin-bottom: 10px; }
+
+.ranked-targets-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 12px;
+}
+
+.ranked-targets-empty {
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 11px;
+    font-style: italic;
+    padding: 10px 12px;
+    border: 1px dashed rgba(255, 255, 255, 0.12);
+    border-radius: 10px;
+}
+
+.ranked-target-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01));
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    transition: border-color 0.15s ease, opacity 0.15s ease;
+}
+
+.ranked-target-row:hover {
+    border-color: rgba(255, 255, 255, 0.16);
+}
+
+.ranked-target-row.rt-dragging {
+    opacity: 0.4;
+}
+
+.ranked-target-row.rt-dragover {
+    border-color: rgba(99, 179, 237, 0.7);
+}
+
+.ranked-target-row .rt-handle {
+    cursor: grab;
+    color: rgba(255, 255, 255, 0.35);
+    font-size: 14px;
+    user-select: none;
+}
+
+.ranked-target-row .rt-rank {
+    min-width: 18px;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.ranked-target-row .rt-label {
     color: rgba(255, 255, 255, 0.95);
     font-size: 12px;
     font-weight: 600;
 }
 
-.quality-tier-priority {
-    color: rgba(255, 255, 255, 0.45);
-    font-size: 10px;
-    font-weight: 500;
-}
-
-.quality-tier-sliders {
-    padding-left: 24px;
-    opacity: 1;
-    transition: opacity 0.3s ease;
-}
-
-.quality-tier-sliders.disabled {
-    opacity: 0.35;
-    pointer-events: none;
-}
-
-.flac-bit-depth-selector {
-    padding: 8px 12px;
-    transition: opacity 0.3s ease;
-}
-
-.flac-bit-depth-selector.disabled {
-    opacity: 0.35;
-    pointer-events: none;
-}
-
-.flac-bit-depth-selector label {
-    display: block;
-    margin-bottom: 6px;
-    color: rgba(255, 255, 255, 0.7);
-    font-size: 11px;
-}
-
-.bit-depth-buttons {
-    display: flex;
-    gap: 8px;
-}
-
-.bit-depth-btn {
+.ranked-target-row .rt-spacer {
     flex: 1;
-    padding: 7px 12px;
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02));
+}
+
+.ranked-target-row .rt-move,
+.ranked-target-row .rt-del {
+    background: rgba(255, 255, 255, 0.06);
     border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 10px;
-    color: rgba(255, 255, 255, 0.7);
+    border-radius: 6px;
+    color: rgba(255, 255, 255, 0.65);
+    cursor: pointer;
     font-size: 11px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    padding: 2px 7px;
+    transition: background 0.15s ease;
 }
 
-.bit-depth-btn.active {
-    background: linear-gradient(135deg,
-            rgba(var(--accent-rgb), 0.2) 0%,
-            rgba(var(--accent-light-rgb), 0.12) 100%);
-    border-color: rgba(var(--accent-rgb), 0.4);
-    color: rgb(var(--accent-light-rgb));
-    font-weight: 600;
-    box-shadow: 0 4px 16px rgba(var(--accent-rgb), 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+.ranked-target-row .rt-move:hover,
+.ranked-target-row .rt-del:hover {
+    background: rgba(255, 255, 255, 0.12);
 }
 
-.bit-depth-btn:hover {
-    background: rgba(255, 255, 255, 0.08);
-    border-color: rgba(255, 255, 255, 0.15);
-    color: #ffffff;
-    transform: translateY(-1px);
+.ranked-target-row .rt-del:hover {
+    background: rgba(229, 62, 62, 0.25);
+    border-color: rgba(229, 62, 62, 0.5);
 }
 
-.bit-depth-btn.active:hover {
-    background: linear-gradient(135deg,
-            rgba(var(--accent-rgb), 0.28) 0%,
-            rgba(var(--accent-light-rgb), 0.18) 100%);
-}
-
-.slider-group {
-    margin-top: 8px;
-}
-
-.slider-group label {
-    display: block;
-    margin-bottom: 8px;
-    color: rgba(255, 255, 255, 0.7);
-    font-size: 11px;
-}
-
-.dual-slider-container {
-    position: relative;
-    height: 40px;
-    margin: 10px 0;
-}
-
-.range-slider {
-    position: absolute;
-    width: 100%;
-    height: 4px;
-    -webkit-appearance: none;
-    appearance: none;
-    background: transparent;
-    outline: none;
-    pointer-events: none;
-}
-
-.range-slider::-webkit-slider-track {
-    width: 100%;
-    height: 4px;
-    background: rgba(255, 255, 255, 0.08);
-    border-radius: 2px;
-}
-
-.range-slider::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 16px;
-    height: 16px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, rgb(var(--accent-rgb)), rgb(var(--accent-light-rgb)));
-    cursor: pointer;
-    pointer-events: all;
-    border: 2px solid #0a0a0a;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4), 0 0 8px rgba(var(--accent-rgb), 0.2);
-}
-
-.range-slider::-webkit-slider-thumb:hover {
-    background: linear-gradient(135deg, rgb(var(--accent-light-rgb)), #22e968);
-    transform: scale(1.15);
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4), 0 0 12px rgba(var(--accent-rgb), 0.3);
-}
-
-.range-slider::-moz-range-track {
-    width: 100%;
-    height: 4px;
-    background: rgba(255, 255, 255, 0.08);
-    border-radius: 2px;
-}
-
-.range-slider::-moz-range-thumb {
-    width: 16px;
-    height: 16px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, rgb(var(--accent-rgb)), rgb(var(--accent-light-rgb)));
-    cursor: pointer;
-    pointer-events: all;
-    border: 2px solid #0a0a0a;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4), 0 0 8px rgba(var(--accent-rgb), 0.2);
-}
-
-.range-slider::-moz-range-thumb:hover {
-    background: linear-gradient(135deg, rgb(var(--accent-light-rgb)), #22e968);
-    transform: scale(1.15);
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4), 0 0 12px rgba(var(--accent-rgb), 0.3);
-}
-
-.range-slider-track {
-    position: absolute;
-    top: 18px;
-    width: 100%;
-    height: 4px;
-    background: rgba(var(--accent-rgb), 0.25);
-    border-radius: 2px;
-    pointer-events: none;
-}
-
-.slider-values {
+.ranked-target-add {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    margin-top: 8px;
-    color: rgba(255, 255, 255, 0.5);
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+}
+
+.ranked-target-add select,
+.ranked-target-add input[type="number"] {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 6px;
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 13px;
+    padding: 7px 9px;
+    min-height: 34px;
+}
+
+.ranked-target-add select { min-width: 130px; cursor: pointer; }
+
+/* Kill the default light optgroup/option bars in the dark dropdown. */
+.ranked-target-add select optgroup {
+    background: #1a1a1e;
+    color: rgba(255, 255, 255, 0.55);
+    font-style: normal;
+    font-weight: 600;
+}
+
+.ranked-target-add select option {
+    background: #1a1a1e;
+    color: rgba(255, 255, 255, 0.92);
+    font-weight: 400;
+}
+
+.ranked-target-add .rt-inline-label {
+    color: rgba(255, 255, 255, 0.7);
     font-size: 11px;
-    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
 }
 
-.slider-values span:first-child,
-.slider-values span:last-child {
-    color: rgb(var(--accent-light-rgb));
-    font-weight: 700;
+.ranked-target-add .rt-add-btn {
+    background: rgba(99, 179, 237, 0.18);
+    border: 1px solid rgba(99, 179, 237, 0.4);
+    border-radius: 6px;
+    color: rgba(255, 255, 255, 0.92);
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 5px 12px;
+    transition: background 0.15s ease;
 }
 
-/* ===== END QUALITY PROFILE STYLES ===== */
+.ranked-target-add .rt-add-btn:hover {
+    background: rgba(99, 179, 237, 0.3);
+}
 
 .test-button {
     background: rgba(var(--accent-rgb), 0.1);
@@ -4348,12 +4962,6 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 
 .save-button:active {
     transform: translateY(0) scale(0.97);
-}
-
-.settings-actions {
-    display: flex;
-    justify-content: center;
-    padding-top: 20px;
 }
 
 /* Additional Settings Components */
@@ -8236,10 +8844,11 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-top: 1px solid rgba(255, 255, 255, 0.12);
     margin: 20px;
-    /* Soft floating shadow */
+    /* Soft floating shadow — one outer layer instead of two stacked (this is a
+       near-fullscreen element, so each shadow pass is expensive); the single
+       slightly-stronger blur reads the same. */
     box-shadow:
-        0 8px 32px rgba(0, 0, 0, 0.3),
-        0 4px 16px rgba(0, 0, 0, 0.2),
+        0 8px 28px rgba(0, 0, 0, 0.34),
         inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
@@ -8895,8 +9504,9 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 
 .service-card {
-    background: rgba(18, 18, 22, 0.9);
-    backdrop-filter: blur(12px);
+    /* backdrop-filter dropped: the 90% opaque bg made blur(12px) invisible (x3 cards,
+       pure GPU waste). Bumped to 0.97 so the now-unblurred sliver is imperceptible. */
+    background: rgba(18, 18, 22, 0.97);
     border-radius: 16px;
     border: 1px solid rgba(255, 255, 255, 0.06);
     padding: 20px 22px;
@@ -9667,8 +10277,9 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 
 .stat-card-dashboard {
-    background: rgba(18, 18, 22, 0.9);
-    backdrop-filter: blur(12px);
+    /* backdrop-filter dropped: 90% opaque bg made blur(12px) invisible (x3, GPU waste);
+       0.97 keeps it looking solid. */
+    background: rgba(18, 18, 22, 0.97);
     border-radius: 16px;
     border: 1px solid rgba(255, 255, 255, 0.06);
     padding: 20px;
@@ -10074,9 +10685,9 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .activity-feed-container {
     /* Premium glassmorphic foundation */
     background: linear-gradient(135deg,
-            rgba(26, 26, 26, 0.95) 0%,
-            rgba(18, 18, 18, 0.98) 100%);
-    backdrop-filter: blur(12px) saturate(1.1);
+            rgba(26, 26, 26, 0.97) 0%,
+            rgba(18, 18, 18, 0.99) 100%);
+    /* backdrop-filter dropped: 95-99% opaque bg already hid the blur (GPU waste). */
     border-radius: 16px;
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-top: 1px solid rgba(255, 255, 255, 0.12);
@@ -10518,6 +11129,63 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     display: flex;
     flex-direction: column;
     gap: 4px;
+}
+
+/* #876: quarantine "alternatives for one song" group — a collapsible parent
+   row wrapping the standard entry rows for each failed source attempt. */
+.lh-quarantine-group {
+    border-left: 3px solid rgba(var(--accent-rgb), 0.35);
+    border-radius: 8px;
+    margin-bottom: 4px;
+    background: rgba(var(--accent-rgb), 0.03);
+}
+
+.lh-quarantine-group-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    cursor: pointer;
+    border-radius: 8px;
+    transition: background 0.15s ease;
+}
+
+.lh-quarantine-group-header:hover {
+    background: rgba(var(--accent-rgb), 0.06);
+}
+
+.lh-quarantine-group-text {
+    flex: 1;
+    min-width: 0;
+}
+
+.lh-quarantine-group-count {
+    flex-shrink: 0;
+    font-size: 12px;
+    color: rgba(var(--accent-rgb), 0.95);
+    border: 1px solid rgba(var(--accent-rgb), 0.4);
+    border-radius: 999px;
+    padding: 2px 10px;
+    white-space: nowrap;
+}
+
+.lh-quarantine-group-header .lh-expand-btn {
+    transition: transform 0.18s ease;
+}
+
+.lh-quarantine-group:not(.lh-qgroup-collapsed) .lh-quarantine-group-header .lh-expand-btn {
+    transform: rotate(180deg);
+}
+
+.lh-quarantine-group-members {
+    padding: 0 8px 8px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.lh-quarantine-group.lh-qgroup-collapsed .lh-quarantine-group-members {
+    display: none;
 }
 
 .library-history-entry-row1 {
@@ -12222,6 +12890,171 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .auto-sync-scheduled-timing small {
     background: rgba(255, 255, 255, 0.05);
     color: rgba(255, 255, 255, 0.45);
+}
+
+/* ── Hourly board: interval LANES (horizontal rows — Concept 1) ───────────── */
+.auto-sync-lanes {
+    min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.auto-sync-lane {
+    display: flex;
+    align-items: stretch;
+    gap: 12px;
+    padding: 11px 14px;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.025);
+    transition: border-color 0.22s ease, background 0.22s ease,
+                box-shadow 0.22s ease, transform 0.18s ease;
+}
+
+.auto-sync-lane.empty {
+    background: transparent;
+    border-style: dashed;
+    border-color: rgba(255, 255, 255, 0.08);
+}
+
+.auto-sync-lane.filled {
+    border-color: rgba(var(--accent-rgb), 0.22);
+    background:
+        linear-gradient(100deg, rgba(var(--accent-rgb), 0.07), rgba(var(--accent-rgb), 0.012) 55%),
+        rgba(255, 255, 255, 0.02);
+}
+
+.auto-sync-lane:hover {
+    border-color: rgba(var(--accent-rgb), 0.3);
+}
+
+.auto-sync-lane.drag-over {
+    border-color: rgba(var(--accent-rgb), 0.65);
+    border-style: solid;
+    background: rgba(var(--accent-rgb), 0.1);
+    box-shadow:
+        inset 0 0 0 1px rgba(var(--accent-rgb), 0.35),
+        0 10px 30px rgba(var(--accent-rgb), 0.16);
+    transform: translateY(-1px);
+}
+
+.auto-sync-lane-badge {
+    position: relative;
+    flex: 0 0 86px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    padding: 4px 14px 4px 4px;
+    border-right: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.auto-sync-lane-badge b {
+    font-size: 21px;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    color: rgba(255, 255, 255, 0.92);
+}
+
+.auto-sync-lane.filled .auto-sync-lane-badge b {
+    background: linear-gradient(160deg, rgb(var(--accent-rgb)), rgba(var(--accent-rgb), 0.6));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.auto-sync-lane-badge span {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: rgba(255, 255, 255, 0.4);
+    white-space: nowrap;
+}
+
+.auto-sync-lane-count {
+    position: absolute;
+    top: 0;
+    right: 10px;
+    min-width: 17px;
+    height: 17px;
+    padding: 0 4px;
+    display: grid;
+    place-items: center;
+    font-size: 10px;
+    font-weight: 800;
+    font-style: normal;
+    border-radius: 999px;
+    color: #fff;
+    background: rgba(var(--accent-rgb), 0.9);
+    box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.35);
+}
+
+.auto-sync-lane-track {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 2px 0;
+}
+
+.auto-sync-lane-hint {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 7px 2px;
+    color: rgba(255, 255, 255, 0.32);
+    font-size: 12.5px;
+    font-weight: 500;
+}
+
+.auto-sync-lane-hint-ic {
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 7px;
+    border: 1px dashed rgba(255, 255, 255, 0.2);
+    font-size: 15px;
+    line-height: 1;
+}
+
+.auto-sync-lane.drag-over .auto-sync-lane-hint { color: rgb(var(--accent-rgb)); }
+.auto-sync-lane.drag-over .auto-sync-lane-hint-ic {
+    border-style: solid;
+    border-color: rgba(var(--accent-rgb), 0.6);
+    color: rgb(var(--accent-rgb));
+}
+
+/* Scheduled cards flow horizontally inside a lane (override the column full-width) */
+.auto-sync-lane .auto-sync-scheduled-card {
+    width: auto;
+    min-width: 212px;
+    max-width: 264px;
+    margin-bottom: 0;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: rgba(0, 0, 0, 0.28);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    animation: autoSyncPop 0.24s ease both;
+}
+
+.auto-sync-lane .auto-sync-scheduled-card:hover {
+    border-color: rgba(var(--accent-rgb), 0.4);
+    background: rgba(0, 0, 0, 0.36);
+}
+
+@keyframes autoSyncPop {
+    from { opacity: 0; transform: translateY(5px) scale(0.97); }
+    to { opacity: 1; transform: none; }
 }
 
 .auto-sync-board {
@@ -14461,6 +15294,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .mirrored-card-delete,
 .mirrored-card-clear,
 .mirrored-card-link,
+.mirrored-card-export,
 .mirrored-card-rename {
     background: rgba(255, 255, 255, 0.06);
     border: 1px solid rgba(255, 255, 255, 0.08);
@@ -14482,9 +15316,23 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .mirrored-playlist-card:hover .mirrored-card-delete,
 .mirrored-playlist-card:hover .mirrored-card-clear,
 .mirrored-playlist-card:hover .mirrored-card-link,
+.mirrored-playlist-card:hover .mirrored-card-export,
 .mirrored-playlist-card:hover .mirrored-card-rename,
 .mirrored-playlist-card:hover .mirrored-card-pipeline {
     opacity: 1;
+}
+
+.mirrored-card-export:hover {
+    color: rgba(var(--accent-rgb), 1);
+    background: rgba(var(--accent-rgb), 0.15);
+    border-color: rgba(var(--accent-rgb), 0.3);
+    transform: scale(1.1);
+}
+
+/* Live export status, injected inline into the card's .card-meta line. */
+.export-status-span {
+    font-size: inherit;
+    white-space: nowrap;
 }
 
 .mirrored-card-delete:hover {
@@ -21762,8 +22610,13 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 8px;
     height: 520px;
+    width: 100%;
+    box-sizing: border-box;
     overflow-y: auto;
     overflow-x: hidden;
+    /* Always reserve the scrollbar gutter so switching between a long log
+       (scrollbar present) and a short one (absent) never shifts the width. */
+    scrollbar-gutter: stable;
     padding: 12px;
     font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Courier New', monospace;
     font-size: 12px;
@@ -34787,6 +35640,263 @@ div.artist-hero-badge {
 }
 .ya-card-name:hover { color: var(--accent); }
 
+/* ── Your Mixes (Spotify-style playlist cards, #discover redesign) ───────────
+   Each mix is ONE card: a 2x2 mosaic cover from its top tracks + name below, with
+   a hover play button. Click opens the track list in a modal. Replaces the old
+   full-width compact-track tables. */
+.discover-mixes-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 18px;
+}
+.discover-mix-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 14px;
+    padding: 12px;
+    cursor: pointer;
+    transition: transform 0.3s cubic-bezier(0.4,0,0.2,1), border-color 0.3s, box-shadow 0.3s, background 0.3s;
+}
+.discover-mix-card:hover {
+    transform: translateY(-5px);
+    background: rgba(255,255,255,0.06);
+    border-color: rgba(var(--accent-rgb),0.25);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.5), 0 0 24px rgba(var(--accent-rgb),0.12);
+}
+.mix-card-cover {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1;
+    border-radius: 10px;
+    overflow: hidden;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+}
+.mix-card-tile {
+    background-size: cover;
+    background-position: center;
+    background-color: #1a1a1a;
+}
+.mix-card-play {
+    position: absolute;
+    bottom: 10px; right: 10px;
+    width: 44px; height: 44px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #000;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 15px; padding-left: 2px;
+    box-shadow: 0 6px 16px rgba(0,0,0,0.45);
+    opacity: 0; transform: translateY(8px);
+    transition: opacity 0.25s, transform 0.25s;
+    z-index: 2;
+}
+.discover-mix-card:hover .mix-card-play {
+    opacity: 1; transform: translateY(0);
+}
+.mix-card-name {
+    font-size: 14px; font-weight: 700; color: #fff;
+    margin-top: 12px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.mix-card-meta {
+    font-size: 12px; color: rgba(255,255,255,0.5);
+    margin-top: 3px;
+}
+/* Solid/gradient cover for mixes with no per-track art (e.g. decades). */
+.mix-card-cover--solid {
+    background: linear-gradient(135deg, rgba(var(--accent-rgb),0.42), rgba(var(--accent-rgb),0.10));
+    display: flex; align-items: center; justify-content: center;
+}
+.mix-card-decade {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 4px; color: #fff; text-shadow: 0 2px 8px rgba(0,0,0,0.4);
+}
+.mix-card-decade-icon { font-size: 34px; line-height: 1; }
+.mix-card-decade-label { font-size: 22px; font-weight: 800; letter-spacing: 0.5px; }
+/* The mix modal — opened from a mix card; holds the track list + per-mix actions. */
+.mix-modal {
+    background: #14141c; border-radius: 18px;
+    width: 760px; max-width: 94vw; max-height: 86vh;
+    display: flex; flex-direction: column;
+    box-shadow: 0 24px 70px rgba(0,0,0,0.6);
+    border: 1px solid rgba(255,255,255,0.08);
+}
+.mix-modal-header {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    padding: 22px 24px; gap: 16px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.mix-modal-subtitle { font-size: 12px; color: #999; }
+.mix-modal-title { font-size: 24px; font-weight: 700; color: #fff; margin: 4px 0; }
+.mix-modal-meta { font-size: 12px; color: rgba(255,255,255,0.5); }
+.mix-modal-actions { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+.mix-modal-close {
+    background: none; border: none; color: rgba(255,255,255,0.5);
+    font-size: 16px; cursor: pointer; padding: 6px; line-height: 1;
+}
+.mix-modal-close:hover { color: #fff; }
+.mix-modal-body { overflow-y: auto; padding: 16px 24px 24px; }
+
+/* ── Unified Discover card grid (#discover redesign) ─────────────────────────
+   One responsive wrapping grid (fills the section width, wraps to rows — no
+   horizontal scroll) holding the same .ya-card the Your Artists section uses, so
+   every album/artist section reads as one design. */
+.discover-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 16px;
+}
+.discover-grid .ya-card { width: 100%; }
+/* Two same-card sections side by side (#discover redesign) — halves the scroll. The inner
+   .discover-grid auto-fits fewer columns at half width, so cards stay full-size. Collapses to a
+   single column on narrower screens. min-width:0 lets each column shrink instead of overflowing. */
+.discover-row-2col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 28px;
+    align-items: start;
+}
+.discover-row-2col > .discover-section { min-width: 0; }
+@media (max-width: 1100px) {
+    .discover-row-2col { grid-template-columns: 1fr; gap: 0; }
+}
+/* Albums are square, so don't crop the cover with the artist card's 0.85 portrait ratio. */
+.discover-grid .discover-album-card.ya-card { aspect-ratio: 1; }
+/* Genre cards: no cover art — square gradient tile with the genre emoji centered. */
+.discover-grid .discover-genre-card.ya-card { aspect-ratio: 1; }
+.discover-genre-card .genre-card-art {
+    display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, rgba(var(--accent-rgb),0.38), rgba(var(--accent-rgb),0.07));
+}
+.discover-genre-card .genre-icon-large { font-size: 46px; line-height: 1; }
+/* Secondary line under the title (album → artist). */
+.ya-card-sub {
+    font-size: 11px; font-weight: 500;
+    color: rgba(255,255,255,0.72);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.6);
+    margin-top: 2px;
+}
+/* "Why this rec" chips on recommendation cards (the explainability flex). */
+.ya-card-why { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.ya-why-chip {
+    font-size: 9.5px; font-weight: 700; line-height: 1.4;
+    padding: 2px 7px; border-radius: 10px;
+    background: rgba(0,0,0,0.55); color: #fff;
+    border: 1px solid rgba(255,255,255,0.14);
+    white-space: nowrap;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+}
+.ya-why-chip.ya-why-genre { background: rgba(29,185,84,0.6); border-color: rgba(29,185,84,0.45); }
+.ya-why-chip.ya-why-obscure { background: rgba(124,92,224,0.6); border-color: rgba(150,118,240,0.45); }
+.ya-why-chip.ya-why-consensus { background: rgba(0,0,0,0.62); }
+.ya-why-chip.ya-why-explore { background: rgba(255,152,0,0.55); border-color: rgba(255,167,38,0.45); }
+/* Owned / missing indicator on album cards (corner badge). */
+.discover-album-badge {
+    width: 20px; height: 20px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.45);
+}
+.discover-album-badge.owned { background: #1DB954; color: #000; }
+.discover-album-badge.missing {
+    background: rgba(0,0,0,0.55); color: rgba(255,255,255,0.85);
+    border: 1px solid rgba(255,255,255,0.2);
+}
+/* Show all / Show less toggle under a clamped discover-grid. */
+.discover-show-all {
+    margin: 14px auto 0;
+    display: block;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
+    color: rgba(255,255,255,0.85);
+    font-size: 13px; font-weight: 600;
+    padding: 8px 20px; border-radius: 20px;
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s, color 0.2s;
+}
+.discover-show-all:hover {
+    background: rgba(var(--accent-rgb),0.15);
+    border-color: rgba(var(--accent-rgb),0.4);
+    color: #fff;
+}
+
+/* ── Adventurousness — living wave dial (Discover page) ──────────────────────
+   A draggable orb rides an animated line that waves calmer + greener at the left (safe)
+   and wilder + redder at the right (obscure). The path + colours are drawn each frame in
+   JS (rAF). Syncs with Settings → Discovery. */
+.adv-wave {
+    position: relative;
+    margin: 0 0 28px;
+    padding: 18px 26px 16px;
+    border-radius: 18px;
+    background: linear-gradient(135deg, rgba(255,255,255,0.04), rgba(255,255,255,0.012));
+    border: 1px solid rgba(255,255,255,0.07);
+    box-shadow: 0 10px 34px rgba(0,0,0,0.30);
+    overflow: hidden;  /* contain the colour aura wash */
+}
+.adv-wave-head { display: flex; flex-direction: column; gap: 1px; position: relative; z-index: 2; }
+.adv-wave-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 2.5px; color: rgba(255,255,255,0.38); }
+.adv-wave-state { font-size: 21px; font-weight: 800; letter-spacing: -0.3px; line-height: 1.15; transition: color 0.25s; }
+.adv-wave-track {
+    position: relative; height: 104px; margin: 6px 0 2px;
+    cursor: grab; touch-action: none;
+}
+.adv-wave-track:active { cursor: grabbing; }
+.adv-wave-aura {
+    position: absolute; top: 50%; left: 30%;
+    width: 300px; height: 200px; transform: translate(-50%, -50%);
+    pointer-events: none; filter: blur(24px); z-index: 0;   /* heavier blur = soft glow, no hard clipped edge */
+    will-change: left, background;
+}
+.adv-wave-svg { width: 100%; height: 100%; display: block; overflow: visible; position: relative; z-index: 1; }
+.adv-wave-orb {
+    position: absolute; top: 50%; left: 30%; z-index: 2;
+    width: 22px; height: 22px; border-radius: 50%;
+    transform: translate(-50%, -50%);
+    background: #1DB954; color: #1DB954;
+    box-shadow: 0 0 9px 0 #1DB954, inset 0 0 0 2px rgba(255,255,255,0.5);
+    pointer-events: none;  /* the track captures the pointer; the orb is purely visual */
+    will-change: left, top;
+}
+.adv-wave-orb::after {
+    content: ''; position: absolute; inset: -5px; border-radius: 50%;
+    border: 1.5px solid currentColor; opacity: 0.4;
+    animation: adv-orb-pulse 2.8s ease-out infinite;
+}
+@keyframes adv-orb-pulse {
+    0% { transform: scale(0.75); opacity: 0.4; }
+    100% { transform: scale(1.5); opacity: 0; }
+}
+.adv-wave-ends {
+    display: flex; justify-content: space-between;
+    font-size: 11px; font-weight: 500; color: rgba(255,255,255,0.35);
+    position: relative; z-index: 2;
+}
+
+/* Watchlist toggle on recommended-artist .ya-cards — corner pill, appears on hover,
+   stays lit when already watching. Keeps the .recommended-card-watchlist-btn hook. */
+.recommended-artist-card .recommended-card-watchlist-btn {
+    position: absolute; top: 8px; right: 8px; z-index: 3;
+    background: rgba(0,0,0,0.72); color: #fff;
+    border: 1px solid rgba(255,255,255,0.25);
+    border-radius: 14px; padding: 4px 10px;
+    font-size: 10px; font-weight: 600; cursor: pointer;
+    opacity: 0; transform: translateY(-4px);
+    transition: opacity 0.2s, transform 0.2s, background 0.2s, border-color 0.2s;
+}
+.recommended-artist-card:hover .recommended-card-watchlist-btn { opacity: 1; transform: none; }
+.recommended-artist-card .recommended-card-watchlist-btn:hover {
+    background: var(--accent); color: #000; border-color: transparent;
+}
+.recommended-artist-card .recommended-card-watchlist-btn.watching {
+    opacity: 1; transform: none;
+    background: var(--accent); color: #000; border-color: transparent;
+}
+
 /* ── Artist Info Modal ── */
 .ya-info-modal {
     background: #141420; border-radius: 18px;
@@ -34975,6 +36085,23 @@ div.artist-hero-badge {
     position: fixed; inset: 0; z-index: 100;
     background: #0a0a14; flex-direction: column;
 }
+/* Artist Web "Group by" lens toggle (Genre | Communities) */
+.artweb-lens-toggle {
+    display: inline-flex; align-items: center; gap: 2px;
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 9px; padding: 2px;
+}
+.artweb-lens-btn {
+    border: none; background: transparent; color: rgba(255,255,255,0.6);
+    font-size: 12px; font-weight: 600; padding: 5px 11px; border-radius: 7px; cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+.artweb-lens-btn:hover { color: #fff; }
+.artweb-lens-btn.active { background: rgba(255,255,255,0.14); color: #fff; }
+/* Toolbar toggle buttons (Path, Filter) when engaged */
+#artist-web-container .artmap-tool-btn.active {
+    background: rgba(29,185,84,0.28); border-color: rgba(29,185,84,0.5); color: #fff;
+}
 .artist-map-toolbar {
     display: flex; align-items: center; justify-content: space-between;
     padding: 8px 16px; background: linear-gradient(180deg, rgba(14,14,22,0.98) 0%, rgba(14,14,22,0.92) 100%);
@@ -35144,7 +36271,38 @@ div.artist-hero-badge {
     background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.5);
     text-transform: capitalize;
 }
-.artmap-content-row { display: flex; flex: 1; overflow: hidden; }
+.artmap-content-row { display: flex; flex: 1; overflow: hidden; position: relative; }
+/* Artist Web color legend — floating bottom-left over the canvas, decodes node colors per lens */
+.artweb-legend {
+    position: absolute; left: 14px; bottom: 14px; z-index: 6;
+    display: flex; flex-direction: column; gap: 5px;
+    padding: 10px 12px; max-width: 220px;
+    background: rgba(14, 13, 20, 0.72); backdrop-filter: blur(6px);
+    border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px;
+    pointer-events: none;
+}
+.artweb-legend-row { display: flex; align-items: center; gap: 8px; font-size: 11px; color: rgba(255,255,255,0.72); }
+.artweb-legend-dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; box-shadow: 0 0 6px rgba(0,0,0,0.4); }
+.artweb-legend-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.artweb-legend-count { margin-left: auto; color: rgba(255,255,255,0.38); font-variant-numeric: tabular-nums; }
+/* Artist Web empty/error state card — centered, with an optional Retry action */
+.artweb-state-card {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 14px; text-align: center; padding: 24px;
+}
+.artweb-state-msg { color: rgba(255,255,255,0.5); font-size: 14px; max-width: 380px; line-height: 1.5; }
+.artweb-state-btn {
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14); color: rgba(255,255,255,0.85);
+    padding: 8px 18px; border-radius: 8px; cursor: pointer; font-size: 13px; transition: all 0.15s ease;
+}
+.artweb-state-btn:hover { background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.25); }
+/* Artist Web guide modal (extends the shared shortcuts-modal) */
+.artweb-help-modal { max-width: 520px; }
+.artweb-help-body { padding: 4px 4px 2px; }
+.artweb-help-section { margin-bottom: 14px; }
+.artweb-help-section h4 { margin: 0 0 5px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: rgba(255,255,255,0.5); }
+.artweb-help-section p { margin: 0; font-size: 13px; line-height: 1.55; color: rgba(255,255,255,0.78); }
+.artweb-help-section b { color: rgba(255,255,255,0.95); font-weight: 600; }
 #artist-map-canvas { flex: 1; display: block; cursor: grab; }
 #artist-map-canvas:active { cursor: grabbing; }
 #artist-map-loading {
@@ -38070,6 +39228,7 @@ div.artist-hero-badge {
 .enh-source-tab.enh-tab-amazon.active { background: rgba(255, 153, 0, 0.2); color: #FF9900; }
 .enh-source-tab.enh-tab-youtube.active { background: rgba(255, 0, 0, 0.2); color: #ff4444; }
 .enh-source-tab.enh-tab-musicbrainz.active { background: rgba(186, 51, 88, 0.2); color: #BA3358; }
+.enh-source-tab.enh-tab-jiosaavn.active { background: rgba(43, 197, 180, 0.2); color: #2bc5b4; }
 
 /* ── Source picker icon row (replaces dropdown + post-search tabs) ── */
 .enh-source-row {
@@ -40896,6 +42055,44 @@ div.artist-hero-badge {
     border-right: 6px solid transparent;
     border-bottom: 8px solid rgba(30, 30, 30, 0.98);
 }
+
+/* JioSaavn enrichment bubble (teal #2bc5b4) */
+.jiosaavn-button-container { position: relative; display: inline-block; margin-right: 12px; }
+.jiosaavn-button {
+    position: relative; width: 44px; height: 44px;
+    background: linear-gradient(135deg, rgba(43, 197, 180, 0.12) 0%, rgba(30, 160, 145, 0.18) 100%);
+    backdrop-filter: blur(20px) saturate(1.4); -webkit-backdrop-filter: blur(20px) saturate(1.4);
+    border: 1.5px solid rgba(43, 197, 180, 0.25); border-radius: 50%; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 4px 16px rgba(43, 197, 180, 0.2), 0 2px 8px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+.jiosaavn-button:hover { border-color: rgba(43, 197, 180, 0.4); transform: scale(1.05); }
+.jiosaavn-logo { font-size: 20px; line-height: 1; opacity: 0.9; filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3)); }
+.jiosaavn-spinner {
+    position: absolute; width: 44px; height: 44px; border: 3px solid transparent;
+    border-top-color: rgba(43, 197, 180, 0.8); border-right-color: rgba(43, 197, 180, 0.5);
+    border-radius: 50%; opacity: 0; transition: opacity 0.3s ease; pointer-events: none;
+}
+.jiosaavn-button.active .jiosaavn-spinner { opacity: 1; animation: jiosaavn-spin 1.2s linear infinite; }
+.jiosaavn-button.active { border-color: rgba(43, 197, 180, 0.5); }
+.jiosaavn-button.complete { border-color: rgba(76, 175, 80, 0.35); }
+.jiosaavn-button.complete .jiosaavn-spinner { opacity: 0; }
+.jiosaavn-button.paused { border-color: rgba(255, 193, 7, 0.35); }
+@keyframes jiosaavn-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.jiosaavn-tooltip {
+    position: absolute; left: 50%; top: calc(100% + 12px); transform: translateX(-50%) translateY(-5px);
+    z-index: 5000; opacity: 0; visibility: hidden; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); pointer-events: none;
+}
+.jiosaavn-button:hover + .jiosaavn-tooltip { opacity: 1; visibility: visible; transform: translateX(-50%) translateY(0); }
+.jiosaavn-tooltip-content {
+    min-width: 260px; background: linear-gradient(135deg, rgba(30, 30, 30, 0.98) 0%, rgba(20, 20, 20, 0.99) 100%);
+    border: 1px solid rgba(43, 197, 180, 0.3); border-radius: 16px; padding: 16px 18px;
+}
+.jiosaavn-tooltip-header { font-size: 13px; font-weight: 600; color: rgba(43, 197, 180, 0.95); margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+.jiosaavn-tooltip-body { display: flex; flex-direction: column; gap: 8px; }
+#jiosaavn-tooltip-status { color: rgb(var(--accent-light-rgb)); font-weight: 600; }
+.jiosaavn-button.paused + .jiosaavn-tooltip #jiosaavn-tooltip-status { color: #ffc107; }
 
 /* ============================================================================
    SPOTIFY ENRICHMENT STATUS BUTTON
@@ -53430,7 +54627,7 @@ tr.tag-diff-same {
 }
 
 /* Action buttons — compact 26x26 */
-.repair-run-btn, .repair-settings-btn {
+.repair-run-btn, .repair-settings-btn, .repair-stop-btn {
     background: transparent;
     border: 1px solid rgba(255, 255, 255, 0.08);
     color: rgba(255, 255, 255, 0.4);
@@ -53443,6 +54640,31 @@ tr.tag-diff-same {
     justify-content: center;
     font-size: 11px;
     transition: all 0.2s ease;
+}
+/* Stop button (shown while a job is running) — reads as the destructive action */
+.repair-stop-btn {
+    border-color: rgba(239, 68, 68, 0.35);
+    color: rgba(248, 113, 113, 0.85);
+}
+.repair-stop-btn:hover {
+    background: rgba(239, 68, 68, 0.15);
+    color: rgb(248, 113, 113);
+    border-color: rgba(239, 68, 68, 0.5);
+}
+/* #970: stop clicked but the run hasn't unwound yet (waiting on its current item) */
+.repair-stop-btn.stopping {
+    cursor: default;
+    opacity: 0.6;
+    animation: repair-stop-pulse 1s ease-in-out infinite;
+}
+.repair-stop-btn.stopping:hover {
+    background: transparent;
+    color: rgba(248, 113, 113, 0.85);
+    border-color: rgba(239, 68, 68, 0.35);
+}
+@keyframes repair-stop-pulse {
+    0%, 100% { opacity: 0.35; }
+    50% { opacity: 0.7; }
 }
 
 .repair-run-btn:hover {
@@ -55205,19 +56427,122 @@ tr.tag-diff-same {
     padding-bottom: 10vh;
 }
 
-/* Tab bar centered */
-#settings-page .stg-tabbar {
+/* Tab bar + save action sit on one control row. */
+#settings-page .settings-nav-row {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 14px;
+    width: 100%;
+    max-width: 920px;
     margin: 0 auto 28px;
+    padding: 0 2px;
+}
+
+#settings-page .stg-tabbar {
+    display: flex;
+    flex: 0 1 auto;
+    margin: 0;
+    width: fit-content;
+    max-width: 100%;
+    min-width: 0;
+}
+
+#settings-page .settings-nav-row .header-actions {
+    display: flex;
+    flex: 0 0 auto;
+    justify-content: flex-end;
+    align-items: center;
+    flex-wrap: nowrap;
+    width: auto;
+    margin: 0 0 0 auto;
+    margin-top: 0;
+}
+
+#settings-page .settings-nav-row .save-button {
+    padding: 8px 16px;
+    border-radius: 9px;
+    font-size: 0.84em;
+    font-weight: 600;
+    white-space: nowrap;
 }
 
 /* Columns become single centered column */
 #settings-page .settings-columns {
     flex-direction: column;
-    max-width: 760px;
+    max-width: 920px;
     width: 100%;
     gap: 0;
     margin: 0 auto;
     margin-bottom: 0;
+}
+/* The Logs tab uses the full available width — the log terminal benefits from
+   the extra horizontal space (other tabs stay at the readable 920px). Matches
+   only while the logs group is the visible one (switchSettingsTab clears its
+   inline display when active, sets display:none otherwise). */
+#settings-page .settings-columns:has(> .settings-group[data-stg="logs"]:not([style*="none"])) {
+    max-width: 100%;
+}
+
+#settings-page .settings-group[data-stg="logs"] {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+}
+
+#settings-page .settings-group[data-stg="logs"] .log-viewer-header,
+#settings-page .settings-group[data-stg="logs"] .log-viewer-terminal,
+#settings-page .settings-group[data-stg="logs"] .log-viewer-status {
+    width: 100%;
+}
+
+#settings-page .settings-group[data-stg="logs"] .log-viewer-controls,
+#settings-page .settings-group[data-stg="logs"] .log-viewer-actions {
+    min-width: 0;
+}
+
+/* ── Settings local title — quiet, far-left, no dashboard banner ── */
+#settings-page .dashboard-header.settings-header-compact {
+    flex-direction: row;
+    align-items: center;
+    width: 100%;
+    min-height: 0;
+    padding: 0;
+    margin: 0 0 12px;
+    position: relative;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    overflow: visible;
+}
+#settings-page .dashboard-header.settings-header-compact::after,
+#settings-page .settings-header-compact .dashboard-header-sweep {
+    display: none;
+}
+#settings-page .settings-header-compact .header-text {
+    min-width: 0;
+}
+#settings-page .settings-header-compact .header-title {
+    font-size: 1.82em;
+    margin: 0;
+    line-height: 1.1;
+    color: rgba(255, 255, 255, 0.88);
+}
+#settings-page .settings-header-compact .page-header-icon {
+    width: 44px;
+    height: 44px;
+    opacity: 0.86;
+}
+
+/* Checkbox/label rows that carry an ⓘ icon span the full width so the help
+   body wraps cleanly beneath them. */
+#settings-page .form-group > .setting-row {
+    flex: 1 1 100%;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
 
 #settings-page .settings-left-column,
@@ -55283,12 +56608,14 @@ tr.tag-diff-same {
 #settings-page .form-group {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    /* Row grammar: label grows to hold the left, control + ⓘ group at the right.
+       (Was justify-content:space-between, which stranded selects in mid-row.) */
+    justify-content: flex-start;
     flex-wrap: wrap;
-    gap: 8px 20px;
-    padding: 14px 8px !important;
+    gap: 8px 16px;
+    padding: 12px 8px !important;
     margin: 0 !important;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.035);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
     border-radius: 8px;
     transition: background 0.2s;
 }
@@ -55301,9 +56628,17 @@ tr.tag-diff-same {
     font-size: 0.9em;
     color: rgba(255, 255, 255, 0.8);
     font-weight: 400;
-    white-space: nowrap;
     margin: 0;
-    flex-shrink: 0;
+    /* Grow to fill the left so the control aligns to a consistent right edge. */
+    flex: 1 1 auto;
+    min-width: 0;
+}
+/* The growing label pushes the control to a consistent right edge; the ⓘ rides
+   immediately after the control as a pair so it can never shove it around. The
+   help callout (flex-basis:100%) wraps to its own line below. */
+#settings-page .form-group > select,
+#settings-page .form-group > .form-select {
+    flex: 0 0 auto;
 }
 
 #settings-page .form-group > input[type="text"],
@@ -55322,11 +56657,27 @@ tr.tag-diff-same {
     margin: 0;
     transition: border-color 0.25s, background 0.25s, box-shadow 0.25s;
 }
+#settings-page .form-group > textarea {
+    padding: 9px 14px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 0.88em;
+    margin: 0;
+    resize: vertical;
+    transition: border-color 0.25s, background 0.25s, box-shadow 0.25s;
+}
 #settings-page .form-group > input:hover {
     background: rgba(255, 255, 255, 0.06);
     border-color: rgba(255, 255, 255, 0.1);
 }
-#settings-page .form-group > input:focus {
+#settings-page .form-group > textarea:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.1);
+}
+#settings-page .form-group > input:focus,
+#settings-page .form-group > textarea:focus {
     border-color: rgba(var(--accent-rgb), 0.4);
     background: rgba(255, 255, 255, 0.06);
     outline: none;
@@ -55513,18 +56864,6 @@ tr.tag-diff-same {
     flex-wrap: wrap;
 }
 
-/* ── Quality section ── */
-#settings-page .quality-tier {
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 12px;
-    margin-bottom: 10px;
-    transition: border-color 0.2s;
-}
-#settings-page .quality-tier:hover {
-    border-color: rgba(255, 255, 255, 0.1);
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
-}
 #settings-page .preset-button {
     border-radius: 8px;
     font-size: 0.84em;
@@ -55553,6 +56892,15 @@ tr.tag-diff-same {
     color: #fff;
 }
 #settings-page .checkbox-label:last-child { border-bottom: none; }
+/* When a checkbox-label is the control of a .form-group row, the row separator
+   is the form-group's own border-bottom — drop the label's own border/box so
+   every row (checkbox or input/select) has ONE consistent full-width divider. */
+#settings-page .form-group > .checkbox-label {
+    border-bottom: 0 !important;
+    border-radius: 0 !important;
+    padding: 4px 0 !important;
+    background: transparent !important;
+}
 
 /* ── Tag service groups ── */
 #settings-page .tag-service-group {
@@ -55572,30 +56920,6 @@ tr.tag-diff-same {
 }
 #settings-page .tag-service-body {
     padding: 0 18px 12px;
-}
-
-/* ── Save button — centered, sticky feel ── */
-#settings-page .settings-actions {
-    max-width: 760px;
-    width: 100%;
-    margin: 0 auto;
-    padding: 24px 0 16px;
-}
-#settings-page .settings-actions .save-button {
-    width: 100%;
-    padding: 12px;
-    border-radius: 10px;
-    font-size: 0.92em;
-    font-weight: 600;
-    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-}
-#settings-page .settings-actions .save-button:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 20px rgba(var(--accent-rgb, 29, 185, 84), 0.35);
-}
-#settings-page .settings-actions .save-button:active {
-    transform: scale(0.99);
-    box-shadow: 0 2px 8px rgba(var(--accent-rgb, 29, 185, 84), 0.2);
 }
 
 /* ── Path input groups (dir paths with Unlock buttons) ── */
@@ -55661,6 +56985,198 @@ tr.tag-diff-same {
     line-height: 1.5;
     margin: 0;
 }
+/* Collapsible ⓘ help bodies stay hidden until toggled — wins over the
+   .setting-help-text/.settings-hint display rules that would otherwise show them. */
+#settings-page .setting-help-body[hidden],
+.setting-help-body[hidden] {
+    display: none !important;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   Expanded tile = ONE connected card. The header rounds only its top
+   and joins seamlessly to its body, which carries the side + bottom
+   frame; inner groups drop their own card frame so the expanded
+   settings clearly belong to the tile (no box-in-a-box, no detached feel).
+   ════════════════════════════════════════════════════════════════ */
+#settings-page .settings-section-header:not(.collapsed) {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    margin-bottom: 0;
+    /* Accent-tinted frame so the OPEN card clearly stands out from the grey
+       page instead of grey-on-grey. */
+    background: rgba(var(--accent-rgb), 0.07);
+    border-color: rgba(var(--accent-rgb), 0.30);
+    border-bottom: 1px solid rgba(var(--accent-rgb), 0.18);
+}
+#settings-page .settings-section-body:not(.collapsed) {
+    border: 1px solid rgba(var(--accent-rgb), 0.30);
+    border-top: none;
+    border-bottom-left-radius: 12px;
+    border-bottom-right-radius: 12px;
+    /* Dark neutral body (accent stays on the border + header) so the lighter
+       inner sub-cards stand out clearly instead of washing out on a tint.
+       Symmetric padding so the inner sub-cards sit an equal distance from the
+       outer frame on every side. */
+    background: rgba(0, 0, 0, 0.22);
+    box-shadow: 0 6px 22px rgba(0, 0, 0, 0.28);
+    padding: 14px;
+}
+/* Inner groups inside an expanded tile: no own frame/shadow/accent bar —
+   they're sub-sections of the one tile card, separated by their h3 labels. */
+/* ── Sub-cards: each sub-section inside an OPEN tile sits in its own framed
+   card that stands out clearly on the accent-tinted tile background. Covers
+   inner settings-groups (Folder Paths, File Organization, Retry rows, …) and
+   the Security method cards. ── */
+#settings-page .settings-section-body:not(.collapsed) > .settings-group,
+#settings-page .settings-section-body:not(.collapsed) .security-subgroup,
+#settings-page .settings-section-body:not(.collapsed) .settings-subcard,
+#settings-page .settings-section-body:not(.collapsed) [id$="-settings-container"]:not(#hybrid-settings-container) {
+    background: rgba(255, 255, 255, 0.045) !important;
+    border: 1px solid rgba(255, 255, 255, 0.13) !important;
+    border-radius: 10px !important;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25) !important;
+    padding: 6px 16px 12px !important;
+    margin: 0 0 14px !important;
+}
+#settings-page .settings-section-body:not(.collapsed) > .settings-group:last-child,
+#settings-page .settings-section-body:not(.collapsed) .security-subgroup:last-child {
+    margin-bottom: 0 !important;
+}
+#settings-page .settings-section-body:not(.collapsed) .security-subgroup {
+    padding-top: 14px !important;
+}
+#settings-page .settings-section-body:not(.collapsed) > .settings-group::before { display: none; }
+/* Sub-card title: clean header inside its frame (no accent bar / huge padding). */
+#settings-page .settings-section-body:not(.collapsed) > .settings-group > h3 {
+    padding: 10px 0 10px;
+    border-left: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+/* The Security wrapper group is a transparent passthrough — its .security-subgroup
+   children are the actual sub-cards (avoids a card-in-a-card). */
+#settings-page .settings-section-body:not(.collapsed) > .settings-group.security-wrapper {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 4px 14px 6px !important;
+    margin: 0 !important;
+}
+/* Mid-level framed containers inside a tile sub-card get flattened so there are
+   never 3 stacked frames (tile → sub-card → container). The innermost
+   interactive items (draggable hybrid rows, tag-embed accordions) keep theirs. */
+#settings-page .settings-section-body:not(.collapsed) .api-service-frame,
+#settings-page .settings-section-body:not(.collapsed) .post-processing-section,
+#settings-page .settings-section-body:not(.collapsed) #hybrid-settings-container {
+    border: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+}
+/* The Source Settings group is a transparent passthrough: the basic source/
+   stream/concurrency rows + the hybrid drag list sit flat in the tile, and each
+   per-source config pops open in ITS OWN frame directly inside the tile
+   (tile → config card, never a triple frame). */
+#settings-page .settings-section-body:not(.collapsed) > .settings-group.source-settings-wrapper {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 4px 14px 6px !important;
+    margin: 0 !important;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   Collapsible info panel (ⓘ help) — one consistent pattern.
+   The ⓘ is a small circular badge flush at the end of its row; the
+   help body, when revealed, is an indented accent-bordered panel that
+   spans the full width below the control. Rows never reflow sideways.
+   ════════════════════════════════════════════════════════════════ */
+#settings-page .info-icon {
+    /* Single clean circle with a centred "i" (was the ⓘ glyph, which carried
+       its own inner circle → a double-circle that read as off-centre). */
+    /* It's a role="button" with a text "i" inside — without these, hovering the
+       glyph gives the I-beam text caret on Windows (Linux happened to resolve a
+       pointer). Force the button hand + make the glyph non-selectable so the
+       cursor is the same on every platform. */
+    cursor: pointer;
+    -webkit-user-select: none;
+    user-select: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 1px solid rgba(var(--accent-rgb), 0.45);
+    background: transparent;
+    color: rgba(var(--accent-rgb), 0.9);
+    font-family: Georgia, 'Times New Roman', serif;
+    font-style: italic;
+    font-weight: 700;
+    font-size: 11px;
+    line-height: 1;
+    text-align: center;
+    margin-left: 6px;
+    flex: 0 0 auto;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+#settings-page .info-icon:hover {
+    background: rgba(var(--accent-rgb), 0.16);
+    border-color: rgba(var(--accent-rgb), 0.85);
+    color: rgba(var(--accent-rgb), 1);
+}
+#settings-page .info-icon.open {
+    background: rgba(var(--accent-rgb), 0.9);
+    border-color: rgba(var(--accent-rgb), 0.9);
+    color: #0b0f14;
+}
+/* The revealed panel — indented, readable, clearly a callout (not a
+   detached muted line). Higher source-order than the .settings-hint /
+   .setting-help-text colour rules above, so it wins on equal specificity. */
+#settings-page .setting-help-body {
+    display: block;
+    width: 100%;
+    flex-basis: 100%;
+    box-sizing: border-box;
+    margin: 8px 0 4px;
+    padding: 10px 12px;
+    background: rgba(var(--accent-rgb), 0.06);
+    border-left: 2px solid rgba(var(--accent-rgb), 0.5);
+    border-radius: 0 6px 6px 0;
+    font-size: 0.8em;
+    line-height: 1.55;
+    color: rgba(255, 255, 255, 0.6);
+    letter-spacing: 0.01em;
+}
+#settings-page .setting-help-body strong { color: rgba(255, 255, 255, 0.82); font-weight: 600; }
+#settings-page .setting-help-body em { color: rgba(var(--accent-rgb), 0.9); font-style: normal; }
+#settings-page .setting-help-body code {
+    font-family: monospace;
+    background: rgba(255, 255, 255, 0.06);
+    padding: 1px 5px;
+    border-radius: 4px;
+    color: rgba(255, 255, 255, 0.75);
+}
+/* A checkbox-label inside a .setting-row must drop its row-divider border and
+   box padding — otherwise it draws a partial underline only under the label
+   text and sits in a padded box, misaligned with the ⓘ. The label fills the
+   row so the icon is pushed flush to the right edge. (Replaces the old
+   per-element inline style="border:0;padding:0;flex:1" hacks.) */
+#settings-page .setting-row > .checkbox-label {
+    flex: 1 1 auto;
+    border-bottom: 0 !important;
+    border-radius: 0 !important;
+    padding: 4px 0 !important;
+}
+#settings-page .setting-row > .checkbox-label:hover { background: transparent; }
+/* Icon always sits at the right edge of its row, vertically centred. */
+#settings-page .setting-row > .info-icon {
+    margin-left: auto;
+    align-self: center;
+}
+
 /* Standalone help text (not inside a form-group) — add separator */
 #settings-page .settings-group > .setting-help-text {
     padding: 6px 0 14px;
@@ -55680,6 +57196,9 @@ tr.tag-diff-same {
 #settings-page #qobuz-settings-container,
 #settings-page #hifi-download-settings-container,
 #settings-page #deezer-download-settings-container,
+#settings-page #amazon-download-settings-container,
+#settings-page #lidarr-download-settings-container,
+#settings-page #soundcloud-download-settings-container,
 #settings-page #youtube-settings-container,
 #settings-page #hybrid-settings-container {
     background: rgba(255, 255, 255, 0.02);
@@ -55694,16 +57213,13 @@ tr.tag-diff-same {
 #settings-page #qobuz-settings-container:hover,
 #settings-page #hifi-download-settings-container:hover,
 #settings-page #deezer-download-settings-container:hover,
+#settings-page #amazon-download-settings-container:hover,
+#settings-page #lidarr-download-settings-container:hover,
+#settings-page #soundcloud-download-settings-container:hover,
 #settings-page #youtube-settings-container:hover,
 #settings-page #hybrid-settings-container:hover {
     border-color: rgba(255, 255, 255, 0.1);
     box-shadow: 0 2px 16px rgba(0, 0, 0, 0.12);
-}
-
-/* ── Path inputs with lock buttons ── */
-#settings-page .form-group .path-input-wrapper {
-    flex: 1;
-    max-width: 340px;
 }
 
 /* ── Hybrid source priority list (drag and drop) ── */
@@ -55783,6 +57299,36 @@ tr.tag-diff-same {
     color: rgba(255, 255, 255, 0.85);
     font-weight: 500;
 }
+.hybrid-source-name[onclick]:hover {
+    color: rgb(var(--accent-light-rgb, 29, 185, 84));
+}
+/* ⚙ Configure button on each enabled source row */
+.hybrid-source-config-btn {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.3);
+    font-size: 0.95em;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 6px;
+    line-height: 1;
+    transition: all 0.15s;
+}
+.hybrid-source-config-btn:hover {
+    color: rgb(var(--accent-light-rgb, 29, 185, 84));
+    background: rgba(255, 255, 255, 0.06);
+    transform: rotate(45deg);
+}
+/* Row whose config panel is currently open */
+.hybrid-source-item.config-open {
+    border-color: rgba(var(--accent-rgb, 29, 185, 84), 0.45);
+    background: rgba(var(--accent-rgb, 29, 185, 84), 0.06);
+}
+.hybrid-source-item.config-open .hybrid-source-config-btn {
+    color: rgb(var(--accent-light-rgb, 29, 185, 84));
+    transform: rotate(45deg);
+}
 .hybrid-source-badge {
     flex-shrink: 0;
     font-size: 0.68em;
@@ -55807,6 +57353,35 @@ tr.tag-diff-same {
     min-width: 18px;
     text-align: center;
 }
+/* Drag handle + drop-target highlight (mirrors the Quality ranked-target list). */
+.hybrid-source-handle {
+    cursor: grab;
+    color: rgba(255, 255, 255, 0.3);
+    font-size: 14px;
+    line-height: 1;
+    padding: 0 2px;
+    user-select: none;
+    flex-shrink: 0;
+}
+.hybrid-source-handle:active { cursor: grabbing; }
+.hybrid-source-item.drag-over {
+    border-color: rgba(var(--accent-rgb), 0.7) !important;
+    box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.4);
+}
+/* Per-source live connection status dot (set by "Test all sources"). */
+.hybrid-source-status {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: rgba(255, 255, 255, 0.18);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+.hybrid-source-status.hss-ok     { background: #34d27b; box-shadow: 0 0 6px rgba(52, 210, 123, 0.6); }
+.hybrid-source-status.hss-fail   { background: #ff5f57; box-shadow: 0 0 6px rgba(255, 95, 87, 0.5); }
+.hybrid-source-status.hss-na     { background: rgba(255, 255, 255, 0.12); }
+.hybrid-source-status.hss-testing { background: #f0b429; animation: hssPulse 0.9s ease-in-out infinite; }
+@keyframes hssPulse { 0%,100% { opacity: 0.35; } 50% { opacity: 1; } }
 .hybrid-source-toggle {
     position: relative;
     width: 36px;
@@ -56053,11 +57628,20 @@ tr.tag-diff-same {
 
 /* ── Responsive ── */
 @media (max-width: 768px) {
+    #settings-page .settings-nav-row {
+        flex-wrap: wrap;
+        justify-content: flex-start;
+        gap: 10px;
+        padding: 0 8px;
+    }
+    #settings-page .settings-nav-row .header-actions {
+        margin-left: auto;
+    }
     /* Tab bar scrolls horizontally */
     #settings-page .stg-tabbar {
         width: 100%;
+        flex: 1 1 100%;
         border-radius: 0;
-        margin-bottom: 16px;
         justify-content: flex-start;
     }
     .stg-tab { padding: 8px 14px; font-size: 0.8em; }
@@ -56087,9 +57671,6 @@ tr.tag-diff-same {
     /* Accordion headers */
     #settings-page .stg-service > .stg-service-header { padding: 12px 14px; }
     #settings-page .stg-service > .stg-service-body { padding: 0 0 8px; }
-    /* Save button */
-    #settings-page .settings-actions { padding: 16px 8px; }
-    #settings-page .settings-actions .save-button { width: 100%; }
     /* Section titles */
     #settings-page .settings-group > h3 { padding: 24px 0 10px; }
 }
@@ -57928,6 +59509,28 @@ tr.tag-diff-same {
     font-weight: 600;
     white-space: nowrap;
 }
+/* unmatched (wing-it fallback) — never wishlisted; muted, non-actionable */
+.sync-dl-unmatched {
+    font-size: 9px;
+    color: rgba(255, 255, 255, 0.4);
+    font-weight: 600;
+    white-space: nowrap;
+}
+/* clickable variant — re-add to wishlist */
+.sync-dl-wishlist-btn {
+    border: 1px solid rgba(255, 183, 77, 0.35);
+    background: rgba(255, 183, 77, 0.1);
+    border-radius: 999px;
+    padding: 3px 9px;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.sync-dl-wishlist-btn:hover { background: rgba(255, 183, 77, 0.22); border-color: rgba(255, 183, 77, 0.6); color: #ffce8a; }
+.sync-dl-wishlist-btn.is-busy { opacity: 0.6; cursor: default; }
+.sync-dl-wishlist-btn.is-done {
+    color: rgba(76, 175, 80, 0.95); border-color: rgba(76, 175, 80, 0.4);
+    background: rgba(76, 175, 80, 0.12); cursor: default;
+}
 
 .sync-detail-track {
     font-weight: 500;
@@ -58465,6 +60068,82 @@ tr.tag-diff-same {
 .server-editor-stat-num.matched { color: #4caf50; }
 .server-editor-stat-num.missing { color: #ef5350; }
 .server-editor-stat-num.extra { color: #ffb74d; }
+
+/* "out of order" badge — server playlist has the right tracks but a different
+   sequence than the source. Opens a read-only view of the real server order. */
+.server-order-badge {
+    margin-left: 8px; padding: 2px 9px; border-radius: 999px; cursor: pointer;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.2px; white-space: nowrap;
+    color: #ffb74d; background: rgba(255, 183, 77, 0.12);
+    border: 1px solid rgba(255, 183, 77, 0.4);
+    transition: background 0.15s ease;
+}
+.server-order-badge:hover { background: rgba(255, 183, 77, 0.22); }
+
+/* read-only server-order modal */
+.server-order-overlay {
+    position: fixed; inset: 0; z-index: 10000; display: flex;
+    align-items: center; justify-content: center; padding: 24px;
+    background: rgba(8, 9, 13, 0.72); backdrop-filter: blur(6px);
+    animation: serverOrderFade 0.16s ease;
+}
+@keyframes serverOrderFade { from { opacity: 0; } to { opacity: 1; } }
+.server-order-dialog {
+    width: min(460px, 100%); max-height: 82vh; display: flex; flex-direction: column;
+    background: linear-gradient(180deg, #20232b, #16181e);
+    border: 1px solid rgba(255, 255, 255, 0.09); border-radius: 18px;
+    box-shadow: 0 30px 80px -20px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    overflow: hidden; animation: serverOrderPop 0.2s cubic-bezier(0.2, 0.7, 0.2, 1.1);
+}
+@keyframes serverOrderPop { from { opacity: 0; transform: translateY(10px) scale(0.98); } to { opacity: 1; transform: none; } }
+.server-order-head {
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+    padding: 18px 20px 15px;
+    background: linear-gradient(180deg, rgba(255, 183, 77, 0.08), transparent);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.server-order-h1 { font-size: 16px; font-weight: 800; color: #fff; letter-spacing: -0.01em; }
+.server-order-sub { font-size: 11.5px; color: rgba(255, 255, 255, 0.45); margin-top: 4px; line-height: 1.4; }
+.server-order-close {
+    flex: 0 0 auto; width: 30px; height: 30px; border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05); border: none; color: rgba(255, 255, 255, 0.55);
+    font-size: 20px; line-height: 1; cursor: pointer; transition: all 0.15s ease;
+}
+.server-order-close:hover { color: #fff; background: rgba(255, 255, 255, 0.12); }
+.server-order-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 8px 10px 12px; scrollbar-width: thin; }
+.server-order-row {
+    display: flex; align-items: center; gap: 12px; padding: 7px 8px; border-radius: 10px;
+    transition: background 0.12s ease;
+}
+.server-order-row:hover { background: rgba(255, 255, 255, 0.04); }
+.server-order-num {
+    flex: 0 0 22px; text-align: right; font-size: 12px; font-weight: 800;
+    color: rgba(255, 255, 255, 0.3); font-variant-numeric: tabular-nums;
+}
+.server-order-art {
+    flex: 0 0 40px; width: 40px; height: 40px; border-radius: 7px; object-fit: cover;
+    background: rgba(255, 255, 255, 0.05); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+.server-order-art-ph { display: flex; align-items: center; justify-content: center;
+    font-size: 17px; color: rgba(255, 255, 255, 0.3); }
+.server-order-meta { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.server-order-title { font-size: 13.5px; font-weight: 600; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.server-order-artist { font-size: 11.5px; color: rgba(255, 255, 255, 0.45); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.server-order-empty { padding: 20px; text-align: center; color: rgba(255, 255, 255, 0.4); font-size: 13px; }
+.server-order-foot { flex: 0 0 auto; padding: 14px 16px 16px; border-top: 1px solid rgba(255, 255, 255, 0.07); }
+.server-order-foot-label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px;
+    color: rgba(255, 255, 255, 0.5); margin-bottom: 10px; }
+.server-order-actions { display: flex; gap: 10px; }
+.server-align-btn {
+    flex: 1; display: flex; flex-direction: column; gap: 3px; text-align: left;
+    padding: 10px 12px; border-radius: 10px; cursor: pointer;
+    background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.12);
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+.server-align-btn:hover { background: rgba(76, 175, 80, 0.14); border-color: rgba(76, 175, 80, 0.5); }
+.server-align-btn-t { font-size: 13px; font-weight: 700; color: #fff; }
+.server-align-btn-d { font-size: 11px; color: rgba(255, 255, 255, 0.5); line-height: 1.35; }
+.server-order-foot-note { font-size: 11px; color: rgba(255, 255, 255, 0.4); margin-top: 9px; }
 
 .server-editor-stat-label {
     font-size: 9px;
@@ -59554,6 +61233,7 @@ tr:hover .enhanced-track-actions-group { opacity: 1; }
 .enhanced-track-actions-group.visible { opacity: 1; }
 
 .enhanced-source-info-btn,
+.enhanced-reidentify-btn,
 .enhanced-redownload-btn {
     background: none; border: none; cursor: pointer;
     width: 24px; height: 24px; border-radius: 5px;
@@ -59563,6 +61243,9 @@ tr:hover .enhanced-track-actions-group { opacity: 1; }
 
 .enhanced-source-info-btn { color: rgba(255,255,255,0.35); font-size: 13px; }
 .enhanced-source-info-btn:hover { color: rgba(100,181,246,0.9); background: rgba(100,181,246,0.1); }
+
+.enhanced-reidentify-btn { color: rgba(255,255,255,0.35); font-size: 15px; }
+.enhanced-reidentify-btn:hover { color: rgb(var(--accent-light-rgb)); background: rgba(var(--accent-rgb),0.1); }
 
 .enhanced-redownload-btn { color: rgba(255,255,255,0.35); font-size: 15px; }
 .enhanced-redownload-btn:hover { color: var(--accent); background: rgba(var(--accent-rgb),0.1); }
@@ -59711,14 +61394,21 @@ tr:hover .enhanced-track-actions-group { opacity: 1; }
 }
 .blacklist-entry-remove:hover { background: rgba(239, 83, 80, 0.12); color: #ef5350; }
 
-/* ── Reduce Visual Effects ── Full performance mode: disables GPU-heavy
-   properties and halts decorative animation globally. */
+/* ── Reduce Visual Effects ── Performance mode. Kills the GPU-EXPENSIVE
+   properties only — the actual lag (esp. Firefox) is backdrop-filter / box-shadow /
+   filter re-rasterizing every frame. Because !important author declarations outrank
+   animation + transition declarations in the cascade, any keyframe/transition that
+   tries to set these is forced to none even while it runs — so the expensive part is
+   neutralized without freezing the motion itself.
+
+   We deliberately do NOT blanket `animation: none` / `transition-duration: 0s`:
+   that froze every functional loading spinner (the dash-header worker-service
+   spinners read as BROKEN, stuck mid-rotation) and killed cheap transform/colour
+   feedback (e.g. the Quick Actions hover). Transform- and opacity-only motion is
+   composited for ~free, so it stays — a spinner that spins, just without glow. */
 body.reduce-effects *,
 body.reduce-effects *::before,
 body.reduce-effects *::after {
-    animation: none !important;
-    transition-duration: 0s !important;
-    transition-delay: 0s !important;
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
     box-shadow: none !important;
@@ -59728,6 +61418,38 @@ body.reduce-effects *::after {
 /* Kill the background particle canvas entirely in performance mode */
 body.reduce-effects #page-particles-canvas {
     display: none !important;
+}
+
+/* ── Max Performance ── Nuclear low-power mode for software-rendered / no-GPU
+   setups (e.g. Docker, remote desktop), where there is no compositor and even
+   transform/opacity motion repaints on the CPU. Superset of Reduce Visual Effects:
+   kills the expensive GPU properties AND halts ALL animation + transitions — so
+   functional loading spinners go static. That's the deliberate trade-off for
+   minimum CPU; the user opts in explicitly. Worker orbs, particles, the cursor
+   glow and the API-monitor sparks are halted in JS (gated on window._maxPerfActive). */
+body.max-performance *,
+body.max-performance *::before,
+body.max-performance *::after {
+    animation: none !important;
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    box-shadow: none !important;
+    filter: none !important;
+}
+
+/* Drop the always-on page-particles canvas from the compositor entirely. */
+body.max-performance #page-particles-canvas {
+    display: none !important;
+}
+
+/* Appearance toggles that Max Performance overrides: greyed + locked while it's on. */
+.form-group.setting-overridden {
+    opacity: 0.45;
+}
+.form-group.setting-overridden .checkbox-label {
+    cursor: not-allowed;
 }
 
 /* ============================================
@@ -60149,8 +61871,9 @@ body.reduce-effects #page-particles-canvas {
 
 .dl-nav-badge {
     position: absolute;
-    top: 4px;
+    top: 50%;
     right: 8px;
+    transform: translateY(-50%);
     background: rgb(var(--accent-rgb));
     color: #fff;
     font-size: 0.6rem;
@@ -62495,6 +64218,10 @@ body[data-artist-source="source"] #artist-detail-page #library-artist-enhance-bt
 }
 
 #artist-detail-page .artist-detail-hero-bg {
+    /* Blurred artist-cover backdrop retired — Boulder didn't want the artist
+       image bleeding behind the header. The element stays in the DOM (JS still
+       sets its background-image) but is hidden; flip display back on to restore. */
+    display: none;
     position: absolute;
     inset: -20px;
     background-size: cover;
@@ -62751,8 +64478,10 @@ body[data-artist-source="source"] #artist-detail-page #library-artist-enhance-bt
     opacity: 1;
     pointer-events: none;
     z-index: 0;
-    will-change: left, top, transform, opacity;
-    animation: dashBlobHaloPulse 5.5s ease-in-out infinite;
+    will-change: left, top;
+    /* No infinite scale-pulse: scaling a blur(48px) element re-rasterizes the blur every
+       frame, and with 8 cards × 2 blobs that pinned the GPU at idle (#935). The blob still
+       follows the cursor via --blob-x/y; it just doesn't breathe when nothing's happening. */
 }
 .dash-card::after {
     content: '';
@@ -62772,9 +64501,9 @@ body[data-artist-source="source"] #artist-detail-page #library-artist-enhance-bt
     opacity: 1;
     pointer-events: none;
     z-index: 0;
-    will-change: left, top, transform, opacity;
+    will-change: left, top;
     mix-blend-mode: screen;
-    animation: dashBlobCorePulse 3.7s ease-in-out infinite;
+    /* No infinite scale-pulse — same reason as ::before (#935). */
 }
 
 @keyframes dashBlobHaloPulse {
@@ -62793,7 +64522,9 @@ body[data-artist-source="source"] #artist-detail-page #library-artist-enhance-bt
 }
 
 body.reduce-effects .dash-card::before,
-body.reduce-effects .dash-card::after {
+body.reduce-effects .dash-card::after,
+body.max-performance .dash-card::before,
+body.max-performance .dash-card::after {
     display: none;
 }
 .dash-card:hover {
@@ -67948,6 +69679,7 @@ body.em-scroll-lock { overflow: hidden; }
 .verif-badge.verif-unverified { color: #f1c40f; background: rgba(241,196,15,0.14); }
 .verif-badge.verif-force { color: #e67e22; background: rgba(230,126,34,0.16); }
 .adl-retry-info { margin-left: 6px; font-size: 11px; color: #e67e22; cursor: help; }
+.adl-quality-chip { display: inline-block; margin-left: 6px; font-size: 10px; font-weight: 600; letter-spacing: 0.02em; color: rgba(255,255,255,0.78); background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; padding: 0 6px; line-height: 16px; cursor: help; vertical-align: middle; }
 .verif-badge.verif-human { color: #3498db; background: rgba(52,152,219,0.14); }
 .verif-actions { display: inline-flex; gap: 6px; margin-left: 10px; align-items: center; }
 .verif-act { border: 1px solid rgba(255,255,255,0.18); background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.85); border-radius: 6px; padding: 2px 8px; font-size: 12px; cursor: pointer; line-height: 18px; }
@@ -67965,6 +69697,14 @@ body.em-scroll-lock { overflow: hidden; }
 .verif-detail-label { color: rgba(255,255,255,0.4); margin-right: 4px; }
 .verif-banner-spacer { flex: 1; }
 .verif-bulk-danger { border-color: rgba(248,113,113,0.4) !important; color: #f87171 !important; }
+
+.verif-quar-alt-wrapper { display: contents; }
+.verif-quar-alt-slot { min-width: 68px; display: flex; align-items: center; justify-content: flex-end; flex-shrink: 0; }
+.verif-quar-alt-btn { border: 1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.5); border-radius: 6px; padding: 2px 7px; font-size: 11px; cursor: pointer; white-space: nowrap; line-height: 18px; }
+.verif-quar-alt-btn:hover { background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.8); }
+.verif-quar-alt-btn.open { color: rgba(255,255,255,0.75); border-color: rgba(255,255,255,0.25); }
+.verif-quar-alt-members { display: none; padding-left: 20px; border-left: 2px solid rgba(255,255,255,0.07); margin-left: 8px; margin-bottom: 2px; }
+.verif-quar-alt-members.vqg-open { display: block; }
 
 /* ── Security settings: grouped sub-sections + dependency visuals ── */
 .security-subgroup {
@@ -68282,3 +70022,451 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
 }
 .wlx-opt input { accent-color: #7aa2f7; }
 .watchlist-export-btn .watchlist-all-icon { font-weight: 700; }
+
+/* =========================================================================
+   Re-identify Track Modal (#889)
+   A focused, vibey chooser: "which release does this track belong to?"
+   ========================================================================= */
+#reid-modal-overlay { backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+
+.reid-modal {
+    position: relative;
+    width: min(760px, 94vw);
+    max-height: 88vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-radius: 20px;
+    background: linear-gradient(180deg, #14161d 0%, #0e0f15 100%);
+    border: 1px solid rgba(var(--accent-rgb), 0.18);
+    box-shadow:
+        0 30px 90px rgba(0, 0, 0, 0.6),
+        0 0 80px rgba(var(--accent-rgb), 0.08),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    animation: reidPop 0.34s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes reidPop {
+    from { opacity: 0; transform: translateY(18px) scale(0.97); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ── Hero ──
+   No overflow:hidden on .reid-hero itself (it was clipping the header content).
+   Instead the decorative blurred bg + overlay live in .reid-hero-decor, an
+   absolutely-positioned clip layer: it contains the blur (so it can't bleed into
+   the tabs) and is pointer-events:none (so it can never steal clicks from the
+   source tabs). The actual content is a SIBLING of the decor layer, so it's never
+   clipped. */
+.reid-hero { position: relative; padding: 26px 28px; }
+.reid-hero-decor {
+    position: absolute; inset: 0; z-index: 0;
+    overflow: hidden; pointer-events: none;
+    border-radius: 20px 20px 0 0;
+}
+.reid-hero-bg {
+    position: absolute; inset: -30px;
+    background-size: cover; background-position: center;
+    filter: blur(46px) brightness(0.4) saturate(1.5);
+    transform: scale(1.25); opacity: 0.9;
+    transition: background-image 0.4s ease;
+}
+.reid-hero-overlay {
+    position: absolute; inset: 0;
+    background: linear-gradient(135deg, rgba(10,11,16,0.55) 0%, rgba(10,11,16,0.8) 100%);
+}
+.reid-hero-content { position: relative; z-index: 2; display: flex; gap: 18px; align-items: center; }
+.reid-hero-art {
+    width: 76px; height: 76px; flex: 0 0 76px; border-radius: 12px;
+    background: rgba(255,255,255,0.05) center/cover no-repeat;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.08);
+}
+.reid-hero-art.empty { display: grid; place-items: center; }
+.reid-hero-art.empty::after { content: '♪'; font-size: 30px; color: rgba(var(--accent-rgb), 0.7); }
+.reid-hero-meta { min-width: 0; }
+.reid-hero-eyebrow {
+    font: 600 11px/1 'JetBrains Mono', ui-monospace, monospace;
+    letter-spacing: 0.14em; text-transform: uppercase;
+    color: rgb(var(--accent-light-rgb)); margin-bottom: 7px;
+}
+.reid-hero-title {
+    font-size: 23px; font-weight: 800; color: #fff; line-height: 1.15;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.reid-hero-sub { margin-top: 4px; color: #aab; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.reid-close {
+    position: absolute; top: 14px; right: 18px; z-index: 3;
+    font-size: 26px; line-height: 1; color: #aab; cursor: pointer;
+    width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%;
+    transition: all 0.18s ease;
+}
+.reid-close:hover { color: #fff; background: rgba(255,255,255,0.1); transform: rotate(90deg); }
+
+/* ── Source tabs ── */
+.reid-tabs {
+    display: flex; gap: 7px; padding: 14px 28px 0; flex-wrap: wrap;
+}
+.reid-tab {
+    padding: 7px 15px; border-radius: 999px; cursor: pointer;
+    font-size: 12.5px; font-weight: 600; color: #9aa3bd;
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06);
+    transition: all 0.18s ease; white-space: nowrap;
+}
+.reid-tab:hover { color: #fff; background: rgba(255,255,255,0.08); }
+.reid-tab.active {
+    color: #06210f; background: linear-gradient(180deg, rgb(var(--accent-light-rgb)), rgb(var(--accent-rgb)));
+    border-color: transparent; box-shadow: 0 4px 14px rgba(var(--accent-rgb), 0.35);
+}
+
+/* ── Search ── */
+.reid-search { display: flex; align-items: center; gap: 10px; padding: 16px 28px 12px; position: relative; }
+.reid-search-icon { position: absolute; left: 42px; color: #6b7390; pointer-events: none; }
+.reid-search-input {
+    flex: 1; padding: 12px 14px 12px 40px; border-radius: 12px;
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+    color: #fff; font-size: 14px; transition: all 0.18s ease;
+}
+.reid-search-input:focus {
+    outline: none; border-color: rgba(var(--accent-rgb), 0.5);
+    background: rgba(255,255,255,0.06); box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.12);
+}
+.reid-search-btn {
+    padding: 11px 20px; border-radius: 12px; cursor: pointer; font-weight: 700; font-size: 13px;
+    color: #06210f; background: linear-gradient(180deg, rgb(var(--accent-light-rgb)), rgb(var(--accent-rgb)));
+    border: none; transition: all 0.18s ease;
+}
+.reid-search-btn:hover { filter: brightness(1.08); transform: translateY(-1px); }
+
+/* ── Results ── */
+.reid-results { flex: 1; overflow-y: auto; padding: 4px 22px 10px; min-height: 220px; }
+.reid-result {
+    display: flex; align-items: center; gap: 14px; padding: 12px 14px; margin: 6px 0;
+    border-radius: 14px; cursor: pointer;
+    background: rgba(255,255,255,0.025); border: 1.5px solid transparent;
+    transition: transform 0.16s ease, background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+    animation: reidRowIn 0.3s ease backwards;
+}
+@keyframes reidRowIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+.reid-result:hover { background: rgba(255,255,255,0.05); transform: translateY(-2px); }
+.reid-result.selected {
+    border-color: rgba(var(--accent-rgb), 0.65);
+    background: rgba(var(--accent-rgb), 0.1);
+    box-shadow: 0 6px 20px rgba(var(--accent-rgb), 0.18);
+}
+.reid-result-art {
+    width: 52px; height: 52px; flex: 0 0 52px; border-radius: 9px;
+    background: rgba(255,255,255,0.06) center/cover no-repeat; border: 1px solid rgba(255,255,255,0.07);
+    display: grid; place-items: center;
+}
+.reid-result-art span { font-size: 20px; color: rgba(var(--accent-rgb), 0.6); }
+.reid-result-info { min-width: 0; flex: 1; }
+.reid-result-title { font-weight: 700; color: #fff; font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.reid-result-release { color: #9aa3bd; font-size: 12.5px; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.reid-result-meta { display: flex; align-items: center; gap: 9px; flex: 0 0 auto; }
+.reid-result-detail { color: #6b7390; font-size: 11.5px; font-family: 'JetBrains Mono', ui-monospace, monospace; text-align: right; }
+.reid-result-check {
+    width: 22px; height: 22px; border-radius: 50%; flex: 0 0 22px;
+    border: 2px solid rgba(255,255,255,0.14); display: grid; place-items: center; transition: all 0.18s ease;
+}
+.reid-result.selected .reid-result-check {
+    border-color: rgb(var(--accent-rgb)); background: rgb(var(--accent-rgb));
+}
+.reid-result.selected .reid-result-check::after { content: '✓'; color: #06210f; font-size: 13px; font-weight: 900; }
+
+/* Type badges */
+.reid-badge {
+    font: 700 10px/1 'JetBrains Mono', ui-monospace, monospace;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    padding: 4px 8px; border-radius: 6px; white-space: nowrap;
+}
+.reid-badge.album       { color: #22ff6b; background: rgba(34,255,107,0.12); border: 1px solid rgba(34,255,107,0.25); }
+.reid-badge.ep          { color: #5aa9ff; background: rgba(90,169,255,0.12); border: 1px solid rgba(90,169,255,0.25); }
+.reid-badge.single      { color: #ffc24b; background: rgba(255,194,75,0.12);  border: 1px solid rgba(255,194,75,0.25); }
+.reid-badge.compilation { color: #c98bff; background: rgba(201,139,255,0.12); border: 1px solid rgba(201,139,255,0.25); }
+
+/* Idle / loading / empty */
+.reid-state { display: grid; place-items: center; gap: 14px; min-height: 200px; text-align: center; color: #6b7390; padding: 20px; }
+.reid-state .reid-state-icon { font-size: 38px; opacity: 0.5; }
+.reid-state p { font-size: 13.5px; max-width: 360px; }
+.reid-spinner {
+    width: 38px; height: 38px; border-radius: 50%;
+    border: 3px solid rgba(var(--accent-rgb), 0.15); border-top-color: rgb(var(--accent-rgb));
+    animation: reidSpin 0.8s linear infinite;
+}
+@keyframes reidSpin { to { transform: rotate(360deg); } }
+.reid-skel {
+    height: 76px; margin: 6px 0; border-radius: 14px;
+    background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.07) 37%, rgba(255,255,255,0.03) 63%);
+    background-size: 400% 100%; animation: reidShimmer 1.4s ease infinite;
+}
+@keyframes reidShimmer { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
+
+/* ── Footer ── */
+.reid-footer {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    padding: 16px 28px; border-top: 1px solid rgba(255,255,255,0.06);
+    background: rgba(0,0,0,0.2); flex-wrap: wrap;
+}
+.reid-replace { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; }
+.reid-replace input { display: none; }
+.reid-replace-box {
+    width: 20px; height: 20px; border-radius: 6px; flex: 0 0 20px;
+    border: 2px solid rgba(255,255,255,0.18); transition: all 0.18s ease; display: grid; place-items: center;
+}
+.reid-replace input:checked + .reid-replace-box {
+    background: linear-gradient(180deg, rgb(var(--accent-light-rgb)), rgb(var(--accent-rgb))); border-color: transparent;
+}
+.reid-replace input:checked + .reid-replace-box::after { content: '✓'; color: #06210f; font-size: 13px; font-weight: 900; }
+.reid-replace-text { color: #c2c9de; font-size: 13px; }
+.reid-replace-text em { color: #7f879e; font-style: normal; font-size: 11.5px; }
+.reid-footer-actions { display: flex; gap: 10px; }
+#reid-confirm-btn:disabled { opacity: 0.4; cursor: not-allowed; filter: grayscale(0.4); }
+
+/* Settings cleanup: source settings uses the same inner-card spacing as Retry Logic. */
+#settings-page .settings-section-body:not(.collapsed) > .settings-group.source-settings-wrapper {
+    padding: 0 !important;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+#settings-page .settings-section-body:not(.collapsed) > .settings-group.source-settings-wrapper > .settings-subcard {
+    margin: 0 !important;
+}
+
+/* Firefox-only performance overrides (#935). Firefox re-rasterizes blur()/backdrop-filter on
+   every composite where Chrome caches them, so the frosted-glass shell costs real idle GPU on
+   Firefox only. @supports(-moz-appearance) matches Firefox and NOT Chrome — this whole block is
+   invisible to Chrome, which keeps the full frosted look. Revert = delete this block. */
+@supports (-moz-appearance: none) {
+    /* dash-card cursor-glow blobs — 16 large blur(48px)/blur(18px) layers, purely decorative */
+    .dash-card::before,
+    .dash-card::after { display: none; }
+
+    /* sidebar aura orbs — two blur(28px) elements, always visible on every page */
+    .sidebar::before,
+    .sidebar::after { display: none; }
+
+    /* shell frosted-glass panels — drop the backdrop blur (each element keeps its own tint, so
+       it stays a solid/translucent panel, just not frosted). always-visible, so helps every page. */
+    .sidebar-header,
+    .header-button,
+    .watchlist-button,
+    .wishlist-button {
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
+    }
+}
+
+/* ===== Album cover-art picker ===== */
+.enhanced-expanded-art-wrap {
+    position: relative;
+    display: inline-block;
+    cursor: pointer;
+    border-radius: 8px;
+    overflow: hidden;
+    line-height: 0;
+}
+.enhanced-art-edit-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: .02em;
+    background: linear-gradient(to top, rgba(0,0,0,.78), rgba(0,0,0,.28));
+    opacity: 0;
+    transition: opacity .18s ease;
+}
+.enhanced-expanded-art-wrap:hover .enhanced-art-edit-overlay { opacity: 1; }
+.enhanced-art-edit-overlay svg { opacity: .95; }
+
+.art-picker-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgba(0,0,0,.72);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    opacity: 0;
+    transition: opacity .2s ease;
+}
+.art-picker-overlay.visible { opacity: 1; }
+.art-picker-modal {
+    width: min(920px, 94vw);
+    max-height: 86vh;
+    display: flex;
+    flex-direction: column;
+    background: #181818;
+    border: 1px solid rgba(255,255,255,.06);
+    border-radius: 16px;
+    box-shadow: 0 24px 70px rgba(0,0,0,.6);
+    transform: translateY(14px) scale(.975);
+    transition: transform .22s cubic-bezier(.2,.8,.2,1);
+    overflow: hidden;
+}
+.art-picker-overlay.visible .art-picker-modal { transform: none; }
+.art-picker-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 20px 24px;
+    border-bottom: 1px solid rgba(255,255,255,.06);
+}
+.art-picker-title { font-size: 18px; font-weight: 700; color: #fff; }
+.art-picker-subtitle { font-size: 13px; color: #b3b3b3; margin-top: 3px; }
+.art-picker-close {
+    flex: 0 0 auto;
+    width: 34px; height: 34px;
+    display: flex; align-items: center; justify-content: center;
+    border: none; border-radius: 50%;
+    background: transparent; color: #b3b3b3; cursor: pointer;
+    transition: background .15s ease, color .15s ease;
+}
+.art-picker-close:hover { background: rgba(255,255,255,.1); color: #fff; }
+
+.art-picker-body { flex: 1; overflow-y: auto; padding: 22px 24px; }
+.art-picker-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 14px;
+}
+.art-picker-tile {
+    position: relative;
+    aspect-ratio: 1 / 1;
+    padding: 0;
+    border: 2px solid transparent;
+    border-radius: 10px;
+    overflow: hidden;
+    background: #0f0f0f;
+    cursor: pointer;
+    transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease;
+}
+.art-picker-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.art-picker-tile:hover {
+    transform: translateY(-2px) scale(1.03);
+    border-color: rgba(var(--accent-rgb), .55);
+    box-shadow: 0 10px 24px rgba(0,0,0,.5);
+}
+.art-picker-tile.selected {
+    border-color: rgb(var(--accent-rgb));
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .3), 0 10px 24px rgba(0,0,0,.5);
+}
+.art-picker-badge {
+    position: absolute;
+    left: 7px; bottom: 7px;
+    padding: 2px 7px;
+    font-size: 9px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .06em;
+    color: #e6e6e6;
+    background: rgba(0,0,0,.72);
+    border-radius: 6px;
+    pointer-events: none;
+}
+.art-picker-check {
+    position: absolute;
+    top: 7px; right: 7px;
+    width: 26px; height: 26px;
+    display: flex; align-items: center; justify-content: center;
+    color: #0b1d12;
+    background: rgb(var(--accent-rgb));
+    border-radius: 50%;
+    box-shadow: 0 2px 8px rgba(0,0,0,.4);
+    transform: scale(0);
+    transition: transform .16s cubic-bezier(.2,.9,.3,1.4);
+    pointer-events: none;
+}
+.art-picker-tile.selected .art-picker-check { transform: scale(1); }
+
+.art-picker-skel {
+    aspect-ratio: 1 / 1;
+    border-radius: 10px;
+    background: linear-gradient(100deg, #191919 30%, #232323 50%, #191919 70%);
+    background-size: 200% 100%;
+    animation: artPickerShimmer 1.3s ease-in-out infinite;
+}
+@keyframes artPickerShimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+.art-picker-empty { padding: 48px 12px; text-align: center; color: #b3b3b3; font-size: 14px; }
+
+.art-picker-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 16px 24px;
+    border-top: 1px solid rgba(255,255,255,.06);
+}
+.art-picker-count { font-size: 13px; color: #b3b3b3; }
+.art-picker-actions { display: flex; gap: 10px; }
+.art-picker-btn {
+    padding: 9px 20px;
+    font-size: 14px; font-weight: 600;
+    border-radius: 999px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: transform .12s ease, background .15s ease, opacity .15s ease;
+}
+.art-picker-btn:hover { transform: scale(1.04); }
+.art-picker-cancel { background: transparent; color: #e6e6e6; border-color: rgba(255,255,255,.22); }
+.art-picker-cancel:hover { border-color: #fff; }
+.art-picker-apply { background: rgb(var(--accent-rgb)); color: #0b1d12; }
+.art-picker-apply:disabled { opacity: .4; cursor: default; transform: none; }
+
+/* Library M3U export button (standalone action in the Export modal) */
+.arec-btn-m3u {
+    border-color: rgba(var(--accent-rgb), .55) !important;
+    color: rgb(var(--accent-light-rgb)) !important;
+}
+.arec-btn-m3u:hover {
+    background: rgba(var(--accent-rgb), .14) !important;
+    border-color: rgb(var(--accent-rgb)) !important;
+}
+
+/* Sidebar nav section headers — clean collapsible dividers. Deliberately distinct from nav items
+   (they toggle a group, not navigate): compact, uppercase, readable, with a disclosure chevron. */
+.nav-section-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    box-sizing: border-box;
+    width: 216px;
+    height: 30px;
+    margin: 12px 0 2px;
+    padding: 0 12px 0 16px;
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    font-family: inherit;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.64);
+    cursor: pointer;
+    user-select: none;
+    text-align: left;
+    transition: background .12s ease, color .12s ease;
+}
+.nav-section-label:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.95);
+}
+.nav-section-chevron {
+    flex: 0 0 auto;
+    width: 14px;
+    height: 14px;
+    opacity: 0.55;
+    transition: transform .2s ease, opacity .15s ease;
+}
+.nav-section-label:hover .nav-section-chevron { opacity: 1; }
+/* Collapsed: chevron points right (closed). Expanded: points down (default, open). */
+.nav-section-label.collapsed .nav-section-chevron { transform: rotate(-90deg); }
+.nav-item-hidden { display: none !important; }

@@ -15,7 +15,7 @@ shape) is intentionally NOT routed through here and stays in its own function.
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from utils.logging_config import get_logger
 
@@ -205,6 +205,56 @@ def playlist_image_dict(state: Dict[str, Any]) -> str:
     return state['playlist'].get('image_url', '')
 
 
+def reconcile_sync_phase(
+    state: Dict[str, Any],
+    sync_state: Dict[str, Any],
+    *,
+    activity_subject: str = None,
+    playlist_name_getter=None,
+    add_activity_item=None,
+) -> Optional[str]:
+    """Advance a discovery playlist OUT of the 'syncing' phase once its sync
+    reaches a terminal status. THE single source of truth for that transition.
+
+    Returns the terminal status it acted on ('finished' / 'error' / 'cancelled')
+    or None if nothing changed (state isn't syncing, or the sync isn't terminal).
+
+    Guarded on ``phase == 'syncing'`` so it fires exactly ONCE per sync: whichever
+    caller first sees the terminal status flips the phase, and any later caller is
+    a no-op. That one-shot guard is what makes it safe to call from BOTH the
+    ``get_*_sync_status`` HTTP poll AND a server-side reconcile loop — the
+    activity-feed item is posted exactly once, by whoever wins.
+
+    Before #972 this logic lived ONLY inside ``get_sync_status`` (an HTTP GET), so
+    a socket-driven client (which skips that endpoint — see the
+    ``if (socketConnected) return`` fast-path in sync-services.js) left the SERVER
+    stuck in 'syncing' after a sync finished: the next sync attempt 400'd with
+    'not ready for sync' and a reload showed a phantom, never-progressing sync.
+    """
+    if state.get('phase') != 'syncing':
+        return None
+    status = (sync_state or {}).get('status')
+    if status == 'finished':
+        state['phase'] = 'sync_complete'
+        state['sync_progress'] = (sync_state or {}).get('progress', {})
+        if add_activity_item and playlist_name_getter:
+            add_activity_item("", "Sync Complete",
+                              f"{activity_subject} '{playlist_name_getter(state)}' synced successfully", "Now")
+        return 'finished'
+    if status == 'error':
+        state['phase'] = 'discovered'
+        if add_activity_item and playlist_name_getter:
+            add_activity_item("", "Sync Failed",
+                              f"{activity_subject} '{playlist_name_getter(state)}' sync failed", "Now")
+        return 'error'
+    if status == 'cancelled':
+        # cancel_sync already resets phase/sync_playlist_id itself, but if a sync
+        # was cancelled out from under a still-'syncing' state, unstick it too.
+        state['phase'] = 'discovered'
+        return 'cancelled'
+    return None
+
+
 def get_sync_status(
     states: Dict[str, Any],
     key: str,
@@ -258,15 +308,15 @@ def get_sync_status(
             'error': sync_state.get('error'),
         }
 
-        if sync_state.get('status') == 'finished':
-            state['phase'] = 'sync_complete'
-            state['sync_progress'] = sync_state.get('progress', {})
-            playlist_name = playlist_name_getter(state)
-            add_activity_item("", "Sync Complete", f"{activity_subject} '{playlist_name}' synced successfully", "Now")
-        elif sync_state.get('status') == 'error':
-            state['phase'] = 'discovered'
-            playlist_name = playlist_name_getter(state)
-            add_activity_item("", "Sync Failed", f"{activity_subject} '{playlist_name}' sync failed", "Now")
+        # Advance the discovery phase to match a terminal sync (one-shot). A
+        # server-side loop calls the same helper so this also happens for clients
+        # that never poll this endpoint (socket-driven) — see reconcile_sync_phase.
+        reconcile_sync_phase(
+            state, sync_state,
+            activity_subject=activity_subject,
+            playlist_name_getter=playlist_name_getter,
+            add_activity_item=add_activity_item,
+        )
 
         return response, 200
     except Exception as e:

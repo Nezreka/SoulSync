@@ -21,7 +21,11 @@ from core.metadata.registry import get_client_for_source
 from core.metadata.types import Album
 from core.wishlist.payloads import ensure_wishlist_track_format
 
-logger = logging.getLogger(__name__)
+# Use the project logger namespace ("soulsync.*") so the scanner's progress and
+# diagnostics actually surface in the app log — plain getLogger(__name__) lands
+# under "core.discovery.quality_scanner", which the app log view doesn't show.
+from utils.logging_config import get_logger
+logger = get_logger("discovery.quality_scanner")
 
 
 # Per-source typed converter dispatch — same registry pattern as

@@ -8,7 +8,7 @@ source_track_id echo (Bug B), and parity with the original three-pass behavior
 
 from __future__ import annotations
 
-from core.sync.playlist_reconcile import norm_title, reconcile_playlist
+from core.sync.playlist_reconcile import compute_order_status, norm_title, reconcile_playlist
 
 
 def _src(name, artist, sid="", **kw):
@@ -160,3 +160,67 @@ def test_norm_title_helper_parity():
     assert norm_title("Stay (feat. X)") == "stay"
     assert norm_title("Song (2019 Remaster)") == "song"
     assert norm_title("Album (Deluxe Edition)") == "album"
+
+
+# ── order status: server playlist accurate-but-out-of-order detection ─────────
+# The editor renders the server column in SOURCE order, so a reordered-but-same-
+# membership playlist used to read "in sync" when the real Navidrome order differed.
+# compute_order_status surfaces that drift (one-way: source order is truth).
+
+def test_reconcile_attaches_server_index_to_matched():
+    source = [_src("Yellow", "Coldplay", "s1")]
+    server = [_svr("Filler", "X", "nv0"), _svr("Yellow", "Coldplay", "nv1")]
+    combined = reconcile_playlist(source, server)
+    matched = [c for c in combined if c["match_status"] == "matched"][0]
+    assert matched["server_index"] == 1            # Yellow is at server position 1
+
+
+def test_in_order_when_server_matches_source_sequence():
+    titles = ["Mandinka", "Real Love Baby", "Liquid Indian", "Heaven or Las Vegas", "hospital beach"]
+    source = [_src(t, "A", f"s{i}") for i, t in enumerate(titles)]
+    server = [_svr(t, "A", f"nv{i}") for i, t in enumerate(titles)]   # same order
+    status = compute_order_status(reconcile_playlist(source, server))
+    assert status == {"matched": 5, "in_order": True, "out_of_order": False}
+
+
+def test_out_of_order_reproduces_real_love_baby_case():
+    # Source (Spotify): Real Love Baby at position 2. Server (Navidrome): still last.
+    src_titles = ["Mandinka", "Real Love Baby", "Liquid Indian", "Heaven or Las Vegas", "hospital beach"]
+    svr_titles = ["Mandinka", "Liquid Indian", "Heaven or Las Vegas", "hospital beach", "Real Love Baby"]
+    source = [_src(t, "A", f"s{i}") for i, t in enumerate(src_titles)]
+    server = [_svr(t, "A", f"nv{i}") for i, t in enumerate(svr_titles)]
+    status = compute_order_status(reconcile_playlist(source, server))
+    assert status["matched"] == 5
+    assert status["out_of_order"] is True          # the bug: looked synced, wasn't
+
+
+def test_missing_tracks_do_not_false_flag_out_of_order():
+    # 2 tracks missing on the server, but the present ones are in the right relative
+    # order -> NOT out of order (membership is a separate axis).
+    source = [_src(t, "A", f"s{i}") for i, t in enumerate(["one", "two", "three", "four"])]
+    server = [_svr("one", "A", "nv0"), _svr("three", "A", "nv1")]   # two/four missing, order ok
+    status = compute_order_status(reconcile_playlist(source, server))
+    assert status["matched"] == 2
+    assert status["out_of_order"] is False
+
+
+def test_missing_and_shuffled_still_flags_out_of_order():
+    source = [_src(t, "A", f"s{i}") for i, t in enumerate(["one", "two", "three", "four"])]
+    server = [_svr("three", "A", "nv0"), _svr("one", "A", "nv1")]   # present pair is reversed
+    status = compute_order_status(reconcile_playlist(source, server))
+    assert status["matched"] == 2
+    assert status["out_of_order"] is True
+
+
+def test_extras_ignored_for_order():
+    # An extra server track (not in source) must not affect the order verdict.
+    source = [_src("a", "A", "s0"), _src("b", "A", "s1")]
+    server = [_svr("a", "A", "nv0"), _svr("zzz extra", "A", "nv1"), _svr("b", "A", "nv2")]
+    status = compute_order_status(reconcile_playlist(source, server))
+    assert status["matched"] == 2 and status["out_of_order"] is False
+
+
+def test_fewer_than_two_matches_never_out_of_order():
+    assert compute_order_status([])["out_of_order"] is False
+    one = reconcile_playlist([_src("a", "A", "s0")], [_svr("a", "A", "nv0")])
+    assert compute_order_status(one)["out_of_order"] is False

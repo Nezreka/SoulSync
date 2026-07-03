@@ -128,7 +128,14 @@ class SoundcloudClient(DownloadSourcePlugin):
             download_path = config_manager.get('soulseek.download_path', './downloads')
 
         self.download_path = Path(download_path)
-        self.download_path.mkdir(parents=True, exist_ok=True)
+        # Don't crash construction if the path isn't creatable yet (e.g. an
+        # unmounted/misconfigured volume) — the registry would null the whole
+        # client and the source vanishes. Warn and continue, same as
+        # SoulseekClient; the dir is (re)created lazily at download time.
+        try:
+            self.download_path.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            logger.warning(f"Could not verify SoundCloud download path {self.download_path}: {e}")
 
         logger.info(f"SoundCloud client using download path: {self.download_path}")
 

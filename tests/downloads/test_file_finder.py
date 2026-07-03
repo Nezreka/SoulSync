@@ -18,6 +18,7 @@ finishes downloading release).
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -363,8 +364,10 @@ def test_encoded_title_with_slash_is_not_basename_split():
 def test_finds_youtube_file_whose_title_contains_a_slash(tmp_path):
     downloads = tmp_path / 'downloads'
     # On disk the slash is sanitised to a look-alike and the colon spaced out,
-    # exactly as in the issue screenshot.
-    target = downloads / 'YouSeeBIGGIRL∕T: T.mp3'
+    # exactly as in the issue screenshot. Windows forbids ':' in filenames, so
+    # yt-dlp-style sanitisation there leaves a space instead of ': '.
+    on_disk = 'YouSeeBIGGIRL∕T T.mp3' if sys.platform == 'win32' else 'YouSeeBIGGIRL∕T: T.mp3'
+    target = downloads / on_disk
     _touch(target)
 
     found, location = find_completed_audio_file(
@@ -395,4 +398,57 @@ def test_real_soulseek_path_still_basenamed(tmp_path):
     found, _ = find_completed_audio_file(
         str(downloads), r'shared\Billy Ocean\Very Best Of\01 - Suddenly.flac',
     )
+    assert found == str(target)
+
+
+# ---------------------------------------------------------------------------
+# Unbalanced bracket — slskd REPORTS "[34 - Title.flac" but SAVES the file as
+# "34 - Title.flac" (it sanitises the leading '['). The normaliser's old combined
+# bracket-strip r'[\[\(].*?[\]\)]' matched from that lone '[' all the way to the
+# next ')', eating the whole title and collapsing the search target to just "flac"
+# → 0.40 fuzzy score → "File not found on disk" despite the file sitting right
+# there. (Discord: Shdjfgatdif — "You & Me (Flume Remix)".)
+# ---------------------------------------------------------------------------
+
+
+def test_finds_file_when_slskd_strips_a_leading_bracket(tmp_path):
+    downloads = tmp_path / 'downloads'
+    # On disk: no leading '['. API filename (slskd-reported): has the '['.
+    target = downloads / 'Disclosure' / '34 - You & Me (Flume Remix).flac'
+    _touch(target)
+
+    found, location = find_completed_audio_file(
+        str(downloads), r'Music\Disclosure\[34 - You & Me (Flume Remix).flac',
+    )
+
+    assert found == str(target), \
+        'the lone "[" used to collapse the target to "flac" and miss the file'
+    assert location == 'downloads'
+
+
+def test_balanced_bracket_tags_still_stripped(tmp_path):
+    """No regression: balanced "[FLAC]" / "(Remastered 2016)" tags in a Soulseek
+    filename must still be stripped so it matches the clean saved file."""
+    downloads = tmp_path / 'downloads'
+    target = downloads / 'Song.mp3'
+    _touch(target)
+
+    found, _ = find_completed_audio_file(
+        str(downloads), r'shared\Artist\Album\Song [FLAC] (Remastered 2016).mp3',
+    )
+
+    assert found == str(target)
+
+
+def test_stray_closing_bracket_does_not_break_match(tmp_path):
+    """The other shape in the wild (Discord: "Abort, Retry, Fail_]1-01 …") — a
+    stray ']' must not wreck the match either."""
+    downloads = tmp_path / 'downloads'
+    target = downloads / 'White Town' / "Fail_]1-01 Your Woman.flac"
+    _touch(target)
+
+    found, _ = find_completed_audio_file(
+        str(downloads), r"@@digadom\Music\White Town\Fail_]1-01 Your Woman.flac",
+    )
+
     assert found == str(target)

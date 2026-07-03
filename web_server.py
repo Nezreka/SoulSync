@@ -40,7 +40,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "2.7.2"
+_SOULSYNC_BASE_VERSION = "2.8.4"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -82,8 +82,9 @@ if not pp_logger.handlers:
     _pp_handler.setFormatter(_logging.Formatter("%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
     pp_logger.addHandler(_pp_handler)
     pp_logger.propagate = False
-from core.spotify_client import SpotifyClient, Playlist as SpotifyPlaylist, Track as SpotifyTrack, _is_globally_rate_limited as _spotify_rate_limited
+from core.spotify_client import SpotifyClient, Playlist as SpotifyPlaylist, Track as SpotifyTrack, _is_globally_rate_limited as _spotify_rate_limited, SPOTIFY_OAUTH_SCOPE
 from core.plex_client import PlexClient
+from core.ui_appearance import is_firefox_user_agent, resolve_worker_orbs_default
 from plexapi.myplex import MyPlexAccount, MyPlexPinLogin
 from core.jellyfin_client import JellyfinClient
 from core.navidrome_client import NavidromeClient
@@ -176,6 +177,7 @@ from core.imports.routes import singles_process as _import_singles_process
 from core.imports.routes import staging_files as _import_staging_files
 from core.imports.routes import staging_groups as _import_staging_groups
 from core.imports.routes import staging_hints as _import_staging_hints
+from core.imports.routes import staging_scan_status as _import_staging_scan_status
 from core.imports.routes import staging_suggestions as _import_staging_suggestions
 from core.imports.paths import build_final_path_for_track as _build_final_path_for_track
 from core.imports.pipeline import build_import_pipeline_runtime as _build_import_pipeline_runtime
@@ -192,6 +194,7 @@ from core.runtime_state import (
     activity_feed,
     activity_feed_lock,
     add_activity_item,
+    claim_for_post_processing,
     download_batches,
     download_tasks,
     matched_context_lock,
@@ -224,6 +227,7 @@ from core.musicbrainz_worker import MusicBrainzWorker
 from core.audiodb_worker import AudioDBWorker
 from core.discogs_worker import DiscogsWorker
 from core.deezer_worker import DeezerWorker
+from core.jiosaavn_worker import JioSaavnWorker
 from core.spotify_worker import SpotifyWorker
 from core.itunes_worker import iTunesWorker
 from core.lastfm_worker import LastFMWorker
@@ -302,6 +306,105 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0 if DEV_STATIC_NO_CACHE else 31536000
 import time as _cache_bust_time
 _STATIC_CACHE_BUST = str(int(_cache_bust_time.time()))
 
+def _valid_hex_color(value, fallback='#1db954'):
+    value = str(value or '').strip()
+    return value if re.fullmatch(r'#[0-9a-fA-F]{6}', value) else fallback
+
+
+def _hex_to_rgb(hex_color):
+    color = _valid_hex_color(hex_color)
+    return tuple(int(color[i:i + 2], 16) for i in (1, 3, 5))
+
+
+def _rgb_to_hsl(r, g, b):
+    rn, gn, bn = r / 255, g / 255, b / 255
+    max_c = max(rn, gn, bn)
+    min_c = min(rn, gn, bn)
+    lightness = (max_c + min_c) / 2
+    if max_c == min_c:
+        return 0, 0, lightness
+
+    delta = max_c - min_c
+    saturation = delta / (2 - max_c - min_c) if lightness > 0.5 else delta / (max_c + min_c)
+    if max_c == rn:
+        hue = ((gn - bn) / delta + (6 if gn < bn else 0)) / 6
+    elif max_c == gn:
+        hue = ((bn - rn) / delta + 2) / 6
+    else:
+        hue = ((rn - gn) / delta + 4) / 6
+    return hue, saturation, lightness
+
+
+def _hsl_to_rgb(hue, saturation, lightness):
+    if saturation == 0:
+        value = round(lightness * 255)
+        return value, value, value
+
+    def hue_to_rgb(p, q, t):
+        if t < 0:
+            t += 1
+        if t > 1:
+            t -= 1
+        if t < 1 / 6:
+            return p + (q - p) * 6 * t
+        if t < 1 / 2:
+            return q
+        if t < 2 / 3:
+            return p + (q - p) * (2 / 3 - t) * 6
+        return p
+
+    q = lightness * (1 + saturation) if lightness < 0.5 else lightness + saturation - lightness * saturation
+    p = 2 * lightness - q
+    return (
+        round(hue_to_rgb(p, q, hue + 1 / 3) * 255),
+        round(hue_to_rgb(p, q, hue) * 255),
+        round(hue_to_rgb(p, q, hue - 1 / 3) * 255),
+    )
+
+
+def _request_is_firefox() -> bool:
+    """Whether the current request's browser is Firefox (UA-based). Used ONLY to pick a
+    performance-friendly default; an explicit saved setting always wins. Safe outside a
+    request context (returns False)."""
+    try:
+        from flask import has_request_context, request
+        if not has_request_context():
+            return False
+        return is_firefox_user_agent(request.headers.get('User-Agent'))
+    except Exception:
+        return False
+
+
+def _initial_appearance_context():
+    preset = config_manager.get('ui_appearance.accent_preset', '#1db954')
+    custom = config_manager.get('ui_appearance.accent_color', '#1db954')
+    accent = _valid_hex_color(custom if preset == 'custom' else preset)
+    particles_enabled = config_manager.get('ui_appearance.particles_enabled', False) is True
+    # Worker orbs: explicit choice wins; unset → OFF on Firefox (the blurred orb canvas
+    # is the main remaining Firefox lag source), ON elsewhere. config default None so we
+    # can tell "unset" from an explicit False. (#kettui — single source: the server
+    # decides, the client consumes the injected value below.)
+    worker_orbs_enabled = resolve_worker_orbs_default(
+        config_manager.get('ui_appearance.worker_orbs_enabled', None),
+        _request_is_firefox(),
+    )
+    reduce_effects = config_manager.get('ui_appearance.reduce_effects', False) is True
+    max_performance = config_manager.get('ui_appearance.max_performance', False) is True
+    r, g, b = _hex_to_rgb(accent)
+    hue, saturation, lightness = _rgb_to_hsl(r, g, b)
+    light = _hsl_to_rgb(hue, saturation, min(lightness + 0.16, 0.95))
+    neon = _hsl_to_rgb(hue, min(saturation + 0.1, 1.0), min(lightness + 0.30, 0.95))
+    return {
+        'initial_accent_color': accent,
+        'initial_accent_rgb': f'{r}, {g}, {b}',
+        'initial_accent_light_rgb': f'{light[0]}, {light[1]}, {light[2]}',
+        'initial_accent_neon_rgb': f'{neon[0]}, {neon[1]}, {neon[2]}',
+        'initial_particles_enabled': particles_enabled,
+        'initial_worker_orbs_enabled': worker_orbs_enabled,
+        'initial_reduce_effects': reduce_effects,
+        'initial_max_performance': max_performance,
+    }
+
 
 @app.context_processor
 def _inject_static_cache_bust():
@@ -318,7 +421,7 @@ def _inject_static_cache_bust():
                 static_v = str(max(mtimes))
         except Exception:
             static_v = _STATIC_CACHE_BUST
-    return {'static_v': static_v}
+    return {'static_v': static_v, **_initial_appearance_context()}
 
 
 @app.context_processor
@@ -571,6 +674,12 @@ def _add_discover_cache_headers(response):
         if not (200 <= response.status_code < 300):
             return response
         if response.headers.get('Cache-Control'):
+            return response
+        # The two rec rows re-rank on the live adventurousness dial, which lives in server-side config
+        # (NOT the URL). A browser cache would freeze them at the first load's value — the slider would
+        # flicker but never move (the reported bug). Never cache these; the rest of discover still is.
+        if request.path in ('/api/discover/similar-artists', '/api/discover/listening-recommendations'):
+            response.headers['Cache-Control'] = 'no-store'
             return response
         response.headers['Cache-Control'] = 'private, max-age=300'
     except Exception as exc:
@@ -1838,6 +1947,7 @@ def _shutdown_runtime_components():
         (audiodb_worker, "audiodb worker"),
         (discogs_worker, "discogs worker"),
         (deezer_worker, "deezer worker"),
+        (jiosaavn_worker, "jiosaavn worker"),
         (spotify_enrichment_worker, "spotify enrichment worker"),
         (itunes_enrichment_worker, "itunes enrichment worker"),
         (lastfm_worker, "lastfm worker"),
@@ -2153,6 +2263,7 @@ SERVICE_CONFIG_REGISTRY = {
     'deezer':       {'always': True},   # anon search works, premium ARL is optional
     'musicbrainz':  {'always': True},   # public API, no credentials required
     'amazon':       {'always': True},   # T2Tunes proxy, no credentials required
+    'jiosaavn':     {'always': True},   # public proxy API, no credentials required
     'discogs':      {'required': ['token']},
     'tidal':        {'custom': lambda _svc: _tidal_has_auth_token()},
     'qobuz':        {'any_of': [['email', 'password'], ['token'], ['user_auth_token']]},
@@ -2284,6 +2395,8 @@ def _get_windowed_calls(key, current_total):
 def _get_enrichment_status():
     """Get lightweight status for all enrichment services (no DB queries).
     Reads worker properties directly to avoid expensive get_stats() calls."""
+    from core.metadata.registry import is_jiosaavn_enabled
+
     services = {}
 
     # Worker-based enrichment services: (key, display_name, worker_var)
@@ -2299,6 +2412,7 @@ def _get_enrichment_status():
         ('audiodb', 'AudioDB', lambda: audiodb_worker),
         ('discogs', 'Discogs', lambda: discogs_worker),
         ('amazon_enrichment', 'Amazon Music', lambda: amazon_worker),
+        ('jiosaavn_enrichment', 'JioSaavn', lambda: jiosaavn_worker),
     ]
 
     # Config-based "configured" checks for services that need API keys/credentials
@@ -2308,9 +2422,12 @@ def _get_enrichment_status():
         'qobuz_enrichment': lambda: bool(qobuz_enrichment_worker and qobuz_enrichment_worker.client and qobuz_enrichment_worker.client.user_auth_token),
         'lastfm': lambda: bool(config_manager.get('lastfm.api_key', '')),
         'genius': lambda: bool(config_manager.get('genius.access_token', '')),
+        'jiosaavn_enrichment': is_jiosaavn_enabled,
     }
 
     for key, name, get_worker in workers_info:
+        if key == 'jiosaavn_enrichment' and not is_jiosaavn_enabled():
+            continue
         worker = get_worker()
         if worker is not None:
             is_alive = worker.thread is not None and worker.thread.is_alive()
@@ -2486,6 +2603,11 @@ def get_status():
             'enrichment': _get_enrichment_status(),
             'active_downloads': active_dl_count,
         }
+        try:
+            from core.metadata.registry import experimental_status
+            status_data['_experimental'] = experimental_status()
+        except Exception:
+            status_data['_experimental'] = {}
         return jsonify(status_data)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -2737,6 +2859,7 @@ def generate_playlist_m3u():
         # contention) — which is exactly why "Export M3U" hung with nothing in the
         # logs. One WAL-concurrent read can't be starved that way.
         from collections import defaultdict
+        from core.text.title_match import choose_best_title_candidate
         lib_by_artist = defaultdict(list)
         for row in db.get_tracks_for_m3u_resolution(server_source=active_server):
             lib_by_artist[_clean(row['artist'])].append(
@@ -2755,15 +2878,12 @@ def generate_playlist_m3u():
                 file_path_map[idx] = None
                 continue
             s_norm, s_clean = _norm(name), _clean(name)
-            matched_path = None
-            for db_n, db_c, fp in candidates:
-                if s_norm == db_n or s_clean == db_c:
-                    matched_path = fp
-                    break
-                if max(SequenceMatcher(None, s_norm, db_n).ratio(),
-                       SequenceMatcher(None, s_clean, db_c).ratio()) >= 0.7:
-                    matched_path = fp
-                    break
+            matched_path = choose_best_title_candidate(
+                s_norm,
+                s_clean,
+                candidates,
+                lambda left, right: SequenceMatcher(None, left, right).ratio(),
+            )
             file_path_map[idx] = matched_path
 
         # --- build M3U content ---
@@ -2847,9 +2967,15 @@ def _build_system_stats():
     uptime_seconds = time.time() - start_time
     uptime = str(timedelta(seconds=int(uptime_seconds)))
 
-    # Get memory usage
+    # Get memory usage — global system %, plus SoulSync's own resident memory (RSS),
+    # so the dashboard can show "system load" and "how much RAM SoulSync itself uses".
     memory = psutil.virtual_memory()
     memory_usage = f"{memory.percent}%"
+    try:
+        _proc_rss_mb = psutil.Process(os.getpid()).memory_info().rss / (1024 * 1024)
+        process_memory = f"{_proc_rss_mb:.0f} MB" if _proc_rss_mb < 1024 else f"{_proc_rss_mb / 1024:.1f} GB"
+    except Exception:
+        process_memory = None
 
     # Count active downloads from download_batches (batches that are currently downloading)
     active_downloads = len([batch_id for batch_id, batch_data in download_batches.items()
@@ -2927,7 +3053,8 @@ def _build_system_stats():
         'download_speed': download_speed_str,
         'active_syncs': active_syncs,
         'uptime': uptime,
-        'memory_usage': memory_usage
+        'memory_usage': memory_usage,
+        'process_memory': process_memory
     }
 
 @app.route('/api/system/stats')
@@ -2984,6 +3111,61 @@ def debug_memory_stop():
     try:
         from core.diagnostics.memory_tracker import stop_tracking
         return jsonify(stop_tracking())
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/debug/memory/objects')
+def debug_memory_objects():
+    """One-shot memory breakdown by live object type (plain gc — NO tracemalloc, so it
+    won't lock up a loaded app). Hit this once when RSS is high to see which type/cache
+    dominates: a big 'count' reveals accumulation (a cache that never evicts); a big
+    'mb' under bytes/str reveals blob retention. Pinpoints the leak without tracing."""
+    import gc
+    import sys
+    from collections import defaultdict
+    try:
+        gc.collect()
+        objs = gc.get_objects()
+        counts = defaultdict(int)
+        sizes = defaultdict(int)
+        biggest = []
+        for o in objs:
+            tn = type(o).__name__
+            counts[tn] += 1
+            try:
+                sz = sys.getsizeof(o)
+            except Exception:
+                sz = 0
+            sizes[tn] += sz
+            if sz > 1_000_000 and isinstance(o, (dict, list, set, frozenset, bytes, bytearray, str, tuple)):
+                try:
+                    biggest.append((sz, tn, len(o)))
+                except Exception:  # noqa: S110 — debug stat, len() on an exotic obj is non-fatal
+                    pass
+        biggest.sort(reverse=True)
+        rss = None
+        try:
+            import psutil
+            rss = round(psutil.Process(os.getpid()).memory_info().rss / (1024 * 1024), 1)
+        except Exception:  # noqa: S110 — psutil optional; rss stays None in the debug payload
+            pass
+        return jsonify({
+            'rss_mb': rss,
+            'total_objects': len(objs),
+            'top_by_size_mb': [
+                {'type': t, 'count': counts[t], 'mb': round(sizes[t] / (1024 * 1024), 1)}
+                for t, _ in sorted(sizes.items(), key=lambda x: x[1], reverse=True)[:20]
+            ],
+            'top_by_count': [
+                {'type': t, 'count': c, 'mb': round(sizes[t] / (1024 * 1024), 1)}
+                for t, c in sorted(counts.items(), key=lambda x: x[1], reverse=True)[:20]
+            ],
+            'biggest_containers': [
+                {'mb': round(s / (1024 * 1024), 1), 'type': t, 'len': ln}
+                for s, t, ln in biggest[:15]
+            ],
+        })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -3137,13 +3319,62 @@ def handle_settings():
                                              f"in Manage Profiles first.",
                                     "members_without_password": _stranded}), 400
 
+            # YouTube pasted cookies.txt (server/Docker path): pull it out BEFORE the
+            # generic persist so the raw cookie blob never lands in config.json — it's
+            # secret + bulky. We validate up front and store only a file path.
+            _yt_in = new_settings.get('youtube')
+            _yt_paste = _yt_in.pop('cookies_paste', None) if isinstance(_yt_in, dict) else None
+            if _yt_paste is not None and str(_yt_paste).strip():
+                from core.youtube_cookies import looks_like_cookiefile, write_pasted_cookiefile
+                if not looks_like_cookiefile(_yt_paste):
+                    return jsonify({"success": False,
+                                    "error": "That doesn't look like a cookies.txt file. Export it "
+                                             "with a 'Get cookies.txt LOCALLY' browser extension and "
+                                             "paste the whole file."}), 400
+                _cookie_path = str(config_manager.config_path.parent / "youtube_cookies.txt")
+                if write_pasted_cookiefile(_yt_paste, _cookie_path):
+                    config_manager.set('youtube.cookies_file', _cookie_path)
+
+            _experimental_in = new_settings.get('experimental')
+            _metadata_in = new_settings.get('metadata')
+
+            from core.metadata.registry import resolve_settings_metadata_primary
+            _primary_err, _primary_override = resolve_settings_metadata_primary(
+                _experimental_in,
+                _metadata_in,
+                config_manager.get,
+            )
+            if _primary_err:
+                return jsonify({"success": False, "error": _primary_err}), 400
+
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
 
-            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists']:
+            if isinstance(_experimental_in, dict):
+                for key, value in _experimental_in.items():
+                    config_manager.set(f'experimental.{key}', value)
+
+            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'experimental']:
                 if service in new_settings:
+                    if service == 'experimental' and isinstance(_experimental_in, dict):
+                        continue
                     for key, value in new_settings[service].items():
                         config_manager.set(f'{service}.{key}', value)
+
+            if _primary_override:
+                config_manager.set('metadata.fallback_source', _primary_override)
+
+            # The Settings → Quality page's toggles are saved as config keys
+            # (above), but the pipeline enforces the PROFILE row (live, per
+            # item). Write the quality-owned keys through to the active
+            # default profile so "the page edits the active profile" holds —
+            # without this, a checkbox change here would never reach the
+            # pipeline (see MusicDatabase.sync_default_quality_profile_from_config).
+            if any(s in new_settings for s in ('acoustid', 'lossy_copy', 'post_processing', 'import')):
+                try:
+                    get_database().sync_default_quality_profile_from_config()
+                except Exception as _qp_sync_err:
+                    logger.error(f"Default quality profile sync failed: {_qp_sync_err}")
 
             logger.info("Settings saved successfully via Web UI.")
             
@@ -3151,9 +3382,7 @@ def handle_settings():
             changed_services = list(new_settings.keys())
             services_text = ", ".join(changed_services)
             add_activity_item("", "Settings Updated", f"{services_text} configuration saved", "Now")
-            
-            add_activity_item("", "Settings Updated", f"{services_text} configuration saved", "Now")
-            
+
             # Reload service clients with new settings (guard against None from partial init)
             if spotify_client:
                 spotify_client.reload_config()
@@ -3922,10 +4151,13 @@ def settings_config_status_endpoint():
     Drives the green/yellow header gradient. No API calls — just config reads.
     """
     try:
+        from core.metadata.registry import experimental_source_rejected, experimental_status
         result = {
             service: {'configured': _is_service_configured(service)}
             for service in SERVICE_CONFIG_REGISTRY
+            if not experimental_source_rejected(service)
         }
+        result['_experimental'] = experimental_status()
         # Spotify Free: Spotify metadata can be available without credentials
         # (opt-in no-creds source). Surface that separately so the search source
         # picker offers Spotify, while `configured` (the Connections indicator)
@@ -4538,19 +4770,26 @@ def get_quality_presets():
 
 @app.route('/api/quality-profile/preset/<preset_name>', methods=['POST'])
 def apply_quality_preset(preset_name):
-    """Apply a predefined quality preset"""
+    """Switch to a quality preset, restoring its saved edits if it has any."""
     try:
         from database.music_database import MusicDatabase
         db = MusicDatabase()
 
-        preset = db.get_quality_preset(preset_name)
+        current = db.get_quality_profile()
+        preset = dict(db.get_quality_preset(preset_name))
+        # search_mode + rank_candidates_by_quality are global search/ordering
+        # strategies, not per-preset audio settings — carry the user's current
+        # choices across preset switches.
+        preset['search_mode'] = current.get('search_mode', preset.get('search_mode', 'priority'))
+        preset['rank_candidates_by_quality'] = current.get(
+            'rank_candidates_by_quality', preset.get('rank_candidates_by_quality', False))
         success = db.set_quality_profile(preset)
 
         if success:
-            add_activity_item("", "Quality Preset Applied", f"Applied '{preset_name}' preset", "Now")
+            add_activity_item("", "Quality Preset Applied", f"Switched to '{preset_name}' preset", "Now")
             return jsonify({
                 "success": True,
-                "message": f"Applied '{preset_name}' preset",
+                "message": f"Switched to '{preset_name}' preset",
                 "profile": preset
             })
         else:
@@ -4558,6 +4797,185 @@ def apply_quality_preset(preset_name):
 
     except Exception as e:
         logger.error(f"Error applying quality preset: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/quality-profile/preset/<preset_name>/reset', methods=['POST'])
+def reset_quality_preset(preset_name):
+    """Discard a preset's saved edits and restore its factory defaults."""
+    try:
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+
+        current = db.get_quality_profile()
+        preset = dict(db.reset_quality_preset(preset_name))
+        preset['search_mode'] = current.get('search_mode', preset.get('search_mode', 'priority'))
+        preset['rank_candidates_by_quality'] = current.get(
+            'rank_candidates_by_quality', preset.get('rank_candidates_by_quality', False))
+        success = db.set_quality_profile(preset)
+
+        if success:
+            add_activity_item("", "Quality Preset Reset", f"Reset '{preset_name}' to defaults", "Now")
+            return jsonify({
+                "success": True,
+                "message": f"Reset '{preset_name}' to defaults",
+                "profile": preset
+            })
+        else:
+            return jsonify({"success": False, "error": "Failed to reset preset"}), 500
+
+    except Exception as e:
+        logger.error(f"Error resetting quality preset: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+# ── Named global quality profiles (assignable to Wishlist items / per-context
+# overrides like Auto-Import, not just the single active default) — CRUD over
+# `quality_profiles`. ──────────
+
+@app.route('/api/quality-profile/custom', methods=['GET'])
+def list_custom_quality_profiles():
+    """List every quality profile (built-ins + user-created), default first."""
+    try:
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+        return jsonify({"success": True, "profiles": db.list_quality_profiles()})
+    except Exception as e:
+        logger.error(f"Error listing quality profiles: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/quality-profile/custom', methods=['POST'])
+def create_custom_quality_profile():
+    """Save the current Quality-page settings as a new named profile."""
+    try:
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+
+        data = request.get_json() or {}
+        name = str(data.get('name') or '').strip()
+        if not name:
+            return jsonify({"success": False, "error": "Name is required"}), 400
+
+        profile_id = db.create_quality_profile(name, data)
+        if profile_id is None:
+            return jsonify({"success": False, "error": "A profile with that name may already exist"}), 400
+
+        add_activity_item("", "Quality Profile Created", f"Saved '{name}'", "Now")
+        return jsonify({"success": True, "id": profile_id, "profiles": db.list_quality_profiles()})
+    except Exception as e:
+        logger.error(f"Error creating quality profile: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/quality-profile/custom/<int:profile_id>', methods=['GET'])
+def get_custom_quality_profile(profile_id):
+    """Read-only: a single profile in the same full v3 shape `/apply` and
+    `/api/quality-profile` return (parsed ranked_targets, real booleans,
+    `preset`), so the Settings UI can load a profile's settings into the page
+    for viewing/editing WITHOUT the side effects `/apply` has (making it the
+    default, pushing into live config) — purely a SELECT."""
+    try:
+        from core.quality.selection import load_profile_by_id
+        from database.music_database import MusicDatabase
+
+        db = MusicDatabase()
+        if not any(p['id'] == profile_id for p in db.list_quality_profiles()):
+            return jsonify({"success": False, "error": "Profile not found"}), 404
+
+        return jsonify({"success": True, "profile": load_profile_by_id(profile_id)})
+    except Exception as e:
+        logger.error(f"Error loading quality profile {profile_id}: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/quality-profile/custom/<int:profile_id>/apply', methods=['POST'])
+def apply_custom_quality_profile(profile_id):
+    """Make a named profile the app-wide default AND push every setting it
+    captures (AcoustID strictness, downsample, deep verify, import
+    quality-filter/replace-lower-quality, lossy-copy) into the live global
+    settings — not just the ranked-target ladder."""
+    try:
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+
+        profile = db.apply_quality_profile_to_settings(profile_id)
+        if profile is None:
+            return jsonify({"success": False, "error": "Profile not found"}), 404
+
+        add_activity_item("", "Quality Profile Applied", f"Now using '{profile.get('preset', 'custom')}'", "Now")
+        return jsonify({"success": True, "profile": profile})
+    except Exception as e:
+        logger.error(f"Error applying quality profile: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/quality-profile/custom/<int:profile_id>/update', methods=['POST'])
+def update_custom_quality_profile(profile_id):
+    """Overwrite a named profile's captured settings with whatever is
+    currently on the Quality page (edit-in-place, keeps the name)."""
+    try:
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+
+        data = request.get_json() or {}
+        if not db.update_quality_profile(profile_id, data):
+            return jsonify({"success": False, "error": "Profile not found"}), 404
+
+        profiles = db.list_quality_profiles()
+        # Editing the ACTIVE DEFAULT profile must also push the new values
+        # into config.json — every profile-owned key the rest of the app
+        # reads directly (AcoustID, lossy-copy, deep-verify, replace-lower-
+        # quality). Without this, the row and config.json go out of sync,
+        # and the next unrelated Settings save (which mirrors config -> the
+        # default row via sync_default_quality_profile_from_config) silently
+        # reverts this edit back to the stale config values.
+        if any(p['id'] == profile_id and p.get('is_default') for p in profiles):
+            db.apply_quality_profile_to_settings(profile_id)
+            profiles = db.list_quality_profiles()
+
+        add_activity_item("", "Quality Profile Updated", f"Updated saved profile {profile_id}", "Now")
+        return jsonify({"success": True, "profiles": profiles})
+    except Exception as e:
+        logger.error(f"Error updating quality profile: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/quality-profile/custom/<int:profile_id>', methods=['PUT'])
+def rename_custom_quality_profile(profile_id):
+    try:
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+
+        data = request.get_json() or {}
+        name = str(data.get('name') or '').strip()
+        if not name:
+            return jsonify({"success": False, "error": "Name is required"}), 400
+
+        ok, reason = db.rename_quality_profile(profile_id, name)
+        if not ok:
+            status = 404 if reason == "Profile not found" else 400
+            return jsonify({"success": False, "error": reason}), status
+        return jsonify({"success": True, "profiles": db.list_quality_profiles()})
+    except Exception as e:
+        logger.error(f"Error renaming quality profile: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/quality-profile/custom/<int:profile_id>', methods=['DELETE'])
+def delete_custom_quality_profile(profile_id):
+    """Delete any profile, including the built-ins. Only refuses when it
+    would leave zero profiles — deleting the current default auto-promotes
+    another remaining profile first (see `MusicDatabase.delete_quality_profile`)."""
+    try:
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+
+        ok, reason = db.delete_quality_profile(profile_id)
+        if not ok:
+            return jsonify({"success": False, "error": reason}), 400
+        return jsonify({"success": True, "profiles": db.list_quality_profiles()})
+    except Exception as e:
+        logger.error(f"Error deleting quality profile: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 # ===============================
@@ -4589,18 +5007,20 @@ def _profile_spotify_oauth(profile_id_int):
     chooser so a user can't silently inherit whatever Spotify session is active
     in their browser (e.g. the admin's). Returns None if no app creds exist."""
     from spotipy.oauth2 import SpotifyOAuth
+    from core.spotify_client import normalize_spotify_oauth_config
     creds = (get_database().get_profile_spotify(profile_id_int) or {})
-    cfg = config_manager.get_spotify_config()
-    client_id = creds.get('client_id') or cfg.get('client_id')
-    client_secret = creds.get('client_secret') or cfg.get('client_secret')
-    redirect_uri = creds.get('redirect_uri') or cfg.get('redirect_uri', 'http://127.0.0.1:8888/callback')
+    cfg = normalize_spotify_oauth_config(config_manager.get_spotify_config())
+    profile_creds = normalize_spotify_oauth_config(creds)
+    client_id = profile_creds.get('client_id') or cfg.get('client_id')
+    client_secret = profile_creds.get('client_secret') or cfg.get('client_secret')
+    redirect_uri = profile_creds.get('redirect_uri') or cfg.get('redirect_uri', 'http://127.0.0.1:8888/callback')
     if not client_id or not client_secret:
         return None
     return SpotifyOAuth(
         client_id=client_id,
         client_secret=client_secret,
         redirect_uri=redirect_uri,
-        scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email user-follow-read",
+        scope=SPOTIFY_OAUTH_SCOPE,
         cache_path=f'config/.spotify_cache_profile_{profile_id_int}',
         state=f'profile_{profile_id_int}',
         show_dialog=True,
@@ -4736,6 +5156,38 @@ def auth_spotify():
     except Exception as e:
         logger.error(f"Error starting Spotify auth: {e}")
         return f"<h1>Spotify Authentication Error</h1><p>{str(e)}</p>", 500
+
+
+@app.route('/auth/spotify/export')
+def auth_spotify_export():
+    """On-demand authorization for Spotify playlist EXPORT (#945).
+
+    Requests the export scope (the normal read scope + playlist-modify) so the user can write
+    a playlist to their Spotify — WITHOUT changing the global login scope, so no existing
+    token is invalidated. Spotify returns a superset token; the normal /callback exchanges and
+    stores it unchanged (read ⊆ read+write keeps the standard auth check happy). show_dialog
+    forces the consent screen so the new write permission is actually granted."""
+    try:
+        from spotipy.oauth2 import SpotifyOAuth
+        from core.spotify_client import normalize_spotify_oauth_config, SPOTIFY_EXPORT_SCOPE
+        from core.spotify_token_cache import DatabaseTokenCache
+        cfg = normalize_spotify_oauth_config(config_manager.get_spotify_config())
+        if not cfg.get('client_id') or not cfg.get('client_secret'):
+            return "<h1>Spotify not configured</h1><p>Add your Spotify app credentials in Settings first.</p>", 400
+        auth_manager = SpotifyOAuth(
+            client_id=cfg['client_id'],
+            client_secret=cfg['client_secret'],
+            redirect_uri=cfg.get('redirect_uri', 'http://127.0.0.1:8888/callback'),
+            scope=SPOTIFY_EXPORT_SCOPE,
+            cache_handler=DatabaseTokenCache(config_manager),
+            show_dialog=True,
+        )
+        add_activity_item("", "Spotify Export Auth", "Requesting permission to create playlists", "Now")
+        return redirect(auth_manager.get_authorize_url())
+    except Exception as e:
+        logger.error(f"Error starting Spotify export auth: {e}")
+        return f"<h1>Spotify Export Authorization Error</h1><p>{str(e)}</p>", 500
+
 
 @app.route('/auth/tidal')
 def auth_tidal():
@@ -4992,7 +5444,7 @@ def spotify_callback():
             pass
 
     try:
-        from core.spotify_client import SpotifyClient
+        from core.spotify_client import SpotifyClient, normalize_spotify_oauth_config
         from spotipy.oauth2 import SpotifyOAuth
         from config.settings import config_manager
 
@@ -5022,16 +5474,20 @@ def spotify_callback():
                     raise Exception("Failed to exchange authorization code for access token")
 
         # Global callback (admin)
-        config = config_manager.get_spotify_config()
+        config = normalize_spotify_oauth_config(config_manager.get_spotify_config())
         configured_uri = config.get('redirect_uri', "http://127.0.0.1:8888/callback")
         logger.info(f"Using redirect_uri for token exchange: {configured_uri}")
 
+        # Write the freshly-exchanged token to the SAME store the client reads
+        # (DatabaseTokenCache), not the legacy file — otherwise a re-auth never reaches the
+        # client and "validation failed" even though the exchange succeeded.
+        from core.spotify_token_cache import DatabaseTokenCache
         auth_manager = SpotifyOAuth(
             client_id=config['client_id'],
             client_secret=config['client_secret'],
             redirect_uri=configured_uri,
-            scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email user-follow-read",
-            cache_path='config/.spotify_cache'
+            scope=SPOTIFY_OAUTH_SCOPE,
+            cache_handler=DatabaseTokenCache(config_manager)
         )
 
         token_info = auth_manager.get_access_token(auth_code)
@@ -6388,6 +6844,13 @@ def start_download():
                 # Register download for post-processing (simple transfer to /Transfer)
                 context_key = _make_context_key(username, filename)
                 is_streaming_source = username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud', 'amazon')
+                # Per-download check overrides: skip AcoustID and/or
+                # quality-quarantine checks on request.
+                _skip_checks = []
+                if data.get('skip_acoustid'):
+                    _skip_checks.append('acoustid')
+                if data.get('quality_check') is False:
+                    _skip_checks.extend(['bit_depth', 'quality'])
                 with matched_context_lock:
                     matched_downloads_context[context_key] = {
                         'search_result': {
@@ -6401,7 +6864,8 @@ def start_download():
                         },
                         'spotify_artist': None,  # No Spotify metadata
                         'spotify_album': None,
-                        'track_info': None
+                        'track_info': None,
+                        '_skip_quarantine_check': _skip_checks or None,
                     }
                     source_label = username.title() if is_streaming_source else 'Soulseek'
                     logger.info(f"[{source_label}] Registered simple download for post-processing: {context_key}")
@@ -6761,6 +7225,19 @@ def get_download_status():
                         _pp_task_id = context.get('task_id')
                         _pp_batch_id = context.get('batch_id')
                         if _pp_task_id and _pp_batch_id:
+                            # Atomic claim: the download monitor ALSO watches slskd
+                            # transfers and submits its own post-processing worker for
+                            # this task. Losing the claim means the monitor (or a
+                            # parallel poll) already owns it — skip to avoid a double
+                            # import and the quarantine-requeue race that produced the
+                            # bogus "missing file or source information" failure.
+                            if not claim_for_post_processing(_pp_task_id):
+                                logger.info(
+                                    f"Task {_pp_task_id} already claimed for post-processing "
+                                    f"by another path — skipping duplicate for {context_key}"
+                                )
+                                processed_download_ids.add(context_key)
+                                continue
                             _pp_target = _post_process_matched_download_with_verification
                             _pp_args = (context_key, context, found_path, _pp_task_id, _pp_batch_id)
                         else:
@@ -6782,6 +7259,15 @@ def get_download_status():
                         logger.error(f"Error starting post-processing thread for {context_key}: {e}")
                         # Don't add to processed set if thread failed to start
                         logger.warning(f"Will retry {context_key} on next check")
+                        # Release the post-processing claim so a later poll (or the
+                        # monitor) can retry — otherwise the task is stuck in
+                        # 'post_processing' with no worker running.
+                        _failed_task_id = context.get('task_id')
+                        if _failed_task_id:
+                            with tasks_lock:
+                                _ft = download_tasks.get(_failed_task_id)
+                                if _ft and _ft.get('status') == 'post_processing':
+                                    _ft['status'] = 'downloading'
 
             # Start a single thread to manage the launching of all processing threads
             processing_thread = threading.Thread(target=process_completed_downloads)
@@ -6839,6 +7325,16 @@ def get_download_status():
                                         _st_task_id = _ctx.get('task_id')
                                         _st_batch_id = _ctx.get('batch_id')
                                         if _st_task_id and _st_batch_id:
+                                            # Atomic claim — the download monitor watches
+                                            # these (non-soulseek) transfers too and would
+                                            # otherwise double-process this same task.
+                                            if not claim_for_post_processing(_st_task_id):
+                                                logger.info(
+                                                    f"[{_label}] Task {_st_task_id} already claimed "
+                                                    f"for post-processing — skipping duplicate for {_ctx_key}"
+                                                )
+                                                processed_download_ids.add(_ctx_key)
+                                                return
                                             _st_target = _post_process_matched_download_with_verification
                                             _st_args = (_ctx_key, _ctx, _path, _st_task_id, _st_batch_id)
                                         else:
@@ -6851,6 +7347,13 @@ def get_download_status():
                                         logger.info(f"[{_label}] Marked as processed: {_ctx_key}")
                                     except Exception as e:
                                         logger.error(f"[{_label}] Error starting post-processing thread for {_ctx_key}: {e}")
+                                        # Release the claim so a later poll / the monitor retries.
+                                        _st_failed_id = _ctx.get('task_id')
+                                        if _st_failed_id:
+                                            with tasks_lock:
+                                                _stf = download_tasks.get(_st_failed_id)
+                                                if _stf and _stf.get('status') == 'post_processing':
+                                                    _stf['status'] = 'downloading'
 
                                 processing_thread = threading.Thread(target=process_streaming_download)
                                 processing_thread.daemon = True
@@ -7364,6 +7867,7 @@ def manual_search_for_task(task_id):
         link = parse_download_track_link(query)
         link_source = None
         link_track_id = None
+        linked_result = None  # the EXACT track fetched by id, injected into results
         # A pasted SoundCloud link can't be turned into an "artist title" query
         # and searched — unlisted/private tracks aren't searchable. Instead force
         # the SoundCloud source and keep the URL as the query; the SoundCloud
@@ -7393,6 +7897,18 @@ def manual_search_for_task(task_id):
             query = clean_q
             source = _src
             link_source, link_track_id = _src, _tid
+            # Fetch the EXACT linked track as a downloadable result to inject —
+            # a text search for an obscure track's name often doesn't surface it
+            # at all, so we can't rely on it being in the search results (#932).
+            # Defensive: only sources that expose get_track_result (Qobuz today);
+            # others fall back to the bubble path below — never worse than before.
+            _link_client = download_orchestrator.client(_src) if download_orchestrator else None
+            if _link_client is not None and hasattr(_link_client, 'get_track_result'):
+                try:
+                    linked_result = _link_client.get_track_result(_tid)
+                except Exception as _lr_err:
+                    logger.debug("[Manual Search] get_track_result failed for %s %s: %s",
+                                 _src, _tid, _lr_err)
 
         if source != 'all':
             if source not in valid_source_ids:
@@ -7453,13 +7969,15 @@ def manual_search_for_task(task_id):
                             "error": error,
                         }) + "\n"
                         continue
-                    # Pasted-link exact match: bubble the track whose id matches
-                    # the link to the top so the user sees the exact version
-                    # first (graceful no-op if ids don't line up).
-                    if src_name == link_source and link_track_id and tracks:
-                        tracks = sorted(
-                            tracks,
-                            key=lambda t: str(getattr(t, 'id', '')) != str(link_track_id))
+                    # Pasted-link exact match (#932): the linked source's search may
+                    # not surface an obscure linked track at all, so INJECT the exact
+                    # track (fetched by id) at the top and drop any search duplicate of
+                    # it. If we couldn't fetch it (source has no get_track_result, or it
+                    # failed), fall back to bubbling a matching search result — never
+                    # worse than before.
+                    if src_name == link_source and link_track_id:
+                        from core.downloads.track_link import inject_linked_track_first
+                        tracks = inject_linked_track_first(tracks, linked_result, link_track_id)
                     serialized = []
                     for t in tracks:
                         s = _serialize_candidate(t, source_override=src_name)
@@ -7568,6 +8086,18 @@ def approve_quarantine_item(entry_id):
             docker_resolve_path(config_manager.get('soulseek.download_path', './downloads')),
             'Transfer',
         )
+        _req = request.get_json(silent=True) or {}
+        # #876: capture the sibling alternatives BEFORE approving — the approve
+        # restores (moves) this entry's file out of quarantine, after which its
+        # own group_key can no longer be looked up by id. Read-only here; the
+        # actual deletion happens only after the re-import is safely kicked off.
+        _sibling_ids = []
+        if _req.get('remove_siblings'):
+            from core.imports.quarantine import find_quarantine_siblings
+            try:
+                _sibling_ids = find_quarantine_siblings(_get_quarantine_dir(), entry_id)
+            except Exception as sib_exc:
+                logger.warning(f"[Quarantine] Sibling lookup for {entry_id} failed: {sib_exc}")
         result = approve_quarantine_entry(_get_quarantine_dir(), entry_id, restore_dir)
         if result is None:
             return jsonify({
@@ -7586,7 +8116,6 @@ def approve_quarantine_item(entry_id):
         # context lost task_id/batch_id (the wrapper pops them before quarantine),
         # so we re-supply them here. Manager-tab approvals (no task_id) keep the
         # original inner-pipeline path.
-        _req = request.get_json(silent=True) or {}
         _task_id = (_req.get('task_id') or '').strip() or None
         _batch_id = None
         if _task_id:
@@ -7594,6 +8123,17 @@ def approve_quarantine_item(entry_id):
                 _t = download_tasks.get(_task_id)
                 if isinstance(_t, dict):
                     _batch_id = _t.get('batch_id')
+        else:
+            # Manager-tab approve: no task_id in the request. Find the task that
+            # owns this quarantine entry so the re-import marks it completed in
+            # the downloads list without waiting for the batch to finish.
+            with tasks_lock:
+                for _tid, _t in download_tasks.items():
+                    if isinstance(_t, dict) and _t.get('quarantine_entry_id') == entry_id:
+                        _task_id = _tid
+                        _batch_id = _t.get('batch_id')
+                        break
+        if _task_id:
             context['task_id'] = _task_id
             if _batch_id:
                 context['batch_id'] = _batch_id
@@ -7606,7 +8146,52 @@ def approve_quarantine_item(entry_id):
             _reprocess = lambda: _post_process_matched_download(context_key, context, restored_path)
         threading.Thread(target=_reprocess, daemon=True).start()
         logger.info(f"[Quarantine] Approved {entry_id} (original_trigger={trigger}, bypass=all, task={_task_id}) → re-running pipeline")
-        return jsonify({"success": True, "trigger_bypassed": "all", "original_trigger": trigger})
+        # #876: once one alternative for a song is accepted, the other
+        # quarantined attempts at the SAME intended target are redundant
+        # failed downloads of a track the user now owns. Delete the siblings
+        # captured above (scoped to the quarantine manager via `remove_siblings`
+        # — the download-modal chooser passes no flag and is unaffected).
+        removed_siblings = []
+        if _sibling_ids:
+            from core.imports.quarantine import delete_quarantine_entry
+            try:
+                for sib_id in _sibling_ids:
+                    if delete_quarantine_entry(_get_quarantine_dir(), sib_id):
+                        removed_siblings.append(sib_id)
+                if removed_siblings:
+                    logger.info(f"[Quarantine] Auto-removed {len(removed_siblings)} sibling alternative(s) of {entry_id}: {removed_siblings}")
+            except Exception as sib_exc:
+                logger.warning(f"[Quarantine] Sibling cleanup for {entry_id} failed: {sib_exc}")
+        # Cancel any still-running quarantine-retry task for the same track so
+        # the engine doesn't keep fetching new candidates after the user has
+        # already accepted one. Match by track title from the restored context.
+        cancelled_retry_task = None
+        try:
+            ti = context.get('track_info') if isinstance(context.get('track_info'), dict) else {}
+            _approved_name = (ti.get('name') or '').strip().lower()
+            if _approved_name:
+                with tasks_lock:
+                    for _tid, _t in download_tasks.items():
+                        if not _t.get('_quarantine_retry'):
+                            continue
+                        if _t.get('status') in ('completed', 'cancelled', 'failed'):
+                            continue
+                        _tti = _t.get('track_info') if isinstance(_t.get('track_info'), dict) else {}
+                        if (_tti.get('name') or '').strip().lower() == _approved_name:
+                            _t['status'] = 'cancelled'
+                            _t['_quarantine_approved_alternative'] = True
+                            cancelled_retry_task = _tid
+                            logger.info(f"[Quarantine] Cancelled in-flight retry task {_tid} for '{_approved_name}' (user approved alternative)")
+                            break
+        except Exception as _crt_exc:
+            logger.debug(f"[Quarantine] Retry-cancel scan failed: {_crt_exc}")
+        return jsonify({
+            "success": True,
+            "trigger_bypassed": "all",
+            "original_trigger": trigger,
+            "removed_siblings": removed_siblings,
+            "cancelled_retry_task": cancelled_retry_task,
+        })
     except Exception as e:
         logger.error(f"[Quarantine] Error approving {entry_id}: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -7716,7 +8301,8 @@ def get_verification_config():
     queue collapses to quarantine-only in the UI."""
     try:
         enabled = bool(config_manager.get('acoustid.enabled', False))
-        return jsonify({"success": True, "acoustid_enabled": enabled})
+        require_verified = bool(config_manager.get('acoustid.require_verified', False))
+        return jsonify({"success": True, "acoustid_enabled": enabled, "require_verified": require_verified})
     except Exception as e:
         return jsonify({"success": True, "acoustid_enabled": True, "error": str(e)})
 
@@ -8007,6 +8593,46 @@ def delete_verification_item(history_id):
         return jsonify({"success": True, "file_deleted": file_deleted})
     except Exception as e:
         logger.error(f"[Verification] Delete failed for {history_id}: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/verification/clean-orphans', methods=['POST'])
+@admin_only
+def clean_orphan_verification_items():
+    """Remove dead review-queue rows whose file no longer exists anywhere
+    (deleted / replaced / re-downloaded elsewhere). These are append-only
+    library_history rows that can never be healed — there's no file left to
+    confirm — so they linger in the Unverified list forever (#934).
+
+    User-initiated only, never automatic: it does a filesystem check, which
+    would mass-false-positive if the library mount were down. The pure helper
+    flags that signature (every reviewed file unreachable) and we refuse. Only
+    history ROWS are deleted — the files are already gone; this never removes a
+    file. Admin-only: it mutates shared review state."""
+    try:
+        from core.downloads.orphan_history import find_orphan_history_ids
+        db = get_database()
+        # get_library_history_unverified() returns unverified + force_imported rows.
+        # Check ALL of them so the mount-down gate sees the true count, but only
+        # DELETE 'unverified' orphans — 'force_imported' is a deliberate user
+        # decision (accepted a version mismatch) and stays for human approval.
+        rows = db.get_library_history_unverified() or []
+        result = find_orphan_history_ids(
+            rows, _resolve_history_audio_path,
+            deletable=lambda r: r.get('verification_status') == 'unverified')
+        if result['suspicious']:
+            return jsonify({
+                "success": False,
+                "error": "Every reviewed file is unreachable — your library may be "
+                         "offline right now. Nothing was removed.",
+            }), 409
+        orphan_ids = result['orphan_ids']
+        removed = db.delete_library_history_rows(orphan_ids) if orphan_ids else 0
+        logger.info("[Verification] Cleaned %d orphaned review rows (checked %d)",
+                    removed, result['checked'])
+        return jsonify({"success": True, "removed": removed, "checked": result['checked']})
+    except Exception as e:
+        logger.error(f"[Verification] Clean orphans failed: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -8514,11 +9140,18 @@ def _build_source_only_artist_detail(artist_id, artist_name, source):
         logger.debug(f"Discogs client resolution failed: {e}")
 
     az = None
+    js = None
     try:
         from core.metadata.registry import get_amazon_client
         az = get_amazon_client()
     except Exception as e:
         logger.debug(f"Amazon client resolution failed: {e}")
+    try:
+        from core.metadata.registry import get_jiosaavn_client, is_source_enabled
+        if is_source_enabled('jiosaavn'):
+            js = get_jiosaavn_client()
+    except Exception as e:
+        logger.debug(f"JioSaavn client resolution failed: {e}")
 
     try:
         lastfm_api_key = config_manager.get('lastfm.api_key', '') or None
@@ -8534,6 +9167,7 @@ def _build_source_only_artist_detail(artist_id, artist_name, source):
         itunes_client=it,
         discogs_client=dc,
         amazon_client=az,
+        jiosaavn_client=js,
         lastfm_api_key=lastfm_api_key,
     )
     return jsonify(payload), status
@@ -8555,6 +9189,14 @@ def get_artist_detail(artist_id):
     try:
         source_param = (request.args.get('source', '') or '').strip().lower()
         artist_name_arg = (request.args.get('name', '') or '').strip()
+        if source_param:
+            from core.metadata.registry import experimental_source_rejected
+            if experimental_source_rejected(source_param):
+                return jsonify({
+                    "success": False,
+                    "error": f"{source_param} is not enabled",
+                }), 503
+
         logger.info(
             f"Getting artist detail for ID: {artist_id} "
             f"(source={source_param or 'library'})"
@@ -9126,7 +9768,11 @@ def get_artist_discography(artist_id):
                 effective_override_source = 'spotify'
 
         from core.metadata.lookup import MetadataLookupOptions
-        from core.metadata_service import get_artist_discography as _get_artist_discography
+        # #877: use the artist-DETAIL discography so the Download Discography modal
+        # gets the SAME release-type split (albums / eps / singles) the Artist
+        # Detail view shows — EPs were being lumped into singles before, leaving
+        # the modal's EPs toggle dead.
+        from core.metadata.discography import get_artist_detail_discography as _get_artist_discography
 
         # Server-side per-source ID resolution. Look up the library row
         # by ANY of the IDs the frontend might send: library DB id,
@@ -9204,6 +9850,7 @@ def get_artist_discography(artist_id):
         )
 
         album_list = discography['albums']
+        eps_list = discography.get('eps', [])
         singles_list = discography['singles']
         active_source = discography['source']
         source_priority = discography['source_priority']
@@ -9315,6 +9962,7 @@ def get_artist_discography(artist_id):
 
         return jsonify({
             "albums": album_list,
+            "eps": eps_list,
             "singles": singles_list,
             "source": active_source or (source_priority[0] if source_priority else "unknown"),
             "artist_info": artist_info,
@@ -9323,6 +9971,343 @@ def get_artist_discography(artist_id):
     except Exception as e:
         logger.exception("Error fetching artist discography for %s", artist_id)
         return jsonify({"error": str(e)}), 500
+
+_ART_OPTIONS_CACHE = {}                       # (artist_lower, album_lower) -> (ts, candidates)
+_ART_OPTIONS_CACHE_LOCK = threading.Lock()
+_ART_OPTIONS_TTL_S = 900                       # 15 min — gathering is several slow external calls
+
+
+@app.route('/api/album/<album_id>/art-options', methods=['GET'])
+def get_album_art_options(album_id):
+    """Candidate cover-art images for an album, for the art picker (read-only).
+
+    Gathers from Cover Art Archive (a front cover per edition across the release-group) +
+    Deezer/iTunes/Spotify/AudioDB (their single validated best), fanned out concurrently. ``artist``
+    and ``album`` come from the caller — the enhanced library view already has them. Results are
+    cached briefly since the gather is several slow external calls.
+    """
+    try:
+        artist = (request.args.get('artist') or '').strip()
+        album = (request.args.get('album') or '').strip()
+        if not artist or not album:
+            return jsonify({"error": "artist and album query params are required"}), 400
+
+        cache_key = (artist.lower(), album.lower())
+        now = time.time()
+        with _ART_OPTIONS_CACHE_LOCK:
+            hit = _ART_OPTIONS_CACHE.get(cache_key)
+            if hit and now - hit[0] < _ART_OPTIONS_TTL_S:
+                return jsonify({"album_id": album_id, "count": len(hit[1]),
+                                "candidates": hit[1], "cached": True})
+
+        metadata = {}
+        try:
+            from core.metadata import album_mbid_cache
+            from core.metadata.source import normalize_album_cache_key
+            mbid = album_mbid_cache.lookup(normalize_album_cache_key(album), artist.lower())
+            if mbid:
+                metadata["musicbrainz_release_id"] = mbid
+        except Exception as exc:
+            logger.debug("[art-options] release-MBID resolve failed: %s", exc)
+
+        from core.metadata.art_lookup import gather_album_art_candidates
+        candidates = gather_album_art_candidates(artist, album, metadata)
+        with _ART_OPTIONS_CACHE_LOCK:
+            _ART_OPTIONS_CACHE[cache_key] = (now, candidates)
+        return jsonify({"album_id": album_id, "count": len(candidates), "candidates": candidates})
+    except Exception as e:
+        logger.error("[art-options] failed for album %s: %s", album_id, e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+def _derive_album_folder(db, album_id):
+    """The album's folder on disk, from the first resolvable track path (Docker-safe). None if no
+    track file can be located (e.g. paths aren't mapped in this container)."""
+    try:
+        tracks = db.get_tracks_by_album(int(album_id))
+    except Exception:
+        return None
+    for tr in (tracks or []):
+        raw = getattr(tr, 'file_path', None)
+        if not raw:
+            continue
+        resolved = _resolve_library_file_path(raw) or raw
+        if resolved and os.path.exists(resolved):
+            return os.path.dirname(resolved)
+    return None
+
+
+def _overwrite_cover_jpg(url, folder):
+    """Download ``url`` and OVERWRITE cover.jpg in ``folder`` (the picker is *replacing* art, so the
+    existing-file guard in download_cover_art doesn't apply). Returns True on success."""
+    import urllib.request  # not bound at module level (only urllib.parse is); matches the local-import pattern used elsewhere
+    req = urllib.request.Request(url, headers={"User-Agent": "SoulSync/1.0", "Accept": "image/*"})
+    with urllib.request.urlopen(req, timeout=15) as resp:   # noqa: S310 (user-chosen art URL)
+        data = resp.read()
+    if not data:
+        return False
+    with open(os.path.join(folder, "cover.jpg"), "wb") as handle:
+        handle.write(data)
+    return True
+
+
+@app.route('/api/album/<album_id>/art', methods=['POST'])
+def set_album_art(album_id):
+    """Apply a cover chosen in the picker: set the album's DB art URL and overwrite cover.jpg in the
+    album folder. The non-empty thumb_url also pins the choice — enrichment workers only fill empty
+    art, so they won't clobber it. Body: ``{"url": "<image url>"}``."""
+    try:
+        data = request.get_json(silent=True) or {}
+        url = (data.get('url') or '').strip()
+        if not url:
+            return jsonify({"error": "url is required"}), 400
+
+        db = get_database()
+        if not db.set_album_thumb_url(album_id, url):
+            return jsonify({"error": "Album not found"}), 404
+
+        # Invalidate the cached options for this album's art so a re-open reflects the change.
+        cover_written = False
+        folder = _derive_album_folder(db, album_id)
+        if folder:
+            try:
+                cover_written = _overwrite_cover_jpg(url, folder)
+                logger.info("[set-art] album %s cover.jpg -> %s", album_id, folder)
+            except Exception as exc:
+                logger.warning("[set-art] cover.jpg write failed for album %s: %s", album_id, exc)
+        else:
+            logger.info("[set-art] no on-disk folder for album %s — DB art updated only", album_id)
+
+        return jsonify({"success": True, "album_id": album_id, "thumb_url": url,
+                        "cover_written": cover_written})
+    except Exception as e:
+        logger.error("[set-art] failed for album %s: %s", album_id, e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/graph/library', methods=['GET'])
+def get_library_graph():
+    """Library "Taste Map": EVERY library artist as a node, grouped by genre + wired by similarity.
+
+    Returns {"nodes": [{key,label,kind,owned,primary_genre,popularity,thumb} | {key,label,kind,genre}],
+    "edges": [{source,target,weight,kind}]}. Every artist is included (attached to a per-genre hub node
+    so a force layout clusters them); similarity edges come from similar_artists (resolved in-memory —
+    a SQL self-join is too slow at 75k rows).
+    """
+    try:
+        from core.graph.artist_graph import build_genre_grouped_map
+        db = get_database()
+        conn = db._get_connection()
+        try:
+            cur = conn.cursor()
+            owned = set()
+            meta = {}
+            artists = []
+            for name, thumb, genres, aid, source in cur.execute(
+                "SELECT name, thumb_url, genres, id, server_source FROM artists"
+            ):
+                key = (name or "").strip().lower()
+                owned.add(key)
+                meta[key] = {"thumb_url": thumb, "genres": genres}
+                artists.append((name, genres, thumb, aid, source))
+            rows = cur.execute(
+                "SELECT source_artist_id, similar_artist_name, similar_artist_spotify_id, "
+                "similar_artist_deezer_id, similar_artist_itunes_id, occurrence_count, popularity "
+                "FROM similar_artists WHERE profile_id = ?", (get_current_profile_id(),)
+            ).fetchall()
+        finally:
+            conn.close()
+        graph = build_genre_grouped_map(artists, rows, owned, artist_meta=meta)
+        n_artists = sum(1 for n in graph["nodes"] if n.get("kind") == "artist")
+        n_genres = sum(1 for n in graph["nodes"] if n.get("kind") == "genre")
+        return jsonify({**graph, "counts": {
+            "nodes": len(graph["nodes"]), "edges": len(graph["edges"]),
+            "artists": n_artists, "genres": n_genres,
+        }})
+    except Exception as e:
+        logger.error("[library-graph] failed: %s", e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/graph/discovery', methods=['GET'])
+def get_discovery_graph():
+    """Discovery Web: owned artists as anchors + their UNOWNED similar artists as discovery candidates.
+
+    Candidates are enriched from the metadata cache (image/genres/popularity) so they render as real
+    artists you could add, not bare dots. Returns the WHOLE frontier by default — its real size is
+    modest (only artists whose similars were fetched can anchor); ``seed``/``per`` query params
+    optionally trim to the top anchors / top candidates per anchor.
+    """
+    try:
+        from core.graph.artist_graph import build_discovery_map
+
+        def _opt_int(name):
+            raw = request.args.get(name)
+            if raw is None:
+                return None
+            try:
+                v = int(raw)
+            except (TypeError, ValueError):
+                return None
+            return max(1, v) if v > 0 else None
+
+        seed = _opt_int('seed')
+        per = _opt_int('per')
+        db = get_database()
+        conn = db._get_connection()
+        try:
+            cur = conn.cursor()
+            owned, owned_meta, rows = _discovery_load_inputs(cur)
+            graph = build_discovery_map(rows, owned, owned_meta, seed_count=seed, per_anchor=per)
+        finally:
+            conn.close()
+
+        n_owned = sum(1 for n in graph["nodes"] if n.get("kind") == "owned")
+        n_disc = sum(1 for n in graph["nodes"] if n.get("kind") == "discovery")
+        return jsonify({**graph, "counts": {
+            "nodes": len(graph["nodes"]), "edges": len(graph["edges"]),
+            "owned": n_owned, "discovery": n_disc,
+        }})
+    except Exception as e:
+        logger.error("[discovery-graph] failed: %s", e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+def _discovery_load_inputs(cur):
+    """Shared input load for the discovery routes: owned artists + this profile's similar_artists.
+
+    similar_artists is per-profile (unique on profile_id + source + name); without the filter, a
+    multi-profile install double-counts every anchor->target pair and leaks one profile's discovery
+    taste into another's graph.
+
+    Rows include the table's OWN image_url/genres columns (~99% of rows carry image + real
+    popularity) — enriching from metadata_cache_entities instead measured 18-250s per request
+    (random reads into a 1.3M-row table), for data these rows already have.
+    """
+    owned = set()
+    owned_meta = {}
+    for name, thumb, genres, aid in cur.execute("SELECT name, thumb_url, genres, id FROM artists"):
+        key = (name or "").strip().lower()
+        owned.add(key)
+        owned_meta[key] = {"thumb_url": thumb, "genres": genres, "id": aid}
+    rows = cur.execute(
+        "SELECT source_artist_id, similar_artist_name, similar_artist_spotify_id, "
+        "similar_artist_deezer_id, similar_artist_itunes_id, occurrence_count, popularity, "
+        "image_url, genres "
+        "FROM similar_artists WHERE profile_id = ?", (get_current_profile_id(),)
+    ).fetchall()
+    return owned, owned_meta, rows
+
+
+@app.route('/api/graph/discovery/expand', methods=['POST'])
+def expand_discovery_graph():
+    """Expand-on-click for the Discovery Web: one node's similar artists, minus what's on screen.
+
+    POST JSON: ``key`` (normalized artist name), ``ids`` (external ids — for unowned candidates whose
+    similars are keyed by id), ``exclude`` (node keys already in the graph — JSON body because artist
+    names can contain commas), ``per`` (max new nodes). Same node/edge shape as /api/graph/discovery.
+    """
+    try:
+        from core.graph.artist_graph import expand_discovery_node
+        payload = request.get_json(silent=True) or {}
+        node_key = str(payload.get('key') or '').strip().lower()
+        if not node_key:
+            return jsonify({"error": "missing key"}), 400
+        node_ids = [i for i in (payload.get('ids') or []) if i]
+        exclude = {k for k in (payload.get('exclude') or []) if k}
+        try:
+            per = int(payload.get('per') or 10)
+        except (TypeError, ValueError):
+            per = 10
+        per = max(1, min(per, 30))
+        db = get_database()
+        conn = db._get_connection()
+        try:
+            cur = conn.cursor()
+            owned, owned_meta, rows = _discovery_load_inputs(cur)
+            graph = expand_discovery_node(rows, owned, node_key, node_ids, owned_meta, per=per, exclude=exclude)
+        finally:
+            conn.close()
+        return jsonify({**graph, "counts": {"nodes": len(graph["nodes"]), "edges": len(graph["edges"])}})
+    except Exception as e:
+        logger.error("[discovery-expand] failed: %s", e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/graph/discovery/preview/<deezer_id>', methods=['GET'])
+def get_discovery_preview(deezer_id):
+    """30-second Deezer preview for a discovery candidate's top track (hear it before you add it).
+
+    Deliberately Deezer-only + explicit: the generic top-tracks endpoint routes by the CONFIGURED
+    primary source and resolves ids via the library DB — a candidate isn't in the library, and its
+    Deezer id would be garbage to a Spotify query (whose previews are deprecated anyway).
+    """
+    try:
+        if not str(deezer_id).isdigit():
+            return jsonify({"success": False, "reason": "not_a_deezer_id"}), 400
+        client = _get_deezer_client()
+        if not client:
+            return jsonify({"success": False, "reason": "deezer_unavailable"}), 503
+        tracks = client.get_artist_top_tracks(str(deezer_id), limit=3) or []
+        for t in tracks:
+            if t.get('preview_url'):
+                return jsonify({
+                    "success": True,
+                    "track": t.get('name'),
+                    "artist": ((t.get('artists') or [{}])[0] or {}).get('name'),
+                    "preview_url": t['preview_url'],
+                })
+        return jsonify({"success": False, "reason": "no_preview"})
+    except Exception as e:
+        logger.error("[discovery-preview] failed: %s", e, exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/library/artist/<int:artist_id>/thumb', methods=['GET'])
+def get_library_artist_thumb(artist_id):
+    """Browser-loadable thumb URL for ONE library artist, by library DB id.
+
+    Used by the Artist Web side panel. Two deliberate choices:
+    - Lazily per-click, not eagerly for every node: normalize_image_url registers the URL in the
+      image cache (a DB write transaction each) — doing that for ~5k artists per graph load takes
+      minutes; one artist per panel open is instant.
+    - By LIBRARY id against the artists table — the generic /api/artist/<id>/image resolver sends
+      whatever id it gets to external providers, so a library row id returned whichever Deezer/iTunes
+      artist happened to own that number (wrong photo, essentially always).
+    """
+    try:
+        db = get_database()
+        conn = db._get_connection()
+        try:
+            cur = conn.cursor()
+            row = cur.execute("SELECT thumb_url FROM artists WHERE id = ?", (artist_id,)).fetchone()
+        finally:
+            conn.close()
+        thumb = row['thumb_url'] if row else None
+        url = fix_artist_image_url(thumb) if thumb else None
+        return jsonify({"success": True, "image_url": url})
+    except Exception as e:
+        logger.error("[artist-thumb] failed: %s", e, exc_info=True)
+        return jsonify({"success": False, "image_url": None}), 500
+
+
+@app.route('/api/library/export/m3u', methods=['GET'])
+def export_library_m3u():
+    """Download an extended-M3U playlist of the entire library. Always current (built on request)."""
+    try:
+        db = get_database()
+        entries = db.get_all_library_tracks_for_export()
+        from core.library.m3u_export import build_m3u
+        content = build_m3u(entries, entry_base_path=config_manager.get('m3u_export.entry_base_path', '') or '')
+        return Response(
+            content,
+            mimetype='audio/x-mpegurl',
+            headers={'Content-Disposition': 'attachment; filename="soulsync_library.m3u"'},
+        )
+    except Exception as e:
+        logger.error("[library-m3u] export failed: %s", e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route('/api/album/<album_id>/tracks', methods=['GET'])
 def get_album_tracks(album_id):
@@ -9498,6 +10483,27 @@ def download_discography(artist_id):
         except Exception as e:
             logger.debug("active media server lookup failed: %s", e)
 
+        # Pre-fetch the artist's owned library tracks ONCE so the per-track
+        # ownership check scores in-memory instead of firing fuzzy SQL scans
+        # against the whole library for every track (which, on a large library
+        # and an artist the user owns nothing of, was ~15-30s PER TRACK — every
+        # title/artist variation fell through to a full-table fuzzy fallback).
+        # Same batched path the discography backfill job + completion-stream use.
+        # Crucially we pass an empty list (not None) when nothing is owned, so the
+        # owns-nothing case still takes the fast in-memory path → instant.
+        owned_candidate_tracks = []
+        try:
+            cand_albums = db.get_candidate_albums_for_artist(
+                artist_name, server_source=active_server
+            )
+            if cand_albums:
+                owned_candidate_tracks = db.get_candidate_tracks_for_albums(
+                    [a.id for a in cand_albums]
+                ) or []
+        except Exception as _cand_err:
+            logger.debug("Discography: candidate pre-fetch failed for %s: %s", artist_name, _cand_err)
+            owned_candidate_tracks = []
+
         total_added = 0
         total_skipped = 0
         total_skipped_artist = 0
@@ -9587,7 +10593,8 @@ def download_discography(artist_id):
                         # Same library-ownership check the discography
                         # backfill repair job uses. Format-agnostic so
                         # Blasphemy mode (FLAC→MP3) doesn't false-miss.
-                        if track_already_owned(db, track_name, hint_artist, album_name, active_server):
+                        if track_already_owned(db, track_name, hint_artist, album_name, active_server,
+                                               candidate_tracks=owned_candidate_tracks):
                             skipped_owned += 1
                             continue
 
@@ -9917,16 +10924,13 @@ def library_check_tracks():
 
         def _match_title(search_norm, search_clean, candidates):
             """Find best matching track from a list of (norm, clean, db_track) candidates."""
-            for db_norm, db_clean, db_track in candidates:
-                if search_norm == db_norm or search_clean == db_clean:
-                    return db_track
-                sim = max(
-                    SequenceMatcher(None, search_norm, db_norm).ratio(),
-                    SequenceMatcher(None, search_clean, db_clean).ratio()
-                )
-                if sim >= 0.7:
-                    return db_track
-            return None
+            from core.text.title_match import choose_best_title_candidate
+            return choose_best_title_candidate(
+                search_norm,
+                search_clean,
+                candidates,
+                lambda left, right: SequenceMatcher(None, left, right).ratio(),
+            )
 
         # Split DB tracks by album if album-aware matching is active
         album_entries = []
@@ -10018,6 +11022,147 @@ def get_artist_enhanced_detail(artist_id):
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
+
+# ── Re-identify an imported track (#889) ──
+@app.route('/api/reidentify/sources', methods=['GET'])
+def reidentify_sources():
+    """Source tabs for the Re-identify modal — every metadata source with a live
+    client, the active one flagged so the UI selects it by default."""
+    try:
+        from core.imports.rematch_search import available_sources
+        return jsonify({"success": True, "sources": available_sources()})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e), "sources": []}), 500
+
+
+@app.route('/api/reidentify/search', methods=['GET'])
+def reidentify_search():
+    """Search one metadata source for the releases a track appears on.
+
+    Query params: ``source`` (defaults to the active source), ``q`` (the query),
+    ``limit``. Returns display rows — the SAME song across single/EP/album, each
+    with a type badge — for the user to pick. album_id is resolved later, only for
+    the chosen row."""
+    try:
+        from core.imports.rematch_search import available_sources, search_release_candidates
+        query = (request.args.get('q') or '').strip()
+        if not query:
+            return jsonify({"success": True, "results": []})
+        source = (request.args.get('source') or '').strip()
+        if not source:
+            actives = [s for s in available_sources() if s.get('active')]
+            source = actives[0]['source'] if actives else 'spotify'
+        try:
+            limit = max(1, min(50, int(request.args.get('limit', 25))))
+        except (TypeError, ValueError):
+            limit = 25
+        rows = search_release_candidates(source, query, limit=limit)
+        return jsonify({"success": True, "source": source, "results": rows})
+    except Exception as e:
+        logger.error(f"Re-identify search error: {e}")
+        return jsonify({"success": False, "error": str(e), "results": []}), 500
+
+
+@app.route('/api/reidentify/apply', methods=['POST'])
+def reidentify_apply():
+    """Apply a re-identify: stage the track's library file + write a single-use hint
+    so the auto-import worker re-files it under the chosen release (Phase 2).
+
+    Body: ``{library_track_id, source, track_id, replace}``. Admin-only (mutates the
+    library). COPIES the file — the original is removed only after the re-import
+    succeeds, and only when ``replace`` is true."""
+    try:
+        database = get_database()
+        pid = get_current_profile_id()
+        prof = database.get_profile(pid) if pid else None
+        if not prof or not prof.get('is_admin'):
+            return jsonify({"success": False, "error": "Admin only"}), 403
+
+        data = request.get_json(silent=True) or {}
+        library_track_id = data.get('library_track_id')
+        source = (data.get('source') or '').strip()
+        track_id = (data.get('track_id') or '').strip()
+        replace = bool(data.get('replace', True))
+        if not library_track_id or not source or not track_id:
+            return jsonify({"success": False, "error": "library_track_id, source and track_id are required"}), 400
+
+        from core.imports.rematch_search import resolve_hint_fields
+        from core.imports.rematch_apply import stage_file_for_reidentify, build_reidentify_hint
+        from core.imports.rematch_hints import create_hint
+
+        # 1) Resolve the picked release → the IDs the hint needs (album_id critically).
+        hint_fields = resolve_hint_fields(source, track_id)
+        if not hint_fields:
+            return jsonify({"success": False, "error": "Could not resolve the selected release (no album id)"}), 400
+
+        # 2) Locate the library file for this track.
+        conn = database._get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT file_path FROM tracks WHERE id = ?", (str(library_track_id),))
+            row = cur.fetchone()
+        finally:
+            conn.close()
+        if not row or not row['file_path']:
+            return jsonify({"success": False, "error": "Library track has no file on disk"}), 404
+        stored_path = row['file_path']
+
+        # Resolve the stored DB path to a file THIS process can actually read, using
+        # the SAME strong resolver the rest of the app uses (transfer/download/library/
+        # Plex search + #833 confusable folding via find_on_disk).
+        real_path = _resolve_library_file_path(stored_path)
+        if not real_path:
+            # On a miss, run the diagnostic variant purely to tell us (and the user)
+            # what was tried — instead of failing on the raw, possibly-stale path.
+            from core.library.path_resolver import resolve_library_file_path_with_diagnostic
+            try:
+                _plex = media_server_engine.client('plex') if media_server_engine else None
+            except Exception:
+                _plex = None
+            _, attempt = resolve_library_file_path_with_diagnostic(
+                stored_path, config_manager=config_manager, plex_client=_plex)
+            searched = ", ".join(attempt.base_dirs_tried) or "(no library/transfer/download dirs configured)"
+            logger.warning("[Re-identify] could not locate track %s file — stored=%s raw_exists=%s searched=[%s]",
+                           library_track_id, stored_path, attempt.raw_path_existed, searched)
+            return jsonify({"success": False, "error": (
+                f"SoulSync couldn't find this track's file on disk.\nStored path: {stored_path}\n"
+                f"Searched: {searched}.\nIf the file lives on a media server SoulSync can't read directly "
+                f"(or the stored path is stale), re-identify isn't available for it.")}), 404
+
+        # 3) Copy into staging + fingerprint the copy.
+        staging_dir = docker_resolve_path(config_manager.get('import.staging_path', './Staging'))
+        staged = stage_file_for_reidentify(real_path, staging_dir, library_track_id)
+
+        # 4) Persist the single-use hint.
+        hint = build_reidentify_hint(library_track_id, hint_fields,
+                                     staged['staged_path'], staged['content_hash'], replace=replace)
+        conn = database._get_connection()
+        try:
+            cur = conn.cursor()
+            hint_id = create_hint(cur, hint)
+            conn.commit()
+        finally:
+            conn.close()
+
+        # 5) Nudge the worker so it doesn't wait for the next timer tick.
+        try:
+            if auto_import_worker is not None:
+                auto_import_worker.trigger_scan()
+        except Exception as _e:
+            logger.debug("Re-identify: scan nudge failed (worker will catch it on its timer): %s", _e)
+
+        logger.info("[Re-identify] staged track %s → %s '%s' (%s), replace=%s",
+                    library_track_id, hint.album_type or 'release', hint.album_name or '?',
+                    source, replace)
+        return jsonify({"success": True, "hint_id": hint_id, "staged_path": staged['staged_path'],
+                        "album_name": hint.album_name, "album_type": hint.album_type})
+    except FileNotFoundError as e:
+        return jsonify({"success": False, "error": f"Source file not found: {e}"}), 404
+    except Exception as e:
+        logger.error(f"Re-identify apply error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/library/artist/<artist_id>/quality-analysis')
 def get_artist_quality_analysis(artist_id):
     """Analyze track quality for an artist — returns tier classification for each track."""
@@ -10030,16 +11175,25 @@ def get_artist_quality_analysis(artist_id):
         artist = result.get('artist', {})
         albums = result.get('albums', [])
 
-        # Get user's quality profile to determine min acceptable tier
+        # Get the app-wide default quality profile (v3 shape — `ranked_targets`,
+        # not the legacy v2 `qualities` dict) to determine min acceptable tier.
         quality_profile = database.get_quality_profile()
-        preferred_qualities = quality_profile.get('qualities', {})
+        ranked_targets = quality_profile.get('ranked_targets') or []
         min_acceptable_tier = 999
-        tier_map = {'flac': 'lossless', 'mp3_320': 'low_lossy', 'mp3_256': 'low_lossy', 'mp3_192': 'low_lossy'}
-        for qname, qconfig in preferred_qualities.items():
-            if qconfig.get('enabled', False):
-                tname = tier_map.get(qname)
-                if tname and tname in QUALITY_TIERS:
-                    min_acceptable_tier = min(min_acceptable_tier, QUALITY_TIERS[tname]['tier'])
+        # Mirrors QUALITY_TIERS' extension groupings so a ranked-target's
+        # `format` (as edited in the Settings ranked-targets picker — see
+        # RT_LOSSLESS_FORMATS/RT_LOSSY_FORMATS in settings.js) lands on the
+        # same tier this scan buckets library files into.
+        format_tier_map = {
+            'flac': 'lossless', 'alac': 'lossless', 'wav': 'lossless', 'dsf': 'lossless',
+            'opus': 'high_lossy', 'ogg': 'high_lossy',
+            'aac': 'standard_lossy',
+            'mp3': 'low_lossy', 'wma': 'low_lossy',
+        }
+        for target in ranked_targets:
+            tname = format_tier_map.get((target or {}).get('format'))
+            if tname and tname in QUALITY_TIERS:
+                min_acceptable_tier = min(min_acceptable_tier, QUALITY_TIERS[tname]['tier'])
 
         tracks = []
         summary = {'total': 0, 'lossless': 0, 'high_lossy': 0, 'standard_lossy': 0, 'low_lossy': 0, 'unknown': 0}
@@ -11233,6 +12387,9 @@ def reorganize_album_files(album_id):
             artist_name=meta['artist_name'],
             source=chosen_source,
             metadata_source=metadata_source,
+            # Rename-only (#875): just move files to the current naming scheme — skip
+            # the copy + post-processing (re-tag / quality / AcoustID) of the full flow.
+            rename_only=bool(data.get('rename_only')),
         )
         return jsonify({"success": True, **result})
     except Exception as e:
@@ -11349,6 +12506,9 @@ try:
         get_transfer_path=lambda: docker_resolve_path(
             config_manager.get('soulseek.transfer_path', './Transfer')
         ),
+        # Rename-only mode (#875) computes destinations via the same path builder the
+        # preview uses, so apply matches exactly what the user saw.
+        build_final_path_fn=lambda *a, **kw: _build_final_path_for_track(*a, **kw),
     ))
 except Exception as _runner_init_err:
     logger.error(f"Failed to register reorganize queue runner: {_runner_init_err}")
@@ -11744,6 +12904,9 @@ def _sync_tracks_to_server(track_rows, server_type):
     return result
 
 
+_resolve_library_diag_logged = False
+
+
 def _resolve_library_file_path(file_path):
     """Resolve a library file path to an actual file on disk."""
     if not file_path:
@@ -11780,22 +12943,58 @@ def _resolve_library_file_path(file_path):
     except Exception as e:
         logger.debug("library music paths read failed: %s", e)
 
-    path_parts = file_path.replace('\\', '/').split('/')
-
-    # Try progressively shorter path suffixes against each candidate directory
-    # (skip index 0 to avoid drive letter issues). find_on_disk matches each
-    # component exactly when present, else folds typographic confusables (#833:
-    # curly U+2019 apostrophe in DB metadata vs ASCII U+0027 on disk) — exact
-    # matches always win, so paths that already resolved are unaffected.
-    from core.library.path_resolve import find_on_disk
-    for base_dir in [transfer_dir, download_dir] + list(library_dirs):
-        if not base_dir or not os.path.isdir(base_dir):
+    # Build the set of candidate base directories (absolute forms only, so
+    # os.path.join produces unambiguous paths). Config often stores RELATIVE
+    # paths ("./Transfer") — take os.path.abspath() so they resolve from the
+    # current working directory of the server process.
+    library_dir_list = list(library_dirs)
+    raw_bases = [transfer_dir, download_dir] + library_dir_list
+    abs_bases = []
+    seen_abs = set()
+    for b in raw_bases:
+        if not b:
             continue
-        for i in range(1, len(path_parts)):
-            found = find_on_disk(base_dir, path_parts[i:])
+        for form in [os.path.abspath(b), b, '/' + b.replace('./', '', 1).lstrip('/')]:
+            a = os.path.abspath(form) if not os.path.isabs(form) else form
+            if a and a not in seen_abs and os.path.isdir(a):
+                seen_abs.add(a)
+                abs_bases.append(a)
+
+    # --- Fast path: direct join ---
+    # When the DB stores a clean relative path ("Artist/Album/Track.flac") this
+    # is all that's needed. No component-by-component descent, no confusable
+    # folding. This handles the common Docker case where CWD is /app, config
+    # says ./Transfer, and files live at /app/Transfer/Artist/Album/Track.flac.
+    clean_rel = file_path.replace('\\', '/')
+    for abs_base in abs_bases:
+        candidate = os.path.join(abs_base, clean_rel)
+        if os.path.exists(candidate):
+            logger.debug("[PathResolve] direct join: %r → %r", file_path, candidate)
+            return candidate
+
+    # --- Slow path: confusable-tolerant suffix scan ---
+    # Handles paths with typographic apostrophes/dashes that differ between the
+    # DB metadata and the actual on-disk filename (#833).
+    path_parts = clean_rel.split('/')
+    from core.library.path_resolve import find_on_disk
+    for abs_base in abs_bases:
+        for i in range(0, len(path_parts)):
+            found = find_on_disk(abs_base, path_parts[i:])
             if found:
                 return found
 
+    # Couldn't resolve — log the bases we searched ONCE so a path/mount mismatch
+    # is diagnosable (e.g. files live under a dir that isn't transfer/download/
+    # a configured library path).
+    global _resolve_library_diag_logged
+    if not _resolve_library_diag_logged:
+        _resolve_library_diag_logged = True
+        logger.warning(
+            "[PathResolve] Could not resolve %r — tried direct-join + suffix-scan under %r (cwd=%r). "
+            "If files live elsewhere, set soulseek.transfer_path to the absolute mount or add "
+            "the dir under Settings > Library music paths.",
+            file_path, abs_bases, os.getcwd(),
+        )
     return None
 
 
@@ -11929,7 +13128,7 @@ def library_log_play():
         logger.debug(f"log-play failed (non-fatal): {e}")
         return jsonify({"success": False, "error": str(e)}), 200
 
-_enrichment_locks = {svc: threading.Lock() for svc in ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz', 'discogs')}
+_enrichment_locks = {svc: threading.Lock() for svc in ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz', 'discogs', 'jiosaavn')}
 
 @app.route('/api/library/enrich', methods=['POST'])
 def library_enrich_entity():
@@ -11955,7 +13154,7 @@ def library_enrich_entity():
         if entity_type not in ('artist', 'album', 'track'):
             return jsonify({"success": False, "error": "entity_type must be artist, album, or track"}), 400
 
-        valid_services = ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz', 'discogs')
+        valid_services = ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz', 'discogs', 'jiosaavn')
         if service not in valid_services:
             return jsonify({"success": False, "error": f"service must be one of: {', '.join(valid_services)}"}), 400
 
@@ -12045,6 +13244,20 @@ def _run_single_enrichment(service, entity_type, entity_id, name, artist_name):
         elif entity_type == 'track':
             deezer_worker._process_track(entity_id, name, artist_name, item)
         return {"success": True, "message": f"Deezer lookup complete for {entity_type}"}
+
+    elif service == 'jiosaavn':
+        if not jiosaavn_worker:
+            return {"success": False, "error": "JioSaavn worker not initialized"}
+        from core.metadata.registry import is_jiosaavn_enabled
+        if not is_jiosaavn_enabled():
+            return {"success": False, "error": "JioSaavn is disabled (experimental feature off)"}
+        if entity_type == 'artist':
+            jiosaavn_worker._process_artist(entity_id, name)
+        elif entity_type == 'album':
+            jiosaavn_worker._process_album(entity_id, name, artist_name)
+        elif entity_type == 'track':
+            jiosaavn_worker._process_track(entity_id, name, artist_name)
+        return {"success": True, "message": f"JioSaavn lookup complete for {entity_type}"}
 
     elif service == 'musicbrainz':
         if not mb_worker:
@@ -12183,6 +13396,7 @@ _SERVICE_ID_COLUMNS = {
     'tidal': {'artist': 'tidal_id', 'album': 'tidal_id', 'track': 'tidal_id'},
     'qobuz': {'artist': 'qobuz_id', 'album': 'qobuz_id', 'track': 'qobuz_id'},
     'amazon': {'artist': 'amazon_id', 'album': 'amazon_id', 'track': 'amazon_id'},
+    'jiosaavn': {'artist': 'jiosaavn_id', 'album': 'jiosaavn_id', 'track': 'jiosaavn_id'},
 }
 
 @app.route('/api/library/manual-match', methods=['PUT'])
@@ -14743,16 +15957,20 @@ def clean_youtube_artist(artist_string):
 
 def _youtube_cookie_opts():
     """yt-dlp cookie options matching the rest of the app (Settings → YouTube).
-    Per-video extraction needs these to get past YouTube's bot checks."""
-    opts = {}
+
+    Per-video extraction needs these to get past YouTube's bot checks, and private
+    playlists (a user's "Liked Music", list=LM) need them to be visible at all. The
+    dropdown is either a browser name (cookiesfrombrowser, local installs) or the
+    PASTE_MODE sentinel, in which case we point yt-dlp at the pasted cookies.txt that
+    server/Docker users supply. Precedence + emptiness live in core.youtube_cookies."""
+    from core.youtube_cookies import build_youtube_cookie_opts
     try:
-        cb = config_manager.get('youtube.cookies_browser', '')
-        # 'custom' = the paste-cookies.txt sentinel (not a yt-dlp browser); skip it here.
-        if cb and cb != 'custom':
-            opts['cookiesfrombrowser'] = (cb,)
+        mode = config_manager.get('youtube.cookies_browser', '')
+        path = config_manager.get('youtube.cookies_file', '')
+        exists = bool(path) and os.path.exists(path)
+        return build_youtube_cookie_opts(mode, path, cookiefile_exists=exists)
     except Exception:  # noqa: S110 - cookie config is best-effort; resolve still works without it
-        pass
-    return opts
+        return {}
 
 
 def _fetch_youtube_video_artist(video_id, cookie_opts):
@@ -14806,7 +16024,12 @@ def parse_youtube_playlist(url):
             'no_warnings': True,
             'extract_flat': 'in_playlist',  # Only extract basic info, no individual video metadata
             'skip_download': True,  # Don't download, just extract IDs and basic info
-            'lazy_playlist': False,  # Force full playlist resolution (prevents ~100 entry cap)
+            'lazy_playlist': False,  # Force full playlist resolution
+            # #908 / yt-dlp #16943: a YouTube-side regression caps the webpage-based playlist
+            # path at the first ~100-item page (Liked Music came back as only 104). Skipping the
+            # webpage and paging via the InnerTube API directly gets far more — verified live
+            # 100 -> 200+ on a large playlist. Remove once the upstream fix (PR #16948) ships.
+            'extractor_args': {'youtubetab': {'skip': ['webpage']}},
         }
         ydl_opts.update(_youtube_cookie_opts())
         
@@ -15006,6 +16229,14 @@ def _get_file_path_from_template_raw(template: str, context: dict) -> tuple:
         full_path = re.sub(r'\s*-\s*$', '', full_path)
         full_path = re.sub(r'\s+', ' ', full_path).strip()
         return '', _sanitize_filename(full_path)
+
+
+def _probe_audio_quality(file_path):
+    """Probe real measured audio quality (bit depth / sample rate / bitrate)
+    as an AudioQuality, for the library quality scanner. Delegates to the same
+    core the download import guard uses. Returns None on any error."""
+    from core.imports.file_ops import probe_audio_quality
+    return probe_audio_quality(file_path)
 
 
 def _get_audio_quality_string(file_path):
@@ -15295,7 +16526,6 @@ def _get_file_path_from_template(context: dict, template_type: str = 'album_path
 from mutagen import File as MutagenFile
 from mutagen.id3 import ID3, TIT2, TPE1, TALB, TDRC, TRCK, TCON, TPE2, TPOS, TXXX, APIC, UFID, TSRC, TBPM, TCOP, TPUB, TMED, TDOR
 from mutagen.apev2 import APEv2, APENoHeaderError
-import urllib.request
 
 def _wipe_source_tags(file_path: str) -> bool:
     return metadata_enrichment.wipe_source_tags(file_path)
@@ -15309,6 +16539,7 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
         runtime=metadata_runtime or _build_metadata_enrichment_runtime(
             mb_worker=mb_worker,
             deezer_worker=deezer_worker,
+            jiosaavn_worker=jiosaavn_worker,
             audiodb_worker=audiodb_worker,
             tidal_client=tidal_client,
             qobuz_enrichment_worker=qobuz_enrichment_worker,
@@ -15414,6 +16645,7 @@ def _post_process_matched_download_with_verification(context_key, context, file_
         _build_metadata_enrichment_runtime(
             mb_worker=mb_worker,
             deezer_worker=deezer_worker,
+            jiosaavn_worker=jiosaavn_worker,
             audiodb_worker=audiodb_worker,
             tidal_client=tidal_client,
             qobuz_enrichment_worker=qobuz_enrichment_worker,
@@ -15538,6 +16770,7 @@ def _post_process_matched_download(context_key, context, file_path):
         metadata_runtime=_build_metadata_enrichment_runtime(
             mb_worker=mb_worker,
             deezer_worker=deezer_worker,
+            jiosaavn_worker=jiosaavn_worker,
             audiodb_worker=audiodb_worker,
             tidal_client=tidal_client,
             qobuz_enrichment_worker=qobuz_enrichment_worker,
@@ -15833,6 +17066,23 @@ def _db_update_artist_callback(artist_name, success, details, album_count, track
 
 def _db_update_finished_callback(total_artists, total_albums, total_tracks, successful, failed):
     global _db_update_automation_id
+    # Library extras: keep the whole-library M3U in sync with the DB. Every scan type (deep,
+    # incremental, full refresh) converges on this callback, so writing here keeps it current.
+    # Destination = the configured M3U output folder if set, else the Transfer folder. Fully
+    # guarded — a playlist write must never disturb scan completion.
+    try:
+        if config_manager.get('m3u_export.library_enabled', False):
+            from core.library.m3u_export import write_library_m3u
+            _entries = get_database().get_all_library_tracks_for_export()
+            _dest = (config_manager.get('m3u_export.library_path', '') or '').strip() \
+                or config_manager.get('soulseek.transfer_path', './Transfer')
+            _dest = docker_resolve_path(_dest)
+            _base = config_manager.get('m3u_export.entry_base_path', '') or ''
+            _written = write_library_m3u(_entries, _dest, entry_base_path=_base)
+            if _written:
+                logger.info("[library-m3u] auto-synced %d tracks -> %s", len(_entries), _written)
+    except Exception as _m3u_err:
+        logger.warning("[library-m3u] auto-sync failed: %s", _m3u_err)
     # Check for removal results from the worker
     removed_artists = 0
     removed_albums = 0
@@ -15985,7 +17235,7 @@ def _pause_workers_for_scan():
         'mb': mb_worker, 'spotify': spotify_enrichment_worker, 'itunes': itunes_enrichment_worker,
         'deezer': deezer_worker, 'audiodb': audiodb_worker, 'discogs': discogs_worker, 'lastfm': lastfm_worker,
         'genius': genius_worker, 'tidal': tidal_enrichment_worker, 'qobuz': qobuz_enrichment_worker,
-        'amazon': amazon_worker, 'repair': repair_worker, 'soulid': soulid_worker,
+        'amazon': amazon_worker, 'repair': repair_worker, 'soulid': soulid_worker, 'jiosaavn': jiosaavn_worker,
     }
     for name, w in workers.items():
         if w and hasattr(w, 'pause') and not getattr(w, 'paused', True):
@@ -16001,7 +17251,7 @@ def _resume_workers_after_scan():
         'mb': mb_worker, 'spotify': spotify_enrichment_worker, 'itunes': itunes_enrichment_worker,
         'deezer': deezer_worker, 'audiodb': audiodb_worker, 'discogs': discogs_worker, 'lastfm': lastfm_worker,
         'genius': genius_worker, 'tidal': tidal_enrichment_worker, 'qobuz': qobuz_enrichment_worker,
-        'amazon': amazon_worker, 'repair': repair_worker, 'soulid': soulid_worker,
+        'amazon': amazon_worker, 'repair': repair_worker, 'soulid': soulid_worker, 'jiosaavn': jiosaavn_worker,
     }
     resumed = 0
     for name, w in workers.items():
@@ -16187,16 +17437,40 @@ def _run_soulsync_deep_scan():
 
         logger.info(f"[SoulSync Deep Scan] {len(db_paths)} tracks in soulsync DB")
 
-        # Phase 3: Find untracked files (in Transfer but not in DB)
-        untracked = transfer_files - db_paths
-        # Also check with normalized paths (Windows vs Unix separators)
-        if untracked:
-            db_paths_normalized = {p.replace('\\', '/') for p in db_paths}
-            untracked = {f for f in untracked if f.replace('\\', '/') not in db_paths_normalized}
+        # Phase 3: Plan the untracked → Staging move, with the data-loss guard (#904).
+        # A path-only diff treats EVERY file the DB doesn't know about as "a new arrival
+        # to relocate". When the DB is empty/out of sync with disk (volume swap, DB reset,
+        # external tag edits) but Transfer holds the real library, that flags the whole
+        # library as untracked and relocates all of it. The planner refuses the move when
+        # the untracked share is implausibly large (the desync signature) or when the user
+        # marked Transfer as their permanent library — leaving files in place and warning.
+        from core.library.standalone_scan import (
+            plan_standalone_deep_scan, BLOCK_TRANSFER_PERMANENT, BLOCK_DESYNC,
+        )
+        never_move = bool(config_manager.get('import.transfer_is_permanent', False))
+        plan = plan_standalone_deep_scan(transfer_files, db_paths, never_move=never_move)
+        untracked = plan['untracked']
+        move_blocked = plan['move_blocked']
+        block_reason = plan['block_reason']
 
-        # Phase 4: Move untracked files to Staging for auto-import
+        # Phase 4: Move untracked files to Staging for auto-import — unless guarded.
         moved_count = 0
-        if untracked and os.path.isdir(staging_path):
+        blocked_count = 0
+        if untracked and move_blocked:
+            blocked_count = len(untracked)
+            if block_reason == BLOCK_TRANSFER_PERMANENT:
+                warn = (f"Deep scan: {blocked_count} file(s) in Transfer aren't in the database, "
+                        f"but Transfer is marked your permanent library — nothing was moved.")
+            else:  # BLOCK_DESYNC
+                pct = round(100 * blocked_count / max(1, len(transfer_files)))
+                warn = (f"Deep scan STOPPED to protect your library: {blocked_count} of "
+                        f"{len(transfer_files)} files in Transfer ({pct}%) aren't in the database. "
+                        f"That usually means the database is out of sync with disk, not that you "
+                        f"have {blocked_count} new files — so NOTHING was moved. Re-sync/import "
+                        f"before scanning, or enable 'Transfer is my permanent library'.")
+            logger.warning(f"[SoulSync Deep Scan] {warn}")
+            add_activity_item("", "SoulSync Deep Scan — move blocked", warn, "Now")
+        elif untracked and os.path.isdir(staging_path):
             _db_update_phase_callback('moving_untracked')
             for file_path in untracked:
                 try:
@@ -16227,6 +17501,23 @@ def _run_soulsync_deep_scan():
             if not os.path.exists(db_path):
                 stale_track_ids.append(db_path)
                 stale_count += 1
+
+        # Guard the deletes the same way as the move (#904): if a desync blocked the
+        # move, the DB<->disk mapping is unreliable, so os.path.exists may be lying for
+        # every file — don't delete rows. Also independently skip when the stale share
+        # is implausibly large (storage unreachable / remount), mirroring the orphan guard.
+        from core.library.stale_guard import is_implausible_stale_removal
+        if move_blocked and block_reason == BLOCK_DESYNC:
+            if stale_track_ids:
+                logger.warning(f"[SoulSync Deep Scan] Skipping removal of {stale_count} 'stale' "
+                               f"records — move was blocked for desync, mapping is unreliable.")
+            stale_track_ids = []
+            stale_count = 0
+        elif is_implausible_stale_removal(stale_count, len(db_paths)):
+            logger.warning(f"[SoulSync Deep Scan] Skipping removal of {stale_count}/{len(db_paths)} "
+                           f"'stale' records — implausibly large share, storage likely unreachable.")
+            stale_track_ids = []
+            stale_count = 0
 
         # Remove stale records
         if stale_track_ids:
@@ -16260,9 +17551,11 @@ def _run_soulsync_deep_scan():
         summary = f"Deep scan complete: {len(transfer_files)} files scanned"
         if moved_count > 0:
             summary += f", {moved_count} untracked files moved to Staging"
+        if blocked_count > 0:
+            summary += f", {blocked_count} untracked files LEFT IN PLACE (move blocked — see warning)"
         if stale_count > 0:
             summary += f", {stale_count} stale records removed"
-        if moved_count == 0 and stale_count == 0:
+        if moved_count == 0 and blocked_count == 0 and stale_count == 0:
             summary += " — library is clean"
 
         logger.info(f"[SoulSync Deep Scan] {summary}")
@@ -16792,6 +18085,48 @@ def remove_batch_from_wishlist():
         return jsonify(payload), status_code
     except Exception as e:
         logger.error(f"Error batch removing from wishlist: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/wishlist/ignore-list', methods=['GET'])
+def get_wishlist_ignore_list():
+    """#874: active (non-expired) wishlist ignore entries for this profile."""
+    try:
+        from core.wishlist_service import get_wishlist_service
+        runtime = _build_wishlist_route_runtime()
+        entries = get_wishlist_service().database.get_wishlist_ignore(profile_id=runtime.profile_id)
+        from core.wishlist.ignore import IGNORE_TTL_DAYS
+        return jsonify({"success": True, "entries": entries, "ttl_days": IGNORE_TTL_DAYS})
+    except Exception as e:
+        logger.error(f"Error reading wishlist ignore-list: {e}")
+        return jsonify({"success": False, "error": str(e), "entries": []}), 500
+
+@app.route('/api/wishlist/ignore-list/remove', methods=['POST'])
+def remove_from_wishlist_ignore_list():
+    """#874: un-ignore a track so it can be auto-acquired again."""
+    try:
+        data = request.get_json() or {}
+        track_id = data.get('track_id') or data.get('spotify_track_id')
+        if not track_id:
+            return jsonify({"success": False, "error": "No track_id provided"}), 400
+        from core.wishlist_service import get_wishlist_service
+        runtime = _build_wishlist_route_runtime()
+        ok = get_wishlist_service().database.remove_from_wishlist_ignore(
+            track_id, profile_id=runtime.profile_id)
+        return jsonify({"success": True, "removed": ok})
+    except Exception as e:
+        logger.error(f"Error removing from wishlist ignore-list: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/wishlist/ignore-list/clear', methods=['POST'])
+def clear_wishlist_ignore_list():
+    """#874: clear the entire wishlist ignore-list for this profile."""
+    try:
+        from core.wishlist_service import get_wishlist_service
+        runtime = _build_wishlist_route_runtime()
+        count = get_wishlist_service().database.clear_wishlist_ignore(profile_id=runtime.profile_id)
+        return jsonify({"success": True, "cleared": count})
+    except Exception as e:
+        logger.error(f"Error clearing wishlist ignore-list: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/add-album-to-wishlist', methods=['POST'])
@@ -18027,9 +19362,9 @@ def _build_candidates_deps():
     )
 
 
-def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None):
+def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None, **kwargs):
     return _downloads_candidates.attempt_download_with_candidates(
-        task_id, candidates, track, batch_id, _build_candidates_deps()
+        task_id, candidates, track, batch_id, _build_candidates_deps(), **kwargs
     )
 
 
@@ -18480,6 +19815,7 @@ def _build_status_deps():
             page=1,
             limit=limit,
         )[0],
+        get_unverified_download_history=lambda: get_database().get_library_history_unverified(),
     )
 
 
@@ -18541,10 +19877,17 @@ def get_batch_history():
 
 @app.route('/api/downloads/clear-completed', methods=['POST'])
 def clear_completed_downloads():
-    """Remove completed/failed/cancelled tasks from the download tracker."""
+    """Clear completed/failed downloads from the Downloads page: the live
+    session tasks AND the persisted download-history tail (so the list actually
+    empties and stays empty across restart). Rows still awaiting verification
+    (unverified / force_imported) are preserved — they belong to the review
+    queue, not this cleanup."""
     try:
         cleared = _downloads_cancel.clear_completed_local()
-        return jsonify({'success': True, 'cleared': cleared})
+        history_cleared = get_database().clear_completed_download_history()
+        return jsonify({'success': True, 'cleared': cleared,
+                        'history_cleared': history_cleared,
+                        'total_cleared': cleared + history_cleared})
     except Exception as e:
         logger.error(f"Error clearing completed downloads: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -18931,26 +20274,44 @@ def _check_batch_completion_v2(batch_id):
 
 
 def _add_cancelled_task_to_wishlist(task):
-    """
-    Helper function to add cancelled task to wishlist.
-    Separated for clarity and error isolation.
+    """Handle a user-cancelled download's wishlist state.
+
+    #874: a manual cancel means "stop auto-retrying this release". The
+    previous behaviour re-added the cancelled track to the wishlist, which
+    the auto-processor then re-downloaded → re-cancelled → re-added,
+    forever. Instead we record a TTL'd ignore entry (so the watchlist /
+    auto-processor skip it) and drop it from the active wishlist. The user
+    can still force-download it manually (manual paths bypass the gate),
+    and the ignore lapses after core.wishlist.ignore.IGNORE_TTL_DAYS so it
+    is reconsidered later. Error-isolated; never raises into the caller.
     """
     if not task:
         return
-        
+
     try:
         from core.wishlist_service import get_wishlist_service
+        from core.wishlist.ignore import extract_display, REASON_CANCELLED
         wishlist_service = get_wishlist_service()
-        payload = _build_cancelled_task_wishlist_payload(task, profile_id=get_current_profile_id())
-        success = wishlist_service.add_spotify_track_to_wishlist(**payload)
-        
-        if success:
-            logger.info(f"[Atomic Cancel] Added '{task.get('track_info', {}).get('name')}' to wishlist")
-        else:
-            logger.error(f"[Atomic Cancel] Failed to add '{task.get('track_info', {}).get('name')}' to wishlist")
-            
+        profile_id = get_current_profile_id()
+        track_info = task.get('track_info', {}) or {}
+        track_id = track_info.get('id')
+        name = track_info.get('name')
+
+        if not track_id:
+            logger.warning("[Atomic Cancel] No track id on cancelled task — cannot ignore '%s'", name)
+            return
+
+        disp_name, disp_artist = extract_display(track_info)
+        wishlist_service.database.add_to_wishlist_ignore(
+            track_id, track_name=disp_name, artist_name=disp_artist,
+            reason=REASON_CANCELLED, profile_id=profile_id)
+        # Drop it from the active wishlist so the auto-processor stops
+        # re-attempting it; the gate then blocks any automatic re-add.
+        wishlist_service.remove_track_from_wishlist(track_id, profile_id=profile_id)
+        logger.info("[Atomic Cancel] Ignored (TTL) + removed from wishlist: '%s'", name or track_id)
+
     except Exception as e:
-        logger.error(f"[Atomic Cancel] Critical error adding to wishlist: {e}")
+        logger.error(f"[Atomic Cancel] Critical error handling cancelled task: {e}")
 
 @app.route('/api/playlists/<batch_id>/cancel_batch', methods=['POST'])
 def cancel_batch(batch_id):
@@ -19124,6 +20485,44 @@ def get_sync_history_entry(entry_id):
     except Exception as e:
         logger.error(f"Error getting sync history entry: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/sync/history/<int:entry_id>/track/<int:track_index>/wishlist', methods=['POST'])
+def readd_sync_track_to_wishlist(entry_id, track_index):
+    """Re-add a synced unmatched track to the wishlist with the SAME context the
+    sync originally used (source_type='playlist' + the playlist's name/id), so it
+    behaves identically to the auto-add. Only 'wishlist'-status rows are eligible."""
+    try:
+        db = MusicDatabase()
+        entry = db.get_sync_history_entry(entry_id)
+        if not entry:
+            return jsonify({"success": False, "error": "Sync entry not found"}), 404
+
+        tracks = json.loads(entry['tracks_json']) if entry.get('tracks_json') else []
+        track_results = json.loads(entry['track_results']) if entry.get('track_results') else []
+
+        from core.sync.wishlist_readd import reconstruct_sync_track_data
+        spotify_track_data = reconstruct_sync_track_data(track_results, tracks, track_index)
+        if not spotify_track_data:
+            return jsonify({"success": False, "error": "This track can't be re-added to the wishlist"}), 400
+
+        from core.wishlist_service import get_wishlist_service
+        added = get_wishlist_service().add_spotify_track_to_wishlist(
+            spotify_track_data=spotify_track_data,
+            failure_reason='Missing from media server after sync',
+            source_type='playlist',
+            source_context={
+                'playlist_name': entry.get('playlist_name'),
+                'playlist_id': entry.get('playlist_id'),
+                'sync_type': 'automatic_sync',
+                'timestamp': datetime.now().isoformat(),
+            },
+        )
+        return jsonify({"success": True, "added": bool(added),
+                        "name": spotify_track_data.get('name', '')})
+    except Exception as e:
+        logger.error(f"Error re-adding synced track to wishlist (entry {entry_id}, track {track_index}): {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 
 @app.route('/api/sync/history/<int:entry_id>', methods=['DELETE'])
 def delete_sync_history_entry_api(entry_id):
@@ -19402,7 +20801,7 @@ def get_server_playlist_tracks(playlist_id):
         # core.sync.playlist_reconcile (pure + tested) — fixes #768 (YouTube
         # "Artist - Title" sources now match, and source_track_id is echoed
         # back so manual "Find & add" overrides persist).
-        from core.sync.playlist_reconcile import reconcile_playlist
+        from core.sync.playlist_reconcile import compute_order_status, reconcile_playlist
 
         # Pass 0: User-confirmed match overrides from sync_match_cache.
         # When a user previously picked a local file via "Find & Add",
@@ -19411,28 +20810,41 @@ def get_server_playlist_tracks(playlist_id):
         # exact/fuzzy passes entirely. Stale-cache safe — if the cached
         # server track no longer exists, the override is silently
         # skipped and normal matching runs.
-        from core.sync.match_overrides import resolve_durable_match_server_id, resolve_match_overrides
+        from core.sync.match_overrides import resolve_override_server_id, resolve_match_overrides
         _db_for_overrides = get_database()
         # Set of server track ids currently in this playlist — used to validate
-        # a re-resolved durable match actually exists before pairing it.
+        # a cached/durable match actually exists in this playlist before pairing it.
         _server_ids = {str(t.get('id')) for t in server_tracks if isinstance(t, dict) and t.get('id') is not None}
         _ov_profile = get_current_profile_id()
 
         def _override_lookup(src_id):
-            # 1) Fast override cache (cleared on every rescan).
-            cached = _db_for_overrides.read_sync_match_cache(src_id, active_server) or {}
-            if cached.get('server_track_id'):
-                return cached['server_track_id']
-            # 2) Durable manual library match — survives a rescan (#787), so a
-            #    Find & Add / manual match keeps pairing after a DB scan. Re-
-            #    resolves a stale id via the stored file path when needed.
-            return resolve_durable_match_server_id(
-                _db_for_overrides, _ov_profile, src_id, active_server, _server_ids
+            # Validated fast-cache hit, else durable manual match (#787) which
+            # self-heals a stale library id via the stored file path. A cache hit
+            # that no longer points into THIS playlist must not short-circuit the
+            # durable path, or the manual match silently never applies (wolf39us).
+            return resolve_override_server_id(
+                _db_for_overrides, _ov_profile, src_id, active_server, _server_ids,
+                _db_for_overrides.read_sync_match_cache,
             )
 
         _override_pairs = resolve_match_overrides(source_tracks, server_tracks, _override_lookup)
 
         combined = reconcile_playlist(source_tracks, server_tracks, _override_pairs)
+
+        # Order status: the editor renders the server column in SOURCE order, so a
+        # reordered-but-same-membership playlist reads "in sync" when Navidrome's real
+        # order differs. Surface that (one-way: source order is truth). `server_order`
+        # is the server's ACTUAL sequence, for the read-only "view server order" view.
+        order_status = compute_order_status(combined)
+        server_order = [
+            {
+                "title": t.get("title"),
+                "artist": t.get("artist"),
+                "thumb": t.get("thumb"),
+                "id": t.get("id"),
+            }
+            for t in server_tracks if isinstance(t, dict)
+        ]
 
         return jsonify({
             "success": True,
@@ -19441,9 +20853,65 @@ def get_server_playlist_tracks(playlist_id):
             "tracks": combined,
             "server_track_count": len(server_tracks),
             "source_track_count": len(source_tracks),
+            "order_status": order_status,
+            "server_order": server_order,
         })
     except Exception as e:
         logger.error(f"Error getting server playlist tracks: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/server/playlist/<playlist_id>/align', methods=['POST'])
+def server_playlist_align(playlist_id):
+    """Align a server playlist's ORDER to the source ('Align playlists').
+
+    Order-only and metadata-free: the client sends the matched server-track ids in
+    SOURCE order (`matched_ids`) plus the extras choice (`keep_extras`); the server
+    validates every id is currently in the playlist (so this can only reorder/drop
+    tracks already there — never inject one) and rewrites the playlist in that order
+    via the overwrite primitive. Does NOT touch membership-completeness — missing
+    tracks are the normal sync's job. Navidrome only for now."""
+    try:
+        data = request.get_json() or {}
+        playlist_name = (data.get('playlist_name') or '').strip()
+        matched_ids = data.get('matched_ids') or []
+        keep_extras = bool(data.get('keep_extras', False))
+        if not playlist_name:
+            return jsonify({"success": False, "error": "playlist_name required"}), 400
+        if not matched_ids:
+            return jsonify({"success": False, "error": "no matched tracks to align"}), 400
+
+        active_server = config_manager.get_active_media_server()
+        client = media_server_engine.client(active_server) if active_server else None
+        if active_server not in ('navidrome', 'plex', 'jellyfin') or not client:
+            return jsonify({"success": False,
+                            "error": "Align isn't supported on this server yet"}), 400
+
+        # Current playlist track ids (in current server order) — per server.
+        if active_server == 'navidrome':
+            current_tracks = client.get_playlist_tracks(playlist_id) or []
+            current_ids = [str(t.ratingKey) for t in current_tracks if getattr(t, 'ratingKey', None)]
+        elif active_server == 'plex':
+            current_ids = client.get_playlist_track_ids(playlist_id, playlist_name)
+        else:  # jellyfin
+            current_ids = client.get_playlist_track_ids(playlist_id)
+
+        from core.sync.playlist_edit import plan_align_rewrite
+        ordered = plan_align_rewrite(current_ids, matched_ids, keep_extras=keep_extras)
+        if ordered is None:
+            return jsonify({"success": False,
+                            "error": "Playlist changed on the server — reload and try again"}), 409
+
+        if active_server == 'navidrome':
+            ok = client.rewrite_playlist_order(playlist_id, playlist_name, ordered)
+        else:  # plex / jellyfin — in-place reorder
+            ok = client.reorder_playlist(playlist_id, playlist_name, ordered)
+        if not ok:
+            return jsonify({"success": False, "error": "Failed to reorder playlist"}), 500
+        return jsonify({"success": True, "track_count": len(ordered),
+                        "kept_extras": keep_extras})
+    except Exception as e:
+        logger.error(f"Error aligning server playlist '{playlist_id}': {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -20246,6 +21714,56 @@ def _save_sync_status_file(sync_statuses):
     except Exception as e:
         logger.error(f"Error saving sync status: {e}")
 
+def _sync_status_timestamp(status_info):
+    """Return comparable timestamp for a persisted sync-status record."""
+    if not status_info or 'last_synced' not in status_info:
+        return None
+    try:
+        return datetime.fromisoformat(status_info['last_synced'])
+    except (TypeError, ValueError):
+        return None
+
+def _latest_sync_status(*status_infos):
+    """Pick the newest non-empty sync-status record."""
+    candidates = [s for s in status_infos if s]
+    if not candidates:
+        return {}
+    return max(candidates, key=lambda s: _sync_status_timestamp(s) or datetime.min)
+
+def _mirrored_spotify_sync_status(playlist_id, sync_statuses, *, database=None, profile_id=None):
+    """Return auto-sync status for a Spotify playlist mirrored into SoulSync."""
+    try:
+        db = database or get_database()
+        profile = profile_id if profile_id is not None else get_current_profile_id()
+        mirrored = db.get_mirrored_playlist_by_source('spotify', str(playlist_id), profile)
+        if not mirrored:
+            return {}
+        return sync_statuses.get(f"auto_mirror_{mirrored.get('id')}", {})
+    except Exception as e:
+        logger.debug("Spotify mirrored sync-status lookup failed for %s: %s", playlist_id, e)
+        return {}
+
+def _resolve_spotify_playlist_sync_status(playlist_id, sync_statuses, *, database=None, profile_id=None):
+    """Resolve direct or mirrored sync status for a Spotify playlist card."""
+    direct_status = sync_statuses.get(playlist_id, {})
+    mirrored_status = _mirrored_spotify_sync_status(
+        playlist_id,
+        sync_statuses,
+        database=database,
+        profile_id=profile_id,
+    )
+    return _latest_sync_status(direct_status, mirrored_status)
+
+def _format_playlist_sync_status(status_info, playlist_snapshot):
+    """Build user-facing sync-status text from persisted status + snapshot."""
+    if 'last_synced' not in status_info:
+        return "Never Synced"
+    last_sync_time = datetime.fromisoformat(status_info['last_synced']).strftime('%b %d, %H:%M')
+    stored_snapshot = status_info.get('snapshot_id')
+    if stored_snapshot and playlist_snapshot and playlist_snapshot != stored_snapshot:
+        return f"Last Sync: {last_sync_time}"
+    return f"Synced: {last_sync_time}"
+
 def _update_and_save_sync_status(playlist_id, playlist_name, playlist_owner, snapshot_id, **kwargs):
     """Updates the sync status for a given playlist and saves to file (same logic as GUI)."""
     try:
@@ -20288,16 +21806,14 @@ def get_spotify_playlists():
 
         # Add regular playlists first
         for p in playlists:
-            status_info = sync_statuses.get(p.id, {})
-            sync_status = "Never Synced"
+            status_info = _resolve_spotify_playlist_sync_status(p.id, sync_statuses)
             # Handle snapshot_id safely - may not exist in core Playlist class
             playlist_snapshot = getattr(p, 'snapshot_id', '')
+            sync_status = _format_playlist_sync_status(status_info, playlist_snapshot)
 
             if 'last_synced' in status_info:
                 stored_snapshot = status_info.get('snapshot_id')
-                last_sync_time = datetime.fromisoformat(status_info['last_synced']).strftime('%b %d, %H:%M')
-                if playlist_snapshot != stored_snapshot:
-                    sync_status = f"Last Sync: {last_sync_time}"
+                if stored_snapshot and playlist_snapshot and playlist_snapshot != stored_snapshot:
                     logger.info(
                         "Playlist sync status: name=%s id=%s snapshot=%r stored_snapshot=%r result=Needs Sync display=%s",
                         p.name,
@@ -20307,7 +21823,6 @@ def get_spotify_playlists():
                         sync_status,
                     )
                 else:
-                    sync_status = f"Synced: {last_sync_time}"
                     logger.info(
                         "Playlist sync status: name=%s id=%s snapshot=%r stored_snapshot=%r result=Synced display=%s",
                         p.name,
@@ -20585,7 +22100,38 @@ def get_spotify_album_tracks(album_id):
             logger.warning(f"Hydrabase album_tracks failed for '{album_id}', falling back to Spotify: {e}")
 
     # Source override: when user clicked from a specific search tab
-    source_override = request.args.get('source', '')
+    source_override = request.args.get('source', '').strip().lower()
+
+    if source_override == 'jiosaavn':
+        try:
+            from core.metadata.registry import (
+                get_jiosaavn_client,
+                experimental_source_rejected,
+            )
+            if experimental_source_rejected(source_override):
+                return jsonify({"error": "JioSaavn is not enabled"}), 503
+            client = get_jiosaavn_client()
+            if not client:
+                return jsonify({"error": "JioSaavn client unavailable"}), 503
+            album_data = client.get_album(album_id)
+            if not album_data:
+                return jsonify({"error": "Album not found"}), 404
+            tracks = album_data.get('tracks', [])
+            if not isinstance(tracks, list):
+                tracks = []
+            return jsonify({
+                'id': album_data['id'],
+                'name': album_data['name'],
+                'artists': album_data.get('artists', []),
+                'release_date': album_data.get('release_date', ''),
+                'total_tracks': album_data.get('total_tracks', len(tracks)),
+                'album_type': album_data.get('album_type', 'album'),
+                'images': album_data.get('images', []),
+                'tracks': tracks,
+            })
+        except Exception as e:
+            logger.error(f"JioSaavn album detail failed: {e}")
+            return jsonify({"error": str(e)}), 500
 
     if not spotify_client or not spotify_client.is_authenticated():
         return jsonify({"error": "Spotify not authenticated."}), 401
@@ -20659,6 +22205,27 @@ def get_spotify_album_tracks(album_id):
 @app.route('/api/spotify/track/<track_id>', methods=['GET'])
 def get_spotify_track(track_id):
     """Fetches full track details including album data for a specific track."""
+    source_override = request.args.get('source', '').strip().lower()
+
+    if source_override == 'jiosaavn':
+        try:
+            from core.metadata.registry import (
+                get_jiosaavn_client,
+                experimental_source_rejected,
+            )
+            if experimental_source_rejected(source_override):
+                return jsonify({"error": "JioSaavn is not enabled"}), 503
+            client = get_jiosaavn_client()
+            if not client:
+                return jsonify({"error": "JioSaavn client unavailable"}), 503
+            track_data = client.get_track_details(track_id)
+            if not track_data:
+                return jsonify({"error": "Track not found"}), 404
+            return jsonify(track_data)
+        except Exception as e:
+            logger.error(f"JioSaavn track detail failed: {e}")
+            return jsonify({"error": str(e)}), 500
+
     # Try Hydrabase first when active and track name provided
     if _is_hydrabase_active():
         track_name = request.args.get('name', '')
@@ -20749,17 +22316,13 @@ def search_spotify_tracks():
         legacy_query = request.args.get('query', '').strip()
         limit = int(request.args.get('limit', 20))
 
-        # Build Spotify field-filtered query
-        if track_q or artist_q:
-            parts = []
-            if track_q:
-                parts.append(f'track:{track_q}')
-            if artist_q:
-                parts.append(f'artist:{artist_q}')
-            query = ' '.join(parts)
-        elif legacy_query:
-            query = legacy_query
-        else:
+        # Plain combined query — NOT field-scoped (`track:X artist:Y`). That Spotify
+        # syntax leaks to non-Spotify sources when search falls back (Deezer aborted
+        # the connection on it); the iTunes/Deezer endpoints already dropped it for the
+        # same reason, and the rerank below recovers precision. (Pool-fix "no results".)
+        from core.metadata.relevance import build_combined_search_query
+        query = build_combined_search_query(track_q, artist_q, legacy_query)
+        if not query:
             return jsonify({"error": "Query parameter is required"}), 400
 
         if use_hydrabase:
@@ -22400,6 +23963,7 @@ from core.discovery.endpoints import (
     cancel_sync as _cancel_sync_core,
     delete_playlist_state as _delete_playlist_state_core,
     get_sync_status as _get_sync_status_core,
+    reconcile_sync_phase as _reconcile_sync_phase,
     get_discovery_status as _get_discovery_status_core,
     reset_playlist as _reset_playlist_core,
     get_playlist_states as _get_playlist_states_core,
@@ -22665,6 +24229,11 @@ def _get_metadata_fallback_client():
         if hydrabase_client and hydrabase_client.is_connected():
             return hydrabase_client
         return _get_itunes_client()
+    if source == 'jiosaavn':
+        from core.metadata.registry import get_jiosaavn_client
+        client = get_jiosaavn_client()
+        if client is not None:
+            return client
     return _get_itunes_client()
 
 @app.route('/api/deezer/arl-status', methods=['GET'])
@@ -26653,7 +28222,12 @@ def select_my_service_credential():
 # ==================================================================================
 
 # Selectable metadata sources (mirrors the Settings <select>).
-_QS_METADATA_SOURCES = ['spotify', 'spotify_free', 'itunes', 'deezer', 'discogs', 'musicbrainz']
+def _qs_metadata_sources():
+    """Metadata sources offered in Connections / quick-switch UI."""
+    from core.metadata.registry import EXPERIMENTAL_SOURCES, is_source_enabled
+    sources = ['spotify', 'spotify_free', 'itunes', 'deezer', 'discogs', 'musicbrainz']
+    sources += [name for name in EXPERIMENTAL_SOURCES if is_source_enabled(name)]
+    return sources
 _QS_MEDIA_SERVERS = ['plex', 'jellyfin', 'navidrome', 'soulsync']
 # Single download sources (everything the mode accepts except 'hybrid').
 _QS_DOWNLOAD_SOURCES = ['soulseek', 'youtube', 'tidal', 'qobuz', 'hifi', 'torrent', 'usenet']
@@ -26708,7 +28282,7 @@ def get_active_sources():
                 # with the sidebar/Settings status.
                 'active': meta_active,
                 'effective': meta_effective,
-                'options': [{'id': s, 'available': _qs_metadata_available(s)} for s in _QS_METADATA_SOURCES],
+                'options': [{'id': s, 'available': _qs_metadata_available(s)} for s in _qs_metadata_sources()],
             },
             'server': {
                 'active': config_manager.get_active_media_server(),
@@ -26737,16 +28311,15 @@ def set_active_sources():
 
         if 'metadata_source' in data:
             src = data['metadata_source']
-            if src not in _QS_METADATA_SOURCES:
+            if src not in _qs_metadata_sources():
                 return jsonify({'success': False, 'error': 'Unknown metadata source'}), 400
-            # Same composite the Settings save uses: 'spotify_free' is stored as
-            # fallback_source='spotify' + metadata.spotify_free=true.
-            if src == 'spotify_free':
-                config_manager.set('metadata.fallback_source', 'spotify')
-                config_manager.set('metadata.spotify_free', True)
-            else:
-                config_manager.set('metadata.fallback_source', src)
-                config_manager.set('metadata.spotify_free', False)
+            from core.metadata.registry import apply_primary_metadata_source
+            _primary_err = apply_primary_metadata_source(
+                src,
+                config_manager.set,
+            )
+            if _primary_err:
+                return jsonify({'success': False, 'error': _primary_err}), 400
             invalidate_metadata_status_caches()
             changed.append('metadata')
 
@@ -26873,6 +28446,249 @@ def export_watchlist():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+# ── Playlist export to ListenBrainz / JSPF (#903) ────────────────────────────
+# Resolve each mirrored-playlist track to a MusicBrainz recording MBID (cache -> DB ->
+# file tag -> live MB), build a JSPF, and either hand it back as a download or create the
+# playlist directly on ListenBrainz. Runs in a background thread with live status the
+# mirrored-playlist card polls. Entirely additive — new routes + an in-memory job registry.
+_playlist_export_jobs = {}
+_playlist_export_jobs_lock = threading.Lock()
+
+
+def _build_service_search_id_fn(service):
+    """Bind a confident-search ID resolver to the service's metadata search client, for the
+    opt-in export backfill (#945). Returns None when the search client isn't available — the
+    backfill then simply finds nothing for that track rather than crashing the export."""
+    from core.exports.export_sources import search_service_track_id
+    try:
+        if service == 'spotify':
+            client = get_spotify_client()
+            if not client:
+                return None
+            # allow_fallback=False is CRITICAL: Spotify's search falls back to iTunes/Deezer
+            # when rate-limited/free, returning tracks whose .id is NOT a Spotify id — backfill
+            # would then push wrong ids into the Spotify playlist. Disable it: real Spotify hits
+            # or nothing.
+            search_fn = lambda q: client.search_tracks(q, limit=8, allow_fallback=False)  # noqa: E731
+        else:
+            from core.metadata.registry import get_deezer_client
+            client = get_deezer_client()
+            if not client:
+                return None
+            # Deezer's search stays within Deezer (query-only fallback), so its .id is always a
+            # Deezer id — no cross-service guard needed.
+            search_fn = lambda q: client.search_tracks(q, limit=8)  # noqa: E731
+        return lambda artist, title: search_service_track_id(artist, title, search_fn=search_fn)
+    except Exception:
+        return None
+
+
+def _run_service_export(job, db, playlist_id, title, service, client, resolve_ids_fn=None):
+    """Export a mirrored playlist back to a streaming service (Spotify/Deezer, #945).
+
+    Resolves each track to a target-service ID via the discovery cache (the track's
+    extra_data — free + already matched) → the library's stored id → (when job['backfill']
+    is set) a confident live-search match, pushes the matched set via the service write
+    client, and stores the returned playlist id so a re-export updates in place (idempotent,
+    like the LB #903 fix). Deps injected so the orchestration is unit-testable without a DB
+    or live service.
+    """
+    from core.exports.export_sources import resolve_service_track_ids
+    resolve_ids_fn = resolve_ids_fn or resolve_service_track_ids
+
+    tracks = db.get_mirrored_playlist_tracks(int(playlist_id))
+    job['total'] = len(tracks)
+    job['phase'] = 'resolving'
+
+    def on_progress(done, total, stats):
+        job['done'] = done
+        job['stats'] = dict(stats)
+
+    # Opt-in backfill: confident live-search for tracks the cache + library couldn't resolve.
+    search_id_fn = _build_service_search_id_fn(service) if job.get('backfill') else None
+    out = resolve_ids_fn(tracks, service, search_id_fn=search_id_fn, on_progress=on_progress)
+    job['stats'] = out['stats']
+    ids = [r['service_track_id'] for r in out['resolved'] if r.get('service_track_id')]
+    if not ids:
+        job['phase'] = 'error'
+        job['error'] = f"No tracks matched a {service.title()} ID — nothing to export"
+        return
+    if client is None:
+        job['phase'] = 'error'
+        job['error'] = f"{service.title()} is not connected"
+        return
+
+    job['phase'] = 'pushing'
+    # Re-export updates the same service playlist in place (idempotent), mirroring the
+    # ListenBrainz #903 fix — the target ID is stored per (playlist, service).
+    existing = db.get_playlist_export_target(int(playlist_id), service)
+    res = client.create_or_update_playlist(title, ids, existing_id=existing)
+    job['push'] = res
+    if res.get('success'):
+        if res.get('playlist_id'):
+            db.set_playlist_export_target(int(playlist_id), service, str(res['playlist_id']))
+        job['phase'] = 'done'
+    else:
+        job['phase'] = 'error'
+        job['error'] = res.get('error') or f"{service.title()} push failed"
+
+
+def _run_playlist_export(job_id, playlist_id, title, mode):
+    job = _playlist_export_jobs[job_id]
+    try:
+        # Service export (#945) — resolve to Spotify/Deezer track IDs and push.
+        if mode in ('spotify', 'deezer'):
+            db = get_database()
+            if mode == 'spotify':
+                client = get_spotify_client()
+            else:
+                from core.deezer_download_client import DeezerDownloadClient
+                client = DeezerDownloadClient()
+            _run_service_export(job, db, playlist_id, title, mode, client)
+            return
+
+        from core.exports.export_sources import build_resolve_fn
+        from core.exports.playlist_export import resolve_playlist_tracks
+        from core.exports.jspf_export import build_jspf
+
+        db = get_database()
+        tracks = db.get_mirrored_playlist_tracks(int(playlist_id))
+        job['total'] = len(tracks)
+        job['phase'] = 'resolving'
+
+        resolve_fn = build_resolve_fn()
+
+        def on_progress(done, total, stats):
+            job['done'] = done
+            job['stats'] = dict(stats)
+
+        out = resolve_playlist_tracks(tracks, resolve_fn, on_progress=on_progress)
+        jspf, summary = build_jspf(title, out['resolved'], creator='SoulSync')
+        job['summary'] = summary
+        job['jspf'] = jspf
+        job['stats'] = out['stats']
+
+        if mode == 'push':
+            job['phase'] = 'pushing'
+            from core.listenbrainz_client import ListenBrainzClient
+            client = ListenBrainzClient()
+            # Re-export updates the same LB playlist in place instead of duplicating it (#903).
+            existing = db.get_playlist_export_target(int(playlist_id), 'listenbrainz')
+            res = client.create_or_update_playlist(title, jspf['playlist']['track'], existing_mbid=existing)
+            job['push'] = res
+            if res.get('success'):
+                if res.get('playlist_mbid'):
+                    db.set_playlist_export_target(int(playlist_id), 'listenbrainz', res['playlist_mbid'])
+                job['phase'] = 'done'
+            else:
+                job['phase'] = 'error'
+                job['error'] = res.get('error') or 'ListenBrainz push failed'
+        else:
+            job['phase'] = 'done'
+    except Exception as e:
+        logger.error(f"[Playlist Export] job {job_id} failed: {e}")
+        job['phase'] = 'error'
+        job['error'] = str(e)
+
+
+@app.route('/api/playlists/<playlist_id>/export/listenbrainz', methods=['POST'])
+def start_playlist_export_listenbrainz(playlist_id):
+    """Start a background export of a mirrored playlist to ListenBrainz/JSPF.
+
+    Body: {"mode": "download"|"push"} (default "download"). Returns {job_id} to poll."""
+    try:
+        body = request.get_json(silent=True) or {}
+        mode = 'push' if body.get('mode') == 'push' else 'download'
+        db = get_database()
+        meta = db.get_mirrored_playlist(int(playlist_id)) or {}
+        title = (meta.get('name') or meta.get('title') or 'SoulSync Export').strip() or 'SoulSync Export'
+
+        import uuid
+        job_id = uuid.uuid4().hex
+        with _playlist_export_jobs_lock:
+            _playlist_export_jobs[job_id] = {
+                'job_id': job_id, 'playlist_id': str(playlist_id), 'title': title,
+                'mode': mode, 'phase': 'starting', 'done': 0, 'total': 0,
+                'stats': {}, 'error': None,
+            }
+        t = threading.Thread(target=_run_playlist_export, args=(job_id, playlist_id, title, mode), daemon=True)
+        t.start()
+        return jsonify({"success": True, "job_id": job_id})
+    except Exception as e:
+        logger.error(f"Playlist export start failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/playlists/<playlist_id>/export/service/<service>', methods=['POST'])
+def start_playlist_export_service(playlist_id, service):
+    """Export a mirrored playlist back to a streaming service (#945).
+
+    ``service`` ∈ {spotify, deezer}. Creates a service-owned playlist (or updates the
+    one a prior export created) from the library tracks' stored service IDs. Returns
+    {job_id} to poll via the shared export-status endpoint."""
+    try:
+        service = (service or '').lower()
+        if service not in ('spotify', 'deezer'):
+            return jsonify({"success": False, "error": f"Unsupported export target: {service}"}), 400
+        # Spotify export needs the write scope, which the normal login doesn't request. If the
+        # current token doesn't carry it, tell the UI to send the user through the one-time
+        # on-demand export-auth (instead of starting a job that would 403). #945.
+        if service == 'spotify' and not (spotify_client and spotify_client.has_write_scope()):
+            return jsonify({
+                "success": False, "needs_auth": True,
+                "auth_url": "/auth/spotify/export",
+                "error": "Spotify needs permission to create playlists",
+            }), 200
+        body = request.get_json(silent=True) or {}
+        backfill = bool(body.get('backfill'))
+        db = get_database()
+        meta = db.get_mirrored_playlist(int(playlist_id)) or {}
+        title = (meta.get('name') or meta.get('title') or 'SoulSync Export').strip() or 'SoulSync Export'
+
+        import uuid
+        job_id = uuid.uuid4().hex
+        with _playlist_export_jobs_lock:
+            _playlist_export_jobs[job_id] = {
+                'job_id': job_id, 'playlist_id': str(playlist_id), 'title': title,
+                'mode': service, 'backfill': backfill, 'phase': 'starting', 'done': 0,
+                'total': 0, 'stats': {}, 'error': None,
+            }
+        t = threading.Thread(target=_run_playlist_export,
+                             args=(job_id, playlist_id, title, service), daemon=True)
+        t.start()
+        return jsonify({"success": True, "job_id": job_id})
+    except Exception as e:
+        logger.error(f"Service playlist export start failed ({service}): {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/playlists/export/status/<job_id>', methods=['GET'])
+def playlist_export_status(job_id):
+    """Live status for an export job (polled by the mirrored-playlist card)."""
+    job = _playlist_export_jobs.get(job_id)
+    if not job:
+        return jsonify({"success": False, "error": "unknown job"}), 404
+    # Don't ship the full JSPF on every poll — just status + coverage.
+    out = {k: v for k, v in job.items() if k != 'jspf'}
+    out['has_download'] = bool(job.get('jspf'))
+    return jsonify({"success": True, "job": out})
+
+
+@app.route('/api/playlists/export/download/<job_id>', methods=['GET'])
+def playlist_export_download(job_id):
+    """Download a completed export's JSPF file."""
+    job = _playlist_export_jobs.get(job_id)
+    if not job or not job.get('jspf'):
+        return jsonify({"success": False, "error": "no export available"}), 404
+    import json as _json
+    safe = re.sub(r'[^\w\-]+', '_', (job.get('title') or 'playlist')).strip('_') or 'playlist'
+    return Response(
+        _json.dumps(job['jspf'], indent=2, ensure_ascii=False),
+        mimetype='application/jspf+json',
+        headers={'Content-Disposition': f'attachment; filename="{safe}.jspf"'},
+    )
+
+
 @app.route('/api/library/artists/export', methods=['GET'])
 def export_library_artists():
     """Export the WHOLE library artist roster (name + every source id/url we have,
@@ -26951,10 +28767,16 @@ def add_to_watchlist():
             return jsonify({"success": False, "error": "Missing artist_id or artist_name"}), 400
 
         database = get_database()
+        # Callers that KNOW the id's source (e.g. the Discovery Web, whose candidates carry
+        # [source, id] pairs) can pass it explicitly — numeric Deezer/iTunes ids are ambiguous and
+        # the detection below can otherwise mistake them for a library DB row id.
+        explicit_source = (data.get('source') or '').strip().lower()
+        if explicit_source not in ('spotify', 'deezer', 'itunes', 'discogs', 'musicbrainz'):
+            explicit_source = None
         # Detect source from ID — check if it's a library DB ID first
         is_numeric_id = artist_id.isdigit()
-        source = None
-        if is_numeric_id:
+        source = explicit_source
+        if is_numeric_id and not explicit_source:
             # Could be a library DB ID, iTunes ID, Deezer ID, or Discogs ID
             # Check if this is a library DB artist and use their actual source IDs
             try:
@@ -26995,8 +28817,8 @@ def add_to_watchlist():
                         source = 'musicbrainz'
             except Exception as e:
                 logger.debug("watchlist artist source lookup failed: %s", e)
+        fallback_source = _get_metadata_fallback_source()   # always defined — image block below reads it
         if not source:
-            fallback_source = _get_metadata_fallback_source()
             source = fallback_source if is_numeric_id else 'spotify'
         success = database.add_artist_to_watchlist(artist_id, artist_name, profile_id=get_current_profile_id(), source=source)
         if success:
@@ -27501,22 +29323,10 @@ def start_watchlist_scan():
                 # #831 round 2: persist this run + its track ledger so the
                 # Watchlist History modal can show what every past scan did.
                 try:
-                    _state = watchlist_scan_state
-                    get_database().save_watchlist_scan_run(
-                        run_id=_state.get('scan_run_id') or datetime.now().strftime('%Y%m%d-%H%M%S'),
-                        profile_id=scan_profile_id,
-                        status='cancelled' if was_cancelled else 'completed',
-                        started_at=(_state.get('started_at').isoformat()
-                                    if _state.get('started_at') else None),
-                        completed_at=(_state.get('completed_at') or datetime.now()).isoformat()
-                                     if not isinstance(_state.get('completed_at'), str)
-                                     else _state.get('completed_at'),
-                        total_artists=(_state.get('summary') or {}).get('total_artists',
-                                                                        _state.get('total_artists', 0)),
-                        artists_scanned=(_state.get('summary') or {}).get('successful_scans', 0),
-                        tracks_found=_state.get('tracks_found_this_scan', 0),
-                        tracks_added=_state.get('tracks_added_this_scan', 0),
-                        track_events=_state.get('scan_track_events') or [],
+                    from core.watchlist.scan_history import persist_scan_run
+                    persist_scan_run(
+                        get_database(), watchlist_scan_state,
+                        profile_id=scan_profile_id, was_cancelled=was_cancelled,
                     )
                 except Exception as _hist_err:
                     logger.error(f"Failed to persist watchlist scan run: {_hist_err}")
@@ -27953,7 +29763,14 @@ def watchlist_artist_config(artist_id):
                 lookback_days = int(lookback_days) if lookback_days != '' else None
             preferred_metadata_source = data.get('preferred_metadata_source', None)
             # Validate — only accept known sources, empty string means clear override
-            if preferred_metadata_source == '' or preferred_metadata_source not in ('spotify', 'deezer', 'itunes', 'discogs', 'musicbrainz'):
+            _watchlist_meta_sources = (
+                'spotify', 'deezer', 'itunes', 'discogs', 'musicbrainz',
+            )
+            from core.metadata.registry import EXPERIMENTAL_SOURCES, is_source_enabled
+            _watchlist_meta_sources = _watchlist_meta_sources + tuple(
+                name for name in EXPERIMENTAL_SOURCES if is_source_enabled(name)
+            )
+            if preferred_metadata_source == '' or preferred_metadata_source not in _watchlist_meta_sources:
                 preferred_metadata_source = None
             # Follow-only toggle: default True so an older client that omits the
             # field keeps auto-downloading.
@@ -28370,6 +30187,48 @@ def get_discover_hero():
     return _discover_hero_get()
 
 
+_discover_taste_cache = {}            # profile_id -> (expiry_ts, {genre: 0..1})
+# Genre/novelty weights now come from adventurousness_weights(dial) (core.discovery) — the dial blends
+# them, single source of truth — instead of the old fixed _DISCOVER_GENRE_WEIGHT / _NOVELTY_PENALTY.
+
+
+def _discover_genre_taste(database, profile_id):
+    """Cached genre-taste profile for a profile — ``{genre_lower: 0..1}`` from the genres of your
+    top-played artists, weighted by plays. Cached 5 min (it changes slowly) so the live dial-drag
+    re-fetch doesn't recompute it. Fail-soft -> ``{}`` (no genre data -> no boost, never a penalty)."""
+    import time
+    now = time.time()
+    cached = _discover_taste_cache.get(profile_id)
+    if cached and now < cached[0]:
+        return cached[1]
+    profile = {}
+    try:
+        from core.discovery.listening_recommendations import build_genre_taste_profile
+        top = database.get_top_artists('all', 300) or []
+        genres_by_name = database.get_artist_genres_by_name([t.get('name') for t in top if t.get('name')])
+        weighted = [(genres_by_name.get((t.get('name') or '').strip().lower(), []),
+                     t.get('play_count', 1) or 1) for t in top]
+        profile = build_genre_taste_profile(weighted)
+    except Exception as e:
+        logger.debug(f"discover genre taste profile failed: {e}")
+    _discover_taste_cache[profile_id] = (now + 300, profile)
+    return profile
+
+
+def _discover_primary_genre(item):
+    """First genre of a discover candidate for diversity grouping — its ``genres`` may be a JSON
+    string, an already-parsed list, or missing. Returns a normalized genre string or None."""
+    g = item.get('genres')
+    if isinstance(g, str):
+        try:
+            g = json.loads(g)
+        except (ValueError, TypeError):
+            g = None
+    if isinstance(g, list) and g and isinstance(g[0], str) and g[0].strip():
+        return g[0].strip().lower()
+    return None
+
+
 @app.route('/api/discover/similar-artists', methods=['GET'])
 def get_discover_similar_artists():
     """Get all recommended similar artists (basic data, no enrichment for speed)"""
@@ -28378,12 +30237,19 @@ def get_discover_similar_artists():
         active_source = _get_active_discovery_source()
         from config.settings import config_manager
         active_server = config_manager.get_active_media_server()
+        try:
+            _adv_level = float(config_manager.get('discover.adventurousness', 0.3) or 0)
+        except (TypeError, ValueError):
+            _adv_level = 0.0
 
+        # The dial drives candidate SELECTION here (not just the re-rank below): the pool shifts from
+        # consensus picks toward obscure long-tail deep cuts as you turn it up.
         similar_artists = database.get_top_similar_artists(
             limit=200,
             profile_id=get_current_profile_id(),
             require_source=active_source,
             exclude_library_server=active_server,
+            adventurousness=_adv_level,
         )
 
         if not similar_artists:
@@ -28436,6 +30302,62 @@ def get_discover_similar_artists():
                 artist_data["because"] = because
             result_artists.append(artist_data)
 
+        # Re-rank: genre/tag affinity (always-on) + the adventurousness popularity penalty (dial).
+        # Score from the SQL signals (occurrence primary, similarity a minor tiebreak), boosted by how
+        # well the candidate's genres match your taste, then popularity-penalised by the dial. We only
+        # re-rank when there's a reason (genre data OR dial > 0) — with neither, the fetch order is
+        # left untouched (no regression). Fail-soft. (_adv_level was read above for the fetch.)
+        _pid = get_current_profile_id()
+        _taste = _discover_genre_taste(database, _pid)
+        _plays = database.get_play_counts_by_name(
+            [a.get('artist_name') for a in result_artists], _pid) if result_artists else {}
+        if result_artists and (_adv_level > 0 or _taste or _plays):
+            try:
+                from core.discovery.listening_recommendations import (
+                    apply_adventurous_blend, genre_affinity, novelty_score)
+                for a in result_artists:
+                    _oc = float(a.get('occurrence_count') or 0)
+                    _rank = min(float(a.get('similarity_rank') or 10), 10.0)
+                    a['_base'] = _oc + (10.0 - _rank) * 0.1              # consensus base
+                    _aff = genre_affinity(a.get('genres') or [], _taste) if _taste else 0.0
+                    a['_aff'] = a['_why_genre'] = _aff                    # _why_genre feeds the "why" chips
+                    a['_nov'] = novelty_score(_plays.get((a.get('artist_name') or '').strip().lower(), 0))
+                # Blend the sort axis consensus<->obscurity by the dial (scaled by genre/novelty
+                # quality). dial 0 = most-recommended first; dial 1 = least-popular (deep cuts) first.
+                result_artists = apply_adventurous_blend(
+                    result_artists, _adv_level, base_key='_base', pop_key='popularity',
+                    tiebreak_key='occurrence_count')
+                for a in result_artists:
+                    a.pop('_base', None); a.pop('_aff', None); a.pop('_nov', None)
+            except Exception as _adv_err:
+                logger.debug(f"similar-artists re-rank skipped: {_adv_err}")
+
+        # "Why this rec" chips — built unconditionally so they show even when the re-rank block above
+        # was skipped (no genre data, no plays, dial 0). Deep-cut/consensus tags don't need taste.
+        try:
+            from core.discovery.listening_recommendations import why_chips
+            for a in result_artists:
+                _w = why_chips(genre_affinity=a.get('_why_genre', 0.0), popularity=a.get('popularity'),
+                               seed_count=len(a.get('because') or []) or int(a.get('occurrence_count') or 0),
+                               level=_adv_level)   # adaptive: "Off your usual path" on the adventurous end
+                if _w:
+                    a['why'] = _w
+                a.pop('_why_genre', None)
+        except Exception as _why_err:
+            logger.debug(f"similar-artists why chips skipped: {_why_err}")
+
+        # Diversity: spread the shown picks across genres so one genre can't hog the row (broader
+        # discovery). No-ops on small lists. Then mark the shown set featured so the next load
+        # rotates in different deep cuts (freshness).
+        try:
+            from core.discovery.listening_recommendations import diversify_by_genre
+            result_artists = diversify_by_genre(result_artists, _discover_primary_genre, cap=3)
+            _shown = [a.get('artist_name') for a in result_artists[:18] if a.get('artist_name')]
+            if _shown:
+                database.mark_artists_featured(_shown)
+        except Exception as _div_err:
+            logger.debug(f"similar-artists diversify/rotate skipped: {_div_err}")
+
         logger.info(
             f"[Similar Artists] {len(similar_artists)} from DB, {len(result_artists)} valid for "
             f"{active_source} after excluding {active_server} library artists"
@@ -28450,6 +30372,256 @@ def get_discover_similar_artists():
 
     except Exception as e:
         logger.error(f"Error getting similar artists: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/discover/adventurousness', methods=['GET', 'POST'])
+def discover_adventurousness():
+    """Get/set the global Discover adventurousness dial (0..1). Shares the config key
+    ``discover.adventurousness`` with the Settings -> Discovery slider, so the two controls stay in
+    sync (change one, the other reflects it on next load). Read-only-safe; clamps to [0, 1]."""
+    try:
+        if request.method == 'POST':
+            data = request.get_json(silent=True) or {}
+            try:
+                v = float(data.get('value'))
+            except (TypeError, ValueError):
+                return jsonify({"success": False, "error": "value must be a number"}), 400
+            v = max(0.0, min(1.0, v))
+            config_manager.set('discover.adventurousness', v)
+            return jsonify({"success": True, "value": v})
+        try:
+            v = float(config_manager.get('discover.adventurousness', 0.3) or 0)
+        except (TypeError, ValueError):
+            v = 0.3
+        return jsonify({"success": True, "value": max(0.0, min(1.0, v))})
+    except Exception as e:
+        logger.error(f"adventurousness endpoint error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+def _resolve_popularity_sources():
+    """Best-effort handles for the popularity cascade — each may be None (then it's skipped)."""
+    spotify_free = lastfm = deezer = None
+    try:
+        from core.spotify_free_metadata import SpotifyFreeMetadataClient, spotify_free_installed
+        if spotify_free_installed():
+            spotify_free = SpotifyFreeMetadataClient()
+    except Exception as e:
+        logger.debug(f"spotify-free unavailable for backfill: {e}")
+    try:
+        from core.lastfm_client import LastFMClient
+        _key = config_manager.get('lastfm.api_key', '')
+        if _key:
+            lastfm = LastFMClient(api_key=_key)
+    except Exception as e:
+        logger.debug(f"lastfm unavailable for backfill: {e}")
+    try:
+        deezer = _get_deezer_client()
+    except Exception as e:
+        logger.debug(f"deezer unavailable for backfill: {e}")
+    return spotify_free, lastfm, deezer
+
+
+@app.route('/api/discover/popularity-backfill/start', methods=['POST'])
+@admin_only
+def start_popularity_backfill():
+    """Kick off the background popularity backfill (fills similar_artists.popularity via the Spotify
+    Free -> Last.fm -> Deezer cascade). Rate-limited + resumable; safe to call repeatedly."""
+    try:
+        from core.discovery import popularity_backfill as pb
+        if pb.is_running():
+            return jsonify({"success": False, "error": "Backfill already running", "state": pb.get_state()})
+        spotify_free, lastfm, deezer = _resolve_popularity_sources()
+        if not any([spotify_free, lastfm, deezer]):
+            return jsonify({"success": False,
+                            "error": "No popularity source available — configure Last.fm, Spotify Free, or Deezer."})
+        pb.start_background(get_database(), spotify_free=spotify_free, lastfm=lastfm, deezer=deezer,
+                            profile_id=get_current_profile_id())
+        return jsonify({"success": True, "state": pb.get_state()})
+    except Exception as e:
+        logger.error(f"start popularity backfill error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/discover/popularity-backfill/status', methods=['GET'])
+def popularity_backfill_status():
+    from core.discovery import popularity_backfill as pb
+    return jsonify({"success": True, "state": pb.get_state()})
+
+
+@app.route('/api/discover/popularity-backfill/cancel', methods=['POST'])
+@admin_only
+def cancel_popularity_backfill():
+    from core.discovery import popularity_backfill as pb
+    pb.cancel()
+    return jsonify({"success": True, "state": pb.get_state()})
+
+
+def _autostart_popularity_backfill():
+    """Self-maintaining popularity fill — no button, no restart, no cost to scans.
+
+    Sweeps ~90s after boot, then re-checks hourly so new similar-artist data (added by watchlist scans)
+    tops up on its own. It's deliberately DECOUPLED from the scan worker — the worker stays fast and
+    never makes popularity lookups mid-scan; this loop fills the gaps afterwards, rate-limited inside
+    the sweep. Each tick: if there's nothing missing, or no source configured, it just sleeps again."""
+    import time as _t
+    _t.sleep(90)  # let the server finish its own startup work first
+    while True:
+        try:
+            from core.discovery import popularity_backfill as pb
+            if not pb.is_running():
+                database = get_database()
+                missing = database.count_similar_artists_missing_popularity(1)
+                if missing > 0:
+                    spotify_free, lastfm, deezer = _resolve_popularity_sources()
+                    if any([spotify_free, lastfm, deezer]):
+                        logger.info("Popularity backfill: filling %d artist(s) in the background", missing)
+                        # run synchronously — this thread IS the background worker
+                        pb.run_backfill(database, spotify_free=spotify_free, lastfm=lastfm,
+                                        deezer=deezer, profile_id=1)
+                    else:
+                        logger.debug("Popularity backfill: %d missing but no source configured", missing)
+        except Exception as e:
+            logger.debug(f"popularity backfill tick skipped: {e}")
+        _t.sleep(3600)  # re-check hourly; new artists fill within the hour
+
+
+@app.route('/api/discover/listening-recommendations', methods=['GET'])
+def get_discover_listening_recommendations():
+    """#913: artists you'd love based on what you actually LISTEN to (play-weighted).
+
+    Distinct from /api/discover/similar-artists (which is driven by your whole library /
+    watchlist): this is seeded by your most-PLAYED artists, consensus-ranked across the
+    similar-artist graph, and recency-boosted. The heavy lifting + storage happen during the
+    watchlist scan (core.watchlist_scanner._build_listening_recommendations -> the
+    'listening_recs_artists' metadata key); this endpoint just reshapes the stored list to the
+    same card shape the recommended-artists row already renders. Read-only, fail-soft.
+    """
+    try:
+        database = get_database()
+        active_source = _get_active_discovery_source()
+        raw = database.get_metadata('listening_recs_artists')
+        if not raw:
+            return jsonify({"success": True, "artists": [], "source": active_source, "count": 0})
+        try:
+            stored = json.loads(raw) or []
+        except (ValueError, TypeError):
+            stored = []
+
+        try:
+            level = float(config_manager.get('discover.adventurousness', 0.3) or 0)
+        except (TypeError, ValueError):
+            level = 0.0
+
+        # Quality re-rank (aurral parity, always-on): the adventurousness dial BLENDS the weights —
+        # genre/tag affinity boosts on-taste candidates (leash loosens as you get adventurous); novelty
+        # penalises recs you've already heard (pull tightens). Additive — no genre match / no plays
+        # leaves the score untouched, and at the default dial the weights equal the old constants.
+        try:
+            from core.discovery.listening_recommendations import (
+                apply_adventurous_blend, genre_affinity, novelty_score)
+            _pid = get_current_profile_id()
+            taste = _discover_genre_taste(database, _pid)
+            _names = [a.get('name') for a in stored]
+            plays = database.get_play_counts_by_name(_names, _pid) if stored else {}
+            pops = database.get_similar_artist_popularities(_names) if stored else {}  # for the "why" chips + dial
+            for a in stored:
+                if a.get('popularity') is None:
+                    a['popularity'] = pops.get((a.get('name') or '').strip().lower())
+                aff = genre_affinity(a.get('genres') or [], taste) if taste else 0.0
+                a['_aff'] = a['_why_genre'] = aff   # _why_genre also feeds the "why this rec" chips
+                a['_nov'] = novelty_score(plays.get((a.get('name') or '').strip().lower(), 0))
+            # Blend the sort axis consensus<->obscurity by the dial (base = the recommendation score),
+            # so the adventurous end genuinely surfaces the least-popular on-taste picks.
+            stored = apply_adventurous_blend(
+                stored, level, base_key='score', pop_key='popularity', tiebreak_key='seed_count')
+            for a in stored:
+                a.pop('_aff', None); a.pop('_nov', None)
+        except Exception as _qual_err:
+            logger.debug(f"genre/novelty re-rank skipped: {_qual_err}")
+
+        result_artists = []
+        for a in stored:
+            name = a.get('name')
+            if not name:
+                continue
+            if active_source == 'spotify':
+                artist_id = a.get('spotify_artist_id')
+            elif active_source == 'deezer':
+                artist_id = a.get('deezer_artist_id') or a.get('itunes_artist_id')
+            else:
+                artist_id = a.get('itunes_artist_id')
+            entry = {
+                "artist_id": artist_id,
+                "spotify_artist_id": a.get('spotify_artist_id'),
+                "itunes_artist_id": a.get('itunes_artist_id'),
+                "deezer_artist_id": a.get('deezer_artist_id'),
+                "artist_name": name,
+                "seed_count": a.get('seed_count'),
+                "source": active_source,
+            }
+            try:
+                from core.discovery.listening_recommendations import why_chips
+                _why = why_chips(genre_affinity=a.get('_why_genre', 0.0),
+                                 popularity=a.get('popularity'), seed_count=a.get('seed_count'),
+                                 level=level)   # adaptive: "Off your usual path" on the adventurous end
+                if _why:
+                    entry["why"] = _why
+            except Exception as _why_err:
+                logger.debug(f"why chips skipped: {_why_err}")
+            img = a.get('image_url')
+            if img:
+                entry["image_url"] = fix_artist_image_url(img)
+            if a.get('genres'):
+                entry["genres"] = a['genres'][:3]
+            # "because you listen to X, Y, Z" — the most-played artists that point here.
+            if a.get('seeds'):
+                entry["because"] = a['seeds']
+            result_artists.append(entry)
+
+        # Spread the shown picks across genres (broader discovery). No-ops on small lists.
+        try:
+            from core.discovery.listening_recommendations import diversify_by_genre
+            result_artists = diversify_by_genre(result_artists, _discover_primary_genre, cap=3)
+        except Exception as _div_err:
+            logger.debug(f"listening-recs diversify skipped: {_div_err}")
+
+        return jsonify({
+            "success": True,
+            "artists": result_artists,
+            "source": active_source,
+            "count": len(result_artists),
+        })
+    except Exception as e:
+        logger.error(f"Error getting listening recommendations: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/discover/personalized/listening-mix', methods=['GET'])
+def get_discover_listening_mix():
+    """#913: the "Listening Mix" playlist row — a playable track mix from the artists you'd
+    love based on what you actually listen to.
+
+    The tracks are built during the watchlist scan (core.watchlist_scanner
+    ._build_listening_recommendations -> the 'listening_recs_tracks_full' metadata key) as full
+    render-ready dicts, so this endpoint just hands them back — no discovery-pool re-hydration,
+    which means it can't shrink when the pool rotates (the failure mode Fresh Tape/Archives hit).
+    Same {success, tracks} shape renderCompactPlaylist + the sync/download chains expect.
+    """
+    try:
+        database = get_database()
+        active_source = _get_active_discovery_source()
+        raw = database.get_metadata('listening_recs_tracks_full')
+        tracks = []
+        if raw:
+            try:
+                tracks = json.loads(raw) or []
+            except (ValueError, TypeError):
+                tracks = []
+        return jsonify({"success": True, "tracks": tracks, "source": active_source})
+    except Exception as e:
+        logger.error(f"Error getting listening mix: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -34288,6 +36460,37 @@ def get_discovery_pool():
         logger.error(f"Error getting discovery pool: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/wing-it-pool', methods=['GET'])
+def get_wing_it_pool():
+    """List Wing It auto-matched tracks (unverified best-effort guesses), optionally per-playlist.
+
+    These are tracks that couldn't match a metadata source and got a raw-name Wing It stub. They
+    count as 'discovered' so the Discovery Pool hides them — this surfaces them so the user can
+    verify and re-match. Re-matching reuses the Discovery Pool's /api/discovery-pool/fix endpoint
+    (both key off the mirrored_playlist_tracks.id), and a manual match drops the track from here.
+    """
+    try:
+        database = get_database()
+        profile_id = get_current_profile_id()
+        playlist_id = request.args.get('playlist_id', type=int)
+
+        tracks = database.get_wing_it_pool(profile_id=profile_id, playlist_id=playlist_id)
+        matched = database.get_wing_it_pool(profile_id=profile_id, playlist_id=playlist_id, resolved=True)
+        stats = database.get_wing_it_pool_stats(profile_id=profile_id)
+
+        playlists = database.get_mirrored_playlists(profile_id=profile_id)
+        playlist_options = [{'id': p['id'], 'name': p['name']} for p in playlists]
+
+        return jsonify({
+            'tracks': tracks,
+            'matched': matched,
+            'stats': stats,
+            'playlists': playlist_options,
+        })
+    except Exception as e:
+        logger.error(f"Error getting wing it pool: {e}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/discovery-pool/fix', methods=['POST'])
 def fix_discovery_pool_track():
     """Manually fix a failed discovery by linking a mirrored track to a Spotify/iTunes result."""
@@ -34331,7 +36534,8 @@ def fix_discovery_pool_track():
             'source': 'spotify',
         }
 
-        # Update the mirrored track's extra_data
+        # Update the mirrored track's extra_data (merges, so a wing-it track keeps its
+        # wing_it_fallback flag — that + manual_match is how the Wing It Pool lists resolved guesses).
         extra_data = {
             'discovered': True,
             'provider': 'spotify',
@@ -34901,19 +37105,24 @@ def start_oauth_callback_servers():
                     try:
                         from spotipy.oauth2 import SpotifyOAuth
                         from config.settings import config_manager
+                        from core.spotify_client import normalize_spotify_oauth_config
 
                         # Get Spotify config
-                        config = config_manager.get_spotify_config()
+                        config = normalize_spotify_oauth_config(config_manager.get_spotify_config())
                         configured_uri = config.get('redirect_uri', "http://127.0.0.1:8888/callback")
                         _oauth_logger.info(f"Using redirect_uri for token exchange: {configured_uri}")
 
-                        # Create auth manager and exchange code for token
+                        # Create auth manager and exchange code for token. Use the SAME store
+                        # the client reads (DatabaseTokenCache), not the legacy file — a re-auth
+                        # written to the file never reaches the DB-backed client, so it would
+                        # report "validation failed" despite a successful exchange.
+                        from core.spotify_token_cache import DatabaseTokenCache
                         auth_manager = SpotifyOAuth(
                             client_id=config['client_id'],
                             client_secret=config['client_secret'],
                             redirect_uri=configured_uri,
-                            scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email user-follow-read",
-                            cache_path='config/.spotify_cache'
+                            scope=SPOTIFY_OAUTH_SCOPE,
+                            cache_handler=DatabaseTokenCache(config_manager)
                         )
 
                         # Extract the authorization code and exchange it for tokens
@@ -35222,6 +37431,32 @@ except Exception as e:
 # END DEEZER INTEGRATION
 # ================================================================================================
 
+# ================================================================================================
+# JIOSAAVN ENRICHMENT INTEGRATION
+# ================================================================================================
+
+jiosaavn_worker = None
+try:
+    from database.music_database import MusicDatabase
+    jiosaavn_db = MusicDatabase()
+    jiosaavn_worker = JioSaavnWorker(database=jiosaavn_db)
+    jiosaavn_worker.start()
+    if config_manager.get('jiosaavn_enrichment_paused', False):
+        jiosaavn_worker.pause()
+        logger.info("JioSaavn enrichment worker initialized (paused — restored from config)")
+    else:
+        logger.info("JioSaavn enrichment worker initialized and started")
+except Exception as e:
+    logger.error(f"JioSaavn worker initialization failed: {e}")
+    jiosaavn_worker = None
+
+# JioSaavn status / pause / resume routes are served by the
+# generic enrichment blueprint at /api/enrichment/jiosaavn/{status,pause,resume}.
+
+# ================================================================================================
+# END JIOSAAVN INTEGRATION
+# ================================================================================================
+
 amazon_worker = None
 try:
     amazon_db = MusicDatabase()
@@ -35279,11 +37514,13 @@ except Exception as e:
 # they explicitly want background Spotify enrichment.
 spotify_enrichment_worker = None
 try:
-    from core.metadata_service import get_primary_source as _get_primary_source
+    from core.metadata_service import get_configured_primary_source
     from database.music_database import MusicDatabase
     spotify_enrichment_db = MusicDatabase()
     spotify_enrichment_worker = SpotifyWorker(database=spotify_enrichment_db)
-    _primary = _get_primary_source()
+    # Use configured source only — get_primary_source() probes Spotify auth and can
+    # block gunicorn worker boot indefinitely when the API is unreachable.
+    _primary = get_configured_primary_source()
     _user_paused = config_manager.get('spotify_enrichment_paused', False)
     if _user_paused or _primary != 'spotify':
         spotify_enrichment_worker.paused = True  # Set BEFORE start() to prevent race condition
@@ -35532,6 +37769,7 @@ _init_service_search(
     discogs_worker_obj=discogs_worker,
     audiodb_worker_obj=audiodb_worker,
     amazon_worker_obj=amazon_worker,
+    jiosaavn_worker_obj=jiosaavn_worker,
 )
 
 # Qobuz status / pause / resume routes are now served by the
@@ -36212,6 +38450,20 @@ def repair_job_run(job_id):
         logger.error(f"Error running repair job {job_id}: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/repair/jobs/<job_id>/stop', methods=['POST'])
+def repair_job_stop(job_id):
+    """Stop a running (or queued) job — signals its scan loop to unwind (#970)."""
+    try:
+        if repair_worker is None:
+            return jsonify({'error': 'Repair worker not initialized'}), 400
+
+        outcome = repair_worker.stop_current_job(job_id)
+        logger.info("Repair job %s stop requested via UI: %s", job_id, outcome)
+        return jsonify({'success': True, 'job_id': job_id, **outcome}), 200
+    except Exception as e:
+        logger.error(f"Error stopping repair job {job_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/repair/findings', methods=['GET'])
 def repair_findings_list():
     """Get paginated findings with filters"""
@@ -36445,6 +38697,12 @@ def import_staging_groups():
     return jsonify(payload), status
 
 
+@app.route('/api/import/staging/scan-status', methods=['GET'])
+def import_staging_scan_status():
+    payload, status = _import_staging_scan_status(_build_import_route_runtime())
+    return jsonify(payload), status
+
+
 @app.route('/api/import/staging/hints', methods=['GET'])
 def import_staging_hints():
     payload, status = _import_staging_hints(_build_import_route_runtime())
@@ -36543,6 +38801,15 @@ def auto_import_toggle():
 
 @app.route('/api/auto-import/settings', methods=['GET', 'POST'])
 def auto_import_settings():
+    def normalize_quality_profile_id(raw_profile_id):
+        if raw_profile_id in (None, '', 0, '0'):
+            return None
+        try:
+            profile_id = int(raw_profile_id)
+        except (TypeError, ValueError):
+            return None
+        return profile_id if profile_id > 0 else None
+
     if request.method == 'GET':
         return jsonify({
             "success": True,
@@ -36550,9 +38817,34 @@ def auto_import_settings():
             "scan_interval": config_manager.get('auto_import.scan_interval', 60),
             "confidence_threshold": config_manager.get('auto_import.confidence_threshold', 0.9),
             "auto_process": config_manager.get('auto_import.auto_process', True),
+            # Per-context quality profile override (see core/auto_import_worker.py
+            # _process_matches) — None/0 means "use the app-wide default profile",
+            # same as every other context that doesn't specify its own.
+            "quality_profile_id": normalize_quality_profile_id(config_manager.get('auto_import.quality_profile_id')),
         })
     data = request.get_json() or {}
-    for key in ['enabled', 'scan_interval', 'confidence_threshold', 'auto_process']:
+    if 'quality_profile_id' in data:
+        raw_profile_id = data.get('quality_profile_id')
+        if raw_profile_id in (None, '', 0, '0'):
+            data['quality_profile_id'] = None
+        else:
+            profile_id = normalize_quality_profile_id(raw_profile_id)
+            if profile_id is None:
+                return jsonify({"success": False, "error": "Invalid quality profile"}), 400
+
+            try:
+                from database.music_database import MusicDatabase
+                db = MusicDatabase()
+                profile_ids = {int(profile.get('id')) for profile in db.list_quality_profiles()}
+            except Exception as e:
+                logger.error(f"Error validating Auto-Import quality profile: {e}")
+                return jsonify({"success": False, "error": str(e)}), 500
+
+            if profile_id not in profile_ids:
+                return jsonify({"success": False, "error": "Quality profile not found"}), 404
+            data['quality_profile_id'] = profile_id
+
+    for key in ['enabled', 'scan_interval', 'confidence_threshold', 'auto_process', 'quality_profile_id']:
         if key in data:
             config_manager.set(f'auto_import.{key}', data[key])
     return jsonify({"success": True})
@@ -37107,6 +39399,11 @@ _register_enrichment_services([
         config_paused_key='amazon_enrichment_paused',
     ),
     _EnrichmentService(
+        id='jiosaavn', display_name='JioSaavn',
+        worker_getter=lambda: jiosaavn_worker,
+        config_paused_key='jiosaavn_enrichment_paused',
+    ),
+    _EnrichmentService(
         id='similar_artists', display_name='Similar Artists',
         worker_getter=lambda: similar_artists_worker,
         config_paused_key='similar_artists_enrichment_paused',
@@ -37137,6 +39434,7 @@ def _emit_rate_monitor_loop():
         'deezer': 'deezer_enrichment', 'lastfm': 'lastfm', 'genius': 'genius',
         'musicbrainz': 'musicbrainz', 'audiodb': 'audiodb', 'discogs': 'discogs',
         'tidal': 'tidal_enrichment', 'qobuz': 'qobuz_enrichment', 'amazon': 'amazon_enrichment',
+        'jiosaavn': 'jiosaavn_enrichment',
     }
 
     while not globals().get('IS_SHUTTING_DOWN', False):
@@ -37193,6 +39491,7 @@ def _emit_enrichment_status_loop():
         'audiodb': lambda: audiodb_worker,
         'discogs': lambda: discogs_worker,
         'deezer': lambda: deezer_worker,
+        'jiosaavn': lambda: jiosaavn_worker,
         'spotify-enrichment': lambda: spotify_enrichment_worker,
         'itunes-enrichment': lambda: itunes_enrichment_worker,
         'lastfm-enrichment': lambda: lastfm_worker,
@@ -37450,11 +39749,57 @@ def _any_playlist_sync_running() -> bool:
         )
 
 
+def _reconcile_discovery_sync_phases():
+    """Server-side backstop for the 'syncing' -> terminal phase transition (#972).
+
+    That transition used to happen ONLY inside the get_*_sync_status HTTP poll, so
+    a socket-driven client — which never hits that endpoint (see the
+    `if (socketConnected) return` fast-path in sync-services.js) — left the server
+    stuck in 'syncing' after a sync finished: re-syncing 400'd with 'not ready for
+    sync' and a reload showed a phantom, never-progressing sync. This runs every
+    second regardless of how (or whether) the client observes progress, using the
+    SAME reconcile helper the poll uses so the activity item still fires once.
+
+    Beatport is intentionally excluded — it has its own sync-status lifecycle, not
+    the shared get_sync_status."""
+    targets = (
+        (tidal_discovery_states, "Tidal playlist", _pl_name_attr_or_unknown),
+        (deezer_discovery_states, "Deezer playlist", _pl_name_strict),
+        (qobuz_discovery_states, "Qobuz playlist", _pl_name_strict),
+        (spotify_public_discovery_states, "Spotify Link playlist", _pl_name_strict),
+        (itunes_link_discovery_states, "iTunes Link", _pl_name_strict),
+        (youtube_playlist_states, "YouTube playlist", _pl_name_safe),
+        (listenbrainz_playlist_states, "ListenBrainz playlist", _pl_name_safe),
+    )
+    for states_dict, activity_subject, name_getter in targets:
+        for state in list(states_dict.values()):
+            if state.get('phase') != 'syncing':
+                continue
+            spid = state.get('sync_playlist_id')
+            if not spid:
+                continue
+            with sync_lock:
+                sync_state = dict(sync_states.get(spid) or {})
+            try:
+                _reconcile_sync_phase(
+                    state, sync_state,
+                    activity_subject=activity_subject,
+                    playlist_name_getter=name_getter,
+                    add_activity_item=add_activity_item,
+                )
+            except Exception as e:
+                logger.debug("sync phase reconcile failed for %s: %s", spid, e)
+
+
 def _emit_sync_progress_loop():
     """Push sync progress to subscribed rooms every 1 second."""
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(1)
         try:
+            # Reconcile stuck 'syncing' discovery states BEFORE emitting, so the
+            # sync:progress event we push already carries the terminal status.
+            _reconcile_discovery_sync_phases()
+
             with sync_lock:
                 for pid, state in list(sync_states.items()):
                     try:
@@ -37689,6 +40034,58 @@ def start_runtime_services():
         # Initialize app start time for uptime tracking
         app.start_time = time.time()
 
+        # Growth-triggered garbage collection (#802 / resource usage). plexapi builds large XML
+        # Element trees whose nodes reference each other in cycles; Python's generational GC
+        # parks those in gen2 and sweeps it rarely, so they accumulate and RSS climbs (measured:
+        # ~300MB fresh -> 1.8-2.2GB after browsing every page, most of it reclaimable cyclic
+        # garbage a full gc.collect() frees instantly). A FIXED timer overshoots — browsing piles
+        # garbage faster than once-a-minute catches it. Instead, poll RSS cheaply and collect as
+        # soon as it has grown GROW_MB since the last sweep, so it kicks in DURING a heavy browse
+        # and caps the peak near (floor + GROW_MB) instead of letting it run to 2GB+. A backstop
+        # interval still collects slow accumulation when idle.
+        def _growth_triggered_gc():
+            import gc
+            CHECK_SECONDS = 8       # cheap RSS poll cadence
+            GROW_MB = 200           # collect once RSS climbs this much since the last sweep
+            BACKSTOP_SECONDS = 120  # ...or at least this often regardless
+            try:
+                import psutil
+                proc = psutil.Process(os.getpid())
+                rss_mb = lambda: proc.memory_info().rss / (1024 * 1024)
+            except Exception:
+                rss_mb = lambda: 0.0
+            # glibc malloc_trim hands freed arenas back to the OS — WITHOUT it gc.collect() frees
+            # the Python objects but glibc hoards the memory, so RSS never drops and the peak still
+            # runs to 2GB+. Best-effort: absent on musl/Alpine or non-Linux, where we just skip it
+            # (gc still helps, RSS just sticks closer to the high-water mark there).
+            _trim = None
+            try:
+                import ctypes
+                import ctypes.util
+                _libc = ctypes.CDLL(ctypes.util.find_library('c') or 'libc.so.6')
+                if hasattr(_libc, 'malloc_trim'):
+                    _trim = _libc.malloc_trim
+            except Exception:  # noqa: S110 — malloc_trim absent on musl/non-Linux; just skip it
+                pass
+            floor = rss_mb()
+            last = time.time()
+            while True:
+                time.sleep(CHECK_SECONDS)
+                try:
+                    if (rss_mb() - floor) >= GROW_MB or (time.time() - last) >= BACKSTOP_SECONDS:
+                        gc.collect()
+                        if _trim is not None:
+                            try:
+                                _trim(0)
+                            except Exception:  # noqa: S110 — best-effort OS reclaim, never fatal
+                                pass
+                        floor = rss_mb()
+                        last = time.time()
+                except Exception:  # noqa: S110 — best-effort housekeeping, never crash the app
+                    pass
+        threading.Thread(target=_growth_triggered_gc, daemon=True, name='gc-sweeper').start()
+        logger.info("GC sweeper started (collect + malloc_trim on +200MB growth, backstop 120s)")
+
         # Register action handlers and start automation engine
         _register_automation_handlers()
         if automation_engine:
@@ -37746,6 +40143,20 @@ def start_runtime_services():
         logger.info("WebSocket emitters started (Phase 1-7: global/dashboard/enrichment/tools/sync/automations/repair + rate monitor + live logs)")
 
         _runtime_started = True
+
+
+# Module import is complete — provider clients may now perform network probes.
+from core.boot_phase import mark_boot_complete
+mark_boot_complete()
+
+# Auto-run the Discover popularity backfill in the background (no manual trigger). Self-limits: it
+# sleeps past startup, fills whatever's still missing, and exits when there's nothing left.
+try:
+    import threading as _pb_threading
+    _pb_threading.Thread(target=_autostart_popularity_backfill, daemon=True,
+                         name='PopularityBackfillAutostart').start()
+except Exception as _pb_autostart_err:
+    logger.debug(f"could not start popularity backfill autostart: {_pb_autostart_err}")
 
 
 # Direct execution: python web_server.py (dev/Windows fallback)

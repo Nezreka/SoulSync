@@ -66,6 +66,39 @@ def add_activity_item(icon, title, subtitle, time_ago="Now", show_toast=True):
     return activity_item
 
 
+def claim_for_post_processing(task_id: str) -> bool:
+    """Atomically claim a download task for post-processing.
+
+    The browser-poll status endpoint AND the background download monitor both
+    watch the same slskd/streaming transfers and each tries to post-process a
+    completed file. Without a single claim, BOTH run the verification pipeline
+    on the same download — double imports, and a nasty race where one path
+    quarantines + requeues the next-best candidate (clearing the source identity
+    and resetting status to ``searching``) while the other, mid-flight, then
+    reports a bogus "missing file or source information" failure that clobbers
+    the in-flight retry.
+
+    The claim is the ``downloading``/``queued`` -> ``post_processing`` status
+    transition, done under ``tasks_lock``. Exactly one caller wins:
+
+    - Returns ``True`` (and flips the status) for the caller that claimed it.
+    - Returns ``False`` if the task is gone, already ``post_processing`` (owned
+      by the other path), requeued (``searching``), or terminal — the caller
+      must then NOT process the file.
+
+    Acquires ``tasks_lock`` itself, so callers must NOT already hold it.
+    """
+    with tasks_lock:
+        task = download_tasks.get(task_id)
+        if not task:
+            return False
+        if task.get("status") in ("downloading", "queued"):
+            task["status"] = "post_processing"
+            task["status_change_time"] = time.time()
+            return True
+        return False
+
+
 @caller_must_hold_tasks_lock
 def mark_task_completed(task_id: str, track_info: Optional[Dict[str, Any]] = None) -> bool:
     """Mark a download task as completed.

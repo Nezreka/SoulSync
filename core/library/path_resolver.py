@@ -138,10 +138,25 @@ def _collect_base_dirs(
         except Exception as e:
             logger.debug("music paths read failed: %s", e)
 
+    # Normalize to absolute forms so resolution does NOT depend on the calling
+    # thread's CWD. A relative config like "./Transfer" otherwise only resolves
+    # when os.path.isdir("./Transfer") happens to be true from the current CWD —
+    # which fails in background workers whose CWD isn't the app root, leaving
+    # base_dirs empty and every track "unresolved". For each candidate we try
+    # the raw form first (cheap, preserves an already-absolute path), then its
+    # os.path.abspath() form so "./Transfer" → "/app/Transfer".
+    expanded: list[str] = []
+    for c in candidates:
+        if not c:
+            continue
+        expanded.append(c)
+        if not os.path.isabs(c):
+            expanded.append(os.path.abspath(c))
+
     # De-duplicate while preserving order, drop empties / non-existent dirs.
     seen: set[str] = set()
     out: list[str] = []
-    for c in candidates:
+    for c in expanded:
         if not c or c in seen:
             continue
         seen.add(c)
@@ -224,10 +239,23 @@ def resolve_library_file_path_with_diagnostic(
     if not base_dirs:
         return None, attempt
 
-    # Skip index 0 to avoid drive-letter / leading-slash artifacts
-    # (e.g. "E:" or "" from a leading "/").
+    # Try progressively shorter path suffixes against each base dir.
+    #
+    # Start at index 0 so a clean RELATIVE library path is tried in FULL first.
+    # SoulSync's own library scanner stores paths like
+    # "Asketa/Another Side/01 - Track.flac" (no leading slash) — index 0 is the
+    # artist folder and dropping it (the old range(1, ...)) meant the artist
+    # segment was never joined, so nothing under transfer/ ever resolved and
+    # every track looked unreadable to the quality scanner.
+    #
+    # For ABSOLUTE media-server paths ("/music/Artist/Album/track.flac") index 0
+    # is the empty leading segment and i=0 yields os.path.join(base, "", ...) ==
+    # base/Artist/... which simply won't exist and harmlessly falls through to
+    # i=1 ("music/...") etc. A Windows drive part ("E:") at i=0 likewise just
+    # fails on POSIX and falls through. So starting at 0 is safe for every form
+    # and only ADDS the relative-full-path match that was missing.
     for base in base_dirs:
-        for i in range(1, len(path_parts)):
+        for i in range(0, len(path_parts)):
             candidate = os.path.join(base, *path_parts[i:])
             if os.path.exists(candidate):
                 return candidate, attempt

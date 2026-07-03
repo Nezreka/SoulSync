@@ -81,6 +81,11 @@ class _FakeDB:
         self._watchlist_artists = watchlist_artists or []
         self._lb_profiles = lb_profiles or []
         self.database_path = '/tmp/test.db'
+        self.scan_runs_saved = []
+
+    def save_watchlist_scan_run(self, **kwargs):
+        self.scan_runs_saved.append(kwargs)
+        return True
 
     def get_all_profiles(self):
         return self._profiles
@@ -235,6 +240,39 @@ def test_successful_scan_runs_post_steps(patched_modules):
     # State has summary
     assert deps._state_ref[0]['status'] == 'completed'
     assert deps._state_ref[0]['summary']['new_tracks_found'] == 2
+
+
+def test_successful_scan_records_history_run(patched_modules):
+    """#933: the automatic scan must persist a History row (it used to skip this,
+    so only manual scans appeared in History)."""
+    scanner, db = patched_modules
+    deps = _build_deps()
+
+    autosc.process_watchlist_scan_automatically(automation_id='a1', deps=deps)
+
+    assert len(db.scan_runs_saved) == 1            # exactly one row, no double-record
+    saved = db.scan_runs_saved[0]
+    assert saved['status'] == 'completed'
+    assert saved['artists_scanned'] == 1           # one successful _ScanResult
+    assert saved['run_id']                         # a run id was stamped
+
+
+def test_cancelled_scan_still_records_history_run(patched_modules, monkeypatch):
+    """A cancelled scan is recorded too, with status='cancelled'."""
+    scanner, db = patched_modules
+    deps = _build_deps()
+    # Make the scan observe a cancel request mid-run.
+    orig = scanner.scan_watchlist_artists
+    def _cancel_during(artists, *, scan_state, progress_callback, cancel_check):
+        scan_state['cancel_requested'] = True
+        return orig(artists, scan_state=scan_state, progress_callback=progress_callback,
+                    cancel_check=cancel_check)
+    monkeypatch.setattr(scanner, 'scan_watchlist_artists', _cancel_during)
+
+    autosc.process_watchlist_scan_automatically(automation_id='a1', deps=deps)
+
+    assert len(db.scan_runs_saved) == 1
+    assert db.scan_runs_saved[0]['status'] == 'cancelled'
 
 
 def test_completion_emits_automation_event(patched_modules):

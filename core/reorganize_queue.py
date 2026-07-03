@@ -70,6 +70,9 @@ class QueueItem:
     # 'tags'          = read each file's embedded tags as the source
     #                   of truth (issue #592). Zero API calls.
     metadata_source: str = 'api'
+    # Rename-only mode (#875): move files to the current naming scheme WITHOUT the
+    # copy + post-processing (re-tag / quality / AcoustID) the full flow runs.
+    rename_only: bool = False
     status: str = 'queued'              # queued | running | done | failed | cancelled
     started_at: Optional[float] = None
     finished_at: Optional[float] = None
@@ -96,6 +99,7 @@ class QueueItem:
             'artist_name': self.artist_name,
             'source': self.source,
             'metadata_source': self.metadata_source,
+            'rename_only': self.rename_only,
             'enqueued_at': self.enqueued_at,
             'started_at': self.started_at,
             'finished_at': self.finished_at,
@@ -161,6 +165,7 @@ class ReorganizeQueue:
         artist_name: str,
         source: Optional[str] = None,
         metadata_source: str = 'api',
+        rename_only: bool = False,
     ) -> dict:
         """Add an album to the queue. Returns a result dict:
 
@@ -190,6 +195,7 @@ class ReorganizeQueue:
                 source=source,
                 enqueued_at=time.time(),
                 metadata_source=metadata_source or 'api',
+                rename_only=bool(rename_only),
             )
             self._items.append(item)
             position = sum(1 for i in self._items if i.status == 'queued')

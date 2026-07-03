@@ -250,6 +250,19 @@ describe('import route', () => {
     expect(await screen.findByText('Import folder: error')).toBeInTheDocument();
   });
 
+  it('shows scan progress while a large staging folder is still scanning (#947)', async () => {
+    server.use(
+      http.get('/api/import/staging/files', () =>
+        HttpResponse.json({ success: true, scanning: true, progress: { scanned: 5, total: 20 } }),
+      ),
+    );
+
+    renderImportRoute();
+
+    expect(await screen.findByTestId('import-page')).toBeInTheDocument();
+    expect(await screen.findByText(/Scanning 5 of 20 files/)).toBeInTheDocument();
+  });
+
   it('stores the active tab in nested route paths', async () => {
     const { history } = renderImportRoute();
 

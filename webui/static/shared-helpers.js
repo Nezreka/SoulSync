@@ -76,6 +76,10 @@ const SOURCE_LABELS = {
         logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/9e/MusicBrainz_Logo_%282016%29.svg/500px-MusicBrainz_Logo_%282016%29.svg.png',
         tabClass: 'enh-tab-musicbrainz', badgeClass: 'enh-badge-musicbrainz',
     },
+    jiosaavn: {
+        text: 'JioSaavn', icon: '🎵',
+        tabClass: 'enh-tab-jiosaavn', badgeClass: 'enh-badge-jiosaavn',
+    },
     youtube_videos: {
         text: 'Music Videos', icon: '🎬',
         tabClass: 'enh-tab-youtube', badgeClass: 'enh-badge-youtube',
@@ -91,7 +95,7 @@ const SOURCE_LABELS = {
 // Canonical display order for the source picker. Standard metadata sources
 // first, then YouTube Music Videos, then Soulseek (basic-file source).
 const SOURCE_ORDER = [
-    'spotify', 'itunes', 'deezer', 'discogs', 'hydrabase', 'amazon', 'musicbrainz',
+    'spotify', 'itunes', 'deezer', 'discogs', 'hydrabase', 'amazon', 'musicbrainz', 'jiosaavn',
     'youtube_videos', 'soulseek',
 ];
 
@@ -100,19 +104,78 @@ const SOURCE_ORDER = [
 // Soulseek IS configurable (needs slskd URL), so it's intentionally not here:
 // /api/settings/config-status reports its real state and the picker dims it
 // when no slskd is set up, redirecting clicks to Settings → Downloads.
-const _ALWAYS_CONFIGURED_SOURCES = new Set(['amazon', 'musicbrainz', 'youtube_videos']);
+const _ALWAYS_CONFIGURED_SOURCES = new Set(['amazon', 'musicbrainz', 'jiosaavn', 'youtube_videos']);
+
+// Experimental metadata sources — each is opt-in via Settings → Advanced →
+// Experimental and individually toggleable. The backend reports their on/off
+// state in the `_experimental` payload ({'<name>_enabled': bool}); the picker
+// hides any experimental source that isn't currently enabled. To add a new
+// experimental provider, add its name here (plus a SOURCE_DEFINITIONS entry).
+const EXPERIMENTAL_SOURCES = new Set(['jiosaavn']);
+
+/** Parse an `_experimental` payload into a Set of enabled experimental names. */
+function parseEnabledExperimental(data) {
+    const enabled = new Set();
+    const flags = data && data._experimental;
+    if (flags && typeof flags === 'object') {
+        for (const [key, value] of Object.entries(flags)) {
+            if (value && key.endsWith('_enabled')) {
+                enabled.add(key.slice(0, -'_enabled'.length));
+            }
+        }
+    }
+    return enabled;
+}
+
+/** True when JioSaavn experimental opt-in is on (settings, payload, or /status). */
+function isJiosaavnExperimentalEnabled() {
+    if (document.getElementById('experimental-jiosaavn-enabled')?.checked === true) return true;
+    if (window._settingsPayload?.experimental?.jiosaavn_enabled === true) return true;
+    if (window._lastStatusPayload && parseEnabledExperimental(window._lastStatusPayload).has('jiosaavn')) {
+        return true;
+    }
+    return false;
+}
+
+/** Drop JioSaavn rows from service lists when experimental is off. */
+function filterJiosaavnServiceEntries(items, idKey = 'key') {
+    if (isJiosaavnExperimentalEnabled()) return items;
+    return items.filter((item) => {
+        const id = item[idKey] ?? item.svc ?? item.id;
+        return id !== 'jiosaavn';
+    });
+}
+
+/** Set of currently-enabled experimental sources (read from /status). */
+async function fetchEnabledExperimentalSources() {
+    try {
+        const resp = await fetch('/status');
+        if (resp.ok) return parseEnabledExperimental(await resp.json());
+    } catch (_) { /* fall through */ }
+    return new Set();
+}
+
+/** Source picker order with disabled experimental sources removed. */
+function visibleSourceOrder(enabledExperimental = new Set()) {
+    return SOURCE_ORDER.filter(
+        src => !EXPERIMENTAL_SOURCES.has(src) || enabledExperimental.has(src)
+    );
+}
 
 // Fetch /api/settings/config-status and return a map { src -> bool }
-// covering every source in SOURCE_ORDER. Sources not present in the backend
+// covering every visible source. Sources not present in the backend
 // registry (musicbrainz / youtube_videos / soulseek) are reported as
 // configured so the picker doesn't dim always-available sources.
-async function fetchSourceConfiguredMap() {
+async function fetchSourceConfiguredMap(enabledExperimental = new Set()) {
     const map = {};
     try {
         const resp = await fetch('/api/settings/config-status');
         if (resp.ok) {
             const data = await resp.json();
-            for (const src of SOURCE_ORDER) {
+            // /status and config-status share the _experimental shape; trust the
+            // freshest read so the picker and config agree.
+            enabledExperimental = parseEnabledExperimental(data);
+            for (const src of visibleSourceOrder(enabledExperimental)) {
                 if (_ALWAYS_CONFIGURED_SOURCES.has(src)) {
                     map[src] = true;
                 } else if (src === 'spotify') {
@@ -126,8 +189,11 @@ async function fetchSourceConfiguredMap() {
             return map;
         }
     } catch (_) { /* fall through to conservative default */ }
-    // Network / endpoint failure — be permissive rather than dim everything.
-    for (const src of SOURCE_ORDER) map[src] = true;
+    // Network / endpoint failure — be permissive for standard sources. Disabled
+    // experimental sources are already excluded from visibleSourceOrder.
+    for (const src of visibleSourceOrder(enabledExperimental)) {
+        map[src] = true;
+    }
     return map;
 }
 
@@ -182,6 +248,7 @@ function createSearchController({
         fallbacks: {},
         loadingSources: new Set(),
         configuredSources: {},
+        enabledExperimental: new Set(),
         _initialized: false,
     };
     // Optimistic default — replaced by the real config-status lookup on
@@ -208,7 +275,8 @@ function createSearchController({
 
     function renderSourceRow() {
         if (!sourceRowElement) return;
-        sourceRowElement.innerHTML = SOURCE_ORDER.map(src => {
+        const order = visibleSourceOrder(state.enabledExperimental);
+        sourceRowElement.innerHTML = order.map(src => {
             const info = SOURCE_LABELS[src];
             if (!info) return '';
             const active = src === state.activeSource;
@@ -292,16 +360,22 @@ function createSearchController({
         } catch (_) { /* best-effort */ }
         if (!SOURCE_LABELS[state.activeSource]) state.activeSource = 'spotify';
 
+        state.enabledExperimental = await fetchEnabledExperimentalSources();
+        if (EXPERIMENTAL_SOURCES.has(state.activeSource) && !state.enabledExperimental.has(state.activeSource)) {
+            state.activeSource = 'spotify';
+        }
+
         // Figure out which sources actually have credentials saved.
         try {
-            state.configuredSources = await fetchSourceConfiguredMap();
+            state.configuredSources = await fetchSourceConfiguredMap(state.enabledExperimental);
         } catch (_) { /* keep optimistic default */ }
 
         // If the configured primary is itself unconfigured (Spotify saved
         // as primary but no client_id yet), fall forward to the first
         // configured source so the default active icon is usable.
         if (state.configuredSources[state.activeSource] === false) {
-            const firstConfigured = SOURCE_ORDER.find(s => state.configuredSources[s] !== false);
+            const firstConfigured = visibleSourceOrder(state.enabledExperimental)
+                .find(s => state.configuredSources[s] !== false);
             if (firstConfigured) state.activeSource = firstConfigured;
         }
 
@@ -311,6 +385,7 @@ function createSearchController({
 
     function setActiveSource(src) {
         if (!SOURCE_LABELS[src]) return;
+        if (EXPERIMENTAL_SOURCES.has(src) && !state.enabledExperimental.has(src)) return;
 
         // Unconfigured — jump to the relevant card in Settings rather than
         // firing a search that can't succeed. Don't swap activeSource so the
@@ -3645,6 +3720,7 @@ function getMetadataSourceLabel(source) {
     if (source === 'hydrabase') return 'Hydrabase';
     if (source === 'itunes') return 'iTunes';
     if (source === 'musicbrainz') return 'MusicBrainz';
+    if (source === 'jiosaavn') return 'JioSaavn';
     if (source === 'spotify_free') return 'Spotify (no auth)';
     if (source === 'spotify') return 'Spotify';
     return 'Unmapped';
@@ -3826,9 +3902,11 @@ function renderEnrichmentCards(enrichment) {
     const grid = document.getElementById('enrichment-status-grid');
     if (!grid || !enrichment) return;
 
+    const jiosaavnEnabled = isJiosaavnExperimentalEnabled();
+
     // Service display order
     const serviceOrder = [
-        'musicbrainz', 'spotify_enrichment', 'itunes_enrichment', 'deezer_enrichment',
+        'musicbrainz', 'spotify_enrichment', 'itunes_enrichment', 'deezer_enrichment', 'jiosaavn_enrichment',
         'tidal_enrichment', 'qobuz_enrichment', 'lastfm', 'genius', 'audiodb',
         'acoustid', 'listenbrainz'
     ];
@@ -3846,6 +3924,7 @@ function renderEnrichmentCards(enrichment) {
 
     const chips = [];
     for (const key of serviceOrder) {
+        if (key === 'jiosaavn_enrichment' && !jiosaavnEnabled) continue;
         const svc = enrichment[key];
         if (!svc) continue;
 

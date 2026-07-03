@@ -731,3 +731,26 @@ def test_get_artist_discography_prefers_source_specific_artist_ids(monkeypatch):
         )
     ]
     assert deezer.album_calls == []
+
+
+def test_get_artist_detail_discography_splits_eps_from_singles(monkeypatch):
+    """#877: get_artist_detail_discography must put EPs in their OWN bucket (not
+    lumped into singles). The Download Discography modal now reads this split, so
+    its EPs filter has cards to act on and stays in sync with Artist Detail."""
+    spotify = _FakeSourceClient(
+        album_results=[
+            _album("a1", "An Album", "2024-01-01", album_type="album"),
+            _album("e1", "An EP", "2024-02-01", album_type="ep"),
+            _album("s1", "A Single", "2024-03-01", album_type="single"),
+        ]
+    )
+    clients = {"deezer": _FakeSourceClient(), "spotify": spotify, "itunes": _FakeSourceClient()}
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "deezer")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
+    monkeypatch.setattr(metadata_registry, "get_client_for_source", lambda source, **kwargs: clients.get(source))
+
+    result = metadata_discography.get_artist_detail_discography("artist-1", "Artist One", MetadataLookupOptions())
+
+    assert [r["id"] for r in result["albums"]] == ["a1"]
+    assert [r["id"] for r in result["eps"]] == ["e1"]
+    assert [r["id"] for r in result["singles"]] == ["s1"]

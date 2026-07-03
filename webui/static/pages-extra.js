@@ -1424,6 +1424,11 @@ async function _openServerCompareView(playlistId, playlistName, mirroredPlaylist
 
         _serverEditorState.tracks = data.tracks || [];
         _serverEditorState.serverType = data.server_type;
+        // Order status: the columns render in SOURCE order, so a same-tracks-but-
+        // reordered server playlist looks in-sync. order_status flags that drift;
+        // server_order is the server's ACTUAL sequence for the read-only view.
+        _serverEditorState.orderStatus = data.order_status || null;
+        _serverEditorState.serverOrder = data.server_order || [];
 
         const tracks = _serverEditorState.tracks;
         const serverLabel = data.server_type ? data.server_type.charAt(0).toUpperCase() + data.server_type.slice(1) : 'Server';
@@ -1456,7 +1461,19 @@ async function _openServerCompareView(playlistId, playlistName, mirroredPlaylist
         if (srcCountEl) srcCountEl.textContent = `${data.source_track_count || 0} tracks`;
         if (svrIconEl) svrIconEl.textContent = serverIconMap[data.server_type] || '💻';
         if (svrLabelEl) svrLabelEl.textContent = serverLabel;
-        if (svrCountEl) svrCountEl.textContent = `${data.server_track_count || 0} tracks`;
+        if (svrCountEl) {
+            const os = _serverEditorState.orderStatus;
+            if (os && os.out_of_order) {
+                // Accurate membership but different order than the source. Read-only:
+                // source order is the source of truth; the badge opens the real order.
+                svrCountEl.innerHTML = `${data.server_track_count || 0} tracks ` +
+                    `<button type="button" class="server-order-badge" onclick="_showServerOrder()" ` +
+                    `title="These tracks match the source, but the playlist is in a different order on ${serverLabel}. Click to view the actual server order.">` +
+                    `&#9888; out of order</button>`;
+            } else {
+                svrCountEl.textContent = `${data.server_track_count || 0} tracks`;
+            }
+        }
 
         // Render columns
         _renderCompareColumns(tracks);
@@ -1496,6 +1513,105 @@ function _updateCompareStats(tracks) {
 
     const footer = document.getElementById('server-editor-footer');
     if (footer) footer.textContent = `${matched}/${matched + missing} matched${extra > 0 ? ` · ${extra} extra on server` : ''}`;
+}
+
+// Read-only view of the server playlist's ACTUAL order. Source order is the source
+// of truth; this just lets the user SEE how the server currently differs (no editing).
+function _showServerOrder() {
+    const esc = typeof _esc === 'function' ? _esc : s => s;
+    const order = (_serverEditorState && _serverEditorState.serverOrder) || [];
+    const serverType = (_serverEditorState && _serverEditorState.serverType) || 'server';
+    const serverLabel = serverType.charAt(0).toUpperCase() + serverType.slice(1);
+
+    document.getElementById('server-order-modal')?.remove();
+    const rows = order.map((t, i) => {
+        const art = t.thumb
+            ? `<img class="server-order-art" src="${esc(t.thumb)}" alt="" loading="lazy" onerror="this.outerHTML='<div class=&quot;server-order-art server-order-art-ph&quot;>&#9835;</div>'">`
+            : `<div class="server-order-art server-order-art-ph">&#9835;</div>`;
+        return `
+        <div class="server-order-row">
+            <span class="server-order-num">${i + 1}</span>
+            ${art}
+            <div class="server-order-meta">
+                <span class="server-order-title">${esc(t.title || 'Unknown')}</span>
+                <span class="server-order-artist">${esc(t.artist || '')}</span>
+            </div>
+        </div>`;
+    }).join('');
+
+    // Align actions — reorder the server playlist to the source order. Two choices
+    // for server-only "extra" tracks. Order-only: never adds the missing tracks
+    // (that's the normal sync's job). Supported where reorder is implemented.
+    const canAlign = serverType === 'navidrome' || serverType === 'plex' || serverType === 'jellyfin';
+    const alignFoot = canAlign ? `
+            <div class="server-order-foot">
+                <div class="server-order-foot-label">Align this playlist to the source order</div>
+                <div class="server-order-actions">
+                    <button type="button" class="server-align-btn" onclick="_alignPlaylist(false)">
+                        <span class="server-align-btn-t">Mirror source</span>
+                        <span class="server-align-btn-d">reorder to match the source &middot; remove server-only tracks</span>
+                    </button>
+                    <button type="button" class="server-align-btn" onclick="_alignPlaylist(true)">
+                        <span class="server-align-btn-t">Keep extras</span>
+                        <span class="server-align-btn-d">reorder to match the source &middot; keep server-only tracks at the end</span>
+                    </button>
+                </div>
+                <div class="server-order-foot-note">Missing tracks aren't added here &mdash; run a normal sync for those.</div>
+            </div>` : '';
+
+    const overlay = document.createElement('div');
+    overlay.id = 'server-order-modal';
+    overlay.className = 'server-order-overlay';
+    overlay.innerHTML = `
+        <div class="server-order-dialog" onclick="event.stopPropagation()">
+            <div class="server-order-head">
+                <div>
+                    <div class="server-order-h1">${esc(serverLabel)} playlist order</div>
+                    <div class="server-order-sub">the actual order on your server · source order stays the source of truth</div>
+                </div>
+                <button type="button" class="server-order-close" onclick="document.getElementById('server-order-modal').remove()">&times;</button>
+            </div>
+            <div class="server-order-list">${rows || '<div class="server-order-empty">No server tracks.</div>'}</div>
+            ${alignFoot}
+        </div>`;
+    overlay.onclick = () => overlay.remove();
+    document.body.appendChild(overlay);
+}
+
+// Align the server playlist's ORDER to the source (the "Align playlists" action).
+// Sends the matched server-track ids in SOURCE order + the extras choice; the
+// backend validates they're all in the playlist and rewrites. Order-only.
+async function _alignPlaylist(keepExtras) {
+    const st = _serverEditorState;
+    if (!st || !st.playlistId) return;
+    const matchedIds = (Array.isArray(st.tracks) ? st.tracks : [])
+        .filter(t => t.match_status === 'matched' && t.server_track && t.server_track.id != null)
+        .map(t => String(t.server_track.id));
+    if (!matchedIds.length) {
+        if (typeof showToast === 'function') showToast('Nothing to align', 'warning');
+        return;
+    }
+    try {
+        const resp = await fetch(`/api/server/playlist/${st.playlistId}/align`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                playlist_name: st.playlistName || '',
+                matched_ids: matchedIds,
+                keep_extras: !!keepExtras,
+            }),
+        });
+        const data = await resp.json();
+        if (data && data.success) {
+            if (typeof showToast === 'function') showToast(`Playlist order aligned (${data.track_count} tracks)`, 'success');
+            document.getElementById('server-order-modal')?.remove();
+            _serverEditorRefresh();
+        } else {
+            if (typeof showToast === 'function') showToast((data && data.error) || 'Align failed', 'error');
+        }
+    } catch (e) {
+        if (typeof showToast === 'function') showToast('Align failed: ' + e.message, 'error');
+    }
 }
 
 function _formatDurationMs(ms) {
@@ -2082,6 +2198,37 @@ function _relativeTime(dateStr) {
     } catch (e) { return ''; }
 }
 
+// Re-add a synced unmatched track to the wishlist from the sync-detail modal, with
+// the same context the original sync used (resolved server-side from the entry).
+async function _readdSyncWishlist(entryId, index, el) {
+    if (el && el.dataset.busy) return;
+    if (el) { el.dataset.busy = '1'; el.classList.add('is-busy'); }
+    try {
+        const resp = await fetch(`/api/sync/history/${entryId}/track/${index}/wishlist`, { method: 'POST' });
+        const data = await resp.json();
+        if (data && data.success) {
+            if (el) {
+                el.classList.remove('is-busy');
+                el.classList.add('is-done');
+                el.disabled = true;
+                el.innerHTML = data.added ? '&#10003; Re-added' : '&#10003; On wishlist';
+            }
+            if (typeof showToast === 'function') {
+                showToast(
+                    data.added ? `Re-added "${data.name}" to wishlist` : `"${data.name}" is already on the wishlist`,
+                    data.added ? 'success' : 'info',
+                );
+            }
+        } else {
+            if (el) { delete el.dataset.busy; el.classList.remove('is-busy'); }
+            if (typeof showToast === 'function') showToast((data && data.error) || 'Could not re-add to wishlist', 'error');
+        }
+    } catch (e) {
+        if (el) { delete el.dataset.busy; el.classList.remove('is-busy'); }
+        if (typeof showToast === 'function') showToast('Could not re-add to wishlist: ' + e.message, 'error');
+    }
+}
+
 async function openSyncDetailModal(entryId) {
     try {
         showLoadingOverlay('Loading sync details...');
@@ -2123,7 +2270,20 @@ async function openSyncDetailModal(entryId) {
                 else if (t.download_status === 'cancelled') dlIcon = '🚫';
 
                 let dlDisplay = dlIcon;
-                if (!dlDisplay && t.download_status === 'wishlist') dlDisplay = '<span class="sync-dl-wishlist">→ Wishlist</span>';
+                if (!dlDisplay && t.download_status === 'wishlist') {
+                    // Wing-it fallback stubs (no real metadata) were never actually
+                    // wishlisted by the sync — show them as plain, non-clickable.
+                    const isWingIt = String(t.source_track_id || '').startsWith('wing_it_');
+                    if (isWingIt) {
+                        dlDisplay = `<span class="sync-dl-unmatched" title="Couldn't be resolved to real metadata (wing-it fallback), so it was never added to the wishlist">Unmatched</span>`;
+                    } else {
+                        // Clickable: re-add this exact track to the wishlist with the
+                        // same context the sync originally used.
+                        dlDisplay = `<button type="button" class="sync-dl-wishlist sync-dl-wishlist-btn" `
+                            + `onclick="_readdSyncWishlist(${entryId}, ${i}, this)" `
+                            + `title="Re-add to wishlist with the original sync context">&rarr; Wishlist</button>`;
+                    }
+                }
 
                 return `
                     <tr class="sync-detail-row ${statusClass}">
@@ -2274,6 +2434,7 @@ let _adlBatchHistory = [];
 let _adlExpandedBatches = new Set();
 let _adlBatchHistoryPoller = null;
 let _adlFilterBatchId = null; // When set, main list shows only this batch
+let _adlFetchCount = 0; // used to rate-limit periodic quarantine refresh
 const _batchColorMap = {};
 const _batchCompletedAt = {}; // batch_id -> timestamp when first seen as complete
 let _batchColorNext = 0;
@@ -2407,6 +2568,10 @@ async function _adlFetch() {
     } catch (e) {
         console.error('Downloads page fetch error:', e);
     }
+    // Refresh the quarantine panel every ~15 s (every 7 polls × 2 s) so new
+    // quarantine entries created during a batch appear without a manual click.
+    _adlFetchCount++;
+    if (_adlFetchCount % 7 === 0) _verifLoadQuarantine(true);
 }
 
 function _adlUpdateBadge() {
@@ -2428,6 +2593,14 @@ function _updateDlNavBadge(count) {
     if (dlBtn) {
         dlBtn.classList.toggle('nav-downloads-active', count > 0);
     }
+}
+
+function _adlQualityBadge(dl) {
+    // Show the real audio quality of a completed download (probed from the
+    // file itself — FLAC bit depth, MP3 bitrate, …), so you can see at a
+    // glance what was actually fetched.
+    if (dl.status !== 'completed' || !dl.quality) return '';
+    return ` <span class="adl-quality-chip" title="Audio quality of the downloaded file (read from the file itself)">${_adlEsc(dl.quality)}</span>`;
 }
 
 function _adlVerifBadge(dl) {
@@ -2457,9 +2630,15 @@ function _adlVerifBadge(dl) {
 
 function verifHistoryId(dl) {
     // Persistent history rows carry task_id 'history-<dbid>'.
-    if (!dl.is_persistent_history || !dl.task_id) return null;
-    const m = String(dl.task_id).match(/^history-(\d+)$/);
-    return m ? m[1] : null;
+    if (dl.is_persistent_history && dl.task_id) {
+        const m = String(dl.task_id).match(/^history-(\d+)$/);
+        if (m) return m[1];
+    }
+    // Still-live completed tasks carry the library_history id directly, so the
+    // review actions (play/audit/approve/delete) work before the task becomes
+    // a persistent-history row — otherwise the buttons "didn't always load".
+    if (dl.history_id) return String(dl.history_id);
+    return null;
 }
 
 function _verifTimeAgo(iso) {
@@ -2581,6 +2760,84 @@ async function verifDelete(hid, btn) {
     } catch (e) { showToast && showToast('Delete failed', 'error'); }
     if (btn) btn.disabled = false;
 }
+
+// ---- Unverified review rows (Quarantine-style cards) ----
+// The Unverified sub-view used to piggyback on the generic download row and
+// open a modal on click. These give it the same card design the Quarantine
+// sub-view got — row click expands an inline detail panel in place — minus the
+// grouping (each unverified import is its own track, nothing to group).
+let _verifUnvData = [];
+const _verifUnvOpenDetails = new Set();
+
+function _verifUnvKey(dl) {
+    return verifHistoryId(dl) || dl.task_id || '';
+}
+
+function _verifUnvDetailRows(dl) {
+    const reason = dl.verification_status === 'force_imported'
+        ? 'Accepted as the best available candidate after the retry budget was exhausted (version-mismatch fallback). A library AcoustID scan reports these as informational.'
+        : 'AcoustID could not hard-confirm this file (ambiguous / cross-script metadata / no fingerprint match). Imported, but not verified.';
+    const source = dl.batch_source || dl.batch_name || '';
+    return [
+        `<div><span class="verif-detail-label">Why flagged:</span> ${_adlEsc(reason)}</div>`,
+        source ? `<div><span class="verif-detail-label">Download source:</span> ${_adlEsc(source)}</div>` : '',
+        dl.quality ? `<div><span class="verif-detail-label">Quality:</span> ${_adlEsc(dl.quality)}</div>` : '',
+        dl.file_path ? `<div><span class="verif-detail-label">File:</span> ${_adlEsc(dl.file_path)}</div>` : '',
+        dl.created_at ? `<div><span class="verif-detail-label">Downloaded:</span> ${_adlEsc(dl.created_at)}</div>` : '',
+    ].filter(Boolean).join('');
+}
+
+function _verifUnverifiedRowHtml(dl, idx) {
+    const hid = verifHistoryId(dl);
+    const title = _adlEsc(dl.title || 'Unknown Track');
+    const meta = [_adlEsc(dl.artist || ''), _adlEsc(dl.album || '')].filter(Boolean).join(' · ');
+    const source = _adlEsc(dl.batch_source || dl.batch_name || '');
+    const timeAgo = _verifTimeAgo(dl.created_at);
+    const artHtml = dl.artwork
+        ? `<img class="adl-row-art" src="${_adlEsc(dl.artwork)}" alt="" onerror="this.style.display='none'">`
+        : '<div class="adl-row-art adl-row-art-empty"></div>';
+    const detailsOpen = _verifUnvOpenDetails.has(_verifUnvKey(dl));
+    const actions = hid ? `
+        <button class="verif-act verif-act-play" onclick="verifPlay('${hid}')" title="Play the downloaded file in the media player">▶</button>
+        <button class="verif-act" onclick="verifCompare('${hid}', this)" title="Find this track on Soulseek/streaming sources and play it in the media player — compare against your file">⇆</button>
+        <button class="verif-act" onclick="verifAudit('${hid}')" title="Open the full audit trail for this download (lifecycle, embedded tags, lyrics)">🔍</button>
+        <button class="verif-act verif-act-ok" onclick="verifApprove('${hid}', this)" title="Approve: mark as human-verified (tag + DB). The AcoustID scanner will skip it.">✔</button>
+        <button class="verif-act verif-act-del" onclick="verifDelete('${hid}', this)" title="Wrong file: delete it from disk and remove this entry">🗑</button>` : '';
+    return `<div class="adl-row adl-row-completed verif-quar-row" data-task-id="${_adlEsc(dl.task_id || '')}" onclick="verifUnvInspect(${idx})" title="Click to show/hide details (why it was flagged, source, quality, file)">
+        ${artHtml}
+        <div class="adl-row-info">
+            <div class="adl-row-title">${title}</div>
+            ${meta ? `<div class="adl-row-meta">${meta}</div>` : ''}
+            ${source ? `<div class="adl-row-batch">${source}</div>` : ''}
+            <div class="verif-quar-details" id="verif-unv-details-${idx}" style="display:${detailsOpen ? '' : 'none'}">${_verifUnvDetailRows(dl)}</div>
+        </div>
+        <div class="verif-actions" onclick="event.stopPropagation()">
+            ${_verifReasonBadge(dl)}
+            ${dl.quality ? `<span class="adl-quality-chip" title="Audio quality of the downloaded file (read from the file itself)">${_adlEsc(dl.quality)}</span>` : ''}
+            ${timeAgo ? `<span class="verif-time">${timeAgo}</span>` : ''}
+            ${actions}
+        </div>
+    </div>`;
+}
+
+function _verifUnverifiedRows(items) {
+    _verifUnvData = items;
+    if (!items.length) return '';
+    return items.map((dl, idx) => _verifUnverifiedRowHtml(dl, idx)).join('');
+}
+
+function verifUnvInspect(idx) {
+    // Open-state lives in a Set keyed by the row's stable id (not the DOM) so it
+    // survives the 2 s polling re-render — same pattern as verifQuarInspect.
+    const dl = _verifUnvData[idx];
+    if (!dl) return;
+    const key = _verifUnvKey(dl);
+    if (_verifUnvOpenDetails.has(key)) _verifUnvOpenDetails.delete(key);
+    else _verifUnvOpenDetails.add(key);
+    const el = document.getElementById(`verif-unv-details-${idx}`);
+    if (el) el.style.display = _verifUnvOpenDetails.has(key) ? '' : 'none';
+}
+
 // ---- Quarantine sub-view inside the ⚠ filter ----
 // The review queue covers BOTH kinds of suspect files: imported-but-
 // unconfirmed (unverified/force_imported) and not-imported-at-all
@@ -2592,6 +2849,7 @@ let _verifQuarLoading = false;
 // Expanded 🔍 detail panels, keyed by quarantine entry id — survives the
 // polling re-render (which rebuilds the rows every few seconds).
 const _verifQuarOpenDetails = new Set();
+const _verifQuarOpenGroups = new Set(); // group keys whose alt-members are expanded
 // null = not fetched yet (assume enabled). Without an AcoustID API key
 // nothing ever gets a verification status, so the review queue collapses
 // to quarantine-only.
@@ -2605,6 +2863,10 @@ async function _verifLoadConfig() {
         const r = await fetch('/api/verification/config');
         const d = await r.json();
         _verifAcoustidEnabled = !!(d && d.acoustid_enabled);
+        // When require_verified is on, nothing ever lands in the library as
+        // "unverified" — unconfirmed tracks go straight to quarantine instead.
+        // Collapse the sub-view to quarantine-only just like the no-AcoustID case.
+        if (_verifAcoustidEnabled && d && d.require_verified) _verifAcoustidEnabled = false;
     } catch (e) { _verifAcoustidEnabled = true; }
     _verifConfigLoading = false;
     if (_verifAcoustidEnabled === false) {
@@ -2612,7 +2874,7 @@ async function _verifLoadConfig() {
         const pill = document.querySelector('.adl-pill[data-filter="unverified"]');
         if (pill) {
             pill.textContent = '🛡 Quarantine';
-            pill.title = 'Files that failed import checks and were NOT imported. (AcoustID is not configured, so there is no unverified review queue.)';
+            pill.title = 'Files that failed import checks and were NOT imported. (AcoustID is not configured or require-verified is on, so there is no unverified review queue.)';
         }
         if (_adlFilter === 'unverified') { _verifLoadQuarantine(true); _adlRender(); }
     }
@@ -2641,49 +2903,100 @@ async function _verifLoadQuarantine(force) {
 const _VERIF_QUAR_TRIGGERS = {
     integrity: ['DURATION / INTEGRITY', 'verif-rb-int'],
     acoustid: ['ACOUSTID MISMATCH', 'verif-rb-force'],
+    acoustid_unverified: ['ACOUSTID UNVERIFIED', 'verif-rb-unv'],
     bit_depth: ['BIT DEPTH FILTER', 'verif-rb-int'],
 };
+
+// Streaming sources carry their service name in source_username; a Soulseek
+// download carries the uploader's peer name instead — collapse that to
+// 'soulseek' so the label matches the Completed view's download-source line.
+const _VERIF_QUAR_STREAMING_SOURCES = ['youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud', 'amazon', 'torrent', 'usenet'];
+
+function _verifQuarSourceLabel(q) {
+    const u = String(q.source_username || '').toLowerCase();
+    if (_VERIF_QUAR_STREAMING_SOURCES.includes(u)) return _adlSourceLabel(u);
+    return q.source_username ? _adlSourceLabel('soulseek') : '';
+}
+
+function _verifQuarRowHtml(q, idx, extraAction = '') {
+    const title = _adlEsc(q.expected_track || q.original_filename || q.filename || 'Unknown file');
+    const meta = [_adlEsc(q.expected_artist || ''), _adlEsc(q.original_filename || '')].filter(Boolean).join(' — ');
+    const sourceLabel = _verifQuarSourceLabel(q);
+    const [trigLabel, trigClass] = _VERIF_QUAR_TRIGGERS[q.trigger] || ['QUARANTINED', 'verif-rb-unv'];
+    const timeAgo = _verifTimeAgo(q.timestamp);
+    const approveBtn = q.has_full_context
+        ? `<button class="verif-act verif-act-ok" onclick="verifQuarApprove(${idx}, this)" title="Approve: re-import this exact file into the library, marked human-verified">✔</button>`
+        : `<button class="verif-act verif-act-ok" onclick="verifQuarRecover(${idx}, this)" title="Recover to Staging for a manual import (legacy entry without embedded context)">⤴</button>`;
+    const details = [
+        q.reason ? `<div><span class="verif-detail-label">Reason:</span> ${_adlEsc(q.reason)}</div>` : '',
+        q.source_username ? `<div><span class="verif-detail-label">Source uploader:</span> ${_adlEsc(q.source_username)}</div>` : '',
+        q.source_filename ? `<div><span class="verif-detail-label">Original Soulseek file:</span> ${_adlEsc(q.source_filename)}</div>` : '',
+        q.timestamp ? `<div><span class="verif-detail-label">Quarantined:</span> ${_adlEsc(q.timestamp)}</div>` : '',
+    ].filter(Boolean).join('');
+    const detailsOpen = _verifQuarOpenDetails.has(q.id);
+    const artHtml = q.thumb_url
+        ? `<img class="adl-row-art" src="${_adlEsc(q.thumb_url)}" alt="" onerror="this.style.display='none'">`
+        : '<div class="adl-row-art adl-row-art-empty"></div>';
+    return `<div class="adl-row adl-row-failed verif-quar-row" data-quarantine-id="${_adlEsc(q.id)}" onclick="verifQuarInspect(${idx})" title="Click to show/hide details (reason, source uploader, original filename)">
+        ${artHtml}
+        <div class="adl-row-info">
+            <div class="adl-row-title">${title}</div>
+            ${meta ? `<div class="adl-row-meta">${meta}</div>` : ''}
+            ${sourceLabel ? `<div class="adl-row-batch">${sourceLabel}</div>` : ''}
+            <div class="verif-quar-details" id="verif-quar-details-${idx}" style="display:${detailsOpen ? '' : 'none'}">${details || 'No further details in the sidecar.'}</div>
+        </div>
+        <div class="verif-actions" onclick="event.stopPropagation()">
+            <span class="verif-reason-badge ${trigClass}" title="${_adlEsc(q.reason || '')}">${trigLabel}</span>
+            ${q.quality ? `<span class="adl-quality-chip" title="Audio quality of the quarantined file (read from the file itself)">${_adlEsc(q.quality)}</span>` : ''}
+            ${timeAgo ? `<span class="verif-time">${timeAgo}</span>` : ''}
+            <button class="verif-act verif-act-play" onclick="verifQuarPlay(${idx})" title="Play the quarantined file in the media player">▶</button>
+            <button class="verif-act" onclick="verifQuarCompare(${idx}, this)" title="Find the expected track on Soulseek/streaming sources and play it in the media player — compare against the quarantined file">⇆</button>
+            <button class="verif-act" onclick="verifQuarAudit(${idx})" title="Open the audit trail for this quarantined file (details, embedded tags, lyrics)">🔍</button>
+            ${approveBtn}
+            <button class="verif-act verif-act-del" onclick="verifQuarDelete(${idx}, this)" title="Delete the quarantined file permanently">🗑</button>
+        </div>
+        <div class="verif-quar-alt-slot" onclick="event.stopPropagation()">${extraAction}</div>
+    </div>`;
+}
+
+function _verifQuarToggleGroup(btn) {
+    const key = btn.dataset.groupKey;
+    const open = !_verifQuarOpenGroups.has(key);
+    if (open) _verifQuarOpenGroups.add(key); else _verifQuarOpenGroups.delete(key);
+    const wrapper = btn.closest('.verif-quar-alt-wrapper');
+    if (wrapper) wrapper.querySelector('.verif-quar-alt-members')?.classList.toggle('vqg-open', open);
+    btn.classList.toggle('open', open);
+    btn.textContent = open ? `▴ ${btn.dataset.altCount} more` : `▾ ${btn.dataset.altCount} more`;
+}
 
 function _verifQuarRows() {
     if (!_verifQuarLoaded) return '<div class="adl-section-header">Loading quarantine…</div>';
     if (!_verifQuarEntries.length) return '';
+    const idxById = new Map(_verifQuarEntries.map((q, i) => [q.id, i]));
+    const groups = (typeof _groupQuarantineEntries === 'function')
+        ? _groupQuarantineEntries(_verifQuarEntries)
+        : _verifQuarEntries.map(q => ({ key: null, members: [q] }));
     let html = '';
-    _verifQuarEntries.forEach((q, idx) => {
-        const title = _adlEsc(q.expected_track || q.original_filename || q.filename || 'Unknown file');
-        const meta = [_adlEsc(q.expected_artist || ''), _adlEsc(q.original_filename || '')].filter(Boolean).join(' — ');
-        const [trigLabel, trigClass] = _VERIF_QUAR_TRIGGERS[q.trigger] || ['QUARANTINED', 'verif-rb-unv'];
-        const timeAgo = _verifTimeAgo(q.timestamp);
-        const approveBtn = q.has_full_context
-            ? `<button class="verif-act verif-act-ok" onclick="verifQuarApprove(${idx}, this)" title="Approve: re-import this exact file into the library, marked human-verified">✔</button>`
-            : `<button class="verif-act verif-act-ok" onclick="verifQuarRecover(${idx}, this)" title="Recover to Staging for a manual import (legacy entry without embedded context)">⤴</button>`;
-        const details = [
-            q.reason ? `<div><span class="verif-detail-label">Reason:</span> ${_adlEsc(q.reason)}</div>` : '',
-            q.source_username ? `<div><span class="verif-detail-label">Source uploader:</span> ${_adlEsc(q.source_username)}</div>` : '',
-            q.source_filename ? `<div><span class="verif-detail-label">Original Soulseek file:</span> ${_adlEsc(q.source_filename)}</div>` : '',
-            q.timestamp ? `<div><span class="verif-detail-label">Quarantined:</span> ${_adlEsc(q.timestamp)}</div>` : '',
-        ].filter(Boolean).join('');
-        const detailsOpen = _verifQuarOpenDetails.has(q.id);
-        const artHtml = q.thumb_url
-            ? `<img class="adl-row-art" src="${_adlEsc(q.thumb_url)}" alt="" onerror="this.style.display='none'">`
-            : '<div class="adl-row-art adl-row-art-empty"></div>';
-        html += `<div class="adl-row adl-row-failed verif-quar-row" data-quarantine-id="${_adlEsc(q.id)}" onclick="verifQuarInspect(${idx})" title="Click to show/hide details (reason, source uploader, original filename)">
-            ${artHtml}
-            <div class="adl-row-info">
-                <div class="adl-row-title">${title}</div>
-                ${meta ? `<div class="adl-row-meta">${meta}</div>` : ''}
-                <div class="verif-quar-details" id="verif-quar-details-${idx}" style="display:${detailsOpen ? '' : 'none'}">${details || 'No further details in the sidecar.'}</div>
-            </div>
-            <div class="verif-actions" onclick="event.stopPropagation()">
-                <span class="verif-reason-badge ${trigClass}" title="${_adlEsc(q.reason || '')}">${trigLabel}</span>
-                ${timeAgo ? `<span class="verif-time">${timeAgo}</span>` : ''}
-                <button class="verif-act verif-act-play" onclick="verifQuarPlay(${idx})" title="Play the quarantined file in the media player">▶</button>
-                <button class="verif-act" onclick="verifQuarCompare(${idx}, this)" title="Find the expected track on Soulseek/streaming sources and play it in the media player — compare against the quarantined file">⇆</button>
-                <button class="verif-act" onclick="verifQuarAudit(${idx})" title="Open the audit trail for this quarantined file (details, embedded tags, lyrics)">🔍</button>
-                ${approveBtn}
-                <button class="verif-act verif-act-del" onclick="verifQuarDelete(${idx}, this)" title="Delete the quarantined file permanently">🗑</button>
-            </div>
-        </div>`;
-    });
+    for (const group of groups) {
+        if (group.members.length === 1) {
+            html += _verifQuarRowHtml(group.members[0], idxById.get(group.members[0].id));
+        } else {
+            // First member shown as normal row; rest hidden under a toggle button.
+            const first = group.members[0];
+            const firstIdx = idxById.get(first.id);
+            const altCount = group.members.length - 1;
+            const groupKey = group.key || first.id;
+            const isOpen = _verifQuarOpenGroups.has(groupKey);
+            const altBtn = `<button class="verif-quar-alt-btn${isOpen ? ' open' : ''}" data-group-key="${_adlEsc(groupKey)}" data-alt-count="${altCount}" onclick="_verifQuarToggleGroup(this)" title="Show ${altCount} more alternative candidate${altCount === 1 ? '' : 's'} for this track">${isOpen ? '▴' : '▾'} ${altCount} more</button>`;
+            html += `<div class="verif-quar-alt-wrapper">`;
+            html += _verifQuarRowHtml(first, firstIdx, altBtn);
+            html += `<div class="verif-quar-alt-members${isOpen ? ' vqg-open' : ''}">`;
+            for (let i = 1; i < group.members.length; i++) {
+                html += _verifQuarRowHtml(group.members[i], idxById.get(group.members[i].id));
+            }
+            html += `</div></div>`;
+        }
+    }
     return html;
 }
 
@@ -2761,10 +3074,17 @@ async function verifQuarApprove(idx, btn) {
     const q = _verifQuarEntries[idx]; if (!q) return;
     if (btn) btn.disabled = true;
     try {
-        const r = await fetch(`/api/quarantine/${encodeURIComponent(q.id)}/approve`, { method: 'POST' });
+        const r = await fetch(`/api/quarantine/${encodeURIComponent(q.id)}/approve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ remove_siblings: true }),
+        });
         const d = await r.json();
         if (d.success) {
-            showToast && showToast('Approved — re-importing, will be marked human-verified 🛡✔', 'success');
+            const extra = d.removed_siblings && d.removed_siblings.length
+                ? ` (${d.removed_siblings.length} duplicate candidate${d.removed_siblings.length > 1 ? 's' : ''} removed)`
+                : '';
+            showToast && showToast(`Approved — re-importing, will be marked human-verified 🛡✔${extra}`, 'success');
             _verifLoadQuarantine(true);
         } else {
             showToast && showToast(d.error || 'Approve failed', 'error');
@@ -2864,6 +3184,31 @@ async function verifDeleteAll(btn) {
     _adlFetch();
 }
 
+async function verifCleanOrphans(btn) {
+    // Removes review entries whose file is GONE (deleted / replaced / re-downloaded
+    // elsewhere) — dead log rows that can never be healed. Server-side it does a
+    // filesystem check and refuses if the whole library looks offline. Removes log
+    // rows only, never a file.
+    if (!await showConfirmDialog({
+        title: 'Clean orphaned entries',
+        message: 'Remove review entries whose file no longer exists on disk (deleted, replaced, or re-downloaded elsewhere)? This removes only the stale log rows — it never deletes a file. It checks the filesystem first and refuses if your library looks offline.',
+        confirmText: 'Clean up',
+        cancelText: 'Cancel',
+    })) return;
+    if (btn) btn.disabled = true;
+    try {
+        const r = await fetch('/api/verification/clean-orphans', { method: 'POST' });
+        const d = await r.json();
+        if (d.success) {
+            showToast && showToast(`Removed ${d.removed} orphaned entr${d.removed === 1 ? 'y' : 'ies'} (checked ${d.checked})`, 'success');
+            _adlFetch();
+        } else {
+            showToast && showToast(d.error || 'Clean-up failed', 'error');
+        }
+    } catch (e) { showToast && showToast('Clean-up failed', 'error'); }
+    if (btn) btn.disabled = false;
+}
+
 async function verifQuarApproveAll(btn) {
     const entries = _verifQuarEntries.filter(q => q.has_full_context);
     if (!entries.length) {
@@ -2880,7 +3225,11 @@ async function verifQuarApproveAll(btn) {
     let ok = 0;
     for (const q of entries) {
         try {
-            const r = await fetch(`/api/quarantine/${encodeURIComponent(q.id)}/approve`, { method: 'POST' });
+            const r = await fetch(`/api/quarantine/${encodeURIComponent(q.id)}/approve`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ remove_siblings: true }),
+            });
             const d = await r.json();
             if (d.success) ok++;
         } catch (e) {}
@@ -2958,8 +3307,12 @@ function _adlRender() {
     // (review banner injected below when this filter is active)
     else if (_adlFilter === 'failed') filtered = filtered.filter(d => failedStatuses.includes(d.status));
 
+    // Clear-completed clears live completed tasks AND the persisted download-history
+    // tail (including unverified review-queue rows), so count every completed/failed
+    // row — otherwise the button vanishes after a restart when the list is all
+    // persisted completed rows.
     const completedN = _adlData.filter(d =>
-        [...completedStatuses, ...failedStatuses].includes(d.status) && !d.is_persistent_history
+        [...completedStatuses, ...failedStatuses].includes(d.status)
     ).length;
 
     if (countEl) {
@@ -3020,6 +3373,7 @@ function _adlRender() {
             ? `<button class="adl-filter-banner-clear" onclick="verifQuarApproveAll(this)" title="Approve + re-import every quarantined file (marked human-verified)">✔ Approve all</button>
                <button class="adl-filter-banner-clear verif-bulk-danger" onclick="verifQuarClearAll(this)" title="Permanently delete every quarantined file">🗑 Clear all</button>`
             : `<button class="adl-filter-banner-clear" onclick="verifApproveAll(this)" title="Mark every listed entry as human-verified">✔ Approve all</button>
+               <button class="adl-filter-banner-clear" onclick="verifCleanOrphans(this)" title="Remove dead entries whose file no longer exists (deleted / replaced). Removes log rows only — never a file.">🧹 Clean orphaned</button>
                <button class="adl-filter-banner-clear verif-bulk-danger" onclick="verifDeleteAll(this)" title="Delete every listed file from disk and remove its entry">🗑 Delete all</button>`;
         // Without an AcoustID key nothing ever gets a verification status —
         // hide the pointless Unverified pill and show quarantine only.
@@ -3044,6 +3398,18 @@ function _adlRender() {
         list.innerHTML = qEmptyHtml + qhtml;
         const qNewEmpty = document.getElementById('adl-empty');
         if (qNewEmpty) qNewEmpty.style.display = qhtml ? 'none' : '';
+        return;
+    }
+
+    // Unverified review sub-view: render the Quarantine-style cards (inline
+    // expandable details), not the generic download rows.
+    if (_adlFilter === 'unverified' && _verifSubView === 'unverified') {
+        const uhtml = _verifUnverifiedRows(filtered);
+        const uEmptyEl = document.getElementById('adl-empty');
+        const uEmptyHtml = uEmptyEl ? uEmptyEl.outerHTML : '';
+        list.innerHTML = uEmptyHtml + uhtml;
+        const uNewEmpty = document.getElementById('adl-empty');
+        if (uNewEmpty) uNewEmpty.style.display = uhtml ? 'none' : '';
         return;
     }
 
@@ -3112,7 +3478,16 @@ function _adlRender() {
                    </button>`
                 : '';
 
-            html += `<div class="adl-row adl-row-${statusClass}" data-task-id="${dl.task_id}" data-batch-id="${dl.batch_id || ''}">
+            // In the Unverified review sub-view, make the whole row clickable to
+            // open the audit/info modal (same as the 🔍 button) — mirrors the
+            // Quarantine rows, which are row-clickable for their details. The
+            // action buttons stopPropagation so they don't double-trigger.
+            const _unvHid = _adlFilter === 'unverified' ? verifHistoryId(dl) : null;
+            const reviewRowClick = _unvHid
+                ? ` onclick="verifAudit('${_unvHid}')" style="cursor:pointer" title="Click to show download details (audit trail, embedded tags, lyrics)"`
+                : '';
+
+            html += `<div class="adl-row adl-row-${statusClass}" data-task-id="${dl.task_id}" data-batch-id="${dl.batch_id || ''}"${reviewRowClick}>
                 ${colorBar}
                 ${artHtml}
                 <div class="adl-row-info">
@@ -3123,7 +3498,7 @@ function _adlRender() {
                 </div>
                 <div class="adl-row-status ${statusClass}">
                     <span class="adl-status-dot ${statusClass}"></span>
-                    ${statusLabel}${_adlVerifBadge(dl)}${dl.retry_info && (statusClass === 'active' || statusClass === 'queued') ? ` <span class="adl-retry-info" title="Retry engine: trying the next-best candidate (attempt ${_adlEsc(String(dl.retry_info))}${dl.retry_trigger ? ', triggered by ' + _adlEsc(dl.retry_trigger) : ''})">🔁 ${_adlEsc(String(dl.retry_info))}</span>` : ''}
+                    ${statusLabel}${_adlVerifBadge(dl)}${_adlQualityBadge(dl)}${dl.retry_info && (statusClass === 'active' || statusClass === 'queued') ? ` <span class="adl-retry-info" title="Retry engine: trying the next-best candidate (attempt ${_adlEsc(String(dl.retry_info))}${dl.retry_trigger ? ' — previous candidate ' + (['acoustid','acoustid_unverified'].includes(dl.retry_trigger) ? 'quarantined (AcoustID)' : 'triggered by ' + _adlEsc(dl.retry_trigger)) : ''})">🔁 ${_adlEsc(String(dl.retry_info))}${['acoustid','acoustid_unverified'].includes(dl.retry_trigger) ? ' 🛡' : ''}</span>` : ''}
                 </div>
                 ${_adlReviewActions(dl)}
                 ${cancelBtnHtml}
@@ -3240,11 +3615,23 @@ function _adlBundleProgressText(bundle) {
 }
 
 async function adlClearCompleted() {
+    // This now also deletes the persisted completed-download history, so confirm.
+    if (typeof showConfirmDialog === 'function') {
+        const ok = await showConfirmDialog({
+            title: 'Clear Completed',
+            message: 'Remove ALL completed and failed downloads from the list and history? '
+                   + 'This also clears unverified items from the verification queue. '
+                   + 'Your files stay in the library — only the download-history rows are removed.',
+            confirmText: 'Clear', destructive: true,
+        });
+        if (!ok) return;
+    }
     try {
         const resp = await fetch('/api/downloads/clear-completed', { method: 'POST' });
         const data = await resp.json();
         if (data.success) {
-            if (typeof showToast === 'function') showToast(`Cleared ${data.cleared} downloads`, 'success');
+            const n = data.total_cleared != null ? data.total_cleared : data.cleared;
+            if (typeof showToast === 'function') showToast(`Cleared ${n} downloads`, 'success');
             _adlFetch();
         }
     } catch (e) {

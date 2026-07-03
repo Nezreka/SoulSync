@@ -34,9 +34,11 @@ from core.imports.context import (
 )
 from core.imports.file_integrity import check_audio_integrity, expected_duration_for_check, resolve_duration_tolerance
 from core.imports.filename import extract_track_number_from_filename
-from core.imports.guards import check_flac_bit_depth, move_to_quarantine
+from core.imports.guards import check_flac_bit_depth, check_quality_target, move_to_quarantine
+from core.imports.silence import detect_broken_audio
 from core.imports.quarantine import (
     approve_quarantine_entry,
+    delete_quarantine_entry,
     entry_id_from_quarantined_filename,
     list_quarantine_entries,
 )
@@ -92,6 +94,32 @@ def _should_skip_quarantine_check(context: dict, check_name: str) -> bool:
     if isinstance(bypass, (list, tuple, set)):
         return 'all' in bypass or check_name in bypass
     return bypass == check_name
+
+
+def _resolve_context_quality_profile(context: dict) -> dict:
+    """The item's quality profile — its own assigned one
+    (``track_info.quality_profile_id``, e.g. from a wishlist row or the
+    Auto-Import override) or the app-wide default — resolved LIVE once per
+    file and cached on the context. Every post-processing step reads its own
+    settings from this dict (with the legacy global config key as fallback
+    when resolution failed entirely), so a per-item profile governs the WHOLE
+    pipeline: quality gate, AcoustID strictness, deep verify, replace-lower,
+    downsample, and lossy copy — not just search ranking."""
+    cached = context.get('_quality_profile')
+    if isinstance(cached, dict):
+        return cached
+    try:
+        from core.quality.selection import load_profile_by_id
+        track_info = context.get('track_info')
+        profile_id = track_info.get('quality_profile_id') if isinstance(track_info, dict) else None
+        profile = load_profile_by_id(profile_id)
+        if not isinstance(profile, dict):
+            profile = {}
+    except Exception as e:  # noqa: BLE001
+        logger.debug("quality profile resolution failed, falling back to global settings: %s", e)
+        profile = {}
+    context['_quality_profile'] = profile
+    return profile
 
 
 def _mark_task_quarantined(context: dict, quarantine_path: str | None) -> None:
@@ -160,7 +188,9 @@ def import_rejection_reason(context: dict) -> str | None:
             f"{context.get('_acoustid_failure_msg', 'fingerprint mismatch')}"
         )
     if context.get('_bitdepth_rejected'):
-        return "rejected by bit-depth filter"
+        return "rejected by quality filter"
+    if context.get('_silence_rejected'):
+        return "rejected by audio guard (incomplete or silent audio)"
     if context.get('_race_guard_failed'):
         return "source file disappeared before import completed"
     return None
@@ -321,11 +351,14 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                 _mark_task_quarantined(context, quarantine_path)
                 logger.error(f"File quarantined due to integrity failure: {quarantine_path}")
             except Exception as quarantine_error:
-                logger.error(f"Quarantine failed ({quarantine_error}), deleting broken file: {file_path}")
-                try:
-                    os.remove(file_path)
-                except Exception as del_error:
-                    logger.error(f"Could not delete broken file either: {del_error}")
+                # Quarantine MOVE failed (e.g. cross-device / permission on a NAS).
+                # Do NOT delete — destroying a download we couldn't even quarantine is
+                # data loss and forces a re-download. Leave it in place so it can be
+                # retried; the task is still marked failed below either way (#kettui).
+                logger.error(
+                    f"Quarantine failed ({quarantine_error}) — leaving file in place "
+                    f"for retry (not deleting): {file_path}"
+                )
 
             with matched_context_lock:
                 if context_key in matched_downloads_context:
@@ -352,6 +385,120 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                 f"length={integrity.checks.get('actual_length_s', 0):.1f}s, "
                 f"drift={integrity.checks.get('length_drift_s', 'n/a')})"
             )
+
+        # Audio-completeness guard — runs right where the length is verified,
+        # BEFORE the AcoustID/quality gates, so a truncated file (container
+        # claims the full length but only ~30s actually decodes, e.g. HiFi/
+        # Monochrome HLS assembly) or a mostly-silent file is caught regardless
+        # of its quality verdict and gets the right reason. Same quarantine +
+        # next-candidate retry pattern as the integrity check.
+        #
+        # Opt-in (default OFF): this is the one check that fully DECODES the file
+        # with ffmpeg, so it is the most CPU-expensive step in post-processing.
+        # Most preview/truncation cases are already caught at the source
+        # (HiFi/Qobuz have their own guards), so it stays off unless the user
+        # turns it on in the item's quality profile (Settings → Quality).
+        _audio_guard_enabled = _resolve_context_quality_profile(context).get(
+            'deep_audio_verify',
+            config_manager.get('post_processing.audio_completeness_check', False))
+        _skip_audio = (not _audio_guard_enabled) or _should_skip_quarantine_check(context, 'silence')
+        audio_reason = None if _skip_audio else detect_broken_audio(file_path)
+        if audio_reason:
+            logger.error(f"[AudioGuard] Rejected {_basename}: {audio_reason}")
+            context['_silence_rejected'] = True
+            try:
+                quarantine_path = move_to_quarantine(
+                    file_path, context, audio_reason, automation_engine,
+                    trigger='silence',
+                )
+                _mark_task_quarantined(context, quarantine_path)
+                logger.warning("File quarantined — incomplete/silent audio: %s", quarantine_path)
+            except Exception as quarantine_error:
+                # Don't delete a file we couldn't quarantine — leave it for retry
+                # instead of forcing a re-download (data loss). See integrity block.
+                logger.error(
+                    f"Quarantine failed ({quarantine_error}) — leaving file in place "
+                    f"for retry (not deleting): {file_path}"
+                )
+
+            with matched_context_lock:
+                matched_downloads_context.pop(context_key, None)
+
+            task_id = context.get('task_id')
+            batch_id = context.get('batch_id')
+            # Try the next-best candidate before giving up — same pattern as
+            # the integrity / AcoustID / quality failures.
+            if _requeue_quarantined_task_for_retry(task_id, batch_id, 'silence'):
+                logger.info(
+                    "Incomplete/silent audio for task %s — retrying next-best candidate: %s",
+                    task_id, audio_reason,
+                )
+                return
+            if task_id:
+                with tasks_lock:
+                    if task_id in download_tasks:
+                        download_tasks[task_id]['status'] = 'failed'
+                        download_tasks[task_id]['error_message'] = f"Audio guard: {audio_reason}"
+            if task_id and batch_id:
+                _notify_download_completed(batch_id, task_id, success=False)
+            return
+
+        # QUALITY GATE — runs BEFORE AcoustID so (1) a wrong-quality file is
+        # rejected without paying for an AcoustID fingerprint, and (2) the real
+        # audio quality is recorded on the context (→ quarantine sidecar) for
+        # EVERY trigger, so it's known when reviewing/approving any quarantined
+        # file. force_import still never fires on a quality mismatch.
+        context['_audio_quality'] = get_audio_quality_string(file_path)
+        if context['_audio_quality']:
+            logger.info(f"Audio quality detected: {context['_audio_quality']}")
+
+            _skip_quality = _should_skip_quarantine_check(context, 'bit_depth') or \
+                            _should_skip_quarantine_check(context, 'quality')
+            rejection_reason = None if _skip_quality else check_quality_target(file_path, context)
+            if _skip_quality:
+                logger.info(f"[QualityGuard] Skipped (user approval) for {_basename}")
+            if rejection_reason:
+                try:
+                    quarantine_path = move_to_quarantine(
+                        file_path,
+                        context,
+                        rejection_reason,
+                        automation_engine,
+                        trigger='quality',
+                    )
+                    _mark_task_quarantined(context, quarantine_path)
+                    logger.info(f"File quarantined due to quality mismatch: {quarantine_path}")
+                except Exception as quarantine_error:
+                    # Don't delete a file we couldn't quarantine — leave it for retry
+                    # instead of forcing a re-download (data loss). See integrity block.
+                    logger.error(
+                        f"Quarantine failed ({quarantine_error}) — leaving file in place "
+                        f"for retry (not deleting): {file_path}"
+                    )
+
+                context['_bitdepth_rejected'] = True
+                task_id = context.get('task_id')
+                batch_id = context.get('batch_id')
+                with matched_context_lock:
+                    matched_downloads_context.pop(context_key, None)
+
+                # Try the next-best candidate before giving up — same pattern
+                # as AcoustID and integrity failures.
+                if _requeue_quarantined_task_for_retry(task_id, batch_id, 'quality'):
+                    logger.info(
+                        "Quality mismatch for task %s — retrying next-best candidate: %s",
+                        task_id, rejection_reason,
+                    )
+                    return
+
+                if task_id:
+                    with tasks_lock:
+                        if task_id in download_tasks:
+                            download_tasks[task_id]['status'] = 'failed'
+                            download_tasks[task_id]['error_message'] = f"Quality filter: {rejection_reason}"
+                if task_id and batch_id:
+                    _notify_download_completed(batch_id, task_id, success=False)
+                return
 
         _skip_acoustid = _should_skip_quarantine_check(context, 'acoustid')
         if _skip_acoustid:
@@ -390,24 +537,47 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                     logger.info(f"AcoustID verification result: {verification_result.value} - {verification_msg}")
                     context['_acoustid_result'] = verification_result.value
 
-                    if verification_result == VerificationResult.FAIL:
+                    # Fail-closed mode: when the item's quality profile
+                    # requires a hard AcoustID PASS, a SKIP (ran but couldn't
+                    # confirm — no fingerprint match / cross-script metadata)
+                    # is treated like a FAIL: quarantine + try the next
+                    # candidate, instead of importing an unverified file.
+                    # ERROR (rate-limit / infra) is NOT blocked — that would
+                    # stall the whole pipeline during an outage; those still
+                    # import with their existing flag.
+                    require_verified = _resolve_context_quality_profile(context).get(
+                        'acoustid_required',
+                        config_manager.get('acoustid.require_verified', False))
+                    _skip_as_fail = (
+                        require_verified
+                        and verification_result == VerificationResult.SKIP
+                    )
+                    if _skip_as_fail:
+                        verification_msg = (
+                            f"AcoustID could not confirm the track and 'require verified' "
+                            f"is on — rejecting unverified file ({verification_msg})"
+                        )
+                        logger.warning("[AcoustID] Require-verified: SKIP treated as FAIL — %s", verification_msg)
+
+                    if verification_result == VerificationResult.FAIL or _skip_as_fail:
                         try:
                             quarantine_path = move_to_quarantine(
                                 file_path,
                                 context,
                                 verification_msg,
                                 automation_engine,
-                                trigger='acoustid',
+                                trigger='acoustid_unverified' if _skip_as_fail else 'acoustid',
                             )
                             _mark_task_quarantined(context, quarantine_path)
                             logger.error(f"File quarantined due to verification failure: {quarantine_path}")
                         except Exception as quarantine_error:
-                            logger.error(f"Quarantine failed ({quarantine_error}), deleting wrong file: {file_path}")
-                            logger.error(f"Quarantine failed, deleting wrong file: {file_path}")
-                            try:
-                                os.remove(file_path)
-                            except Exception as del_error:
-                                logger.error(f"Could not delete wrong file either: {del_error}")
+                            # Don't delete a file we couldn't quarantine — leave it for
+                            # retry instead of forcing a re-download (data loss). The
+                            # task is still marked failed / requeued below. See integrity.
+                            logger.error(
+                                f"Quarantine failed ({quarantine_error}) — leaving file "
+                                f"in place for retry (not deleting): {file_path}"
+                            )
 
                         context['_acoustid_quarantined'] = True
                         context['_acoustid_failure_msg'] = verification_msg
@@ -577,48 +747,6 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                 album_info.get('album_name', 'None'),
             )
 
-        context['_audio_quality'] = get_audio_quality_string(file_path)
-        if context['_audio_quality']:
-            logger.info(f"Audio quality detected: {context['_audio_quality']}")
-
-            _skip_bit_depth = _should_skip_quarantine_check(context, 'bit_depth')
-            rejection_reason = None if _skip_bit_depth else check_flac_bit_depth(file_path, context)
-            if _skip_bit_depth:
-                logger.info(f"[BitDepth] Skipped (user approval) for {_basename}")
-            if rejection_reason:
-                try:
-                    quarantine_path = move_to_quarantine(
-                        file_path,
-                        context,
-                        rejection_reason,
-                        automation_engine,
-                        trigger='bit_depth',
-                    )
-                    _mark_task_quarantined(context, quarantine_path)
-                    logger.info(f"File quarantined due to bit depth filter: {quarantine_path}")
-                except Exception as quarantine_error:
-                    logger.error(f"Quarantine failed ({quarantine_error}), deleting file: {file_path}")
-                    try:
-                        os.remove(file_path)
-                    except Exception as e:
-                        logger.debug("delete quarantine fallback: %s", e)
-
-                context['_bitdepth_rejected'] = True
-                with matched_context_lock:
-                    if context_key in matched_downloads_context:
-                        del matched_downloads_context[context_key]
-
-                task_id = context.get('task_id')
-                batch_id = context.get('batch_id')
-                if task_id:
-                    with tasks_lock:
-                        if task_id in download_tasks:
-                            download_tasks[task_id]['status'] = 'failed'
-                            download_tasks[task_id]['error_message'] = f"Bit depth filter: {rejection_reason}"
-                if task_id and batch_id:
-                    _notify_download_completed(batch_id, task_id, success=False)
-                return
-
         file_ext = os.path.splitext(file_path)[1]
         clean_track_name = get_import_clean_title(
             context,
@@ -629,9 +757,17 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
         # See ``core/imports/track_number.py`` for the resolution
         # chain — pure function, unit-tested in isolation, single
         # place to fix the rule.
-        from core.imports.track_number import resolve_track_number
+        from core.imports.track_number import resolve_track_number, read_embedded_track_number
         track_info_for_resolve = context.get('track_info') if isinstance(context, dict) else None
-        track_number = resolve_track_number(album_info, track_info_for_resolve, file_path)
+        # "Track 01" bug: a single Deezer track is matched via an endpoint
+        # that omits track_position, so the context never carried the real
+        # number. The downloaded file itself does (deemix/source wrote it),
+        # so read it as a source between metadata and the filename guess.
+        embedded_track_number = read_embedded_track_number(file_path)
+        track_number = resolve_track_number(
+            album_info, track_info_for_resolve, file_path,
+            embedded_track_number=embedded_track_number,
+        )
         logger.debug(
             "Final track_number processing: source=%s album_info=%s resolved=%s",
             album_info.get('source', 'unknown'),
@@ -646,6 +782,16 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
         album_info['track_number'] = track_number
         album_info['clean_track_name'] = clean_track_name
         logger.info(f"[FIX] Updated album_info track_number to {track_number} for consistent metadata")
+
+        # Sync the disc number the SAME way (and via the SAME resolver) the embedded
+        # tag will use — otherwise the "Disc N" folder is built from album_info's
+        # original disc while the tag takes the per-track disc, so a disc-2/3 track
+        # lands in the Disc 1 folder and every disc's tracks collapse together (Sokhi).
+        from core.imports.track_number import resolve_disc_for_track
+        _resolved_disc = resolve_disc_for_track(get_import_original_search(context), album_info)
+        if album_info.get('disc_number') != _resolved_disc:
+            logger.info(f"[FIX] Updated album_info disc_number to {_resolved_disc} for consistent metadata")
+        album_info['disc_number'] = _resolved_disc
 
         final_path, _ = build_final_path_for_track(context, artist_context, album_info, file_ext)
         logger.info(f"Resolved path: '{final_path}'")
@@ -696,7 +842,9 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                 existing_file = MutagenFile(final_path)
                 has_metadata = existing_file is not None and len(existing_file.tags or {}) > 2
                 if has_metadata and not is_enhance_download:
-                    _replace_lower = config_manager.get('import.replace_lower_quality', False)
+                    _replace_lower = _resolve_context_quality_profile(context).get(
+                        'replace_lower_quality',
+                        config_manager.get('import.replace_lower_quality', False))
                     if _replace_lower:
                         _existing_tier = get_quality_tier_from_extension(final_path)
                         _incoming_tier = get_quality_tier_from_extension(file_path)
@@ -759,9 +907,12 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             expected_ext = os.path.splitext(final_path)[1]
             found_variant = None
             check_exts = {expected_ext}
-            if expected_ext == '.flac' and config_manager.get('lossy_copy.enabled', False) and config_manager.get('lossy_copy.delete_original', False):
+            _qp = _resolve_context_quality_profile(context)
+            _lossy_on = _qp.get('lossy_copy_enabled', config_manager.get('lossy_copy.enabled', False))
+            _lossy_del = _qp.get('lossy_copy_delete_original', config_manager.get('lossy_copy.delete_original', False))
+            if expected_ext == '.flac' and _lossy_on and _lossy_del:
                 _lossy_ext_map = {'mp3': '.mp3', 'opus': '.opus', 'aac': '.m4a'}
-                _lossy_codec = config_manager.get('lossy_copy.codec', 'mp3')
+                _lossy_codec = _qp.get('lossy_copy_codec', config_manager.get('lossy_copy.codec', 'mp3'))
                 check_exts.add(_lossy_ext_map.get(_lossy_codec, '.mp3'))
             if os.path.exists(expected_dir):
                 for f in os.listdir(expected_dir):
@@ -810,14 +961,22 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             except Exception as rg_err:
                 pp_logger.debug(f"ReplayGain analysis skipped: {rg_err}")
 
-        downsampled_path = downsample_hires_flac(final_path, context)
+        _qp_post = _resolve_context_quality_profile(context)
+        downsampled_path = downsample_hires_flac(
+            final_path, context,
+            enabled=_qp_post.get('downsample_enabled'))
         if downsampled_path:
             final_path = downsampled_path
             context['_final_processed_path'] = final_path
 
         _persist_verification_status(context, final_path)
 
-        blasphemy_path = create_lossy_copy(final_path)
+        blasphemy_path = create_lossy_copy(final_path, settings={
+            'enabled': _qp_post.get('lossy_copy_enabled'),
+            'codec': _qp_post.get('lossy_copy_codec'),
+            'bitrate': _qp_post.get('lossy_copy_bitrate'),
+            'delete_original': _qp_post.get('lossy_copy_delete_original'),
+        } if _qp_post else None)
         if blasphemy_path:
             context['_final_processed_path'] = blasphemy_path
 
@@ -969,6 +1128,22 @@ def post_process_matched_download_with_verification(context_key, context, file_p
         if original_batch_id:
             context['batch_id'] = original_batch_id
 
+        # Quality / audio-guard quarantine. Unlike acoustid/integrity (whose
+        # retry+fail is driven by THIS wrapper below), the inner pipeline fully
+        # owns the quality and audio-guard outcome: it quarantines the file and
+        # then either re-queues the next-best candidate or marks the task failed
+        # and notifies. The wrapper must NOT continue to the "assume success"
+        # fall-through — that marked the quarantined file Completed, so the same
+        # track showed in BOTH Completed and Quarantine (e.g. an MP3-VBR rejected
+        # by a FLAC-only profile). It must also NOT mark it failed here, which
+        # would clobber a successful next-candidate retry. Just return.
+        if context.get('_bitdepth_rejected') or context.get('_silence_rejected'):
+            logger.info(
+                f"Task {task_id} quarantined by the quality/audio guard — inner "
+                f"pipeline already handled retry/fail; wrapper not marking completed"
+            )
+            return
+
         if context.get('_race_guard_failed'):
             logger.info(f"Race guard: source file gone for task {task_id} — marking as failed")
             with tasks_lock:
@@ -982,6 +1157,33 @@ def post_process_matched_download_with_verification(context_key, context, file_p
             return
 
         if context.get('_acoustid_quarantined'):
+            # Race-condition guard: if the user approved an alternative quarantine
+            # entry for this track while this download was already in flight, the
+            # pipeline will have created a new quarantine entry for the just-finished
+            # file. Delete that entry and exit — the user's choice already won.
+            _approved_alt = False
+            if task_id:
+                with tasks_lock:
+                    _ct = download_tasks.get(task_id)
+                    if isinstance(_ct, dict) and _ct.get('_quarantine_approved_alternative'):
+                        _approved_alt = True
+            if _approved_alt:
+                _eid = context.get('_quarantine_entry_id')
+                if _eid:
+                    try:
+                        from core.imports.guards import _get_config_manager
+                        _dl_dir = _get_config_manager().get('soulseek.download_path', './downloads')
+                        _qdir = os.path.join(docker_resolve_path(_dl_dir), 'ss_quarantine')
+                        delete_quarantine_entry(_qdir, _eid)
+                        logger.info(
+                            f"[Quarantine] Discarded late entry {_eid} — task {task_id} "
+                            f"was cancelled by prior quarantine approval"
+                        )
+                    except Exception as _dqe:
+                        logger.debug(f"[Quarantine] Could not clean up late entry {_eid}: {_dqe}")
+                _notify_download_completed(batch_id, task_id, success=False)
+                return
+
             failure_msg = context.get('_acoustid_failure_msg', 'AcoustID verification failed')
             # Before failing outright, try the next-best candidate. The wrong
             # file was just quarantined; re-running the worker (with the bad
@@ -1098,6 +1300,10 @@ def post_process_matched_download_with_verification(context_key, context, file_p
                     _mark_task_completed(task_id, context.get('track_info'))
                     if context.get('_verification_status'):
                         download_tasks[task_id]['verification_status'] = context['_verification_status']
+                    if context.get('_history_id'):
+                        download_tasks[task_id]['history_id'] = context['_history_id']
+                    if context.get('_audio_quality'):
+                        download_tasks[task_id]['quality'] = context['_audio_quality']
             with matched_context_lock:
                 if context_key in matched_downloads_context:
                     del matched_downloads_context[context_key]
@@ -1112,6 +1318,10 @@ def post_process_matched_download_with_verification(context_key, context, file_p
                     download_tasks[task_id]['metadata_enhanced'] = True
                     if context.get('_verification_status'):
                         download_tasks[task_id]['verification_status'] = context['_verification_status']
+                    if context.get('_history_id'):
+                        download_tasks[task_id]['history_id'] = context['_history_id']
+                    if context.get('_audio_quality'):
+                        download_tasks[task_id]['quality'] = context['_audio_quality']
                     redownload_ctx = download_tasks[task_id].get('_redownload_context')
 
             with matched_context_lock:

@@ -19,41 +19,278 @@ let personalizedPopularPicks = [];
 let personalizedHiddenGems = [];
 let personalizedDailyMixes = [];
 let personalizedDiscoveryShuffle = [];
+let personalizedListeningMix = [];   // #913: the "Your Listening Mix" track playlist
 let buildPlaylistSelectedArtists = [];
+
+// ── Adventurousness — living wave dial (Discover page) ──────────────────────────────────────
+// A draggable orb rides an animated line. At the left (value 0) the line is green and waves gently
+// ("artists you already like"); dragging right shifts the colour through the spectrum to red and the
+// wave grows bigger + more erratic. Drawn each frame with rAF. Shares discover.adventurousness with
+// the Settings slider, so the two stay in sync.
+const _advWave = { value: 0.3, phase: 0, raf: null, dragging: false };
+
+function _advState(v) {
+    if (v < 0.12) return 'Playing it safe';
+    if (v < 0.40) return 'Balanced';
+    if (v < 0.70) return 'Adventurous';
+    return 'Deep cuts only';
+}
+// green (120°) → blue (220°) through cyan as the orb moves right. Blue reads "deep / exploratory"
+// rather than red's "danger / bad" — safe at the green end, adventurous at the cool blue end.
+function _advColor(v, light, alpha) {
+    const hue = 120 + 100 * Math.max(0, Math.min(1, v));
+    const l = light || 55;
+    return alpha != null ? `hsla(${hue.toFixed(0)}, 85%, ${l}%, ${alpha})` : `hsl(${hue.toFixed(0)}, 85%, ${l}%)`;
+}
+// Wave height (viewBox units, centre 40) at position u (0..1) for adventurousness v.
+// px the orb + colour aura stay inset from the track edges, so they never collide with the card's
+// overflow:hidden and get sliced (the half-orb / hard green block on the left in the v0 screenshot).
+const _ADV_ORB_PAD = 18;
+
+function _advWaveY(u, v) {
+    const amp = 4.5 + v * 10;          // real body even at rest (was a near-flat ±2 wire), lively at 1
+    const freq = 1.25 + v * 1.9;       // a few more cycles as it gets adventurous
+    let y = 40 + amp * Math.sin(freq * u * Math.PI * 2 + _advWave.phase);
+    if (v > 0) {                       // a detuned second harmonic adds a touch of wobble
+        y += v * amp * 0.38 * Math.sin(freq * 2.2 * u * Math.PI * 2 + _advWave.phase * 1.6 + 1.3);
+    }
+    return y;
+}
+function _advDraw() {
+    const path = document.getElementById('adv-wave-path');
+    const track = document.getElementById('adv-wave-track');
+    if (!path || !track) { _advWave.raf = null; return; }
+    if (track.offsetParent !== null) {  // skip the work while the Discover page is hidden
+        const v = _advWave.value;
+        _advWave.phase += 0.022 + v * 0.045;   // waves a little faster the more adventurous
+        let line = '';
+        const N = 90;
+        for (let i = 0; i <= N; i++) {
+            const u = i / N;
+            line += (i === 0 ? 'M ' : ' L ') + (u * 1000).toFixed(1) + ' ' + _advWaveY(u, v).toFixed(1);
+        }
+        path.setAttribute('d', line);
+        // the luminous filled area = the wave closed down to the baseline
+        const area = document.getElementById('adv-wave-area');
+        if (area) area.setAttribute('d', line + ' L 1000 80 L 0 80 Z');
+        const orb = document.getElementById('adv-wave-orb');
+        if (orb) {
+            // Sample the wave at the orb's INSET x (not raw v) so the handle still sits exactly on the
+            // line after we pulled its travel in from the edges.
+            const W = track.clientWidth || 1;
+            const uOrb = (_ADV_ORB_PAD + v * (W - 2 * _ADV_ORB_PAD)) / W;
+            orb.style.top = (_advWaveY(uOrb, v) / 80 * 100).toFixed(2) + '%';  // orb rides the wave
+        }
+    }
+    _advWave.raf = requestAnimationFrame(_advDraw);
+}
+function _advApply(v) {
+    v = Math.max(0, Math.min(1, v));
+    _advWave.value = v;
+    const c = _advColor(v, 55);
+    const cBright = _advColor(v, 62);
+    // Line stroke + its colour glow (set on change, not every frame, so the rAF stays cheap).
+    const path = document.getElementById('adv-wave-path');
+    if (path) { path.setAttribute('stroke', c); path.style.filter = `drop-shadow(0 0 7px ${c})`; }
+    const fillTop = document.getElementById('adv-wave-fill-top');
+    if (fillTop) fillTop.setAttribute('stop-color', c);   // luminous filled area
+    const orb = document.getElementById('adv-wave-orb');
+    if (orb) {
+        orb.style.left = `calc(${_ADV_ORB_PAD}px + ${v.toFixed(4)} * (100% - ${2 * _ADV_ORB_PAD}px))`;
+        orb.style.color = c;                              // currentColor for the pulsing ring
+        orb.style.background = cBright;
+        orb.style.boxShadow = `0 0 9px 0 ${c}, inset 0 0 0 2px rgba(255,255,255,0.5)`;
+    }
+    const aura = document.getElementById('adv-wave-aura');   // colour wash that follows the orb
+    if (aura) {
+        aura.style.left = `calc(${_ADV_ORB_PAD}px + ${v.toFixed(4)} * (100% - ${2 * _ADV_ORB_PAD}px))`;
+        aura.style.background = `radial-gradient(circle, ${_advColor(v, 50, 0.16)} 0%, transparent 72%)`;
+    }
+    const stateEl = document.getElementById('adv-wave-state');
+    if (stateEl) { stateEl.textContent = _advState(v); stateEl.style.color = cBright; }
+}
+async function _advCommitNow(v) {
+    try {
+        await fetch('/api/discover/adventurousness', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ value: v }),
+        });
+    } catch (e) { console.debug('adventurousness save failed', e); }
+    // Re-fetch the two rec rows so the dial is felt immediately. Use refresh() (which bypasses the
+    // controller's load() coalesce) so the LATEST dial value always re-fetches — load() would fold a
+    // rapid drag into an in-flight request that used an earlier value and render stale.
+    try {
+        if (_listeningRecsCtrl && _listeningRecsCtrl.refresh) _listeningRecsCtrl.refresh();
+        else if (typeof loadListeningRecommendations === 'function') loadListeningRecommendations();
+        if (_recommendedSectionCtrl && _recommendedSectionCtrl.refresh) _recommendedSectionCtrl.refresh();
+        else if (typeof loadRecommendedArtistsSection === 'function') loadRecommendedArtistsSection();
+    } catch (e) {
+        if (typeof loadListeningRecommendations === 'function') loadListeningRecommendations();
+        if (typeof loadRecommendedArtistsSection === 'function') loadRecommendedArtistsSection();
+    }
+}
+let _advLastLive = 0;
+function _advCommitLive(v) {
+    // Throttled while dragging so both rec columns visibly re-rank in real time (not just on release).
+    const now = Date.now();
+    if (now - _advLastLive < 450) return;
+    _advLastLive = now;
+    _advCommitNow(v);
+}
+function _advInitDrag() {
+    const track = document.getElementById('adv-wave-track');
+    if (!track || track._advWired) return;
+    track._advWired = true;
+    const fromX = (clientX) => {
+        const r = track.getBoundingClientRect();
+        return r.width ? (clientX - r.left) / r.width : 0;
+    };
+    track.addEventListener('pointerdown', (e) => {
+        _advWave.dragging = true;
+        try { track.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+        _advApply(fromX(e.clientX));
+    });
+    track.addEventListener('pointermove', (e) => {
+        if (!_advWave.dragging) return;
+        _advApply(fromX(e.clientX));
+        _advCommitLive(_advWave.value);   // live update as you drag (throttled)
+    });
+    const end = (e) => {
+        if (!_advWave.dragging) return;
+        _advWave.dragging = false;
+        _advApply(fromX(e.clientX));
+        _advLastLive = 0;                 // reset the throttle so the final value always commits
+        _advCommitNow(_advWave.value);
+    };
+    track.addEventListener('pointerup', end);
+    track.addEventListener('pointercancel', end);
+}
+async function loadAdventurousnessDial() {
+    const track = document.getElementById('adv-wave-track');
+    if (!track) return;
+    _advInitDrag();
+    try {
+        const resp = await fetch('/api/discover/adventurousness');
+        if (resp.ok) {
+            const data = await resp.json();
+            if (typeof data.value === 'number') _advWave.value = data.value;
+        }
+    } catch (e) { /* non-fatal */ }
+    _advApply(_advWave.value);
+    if (!_advWave.raf) _advWave.raf = requestAnimationFrame(_advDraw);
+}
 
 async function loadDiscoverPage() {
     console.log('Loading discover page...');
 
-    // Load all sections
-    await Promise.all([
+    // The Last.fm / ListenBrainz / weekly / release-radar sections fetch from external services that
+    // can hang for tens of seconds when those services are slow or down (the LB endpoints can time out
+    // ~39s). They sit LOW in the layout, so don't let them hold the whole-page reorder hostage — start
+    // them now (concurrently) but slot them in when they actually arrive, not before the rest of the
+    // page can settle into the intended order. (#discover — fixes the late "reshuffle on load".)
+    const slowExternalLoaders = [
+        initializeLastfmRadioSection(),  // Last.fm Radio (external)
+        initializeListenBrainzTabs(),    // ListenBrainz playlists (external; can time out ~39s)
+        loadDiscoverReleaseRadar(),      // external playlist source
+        loadDiscoverWeekly(),            // external playlist source
+    ];
+
+    // Fast/local sections — settle quickly so the layout snaps into place without waiting on the
+    // external APIs above. allSettled (not all) so one failing loader can't block the reorder.
+    await Promise.allSettled([
         loadDiscoverHero(),
+        loadAdventurousnessDial(),  // sets the Discover-page dial from config
+        loadListeningRecommendations(),  // #913: play-weighted, consensus-ranked picks
+        loadPersonalizedListeningMix(),  // #913: playable track mix from those picks
         loadRecommendedArtistsSection(),
         loadYourArtists(),
         loadYourAlbums(),
         loadDiscoverRecentReleases(),
         loadSeasonalContent(),  // Seasonal discovery
-        // loadPersonalizedDailyMixes(),  // NEW: Daily Mix playlists (HIDDEN)
-        loadDiscoverReleaseRadar(),
-        loadDiscoverWeekly(),
-        loadPersonalizedPopularPicks(),  // NEW: Popular picks from discovery pool
-        loadPersonalizedHiddenGems(),  // NEW: Hidden gems from discovery pool
-        loadDiscoveryShuffle(),  // NEW: Discovery Shuffle
+        loadPersonalizedPopularPicks(),  // Popular picks from discovery pool
+        loadPersonalizedHiddenGems(),  // Hidden gems from discovery pool
+        loadDiscoveryShuffle(),  // Discovery Shuffle
         loadBecauseYouListenTo(),  // Personalized by listening stats
         loadCacheUndiscoveredAlbums(),  // From metadata cache
         loadCacheGenreNewReleases(),    // From metadata cache
         loadCacheLabelExplorer(),       // From metadata cache
         loadCacheDeepCuts(),            // From metadata cache
         loadCacheGenreExplorer(),       // From metadata cache
-        initializeLastfmRadioSection(),  // Last.fm Radio section (gated on API key)
-        initializeListenBrainzTabs(),  // ListenBrainz playlists (tabbed)
         loadDecadeBrowserTabs(),  // Time Machine (tabbed by decade)
-        loadGenreBrowserTabs(),  // Browse by Genre (tabbed by genre)
-        loadListenBrainzPlaylistsFromBackend(),  // Load ListenBrainz playlist states for persistence
+        loadListenBrainzPlaylistsFromBackend(),  // local: ListenBrainz playlist states for persistence
         loadDiscoveryBlacklist()  // Blocked artists list
     ]);
 
+    // Reorder now that the fast sections are in — NOT gated on the slow external APIs above.
+    _reorderDiscoverSections();
+
+    // Re-slot the slow external sections into the already-ordered layout when they finish, instead of
+    // delaying the whole page until then. allSettled so one failing source can't block the re-order.
+    Promise.allSettled(slowExternalLoaders).then(() => _reorderDiscoverSections());
+
     // Check for active syncs after page load
     checkForActiveDiscoverSyncs();
+}
+
+// #discover redesign: sections were authored in code-order (and several inject into a mid-page
+// sub-container, #discover-bylt-sections), so the page reads as a jumble. After all loaders run,
+// move each section into the intended Spotify-style order. appendChild MOVES nodes — including ones
+// nested in #discover-bylt-sections — into .discover-container, so the cache sections get pulled out
+// to their own slots while the BYLT container keeps just its "Because you listen to" rows. Hidden /
+// collapsed sections (old mix tables, Daily Mixes) are left untouched and stay invisible. The hero
+// and the Artist Map hub are left in place near the top.
+function _reorderDiscoverSections() {
+    const container = document.querySelector('.discover-container');
+    if (!container) return;
+    const sectionByTitle = (t) => Array.from(
+        document.querySelectorAll('.discover-container .discover-section, #discover-bylt-sections .discover-section'))
+        .find(s => (s.querySelector('.discover-section-title')?.textContent || '').toLowerCase().includes(t));
+    const resolve = (spec) => {
+        if (!spec) return null;
+        if (spec.id) return document.getElementById(spec.id);
+        if (spec.el) return document.querySelector(spec.el);
+        if (spec.title) return sectionByTitle(spec.title);
+        return null;
+    };
+    const isShown = (s) => s && s.style.display !== 'none';
+    // top → bottom. `pair` = two same-card sections side by side (collapses to 1-up on narrow); the
+    // dial sits right above its two targets so the user sees both react. Everything else full-width.
+    const LAYOUT = [
+        { id: 'cache-genre-explorer' },                                                   // quick browse
+        { id: 'your-mixes-section' },                                                     // made for you
+        { id: 'year-mixes-section' },
+        { el: '#adv-wave' },                                                              // the dial
+        { pair: [{ id: 'listening-recs-section' }, { id: 'recommended-artists-section' }] },  // its targets
+        { pair: [{ title: 'recent releases' }, { id: 'cache-genre-releases' }] },         // new
+        { pair: [{ id: 'seasonal-albums-section' }, { id: 'cache-undiscovered' }] },
+        { pair: [{ id: 'cache-label-explorer' }, { id: 'your-albums-section' }] },
+        { id: 'your-artists-section' },                                                   // your library
+        { id: 'discover-bylt-sections' },                                                 // because you listen
+        { id: 'cache-deep-cuts' },
+        { title: 'last.fm radio' },                                                       // stations & tools
+        { title: 'listenbrainz' },
+        { title: 'build a playlist' },
+    ];
+    // Re-runs on every navigation — unwrap any prior 2-col rows first (their children get re-resolved
+    // and re-placed below), so we never nest or duplicate.
+    container.querySelectorAll('.discover-row-2col').forEach(row => {
+        while (row.firstChild) container.appendChild(row.firstChild);
+        row.remove();
+    });
+    LAYOUT.forEach(item => {
+        if (item.pair) {
+            const members = item.pair.map(resolve).filter(isShown);  // skip empty/hidden sections
+            if (!members.length) return;
+            if (members.length === 1) { container.appendChild(members[0]); return; }  // lone → full width
+            const row = document.createElement('div');
+            row.className = 'discover-row-2col';
+            members.forEach(m => row.appendChild(m));
+            container.appendChild(row);
+        } else {
+            const node = resolve(item);
+            if (node && node.parentElement) container.appendChild(node);
+        }
+    });
 }
 
 async function checkForActiveDiscoverSyncs() {
@@ -676,43 +913,72 @@ async function addAllRecommendedToWatchlist(btn) {
 // machinery, so the inline carousel and the "View All" modal stay in sync.
 let _recommendedSectionCtrl = null;
 
-function _renderRecommendedMini(artist, source) {
+// "Because you listen to X, Y" — the listening-driven (#913) variant of the reason line.
+function _listeningRecommendationReason(artist) {
+    const names = (artist && artist.because) || [];
+    if (names.length === 1) return `Because you listen to ${escapeHtml(names[0])}`;
+    if (names.length === 2) return `Because you listen to ${escapeHtml(names[0])} & ${escapeHtml(names[1])}`;
+    if (names.length >= 3) {
+        const shown = names.slice(0, 2).map(escapeHtml).join(', ');
+        return `Because you listen to ${shown} +${names.length - 2} more`;
+    }
+    return 'From artists you play often';
+}
+function _listeningRecommendationReasonTitle(artist) {
+    const names = (artist && artist.because) || [];
+    return names.length ? `You listen to: ${names.join(', ')}` : '';
+}
+
+function _whyIcon(type) {
+    return type === 'genre' ? '🎯' : type === 'obscure' ? '💎' : type === 'consensus' ? '👥'
+        : type === 'explore' ? '🧭' : '✨';
+}
+
+function _renderRecommendedMini(artist, source, opts) {
+    const reasonFn = (opts && opts.reasonFn) || _recommendationReason;
+    const titleFn = (opts && opts.titleFn) || _recommendationReasonTitle;
     const artistSource = artist.source || source || '';
-    const reason = _recommendationReason(artist);
-    const reasonTitle = _recommendationReasonTitle(artist);
-    const genreTags = (artist.genres || []).slice(0, 2).map(g =>
-        `<span class="recommended-card-genre">${escapeHtml(g)}</span>`
-    ).join('');
+    const reason = reasonFn(artist);
+    const reasonTitle = titleFn(artist);
     const img = artist.image_url
         ? `<img src="${artist.image_url}" alt="${escapeHtml(artist.artist_name)}" loading="lazy"
                 onerror="this.parentElement.innerHTML='<div class=\\'recommended-card-image-fallback\\'>🎤</div>';">`
         : `<div class="recommended-card-image-fallback">🎤</div>`;
+    // "Why this rec" chips from the scoring signals — the explainability flex. When present they
+    // replace the plain reason line (they ARE the reason, just clearer); else fall back to the text.
+    const whyHtml = (artist.why && artist.why.length)
+        ? `<div class="ya-card-why">${artist.why.slice(0, 2).map(w =>
+              `<span class="ya-why-chip ya-why-${w.type}">${_whyIcon(w.type)} ${escapeHtml(w.label)}</span>`).join('')}</div>`
+        : `<div class="ya-card-sub" title="${escapeHtml(reasonTitle)}">${reason}</div>`;
+    // .ya-card visual (matches Your Artists / albums) while keeping the class + data hooks the
+    // watchlist handler (.recommended-card-watchlist-btn) and image enrichment
+    // (.recommended-artist-card[data-artist-id] → .recommended-card-image) rely on. #discover redesign.
     return `
-        <div class="recommended-artist-card recommended-card--carousel"
+        <div class="ya-card recommended-artist-card"
              data-artist-name="${escapeHtml(artist.artist_name).toLowerCase()}"
              data-artist-id="${artist.artist_id}"
              data-artist-source="${escapeHtml(artistSource)}">
-            <button class="recommended-card-watchlist-btn"
+            <a class="recommended-card-link" href="${buildArtistDetailPath(artist.artist_id, artistSource || null)}"
+               style="display:block;text-decoration:none;color:inherit;">
+                <div class="ya-card-img recommended-card-image">${img}</div>
+                <div class="ya-card-gradient"></div>
+                <div class="ya-card-info">
+                    <div class="ya-card-name">${escapeHtml(artist.artist_name)}</div>
+                    ${whyHtml}
+                </div>
+            </a>
+            <button class="recommended-card-watchlist-btn ya-card-reco-btn"
                     data-artist-id="${artist.artist_id}"
                     data-artist-name="${escapeHtml(artist.artist_name)}">
                 Add to Watchlist
             </button>
-            <a class="recommended-card-link" href="${buildArtistDetailPath(artist.artist_id, artistSource || null)}"
-               style="display:block;text-decoration:none;color:inherit;">
-                <div class="recommended-card-image">${img}</div>
-                <div class="recommended-card-info">
-                    <span class="recommended-card-name">${escapeHtml(artist.artist_name)}</span>
-                    <span class="recommended-card-similarity" title="${escapeHtml(reasonTitle)}">${reason}</span>
-                    <div class="recommended-card-genres">${genreTags}</div>
-                </div>
-            </a>
         </div>`;
 }
 
 // Progressively fill in images for the cards we actually rendered (the API
 // returns cached images only; the rest are fetched on demand — same endpoint
 // the modal uses).
-async function _enrichRecommendedCarouselCards(items, source) {
+async function _enrichRecommendedCarouselCards(items, source, carouselId) {
     const idKey = source === 'spotify' ? 'spotify_artist_id'
                 : source === 'deezer' ? 'deezer_artist_id'
                 : 'itunes_artist_id';
@@ -726,7 +992,7 @@ async function _enrichRecommendedCarouselCards(items, source) {
         });
         const data = await resp.json();
         if (!data.success || !data.artists) return;
-        const carousel = document.getElementById('recommended-artists-carousel');
+        const carousel = document.getElementById(carouselId || 'recommended-artists-carousel');
         if (!carousel) return;
         for (const [aid, info] of Object.entries(data.artists)) {
             if (!info.image_url) continue;
@@ -769,6 +1035,7 @@ async function loadRecommendedArtistsSection() {
                 }
                 const source = (data && data.source) || 'spotify';
                 _enrichRecommendedCarouselCards((data && data.artists || []).slice(0, 18), source);
+                _clampGrid(carousel);
             },
             loadingMessage: 'Finding recommendations...',
             emptyMessage: 'No recommendations yet — let the Similar Artists worker run',
@@ -776,6 +1043,49 @@ async function loadRecommendedArtistsSection() {
         });
     }
     return _recommendedSectionCtrl.load();
+}
+
+// #913: "Based On Your Listening" — play-weighted, consensus-ranked recommendations.
+// Mirrors loadRecommendedArtistsSection but reads the listening-driven endpoint and
+// renders a "Because you listen to X" reason. Hides itself when empty (no scan yet).
+let _listeningRecsCtrl = null;
+async function loadListeningRecommendations() {
+    if (!_listeningRecsCtrl) {
+        _listeningRecsCtrl = createDiscoverSectionController({
+            id: 'listening-recs',
+            sectionEl: '#listening-recs-section',
+            contentEl: '#listening-recs-carousel',
+            fetchUrl: '/api/discover/listening-recommendations',
+            extractItems: (data) => data.artists || [],
+            isEmpty: (items) => items.length === 0,
+            hideWhenEmpty: true,
+            renderItems: (items, data) => {
+                const source = data.source || 'spotify';
+                const shown = items.slice(0, 18);
+                return shown.map(a => _renderRecommendedMini(a, source, {
+                    reasonFn: _listeningRecommendationReason,
+                    titleFn: _listeningRecommendationReasonTitle,
+                })).join('');
+            },
+            onRendered: ({ data }) => {
+                const carousel = document.getElementById('listening-recs-carousel');
+                if (carousel && !carousel._recoWired) {
+                    carousel._recoWired = true;
+                    carousel.addEventListener('click', function (e) {
+                        const btn = e.target.closest('.recommended-card-watchlist-btn');
+                        if (btn) { e.preventDefault(); e.stopPropagation(); toggleRecommendedWatchlist(btn); }
+                    });
+                }
+                const source = (data && data.source) || 'spotify';
+                _enrichRecommendedCarouselCards((data && data.artists || []).slice(0, 18), source, 'listening-recs-carousel');
+                _clampGrid(carousel);
+            },
+            loadingMessage: 'Reading your listening...',
+            emptyMessage: 'Play more music and run a watchlist scan to see picks based on your listening',
+            errorMessage: 'Failed to load listening recommendations',
+        });
+    }
+    return _listeningRecsCtrl.load();
 }
 
 function closeRecommendedArtistsModal() {
@@ -945,15 +1255,18 @@ let _recentReleasesCtrl = null;
 
 function _renderRecentReleaseCard(album, index) {
     const coverUrl = album.album_cover_url || '/static/placeholder-album.png';
+    // Unified Discover card — same .ya-card the Your Artists section uses (full-bleed cover,
+    // gradient, name overlaid), square so the album art isn't cropped. #discover redesign.
     return `
-        <div class="discover-card" onclick="openDownloadModalForRecentAlbum(${index})" style="cursor: pointer;">
-            <div class="discover-card-image">
-                <img src="${coverUrl}" alt="${album.album_name}" loading="lazy">
+        <div class="ya-card discover-album-card" onclick="openDownloadModalForRecentAlbum(${index})">
+            <div class="ya-card-img">
+                <img src="${coverUrl}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+                <div class="ya-card-placeholder" style="display:none">&#9835;</div>
             </div>
-            <div class="discover-card-info">
-                <h4 class="discover-card-title">${album.album_name}</h4>
-                <p class="discover-card-subtitle">${album.artist_name}</p>
-                <p class="discover-card-meta">${album.release_date}</p>
+            <div class="ya-card-gradient"></div>
+            <div class="ya-card-info">
+                <div class="ya-card-name">${_esc(album.album_name)}</div>
+                <div class="ya-card-sub">${_esc(album.artist_name)}</div>
             </div>
         </div>
     `;
@@ -980,7 +1293,8 @@ async function loadDiscoverRecentReleases() {
             showErrorToast: true,
         });
     }
-    return _recentReleasesCtrl.load();
+    await _recentReleasesCtrl.load();
+    _clampGrid(document.getElementById('recent-releases-carousel'));
 }
 
 // ===============================
@@ -1119,22 +1433,19 @@ function _renderYourAlbumsGrid(albums) {
     let html = '';
     albums.forEach((album, index) => {
         const coverUrl = album.image_url || '/static/placeholder-album.png';
-        const year = album.release_date ? album.release_date.substring(0, 4) : '';
         const badgeClass = album.in_library ? 'owned' : 'missing';
         const badgeIcon = album.in_library ? '\u2713' : '\u2193';
-        const trackInfo = album.total_tracks ? `${album.total_tracks} tracks` : '';
-        const meta = [year, trackInfo].filter(Boolean).join(' \u00B7 ');
-        const sources = (album.source_services || []).join(', ');
         html += `
-            <div class="spotify-library-card" onclick="openYourAlbumDownload(${index})" title="${escapeHtml(album.album_name)} \u2014 ${escapeHtml(album.artist_name)}">
-                <div class="spotify-library-card-img">
-                    <img src="${coverUrl}" alt="${escapeHtml(album.album_name)}" loading="lazy">
-                    <div class="spotify-library-card-badge ${badgeClass}">${badgeIcon}</div>
+            <div class="ya-card discover-album-card" onclick="openYourAlbumDownload(${index})" title="${escapeHtml(album.album_name)} \u2014 ${escapeHtml(album.artist_name)}">
+                <div class="ya-card-img">
+                    <img src="${coverUrl}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+                    <div class="ya-card-placeholder" style="display:none">&#9835;</div>
                 </div>
-                <div class="spotify-library-card-info">
-                    <p class="spotify-library-card-title">${escapeHtml(album.album_name)}</p>
-                    <p class="spotify-library-card-artist">${escapeHtml(album.artist_name)}</p>
-                    <p class="spotify-library-card-meta">${escapeHtml(meta)}</p>
+                <div class="ya-card-gradient"></div>
+                <div class="ya-card-badges"><div class="discover-album-badge ${badgeClass}">${badgeIcon}</div></div>
+                <div class="ya-card-info">
+                    <div class="ya-card-name">${_esc(album.album_name)}</div>
+                    <div class="ya-card-sub">${_esc(album.artist_name)}</div>
                 </div>
             </div>`;
     });
@@ -1725,11 +2036,7 @@ async function loadDiscoverReleaseRadar() {
             contentEl: '#release-radar-playlist',
             fetchUrl: '/api/discover/release-radar',
             extractItems: (data) => data.tracks || [],
-            renderItems: (items) => {
-                discoverReleaseRadarTracks = items;
-                const rows = items.map((t, i) => _renderCompactTrackRow(t, i)).join('');
-                return `<div class="discover-playlist-tracks-compact">${rows}</div>`;
-            },
+            renderItems: (items) => { discoverReleaseRadarTracks = items; return ''; },
             loadingMessage: 'Loading release radar...',
             emptyMessage: 'No new releases available',
             errorMessage: 'Failed to load release radar',
@@ -1737,7 +2044,16 @@ async function loadDiscoverReleaseRadar() {
             showErrorToast: true,
         });
     }
-    return _releaseRadarCtrl.load();
+    await _releaseRadarCtrl.load();
+    const c = document.querySelector('#release-radar-playlist');
+    if (c) _collapseOldMixSection(c);
+    if (discoverReleaseRadarTracks && discoverReleaseRadarTracks.length) {
+        _upsertMixCard({
+            key: 'release_radar', title: 'Fresh Tape',
+            subtitle: 'New releases from artists you follow',
+            tracks: discoverReleaseRadarTracks, syncKey: 'release_radar',
+        });
+    }
 }
 
 let _weeklyCtrl = null;
@@ -1749,11 +2065,7 @@ async function loadDiscoverWeekly() {
             contentEl: '#discovery-weekly-playlist',
             fetchUrl: '/api/discover/weekly',
             extractItems: (data) => data.tracks || [],
-            renderItems: (items) => {
-                discoverWeeklyTracks = items;
-                const rows = items.map((t, i) => _renderCompactTrackRow(t, i)).join('');
-                return `<div class="discover-playlist-tracks-compact">${rows}</div>`;
-            },
+            renderItems: (items) => { discoverWeeklyTracks = items; return ''; },
             loadingMessage: 'Curating your discovery playlist...',
             emptyMessage: 'No tracks available yet',
             errorMessage: 'Failed to load discovery weekly',
@@ -1761,7 +2073,16 @@ async function loadDiscoverWeekly() {
             showErrorToast: true,
         });
     }
-    return _weeklyCtrl.load();
+    await _weeklyCtrl.load();
+    const c = document.querySelector('#discovery-weekly-playlist');
+    if (c) _collapseOldMixSection(c);
+    if (discoverWeeklyTracks && discoverWeeklyTracks.length) {
+        _upsertMixCard({
+            key: 'discovery_weekly', title: 'The Archives',
+            subtitle: 'A weekly dig through artists across your library',
+            tracks: discoverWeeklyTracks, syncKey: 'discovery_weekly',
+        });
+    }
 }
 
 // ===============================
@@ -1866,15 +2187,14 @@ let genreTracks = [];
 function _renderGenreCard(genre) {
     const icon = getGenreIcon(genre.name);
     const displayName = capitalizeGenre(genre.name);
+    // Genres have no cover art — a gradient .ya-card with the emoji, so they match the grid. #discover redesign
     return `
-        <div class="discover-card genre-card-modern" onclick="openGenrePlaylist('${escapeForInlineJs(genre.name)}')">
-            <div class="discover-card-image genre-card-image">
-                <div class="genre-icon-large">${icon}</div>
-            </div>
-            <div class="discover-card-info">
-                <h4 class="discover-card-title">${displayName}</h4>
-                <p class="discover-card-subtitle">${genre.track_count} tracks</p>
-                <p class="discover-card-meta">Curated</p>
+        <div class="ya-card discover-genre-card" onclick="openGenrePlaylist('${escapeForInlineJs(genre.name)}')">
+            <div class="ya-card-img genre-card-art"><div class="genre-icon-large">${icon}</div></div>
+            <div class="ya-card-gradient"></div>
+            <div class="ya-card-info">
+                <div class="ya-card-name">${displayName}</div>
+                <div class="ya-card-sub">${genre.track_count} tracks</div>
             </div>
         </div>
     `;
@@ -2296,7 +2616,44 @@ function _renderTabbedTrackList(tracks) {
 }
 
 async function loadDecadeBrowserTabs() {
-    return _getDecadeBrowserTabsCtrl().loadTabs();
+    // #discover redesign: Time Machine is now a shelf of decade mix cards (each opens its tracks in
+    // the shared modal) instead of a tabbed track table. Tracks load lazily on open.
+    const grid = document.getElementById('decade-tab-contents');
+    if (!grid) return;
+    const tabs = document.getElementById('decade-tabs');
+    if (tabs) tabs.style.display = 'none';
+    try {
+        const resp = await fetch('/api/discover/decades/available');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (!data.success || !Array.isArray(data.decades) || !data.decades.length) {
+            grid.closest('.discover-section')?.style.setProperty('display', 'none');
+            return;
+        }
+        grid.className = 'discover-grid';
+        const mixes = data.decades.map(d => {
+            const year = d.year;
+            return {
+                key: `decade_${year}`,
+                title: `${year}s`,
+                subtitle: `${year}s Classics`,
+                trackCount: d.track_count,
+                statusBase: `decade-${year}`,
+                actions: [
+                    { label: 'Download', closeFirst: true, onclick: `openDownloadModalForDecade(${year})` },
+                    { label: 'Sync', primary: true, isSync: true, onclick: `startDecadeSync(${year})` },
+                ],
+                // Populate decadeTracksCache like the old tab fetch did so startDecadeSync works.
+                fetchTracks: () => fetch(`/api/discover/decade/${year}`).then(r => r.json()).then(dd => {
+                    const tracks = (dd && dd.tracks) || [];
+                    decadeTracksCache[year] = tracks;
+                    activeDecade = year;
+                    return tracks;
+                }),
+            };
+        });
+        _renderMixGrid(grid, mixes);
+    } catch (e) { console.debug('Decade browser:', e); }
 }
 
 function switchDecadeTab(decade) {
@@ -3190,84 +3547,59 @@ function groupListenBrainzPlaylists(playlists) {
 }
 
 function buildListenBrainzPlaylistsHtml(playlists, tabId) {
-    let html = '';
-    playlists.forEach((playlist, index) => {
+    // #discover redesign: each playlist is a mix card (opens its tracks + actions in the shared
+    // modal) instead of a full-width track-table subsection. Shared by Last.fm Radio + ListenBrainz.
+    const mixes = playlists.map(playlist => {
         const playlistData = playlist.playlist || playlist;
         const identifier = playlistData.identifier?.split('/').pop() || '';
-        console.log(`📋 Playlist ${index}:`, {
-            title: playlistData.title,
-            fullIdentifier: playlistData.identifier,
-            extractedIdentifier: identifier
-        });
         const title = playlistData.title || 'Untitled Playlist';
         const creator = playlistData.creator || 'ListenBrainz';
-
         let trackCount = 50;
         if (playlistData.annotation?.track_count && playlistData.annotation.track_count > 0) {
             trackCount = playlistData.annotation.track_count;
         } else if (playlistData.track && Array.isArray(playlistData.track) && playlistData.track.length > 0) {
             trackCount = playlistData.track.length;
         }
-
-        const playlistId = `discover-lb-playlist-${identifier}`;  // Use consistent MBID-based ID
-        const virtualPlaylistId = `discover_lb_${tabId}_${identifier}`;
-
-        html += `
-            <div class="discover-section-subsection">
-                <div class="discover-section-header">
-                    <div>
-                        <h3 class="discover-section-subtitle-large">${title}</h3>
-                        <p class="discover-section-meta" id="${playlistId}-meta">by ${creator} • Loading tracks...</p>
-                    </div>
-                    <div class="discover-section-actions">
-                        <button class="action-button secondary"
-                                onclick="openDownloadModalForListenBrainzPlaylist('${identifier}', '${escapeForInlineJs(title)}')"
-                                title="Download missing tracks">
-                            <span class="button-icon">↓</span>
-                            <span class="button-text">Download</span>
-                        </button>
-                        <span class="wing-it-wrap">
-                        <button class="action-button wing-it-btn-sm"
-                                onclick="_toggleWingItDropdownLB(this, '${identifier}', '${escapeForInlineJs(title)}')"
-                                title="Download or sync using raw track names — no metadata discovery">
-                            <span class="button-icon">⚡</span>
-                            <span class="button-text">Wing It</span>
-                        </button>
-                        </span>
-                        <button class="action-button primary"
-                                id="${playlistId}-sync-btn"
-                                onclick="startListenBrainzPlaylistSync('${identifier}')"
-                                title="Sync to media server"
-                                style="display: none;">
-                            <span class="button-icon">⟳</span>
-                            <span class="button-text">Sync</span>
-                        </button>
+        const escTitle = escapeForInlineJs(title);
+        // playlistId is the status base startListenBrainzPlaylistSync targets; LB uses its own
+        // -sync-total/-sync-matched spans, so we hand the modal a matching statusHtml block.
+        const playlistId = `discover-lb-playlist-${identifier}`;
+        const statusHtml = `
+            <div class="discover-sync-status" id="${playlistId}-sync-status" style="display:none">
+                <div class="sync-status-content">
+                    <div class="sync-status-label"><span class="sync-icon">&#10227;</span><span>Syncing to media server...</span></div>
+                    <div class="sync-status-stats">
+                        <span class="sync-stat">&#9834; <span id="${playlistId}-sync-total">0</span></span>
+                        <span class="sync-separator">/</span>
+                        <span class="sync-stat">&#10003; <span id="${playlistId}-sync-matched">0</span></span>
+                        <span class="sync-separator">/</span>
+                        <span class="sync-stat">&#10007; <span id="${playlistId}-sync-failed">0</span></span>
+                        <span class="sync-stat">(<span id="${playlistId}-sync-percentage">0</span>%)</span>
                     </div>
                 </div>
-                <!-- Sync Status Display -->
-                <div class="discover-sync-status" id="${playlistId}-sync-status" style="display: none;">
-                    <div class="sync-status-content">
-                        <div class="sync-status-label">
-                            <span class="sync-icon">⟳</span>
-                            <span>Syncing to media server...</span>
-                        </div>
-                        <div class="sync-status-stats">
-                            <span class="sync-stat">♪ <span id="${playlistId}-sync-total">0</span></span>
-                            <span class="sync-separator">/</span>
-                            <span class="sync-stat">✓ <span id="${playlistId}-sync-matched">0</span></span>
-                            <span class="sync-separator">/</span>
-                            <span class="sync-stat">✗ <span id="${playlistId}-sync-failed">0</span></span>
-                            <span class="sync-stat">(<span id="${playlistId}-sync-percentage">0</span>%)</span>
-                        </div>
-                    </div>
-                </div>
-                <div class="discover-playlist-container compact" id="${playlistId}-playlist">
-                    <div class="discover-loading"><div class="loading-spinner"></div><p>Loading tracks...</p></div>
-                </div>
-            </div>
-        `;
+            </div>`;
+        return {
+            key: `lb-${tabId}-${identifier}`,
+            title, subtitle: `by ${creator}`, trackCount,
+            statusBase: playlistId,
+            statusHtml,
+            actions: [
+                { label: 'Download', closeFirst: true, onclick: `openDownloadModalForListenBrainzPlaylist('${identifier}', '${escTitle}')` },
+                { label: 'Sync', primary: true, isSync: true, onclick: `startListenBrainzPlaylistSync('${identifier}')` },
+            ],
+            // Tracks load lazily on open; cache them where displayListenBrainzTracks would so reuse works.
+            fetchTracks: () => fetch(`/api/discover/listenbrainz/playlist/${identifier}`).then(r => r.json()).then(d => {
+                const tracks = (d && d.tracks) || [];
+                listenbrainzTracksCache[identifier] = tracks;
+                return tracks;
+            }),
+        };
     });
-    return html;
+    mixes.forEach(m => { _discoverMixRegistry[m.key] = m; });
+    // Caller injects this HTML synchronously; hydrate covers + tracks on the next tick so the cards
+    // exist in the DOM. Background-fetches each playlist's tracks → real mosaic + instant modal.
+    setTimeout(() => _hydrateMixCovers(mixes), 0);
+    return `<div class="discover-grid">${mixes.map(_buildMixCard).join('')}</div>`;
 }
 
 function loadTracksForPlaylists(playlists) {
@@ -3935,14 +4267,15 @@ async function loadSeasonalContent() {
 function _renderSeasonalAlbumCard(album, index) {
     const coverUrl = album.album_cover_url || '/static/placeholder-album.png';
     return `
-        <div class="discover-card" onclick="openDownloadModalForSeasonalAlbum(${index})" style="cursor: pointer;">
-            <div class="discover-card-image">
-                <img src="${coverUrl}" alt="${album.album_name}" loading="lazy">
+        <div class="ya-card discover-album-card" onclick="openDownloadModalForSeasonalAlbum(${index})">
+            <div class="ya-card-img">
+                <img src="${coverUrl}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+                <div class="ya-card-placeholder" style="display:none">&#9835;</div>
             </div>
-            <div class="discover-card-info">
-                <h4 class="discover-card-title">${album.album_name}</h4>
-                <p class="discover-card-subtitle">${album.artist_name}</p>
-                ${album.release_date ? `<p class="discover-card-meta">${album.release_date}</p>` : ''}
+            <div class="ya-card-gradient"></div>
+            <div class="ya-card-info">
+                <div class="ya-card-name">${_esc(album.album_name)}</div>
+                <div class="ya-card-sub">${_esc(album.artist_name)}</div>
             </div>
         </div>
     `;
@@ -3977,7 +4310,8 @@ async function loadSeasonalAlbums(seasonData) {
         verboseErrors: true,
             showErrorToast: true,
     });
-    return ctrl.load();
+    await ctrl.load();
+    _clampGrid(document.getElementById('seasonal-albums-carousel'));
 }
 
 let _seasonalPlaylistCtrl = null;
@@ -3987,23 +4321,6 @@ async function loadSeasonalPlaylist(seasonData) {
     const playlistContainer = document.getElementById('seasonal-playlist');
     if (!playlistContainer) return;
 
-    // Show seasonal playlist section
-    const seasonalPlaylistSection = document.getElementById('seasonal-playlist-section');
-    if (seasonalPlaylistSection) {
-        seasonalPlaylistSection.style.display = 'block';
-    }
-
-    // Update header
-    const playlistTitle = document.getElementById('seasonal-playlist-title');
-    const playlistSubtitle = document.getElementById('seasonal-playlist-subtitle');
-
-    if (playlistTitle) {
-        playlistTitle.textContent = `${seasonData.icon} ${seasonData.name} Mix`;
-    }
-    if (playlistSubtitle) {
-        playlistSubtitle.textContent = `Curated playlist for ${seasonData.name.toLowerCase()}`;
-    }
-
     // Re-create the controller when the season key changes so the
     // fetchUrl always points at the active season's endpoint.
     if (!_seasonalPlaylistCtrl || _seasonalPlaylistCtrlKey !== currentSeasonKey) {
@@ -4012,11 +4329,7 @@ async function loadSeasonalPlaylist(seasonData) {
             contentEl: '#seasonal-playlist',
             fetchUrl: `/api/discover/seasonal/${currentSeasonKey}/playlist`,
             extractItems: (data) => data.tracks || [],
-            renderItems: (items) => {
-                discoverSeasonalTracks = items;
-                const rows = items.map((t, i) => _renderCompactTrackRow(t, i)).join('');
-                return `<div class="discover-playlist-tracks-compact">${rows}</div>`;
-            },
+            renderItems: (items) => { discoverSeasonalTracks = items; return ''; },
             loadingMessage: 'Loading playlist...',
             emptyMessage: 'No tracks available yet',
             errorMessage: 'Failed to load playlist',
@@ -4025,7 +4338,16 @@ async function loadSeasonalPlaylist(seasonData) {
         });
         _seasonalPlaylistCtrlKey = currentSeasonKey;
     }
-    return _seasonalPlaylistCtrl.load();
+    await _seasonalPlaylistCtrl.load();
+    _collapseOldMixSection(playlistContainer);
+    if (discoverSeasonalTracks && discoverSeasonalTracks.length) {
+        _upsertMixCard({
+            key: 'seasonal_playlist',
+            title: `${seasonData.icon} ${seasonData.name} Mix`,
+            subtitle: `Curated playlist for ${seasonData.name.toLowerCase()}`,
+            tracks: discoverSeasonalTracks, syncKey: 'seasonal_playlist',
+        });
+    }
 }
 
 function hideSeasonalSections() {
@@ -4215,8 +4537,12 @@ async function loadPersonalizedPopularPicks() {
         }
 
         personalizedPopularPicks = data.tracks;
-        renderCompactPlaylist(container, data.tracks);
-        container.closest('.discover-section').style.display = 'block';
+        _upsertMixCard({
+            key: 'popular_picks', title: 'Popular Picks',
+            subtitle: 'Popular tracks from artists you love',
+            tracks: data.tracks, syncKey: 'popular_picks',
+        });
+        _collapseOldMixSection(container);
 
     } catch (error) {
         console.error('Error loading popular picks:', error);
@@ -4238,11 +4564,47 @@ async function loadPersonalizedHiddenGems() {
         }
 
         personalizedHiddenGems = data.tracks;
-        renderCompactPlaylist(container, data.tracks);
-        container.closest('.discover-section').style.display = 'block';
+        _upsertMixCard({
+            key: 'hidden_gems', title: 'Hidden Gems',
+            subtitle: 'Deeper cuts you might have missed',
+            tracks: data.tracks, syncKey: 'hidden_gems',
+        });
+        _collapseOldMixSection(container);
 
     } catch (error) {
         console.error('Error loading hidden gems:', error);
+    }
+}
+
+// #913: "Your Listening Mix" — a playable track playlist from the artists matched to your
+// listening. Mirrors loadPersonalizedHiddenGems; tracks come pre-shaped from the scan so the
+// row renders + syncs like the others. Hides when empty (no scan / no listening data yet).
+async function loadPersonalizedListeningMix() {
+    try {
+        const container = document.getElementById('personalized-listening-mix');
+        if (!container) return;
+
+        const response = await fetch('/api/discover/personalized/listening-mix');
+        if (!response.ok) return;
+
+        const data = await response.json();
+        if (!data.success || !data.tracks || data.tracks.length === 0) {
+            container.closest('.discover-section').style.display = 'none';
+            return;
+        }
+
+        personalizedListeningMix = data.tracks;
+        // Spotify-style: collapse this mix into a card in the "Your Mixes" shelf; its
+        // track list + actions live in the modal you open from the card (#discover redesign).
+        _upsertMixCard({
+            key: 'listening_mix', title: 'Your Listening Mix',
+            subtitle: 'From artists matched to your listening',
+            tracks: data.tracks, syncKey: 'listening_mix',
+        });
+        _collapseOldMixSection(container);
+
+    } catch (error) {
+        console.error('Error loading listening mix:', error);
     }
 }
 
@@ -4261,66 +4623,258 @@ async function loadPersonalizedDailyMixes() {
         }
 
         personalizedDailyMixes = data.mixes;
-
-        // Render Daily Mix cards
-        let html = '';
+        // Fold each daily mix into the unified "Your Mixes" shelf (#discover redesign).
+        // (Their old open action was a no-op stub; opening to the track list is an upgrade.)
         data.mixes.forEach((mix, index) => {
-            const coverUrl = mix.tracks && mix.tracks.length > 0 ?
-                (mix.tracks[0].album_cover_url || '/static/placeholder-album.png') :
-                '/static/placeholder-album.png';
-
-            html += `
-                <div class="discover-playlist-card" onclick="openDailyMix(${index})">
-                    <div class="discover-playlist-cover">
-                        <img src="${coverUrl}" alt="${mix.name}" loading="lazy">
-                        <div class="playlist-play-overlay">▶</div>
-                    </div>
-                    <div class="discover-playlist-info">
-                        <h4 class="discover-playlist-name">${mix.name}</h4>
-                        <p class="discover-playlist-description">${mix.description}</p>
-                        <p class="discover-playlist-count">${mix.track_count} tracks</p>
-                    </div>
-                </div>
-            `;
+            _upsertMixCard({
+                key: `daily_mix_${index}`, title: mix.name,
+                subtitle: mix.description || 'Daily Mix',
+                tracks: mix.tracks || [],
+            });
         });
-
-        container.innerHTML = html;
-        container.closest('.discover-section').style.display = 'block';
+        _collapseOldMixSection(container);
 
     } catch (error) {
         console.error('Error loading daily mixes:', error);
     }
 }
 
+// Tracks come in two shapes across the discovery sources: flat (track_name/artist_name/…) for the
+// personalized mixes, or nested under track_data_json (name/artists[]/album/…) for the decade,
+// ListenBrainz + Last.fm playlists. Normalize both so renderers don't print "undefined". #discover
+function _normalizeTrack(track) {
+    // track_data_json when present, else the track itself (decade/Spotify-shaped rows carry
+    // name/artists[]/album at the top level — same fallback _renderTabbedTrackList uses).
+    const td = (track && track.track_data_json) || track || {};
+    const a0 = td.artists && td.artists[0];
+    return {
+        name: td.name || td.track_name || track.track_name || 'Unknown Track',
+        artist: (a0 && (a0.name || a0)) || td.artist_name || track.artist_name || 'Unknown Artist',
+        // album/duration are optional (ListenBrainz recording playlists carry neither) — leave blank
+        // rather than printing "Unknown Album" / "0:00".
+        album: (td.album && td.album.name) || td.album_name || track.album_name || '',
+        cover: (td.album && td.album.images && td.album.images[0] && td.album.images[0].url) || track.album_cover_url || '',
+        durationMs: td.duration_ms || track.duration_ms || 0,
+    };
+}
+
 function renderCompactPlaylist(container, tracks) {
     let html = '<div class="discover-playlist-tracks-compact">';
 
     tracks.forEach((track, index) => {
-        const coverUrl = track.album_cover_url || '/static/placeholder-album.png';
-        const durationMin = Math.floor(track.duration_ms / 60000);
-        const durationSec = Math.floor((track.duration_ms % 60000) / 1000);
-        const duration = `${durationMin}:${durationSec.toString().padStart(2, '0')}`;
-        const artistEsc = (track.artist_name || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+        const t = _normalizeTrack(track);
+        const coverUrl = t.cover || '/static/placeholder-album.png';
+        const durationMin = Math.floor(t.durationMs / 60000);
+        const durationSec = Math.floor((t.durationMs % 60000) / 1000);
+        const duration = t.durationMs > 0 ? `${durationMin}:${durationSec.toString().padStart(2, '0')}` : '';
 
         html += `
             <div class="discover-playlist-track-compact" data-track-index="${index}">
                 <div class="track-compact-number">${index + 1}</div>
                 <div class="track-compact-image">
-                    <img src="${coverUrl}" alt="${track.album_name}" loading="lazy">
+                    <img src="${coverUrl}" alt="${_esc(t.album)}" loading="lazy">
                 </div>
                 <div class="track-compact-info">
-                    <div class="track-compact-name">${track.track_name}</div>
-                    <div class="track-compact-artist">${track.artist_name}</div>
+                    <div class="track-compact-name">${_esc(t.name)}</div>
+                    <div class="track-compact-artist">${_esc(t.artist)}</div>
                 </div>
-                <div class="track-compact-album">${track.album_name}</div>
+                <div class="track-compact-album">${_esc(t.album)}</div>
                 <div class="track-compact-duration">${duration}</div>
-                <button class="track-compact-block" onclick="event.stopPropagation(); blockDiscoveryArtist('${artistEsc}')" title="Block ${artistEsc} from discovery">✕</button>
             </div>
         `;
     });
 
     html += '</div>';
     container.innerHTML = html;
+}
+
+// ── Your Mixes shelf (#discover redesign) ───────────────────────────────────
+// Each mix is ONE card (a 2x2 mosaic cover from its top tracks); clicking it opens
+// the track list + actions in a modal. The old per-mix full-width tables collapse
+// into these cards (the table now lives inside the opened mix, where it belongs).
+const _discoverMixRegistry = {};
+// Keys that belong to the shared "Your Mixes" shelf specifically. The registry above also holds
+// other sections' mixes (decades, Last.fm, ListenBrainz) for openMixModalByKey, so the shelf must
+// render only its own keys — not Object.values(registry), or those sections leak in.
+const _yourMixKeys = [];
+
+function _buildMixCard(mix) {
+    let cover;
+    if (mix.coverHtml) {
+        // Sections with no per-track art (e.g. decades) supply their own cover (a gradient + label).
+        cover = `<div class="mix-card-cover mix-card-cover--solid">${mix.coverHtml}<div class="mix-card-play">&#9654;</div></div>`;
+    } else {
+        const covers = [];
+        for (const t of (mix.tracks || [])) {
+            const c = _normalizeTrack(t).cover;
+            if (c && !covers.includes(c)) covers.push(c);
+            if (covers.length >= 4) break;
+        }
+        while (covers.length < 4) covers.push('/static/placeholder-album.png');
+        const mosaic = covers.map(c => `<div class="mix-card-tile" style="background-image:url('${c}')"></div>`).join('');
+        cover = `<div class="mix-card-cover">${mosaic}<div class="mix-card-play">&#9654;</div></div>`;
+    }
+    const count = mix.tracks ? mix.tracks.length : (mix.trackCount || 0);
+    return `
+        <div class="discover-mix-card" data-mix-key="${mix.key}" onclick="openMixModalByKey('${mix.key}')">
+            ${cover}
+            <div class="mix-card-name">${_esc(mix.title)}</div>
+            <div class="mix-card-meta">${count} tracks</div>
+        </div>
+    `;
+}
+
+// Render a set of mix cards into ANY section grid (Time Machine, Last.fm Radio, ListenBrainz…) and
+// register them so openMixModalByKey can find them. Unlike _upsertMixCard this targets a given
+// container rather than the shared "Your Mixes" shelf, so each section keeps its own header.
+// For sections whose tracks load lazily (decades, Last.fm, ListenBrainz), fetch each mix's tracks in
+// the background and upgrade its card from the placeholder to a real 2x2 mosaic — and stash the
+// tracks on the mix so opening the modal is instant. #discover redesign
+function _hydrateMixCovers(mixes) {
+    mixes.forEach(mix => {
+        if (mix.tracks || !mix.fetchTracks) return;
+        Promise.resolve(mix.fetchTracks()).then(tracks => {
+            mix.tracks = tracks || [];
+            const card = document.querySelector(`.discover-mix-card[data-mix-key="${mix.key}"]`);
+            if (!card) return;
+            const meta = card.querySelector('.mix-card-meta');
+            if (meta) meta.textContent = `${mix.tracks.length} tracks`;
+            const covers = [];
+            for (const t of mix.tracks) {
+                const c = _normalizeTrack(t).cover;
+                if (c && !covers.includes(c)) covers.push(c);
+                if (covers.length >= 4) break;
+            }
+            if (!covers.length) return;  // no art — leave the placeholder cover
+            while (covers.length < 4) covers.push('/static/placeholder-album.png');
+            const coverEl = card.querySelector('.mix-card-cover');
+            if (coverEl) {
+                coverEl.className = 'mix-card-cover';
+                coverEl.innerHTML = covers.map(c => `<div class="mix-card-tile" style="background-image:url('${c}')"></div>`).join('')
+                    + '<div class="mix-card-play">&#9654;</div>';
+            }
+        }).catch(() => {});
+    });
+}
+
+function _renderMixGrid(container, mixes) {
+    if (!container) return;
+    mixes.forEach(m => { _discoverMixRegistry[m.key] = m; });
+    container.innerHTML = mixes.map(_buildMixCard).join('');
+    _clampGrid(container);
+    _hydrateMixCovers(mixes);
+}
+
+// Register/refresh a mix's card in the "Your Mixes" shelf and reveal the section.
+function _upsertMixCard(mix) {
+    _discoverMixRegistry[mix.key] = mix;
+    if (!_yourMixKeys.includes(mix.key)) _yourMixKeys.push(mix.key);
+    const shelf = document.getElementById('your-mixes-grid');
+    if (!shelf) return;
+    shelf.innerHTML = _yourMixKeys.map(k => _buildMixCard(_discoverMixRegistry[k])).join('');
+    const section = document.getElementById('your-mixes-section');
+    if (section) section.style.display = 'block';
+}
+
+// Collapse a now-redundant per-mix table section out of view, and strip its sync-status +
+// sync-button so their ids can't shadow the modal's (the modal owns the live sync display
+// now). Keeps the container so each loader's "already loaded?" guard still works on refresh.
+function _collapseOldMixSection(container) {
+    const section = container.closest('.discover-section');
+    if (!section) return;
+    section.querySelectorAll('.discover-sync-status, [id$="-sync-btn"]').forEach(el => el.remove());
+    section.style.display = 'none';
+}
+
+function openMixModalByKey(key) {
+    const mix = _discoverMixRegistry[key];
+    if (mix) openMixModal(mix);
+}
+
+function openMixModal(mix) {
+    document.getElementById('mix-modal-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'mix-modal-overlay';
+    overlay.className = 'modal-overlay';
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+    // statusBase mirrors startDiscoverPlaylistSync's id convention (underscores → hyphens) so
+    // the sync's live-progress updates land on THIS modal's status elements (the old hidden
+    // section's duplicates are stripped in _collapseOldMixSection so there's no id clash).
+    // A mix either uses the built-in syncKey path (Download + Sync via startDiscoverPlaylistSync)
+    // or supplies a custom `actions` list + `statusBase` (decades, ListenBrainz, Last.fm radio) so
+    // any playlist section can reuse this modal. statusBase drives the live sync-status element ids.
+    const base = mix.statusBase || (mix.syncKey ? mix.syncKey.replace(/_/g, '-') : '');
+    const closeFirst = "document.getElementById('mix-modal-overlay').remove(); ";
+    let actionList = mix.actions;
+    if (!actionList && mix.syncKey) {
+        // Download opens its own modal beneath this one — close this first so it's interactable.
+        actionList = [
+            { label: 'Download', closeFirst: true, onclick: `openDownloadModalForDiscoverPlaylist('${mix.syncKey}', '${escapeForInlineJs(mix.title)}')` },
+            { label: 'Sync', primary: true, isSync: true, onclick: `startDiscoverPlaylistSync('${mix.syncKey}', '${escapeForInlineJs(mix.title)}')` },
+        ];
+    }
+    const actions = (actionList || []).map(a => {
+        const cls = a.primary ? 'btn btn--sm btn--primary' : 'btn btn--sm btn--secondary';
+        const idAttr = (a.isSync && base) ? ` id="${base}-sync-btn"` : '';
+        const oc = (a.closeFirst ? closeFirst : '') + a.onclick;
+        return `<button class="${cls}"${idAttr} onclick="${oc}">${_esc(a.label)}</button>`;
+    }).join('');
+    // A section can supply its own status markup (e.g. ListenBrainz uses -sync-total/-sync-matched
+    // spans instead of the generic -sync-completed/-sync-pending). Otherwise use the generic block.
+    const syncStatus = mix.statusHtml || (base ? `
+        <div class="discover-sync-status" id="${base}-sync-status" style="display:none">
+            <div class="sync-status-content">
+                <div class="sync-status-label"><span class="sync-icon">&#10227;</span><span>Syncing to media server...</span></div>
+                <div class="sync-status-stats">
+                    <span class="sync-stat">&#10003; <span id="${base}-sync-completed">0</span></span>
+                    <span class="sync-stat">&#9203; <span id="${base}-sync-pending">0</span></span>
+                    <span class="sync-stat">&#10007; <span id="${base}-sync-failed">0</span></span>
+                    <span class="sync-stat">(<span id="${base}-sync-percentage">0</span>%)</span>
+                </div>
+            </div>
+        </div>` : '');
+    overlay.innerHTML = `
+        <div class="mix-modal">
+            <div class="mix-modal-header">
+                <div>
+                    <div class="mix-modal-subtitle">${_esc(mix.subtitle || 'Mix')}</div>
+                    <h2 class="mix-modal-title">${_esc(mix.title)}</h2>
+                    <div class="mix-modal-meta">${mix.tracks ? mix.tracks.length + ' tracks' : ''}</div>
+                </div>
+                <div class="mix-modal-actions">
+                    ${actions}
+                    <button class="mix-modal-close" onclick="document.getElementById('mix-modal-overlay').remove()">&#10005;</button>
+                </div>
+            </div>
+            ${syncStatus}
+            <div class="mix-modal-body" id="mix-modal-tracks"></div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    const body = document.getElementById('mix-modal-tracks');
+    if (mix.tracks) {
+        renderCompactPlaylist(body, mix.tracks);
+    } else if (mix.fetchTracks) {
+        // Lazy sections (e.g. decades) load their tracks on open; fetch then fill in the count.
+        body.innerHTML = '<div class="discover-empty"><p>Loading tracks…</p></div>';
+        Promise.resolve(mix.fetchTracks()).then(tracks => {
+            mix.tracks = tracks || [];
+            const metaEl = overlay.querySelector('.mix-modal-meta');
+            if (metaEl) metaEl.textContent = `${mix.tracks.length} tracks`;
+            renderCompactPlaylist(body, mix.tracks);
+        }).catch(() => { body.innerHTML = '<div class="discover-empty"><p>Failed to load tracks</p></div>'; });
+    }
+
+    // If a sync for this mix is already in flight (the modal was closed mid-sync), reveal the
+    // live status + disable the button so re-opening picks the progress back up — the next
+    // poll/WebSocket tick refills the counters onto this fresh modal's elements.
+    const pollerKey = mix.pollerKey || mix.syncKey;
+    if (pollerKey && discoverSyncPollers[pollerKey]) {
+        const statusEl = document.getElementById(`${base}-sync-status`);
+        if (statusEl) statusEl.style.display = 'block';
+        const btnEl = document.getElementById(`${base}-sync-btn`);
+        if (btnEl) { btnEl.disabled = true; btnEl.style.opacity = '0.5'; btnEl.style.cursor = 'not-allowed'; }
+    }
 }
 
 async function blockDiscoveryArtist(artistName) {
@@ -5810,6 +6364,1756 @@ function _artMapPanelArtistById(id) {
     if (!n) return;
     _artMapPanelArtist(n);
     _artMapEmitRipple(n.x, n.y, n._hue);
+}
+
+// ===== Artist Web — sigma.js similarity graph (sibling of the canvas Artist Map) ===============
+// A genre-clustered force graph of the whole library. Interaction is driven by REDUCERS: we keep a
+// little UI state here (search matches, hovered/selected node) and node/edge reducers read it to
+// recolor/dim per frame — the graph data is never mutated for visual state.
+let _artistWeb = {
+    sigma: null, graph: null, onKey: null,
+    gen: 0,                           // open/close generation — in-flight fetches bail if it changed
+    lens: 'genre',                    // 'genre' | 'community' | 'discovery'
+    data: null,                       // cached /api/graph/library payload (reused when switching lens)
+    discoveryData: null,              // cached /api/graph/discovery payload (owned anchors + unowned candidates)
+    genreColor: null,                 // (group) -> color, set at render
+    index: [],                        // [{key,label}] artist nodes, for client-side search
+    searchMatch: null,                // Set<key> of search hits, or null when search is empty
+    focusSet: null,                   // Set<key> currently emphasized (hover node+neighbors, or selection)
+    focusRoot: null,                  // the node at the center of the focus (gets a halo)
+    selectedKey: null,                // click-selected node (survives hover-out)
+    selectedFocus: null,              // the focus set to restore when hover clears
+    genreFilter: null,                // Set<genre> persistent filter (dims everything outside it)
+    genreCounts: null,                // {genre: artistCount} for the filter sidebar
+    sizeBy: 'popularity',             // node-size metric: popularity | connections | influence(betweenness)
+    betweenCache: null,               // cached betweenness scores (computed once on the similarity graph)
+    edgeDeclutter: false,             // when on, hide the weaker half of similarity edges at rest
+    edgeThreshold: 2,                 // weight cutoff for declutter (computed per render)
+    // Shortest-path mode: click two artists to trace how they connect (via the similarity graph).
+    pathMode: false,
+    pathSource: null, pathTarget: null,
+    pathNodes: null,                  // Set<key> on the path (highlighted)
+    pathPairs: null,                  // Set<"a|b"> consecutive path edges (highlighted)
+    pathResult: null,                 // the node-key array, once complete
+    simGraph: null,                   // cached similarity-only graph for pathfinding (lens-independent)
+    // Node-spread effect: selecting a node fans its neighbors outward; they settle back on deselect.
+    cursorFX: true,                   // master flag (one switch to disable the effect)
+    fxRAF: null, home: null,          // rAF handle + captured resting positions
+    spreadRoot: null, spreadSet: null, spreadPush: 0,
+    spreadActive: null,               // Set of nodes currently displaced/pushed — the FX tick animates
+                                      // only these, never a full ~5k-node sweep per frame.
+    fa2: null, fa2Timer: null,        // live-settle worker layout supervisor + its stop timer
+    previewAudio: null, previewKey: null,   // 30s Deezer preview playback (discovery candidates)
+    _hoverNode: null, _mouse: null, _mouseBound: false,   // hover tooltip: current node + last pointer
+};
+
+// White pill label (black text) — custom sigma labelRenderer. Font + padding scale with the node's
+// rendered size, so a small artist gets a small tag and a big genre hub gets a big one.
+function _webDrawLabel(context, data, settings) {
+    if (!data.label) return;
+    const font = settings.labelFont || 'Arial';
+    const weight = settings.labelWeight || 'normal';
+    const fontSize = Math.max(8, Math.min(18, (data.size || 6) * 0.85));   // scale to node size, clamped
+    const pad = Math.max(3, Math.round(fontSize * 0.45));
+    context.font = `${weight} ${fontSize}px ${font}`;
+    const tw = context.measureText(data.label).width;
+    const boxW = tw + pad * 2, boxH = fontSize + pad * 2;
+    const x = Math.round(data.x + data.size + 4);   // sits just right of the node
+    const y = Math.round(data.y - boxH / 2);
+    context.fillStyle = '#ffffff';
+    if (context.roundRect) { context.beginPath(); context.roundRect(x, y, boxW, boxH, 5); context.fill(); }
+    else context.fillRect(x, y, boxW, boxH);
+    context.fillStyle = '#000000';
+    context.textBaseline = 'middle';
+    context.textAlign = 'left';
+    context.fillText(data.label, x + pad, data.y);
+}
+
+// Distinct colors for the most-common genres; everything in the long tail falls back to gray.
+const WEB_PALETTE = ['#1db954', '#e91e63', '#3f8cff', '#ff9800', '#9c27b0', '#00bcd4', '#ffd54f',
+    '#f44336', '#8bc34a', '#ff5722', '#7c4dff', '#26c6da', '#cddc39', '#ff4081', '#009688', '#c0846b'];
+const WEB_GENRE_FALLBACK = '#6b7aa8';   // slate-periwinkle for "Other" — a real color, not dead gray
+const WEB_OWNED_COLOR = '#5b8def';      // Discovery lens: your library artists (cool blue)
+const WEB_DISCOVERY_COLOR = '#ffb74d';  // Discovery lens: unowned candidates to discover (warm amber)
+const WEB_CANVAS_BG = '#111016';   // near-black charcoal (reference look: colors glow on dark)
+
+// Edge opacity scales with weight (consensus): weak links stay faint so they don't clutter; strong,
+// high-agreement links come forward. Capped so nothing gets fully opaque at rest.
+function _webEdgeAlpha(weight) {
+    return Math.min(0.4, 0.08 + (weight || 1) * 0.025);
+}
+function _webEdgeSize(weight) {
+    return 0.35 + Math.min(1.3, Math.sqrt(weight || 1) * 0.3);
+}
+
+// '#rrggbb' -> 'rgba(r,g,b,a)' so edges can inherit a cluster color at low alpha (the glowing web).
+function _webHexToRgba(hex, alpha) {
+    const h = (hex || '').replace('#', '');
+    if (h.length !== 6) return `rgba(140,140,150,${alpha})`;
+    const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+    return `rgba(${r},${g},${b},${alpha})`;
+}
+
+// Map each genre CLUSTER (anchor) to a palette color; "Other" + unknowns are gray. Return the lookup
+// + per-cluster counts (used for hub sizing + the filter list).
+function _webGenreColorMap(nodes) {
+    const counts = {};
+    nodes.forEach(n => { if (n.kind === 'artist' && n.cluster) counts[n.cluster] = (counts[n.cluster] || 0) + 1; });
+    const ranked = Object.keys(counts).filter(g => g !== 'Other').sort((a, b) => counts[b] - counts[a]);
+    const map = { 'Other': WEB_GENRE_FALLBACK };
+    ranked.forEach((g, i) => { map[g] = WEB_PALETTE[i % WEB_PALETTE.length]; });   // cycle, never gray
+    return { color: (g) => map[g] || WEB_GENRE_FALLBACK, counts };
+}
+
+// The top-N most popular artists — always labeled + a size tier, so they anchor the map as landmarks.
+const WEB_STAR_COUNT = 20;
+const WEB_STAR_SIZE = 8;
+function _webTopArtists(artistNodes, n) {
+    return new Set(artistNodes
+        .filter(a => (a.popularity || 0) > 0)
+        .sort((x, y) => (y.popularity || 0) - (x.popularity || 0))
+        .slice(0, n)
+        .map(a => a.key));
+}
+
+async function openArtistWeb(lens) {
+    const container = document.getElementById('artist-web-container');
+    if (!container) return;
+
+    // New generation: any fetch still in flight from a prior open/close bails on resolve.
+    const myGen = ++_artistWeb.gen;
+    // Re-entrancy: drop a stale keydown listener so we never leak/duplicate it.
+    if (_artistWeb.onKey) document.removeEventListener('keydown', _artistWeb.onKey);
+
+    // Pseudo-page takeover: hide the other discover sections, show the web container. Only snapshot
+    // when NOT already open — a re-entrant open (the error-card Retry button) would otherwise
+    // overwrite each sibling's real _prevDisplay ('') with 'none', blanking Discover on close.
+    if (container.style.display !== 'flex') {
+        document.querySelectorAll('#discover-page > .discover-container > *:not(#artist-web-container)').forEach(el => {
+            el._prevDisplay = el.style.display;
+            el.style.display = 'none';
+        });
+    }
+    container.style.display = 'flex';
+
+    const host = document.getElementById('artist-web-canvas');
+    const statsEl = document.getElementById('artist-web-stats');
+    host.innerHTML = '<div style="padding:24px;color:rgba(255,255,255,.4)">Building your artist web…</div>';
+
+    // Keyboard: Esc unwinds (path mode -> panel -> close); the toolbar advertises S/F/0/+/- so wire
+    // them (skipping while typing in an input, where Esc just blurs the field).
+    _artistWeb.onKey = (e) => {
+        const t = e.target;
+        if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) {
+            if (e.key === 'Escape') t.blur();
+            return;
+        }
+        if (e.key === 'Escape') {
+            if (_artistWeb.pathMode) { _artWebExitPath(); return; }
+            const p = document.getElementById('artweb-panel');
+            if (p && p.style.display !== 'none') _artWebClearSelection();
+            else closeArtistWeb();
+        } else if (e.key === 's' || e.key === 'S') {
+            const inp = document.getElementById('artist-web-search');
+            if (inp) { e.preventDefault(); inp.focus(); }
+        } else if (e.key === 'f' || e.key === 'F' || e.key === '0') {
+            artWebFitToView();
+        } else if (e.key === '+' || e.key === '=') {
+            artWebZoom(0.77);           // ratio<1 = zoom IN
+        } else if (e.key === '-' || e.key === '_') {
+            artWebZoom(1.3);            // zoom OUT
+        } else if (e.key === '?') {
+            artWebShowHelp();           // the first-run hint advertises "? for the guide"
+        }
+    };
+    document.addEventListener('keydown', _artistWeb.onKey);
+
+    // Resolve the CDN globals. graphology's UMD default export IS the Graph class.
+    const Graph = window.graphology && (window.graphology.Graph || window.graphology);
+    if (!Graph || !window.Sigma) {
+        host.innerHTML = '<div style="padding:24px;color:#f88">graphology / sigma didn\'t load — check the CDN &lt;script&gt; tags.</div>';
+        return;
+    }
+
+    try {
+        const payload = await (await fetch('/api/graph/library')).json();
+        if (_artistWeb.gen !== myGen) return;   // closed or reopened while fetching — abandon
+        _artistWeb.data = payload;
+        _artistWeb.simGraph = null;   // rebuild pathfinding graph for this (possibly new) data
+        _artistWeb.betweenCache = null;
+        _artistWeb.discoveryData = null;  // refetch on next Discovery view — ownership may have changed
+        // The hub cards deep-link a lens: Taste Map -> 'genre', Discovery Web -> 'discovery'.
+        if (lens === 'genre' || lens === 'community' || lens === 'discovery') _artistWeb.lens = lens;
+        _artistWeb.lens = _artistWeb.lens || 'genre';
+        _artWebSyncLensButtons();
+        if (_artistWeb.lens === 'discovery') _artWebFetchDiscovery(host);
+        else _artWebRenderLens();
+        _artWebMaybeFirstRunHint();
+    } catch (err) {
+        if (_artistWeb.gen !== myGen) return;
+        console.error('[Artist Web] load failed', err);
+        _artWebStateCard(host, 'Failed to load the artist web.', _artistWeb.lens || 'genre');
+    }
+}
+
+// Centered empty/error card in the canvas. retryLens set => a Retry button re-opens that lens.
+// Replacing the canvas with a message: tear down any live graph first so no WebGL context / FA2
+// worker leaks (e.g. a lens switch whose fetch failed, or a zero-candidate discovery).
+function _artWebStateCard(host, msg, retryLens) {
+    if (!host) return;
+    _artWebKillLiveLayout();
+    if (_artistWeb.fxRAF) { cancelAnimationFrame(_artistWeb.fxRAF); _artistWeb.fxRAF = null; }
+    if (_artistWeb.sigma) { try { _artistWeb.sigma.kill(); } catch (e) { /* ignore */ } _artistWeb.sigma = null; }
+    _artistWeb.graph = null;
+    const btn = retryLens
+        ? `<button class="artweb-state-btn" onclick="openArtistWeb('${retryLens}')">Retry</button>` : '';
+    host.innerHTML = `<div class="artweb-state-card"><div class="artweb-state-msg">${escapeHtml(msg)}</div>${btn}</div>`;
+}
+
+// Fetch the discovery payload, then render — only a GOOD payload is cached (a 500 resolves r.json()
+// too, and caching {"error": ...} used to leave the lens permanently blank with no retry).
+function _artWebFetchDiscovery(host) {
+    const myGen = _artistWeb.gen;
+    fetch('/api/graph/discovery')
+        .then(r => r.json().then(d => ({ ok: r.ok, d: d })))
+        .then(({ ok, d }) => {
+            if (!ok || d.error || !Array.isArray(d.nodes)) throw new Error(d.error || 'bad response');
+            _artistWeb.discoveryData = d;
+            // Bail if the Web was closed/reopened or the user moved off Discovery while fetching —
+            // otherwise a late response mounts a sigma+worker into a hidden host, or rebuilds the
+            // lens the user is now on, clobbering their selection/camera.
+            if (_artistWeb.gen !== myGen || _artistWeb.lens !== 'discovery') return;
+            _artWebRenderLens();
+        })
+        .catch(err => {
+            if (_artistWeb.gen !== myGen || _artistWeb.lens !== 'discovery') return;
+            console.error('[Artist Web] discovery load failed', err);
+            _artWebStateCard(host, 'Failed to load discovery.', 'discovery');
+        });
+}
+
+// Switch the organizing lens (genre clusters vs similarity communities) and rebuild.
+function artWebSetLens(lens) {
+    if (!_artistWeb.data || _artistWeb.lens === lens) return;
+    _artistWeb.lens = lens;
+    _artWebSyncLensButtons();
+    // Tear down the prior lens's FA2 worker + settle timer NOW, before any async discovery fetch —
+    // otherwise the old timer fires mid-fetch and finalizes/animates the detached graph.
+    _artWebKillLiveLayout();
+    const host = document.getElementById('artist-web-canvas');
+    if (host) host.innerHTML = '<div style="padding:24px;color:rgba(255,255,255,.4)">Rebuilding…</div>';
+    // Discovery uses its own endpoint — fetch on first view (see _artWebFetchDiscovery).
+    if (lens === 'discovery' && !_artistWeb.discoveryData) {
+        _artWebFetchDiscovery(host);
+    } else {
+        setTimeout(_artWebRenderLens, 20);   // let "Rebuilding…" paint before the sync layout blocks
+    }
+}
+
+function _artWebSyncLensButtons() {
+    document.querySelectorAll('.artweb-lens-btn').forEach(b =>
+        b.classList.toggle('active', b.dataset.lens === _artistWeb.lens));
+}
+
+// ---- "Size by" toggle: scale nodes by popularity | connections (degree) | influence (betweenness) --
+function _artWebSyncSizeButtons() {
+    document.querySelectorAll('.artweb-size-btn').forEach(b =>
+        b.classList.toggle('active', b.dataset.size === _artistWeb.sizeBy));
+}
+
+// Betweenness = "influence" (who bridges the taste network). Computed on the SIMILARITY graph (small,
+// ~1k nodes → fast) not the 5k display graph, and cached — a genre-hub-laden graph would be slow.
+function _artWebBetweenness() {
+    if (_artistWeb.betweenCache) return _artistWeb.betweenCache;
+    const g = _artWebSimGraph();
+    const c = window.graphologyLibrary && window.graphologyLibrary.metrics && window.graphologyLibrary.metrics.centrality;
+    const fn = c && (c.betweenness || c.betweennessCentrality);
+    let res = {};
+    if (fn && g) { try { res = fn(g); } catch (e) { res = {}; } }
+    _artistWeb.betweenCache = res;
+    return res;
+}
+
+function artWebSetSize(mode) {
+    if (_artistWeb.sizeBy === mode || !_artistWeb.graph) return;
+    // Influence needs a (one-time) betweenness pass — show a hint + defer so it paints first.
+    if (mode === 'influence' && !_artistWeb.betweenCache) {
+        _artistWeb.sizeBy = mode; _artWebSyncSizeButtons();
+        _artWebPathHint('Computing influence…');
+        setTimeout(() => { _artWebApplySize(mode); _artWebHidePathHint(); }, 30);
+    } else {
+        _artWebApplySize(mode);
+    }
+}
+
+function _artWebApplySize(mode) {
+    const st = _artistWeb, g = st.graph;
+    if (!g) return;
+    st.sizeBy = mode;
+    _artWebSyncSizeButtons();
+    const sg = (mode === 'connections') ? _artWebSimGraph() : null;
+    const btw = (mode === 'influence') ? _artWebBetweenness() : null;
+    const metric = (k, a) => {
+        if (mode === 'connections') return (sg && sg.hasNode(k)) ? sg.degree(k) : 0;
+        if (mode === 'influence') return btw[k] || 0;
+        return a.popularity || 0;   // popularity
+    };
+    let max = 0;
+    g.forEachNode((k, a) => { if (a.kind === 'artist') { const v = metric(k, a); if (v > max) max = v; } });
+    max = max || 1;
+    g.forEachNode((k, a) => {
+        if (a.kind !== 'artist') return;   // genre hubs stay sized by member count
+        const size = 2 + Math.sqrt(metric(k, a) / max) * 3.5;   // 2..5.5 — matches the original build scale
+        g.setNodeAttribute(k, 'size', a.isStar ? Math.max(size, 6) : size);   // stars stay landmark-sized
+    });
+    if (st.sigma) st.sigma.refresh();
+}
+
+// (Re)build the graph for the current lens, run the layout, and mount sigma.
+function _artWebRenderLens() {
+    const host = document.getElementById('artist-web-canvas');
+    const statsEl = document.getElementById('artist-web-stats');
+    const data = _artistWeb.data;
+    if (!host || !data) return;
+    const Graph = window.graphology && (window.graphology.Graph || window.graphology);
+    if (!Graph) return;
+
+    // Reset per-render UI state + chrome.
+    _artistWeb.searchMatch = _artistWeb.focusSet = _artistWeb.focusRoot = null;
+    _artistWeb.selectedKey = _artistWeb.selectedFocus = null;
+    _artistWeb.pathSource = _artistWeb.pathTarget = _artistWeb.pathResult = null;
+    _artistWeb.pathNodes = _artistWeb.pathPairs = null;
+    _artistWeb.genreFilter = null;
+    _artistWeb.sizeBy = 'popularity';   // build sizes by popularity; user can re-pick per view
+    _artWebSyncSizeButtons();
+    _artistWeb.index = [];
+    _artWebClosePanel();
+    const sidebar = document.getElementById('artweb-genre-sidebar');
+    if (sidebar) sidebar.style.display = 'none';
+    const searchInput = document.getElementById('artist-web-search');
+    if (searchInput) searchInput.value = '';
+
+    const built = _artistWeb.lens === 'community'
+        ? _artWebBuildCommunity(data, Graph)
+        : _artistWeb.lens === 'discovery'
+        ? _artWebBuildDiscovery(_artistWeb.discoveryData || { nodes: [], edges: [] }, Graph)
+        : _artWebBuildGenre(data, Graph);
+
+    _artistWeb.genreColor = built.colorOf;
+    _artistWeb.genreCounts = built.counts;
+    if (statsEl) statsEl.textContent = built.stats;
+    const sbHeader = document.querySelector('#artweb-genre-sidebar .artmap-genre-sidebar-header span');
+    if (sbHeader) sbHeader.textContent = _artistWeb.lens === 'community' ? 'Communities' : 'Genres';
+
+    // Home positions are captured AFTER the layout settles (_artWebFinishLayout); until then the
+    // selection-spread effect stays dormant (its guards check st.home).
+    _artistWeb.home = null;
+    _artistWeb.spreadRoot = _artistWeb.spreadSet = _artistWeb.spreadActive = null;
+
+    // Declutter threshold: hide edges below the median weight — but most edges are weight-1
+    // (single-source), so if the median IS the minimum, bump above it to hide that weakest tier.
+    const w = [];
+    built.graph.forEachEdge((e, a) => { if (a.kind === 'similarity') w.push(a.weight || 1); });
+    w.sort((x, y) => x - y);
+    let thr = w.length ? w[Math.floor(w.length * 0.5)] : 2;
+    if (w.length && thr <= w[0]) thr = w[0] + 1;
+    _artistWeb.edgeThreshold = thr;
+    _artWebSyncEdgeButton();
+
+    // Empty discovery: a valid payload with zero candidates should GUIDE, not show a blank canvas.
+    if (_artistWeb.lens === 'discovery' && built.graph.order === 0) {
+        const lg = document.getElementById('artist-web-legend');
+        if (lg) lg.style.display = 'none';   // don't leave the prior lens's legend over the card
+        _artWebStateCard(host, 'No discovery candidates yet — add artists to your Watchlist so SoulSync can fetch similar artists to explore.', null);
+        return;
+    }
+
+    // Pre-seed positions (circlepack, grouped by cluster) so FA2 REFINES a structured start instead
+    // of untangling random noise — much faster + calmer settle at library scale. Silent no-op if the
+    // CDN bundle lacks the helper (the builders already set random x/y as a fallback).
+    _artWebPreseed(built.graph);
+
+    // Mount FIRST (the pre-seeded islands are visible immediately), then settle live in a Web Worker —
+    // the graph refines into islands without ever blocking the UI.
+    _artWebMountSigma(host, built.graph);
+    _artWebStartLiveLayout(built.graph);
+    _artWebRenderLegend(built);
+}
+
+// Color legend — decodes what the node colors mean for the active lens (Discovery = library vs
+// to-discover; Genre/Community = the top groups by size). Without it the palette is meaningless.
+function _artWebRenderLegend(built) {
+    const box = document.getElementById('artist-web-legend');
+    if (!box) return;
+    let items;
+    if (_artistWeb.lens === 'discovery') {
+        items = [
+            { color: WEB_OWNED_COLOR, label: 'Your library' },
+            { color: WEB_DISCOVERY_COLOR, label: 'To discover' },
+        ];
+    } else {
+        const counts = built.counts || {};
+        const colorOf = built.colorOf || (() => WEB_GENRE_FALLBACK);
+        items = Object.keys(counts)
+            .sort((a, b) => counts[b] - counts[a])
+            .slice(0, 8)
+            .map(g => ({ color: colorOf(g), label: g, count: counts[g] }));
+    }
+    if (!items.length) { box.style.display = 'none'; return; }
+    box.innerHTML = items.map(it =>
+        `<div class="artweb-legend-row">` +
+        `<span class="artweb-legend-dot" style="background:${it.color}"></span>` +
+        `<span class="artweb-legend-label">${escapeHtml(it.label)}</span>` +
+        (it.count != null ? `<span class="artweb-legend-count">${it.count}</span>` : '') +
+        `</div>`
+    ).join('');
+    box.style.display = '';
+}
+
+// Circlepack pre-seed: pack nodes into cluster circles (by the 'genre' attribute the builders set on
+// every node) so FA2 starts from structure, not noise. Discovery has no genre grouping — pack flat.
+function _artWebPreseed(graph) {
+    try {
+        const lib = window.graphologyLibrary;
+        const cp = lib && lib.layout && lib.layout.circlepack;
+        if (!cp || graph.order === 0) return;
+        cp.assign(graph, _artistWeb.lens === 'discovery' ? {} : { hierarchyAttributes: ['genre'] });
+    } catch (e) { /* keep the random positions the builders already set */ }
+}
+
+// ---- Live-settle layout: forceAtlas2 in a Web Worker (FA2Layout supervisor) ---------------------
+// The worker streams positions into the graph; sigma re-renders each frame, so the user watches the
+// blob organize. Falls back to the synchronous pass when the worker build is unavailable or throws.
+function _artWebStartLiveLayout(graph) {
+    _artWebKillLiveLayout();
+    const lib = window.graphologyLibrary;
+    const FA2Layout = lib && lib.FA2Layout;
+    const fa2 = lib && lib.layoutForceAtlas2;
+    if (!FA2Layout || !fa2 || graph.order === 0) {
+        _artWebRunLayout(graph);          // sync fallback (blocks briefly, but always works)
+        _artWebFinishLayout(graph);
+        return;
+    }
+    let layout = null;
+    try {
+        layout = new FA2Layout(graph, {
+            settings: {
+                ...fa2.inferSettings(graph),
+                barnesHutOptimize: true,
+                linLogMode: true,                      // clusters separate into islands
+                outboundAttractionDistribution: true,  // spread the hubs out
+                adjustSizes: true,                     // don't overlap node circles
+                gravity: 1.2, scalingRatio: 3, slowDown: 4,
+            },
+        });
+        layout.start();
+    } catch (e) {
+        console.warn('[Artist Web] worker layout unavailable — falling back to sync', e);
+        try { if (layout) layout.kill(); } catch (_) { /* ignore */ }
+        _artWebRunLayout(graph);
+        _artWebFinishLayout(graph);
+        return;
+    }
+    _artistWeb.fa2 = layout;
+    const statsEl = document.getElementById('artist-web-stats');
+    if (statsEl && statsEl.textContent.indexOf('· settling') === -1) statsEl.textContent += ' · settling…';
+    // Run time scales with graph size (a worker iterates as fast as it can; this is wall-clock).
+    const ms = Math.min(11000, 1600 + graph.order * 1.6);   // ~2x the settle budget — more iterations,
+                                                            // tighter islands (the pre-seed makes them pay off)
+    _artistWeb.fa2Timer = setTimeout(() => {
+        _artWebKillLiveLayout();
+        _artWebFinishLayout(graph);
+        if (statsEl) statsEl.textContent = statsEl.textContent.replace(' · settling…', '');
+        if (_artistWeb.sigma && _artistWeb.graph === graph) {
+            _artistWeb.sigma.getCamera().animatedReset({ duration: 500 });   // fit the settled web
+            // hideEdgesOnMove leaves the LAST frame of the animation edge-less (nothing re-renders
+            // after the camera stops) — force one refresh once the animation has landed.
+            setTimeout(() => {
+                if (_artistWeb.sigma && _artistWeb.graph === graph) _artistWeb.sigma.refresh();
+            }, 650);
+        }
+    }, ms);
+}
+
+function _artWebKillLiveLayout() {
+    if (_artistWeb.fa2Timer) { clearTimeout(_artistWeb.fa2Timer); _artistWeb.fa2Timer = null; }
+    if (_artistWeb.fa2) { try { _artistWeb.fa2.kill(); } catch (e) { /* ignore */ } _artistWeb.fa2 = null; }
+}
+
+// Post-layout bookkeeping: capture resting ("home") positions + scale interaction distances to the
+// settled coordinate range (FA2 output scale is unknown up front).
+function _artWebFinishLayout(graph) {
+    const home = {};
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    graph.forEachNode((k, a) => {
+        home[k] = { x: a.x, y: a.y };
+        if (a.x < minX) minX = a.x; if (a.x > maxX) maxX = a.x;
+        if (a.y < minY) minY = a.y; if (a.y > maxY) maxY = a.y;
+    });
+    const span = Math.max(maxX - minX, maxY - minY) || 1;
+    _artistWeb.home = home;
+    _artistWeb.spreadPush = span * 0.035;    // how far a selected node's neighbors fan out
+    _artistWeb.spreadRoot = null;
+    _artistWeb.spreadSet = null;
+}
+
+// ---- Lens A: GENRE — every artist, grouped by genre-anchor hubs (membership edges = layout only) --
+function _artWebBuildGenre(data, Graph) {
+    const nodes = data.nodes || [], edges = data.edges || [];
+    const { color: colorOf, counts } = _webGenreColorMap(nodes);
+    const stars = _webTopArtists(nodes.filter(n => n.kind === 'artist'), WEB_STAR_COUNT);
+    const graph = new Graph();
+    nodes.forEach(n => {
+        if (n.kind === 'genre') {
+            const members = counts[n.genre] || 1;
+            graph.addNode(n.key, {
+                label: n.label, x: Math.random(), y: Math.random(),
+                size: 6 + Math.sqrt(members) * 1.5,
+                color: colorOf(n.genre), baseColor: colorOf(n.genre),
+                forceLabel: true, kind: 'genre', genre: n.genre,
+            });
+        } else {
+            const color = colorOf(n.cluster);
+            const star = stars.has(n.key);
+            graph.addNode(n.key, {
+                label: n.label, x: Math.random(), y: Math.random(),
+                size: star ? WEB_STAR_SIZE : 2 + Math.sqrt(n.popularity || 0) / 3,
+                color: color, baseColor: color,
+                kind: 'artist', genre: n.cluster, primaryGenre: n.primary_genre,
+                popularity: n.popularity || 0, thumb: n.thumb || null,
+                artistId: n.id != null ? n.id : null, source: n.source || null,
+                isStar: star, forceLabel: star,   // top artists are always-labeled landmarks
+            });
+            _artistWeb.index.push({ key: n.key, label: n.label });
+        }
+    });
+    edges.forEach(e => {
+        if (graph.hasNode(e.source) && graph.hasNode(e.target) && !graph.hasEdge(e.source, e.target)) {
+            const membership = e.kind === 'membership';
+            const base = graph.getNodeAttribute(e.source, 'baseColor') || WEB_GENRE_FALLBACK;
+            graph.addEdge(e.source, e.target, {
+                weight: e.weight,
+                size: membership ? 0.35 : _webEdgeSize(e.weight),
+                color: _webHexToRgba(base, _webEdgeAlpha(e.weight)),
+                baseColor: base,   // hex kept so the reducer can brighten it on focus
+                kind: e.kind,
+            });
+        }
+    });
+    const c = data.counts || {};
+    const simCount = edges.filter(e => e.kind === 'similarity').length;
+    const stats = `${c.artists ?? nodes.length} artists · ${c.genres ?? '?'} genres · ${simCount} similarity links`;
+    return { graph, colorOf, counts, stats };
+}
+
+// ---- Lens B: COMMUNITIES — the similarity-connected core, clustered by Louvain, named by hub artist -
+function _artWebBuildCommunity(data, Graph) {
+    const nodes = data.nodes || [], edges = data.edges || [];
+    const simEdges = edges.filter(e => e.kind === 'similarity');
+    const artistByKey = {};
+    nodes.forEach(n => { if (n.kind === 'artist') artistByKey[n.key] = n; });
+    const stars = _webTopArtists(nodes.filter(n => n.kind === 'artist'), WEB_STAR_COUNT);
+
+    const graph = new Graph();
+    // Only artists with at least one similarity link — the discoverable "taste" core.
+    simEdges.forEach(e => [e.source, e.target].forEach(k => {
+        if (!graph.hasNode(k) && artistByKey[k]) {
+            const n = artistByKey[k];
+            const star = stars.has(k);
+            graph.addNode(k, {
+                label: n.label, x: Math.random(), y: Math.random(),
+                size: star ? WEB_STAR_SIZE : 2 + Math.sqrt(n.popularity || 0) / 3, kind: 'artist',
+                primaryGenre: n.primary_genre, popularity: n.popularity || 0, thumb: n.thumb || null,
+                artistId: n.id != null ? n.id : null, source: n.source || null,
+                isStar: star,
+            });
+        }
+    }));
+    simEdges.forEach(e => {
+        if (graph.hasNode(e.source) && graph.hasNode(e.target) && !graph.hasEdge(e.source, e.target)) {
+            graph.addEdge(e.source, e.target, { weight: e.weight, kind: 'similarity', size: 0.7 });
+        }
+    });
+
+    // Louvain community detection on the similarity graph.
+    const louvain = window.graphologyLibrary && window.graphologyLibrary.communitiesLouvain;
+    let comm = {};
+    if (louvain) { try { comm = louvain(graph, { getEdgeWeight: 'weight' }); } catch (e) { comm = {}; } }
+
+    // Group members; name each community by its highest-degree (most central) artist.
+    const members = {};
+    graph.forEachNode(k => { const cid = (comm[k] != null ? comm[k] : 'x'); (members[cid] = members[cid] || []).push(k); });
+    const commIds = Object.keys(members).sort((a, b) => members[b].length - members[a].length);
+    const repOf = {}, colorByRep = {}, countsByRep = {};
+    commIds.forEach((cid, i) => {
+        let best = null, bestDeg = -1;
+        members[cid].forEach(k => { const d = graph.degree(k); if (d > bestDeg) { bestDeg = d; best = k; } });
+        let rep = best ? graph.getNodeAttribute(best, 'label') : ('Group ' + cid);
+        if (countsByRep[rep] != null) rep = rep + ' · ' + cid;   // guard rare rep-name collision
+        repOf[cid] = rep;
+        colorByRep[rep] = WEB_PALETTE[i % WEB_PALETTE.length];   // cycle palette; no community goes gray
+        countsByRep[rep] = members[cid].length;
+        if (best) graph.setNodeAttribute(best, '_rep', true);
+    });
+    graph.forEachNode(k => {
+        const cid = (comm[k] != null ? comm[k] : 'x');
+        const rep = repOf[cid];
+        const color = colorByRep[rep] || WEB_GENRE_FALLBACK;
+        const isRep = graph.getNodeAttribute(k, '_rep') === true;
+        const isStar = graph.getNodeAttribute(k, 'isStar') === true;
+        graph.mergeNodeAttributes(k, {
+            color, baseColor: color, genre: rep,
+            forceLabel: isRep || isStar,   // community leaders AND top artists are labeled landmarks
+            size: isRep ? Math.max(8, graph.getNodeAttribute(k, 'size')) : graph.getNodeAttribute(k, 'size'),
+        });
+        _artistWeb.index.push({ key: k, label: graph.getNodeAttribute(k, 'label') });
+    });
+    graph.forEachEdge((edge, attrs, s) => {
+        const base = graph.getNodeAttribute(s, 'baseColor') || WEB_GENRE_FALLBACK;
+        const w = attrs.weight || 1;
+        graph.mergeEdgeAttributes(edge, {
+            color: _webHexToRgba(base, _webEdgeAlpha(w)),
+            baseColor: base,
+            size: _webEdgeSize(w),
+        });
+    });
+
+    const stats = `${graph.order} connected artists · ${commIds.length} communities · ${graph.size} links`;
+    return { graph, colorOf: (rep) => colorByRep[rep] || WEB_GENRE_FALLBACK, counts: countsByRep, stats };
+}
+
+// ---- Lens C: DISCOVERY — owned artists (cool) + their unowned similar candidates (warm) ----------
+function _artWebBuildDiscovery(data, Graph) {
+    const nodes = data.nodes || [], edges = data.edges || [];
+    // Count each anchor's candidates up front — anchor size scales with its frontier, and only the
+    // biggest ~25 get an always-on label (the full frontier has ~300 anchors; labeling them all
+    // would wall the view with pills — the rest label on zoom/hover).
+    const anchorDeg = {};
+    edges.forEach(e => { anchorDeg[e.source] = (anchorDeg[e.source] || 0) + 1; });
+    const starAnchors = new Set(Object.keys(anchorDeg).sort((a, b) => anchorDeg[b] - anchorDeg[a]).slice(0, 25));
+
+    const graph = new Graph();
+    nodes.forEach(n => {
+        if (n.kind === 'owned') {
+            const deg = anchorDeg[n.key] || 1;
+            graph.addNode(n.key, {
+                label: n.label, x: Math.random(), y: Math.random(),
+                size: 5 + Math.sqrt(deg) * 0.9,
+                color: WEB_OWNED_COLOR, baseColor: WEB_OWNED_COLOR,
+                forceLabel: starAnchors.has(n.key), kind: 'owned', genre: 'Your library',
+                artistId: n.id != null ? n.id : null, thumb: n.thumb || null,
+            });
+        } else {
+            graph.addNode(n.key, {
+                label: n.label, x: Math.random(), y: Math.random(),
+                size: 3, color: WEB_DISCOVERY_COLOR, baseColor: WEB_DISCOVERY_COLOR,
+                kind: 'discovery', genre: 'Discovery',
+                image_url: n.image_url || null, genresList: n.genres || null,
+                ids: n.ids || [], popularity: n.popularity || 0,
+            });
+        }
+        _artistWeb.index.push({ key: n.key, label: n.label });
+    });
+    let maxW = 1;
+    edges.forEach(e => {
+        if (graph.hasNode(e.source) && graph.hasNode(e.target) && !graph.hasEdge(e.source, e.target)) {
+            if (e.weight > maxW) maxW = e.weight;
+            graph.addEdge(e.source, e.target, {
+                weight: e.weight, size: _webEdgeSize(e.weight),
+                // Weight-scaled alpha (like the other lenses) — a fixed alpha washed out around
+                // dense anchors once the full frontier's ~4.4k edges rendered at once.
+                color: _webHexToRgba(WEB_DISCOVERY_COLOR, _webEdgeAlpha(e.weight)),
+                baseColor: WEB_DISCOVERY_COLOR, kind: 'discovery',
+            });
+        }
+    });
+    // Size each discovery candidate by its strongest similarity link (its best reason to check it out).
+    graph.forEachNode((k, a) => {
+        if (a.kind !== 'discovery') return;
+        let w = 1;
+        graph.forEachEdge(k, (e, ea) => { if ((ea.weight || 1) > w) w = ea.weight; });
+        graph.setNodeAttribute(k, 'size', 2.5 + Math.sqrt(w / maxW) * 5);
+    });
+    const c = data.counts || {};
+    const stats = `${c.owned ?? 0} of your artists · ${c.discovery ?? 0} to discover`;
+    return { graph, colorOf: () => WEB_DISCOVERY_COLOR, counts: {}, stats };
+}
+
+// Shared force layout — LinLog + outbound-attraction settles clusters into separated islands.
+function _artWebRunLayout(graph) {
+    const fa2 = window.graphologyLibrary && window.graphologyLibrary.layoutForceAtlas2;
+    if (!fa2) { console.warn('[Artist Web] forceAtlas2 unavailable — nodes stay at random positions'); return; }
+    fa2.assign(graph, {
+        iterations: 800,
+        settings: {
+            ...fa2.inferSettings(graph),
+            barnesHutOptimize: true,
+            linLogMode: true,                      // clusters separate into islands
+            outboundAttractionDistribution: true,  // spread the hubs out
+            adjustSizes: true,                     // don't overlap node circles
+            gravity: 1.2, scalingRatio: 3, slowDown: 4,
+        },
+    });
+}
+
+// Shared sigma mount + interaction wiring (used by both lenses).
+function _artWebMountSigma(host, graph) {
+    host.innerHTML = '';
+    host.style.background = WEB_CANVAS_BG;   // dark charcoal so the cluster colors glow
+    if (_artistWeb.fxRAF) { cancelAnimationFrame(_artistWeb.fxRAF); _artistWeb.fxRAF = null; }
+    if (_artistWeb.sigma) { _artistWeb.sigma.kill(); _artistWeb.sigma = null; }
+    _artistWeb.graph = graph;
+    _artistWeb.sigma = new window.Sigma(graph, host, {
+        renderLabels: true,
+        labelRenderedSizeThreshold: 20,
+        labelRenderer: _webDrawLabel,
+        hideEdgesOnMove: true,   // edge cleanup: drop edges while panning/zooming for clarity + perf
+        hideLabelsOnMove: true,  // labels re-measure (measureText) per frame — drop them while moving too
+        labelGridCellSize: 150,  // sparser label grid => fewer simultaneous labels/measureText per frame
+        nodeReducer: (node, data) => _artWebNodeReducer(node, data),
+        edgeReducer: (edge, data) => _artWebEdgeReducer(edge, data),
+    });
+    const sig = _artistWeb.sigma;
+    // Track the pointer over the canvas so the hover tooltip positions itself (sigma node events
+    // don't carry client coords reliably across versions). Bound once — the host element is static.
+    if (!_artistWeb._mouseBound) {
+        host.addEventListener('mousemove', (e) => {
+            _artistWeb._mouse = { x: e.clientX, y: e.clientY };
+            if (_artistWeb._hoverNode) _artWebShowTooltip(_artistWeb._hoverNode);
+        });
+        _artistWeb._mouseBound = true;
+    }
+    sig.on('enterNode', ({ node }) => _artWebHover(node));
+    sig.on('leaveNode', () => _artWebHover(null));
+    sig.on('clickNode', ({ node }) => _artWebClickNode(node));
+    sig.on('clickStage', () => {
+        if (_artistWeb.pathMode) { _artWebClearPath(); _artWebPathHint('Click an artist, then a second one, to trace how they connect.'); }
+        else _artWebClearSelection();
+    });
+}
+
+// ---- Node-spread effect: selecting a node fans its neighbors outward, then they settle back -------
+// Set the spread to a node's neighbors (skips huge hubs so the whole screen doesn't heave).
+function _artWebSetSpread(root, focusSet) {
+    const st = _artistWeb;
+    if (!st.cursorFX || !st.home) return;
+    const neighbors = new Set(focusSet);
+    neighbors.delete(root);
+    if (neighbors.size === 0) { _artWebClearSpread(); return; }
+    // Genre hubs have hundreds of members — that's fine, the whole cluster just blooms outward from
+    // its label. (Per-frame cost is the full render either way, so member count doesn't hurt perf.)
+    st.spreadRoot = root;
+    st.spreadSet = neighbors;
+    _artWebStartFX();
+}
+
+function _artWebClearSpread() {
+    const st = _artistWeb;
+    st.spreadRoot = null; st.spreadSet = null;
+    _artWebStartFX();   // loop eases any pushed nodes back home, then stops
+}
+
+function _artWebStartFX() {
+    if (!_artistWeb.fxRAF) _artistWeb.fxRAF = requestAnimationFrame(_artWebSpreadTick);
+}
+
+// Each frame: nodes in the spread set ease toward (home pushed away from the selected node); every
+// other node eases toward home. The loop runs only WHILE things are moving, so it's not continuous.
+function _artWebSpreadTick() {
+    const st = _artistWeb;
+    st.fxRAF = null;
+    if (!st.sigma || !st.cursorFX || !st.home || !st.graph) return;
+    const g = st.graph, home = st.home;
+    const set = st.spreadSet, root = st.spreadRoot;
+    const rootHome = root && home[root] ? home[root] : null;
+    const PUSH = st.spreadPush, EASE = 0.18;
+
+    // Animate only the pushed/displaced nodes, not all ~5k every frame. `spreadActive` accumulates
+    // any pushed node and drops it once it eases back home (and isn't currently pushed).
+    if (!st.spreadActive) st.spreadActive = new Set();
+    if (set) set.forEach(k => st.spreadActive.add(k));
+
+    let moving = false;
+    st.spreadActive.forEach(k => {
+        const h = home[k];
+        if (!h) { st.spreadActive.delete(k); return; }
+        const ax = g.getNodeAttribute(k, 'x'), ay = g.getNodeAttribute(k, 'y');
+        let tx = h.x, ty = h.y;
+        const pushed = set && rootHome && set.has(k);
+        if (pushed) {
+            const dx = h.x - rootHome.x, dy = h.y - rootHome.y;
+            const dist = Math.sqrt(dx * dx + dy * dy) || 0.0001;
+            tx = h.x + (dx / dist) * PUSH;   // push each neighbor outward from the selected node
+            ty = h.y + (dy / dist) * PUSH;
+        }
+        const nx = ax + (tx - ax) * EASE;
+        const ny = ay + (ty - ay) * EASE;
+        if (Math.abs(nx - ax) > 0.0005 || Math.abs(ny - ay) > 0.0005) {
+            g.setNodeAttribute(k, 'x', nx);
+            g.setNodeAttribute(k, 'y', ny);
+            moving = true;
+        } else if (!pushed) {
+            // Reached home and not being pushed → snap exact + stop tracking it.
+            g.setNodeAttribute(k, 'x', tx);
+            g.setNodeAttribute(k, 'y', ty);
+            st.spreadActive.delete(k);
+        }
+    });
+    if (moving) { st.sigma.refresh(); st.fxRAF = requestAnimationFrame(_artWebSpreadTick); }
+}
+
+function closeArtistWeb() {
+    _artistWeb.gen++;   // invalidate any in-flight library/discovery fetch so it can't render into a closed Web
+    const container = document.getElementById('artist-web-container');
+    // Stamp _prevDisplay='none' so if another overlay (Artist Map) later runs its sibling-restore,
+    // it keeps this container hidden instead of falling back to '' and un-hiding a dead (sigma-killed)
+    // Web. Matters on the Explore-in-Map hand-off, where the Map's open skips recording _prevDisplay.
+    if (container) { container.style.display = 'none'; container._prevDisplay = 'none'; }
+    document.querySelectorAll('#discover-page > .discover-container > *').forEach(el => {
+        if (el.id !== 'artist-web-container' && el._prevDisplay !== undefined) el.style.display = el._prevDisplay;
+    });
+    _artWebKillLiveLayout();
+    if (_artistWeb.fxRAF) { cancelAnimationFrame(_artistWeb.fxRAF); _artistWeb.fxRAF = null; }
+    _artistWeb.spreadRoot = _artistWeb.spreadSet = _artistWeb.spreadActive = null;
+    if (_artistWeb.sigma) { _artistWeb.sigma.kill(); _artistWeb.sigma = null; }
+    _artistWeb.graph = null;   // so a late async re-select (expand-after-close) can't refresh a dead graph
+    if (_artistWeb.onKey) { document.removeEventListener('keydown', _artistWeb.onKey); _artistWeb.onKey = null; }
+    const results = document.getElementById('artist-web-search-results');
+    if (results) { results.style.display = 'none'; results.innerHTML = ''; }
+    const sb = document.getElementById('artweb-genre-sidebar');
+    if (sb) sb.style.display = 'none';
+    const legend = document.getElementById('artist-web-legend');
+    if (legend) legend.style.display = 'none';
+    _artistWeb._hoverNode = null;
+    const tt = document.getElementById('artist-web-tooltip');
+    if (tt) { tt.style.display = 'none'; tt._node = null; }
+    _artistWeb.pathMode = false;
+    _artistWeb.pathNodes = _artistWeb.pathPairs = _artistWeb.pathResult = _artistWeb.pathSource = _artistWeb.pathTarget = null;
+    const pathBtn = document.getElementById('artweb-path-btn');
+    if (pathBtn) pathBtn.classList.remove('active');
+    const hint = document.getElementById('artweb-path-hint');
+    if (hint) hint.style.display = 'none';
+    _artWebClosePanel();
+}
+
+// ---- Artist Web reducers: the single place UI state turns into per-frame styling -------------
+// Dimmed nodes fade to a DARK gray (not light — light + WebGL additive blending reads as white).
+// Dimmed edges are hidden outright: thousands of faint edges overlapping accumulate to a white haze.
+const _WEB_DIM_NODE = '#2b2b34';
+
+function _artWebNodeReducer(node, data) {
+    const st = _artistWeb;
+    // Resting fast-path: nothing highlighting/filtering → render base attrs as-is, no per-node
+    // clone. This is the common case and runs once per node (~5k) on EVERY refresh (hover, pan, etc).
+    if (!st.pathNodes && !st.genreFilter && !st.focusSet && !st.searchMatch) return data;
+    const res = Object.assign({}, data);
+    // Shortest-path mode takes priority: the chain lights up, everything else goes dark.
+    if (st.pathNodes) {
+        if (st.pathNodes.has(node)) {
+            res.color = data.baseColor || data.color;
+            res.zIndex = 3;
+            const isEnd = (node === st.pathSource || node === st.pathTarget);
+            res.forceLabel = isEnd || !!st.pathResult;   // label the whole chain once complete
+            if (isEnd) res.highlighted = true;
+        } else {
+            res.color = _WEB_DIM_NODE; res.label = ''; res.zIndex = 0;
+        }
+        return res;
+    }
+    // Persistent genre filter dims anything outside the chosen genres, regardless of focus/search.
+    if (st.genreFilter && !st.genreFilter.has(data.genre)) {
+        res.color = _WEB_DIM_NODE; res.label = ''; res.zIndex = 0;
+        return res;
+    }
+    const active = st.focusSet || st.searchMatch;   // focus (hover/select) wins over search
+    if (!active) return res;
+    const searching = !st.focusSet && !!st.searchMatch;   // search labels all its hits (usually few)
+    if (active.has(node)) {
+        res.color = data.baseColor || data.color;
+        res.zIndex = 2;
+        // Only label the hovered/selected node itself (or search hits) — labeling every neighbor
+        // floods the view with white label pills on big genre clusters.
+        res.forceLabel = searching || node === st.focusRoot;
+        if (node === st.focusRoot) res.highlighted = true;   // sigma draws a halo on the root
+    } else {
+        res.color = _WEB_DIM_NODE;
+        res.label = '';
+        res.zIndex = 0;
+    }
+    return res;
+}
+
+function _artWebEdgeReducer(edge, data) {
+    const st = _artistWeb;
+    // Membership edges are a layout scaffold only. Drawing them starbursts big hubs (1000+ faint
+    // spokes overlapping accumulate to solid white), so never render them — clustering is already
+    // conveyed by node position + color. Only similarity edges are drawn.
+    if (data.kind === 'membership') { const r = Object.assign({}, data); r.hidden = true; return r; }
+    // Resting fast-path: no path/focus/search/genre-filter/declutter active → the ~35k similarity
+    // edges render as-is with NO clone and NO source/target lookups. This is the biggest per-refresh
+    // allocation sink; refresh fires on every hover, click, search keystroke, and spread frame.
+    if (!st.pathNodes && !st.focusSet && !st.searchMatch && !st.genreFilter && !st.edgeDeclutter) {
+        return data;
+    }
+    const res = Object.assign({}, data);
+    // Declutter (resting view only): hide the weaker half of SIMILARITY edges. Scoped to that kind —
+    // the threshold is computed from similarity weights, and applying it to the Discovery lens's
+    // (mostly weight-1) edges hid essentially all of them, leaving candidates as floating dots.
+    if (st.edgeDeclutter && data.kind === 'similarity' && !st.pathNodes && !st.focusSet && !st.searchMatch
+        && (data.weight || 1) < st.edgeThreshold) {
+        res.hidden = true; return res;
+    }
+    const g = _artistWeb.graph;
+    // Shortest-path mode: only the consecutive edges along the chain show (bright + thick), rest hidden.
+    if (st.pathNodes) {
+        if (g && st.pathPairs && st.pathPairs.size) {
+            const s = g.source(edge), t = g.target(edge);
+            const key = s < t ? s + '|' + t : t + '|' + s;
+            if (st.pathPairs.has(key)) {
+                res.zIndex = 3;
+                res.color = _webHexToRgba(data.baseColor || '#ffffff', 0.95);
+                res.size = (data.size || 0.7) * 2.4;
+                return res;
+            }
+        }
+        res.hidden = true;
+        return res;
+    }
+    if (st.genreFilter && g) {
+        const sg = g.getNodeAttribute(g.source(edge), 'genre');
+        const tg = g.getNodeAttribute(g.target(edge), 'genre');
+        if (!(st.genreFilter.has(sg) && st.genreFilter.has(tg))) { res.hidden = true; return res; }
+    }
+    const active = st.focusSet || st.searchMatch;
+    if (active && g) {
+        const s = g.source(edge), t = g.target(edge);
+        // Focus (hover/select): show only edges fully inside the set → clean neighborhood.
+        // Search: show any edge touching a match.
+        const show = st.focusSet ? (active.has(s) && active.has(t)) : (active.has(s) || active.has(t));
+        if (show) {
+            // Brighten + thicken the focused neighborhood's links so relationships read clearly.
+            res.zIndex = 1;
+            res.color = _webHexToRgba(data.baseColor || '#888888', 0.75);
+            res.size = (data.size || 0.7) * 1.7;
+        } else {
+            res.hidden = true;   // hide non-focus edges (faint ones accumulate to a white haze)
+        }
+    }
+    return res;
+}
+
+// ---- Artist Web search: client-side over loaded artist nodes (instant), mirrors Artist Map UX --
+function artWebSearch(query) {
+    const results = document.getElementById('artist-web-search-results');
+    if (!results) return;
+    const q = (query || '').trim().toLowerCase();
+
+    if (q.length < 2) {
+        results.style.display = 'none';
+        results.innerHTML = '';
+        _artistWeb.searchMatch = null;
+        if (_artistWeb.sigma) _artistWeb.sigma.refresh();
+        return;
+    }
+
+    const hits = _artistWeb.index.filter(n => n.label.toLowerCase().includes(q));
+    // Dim everything that isn't a hit.
+    _artistWeb.searchMatch = new Set(hits.map(n => n.key));
+    if (_artistWeb.sigma) _artistWeb.sigma.refresh();
+
+    results.style.display = 'block';
+    if (!hits.length) {
+        results.innerHTML = '<div class="artist-map-search-item artist-map-search-empty">No artists found</div>';
+        return;
+    }
+    results.innerHTML = hits.slice(0, 8).map(n =>
+        `<div class="artist-map-search-item" onclick="artWebFocusNode('${escapeForInlineJs(n.key)}')">
+            <span class="artist-map-search-type similar">○</span>
+            ${escapeHtml(n.label)}
+            <span class="artist-map-search-go">Focus &rarr;</span>
+        </div>`
+    ).join('');
+}
+
+// Enter key → jump to the first match.
+function artWebSearchEnter() {
+    if (_artistWeb.searchMatch && _artistWeb.searchMatch.size) {
+        artWebFocusNode(_artistWeb.searchMatch.values().next().value);
+    }
+}
+
+// Center the camera on a node and pulse it (also closes the dropdown).
+function artWebFocusNode(key) {
+    const sig = _artistWeb.sigma, graph = _artistWeb.graph;
+    if (!sig || !graph || !graph.hasNode(key)) return;
+    const results = document.getElementById('artist-web-search-results');
+    if (results) { results.style.display = 'none'; results.innerHTML = ''; }
+
+    // Isolate this node as the single search match so it stands out.
+    _artistWeb.searchMatch = new Set([key]);
+    sig.refresh();
+
+    const disp = sig.getNodeDisplayData(key);
+    if (disp) {
+        sig.getCamera().animate({ x: disp.x, y: disp.y, ratio: 0.15 }, { duration: 500 });
+        _artWebRefreshAfter(600);
+    }
+}
+
+// ---- Artist Web camera controls ---------------------------------------------------------------
+// hideEdgesOnMove leaves the final frame of any camera ANIMATION edge-less (the last render happens
+// while "moving", and nothing re-renders after the animation stops). Every animated camera move
+// schedules one trailing refresh via this helper.
+function _artWebRefreshAfter(ms) {
+    setTimeout(() => { if (_artistWeb.sigma) _artistWeb.sigma.refresh(); }, ms);
+}
+
+function artWebZoom(factor) {
+    if (!_artistWeb.sigma) return;
+    const cam = _artistWeb.sigma.getCamera();
+    cam.animate({ ratio: cam.ratio * factor }, { duration: 250 });
+    _artWebRefreshAfter(350);
+}
+
+function artWebFitToView() {
+    if (!_artistWeb.sigma) return;
+    _artistWeb.sigma.getCamera().animatedReset({ duration: 400 });
+    _artWebRefreshAfter(500);
+    // Clear any search focus so the whole web is visible again.
+    const input = document.getElementById('artist-web-search');
+    if (input) input.value = '';
+    _artistWeb.searchMatch = null;
+    _artistWeb.sigma.refresh();
+}
+
+// ---- Artist Web hover + selection: highlight a node and its neighbors -------------------------
+// Resolved artist-thumb cache for the hover tooltip, keyed by library artist id. Value: a URL
+// string, '' (tried, none), or null (in-flight) — any non-undefined means "don't refetch".
+const _artWebThumbCache = {};
+let _artWebTipThumbTimer = null;
+
+// Resolve one owned artist's browser-loadable thumb (same endpoint the side-panel avatar uses),
+// cache it, and swap it into the tooltip IF we're still hovering that exact node.
+function _artWebResolveTipThumb(nodeKey, artistId) {
+    _artWebThumbCache[artistId] = null;   // in-flight
+    fetch(`/api/library/artist/${encodeURIComponent(artistId)}/thumb`)
+        .then(r => r.json())
+        .then(d => {
+            const url = (d && d.success && d.image_url) ? d.image_url : '';
+            _artWebThumbCache[artistId] = url;
+            const tip = document.getElementById('artist-web-tooltip');
+            if (url && tip && tip._node === nodeKey && tip.style.display !== 'none') {
+                const slot = tip.querySelector('.artmap-tip-img');
+                if (slot) slot.outerHTML =
+                    `<img class="artmap-tip-img" src="${escapeHtml(url)}" alt="" onerror="this.style.display='none'">`;
+            }
+        })
+        .catch(() => { _artWebThumbCache[artistId] = ''; });
+}
+
+// Hover tooltip — identify any node without clicking (name + genre + connection count). Rebuilt only
+// when the hovered node changes; a plain mousemove just repositions it. Positioned at the pointer.
+function _artWebShowTooltip(nodeKey) {
+    const tip = document.getElementById('artist-web-tooltip');
+    if (!tip) return;
+    const g = _artistWeb.graph;
+    if (!nodeKey || !g || !g.hasNode(nodeKey)) { tip.style.display = 'none'; tip._node = null; return; }
+    if (tip._node !== nodeKey) {
+        tip._node = nodeKey;
+        const a = g.getNodeAttributes(nodeKey);
+        const kind = a.kind;
+        // True connection count: similarity links only (skip the membership scaffold edge). Genre
+        // hubs have no similarity edges — their degree IS the member count.
+        let conn = 0;
+        if (kind === 'genre') { conn = g.degree(nodeKey); }
+        else { g.forEachEdge(nodeKey, (e, attr) => { if (attr.kind === 'similarity') conn++; }); }
+        const noun = kind === 'genre' ? 'artist' : 'connection';
+        const badge = kind === 'discovery' ? '<span class="artmap-tip-badge">To discover</span>'
+                    : kind === 'genre' ? '<span class="artmap-tip-badge">Genre</span>' : '';
+        // Image: discovery candidates ship a full image_url. Owned artists carry a Plex-RELATIVE
+        // thumb that won't load as-is (like the side panel's avatar), so resolve it lazily via the
+        // same /thumb endpoint and cache it — only for artists you actually pause on (cheap; the
+        // endpoint does a DB write per call so eager-resolving all ~5k would take minutes).
+        const cached = (a.artistId != null) ? _artWebThumbCache[a.artistId] : undefined;
+        const imgSrc = (kind === 'discovery') ? a.image_url : (cached || null);
+        const img = imgSrc
+            ? `<img class="artmap-tip-img" src="${escapeHtml(imgSrc)}" alt="" onerror="this.style.display='none'">`
+            : (kind === 'genre' ? '' : '<div class="artmap-tip-img artmap-tip-img-fallback">&#9835;</div>');
+        const gen = a.primaryGenre || '';
+        const genreHTML = gen ? `<div class="artmap-tip-genres"><span>${escapeHtml(gen)}</span></div>` : '';
+        const connHTML = conn ? `<div class="artmap-tip-conn">${conn} ${noun}${conn === 1 ? '' : 's'}</div>` : '';
+        tip.innerHTML = `<div class="artmap-tip-row">${img}<div class="artmap-tip-info">` +
+            `<div class="artmap-tip-name">${escapeHtml(a.label || '')}</div>${badge}${connHTML}${genreHTML}</div></div>`;
+        tip.style.display = 'block';
+
+        // Kick off a debounced lazy thumb resolve for an owned artist we haven't cached yet — the
+        // ~140ms delay means a fast sweep across nodes doesn't fetch for every one you graze past.
+        if (!imgSrc && kind !== 'genre' && kind !== 'discovery'
+            && a.artistId != null && _artWebThumbCache[a.artistId] === undefined) {
+            clearTimeout(_artWebTipThumbTimer);
+            const aid = a.artistId;
+            _artWebTipThumbTimer = setTimeout(() => {
+                if (tip._node === nodeKey && _artWebThumbCache[aid] === undefined) _artWebResolveTipThumb(nodeKey, aid);
+            }, 140);
+        }
+    }
+    const m = _artistWeb._mouse;
+    if (m) {
+        tip.style.left = Math.min(m.x + 16, window.innerWidth - tip.offsetWidth - 10) + 'px';
+        tip.style.top = Math.min(m.y - 10, window.innerHeight - tip.offsetHeight - 10) + 'px';
+    }
+}
+
+function _artWebHover(node) {
+    const st = _artistWeb;
+    if (!st.sigma) return;
+    st._hoverNode = node;
+    _artWebShowTooltip(node);                // tooltip shows even in path mode (helps pick the 2 nodes)
+    if (st.pathMode) return;                 // ...but no hover-dim while tracing a path
+    if (node) {
+        const set = new Set([node]);
+        st.graph.forEachNeighbor(node, nb => set.add(nb));
+        st.focusSet = set;
+        st.focusRoot = node;
+    } else {
+        // Hover-out restores the click-selection's highlight (if any), else clears.
+        st.focusSet = st.selectedFocus || null;
+        st.focusRoot = st.selectedKey || null;
+    }
+    st.sigma.refresh();
+}
+
+function _artWebClickNode(node) {
+    const st = _artistWeb;
+    if (!st.graph || !st.graph.hasNode(node)) return;
+    if (st.pathMode) { _artWebPathClick(node); return; }
+    const set = new Set([node]);
+    st.graph.forEachNeighbor(node, nb => set.add(nb));
+    st.selectedKey = node; st.selectedFocus = set;
+    st.focusSet = set; st.focusRoot = node;
+    st.searchMatch = null;                      // a click supersedes a search dim
+    _artWebSetSpread(node, set);                // fan the neighbors outward
+    st.sigma.refresh();
+    const kind = st.graph.getNodeAttribute(node, 'kind');
+    if (kind === 'genre') _artWebShowGenre(node);
+    else if (kind === 'discovery') _artWebShowDiscovery(node);
+    else _artWebShowArtist(node);
+}
+
+function _artWebClearSelection() {
+    const st = _artistWeb;
+    st.selectedKey = st.selectedFocus = st.focusSet = st.focusRoot = null;
+    _artWebClearSpread();               // let the fanned-out neighbors settle back home
+    if (st.sigma) st.sigma.refresh();
+    _artWebClosePanel();
+}
+
+// Hand off to the Artist Map explorer. The Web is a fixed z-index:100 overlay that sits ON TOP of
+// the Map (later in the DOM), so we must close it first or the Map opens invisibly underneath.
+function artWebExploreInMap(name) {
+    closeArtistWeb();
+    if (typeof artMapExploreArtist === 'function') artMapExploreArtist(name);
+}
+
+// Focus the camera on an artist and open its card (used by the genre panel's member list).
+function _artWebGoToArtist(key) {
+    const sig = _artistWeb.sigma;
+    if (!sig || !_artistWeb.graph.hasNode(key)) return;
+    _artWebClickNode(key);
+    const disp = sig.getNodeDisplayData(key);
+    if (disp) { sig.getCamera().animate({ x: disp.x, y: disp.y, ratio: 0.15 }, { duration: 500 }); _artWebRefreshAfter(600); }
+}
+
+// ---- Artist Web shortest path: click two artists, trace how they connect via similarity ---------
+// Pathfinding runs on a SIMILARITY-only graph (not the displayed one) so a path means "sounds like ->
+// sounds like", never "both are tagged Rock" (which membership-to-hub edges would allow).
+function _artWebSimGraph() {
+    if (_artistWeb.simGraph) return _artistWeb.simGraph;
+    const Graph = window.graphology && (window.graphology.Graph || window.graphology);
+    const data = _artistWeb.data;
+    if (!Graph || !data) return null;
+    // UNDIRECTED: similarity pairs are stored once (sorted), so a directed graph would miss reverse
+    // traversals and report "no connection" for most pairs.
+    const g = new Graph({ type: 'undirected' });
+    (data.edges || []).forEach(e => {
+        if (e.kind !== 'similarity') return;
+        if (!g.hasNode(e.source)) g.addNode(e.source);
+        if (!g.hasNode(e.target)) g.addNode(e.target);
+        if (!g.hasEdge(e.source, e.target)) g.addEdge(e.source, e.target, { weight: e.weight || 1 });
+    });
+    _artistWeb.simGraph = g;
+    return g;
+}
+
+function artWebTogglePathMode() {
+    const st = _artistWeb;
+    if (st.pathMode) { _artWebExitPath(); return; }
+    st.pathMode = true;
+    const btn = document.getElementById('artweb-path-btn');
+    if (btn) btn.classList.add('active');
+    _artWebClearSelection();
+    _artWebClearPath();
+    _artWebPathHint('Click an artist, then a second one, to trace how they connect.');
+}
+
+function _artWebPathClick(node) {
+    const st = _artistWeb, g = st.graph;
+    if (!g || !g.hasNode(node)) return;
+    if (g.getNodeAttribute(node, 'kind') === 'genre') { _artWebPathHint('Pick artists, not genre hubs.'); return; }
+    const label = g.getNodeAttribute(node, 'label') || node;
+
+    if (!st.pathSource || st.pathResult) {
+        // (Re)start from this node.
+        st.pathSource = node; st.pathTarget = null; st.pathResult = null;
+        st.pathNodes = new Set([node]); st.pathPairs = new Set();
+        st.searchMatch = st.focusSet = st.focusRoot = null;
+        _artWebClosePanel();
+        st.sigma.refresh();
+        _artWebPathHint(`Start: <b>${escapeHtml(label)}</b> — now click a second artist.`);
+        return;
+    }
+    if (node === st.pathSource) return;
+    const path = _artWebComputePath(st.pathSource, node);
+    if (!path || path.length < 2) {
+        _artWebPathHint(`No similarity path between <b>${escapeHtml(g.getNodeAttribute(st.pathSource, 'label'))}</b> and <b>${escapeHtml(label)}</b>.`);
+        return;
+    }
+    st.pathTarget = node;
+    st.pathResult = path;
+    st.pathNodes = new Set(path);
+    st.pathPairs = new Set();
+    for (let i = 0; i + 1 < path.length; i++) {
+        const a = path[i], b = path[i + 1];
+        st.pathPairs.add(a < b ? a + '|' + b : b + '|' + a);
+    }
+    st.sigma.refresh();
+    _artWebShowPathPanel(path);
+    _artWebHidePathHint();
+}
+
+function _artWebComputePath(a, b) {
+    const sp = window.graphologyLibrary && window.graphologyLibrary.shortestPath;
+    const g = _artWebSimGraph();
+    if (!sp || !sp.bidirectional || !g || !g.hasNode(a) || !g.hasNode(b)) return null;
+    try { return sp.bidirectional(g, a, b); } catch (e) { return null; }
+}
+
+function _artWebClearPath() {
+    const st = _artistWeb;
+    st.pathSource = st.pathTarget = st.pathResult = st.pathNodes = st.pathPairs = null;
+    if (st.sigma) st.sigma.refresh();
+}
+
+function _artWebExitPath() {
+    _artistWeb.pathMode = false;
+    const btn = document.getElementById('artweb-path-btn');
+    if (btn) btn.classList.remove('active');
+    _artWebHidePathHint();
+    _artWebClosePanel();
+    _artWebClearPath();
+}
+
+function _artWebShowPathPanel(path) {
+    const p = _artWebEnsurePanel();
+    if (!p) return;
+    const g = _artistWeb.graph;
+    const hops = path.length - 1;
+    const between = path.length - 2;
+    const rows = path.map((k, i) => {
+        const label = g.getNodeAttribute(k, 'label') || k;
+        const color = g.getNodeAttribute(k, 'baseColor') || '#1db954';
+        const tag = i === 0 ? 'start' : (i === path.length - 1 ? 'end' : '');
+        return `<div onclick="_artWebCameraTo('${escapeForInlineJs(k)}')" style="display:flex;align-items:center;gap:10px;padding:7px 8px;border-radius:9px;cursor:pointer;" onmouseover="this.style.background='rgba(255,255,255,0.06)'" onmouseout="this.style.background='transparent'">
+            <span style="width:11px;height:11px;border-radius:50%;flex:none;background:${color};box-shadow:0 0 0 ${tag ? '2px rgba(255,255,255,0.5)' : '0'};"></span>
+            <span style="flex:1;min-width:0;font-size:13px;font-weight:${tag ? '800' : '600'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(label)}</span>
+            ${tag ? `<span style="font-size:9px;letter-spacing:0.08em;text-transform:uppercase;color:rgba(255,255,255,0.4);">${tag}</span>` : ''}
+        </div>${i < path.length - 1 ? '<div style="margin-left:13px;height:10px;border-left:2px solid rgba(255,255,255,0.12);"></div>' : ''}`;
+    }).join('');
+    document.getElementById('artweb-panel-body').innerHTML = `
+        <button onclick="_artWebExitPath()" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.7);border-radius:8px;padding:4px 10px;font-size:11px;cursor:pointer;margin-bottom:14px;">&#10005; Done</button>
+        <div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.4);">Connection path</div>
+        <div style="font-size:20px;font-weight:800;margin:3px 0 2px;">${hops} hop${hops === 1 ? '' : 's'} apart</div>
+        <div style="font-size:11.5px;color:rgba(255,255,255,0.5);margin-bottom:14px;">${between === 0 ? 'directly similar' : `via ${between} artist${between === 1 ? '' : 's'} in between`}</div>
+        ${rows}`;
+    p.style.display = 'flex';
+}
+
+// Pan/zoom the camera to a node WITHOUT triggering a selection (used by path + genre member lists).
+function _artWebCameraTo(key) {
+    const sig = _artistWeb.sigma;
+    if (!sig || !_artistWeb.graph || !_artistWeb.graph.hasNode(key)) return;
+    const d = sig.getNodeDisplayData(key);
+    if (d) { sig.getCamera().animate({ x: d.x, y: d.y, ratio: 0.12 }, { duration: 500 }); _artWebRefreshAfter(600); }
+}
+
+function _artWebPathHint(html) {
+    let el = document.getElementById('artweb-path-hint');
+    if (!el) {
+        const container = document.getElementById('artist-web-container');
+        if (!container) return;
+        el = document.createElement('div');
+        el.id = 'artweb-path-hint';
+        el.style.cssText = 'position:absolute;top:70px;left:50%;transform:translateX(-50%);z-index:25;'
+            + 'background:rgba(20,18,26,0.94);border:1px solid rgba(255,255,255,0.12);border-radius:999px;'
+            + 'padding:8px 16px;font-size:12.5px;color:rgba(255,255,255,0.88);box-shadow:0 8px 24px rgba(0,0,0,0.5);pointer-events:none;';
+        container.appendChild(el);
+    }
+    el.innerHTML = html;
+    el.style.display = 'block';
+}
+
+function _artWebHidePathHint() {
+    const el = document.getElementById('artweb-path-hint');
+    if (el) el.style.display = 'none';
+}
+
+// One-time first-run hint (a self-dismissing pill), so a cold user knows where to start.
+function _artWebMaybeFirstRunHint() {
+    try {
+        if (localStorage.getItem('artweb_seen_hint')) return;
+        localStorage.setItem('artweb_seen_hint', '1');
+    } catch (e) { return; }
+    const container = document.getElementById('artist-web-container');
+    if (!container) return;
+    let el = document.getElementById('artweb-firstrun-hint');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'artweb-firstrun-hint';
+        el.style.cssText = 'position:absolute;bottom:20px;left:50%;transform:translateX(-50%);z-index:25;'
+            + 'background:rgba(20,18,26,0.94);border:1px solid rgba(255,255,255,0.12);border-radius:999px;'
+            + 'padding:9px 18px;font-size:12.5px;color:rgba(255,255,255,0.88);box-shadow:0 8px 24px rgba(0,0,0,0.5);'
+            + 'transition:opacity .4s ease;';
+        container.appendChild(el);
+    }
+    el.innerHTML = 'Hover to identify · click an artist to explore · <b>?</b> for the guide';
+    el.style.display = 'block'; el.style.opacity = '1';
+    setTimeout(() => { el.style.opacity = '0'; setTimeout(() => { el.style.display = 'none'; }, 400); }, 8000);
+}
+
+// Guide modal — explains the lenses, colors, and tools (reuses the Artist Map shortcuts-modal styling).
+function artWebShowHelp() {
+    const existing = document.getElementById('artweb-help-overlay');
+    if (existing) { existing.remove(); return; }
+    const overlay = document.createElement('div');
+    overlay.id = 'artweb-help-overlay';
+    overlay.className = 'modal-overlay';
+    overlay.style.zIndex = '10002';
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+    overlay.innerHTML = `
+        <div class="artmap-shortcuts-modal artweb-help-modal">
+            <div class="artmap-shortcuts-header">
+                <h3>Artist Web — Guide</h3>
+                <button class="watch-all-close" onclick="document.getElementById('artweb-help-overlay').remove()">&times;</button>
+            </div>
+            <div class="artweb-help-body">
+                <div class="artweb-help-section">
+                    <h4>Three lenses</h4>
+                    <p><b>Genre</b> — your artists grouped by genre. <b>Communities</b> — clusters found from who's
+                       actually similar to whom, named by each cluster's hub artist. <b>Discovery</b> — your library
+                       (blue) wired to unowned similar artists (amber) you could add.</p>
+                </div>
+                <div class="artweb-help-section">
+                    <h4>Explore</h4>
+                    <p><b>Hover</b> to identify a node · <b>click</b> an artist for details + play. On Discovery,
+                       click a candidate to add it to your watchlist, or an owned node to grow its frontier.</p>
+                </div>
+                <div class="artweb-help-section">
+                    <h4>Tools</h4>
+                    <p><b>Path</b> — click two artists to trace how they connect · <b>Size by</b> Popular / Links /
+                       Influence · <b>Edges</b> — strong connections only · <b>Filter</b> — by genre. The
+                       <b>legend</b> (bottom-left) decodes the colors.</p>
+                </div>
+                <div class="artmap-shortcuts-grid">
+                    <div class="artmap-shortcut"><kbd>S</kbd><span>Focus search</span></div>
+                    <div class="artmap-shortcut"><kbd>F</kbd> / <kbd>0</kbd><span>Fit to view</span></div>
+                    <div class="artmap-shortcut"><kbd>+</kbd> / <kbd>-</kbd><span>Zoom in / out</span></div>
+                    <div class="artmap-shortcut"><kbd>Esc</kbd><span>Back / close</span></div>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+}
+
+// ---- Artist Web side panel (mirrors the Artist Map card design/interactions) -------------------
+function _artWebEnsurePanel() {
+    let p = document.getElementById('artweb-panel');
+    if (p) return p;
+    const container = document.getElementById('artist-web-container');
+    if (!container) return null;
+    // NOTE: do NOT set container.style.position — .artist-map-container is `position:fixed; inset:0`
+    // in CSS, which already anchors this absolute panel. An inline `relative` would clobber the CSS
+    // `fixed`, collapse the fullscreen overlay, and displace the sigma canvas (clicks freeze).
+    p = document.createElement('div');
+    p.id = 'artweb-panel';
+    p.style.cssText = 'position:absolute;top:66px;right:14px;width:300px;max-height:calc(100% - 88px);'
+        + 'background:rgba(20,18,26,0.92);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);'
+        + 'border:1px solid rgba(255,255,255,0.1);border-radius:16px;display:none;flex-direction:column;'
+        + 'overflow:hidden;z-index:20;box-shadow:0 14px 44px rgba(0,0,0,0.55);';
+    p.innerHTML = '<div id="artweb-panel-body" style="flex:1;overflow-y:auto;padding:16px;-webkit-overflow-scrolling:touch;"></div>';
+    container.appendChild(p);
+    return p;
+}
+
+function _artWebClosePanel() {
+    const p = document.getElementById('artweb-panel');
+    if (p) p.style.display = 'none';
+    _artWebStopPreview();   // panel gone -> its preview stops (single choke point: all closes route here)
+}
+
+// ---- 30s Deezer preview playback (discovery candidates): hear it before you add it -------------
+function _artWebStopPreview() {
+    const st = _artistWeb;
+    if (st.previewAudio) {
+        try { st.previewAudio.pause(); } catch (e) { /* ignore */ }
+        st.previewAudio = null;
+    }
+    st.previewKey = null;
+    const btn = document.getElementById('artweb-preview-btn');
+    if (btn) { btn.textContent = '▶ Preview top track'; btn.disabled = false; }
+}
+
+async function artWebTogglePreview(key) {
+    const st = _artistWeb, g = st.graph;
+    if (!g || !g.hasNode(key)) return;
+    if (st.previewKey === key) { _artWebStopPreview(); return; }   // same node -> toggle off
+    _artWebStopPreview();
+    const pairs = g.getNodeAttribute(key, 'ids') || [];
+    const dz = pairs.find(p => p && p[0] === 'deezer');
+    const btn = document.getElementById('artweb-preview-btn');
+    if (!dz) { if (btn) btn.textContent = 'No preview available'; return; }
+    if (btn) { btn.textContent = 'Loading preview…'; btn.disabled = true; }
+    const myGen = st.gen;   // if the Web is closed/reopened mid-fetch, don't start orphaned audio
+    try {
+        const r = await fetch(`/api/graph/discovery/preview/${encodeURIComponent(dz[1])}`);
+        const d = await r.json();
+        if (st.gen !== myGen) return;
+        if (!d.success || !d.preview_url) throw new Error(d.reason || 'no preview');
+        // Pause the main player so the preview doesn't talk over it.
+        if (typeof audioPlayer !== 'undefined' && audioPlayer && !audioPlayer.paused) audioPlayer.pause();
+        const audio = new Audio(d.preview_url);
+        audio.volume = 0.9;
+        audio.onended = () => { if (st.previewKey === key) _artWebStopPreview(); };
+        await audio.play();
+        if (st.gen !== myGen) { try { audio.pause(); } catch (e) {} return; }   // closed during play()
+        st.previewAudio = audio;
+        st.previewKey = key;
+        if (btn) { btn.textContent = `⏸ ${d.track || 'Playing preview'}`; btn.disabled = false; }
+    } catch (e) {
+        _artWebStopPreview();
+        if (btn) { btn.textContent = 'Preview unavailable'; btn.disabled = false; }
+    }
+}
+
+// "Play radio" from an owned node — hands off to the artist-detail page's radio machinery
+// (startArtistRadioById, the shared parameterized core). Audio starts under the graph overlay.
+function artWebPlayArtist(key) {
+    const g = _artistWeb.graph;
+    if (!g || !g.hasNode(key)) return;
+    const a = g.getNodeAttributes(key);
+    if (a.artistId == null) return;
+    _artWebStopPreview();
+    if (typeof startArtistRadioById === 'function') startArtistRadioById(a.artistId, a.label || '');
+    else if (typeof showToast === 'function') showToast('Player not available', 'error');
+}
+
+function _artWebShowArtist(node) {
+    const p = _artWebEnsurePanel();
+    if (!p) return;
+    const g = _artistWeb.graph;
+    const a = g.getNodeAttributes(node);
+    const color = a.baseColor || '#1db954';
+    const conn = g.degree(node);
+    const pop = Math.max(0, Math.min(100, Math.round(a.popularity || 0)));
+    // These are all owned library artists, so the detail page is the library route:
+    // /artist-detail/library/<db id>. (a.source is the server name e.g. 'plex' — NOT a valid
+    // detail source, which is what produced the broken /artist-detail/plex/... link.)
+    const detailPath = (a.artistId != null && typeof buildArtistDetailPath === 'function')
+        ? buildArtistDetailPath(a.artistId, 'library') : null;
+
+    document.getElementById('artweb-panel-body').innerHTML = `
+        <button onclick="_artWebClearSelection()" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.7);border-radius:8px;padding:4px 10px;font-size:11px;cursor:pointer;margin-bottom:14px;">&#10005; Close</button>
+        <div style="text-align:center;">
+            <div id="artweb-avatar" style="width:110px;height:110px;margin:0 auto;border-radius:50%;overflow:hidden;border:2px solid ${color};box-shadow:0 8px 28px ${_webHexToRgba(color, 0.45)};background:rgba(255,255,255,0.05);display:flex;align-items:center;justify-content:center;">
+                <span style="font-size:34px;opacity:0.5;">&#9835;</span>
+            </div>
+            <div style="font-size:18px;font-weight:800;margin-top:12px;">${escapeHtml(a.label)}</div>
+            ${a.primaryGenre ? `<div style="font-size:11px;color:${color};margin-top:3px;">${escapeHtml(a.primaryGenre)}</div>` : ''}
+        </div>
+        <div style="display:flex;gap:8px;margin-top:16px;">
+            ${_miniStat('Popularity', pop, 270)}
+            ${_miniStat('Connections', conn)}
+        </div>
+        <div style="margin-top:8px;height:6px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden;">
+            <div style="height:100%;width:${pop}%;background:${color};"></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:18px;">
+            ${a.artistId != null ? `<button onclick="artWebPlayArtist('${escapeForInlineJs(node)}')" style="background:#1db954;border:none;color:#0b0b0f;border-radius:10px;padding:10px;font-size:13px;font-weight:800;cursor:pointer;">&#9654; Play radio</button>` : ''}
+            ${_artistWeb.lens === 'discovery' ? `<button id="artweb-expand-btn" onclick="artWebExpandNode('${escapeForInlineJs(node)}')" style="background:${color};border:none;color:#0b0b0f;border-radius:10px;padding:10px;font-size:13px;font-weight:800;cursor:pointer;">${a.expanded ? 'Expanded ✓' : 'Expand connections ✦'}</button>` : ''}
+            <button onclick="artWebExploreInMap('${escapeForInlineJs(a.label)}')" style="background:${_artistWeb.lens === 'discovery' ? 'rgba(255,255,255,0.06)' : color};border:${_artistWeb.lens === 'discovery' ? '1px solid rgba(255,255,255,0.12)' : 'none'};color:${_artistWeb.lens === 'discovery' ? '#fff' : '#0b0b0f'};border-radius:10px;padding:10px;font-size:13px;font-weight:800;cursor:pointer;">Explore in Artist Map &rarr;</button>
+            ${detailPath ? `<a href="${detailPath}" style="text-align:center;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:10px;padding:9px;font-size:12px;text-decoration:none;">Open artist page (discography)</a>` : ''}
+        </div>`;
+    p.style.display = 'flex';
+
+    // Resolve the artist's OWN thumb by library id (normalized lazily server-side). The old call —
+    // /api/artist/<library-db-id>/image — sent the library row id to external providers as if it
+    // were THEIR id, so Deezer/iTunes returned whichever artist owns that number: wrong photo,
+    // essentially always. Guarded by selectedKey so a fast re-click can't drop in a stale image.
+    if (a.artistId != null) {
+        const forNode = node;
+        fetch(`/api/library/artist/${encodeURIComponent(a.artistId)}/thumb`)
+            .then(r => r.json())
+            .then(d => {
+                if (!d || !d.success || !d.image_url) return;
+                if (_artistWeb.selectedKey !== forNode) return;   // selection moved on
+                const el = document.getElementById('artweb-avatar');
+                if (el) el.innerHTML = `<img src="${escapeHtml(d.image_url)}" style="width:100%;height:100%;object-fit:cover;" onerror="this.parentNode.innerHTML='<span style=\\'font-size:34px;opacity:0.5;\\'>&#9835;</span>'">`;
+            })
+            .catch(() => {});
+    }
+}
+
+function _artWebShowGenre(node) {
+    const p = _artWebEnsurePanel();
+    if (!p) return;
+    const g = _artistWeb.graph;
+    const genre = g.getNodeAttribute(node, 'genre') || 'Genre';
+    const color = g.getNodeAttribute(node, 'baseColor') || '#1db954';
+    const members = [];
+    g.forEachNeighbor(node, (nb, attrs) => { if (attrs.kind === 'artist') members.push({ key: nb, label: attrs.label, pop: attrs.popularity || 0 }); });
+    members.sort((x, y) => y.pop - x.pop);
+
+    document.getElementById('artweb-panel-body').innerHTML = `
+        <button onclick="_artWebClearSelection()" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.7);border-radius:8px;padding:4px 10px;font-size:11px;cursor:pointer;margin-bottom:14px;">&#10005; Close</button>
+        <div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.4);">Genre</div>
+        <div style="font-size:20px;font-weight:800;color:${color};margin-top:2px;">${escapeHtml(genre)}</div>
+        <div style="font-size:12px;color:rgba(255,255,255,0.55);margin-top:6px;">${members.length} artist${members.length === 1 ? '' : 's'} in your library</div>
+        <div style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:rgba(255,255,255,0.4);margin:16px 2px 8px;">Top artists</div>
+        ${members.slice(0, 30).map((m, i) => `
+            <div onclick="_artWebGoToArtist('${escapeForInlineJs(m.key)}')" style="display:flex;align-items:center;gap:10px;padding:6px 8px;border-radius:9px;cursor:pointer;"
+                 onmouseover="this.style.background='rgba(255,255,255,0.06)'" onmouseout="this.style.background='transparent'">
+                <span style="width:18px;text-align:center;font-size:11px;font-weight:700;color:rgba(255,255,255,0.35);">${i + 1}</span>
+                <span style="flex:1;min-width:0;font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(m.label)}</span>
+            </div>`).join('') || '<div style="color:rgba(255,255,255,0.4);padding:8px;">No artists</div>'}`;
+    p.style.display = 'flex';
+}
+
+// ---- Discovery lens: candidate card with "Add to watchlist" ------------------------------------
+// Deliberately NO expand button here: similar_artists only has rows for artists whose similars
+// SoulSync fetched (owned/watchlist), so expanding an unowned candidate always returns empty
+// (validated 0/176 on real data). The trail opens up after the candidate is watchlisted + scanned.
+function _artWebShowDiscovery(node) {
+    const p = _artWebEnsurePanel();
+    if (!p) return;
+    const g = _artistWeb.graph;
+    const a = g.getNodeAttributes(node);
+    const color = WEB_DISCOVERY_COLOR;
+    let genres = a.genresList;
+    if (typeof genres === 'string') { try { genres = JSON.parse(genres); } catch (e) { genres = [genres]; } }
+    genres = Array.isArray(genres) ? genres.slice(0, 5) : [];
+    // Unowned artists still get a detail page: /artist-detail/<source>/<external id> synthesizes
+    // name + image + discography from the source (same pattern as the discover recommendation cards).
+    // ids pairs are ordered spotify > deezer > itunes; the first is the best detail source.
+    const pair = (a.ids || [])[0];
+    const detailPath = (pair && typeof buildArtistDetailPath === 'function')
+        ? buildArtistDetailPath(pair[1], pair[0]) : null;
+
+    document.getElementById('artweb-panel-body').innerHTML = `
+        <button onclick="_artWebClearSelection()" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.7);border-radius:8px;padding:4px 10px;font-size:11px;cursor:pointer;margin-bottom:14px;">&#10005; Close</button>
+        <div style="text-align:center;">
+            <div style="width:110px;height:110px;margin:0 auto;border-radius:50%;overflow:hidden;border:2px solid ${color};box-shadow:0 8px 28px ${_webHexToRgba(color, 0.45)};background:rgba(255,255,255,0.05);display:flex;align-items:center;justify-content:center;">
+                ${a.image_url ? `<img src="${escapeHtml(a.image_url)}" style="width:100%;height:100%;object-fit:cover;" onerror="this.parentNode.innerHTML='<span style=\\'font-size:34px;opacity:0.5;\\'>&#9835;</span>'">` : '<span style="font-size:34px;opacity:0.5;">&#9835;</span>'}
+            </div>
+            <div style="font-size:18px;font-weight:800;margin-top:12px;">${escapeHtml(a.label)}</div>
+            <div style="display:inline-block;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:${color};border:1px solid ${_webHexToRgba(color, 0.5)};border-radius:999px;padding:2px 9px;margin-top:6px;">Not in your library</div>
+        </div>
+        ${genres.length ? `<div style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:14px;">
+            ${genres.map(gname => `<span style="font-size:10.5px;padding:3px 9px;border-radius:999px;background:${_webHexToRgba(color, 0.16)};border:1px solid ${_webHexToRgba(color, 0.3)};color:#ffd9a3;">${escapeHtml(String(gname))}</span>`).join('')}
+        </div>` : ''}
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:18px;">
+            ${(a.ids || []).some(pr => pr && pr[0] === 'deezer') ? `<button id="artweb-preview-btn" onclick="artWebTogglePreview('${escapeForInlineJs(node)}')" style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.14);color:#fff;border-radius:10px;padding:10px;font-size:13px;font-weight:700;cursor:pointer;">&#9654; Preview top track</button>` : ''}
+            <button id="artweb-add-btn" onclick="artWebAddToWatchlist('${escapeForInlineJs(node)}')" style="background:${color};border:none;color:#0b0b0f;border-radius:10px;padding:10px;font-size:13px;font-weight:800;cursor:pointer;">+ Add to watchlist</button>
+            ${detailPath ? `<a href="${detailPath}" style="text-align:center;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:10px;padding:9px;font-size:12px;text-decoration:none;">Open artist page (discography)</a>` : ''}
+        </div>`;
+    p.style.display = 'flex';
+}
+
+// Add a discovered (unowned) artist to the watchlist. ids are [source, id] PAIRS — we send the id
+// WITH its source so the endpoint never has to guess (a bare numeric Deezer/iTunes id used to be
+// mistaken for a library DB row id and could watch a completely different artist).
+async function artWebAddToWatchlist(key) {
+    const g = _artistWeb.graph;
+    if (!g || !g.hasNode(key)) return;
+    const a = g.getNodeAttributes(key);
+    const pairs = a.ids || [];
+    const pair = pairs.find(p => p && p[0] === 'spotify') || pairs[0];
+    const btn = document.getElementById('artweb-add-btn');
+    if (!pair) { if (btn) btn.textContent = 'No id available'; return; }
+    if (btn) { btn.textContent = 'Adding…'; btn.disabled = true; }
+    try {
+        const r = await fetch('/api/watchlist/add', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ artist_id: String(pair[1]), artist_name: a.label, source: pair[0] }),
+        });
+        const d = await r.json();
+        if (!d.success) throw new Error(d.error || 'failed');
+        if (btn) { btn.textContent = '✓ Added to watchlist'; btn.style.background = 'rgba(255,255,255,0.12)'; btn.style.color = '#fff'; }
+        if (typeof showToast === 'function') showToast(`Added ${a.label} to watchlist`, 'success');
+        if (typeof updateWatchlistCount === 'function') updateWatchlistCount();
+    } catch (e) {
+        if (btn) { btn.textContent = '+ Add to watchlist'; btn.disabled = false; }
+        if (typeof showToast === 'function') showToast(`Couldn't add: ${e.message}`, 'error');
+    }
+}
+
+// Expand-on-click (Discovery lens, owned nodes): fetch the node's similar artists and grow the graph
+// around it. New nodes land in a ring around the parent — no full re-layout, the map grows in place.
+async function artWebExpandNode(key) {
+    const st = _artistWeb, g = st.graph;
+    if (!g || !g.hasNode(key) || st.lens !== 'discovery') return;
+    const a = g.getNodeAttributes(key);
+    const btn = document.getElementById('artweb-expand-btn');
+    if (a.expanded) return;
+    if (btn) { btn.textContent = 'Expanding…'; btn.disabled = true; }
+    try {
+        const exclude = [];
+        g.forEachNode(k => exclude.push(k));
+        const r = await fetch('/api/graph/discovery/expand', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            // a.ids holds [source, id] pairs; the expand matcher wants the flat ids.
+            body: JSON.stringify({ key: key, ids: (a.ids || []).map(p => p[1]), exclude: exclude, per: 10 }),
+        });
+        const d = await r.json();
+        if (d.error) throw new Error(d.error);
+        const newNodes = (d.nodes || []).filter(n => n.key && !g.hasNode(n.key));
+        if (!newNodes.length) {
+            g.setNodeAttribute(key, 'expanded', true);
+            if (btn) btn.textContent = 'No new connections';
+            return;
+        }
+
+        // Ring placement around the parent's home position (stable even mid-spread-animation).
+        const home = st.home || (st.home = {});
+        const ph = home[key] || { x: a.x, y: a.y };
+        const R = (st.spreadPush || 0.1) * 2.2;
+        newNodes.forEach((n, i) => {
+            const th = (2 * Math.PI * i) / newNodes.length + Math.random() * 0.4;
+            const x = ph.x + Math.cos(th) * R, y = ph.y + Math.sin(th) * R;
+            if (n.kind === 'owned') {
+                g.addNode(n.key, {
+                    label: n.label, x: x, y: y, size: 7,
+                    color: WEB_OWNED_COLOR, baseColor: WEB_OWNED_COLOR,
+                    forceLabel: true, kind: 'owned', genre: 'Your library',
+                    artistId: n.id != null ? n.id : null, thumb: n.thumb || null,
+                });
+            } else {
+                g.addNode(n.key, {
+                    label: n.label, x: x, y: y, size: 3.5,
+                    color: WEB_DISCOVERY_COLOR, baseColor: WEB_DISCOVERY_COLOR,
+                    kind: 'discovery', genre: 'Discovery',
+                    image_url: n.image_url || null, genresList: n.genres || null,
+                    ids: n.ids || [], popularity: n.popularity || 0,
+                });
+            }
+            home[n.key] = { x: x, y: y };
+            st.index.push({ key: n.key, label: n.label });   // searchable immediately
+        });
+        (d.edges || []).forEach(e => {
+            if (g.hasNode(e.source) && g.hasNode(e.target) && !g.hasEdge(e.source, e.target)) {
+                g.addEdge(e.source, e.target, {
+                    weight: e.weight, size: _webEdgeSize(e.weight),
+                    color: _webHexToRgba(WEB_DISCOVERY_COLOR, 0.28), baseColor: WEB_DISCOVERY_COLOR, kind: 'discovery',
+                });
+            }
+        });
+        g.setNodeAttribute(key, 'expanded', true);
+
+        // Re-select the node: focus set now includes the new neighbors, panel re-renders ("Expanded").
+        _artWebClickNode(key);
+        const statsEl = document.getElementById('artist-web-stats');
+        if (statsEl) {
+            let own = 0, disc = 0;
+            g.forEachNode((k2, a2) => { if (a2.kind === 'owned') own++; else if (a2.kind === 'discovery') disc++; });
+            statsEl.textContent = `${own} of your artists · ${disc} to discover`;
+        }
+    } catch (e) {
+        if (btn) { btn.textContent = 'Expand connections ✦'; btn.disabled = false; }
+        if (typeof showToast === 'function') showToast(`Expand failed: ${e.message}`, 'error');
+    }
+}
+
+// ---- Artist Web filter by genre: multi-select sidebar; dims everything outside the chosen genres --
+function artWebToggleFilter() {
+    const sb = document.getElementById('artweb-genre-sidebar');
+    const btn = document.getElementById('artweb-filter-btn');
+    if (!sb) return;
+    const open = sb.style.display !== 'none';
+    if (open) {
+        sb.style.display = 'none';
+        if (btn) btn.classList.remove('active');
+    } else {
+        _artWebPopulateGenreList('');
+        sb.style.display = 'flex';
+        if (btn) btn.classList.add('active');
+    }
+}
+
+function _artWebPopulateGenreList(query) {
+    const list = document.getElementById('artweb-genre-sidebar-list');
+    if (!list) return;
+    const counts = _artistWeb.genreCounts || {};
+    const color = _artistWeb.genreColor || (() => WEB_GENRE_FALLBACK);
+    const active = _artistWeb.genreFilter;
+    const q = (query || '').trim().toLowerCase();
+    const genres = Object.keys(counts).sort((a, b) => counts[b] - counts[a])
+        .filter(g => !q || g.toLowerCase().includes(q));
+
+    const clearRow = active ? `<div onclick="artWebClearGenreFilter()" style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:4px;border-radius:8px;cursor:pointer;color:#fff;font-size:12px;font-weight:700;background:rgba(255,255,255,0.06);">&#10005; Clear filter (${active.size})</div>` : '';
+    list.innerHTML = clearRow + (genres.map(g => {
+        const on = active && active.has(g);
+        return `<div onclick="artWebToggleGenre('${escapeForInlineJs(g)}')" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:8px;cursor:pointer;${on ? 'background:rgba(255,255,255,0.09);' : ''}"
+             onmouseover="this.style.background='rgba(255,255,255,0.06)'" onmouseout="this.style.background='${on ? 'rgba(255,255,255,0.09)' : 'transparent'}'">
+            <span style="width:10px;height:10px;border-radius:50%;flex:none;background:${color(g)};"></span>
+            <span style="flex:1;min-width:0;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;${on ? 'font-weight:700;' : ''}">${escapeHtml(g)}</span>
+            <span style="font-size:10.5px;color:rgba(255,255,255,0.4);">${counts[g]}</span>
+        </div>`;
+    }).join('') || '<div style="color:rgba(255,255,255,0.4);padding:8px;font-size:12px;">No genres</div>');
+}
+
+function artWebToggleGenre(genre) {
+    const st = _artistWeb;
+    if (!st.genreFilter) st.genreFilter = new Set();
+    if (st.genreFilter.has(genre)) st.genreFilter.delete(genre);
+    else st.genreFilter.add(genre);
+    if (st.genreFilter.size === 0) st.genreFilter = null;
+    if (st.sigma) st.sigma.refresh();
+    const qi = document.querySelector('#artweb-genre-sidebar .artmap-genre-sidebar-search');
+    _artWebPopulateGenreList(qi ? qi.value : '');
+}
+
+function artWebClearGenreFilter() {
+    _artistWeb.genreFilter = null;
+    if (_artistWeb.sigma) _artistWeb.sigma.refresh();
+    const qi = document.querySelector('#artweb-genre-sidebar .artmap-genre-sidebar-search');
+    _artWebPopulateGenreList(qi ? qi.value : '');
+}
+
+// Sidebar search box just filters which genres are listed.
+function artWebFilterGenreList(query) { _artWebPopulateGenreList(query); }
+
+// ---- Edge declutter toggle: show all connections vs only the stronger (high-consensus) ones -------
+function artWebToggleEdges() {
+    _artistWeb.edgeDeclutter = !_artistWeb.edgeDeclutter;
+    _artWebSyncEdgeButton();
+    if (_artistWeb.sigma) _artistWeb.sigma.refresh();
+}
+
+function _artWebSyncEdgeButton() {
+    const btn = document.getElementById('artweb-edges-btn');
+    if (!btn) return;
+    btn.classList.toggle('active', _artistWeb.edgeDeclutter);
+    const label = btn.querySelector('span');
+    if (label) label.textContent = _artistWeb.edgeDeclutter ? 'Strong' : 'Edges';
 }
 
 async function openArtistMap() {
@@ -7888,8 +10192,12 @@ async function loadDiscoveryShuffle() {
         }
 
         personalizedDiscoveryShuffle = data.tracks;
-        renderCompactPlaylist(container, data.tracks);
-        container.closest('.discover-section').style.display = 'block';
+        _upsertMixCard({
+            key: 'discovery_shuffle', title: 'Discovery Shuffle',
+            subtitle: 'A shuffle across everything we discovered for you',
+            tracks: data.tracks, syncKey: 'discovery_shuffle',
+        });
+        _collapseOldMixSection(container);
 
     } catch (error) {
         console.error('Error loading discovery shuffle:', error);
@@ -7912,19 +10220,26 @@ function _renderByltSection(section, idx) {
                     </div>
                 </div>
             </div>
-            <div class="discover-carousel" id="bylt-carousel-${idx}"></div>
+            <div class="discover-grid" id="bylt-carousel-${idx}"></div>
         </div>
     `;
 }
 
 function _renderByltTrackCard(t) {
+    const img = t.image_url
+        ? `<img src="${t.image_url}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+        : '';
     return `
-        <div class="discover-card">
-            <div class="discover-card-image">
-                ${t.image_url ? `<img src="${t.image_url}" alt="" loading="lazy" onerror="this.src='/static/placeholder-album.png'">` : '<div class="discover-card-placeholder">🎵</div>'}
+        <div class="ya-card discover-album-card">
+            <div class="ya-card-img">
+                ${img}
+                <div class="ya-card-placeholder" style="display:${t.image_url ? 'none' : 'flex'}">&#9835;</div>
             </div>
-            <div class="discover-card-title">${_esc(t.name)}</div>
-            <div class="discover-card-artist">${_esc(t.artist)}</div>
+            <div class="ya-card-gradient"></div>
+            <div class="ya-card-info">
+                <div class="ya-card-name">${_esc(t.name)}</div>
+                <div class="ya-card-sub">${_esc(t.artist)}</div>
+            </div>
         </div>
     `;
 }
@@ -7967,6 +10282,7 @@ async function loadBecauseYouListenTo() {
                     const carousel = document.getElementById(`bylt-carousel-${idx}`);
                     if (!carousel) return;
                     carousel.innerHTML = section.tracks.map(t => _renderByltTrackCard(t)).join('');
+                    _clampGrid(carousel);
                 });
             },
         });
@@ -7986,18 +10302,20 @@ function _cacheDiscoverCard(item, type, sectionKey, index) {
     const coverUrl = item.image_url || '/static/placeholder-album.png';
     const title = item.name || '';
     const subtitle = item.artist_name || '';
-    const meta = item.release_date ? item.release_date.substring(0, 10) : (item.label || '');
     const onclick = `openCacheDiscoverAlbum('${sectionKey}',${index})`;
-    const libBadge = item.in_library ? '<div class="discover-card-lib-badge">In Library</div>' : '';
-    return `<div class="discover-card" onclick="${onclick}" style="cursor:pointer">
-        <div class="discover-card-image">
-            <img src="${_esc(coverUrl)}" alt="${_esc(title)}" loading="lazy" onerror="this.src='/static/placeholder-album.png'">
-            ${libBadge}
+    // Unified Discover album card (#discover redesign) — same .ya-card as Your Artists, square.
+    const libBadge = item.in_library
+        ? '<div class="ya-card-badges"><div class="discover-album-badge owned">&#10003;</div></div>' : '';
+    return `<div class="ya-card discover-album-card" onclick="${onclick}">
+        <div class="ya-card-img">
+            <img src="${_esc(coverUrl)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+            <div class="ya-card-placeholder" style="display:none">&#9835;</div>
         </div>
-        <div class="discover-card-info">
-            <h4 class="discover-card-title">${_esc(title)}</h4>
-            <p class="discover-card-subtitle">${_esc(subtitle)}</p>
-            ${meta ? `<p class="discover-card-meta">${_esc(meta)}</p>` : ''}
+        <div class="ya-card-gradient"></div>
+        ${libBadge}
+        <div class="ya-card-info">
+            <div class="ya-card-name">${_esc(title)}</div>
+            <div class="ya-card-sub">${_esc(subtitle)}</div>
         </div>
     </div>`;
 }
@@ -8142,7 +10460,32 @@ async function openCacheDiscoverAlbum(sectionKey, index) {
     }
 }
 
-function _insertCacheSection(id, title, subtitle, html, position) {
+// Cap a wrapping discover-grid to `limit` cards (≈ a couple rows) with a Show all / Show less
+// toggle, so a 30-item section doesn't become a wall (#discover redesign). Idempotent.
+function _clampGrid(gridEl, limit = 12) {
+    if (!gridEl) return;
+    const cards = Array.from(gridEl.children);
+    // tidy any previous toggle so re-renders don't stack buttons
+    if (gridEl.nextElementSibling && gridEl.nextElementSibling.classList.contains('discover-show-all')) {
+        gridEl.nextElementSibling.remove();
+    }
+    if (cards.length <= limit) {
+        cards.forEach(c => { c.style.display = ''; });
+        return;
+    }
+    let expanded = false;
+    const btn = document.createElement('button');
+    btn.className = 'discover-show-all';
+    const apply = () => {
+        cards.forEach((c, i) => { c.style.display = (expanded || i < limit) ? '' : 'none'; });
+        btn.textContent = expanded ? 'Show less' : `Show all ${cards.length}`;
+    };
+    btn.onclick = () => { expanded = !expanded; apply(); };
+    gridEl.after(btn);
+    apply();
+}
+
+function _insertCacheSection(id, title, subtitle, html, position, wrapGrid = true) {
     const container = document.getElementById('discover-bylt-sections') || document.querySelector('.discover-container');
     if (!container) return;
     let section = document.getElementById(id);
@@ -8169,8 +10512,9 @@ function _insertCacheSection(id, title, subtitle, html, position) {
                 <h3 class="discover-section-title">${title}</h3>
             </div>
         </div>
-        <div class="discover-carousel">${html}</div>
+        ${wrapGrid ? `<div class="discover-grid">${html}</div>` : html}
     `;
+    if (wrapGrid) _clampGrid(section.querySelector('.discover-grid'));
 }
 
 async function loadCacheUndiscoveredAlbums() {
@@ -8240,7 +10584,7 @@ async function loadCacheGenreExplorer() {
             </div>
         `).join('')}</div>`;
         _insertCacheSection('cache-genre-explorer',
-            'Genre Explorer', 'Tap a genre to explore', html, 'top');
+            'Genre Explorer', 'Tap a genre to explore', html, 'top', false);
     } catch (e) { console.debug('Cache genre explorer:', e); }
 }
 
@@ -8646,6 +10990,8 @@ async function openDownloadModalForDiscoverPlaylist(playlistType, playlistName) 
             tracks = personalizedHiddenGems;
         } else if (playlistType === 'discovery_shuffle') {
             tracks = personalizedDiscoveryShuffle;
+        } else if (playlistType === 'listening_mix') {
+            tracks = personalizedListeningMix;
         } else if (playlistType === 'build_playlist') {
             tracks = buildPlaylistTracks;
         }
@@ -8765,6 +11111,8 @@ async function startDiscoverPlaylistSync(playlistType, playlistName) {
         tracks = personalizedHiddenGems;
     } else if (playlistType === 'discovery_shuffle') {
         tracks = personalizedDiscoveryShuffle;
+    } else if (playlistType === 'listening_mix') {
+        tracks = personalizedListeningMix;
     } else if (playlistType === 'build_playlist') {
         tracks = buildPlaylistTracks;
     }

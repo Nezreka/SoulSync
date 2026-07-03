@@ -9,6 +9,7 @@ export interface ShellStatusMediaServer {
 
 export interface ShellStatusPayload {
   media_server?: ShellStatusMediaServer | null;
+  _experimental?: Record<string, boolean>;
 }
 
 export async function fetchShellStatus(): Promise<ShellStatusPayload> {

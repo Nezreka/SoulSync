@@ -438,10 +438,19 @@ def embed_album_art_metadata(audio_file, metadata: dict):
 
         if not image_data:
             art_url = metadata.get("album_art_url")
-            if not art_url:
-                logger.warning("No album art URL available for embedding.")
+            # Prefer the pinned release's OWN cover over a release-group / provider
+            # representative (usually the standard edition); fall back to art_url
+            # when the release has no art of its own. Keeps embedded art in sync
+            # with cover.jpg (same preference + fetch).
+            from core.metadata.caa_art import fetch_release_preferred_art
+            image_data, mime_type, used_url = fetch_release_preferred_art(
+                release_mbid, art_url, fetch_fn=_fetch_art_bytes)
+            if not image_data:
+                if not art_url and not release_mbid:
+                    logger.warning("No album art URL available for embedding.")
                 return False
-            image_data, mime_type = _fetch_art_bytes(art_url)
+            if release_mbid and used_url and used_url != art_url:
+                logger.info("Embedding release-specific art (edition match): %s", release_mbid)
 
         if not image_data:
             logger.error("Failed to download album art data.")
@@ -560,13 +569,20 @@ def download_cover_art(album_info: dict, target_dir: str, context: dict = None, 
                         art_url = images[0].get("url", "")
                 if art_url:
                     logger.info("Using cover art URL from album context")
-            if not art_url:
-                logger.warning("No cover art URL available for download.")
+            # Prefer the pinned release's OWN cover over a release-group / provider
+            # representative (which is usually the standard edition), falling back
+            # to art_url when the release has no art of its own. Upgrades to the
+            # source's highest resolution via _fetch_art_bytes (shared with the
+            # tag-embed path so cover.jpg and embedded art match).
+            from core.metadata.caa_art import fetch_release_preferred_art
+            image_data, _, used_url = fetch_release_preferred_art(
+                release_mbid, art_url, fetch_fn=_fetch_art_bytes)
+            if not image_data:
+                if not art_url and not release_mbid:
+                    logger.warning("No cover art URL available for download.")
                 return
-            # Upgrade to the source's highest resolution (Spotify master /
-            # iTunes 3000 / Deezer 1900) with a one-level fallback — shared
-            # with the tag-embed path so cover.jpg and embedded art match.
-            image_data, _ = _fetch_art_bytes(art_url)
+            if release_mbid and used_url and used_url != art_url:
+                logger.info("Using release-specific cover.jpg (edition match): %s", release_mbid)
 
         if not image_data:
             return

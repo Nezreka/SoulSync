@@ -173,6 +173,32 @@ async def _database_only_find_track(spotify_track, candidate_pool=None):
                 logger.debug("sync match cache fast-path failed: %s", e)
         # --- End cache fast-path ---
 
+        # Durable manual library match (#787) — survives a library rescan (the
+        # sync_match_cache above does not), so a user's Find & Add pairing keeps
+        # sticking across auto-syncs instead of being re-matched from scratch (#895
+        # follow-up). Self-heals a stale library id via the stored file path.
+        if spotify_id:
+            try:
+                from core.artists.map import get_current_profile_id
+                m = db.find_manual_library_match_by_source_track_id(
+                    get_current_profile_id(), str(spotify_id), active_server)
+                if m:
+                    lib_id = m.get('library_track_id')
+                    dt = db.get_track_by_id(lib_id) if lib_id is not None else None
+                    if not dt and m.get('library_file_path'):
+                        new_id = db.find_track_id_by_file_path(m['library_file_path'])
+                        dt = db.get_track_by_id(new_id) if new_id else None
+                    if dt:
+                        class DatabaseTrackDurable:
+                            def __init__(self, db_t):
+                                self.ratingKey = db_t.id
+                                self.title = db_t.title
+                                self.id = db_t.id
+                        logger.debug(f"Durable manual match hit: '{original_title}' → {lib_id}")
+                        return DatabaseTrackDurable(dt), 1.0
+            except Exception as e:
+                logger.debug("durable manual match fast-path failed: %s", e)
+
         # Try each artist
         for artist in spotify_track.artists:
             if isinstance(artist, str):
@@ -281,35 +307,11 @@ def run_sync_task(
         # This avoids needing to re-fetch it from Spotify
         logger.info("Converting JSON tracks to SpotifyTrack objects...")
 
-        # Store original track data with full album objects (for wishlist with cover art)
-        # Normalize formats for wishlist: album must be dict {'name': ...}, artists must be [{'name': ...}]
-        # Important: copy data — don't mutate tracks_json since SpotifyTrack expects List[str] artists
-        original_tracks_map = {}
-        for t in tracks_json:
-            track_id = t.get('id', '')
-            if track_id:
-                normalized = dict(t)
-                # Normalize album to dict format, preserving images and metadata
-                raw_album = normalized.get('album', '')
-                if isinstance(raw_album, str):
-                    normalized['album'] = {
-                        'name': raw_album or normalized.get('name', 'Unknown Album'),
-                        'images': [], 'album_type': 'single', 'total_tracks': 1, 'release_date': ''
-                    }
-                elif not isinstance(raw_album, dict):
-                    normalized['album'] = {
-                        'name': str(raw_album) if raw_album else normalized.get('name', 'Unknown Album'),
-                        'images': [], 'album_type': 'single', 'total_tracks': 1, 'release_date': ''
-                    }
-                else:
-                    # Dict — ensure required keys exist
-                    raw_album.setdefault('name', 'Unknown Album')
-                    raw_album.setdefault('images', [])
-                # Normalize artists to list of dicts
-                raw_artists = normalized.get('artists', [])
-                if raw_artists and isinstance(raw_artists[0], str):
-                    normalized['artists'] = [{'name': a} for a in raw_artists]
-                original_tracks_map[track_id] = normalized
+        # Store original track data with full album objects (for wishlist with cover art).
+        # Shared with the sync-detail "re-add to wishlist" action so both build the
+        # IDENTICAL payload (album→dict + images, artists→dicts). Copy-safe.
+        from core.sync.wishlist_readd import build_original_tracks_map
+        original_tracks_map = build_original_tracks_map(tracks_json)
 
         tracks = []
         for i, t in enumerate(tracks_json):

@@ -258,3 +258,47 @@ def test_import_rejects_missing_expected_track_context(tmp_path):
 
     assert exc.value.status_code == 400
     assert "expected_track" in str(exc.value)
+
+
+# ── #917: recover album year from existing folder so "I have this" reuses the dir ──
+def _year_db(rows):
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE tracks (album_id TEXT, disc_number INTEGER, track_number INTEGER, file_path TEXT, year INTEGER)")
+    conn.executemany(
+        "INSERT INTO tracks (album_id, disc_number, track_number, file_path, year) VALUES (?,?,?,?,?)",
+        [(r.get("album_id", "A1"), r.get("disc_number", 1), r.get("track_number", 1),
+          r.get("file_path"), r.get("year")) for r in rows],
+    )
+    conn.commit()
+    return _FakeDB(conn)
+
+
+def _ident(p):
+    return p
+
+
+def test_year_recovered_from_sibling_year_column():
+    db = _year_db([{"track_number": 3, "file_path": "/m/Artist/Album/03.flac", "year": 2024}])
+    assert mti._existing_album_year_from_sibling(db, "A1", _ident, 1, 5) == "2024"
+
+
+def test_year_recovered_from_paren_folder_name():
+    db = _year_db([{"track_number": 3, "file_path": "/music/Artist/Album (2019)/03 - Song.flac", "year": None}])
+    assert mti._existing_album_year_from_sibling(db, "A1", _ident, 1, 5) == "2019"
+
+
+def test_year_recovered_from_bracket_folder_name():
+    db = _year_db([{"track_number": 3, "file_path": "/music/Artist/Album [2008]/03.flac", "year": None}])
+    assert mti._existing_album_year_from_sibling(db, "A1", _ident, 1, 5) == "2008"
+
+
+def test_year_none_when_no_signal():
+    db = _year_db([{"track_number": 3, "file_path": "/music/Artist/Album/03.flac", "year": None}])
+    assert mti._existing_album_year_from_sibling(db, "A1", _ident, 1, 5) is None
+
+
+def test_year_ignores_the_target_slot_itself():
+    # The only sibling row IS the slot being imported -> excluded -> no year.
+    db = _year_db([{"disc_number": 1, "track_number": 5, "file_path": "/m/Album (2030)/05.flac", "year": 2030}])
+    assert mti._existing_album_year_from_sibling(db, "A1", _ident, 1, 5) is None

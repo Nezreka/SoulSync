@@ -47,6 +47,55 @@ from core.runtime_state import (
 logger = logging.getLogger(__name__)
 
 
+def _priority_sort_key(r):
+    """Today's confidence-first key: never download a high-quality WRONG file."""
+    return (
+        getattr(r, 'confidence', 0) or 0,
+        getattr(r, 'quality_score', 0) or 0,
+        getattr(r, 'upload_speed', 0) or 0,
+        -(getattr(r, 'queue_length', 0) or 0),
+        getattr(r, 'free_upload_slots', 0) or 0,
+        getattr(r, 'size', 0) or 0,
+    )
+
+
+def _quality_first_sort_key(r, targets):
+    """Best-quality key: the user's profile quality rank dominates; all the
+    priority-mode signals (confidence, speed, …) become tiebreakers.
+
+    Every candidate reaching this point already passed match filtering, so it
+    is "correct enough" — ordering by quality among correct candidates is safe.
+    Candidates with no usable quality info, or that match no target, sort last
+    (never dropped). Lower target index = better target, so it's negated to fit
+    the descending (reverse=True) sort.
+    """
+    from core.quality.model import rank_candidate
+
+    aq = getattr(r, 'audio_quality', None)
+    if aq is None or not targets:
+        target_idx, tier = (len(targets) if targets else 0), 0.0
+    else:
+        try:
+            target_idx, tier = rank_candidate(aq, targets)
+        except Exception:
+            target_idx, tier = len(targets), 0.0
+    return (-target_idx, tier) + _priority_sort_key(r)
+
+
+def order_candidates(candidates, *, quality_first=False, targets=None):
+    """Return *candidates* ordered best-first for the download walk.
+
+    ``quality_first=False`` (priority mode) → confidence-first, byte-for-byte
+    today's behaviour. ``quality_first=True`` (best-quality mode) → the user's
+    profile quality rank dominates, confidence/peer signals break ties.
+    """
+    if quality_first:
+        key = lambda r: _quality_first_sort_key(r, targets or [])
+    else:
+        key = _priority_sort_key
+    return sorted(candidates, key=key, reverse=True)
+
+
 @dataclass
 class CandidatesDeps:
     """Bundle of cross-cutting deps the candidate-fallback logic needs."""
@@ -59,25 +108,25 @@ class CandidatesDeps:
     on_download_completed: Callable
 
 
-def attempt_download_with_candidates(task_id, candidates, track, batch_id=None, deps: CandidatesDeps = None):
+def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
+                                     deps: CandidatesDeps = None, *,
+                                     quality_first=False, quality_targets=None):
     """
     Attempts to download with fallback candidate logic (matches GUI's retry_parallel_download_with_fallback).
     Returns True if successful, False if all candidates fail.
+
+    ``quality_first`` (best-quality search mode) orders the walk by the user's
+    profile quality rank instead of confidence-first; ``quality_targets`` is the
+    profile target list used for that ranking. Defaults preserve priority-mode
+    behaviour exactly.
     """
-    # Sort candidates by match confidence first, then peer quality. Upstream
-    # Soulseek validation already considers peer speed/slots/queue when scores
-    # are close; preserve that signal here instead of flattening ties back to
-    # arbitrary slskd response order.
-    candidates.sort(
-        key=lambda r: (
-            getattr(r, 'confidence', 0) or 0,
-            getattr(r, 'quality_score', 0) or 0,
-            getattr(r, 'upload_speed', 0) or 0,
-            -(getattr(r, 'queue_length', 0) or 0),
-            getattr(r, 'free_upload_slots', 0) or 0,
-            getattr(r, 'size', 0) or 0,
-        ),
-        reverse=True,
+    # Sort candidates. Priority mode: confidence-first, then peer quality —
+    # upstream Soulseek validation already considers peer speed/slots/queue when
+    # scores are close; preserve that signal instead of flattening ties back to
+    # arbitrary slskd response order. Best-quality mode: profile quality rank
+    # dominates (all candidates here already passed match filtering).
+    candidates = order_candidates(
+        candidates, quality_first=quality_first, targets=quality_targets,
     )
     
     with tasks_lock:
@@ -204,6 +253,21 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None, 
                     'total_discs': fallback_album.get('total_discs', 1),
                     'artists': _fallback_album_artists
                 }
+
+            # #915: parity with Reorganize / manual Enrich. If the album context is lean
+            # (no release_date) and the user's PRIMARY metadata source isn't Spotify, hydrate
+            # it from that source — the same place a reorganize reads — so the download's
+            # $year folder, release_date and album_type match instead of dropping the year /
+            # defaulting to YYYY-01-01 and forcing a manual reorganize afterwards.
+            try:
+                from core.downloads.track_metadata_backfill import backfill_album_context_from_source
+                from core.metadata import registry as _meta_registry
+                from core.metadata.album_tracks import get_album_for_source as _get_album_for_source
+                backfill_album_context_from_source(
+                    spotify_album_context, _meta_registry.get_primary_source(), _get_album_for_source,
+                )
+            except Exception as _bf_err:  # noqa: BLE001 — never let backfill break a download
+                logger.debug("[Context] primary-source album backfill skipped: %s", _bf_err)
 
             download_payload = candidate.__dict__
 

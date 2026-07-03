@@ -328,6 +328,22 @@ _ALBUM_QUALIFIER_RE = re.compile(
     re.IGNORECASE,
 )
 
+# A trailing "- ..." clause is stripped ONLY when EVERY token in it is an edition/format
+# qualifier (+ connectors / a year-ordinal). So "- Single", "- Acoustic Version", "- 2011
+# Remaster" collapse to the base name, but a real distinguishing subtitle ("- Nos vies en
+# Lumière", "- Live in Berlin") is kept — the bug was a blanket "- anything$" strip that
+# erased subtitles and fused different editions (Sokhi: Expedition 33 OST vs Bonus Edition).
+_DASH_QUALIFIER_WORD = (
+    r'live|acoustic|electric|instrumental|unplugged|mono|stereo|demos?|reissue|'
+    r'remix(?:es)?|edit(?:ed)?|radio|single|ep|lp|version|mix(?:es)?|sessions?|bootleg|'
+    r'covers?|original|redux|deluxe|expanded|remaster(?:ed)?|anniversary|special|'
+    r'edition|bonus|extended|explicit|clean|soundtrack|ost|score'
+)
+_TRAILING_DASH_QUALIFIER_RE = re.compile(
+    r'\s*-\s*(?:(?:' + _DASH_QUALIFIER_WORD + r'|the|a|and|&|\+|\d+(?:st|nd|rd|th)?)\b[\s\-]*)+$',
+    re.IGNORECASE,
+)
+
 
 def _normalize_album_for_match(name: str) -> str:
     """Return a canonical form of an album name suitable for fuzzy comparison.
@@ -347,8 +363,9 @@ def _normalize_album_for_match(name: str) -> str:
     # they're almost always edition or commentary noise, not part of the
     # album's identifying name.
     cleaned = re.sub(r'\s*[\(\[][^\)\]]*[\)\]]\s*', ' ', cleaned)
-    # Trailing dash-clauses ("Album - Remastered", "Album - Live")
-    cleaned = re.sub(r'\s*-\s*[^-]+$', '', cleaned)
+    # Trailing dash-clause, but ONLY when it's entirely edition/format qualifiers — a real
+    # subtitle is preserved (see _TRAILING_DASH_QUALIFIER_RE).
+    cleaned = _TRAILING_DASH_QUALIFIER_RE.sub(' ', cleaned)
     cleaned = re.sub(r'[^a-z0-9 ]+', ' ', cleaned.lower())
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     return cleaned
@@ -382,7 +399,7 @@ def _extract_volume_marker(normalized_name: str):
     return last.group(1) or last.group(2)
 
 
-def _albums_likely_match(spotify_album: str, lib_album: str, threshold: float = 0.6) -> bool:
+def _albums_likely_match(spotify_album: str, lib_album: str, threshold: float = 0.85) -> bool:
     """Return True when two album names plausibly identify the same release.
 
     Designed to swallow naming drift between metadata sources and the
@@ -406,12 +423,31 @@ def _albums_likely_match(spotify_album: str, lib_album: str, threshold: float = 
         return False
     if norm_a == norm_b:
         return True
-    # After normalization the shorter name often becomes a prefix /
-    # substring of the longer one ("napoleon dynamite" ⊂ "napoleon
-    # dynamite music from the motion picture" before stripping).
-    if norm_a in norm_b or norm_b in norm_a:
-        return True
+    # No loose substring shortcut: after qualifier-stripping, a short name being a
+    # prefix of a longer one is usually a DIFFERENT edition carrying a real subtitle
+    # ("clair obscur expedition 33" ⊂ "clair obscur expedition 33 nos vies en lumiere"),
+    # not naming drift. Genuine drift collapses to an EXACT match above; everything else
+    # must clear a high overall-similarity bar.
     return SequenceMatcher(None, norm_a, norm_b).ratio() >= threshold
+
+
+def _extid_match_is_owned(wanted_album: str, library_album: str, allow_duplicates: bool) -> bool:
+    """Whether an external-ID (recording MBID / ISRC) library hit counts as 'already owned' for THIS
+    watchlist request — i.e. whether to skip adding it to the wishlist.
+
+    A recording-ID hit normally means we have the track. But with ``allow_duplicates`` on the user
+    WANTS per-album copies, and soundtrack editions reuse the SAME recordings across releases — the
+    Expedition 33 'Original Soundtrack (original remix)' shares recording MBIDs with the 'Nos vies en
+    Lumière (Bonus Edition)' a user already owns. So when duplicates are allowed and the owned copy is
+    on a DIFFERENT album/edition, it's NOT owned for this release — let it be wishlisted. This mirrors
+    the album gate the fuzzy ``[AllowDup]`` path already applies; the ExtID short-circuit was skipping
+    it entirely. Pure.
+    """
+    if not allow_duplicates:
+        return True   # duplicates off -> any owned recording is 'owned', album-agnostic (prior behaviour)
+    if not wanted_album or not library_album:
+        return True   # nothing to compare -> conservative: treat as owned (prior behaviour)
+    return _albums_likely_match(wanted_album, library_album)
 
 
 @dataclass
@@ -2184,31 +2220,45 @@ class WatchlistScanner:
                         server_source=active_server,
                     )
                     if matched is not None:
-                        logger.info(
-                            f"[ExtID Match] Track found in library by external ID: "
-                            f"'{original_title}' by '{artists_to_search[0] if artists_to_search else 'Unknown'}' "
-                            f"(matched on: {', '.join(sorted(source_ids.keys()))})"
-                        )
-                        return False  # Track exists in library
-
-                    # Second-tier fallback: provenance table. Catches the
-                    # window between "SoulSync downloaded the file" and
-                    # "media-server scan + sync populated the tracks row
-                    # with IDs". File still has to exist on disk —
-                    # otherwise a user who deleted a file would never get
-                    # it back.
-                    prov = find_provenance_by_external_id(
-                        self.database, external_ids=source_ids,
-                    )
-                    if prov is not None:
-                        prov_path = prov.get('file_path')
-                        if prov_path and _os_local.path.exists(prov_path):
+                        matched_album = (matched.get('album_title') if isinstance(matched, dict)
+                                         else getattr(matched, 'album_title', None)) or ''
+                        # The recording IS in the library. Only skip it when it's actually "owned for
+                        # this release" — same album, or duplicates disabled. With duplicates on, the
+                        # same recording on a DIFFERENT edition (soundtrack remix vs the bonus edition
+                        # the user owns) is one they WANT — wishlist it, and don't let the provenance
+                        # fallback below re-skip it either.
+                        if _extid_match_is_owned(album_name, matched_album, allow_duplicates):
                             logger.info(
-                                f"[Provenance Match] Track found in download provenance: "
+                                f"[ExtID Match] Track found in library by external ID: "
                                 f"'{original_title}' by '{artists_to_search[0] if artists_to_search else 'Unknown'}' "
                                 f"(matched on: {', '.join(sorted(source_ids.keys()))})"
                             )
-                            return False
+                            return False  # Track exists in library (same album / duplicates off)
+                        logger.info(
+                            f"[ExtID Match] Same recording on a DIFFERENT album — allowing "
+                            f"(allow_duplicates): '{original_title}' (wanted: '{album_name}', "
+                            f"library: '{matched_album}')"
+                        )
+                        # fall through to the fuzzy path (same album gate), which wishlists it
+                    else:
+                        # Second-tier fallback: provenance table. Catches the
+                        # window between "SoulSync downloaded the file" and
+                        # "media-server scan + sync populated the tracks row
+                        # with IDs". File still has to exist on disk —
+                        # otherwise a user who deleted a file would never get
+                        # it back. Only when there's NO library row (above).
+                        prov = find_provenance_by_external_id(
+                            self.database, external_ids=source_ids,
+                        )
+                        if prov is not None:
+                            prov_path = prov.get('file_path')
+                            if prov_path and _os_local.path.exists(prov_path):
+                                logger.info(
+                                    f"[Provenance Match] Track found in download provenance: "
+                                    f"'{original_title}' by '{artists_to_search[0] if artists_to_search else 'Unknown'}' "
+                                    f"(matched on: {', '.join(sorted(source_ids.keys()))})"
+                                )
+                                return False
             except Exception as ext_id_err:
                 logger.debug(f"External-ID match probe failed (falling through to fuzzy): {ext_id_err}")
 
@@ -3633,8 +3683,13 @@ class WatchlistScanner:
             for source in sources_to_process:
                 logger.info(f"Curating Release Radar for {source}...")
 
-                # 1. Curate Release Radar - 50 tracks from recent albums
-                recent_albums = self.database.get_discovery_recent_albums(limit=50, source=source, profile_id=profile_id)
+                # 1. Curate Release Radar - 50 tracks from recent albums.
+                # Fetch a GENEROUS album budget (not 50) and exclude next-year announcements at the
+                # query: future-dated albums sort to the top of release_date DESC and used to eat the
+                # budget before the in-loop is_future_release skip ran, starving Fresh Tape to a few
+                # tracks. The downstream caps (6/artist, top 75, take 50) still bound the output.
+                recent_albums = self.database.get_discovery_recent_albums(
+                    limit=300, source=source, profile_id=profile_id, exclude_future_years=True)
                 release_radar_tracks = []
 
                 if not recent_albums:
@@ -3971,6 +4026,14 @@ class WatchlistScanner:
                     except Exception as e:
                         logger.debug(f"Error building BYLT for {played_artist.get('name', '?')}: {e}")
 
+                # #913: listening-driven recommendations — consensus-ranked artists you'd love but
+                # don't own + candidate playlist tracks. Self-contained + double-guarded so it can
+                # never affect the scan.
+                try:
+                    self._build_listening_recommendations(profile_id, sources_to_process)
+                except Exception as _lr_err:  # noqa: BLE001 — never let recs break the scan
+                    logger.debug("[Listening Recs] skipped: %s", _lr_err)
+
             # Also save without suffix for backward compatibility (use first active source).
             active_source = sources_to_process[0]
             release_radar_key = f'release_radar_{active_source}'
@@ -3988,6 +4051,240 @@ class WatchlistScanner:
             logger.error(f"Error curating discovery playlists: {e}")
             import traceback
             traceback.print_exc()
+
+    def _build_listening_recommendations(self, profile_id, sources_to_process):
+        """#913: consensus-ranked artists you'd love but don't own, plus candidate playlist
+        tracks, derived from your most-played artists + the similar_artists graph.
+
+        The ranking lives in core.discovery.listening_recommendations (pure + tested); this only
+        gathers inputs — all already in the DB, NO new network — and stores the result under NEW
+        metadata/curated keys. Fully self-contained and guarded: any failure logs and returns, so
+        it can never disturb the scan.
+
+        "Best in class" generation (the elevation over the first cut):
+          • Seeds are recency-weighted — recent plays boost lifetime favourites so the picks
+            track what you're into NOW, not just all-time totals.
+          • The ranker is fed the RAW per-seed edges (one row per seed→similar), so an artist
+            similar to several of your seeds accumulates real CONSENSUS — the old code fed the
+            name-collapsed ``get_top_similar_artists`` query, which flattened every similar to a
+            single seed (consensus could never fire). The raw edges also carry ``similarity_rank``,
+            so a seed's CLOSEST matches outweigh its long-tail ones.
+          • ``source_artist_id`` is a SOURCE id (Spotify/iTunes/Deezer/MusicBrainz), so the id→name
+            map is built from the artists' source-id columns, NOT the internal row id (the first
+            cut keyed it by ``artists.id`` and resolved nothing — the feature produced 0 recs).
+        Phase-1 candidate tracks still come from the discovery pool (like BYLT); a later phase
+        swaps in a direct top-tracks fetch for richer coverage.
+        """
+        try:
+            import json as _json
+            from core.discovery.listening_recommendations import (
+                aggregate_candidate_tracks,
+                build_recency_weighted_seeds,
+                choose_mix_fetch_source,
+                group_similars_by_seed,
+                names_match,
+                rank_recommended_artists,
+                to_mix_track,
+            )
+
+            # Recency-weighted seeds: lifetime top artists, boosted by recent (30d) plays.
+            lifetime = [s for s in (self.database.get_top_artists('all', 30) or []) if s.get('name')]
+            if not lifetime:
+                return
+            recent_rows = self.database.get_top_artists('30d', 50) or []
+            recent_counts = {r['name'].lower(): r.get('play_count', 0)
+                             for r in recent_rows if r.get('name')}
+            seeds = build_recency_weighted_seeds(lifetime, recent_counts)
+            seed_names = {s['name'].lower() for s in seeds}
+
+            # Owned-artist set (for exclusion) + the seeds' SOURCE ids (similar_artists.source_artist_id
+            # is a Spotify/iTunes/Deezer/MusicBrainz id, never the internal artists.id). We only need
+            # id→name for the SEED ids, since the edge query below is already scoped to them.
+            owned, seed_source_ids, seed_id_to_name = set(), [], {}
+            with self.database._get_connection() as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT name, spotify_artist_id, itunes_artist_id, deezer_id, "
+                            "musicbrainz_id FROM artists WHERE name IS NOT NULL AND name != ''")
+                for row in cur.fetchall():
+                    nm = row[0]
+                    lname = (nm or '').lower()
+                    owned.add(lname)
+                    if lname in seed_names:
+                        for sid in (row[1], row[2], row[3], row[4]):
+                            if sid:
+                                seed_source_ids.append(str(sid))
+                                seed_id_to_name[str(sid)] = nm
+
+                # RAW per-seed edges (preserve consensus + similarity_rank). Scoped to the seeds.
+                edges, edge_cols = [], ('source_artist_id', 'similar_artist_name', 'similarity_rank',
+                                       'spotify_id', 'itunes_id', 'deezer_id', 'image_url', 'genres')
+                if seed_source_ids:
+                    placeholders = ",".join("?" * len(seed_source_ids))
+                    cur.execute(
+                        f"SELECT source_artist_id, similar_artist_name, similarity_rank, "
+                        f"similar_artist_spotify_id, similar_artist_itunes_id, "
+                        f"similar_artist_deezer_id, image_url, genres FROM similar_artists "
+                        f"WHERE profile_id = ? AND source_artist_id IN ({placeholders})",
+                        [profile_id, *seed_source_ids])
+                    edges = [dict(zip(edge_cols, r, strict=False)) for r in cur.fetchall()]
+
+            # Per-name enrichment (image/ids/genres) so the Discover row can render rich cards.
+            artist_meta_by_name = {}
+            for e in edges:
+                key = (e['similar_artist_name'] or '').lower()
+                if not key:
+                    continue
+                m = artist_meta_by_name.setdefault(key, {})
+                for src_k, dst_k in (('spotify_id', 'spotify_artist_id'),
+                                     ('itunes_id', 'itunes_artist_id'),
+                                     ('deezer_id', 'deezer_artist_id')):
+                    if e.get(src_k) and not m.get(dst_k):
+                        m[dst_k] = e[src_k]
+                if e.get('image_url') and not m.get('image_url'):
+                    m['image_url'] = e['image_url']
+                if e.get('genres') and not m.get('genres'):
+                    m['genres'] = e['genres']
+
+            similars_by_seed = group_similars_by_seed(
+                seeds, edges, seed_id_to_name, rank_attr='similarity_rank')
+
+            # Fallback: if the raw edges resolved nothing (e.g. source ids not yet populated),
+            # degrade to the aggregated query so the feature still works rather than going dark.
+            if not similars_by_seed:
+                agg = self.database.get_top_similar_artists(limit=1000, profile_id=profile_id)
+                similars_by_seed = group_similars_by_seed(
+                    seeds, agg, seed_id_to_name, rank_attr='similarity_rank')
+
+            # Store a DEEP pool (not just the top consensus), so the request-time adventurousness dial
+            # has obscure-but-relevant picks to surface at the adventurous end — consensus and
+            # popularity are independent, so the top-200 already spans pop-96 favourites down to
+            # pop-1 deep cuts. The track-mix fetch below still only touches recs[:20], so the scan
+            # cost is unchanged; the row itself renders 18 and the dial chooses which 18.
+            recs = rank_recommended_artists(seeds, similars_by_seed, owned, limit=200)
+            if not recs:
+                logger.info("[Listening Recs] no recommendations yet (no similar-artist coverage)")
+                return
+
+            def _enrich(r):
+                m = artist_meta_by_name.get(r.name.lower(), {})
+                genres = m.get('genres')
+                if isinstance(genres, str):
+                    try:
+                        genres = _json.loads(genres)
+                    except Exception:
+                        genres = None
+                return {'name': r.name, 'seed_count': r.seed_count, 'seeds': r.seeds[:5],
+                        'score': r.score, 'spotify_artist_id': m.get('spotify_artist_id'),
+                        'itunes_artist_id': m.get('itunes_artist_id'),
+                        'deezer_artist_id': m.get('deezer_artist_id'),
+                        'image_url': m.get('image_url'),
+                        'genres': (genres[:3] if isinstance(genres, list) else None)}
+
+            self.database.set_metadata('listening_recs_artists',
+                                       _json.dumps([_enrich(r) for r in recs]))
+
+            # Candidate tracks for the "Listening Mix" playlist row: each recommended artist's
+            # top tracks. Prefer a DIRECT top-tracks fetch (Spotify/Deezer — richest + most
+            # accurate), fall back to the discovery pool (covers iTunes + any artist the fetch
+            # missed). Stored as full render-ready dicts so the row needs NO pool re-hydration —
+            # robust against pool rotation (the bug that shrinks Fresh Tape/Archives at read time).
+            pool, active_source = [], None
+            for src in (sources_to_process or []):
+                pool = self.database.get_discovery_pool_tracks(
+                    limit=5000, new_releases_only=False, source=src, profile_id=profile_id)
+                if pool:
+                    active_source = src
+                    break
+            if not active_source:
+                active_source = (sources_to_process or ['spotify'])[0]
+
+            # Pool baseline grouped by artist (full render dicts), no network.
+            pool_by_artist = {}
+            for t in (pool or []):
+                an = (getattr(t, 'artist_name', '') or '').lower()
+                tid = (getattr(t, 'spotify_track_id', None) if active_source == 'spotify'
+                       else getattr(t, 'itunes_track_id', None) if active_source == 'itunes'
+                       else getattr(t, 'deezer_track_id', None))
+                name = getattr(t, 'track_name', '') or ''
+                if not an or not tid or not name:
+                    continue
+                tdj = getattr(t, 'track_data_json', None)
+                if isinstance(tdj, str):
+                    try:
+                        tdj = _json.loads(tdj)
+                    except Exception:
+                        tdj = None
+                pool_by_artist.setdefault(an, []).append({
+                    'track_id': str(tid), 'name': name, 'track_name': name,
+                    'artist_name': getattr(t, 'artist_name', '') or '',
+                    'album_name': getattr(t, 'album_name', '') or '',
+                    'album_cover_url': getattr(t, 'album_cover_url', None),
+                    'duration_ms': getattr(t, 'duration_ms', 0) or 0,
+                    'track_data_json': tdj, 'source': active_source,
+                    f'{active_source}_track_id': str(tid)})
+
+            # Direct top-tracks enrichment — guarded, bounded (top 20 recs), fail-soft per artist.
+            # Source-independent: the active source is used when it can fetch top tracks
+            # (Spotify/Deezer); otherwise we fall back to Deezer's public top-tracks API (no auth,
+            # available to every user) so iTunes / Discogs / MusicBrainz users still get a full mix
+            # without switching sources — the tracks are acquired via Soulseek by artist+title, so
+            # the fetch source need not match the user's active source.
+            fetched_by_artist = {}
+            try:
+                active_client = get_client_for_source(active_source) if active_source in ('spotify', 'deezer') else None
+                active_can_fetch = bool(active_client and hasattr(active_client, 'get_artist_top_tracks'))
+                fetch_source = choose_mix_fetch_source(active_source, active_can_fetch)
+                client = active_client if (active_can_fetch and fetch_source == active_source) \
+                    else get_client_for_source(fetch_source)
+                if client and hasattr(client, 'get_artist_top_tracks'):
+                    id_key = 'spotify_artist_id' if fetch_source == 'spotify' else 'deezer_artist_id'
+                    can_search = hasattr(client, 'search_artists')
+                    for r in recs[:20]:
+                        aid = artist_meta_by_name.get(r.name.lower(), {}).get(id_key)
+                        # Most similar-artist rows store a name but no source id (and a fallback
+                        # fetch source won't have the active source's ids at all), so resolve it
+                        # by name-search — guarded by names_match so we never fetch the WRONG
+                        # artist's tracks (a same-name act).
+                        if not aid and can_search:
+                            try:
+                                found = client.search_artists(r.name, limit=1) or []
+                            except Exception as _s_err:
+                                logger.debug("[Listening Recs] artist search failed for %s: %s",
+                                             r.name, _s_err)
+                                found = []
+                            if found and names_match(r.name, getattr(found[0], 'name', '')):
+                                aid = getattr(found[0], 'id', None)
+                        if not aid:
+                            continue
+                        try:
+                            raw = client.get_artist_top_tracks(str(aid), limit=8) or []
+                        except Exception as _tt_err:
+                            logger.debug("[Listening Recs] top-tracks fetch failed for %s: %s",
+                                         r.name, _tt_err)
+                            continue
+                        shaped = [s for s in (to_mix_track(x, fetch_source) for x in raw) if s][:5]
+                        if shaped:
+                            fetched_by_artist[r.name.lower()] = shaped
+            except Exception as _enr_err:
+                logger.debug("[Listening Recs] top-tracks enrichment skipped: %s", _enr_err)
+
+            # Merge: prefer fetched top tracks, fall back to the pool per artist.
+            top_tracks_by_artist = {}
+            for r in recs:
+                merged = fetched_by_artist.get(r.name.lower()) or pool_by_artist.get(r.name.lower())
+                if merged:
+                    top_tracks_by_artist[r.name.lower()] = merged
+
+            mix = aggregate_candidate_tracks(recs, top_tracks_by_artist, per_artist=3, limit=50)
+            track_ids = [m.get('track_id') for m in mix if m.get('track_id')]
+            if mix:
+                self.database.set_metadata('listening_recs_tracks_full', _json.dumps(mix))
+                self.database.save_curated_playlist('listening_recs_tracks', track_ids, profile_id=profile_id)
+
+            logger.info("[Listening Recs] %d recommended artists, %d mix tracks (%d artists via top-tracks fetch)",
+                        len(recs), len(mix), len(fetched_by_artist))
+        except Exception as e:
+            logger.debug("[Listening Recs] generation skipped: %s", e)
 
     def sync_spotify_library_cache(self, profile_id=1):
         """Sync user's saved Spotify albums into the local cache.

@@ -24,6 +24,23 @@ def _cm(config_data):
     return cm
 
 
+# ── #879: the GET /api/settings handler calls config_manager.redacted_config().
+# If that method is ever renamed/removed the endpoint 500s, the web UI treats the
+# error body as settings, blanks the form to defaults, and autosaves over the
+# user's real config. Pin the method's presence on the class so that can't ship.
+
+def test_redacted_config_is_a_method_on_the_class():
+    assert callable(getattr(ConfigManager, 'redacted_config', None)), (
+        "GET /api/settings depends on ConfigManager.redacted_config(); removing or "
+        "renaming it 500s the settings endpoint and the UI then wipes the config (#879)")
+
+
+def test_redacted_config_callable_on_instance_returns_dict():
+    cm = _cm({'spotify': {'client_secret': 'REAL'}})
+    out = cm.redacted_config()
+    assert isinstance(out, dict) and out.get('spotify', {}).get('client_secret') == S
+
+
 # ── redacted_config: secrets out, everything else intact ────────────────────
 
 def test_configured_secrets_are_masked():

@@ -41,8 +41,8 @@ function _initImportFileTab() {
 
 function _importFileRead(file) {
     const ext = file.name.split('.').pop().toLowerCase();
-    if (!['csv', 'tsv', 'txt'].includes(ext)) {
-        showToast('Unsupported file type. Use CSV, TSV, or TXT.', 'error');
+    if (!['csv', 'tsv', 'txt', 'm3u', 'm3u8'].includes(ext)) {
+        showToast('Unsupported file type. Use CSV, TSV, TXT, M3U, or M3U8.', 'error');
         return;
     }
 
@@ -50,7 +50,8 @@ function _importFileRead(file) {
     reader.onload = (e) => {
         _importFileState.rawText = e.target.result;
         _importFileState.fileName = file.name;
-        _importFileState.fileType = (ext === 'txt') ? 'text' : 'csv';
+        _importFileState.fileType = (ext === 'm3u' || ext === 'm3u8') ? 'm3u'
+                                  : (ext === 'txt') ? 'text' : 'csv';
         _importFileParseAndPreview();
     };
     reader.readAsText(file);
@@ -103,6 +104,66 @@ function _importFileParseCsv(text, delimiter) {
     return { headers, rows };
 }
 
+// Parse an M3U / M3U8 playlist into track objects. Handles both the simple form
+// (one media path per line) and the extended form (#EXTINF:<secs>,<artist> - <title>
+// followed by the path). SoulSync's own export is extended M3U and replaces the path
+// of an un-located track with a "# MISSING: ..." comment — those are exactly the
+// tracks a user imports to go match/download, so a pending #EXTINF is flushed even
+// when no path line follows it. Returns { tracks, playlistName }.
+function _importFileParseM3u(text) {
+    const lines = (text || '').split(/\r?\n/);
+    const tracks = [];
+    let playlistName = '';
+    let pending = null;   // { duration_ms, artist, title } from the last #EXTINF
+
+    function splitArtistTitle(s) {
+        const i = s.indexOf(' - ');
+        return i !== -1
+            ? { artist: s.slice(0, i).trim(), title: s.slice(i + 3).trim() }
+            : { artist: '', title: s.trim() };
+    }
+    function pushTrack(artist, title, duration_ms) {
+        if (!title && !artist) return;
+        tracks.push({ track_name: title || '', artist_name: artist || '', album_name: '', duration_ms: duration_ms || 0 });
+    }
+    function flushPending() {
+        if (pending) { pushTrack(pending.artist, pending.title, pending.duration_ms); pending = null; }
+    }
+
+    for (const raw of lines) {
+        const line = raw.trim();
+        if (!line) continue;
+        if (line.charAt(0) === '#') {
+            if (/^#EXTINF:/i.test(line)) {
+                flushPending();   // a prior #EXTINF whose path was missing still counts
+                const rest = line.slice(8);                 // after "#EXTINF:"
+                const comma = rest.indexOf(',');
+                const secs = parseFloat(comma === -1 ? rest : rest.slice(0, comma));
+                const meta = comma === -1 ? '' : rest.slice(comma + 1).trim();
+                const { artist, title } = splitArtistTitle(meta);
+                pending = { duration_ms: (!isNaN(secs) && secs > 0) ? Math.round(secs * 1000) : 0, artist, title };
+            } else if (/^#PLAYLIST:/i.test(line)) {
+                playlistName = line.slice(line.indexOf(':') + 1).trim();
+            }
+            // ignore #EXTM3U, #GENERATED, "# MISSING:", #EXTALB, and other directives
+            continue;
+        }
+        // A non-# line is a media path/URL — the entry for the pending #EXTINF, if any.
+        if (pending && (pending.title || pending.artist)) {
+            pushTrack(pending.artist, pending.title, pending.duration_ms);
+            pending = null;
+        } else {
+            // Simple M3U with no #EXTINF: derive artist/title from the file name.
+            pending = null;
+            const base = (line.split(/[\\/]/).pop() || line).replace(/\.[^.]+$/, '');
+            const { artist, title } = splitArtistTitle(base);
+            pushTrack(artist, title, 0);
+        }
+    }
+    flushPending();   // trailing #EXTINF with no following path
+    return { tracks, playlistName };
+}
+
 function _importFileAutoMapColumns(headers) {
     const map = {};
     const lowerHeaders = headers.map(h => h.toLowerCase().trim());
@@ -139,7 +200,14 @@ function _importFileParseAndPreview() {
     const state = _importFileState;
     const text = state.rawText;
 
-    if (state.fileType === 'text') {
+    if (state.fileType === 'm3u') {
+        // M3U/M3U8 is self-describing — no column mapping or order/separator needed.
+        const { tracks, playlistName } = _importFileParseM3u(text);
+        state.rows = tracks;            // already track objects
+        state.headers = [];
+        state.columnMap = {};
+        state.m3uPlaylistName = playlistName || '';
+    } else if (state.fileType === 'text') {
         // Plain text: one track per line
         const lines = text.split(/\r?\n/).filter(l => l.trim());
         state.rows = lines;
@@ -163,7 +231,15 @@ function _importFileBuildTracks() {
     const state = _importFileState;
     state.parsedTracks = [];
 
-    if (state.fileType === 'text') {
+    if (state.fileType === 'm3u') {
+        // Tracks were already parsed by _importFileParseM3u; just copy them through.
+        state.parsedTracks = state.rows.map(t => ({
+            track_name: t.track_name || '',
+            artist_name: t.artist_name || '',
+            album_name: t.album_name || '',
+            duration_ms: t.duration_ms || 0
+        }));
+    } else if (state.fileType === 'text') {
         const orderEl = document.getElementById('import-file-text-order');
         const sepEl = document.getElementById('import-file-text-separator');
         const order = orderEl ? orderEl.value : 'artist-title';
@@ -249,10 +325,12 @@ function _importFileRenderPreview() {
         _importFileRenderColumnMapping();
     }
 
-    // Pre-fill playlist name from filename (strip extension)
+    // Pre-fill playlist name: prefer the M3U's own #PLAYLIST: directive, else the filename.
     const nameInput = document.getElementById('import-file-playlist-name');
     if (nameInput && !nameInput.value) {
-        nameInput.value = state.fileName.replace(/\.[^.]+$/, '');
+        nameInput.value = (state.fileType === 'm3u' && state.m3uPlaylistName)
+            ? state.m3uPlaylistName
+            : state.fileName.replace(/\.[^.]+$/, '');
     }
     // Update button state
     const btn = document.getElementById('import-file-import-btn');
@@ -523,6 +601,7 @@ function renderMirroredCard(p, container) {
         <button class="mirrored-card-pipeline" onclick="event.stopPropagation(); runMirroredPlaylistPipeline(${p.id}, '${_escJs(p.name)}')" title="Refresh, discover, sync, and queue missing tracks">Auto-Sync</button>
         <button class="mirrored-card-rename" onclick="event.stopPropagation(); editMirroredCustomName(${p.id}, '${_escJs(p.name)}', '${_escJs(p.custom_name || '')}')" title="Rename (changes the name shown here and used when syncing)">✏️</button>
         <button class="mirrored-card-link" onclick="event.stopPropagation(); editMirroredSourceRef(${p.id}, '${_escJs(p.name)}', '${_escJs(p.source)}', '${_escJs(sourceRef)}')" title="Edit original playlist link">🔗</button>
+        <button class="mirrored-card-export" onclick="event.stopPropagation(); exportMirroredPlaylist(${p.id}, '${_escJs(p.display_name || p.name)}')" title="Export to ListenBrainz / JSPF">📤</button>
         <button class="mirrored-card-delete" onclick="event.stopPropagation(); deleteMirroredPlaylist(${p.id}, '${_escJs(p.name)}')" title="Delete mirror">✕</button>
     `;
     card.addEventListener('click', () => {
@@ -564,6 +643,169 @@ function renderMirroredCard(p, container) {
     if (pipelineState && pipelineState.status === 'running' && !mirroredPipelinePollers[hash]) {
         pollMirroredPipelineStatus(p.id, p.name);
     }
+}
+
+// ── Playlist export to ListenBrainz / JSPF (#903) ───────────────────────────
+// Export button on the mirrored-playlist card -> pick a destination -> background job
+// resolves each track to a MusicBrainz recording MBID (cache/DB/file/MusicBrainz) and either
+// downloads the .jspf or pushes the playlist straight to ListenBrainz, with live status on the card.
+function exportMirroredPlaylist(playlistId, name) {
+    const existing = document.getElementById('pl-export-modal');
+    if (existing) existing.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'pl-export-modal';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);';
+    overlay.innerHTML = `
+        <div style="width:420px;max-width:92vw;background:linear-gradient(135deg,rgba(26,26,30,0.98),rgba(18,18,22,0.99));border:1px solid rgba(var(--accent-rgb),0.25);border-radius:18px;padding:22px;box-shadow:0 18px 50px rgba(0,0,0,0.55);">
+            <div style="font-size:16px;font-weight:700;color:#fff;margin-bottom:4px;">Export playlist</div>
+            <div style="font-size:13px;color:rgba(255,255,255,0.55);margin-bottom:18px;">${_esc(name)} → ListenBrainz</div>
+            <button class="pl-export-choice" data-mode="push" style="width:100%;text-align:left;margin-bottom:10px;padding:13px 15px;border-radius:12px;border:1px solid rgba(var(--accent-rgb),0.35);background:rgba(var(--accent-rgb),0.12);color:#fff;cursor:pointer;">
+                <div style="font-weight:600;">Sync to ListenBrainz</div>
+                <div style="font-size:12px;color:rgba(255,255,255,0.55);">Create the playlist directly on your ListenBrainz account (needs your LB token).</div>
+            </button>
+            <button class="pl-export-choice" data-mode="download" style="width:100%;text-align:left;margin-bottom:10px;padding:13px 15px;border-radius:12px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);color:#fff;cursor:pointer;">
+                <div style="font-weight:600;">Download .jspf file</div>
+                <div style="font-size:12px;color:rgba(255,255,255,0.55);">Save a JSPF playlist you can upload to ListenBrainz manually.</div>
+            </button>
+            <button class="pl-export-choice" data-mode="spotify" style="width:100%;text-align:left;margin-bottom:10px;padding:13px 15px;border-radius:12px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);color:#fff;cursor:pointer;">
+                <div style="font-weight:600;">Sync to Spotify</div>
+                <div style="font-size:12px;color:rgba(255,255,255,0.55);">Create a Spotify playlist in your account (the first time, you'll grant permission to create playlists).</div>
+            </button>
+            <button class="pl-export-choice" data-mode="deezer" style="width:100%;text-align:left;margin-bottom:16px;padding:13px 15px;border-radius:12px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);color:#fff;cursor:pointer;">
+                <div style="font-weight:600;">Sync to Deezer</div>
+                <div style="font-size:12px;color:rgba(255,255,255,0.55);">Create a Deezer playlist from this list (uses your Deezer login).</div>
+            </button>
+            <div style="font-size:11.5px;color:rgba(255,255,255,0.4);line-height:1.5;">Tracks are matched by ID (MusicBrainz for ListenBrainz/JSPF; the stored Spotify/Deezer ID for those). Tracks without a match can't be included — you'll see how many made it. Renaming/re-syncing can reset play counts on the destination.</div>
+            <label style="display:flex;align-items:flex-start;gap:8px;margin-top:12px;font-size:12px;color:rgba(255,255,255,0.6);cursor:pointer;">
+                <input type="checkbox" id="pl-export-backfill" style="margin-top:2px;flex-shrink:0;accent-color:rgb(var(--accent-rgb));">
+                <span><b style="color:rgba(255,255,255,0.75);">Match missing tracks</b> (Spotify/Deezer) — search the service for tracks with no known ID. Slower, and only confident matches are added.</span>
+            </label>
+            <div style="text-align:right;margin-top:14px;"><button onclick="document.getElementById('pl-export-modal').remove()" style="background:none;border:none;color:rgba(255,255,255,0.5);cursor:pointer;font-size:13px;">Cancel</button></div>
+        </div>`;
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    overlay.querySelectorAll('.pl-export-choice').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const mode = btn.dataset.mode;
+            // Gated service button (not connected) → nudge to Settings instead of a doomed export.
+            if (btn.dataset.disconnected) {
+                const dest = mode[0].toUpperCase() + mode.slice(1);
+                overlay.remove();
+                _setExportStatus(playlistId, `<span style="color:#f59e0b;">Connect ${dest} in Settings → Connections to export here</span>`, 9000);
+                return;
+            }
+            const bfEl = overlay.querySelector('#pl-export-backfill');
+            const backfill = !!(bfEl && bfEl.checked);
+            overlay.remove();
+            _startPlaylistExport(playlistId, mode, name, backfill);
+        });
+    });
+    document.body.appendChild(overlay);
+
+    // Gate Spotify/Deezer on connection (cheap token/ARL check — no live verify). Disconnected
+    // services grey out + nudge to Settings rather than letting the export fail with "not connected".
+    fetch('/api/discover/your-albums/sources').then(r => r.json()).then(data => {
+        const connected = (data && data.connected) || [];
+        overlay.querySelectorAll('.pl-export-choice[data-mode]').forEach(btn => {
+            const m = btn.dataset.mode;
+            if ((m === 'spotify' || m === 'deezer') && !connected.includes(m)) {
+                btn.dataset.disconnected = '1';
+                btn.style.opacity = '0.5';
+                const hint = btn.querySelector('div:last-child');
+                if (hint) hint.innerHTML = `<span style="color:#f59e0b;">Not connected</span> — set up ${m[0].toUpperCase() + m.slice(1)} in Settings → Connections first.`;
+            }
+        });
+    }).catch(() => {});
+}
+
+async function _startPlaylistExport(playlistId, mode, name, backfill) {
+    _setExportStatus(playlistId, `<span style="color:#a78bfa;">Starting export…</span>`);
+    try {
+        // Spotify/Deezer go to the service endpoint; ListenBrainz/JSPF keep the LB one.
+        const isService = (mode === 'spotify' || mode === 'deezer');
+        const url = isService
+            ? `/api/playlists/${playlistId}/export/service/${mode}`
+            : `/api/playlists/${playlistId}/export/listenbrainz`;
+        const resp = await fetch(url, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: isService ? JSON.stringify({ backfill: !!backfill }) : JSON.stringify({ mode }),
+        });
+        const data = await resp.json();
+        // Spotify export needs a one-time write-permission grant. Surface a clickable link (a
+        // direct user click avoids popup-blocking; window.open after this await would be blocked)
+        // and tell the user to retry once they've authorized.
+        if (data.needs_auth && data.auth_url) {
+            _setExportStatus(playlistId, `<span style="color:#f59e0b;">Spotify needs permission to create playlists — <a href="${data.auth_url}" target="_blank" rel="noopener" style="color:#38bdf8;text-decoration:underline;">authorize</a>, then click Export again.</span>`, 20000);
+            return;
+        }
+        if (!data.success || !data.job_id) {
+            _setExportStatus(playlistId, `<span style="color:#ef4444;">${_esc(data.error || 'Export failed to start')}</span>`);
+            return;
+        }
+        _pollPlaylistExport(data.job_id, playlistId, mode, name);
+    } catch (e) {
+        _setExportStatus(playlistId, `<span style="color:#ef4444;">Export error</span>`);
+    }
+}
+
+async function _pollPlaylistExport(jobId, playlistId, mode, name) {
+    try {
+        const resp = await fetch(`/api/playlists/export/status/${jobId}`);
+        const data = await resp.json();
+        const job = data.job || {};
+        const st = job.stats || {};
+        if (job.phase === 'resolving') {
+            const pct = job.total ? Math.round(100 * (job.done || 0) / job.total) : 0;
+            _setExportStatus(playlistId, `<span style="color:#38bdf8;">Matching ${job.done || 0}/${job.total || 0} (${pct}%)${st.resolved != null ? ` · ${st.resolved} matched` : ''}</span>`);
+        } else if (job.phase === 'pushing') {
+            const dest = (mode === 'spotify' || mode === 'deezer') ? (mode[0].toUpperCase() + mode.slice(1)) : 'ListenBrainz';
+            _setExportStatus(playlistId, `<span style="color:#a78bfa;">Pushing to ${dest}…</span>`);
+        } else if (job.phase === 'done') {
+            // Spotify/Deezer export: report added + unmatched and link the new playlist.
+            if (mode === 'spotify' || mode === 'deezer') {
+                const dest = mode[0].toUpperCase() + mode.slice(1);
+                const push = job.push || {};
+                const cov = `${st.resolved || 0} added${st.from_search ? ` (${st.from_search} matched live)` : ''}${st.unmatched ? ` · ${st.unmatched} not on ${dest}` : ''}`;
+                const link = push.url ? ` <a href="${push.url}" target="_blank" style="color:#38bdf8;">open</a>` : '';
+                _setExportStatus(playlistId, `<span style="color:#22c55e;">Exported to ${dest} · ${cov}</span>${link}`, 12000);
+                if (typeof showToast === 'function') showToast(`Playlist exported to ${dest} (${cov})`, 'success');
+                return;
+            }
+            const sum = job.summary || {};
+            const cov = `${sum.included || 0}/${sum.total || 0} matched${sum.skipped ? ` · ${sum.skipped} unmatched` : ''}`;
+            if (mode === 'download') {
+                window.location = `/api/playlists/export/download/${jobId}`;
+                _setExportStatus(playlistId, `<span style="color:#22c55e;">Downloaded · ${cov}</span>`, 8000);
+            } else {
+                const url = (job.push && job.push.playlist_url) || '';
+                _setExportStatus(playlistId, `<span style="color:#22c55e;">Synced to ListenBrainz · ${cov}</span>` + (url ? ` <a href="${url}" target="_blank" style="color:#38bdf8;">view</a>` : ''), 12000);
+                if (typeof showToast === 'function') showToast(`Playlist synced to ListenBrainz (${cov})`, 'success');
+            }
+            return;
+        } else if (job.phase === 'error') {
+            _setExportStatus(playlistId, `<span style="color:#ef4444;">${_esc(job.error || 'Export failed')}</span>`, 10000);
+            return;
+        }
+        setTimeout(() => _pollPlaylistExport(jobId, playlistId, mode, name), 1000);
+    } catch (e) {
+        setTimeout(() => _pollPlaylistExport(jobId, playlistId, mode, name), 2000);
+    }
+}
+
+function _setExportStatus(playlistId, html, autoHideMs) {
+    // Inject into the card's existing .card-meta line (same approach as the pipeline phase
+    // indicator) so the status sits inline and never disrupts the card's flex row.
+    const card = document.getElementById(`mirrored-card-${playlistId}`);
+    if (!card) return;
+    const meta = card.querySelector('.card-meta');
+    if (!meta) return;
+    let span = meta.querySelector('.export-status-span');
+    if (!span) {
+        span = document.createElement('span');
+        span.className = 'export-status-span';
+        meta.appendChild(span);
+    }
+    span.innerHTML = html;
+    if (autoHideMs) setTimeout(() => { if (span && span.parentNode) span.remove(); }, autoHideMs);
 }
 
 function updateMirroredCardPhase(urlHash, phase) {
@@ -1107,6 +1349,235 @@ function closeDiscoveryPoolModal() {
     loadDiscoveryPoolStats();
 }
 
+// ── Wing It Pool ───────────────────────────────────────────────────────────
+// Lists tracks Wing It auto-matched on a best-effort guess (extra_data
+// wing_it_fallback flag). They count as 'discovered' so the Discovery Pool hides
+// them — this is the only place to review + re-match the guesses. Re-match reuses
+// the Discovery Pool's openPoolFixModal / /api/discovery-pool/fix (same track id);
+// a manual match drops the row from here on the next refresh.
+let _wingItPoolOverlay = null;
+let _wingItPoolData = null;
+let _wingItPoolView = 'categories';   // 'categories' | 'attention' | 'matched'
+let _wingItPoolPlaylistFilter = null;
+
+async function openWingItPoolModal(playlistId = null) {
+    _wingItPoolPlaylistFilter = playlistId;
+    _wingItPoolView = 'categories';
+    let url = '/api/wing-it-pool';
+    if (playlistId) url += `?playlist_id=${playlistId}`;
+    try {
+        const res = await fetch(url);
+        _wingItPoolData = await res.json();
+    } catch (err) {
+        showToast('Failed to load Wing It pool', 'error');
+        return;
+    }
+    if (_wingItPoolOverlay) _wingItPoolOverlay.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.id = 'wing-it-pool-overlay';
+    overlay.onclick = (e) => { if (e.target === overlay) closeWingItPoolModal(); };
+
+    const playlistOptions = (_wingItPoolData.playlists || [])
+        .map(p => `<option value="${p.id}" ${playlistId == p.id ? 'selected' : ''}>${_esc(p.name)}</option>`)
+        .join('');
+    const attentionCount = (_wingItPoolData.tracks || []).length;
+    const matchedCount = (_wingItPoolData.matched || []).length;
+
+    overlay.innerHTML = `
+        <div class="modal-container playlist-modal">
+            <div class="playlist-modal-header">
+                <div class="playlist-header-content">
+                    <h2>Wing It Pool</h2>
+                    <div class="playlist-quick-info">
+                        <span class="playlist-owner ${attentionCount > 0 ? 'pool-header-failed-highlight' : ''}" id="wing-it-header-attention">${attentionCount} to review</span>
+                        <span class="playlist-track-count" id="wing-it-header-matched">${matchedCount} resolved</span>
+                        <select class="pool-playlist-filter" onchange="filterWingItPool(this.value)">
+                            <option value="">All Playlists</option>
+                            ${playlistOptions}
+                        </select>
+                    </div>
+                </div>
+                <span class="playlist-modal-close" onclick="closeWingItPoolModal()">&times;</span>
+            </div>
+
+            <div class="playlist-modal-body">
+                <div class="pool-category-grid" id="wing-it-category-grid">
+                    <div class="pool-category-card failed" onclick="showWingItList('attention')">
+                        <div class="pool-category-fallback failed"></div>
+                        <div class="pool-category-overlay"></div>
+                        <div class="pool-category-content">
+                            <div class="pool-category-icon">&#9889;</div>
+                            <div class="pool-category-count failed" id="wing-it-cat-attention-count">${attentionCount}</div>
+                            <div class="pool-category-label">guesses to review</div>
+                        </div>
+                        <div class="pool-category-top-bar failed"></div>
+                    </div>
+                    <div class="pool-category-card matched" onclick="showWingItList('matched')">
+                        <div class="pool-category-fallback matched"></div>
+                        <div class="pool-category-overlay"></div>
+                        <div class="pool-category-content">
+                            <div class="pool-category-icon">&#10003;</div>
+                            <div class="pool-category-count matched" id="wing-it-cat-matched-count">${matchedCount}</div>
+                            <div class="pool-category-label">resolved manually</div>
+                        </div>
+                        <div class="pool-category-top-bar matched"></div>
+                    </div>
+                </div>
+
+                <div class="pool-list-view" id="wing-it-list-view" style="display: none;">
+                    <div class="pool-list-header">
+                        <button class="pool-back-btn" onclick="showWingItCategories()">&larr; Back</button>
+                        <span class="pool-list-title" id="wing-it-list-title"></span>
+                        <input type="text" class="pool-list-search" id="wing-it-list-search" placeholder="Filter tracks..." oninput="renderWingItPoolList()">
+                    </div>
+                    <div class="pool-list-content" id="wing-it-list-content"></div>
+                </div>
+            </div>
+
+            <div class="playlist-modal-footer">
+                <div class="playlist-modal-footer-left"></div>
+                <div class="playlist-modal-footer-right">
+                    <button class="playlist-modal-btn playlist-modal-btn-secondary" onclick="closeWingItPoolModal()">Close</button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+    overlay.style.display = 'flex';
+    _wingItPoolOverlay = overlay;
+}
+
+function showWingItList(view) {
+    _wingItPoolView = view;
+    const grid = document.getElementById('wing-it-category-grid');
+    const listView = document.getElementById('wing-it-list-view');
+    const title = document.getElementById('wing-it-list-title');
+    const search = document.getElementById('wing-it-list-search');
+    if (grid) grid.style.display = 'none';
+    if (listView) listView.style.display = 'block';
+    if (title) title.textContent = view === 'matched'
+        ? '✓ Resolved Wing It guesses' : '⚡ Guesses to review';
+    if (search) search.value = '';
+    renderWingItPoolList();
+}
+
+function showWingItCategories() {
+    _wingItPoolView = 'categories';
+    const grid = document.getElementById('wing-it-category-grid');
+    const listView = document.getElementById('wing-it-list-view');
+    if (grid) grid.style.display = 'grid';
+    if (listView) listView.style.display = 'none';
+}
+
+function _wingItMatchedName(t) {
+    try {
+        const md = JSON.parse(t.extra_data || '{}').matched_data || {};
+        return md.name || '';
+    } catch (e) { return ''; }
+}
+
+function renderWingItPoolList() {
+    const container = document.getElementById('wing-it-list-content');
+    if (!container || !_wingItPoolData) return;
+
+    const searchEl = document.getElementById('wing-it-list-search');
+    const query = (searchEl ? searchEl.value : '').toLowerCase().trim();
+    const isMatched = _wingItPoolView === 'matched';
+    let tracks = (isMatched ? _wingItPoolData.matched : _wingItPoolData.tracks) || [];
+    if (query) {
+        tracks = tracks.filter(t =>
+            (t.track_name || '').toLowerCase().includes(query) ||
+            (t.artist_name || '').toLowerCase().includes(query) ||
+            (t.playlist_name || '').toLowerCase().includes(query)
+        );
+    }
+    if (tracks.length === 0) {
+        const emptyMsg = isMatched
+            ? 'No resolved Wing It tracks yet — ones you Fix here will land in this list.'
+            : 'No Wing It guesses to review.';
+        container.innerHTML = query
+            ? '<div class="pool-empty">No tracks match your filter.</div>'
+            : `<div class="pool-empty">${emptyMsg}</div>`;
+        return;
+    }
+    container.innerHTML = tracks.map(t => {
+        if (isMatched) {
+            const matchedName = _wingItMatchedName(t);
+            return `
+                <div class="pool-track-row pool-matched">
+                    <div class="pool-track-info">
+                        <div class="pool-track-name">${_esc(t.track_name)}</div>
+                        <div class="pool-track-meta">
+                            <span class="pool-track-artist">${_esc(t.artist_name)}</span>
+                            ${matchedName ? `<span class="pool-track-arrow">&rarr;</span><span class="pool-match-name">${_esc(matchedName)}</span>` : ''}
+                            <span class="pool-track-playlist-badge">${_esc(t.playlist_name)}</span>
+                        </div>
+                    </div>
+                    <button class="pool-rematch-btn" onclick="openPoolFixModal(${t.id}, '${_escJs(t.track_name)}', '${_escJs(t.artist_name)}')" title="Change this match">Re-match</button>
+                </div>
+            `;
+        }
+        return `
+            <div class="pool-track-row pool-failed">
+                <div class="pool-track-info">
+                    <div class="pool-track-name">${_esc(t.track_name)}</div>
+                    <div class="pool-track-meta">
+                        <span class="pool-track-artist">${_esc(t.artist_name)}</span>
+                        <span class="pool-track-playlist-badge">${_esc(t.playlist_name)}</span>
+                    </div>
+                </div>
+                <button class="playlist-modal-btn playlist-modal-btn-primary pool-fix-btn" onclick="openPoolFixModal(${t.id}, '${_escJs(t.track_name)}', '${_escJs(t.artist_name)}')">Fix Match</button>
+            </div>
+        `;
+    }).join('');
+}
+
+async function filterWingItPool(playlistId) {
+    _wingItPoolPlaylistFilter = playlistId || null;
+    let url = '/api/wing-it-pool';
+    if (playlistId) url += `?playlist_id=${playlistId}`;
+    try {
+        const res = await fetch(url);
+        _wingItPoolData = await res.json();
+    } catch (e) {
+        showToast('Failed to filter Wing It pool', 'error');
+        return;
+    }
+    _updateWingItHeaderCounts();
+    if (_wingItPoolView === 'categories') return;
+    renderWingItPoolList();
+}
+
+function _updateWingItHeaderCounts() {
+    if (!_wingItPoolData) return;
+    const a = (_wingItPoolData.tracks || []).length;
+    const m = (_wingItPoolData.matched || []).length;
+    const aEl = document.getElementById('wing-it-header-attention');
+    const mEl = document.getElementById('wing-it-header-matched');
+    const aCat = document.getElementById('wing-it-cat-attention-count');
+    const mCat = document.getElementById('wing-it-cat-matched-count');
+    if (aEl) { aEl.textContent = `${a} to review`; aEl.classList.toggle('pool-header-failed-highlight', a > 0); }
+    if (mEl) mEl.textContent = `${m} resolved`;
+    if (aCat) aCat.textContent = a;
+    if (mCat) mCat.textContent = m;
+}
+
+// Re-fetch + re-render the open Wing It pool (used after a Fix Match resolves a track).
+function refreshWingItPool() {
+    filterWingItPool(_wingItPoolPlaylistFilter || '');
+}
+
+function closeWingItPoolModal() {
+    if (_wingItPoolOverlay) {
+        _wingItPoolOverlay.remove();
+        _wingItPoolOverlay = null;
+    }
+    _wingItPoolData = null;
+}
+
 function showPoolCategories() {
     _discoveryPoolView = 'categories';
     const grid = document.getElementById('pool-category-grid');
@@ -1448,9 +1919,17 @@ async function searchPoolFix() {
         if (artistVal) params.set('artist', artistVal);
         params.set('limit', '20');
         const res = await fetch(`/api/spotify/search_tracks?${params.toString()}`);
-        const data = await res.json();
-        const tracks = data.tracks || [];
+        const data = await res.json().catch(() => ({}));
 
+        // Surface the real failure instead of masking every error (auth, 500, an
+        // upstream connection abort) as a bland "No results found".
+        if (!res.ok || data.error) {
+            const msg = data.error || res.statusText || `request failed (${res.status})`;
+            resultsContainer.innerHTML = `<div class="pool-fix-empty">Search error: ${_esc(msg)}</div>`;
+            return;
+        }
+
+        const tracks = data.tracks || [];
         if (tracks.length === 0) {
             resultsContainer.innerHTML = '<div class="pool-fix-empty">No results found</div>';
             return;
@@ -1517,8 +1996,12 @@ async function selectPoolFixTrack(track) {
         if (data.success) {
             showToast(`Matched: ${track.name}`, 'success');
             closePoolFixModal();
-            // Refresh pool data
-            filterDiscoveryPool(_discoveryPoolPlaylistFilter || '');
+            // Refresh whichever pool the fix was launched from (Discovery or Wing It).
+            if (typeof _wingItPoolOverlay !== 'undefined' && _wingItPoolOverlay) {
+                refreshWingItPool();
+            } else {
+                filterDiscoveryPool(_discoveryPoolPlaylistFilter || '');
+            }
         } else {
             showToast(data.error || 'Failed to fix track', 'error');
         }
@@ -2480,12 +2963,12 @@ async function loadAutomations() {
     if (!list || !empty) return;
     try {
         const res = await fetch('/api/automations');
-        const raw = await res.json();
-        if (raw.error) throw new Error(raw.error);
-        // The automation engine is app-wide, so /api/automations also returns
-        // video-owned rows. Those belong only on the video Automations page —
-        // exclude them here so the music page shows music automations only.
-        const automations = Array.isArray(raw) ? raw.filter(a => a.owned_by !== 'video') : raw;
+        const payload = await res.json();
+        if (payload.error) throw new Error(payload.error);
+        // Hide video-app automations on the MUSIC page: they live in the shared automation
+        // engine (music_library.db, owned_by='video') but belong to the separate video
+        // automations page. Pure no-op for anyone without the video side — they have no such rows.
+        const automations = (Array.isArray(payload) ? payload : []).filter(a => a.owned_by !== 'video');
         if (!automations.length) {
             list.innerHTML = ''; empty.style.display = '';
             if (statsBar) statsBar.innerHTML = '';
@@ -4904,14 +5387,19 @@ async function checkArtistEnhanceEligibility(artistId) {
 }
 
 async function playArtistRadio() {
-    try {
-        const artistId = artistDetailPageState.currentArtistId;
-        const artistName = artistDetailPageState.currentArtistName || '';
-        if (!artistId) {
-            showToast('No artist selected', 'error');
-            return;
-        }
+    const artistId = artistDetailPageState.currentArtistId;
+    const artistName = artistDetailPageState.currentArtistName || '';
+    if (!artistId) {
+        showToast('No artist selected', 'error');
+        return;
+    }
+    return startArtistRadioById(artistId, artistName);
+}
 
+// Parameterized core of the artist-detail Radio button — also driven by the Artist Web graph panel
+// ("Play radio" on an owned node), so both entry points share one implementation.
+async function startArtistRadioById(artistId, artistName) {
+    try {
         // Get tracks from this artist's library
         const resp = await fetch(`/api/library/artist/${artistId}/enhanced`);
         if (!resp.ok) throw new Error('Failed to load artist data');

@@ -83,9 +83,26 @@ def clear_completed_local() -> int:
     """
     cleared = 0
     with tasks_lock:
+        # Protect tasks belonging to a still-active batch. A batch is "active"
+        # while any of its queued tasks is non-terminal (still searching /
+        # downloading / queued / post-processing). Pruning a batch's completed
+        # or failed tasks mid-run would yank them out of the Downloads page —
+        # and failed/cancelled rows aren't recoverable from library_history —
+        # so the user would never see them until the batch ended. Keep the whole
+        # active batch intact; it gets cleaned by a later run once it finishes.
+        protected_task_ids: set = set()
+        for batch in download_batches.values():
+            queue = batch.get('queue', []) if isinstance(batch, dict) else []
+            batch_active = any(
+                download_tasks.get(tid, {}).get('status') not in _TERMINAL_STATUSES
+                for tid in queue if tid in download_tasks
+            )
+            if batch_active:
+                protected_task_ids.update(queue)
+
         task_ids_to_remove = [
             tid for tid, task in download_tasks.items()
-            if task.get('status') in _TERMINAL_STATUSES
+            if task.get('status') in _TERMINAL_STATUSES and tid not in protected_task_ids
         ]
         for tid in task_ids_to_remove:
             del download_tasks[tid]

@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import requests
 
 from core.download_plugins.types import AlbumResult, DownloadStatus, TrackResult
+from core.quality.source_map import quality_from_deezer, quality_tier_for_source
 from utils.logging_config import get_logger
 
 logger = get_logger("deezer_download")
@@ -92,7 +93,10 @@ class DeezerDownloadClient(DownloadSourcePlugin):
         if download_path is None:
             download_path = config_manager.get('soulseek.download_path', './downloads')
         self.download_path = Path(download_path)
-        self.download_path.mkdir(parents=True, exist_ok=True)
+        try:
+            self.download_path.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            logger.warning(f"Could not verify download path {self.download_path}: {e}")
 
         # Engine reference is populated by set_engine() at registration
         # time. None until orchestrator wires the registry.
@@ -117,14 +121,20 @@ class DeezerDownloadClient(DownloadSourcePlugin):
         self._license_token = None
         self._user_data = None
         self._authenticated = False
+        self._pending_arl: Optional[str] = None
 
         # Quality preference
-        self._quality = config_manager.get('deezer_download.quality', 'flac')
+        self._quality = quality_tier_for_source('deezer', default='flac')
 
         # Try to authenticate on init if ARL is configured
         arl = config_manager.get('deezer_download.arl', '')
         if arl:
-            self._authenticate(arl)
+            from core.boot_phase import is_boot_phase
+            if is_boot_phase():
+                self._pending_arl = arl
+                logger.debug("Deezer ARL present — authentication deferred until after boot")
+            else:
+                self._authenticate(arl)
 
         logger.info(f"Deezer download client initialized (download path: {self.download_path})")
 
@@ -217,17 +227,75 @@ class DeezerDownloadClient(DownloadSourcePlugin):
         self.shutdown_check = check_callable
 
     def is_configured(self) -> bool:
-        return self._authenticated
+        # Go through is_authenticated() so the lazy ARL auth fires (post-boot) — otherwise the raw
+        # _authenticated flag is still False until something else triggers it, and the hybrid-mode
+        # gate + the green-light status (both read is_configured) silently drop Deezer even though it
+        # downloads fine as a primary source (that path calls is_authenticated). Keeps the three in sync.
+        return self.is_authenticated()
 
     def is_available(self) -> bool:
-        return self._authenticated
+        return self.is_authenticated()
 
     def is_authenticated(self) -> bool:
+        if self._pending_arl and not self._authenticated:
+            from core.boot_phase import is_boot_phase
+            if not is_boot_phase():
+                self._authenticate(self._pending_arl)
+                self._pending_arl = None
         return self._authenticated
 
     async def check_connection(self) -> bool:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self.is_available)
+
+    # ─── Playlist export (#945) ──────────────────────────────────
+    #
+    # UNOFFICIAL: rides the private gw-light gateway with the ARL session already used
+    # for downloads. Deezer shut their public developer API, so this is the only write
+    # path — and it's fragile by nature (breaks when Deezer changes internals).
+
+    def create_or_update_playlist(self, name, track_ids, *, existing_id=None,
+                                  public=False, description=""):
+        """Create a Deezer playlist (or append to an existing one) from a mirrored
+        playlist's tracks. ``track_ids`` are stored ``deezer_id`` values per library track.
+        ``existing_id`` set → add to that playlist (idempotent re-export reuses the stored
+        target); unset → create a new one. Returns
+        ``{success, playlist_id, url, added, error}``."""
+        if not self._authenticated:
+            return {"success": False, "error": "Deezer is not connected (ARL)"}
+        song_ids = [str(t) for t in (track_ids or []) if t]
+        if not song_ids:
+            return {"success": False, "error": "No matching Deezer tracks to export"}
+        try:
+            songs = [[sid, i] for i, sid in enumerate(song_ids)]
+            if existing_id:
+                res = self._gw_call("playlist.addSongs",
+                                    {"playlist_id": int(existing_id), "songs": songs})
+                if res is None:
+                    return {"success": False, "error": "Deezer rejected the playlist update"}
+                playlist_id = existing_id
+            else:
+                res = self._gw_call("playlist.create", {
+                    "title": name, "description": description,
+                    "is_public": bool(public), "songs": songs,
+                })
+                if res is None:
+                    return {"success": False, "error": "Deezer rejected the playlist create"}
+                # gw 'playlist.create' returns the new playlist id (int) as `results`.
+                if isinstance(res, dict):
+                    playlist_id = res.get("PLAYLIST_ID") or res.get("id")
+                else:
+                    playlist_id = res
+                if not playlist_id:
+                    return {"success": False, "error": "Deezer did not return a playlist id"}
+            return {
+                "success": True,
+                "playlist_id": str(playlist_id),
+                "url": f"https://www.deezer.com/playlist/{playlist_id}",
+                "added": len(song_ids),
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
     def reconnect(self, arl: str = None) -> bool:
         """Re-authenticate with a new or existing ARL."""
@@ -417,6 +485,12 @@ class DeezerDownloadClient(DownloadSourcePlugin):
                 if aid:
                     album_ids.add(str(aid))
             album_release_dates = {}
+            # Deezer PLAYLIST tracks do NOT carry `track_position` (only `/track/<id>`
+            # and `/album/<id>/tracks` do), so numbering them by their playlist index
+            # poisons the real album track number — which then rides into the wishlist
+            # and onto the downloaded file's tag (e.g. 'Apologize' tagged track 1 instead
+            # of 16). Resolve the REAL position from each album's track list (cache-first).
+            track_positions: Dict[str, int] = {}   # str(track_id) -> album track_position
             try:
                 from core.metadata.cache import get_metadata_cache
                 cache = get_metadata_cache()
@@ -429,24 +503,32 @@ class DeezerDownloadClient(DownloadSourcePlugin):
                         cached = cache.get_entity('deezer', 'album', aid)
                         if cached and cached.get('release_date'):
                             album_release_dates[aid] = cached['release_date']
-                            continue
                     except Exception as e:
                         logger.debug("cache get_entity album release_date: %s", e)
                 # Cache miss — fetch from API
-                try:
-                    time.sleep(0.3)  # Respect rate limits
-                    a_resp = self._session.get(f'https://api.deezer.com/album/{aid}', timeout=10)
-                    if a_resp.ok:
-                        a_data = a_resp.json()
-                        album_release_dates[aid] = a_data.get('release_date', '')
-                        # Store in metadata cache for future use
-                        if cache:
-                            try:
-                                cache.store_entity('deezer', 'album', aid, a_data)
-                            except Exception as e:
-                                logger.debug("cache store_entity album release_date: %s", e)
-                except Exception as e:
-                    logger.debug("fetch deezer album release_date %s: %s", aid, e)
+                if aid not in album_release_dates:
+                    try:
+                        time.sleep(0.3)  # Respect rate limits
+                        a_resp = self._session.get(f'https://api.deezer.com/album/{aid}', timeout=10)
+                        if a_resp.ok:
+                            a_data = a_resp.json()
+                            album_release_dates[aid] = a_data.get('release_date', '')
+                            # Store in metadata cache for future use
+                            if cache:
+                                try:
+                                    cache.store_entity('deezer', 'album', aid, a_data)
+                                except Exception as e:
+                                    logger.debug("cache store_entity album release_date: %s", e)
+                    except Exception as e:
+                        logger.debug("fetch deezer album release_date %s: %s", aid, e)
+            # Real album track positions (separate endpoint — playlist tracks AND the
+            # album object's embedded tracks both omit track_position). Cache-first.
+            try:
+                from core.deezer_client import resolve_album_track_positions
+                track_positions = resolve_album_track_positions(
+                    self._session, 'https://api.deezer.com', album_ids, cache)
+            except Exception as e:
+                logger.debug("resolve deezer album track positions: %s", e)
 
             tracks = []
             for i, t in enumerate(raw_tracks, start=1):
@@ -467,7 +549,9 @@ class DeezerDownloadClient(DownloadSourcePlugin):
                         'id': album_id,
                     },
                     'duration_ms': t.get('duration', 0) * 1000,
-                    'track_number': i,
+                    # REAL album position (resolved above); the playlist index is a last
+                    # resort only when the album lookup failed, never the default.
+                    'track_number': track_positions.get(str(t.get('id'))) or t.get('track_position') or i,
                 })
 
             return {
@@ -581,7 +665,7 @@ class DeezerDownloadClient(DownloadSourcePlugin):
                     bitrate = 128
                     quality = 'mp3'
 
-                results.append(TrackResult(
+                tr = TrackResult(
                     username='deezer_dl',
                     filename=f"{track_id}||{artist} - {title}",
                     size=est_size,
@@ -595,7 +679,10 @@ class DeezerDownloadClient(DownloadSourcePlugin):
                     title=title,
                     album=album,
                     track_number=item.get('track_position'),
-                ))
+                )
+                # Stamp CD-quality FLAC (16/44.1) so lossless ranks correctly.
+                tr.set_quality(quality_from_deezer(self._quality))
+                results.append(tr)
 
             logger.info(f"Deezer search for '{query}' returned {len(results)} results")
             return results, []

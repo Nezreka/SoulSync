@@ -6,6 +6,7 @@ from dataclasses import replace
 from typing import Any, Callable, Dict, List, Optional
 
 from core.metadata import registry as metadata_registry
+from core.source_ids import id_keys
 from core.metadata.lookup import MetadataLookupOptions
 from core.metadata.types import Album
 from utils.logging_config import get_logger
@@ -480,6 +481,8 @@ def get_artist_albums_for_source(
             'album_type': album_type,
             'limit': limit,
         }
+        if source == 'jiosaavn':
+            kwargs['artist_name'] = artist_name
         if source == 'spotify':
             kwargs['allow_fallback'] = False
             kwargs['skip_cache'] = skip_cache
@@ -517,6 +520,18 @@ def get_artist_albums_for_source(
         return None
 
 
+def _album_reference_source_columns() -> Dict[str, tuple]:
+    """Per-source album ID column names used by ``resolve_album_reference``."""
+    return {
+        'spotify': id_keys('spotify', 'album'),
+        'deezer': id_keys('deezer', 'album'),
+        'itunes': id_keys('itunes', 'album'),
+        'discogs': id_keys('discogs', 'album'),
+        'hydrabase': ('soul_id', 'hydrabase_album_id'),
+        'jiosaavn': id_keys('jiosaavn', 'album'),
+    }
+
+
 def resolve_album_reference(
     album_id: str,
     preferred_source: Optional[str] = None,
@@ -538,13 +553,7 @@ def resolve_album_reference(
             if override:
                 source_chain = [override] + [source for source in source_chain if source != override]
 
-            source_columns = {
-                'spotify': ('spotify_album_id',),
-                'deezer': ('deezer_id', 'deezer_album_id'),
-                'itunes': ('itunes_album_id',),
-                'discogs': ('discogs_id',),
-                'hydrabase': ('soul_id', 'hydrabase_album_id'),
-            }
+            source_columns = _album_reference_source_columns()
 
             select_columns = ["a.title", "ar.name as artist_name"]
             for columns in source_columns.values():

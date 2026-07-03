@@ -291,6 +291,13 @@ class ListeningStatsWorker:
         if not (top_artists or top_albums or top_tracks):
             return
 
+        # Normalize image URLs HERE, at cache-build time, not on every /api/stats/cached
+        # read. normalize_image_url registers each URL in the image cache (a SQLite write
+        # under a lock) — doing that per-request made the "instant" stats endpoint take ~20s
+        # on HDD-backed installs (#935). Done once per background rebuild it's off the hot path,
+        # and the read just returns the already-browser-safe URLs.
+        from core.metadata import normalize_image_url as _fix_image
+
         conn = None
         try:
             conn = self.db._get_connection()
@@ -324,7 +331,7 @@ class ListeningStatsWorker:
                     key = (artist.get('name') or '').lower()
                     r = artist_rows.get(key)
                     if r:
-                        artist['image_url'] = r[1] or None
+                        artist['image_url'] = _fix_image(r[1]) or None
                         artist['id'] = r[2]
                         artist['global_listeners'] = r[3]
                         artist['global_playcount'] = r[4]
@@ -356,7 +363,7 @@ class ListeningStatsWorker:
                     key = (album.get('name') or '').lower()
                     r = album_rows.get(key)
                     if r:
-                        album['image_url'] = r[1] or None
+                        album['image_url'] = _fix_image(r[1]) or None
                         album['id'] = r[2]
                         album['artist_id'] = r[3]
 
@@ -395,7 +402,7 @@ class ListeningStatsWorker:
                            (track.get('artist') or '').lower())
                     r = track_rows.get(key)
                     if r:
-                        track['image_url'] = r[2] or None
+                        track['image_url'] = _fix_image(r[2]) or None
                         track['id'] = r[3]
                         track['artist_id'] = r[4]
         except Exception as e:

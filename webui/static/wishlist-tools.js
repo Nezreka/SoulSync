@@ -3256,180 +3256,22 @@ function openLibraryHistoryModal() {
     }
 }
 
-// ──────────────────────────────────────────────────────────────────────
-// Quarantine tab — rendered inside the Library History modal as a third
-// tab next to Downloads + Server Imports. Reuses the existing list +
-// pagination chrome; provides per-row Approve / Recover / Delete actions.
-// ──────────────────────────────────────────────────────────────────────
-
-async function loadQuarantineList() {
-    const list = document.getElementById('library-history-list');
-    const pagination = document.getElementById('library-history-pagination');
-    const sourceBar = document.getElementById('history-source-bar');
-    if (!list) return;
-    list.innerHTML = '<div class="library-history-loading">Loading...</div>';
-    if (pagination) pagination.innerHTML = '';
-    if (sourceBar) sourceBar.style.display = 'none';
-
-    try {
-        const resp = await fetch('/api/quarantine/list');
-        const data = await resp.json();
-        const entries = data.entries || [];
-        const countEl = document.getElementById('history-quarantine-count');
-        if (countEl) countEl.textContent = entries.length;
-
-        if (!data.success) {
-            list.innerHTML = `<div class="library-history-empty">Error: ${escapeHtml(data.error || 'Failed to load')}</div>`;
-            return;
-        }
-        if (entries.length === 0) {
-            list.innerHTML = '<div class="library-history-empty">🛡️<br><br>No quarantined files. Nice and clean.</div>';
-            return;
-        }
-        list.innerHTML = entries.map(renderQuarantineEntry).join('');
-    } catch (err) {
-        console.error('Error loading quarantine entries:', err);
-        list.innerHTML = '<div class="library-history-empty">Error loading quarantine</div>';
+// Bucket entries that are alternatives for the SAME intended target
+// (same backend group_key — derived from expected_artist/expected_track, the
+// track SoulSync was trying to fetch, not the bad file's own tags). Entries
+// with a null group_key (legacy/orphan, ungroupable) each stand alone.
+// Preserves the newest-first order the backend already sorted by.
+function _groupQuarantineEntries(entries) {
+    const groups = [];
+    const byKey = new Map();
+    for (const entry of entries) {
+        const key = entry.group_key;
+        if (!key) { groups.push({ key: null, members: [entry] }); continue; }
+        let g = byKey.get(key);
+        if (!g) { g = { key, members: [] }; byKey.set(key, g); groups.push(g); }
+        g.members.push(entry);
     }
-}
-
-function renderQuarantineEntry(entry) {
-    const triggerLabels = { integrity: 'Duration / Integrity', acoustid: 'AcoustID Mismatch', bit_depth: 'Bit Depth Filter', unknown: 'Unknown' };
-    const triggerColors = { integrity: '#facc15', acoustid: '#ef5350', bit_depth: '#fb923c', unknown: '#888' };
-    const triggerLabel = triggerLabels[entry.trigger] || entry.trigger || 'Unknown';
-    const triggerColor = triggerColors[entry.trigger] || '#888';
-
-    // Keep dynamic filenames/ids out of inline JS. Quarantine ids are derived
-    // from filenames, so quotes in the filename can break onclick attributes
-    // if they are interpolated as JS string literals.
-    const entryIdAttr = escapeHtml(String(entry.id || ''));
-    const approveLabel = entry.has_full_context ? 'Approve' : 'Recover';
-    const approveTitle = entry.has_full_context
-        ? 'Re-run post-processing with quarantine checks skipped for this approved file'
-        : 'Legacy entry — move to Staging, finish via Import flow';
-    const approveCall = entry.has_full_context
-        ? 'approveQuarantineEntryFromButton(this)'
-        : 'recoverQuarantineEntryFromButton(this)';
-
-    const meta = [entry.expected_artist, entry.original_filename].filter(Boolean).join(' — ');
-    const triggerBadge = `<span class="library-history-badge" style="border-color:${triggerColor};color:${triggerColor}">${escapeHtml(triggerLabel)}</span>`;
-    const reasonDetail = `<div class="library-history-entry-source"><span class="lh-prov-label">Reason:</span> ${escapeHtml(entry.reason || 'Unknown')}</div>`;
-
-    // Issue #608 follow-up: show source uploader + original soulseek
-    // filename when the sidecar carried that context. Helps the user
-    // understand which uploader the bad file came from at a glance.
-    const sourceParts = [];
-    if (entry.source_username) {
-        sourceParts.push(`<div class="library-history-entry-source"><span class="lh-prov-label">Source:</span> ${escapeHtml(entry.source_username)}</div>`);
-    }
-    if (entry.source_filename) {
-        sourceParts.push(`<div class="library-history-entry-source"><span class="lh-prov-label">Original filename:</span> ${escapeHtml(entry.source_filename)}</div>`);
-    }
-    const sourceDetail = sourceParts.join('');
-
-    return `<div class="library-history-entry lh-expandable" onclick="this.classList.toggle('lh-expanded')">
-        <div class="library-history-thumb-placeholder">🛡️</div>
-        <div class="library-history-entry-content">
-            <div class="library-history-entry-row1">
-                <div class="library-history-entry-text">
-                    <div class="library-history-entry-title">${escapeHtml(entry.expected_track || entry.original_filename || 'Unknown')}</div>
-                    <div class="library-history-entry-meta">${escapeHtml(meta)}</div>
-                </div>
-                <div class="library-history-entry-badges">${triggerBadge}</div>
-                <div class="library-history-entry-time">${formatHistoryTime(entry.timestamp)}</div>
-                <button class="lh-audit-btn" title="${approveTitle}" data-entry-id="${entryIdAttr}" onclick="event.stopPropagation();${approveCall}">${approveLabel}</button>
-                <button class="lh-audit-btn" title="Delete permanently" data-entry-id="${entryIdAttr}" style="border-color:rgba(248,113,113,0.4);color:#f87171" onclick="event.stopPropagation();deleteQuarantineEntryFromButton(this)">Delete</button>
-                <span class="lh-expand-btn">&#x25BE;</span>
-            </div>
-            <div class="library-history-entry-details">
-                ${reasonDetail}
-                ${sourceDetail}
-            </div>
-        </div>
-    </div>`;
-}
-
-function getQuarantineEntryIdFromButton(button) {
-    return button?.dataset?.entryId || '';
-}
-
-function approveQuarantineEntryFromButton(button) {
-    return approveQuarantineEntry(getQuarantineEntryIdFromButton(button));
-}
-
-function recoverQuarantineEntryFromButton(button) {
-    return recoverQuarantineEntry(getQuarantineEntryIdFromButton(button));
-}
-
-function deleteQuarantineEntryFromButton(button) {
-    return deleteQuarantineEntry(getQuarantineEntryIdFromButton(button));
-}
-
-async function approveQuarantineEntry(entryId) {
-    const ok = await showConfirmDialog({
-        title: 'Approve Quarantined File',
-        message: 'Re-run post-processing for this file with quarantine checks skipped for this approved pass. The file will be tagged, lyrics generated, and moved into your library.',
-        confirmText: 'Approve & Import',
-        cancelText: 'Cancel',
-    });
-    if (!ok) return;
-    try {
-        const r = await fetch(`/api/quarantine/${encodeURIComponent(entryId)}/approve`, { method: 'POST' });
-        const data = await r.json();
-        if (!data.success) {
-            showToast(`Approve failed: ${data.error}`, 'error');
-        } else {
-            showToast(`Approved — skipped ${data.trigger_bypassed} check, re-running pipeline.`, 'success');
-        }
-    } catch (err) {
-        showToast(`Approve failed: ${err.message}`, 'error');
-    }
-    loadQuarantineList();
-}
-
-async function recoverQuarantineEntry(entryId) {
-    const ok = await showConfirmDialog({
-        title: 'Recover To Staging',
-        message: 'Legacy entry — no embedded context. The file will be moved to your Staging folder so you can finish via the Import page (manual match).',
-        confirmText: 'Move To Staging',
-        cancelText: 'Cancel',
-    });
-    if (!ok) return;
-    try {
-        const r = await fetch(`/api/quarantine/${encodeURIComponent(entryId)}/recover`, { method: 'POST' });
-        const data = await r.json();
-        if (!data.success) {
-            showToast(`Recover failed: ${data.error}`, 'error');
-        } else {
-            showToast('Moved to Staging — finish via the Import page.', 'success');
-        }
-    } catch (err) {
-        showToast(`Recover failed: ${err.message}`, 'error');
-    }
-    loadQuarantineList();
-}
-
-async function deleteQuarantineEntry(entryId) {
-    const ok = await showConfirmDialog({
-        title: 'Delete Quarantined File',
-        message: 'This permanently removes the file and its metadata sidecar. Cannot be undone.',
-        confirmText: 'Delete',
-        cancelText: 'Cancel',
-        destructive: true,
-    });
-    if (!ok) return;
-    try {
-        const r = await fetch(`/api/quarantine/${encodeURIComponent(entryId)}`, { method: 'DELETE' });
-        const data = await r.json();
-        if (!data.success) {
-            showToast(`Delete failed: ${data.error}`, 'error');
-        } else {
-            showToast('Quarantined file deleted.', 'success');
-        }
-    } catch (err) {
-        showToast(`Delete failed: ${err.message}`, 'error');
-    }
-    loadQuarantineList();
+    return groups;
 }
 
 function closeLibraryHistoryModal() {
@@ -3448,12 +3290,6 @@ function switchHistoryTab(tab) {
 
 async function loadLibraryHistory() {
     const { tab, page, limit } = _libraryHistoryState;
-    if (tab === 'quarantine') {
-        // Refresh the count for the other two tabs in the background so
-        // the badge stays accurate when the user switches over.
-        loadQuarantineList();
-        return;
-    }
     const list = document.getElementById('library-history-list');
     const pagination = document.getElementById('library-history-pagination');
     if (!list) return;

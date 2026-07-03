@@ -123,6 +123,45 @@ def record_manual_match(
         return False
 
 
+def resolve_override_server_id(
+    db: Any,
+    profile_id: int,
+    source_track_id: str,
+    server_source: str,
+    valid_server_ids: set,
+    read_cache: Callable[[str, str], Optional[Dict[str, Any]]],
+) -> Optional[Any]:
+    """Resolve a source track's user-confirmed server track id for the compare view.
+
+    Prefers the fast ``sync_match_cache`` hit, then the durable manual library match
+    (#787). THE CACHE HIT IS ONLY TRUSTED WHEN IT STILL POINTS AT A TRACK IN THIS
+    PLAYLIST (``valid_server_ids``).
+
+    Why (wolf39us / Plex): a cache hit was previously returned unconditionally, so a
+    STALE entry — Plex reassigned the library ratingKey without a SoulSync rescan to
+    wipe the cache — short-circuited the durable path and the manual match silently
+    never applied (resolve_match_overrides drops a server id that isn't in the
+    playlist). Falling through to the durable match lets it self-heal the stale id
+    via the stored file path. Returns the server track id, or None. Never raises.
+    """
+    try:
+        cached = read_cache(source_track_id, server_source) or {}
+    except Exception:
+        cached = {}
+    cached_id = cached.get("server_track_id")
+    if cached_id is not None:
+        if str(cached_id) in valid_server_ids:
+            return cached_id
+        logger.warning(
+            "Stale match-cache for source %s (%s): cached server track %s is no "
+            "longer in this playlist — falling back to the durable manual match.",
+            source_track_id, server_source, cached_id,
+        )
+    return resolve_durable_match_server_id(
+        db, profile_id, source_track_id, server_source, valid_server_ids
+    )
+
+
 def resolve_durable_match_server_id(
     db: Any,
     profile_id: int,

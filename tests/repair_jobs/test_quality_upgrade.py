@@ -13,6 +13,7 @@ from __future__ import annotations
 import types
 
 import core.repair_jobs.quality_upgrade as qu
+import core.repair_jobs.quality_upgrade_scanner as qs
 from core.repair_jobs.base import JobContext, JobResult
 
 
@@ -38,6 +39,25 @@ NOTHING_ENABLED = {'qualities': {'flac': {'enabled': False}, 'mp3_320': {'enable
 
 
 # --- pure quality decision -------------------------------------------------
+#
+# The old extension-only classifier (meets_preferred_quality / classify_track_
+# quality / preferred_quality_floor / RANK_*) was deleted in favour of the
+# shared v3 path: probe → AudioQuality → quality_meets_profile against the
+# profile's ranked targets. These pin the same behavioural contract through the
+# new API. (Bps→kbps normalisation now lives in probe_audio_quality and is
+# covered by its own tests; the deleted-internals tests for it were removed.)
+
+def meets(path, bitrate, profile):
+    """Does a file of this format+bitrate satisfy the profile? Mirrors the
+    scanner's decision: build the measured AudioQuality and check it against the
+    v3 ranked targets derived from the profile (empty targets → nothing flagged)."""
+    from core.quality.model import AudioQuality
+    from core.quality.selection import quality_meets_profile, targets_from_profile
+
+    ext = path.rsplit('.', 1)[-1].lower()
+    targets, _ = targets_from_profile(profile)
+    return quality_meets_profile(AudioQuality(format=ext, bitrate=bitrate), targets)
+
 
 def test_balanced_profile_accepts_320_mp3_REGRESSION():
     """The headline bug: with FLAC+320+256 enabled, a 320 kbps MP3 is acceptable.
@@ -69,64 +89,96 @@ def test_nothing_enabled_flags_nothing():
     assert meets('song.mp3', 64, NOTHING_ENABLED) is True
 
 
-def test_bitrate_in_bps_is_normalized():
-    """Library bitrate stored as bps (320000) classifies the same as 320 kbps."""
-    assert qu.classify_track_quality('song.mp3', 320000) == qu.RANK_320
-    assert meets('song.mp3', 320000, BALANCED) is True
+# --- require_top_target legacy bridge (both jobs) ---------------------------
+#
+# `require_top_target` predates `upgrade_policy` existing on the profile at
+# all — a JOB-level setting (config.json's repair.jobs.<id>.settings), not
+# exposed in any current settings UI, kept only so an install that had it set
+# before the quality-profiles migration doesn't silently lose "upgrade until
+# top quality" behavior. `MusicDatabase._quality_profile_row_to_dict` always
+# coerces `upgrade_policy` to a real string ("acceptable" fallback, never
+# None) — the migration has no legacy field to carry it from either — so a
+# profile loaded from the DB is NEVER `upgrade_policy=None`. The bridge must
+# fire on "acceptable" too, or it's permanently dead code post-migration.
+
+def test_active_finder_require_top_target_bridges_from_acceptable(monkeypatch):
+    from core.quality.model import QualityTarget
+    targets = [QualityTarget(label='FLAC', format='flac'),
+               QualityTarget(label='MP3 320', format='mp3', min_bitrate=320)]
+    profile = {'upgrade_policy': 'acceptable', 'upgrade_cutoff_index': 0}
+    assert qu._upgrade_cutoff_index(profile, targets, {'require_top_target': True}) == 0
 
 
-def test_unknown_lossy_bitrate_not_flagged_under_lossy_floor():
-    """A lossy file with no bitrate can't be judged against a lossy floor → don't
-    flag (avoid false positives); but under a lossless floor it's clearly below."""
-    assert meets('song.mp3', None, BALANCED) is True
-    assert meets('song.mp3', None, LOSSLESS_ONLY) is False
+def test_active_finder_require_top_target_noop_when_not_set(monkeypatch):
+    from core.quality.model import QualityTarget
+    targets = [QualityTarget(label='FLAC', format='flac')]
+    profile = {'upgrade_policy': 'acceptable', 'upgrade_cutoff_index': 0}
+    assert qu._upgrade_cutoff_index(profile, targets, {'require_top_target': False}) is None
 
 
-def test_floor_is_worst_enabled_not_best():
-    # FLAC+320+256 enabled → floor is MP3-256 (rank 2), not FLAC.
-    assert qu.preferred_quality_floor(BALANCED) == qu.RANK_256
-    assert qu.preferred_quality_floor(LOSSLESS_ONLY) == qu.RANK_LOSSLESS
-    assert qu.preferred_quality_floor(NOTHING_ENABLED) is None
-
-
-def meets(path, bitrate, profile):
-    return qu.meets_preferred_quality(path, bitrate, profile)
+def test_scanner_require_top_target_bridges_from_acceptable(monkeypatch):
+    from core.quality.model import QualityTarget
+    targets = [QualityTarget(label='FLAC', format='flac'),
+               QualityTarget(label='MP3 320', format='mp3', min_bitrate=320)]
+    profile = {'upgrade_policy': 'acceptable', 'upgrade_cutoff_index': 0}
+    assert qs._upgrade_cutoff_index(profile, targets, {'require_top_target': True}) == 0
 
 
 # --- scan produces a finding (seam) ----------------------------------------
 
 class _FakeConn:
-    def __init__(self, rows, finding_ids=()):
+    def __init__(self, rows, finding_ids=(), dismissed=()):
+        import json as _json
         self._rows = rows
         self._finding_ids = list(finding_ids)
+        # dismissed: iterable of (track_id, stored_fingerprint_or_None) —
+        # mirrors what `_load_dismissed_findings` reads out of details_json.
+        self._dismissed_rows = [
+            (str(tid), _json.dumps({'profile_config_fingerprint': fp}) if fp is not None else '{}')
+            for tid, fp in dismissed
+        ]
         self._sql = ''
+        self.deleted_dismissed_params = []
 
-    def execute(self, sql='', *a, **k):
+    def execute(self, sql='', params=(), *a, **k):
         self._sql = sql or ''
+        if self._sql.strip().startswith('DELETE'):
+            self.deleted_dismissed_params.append(params)
         return self
 
     def fetchall(self):
-        # The existing-findings query reads repair_findings; everything else is the
-        # track load.
+        # The existing-findings queries read repair_findings; everything else
+        # is the track load. Distinguish "already found" (pending/resolved/
+        # auto_fixed — see _load_existing_finding_ids) from "dismissed" (see
+        # _load_dismissed_findings) by their distinct WHERE clauses.
         if 'repair_findings' in self._sql:
+            if "status = 'dismissed'" in self._sql:
+                return self._dismissed_rows
             return [(fid,) for fid in self._finding_ids]
         return self._rows
+
+    def commit(self):
+        pass
 
     def close(self):
         pass
 
 
 class _FakeDB:
-    def __init__(self, rows, profile, finding_ids=()):
+    def __init__(self, rows, profile, finding_ids=(), dismissed=()):
         self._rows = rows
         self._profile = profile
         self._finding_ids = finding_ids
+        self._dismissed = dismissed
+        self.conns = []
 
     def get_quality_profile(self):
         return self._profile
 
     def _get_connection(self):
-        return _FakeConn(self._rows, self._finding_ids)
+        conn = _FakeConn(self._rows, self._finding_ids, self._dismissed)
+        self.conns.append(conn)
+        return conn
 
     def get_watchlist_artists(self, profile_id=1):
         return [types.SimpleNamespace(artist_name='Artist A')]
@@ -149,7 +201,25 @@ def _row(track_id=1, title='Song One', path='/music/a.mp3', bitrate=128, duratio
     return (track_id, title, path, bitrate, duration, artist, album, album_id, track_number)
 
 
+def _stub_quality(monkeypatch, *, meets: bool):
+    """Stub the v3 quality path so scan() works on fake (non-existent) file paths.
+
+    The job now probes the REAL file (mutagen) and checks it against the v3
+    ranked targets. Tests use fake paths, so we resolve the path to itself,
+    return a dummy measured quality, and force the meets/below verdict.
+    """
+    from core.quality.model import AudioQuality, QualityTarget
+    monkeypatch.setattr(qu, 'targets_from_profile',
+                        lambda profile: ([QualityTarget(label='MP3 320', format='mp3', min_bitrate=320)], False))
+    monkeypatch.setattr(qu, 'resolve_library_file_path', lambda p, **kw: p)
+    monkeypatch.setattr(qu, 'probe_audio_quality',
+                        lambda p: AudioQuality(format='mp3', bitrate=128))
+    monkeypatch.setattr(qu, 'quality_meets_profile', lambda aq, targets: meets)
+
+
 def _stub_engine(monkeypatch):
+    # Below-profile by default — the finding-creating tests want a flagged track.
+    _stub_quality(monkeypatch, meets=False)
     monkeypatch.setattr(qu, 'get_primary_source', lambda: 'spotify')
     monkeypatch.setattr(qu, 'get_source_priority', lambda src: ['spotify'])
     monkeypatch.setattr(
@@ -168,7 +238,7 @@ def test_scan_creates_finding_for_low_quality_track(monkeypatch):
     fake_match = {'id': 'sp1', 'name': 'Song One', 'artists': ['Artist A'],
                   'album': {'name': 'Album X', 'images': []}}
     # No track-id / ISRC / album hit → exercise the search tier.
-    monkeypatch.setattr(qu, '_read_file_ids', lambda fp: {})
+    monkeypatch.setattr(qu, '_read_file_ids', lambda fp, **kw: {})
     monkeypatch.setattr(qu, '_match_via_track_id', lambda *a, **k: (None, None))
     monkeypatch.setattr(qu, '_match_via_album', lambda *a, **k: (None, None))
     monkeypatch.setattr(qu, '_find_best_match',
@@ -212,7 +282,7 @@ def test_scan_prefers_track_id_tier(monkeypatch):
     """The source's own track ID (from file tags) wins over every other tier."""
     db = _FakeDB([_row()], BALANCED)
     _stub_engine(monkeypatch)
-    monkeypatch.setattr(qu, '_read_file_ids', lambda fp: {'spotify_track_id': 'sp9', 'isrc': 'X'})
+    monkeypatch.setattr(qu, '_read_file_ids', lambda fp, **kw: {'spotify_track_id': 'sp9', 'isrc': 'X'})
     fake = {'id': 'sp9', 'name': 'Song One', 'album': {'name': 'Album X'}}
     monkeypatch.setattr(qu, '_match_via_track_id', lambda ids, sp: (fake, 'spotify'))
     monkeypatch.setattr(qu, '_normalize_track_match', lambda t, s: dict(fake))
@@ -247,6 +317,82 @@ def test_scan_skips_already_proposed_tracks(monkeypatch):
     assert result.findings_skipped_dedup == 1
 
 
+def test_scan_with_empty_default_targets_still_processes_tracks(monkeypatch):
+    """Before the fix, a default profile with no ranked targets (e.g. an
+    "accept anything" profile) made scan() return immediately WITHOUT ever
+    loading or probing a single track — silently skipping deep-audio-verify
+    and any per-track profile override too. It must now proceed: a track that
+    resolves to the empty-target bundle is still scanned/probed, just safely
+    skipped (quality_meets_profile with no targets is vacuously true)."""
+    from core.quality.model import AudioQuality
+    db = _FakeDB([_row(bitrate=128)], NOTHING_ENABLED)
+    monkeypatch.setattr(qu, 'resolve_library_file_path', lambda p, **kw: p)
+    monkeypatch.setattr(qu, 'probe_audio_quality', lambda p: AudioQuality(format='mp3', bitrate=128))
+
+    findings = []
+    result = qu.QualityUpgradeJob().scan(_ctx(db, findings))
+
+    assert result.scanned == 1
+    assert result.skipped == 1
+    assert result.findings_created == 0
+    assert findings == []
+
+
+def test_dismissed_finding_is_cleared_and_reflagged_when_config_changed(monkeypatch):
+    """A dismissed finding must not permanently block re-evaluation: if the
+    profile/cutoff this track resolves to has genuinely changed since the
+    dismissal (here: an old finding with no stored fingerprint at all, from
+    before this field existed), the stale dismissed row is deleted before a
+    fresh finding is created — otherwise the shared repair-findings dedup
+    would silently refuse to insert a duplicate for the same job_id+entity
+    forever."""
+    db = _FakeDB([_row(track_id=7, bitrate=128)], BALANCED, dismissed=[(7, None)])
+    _stub_engine(monkeypatch)
+    fake_match = {'id': 'sp1', 'name': 'Song One', 'artists': ['Artist A'],
+                  'album': {'name': 'Album X', 'images': []}}
+    monkeypatch.setattr(qu, '_read_file_ids', lambda fp, **kw: {})
+    monkeypatch.setattr(qu, '_match_via_track_id', lambda *a, **k: (None, None))
+    monkeypatch.setattr(qu, '_match_via_album', lambda *a, **k: (None, None))
+    monkeypatch.setattr(qu, '_find_best_match',
+                        lambda *a, **k: (fake_match, 0.95, 'spotify', True))
+    monkeypatch.setattr(qu, '_normalize_track_match', lambda track, src: dict(fake_match))
+    monkeypatch.setattr(qu, '_track_name', lambda t: 'Song One')
+
+    findings = []
+    result = qu.QualityUpgradeJob().scan(_ctx(db, findings))
+
+    assert result.findings_created == 1
+    assert findings[0]['entity_id'] == '7'
+    assert 'profile_config_fingerprint' in findings[0]['details']
+    # The stale dismissed row for track 7 was deleted before the re-insert.
+    deletes = [p for conn in db.conns for p in conn.deleted_dismissed_params]
+    assert any('7' in params for params in deletes)
+
+
+def test_dismissed_finding_stays_dismissed_when_config_unchanged(monkeypatch):
+    """The opposite of the test above: if the profile/cutoff hasn't changed
+    since the dismissal, a track that still measures below-profile on every
+    re-run must NOT keep resurrecting a proposal the user already said no to."""
+    from core.quality.model import QualityTarget
+    _stub_engine(monkeypatch)  # forces targets_from_profile → [MP3 320 target], cutoff None
+    stable_fingerprint = qu._config_fingerprint(
+        [QualityTarget(label='MP3 320', format='mp3', min_bitrate=320)], None)
+    db = _FakeDB([_row(track_id=7, bitrate=128)], BALANCED, dismissed=[(7, stable_fingerprint)])
+
+    def _boom(*a, **k):
+        raise AssertionError("no matching for a dismissed track whose config hasn't changed")
+    monkeypatch.setattr(qu, '_match_via_track_id', _boom)
+    monkeypatch.setattr(qu, '_find_best_match', _boom)
+
+    findings = []
+    result = qu.QualityUpgradeJob().scan(_ctx(db, findings))
+
+    assert findings == []
+    assert result.findings_skipped_dedup == 1
+    deletes = [p for conn in db.conns for p in conn.deleted_dismissed_params]
+    assert deletes == []
+
+
 def test_match_via_isrc_accepts_exact_match(monkeypatch):
     """The guard accepts only a candidate whose own ISRC equals ours (dash/case
     insensitive), so it survives a source returning unrelated hits first."""
@@ -275,7 +421,7 @@ def test_scan_prefers_isrc_exact_match_over_fuzzy(monkeypatch):
     and do NOT run the album/search tiers."""
     db = _FakeDB([_row()], BALANCED)
     _stub_engine(monkeypatch)
-    monkeypatch.setattr(qu, '_read_file_ids', lambda fp: {'isrc': 'USRC17607839'})
+    monkeypatch.setattr(qu, '_read_file_ids', lambda fp, **kw: {'isrc': 'USRC17607839'})
     monkeypatch.setattr(qu, '_match_via_track_id', lambda *a, **k: (None, None))
     fake = {'id': 'sp1', 'name': 'Song One', 'artists': ['Artist A'], 'album': {'name': 'Album X'}}
     monkeypatch.setattr(qu, '_match_via_isrc', lambda isrc, sp: (fake, 'spotify'))
@@ -297,7 +443,7 @@ def test_scan_falls_back_to_search_without_ids(monkeypatch):
     """No track-ID / ISRC / album hit → fall back to fuzzy search."""
     db = _FakeDB([_row()], BALANCED)
     _stub_engine(monkeypatch)
-    monkeypatch.setattr(qu, '_read_file_ids', lambda fp: {})  # un-enriched
+    monkeypatch.setattr(qu, '_read_file_ids', lambda fp, **kw: {})  # un-enriched
     monkeypatch.setattr(qu, '_match_via_track_id', lambda *a, **k: (None, None))
     monkeypatch.setattr(qu, '_match_via_album', lambda *a, **k: (None, None))
     fake = {'id': 'sp1', 'name': 'Song One', 'artists': ['Artist A'], 'album': {'name': 'Album X'}}
@@ -316,7 +462,7 @@ def test_scan_uses_album_tier_when_no_ids(monkeypatch):
     'album', and the fuzzy search is never reached."""
     db = _FakeDB([_row()], BALANCED)
     _stub_engine(monkeypatch)
-    monkeypatch.setattr(qu, '_read_file_ids', lambda fp: {})
+    monkeypatch.setattr(qu, '_read_file_ids', lambda fp, **kw: {})
     monkeypatch.setattr(qu, '_match_via_track_id', lambda *a, **k: (None, None))
     fake = {'id': 'sp1', 'name': 'Song One', 'artists': ['Artist A'], 'album': {'name': 'Album X'}}
     monkeypatch.setattr(qu, '_match_via_album', lambda *a, **k: (fake, 'spotify'))
@@ -346,8 +492,9 @@ def test_find_track_in_album_exact_title_with_track_number(monkeypatch):
 
 
 def test_scan_skips_tracks_meeting_quality(monkeypatch):
-    # A 320 kbps MP3 meets the balanced profile → no finding, no metadata calls.
+    # A track that meets the profile → no finding, no metadata calls.
     db = _FakeDB([_row(track_id=2, title='Good Song', bitrate=320)], BALANCED)
+    _stub_quality(monkeypatch, meets=True)
 
     def _boom(*a, **k):  # must never be called for an acceptable track
         raise AssertionError("matching should not run for an acceptable track")
@@ -359,6 +506,263 @@ def test_scan_skips_tracks_meeting_quality(monkeypatch):
     assert result.findings_created == 0
     assert result.skipped == 1
     assert findings == []
+
+
+def test_scan_flags_accepted_track_below_profile_cutoff(monkeypatch):
+    profile = {
+        'id': 11,
+        'name': 'Strict FLAC',
+        'upgrade_policy': 'until_cutoff',
+        'upgrade_cutoff_index': 0,
+        'ranked_targets': [
+            {'label': 'FLAC 24-bit', 'format': 'flac', 'bit_depth': 24},
+            {'label': 'FLAC 16-bit', 'format': 'flac', 'bit_depth': 16},
+        ],
+    }
+    db = _FakeDB([_row(track_id=3, title='Cutoff Song', path='/music/c.flac')], profile)
+    from core.quality.model import AudioQuality, QualityTarget
+    targets = [
+        QualityTarget(label='FLAC 24-bit', format='flac', bit_depth=24),
+        QualityTarget(label='FLAC 16-bit', format='flac', bit_depth=16),
+    ]
+
+    monkeypatch.setattr(qu, 'targets_from_profile', lambda p: (targets, False))
+    monkeypatch.setattr(qu, 'resolve_library_file_path', lambda p, **kw: p)
+    monkeypatch.setattr(qu, 'probe_audio_quality', lambda p: AudioQuality(format='flac', bit_depth=16))
+    monkeypatch.setattr(qu, 'quality_meets_profile', lambda aq, ts: True)
+    monkeypatch.setattr(qu, 'rank_candidate', lambda aq, ts: (1, 0))
+    monkeypatch.setattr(qu, 'get_primary_source', lambda: 'spotify')
+    monkeypatch.setattr(qu, 'get_source_priority', lambda src: ['spotify'])
+    monkeypatch.setattr(qu, '_read_file_ids', lambda fp, **kw: {})
+    monkeypatch.setattr(qu, '_match_via_track_id', lambda *a, **k: (None, None))
+    monkeypatch.setattr(qu, '_match_via_album', lambda *a, **k: (None, None))
+    fake_match = {'id': 'sp-cutoff', 'name': 'Cutoff Song', 'artists': ['Artist A'], 'album': {'name': 'Album X'}}
+    monkeypatch.setattr(qu, '_find_best_match', lambda *a, **k: (fake_match, 0.9, 'spotify', True))
+    monkeypatch.setattr(qu, '_normalize_track_match', lambda t, s: dict(fake_match))
+    monkeypatch.setattr(qu, '_track_name', lambda t: 'Cutoff Song')
+    monkeypatch.setattr(
+        'core.matching_engine.MusicMatchingEngine',
+        lambda: types.SimpleNamespace(
+            generate_download_queries=lambda t: ['q'],
+            similarity_score=lambda a, b: 1.0,
+            normalize_string=lambda s: s,
+        ),
+    )
+
+    findings = []
+    result = qu.QualityUpgradeJob().scan(_ctx(db, findings))
+
+    assert result.findings_created == 1
+    assert findings[0]['details']['matched_track_data']['id'] == 'sp-cutoff'
+    assert findings[0]['details']['quality_profile_id'] == 11
+    assert findings[0]['details']['quality_profile_name'] == 'Strict FLAC'
+    assert 'FLAC 24-bit' in findings[0]['description']
+
+
+def test_flag_only_scanner_finding_carries_profile_for_redownload(monkeypatch, tmp_path):
+    """The passive Quality Check scanner does not pre-search a replacement, so
+    the finding itself must remember the profile that made the file below
+    cutoff; the redownload action then queues the replacement under that same
+    profile."""
+    audio_path = tmp_path / "song.mp3"
+    audio_path.write_bytes(b"fake")
+    profile = {
+        'id': 12,
+        'name': 'Strict FLAC',
+        'upgrade_policy': 'until_cutoff',
+        'upgrade_cutoff_index': 0,
+        'ranked_targets': [
+            {'label': 'FLAC 24-bit', 'format': 'flac', 'bit_depth': 24},
+            {'label': 'MP3 320', 'format': 'mp3', 'min_bitrate': 320},
+        ],
+    }
+    from core.quality.model import AudioQuality, QualityTarget
+    targets = [
+        QualityTarget(label='FLAC 24-bit', format='flac', bit_depth=24),
+        QualityTarget(label='MP3 320', format='mp3', min_bitrate=320),
+    ]
+
+    class _EmptyConn:
+        def execute(self, *a, **k):
+            return self
+
+        def fetchall(self):
+            return []
+
+        def close(self):
+            pass
+
+    class _DB:
+        def get_quality_profile(self):
+            return profile
+
+        def _get_connection(self):
+            return _EmptyConn()
+
+    monkeypatch.setattr(qs, 'targets_from_profile', lambda p: (targets, False))
+    monkeypatch.setattr(qs, 'rank_candidate', lambda aq, ts: (1, 0))
+    monkeypatch.setattr(qs, 'quality_meets_profile', lambda aq, ts: True)
+    monkeypatch.setattr(
+        qs.QualityUpgradeScannerJob,
+        '_collect_music_dirs',
+        lambda self, context: [str(tmp_path)],
+    )
+    monkeypatch.setattr(
+        qs.QualityUpgradeScannerJob,
+        '_build_db_suffix_index',
+        lambda self, context: {
+            'song.mp3': {
+                'track_id': 5,
+                'title': 'Song',
+                'artist': 'Artist A',
+                'album': 'Album X',
+                'track_number': 1,
+                'quality_profile_id': 12,
+            }
+        },
+    )
+    monkeypatch.setattr(
+        'core.imports.file_ops.probe_audio_quality',
+        lambda path: AudioQuality(format='mp3', bitrate=320),
+    )
+    monkeypatch.setattr('core.imports.silence.detect_broken_audio', lambda path: None)
+
+    findings = []
+    ctx = JobContext(
+        db=_DB(),
+        transfer_folder=str(tmp_path),
+        config_manager=None,
+        create_finding=lambda **kw: findings.append(kw) or True,
+        should_stop=lambda: False,
+        is_paused=lambda: False,
+    )
+
+    result = qs.QualityUpgradeScannerJob().scan(ctx)
+
+    assert result.findings_created == 1
+    assert findings[0]['details']['quality_profile_id'] == 12
+    assert findings[0]['details']['quality_profile_name'] == 'Strict FLAC'
+
+
+class _ScannerFakeConn:
+    """Fake repair_findings connection for the flag-only scanner's dismissed-
+    findings lookup — mirrors _FakeConn above but keyed by (entity_id,
+    file_path, details_json) triples, matching what
+    QualityUpgradeScannerJob._load_dismissed_findings actually selects."""
+
+    def __init__(self, dismissed_rows=()):
+        self._dismissed_rows = list(dismissed_rows)
+        self._sql = ''
+        self.deleted_params = []
+
+    def execute(self, sql='', params=(), *a, **k):
+        self._sql = sql or ''
+        if self._sql.strip().startswith('DELETE'):
+            self.deleted_params.append(params)
+        return self
+
+    def fetchall(self):
+        if 'repair_findings' in self._sql:
+            return self._dismissed_rows
+        return []
+
+    def commit(self):
+        pass
+
+    def close(self):
+        pass
+
+
+class _ScannerFakeDB:
+    def __init__(self, profile, dismissed_rows=()):
+        self._profile = profile
+        self._dismissed_rows = dismissed_rows
+        self.conns = []
+
+    def get_quality_profile(self):
+        return self._profile
+
+    def _get_connection(self):
+        conn = _ScannerFakeConn(self._dismissed_rows)
+        self.conns.append(conn)
+        return conn
+
+
+def _scanner_ctx(db, tmp_path, findings):
+    return JobContext(
+        db=db,
+        transfer_folder=str(tmp_path),
+        config_manager=None,
+        create_finding=lambda **kw: findings.append(kw) or True,
+        should_stop=lambda: False,
+        is_paused=lambda: False,
+    )
+
+
+def _setup_scanner_common(monkeypatch, tmp_path, targets, aq):
+    (tmp_path / "song.mp3").write_bytes(b"fake")
+    monkeypatch.setattr(qs, 'targets_from_profile', lambda p: (targets, False))
+    monkeypatch.setattr(
+        qs.QualityUpgradeScannerJob, '_collect_music_dirs', lambda self, context: [str(tmp_path)])
+    monkeypatch.setattr(
+        qs.QualityUpgradeScannerJob, '_build_db_suffix_index',
+        lambda self, context: {
+            'song.mp3': {'track_id': 9, 'title': 'Song', 'artist': 'Artist A',
+                         'album': 'Album X', 'track_number': 1},
+        })
+    monkeypatch.setattr('core.imports.silence.detect_broken_audio', lambda path: None)
+    monkeypatch.setattr('core.imports.file_ops.probe_audio_quality', lambda path: aq)
+
+
+def test_scanner_dismissed_finding_stays_dismissed_when_config_unchanged(monkeypatch, tmp_path):
+    """A track dismissed under the SAME profile/cutoff must not resurrect a
+    finding on every re-run just because it still measures below profile."""
+    import json
+    from core.quality.model import AudioQuality, QualityTarget
+
+    profile = {'id': 20, 'name': 'Lossless Only', 'ranked_targets': [{'label': 'FLAC', 'format': 'flac'}]}
+    targets = [QualityTarget(label='FLAC', format='flac')]
+    aq = AudioQuality(format='mp3', bitrate=128)
+    _setup_scanner_common(monkeypatch, tmp_path, targets, aq)
+    monkeypatch.setattr(qs, 'quality_meets_profile', lambda a, ts: False)
+    monkeypatch.setattr(qs, 'rank_candidate', lambda a, ts: (len(ts), 0))
+
+    stable_fp = qs._config_fingerprint(targets, None)
+    dismissed_rows = [('9', None, json.dumps({'profile_config_fingerprint': stable_fp}))]
+    db = _ScannerFakeDB(profile, dismissed_rows)
+
+    findings = []
+    result = qs.QualityUpgradeScannerJob().scan(_scanner_ctx(db, tmp_path, findings))
+
+    assert findings == []
+    assert result.findings_created == 0
+    deletes = [p for conn in db.conns for p in conn.deleted_params]
+    assert deletes == []
+
+
+def test_scanner_dismissed_finding_is_cleared_and_reflagged_when_config_changed(monkeypatch, tmp_path):
+    """A dismissed finding with no stored fingerprint (from before this field
+    existed) is treated as stale — the row is cleared and the track re-flagged."""
+    from core.quality.model import AudioQuality, QualityTarget
+
+    profile = {'id': 20, 'name': 'Lossless Only', 'ranked_targets': [{'label': 'FLAC', 'format': 'flac'}]}
+    targets = [QualityTarget(label='FLAC', format='flac')]
+    aq = AudioQuality(format='mp3', bitrate=128)
+    _setup_scanner_common(monkeypatch, tmp_path, targets, aq)
+    monkeypatch.setattr(qs, 'quality_meets_profile', lambda a, ts: False)
+    monkeypatch.setattr(qs, 'rank_candidate', lambda a, ts: (len(ts), 0))
+
+    dismissed_rows = [('9', None, '{}')]  # no fingerprint stored
+    db = _ScannerFakeDB(profile, dismissed_rows)
+
+    findings = []
+    result = qs.QualityUpgradeScannerJob().scan(_scanner_ctx(db, tmp_path, findings))
+
+    assert result.findings_created == 1
+    assert findings[0]['entity_id'] == '9'
+    assert 'profile_config_fingerprint' in findings[0]['details']
+    deletes = [p for conn in db.conns for p in conn.deleted_params]
+    assert any('9' in params for params in deletes)
 
 
 # --- fix handler adds to wishlist ------------------------------------------
@@ -381,11 +785,98 @@ def test_fix_handler_adds_matched_track_to_wishlist():
                                'album': {'name': 'Album X'}},
         'current_format': 'MP3 192', 'current_bitrate': 192,
         'album_title': 'Album X', 'provider': 'spotify', 'match_confidence': 0.9,
+        'quality_profile_id': 7, 'quality_profile_name': 'Strict FLAC',
     }
     res = worker._fix_quality_upgrade('track', '1', '/music/a.mp3', details)
 
     assert res['success'] is True
     assert captured['spotify_track_data']['id'] == 'sp1'
     assert captured['source_type'] == 'repair'
+    assert captured['quality_profile_id'] == 7
     assert captured['source_info']['job'] == 'quality_upgrade'
     assert captured['source_info']['album_title'] == 'Album X'
+    assert captured['source_info']['quality_profile_id'] == 7
+    assert captured['source_info']['quality_profile_name'] == 'Strict FLAC'
+
+
+def test_fix_handler_resolves_own_track_identity_when_no_prematched_data():
+    """The flag-only Quality Check scanner never pre-searches a replacement
+    (unlike the active Quality Upgrade Finder) — its findings carry no
+    `matched_track_data`. The redownload action it documents must still work
+    by resolving the track's own identity from the DB instead of failing with
+    "No matched track in finding"."""
+    import sqlite3
+    from core.repair_worker import RepairWorker
+
+    conn = sqlite3.connect(':memory:')
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE artists (id INTEGER PRIMARY KEY, name TEXT)")
+    conn.execute("""CREATE TABLE albums (id INTEGER PRIMARY KEY, title TEXT,
+                     spotify_album_id TEXT, record_type TEXT, track_count INTEGER,
+                     year INTEGER, thumb_url TEXT)""")
+    conn.execute("""CREATE TABLE tracks (id INTEGER PRIMARY KEY, title TEXT,
+                     track_number INTEGER, duration INTEGER, artist_id INTEGER,
+                     album_id INTEGER, spotify_track_id TEXT, itunes_track_id TEXT,
+                     deezer_id TEXT)""")
+    conn.execute("INSERT INTO artists (id, name) VALUES (1, 'Artist A')")
+    conn.execute("INSERT INTO albums (id, title, record_type, track_count, year) "
+                 "VALUES (1, 'Album X', 'album', 10, 2020)")
+    conn.execute("INSERT INTO tracks (id, title, track_number, duration, artist_id, album_id) "
+                 "VALUES (3, 'Cutoff Song', 4, 210000, 1, 1)")
+    conn.commit()
+
+    captured = {}
+
+    class _DB:
+        def _get_connection(self):
+            return conn
+
+        def add_to_wishlist(self, **kw):
+            captured.update(kw)
+            return True
+
+    worker = object.__new__(RepairWorker)
+    worker.db = _DB()
+
+    details = {
+        'quality_issue': 'below_profile',
+        'current_format': 'FLAC 16-bit',
+        'expected_title': 'Cutoff Song',
+        'expected_artist': 'Artist A',
+        'album_title': 'Album X',
+    }
+    res = worker._fix_quality_upgrade('track', 3, '/music/c.flac', details)
+
+    assert res['success'] is True
+    assert captured['spotify_track_data']['name'] == 'Cutoff Song'
+    assert captured['spotify_track_data']['artists'] == [{'name': 'Artist A'}]
+    assert captured['spotify_track_data']['album']['name'] == 'Album X'
+    assert captured['source_info']['job'] == 'quality_upgrade'
+
+
+def test_fix_handler_fails_cleanly_when_track_gone_and_no_prematched_data():
+    import sqlite3
+    from core.repair_worker import RepairWorker
+
+    conn = sqlite3.connect(':memory:')
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE artists (id INTEGER PRIMARY KEY, name TEXT)")
+    conn.execute("""CREATE TABLE albums (id INTEGER PRIMARY KEY, title TEXT,
+                     spotify_album_id TEXT, record_type TEXT, track_count INTEGER,
+                     year INTEGER, thumb_url TEXT)""")
+    conn.execute("""CREATE TABLE tracks (id INTEGER PRIMARY KEY, title TEXT,
+                     track_number INTEGER, duration INTEGER, artist_id INTEGER,
+                     album_id INTEGER, spotify_track_id TEXT, itunes_track_id TEXT,
+                     deezer_id TEXT)""")
+    conn.commit()
+
+    class _DB:
+        def _get_connection(self):
+            return conn
+
+    worker = object.__new__(RepairWorker)
+    worker.db = _DB()
+
+    res = worker._fix_quality_upgrade('track', 999, '/music/gone.flac', {})
+    assert res['success'] is False
+    assert 'No matched track' in res['error']

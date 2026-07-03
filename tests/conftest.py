@@ -36,11 +36,33 @@ if not _os.environ.get('SOULSYNC_TEST_DB_READY'):
     _atexit.register(lambda: _shutil.rmtree(_TEST_DB_DIR, ignore_errors=True))
 
 import copy
+import os as _os
 import pytest
+import tempfile as _tempfile2
 import threading
 import time
 from flask import Flask, jsonify
 from flask_socketio import SocketIO, join_room, leave_room
+
+
+def symlinks_supported() -> bool:
+    """True when the host can create symlinks (often false on Windows without Developer Mode)."""
+    try:
+        with _tempfile2.TemporaryDirectory() as d:
+            target = _os.path.join(d, "target")
+            link = _os.path.join(d, "link")
+            with open(target, "w", encoding="utf-8"):
+                pass
+            _os.symlink("target", link)
+            return _os.path.islink(link) and _os.readlink(link) == "target"
+    except (OSError, NotImplementedError):
+        return False
+
+
+requires_symlinks = pytest.mark.skipif(
+    not symlinks_supported(),
+    reason="host OS cannot create symlinks (common on Windows without Developer Mode)",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -98,6 +120,7 @@ _DEFAULT_ENRICHMENT_STATUS = {
     'musicbrainz': copy.deepcopy(_ENRICHMENT_COMMON),
     'audiodb': copy.deepcopy(_ENRICHMENT_COMMON),
     'deezer': copy.deepcopy(_ENRICHMENT_COMMON),
+    'jiosaavn': copy.deepcopy(_ENRICHMENT_COMMON),
     'spotify-enrichment': {**copy.deepcopy(_ENRICHMENT_COMMON), 'authenticated': True},
     'itunes-enrichment': copy.deepcopy(_ENRICHMENT_COMMON),
     'hydrabase': {
@@ -333,7 +356,7 @@ def _build_enrichment_status(worker_name):
     return copy.deepcopy(enrichment_status.get(worker_name, {}))
 
 ENRICHMENT_WORKERS = [
-    'musicbrainz', 'audiodb', 'deezer',
+    'musicbrainz', 'audiodb', 'deezer', 'jiosaavn',
     'spotify-enrichment', 'itunes-enrichment',
     'hydrabase', 'repair',
 ]
@@ -342,6 +365,7 @@ ENRICHMENT_ENDPOINTS = {
     'musicbrainz': '/api/enrichment/musicbrainz/status',
     'audiodb': '/api/enrichment/audiodb/status',
     'deezer': '/api/enrichment/deezer/status',
+    'jiosaavn': '/api/enrichment/jiosaavn/status',
     'spotify-enrichment': '/api/enrichment/spotify/status',
     'itunes-enrichment': '/api/enrichment/itunes/status',
     'hydrabase': '/api/hydrabase-worker/status',

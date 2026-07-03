@@ -32,6 +32,26 @@ from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
+_UNKNOWN_ARTIST = 'Unknown Artist'
+
+
+def resolve_display_artist(yt_artist: str, matched_artist: str) -> str:
+    """The artist to show in the 'YT Artist' column (#909).
+
+    YouTube's flat playlist data carries no artist, so a track starts as
+    "Unknown Artist" and only gains a real name if per-video recovery succeeds.
+    When recovery comes up empty but the track still matched confidently, show
+    the matched artist instead of a misleading "Unknown Artist". Returns the
+    original ``yt_artist`` whenever it's already a real name (recovery worked) or
+    when there's no matched artist to fall back to — purely a display choice, the
+    match itself is unaffected.
+    """
+    current = (yt_artist or '').strip()
+    if current and current != _UNKNOWN_ARTIST:
+        return current                      # recovery already gave a real name — keep it
+    fallback = (matched_artist or '').strip()
+    return fallback or _UNKNOWN_ARTIST      # backfill from the match, else honest Unknown
+
 
 @dataclass
 class YoutubeDiscoveryDeps:
@@ -131,14 +151,15 @@ def run_youtube_discovery_worker(url_hash, deps: YoutubeDiscoveryDeps):
                     cached_match = cache_db.get_discovery_cache_match(cache_key[0], cache_key[1], discovery_source)
                     if cached_match and deps.validate_discovery_cache_artist(cleaned_artist, cached_match):
                         logger.debug(f"CACHE HIT [{i+1}/{len(tracks)}]: {cleaned_artist} - {cleaned_title}")
+                        _match_artist = deps.extract_artist_name(cached_match.get('artists', [''])[0]) if cached_match.get('artists') else ''
                         result = {
                             'index': i,
                             'yt_track': cleaned_title,
-                            'yt_artist': cleaned_artist,
+                            'yt_artist': resolve_display_artist(cleaned_artist, _match_artist),
                             'status': 'Found',
                             'status_class': 'found',
                             'spotify_track': cached_match.get('name', ''),
-                            'spotify_artist': deps.extract_artist_name(cached_match.get('artists', [''])[0]) if cached_match.get('artists') else '',
+                            'spotify_artist': _match_artist,
                             'spotify_album': cached_match.get('album', {}).get('name', '') if isinstance(cached_match.get('album'), dict) else cached_match.get('album', ''),
                             'duration': f"{int(track['duration_ms']) // 60000}:{(int(track['duration_ms']) % 60000) // 1000:02d}" if track['duration_ms'] else '0:00',
                             'discovery_source': discovery_source,
@@ -265,15 +286,17 @@ def run_youtube_discovery_worker(url_hash, deps: YoutubeDiscoveryDeps):
                             best_confidence = confidence
                             logger.info(f"Strategy 4 YouTube match (extended): {match.artists[0]} - {match.name} (confidence: {confidence:.3f})")
 
-                # Create result entry
+                # Create result entry. yt_artist falls back to the matched artist when
+                # YouTube/recovery left it "Unknown Artist" but we matched confidently (#909).
+                _match_artist = deps.extract_artist_name(matched_track.artists[0]) if matched_track else ''
                 result = {
                     'index': i,
                     'yt_track': cleaned_title,
-                    'yt_artist': cleaned_artist,
+                    'yt_artist': resolve_display_artist(cleaned_artist, _match_artist),
                     'status': 'Found' if matched_track else 'Not Found',
                     'status_class': 'found' if matched_track else 'not-found',
                     'spotify_track': matched_track.name if matched_track else '',
-                    'spotify_artist': deps.extract_artist_name(matched_track.artists[0]) if matched_track else '',
+                    'spotify_artist': _match_artist,
                     'spotify_album': matched_track.album if matched_track else '',
                     'duration': f"{int(track['duration_ms']) // 60000}:{(int(track['duration_ms']) % 60000) // 1000:02d}" if track['duration_ms'] else '0:00',
                     'discovery_source': discovery_source,

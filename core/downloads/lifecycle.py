@@ -26,6 +26,7 @@ Lifted verbatim from web_server.py. Dependencies injected via
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import time
 import traceback
@@ -42,6 +43,27 @@ from core.runtime_state import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# A task that has been in 'post_processing' longer than this is treated as stuck.
+# Post-processing (AcoustID + quality + import) is serialized, so a large batch
+# legitimately backs up — keep this generous so genuinely-slow imports aren't
+# cut off mid-flight (the old 5-min cutoff falsely "completed" queued tasks).
+_POST_PROCESSING_STUCK_TIMEOUT = 1800  # 30 minutes
+
+
+def _resolve_stuck_post_processing_status(task: dict) -> str:
+    """Decide the terminal status for a task stuck in post_processing.
+
+    Only call it 'completed' if the import actually produced a file on disk
+    (``final_file_path`` is set at the end of successful post-processing). Without
+    a real file, force-completing is a lie — the task shows as a downloaded track
+    that isn't anywhere. Mark those 'failed' so they're retryable and honest.
+    """
+    final_path = task.get('final_file_path')
+    if final_path and os.path.exists(final_path):
+        return 'completed'
+    return 'failed'
 
 
 def _safe_batch_dirname(batch_id: str) -> str:
@@ -435,9 +457,15 @@ def on_download_completed(batch_id: str, task_id: str, success: bool, deps: Life
                         retrying_count += 1
                 elif task_status == 'post_processing':
                     task_age = current_time - task.get('status_change_time', current_time)
-                    if task_age > 300:  # 5 minutes (post-processing should be fast)
-                        logger.info(f"⏰ [Stuck Detection] Task {queue_task_id} stuck in post_processing for {task_age:.0f}s - forcing completion")
-                        task['status'] = 'completed'  # Assume it worked if file verification is taking too long
+                    if task_age > _POST_PROCESSING_STUCK_TIMEOUT:
+                        new_status = _resolve_stuck_post_processing_status(task)
+                        if new_status == 'completed':
+                            logger.info(f"⏰ [Stuck Detection] Task {queue_task_id} stuck in post_processing for {task_age:.0f}s but file exists — completing")
+                            task['status'] = 'completed'
+                        else:
+                            logger.warning(f"⏰ [Stuck Detection] Task {queue_task_id} stuck in post_processing for {task_age:.0f}s with no output file — marking failed")
+                            task['status'] = 'failed'
+                            task['error_message'] = 'Post-processing timed out without producing a file'
                         finished_count += 1
                     else:
                         retrying_count += 1
@@ -667,9 +695,15 @@ def check_batch_completion_v2(batch_id: str, deps: LifecycleDeps) -> Optional[bo
                             retrying_count += 1
                     elif task_status == 'post_processing':
                         task_age = current_time - task.get('status_change_time', current_time)
-                        if task_age > 300:  # 5 minutes (post-processing should be fast)
-                            logger.info(f"⏰ [Stuck Detection V2] Task {task_id} stuck in post_processing for {task_age:.0f}s - forcing completion")
-                            task['status'] = 'completed'  # Assume it worked if file verification is taking too long
+                        if task_age > _POST_PROCESSING_STUCK_TIMEOUT:
+                            new_status = _resolve_stuck_post_processing_status(task)
+                            if new_status == 'completed':
+                                logger.info(f"⏰ [Stuck Detection V2] Task {task_id} stuck in post_processing for {task_age:.0f}s but file exists — completing")
+                                task['status'] = 'completed'
+                            else:
+                                logger.warning(f"⏰ [Stuck Detection V2] Task {task_id} stuck in post_processing for {task_age:.0f}s with no output file — marking failed")
+                                task['status'] = 'failed'
+                                task['error_message'] = 'Post-processing timed out without producing a file'
                             finished_count += 1
                         else:
                             retrying_count += 1

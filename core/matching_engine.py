@@ -285,6 +285,14 @@ class MusicMatchingEngine:
             def _strip_versions(s: str) -> str:
                 for kw in different_version_keywords:
                     s = re.sub(r'\b' + re.escape(kw) + r'\b', ' ', s)
+                # A "(live)" vs "- live" difference is the SAME version formatted
+                # differently — the source often uses a dash where the metadata
+                # uses parentheses (lilbob5769). Normalise the wrapping punctuation
+                # away so only a GENUINE distinguishing token (venue / remixer /
+                # year) can trip the divergent-version penalty below. Without this,
+                # stripping just the version word left "song ()" vs "song -", which
+                # compared unequal and wrongly blocked the match.
+                s = re.sub(r'[()\[\]\-]', ' ', s)
                 return re.sub(r'\s+', ' ', s).strip()
 
             if v1 != v2 or _strip_versions(str1) != _strip_versions(str2):
@@ -743,9 +751,16 @@ class MusicMatchingEngine:
                 # No penalty for low similarity — the file might just not have album folders
 
         # 5. Special handling for short titles (high false positive risk)
-        # Titles like "Run", "Love", "Girls", "Stay" need stricter artist matching
-        title_words = spotify_cleaned_title.split()
-        is_short_title = len(spotify_cleaned_title) <= 5 or len(title_words) == 1
+        # Titles like "Run", "Love", "Girls", "Stay" need stricter artist matching.
+        # Length alone is the risk signal — a short SUBSTRING is more likely to
+        # accidentally appear inside an unrelated title. The old `or` clause
+        # additionally flagged every single-word title regardless of length,
+        # so an 11-character word like "Dumbfounded" (common for self-titled
+        # tracks — same name as the containing album/single) got the same 60%
+        # penalty as "Run" whenever artist-path matching was only fuzzy, often
+        # dropping it below the pass threshold while multi-word sibling tracks
+        # in the same album passed under identical artist-match conditions.
+        is_short_title = len(spotify_cleaned_title) <= 5
 
         # --- Junk Artist Gate ---
         # Reject results from generic/compilation folders where metadata is unreliable.

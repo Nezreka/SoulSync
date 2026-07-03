@@ -47,6 +47,12 @@ class SpotifyWorker:
         # Current item being processed (for UI tooltip)
         self.current_item = None
 
+        # Whether the worker is serving via the no-creds Spotify Free source as of
+        # its last loop iteration. Cached from the loop's _free_active() probe so
+        # get_stats() can report it without an auth API call (#887: a no-auth user
+        # whose enrichment runs on Free was shown "Not Authenticated").
+        self._serving_via_free = False
+
         # Statistics
         self.stats = {
             'matched': 0,
@@ -136,8 +142,14 @@ class SpotifyWorker:
             # real-API daily budget (the worker set _budget_exhausted_use_free —
             # a cheap attribute read). Lets the UI show "Running (Spotify Free)"
             # instead of a misleading "rate limited" / "daily limit reached".
+            # #887: the loop's cached _free_active() result is the comprehensive
+            # signal — it's True for a no-auth user enriching via Spotify Free by
+            # default (prefer-free is on unless disabled), not just the rate-limit
+            # / budget bridges. The extra terms stay as a fallback for the brief
+            # window before the loop's first iteration sets the cache.
             using_free = bool(
-                (rate_limited and self.client.is_spotify_metadata_available())
+                getattr(self, '_serving_via_free', False)
+                or (rate_limited and self.client.is_spotify_metadata_available())
                 or getattr(self.client, '_budget_exhausted_use_free', False)
             )
         except Exception:
@@ -264,6 +276,9 @@ class SpotifyWorker:
                     free_serving = self.client._free_active()
                 except Exception:
                     free_serving = False
+                # Cache for get_stats() so the dashboard status reflects that the
+                # worker IS enriching via Free even with no official auth (#887).
+                self._serving_via_free = free_serving
 
                 # Daily budget guard — pause ONLY when the budget is spent AND we
                 # can't serve via free (no free available). Otherwise free took over.

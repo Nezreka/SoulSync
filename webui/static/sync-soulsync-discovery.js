@@ -29,15 +29,34 @@ async function loadSoulsyncDiscoverySyncPlaylists() {
     }
 
     try {
-        const resp = await fetch('/api/personalized/playlists');
-        const data = await resp.json();
+        // Existing generated rows + ALL registered singleton kinds, so every SoulSync
+        // playlist (Listening Mix, Fresh Tape, Archives, Hidden Gems, Discovery Shuffle,
+        // …) is clickable here — not just ones generated before. The Discover page fills
+        // the legacy system, which never seeded these v2 rows, so without this the tab was
+        // empty. Variant kinds (decade / genre / daily mix) need a picker, so we only
+        // auto-list singletons; any existing variant rows still show.
+        // Playlists is REQUIRED; kinds is a best-effort enhancement and must never be able
+        // to break the core list, so it's fetched + parsed inside its own guard (not in a
+        // shared Promise.all, where a kinds-fetch rejection would sink the whole tab).
+        const data = await (await fetch('/api/personalized/playlists')).json();
         if (!data.success) {
             container.innerHTML = `<div class="playlist-placeholder">❌ ${escapeHtml(data.error || 'Failed to load')}</div>`;
             return;
         }
-        _soulsyncDiscoverySyncRecords = data.playlists || [];
+        const existing = data.playlists || [];
+        const seen = new Set(existing.map(p => `${p.kind}|${p.variant || ''}`));
+        let kinds = [];
+        try {
+            const kindsData = await (await fetch('/api/personalized/kinds')).json();
+            if (kindsData.success && Array.isArray(kindsData.kinds)) kinds = kindsData.kinds;
+        } catch (e) { /* kinds endpoint optional — fall back to existing rows only */ }
+        const synthetic = kinds
+            .filter(k => !k.requires_variant && !seen.has(`${k.kind}|`))
+            .map(k => ({ kind: k.kind, variant: '', name: k.name_template || k.kind,
+                         track_count: 0, is_stale: true, _never_generated: true }));
+        _soulsyncDiscoverySyncRecords = [...existing, ...synthetic];
         renderSoulsyncDiscoverySyncPlaylists();
-        console.log(`✨ SoulSync Discovery Sync tab loaded: ${_soulsyncDiscoverySyncRecords.length} playlists`);
+        console.log(`✨ SoulSync Discovery Sync tab loaded: ${existing.length} generated + ${synthetic.length} available`);
     } catch (err) {
         container.innerHTML = `<div class="playlist-placeholder">❌ Error: ${err.message}</div>`;
         if (typeof showToast === 'function') {
@@ -66,7 +85,8 @@ function renderSoulsyncDiscoverySyncPlaylists() {
         const subtitle = p.variant ? `${p.kind} · ${p.variant}` : p.kind;
         const count = p.track_count || 0;
         const stale = !!p.is_stale;
-        const stalenessText = stale ? 'Stale — refresh to regenerate' : 'Ready';
+        const stalenessText = p._never_generated ? 'Tap “Refresh & Mirror” to generate'
+            : (stale ? 'Stale — refresh to regenerate' : 'Ready');
         const stalenessColor = stale ? '#facc15' : '#14b8a6';
 
         return `
