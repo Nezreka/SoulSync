@@ -2208,21 +2208,20 @@ function updateDownloadSourceUI() {
         prowlarrRedirect.style.display = showProwlarr ? 'block' : 'none';
     }
 
-    // Indexers & Downloaders section: only relevant when a torrent or usenet
-    // source is actually selected. Hide the whole intro + Prowlarr/Torrent/Usenet
-    // tiles otherwise (Soulseek/HiFi-only users never see them). The two client
-    // tiles are gated individually on their own source. Selection-based (not the
-    // hybrid expand state) — the tiles are full config sections, not accordion
-    // panels. Tab-gated so it never leaks onto another tab.
+    // Indexers & Downloaders: torrent/usenet setup (Prowlarr + the Torrent and
+    // Usenet client tiles) is shared config — keep it always reachable on the
+    // Downloads tab for BOTH the music and video sides, like the Advanced /
+    // Appearance tabs. (It used to be gated on an active torrent/usenet source,
+    // which hid it from anyone whose source was something else — and from the video
+    // side entirely, whose source lives on a separate dropdown.) Only tab-gated so
+    // it never leaks onto another tab.
     const onDownloadsTab = document.querySelector('.stg-tab.active')?.dataset.tab === 'downloads';
-    const torrentActive = activeSources.has('torrent');
-    const usenetActive = activeSources.has('usenet');
     const indSection = document.getElementById('indexers-downloaders-section');
-    if (indSection) indSection.style.display = (onDownloadsTab && (torrentActive || usenetActive)) ? '' : 'none';
+    if (indSection) indSection.style.display = onDownloadsTab ? '' : 'none';
     const torrentTile = document.getElementById('torrent-tile');
-    if (torrentTile) torrentTile.style.display = torrentActive ? '' : 'none';
+    if (torrentTile) torrentTile.style.display = '';
     const usenetTile = document.getElementById('usenet-tile');
-    if (usenetTile) usenetTile.style.display = usenetActive ? '' : 'none';
+    if (usenetTile) usenetTile.style.display = '';
 
     // Quality profile is now a GLOBAL system — the same ranked-target list
     // drives every source (Soulseek, Tidal, Qobuz, HiFi, Deezer, …), so it is
