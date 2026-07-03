@@ -195,11 +195,26 @@ function resolveExperimentalEnableDialog(confirmed) {
     }
 }
 
+function syncJiosaavnEnrichmentBubble(enabled) {
+    const container = document.querySelector('.jiosaavn-button-container');
+    if (container) container.style.display = enabled ? '' : 'none';
+    if (typeof refreshRateMonitorExperimentalVisibility === 'function') {
+        refreshRateMonitorExperimentalVisibility();
+    }
+    if (enabled && typeof renderEnrichmentRail === 'function') {
+        renderEnrichmentRail();
+    }
+    if (window._lastStatusPayload?.enrichment && typeof renderEnrichmentCards === 'function') {
+        renderEnrichmentCards(window._lastStatusPayload.enrichment);
+    }
+}
+
 async function onExperimentalJiosaavnToggle(checkbox) {
     if (!checkbox) return;
 
     if (!checkbox.checked) {
         syncJiosaavnMetadataSourceOption(false);
+        syncJiosaavnEnrichmentBubble(false);
         debouncedAutoSaveSettings();
         return;
     }
@@ -215,6 +230,7 @@ async function onExperimentalJiosaavnToggle(checkbox) {
 
     checkbox.checked = true;
     syncJiosaavnMetadataSourceOption(true);
+    syncJiosaavnEnrichmentBubble(true);
     debouncedAutoSaveSettings();
 }
 
@@ -1393,6 +1409,7 @@ async function loadSettingsData() {
         const jiosaavnEnabled = settings.experimental?.jiosaavn_enabled === true;
         if (_jiosaavnExp) _jiosaavnExp.checked = jiosaavnEnabled;
         syncJiosaavnMetadataSourceOption(jiosaavnEnabled);
+        syncJiosaavnEnrichmentBubble(jiosaavnEnabled);
         if (jiosaavnEnabled && _metaSel === 'jiosaavn') {
             document.getElementById('metadata-fallback-source').value = 'jiosaavn';
         }
@@ -1624,17 +1641,20 @@ async function loadSettingsData() {
         }
 
         // Populate Import settings
-        const _qualFilterEl = document.getElementById('import-quality-filter-enabled');
-        if (_qualFilterEl) _qualFilterEl.checked = settings.import?.quality_filter_enabled !== false;  // default ON
         document.getElementById('import-replace-lower-quality').checked = settings.import?.replace_lower_quality === true;
+        // Default ON (legacy Artist/Album staging behavior) when the key is absent.
         const _folderArtistEl = document.getElementById('import-folder-artist-override');
-        if (_folderArtistEl) _folderArtistEl.checked = settings.import?.folder_artist_override === true;
+        if (_folderArtistEl) _folderArtistEl.checked = settings.import?.folder_artist_override !== false;
         const _transferPermEl = document.getElementById('import-transfer-permanent');
         if (_transferPermEl) _transferPermEl.checked = settings.import?.transfer_is_permanent === true;
 
         // Populate M3U Export settings
         document.getElementById('m3u-export-enabled').checked = settings.m3u_export?.enabled === true;
         document.getElementById('m3u-entry-base-path').value = settings.m3u_export?.entry_base_path || '';
+        const _libM3uEn = document.getElementById('library-m3u-enabled');
+        if (_libM3uEn) _libM3uEn.checked = settings.m3u_export?.library_enabled === true;
+        const _libM3uPath = document.getElementById('library-m3u-path');
+        if (_libM3uPath) _libM3uPath.value = settings.m3u_export?.library_path || '';
 
         // Populate UI Appearance settings
         const accentPreset = settings.ui_appearance?.accent_preset || '#1db954';
@@ -2266,11 +2286,34 @@ function updateHybridSecondaryOptions() {
 let currentQualityProfile = null;
 let qualityProfileAutoSaveTimer = null;
 
+// Which profile the tiles currently show. null = "the live default", the
+// only state that existed before profiles were previewable — autosave keeps
+// writing straight into the active default/global config exactly as always.
+// Set to a specific id by previewQualityProfile() when the user clicks a
+// DIFFERENT (non-default) profile's row to look at/edit it; in that state
+// autosave must NOT touch the live default — see debouncedSaveQualityProfile.
+let _qpEditingProfileId = null;
+
+function _qpDefaultProfileId() {
+    const def = _qpProfileRows.find(p => p.is_default);
+    return def ? def.id : null;
+}
+
 // Save just the quality profile (not the whole settings page). Used for quality
 // target edits so reordering a target doesn't re-init every backend client.
 function debouncedSaveQualityProfile() {
     if (window._suppressSettingsAutoSave) return;
     if (window._settingsLoadFailed) return;
+    // Previewing a specific NON-default profile: the legacy save endpoint
+    // below always writes the LIVE default row + pushes into global config —
+    // autosaving here would silently overwrite the active profile (and
+    // anything downloading right now under it) while the user is just
+    // looking at/tweaking a different one. Edits only persist once the user
+    // explicitly clicks that profile row's Update (✎) button.
+    if (_qpEditingProfileId !== null && _qpEditingProfileId !== _qpDefaultProfileId()) {
+        qpShowEditingBanner();
+        return;
+    }
     if (qualityProfileAutoSaveTimer) clearTimeout(qualityProfileAutoSaveTimer);
     qualityProfileAutoSaveTimer = setTimeout(() => saveQualityProfile(), 800);
 }
@@ -2287,6 +2330,7 @@ async function loadQualityProfile() {
     } catch (error) {
         console.error('Error loading quality profile:', error);
     }
+    await loadCustomQualityProfiles();
 }
 
 // v3: the working copy of the ordered target list. Mirrors the DOM rows
@@ -2325,7 +2369,16 @@ function populateQualityProfileUI(profile) {
     const rankCandidatesCheckbox = document.getElementById('quality-rank-candidates');
     if (rankCandidatesCheckbox) rankCandidatesCheckbox.checked = profile.rank_candidates_by_quality === true;
 
+    const upgradePolicySelect = document.getElementById('quality-upgrade-policy');
+    if (upgradePolicySelect) {
+        upgradePolicySelect.value = ['until_cutoff', 'until_top'].includes(profile.upgrade_policy)
+            ? 'until_cutoff'
+            : 'acceptable';
+    }
+    renderUpgradeCutoffOptions(profile.upgrade_cutoff_index);
+
     onSearchModeChange();
+    onUpgradePolicyChange();
 }
 
 // Hide the "rank-based download order" toggle when Best quality is active —
@@ -2334,6 +2387,30 @@ function onSearchModeChange() {
     const mode = document.getElementById('quality-search-mode')?.value;
     const group = document.getElementById('quality-rank-candidates-group');
     if (group) group.style.display = mode === 'best_quality' ? 'none' : '';
+}
+
+function renderUpgradeCutoffOptions(selectedIndex = null) {
+    const select = document.getElementById('quality-upgrade-cutoff');
+    if (!select) return;
+    const current = selectedIndex ?? parseInt(select.value || '0', 10);
+    const maxIdx = Math.max(0, currentRankedTargets.length - 1);
+    const clamped = Number.isFinite(current) ? Math.min(Math.max(current, 0), maxIdx) : 0;
+    if (!currentRankedTargets.length) {
+        select.innerHTML = '<option value="0">Top ranked target</option>';
+        select.value = '0';
+        return;
+    }
+    select.innerHTML = currentRankedTargets.map((target, index) => (
+        `<option value="${index}">${index + 1}. ${escapeHtml(rtLabel(target))}</option>`
+    )).join('');
+    select.value = String(clamped);
+}
+
+function onUpgradePolicyChange() {
+    const policy = document.getElementById('quality-upgrade-policy')?.value || 'acceptable';
+    const cutoffGroup = document.getElementById('quality-upgrade-cutoff-group');
+    if (cutoffGroup) cutoffGroup.style.display = policy === 'until_cutoff' ? '' : 'none';
+    renderUpgradeCutoffOptions();
 }
 
 // Toggle the collapsible help text below a setting's ⓘ icon. Walks forward from
@@ -2375,6 +2452,7 @@ function renderRankedTargets() {
     if (currentRankedTargets.length === 0) {
         list.innerHTML = '<div class="ranked-targets-empty">No targets yet — add one below. '
             + 'With fallback off this would reject every download.</div>';
+        renderUpgradeCutoffOptions();
         return;
     }
 
@@ -2407,6 +2485,7 @@ function renderRankedTargets() {
         });
         list.appendChild(row);
     });
+    renderUpgradeCutoffOptions();
 }
 
 function reorderRankedTarget(from, to) {
@@ -2503,6 +2582,45 @@ async function applyQualityPreset(presetName) {
     if (settingsAutoSaveTimer) { clearTimeout(settingsAutoSaveTimer); settingsAutoSaveTimer = null; }
     if (qualityProfileAutoSaveTimer) { clearTimeout(qualityProfileAutoSaveTimer); qualityProfileAutoSaveTimer = null; }
 
+    // Previewing a specific NON-default profile: POST /preset/<name> below
+    // always overwrites the LIVE default row, no matter what's on screen —
+    // clicking a Quick-Set button while just looking at a different profile
+    // would silently destroy the real default's settings and then swap the
+    // tiles to show it instead (looks like the preview "jumps" to a random
+    // profile). Load the preset's values locally instead — read-only, never
+    // touches the server — same as previewQualityProfile; it only persists
+    // once the user explicitly clicks that profile row's Update (✎).
+    if (_qpEditingProfileId !== null && _qpEditingProfileId !== _qpDefaultProfileId()) {
+        try {
+            const response = await fetch('/api/quality-profile/presets');
+            const data = await response.json();
+            const preset = data.success ? data.presets?.[presetName] : null;
+            if (!preset) {
+                showToast(`Failed to load '${presetName}' preset`, 'error');
+                return;
+            }
+            // Same carry-forward as the live-default path below: the search
+            // strategy is a global choice, not part of the preset itself.
+            const uiState = collectQualityProfileFromUI();
+            const merged = {
+                ...preset,
+                search_mode: uiState.search_mode,
+                rank_candidates_by_quality: uiState.rank_candidates_by_quality,
+            };
+            window._suppressSettingsAutoSave = true;
+            try {
+                populateQualityProfileUI(merged);
+            } finally {
+                window._suppressSettingsAutoSave = false;
+            }
+            showToast(`Previewing '${PRESET_LABELS[presetName] || presetName}' — click ✎ on the profile row to save it here`, 'success');
+        } catch (error) {
+            console.error('Error loading quality preset:', error);
+            showToast('Failed to load preset', 'error');
+        }
+        return;
+    }
+
     try {
         const response = await fetch(`/api/quality-profile/preset/${presetName}`, { method: 'POST' });
         const data = await response.json();
@@ -2517,6 +2635,7 @@ async function applyQualityPreset(presetName) {
             } finally {
                 window._suppressSettingsAutoSave = false;
             }
+            renderCustomQualityProfiles(_qpProfileRows);
             showToast(`Switched to '${PRESET_LABELS[presetName] || presetName}'`, 'success');
         } else {
             showToast(`Failed to apply preset: ${data.error}`, 'error');
@@ -2529,6 +2648,16 @@ async function applyQualityPreset(presetName) {
 
 // Discard the active preset's saved edits and restore its factory defaults.
 async function resetActiveQualityPreset() {
+    // "Reset to factory" is a concept the 3 built-in presets have (a
+    // separate stash of saved customizations per preset name) — a named
+    // custom profile (Test/Main/whatever) has no factory counterpart to
+    // reset to. The backend call below would ALSO always write into the
+    // live default row regardless of what's being previewed, same class of
+    // bug as applyQualityPreset — refuse instead of doing that silently.
+    if (_qpEditingProfileId !== null && _qpEditingProfileId !== _qpDefaultProfileId()) {
+        showToast("Reset to defaults only applies to the live default profile — this one has no factory preset to reset to", 'info');
+        return;
+    }
     const presetName = currentQualityProfile?.preset;
     if (!presetName || !(presetName in PRESET_LABELS)) {
         showToast('No preset selected to reset', 'info');
@@ -2576,11 +2705,25 @@ function collectQualityProfileFromUI() {
         fallback_enabled: document.getElementById('quality-fallback-enabled')?.checked ?? true,
         search_mode: document.getElementById('quality-search-mode')?.value === 'best_quality' ? 'best_quality' : 'priority',
         rank_candidates_by_quality: document.getElementById('quality-rank-candidates')?.checked ?? false,
+        upgrade_policy: document.getElementById('quality-upgrade-policy')?.value === 'until_cutoff' ? 'until_cutoff' : 'acceptable',
+        upgrade_cutoff_index: parseInt(document.getElementById('quality-upgrade-cutoff')?.value || '0', 10) || 0,
         ranked_targets,
     };
 }
 
 async function saveQualityProfile() {
+    // Same guard as debouncedSaveQualityProfile, enforced here too — this is
+    // also called directly by the page-wide "Save Settings" button
+    // (saveSettings), which bypasses the debounce path entirely. Without
+    // this, clicking Save Settings for some unrelated setting while merely
+    // PREVIEWING a different profile would still silently push what's on
+    // screen into the live default. Returns true (not false/"failed") —
+    // the banner already explains the skip; saveSettings() would otherwise
+    // report it as an error toast, which it isn't.
+    if (_qpEditingProfileId !== null && _qpEditingProfileId !== _qpDefaultProfileId()) {
+        qpShowEditingBanner();
+        return true;
+    }
     try {
         const profile = collectQualityProfileFromUI();
 
@@ -2606,6 +2749,733 @@ async function saveQualityProfile() {
         console.error('Error saving quality profile:', error);
         return false;
     }
+}
+
+// ── Named global profiles (assignable to Wishlist items / per-context
+// overrides like Auto-Import, not just the single active default) ───────
+//
+// Rendered as a detached, sticky side panel (.qp-side-panel — see the
+// Downloads page's .adl-batch-panel for the same pattern), not a control
+// strip above the tiles it governs. Every action here is inline (a row
+// switching into an edit-in-place `<input>`) or the app's own themed
+// showConfirmDialog() — never a native prompt()/confirm() popup.
+
+let _qpAutoImportProfileId = null; // cached so re-renders don't re-fetch
+let _qpProfileRows = [];
+
+function normalizeQualityProfileId(profileId) {
+    if (profileId === null || profileId === undefined || profileId === '' || profileId === 0 || profileId === '0') {
+        return null;
+    }
+    const numericId = parseInt(profileId, 10);
+    return Number.isFinite(numericId) && numericId > 0 ? numericId : null;
+}
+
+async function loadCustomQualityProfiles() {
+    try {
+        const [profilesRes, autoImportRes] = await Promise.all([
+            fetch('/api/quality-profile/custom'),
+            fetch('/api/auto-import/settings').catch(() => null),
+        ]);
+        const data = await profilesRes.json();
+        if (autoImportRes && autoImportRes.ok) {
+            const aiData = await autoImportRes.json();
+            _qpAutoImportProfileId = normalizeQualityProfileId(aiData.quality_profile_id);
+        }
+        if (data.success) {
+            _qpProfileRows = data.profiles || [];
+            renderCustomQualityProfiles(_qpProfileRows);
+        }
+    } catch (error) {
+        console.error('Error loading custom quality profiles:', error);
+    }
+}
+
+// One-line what's-in-it summary under each profile row (Lidarr shows the
+// allowed qualities on its profile cards for the same reason: a name alone
+// says nothing about what the profile actually does).
+function qpProfileSummary(profile) {
+    let targets = [];
+    try { targets = JSON.parse(profile.ranked_targets || '[]'); } catch (e) { /* unreadable → treat as empty */ }
+    const parts = [];
+    if (targets.length) {
+        const first = targets[0]?.label || 'Top target';
+        parts.push(targets.length === 1 ? first : `${first} +${targets.length - 1} more`);
+    } else {
+        parts.push('Accepts anything');
+    }
+    if (profile.acoustid_required) parts.push('strict AcoustID');
+    if (profile.deep_audio_verify) parts.push('deep verify');
+    if (profile.downsample_enabled) parts.push('downsample');
+    if (profile.lossy_copy_enabled) parts.push(`lossy copy ${(profile.lossy_copy_codec || 'mp3').toUpperCase()}`);
+    if (['until_cutoff', 'until_top'].includes(profile.upgrade_policy)) {
+        const cutoffIndex = Math.min(Math.max(parseInt(profile.upgrade_cutoff_index || '0', 10) || 0, 0), Math.max(targets.length - 1, 0));
+        const cutoff = targets[cutoffIndex]?.label || 'top target';
+        parts.push(`upgrade until ${cutoff}`);
+    }
+    return parts.join(' · ');
+}
+
+function renderCustomQualityProfiles(profiles) {
+    const wrap = document.getElementById('qp-profile-list');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+
+    if (!profiles.length) {
+        wrap.innerHTML = '<span class="qp-profile-list-empty">No profiles yet.</span>';
+        return;
+    }
+
+    // Only tag Auto-Import when the Import page has an explicit override.
+    // Falling back to the default profile is not a real assignment.
+    const autoImportTarget = _qpAutoImportProfileId;
+
+    profiles.forEach(profile => {
+        const row = document.createElement('div');
+        const isEditing = profile.id === _qpEditingProfileId && !profile.is_default;
+        row.className = 'qp-profile-row' + (profile.is_default ? ' active' : '') + (isEditing ? ' editing' : '');
+
+        // The dot is the ONLY control that actually flips the live default —
+        // deliberately separate from clicking the name/summary below, which
+        // just previews the profile's settings. Conflating the two was the
+        // bug: opening a profile to look at it was silently making it live
+        // for every in-flight download.
+        const dot = document.createElement('span');
+        dot.className = 'qp-profile-dot';
+        dot.title = profile.is_default
+            ? 'Currently the active default'
+            : `Set '${profile.name}' as the active default (applies immediately, incl. anything downloading right now)`;
+        dot.onclick = () => confirmSetDefaultQualityProfile(profile.id, profile.name);
+        row.appendChild(dot);
+
+        const text = document.createElement('span');
+        text.className = 'qp-profile-text';
+        text.title = profile.is_default
+            ? "View this profile's settings (it's already the active default)"
+            : `View/edit '${profile.name}'s settings — does not activate it`;
+        text.onclick = () => previewQualityProfile(profile.id);
+
+        const name = document.createElement('span');
+        name.className = 'qp-profile-name';
+        name.textContent = profile.name;
+        text.appendChild(name);
+
+        const sub = document.createElement('span');
+        sub.className = 'qp-profile-sub';
+        sub.textContent = qpProfileSummary(profile);
+        text.appendChild(sub);
+
+        row.appendChild(text);
+
+        if (profile.is_default || profile.id === autoImportTarget) {
+            const tags = document.createElement('span');
+            tags.className = 'qp-profile-tags';
+            // Mirrors the Auto-Import tag below: at-a-glance visibility of
+            // what's actually governing normal downloads right now, without
+            // needing to open Manage.
+            if (profile.is_default) {
+                const dtag = document.createElement('span');
+                dtag.className = 'qp-profile-tag qp-tag-default';
+                dtag.textContent = 'Downloads';
+                dtag.title = 'Used by normal downloads and Wishlist items right now';
+                tags.appendChild(dtag);
+            }
+            if (profile.id === autoImportTarget) {
+                const tag = document.createElement('span');
+                tag.className = 'qp-profile-tag qp-tag-autoimport';
+                tag.textContent = 'Auto-Import';
+                tag.title = 'Also used by Auto-Import (Settings → Import)';
+                tags.appendChild(tag);
+            }
+            row.appendChild(tags);
+        }
+
+        const actions = document.createElement('span');
+        actions.className = 'qp-profile-actions';
+
+        // Assign this profile to Auto-Import (Settings → Import), independent
+        // of the app-wide default used by normal downloads/Wishlist items.
+        // Toggle: click again on the currently-assigned profile to clear it
+        // back to "use the default".
+        const isAutoImport = profile.id === autoImportTarget;
+        const ai = document.createElement('button');
+        ai.type = 'button';
+        ai.className = 'qp-profile-action qp-action-autoimport' + (isAutoImport ? ' active' : '');
+        ai.textContent = '⇩';
+        ai.title = isAutoImport
+            ? `Stop using '${profile.name}' for Auto-Import (revert to the default profile)`
+            : `Use '${profile.name}' for Auto-Import`;
+        ai.onclick = (e) => {
+            e.stopPropagation();
+            toggleAutoImportQualityProfile(profile.id);
+        };
+        actions.appendChild(ai);
+
+        const ren = document.createElement('button');
+        ren.type = 'button';
+        ren.className = 'qp-profile-action qp-action-rename';
+        ren.textContent = '✏';
+        ren.title = `Rename '${profile.name}'`;
+        ren.onclick = (e) => {
+            e.stopPropagation();
+            qpStartRename(row, profile);
+        };
+        actions.appendChild(ren);
+
+        // Update: overwrite this profile's stored settings with whatever is
+        // currently on the page (edit-in-place, keeps the name). Allowed on
+        // every profile, including the starter ones — it's an overwrite,
+        // not a delete.
+        const upd = document.createElement('button');
+        upd.type = 'button';
+        upd.className = 'qp-profile-action qp-action-update';
+        upd.textContent = '✎';
+        upd.title = `Update '${profile.name}' with the current page settings`;
+        upd.onclick = (e) => {
+            e.stopPropagation();
+            updateCustomQualityProfile(profile.id, profile.name);
+        };
+        actions.appendChild(upd);
+
+        // Any profile can be deleted (including the starter ones) as long as
+        // it isn't the very last one left — mirrors the backend guard in
+        // MusicDatabase.delete_quality_profile.
+        if (profiles.length > 1) {
+            const del = document.createElement('button');
+            del.type = 'button';
+            del.className = 'qp-profile-action qp-action-delete';
+            del.textContent = '×';
+            del.title = `Delete '${profile.name}'`;
+            del.onclick = (e) => {
+                e.stopPropagation();
+                deleteCustomQualityProfile(profile.id, profile.name);
+            };
+            actions.appendChild(del);
+        }
+
+        row.appendChild(actions);
+        wrap.appendChild(row);
+    });
+}
+
+// Turns a profile row's name into an inline, in-place text input — no
+// native prompt(). Enter/blur commits via the PUT rename endpoint, Escape
+// cancels back to the plain label.
+function qpStartRename(row, profile) {
+    if (row.querySelector('.qp-profile-name-input')) return; // already editing
+
+    const nameEl = row.querySelector('.qp-profile-name');
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'qp-profile-name-input';
+    input.value = profile.name;
+    // The name sits inside the clickable row text — typing/clicking in the
+    // input must not bubble up and apply the profile.
+    input.onclick = (e) => e.stopPropagation();
+    nameEl.replaceWith(input);
+    input.focus();
+    input.select();
+
+    let settled = false;
+    const commit = async () => {
+        if (settled) return;
+        settled = true;
+        const newName = input.value.trim();
+        if (!newName || newName === profile.name) {
+            await loadCustomQualityProfiles();
+            return;
+        }
+        try {
+            const response = await fetch(`/api/quality-profile/custom/${profile.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: newName }),
+            });
+            const data = await response.json();
+            if (data.success) {
+                _qpProfileRows = data.profiles || []; // keep the cache in sync — see saveCurrentAsQualityProfile
+                renderCustomQualityProfiles(_qpProfileRows);
+                renderQualityProfileManager();
+                showToast(`Renamed to '${newName}'`, 'success');
+            } else {
+                showToast(`Failed to rename: ${data.error}`, 'error');
+                await loadCustomQualityProfiles();
+            }
+        } catch (error) {
+            console.error('Error renaming quality profile:', error);
+            showToast('Failed to rename profile', 'error');
+            await loadCustomQualityProfiles();
+        }
+    };
+    const cancel = () => {
+        if (settled) return;
+        settled = true;
+        loadCustomQualityProfiles();
+    };
+
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); commit(); }
+        else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+    });
+    input.addEventListener('blur', commit);
+}
+
+// Inline "+ New profile" control — swaps the button for a text input, no
+// native prompt().
+function qpShowNewProfileInput() {
+    const wrap = document.getElementById('qp-profile-new');
+    if (!wrap || wrap.querySelector('.qp-profile-new-input')) return;
+    wrap.innerHTML = `
+        <div class="qp-profile-new-row">
+            <input type="text" class="qp-profile-new-input" id="qp-profile-new-input" placeholder="Profile name" autocomplete="off" spellcheck="false">
+        </div>
+    `;
+    const input = document.getElementById('qp-profile-new-input');
+    input.focus();
+
+    let settled = false;
+    const commit = async () => {
+        if (settled) return;
+        const name = input.value.trim();
+        if (!name) { qpResetNewProfileControl(); return; }
+        settled = true;
+        await saveCurrentAsQualityProfile(name);
+    };
+    const cancel = () => {
+        if (settled) return;
+        settled = true;
+        qpResetNewProfileControl();
+    };
+
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); commit(); }
+        else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+    });
+    input.addEventListener('blur', () => { if (!settled) cancel(); });
+}
+
+function qpResetNewProfileControl() {
+    const wrap = document.getElementById('qp-profile-new');
+    if (!wrap) return;
+    wrap.innerHTML = '<button type="button" class="qp-profile-new-btn" id="qp-profile-new-btn" onclick="qpShowNewProfileInput()">+ New profile</button>';
+}
+
+// Everything a "Global Quality Profile" now captures: the ranked-target
+// ladder (collectQualityProfileFromUI) PLUS every other toggle scattered
+// across Quality on Import / Post-Download Conversion / Audio Verification
+// that conceptually belongs to "what quality means to me" — see
+// core/quality/schema.py's QUALITY_PROFILES_DDL docstring for the same list.
+function collectFullQualityBundleFromUI() {
+    const base = collectQualityProfileFromUI();
+    return {
+        ...base,
+        acoustid_required: document.getElementById('acoustid-require-verified')?.checked === true,
+        downsample_enabled: document.getElementById('downsample-hires')?.checked === true,
+        deep_audio_verify: document.getElementById('audio-completeness-check')?.checked === true,
+        replace_lower_quality: document.getElementById('import-replace-lower-quality')?.checked === true,
+        lossy_copy_enabled: document.getElementById('lossy-copy-enabled')?.checked === true,
+        lossy_copy_codec: document.getElementById('lossy-copy-codec')?.value || 'mp3',
+        lossy_copy_bitrate: document.getElementById('lossy-copy-bitrate')?.value || '320',
+        lossy_copy_delete_original: document.getElementById('lossy-copy-delete-original')?.checked === true,
+    };
+}
+
+// The inverse of collectFullQualityBundleFromUI: reflect an applied profile's
+// full bundle back onto every toggle it captures, so the page never shows
+// stale state after switching profiles (which would otherwise get written
+// back over the just-applied config on the next autosave tick).
+function applyFullQualityBundleToDom(profile) {
+    const set = (id, value) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (el.type === 'checkbox') el.checked = value === true;
+        else el.value = value;
+    };
+    set('acoustid-require-verified', profile.acoustid_required);
+    set('downsample-hires', profile.downsample_enabled);
+    set('audio-completeness-check', profile.deep_audio_verify);
+    set('import-replace-lower-quality', profile.replace_lower_quality);
+    set('lossy-copy-enabled', profile.lossy_copy_enabled);
+    set('lossy-copy-codec', profile.lossy_copy_codec);
+    set('lossy-copy-bitrate', profile.lossy_copy_bitrate);
+    set('lossy-copy-delete-original', profile.lossy_copy_delete_original);
+    const lossyOptions = document.getElementById('lossy-copy-options');
+    if (lossyOptions) lossyOptions.style.display = profile.lossy_copy_enabled ? 'block' : 'none';
+}
+
+async function saveCurrentAsQualityProfile(name) {
+    name = (name || '').trim();
+    if (!name) return;
+
+    try {
+        const profile = collectFullQualityBundleFromUI();
+        const response = await fetch('/api/quality-profile/custom', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...profile, name }),
+        });
+        const data = await response.json();
+        if (data.success) {
+            // Bug: this only ever re-rendered with the response's list
+            // without updating the cached _qpProfileRows — every OTHER
+            // function that reads that cache (previewQualityProfile's
+            // default-id check, the Manage modal, the editing banner) kept
+            // seeing the list from before this profile existed, which is
+            // exactly what made a freshly created profile look like it
+            // "vanished" / previewed as an unresolvable "this profile".
+            _qpProfileRows = data.profiles || [];
+            // The tiles already show exactly what was just saved — treat the
+            // new profile as the one now being previewed, same as clicking
+            // its row would.
+            _qpEditingProfileId = data.id ?? null;
+            renderCustomQualityProfiles(_qpProfileRows);
+            qpResetNewProfileControl();
+            if (_qpEditingProfileId !== null && _qpEditingProfileId !== _qpDefaultProfileId()) {
+                qpShowEditingBanner();
+            } else {
+                qpHideEditingBanner();
+            }
+            showToast(`Saved profile '${name}'`, 'success');
+        } else {
+            showToast(`Failed to save profile: ${data.error}`, 'error');
+            qpResetNewProfileControl();
+        }
+    } catch (error) {
+        console.error('Error saving custom quality profile:', error);
+        showToast('Failed to save profile', 'error');
+        qpResetNewProfileControl();
+    }
+}
+
+async function updateCustomQualityProfile(profileId, name) {
+    if (!await showConfirmDialog({
+        title: 'Update Profile',
+        message: `Update '${name}' with the current page settings? This overwrites what was saved before.`,
+        confirmText: 'Update',
+    })) return;
+
+    try {
+        const profile = collectFullQualityBundleFromUI();
+        const response = await fetch(`/api/quality-profile/custom/${profileId}/update`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(profile),
+        });
+        const data = await response.json();
+        if (data.success) {
+            _qpProfileRows = data.profiles || []; // keep the cache in sync — see saveCurrentAsQualityProfile
+            renderCustomQualityProfiles(_qpProfileRows);
+            renderQualityProfileManager();
+            showToast(`Updated '${name}'`, 'success');
+        } else {
+            showToast(`Failed to update profile: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error updating custom quality profile:', error);
+        showToast('Failed to update profile', 'error');
+    }
+}
+
+async function applyCustomQualityProfile(profileId, name) {
+    try {
+        const response = await fetch(`/api/quality-profile/custom/${profileId}/apply`, { method: 'POST' });
+        const data = await response.json();
+        if (data.success) {
+            currentQualityProfile = data.profile;
+            _qpEditingProfileId = null; // tiles now show the (new) live default again
+            window._suppressSettingsAutoSave = true;
+            try {
+                populateQualityProfileUI(currentQualityProfile);
+                applyFullQualityBundleToDom(data.profile);
+            } finally {
+                window._suppressSettingsAutoSave = false;
+            }
+            await loadCustomQualityProfiles();
+            qpHideEditingBanner();
+            showToast(`Now using '${name}' (all Quality-page settings updated)`, 'success');
+        } else {
+            showToast(`Failed to apply profile: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error applying custom quality profile:', error);
+        showToast('Failed to apply profile', 'error');
+    }
+}
+
+// The ONLY path that makes a profile the live default. Anything with no
+// profile of its own (a brand-new download, or a library track whose
+// `quality_profile_id` is still NULL) resolves to this default immediately.
+// Existing Wishlist rows do NOT switch: `add_to_wishlist` pins a concrete,
+// resolved profile id on the row at insert time (see
+// `MusicDatabase._resolve_quality_profile_id`), so they keep following
+// whichever profile was default when they were queued — only NEW Wishlist
+// adds pick up this change. Deliberately gated behind a confirmation: the
+// side panel's row-text click below only PREVIEWS a profile's settings and
+// must never have this side effect (that conflation was the bug — clicking
+// a profile to look at/edit it was silently making it live).
+async function confirmSetDefaultQualityProfile(profileId, name) {
+    if (!await showConfirmDialog({
+        title: 'Set Active Profile',
+        message: `Make '${name}' the active default profile? New downloads and anything without its own profile follow it immediately — existing Wishlist items keep the profile they were queued with.`,
+        confirmText: 'Set Active',
+    })) return;
+    await applyCustomQualityProfile(profileId, name);
+    renderQualityProfileManager();
+}
+
+// onclick-safe wrapper for the Manage modal's rows (numeric id only —
+// avoids embedding a profile name, which may contain quotes, into an inline
+// HTML attribute).
+function confirmSetDefaultQualityProfileById(profileId) {
+    const profile = _qpProfileRows.find(p => p.id === profileId);
+    if (profile) confirmSetDefaultQualityProfile(profileId, profile.name);
+}
+
+// Load a profile's settings into the tile editor for viewing/editing —
+// purely read-only against the DB (a dedicated GET, not the mutating
+// /apply endpoint) so it can never make the previewed profile the live
+// default or touch anything mid-download. Edits made while previewing are
+// local until the row's Update (✎) button explicitly saves them into THIS
+// profile — see debouncedSaveQualityProfile.
+async function previewQualityProfile(profileId) {
+    try {
+        const response = await fetch(`/api/quality-profile/custom/${profileId}`);
+        const data = await response.json();
+        if (!data.success) {
+            showToast(`Failed to load profile: ${data.error}`, 'error');
+            return;
+        }
+        // Keep this in sync with what's actually on screen — collectQualityProfileFromUI
+        // reads currentQualityProfile.preset, and resetActiveQualityPreset reads it to
+        // decide what "reset" even means; leaving it pointed at whatever was loaded
+        // before previewing this profile was exactly the kind of drift that made
+        // preset actions apply to the wrong thing.
+        currentQualityProfile = data.profile;
+        _qpEditingProfileId = profileId;
+        window._suppressSettingsAutoSave = true;
+        try {
+            populateQualityProfileUI(data.profile);
+            applyFullQualityBundleToDom(data.profile);
+        } finally {
+            window._suppressSettingsAutoSave = false;
+        }
+        renderCustomQualityProfiles(_qpProfileRows);
+        qpShowEditingBanner();
+    } catch (error) {
+        console.error('Error previewing quality profile:', error);
+        showToast('Failed to load profile', 'error');
+    }
+}
+
+// Persistent notice (not a toast — it needs to stay visible for as long as
+// the state holds) telling the user the tiles show a profile that ISN'T the
+// active default, so edits need an explicit Update click. Directly answers
+// "how do I know what's actually live right now" without needing the
+// Manage overview open.
+function qpShowEditingBanner() {
+    const banner = document.getElementById('qp-editing-banner');
+    if (!banner) return;
+    const profile = _qpProfileRows.find(p => p.id === _qpEditingProfileId);
+    // The id not resolving means the cache is stale or the profile is gone —
+    // showing a nameless "viewing this profile" is just confusing; hide
+    // instead of guessing.
+    if (!profile) {
+        banner.style.display = 'none';
+        return;
+    }
+    banner.querySelector('.qp-editing-banner-name').textContent = profile.name;
+    banner.style.display = '';
+}
+
+function qpHideEditingBanner() {
+    const banner = document.getElementById('qp-editing-banner');
+    if (banner) banner.style.display = 'none';
+}
+
+async function deleteCustomQualityProfile(profileId, name) {
+    if (!await showConfirmDialog({
+        title: 'Delete Profile',
+        message: `Delete '${name}'? This cannot be undone. Anything still assigned to it (Wishlist items, Auto-Import) automatically falls back to your active profile.`,
+        confirmText: 'Delete',
+        destructive: true,
+    })) return;
+
+    try {
+        const response = await fetch(`/api/quality-profile/custom/${profileId}`, { method: 'DELETE' });
+        const data = await response.json();
+        if (data.success) {
+            // Deleting the profile currently being previewed would otherwise
+            // leave _qpEditingProfileId pointing at a row that no longer
+            // exists — fall back to "showing the live default" like a fresh
+            // page load.
+            if (_qpEditingProfileId === profileId) {
+                _qpEditingProfileId = null;
+                qpHideEditingBanner();
+            }
+            // Full reload (not just re-render): deleting may have cleared the
+            // Auto-Import override and/or promoted a new default — both feed
+            // the row tags, so refresh them from the server.
+            await loadCustomQualityProfiles();
+            showToast(`Deleted '${name}'`, 'success');
+        } else {
+            showToast(`Failed to delete profile: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error deleting custom quality profile:', error);
+        showToast('Failed to delete profile', 'error');
+    }
+}
+
+// Quick inline toggle in the row list (see the qp-action-autoimport button
+// in renderCustomQualityProfiles). The Manage modal below shows the same
+// assignment plus the app-wide default side by side, as the one place that
+// answers "what governs what right now" — this stays for one-click access
+// from the row a user is already looking at.
+async function toggleAutoImportQualityProfile(profileId) {
+    const nowAssigned = _qpAutoImportProfileId === profileId;
+    try {
+        const response = await fetch('/api/auto-import/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ quality_profile_id: nowAssigned ? null : profileId }),
+        });
+        const data = await response.json();
+        if (!data.success) throw new Error(data.error || 'Failed to update Auto-Import');
+        _qpAutoImportProfileId = nowAssigned ? null : profileId;
+        renderCustomQualityProfiles(_qpProfileRows);
+        renderQualityProfileManager();
+        showToast(nowAssigned
+            ? 'Auto-Import now uses the default profile'
+            : 'Auto-Import profile updated', 'success');
+    } catch (error) {
+        console.error('Error updating Auto-Import quality profile:', error);
+        showToast('Failed to update Auto-Import profile', 'error');
+    }
+}
+
+// ── Manage overview modal ────────────────────────────────────────────────
+// The single place that answers "which profile does what right now": the
+// app-wide Default (new downloads and anything with no profile of its own —
+// existing Wishlist rows keep whichever profile was default when they were
+// queued, see confirmSetDefaultQualityProfile) and the Auto-Import override
+// (Settings → Import, falls back to Default when unset). Both assignments
+// are also reachable
+// inline from the row list (the dot / the ⇩ button); this is the overview +
+// explanation surface, not a second way to edit a profile's own settings —
+// that only ever happens via previewQualityProfile + a row's Update (✎).
+function qpManagerOverlay() {
+    let overlay = document.getElementById('qp-manager-overlay');
+    if (overlay) return overlay;
+    overlay = document.createElement('div');
+    overlay.id = 'qp-manager-overlay';
+    overlay.className = 'modal-overlay hidden';
+    overlay.onclick = (event) => { if (event.target === overlay) closeQualityProfileManager(); };
+    overlay.innerHTML = `
+        <div class="enhanced-bulk-modal qp-manager-modal" onclick="event.stopPropagation()">
+            <div class="enhanced-bulk-modal-header">
+                <h3>Quality Profiles — Manage</h3>
+                <button class="enhanced-bulk-modal-close" onclick="closeQualityProfileManager()">&times;</button>
+            </div>
+            <div class="enhanced-bulk-modal-body qp-manager-body">
+                <div class="qp-manager-info-row setting-row">
+                    <span class="qp-manager-info-label">What does this manage?</span>
+                    <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                        onclick="toggleSettingHelp(this)"
+                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                </div>
+                <div class="help-text setting-help-body qp-manager-info" hidden>
+                    Two things read a profile today: normal downloads/Wishlist
+                    items always follow the <strong>Default</strong> below,
+                    and Auto-Import can optionally use a different one instead
+                    (falls back to Default when unset). A profile's
+                    "Upgrade until" setting controls exactly how far below
+                    it counts as needing an upgrade — the Quality Upgrade
+                    Finder then actively searches for and proposes a
+                    replacement, while Quality Check only flags (you choose
+                    re-download/delete/ignore per finding); both read the
+                    cutoff live, same as the download pipeline. Per-artist/
+                    album/track assignment is planned for the Library
+                    Manager; it will plug into this exact mechanism.
+                </div>
+                <div id="qp-manager-rows" class="qp-manager-rows"></div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    return overlay;
+}
+
+// Renders two clearly SEPARATE things — mixing them into one flat list of
+// identical-looking rows was exactly what confused a user into thinking
+// "Auto-Import" was itself a saved profile:
+//   1. "Active now" — the CONTEXTS that consume a profile (Downloads/
+//      Wishlist always via the Default; Auto-Import optionally via its own
+//      override). Read-only status here; changed from the Profiles rows
+//      below, never from here.
+//   2. "Profiles" — the actual named, selectable quality_profiles rows,
+//      with the Set default / Use for import actions.
+function renderQualityProfileManager() {
+    const rows = document.getElementById('qp-manager-rows');
+    if (!rows) return; // modal not open — nothing to refresh
+    if (!_qpProfileRows.length) {
+        rows.innerHTML = '<div class="qp-profile-list-empty">No profiles yet.</div>';
+        return;
+    }
+    const explicitAutoImport = _qpAutoImportProfileId || null;
+    const defaultProfile = _qpProfileRows.find(p => p.is_default);
+    const defaultName = defaultProfile ? defaultProfile.name : '—';
+    const autoImportName = explicitAutoImport
+        ? (_qpProfileRows.find(profile => profile.id === explicitAutoImport)?.name || 'Unknown profile')
+        : `Uses Default (${defaultName})`;
+
+    rows.innerHTML = `
+        <div class="qp-manager-section-title">Active now</div>
+        <div class="qp-manager-status-row">
+            <span class="qp-manager-status-label">Downloads &amp; Wishlist</span>
+            <span class="qp-manager-status-value">${escapeHtml(defaultName)}</span>
+        </div>
+        <div class="qp-manager-status-row">
+            <span class="qp-manager-status-label">Auto-Import</span>
+            <span class="qp-manager-status-value">${escapeHtml(autoImportName)}</span>
+            ${explicitAutoImport ? '<button type="button" class="qp-manager-action clear" onclick="clearAutoImportQualityProfileFromManager()">Use default</button>' : ''}
+        </div>
+
+        <div class="qp-manager-section-title">Profiles</div>
+        ${_qpProfileRows.map(profile => `
+            <div class="qp-manager-row">
+                <div class="qp-manager-row-main">
+                    <span class="qp-manager-row-name">${escapeHtml(profile.name)}</span>
+                    <span class="qp-manager-row-sub">${escapeHtml(qpProfileSummary(profile))}</span>
+                </div>
+                <button type="button" class="qp-manager-action ${profile.is_default ? 'active' : ''}" onclick="confirmSetDefaultQualityProfileById(${profile.id})">
+                    ${profile.is_default ? 'Default' : 'Set default'}
+                </button>
+                <button type="button" class="qp-manager-action ${explicitAutoImport === profile.id ? 'active' : ''}" onclick="toggleAutoImportQualityProfile(${profile.id})">
+                    ${explicitAutoImport === profile.id ? 'Auto-Import' : 'Use for import'}
+                </button>
+            </div>
+        `).join('')}
+    `;
+}
+
+async function clearAutoImportQualityProfileFromManager() {
+    if (_qpAutoImportProfileId != null) await toggleAutoImportQualityProfile(_qpAutoImportProfileId);
+}
+
+async function openQualityProfileManager() {
+    const overlay = qpManagerOverlay();
+    try {
+        await loadCustomQualityProfiles();
+        renderQualityProfileManager();
+        overlay.classList.remove('hidden');
+    } catch (error) {
+        console.error('Error opening quality profile manager:', error);
+        showToast('Failed to open profile manager', 'error');
+    }
+}
+
+function closeQualityProfileManager() {
+    document.getElementById('qp-manager-overlay')?.classList.add('hidden');
 }
 
 // ===============================
@@ -3607,9 +4477,8 @@ async function saveSettings(quiet = false) {
             music_videos_path: document.getElementById('music-videos-path').value || './MusicVideos'
         },
         import: {
-            quality_filter_enabled: document.getElementById('import-quality-filter-enabled')?.checked !== false,
             replace_lower_quality: document.getElementById('import-replace-lower-quality').checked,
-            folder_artist_override: document.getElementById('import-folder-artist-override')?.checked === true,
+            folder_artist_override: document.getElementById('import-folder-artist-override')?.checked !== false,
             transfer_is_permanent: document.getElementById('import-transfer-permanent')?.checked === true,
             staging_path: document.getElementById('staging-path').value || './Staging'
         },
@@ -3637,7 +4506,9 @@ async function saveSettings(quiet = false) {
         },
         m3u_export: {
             enabled: document.getElementById('m3u-export-enabled').checked,
-            entry_base_path: document.getElementById('m3u-entry-base-path').value || ''
+            entry_base_path: document.getElementById('m3u-entry-base-path').value || '',
+            library_enabled: document.getElementById('library-m3u-enabled')?.checked === true,
+            library_path: document.getElementById('library-m3u-path')?.value || ''
         },
         ui_appearance: {
             accent_preset: document.getElementById('accent-preset')?.value || '#1db954',
@@ -3686,6 +4557,30 @@ async function saveSettings(quiet = false) {
                 `Allowed Origins: ${invalid.length} entr${invalid.length === 1 ? 'y looks' : 'ies look'} malformed (need full URL like https://soulsync.example.com, no trailing slash). Saving anyway — they\'ll be ignored.`,
                 'warning'
             );
+        }
+    }
+
+    // Previewing a non-default profile shows ITS acoustid/lossy-copy/deep-verify/
+    // replace-lower-quality values in the same DOM fields this whole-page save
+    // reads (collectFullQualityBundleFromUI's fields, above). The server mirrors
+    // whatever comes through in these sections straight into the ACTIVE default
+    // profile (see web_server.py's settings handler calling
+    // sync_default_quality_profile_from_config) — so without this, just clicking
+    // Save Settings while previewing another profile would silently overwrite the
+    // live default with the previewed profile's values. Substitute the real
+    // default's stored values back in before sending, so this save is a no-op for
+    // those keys regardless of what's currently on screen.
+    if (_qpEditingProfileId !== null && _qpEditingProfileId !== _qpDefaultProfileId()) {
+        const def = _qpProfileRows.find(p => p.is_default);
+        if (def) {
+            settings.acoustid.require_verified = !!def.acoustid_required;
+            settings.lossy_copy.downsample_hires = !!def.downsample_enabled;
+            settings.lossy_copy.enabled = !!def.lossy_copy_enabled;
+            settings.lossy_copy.codec = def.lossy_copy_codec || 'mp3';
+            settings.lossy_copy.bitrate = def.lossy_copy_bitrate || '320';
+            settings.lossy_copy.delete_original = !!def.lossy_copy_delete_original;
+            settings.post_processing.audio_completeness_check = !!def.deep_audio_verify;
+            settings.import.replace_lower_quality = !!def.replace_lower_quality;
         }
     }
 

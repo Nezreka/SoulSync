@@ -292,3 +292,118 @@ def test_selector_caa_uses_release_mbid(monkeypatch):
     url = art_lookup.select_preferred_art_url(
         "A", "B", {"musicbrainz_release_id": "mbid-9"}, ["caa"])
     assert url == "https://coverartarchive.org/release/mbid-9/front-1200"
+
+
+# ---------------------------------------------------------------------------
+# Cover-art PICKER — candidate gathering (CAA multi-image + single sources)
+# ---------------------------------------------------------------------------
+
+
+def test_parse_caa_images_prefers_1200_and_fronts_first():
+    data = {"images": [
+        {"image": "http://caa/back.jpg", "thumbnails": {"1200": "http://caa/back-1200.jpg"},
+         "types": ["Back"], "front": False},
+        {"image": "http://caa/front.jpg",
+         "thumbnails": {"1200": "http://caa/front-1200.jpg", "500": "http://caa/front-500.jpg"},
+         "types": ["Front"], "front": True},
+    ]}
+    out = art_lookup._parse_caa_images(data)
+    assert [c["url"] for c in out] == ["http://caa/front-1200.jpg", "http://caa/back-1200.jpg"]
+    assert out[0]["source"] == "caa" and out[0]["front"] is True
+    assert out[0]["type"] == "Front" and out[1]["type"] == "Back"
+
+
+def test_parse_caa_images_falls_back_to_full_image_and_skips_urlless():
+    data = {"images": [
+        {"image": "http://caa/only-full.jpg", "front": True},   # no thumbnails -> use image
+        {"types": ["Front"]},                                   # no url at all -> skipped
+        "not-a-dict",                                           # ignored
+    ]}
+    assert [c["url"] for c in art_lookup._parse_caa_images(data)] == ["http://caa/only-full.jpg"]
+
+
+def test_parse_caa_images_empty():
+    assert art_lookup._parse_caa_images(None) == []
+    assert art_lookup._parse_caa_images({"images": []}) == []
+
+
+def test_gather_combines_caa_and_single_sources_deduped():
+    caa = [{"url": "http://caa/front-1200.jpg", "source": "caa", "type": "Front", "front": True}]
+    singles = {"deezer": "http://dz/cover.jpg", "itunes": "http://it/cover.jpg",
+               "spotify": None, "audiodb": "http://caa/front-1200.jpg"}  # audiodb dups the CAA url
+    out = art_lookup.gather_album_art_candidates(
+        "Kendrick Lamar", "DAMN.", {}, lookup=lambda s: singles.get(s), caa_candidates=caa)
+    # CAA first, then deezer + itunes; spotify(None) skipped; audiodb dropped (dup url)
+    assert [c["url"] for c in out] == [
+        "http://caa/front-1200.jpg", "http://dz/cover.jpg", "http://it/cover.jpg"]
+    assert out[0]["source"] == "caa"
+
+
+def test_gather_skips_unavailable_sources(monkeypatch):
+    monkeypatch.setattr(art_lookup, "is_art_source_available", lambda s: s != "spotify")
+    out = art_lookup.gather_album_art_candidates(
+        "A", "B", {}, lookup=lambda s: f"http://{s}.jpg", caa_candidates=[])
+    assert {c["source"] for c in out} == {"deezer", "itunes", "audiodb"}
+
+
+def test_gather_guards_a_failing_source(monkeypatch):
+    monkeypatch.setattr(art_lookup, "is_art_source_available", lambda s: True)
+
+    def _lookup(s):
+        if s == "itunes":
+            raise RuntimeError("boom")
+        return f"http://{s}.jpg"
+
+    out = art_lookup.gather_album_art_candidates("A", "B", {}, lookup=_lookup, caa_candidates=[])
+    sources = {c["source"] for c in out}
+    assert "itunes" not in sources and "deezer" in sources
+
+
+# ---------------------------------------------------------------------------
+# Release-group CAA — "loads of covers across editions" (MusicBrainz)
+# ---------------------------------------------------------------------------
+
+
+def test_release_group_candidates_one_front_per_edition_with_art():
+    releases = [
+        {"id": "rel-1", "cover-art-archive": {"front": True}},
+        {"id": "rel-2", "cover-art-archive": {"front": False}},   # no front -> skipped
+        {"id": "rel-3", "cover-art-archive": {"front": True}},
+        {"id": "rel-1", "cover-art-archive": {"front": True}},     # dup mbid -> once
+        {"cover-art-archive": {"front": True}},                    # no id -> skipped
+        "not-a-dict",
+    ]
+    out = art_lookup._caa_release_group_candidates("rg-1", browse=lambda rg: releases)
+    assert [c["url"] for c in out] == [
+        "https://coverartarchive.org/release/rel-1/front-1200",
+        "https://coverartarchive.org/release/rel-3/front-1200",
+    ]
+    assert all(c["source"] == "caa" and c["front"] for c in out)
+
+
+def test_release_group_candidates_empty_and_guarded():
+    assert art_lookup._caa_release_group_candidates("") == []
+
+    def _boom(rg):
+        raise RuntimeError("mb down")
+    assert art_lookup._caa_release_group_candidates("rg-1", browse=_boom) == []
+
+
+def test_release_group_candidates_respects_limit():
+    releases = [{"id": f"rel-{i}", "cover-art-archive": {"front": True}} for i in range(60)]
+    out = art_lookup._caa_release_group_candidates("rg-1", browse=lambda rg: releases, limit=5)
+    assert len(out) == 5
+
+
+def test_resolve_release_group_mbid():
+    assert art_lookup._resolve_release_group_mbid(
+        "rel-1", get_release=lambda m: {"release-group": {"id": "rg-9"}}) == "rg-9"
+
+
+def test_resolve_release_group_mbid_none_and_guarded():
+    assert art_lookup._resolve_release_group_mbid("") is None
+    assert art_lookup._resolve_release_group_mbid("rel-1", get_release=lambda m: {}) is None
+
+    def _boom(m):
+        raise RuntimeError("x")
+    assert art_lookup._resolve_release_group_mbid("rel-1", get_release=_boom) is None

@@ -96,6 +96,32 @@ def _should_skip_quarantine_check(context: dict, check_name: str) -> bool:
     return bypass == check_name
 
 
+def _resolve_context_quality_profile(context: dict) -> dict:
+    """The item's quality profile — its own assigned one
+    (``track_info.quality_profile_id``, e.g. from a wishlist row or the
+    Auto-Import override) or the app-wide default — resolved LIVE once per
+    file and cached on the context. Every post-processing step reads its own
+    settings from this dict (with the legacy global config key as fallback
+    when resolution failed entirely), so a per-item profile governs the WHOLE
+    pipeline: quality gate, AcoustID strictness, deep verify, replace-lower,
+    downsample, and lossy copy — not just search ranking."""
+    cached = context.get('_quality_profile')
+    if isinstance(cached, dict):
+        return cached
+    try:
+        from core.quality.selection import load_profile_by_id
+        track_info = context.get('track_info')
+        profile_id = track_info.get('quality_profile_id') if isinstance(track_info, dict) else None
+        profile = load_profile_by_id(profile_id)
+        if not isinstance(profile, dict):
+            profile = {}
+    except Exception as e:  # noqa: BLE001
+        logger.debug("quality profile resolution failed, falling back to global settings: %s", e)
+        profile = {}
+    context['_quality_profile'] = profile
+    return profile
+
+
 def _mark_task_quarantined(context: dict, quarantine_path: str | None) -> None:
     if not quarantine_path:
         return
@@ -371,8 +397,10 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
         # with ffmpeg, so it is the most CPU-expensive step in post-processing.
         # Most preview/truncation cases are already caught at the source
         # (HiFi/Qobuz have their own guards), so it stays off unless the user
-        # turns it on under Settings → Post-processing.
-        _audio_guard_enabled = config_manager.get('post_processing.audio_completeness_check', False)
+        # turns it on in the item's quality profile (Settings → Quality).
+        _audio_guard_enabled = _resolve_context_quality_profile(context).get(
+            'deep_audio_verify',
+            config_manager.get('post_processing.audio_completeness_check', False))
         _skip_audio = (not _audio_guard_enabled) or _should_skip_quarantine_check(context, 'silence')
         audio_reason = None if _skip_audio else detect_broken_audio(file_path)
         if audio_reason:
@@ -509,14 +537,17 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                     logger.info(f"AcoustID verification result: {verification_result.value} - {verification_msg}")
                     context['_acoustid_result'] = verification_result.value
 
-                    # Fail-closed mode: when the user requires a hard AcoustID
-                    # PASS, a SKIP (ran but couldn't confirm — no fingerprint
-                    # match / cross-script metadata) is treated like a FAIL:
-                    # quarantine + try the next candidate, instead of importing
-                    # an unverified file. ERROR (rate-limit / infra) is NOT
-                    # blocked — that would stall the whole pipeline during an
-                    # outage; those still import with their existing flag.
-                    require_verified = config_manager.get('acoustid.require_verified', False)
+                    # Fail-closed mode: when the item's quality profile
+                    # requires a hard AcoustID PASS, a SKIP (ran but couldn't
+                    # confirm — no fingerprint match / cross-script metadata)
+                    # is treated like a FAIL: quarantine + try the next
+                    # candidate, instead of importing an unverified file.
+                    # ERROR (rate-limit / infra) is NOT blocked — that would
+                    # stall the whole pipeline during an outage; those still
+                    # import with their existing flag.
+                    require_verified = _resolve_context_quality_profile(context).get(
+                        'acoustid_required',
+                        config_manager.get('acoustid.require_verified', False))
                     _skip_as_fail = (
                         require_verified
                         and verification_result == VerificationResult.SKIP
@@ -811,7 +842,9 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                 existing_file = MutagenFile(final_path)
                 has_metadata = existing_file is not None and len(existing_file.tags or {}) > 2
                 if has_metadata and not is_enhance_download:
-                    _replace_lower = config_manager.get('import.replace_lower_quality', False)
+                    _replace_lower = _resolve_context_quality_profile(context).get(
+                        'replace_lower_quality',
+                        config_manager.get('import.replace_lower_quality', False))
                     if _replace_lower:
                         _existing_tier = get_quality_tier_from_extension(final_path)
                         _incoming_tier = get_quality_tier_from_extension(file_path)
@@ -874,9 +907,12 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             expected_ext = os.path.splitext(final_path)[1]
             found_variant = None
             check_exts = {expected_ext}
-            if expected_ext == '.flac' and config_manager.get('lossy_copy.enabled', False) and config_manager.get('lossy_copy.delete_original', False):
+            _qp = _resolve_context_quality_profile(context)
+            _lossy_on = _qp.get('lossy_copy_enabled', config_manager.get('lossy_copy.enabled', False))
+            _lossy_del = _qp.get('lossy_copy_delete_original', config_manager.get('lossy_copy.delete_original', False))
+            if expected_ext == '.flac' and _lossy_on and _lossy_del:
                 _lossy_ext_map = {'mp3': '.mp3', 'opus': '.opus', 'aac': '.m4a'}
-                _lossy_codec = config_manager.get('lossy_copy.codec', 'mp3')
+                _lossy_codec = _qp.get('lossy_copy_codec', config_manager.get('lossy_copy.codec', 'mp3'))
                 check_exts.add(_lossy_ext_map.get(_lossy_codec, '.mp3'))
             if os.path.exists(expected_dir):
                 for f in os.listdir(expected_dir):
@@ -925,14 +961,22 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             except Exception as rg_err:
                 pp_logger.debug(f"ReplayGain analysis skipped: {rg_err}")
 
-        downsampled_path = downsample_hires_flac(final_path, context)
+        _qp_post = _resolve_context_quality_profile(context)
+        downsampled_path = downsample_hires_flac(
+            final_path, context,
+            enabled=_qp_post.get('downsample_enabled'))
         if downsampled_path:
             final_path = downsampled_path
             context['_final_processed_path'] = final_path
 
         _persist_verification_status(context, final_path)
 
-        blasphemy_path = create_lossy_copy(final_path)
+        blasphemy_path = create_lossy_copy(final_path, settings={
+            'enabled': _qp_post.get('lossy_copy_enabled'),
+            'codec': _qp_post.get('lossy_copy_codec'),
+            'bitrate': _qp_post.get('lossy_copy_bitrate'),
+            'delete_original': _qp_post.get('lossy_copy_delete_original'),
+        } if _qp_post else None)
         if blasphemy_path:
             context['_final_processed_path'] = blasphemy_path
 

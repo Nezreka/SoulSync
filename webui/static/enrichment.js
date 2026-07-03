@@ -435,6 +435,112 @@ if (document.readyState === 'loading') {
 }
 
 // ===================================================================
+// JIOSAAVN ENRICHMENT STATUS
+// ===================================================================
+
+async function updateJioSaavnStatus() {
+    if (socketConnected) return;
+    if (document.hidden) return;
+    try {
+        const response = await fetch('/api/enrichment/jiosaavn/status');
+        if (!response.ok) { console.warn('JioSaavn status endpoint unavailable'); return; }
+        const data = await response.json();
+        updateJioSaavnStatusFromData(data);
+    } catch (error) {
+        console.error('Error updating JioSaavn status:', error);
+    }
+}
+
+function updateJioSaavnStatusFromData(data) {
+    const button = document.getElementById('jiosaavn-button');
+    if (!button) return;
+
+    button.classList.remove('active', 'paused', 'complete');
+    if (!data.enabled) {
+        button.classList.add('paused');
+    } else if (data.idle) {
+        button.classList.add('complete');
+    } else if (data.running && !data.paused) {
+        button.classList.add('active');
+    } else if (data.paused) {
+        button.classList.add('paused');
+    }
+
+    const tooltipStatus = document.getElementById('jiosaavn-tooltip-status');
+    const tooltipCurrent = document.getElementById('jiosaavn-tooltip-current');
+    const tooltipProgress = document.getElementById('jiosaavn-tooltip-progress');
+
+    if (tooltipStatus) {
+        if (!data.enabled) { tooltipStatus.textContent = 'Disabled'; }
+        else if (data.idle) { tooltipStatus.textContent = 'Complete'; }
+        else if (data.running && !data.paused) { tooltipStatus.textContent = 'Running'; }
+        else if (data.paused) { tooltipStatus.textContent = data.yield_reason === 'downloads' ? 'Yielding for downloads' : 'Paused'; }
+        else { tooltipStatus.textContent = 'Idle'; }
+    }
+
+    if (tooltipCurrent) {
+        if (!data.enabled) {
+            tooltipCurrent.textContent = 'Enable in Settings → Advanced → Experimental';
+        } else if (data.idle) {
+            tooltipCurrent.textContent = 'All items processed';
+        } else if (data.current_item && data.current_item.name) {
+            tooltipCurrent.textContent = `Now: ${data.current_item.name}`;
+        }
+    }
+
+    if (data.progress && tooltipProgress) {
+        const artists = data.progress.artists || {};
+        const albums = data.progress.albums || {};
+        const tracks = data.progress.tracks || {};
+        const currentType = data.current_item?.type;
+        let progressText = '';
+        const artistsComplete = artists.matched >= artists.total;
+        const albumsComplete = albums.matched >= albums.total;
+        if (currentType === 'artist' || (!artistsComplete && !currentType)) {
+            progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
+        } else if (currentType === 'album' || (artistsComplete && !albumsComplete)) {
+            progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
+        } else if (currentType === 'track' || (artistsComplete && albumsComplete)) {
+            progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
+        } else {
+            progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
+        }
+        tooltipProgress.textContent = progressText;
+    }
+}
+
+async function toggleJioSaavnEnrichment() {
+    try {
+        const button = document.getElementById('jiosaavn-button');
+        if (!button) return;
+        const isRunning = button.classList.contains('active');
+        const endpoint = isRunning ? '/api/enrichment/jiosaavn/pause' : '/api/enrichment/jiosaavn/resume';
+        const response = await fetch(endpoint, { method: 'POST' });
+        if (!response.ok) {
+            throw new Error(`Failed to ${isRunning ? 'pause' : 'resume'} JioSaavn enrichment`);
+        }
+        await updateJioSaavnStatus();
+    } catch (error) {
+        console.error('Error toggling JioSaavn enrichment:', error);
+        showToast(`Error: ${error.message}`, 'error');
+    }
+}
+
+function initJioSaavnEnrichmentUI() {
+    const button = document.getElementById('jiosaavn-button');
+    if (!button) return;
+    button.addEventListener('click', toggleJioSaavnEnrichment);
+    updateJioSaavnStatus();
+    setInterval(updateJioSaavnStatus, 2000);
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initJioSaavnEnrichmentUI);
+} else {
+    initJioSaavnEnrichmentUI();
+}
+
+// ===================================================================
 // SPOTIFY ENRICHMENT STATUS
 // ===================================================================
 
@@ -1861,8 +1967,11 @@ async function loadRepairJobs() {
                                    onchange="toggleRepairJob('${job.job_id}', this.checked)">
                             <span class="repair-toggle-slider small"></span>
                         </label>
-                        <button class="repair-run-btn" onclick="runRepairJobNow('${job.job_id}')"
-                                title="Run now">&#9654;</button>
+                        ${job.is_running
+                    ? `<button class="repair-stop-btn" onclick="stopRepairJobNow('${job.job_id}')"
+                                title="Stop this run">&#9209;</button>`
+                    : `<button class="repair-run-btn" onclick="runRepairJobNow('${job.job_id}')"
+                                title="Run now">&#9654;</button>`}
                         ${Object.keys(job.settings || {}).length > 0 ?
                     `<button class="repair-settings-btn" onclick="expandRepairJobSettings('${job.job_id}')"
                                      title="Settings">&#9881;</button>` : ''}
@@ -2019,6 +2128,36 @@ async function runRepairJobNow(jobId) {
     }
 }
 
+async function stopRepairJobNow(jobId) {
+    // Instant feedback: the scan can't unwind until its current item (e.g. an
+    // in-flight LRClib lookup) returns and it loops back to check_stop(), so the
+    // stop is not truly instant. Show a disabled "Stopping…" button meanwhile —
+    // the live-progress poll flips it back to Run once the run reports finished.
+    const stopBtn = document.querySelector(`.repair-job-card[data-job-id="${jobId}"] .repair-stop-btn`);
+    if (stopBtn) {
+        stopBtn.disabled = true;
+        stopBtn.classList.add('stopping');
+        stopBtn.title = 'Stopping…';
+    }
+    try {
+        const resp = await fetch(`/api/repair/jobs/${jobId}/stop`, { method: 'POST' });
+        const data = await resp.json();
+        if (data.error) throw new Error(data.error);
+        showToast(data.stopped ? 'Stopping job…' : 'Job is not running', data.stopped ? 'success' : 'info');
+        // Fallback reload in case the job was already idle (nothing to flip the
+        // button) or the poll is between ticks.
+        if (!data.stopped) setTimeout(() => loadRepairJobs(), 600);
+    } catch (error) {
+        console.error('Error stopping job:', error);
+        showToast('Error stopping job', 'error');
+        if (stopBtn) {
+            stopBtn.disabled = false;
+            stopBtn.classList.remove('stopping');
+            stopBtn.title = 'Stop this run';
+        }
+    }
+}
+
 // ── Repair Job Live Progress ──
 const _repairProgressLogCounts = {};
 const _repairProgressHideTimers = {};
@@ -2105,6 +2244,16 @@ function updateRepairJobProgressFromData(data) {
                 logEl.scrollTop = logEl.scrollHeight;
             }
             _repairProgressLogCounts[jobId] = state.log.length;
+        }
+
+        // #970: the moment a run ends (finished OR stopped), flip the Stop button
+        // back to Run here — don't wait on the 30s auto-hide reload or the next
+        // poll tick, or a stopped job's button looks stuck on "Stopping…".
+        if (state.status === 'finished' || state.status === 'error') {
+            const stopBtn = card.querySelector('.repair-stop-btn');
+            if (stopBtn) {
+                stopBtn.outerHTML = `<button class="repair-run-btn" onclick="runRepairJobNow('${jobId}')" title="Run now">&#9654;</button>`;
+            }
         }
 
         // Auto-hide panel after completion

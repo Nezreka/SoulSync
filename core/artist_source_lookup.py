@@ -27,7 +27,7 @@ logger = logging.getLogger("artist_source_lookup")
 
 
 SOURCE_ONLY_ARTIST_SOURCES = frozenset({
-    "spotify", "itunes", "deezer", "discogs", "hydrabase", "musicbrainz", "amazon",
+    "spotify", "itunes", "deezer", "discogs", "hydrabase", "musicbrainz", "amazon", "jiosaavn",
 })
 
 
@@ -36,9 +36,8 @@ SOURCE_ONLY_ARTIST_SOURCES = frozenset({
 # previous hardcoded map — this just stops duplicating that knowledge here.
 SOURCE_ID_FIELD = {
     source: _artist_id_column(source, "artist")
-    for source in (
-        "spotify", "itunes", "deezer", "discogs", "hydrabase", "musicbrainz", "amazon",
-    )
+    for source in SOURCE_ONLY_ARTIST_SOURCES
+    if _artist_id_column(source, "artist")
 }
 
 

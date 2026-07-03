@@ -104,7 +104,8 @@ def _seed_schema(db):
             itunes_artist_id TEXT,
             discogs_id TEXT,
             soul_id TEXT,
-            amazon_id TEXT
+            amazon_id TEXT,
+            jiosaavn_id TEXT
         )
     """)
     cur.execute("""

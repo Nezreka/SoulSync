@@ -414,11 +414,17 @@ def get_quality_tier_from_extension(file_path):
     return ("unknown", 999)
 
 
-def downsample_hires_flac(final_path, context):
-    """Downsample a hi-res FLAC to 16-bit/44.1kHz if enabled."""
+def downsample_hires_flac(final_path, context, enabled=None):
+    """Downsample a hi-res FLAC to 16-bit/44.1kHz if enabled.
+
+    ``enabled`` comes from the item's quality profile (see
+    `core/imports/pipeline.py::_resolve_context_quality_profile`); ``None``
+    falls back to the legacy global setting for callers with no profile."""
     from mutagen.flac import FLAC
 
-    if not config_manager.get("lossy_copy.downsample_hires", False):
+    if enabled is None:
+        enabled = config_manager.get("lossy_copy.downsample_hires", False)
+    if not enabled:
         return None
 
     if os.path.splitext(final_path)[1].lower() != ".flac":
@@ -534,23 +540,38 @@ def m4a_codec(path):
         return None
 
 
-def create_lossy_copy(final_path):
+def create_lossy_copy(final_path, settings=None):
     """Convert a lossless file (FLAC / ALAC / WAV / AIFF / DSD) to a lossy copy
-    using the configured codec. Non-lossless inputs are skipped (#941)."""
+    using the configured codec. Non-lossless inputs are skipped (#941).
+
+    ``settings`` is an optional dict from the item's quality profile
+    (``enabled``/``codec``/``bitrate``/``delete_original`` — see
+    `core/imports/pipeline.py::_resolve_context_quality_profile`); missing/None
+    values fall back to the legacy global settings, so callers with no profile
+    (e.g. the lossy-converter repair job) keep today's behavior."""
     from core.quality.lossless import (
         is_lossless_audio_path,
         lossy_output_would_overwrite_source,
     )
 
-    if not config_manager.get("lossy_copy.enabled", False):
+    settings = settings or {}
+
+    enabled = settings.get("enabled")
+    if enabled is None:
+        enabled = config_manager.get("lossy_copy.enabled", False)
+    if not enabled:
         return None
 
     # Was FLAC-only; now any lossless source. .m4a is probed (ALAC vs AAC).
     if not is_lossless_audio_path(final_path, probe_codec=m4a_codec):
         return None
 
-    codec = config_manager.get("lossy_copy.codec", "mp3").lower()
-    bitrate = config_manager.get("lossy_copy.bitrate", "320")
+    codec = str(settings.get("codec") or config_manager.get("lossy_copy.codec", "mp3")).lower()
+    bitrate = str(settings.get("bitrate") or config_manager.get("lossy_copy.bitrate", "320"))
+
+    delete_original = settings.get("delete_original")
+    if delete_original is None:
+        delete_original = config_manager.get("lossy_copy.delete_original", False)
 
     if codec == "opus" and int(bitrate) > 256:
         bitrate = "256"
@@ -623,11 +644,11 @@ def create_lossy_copy(final_path):
             except Exception as tag_err:
                 logger.error(f"[Lossy Copy] Could not update QUALITY tag: {tag_err}")
 
-            # Honor the lossy_copy.delete_original setting — without this
-            # the original FLAC was always kept alongside the converted
-            # MP3/OPUS/AAC even when the user explicitly opted into a
-            # lossy-only library (Discord-reported by CAL).
-            if config_manager.get("lossy_copy.delete_original", False):
+            # Honor the delete-original setting — without this the original
+            # FLAC was always kept alongside the converted MP3/OPUS/AAC even
+            # when the user explicitly opted into a lossy-only library
+            # (Discord-reported by CAL).
+            if delete_original:
                 if os.path.normpath(out_path) != os.path.normpath(final_path):
                     try:
                         os.remove(final_path)

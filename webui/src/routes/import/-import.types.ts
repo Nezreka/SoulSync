@@ -184,6 +184,23 @@ export interface ImportAutoImportSettingsPayload {
   scan_interval?: number;
   confidence_threshold?: number;
   auto_process?: boolean;
+  // Per-context quality-profile override — null/undefined means "use the
+  // app-wide default profile" (Settings -> Quality), same as every other
+  // context that doesn't specify its own.
+  quality_profile_id?: number | null;
+  error?: string;
+}
+
+// Minimal shape from GET /api/quality-profile/custom.
+export interface AutoImportQualityProfile {
+  id: number;
+  name: string;
+  is_default: boolean;
+}
+
+export interface QualityProfilesPayload {
+  success: boolean;
+  profiles?: AutoImportQualityProfile[];
   error?: string;
 }
 
@@ -253,10 +270,3 @@ export interface ImportSinglesQueueJob {
 }
 
 export type ImportQueueJob = ImportAlbumQueueJob | ImportSinglesQueueJob;
-
-// The two import behaviour toggles also shown in Settings → Import, mirrored
-// onto the Import page for visibility. Both map to `import.*` config keys.
-export interface ImportOptionsPayload {
-  qualityFilterEnabled: boolean;
-  folderArtistOverride: boolean;
-}
