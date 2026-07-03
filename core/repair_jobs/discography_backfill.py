@@ -432,10 +432,21 @@ class DiscographyBackfillJob(RepairJob):
             if 'deezer_id' in columns:
                 select.append("deezer_id")
 
+            # Only artists actually IN the library — those you own at least one track
+            # or album by. The `artists` table also carries bare rows for featured/
+            # guest and re-identified artists (a "feat." on a single track, an
+            # unknown-artist fix, etc.). Without this filter the backfill pulled their
+            # ENTIRE discography and wishlisted it, flooding the wishlist with artists
+            # "not in my library" (#977).
             cursor.execute(f"""
                 SELECT {', '.join(select)}
                 FROM artists
                 WHERE name IS NOT NULL AND name != '' AND name != 'Unknown Artist'
+                  AND (
+                    EXISTS (SELECT 1 FROM tracks t
+                            WHERE t.artist_id = artists.id AND COALESCE(t.file_path, '') != '')
+                    OR EXISTS (SELECT 1 FROM albums al WHERE al.artist_id = artists.id)
+                  )
                 ORDER BY name
             """)
             return [dict(row) for row in cursor.fetchall()]
