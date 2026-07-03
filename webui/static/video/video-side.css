@@ -1665,6 +1665,22 @@ body[data-side="video"] #soulsync-toggle { display: none; }
     .vcal-cell { transform: none; } .vcal-cell:hover { --ty: 0px; --sc: 1; }
 }
 
+/* Already-aired days earlier this week — dimmed so upcoming stands out (like
+   Sonarr). Hovering a past episode restores it to full detail. */
+.vcal-dayhead--past { opacity: 0.5; }
+.vcal-dayhead--past .vcal-dayhead-wd { color: rgba(255, 255, 255, 0.62); }
+.vcal-slot--past .vcal-cell { opacity: 0.46; transition: opacity 0.2s ease; }
+.vcal-slot--past .vcal-cell:hover { opacity: 1; }
+
+/* Owned — you already have this episode. Green left-edge in EVERY view (the
+   compact view already had this; the ✓ badge shows too), preserved on hover. */
+.vcal-cell--owned .vcal-card { box-shadow: inset 3px 0 0 #6cd391; }
+.vcal-cell--owned:hover .vcal-card {
+    box-shadow: inset 3px 0 0 #6cd391, 0 22px 46px rgba(0, 0, 0, 0.55),
+        0 0 30px hsla(var(--vcal-show), 78%, 55%, 0.34);
+    border-color: hsla(var(--vcal-show), 78%, 62%, 0.7);
+}
+
 /* Empty state */
 .vcal-state { text-align: center; padding: 90px 20px; color: rgba(255, 255, 255, 0.6); }
 .vcal-state-ic { font-size: 48px; opacity: 0.55; }

@@ -157,8 +157,8 @@
         // header row: corner + 7 day heads
         var html = '<div class="vcal-guide-corner"></div>';
         for (var i = 0; i < COLS; i++) {
-            var dt = days[i], today = isoOf(dt) === d.today;
-            html += '<div class="vcal-dayhead' + (today ? ' vcal-dayhead--today' : '') + '">' +
+            var dt = days[i], di = isoOf(dt), today = di === d.today, past = di < d.today;
+            html += '<div class="vcal-dayhead' + (today ? ' vcal-dayhead--today' : (past ? ' vcal-dayhead--past' : '')) + '">' +
                 '<span class="vcal-dayhead-wd">' + (today ? 'Today' : WD_FULL[dt.getDay()]) + '</span>' +
                 '<span class="vcal-dayhead-date">' + WD[dt.getDay()] + ' ' + dt.getDate() + '</span>' +
                 (dayCount[i] ? '<span class="vcal-dayhead-n">' + dayCount[i] + '</span>' : '') +
@@ -181,12 +181,12 @@
                 '<small>' + b.range + '</small></div>';
             for (var i = 0; i < COLS; i++) {
                 var cell = grid[b.key][i].slice().sort(byTime);
-                var today = isoOf(days[i]) === d.today;
+                var slotDay = isoOf(days[i]); var today = slotDay === d.today; var past = slotDay < d.today;
                 var isNow = today && b.key === nowBand;
                 var inner = cell.length
                     ? cell.map(function (ep) { return epCell(ep, stagger++); }).join('')
                     : '<span class="vcal-slot-dot" aria-hidden="true"></span>';
-                html += '<div class="vcal-slot' + (today ? ' vcal-slot--today' : '') +
+                html += '<div class="vcal-slot' + (today ? ' vcal-slot--today' : (past ? ' vcal-slot--past' : '')) +
                     (isNow ? ' vcal-slot--now' : '') +
                     (cell.length ? '' : ' vcal-slot--empty') + '">' + inner + '</div>';
             }
