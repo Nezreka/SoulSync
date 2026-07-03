@@ -6,7 +6,9 @@ import type {
   LibraryV2AlbumDetail,
   LibraryV2ArtistDetail,
   LibraryV2ArtistSummary,
+  LibraryV2DiscographyStats,
   LibraryV2ImportState,
+  LibraryV2JobState,
   LibraryV2Pagination,
   LibraryV2QualityProfile,
   LibraryV2Search,
@@ -123,10 +125,56 @@ export async function fetchLibraryV2Artist(artistId: number): Promise<LibraryV2A
   return payload.artist;
 }
 
-export async function fetchLibraryV2Album(albumId: number): Promise<LibraryV2AlbumDetail> {
-  const payload = await readJson<AlbumResponse>(apiClient.get(`library/v2/albums/${albumId}`));
+export async function fetchLibraryV2Album(
+  albumId: number,
+  options: { resolve?: boolean } = {},
+): Promise<LibraryV2AlbumDetail> {
+  const params = new URLSearchParams();
+  if (options.resolve) params.set('resolve', '1');
+  const payload = await readJson<AlbumResponse>(
+    apiClient.get(`library/v2/albums/${albumId}`, { searchParams: params }),
+  );
   if (!payload.success || !payload.album) throw new Error(payload.error || 'Album not found');
   return payload.album;
+}
+
+export async function refreshLibraryV2Discography(
+  artistId: number,
+): Promise<LibraryV2DiscographyStats> {
+  const payload = await readJson<
+    { success: boolean; error?: string } & LibraryV2DiscographyStats
+  >(
+    apiClient.post(`library/v2/artists/${artistId}/discography/refresh`, {
+      json: {},
+      timeout: 60_000, // provider discography lookup can take a few seconds
+    }),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Discography refresh failed');
+  return payload;
+}
+
+export async function bulkMonitorLibraryV2Releases(
+  artistId: number,
+  scope: 'albums' | 'eps' | 'singles' | 'all',
+  monitored: boolean,
+): Promise<void> {
+  const payload = await readJson<{ success: boolean; error?: string }>(
+    apiClient.post(`library/v2/artists/${artistId}/releases/monitor`, {
+      json: { scope, monitored },
+    }),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Bulk monitor failed');
+}
+
+export async function startLibraryV2UpgradeScan(): Promise<void> {
+  const payload = await readJson<{ success: boolean; error?: string }>(
+    apiClient.post('library/v2/upgrade-scan', { json: {} }),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Upgrade scan failed');
+}
+
+export async function fetchLibraryV2JobStatus(): Promise<LibraryV2JobState> {
+  return readJson<LibraryV2JobState>(apiClient.get('library/v2/jobs/status'));
 }
 
 export async function fetchLibraryV2Track(trackId: number): Promise<LibraryV2Track> {
@@ -177,10 +225,10 @@ export function libraryV2ArtistQueryOptions(artistId: number) {
   });
 }
 
-export function libraryV2AlbumQueryOptions(albumId: number) {
+export function libraryV2AlbumQueryOptions(albumId: number, options: { resolve?: boolean } = {}) {
   return queryOptions({
-    queryKey: [...LIBRARY_V2_QUERY_KEY, 'album', albumId],
-    queryFn: () => fetchLibraryV2Album(albumId),
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'album', albumId, options.resolve ?? false],
+    queryFn: () => fetchLibraryV2Album(albumId, options),
     enabled: albumId > 0,
   });
 }
@@ -229,6 +277,8 @@ export interface SourceSearchResult {
     indexer?: string;
     grabs?: number;
     seeders?: number;
+    leechers?: number;
+    publish_date?: string | null;
   } | null;
 }
 

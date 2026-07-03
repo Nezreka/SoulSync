@@ -391,6 +391,14 @@ def record_download_provenance(context: Dict[str, Any]) -> None:
     except Exception as e:
         logger.debug("record_download_provenance failed: %s", e)
 
+    # Library v2 auto-link (opt-in, best-effort): make the imported file appear
+    # in the v2 library immediately instead of waiting for a full re-import.
+    try:
+        from core.library2.autolink import link_download_into_library_v2
+        link_download_into_library_v2(context)
+    except Exception as e:
+        logger.debug("library v2 autolink skipped: %s", e)
+
 
 def is_active_media_server_ready() -> tuple[bool, str]:
     """Standalone ('soulsync') is always ready — no external connection needed.

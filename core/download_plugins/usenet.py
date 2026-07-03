@@ -147,6 +147,7 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
                     'indexer': result.indexer_name,
                     'indexer_id': result.indexer_id,
                     'grabs': result.grabs,
+                    'publish_date': result.publish_date,
                     'protocol': 'usenet',
                 },
             )

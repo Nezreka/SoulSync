@@ -176,6 +176,33 @@ class _ArtistResolver:
         return new_id
 
 
+def _claim_discography_album(cursor, artist_id: int, title: str, album_type: str) -> Optional[int]:
+    """Find a provider-only (origin='discography') row matching a legacy album.
+
+    A discography expansion may have created the release before the user's files
+    were imported; claiming that row (instead of inserting a fresh one) keeps a
+    single release identity — its monitor state and metadata carry over.
+    Matching mirrors ``core/library2/discography.py``: normalized title, prefer
+    the same single-vs-release bucket.
+    """
+    key = normalize_name(title)
+    want_single = (album_type or "").lower() == "single"
+    cursor.execute(
+        """SELECT id, title, album_type FROM lib2_albums
+            WHERE primary_artist_id=? AND origin='discography' AND legacy_album_id IS NULL""",
+        (artist_id,),
+    )
+    fallback: Optional[int] = None
+    for row in cursor.fetchall():
+        if normalize_name(row["title"]) != key:
+            continue
+        if ((row["album_type"] or "").lower() == "single") == want_single:
+            return row["id"]
+        if fallback is None:
+            fallback = row["id"]
+    return fallback
+
+
 def _normalize_genres(raw: Any) -> str:
     """Mirror legacy genre storage (JSON array OR comma string) → JSON array string."""
     if not raw:
@@ -275,13 +302,23 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 track_count, expected,
             )
             existing = album_map.get(row["id"])
+            if existing is None:
+                # A discography expansion may already have created a provider-only
+                # row for this release — claim it instead of inserting a duplicate.
+                existing = _claim_discography_album(
+                    cursor, lib2_artist, row["title"], album_type)
+                if existing is not None:
+                    album_map[row["id"]] = existing
             if existing is not None:
                 cursor.execute(
                     "UPDATE lib2_albums SET primary_artist_id=?, title=?, album_type=?, "
-                    "release_date=?, year=?, spotify_id=?, musicbrainz_id=?, image_url=?, "
+                    "release_date=?, year=?, spotify_id=COALESCE(?, spotify_id), "
+                    "musicbrainz_id=COALESCE(?, musicbrainz_id), "
+                    "image_url=COALESCE(?, image_url), "
                     "genres=?, track_count=?, expected_track_count=?, "
+                    "origin='library', legacy_album_id=?, "
                     "updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                    (*fields, existing),
+                    (*fields, row["id"], existing),
                 )
                 album_id = existing
             else:

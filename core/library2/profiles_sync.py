@@ -56,8 +56,8 @@ def sync_settings_presets(database) -> int:
             pname = active.get("preset")
             if pname and pname not in presets and active.get("ranked_targets"):
                 presets[pname] = active
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as e:  # noqa: BLE001
+            logger.debug("active-profile preset lookup skipped: %s", e)
         if not presets:
             return 0
 

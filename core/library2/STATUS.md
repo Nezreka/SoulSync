@@ -62,31 +62,67 @@ tests `tests/library2/`.
 - `lib2_manual_skips`: records user-initiated check skips (acoustid/quality) on manual
   downloads so later cleanup/repair jobs respect the override.
 
+### Discography — all releases of an artist (Lidarr-style)
+- `discography.py`: `expand_artist_discography` fetches the FULL provider catalog
+  (`core/metadata/discography.get_artist_detail_discography` — source-priority with
+  fallback) and persists every release as a `lib2_albums` row with
+  `origin='discography'`, `monitored=0`. Existing releases are matched (provider id →
+  normalized title, single-vs-release bucket) and enriched in place; vanished pristine
+  provider rows are pruned (monitored / tracked rows survive).
+- Importer claims discography rows when files arrive later (`_claim_discography_album`)
+  — one release identity, no duplicates; monitor state carries over.
+- UI: artist detail has a **My Library / All Releases** toggle (URL param `releases`),
+  an **EPs** section, per-section **Monitor all / Unmonitor all** (background bulk job
+  `/releases/monitor` + `/jobs/status` polling), an **Update Discography** toolbar
+  button, and "not in library" badges. First switch to All Releases auto-fetches.
+- Monitoring an unowned release materializes its provider tracklist first
+  (`resolve_tracklist`) so real, monitorable track rows mirror into the Wishlist;
+  expanding one does the same via `GET /albums/<id>?resolve=1`.
+
+### Refresh & Scan reads real file tags
+- `scan.py`: `rescan_files` probes files with `core/imports/file_ops.probe_audio_quality`
+  (mutagen ground truth) → `lib2_track_files.sample_rate/bit_depth/bitrate/format/size` +
+  `quality_tier`. Wired into `/refresh` (artist/album scope). Absent paths are skipped
+  (Docker bind mounts), never treated as deleted.
+
+### Auto-link new downloads into lib2
+- `autolink.py`: post-processing hook (called from
+  `core/imports/side_effects.record_download_provenance`) links every finished
+  download's final file into lib2 — matches existing artist/album/track rows
+  (including fileless wanted rows, flipping them missing→present), creates rows only
+  when genuinely new, probes real quality. Gated on `features.library_v2`; never
+  raises into the pipeline.
+
+### lib2-aware upgrade scan
+- `POST /api/library/v2/upgrade-scan` (background job): every monitored track with a
+  file under an `until_top` profile is re-checked (`_mirror_tracks_wishlist` re-runs
+  `upgrade_candidate`) and genuine upgrade candidates are queued into the Wishlist.
+
+### Interactive Search (Lidarr-style result table)
+- Usenet/torrent plugins now pass `publish_date` in `_source_metadata` → **Age** column
+  ("3d"/"8mo"/"2.1y", tooltip = raw date). All columns sortable (source/title/quality/
+  size/age/availability), default sort quality-desc with size tiebreak. Availability
+  stays source-aware (grabs vs seeders vs slots/queue).
+
 ## TODO (next)
 1. **Profile-scoped monitoring/import**: the importer currently reads all
    `watchlist_artists` / `wishlist_tracks` rows it can see. Before multi-profile use,
    pass the active `profile_id` into the import/sync path so Library v2 does not
    leak another profile's wanted/monitored state into the current view.
-2. **Phase D M2 — lib2 auto-upgrade**: `upgrade_candidate` is evaluated on read only
-   for monitored tracks, and assigning an `until_top` profile auto-monitors the
-   affected tracks and queues missing/upgrade-candidate rows into the Wishlist. The
-   existing `quality_upgrade` worker still scans the legacy `tracks` table and global
-   Settings quality profile; add a lib2-aware scan path that consumes the stored
-   Wishlist `source_info.quality_profile_id` / per track `quality_profile_id`, especially
-   `upgrade_policy='until_top'`.
-3. **Refresh & Scan should read file tags** (sample_rate/bit_depth, present-tags) into
-   `lib2_track_files` so hi-res quality targets + metadata gaps are exact (currently the
-   importer only stores format+bitrate; eval falls back to format-based).
-4. **Phase C on lib2**: Re-Tag / Preview Re-Tag (reuse `/api/library/.../tag-preview` +
+2. **Phase C on lib2**: Re-Tag / Preview Re-Tag (reuse `/api/library/.../tag-preview` +
    `write-tags-batch`), Metadata Gap Fill / Fix Unknown Artist / Album Tag Consistency
    (scoped `RepairJob.scan`), Manual Import from staging (`core/imports/`), all → `lib2`.
-5. **Phase D actions on lib2**: single↔album move/dedup (`single_album_dedup`), Manage
+3. **Phase D actions on lib2**: single↔album move/dedup (`single_album_dedup`), Manage
    Tracks, Edit, Delete (with confirm) — the toolbar buttons are placeholders today.
-6. **Auto-link new downloads into lib2** (today: download via pipeline → Refresh/import).
-7. **Explicit monitor provenance**: if album-level monitoring must survive re-imports
+4. **Explicit monitor provenance**: if album-level monitoring must survive re-imports
    independently from track-level wishlist monitoring, add provenance/mode columns
    instead of deriving parent release flags from child tracks.
-8. **Optional**: in-library quality-profile editor (ranked_targets) instead of only
+5. **Periodic lib2 upgrade scan**: `/upgrade-scan` is manual today; schedule it with the
+   existing repair/worker cadence once the behavior is proven.
+6. **New-release automation stays with the watchlist scanner** (by design): monitored
+   artists get new releases queued there; a lib2 "monitor new items" enforcement pass
+   could later auto-monitor newly discovered discography rows.
+7. **Optional**: in-library quality-profile editor (ranked_targets) instead of only
    Settings + sync; cleanup job that consumes `lib2_manual_skips`.
 
 ## Run / verify (no Node/Flask locally — use Docker)

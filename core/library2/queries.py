@@ -21,13 +21,18 @@ _SORTS = {
     "tracks": "track_count DESC, a.name COLLATE NOCASE",
 }
 
+# Index stats count releases that are "mine": in the library, or provider-only
+# rows the user explicitly monitors (= wanted). Unmonitored discography rows are
+# browsable in the artist detail but don't inflate the overview counts.
 _ARTIST_STATS = """
     (SELECT COUNT(DISTINCT al.id) FROM lib2_album_artists aa
        JOIN lib2_albums al ON al.id = aa.album_id
-       WHERE aa.artist_id = a.id AND al.album_type <> 'single') AS album_count,
+       WHERE aa.artist_id = a.id AND al.album_type <> 'single'
+         AND (al.origin = 'library' OR al.monitored = 1)) AS album_count,
     (SELECT COUNT(DISTINCT al.id) FROM lib2_album_artists aa
        JOIN lib2_albums al ON al.id = aa.album_id
-       WHERE aa.artist_id = a.id AND al.album_type = 'single') AS single_count,
+       WHERE aa.artist_id = a.id AND al.album_type = 'single'
+         AND (al.origin = 'library' OR al.monitored = 1)) AS single_count,
     (SELECT COUNT(DISTINCT ta.track_id) FROM lib2_track_artists ta
        WHERE ta.artist_id = a.id) AS track_count,
     (SELECT COUNT(DISTINCT ta.track_id) FROM lib2_track_artists ta
@@ -142,7 +147,8 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
     album_rows = conn.execute(
         """
         SELECT DISTINCT al.id, al.title, al.album_type, al.release_date, al.year,
-               al.image_url, al.monitored, al.quality_profile_id, al.track_count, al.expected_track_count,
+               al.image_url, al.monitored, al.quality_profile_id, al.track_count,
+               al.expected_track_count, al.origin, al.spotify_id,
                (SELECT COUNT(*) FROM lib2_tracks t WHERE t.album_id = al.id) AS db_track_count,
                (SELECT COUNT(DISTINCT t.id) FROM lib2_tracks t
                   JOIN lib2_track_files tf ON tf.track_id = t.id
@@ -155,7 +161,7 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
         (artist_id,),
     ).fetchall()
 
-    albums, singles = [], []
+    albums, eps, singles = [], [], []
     for r in album_rows:
         present = r["files_present"] or 0
         # Total = the metadata's true track count when known, so partial albums
@@ -171,11 +177,21 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
             "image_url": r["image_url"],
             "monitored": bool(r["monitored"]),
             "quality_profile_id": r["quality_profile_id"],
+            "origin": r["origin"] or "library",
+            "spotify_id": r["spotify_id"],
             "track_count": total,
             "tracks_present": present,
             "tracks_missing": max(0, total - present),
         }
-        (singles if r["album_type"] == "single" else albums).append(entry)
+        if r["album_type"] == "single":
+            singles.append(entry)
+        elif r["album_type"] == "ep":
+            eps.append(entry)
+        else:
+            albums.append(entry)
+
+    def _in_library(entries):
+        return sum(1 for e in entries if e["origin"] == "library" or e["monitored"])
 
     return {
         "id": a["id"],
@@ -187,9 +203,11 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
         "monitor_new_items": a["monitor_new_items"],
         "quality_profile": _quality_profile_dict(qp),
         "albums": albums,
+        "eps": eps,
         "singles": singles,
-        "album_count": len(albums),
-        "single_count": len(singles),
+        "album_count": _in_library(albums) + _in_library(eps),
+        "single_count": _in_library(singles),
+        "discography_count": sum(1 for e in albums + eps + singles if e["origin"] == "discography"),
     }
 
 
@@ -468,6 +486,12 @@ def get_album(conn, album_id: int) -> Optional[Dict[str, Any]]:
     tracks.sort(key=lambda t: (t.get("disc_number") or 1, t.get("track_number") or 0,
                               t.get("id") or 0))
 
+    origin = "library"
+    try:
+        origin = al["origin"] or "library"
+    except (IndexError, KeyError):
+        pass
+
     return {
         "id": al["id"],
         "title": al["title"],
@@ -477,6 +501,7 @@ def get_album(conn, album_id: int) -> Optional[Dict[str, Any]]:
         "image_url": al["image_url"],
         "genres": _json_list(al["genres"]),
         "monitored": bool(al["monitored"]),
+        "origin": origin,
         "quality_profile": _quality_profile_dict(qp),
         "primary_artist": {"id": artist["id"], "name": artist["name"]} if artist else None,
         "tracks": tracks,

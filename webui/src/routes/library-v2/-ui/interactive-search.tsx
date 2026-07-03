@@ -1,7 +1,62 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { searchSources, startSourceDownload, type SourceSearchResult } from '../-library-v2.api';
 import styles from './library-v2-page.module.css';
+
+/** Lidarr-style release age: "3d", "8mo", "2.1y" — usenet retention at a glance. */
+function ageText(publishDate?: string | null): string {
+  if (!publishDate) return '—';
+  const then = Date.parse(publishDate);
+  if (Number.isNaN(then)) return '—';
+  const days = Math.max(0, (Date.now() - then) / 86_400_000);
+  if (days < 1) return '<1d';
+  if (days < 60) return `${Math.round(days)}d`;
+  if (days < 365) return `${Math.round(days / 30.4)}mo`;
+  return `${(days / 365.25).toFixed(1)}y`;
+}
+
+function ageDays(publishDate?: string | null): number {
+  if (!publishDate) return Number.POSITIVE_INFINITY;
+  const then = Date.parse(publishDate);
+  if (Number.isNaN(then)) return Number.POSITIVE_INFINITY;
+  return (Date.now() - then) / 86_400_000;
+}
+
+/** Rank a quality string for sorting (lossless hi-res > lossless > high lossy > rest). */
+function qualityRank(r: SourceSearchResult): number {
+  const q = ((r.result_type === 'album' ? r.dominant_quality : r.quality) ?? '').toLowerCase();
+  const bitDepth = r.bit_depth ?? 0;
+  const lossless = q.includes('flac') || q.includes('alac') || q.includes('wav');
+  if (lossless && bitDepth > 16) return 4;
+  if (lossless) return 3;
+  const kbps = r.bitrate ? (r.bitrate > 5000 ? r.bitrate / 1000 : r.bitrate) : 0;
+  if (kbps >= 256 || q.includes('320')) return 2;
+  if (q) return 1;
+  return 0;
+}
+
+type SortKey = 'source' | 'title' | 'quality' | 'size' | 'age' | 'availability';
+
+function sortValue(r: SourceSearchResult, key: SortKey): number | string {
+  switch (key) {
+    case 'source':
+      return sourceLabel(r);
+    case 'title':
+      return resultTitle(r).toLowerCase();
+    case 'quality':
+      return qualityRank(r);
+    case 'size':
+      return resultSize(r) ?? 0;
+    case 'age':
+      return ageDays(effMeta(r).publish_date);
+    case 'availability': {
+      const meta = effMeta(r);
+      if (meta.grabs != null) return meta.grabs;
+      if (meta.seeders != null) return meta.seeders;
+      return (r.free_upload_slots ?? 0) * 100 - (r.queue_length ?? 0);
+    }
+  }
+}
 
 function fmtBytes(n?: number | null): string {
   if (!n || n <= 0) return '—';
@@ -123,6 +178,49 @@ export function InteractiveSearchModal({
   const [grabbed, setGrabbed] = useState<Record<string, GrabState>>({});
   const [qualityCheck, setQualityCheck] = useState(true);
   const [acoustidCheck, setAcoustidCheck] = useState(true);
+  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'quality', dir: -1 });
+
+  const sorted = useMemo(() => {
+    const copy = [...results];
+    copy.sort((a, b) => {
+      const va = sortValue(a, sort.key);
+      const vb = sortValue(b, sort.key);
+      const cmp =
+        typeof va === 'string' || typeof vb === 'string'
+          ? String(va).localeCompare(String(vb))
+          : va - vb;
+      if (cmp !== 0) return cmp * sort.dir;
+      // Stable tiebreak: better quality first, then larger size.
+      return qualityRank(b) - qualityRank(a) || (resultSize(b) ?? 0) - (resultSize(a) ?? 0);
+    });
+    return copy;
+  }, [results, sort]);
+
+  function toggleSort(key: SortKey) {
+    setSort((s) => (s.key === key ? { key, dir: s.dir === 1 ? -1 : 1 } : { key, dir: -1 }));
+  }
+
+  function SortTh({
+    label,
+    k,
+    className,
+  }: {
+    label: string;
+    k: SortKey;
+    className?: string;
+  }) {
+    const active = sort.key === k;
+    return (
+      <th
+        className={`${className ?? ''} ${styles.sortableTh}`}
+        aria-sort={active ? (sort.dir === 1 ? 'ascending' : 'descending') : undefined}
+        onClick={() => toggleSort(k)}
+      >
+        {label}
+        {active ? <span className={styles.sortArrow}>{sort.dir === 1 ? '▲' : '▼'}</span> : null}
+      </th>
+    );
+  }
 
   async function run(q: string) {
     if (!q.trim()) return;
@@ -224,17 +322,18 @@ export function InteractiveSearchModal({
             <table className={styles.trackTable}>
               <thead>
                 <tr>
-                  <th className={styles.isSource}>Source</th>
-                  <th>Title</th>
+                  <SortTh label="Source" k="source" className={styles.isSource} />
+                  <SortTh label="Title" k="title" />
                   <th className={styles.isArtist}>Artist</th>
-                  <th className={styles.isQuality}>Quality</th>
-                  <th className={styles.colNum}>Size</th>
-                  <th className={styles.isAvail}>Availability</th>
+                  <SortTh label="Quality" k="quality" className={styles.isQuality} />
+                  <SortTh label="Size" k="size" className={styles.colNum} />
+                  <SortTh label="Age" k="age" className={styles.colNum} />
+                  <SortTh label="Availability" k="availability" className={styles.isAvail} />
                   <th className={styles.isGrab}></th>
                 </tr>
               </thead>
               <tbody>
-                {results.map((r, i) => {
+                {sorted.map((r, i) => {
                   const key = resultKey(r);
                   const state = grabbed[key];
                   const isAlbum = r.result_type === 'album';
@@ -257,6 +356,9 @@ export function InteractiveSearchModal({
                       <td>{r.artist ?? '—'}</td>
                       <td className={styles.qualityText}>{resultQuality(r)}</td>
                       <td className={styles.colNum}>{fmtBytes(resultSize(r))}</td>
+                      <td className={styles.colNum} title={effMeta(r).publish_date ?? undefined}>
+                        {ageText(effMeta(r).publish_date)}
+                      </td>
                       <td className={styles.isAvailCell}>{availabilityCell(r)}</td>
                       <td>
                         <button

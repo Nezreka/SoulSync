@@ -684,6 +684,98 @@
   color: rgb(245, 158, 11);
 }
 
+.statusNotOwned {
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 8px;
+  padding: 2px 8px;
+  white-space: nowrap;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.55);
+}
+
+/* --- releases toggle (My Library / All Releases) --- */
+.releasesBar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin: 18px 0 6px;
+}
+
+.releasesToggle {
+  display: inline-flex;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.releasesToggle button {
+  background: transparent;
+  color: rgba(255, 255, 255, 0.6);
+  border: none;
+  padding: 8px 14px;
+  cursor: pointer;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.releasesHint {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+/* --- section bulk-monitor button --- */
+.sectionBulk {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 12px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.sectionBulk:hover:not(:disabled) {
+  border-color: rgba(var(--accent-rgb), 0.6);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.sectionBulk:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* No fill/stroke overrides here: SvgIcon sets them per-path so the
+   filled-bookmark (monitored) state renders correctly. */
+.sectionBulk svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* --- sortable search-result headers --- */
+.sortableTh {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.sortableTh:hover {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.sortArrow {
+  font-size: 9px;
+  margin-left: 4px;
+  color: rgb(var(--accent-rgb));
+}
+
 /* --- misc --- */
 .backLink {
   background: none;

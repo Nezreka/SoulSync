@@ -20,6 +20,8 @@ export const libraryV2SearchSchema = z.object({
   page: z.coerce.number().int().positive().default(1).catch(1),
   artist: z.coerce.number().int().positive().optional().catch(undefined),
   album: z.coerce.number().int().positive().optional().catch(undefined),
+  /** Artist detail: show only owned releases or the full provider discography. */
+  releases: z.enum(['library', 'all']).default('library').catch('library'),
 });
 
 export type LibraryV2Search = z.infer<typeof libraryV2SearchSchema>;
@@ -58,6 +60,9 @@ export interface LibraryV2AlbumSummary {
   image_url: string | null;
   monitored: boolean;
   quality_profile_id: number;
+  /** 'library' = imported from files; 'discography' = provider-only release. */
+  origin: 'library' | 'discography' | string;
+  spotify_id: string | null;
   track_count: number;
   tracks_present: number;
   tracks_missing: number;
@@ -73,9 +78,12 @@ export interface LibraryV2ArtistDetail {
   monitor_new_items: string;
   quality_profile: LibraryV2QualityProfile | null;
   albums: LibraryV2AlbumSummary[];
+  eps: LibraryV2AlbumSummary[];
   singles: LibraryV2AlbumSummary[];
   album_count: number;
   single_count: number;
+  /** Provider-only releases currently persisted for this artist. */
+  discography_count: number;
 }
 
 export interface LibraryV2TrackArtist {
@@ -127,6 +135,7 @@ export interface LibraryV2AlbumDetail {
   image_url: string | null;
   genres: string[];
   monitored: boolean;
+  origin: 'library' | 'discography' | string;
   quality_profile: LibraryV2QualityProfile | null;
   primary_artist: { id: number; name: string } | null;
   tracks: LibraryV2Track[];
@@ -154,4 +163,22 @@ export interface LibraryV2ImportState {
   stats: Record<string, number> | null;
   error: string | null;
   finished_at: number | null;
+}
+
+export interface LibraryV2JobState {
+  running: boolean;
+  kind: string | null;
+  current: number;
+  total: number;
+  result: Record<string, number> | null;
+  error: string | null;
+  finished_at: number | null;
+}
+
+export interface LibraryV2DiscographyStats {
+  added: number;
+  enriched: number;
+  removed: number;
+  total: number;
+  source: string | null;
 }

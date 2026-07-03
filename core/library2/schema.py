@@ -104,6 +104,7 @@ CREATE TABLE IF NOT EXISTS lib2_albums (
     track_count INTEGER,
     expected_track_count INTEGER,                      -- true total from metadata (for have/missing)
     tracklist_json TEXT,                               -- cached canonical tracklist (missing-track titles)
+    origin TEXT NOT NULL DEFAULT 'library',            -- 'library' (has/had files) | 'discography' (provider-only)
     monitored INTEGER NOT NULL DEFAULT 1,
     quality_profile_id INTEGER NOT NULL DEFAULT 1,
     legacy_album_id INTEGER,                           -- source row in legacy `albums`
@@ -208,6 +209,7 @@ _INDEXES = (
     "CREATE INDEX IF NOT EXISTS idx_lib2_albums_artist ON lib2_albums(primary_artist_id)",
     "CREATE INDEX IF NOT EXISTS idx_lib2_albums_type ON lib2_albums(album_type)",
     "CREATE INDEX IF NOT EXISTS idx_lib2_albums_legacy ON lib2_albums(legacy_album_id)",
+    "CREATE INDEX IF NOT EXISTS idx_lib2_albums_origin ON lib2_albums(origin)",
     "CREATE INDEX IF NOT EXISTS idx_lib2_album_artists_artist ON lib2_album_artists(artist_id)",
     "CREATE INDEX IF NOT EXISTS idx_lib2_tracks_album ON lib2_tracks(album_id)",
     "CREATE INDEX IF NOT EXISTS idx_lib2_tracks_isrc ON lib2_tracks(isrc)",
@@ -264,6 +266,8 @@ _ADDED_COLUMNS = (
      "ALTER TABLE lib2_albums ADD COLUMN quality_profile_id INTEGER NOT NULL DEFAULT 1"),
     ("lib2_tracks", "quality_profile_id",
      "ALTER TABLE lib2_tracks ADD COLUMN quality_profile_id INTEGER NOT NULL DEFAULT 1"),
+    ("lib2_albums", "origin",
+     "ALTER TABLE lib2_albums ADD COLUMN origin TEXT NOT NULL DEFAULT 'library'"),
 )
 
 

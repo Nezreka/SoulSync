@@ -6,13 +6,16 @@ import { useReactPageShell } from '@/platform/shell/route-controllers';
 
 import {
   autoGrabBest,
+  bulkMonitorLibraryV2Releases,
   fetchLibraryV2ImportStatus,
+  fetchLibraryV2JobStatus,
   LIBRARY_V2_QUERY_KEY,
   libraryV2AlbumQueryOptions,
   libraryV2ArtistQueryOptions,
   libraryV2ArtistsQueryOptions,
   libraryV2EnabledQueryOptions,
   refreshLibraryV2,
+  refreshLibraryV2Discography,
   setLibraryV2Monitored,
   startLibraryV2Import,
 } from '../-library-v2.api';
@@ -497,11 +500,24 @@ function ArtistTable({ artists }: { artists: LibraryV2ArtistSummary[] }) {
 
 // --- artist detail (Lidarr-style: expandable album/single tables) ------------
 
+/** Filter for the release toggle: "My Library" keeps owned or wanted releases;
+ *  "All Releases" shows the full provider discography. */
+function visibleReleases(
+  entries: LibraryV2AlbumSummary[],
+  mode: 'library' | 'all',
+): LibraryV2AlbumSummary[] {
+  if (mode === 'all') return entries;
+  return entries.filter((e) => e.origin !== 'discography' || e.monitored);
+}
+
 function ArtistDetailView({ artistId }: { artistId: number }) {
   const navigate = useNavigate();
+  const search = Route.useSearch();
+  const releasesMode = search.releases;
   const artistQuery = useQuery(libraryV2ArtistQueryOptions(artistId));
   const artist = artistQuery.data;
   const [refreshing, setRefreshing] = useState(false);
+  const [discographyBusy, setDiscographyBusy] = useState(false);
   const [modalAction, setModalAction] = useState<string | null>(null);
   const [grabBanner, setGrabBanner] = useState<{ tone: 'busy' | 'ok' | 'err'; text: string } | null>(
     null,
@@ -517,6 +533,34 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
       await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
     } finally {
       setRefreshing(false);
+    }
+  }
+
+  async function updateDiscography() {
+    setDiscographyBusy(true);
+    setGrabBanner({ tone: 'busy', text: 'Fetching full discography…' });
+    try {
+      const stats = await refreshLibraryV2Discography(artistId);
+      await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+      setGrabBanner({
+        tone: 'ok',
+        text: `Discography updated from ${stats.source ?? 'provider'}: ${stats.added} new, ${stats.enriched} matched.`,
+      });
+    } catch (e) {
+      setGrabBanner({
+        tone: 'err',
+        text: e instanceof Error ? e.message : 'Discography refresh failed',
+      });
+    } finally {
+      setDiscographyBusy(false);
+    }
+  }
+
+  function setReleasesMode(mode: 'library' | 'all') {
+    void navigate({ search: (p) => ({ ...p, releases: mode }) });
+    // First switch to "All Releases" with nothing persisted yet → fetch it.
+    if (mode === 'all' && artist && artist.discography_count === 0 && !discographyBusy) {
+      void updateDiscography();
     }
   }
 
@@ -577,15 +621,28 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 icon="search"
                 label="Search Monitored"
                 title="Search monitored missing tracks"
-                disabled={!artist.monitored || (artist.albums.length === 0 && artist.singles.length === 0)}
+                disabled={
+                  !artist.monitored ||
+                  artist.albums.length + (artist.eps?.length ?? 0) + artist.singles.length === 0
+                }
                 onClick={() => handleAction('Search Monitored')}
               />
               <ActionButton
                 icon="interactive"
                 label="Interactive Search"
                 title="Search all SoulSync sources manually"
-                disabled={!artist.monitored || (artist.albums.length === 0 && artist.singles.length === 0)}
+                disabled={
+                  !artist.monitored ||
+                  artist.albums.length + (artist.eps?.length ?? 0) + artist.singles.length === 0
+                }
                 onClick={() => handleAction('Interactive Search')}
+              />
+              <ActionButton
+                icon="download"
+                label={discographyBusy ? 'Updating…' : 'Update Discography'}
+                title="Fetch every release this artist has published (metadata only)"
+                busy={discographyBusy}
+                onClick={() => void updateDiscography()}
               />
             </div>
             <div className={styles.toolbarGroup}>
@@ -634,7 +691,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 </span>
                 <span className={styles.detailLabel}>
                   <SvgIcon name="tracks" />
-                  {artist.albums.length + artist.singles.length} releases
+                  {artist.albums.length + (artist.eps?.length ?? 0) + artist.singles.length} releases
                 </span>
               </div>
               {artist.genres.length > 0 ? (
@@ -643,15 +700,54 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             </div>
           </header>
 
+          <div className={styles.releasesBar}>
+            <div className={styles.releasesToggle}>
+              <button
+                type="button"
+                className={releasesMode === 'library' ? styles.viewActive : ''}
+                onClick={() => setReleasesMode('library')}
+              >
+                My Library
+              </button>
+              <button
+                type="button"
+                className={releasesMode === 'all' ? styles.viewActive : ''}
+                onClick={() => setReleasesMode('all')}
+              >
+                All Releases
+                {artist.discography_count > 0 ? (
+                  <span className={styles.sectionCount}>{artist.discography_count}</span>
+                ) : null}
+              </button>
+            </div>
+            <span className={styles.releasesHint}>
+              {releasesMode === 'all'
+                ? 'Full discography from the metadata provider — monitor a release to add it to Wanted.'
+                : 'Releases in your library (plus monitored ones).'}
+            </span>
+          </div>
+
           <AlbumGroup
             title="Albums"
-            albums={artist.albums}
+            albums={visibleReleases(artist.albums, releasesMode)}
+            artistId={artistId}
+            scope="albums"
+            onAction={handleAction}
+            onQualityProfile={setQpTarget}
+          />
+          <AlbumGroup
+            title="EPs"
+            albums={visibleReleases(artist.eps ?? [], releasesMode)}
+            artistId={artistId}
+            scope="eps"
             onAction={handleAction}
             onQualityProfile={setQpTarget}
           />
           <AlbumGroup
             title="Singles"
-            albums={artist.singles}
+            albums={visibleReleases(artist.singles, releasesMode)}
+            artistId={artistId}
+            scope="singles"
             onAction={handleAction}
             onQualityProfile={setQpTarget}
           />
@@ -678,24 +774,72 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   );
 }
 
+/** Poll the background bulk-job status until it settles, then refresh. */
+async function awaitBulkJob(queryClient: ReturnType<typeof useQueryClient>): Promise<string | null> {
+  for (let i = 0; i < 300; i += 1) {
+    const state = await fetchLibraryV2JobStatus();
+    if (!state.running) {
+      await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+      return state.error;
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  return 'Timed out waiting for the bulk job';
+}
+
 /** Lidarr-style album list: each album is a block whose header expands to reveal
  *  its track table — contained in the block (no fragile nested-table colspans). */
 function AlbumGroup({
   title,
   albums,
+  artistId,
+  scope,
   onAction,
   onQualityProfile,
 }: {
   title: string;
   albums: LibraryV2AlbumSummary[];
+  artistId: number;
+  scope: 'albums' | 'eps' | 'singles';
   onAction: (action: string) => void;
   onQualityProfile: (target: QpTarget) => void;
 }) {
+  const queryClient = useQueryClient();
+  const [bulkBusy, setBulkBusy] = useState(false);
   if (albums.length === 0) return null;
+  const allMonitored = albums.every((a) => a.monitored);
+
+  async function bulkMonitor(monitored: boolean) {
+    setBulkBusy(true);
+    try {
+      await bulkMonitorLibraryV2Releases(artistId, scope, monitored);
+      await awaitBulkJob(queryClient);
+    } catch {
+      // Job endpoint already logs; refresh so the UI shows the actual state.
+      await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
   return (
     <section className={styles.section}>
       <h2 className={styles.sectionTitle}>
         {title} <span className={styles.sectionCount}>{albums.length}</span>
+        <button
+          type="button"
+          className={styles.sectionBulk}
+          disabled={bulkBusy}
+          title={
+            allMonitored
+              ? `Stop monitoring all ${title.toLowerCase()}`
+              : `Monitor all ${title.toLowerCase()} (adds missing tracks to Wanted)`
+          }
+          onClick={() => void bulkMonitor(!allMonitored)}
+        >
+          <SvgIcon name="monitor" filled={allMonitored} />
+          {bulkBusy ? 'Working…' : allMonitored ? 'Unmonitor all' : 'Monitor all'}
+        </button>
       </h2>
       <div className={styles.albumList}>
         {albums.map((album) => (
@@ -723,6 +867,7 @@ function AlbumBlock({
   const [open, setOpen] = useState(false);
   const complete = album.tracks_missing === 0 && album.track_count > 0;
   const pct = album.track_count ? Math.round((100 * album.tracks_present) / album.track_count) : 0;
+  const unowned = album.origin === 'discography' && album.tracks_present === 0;
   return (
     <div className={`${styles.albumBlock} ${open ? styles.albumBlockOpen : ''}`}>
       <div className={styles.albumHead} onClick={() => setOpen(!open)}>
@@ -749,9 +894,13 @@ function AlbumBlock({
             {trackProgress(album.tracks_present, album.track_count)}
           </span>
         </div>
-        <span className={complete ? styles.statusOk : styles.statusWarn}>
-          {complete ? 'complete' : `${album.tracks_missing} missing`}
-        </span>
+        {unowned ? (
+          <span className={styles.statusNotOwned}>not in library</span>
+        ) : (
+          <span className={complete ? styles.statusOk : styles.statusWarn}>
+            {complete ? 'complete' : `${album.tracks_missing} missing`}
+          </span>
+        )}
         <span className={styles.albumActions}>
           <IconActionButton icon="search" title="Search Monitored" onClick={() => onAction(`Search Monitored: ${album.title}`)} />
           <IconActionButton icon="interactive" title="Interactive Search" onClick={() => onAction(`Interactive Search: ${album.title}`)} />
@@ -770,19 +919,24 @@ function AlbumBlock({
           <IconActionButton icon="edit" title="Edit Album" onClick={() => onAction(`Edit Album: ${album.title}`)} />
         </span>
       </div>
-      {open ? <AlbumTrackTable albumId={album.id} onAction={onAction} /> : null}
+      {open ? (
+        <AlbumTrackTable albumId={album.id} resolve={unowned} onAction={onAction} />
+      ) : null}
     </div>
   );
 }
 
 function AlbumTrackTable({
   albumId,
+  resolve,
   onAction,
 }: {
   albumId: number;
+  /** Discography-only releases materialize their provider tracklist on expand. */
+  resolve?: boolean;
   onAction: (action: string) => void;
 }) {
-  const albumQuery = useQuery(libraryV2AlbumQueryOptions(albumId));
+  const albumQuery = useQuery(libraryV2AlbumQueryOptions(albumId, { resolve }));
   const album = albumQuery.data;
   if (albumQuery.isLoading || !album) {
     return <div className={styles.inlineLoading}>Loading tracks…</div>;

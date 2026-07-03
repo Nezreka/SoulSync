@@ -33,6 +33,13 @@ _import_state: Dict[str, Any] = {"running": False, "stage": None, "current": 0,
                                  "total": 0, "stats": None, "error": None,
                                  "finished_at": None}
 
+# Bulk monitor / upgrade-scan job state (background; tracklist resolution can
+# hit metadata providers once per release, so these must not block a request).
+_job_lock = threading.Lock()
+_job_state: Dict[str, Any] = {"running": False, "kind": None, "current": 0,
+                              "total": 0, "result": None, "error": None,
+                              "finished_at": None}
+
 _MONITOR_TABLES = {"artists": "lib2_artists", "albums": "lib2_albums", "tracks": "lib2_tracks"}
 _PROFILE_TABLES = {"artists": "lib2_artists", "albums": "lib2_albums", "tracks": "lib2_tracks"}
 
@@ -138,6 +145,19 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         from core.library2 import queries as Q
         conn = _conn()
         try:
+            # ``?resolve=1``: materialize the provider tracklist first, so a
+            # discography-only release (no track rows yet) shows its real
+            # tracklist when the user expands it — Lidarr-style.
+            if request.args.get("resolve") == "1":
+                has_tracks = conn.execute(
+                    "SELECT 1 FROM lib2_tracks WHERE album_id=? LIMIT 1", (album_id,)
+                ).fetchone()
+                if not has_tracks:
+                    try:
+                        from core.library2.completeness import resolve_tracklist
+                        resolve_tracklist(config_manager, conn, album_id)
+                    except Exception as e:  # noqa: BLE001
+                        logger.debug("on-demand tracklist resolve failed (%s): %s", album_id, e)
             data = Q.get_album(conn, album_id)
         finally:
             conn.close()
@@ -368,6 +388,20 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         conn = db._get_connection()
         try:
             cur = conn.cursor()
+            # Monitoring a discography-only release must first materialize its
+            # provider tracklist into real, monitorable track rows — otherwise
+            # there is nothing to mirror into the wishlist (Lidarr: monitoring
+            # an unowned album makes its tracks "wanted").
+            if entity == "albums" and monitored:
+                has_tracks = conn.execute(
+                    "SELECT 1 FROM lib2_tracks WHERE album_id=? LIMIT 1", (eid,)
+                ).fetchone()
+                if not has_tracks:
+                    try:
+                        from core.library2.completeness import resolve_tracklist
+                        resolve_tracklist(config_manager, conn, eid)
+                    except Exception as e:  # noqa: BLE001
+                        logger.debug("monitor tracklist resolve failed (%s): %s", eid, e)
             cur.execute(f"UPDATE {table} SET monitored=? WHERE id=?", (1 if monitored else 0, eid))
             if not cur.rowcount:
                 return jsonify({"success": False, "error": "Not found"}), 404
@@ -484,6 +518,162 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             },
         })
 
+    # -- discography (all releases of an artist, Lidarr-style) ----------------
+
+    @app.route("/api/library/v2/artists/<int:artist_id>/discography/refresh", methods=["POST"])
+    def lib2_discography_refresh(artist_id):
+        """Fetch the artist's full provider discography and persist it as
+        browsable (unmonitored) ``origin='discography'`` releases."""
+        guard = _guard()
+        if guard:
+            return guard
+        try:
+            from core.library2.discography import expand_artist_discography
+            stats = expand_artist_discography(get_database(), artist_id)
+        except ValueError:
+            return jsonify({"success": False, "error": "Artist not found"}), 404
+        except Exception as e:  # noqa: BLE001
+            logger.error("Discography refresh failed (artist %s): %s", artist_id, e)
+            return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": True, **stats})
+
+    def _bulk_track_ids_for_albums(conn, album_ids: List[int]) -> List[int]:
+        if not album_ids:
+            return []
+        marks = ",".join("?" for _ in album_ids)
+        return [r["id"] for r in conn.execute(
+            f"SELECT id FROM lib2_tracks WHERE album_id IN ({marks})", album_ids)]
+
+    @app.route("/api/library/v2/artists/<int:artist_id>/releases/monitor", methods=["POST"])
+    def lib2_bulk_monitor(artist_id):
+        """Bulk-set the monitor flag on an artist's releases.
+
+        Body: ``{"scope": "albums"|"eps"|"singles"|"all", "monitored": bool}``.
+        Runs in the background: monitoring unowned releases resolves each
+        tracklist from a metadata provider before mirroring to the wishlist.
+        """
+        guard = _guard()
+        if guard:
+            return guard
+        body = request.json or {}
+        scope = str(body.get("scope") or "all")
+        monitored = bool(body.get("monitored", True))
+        type_filter = {
+            "albums": "al.album_type NOT IN ('single','ep')",
+            "eps": "al.album_type = 'ep'",
+            "singles": "al.album_type = 'single'",
+            "all": "1=1",
+        }.get(scope)
+        if not type_filter:
+            return jsonify({"success": False, "error": "Unknown scope"}), 400
+        with _job_lock:
+            if _job_state["running"]:
+                return jsonify({"success": False, "error": "A bulk job is already running"}), 409
+            _job_state.update(running=True, kind=f"monitor:{scope}", current=0,
+                              total=0, result=None, error=None, finished_at=None)
+
+        def _run():
+            import time as _t
+            db = get_database()
+            try:
+                conn = db._get_connection()
+                try:
+                    albums = [r["id"] for r in conn.execute(
+                        f"""SELECT al.id FROM lib2_album_artists aa
+                            JOIN lib2_albums al ON al.id = aa.album_id
+                           WHERE aa.artist_id = ? AND {type_filter}""", (artist_id,))]
+                    _job_state.update(total=len(albums))
+                    mirrored = 0
+                    for i, album_id in enumerate(albums):
+                        _job_state.update(current=i)
+                        if monitored:
+                            has_tracks = conn.execute(
+                                "SELECT 1 FROM lib2_tracks WHERE album_id=? LIMIT 1",
+                                (album_id,)).fetchone()
+                            if not has_tracks:
+                                try:
+                                    from core.library2.completeness import resolve_tracklist
+                                    resolve_tracklist(config_manager, conn, album_id)
+                                except Exception as e:  # noqa: BLE001
+                                    logger.debug("bulk tracklist resolve failed (%s): %s",
+                                                 album_id, e)
+                        conn.execute("UPDATE lib2_albums SET monitored=? WHERE id=?",
+                                     (1 if monitored else 0, album_id))
+                        track_ids = _bulk_track_ids_for_albums(conn, [album_id])
+                        if track_ids:
+                            marks = ",".join("?" for _ in track_ids)
+                            conn.execute(
+                                f"UPDATE lib2_tracks SET monitored=? WHERE id IN ({marks})",
+                                [1 if monitored else 0, *track_ids])
+                        conn.commit()
+                        if track_ids:
+                            mirrored += _mirror_tracks_wishlist(db, conn, track_ids, monitored)
+                    _job_state.update(result={"albums": len(albums), "mirrored": mirrored})
+                finally:
+                    conn.close()
+            except Exception as e:  # noqa: BLE001
+                logger.error("Bulk monitor failed (artist %s): %s", artist_id, e, exc_info=True)
+                _job_state.update(error=str(e))
+            finally:
+                _job_state.update(running=False, finished_at=_t.time())
+
+        threading.Thread(target=_run, name="lib2-bulk-monitor", daemon=True).start()
+        return jsonify({"success": True, "started": True})
+
+    @app.route("/api/library/v2/jobs/status")
+    def lib2_job_status():
+        guard = _guard()
+        if guard:
+            return guard
+        return jsonify({"success": True, **_job_state})
+
+    # -- upgrade scan (lib2-aware quality upgrade pass) ------------------------
+
+    @app.route("/api/library/v2/upgrade-scan", methods=["POST"])
+    def lib2_upgrade_scan():
+        """Queue every monitored track whose file is an upgrade candidate under
+        its ``until_top`` quality profile into the wishlist (lib2-aware pass;
+        the legacy quality_upgrade worker only scans the legacy tables)."""
+        guard = _guard()
+        if guard:
+            return guard
+        with _job_lock:
+            if _job_state["running"]:
+                return jsonify({"success": False, "error": "A bulk job is already running"}), 409
+            _job_state.update(running=True, kind="upgrade-scan", current=0,
+                              total=0, result=None, error=None, finished_at=None)
+
+        def _run():
+            import time as _t
+            db = get_database()
+            try:
+                conn = db._get_connection()
+                try:
+                    rows = conn.execute(
+                        """SELECT t.id FROM lib2_tracks t
+                           JOIN lib2_quality_profiles qp ON qp.id = t.quality_profile_id
+                          WHERE t.monitored = 1 AND qp.upgrade_policy = 'until_top'
+                            AND EXISTS (SELECT 1 FROM lib2_track_files tf
+                                        WHERE tf.track_id = t.id
+                                          AND tf.path IS NOT NULL AND tf.path <> '')"""
+                    ).fetchall()
+                    track_ids = [r["id"] for r in rows]
+                    _job_state.update(total=len(track_ids))
+                    # _mirror_tracks_wishlist re-checks upgrade_candidate per
+                    # track and only queues genuine upgrade candidates.
+                    queued = _mirror_tracks_wishlist(db, conn, track_ids, True)
+                    _job_state.update(result={"checked": len(track_ids), "queued": queued})
+                finally:
+                    conn.close()
+            except Exception as e:  # noqa: BLE001
+                logger.error("Upgrade scan failed: %s", e, exc_info=True)
+                _job_state.update(error=str(e))
+            finally:
+                _job_state.update(running=False, finished_at=_t.time())
+
+        threading.Thread(target=_run, name="lib2-upgrade-scan", daemon=True).start()
+        return jsonify({"success": True, "started": True})
+
     # -- refresh & scan (re-read tags into DB + bust artwork cache) -----------
 
     @app.route("/api/library/v2/<entity>/<int:eid>/refresh", methods=["POST"])
@@ -521,7 +711,16 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                         pass
         finally:
             conn.close()
-        return jsonify({"success": True, "refreshed_albums": len(album_ids)})
+        # Probe the files in scope so quality evaluation runs against measured
+        # sample-rate/bit-depth instead of format-based fallbacks.
+        scan_stats = {}
+        try:
+            from core.library2.scan import rescan_files
+            scan_stats = rescan_files(db, album_ids=album_ids)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("file rescan failed (%s %s): %s", entity, eid, e)
+        return jsonify({"success": True, "refreshed_albums": len(album_ids),
+                        "scan": scan_stats})
 
     # -- importer -------------------------------------------------------------
 
