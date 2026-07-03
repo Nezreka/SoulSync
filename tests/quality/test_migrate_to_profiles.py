@@ -187,6 +187,15 @@ def test_migration_does_not_overwrite_existing_auto_import_override(db, monkeypa
         conn.commit()
         apply_pending_quality_profile_config_writes(db)
         assert "auto_import.quality_profile_id" not in set_calls
+
+        # The whole point of checking the override BEFORE inserting: no
+        # unused, orphaned "Auto-Import (accept anything)" row should exist
+        # when Auto-Import already had its own explicit assignment.
+        orphan = conn.execute(
+            "SELECT id FROM quality_profiles WHERE name=?",
+            ("Auto-Import (accept anything)",),
+        ).fetchone()
+        assert orphan is None
     finally:
         conn.close()
 

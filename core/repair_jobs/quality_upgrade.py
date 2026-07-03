@@ -65,11 +65,28 @@ def _upgrade_cutoff_index(profile: dict, targets: list, settings: dict) -> Optio
 
     ``None`` means any configured target is acceptable. ``until_top`` is kept
     as a compatibility alias for rows created by the first profile branch.
+
+    The legacy job-level ``require_top_target`` setting (pre-dates
+    ``upgrade_policy`` existing on the profile at all — not exposed in any
+    current settings UI, but still honored for installs upgrading with it
+    already set in config.json) used to bridge in only when ``policy is
+    None``. But a profile loaded from the DB never actually IS ``None`` —
+    ``MusicDatabase._quality_profile_row_to_dict`` always coerces it to a
+    real string (``row["upgrade_policy"] or "acceptable"``), and the
+    quality-profile migration has no legacy field to carry it forward from
+    either (``preferences.quality_profile`` never had an ``upgrade_policy``
+    key), so every migrated profile lands on the "acceptable" fallback. That
+    made this bridge permanently dead code post-migration, silently dropping
+    anyone who had "upgrade until top quality" enabled at the job level down
+    to "flag below any accepted target". Honoring it on "acceptable" too
+    (not just ``None``) fixes that without touching an EXPLICIT ``until_cutoff``/
+    ``acceptable`` choice made elsewhere (there is no UI path that sets both
+    an explicit "acceptable" policy AND this legacy flag going forward).
     """
     policy = profile.get("upgrade_policy")
     if policy == "until_top":
         policy = "until_cutoff"
-    if policy is None and settings.get("require_top_target"):
+    if policy in (None, "acceptable") and settings.get("require_top_target"):
         policy = "until_cutoff"
     if policy != "until_cutoff" or not targets:
         return None

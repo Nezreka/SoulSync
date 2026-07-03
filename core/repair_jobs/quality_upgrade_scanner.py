@@ -36,10 +36,14 @@ AUDIO_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.
 
 
 def _upgrade_cutoff_index(profile: dict, targets: list, settings: dict):
+    """See core/repair_jobs/quality_upgrade.py's identical function for why
+    "acceptable" (not just None) must also bridge in the legacy
+    require_top_target job setting — a DB-loaded profile's upgrade_policy is
+    never actually None."""
     policy = profile.get("upgrade_policy")
     if policy == "until_top":
         policy = "until_cutoff"
-    if policy is None and settings.get("require_top_target"):
+    if policy in (None, "acceptable") and settings.get("require_top_target"):
         policy = "until_cutoff"
     if policy != "until_cutoff" or not targets:
         return None

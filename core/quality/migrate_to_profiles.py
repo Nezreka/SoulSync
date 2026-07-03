@@ -173,6 +173,15 @@ def _materialize_relaxed_auto_import_profile(cursor, config_manager, fields: dic
     so a later failure in the same transaction can't leave config.json
     pointing at a profile row that got rolled back.
     """
+    # Check BEFORE inserting — an existing override means Auto-Import already
+    # has a real, deliberate assignment, so this relaxed clone is unnecessary.
+    # Checking only after the INSERT (the previous ordering here) still
+    # correctly avoided reassigning Auto-Import, but left the freshly created
+    # profile row behind anyway: orphaned, unused by anything, cluttering the
+    # profile list for no reason.
+    if config_manager.get("auto_import.quality_profile_id"):
+        return None
+
     clone_fields = dict(fields)
     clone_fields["fallback_enabled"] = 1
     cursor.execute(
@@ -200,10 +209,7 @@ def _materialize_relaxed_auto_import_profile(cursor, config_manager, fields: dic
             **clone_fields, **bundle,
         },
     )
-    new_profile_id = cursor.lastrowid
-    if config_manager.get("auto_import.quality_profile_id"):
-        return None
-    return new_profile_id
+    return cursor.lastrowid
 
 
 def materialize_default_profile_and_backfill(database, conn) -> bool:
