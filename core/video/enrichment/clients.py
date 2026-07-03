@@ -73,13 +73,21 @@ class TMDBClient:
             meta["overview"] = results[0].get("overview")
             if tmdb_id is None:
                 return None
+        # A failed details CALL (429 rate-limit, 5xx, timeout) must PROPAGATE so the
+        # backfill records an error and retries — not get swallowed into empty
+        # metadata that then gets marked details_synced=1 forever (the bug that left
+        # ~29% of shows with no status/network). A 404 = TMDB genuinely has nothing,
+        # so keep what we have and let it settle.
+        detail_path = "/movie/" if kind == "movie" else "/tv/"
+        _resp = requests.get(self.BASE + detail_path + str(tmdb_id),
+                             params={"api_key": self.api_key,
+                                     "append_to_response": "external_ids,credits,images",
+                                     "include_image_language": "en,null"},
+                             timeout=15)
+        if _resp.status_code != 404:
+            _resp.raise_for_status()
         try:
-            detail_path = "/movie/" if kind == "movie" else "/tv/"
-            dr = requests.get(self.BASE + detail_path + str(tmdb_id),
-                              params={"api_key": self.api_key,
-                                      "append_to_response": "external_ids,credits,images",
-                                      "include_image_language": "en,null"},
-                              timeout=15).json() or {}
+            dr = _resp.json() or {}
             meta["overview"] = dr.get("overview") or meta.get("overview")
             if dr.get("backdrop_path"):
                 meta["backdrop_url"] = self.IMG + dr["backdrop_path"]
@@ -106,6 +114,9 @@ class TMDBClient:
             else:
                 meta["first_air_date"] = dr.get("first_air_date")
                 meta["last_air_date"] = dr.get("last_air_date")
+                nets = dr.get("networks") or []
+                if nets:
+                    meta["network"] = nets[0].get("name")
                 ert = dr.get("episode_run_time") or []
                 if ert:
                     meta["runtime_minutes"] = ert[0]

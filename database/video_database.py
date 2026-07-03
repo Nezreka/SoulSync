@@ -2151,7 +2151,13 @@ class VideoDatabase:
             srv_where, pre = "s.server_source IS NOT NULL", []
         wl_where = ""
         if watchlist_only:
-            active = self._ACTIVE_SHOW_SQL.replace("status", "s.status")
+            # A show with an episode in the calendar window is airing BY DEFINITION,
+            # so for the calendar we only exclude shows we KNOW are terminal — a
+            # NULL/blank status (enrichment gap) must NOT hide an airing show. (The
+            # global _ACTIVE_SHOW_SQL requires a non-null status, which drops ~29%
+            # of shows whose status backfill never landed — Cops, Dutton Ranch, …)
+            active = ("(s.status IS NULL OR TRIM(s.status)='' OR LOWER(s.status) "
+                      "NOT IN ('ended','canceled','cancelled','completed'))")
             wl_where = (
                 " AND (s.tmdb_id IN (SELECT tmdb_id FROM video_watchlist WHERE kind='show' AND state='follow')"
                 " OR (" + active + " AND s.tmdb_id NOT IN "
