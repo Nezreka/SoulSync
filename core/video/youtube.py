@@ -325,7 +325,7 @@ def _harvest(kind, base, cid, pages, fetch):
     instances return an empty first page), stopping when there's no token left."""
     from urllib.parse import quote
     out, token = {}, None
-    for i in range(max(1, pages)):
+    for _ in range(max(1, pages)):
         if kind == "piped":
             url = (base + "/channel/" + cid) if token is None \
                 else (base + "/nextpage/channel/" + cid + "?nextpage=" + quote(token, safe=""))
