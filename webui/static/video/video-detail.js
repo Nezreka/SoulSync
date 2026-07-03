@@ -450,10 +450,25 @@
         // Get control instead (unowned → add to wishlist, owned → re-download /
         // upgrade). Opens the same VideoGet modal the discover/search cards use.
         if (d.kind === 'movie' && window.VideoGet) {
+            var wished = !!d._wl_wished;
+            var wlLabel = wished ? 'In Wishlist' : (d.owned ? 'Get' : 'Add to Wishlist');
+            var wlIcon = wished ? '✓' : (d.owned ? '⬇' : '＋');
             html +=
-                '<button class="library-artist-watchlist-btn" type="button" data-vd-act="get">' +
-                '<span class="watchlist-icon">' + (d.owned ? '⬇' : '＋') + '</span>' +
-                '<span class="watchlist-text">' + (d.owned ? 'Get' : 'Add to Wishlist') + '</span></button>';
+                '<button class="library-artist-watchlist-btn' + (wished ? ' watching' : '') + '" type="button" data-vd-act="get">' +
+                '<span class="watchlist-icon">' + wlIcon + '</span>' +
+                '<span class="watchlist-text">' + wlLabel + '</span></button>';
+            // Reflect wishlist membership on the button (like the show watchlist eye):
+            // check once, then re-render. Re-checked on soulsync:video-wishlist-changed.
+            if (!d._wl_checked && d.tmdb_id) {
+                d._wl_checked = true;
+                fetch('/api/video/wishlist/check', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ movie_ids: [d.tmdb_id] }) })
+                    .then(function (r) { return r.ok ? r.json() : null; })
+                    .then(function (res) {
+                        var w = !!(res && res.movies && res.movies.some(function (m) { return String(m) === String(d.tmdb_id); }));
+                        if (w !== !!d._wl_wished) { d._wl_wished = w; if (data === d) renderActions(d); }
+                    }).catch(function () { /* keep default */ });
+            }
         }
         // "Get Missing" filters the OWNED episode list — library shows only.
         if (d.kind === 'show' && d.source !== 'tmdb') {
@@ -2028,6 +2043,11 @@
         // Kill the billboard trailer (audio!) when navigating to a non-detail page.
         document.addEventListener('soulsync:video-page-shown', function (e) {
             if (e && e.detail !== 'video-movie-detail' && e.detail !== 'video-show-detail') stopBillboardTrailer();
+        });
+        // Keep the movie Get button's "In Wishlist" state fresh — re-check whenever
+        // the wishlist changes (e.g. after the Get modal adds/removes this movie).
+        document.addEventListener('soulsync:video-wishlist-changed', function () {
+            if (currentKind === 'movie' && data) { data._wl_checked = false; renderActions(data); }
         });
         document.addEventListener('keydown', function (e) {
             if (e.key === 'Escape') { closeTrailer(); closeLightbox(); closeCastModal(); }
