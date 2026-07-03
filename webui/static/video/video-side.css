@@ -153,8 +153,12 @@ body[data-side="video"] .settings-group[data-stg="connections"]:not([data-video-
    side — not just .settings-group, but also the quality-profile tile + the
    collapsible section headers/bodies (#quality-profile-tile, .settings-section-*).
    The video-only ones (folders, video source/hybrid, video quality) replace them.
-   The shared "Indexers & Downloaders" tab is NOT hidden — it's identical for both. */
-body[data-side="video"] [data-stg="downloads"]:not([data-video-only]) {
+   EXCEPTION: the shared torrent/usenet setup (Indexers/Prowlarr, Torrent Client,
+   Usenet Client) is identical for both sides — the video downloader grabs via
+   Prowlarr too — so those sections (header + body + group) carry data-shared and
+   stay visible on video. (Pre-merge these lived on a separate "indexers" tab that
+   this rule didn't touch; the merge folded them under data-stg="downloads".) */
+body[data-side="video"] [data-stg="downloads"]:not([data-video-only]):not([data-shared]) {
     display: none !important;
 }
 /* The Quality tab's music sections (quality profile, import checks, conversion,
