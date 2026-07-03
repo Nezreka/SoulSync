@@ -3460,8 +3460,19 @@ class RepairWorker:
             try:
                 conn = self.db._get_connection()
                 cursor = conn.cursor()
-                # Try exact match
-                cursor.execute("UPDATE tracks SET file_path = ? WHERE file_path = ?", (dst, src))
+                # Prefer updating the exact track by id — authoritative, the way the
+                # live reorganize executor does it. Path-matching below is a fallback:
+                # it can MISS for media-server libraries whose stored file_path differs
+                # from the resolved path we just moved, which is exactly the #978
+                # population (so without this the file moves but the DB stays stale).
+                try:
+                    tid = int(entity_id) if entity_id not in (None, '') else None
+                except (TypeError, ValueError):
+                    tid = None
+                if tid is not None:
+                    cursor.execute("UPDATE tracks SET file_path = ? WHERE id = ?", (dst, tid))
+                if tid is None or cursor.rowcount == 0:
+                    cursor.execute("UPDATE tracks SET file_path = ? WHERE file_path = ?", (dst, src))
                 if cursor.rowcount == 0:
                     cursor.execute("UPDATE tracks SET file_path = ? WHERE file_path = ?",
                                    (dst, os.path.normpath(src)))
