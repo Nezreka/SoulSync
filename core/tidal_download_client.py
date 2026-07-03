@@ -16,6 +16,9 @@ import uuid
 import time
 import shutil
 import subprocess
+import threading
+import contextlib
+from collections import deque
 from typing import List, Optional, Dict, Any, Tuple
 from pathlib import Path
 from datetime import datetime, timezone
@@ -36,6 +39,87 @@ from core.download_plugins.types import TrackResult, AlbumResult, DownloadStatus
 from core.quality.source_map import quality_from_tidal_tier, quality_tier_for_source
 
 logger = get_logger("tidal_download_client")
+
+
+# --- Download-path Tidal request-rate instrumentation -------------------------
+# The download path (tidalapi search + the raw trackManifests GET) talks to Tidal
+# WITHOUT going through core.tidal_client's global @rate_limited gate that paces
+# the enrichment worker to ~2 req/s. When a download batch fans out across
+# workers these requests can burst, and Tidal's anti-bot may answer with a
+# 401/403 + captcha ("bot-like behavior") that deauths the *download* session —
+# a failure mode users hit on downloads but never on enrichment (which stays
+# throttled). This meter records outbound download requests so that, when
+# pushback (429/401/403) lands, we can log the request rate that immediately
+# preceded it — turning "probably a burst" into evidence, and distinguishing it
+# from a deauth at low volume (which points at IP/account, not our request rate).
+# Diagnostic ONLY: it records and logs, it does NOT throttle anything (a
+# proactive limiter is a separate, deliberate change).
+_dl_req_lock = threading.Lock()
+_dl_req_times: "deque[float]" = deque(maxlen=2048)
+
+
+def _record_download_request() -> None:
+    """Timestamp one outbound Tidal download request (search or manifest)."""
+    with _dl_req_lock:
+        _dl_req_times.append(time.time())
+
+
+def _download_request_rate(window_seconds: float = 10.0) -> int:
+    """Count download requests recorded in the last ``window_seconds``."""
+    now = time.time()
+    with _dl_req_lock:
+        return sum(1 for t in _dl_req_times if now - t <= window_seconds)
+
+
+def _safe_response_body(response, limit: int = 300) -> str:
+    """Read a short slice of a response body for diagnostics — never raises, so
+    a weird/undecodable error body can't propagate into the download path."""
+    with contextlib.suppress(Exception):
+        return (response.text or '')[:limit]
+    return ''
+
+
+def _classify_tidal_pushback(text: str) -> Optional[str]:
+    """Tag a response body / error string as Tidal anti-abuse pushback:
+    ``'bot_challenge'`` | ``'rate_limit'`` | ``'deauth'``, else ``None``.
+    Used only to label diagnostic logs — never affects control flow."""
+    if not text:
+        return None
+    low = text.lower()
+    if 'captcha' in low or 'bot-like' in low or 'bot like' in low or 'challenge' in low:
+        return 'bot_challenge'
+    if '429' in low or 'too many requests' in low or 'rate limit' in low:
+        return 'rate_limit'
+    if ('401' in low or '403' in low or 'unauthorized' in low
+            or 'forbidden' in low or 'invalid_token' in low):
+        return 'deauth'
+    return None
+
+
+def _log_tidal_download_pushback(context: str, *, status=None, body: str = '',
+                                 exc: Exception = None) -> None:
+    """Emit a prominent, greppable log line when Tidal pushes back on a download
+    request, stamped with the request rate that preceded it — the evidence that
+    tells "we burst and got flagged" apart from "flagged at low volume". Also
+    records an event into api_call_tracker so it surfaces in Copy Debug Info.
+    Best-effort: never raises into the download path."""
+    with contextlib.suppress(Exception):
+        rate10 = _download_request_rate(10.0)
+        rate60 = _download_request_rate(60.0)
+        snippet = (body or (str(exc) if exc else '') or '').strip().replace('\n', ' ')[:300]
+        reason = _classify_tidal_pushback(f"{status or ''} {snippet}") or 'unknown'
+        logger.error(
+            "TIDAL DOWNLOAD PUSHBACK [%s] reason=%s status=%s — %d download req in last 10s, "
+            "%d in last 60s. The download path is NOT globally rate-limited; this is the request "
+            "rate that preceded the pushback. body=%r",
+            context, reason, status, rate10, rate60, snippet,
+        )
+        with contextlib.suppress(Exception):
+            from core.api_call_tracker import api_call_tracker
+            api_call_tracker.record_event(
+                'tidal', reason, endpoint=f'download:{context}',
+                detail=f'{rate10}/10s {rate60}/60s status={status} {snippet}'[:200],
+            )
 
 # How long a live check_login() result is trusted before re-verifying. Keeps the download-source
 # status poll from hitting Tidal on every call and prevents a single transient failure from flipping
@@ -474,6 +558,7 @@ class TidalDownloadClient(DownloadSourcePlugin):
                     q_copy = attempt_query
 
                     def _search(q=q_copy):
+                        _record_download_request()
                         results = self.session.search(q, models=[tidalapi.media.Track], limit=50)
                         return results.get('tracks', []) if isinstance(results, dict) else []
 
@@ -525,6 +610,8 @@ class TidalDownloadClient(DownloadSourcePlugin):
                 except Exception as e:
                     last_error = e
                     logger.debug(f"Tidal search attempt {attempt_idx + 1} failed: {e}")
+                    if _classify_tidal_pushback(str(e)):
+                        _log_tidal_download_pushback('search', exc=e)
 
             if not tidal_tracks:
                 if last_error is not None:
@@ -701,15 +788,29 @@ class TidalDownloadClient(DownloadSourcePlugin):
         returns the last 429 response so existing error handling applies."""
         response = None
         for attempt in range(self._MANIFEST_MAX_RETRIES + 1):
+            _record_download_request()
             response = http_requests.get(url, params=params, headers=headers, timeout=timeout)
+            # 401/403 is Tidal deauthing / anti-bot-challenging the download
+            # session — the "bot-like behavior" + captcha users report. Log it
+            # loudly with the request-rate snapshot, then return unchanged so the
+            # caller's raise_for_status path behaves exactly as before.
+            if response.status_code in (401, 403):
+                _log_tidal_download_pushback('manifest', status=response.status_code,
+                                             body=_safe_response_body(response))
+                return response
             if response.status_code != 429 and response.status_code < 500:
                 return response
             if attempt >= self._MANIFEST_MAX_RETRIES:
+                if response.status_code == 429:
+                    _log_tidal_download_pushback('manifest', status=429,
+                                                 body=_safe_response_body(response))
                 return response
             delay = self._retry_after_seconds(response, attempt)
             logger.warning(
                 f"Tidal returned {response.status_code} on manifest fetch — backing off "
-                f"{delay:.1f}s (attempt {attempt + 1}/{self._MANIFEST_MAX_RETRIES})")
+                f"{delay:.1f}s (attempt {attempt + 1}/{self._MANIFEST_MAX_RETRIES}); "
+                f"{_download_request_rate(10.0)} download req in last 10s, "
+                f"{_download_request_rate(60.0)} in last 60s")
             if self._sleep_with_shutdown(delay):
                 return response
         return response
