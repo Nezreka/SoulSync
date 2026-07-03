@@ -4880,8 +4880,20 @@ def update_custom_quality_profile(profile_id):
         if not db.update_quality_profile(profile_id, data):
             return jsonify({"success": False, "error": "Profile not found"}), 404
 
+        profiles = db.list_quality_profiles()
+        # Editing the ACTIVE DEFAULT profile must also push the new values
+        # into config.json — every profile-owned key the rest of the app
+        # reads directly (AcoustID, lossy-copy, deep-verify, replace-lower-
+        # quality). Without this, the row and config.json go out of sync,
+        # and the next unrelated Settings save (which mirrors config -> the
+        # default row via sync_default_quality_profile_from_config) silently
+        # reverts this edit back to the stale config values.
+        if any(p['id'] == profile_id and p.get('is_default') for p in profiles):
+            db.apply_quality_profile_to_settings(profile_id)
+            profiles = db.list_quality_profiles()
+
         add_activity_item("", "Quality Profile Updated", f"Updated saved profile {profile_id}", "Now")
-        return jsonify({"success": True, "profiles": db.list_quality_profiles()})
+        return jsonify({"success": True, "profiles": profiles})
     except Exception as e:
         logger.error(f"Error updating quality profile: {e}")
         return jsonify({"success": False, "error": str(e)}), 500

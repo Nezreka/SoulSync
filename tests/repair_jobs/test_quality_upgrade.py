@@ -89,6 +89,41 @@ def test_nothing_enabled_flags_nothing():
     assert meets('song.mp3', 64, NOTHING_ENABLED) is True
 
 
+# --- require_top_target legacy bridge (both jobs) ---------------------------
+#
+# `require_top_target` predates `upgrade_policy` existing on the profile at
+# all — a JOB-level setting (config.json's repair.jobs.<id>.settings), not
+# exposed in any current settings UI, kept only so an install that had it set
+# before the quality-profiles migration doesn't silently lose "upgrade until
+# top quality" behavior. `MusicDatabase._quality_profile_row_to_dict` always
+# coerces `upgrade_policy` to a real string ("acceptable" fallback, never
+# None) — the migration has no legacy field to carry it from either — so a
+# profile loaded from the DB is NEVER `upgrade_policy=None`. The bridge must
+# fire on "acceptable" too, or it's permanently dead code post-migration.
+
+def test_active_finder_require_top_target_bridges_from_acceptable(monkeypatch):
+    from core.quality.model import QualityTarget
+    targets = [QualityTarget(label='FLAC', format='flac'),
+               QualityTarget(label='MP3 320', format='mp3', min_bitrate=320)]
+    profile = {'upgrade_policy': 'acceptable', 'upgrade_cutoff_index': 0}
+    assert qu._upgrade_cutoff_index(profile, targets, {'require_top_target': True}) == 0
+
+
+def test_active_finder_require_top_target_noop_when_not_set(monkeypatch):
+    from core.quality.model import QualityTarget
+    targets = [QualityTarget(label='FLAC', format='flac')]
+    profile = {'upgrade_policy': 'acceptable', 'upgrade_cutoff_index': 0}
+    assert qu._upgrade_cutoff_index(profile, targets, {'require_top_target': False}) is None
+
+
+def test_scanner_require_top_target_bridges_from_acceptable(monkeypatch):
+    from core.quality.model import QualityTarget
+    targets = [QualityTarget(label='FLAC', format='flac'),
+               QualityTarget(label='MP3 320', format='mp3', min_bitrate=320)]
+    profile = {'upgrade_policy': 'acceptable', 'upgrade_cutoff_index': 0}
+    assert qs._upgrade_cutoff_index(profile, targets, {'require_top_target': True}) == 0
+
+
 # --- scan produces a finding (seam) ----------------------------------------
 
 class _FakeConn:
