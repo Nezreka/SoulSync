@@ -253,6 +253,37 @@ export async function writeLibraryV2Tags(trackIds: number[], embedCover = true):
   if (!payload.success) throw new Error(payload.error || 'Write tags failed');
 }
 
+export interface LibraryV2DuplicateSide {
+  track_id: number;
+  album_title: string | null;
+  monitored: boolean;
+  file: {
+    path: string;
+    format: string | null;
+    bitrate: number | null;
+    sample_rate: number | null;
+    bit_depth: number | null;
+  } | null;
+}
+
+export interface LibraryV2DuplicatePair {
+  title: string | null;
+  single: LibraryV2DuplicateSide;
+  album: LibraryV2DuplicateSide;
+}
+
+export async function fetchLibraryV2Duplicates(
+  artistId: number,
+): Promise<LibraryV2DuplicatePair[]> {
+  const payload = await readJson<{
+    success: boolean;
+    pairs?: LibraryV2DuplicatePair[];
+    error?: string;
+  }>(apiClient.get(`library/v2/artists/${artistId}/duplicates`));
+  if (!payload.success) throw new Error(payload.error || 'Duplicates failed');
+  return payload.pairs ?? [];
+}
+
 /** Trigger a library-wide repair job (Stats → Repair jobs) immediately. */
 export async function runRepairJob(jobId: string): Promise<void> {
   const payload = await readJson<{ success?: boolean; error?: string }>(

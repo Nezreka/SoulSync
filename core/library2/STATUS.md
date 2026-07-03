@@ -101,10 +101,25 @@ tests `tests/library2/`.
   when genuinely new, probes real quality. Gated on `features.library_v2`; never
   raises into the pipeline.
 
-### lib2-aware upgrade scan
-- `POST /api/library/v2/upgrade-scan` (background job): every monitored track with a
-  file under an `until_top` profile is re-checked (`_mirror_tracks_wishlist` re-runs
-  `upgrade_candidate`) and genuine upgrade candidates are queued into the Wishlist.
+### lib2-aware upgrade scan — manual AND periodic
+- Shared implementation `wishlist_mirror.py` (payload build, wishlist add/remove with
+  per-item `quality_profile_id`, upgrade-candidate selection) used by:
+  `POST /api/library/v2/upgrade-scan` (the "Search Upgrades" button) and the
+  **`lib2_upgrade_scan` repair job** (registered, default-off, 24h cadence) — enable
+  it under Stats → Repair jobs and upgrades keep flowing without pressing anything.
+
+### monitor_new_items enforcement
+- On a *re*-expansion of a monitored artist with `monitor_new_items` 'all'/'new',
+  newly DISCOVERED releases are auto-monitored: the discography endpoint materializes
+  their tracklists and mirrors them into the Wishlist. The FIRST expansion never
+  auto-monitors (that would queue the whole back catalog in one click).
+
+### Manage Tracks (Phase D, first slice)
+- `GET /api/library/v2/artists/<id>/duplicates`: single↔album duplicate pairs from the
+  importer's `canonical_track_id` links, each side with file quality + monitor state.
+- Manage Tracks modal shows the pairs with per-side monitor toggles ("which version
+  stays wanted"); duplicate-FILE removal remains the `single_album_dedup` maintenance
+  job (now in the Maintenance modal). Single↔album move stays on the roadmap.
 
 ### Interactive Search (Lidarr-style result table, source-aware)
 - Usenet/torrent plugins now pass `publish_date` in `_source_metadata` → **Age** column
@@ -153,17 +168,14 @@ tests `tests/library2/`.
 2. **Per-artist scope for repair jobs**: the Maintenance modal runs the jobs
    library-wide; scoping (e.g. gap-fill just this artist) needs a scope parameter in
    the repair-job base.
-3. **Phase D actions on lib2**: single↔album move/dedup (`single_album_dedup`),
-   Manage Tracks (placeholder modal documents this on the page).
+3. **Phase D remainder**: single↔album MOVE (re-home a track between releases);
+   Manage Tracks currently reviews duplicates + monitor state.
 4. **Explicit monitor provenance**: if album-level monitoring must survive re-imports
    independently from track-level wishlist monitoring, add provenance/mode columns
    instead of deriving parent release flags from child tracks.
-5. **Periodic lib2 upgrade scan**: `/upgrade-scan` is manual today; schedule it with the
-   existing repair/worker cadence once the behavior is proven.
-6. **`monitor_new_items` enforcement**: the flag is editable (Monitoring modal) and new
-   releases of watchlisted artists queue via the scanner; a discography-refresh pass
-   could additionally auto-monitor newly discovered rows when the flag says 'all'/'new'.
-7. **Optional**: cleanup job that consumes `lib2_manual_skips`.
+5. **Optional**: cleanup job that consumes `lib2_manual_skips`; periodic discography
+   re-expansion (today it refreshes on demand — the watchlist scanner already covers
+   new-release queueing on its own cadence).
 
 ## Run / verify (no Node/Flask locally — use Docker)
 ```

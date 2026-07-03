@@ -10,6 +10,7 @@ import {
   deleteLibraryV2Entity,
   editLibraryV2Artist,
   fetchLibraryV2ArtistHistory,
+  fetchLibraryV2Duplicates,
   fetchLibraryV2ImportStatus,
   fetchLibraryV2JobStatus,
   LIBRARY_V2_QUERY_KEY,
@@ -499,9 +500,19 @@ const MAINTENANCE_JOBS: Array<{ id: string; label: string; desc: string }> = [
     desc: 'Move files into the configured folder/name scheme (preview via Stats → Repair).',
   },
   {
+    id: 'single_album_dedup',
+    label: 'Single/Album Dedup',
+    desc: 'Find duplicate files where a single also exists on an album (review under Stats → Repair).',
+  },
+  {
     id: 'library_retag',
     label: 'Full Library Retag',
     desc: 'Rewrite tags from library metadata across the whole library.',
+  },
+  {
+    id: 'lib2_upgrade_scan',
+    label: 'Library v2 Upgrade Scan',
+    desc: 'Queue monitored tracks below their quality profile cutoff (also schedulable under Stats → Repair).',
   },
 ];
 
@@ -541,20 +552,84 @@ function MaintenanceModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-/** Roadmap placeholder (kept on purpose): shows what's planned so the page
- *  itself documents the remaining work. */
-function PlannedModal({ action, onClose }: { action: string; onClose: () => void }) {
+/** Manage Tracks: the same recording appearing both as a single and on an
+ *  album (linked by the importer via canonical_track_id). Shows each side's
+ *  quality and lets the user decide which version stays wanted; file-level
+ *  dedup is the single_album_dedup maintenance job. */
+function ManageTracksModal({ artistId, onClose }: { artistId: number; onClose: () => void }) {
+  const dupesQuery = useQuery({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'duplicates', artistId],
+    queryFn: () => fetchLibraryV2Duplicates(artistId),
+  });
+  const pairs = dupesQuery.data ?? [];
+
+  function fileText(side: { file: { format: string | null; bitrate: number | null } | null }) {
+    if (!side.file) return 'no file';
+    const fmt = (side.file.format ?? '').toUpperCase();
+    const kbps = side.file.bitrate
+      ? side.file.bitrate > 5000
+        ? Math.round(side.file.bitrate / 1000)
+        : side.file.bitrate
+      : null;
+    return [fmt, kbps ? `${kbps} kbps` : null].filter(Boolean).join(' / ') || 'file';
+  }
+
   return (
-    <ModalShell title={action} onClose={onClose}>
-      <p>
-        Planned, not wired yet — see <code>core/library2/STATUS.md</code> for the roadmap. It
-        will reuse the existing SoulSync machinery (single↔album dedup, manage-track moves)
-        once the lib2 write paths land.
+    <ModalShell title="Manage Tracks — single ↔ album duplicates" wide onClose={onClose}>
+      <p className={styles.qpSubtitle}>
+        The same recording released as a single and on an album. Unmonitor the version you
+        don't want kept up to date; removing duplicate <em>files</em> is the
+        "Single/Album Dedup" job under Maintenance.
       </p>
-      <div className={styles.modalActions}>
-        <button type="button" className={styles.btnPrimary} onClick={onClose}>
-          Close
-        </button>
+      <div className={styles.resultsWrap}>
+        {dupesQuery.isLoading ? (
+          <div className={styles.inlineLoading}>Scanning for duplicates…</div>
+        ) : pairs.length === 0 ? (
+          <div className={styles.inlineLoading}>
+            No single↔album duplicates found for this artist.
+          </div>
+        ) : (
+          <table className={styles.trackTable}>
+            <thead>
+              <tr>
+                <th>Title</th>
+                <th>Single version</th>
+                <th className={styles.colMonitor}>Mon.</th>
+                <th>Album version</th>
+                <th className={styles.colMonitor}>Mon.</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pairs.map((p, i) => (
+                <tr key={`${p.single.track_id}-${i}`}>
+                  <td>{p.title ?? '—'}</td>
+                  <td className={styles.qualityText}>
+                    {p.single.album_title ?? '—'}
+                    <span className={styles.muted}> · {fileText(p.single)}</span>
+                  </td>
+                  <td>
+                    <MonitorToggle
+                      entity="tracks"
+                      id={p.single.track_id}
+                      monitored={p.single.monitored}
+                    />
+                  </td>
+                  <td className={styles.qualityText}>
+                    {p.album.album_title ?? '—'}
+                    <span className={styles.muted}> · {fileText(p.album)}</span>
+                  </td>
+                  <td>
+                    <MonitorToggle
+                      entity="tracks"
+                      id={p.album.track_id}
+                      monitored={p.album.monitored}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </ModalShell>
   );
@@ -815,7 +890,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   const [showMonitoring, setShowMonitoring] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showMaintenance, setShowMaintenance] = useState(false);
-  const [plannedAction, setPlannedAction] = useState<string | null>(null);
+  const [showManageTracks, setShowManageTracks] = useState(false);
   const [retagTarget, setRetagTarget] = useState<{
     entity: 'artists' | 'albums';
     id: number;
@@ -998,8 +1073,8 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               <ActionButton
                 icon="tracks"
                 label="Manage Tracks"
-                title="Planned: single↔album moves and dedup"
-                onClick={() => setPlannedAction('Manage Tracks')}
+                title="Review single↔album duplicate recordings and their monitor state"
+                onClick={() => setShowManageTracks(true)}
               />
               <ActionButton
                 icon="history"
@@ -1153,8 +1228,8 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
           ) : null}
           {showHistory ? <HistoryModal artistId={artistId} onClose={() => setShowHistory(false)} /> : null}
           {showMaintenance ? <MaintenanceModal onClose={() => setShowMaintenance(false)} /> : null}
-          {plannedAction ? (
-            <PlannedModal action={plannedAction} onClose={() => setPlannedAction(null)} />
+          {showManageTracks ? (
+            <ManageTracksModal artistId={artistId} onClose={() => setShowManageTracks(false)} />
           ) : null}
           {retagTarget ? (
             <RetagModal

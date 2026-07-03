@@ -1,0 +1,66 @@
+"""Shared wishlist mirror: candidate selection for the upgrade scan."""
+
+from __future__ import annotations
+
+from core.library2.wishlist_mirror import (
+    track_wishlist_payload,
+    upgrade_candidate_track_ids,
+)
+
+
+def _seed(conn, *, policy: str, monitored: int = 1, with_file: bool = True) -> int:
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO quality_profiles(name, ranked_targets, upgrade_policy) VALUES(?,?,?)",
+        (f"P-{policy}-{monitored}-{with_file}",
+         '[{"label":"FLAC","format":"flac"}]', policy))
+    profile_id = cur.lastrowid
+    cur.execute("INSERT INTO lib2_artists(name) VALUES('X')")
+    artist_id = cur.lastrowid
+    cur.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title) VALUES(?, 'Alb')", (artist_id,))
+    album_id = cur.lastrowid
+    cur.execute("INSERT INTO lib2_album_artists(album_id, artist_id) VALUES(?,?)",
+                (album_id, artist_id))
+    cur.execute(
+        "INSERT INTO lib2_tracks(album_id, title, monitored, quality_profile_id) "
+        "VALUES(?, 'T', ?, ?)", (album_id, monitored, profile_id))
+    track_id = cur.lastrowid
+    cur.execute("INSERT INTO lib2_track_artists(track_id, artist_id) VALUES(?,?)",
+                (track_id, artist_id))
+    if with_file:
+        cur.execute(
+            "INSERT INTO lib2_track_files(track_id, path, format, bitrate) "
+            "VALUES(?, '/m/t.mp3', 'mp3', 320)", (track_id,))
+    conn.commit()
+    return track_id
+
+
+def test_upgrade_candidates_only_monitored_upgrade_policies_with_files(imported_conn):
+    conn = imported_conn
+    t_cutoff = _seed(conn, policy="until_cutoff")
+    t_top = _seed(conn, policy="until_top")
+    t_acceptable = _seed(conn, policy="acceptable")
+    t_unmonitored = _seed(conn, policy="until_cutoff", monitored=0)
+    t_fileless = _seed(conn, policy="until_cutoff", with_file=False)
+
+    ids = set(upgrade_candidate_track_ids(conn))
+    assert t_cutoff in ids
+    assert t_top in ids
+    assert t_acceptable not in ids
+    assert t_unmonitored not in ids
+    assert t_fileless not in ids
+
+
+def test_payload_carries_app_wide_profile_id(imported_conn):
+    conn = imported_conn
+    track_id = _seed(conn, policy="until_cutoff")
+    payload = track_wishlist_payload(conn, track_id)
+    assert payload is not None
+    profile_id = conn.execute(
+        "SELECT quality_profile_id FROM lib2_tracks WHERE id=?", (track_id,)
+    ).fetchone()["quality_profile_id"]
+    assert payload["quality_profile_id"] == profile_id
+    # An MP3 under an until_cutoff FLAC-only profile is an upgrade candidate.
+    assert payload["_should_queue"] is True
+    assert payload["_source_info"]["quality_profile_id"] == profile_id

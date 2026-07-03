@@ -115,6 +115,81 @@ def test_monitored_discography_row_survives_prune(legacy_db, imported_conn, fake
         "SELECT COUNT(*) c FROM lib2_albums WHERE title='Scorpion'").fetchone()["c"] == 1
 
 
+def test_first_expansion_never_auto_monitors(legacy_db, imported_conn, fake_discography):
+    """Even a monitored 'all' artist must NOT get its back catalog auto-queued
+    on the FIRST expansion."""
+    aid = _artist_id(imported_conn)
+    conn = legacy_db._get_connection()
+    conn.execute("UPDATE lib2_artists SET monitored=1, monitor_new_items='all' WHERE id=?", (aid,))
+    conn.commit()
+    conn.close()
+
+    stats = D.expand_artist_discography(legacy_db, aid)
+    assert stats["auto_monitor_album_ids"] == []
+    assert imported_conn.execute(
+        "SELECT monitored FROM lib2_albums WHERE title='Scorpion'").fetchone()["monitored"] == 0
+
+
+def test_reexpansion_auto_monitors_new_release(legacy_db, imported_conn, fake_discography, monkeypatch):
+    """monitor_new_items enforcement: a release DISCOVERED on re-expansion of a
+    monitored 'all' artist comes back pre-monitored."""
+    aid = _artist_id(imported_conn)
+    conn = legacy_db._get_connection()
+    conn.execute("UPDATE lib2_artists SET monitored=1, monitor_new_items='all' WHERE id=?", (aid,))
+    conn.commit()
+    conn.close()
+
+    D.expand_artist_discography(legacy_db, aid)  # first expansion (no auto-monitor)
+
+    grown = _cards(
+        ("albums", {"id": "sp-views", "title": "Views", "album_type": "album", "track_count": 20}),
+        ("albums", {"id": "sp-scorpion", "title": "Scorpion", "album_type": "album", "track_count": 25}),
+        ("albums", {"id": "sp-new", "title": "For All The Dogs", "album_type": "album",
+                    "track_count": 23}),
+        ("singles", {"id": "sp-onedance", "title": "One Dance", "album_type": "single",
+                     "track_count": 1}),
+    )
+    monkeypatch.setattr(
+        "core.metadata.discography.get_artist_detail_discography",
+        lambda artist_id, artist_name="", options=None: grown,
+    )
+    stats = D.expand_artist_discography(legacy_db, aid)
+    assert stats["added"] == 1
+    assert len(stats["auto_monitor_album_ids"]) == 1
+    row = imported_conn.execute(
+        "SELECT monitored FROM lib2_albums WHERE title='For All The Dogs'").fetchone()
+    assert row["monitored"] == 1
+    # The untouched back-catalog row stays unmonitored.
+    assert imported_conn.execute(
+        "SELECT monitored FROM lib2_albums WHERE title='Scorpion'").fetchone()["monitored"] == 0
+
+
+def test_reexpansion_respects_monitor_new_items_none(legacy_db, imported_conn, fake_discography, monkeypatch):
+    aid = _artist_id(imported_conn)
+    conn = legacy_db._get_connection()
+    conn.execute("UPDATE lib2_artists SET monitored=1, monitor_new_items='none' WHERE id=?", (aid,))
+    conn.commit()
+    conn.close()
+
+    D.expand_artist_discography(legacy_db, aid)
+    grown = _cards(
+        ("albums", {"id": "sp-views", "title": "Views", "album_type": "album", "track_count": 20}),
+        ("albums", {"id": "sp-scorpion", "title": "Scorpion", "album_type": "album", "track_count": 25}),
+        ("albums", {"id": "sp-new", "title": "For All The Dogs", "album_type": "album",
+                    "track_count": 23}),
+        ("singles", {"id": "sp-onedance", "title": "One Dance", "album_type": "single",
+                     "track_count": 1}),
+    )
+    monkeypatch.setattr(
+        "core.metadata.discography.get_artist_detail_discography",
+        lambda artist_id, artist_name="", options=None: grown,
+    )
+    stats = D.expand_artist_discography(legacy_db, aid)
+    assert stats["auto_monitor_album_ids"] == []
+    assert imported_conn.execute(
+        "SELECT monitored FROM lib2_albums WHERE title='For All The Dogs'").fetchone()["monitored"] == 0
+
+
 def test_reimport_claims_discography_row(legacy_db, imported_conn, fake_discography):
     """When files for a discography-only release get imported later, the importer
     claims the existing row instead of duplicating the release."""

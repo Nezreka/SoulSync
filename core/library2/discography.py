@@ -14,13 +14,13 @@ Persistence rules:
 - Genuinely new releases are inserted with ``origin='discography'`` and
   ``monitored=0`` — pure metadata, no wishlist side effects. Monitoring stays an
   explicit user action (the monitor endpoint materializes the tracklist and
-  mirrors to the wishlist).
+  mirrors to the wishlist). ONE exception: on a *re*-expansion of a monitored
+  artist whose ``monitor_new_items`` is 'all'/'new', newly DISCOVERED releases
+  are auto-monitored (their ids come back in ``auto_monitor_album_ids`` so the
+  caller can materialize + mirror them). The first expansion never does this —
+  it would queue the whole back catalog in one click.
 - Releases that disappeared from the provider are pruned again, but only when
   they are still pristine (no tracks, not monitored, origin='discography').
-
-New-release automation intentionally lives elsewhere: watchlisted (= monitored)
-artists already get their *new* releases queued by the existing watchlist
-scanner; this module only makes the full back catalog visible and monitorable.
 """
 
 from __future__ import annotations
@@ -116,11 +116,13 @@ def expand_artist_discography(database, artist_id: int) -> Dict[str, Any]:
     """
     import json
 
-    stats = {"added": 0, "enriched": 0, "removed": 0, "total": 0, "source": None}
+    stats: Dict[str, Any] = {"added": 0, "enriched": 0, "removed": 0, "total": 0,
+                             "source": None, "auto_monitor_album_ids": []}
     conn = database._get_connection()
     try:
         artist = conn.execute(
-            "SELECT id, name, spotify_id, quality_profile_id FROM lib2_artists WHERE id=?",
+            "SELECT id, name, spotify_id, quality_profile_id, monitored, monitor_new_items "
+            "FROM lib2_artists WHERE id=?",
             (artist_id,),
         ).fetchone()
         if not artist:
@@ -133,6 +135,18 @@ def expand_artist_discography(database, artist_id: int) -> Dict[str, Any]:
             return stats
 
         index = _existing_release_index(conn, artist_id)
+        # "Monitor new items" applies to releases DISCOVERED after the catalog
+        # was first expanded — never to the first expansion itself (that would
+        # queue an artist's whole back catalog in one click).
+        had_discography = any(
+            row["origin"] == "discography"
+            for rows in index.values() for row in rows
+        )
+        auto_monitor_new = bool(
+            had_discography
+            and artist["monitored"]
+            and (artist["monitor_new_items"] or "all") in ("all", "new")
+        )
         seen_ids: set = set()
         cursor = conn.cursor()
 
@@ -180,13 +194,16 @@ def expand_artist_discography(database, artist_id: int) -> Dict[str, Any]:
                        release_date, year, spotify_id, external_ids, image_url,
                        track_count, expected_track_count, origin, monitored,
                        quality_profile_id)
-                   VALUES(?,?,?,?,?,?,?,?,?,?, 'discography', 0, ?)""",
+                   VALUES(?,?,?,?,?,?,?,?,?,?, 'discography', ?, ?)""",
                 (artist_id, title, album_type, release_date, year, spotify_id,
                  external_ids, image_url, track_count, track_count,
+                 1 if auto_monitor_new else 0,
                  artist["quality_profile_id"] or 1),
             )
             new_id = cursor.lastrowid
             seen_ids.add(new_id)
+            if auto_monitor_new:
+                stats["auto_monitor_album_ids"].append(new_id)
             cursor.execute(
                 "INSERT OR IGNORE INTO lib2_album_artists(album_id, artist_id, role) "
                 "VALUES(?,?, 'primary')", (new_id, artist_id),
