@@ -168,6 +168,29 @@
         dashboardHeader.addEventListener('mouseleave', onMouseLeave);
         window.addEventListener('resize', onResize);
         document.addEventListener('visibilitychange', onVisibility);
+
+        // The Music↔Video side toggle hides the whole music page with
+        // `display:none` (body[data-side="video"] .page:not(.video-page)). On a
+        // fresh load *from* the video side, the dashboard is already the active
+        // music page but sits at 0x0, so init/bootstrap measured every orb home
+        // at the (0,0) top-left origin. Switching back to music is just an
+        // attribute flip — it fires neither `resize` nor `visibilitychange` and
+        // doesn't re-run setPage() — so nothing recomputed the geometry and the
+        // cluster stayed pinned to the top-left corner (blooming, and shooting
+        // there on hover). Re-measure the instant the header regains real size.
+        if (typeof ResizeObserver !== 'undefined') {
+            let hadSize = dashboardHeader.getBoundingClientRect().width > 0;
+            const ro = new ResizeObserver(() => {
+                const hasSize = dashboardHeader.getBoundingClientRect().width > 0;
+                if (hasSize && !hadSize && onDashboard) {
+                    computeHomes();
+                    resizeCanvas();
+                    if (state === 'orbs') centerOrbs();
+                }
+                hadSize = hasSize;
+            });
+            ro.observe(dashboardHeader);
+        }
     }
 
     function computeHomes() {
