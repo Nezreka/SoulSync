@@ -4,12 +4,24 @@ import {
   LIBRARY_V2_QUERY_KEY,
   libraryV2QualityProfilesQueryOptions,
   setLibraryV2QualityProfile,
-  syncLibraryV2QualityProfiles,
 } from '../-library-v2.api';
+import type { LibraryV2QualityProfile } from '../-library-v2.types';
 import styles from './library-v2-page.module.css';
 
-/** Pick the quality profile for an artist or album. Profiles drive what quality
- *  counts as "good enough" and whether upgrades are proposed (see core/quality). */
+function policyLabel(p: LibraryV2QualityProfile): string {
+  if (p.upgrade_policy === 'until_top') return 'Upgrades until top quality';
+  if (p.upgrade_policy === 'until_cutoff') {
+    return p.upgrade_cutoff_index > 0
+      ? `Upgrades until cutoff (target #${p.upgrade_cutoff_index + 1})`
+      : 'Upgrades until top quality';
+  }
+  return 'No upgrades once acceptable';
+}
+
+/** Pick the quality profile for an artist or album. These are the app-wide
+ *  profiles (Settings → Quality) — the exact rows the wishlist/download
+ *  pipeline enforces, so assigning one here changes what gets searched,
+ *  accepted and upgraded for this artist/album. */
 export function QualityProfileModal({
   entity,
   id,
@@ -30,11 +42,6 @@ export function QualityProfileModal({
     onSettled: () => queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY }),
     onSuccess: () => onClose(),
   });
-  const syncMutation = useMutation({
-    mutationFn: syncLibraryV2QualityProfiles,
-    onSettled: () => queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY }),
-  });
-
   const profiles = profilesQuery.data ?? [];
 
   return (
@@ -51,19 +58,7 @@ export function QualityProfileModal({
             {entity === 'artists' ? 'Artist' : 'Album'}: {title}
             {entity === 'artists' ? ' — applies to all its albums' : ''}
           </p>
-          <button
-            type="button"
-            className={styles.btnGhost}
-            disabled={syncMutation.isPending}
-            title="Import the profiles you defined in Settings → Quality"
-            onClick={() => syncMutation.mutate()}
-          >
-            {syncMutation.isPending
-              ? 'Syncing…'
-              : syncMutation.isSuccess
-                ? `Synced ${syncMutation.data}`
-                : 'Sync from Settings'}
-          </button>
+          <span className={styles.qpManagedHint}>Profiles are managed in Settings → Quality</span>
         </div>
         <div className={styles.qpList}>
           {profilesQuery.isLoading ? (
@@ -84,11 +79,7 @@ export function QualityProfileModal({
                     {active ? <span className={styles.qpCurrent}>current</span> : null}
                   </span>
                   {p.description ? <span className={styles.qpDesc}>{p.description}</span> : null}
-                  <span className={styles.qpPolicy}>
-                    {p.upgrade_policy === 'until_top'
-                      ? 'Upgrades until top quality'
-                      : 'No upgrades once acceptable'}
-                  </span>
+                  <span className={styles.qpPolicy}>{policyLabel(p)}</span>
                 </button>
               );
             })

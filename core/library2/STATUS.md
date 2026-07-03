@@ -51,12 +51,20 @@ tests `tests/library2/`.
 - Only **Interactive Search** opens the window; **Search/Grab** auto-grab the best result
   (status banner).
 
-### Quality profiles  (Phase D, Milestone 1)
-- `lib2_quality_profiles` (Balanced / Upgrade-until-top + **synced from Settings →
-  Quality presets** via `profiles_sync.py`). Assign per artist/album (cascades).
+### Quality profiles — app-wide, pipeline-enforced (Phase D M1+M2)
+- Library v2 uses the **app-wide `quality_profiles` table** directly (Settings →
+  Quality manages it; `core/quality/selection.load_profile_by_id` resolves it live in
+  every pipeline stage). The early parallel `lib2_quality_profiles` table is migrated
+  away on startup (`_migrate_lib2_profiles_to_app_wide`: remap by name, drop table).
+- **Assignments reach the pipeline**: the wishlist mirror passes
+  `add_to_wishlist(quality_profile_id=…)`, so "this artist must satisfy profile X" is
+  enforced by the actual search/import decisions, not just displayed. The watchlist
+  scanner's new-release queueing looks up the lib2 per-artist profile too
+  (`profile_lookup.py`, fail-open to default).
 - Per-track evaluation `quality_eval.py` (reuses `core/quality`): `meets_profile` /
-  `upgrade_candidate` per `upgrade_policy`. UI: profile picker modal + per-track badges
-  ("below profile" / "upgrade ↑").
+  `upgrade_candidate` honoring `upgrade_policy` **incl. `until_cutoff` +
+  `upgrade_cutoff_index`** (Lidarr-style cutoff; `until_top` = legacy alias).
+  UI: profile picker modal (labels the cutoff) + per-track badges.
 
 ### Skip audit
 - `lib2_manual_skips`: records user-initiated check skips (acoustid/quality) on manual
@@ -98,11 +106,28 @@ tests `tests/library2/`.
   file under an `until_top` profile is re-checked (`_mirror_tracks_wishlist` re-runs
   `upgrade_candidate`) and genuine upgrade candidates are queued into the Wishlist.
 
-### Interactive Search (Lidarr-style result table)
+### Interactive Search (Lidarr-style result table, source-aware)
 - Usenet/torrent plugins now pass `publish_date` in `_source_metadata` → **Age** column
   ("3d"/"8mo"/"2.1y", tooltip = raw date). All columns sortable (source/title/quality/
   size/age/availability), default sort quality-desc with size tiebreak. Availability
-  stays source-aware (grabs vs seeders vs slots/queue).
+  stays source-aware (grabs vs seeders vs slots/queue); source badges are colored by
+  family (usenet/torrent/streaming/p2p).
+- **Profile preview badges** (Lidarr's rejection hints): each result is measured
+  against the target entity's ranked targets → "meets cutoff" / "acceptable" /
+  "below profile". Source-aware: facts a source doesn't expose never fail a target,
+  and hi-res targets need positive bit-depth evidence. Informative only — the
+  pipeline's real quality check remains authoritative at import time.
+
+### Artist-page actions (every button is functional)
+- **Monitoring** modal: Monitor all / Monitor missing only / Unmonitor everything
+  (background bulk job) + "future releases" (`monitor_new_items` via `/edit`).
+- **Search Upgrades**: runs the lib2-aware `/upgrade-scan` and reports queued count.
+- **History** modal: recent `track_downloads` provenance for the artist (date, title,
+  album, source, quality, status).
+- **Delete artist / delete album** with confirm: removes lib2 rows, withdraws
+  wishlist/watchlist mirrors, **never touches files on disk**.
+- Buttons without a real backend (Preview Rename/Retag, Manage Tracks, Manual Import)
+  were REMOVED rather than left as dead placeholders — they return with Phase C.
 
 ## TODO (next)
 1. **Profile-scoped monitoring/import**: the importer currently reads all
@@ -111,19 +136,19 @@ tests `tests/library2/`.
    leak another profile's wanted/monitored state into the current view.
 2. **Phase C on lib2**: Re-Tag / Preview Re-Tag (reuse `/api/library/.../tag-preview` +
    `write-tags-batch`), Metadata Gap Fill / Fix Unknown Artist / Album Tag Consistency
-   (scoped `RepairJob.scan`), Manual Import from staging (`core/imports/`), all → `lib2`.
-3. **Phase D actions on lib2**: single↔album move/dedup (`single_album_dedup`), Manage
-   Tracks, Edit, Delete (with confirm) — the toolbar buttons are placeholders today.
+   (scoped `RepairJob.scan`), Manual Import from staging (`core/imports/`), all → `lib2`
+   (their toolbar buttons were removed until then — no dead placeholders).
+3. **Phase D actions on lib2**: single↔album move/dedup (`single_album_dedup`),
+   Manage Tracks.
 4. **Explicit monitor provenance**: if album-level monitoring must survive re-imports
    independently from track-level wishlist monitoring, add provenance/mode columns
    instead of deriving parent release flags from child tracks.
 5. **Periodic lib2 upgrade scan**: `/upgrade-scan` is manual today; schedule it with the
    existing repair/worker cadence once the behavior is proven.
-6. **New-release automation stays with the watchlist scanner** (by design): monitored
-   artists get new releases queued there; a lib2 "monitor new items" enforcement pass
-   could later auto-monitor newly discovered discography rows.
-7. **Optional**: in-library quality-profile editor (ranked_targets) instead of only
-   Settings + sync; cleanup job that consumes `lib2_manual_skips`.
+6. **`monitor_new_items` enforcement**: the flag is editable (Monitoring modal) and new
+   releases of watchlisted artists queue via the scanner; a discography-refresh pass
+   could additionally auto-monitor newly discovered rows when the flag says 'all'/'new'.
+7. **Optional**: cleanup job that consumes `lib2_manual_skips`.
 
 ## Run / verify (no Node/Flask locally — use Docker)
 ```

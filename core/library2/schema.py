@@ -64,27 +64,13 @@ CREATE TABLE IF NOT EXISTS lib2_artists (
 """
 
 # --- Quality profiles --------------------------------------------------------
-# Library-level quality profiles define what "good enough" means for an entity.
-# ``upgrade_policy='until_top'`` is the Lidarr-like "keep searching/upgrading until
-# the first ranked target is reached" mode; it maps to the existing
-# quality_upgrade repair worker with require_top_target=True.
-LIB2_QUALITY_PROFILES_DDL = """
-CREATE TABLE IF NOT EXISTS lib2_quality_profiles (
-    id INTEGER PRIMARY KEY,
-    name TEXT NOT NULL UNIQUE,
-    description TEXT,
-    ranked_targets TEXT NOT NULL DEFAULT '[]',
-    fallback_enabled INTEGER NOT NULL DEFAULT 1,
-    search_mode TEXT NOT NULL DEFAULT 'priority',
-    rank_candidates_by_quality INTEGER NOT NULL DEFAULT 0,
-    upgrade_policy TEXT NOT NULL DEFAULT 'acceptable', -- 'acceptable'|'until_top'
-    repair_job_id TEXT NOT NULL DEFAULT 'quality_upgrade',
-    repair_settings TEXT NOT NULL DEFAULT '{}',
-    is_default INTEGER NOT NULL DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-)
-"""
+# Library v2 uses the APP-WIDE ``quality_profiles`` table (core/quality/schema.py)
+# — the same rows the wishlist/download/import pipeline resolves live via
+# ``core/quality/selection.load_profile_by_id``. The ``quality_profile_id``
+# columns on lib2 rows are plain pointers into that table. (An earlier draft
+# kept a parallel ``lib2_quality_profiles`` table; it predated the app-wide
+# table's extraction and meant lib2 assignments never reached the pipeline —
+# ``_migrate_lib2_profiles_to_app_wide`` below converges old installs.)
 
 # --- Albums (releases; a "single" is an album row with type='single') --------
 LIB2_ALBUMS_DDL = """
@@ -201,7 +187,6 @@ CREATE TABLE IF NOT EXISTS lib2_track_files (
 """
 
 _INDEXES = (
-    "CREATE INDEX IF NOT EXISTS idx_lib2_quality_profiles_default ON lib2_quality_profiles(is_default)",
     "CREATE INDEX IF NOT EXISTS idx_lib2_artists_name ON lib2_artists(name)",
     "CREATE INDEX IF NOT EXISTS idx_lib2_artists_spotify ON lib2_artists(spotify_id)",
     "CREATE INDEX IF NOT EXISTS idx_lib2_artists_mbid ON lib2_artists(musicbrainz_id)",
@@ -241,7 +226,6 @@ CREATE TABLE IF NOT EXISTS lib2_manual_skips (
 """
 
 _ALL_DDL = (
-    LIB2_QUALITY_PROFILES_DDL,
     LIB2_ARTISTS_DDL,
     LIB2_ALBUMS_DDL,
     LIB2_ALBUM_ARTISTS_DDL,
@@ -271,39 +255,51 @@ _ADDED_COLUMNS = (
 )
 
 
-_DEFAULT_RANKED_TARGETS = """[
-  {"label":"FLAC 24-bit/192kHz","format":"flac","bit_depth":24,"min_sample_rate":192000},
-  {"label":"FLAC 24-bit/96kHz","format":"flac","bit_depth":24,"min_sample_rate":96000},
-  {"label":"FLAC 24-bit/48kHz","format":"flac","bit_depth":24,"min_sample_rate":48000},
-  {"label":"FLAC 24-bit/44.1kHz","format":"flac","bit_depth":24,"min_sample_rate":44100},
-  {"label":"FLAC 16-bit","format":"flac","bit_depth":16},
-  {"label":"MP3 320kbps","format":"mp3","min_bitrate":320}
-]"""
+def _migrate_lib2_profiles_to_app_wide(cursor: Any) -> None:
+    """One-time converge: retire the parallel ``lib2_quality_profiles`` table.
 
-_TOP_RANKED_TARGETS = """[
-  {"label":"FLAC 24-bit/192kHz","format":"flac","bit_depth":24,"min_sample_rate":192000},
-  {"label":"FLAC 24-bit/96kHz","format":"flac","bit_depth":24,"min_sample_rate":96000},
-  {"label":"FLAC 24-bit/48kHz","format":"flac","bit_depth":24,"min_sample_rate":48000},
-  {"label":"FLAC 24-bit/44.1kHz","format":"flac","bit_depth":24,"min_sample_rate":44100},
-  {"label":"FLAC 16-bit","format":"flac","bit_depth":16}
-]"""
-
-
-def _seed_quality_profiles(cursor: Any) -> None:
+    Early lib2 builds stored profile assignments against their own table, so
+    the ids on lib2 rows never matched the app-wide ``quality_profiles`` rows
+    the pipeline resolves. Remap by profile NAME (the seeds were identical:
+    1=Balanced, 2=Upgrade until top quality), point unmatched assignments at
+    the app-wide default, then drop the old table. Dropping it is what makes
+    this idempotent — once gone, this is a no-op.
+    """
     cursor.execute(
-        """
-        INSERT OR IGNORE INTO lib2_quality_profiles
-            (id, name, description, ranked_targets, fallback_enabled, search_mode,
-             rank_candidates_by_quality, upgrade_policy, repair_job_id, repair_settings, is_default)
-        VALUES
-            (1, 'Balanced', 'Lossless preferred, high-quality lossy accepted.',
-             ?, 1, 'priority', 0, 'acceptable', 'quality_upgrade', '{}', 1),
-            (2, 'Upgrade until top quality', 'Keep proposing upgrades until the first ranked target is reached.',
-             ?, 1, 'best_quality', 1, 'until_top', 'quality_upgrade',
-             '{"require_top_target": true}', 0)
-        """,
-        (_DEFAULT_RANKED_TARGETS, _TOP_RANKED_TARGETS),
-    )
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='lib2_quality_profiles'")
+    if not cursor.fetchone():
+        return
+    try:
+        cursor.execute("SELECT id FROM quality_profiles WHERE is_default=1 ORDER BY id LIMIT 1")
+        row = cursor.fetchone()
+        default_id = row[0] if row else 1
+
+        remap = {}
+        cursor.execute("SELECT id, name FROM lib2_quality_profiles")
+        old_rows = cursor.fetchall()
+        for old in old_rows:
+            cursor.execute("SELECT id FROM quality_profiles WHERE name=?", (old[1],))
+            match = cursor.fetchone()
+            remap[old[0]] = match[0] if match else default_id
+
+        for table in ("lib2_artists", "lib2_albums", "lib2_tracks"):
+            cursor.execute(f"PRAGMA table_info({table})")
+            if "quality_profile_id" not in {r[1] for r in cursor.fetchall()}:
+                continue
+            for old_id, new_id in remap.items():
+                if old_id != new_id:
+                    cursor.execute(
+                        f"UPDATE {table} SET quality_profile_id=? WHERE quality_profile_id=?",
+                        (new_id, old_id))
+            # Anything left pointing at a nonexistent profile → default.
+            cursor.execute(
+                f"UPDATE {table} SET quality_profile_id=? WHERE quality_profile_id NOT IN "
+                f"(SELECT id FROM quality_profiles)", (default_id,))
+
+        cursor.execute("DROP TABLE lib2_quality_profiles")
+        logger.info("Migrated %d lib2 quality profiles onto the app-wide table", len(old_rows))
+    except Exception as e:  # noqa: BLE001
+        logger.error("lib2 quality-profile migration failed (will retry next start): %s", e)
 
 
 def ensure_library_v2_schema(connection: Any) -> None:
@@ -312,13 +308,22 @@ def ensure_library_v2_schema(connection: Any) -> None:
     Idempotent. Safe to call on every app startup. The caller is responsible for
     committing the connection (we leave that to the caller so this composes with
     the other schema-init steps in one transaction).
+
+    Library v2 reads/writes the app-wide ``quality_profiles`` table, so its
+    schema is ensured here too (idempotent; normally already done by
+    ``MusicDatabase._initialize_database`` — this covers standalone use such
+    as the sqlite-only test harness).
     """
     cursor = connection.cursor()
+    try:
+        from core.quality.schema import ensure_quality_profiles_schema
+        ensure_quality_profiles_schema(connection)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("quality_profiles ensure skipped: %s", e)
     for ddl in _ALL_DDL:
         cursor.execute(ddl)
     for index_sql in _INDEXES:
         cursor.execute(index_sql)
-    _seed_quality_profiles(cursor)
     # Additive column migrations for installs created before a column existed.
     for table, column, alter_sql in _ADDED_COLUMNS:
         cursor.execute(f"PRAGMA table_info({table})")
@@ -327,13 +332,13 @@ def ensure_library_v2_schema(connection: Any) -> None:
                 cursor.execute(alter_sql)
             except Exception as e:  # noqa: BLE001
                 logger.debug("column migration %s.%s: %s", table, column, e)
+    _migrate_lib2_profiles_to_app_wide(cursor)
     logger.debug("Library v2 schema ensured")
 
 
 __all__ = [
     "ensure_library_v2_schema",
     "LIB2_ARTISTS_DDL",
-    "LIB2_QUALITY_PROFILES_DDL",
     "LIB2_ALBUMS_DDL",
     "LIB2_ALBUM_ARTISTS_DDL",
     "LIB2_TRACKS_DDL",

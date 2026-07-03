@@ -73,10 +73,17 @@ def _find_or_create_album(conn, artist_id: int, title: str, *,
     for row in rows:
         if normalize_name(row["title"]) == key:
             return row["id"]
+    # New albums inherit the artist's quality-profile assignment (cascade),
+    # mirroring what the explicit assign endpoint does.
+    artist_profile = conn.execute(
+        "SELECT quality_profile_id FROM lib2_artists WHERE id=?", (artist_id,)
+    ).fetchone()
+    profile_id = (artist_profile["quality_profile_id"] if artist_profile else None) or 1
     cur = conn.execute(
-        """INSERT INTO lib2_albums(primary_artist_id, title, album_type, spotify_id)
-           VALUES(?,?,?,?)""",
-        (artist_id, title, album_type, spotify_album_id),
+        """INSERT INTO lib2_albums(primary_artist_id, title, album_type, spotify_id,
+               quality_profile_id)
+           VALUES(?,?,?,?,?)""",
+        (artist_id, title, album_type, spotify_album_id, profile_id),
     )
     album_id = cur.lastrowid
     conn.execute(
@@ -99,10 +106,15 @@ def _find_or_create_track(conn, album_id: int, artist_id: int, title: str, *,
     for row in rows:
         if normalize_name(row["title"]) == key:
             return row["id"]
+    album_profile = conn.execute(
+        "SELECT quality_profile_id FROM lib2_albums WHERE id=?", (album_id,)
+    ).fetchone()
+    profile_id = (album_profile["quality_profile_id"] if album_profile else None) or 1
     cur = conn.execute(
-        """INSERT INTO lib2_tracks(album_id, title, track_number, spotify_id)
-           VALUES(?,?,?,?)""",
-        (album_id, title, track_number, spotify_track_id),
+        """INSERT INTO lib2_tracks(album_id, title, track_number, spotify_id,
+               quality_profile_id)
+           VALUES(?,?,?,?,?)""",
+        (album_id, title, track_number, spotify_track_id, profile_id),
     )
     track_id = cur.lastrowid
     conn.execute(

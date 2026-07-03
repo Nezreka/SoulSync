@@ -52,15 +52,27 @@ def _json_dict(raw: Any) -> Dict[str, Any]:
 
 
 def _quality_profile_dict(row: Any) -> Optional[Dict[str, Any]]:
+    """Shape an app-wide ``quality_profiles`` row for the Library v2 UI."""
     if row is None:
         return None
+    keys = set(row.keys())
+
+    def _ranked(raw: Any) -> List[Any]:
+        try:
+            val = json.loads(raw) if isinstance(raw, str) else (raw or [])
+            return val if isinstance(val, list) else []
+        except (ValueError, TypeError):
+            return []
+
     return {
         "id": row["id"],
         "name": row["name"],
-        "description": row["description"],
-        "upgrade_policy": row["upgrade_policy"],
-        "repair_job_id": row["repair_job_id"],
-        "repair_settings": _json_dict(row["repair_settings"]),
+        "description": row["description"] if "description" in keys else None,
+        "upgrade_policy": row["upgrade_policy"] or "acceptable",
+        "upgrade_cutoff_index": int(row["upgrade_cutoff_index"] or 0) if "upgrade_cutoff_index" in keys else 0,
+        "ranked_targets": _ranked(row["ranked_targets"] if "ranked_targets" in keys else None),
+        "repair_job_id": row["repair_job_id"] if "repair_job_id" in keys else "quality_upgrade",
+        "repair_settings": _json_dict(row["repair_settings"] if "repair_settings" in keys else None),
         "is_default": bool(row["is_default"]),
     }
 
@@ -141,7 +153,7 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
     if a is None:
         return None
     qp = conn.execute(
-        "SELECT * FROM lib2_quality_profiles WHERE id = ?", (a["quality_profile_id"],)
+        "SELECT * FROM quality_profiles WHERE id = ?", (a["quality_profile_id"],)
     ).fetchone()
 
     album_rows = conn.execute(
@@ -423,7 +435,7 @@ def get_album(conn, album_id: int) -> Optional[Dict[str, Any]]:
     if al is None:
         return None
     qp = conn.execute(
-        "SELECT * FROM lib2_quality_profiles WHERE id = ?", (al["quality_profile_id"],)
+        "SELECT * FROM quality_profiles WHERE id = ?", (al["quality_profile_id"],)
     ).fetchone()
     artist = conn.execute(
         "SELECT id, name FROM lib2_artists WHERE id = ?", (al["primary_artist_id"],)
@@ -442,11 +454,11 @@ def get_album(conn, album_id: int) -> Optional[Dict[str, Any]]:
     # Evaluate each present file against the album's quality profile (meets /
     # upgrade-available), reusing core/quality. Missing rows stay neutral.
     from core.library2.quality_eval import evaluate_file, profile_targets
-    targets, upgrade_policy = profile_targets(dict(qp) if qp else None)
+    targets, upgrade_policy, cutoff_index = profile_targets(dict(qp) if qp else None)
     upgrades_available = 0
     for t in tracks:
         if t.get("file"):
-            ev = evaluate_file(t["file"], targets, upgrade_policy)
+            ev = evaluate_file(t["file"], targets, upgrade_policy, cutoff_index)
             t["meets_profile"] = ev["meets_profile"]
             t["upgrade_candidate"] = bool(t["monitored"] and ev["upgrade_candidate"])
             if t["upgrade_candidate"]:
@@ -527,7 +539,7 @@ def get_track(conn, track_id: int) -> Optional[Dict[str, Any]]:
 
 def list_quality_profiles(conn) -> List[Dict[str, Any]]:
     rows = conn.execute(
-        "SELECT * FROM lib2_quality_profiles ORDER BY is_default DESC, id"
+        "SELECT * FROM quality_profiles ORDER BY is_default DESC, id"
     ).fetchall()
     return [_quality_profile_dict(row) for row in rows if row is not None]
 

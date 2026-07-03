@@ -87,14 +87,6 @@ export async function fetchLibraryV2QualityProfiles(): Promise<LibraryV2QualityP
   return payload.profiles;
 }
 
-export async function syncLibraryV2QualityProfiles(): Promise<number> {
-  const payload = await readJson<{ success: boolean; synced?: number; error?: string }>(
-    apiClient.post('library/v2/quality-profiles/sync', { json: {} }),
-  );
-  if (!payload.success) throw new Error(payload.error || 'Sync failed');
-  return payload.synced ?? 0;
-}
-
 export async function setLibraryV2QualityProfile(
   entity: 'artists' | 'albums' | 'tracks',
   id: number,
@@ -155,7 +147,7 @@ export async function refreshLibraryV2Discography(
 
 export async function bulkMonitorLibraryV2Releases(
   artistId: number,
-  scope: 'albums' | 'eps' | 'singles' | 'all',
+  scope: 'albums' | 'eps' | 'singles' | 'all' | 'missing',
   monitored: boolean,
 ): Promise<void> {
   const payload = await readJson<{ success: boolean; error?: string }>(
@@ -164,6 +156,54 @@ export async function bulkMonitorLibraryV2Releases(
     }),
   );
   if (!payload.success) throw new Error(payload.error || 'Bulk monitor failed');
+}
+
+export async function editLibraryV2Artist(
+  artistId: number,
+  monitorNewItems: 'all' | 'none' | 'new',
+): Promise<void> {
+  const payload = await readJson<{ success: boolean; error?: string }>(
+    apiClient.post(`library/v2/artists/${artistId}/edit`, {
+      json: { monitor_new_items: monitorNewItems },
+    }),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Edit failed');
+}
+
+export async function deleteLibraryV2Entity(
+  entity: 'artists' | 'albums',
+  id: number,
+): Promise<void> {
+  const payload = await readJson<{ success: boolean; error?: string }>(
+    apiClient.delete(`library/v2/${entity}/${id}`),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Delete failed');
+}
+
+export interface LibraryV2HistoryEntry {
+  title: string | null;
+  album: string | null;
+  source: string | null;
+  source_detail: string | null;
+  quality: string | null;
+  bit_depth: number | null;
+  sample_rate: number | null;
+  bitrate: number | null;
+  file_path: string | null;
+  status: string | null;
+  date: string | null;
+}
+
+export async function fetchLibraryV2ArtistHistory(
+  artistId: number,
+): Promise<LibraryV2HistoryEntry[]> {
+  const payload = await readJson<{
+    success: boolean;
+    history?: LibraryV2HistoryEntry[];
+    error?: string;
+  }>(apiClient.get(`library/v2/artists/${artistId}/history`));
+  if (!payload.success) throw new Error(payload.error || 'History failed');
+  return payload.history ?? [];
 }
 
 export async function startLibraryV2UpgradeScan(): Promise<void> {

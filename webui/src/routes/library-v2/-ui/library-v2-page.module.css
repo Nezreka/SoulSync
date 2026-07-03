@@ -759,6 +759,43 @@
   height: 13px;
 }
 
+.qpManagedHint {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+  white-space: nowrap;
+}
+
+.btnDanger {
+  background: rgba(239, 68, 68, 0.85);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btnDanger:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.editRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.editRow label {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.6);
+  white-space: nowrap;
+}
+
 /* --- sortable search-result headers --- */
 .sortableTh {
   cursor: pointer;
@@ -952,6 +989,22 @@
   padding: 1px 7px;
 }
 
+/* Source-family coloring (Lidarr colors its protocol chips too). */
+.sourceBadge[data-tone='usenet'] {
+  color: rgb(96, 165, 250);
+  background: rgba(59, 130, 246, 0.14);
+}
+
+.sourceBadge[data-tone='torrent'] {
+  color: rgb(74, 222, 128);
+  background: rgba(34, 197, 94, 0.14);
+}
+
+.sourceBadge[data-tone='stream'] {
+  color: rgb(196, 181, 253);
+  background: rgba(139, 92, 246, 0.14);
+}
+
 .sourceDetail {
   margin-left: 6px;
   font-size: 11px;
@@ -1096,7 +1149,9 @@
 }
 
 .qBelow,
-.qUpgrade {
+.qUpgrade,
+.qMeets,
+.qAcceptable {
   margin-left: 8px;
   font-size: 10px;
   font-weight: 600;
@@ -1113,6 +1168,16 @@
 .qUpgrade {
   background: rgba(245, 158, 11, 0.16);
   color: rgb(245, 158, 11);
+}
+
+.qMeets {
+  background: rgba(16, 185, 129, 0.16);
+  color: rgb(16, 185, 129);
+}
+
+.qAcceptable {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.55);
 }
 
 .albumResultBadge {

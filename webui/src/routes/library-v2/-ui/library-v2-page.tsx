@@ -7,6 +7,9 @@ import { useReactPageShell } from '@/platform/shell/route-controllers';
 import {
   autoGrabBest,
   bulkMonitorLibraryV2Releases,
+  deleteLibraryV2Entity,
+  editLibraryV2Artist,
+  fetchLibraryV2ArtistHistory,
   fetchLibraryV2ImportStatus,
   fetchLibraryV2JobStatus,
   LIBRARY_V2_QUERY_KEY,
@@ -18,6 +21,7 @@ import {
   refreshLibraryV2Discography,
   setLibraryV2Monitored,
   startLibraryV2Import,
+  startLibraryV2UpgradeScan,
 } from '../-library-v2.api';
 import type {
   LibraryV2AlbumSummary,
@@ -248,23 +252,223 @@ function IconActionButton({
   );
 }
 
-function PlaceholderModal({ action, onClose }: { action: string | null; onClose: () => void }) {
-  if (!action) return null;
+function ModalShell({
+  title,
+  wide,
+  onClose,
+  children,
+}: {
+  title: string;
+  wide?: boolean;
+  onClose: () => void;
+  children: ReactNode;
+}) {
   return (
     <div className={styles.modalBackdrop} role="presentation" onClick={onClose}>
-      <div className={styles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+      <div
+        className={`${styles.modal} ${wide ? styles.modalWide : ''}`}
+        role="dialog"
+        aria-modal="true"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className={styles.modalHeader}>
-          <h3>{action}</h3>
+          <h3>{title}</h3>
           <IconActionButton icon="close" title="Close" onClick={onClose} />
         </div>
-        <p>This control is now placed in the Library UI. The backend action can be wired next.</p>
-        <div className={styles.modalActions}>
-          <button type="button" className={styles.btnPrimary} onClick={onClose}>
-            Close
-          </button>
-        </div>
+        {children}
       </div>
     </div>
+  );
+}
+
+/** Lidarr-style artist monitoring options: one click applies a monitoring
+ *  strategy across the artist's releases (runs as a background bulk job). */
+function MonitoringModal({
+  artistId,
+  monitorNewItems,
+  onClose,
+}: {
+  artistId: number;
+  monitorNewItems: string;
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [busy, setBusy] = useState<string | null>(null);
+  const [newItems, setNewItems] = useState(monitorNewItems || 'all');
+
+  async function apply(scope: 'all' | 'missing', monitored: boolean, label: string) {
+    setBusy(label);
+    try {
+      await bulkMonitorLibraryV2Releases(artistId, scope, monitored);
+      await awaitBulkJob(queryClient);
+      onClose();
+    } catch {
+      await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+      setBusy(null);
+    }
+  }
+
+  const options: Array<{ label: string; desc: string; run: () => void }> = [
+    {
+      label: 'Monitor all releases',
+      desc: 'Every album, EP and single becomes wanted (missing tracks queue for download).',
+      run: () => void apply('all', true, 'all'),
+    },
+    {
+      label: 'Monitor missing only',
+      desc: 'Only releases with missing tracks become wanted; complete ones stay untouched.',
+      run: () => void apply('missing', true, 'missing'),
+    },
+    {
+      label: 'Unmonitor everything',
+      desc: 'Stop wanting all releases; wishlist entries are withdrawn.',
+      run: () => void apply('all', false, 'none'),
+    },
+  ];
+
+  return (
+    <ModalShell title="Artist Monitoring" onClose={onClose}>
+      <div className={styles.qpList}>
+        {options.map((o) => (
+          <button
+            key={o.label}
+            type="button"
+            className={styles.qpOption}
+            disabled={busy !== null}
+            onClick={o.run}
+          >
+            <span className={styles.qpName}>{busy ? 'Applying…' : o.label}</span>
+            <span className={styles.qpDesc}>{o.desc}</span>
+          </button>
+        ))}
+      </div>
+      <div className={styles.editRow}>
+        <label htmlFor="lib2-monitor-new">Future releases</label>
+        <select
+          id="lib2-monitor-new"
+          className={styles.select}
+          value={newItems}
+          onChange={(e) => {
+            const value = e.target.value as 'all' | 'none' | 'new';
+            setNewItems(value);
+            void editLibraryV2Artist(artistId, value)
+              .then(() => queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY }))
+              .catch(() => undefined);
+          }}
+        >
+          <option value="all">Monitor new releases</option>
+          <option value="new">Monitor new releases (from now on)</option>
+          <option value="none">Don't monitor new releases</option>
+        </select>
+      </div>
+    </ModalShell>
+  );
+}
+
+/** Recent downloads for this artist, from the pipeline's provenance records. */
+function HistoryModal({ artistId, onClose }: { artistId: number; onClose: () => void }) {
+  const historyQuery = useQuery({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'history', artistId],
+    queryFn: () => fetchLibraryV2ArtistHistory(artistId),
+  });
+  const rows = historyQuery.data ?? [];
+  return (
+    <ModalShell title="History" wide onClose={onClose}>
+      <div className={styles.resultsWrap}>
+        {historyQuery.isLoading ? (
+          <div className={styles.inlineLoading}>Loading history…</div>
+        ) : rows.length === 0 ? (
+          <div className={styles.inlineLoading}>No recorded downloads for this artist yet.</div>
+        ) : (
+          <table className={styles.trackTable}>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Title</th>
+                <th>Album</th>
+                <th>Source</th>
+                <th>Quality</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((h, i) => (
+                <tr key={i}>
+                  <td className={styles.muted}>{h.date ? h.date.slice(0, 16).replace('T', ' ') : '—'}</td>
+                  <td title={h.file_path ?? undefined}>{h.title ?? '—'}</td>
+                  <td>{h.album ?? '—'}</td>
+                  <td>
+                    <span className={styles.sourceBadge}>{h.source ?? '—'}</span>
+                  </td>
+                  <td className={styles.qualityText}>
+                    {[
+                      h.quality,
+                      h.bit_depth ? `${h.bit_depth}-bit` : null,
+                      h.sample_rate ? `${Math.round(h.sample_rate / 100) / 10} kHz` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' / ') || '—'}
+                  </td>
+                  <td>{h.status ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </ModalShell>
+  );
+}
+
+/** Confirm + delete a library entity. Files on disk are never touched. */
+function DeleteConfirmModal({
+  entity,
+  id,
+  title,
+  onDone,
+  onClose,
+}: {
+  entity: 'artists' | 'albums';
+  id: number;
+  title: string;
+  onDone: () => void;
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <ModalShell title={`Delete ${entity === 'artists' ? 'Artist' : 'Album'}`} onClose={onClose}>
+      <p>
+        Remove <strong>{title}</strong> from the library? Monitoring stops and wishlist entries
+        are withdrawn. <strong>Files on disk are not deleted.</strong>
+      </p>
+      {error ? <div className={styles.searchError}>{error}</div> : null}
+      <div className={styles.modalActions}>
+        <button type="button" className={styles.btnGhost} disabled={busy} onClick={onClose}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          className={styles.btnDanger}
+          disabled={busy}
+          onClick={() => {
+            setBusy(true);
+            void deleteLibraryV2Entity(entity, id)
+              .then(async () => {
+                await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+                onDone();
+              })
+              .catch((e) => {
+                setError(e instanceof Error ? e.message : 'Delete failed');
+                setBusy(false);
+              });
+          }}
+        >
+          {busy ? 'Deleting…' : 'Delete'}
+        </button>
+      </div>
+    </ModalShell>
   );
 }
 
@@ -518,13 +722,39 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   const artist = artistQuery.data;
   const [refreshing, setRefreshing] = useState(false);
   const [discographyBusy, setDiscographyBusy] = useState(false);
+  const [upgradeScanBusy, setUpgradeScanBusy] = useState(false);
   const [modalAction, setModalAction] = useState<string | null>(null);
+  const [showMonitoring, setShowMonitoring] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{
+    entity: 'artists' | 'albums';
+    id: number;
+    title: string;
+  } | null>(null);
   const [grabBanner, setGrabBanner] = useState<{ tone: 'busy' | 'ok' | 'err'; text: string } | null>(
     null,
   );
   const [qpTarget, setQpTarget] = useState<QpTarget | null>(null);
   const queryClient = useQueryClient();
   const artistName = artist?.name ?? '';
+
+  async function searchUpgrades() {
+    setUpgradeScanBusy(true);
+    setGrabBanner({ tone: 'busy', text: 'Scanning monitored tracks for quality upgrades…' });
+    try {
+      await startLibraryV2UpgradeScan();
+      const error = await awaitBulkJob(queryClient);
+      setGrabBanner(
+        error
+          ? { tone: 'err', text: `Upgrade scan failed: ${error}` }
+          : { tone: 'ok', text: 'Upgrade scan finished — genuine upgrade candidates were queued to the wishlist.' },
+      );
+    } catch (e) {
+      setGrabBanner({ tone: 'err', text: e instanceof Error ? e.message : 'Upgrade scan failed' });
+    } finally {
+      setUpgradeScanBusy(false);
+    }
+  }
 
   async function refresh() {
     setRefreshing(true);
@@ -565,8 +795,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   }
 
   /** Route a toolbar/row action: Interactive Search opens the window; plain
-   *  Search / Grab auto-searches and downloads the best result; the rest are
-   *  not-yet-wired placeholders. */
+   *  Search / Grab auto-searches and downloads the best result. */
   function handleAction(action: string) {
     if (action === 'Quality Profile' && artist) {
       setQpTarget({
@@ -594,9 +823,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
           }
         })
         .catch((e) => setGrabBanner({ tone: 'err', text: e instanceof Error ? e.message : 'Search failed' }));
-      return;
     }
-    setModalAction(action);
   }
 
   return (
@@ -646,17 +873,37 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               />
             </div>
             <div className={styles.toolbarGroup}>
-              <ActionButton icon="organize" label="Preview Rename" onClick={() => handleAction('Preview Rename')} />
-              <ActionButton icon="retag" label="Preview Retag" onClick={() => handleAction('Preview Retag')} />
-              <ActionButton icon="tracks" label="Manage Tracks" onClick={() => handleAction('Manage Tracks')} />
-              <ActionButton icon="history" label="History" onClick={() => handleAction('History')} />
-              <ActionButton icon="import" label="Manual Import" onClick={() => handleAction('Manual Import')} />
+              <ActionButton
+                icon="retag"
+                label={upgradeScanBusy ? 'Scanning…' : 'Search Upgrades'}
+                title="Queue monitored tracks whose files are below their quality profile's cutoff"
+                busy={upgradeScanBusy}
+                onClick={() => void searchUpgrades()}
+              />
+              <ActionButton
+                icon="history"
+                label="History"
+                title="Recent downloads recorded for this artist"
+                onClick={() => setShowHistory(true)}
+              />
             </div>
             <div className={styles.toolbarGroup}>
-              <ActionButton icon="monitor" label="Monitoring" onClick={() => handleAction('Artist Monitoring')} />
+              <ActionButton
+                icon="monitor"
+                label="Monitoring"
+                title="Apply a monitoring strategy across this artist's releases"
+                onClick={() => setShowMonitoring(true)}
+              />
               <ActionButton icon="profile" label="Quality Profile" onClick={() => handleAction('Quality Profile')} />
-              <ActionButton icon="edit" label="Edit" onClick={() => handleAction('Edit Artist')} />
-              <ActionButton icon="delete" label="Delete" tone="danger" onClick={() => handleAction('Delete Artist')} />
+              <ActionButton
+                icon="delete"
+                label="Delete"
+                tone="danger"
+                title="Remove this artist from the library (files stay on disk)"
+                onClick={() =>
+                  setDeleteTarget({ entity: 'artists', id: artistId, title: artist.name })
+                }
+              />
             </div>
           </div>
 
@@ -734,6 +981,9 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             scope="albums"
             onAction={handleAction}
             onQualityProfile={setQpTarget}
+            onDelete={(album) =>
+              setDeleteTarget({ entity: 'albums', id: album.id, title: album.title })
+            }
           />
           <AlbumGroup
             title="EPs"
@@ -742,6 +992,9 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             scope="eps"
             onAction={handleAction}
             onQualityProfile={setQpTarget}
+            onDelete={(album) =>
+              setDeleteTarget({ entity: 'albums', id: album.id, title: album.title })
+            }
           />
           <AlbumGroup
             title="Singles"
@@ -750,15 +1003,39 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             scope="singles"
             onAction={handleAction}
             onQualityProfile={setQpTarget}
+            onDelete={(album) =>
+              setDeleteTarget({ entity: 'albums', id: album.id, title: album.title })
+            }
           />
           {modalAction && INTERACTIVE_RE.test(modalAction) ? (
             <InteractiveSearchModal
               initialQuery={buildSearchQuery(artist.name, modalAction)}
+              qualityProfile={artist.quality_profile}
               onClose={() => setModalAction(null)}
             />
-          ) : (
-            <PlaceholderModal action={modalAction} onClose={() => setModalAction(null)} />
-          )}
+          ) : null}
+          {showMonitoring ? (
+            <MonitoringModal
+              artistId={artistId}
+              monitorNewItems={artist.monitor_new_items}
+              onClose={() => setShowMonitoring(false)}
+            />
+          ) : null}
+          {showHistory ? <HistoryModal artistId={artistId} onClose={() => setShowHistory(false)} /> : null}
+          {deleteTarget ? (
+            <DeleteConfirmModal
+              entity={deleteTarget.entity}
+              id={deleteTarget.id}
+              title={deleteTarget.title}
+              onDone={() => {
+                setDeleteTarget(null);
+                if (deleteTarget.entity === 'artists') {
+                  void navigate({ search: (p) => ({ ...p, artist: undefined }) });
+                }
+              }}
+              onClose={() => setDeleteTarget(null)}
+            />
+          ) : null}
           {qpTarget ? (
             <QualityProfileModal
               entity={qpTarget.entity}
@@ -796,6 +1073,7 @@ function AlbumGroup({
   scope,
   onAction,
   onQualityProfile,
+  onDelete,
 }: {
   title: string;
   albums: LibraryV2AlbumSummary[];
@@ -803,6 +1081,7 @@ function AlbumGroup({
   scope: 'albums' | 'eps' | 'singles';
   onAction: (action: string) => void;
   onQualityProfile: (target: QpTarget) => void;
+  onDelete: (album: LibraryV2AlbumSummary) => void;
 }) {
   const queryClient = useQueryClient();
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -848,6 +1127,7 @@ function AlbumGroup({
             album={album}
             onAction={onAction}
             onQualityProfile={onQualityProfile}
+            onDelete={onDelete}
           />
         ))}
       </div>
@@ -859,10 +1139,12 @@ function AlbumBlock({
   album,
   onAction,
   onQualityProfile,
+  onDelete,
 }: {
   album: LibraryV2AlbumSummary;
   onAction: (action: string) => void;
   onQualityProfile: (target: QpTarget) => void;
+  onDelete: (album: LibraryV2AlbumSummary) => void;
 }) {
   const [open, setOpen] = useState(false);
   const complete = album.tracks_missing === 0 && album.track_count > 0;
@@ -916,7 +1198,12 @@ function AlbumBlock({
               })
             }
           />
-          <IconActionButton icon="edit" title="Edit Album" onClick={() => onAction(`Edit Album: ${album.title}`)} />
+          <IconActionButton
+            icon="delete"
+            title="Remove album from library (files stay on disk)"
+            tone="danger"
+            onClick={() => onDelete(album)}
+          />
         </span>
       </div>
       {open ? (
@@ -1033,18 +1320,6 @@ function TrackRow({
           title="Grab / Download"
           disabled={!track.id}
           onClick={() => onAction(`Grab Release: ${label} (${albumTitle})`)}
-        />
-        <IconActionButton
-          icon="retag"
-          title="Preview Retag"
-          disabled={!track.id || missing}
-          onClick={() => onAction(`Preview Retag: ${label}`)}
-        />
-        <IconActionButton
-          icon="tracks"
-          title="Manage Track"
-          disabled={!track.id}
-          onClick={() => onAction(`Manage Track: ${label}`)}
         />
       </td>
     </tr>

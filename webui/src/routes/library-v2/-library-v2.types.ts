@@ -145,11 +145,22 @@ export interface LibraryV2AlbumDetail {
   upgrades_available?: number;
 }
 
+export interface LibraryV2RankedTarget {
+  label?: string;
+  format?: string;
+  bit_depth?: number;
+  min_sample_rate?: number;
+  min_bitrate?: number;
+}
+
 export interface LibraryV2QualityProfile {
   id: number;
   name: string;
   description: string | null;
-  upgrade_policy: 'acceptable' | 'until_top' | string;
+  upgrade_policy: 'acceptable' | 'until_cutoff' | 'until_top' | string;
+  /** For 'until_cutoff': index into ranked_targets that counts as "done" (0 = top). */
+  upgrade_cutoff_index: number;
+  ranked_targets: LibraryV2RankedTarget[];
   repair_job_id: string;
   repair_settings: Record<string, unknown>;
   is_default: boolean;

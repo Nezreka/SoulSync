@@ -2375,6 +2375,17 @@ class WatchlistScanner:
                 'is_local': False
             }
             
+            # Library v2 (opt-in): a per-artist quality-profile assignment must
+            # also govern releases the watchlist scan queues, not only the ones
+            # lib2 mirrors itself. Fail-open None → app-wide default profile.
+            lib2_profile_id = None
+            try:
+                from core.library2.profile_lookup import lib2_quality_profile_for_artist
+                lib2_profile_id = lib2_quality_profile_for_artist(
+                    self.database, watchlist_artist.artist_name)
+            except Exception:
+                lib2_profile_id = None
+
             # Add to wishlist with watchlist context (scoped to artist's profile)
             success = self.database.add_to_wishlist(
                 spotify_track_data=spotify_track_data,
@@ -2388,7 +2399,8 @@ class WatchlistScanner:
                     # #831: groups wishlist rows by the scan run that added them.
                     'scan_run_id': scan_run_id or '',
                 },
-                profile_id=getattr(watchlist_artist, 'profile_id', 1)
+                profile_id=getattr(watchlist_artist, 'profile_id', 1),
+                quality_profile_id=lib2_profile_id
             )
             
             if success:

@@ -1,12 +1,18 @@
-"""Per-track quality evaluation against a Library v2 quality profile.
+"""Per-track quality evaluation against an app-wide quality profile.
 
 Reuses SoulSync's existing quality model (``core/quality``): a profile is a set of
 ranked targets; a file's ``AudioQuality`` either meets them or not, and — depending
 on the profile's ``upgrade_policy`` — may still be an *upgrade candidate* even when
 it's "acceptable":
 
-- ``acceptable``: good enough once it matches ANY ranked target.
-- ``until_top``:  keep proposing upgrades until it matches the TOP (best) target.
+- ``acceptable``:   good enough once it matches ANY ranked target.
+- ``until_cutoff``: keep proposing upgrades until the target at
+  ``upgrade_cutoff_index`` (or better) is reached — Lidarr's quality cutoff.
+- ``until_top``:    legacy alias for ``until_cutoff`` with cutoff 0.
+
+Profiles are rows of the app-wide ``quality_profiles`` table (the same rows the
+wishlist/download pipeline resolves via ``core/quality/selection``), so the
+badges here and the pipeline's accept/upgrade decisions can't drift apart.
 
 This is the read-side that powers the "meets profile / upgrade available" badges and
 feeds the upgrade search. Never raises — unknown/unreadable quality is treated as
@@ -35,22 +41,32 @@ def audio_quality_from_file(file_row: Optional[Dict[str, Any]]):
         return None
 
 
-def profile_targets(profile_row: Optional[Dict[str, Any]]) -> Tuple[List[Any], str]:
-    """Return ``(targets, upgrade_policy)`` for a ``lib2_quality_profiles`` row."""
+def is_upgrade_policy(policy: Optional[str]) -> bool:
+    """Whether a profile keeps searching after an acceptable file exists."""
+    return (policy or "") in ("until_top", "until_cutoff")
+
+
+def profile_targets(profile_row: Optional[Dict[str, Any]]) -> Tuple[List[Any], str, int]:
+    """Return ``(targets, upgrade_policy, cutoff_index)`` for a ``quality_profiles`` row."""
     if not profile_row:
-        return [], "acceptable"
+        return [], "acceptable", 0
     try:
         from core.quality.selection import targets_from_profile
         raw = profile_row.get("ranked_targets")
         ranked = json.loads(raw) if isinstance(raw, str) else (raw or [])
         targets, _fallback = targets_from_profile({"ranked_targets": ranked})
-        return targets, (profile_row.get("upgrade_policy") or "acceptable")
+        policy = profile_row.get("upgrade_policy") or "acceptable"
+        try:
+            cutoff = int(profile_row.get("upgrade_cutoff_index") or 0)
+        except (TypeError, ValueError):
+            cutoff = 0
+        return targets, policy, cutoff
     except Exception:
-        return [], "acceptable"
+        return [], "acceptable", 0
 
 
 def evaluate_file(file_row: Optional[Dict[str, Any]], targets: List[Any],
-                  upgrade_policy: str) -> Dict[str, Any]:
+                  upgrade_policy: str, cutoff_index: int = 0) -> Dict[str, Any]:
     """Return ``{meets_profile, upgrade_candidate}`` for one file against targets."""
     if not targets:
         return {"meets_profile": True, "upgrade_candidate": False}
@@ -63,12 +79,15 @@ def evaluate_file(file_row: Optional[Dict[str, Any]], targets: List[Any],
     except Exception:
         return {"meets_profile": True, "upgrade_candidate": False}
     meets = idx < len(targets)
-    if upgrade_policy == "until_top":
-        # Only the best (index 0) target is "done"; everything else can upgrade.
-        upgrade = idx > 0
+    if is_upgrade_policy(upgrade_policy):
+        # Done once the cutoff target (or better) is reached; 'until_top' is
+        # the legacy alias for cutoff 0.
+        cutoff = cutoff_index if upgrade_policy == "until_cutoff" else 0
+        cutoff = max(0, min(int(cutoff or 0), len(targets) - 1))
+        upgrade = idx > cutoff
     else:  # 'acceptable'
         upgrade = not meets
     return {"meets_profile": bool(meets), "upgrade_candidate": bool(upgrade)}
 
 
-__all__ = ["audio_quality_from_file", "profile_targets", "evaluate_file"]
+__all__ = ["audio_quality_from_file", "profile_targets", "evaluate_file", "is_upgrade_policy"]

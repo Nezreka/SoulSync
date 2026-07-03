@@ -183,12 +183,18 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
     @app.route("/api/library/v2/quality-profiles/sync", methods=["POST"])
     def lib2_sync_quality_profiles():
+        """Compatibility endpoint: profiles are the app-wide ``quality_profiles``
+        rows (managed in Settings → Quality) — there is nothing to sync anymore.
+        Returns the live count so old UIs still show a sensible number."""
         guard = _guard()
         if guard:
             return guard
-        from core.library2.profiles_sync import sync_settings_presets
-        synced = sync_settings_presets(get_database())
-        return jsonify({"success": True, "synced": synced})
+        conn = _conn()
+        try:
+            count = conn.execute("SELECT COUNT(*) FROM quality_profiles").fetchone()[0]
+        finally:
+            conn.close()
+        return jsonify({"success": True, "synced": count})
 
     @app.route("/api/library/v2/quality-profiles")
     def lib2_quality_profiles():
@@ -275,11 +281,11 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                       al.id AS album_id, al.title album_title, al.spotify_id album_spotify,
                       al.track_count, al.expected_track_count, al.album_type,
                       qp.name AS quality_profile_name, qp.upgrade_policy,
-                      qp.ranked_targets,
+                      qp.upgrade_cutoff_index, qp.ranked_targets,
                       EXISTS(SELECT 1 FROM lib2_track_files tf
                              WHERE tf.track_id = t.id AND tf.path IS NOT NULL AND tf.path <> '') has_file
                FROM lib2_tracks t JOIN lib2_albums al ON al.id = t.album_id
-               LEFT JOIN lib2_quality_profiles qp ON qp.id = t.quality_profile_id
+               LEFT JOIN quality_profiles qp ON qp.id = t.quality_profile_id
                WHERE t.id = ?""",
             (track_id,),
         ).fetchone()
@@ -299,15 +305,18 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             "id": t["quality_profile_id"],
             "name": t["quality_profile_name"] or "",
             "upgrade_policy": t["upgrade_policy"] or "acceptable",
+            "upgrade_cutoff_index": t["upgrade_cutoff_index"] or 0,
             "ranked_targets": t["ranked_targets"] or "[]",
         }
 
+        from core.library2.quality_eval import is_upgrade_policy
         should_queue = not bool(t["has_file"])
-        if t["has_file"] and profile_info["upgrade_policy"] == "until_top":
+        if t["has_file"] and is_upgrade_policy(profile_info["upgrade_policy"]):
             try:
                 from core.library2.quality_eval import evaluate_file, profile_targets
-                targets, upgrade_policy = profile_targets(profile_info)
-                should_queue = bool(evaluate_file(file_info, targets, upgrade_policy)["upgrade_candidate"])
+                targets, upgrade_policy, cutoff = profile_targets(profile_info)
+                should_queue = bool(evaluate_file(
+                    file_info, targets, upgrade_policy, cutoff)["upgrade_candidate"])
             except Exception as e:  # noqa: BLE001
                 logger.debug("quality-profile upgrade check failed (track %s): %s", track_id, e)
                 should_queue = False
@@ -359,10 +368,15 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 if monitored:
                     if not should_queue:
                         continue
+                    # quality_profile_id is the app-wide profile the download/
+                    # import pipeline resolves live (load_profile_by_id) — THIS
+                    # is what makes "this artist must satisfy profile X" reach
+                    # the actual search/import decisions.
                     ok = db.add_to_wishlist(payload, source_type=stype,
                                             source_info=source_info,
                                             user_initiated=True,
-                                            profile_id=profile_id)
+                                            profile_id=profile_id,
+                                            quality_profile_id=payload.get("quality_profile_id"))
                 else:
                     ok = db.remove_from_wishlist(payload["id"], profile_id)
                     if source_album_id:
@@ -443,7 +457,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         try:
             profile = conn.execute(
                 "SELECT id, upgrade_policy, repair_job_id, repair_settings "
-                "FROM lib2_quality_profiles WHERE id=?",
+                "FROM quality_profiles WHERE id=?",
                 (profile_id,),
             ).fetchone()
             if profile is None:
@@ -473,7 +487,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 updated += cur.rowcount
             auto_monitored = 0
             auto_monitor_track_ids: List[int] = []
-            if profile["upgrade_policy"] == "until_top":
+            from core.library2.quality_eval import is_upgrade_policy
+            if is_upgrade_policy(profile["upgrade_policy"]):
                 if entity == "artists":
                     auto_monitor_track_ids = [r["id"] for r in conn.execute(
                         "SELECT id FROM lib2_tracks "
@@ -563,6 +578,14 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             "eps": "al.album_type = 'ep'",
             "singles": "al.album_type = 'single'",
             "all": "1=1",
+            # Lidarr's "Monitor missing": only releases that are incomplete.
+            "missing": """(
+                COALESCE(al.expected_track_count,
+                         (SELECT COUNT(*) FROM lib2_tracks t2 WHERE t2.album_id = al.id)) >
+                (SELECT COUNT(DISTINCT t3.id) FROM lib2_tracks t3
+                   JOIN lib2_track_files tf3 ON tf3.track_id = t3.id
+                  WHERE t3.album_id = al.id)
+            )""",
         }.get(scope)
         if not type_filter:
             return jsonify({"success": False, "error": "Unknown scope"}), 400
@@ -627,6 +650,144 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             return guard
         return jsonify({"success": True, **_job_state})
 
+    # -- edit / delete / history (Lidarr artist-page actions) ------------------
+
+    @app.route("/api/library/v2/artists/<int:artist_id>/edit", methods=["POST"])
+    def lib2_edit_artist(artist_id):
+        """Update artist-level settings. Currently: ``monitor_new_items``
+        ('all'|'none'|'new') — how future discography refreshes should treat
+        newly discovered releases."""
+        guard = _guard()
+        if guard:
+            return guard
+        body = request.json or {}
+        monitor_new = str(body.get("monitor_new_items") or "").strip()
+        if monitor_new not in ("all", "none", "new"):
+            return jsonify({"success": False, "error": "monitor_new_items must be all|none|new"}), 400
+        conn = _conn()
+        try:
+            cur = conn.execute(
+                "UPDATE lib2_artists SET monitor_new_items=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (monitor_new, artist_id))
+            if not cur.rowcount:
+                return jsonify({"success": False, "error": "Artist not found"}), 404
+            conn.commit()
+        finally:
+            conn.close()
+        return jsonify({"success": True, "monitor_new_items": monitor_new})
+
+    def _unmonitor_tracks_and_delete(db, conn, *, artist_id: Optional[int] = None,
+                                     album_ids: Optional[List[int]] = None) -> Dict[str, int]:
+        """Shared delete path: unmirror wishlist entries, then delete lib2 rows.
+
+        NEVER touches files on disk — this removes library entries only,
+        exactly like Lidarr's 'delete artist' without the delete-files box.
+        """
+        if album_ids is None:
+            album_ids = [r["id"] for r in conn.execute(
+                """SELECT al.id FROM lib2_album_artists aa
+                   JOIN lib2_albums al ON al.id = aa.album_id WHERE aa.artist_id=?""",
+                (artist_id,))]
+        track_ids = _bulk_track_ids_for_albums(conn, album_ids)
+        # Pull monitored tracks out of the wishlist BEFORE their rows vanish
+        # (the payload builder needs the rows to compute the wishlist keys).
+        unmirrored = _mirror_tracks_wishlist(db, conn, track_ids, False) if track_ids else 0
+        removed_albums = 0
+        for aid_ in album_ids:
+            conn.execute("DELETE FROM lib2_album_artists WHERE album_id=?", (aid_,))
+            conn.execute(
+                "DELETE FROM lib2_track_artists WHERE track_id IN "
+                "(SELECT id FROM lib2_tracks WHERE album_id=?)", (aid_,))
+            conn.execute(
+                "DELETE FROM lib2_track_files WHERE track_id IN "
+                "(SELECT id FROM lib2_tracks WHERE album_id=?)", (aid_,))
+            conn.execute("DELETE FROM lib2_tracks WHERE album_id=?", (aid_,))
+            conn.execute("DELETE FROM lib2_albums WHERE id=?", (aid_,))
+            removed_albums += 1
+        return {"albums": removed_albums, "tracks": len(track_ids), "unmirrored": unmirrored}
+
+    @app.route("/api/library/v2/artists/<int:artist_id>", methods=["DELETE"])
+    def lib2_delete_artist(artist_id):
+        """Remove an artist (and their releases/tracks/file links) from
+        Library v2. Files on disk are untouched; watchlist + wishlist mirrors
+        are removed so nothing keeps auto-downloading for it."""
+        guard = _guard()
+        if guard:
+            return guard
+        db = get_database()
+        conn = db._get_connection()
+        try:
+            row = conn.execute("SELECT id FROM lib2_artists WHERE id=?", (artist_id,)).fetchone()
+            if not row:
+                return jsonify({"success": False, "error": "Artist not found"}), 404
+            _mirror_artist_watchlist(db, conn, artist_id, False)
+            stats = _unmonitor_tracks_and_delete(db, conn, artist_id=artist_id)
+            conn.execute("DELETE FROM lib2_artists WHERE id=?", (artist_id,))
+            conn.commit()
+        finally:
+            conn.close()
+        return jsonify({"success": True, **stats})
+
+    @app.route("/api/library/v2/albums/<int:album_id>", methods=["DELETE"])
+    def lib2_delete_album(album_id):
+        guard = _guard()
+        if guard:
+            return guard
+        db = get_database()
+        conn = db._get_connection()
+        try:
+            row = conn.execute("SELECT id FROM lib2_albums WHERE id=?", (album_id,)).fetchone()
+            if not row:
+                return jsonify({"success": False, "error": "Album not found"}), 404
+            stats = _unmonitor_tracks_and_delete(db, conn, album_ids=[album_id])
+            conn.commit()
+        finally:
+            conn.close()
+        return jsonify({"success": True, **stats})
+
+    @app.route("/api/library/v2/artists/<int:artist_id>/history")
+    def lib2_artist_history(artist_id):
+        """Recent download/import provenance for this artist (Lidarr's History
+        tab), read from the existing ``track_downloads`` table by artist name."""
+        guard = _guard()
+        if guard:
+            return guard
+        limit = min(int(request.args.get("limit", 50)), 200)
+        conn = _conn()
+        try:
+            artist = conn.execute(
+                "SELECT name FROM lib2_artists WHERE id=?", (artist_id,)).fetchone()
+            if not artist:
+                return jsonify({"success": False, "error": "Artist not found"}), 404
+            try:
+                rows = conn.execute(
+                    """SELECT track_title, track_album, source_service, source_username,
+                              audio_quality, bit_depth, sample_rate, bitrate,
+                              file_path, status, created_at
+                       FROM track_downloads
+                       WHERE lower(track_artist) = lower(?)
+                       ORDER BY id DESC LIMIT ?""",
+                    (artist["name"], limit),
+                ).fetchall()
+            except Exception:  # table/columns may not exist on a fresh DB
+                rows = []
+            history = [{
+                "title": r["track_title"],
+                "album": r["track_album"],
+                "source": r["source_service"],
+                "source_detail": r["source_username"],
+                "quality": r["audio_quality"],
+                "bit_depth": r["bit_depth"],
+                "sample_rate": r["sample_rate"],
+                "bitrate": r["bitrate"],
+                "file_path": r["file_path"],
+                "status": r["status"],
+                "date": r["created_at"],
+            } for r in rows]
+        finally:
+            conn.close()
+        return jsonify({"success": True, "history": history})
+
     # -- upgrade scan (lib2-aware quality upgrade pass) ------------------------
 
     @app.route("/api/library/v2/upgrade-scan", methods=["POST"])
@@ -651,8 +812,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 try:
                     rows = conn.execute(
                         """SELECT t.id FROM lib2_tracks t
-                           JOIN lib2_quality_profiles qp ON qp.id = t.quality_profile_id
-                          WHERE t.monitored = 1 AND qp.upgrade_policy = 'until_top'
+                           JOIN quality_profiles qp ON qp.id = t.quality_profile_id
+                          WHERE t.monitored = 1
+                            AND qp.upgrade_policy IN ('until_top', 'until_cutoff')
                             AND EXISTS (SELECT 1 FROM lib2_track_files tf
                                         WHERE tf.track_id = t.id
                                           AND tf.path IS NOT NULL AND tf.path <> '')"""
@@ -762,13 +924,6 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     precache_all_artwork(get_database(), config_manager)
                 except Exception as e:  # noqa: BLE001
                     logger.debug("artwork precache failed: %s", e)
-
-                _import_state.update(stage="profiles")
-                try:
-                    from core.library2.profiles_sync import sync_settings_presets
-                    sync_settings_presets(get_database())
-                except Exception as e:  # noqa: BLE001
-                    logger.debug("profile preset sync failed: %s", e)
 
                 _import_state.update(stage="done")
             except Exception as e:  # noqa: BLE001

@@ -1,7 +1,52 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { searchSources, startSourceDownload, type SourceSearchResult } from '../-library-v2.api';
+import type { LibraryV2QualityProfile, LibraryV2RankedTarget } from '../-library-v2.types';
 import styles from './library-v2-page.module.css';
+
+/** Extract the numeric quality facts a result exposes (source-aware: many
+ *  sources only know some of these — missing facts must not fail a target). */
+function resultFacts(r: SourceSearchResult): {
+  fmt: string;
+  kbps: number | null;
+  sampleRate: number | null;
+  bitDepth: number | null;
+} {
+  const fmt = ((r.result_type === 'album' ? r.dominant_quality : r.quality) ?? '').toLowerCase();
+  const bitrate = r.bitrate ?? firstTrackNumber(r, 'bitrate');
+  const kbps = bitrate ? (bitrate > 5000 ? Math.round(bitrate / 1000) : bitrate) : null;
+  return {
+    fmt,
+    kbps,
+    sampleRate: r.sample_rate ?? firstTrackNumber(r, 'sample_rate'),
+    bitDepth: r.bit_depth ?? firstTrackNumber(r, 'bit_depth'),
+  };
+}
+
+/** Client-side PREVIEW of how the pipeline's quality check will see a result:
+ *  the index of the best ranked target it plausibly satisfies, or null when
+ *  the source doesn't expose enough facts to judge (never falsely reject).
+ *  The authoritative check still runs in the import pipeline. */
+function profileTargetRank(
+  r: SourceSearchResult,
+  targets: LibraryV2RankedTarget[],
+): number | null {
+  if (targets.length === 0) return null;
+  const { fmt, kbps, sampleRate, bitDepth } = resultFacts(r);
+  if (!fmt) return null; // source exposes no quality info — don't judge
+  for (let i = 0; i < targets.length; i += 1) {
+    const t = targets[i];
+    if (t.format && !fmt.includes(t.format.toLowerCase())) continue;
+    // Only enforce numeric facts the result actually exposes.
+    if (t.bit_depth && bitDepth !== null && bitDepth < t.bit_depth) continue;
+    if (t.min_sample_rate && sampleRate !== null && sampleRate < t.min_sample_rate) continue;
+    if (t.min_bitrate && kbps !== null && kbps < t.min_bitrate) continue;
+    // Hi-res targets need positive evidence, not just absence of counter-evidence.
+    if (t.bit_depth && t.bit_depth > 16 && bitDepth === null) continue;
+    return i;
+  }
+  return targets.length; // judged, and no target matched
+}
 
 /** Lidarr-style release age: "3d", "8mo", "2.1y" — usenet retention at a glance. */
 function ageText(publishDate?: string | null): string {
@@ -127,6 +172,14 @@ function sourceLabel(r: SourceSearchResult): string {
   return SOURCE_LABELS[u] ?? 'Soulseek';
 }
 
+/** Coarse source family for badge coloring (usenet/torrent/streaming/p2p). */
+function sourceTone(r: SourceSearchResult): 'usenet' | 'torrent' | 'stream' | 'p2p' {
+  const u = (r.username ?? '').toLowerCase();
+  if (u === 'usenet') return 'usenet';
+  if (u === 'torrent') return 'torrent';
+  return SOURCE_LABELS[u] ? 'stream' : 'p2p';
+}
+
 /** Source metadata (indexer/grabs) — album results carry it on their first track. */
 function effMeta(r: SourceSearchResult): NonNullable<SourceSearchResult['_source_metadata']> {
   if (r._source_metadata) return r._source_metadata;
@@ -162,13 +215,53 @@ function availabilityCell(r: SourceSearchResult): string {
 
 type GrabState = 'pending' | 'done' | 'error';
 
+/** Preview badge: how this result measures against the entity's quality
+ *  profile. Informative only — the pipeline runs the authoritative check. */
+function ProfileBadge({
+  result,
+  profile,
+}: {
+  result: SourceSearchResult;
+  profile?: LibraryV2QualityProfile | null;
+}) {
+  if (!profile || profile.ranked_targets.length === 0) return null;
+  const rank = profileTargetRank(result, profile.ranked_targets);
+  if (rank === null) return null; // source exposes no judgeable quality info
+  const targets = profile.ranked_targets;
+  if (rank >= targets.length) {
+    return (
+      <span className={styles.qBelow} title={`Matches none of "${profile.name}"'s targets — the pipeline will likely reject or quarantine it`}>
+        below profile
+      </span>
+    );
+  }
+  const cutoff = profile.upgrade_policy === 'until_cutoff' ? profile.upgrade_cutoff_index : 0;
+  const label = targets[rank]?.label ?? `target #${rank + 1}`;
+  if (rank <= cutoff) {
+    return (
+      <span className={styles.qMeets} title={`Matches "${label}" — satisfies the profile's cutoff`}>
+        meets cutoff
+      </span>
+    );
+  }
+  return (
+    <span className={styles.qAcceptable} title={`Matches "${label}" — acceptable, but below the upgrade cutoff`}>
+      acceptable
+    </span>
+  );
+}
+
 /** Lidarr-style interactive search: search every configured SoulSync source for a
- *  release, pick one, and send it through the download pipeline. */
+ *  release, pick one, and send it through the download pipeline. When the
+ *  target entity's quality profile is provided, each result gets a preview
+ *  badge of how it measures against the profile's ranked targets. */
 export function InteractiveSearchModal({
   initialQuery,
+  qualityProfile,
   onClose,
 }: {
   initialQuery: string;
+  qualityProfile?: LibraryV2QualityProfile | null;
   onClose: () => void;
 }) {
   const [query, setQuery] = useState(initialQuery);
@@ -340,7 +433,9 @@ export function InteractiveSearchModal({
                   return (
                     <tr key={`${key}-${i}`}>
                       <td>
-                        <span className={styles.sourceBadge}>{sourceLabel(r)}</span>
+                        <span className={styles.sourceBadge} data-tone={sourceTone(r)}>
+                          {sourceLabel(r)}
+                        </span>
                         {sourceDetail(r) ? (
                           <span className={styles.sourceDetail}>{sourceDetail(r)}</span>
                         ) : null}
@@ -354,7 +449,10 @@ export function InteractiveSearchModal({
                         ) : null}
                       </td>
                       <td>{r.artist ?? '—'}</td>
-                      <td className={styles.qualityText}>{resultQuality(r)}</td>
+                      <td className={styles.qualityText}>
+                        {resultQuality(r)}
+                        <ProfileBadge result={r} profile={qualityProfile} />
+                      </td>
                       <td className={styles.colNum}>{fmtBytes(resultSize(r))}</td>
                       <td className={styles.colNum} title={effMeta(r).publish_date ?? undefined}>
                         {ageText(effMeta(r).publish_date)}
