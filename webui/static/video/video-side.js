@@ -286,6 +286,9 @@
             toggleButtons[i].classList.toggle(
                 'active', toggleButtons[i].getAttribute('data-side-target') === side);
         }
+        // Global (music) search is hidden on the video side — recompute its
+        // visibility/active state the moment the side flips.
+        if (typeof _gsUpdateVisibility === 'function') _gsUpdateVisibility();
     }
 
     function switchSide(side) {

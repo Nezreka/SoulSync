@@ -4112,3 +4112,14 @@ img.vdh-poster--none { font-size: 0; }
 .video-subpage[data-video-subpage="video-tools"] .tool-card-controls button {
     flex: 1 1 100%;           /* action button takes its own full-width row */
 }
+
+/* ── Global (music) search must NEVER appear on the video side ──
+   The bottom-of-page global search bar, its results dropdown, and its aura
+   are music-only. Hiding them via body[data-side="video"] guarantees they
+   stay hidden the instant the side toggle flips, regardless of any JS
+   visibility timing. */
+body[data-side="video"] #gsearch-bar,
+body[data-side="video"] #gsearch-results,
+body[data-side="video"] #gsearch-aura {
+    display: none !important;
+}

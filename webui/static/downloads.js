@@ -5946,8 +5946,9 @@ let _gsController = null;
             }
         });
 
-        // Keyboard shortcuts
+        // Keyboard shortcuts — never summon the (music-only) global search on the video side.
         document.addEventListener('keydown', e => {
+            if (document.body.getAttribute('data-side') === 'video') return;
             if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); input.focus(); return; }
             if (e.key === '/' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) { e.preventDefault(); input.focus(); }
         });
@@ -5998,9 +5999,11 @@ function _gsUpdateVisibility() {
     const bar = document.getElementById('gsearch-bar');
     const aura = document.getElementById('gsearch-aura');
     if (!bar) return;
-    // Hide on pages where global search doesn't belong.
+    // Hide on pages where global search doesn't belong, and always on the
+    // video side (the global/music search is music-only).
     const _gsHidePages = new Set(['search', 'downloads', 'settings', 'help', 'issues', 'import']);
-    const onHidePage = typeof currentPage !== 'undefined' && _gsHidePages.has(currentPage);
+    const onVideoSide = document.body.getAttribute('data-side') === 'video';
+    const onHidePage = onVideoSide || (typeof currentPage !== 'undefined' && _gsHidePages.has(currentPage));
     bar.style.display = onHidePage ? 'none' : '';
     if (aura) aura.classList.toggle('hidden', onHidePage);
     if (onHidePage && _gsState.active) _gsDeactivate();
