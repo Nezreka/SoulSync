@@ -3353,6 +3353,18 @@ def handle_settings():
             if _primary_override:
                 config_manager.set('metadata.fallback_source', _primary_override)
 
+            # The Settings → Quality page's toggles are saved as config keys
+            # (above), but the pipeline enforces the PROFILE row (live, per
+            # item). Write the quality-owned keys through to the active
+            # default profile so "the page edits the active profile" holds —
+            # without this, a checkbox change here would never reach the
+            # pipeline (see MusicDatabase.sync_default_quality_profile_from_config).
+            if any(s in new_settings for s in ('acoustid', 'lossy_copy', 'post_processing', 'import')):
+                try:
+                    get_database().sync_default_quality_profile_from_config()
+                except Exception as _qp_sync_err:
+                    logger.error(f"Default quality profile sync failed: {_qp_sync_err}")
+
             logger.info("Settings saved successfully via Web UI.")
             
             # Add activity for settings save
@@ -4802,6 +4814,156 @@ def reset_quality_preset(preset_name):
 
     except Exception as e:
         logger.error(f"Error resetting quality preset: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+# ── Named global quality profiles (assignable to Wishlist items / per-context
+# overrides like Auto-Import, not just the single active default) — CRUD over
+# `quality_profiles`. ──────────
+
+@app.route('/api/quality-profile/custom', methods=['GET'])
+def list_custom_quality_profiles():
+    """List every quality profile (built-ins + user-created), default first."""
+    try:
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+        return jsonify({"success": True, "profiles": db.list_quality_profiles()})
+    except Exception as e:
+        logger.error(f"Error listing quality profiles: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/quality-profile/custom', methods=['POST'])
+def create_custom_quality_profile():
+    """Save the current Quality-page settings as a new named profile."""
+    try:
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+
+        data = request.get_json() or {}
+        name = str(data.get('name') or '').strip()
+        if not name:
+            return jsonify({"success": False, "error": "Name is required"}), 400
+
+        profile_id = db.create_quality_profile(name, data)
+        if profile_id is None:
+            return jsonify({"success": False, "error": "A profile with that name may already exist"}), 400
+
+        add_activity_item("", "Quality Profile Created", f"Saved '{name}'", "Now")
+        return jsonify({"success": True, "id": profile_id, "profiles": db.list_quality_profiles()})
+    except Exception as e:
+        logger.error(f"Error creating quality profile: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/quality-profile/custom/<int:profile_id>', methods=['GET'])
+def get_custom_quality_profile(profile_id):
+    """Read-only: a single profile in the same full v3 shape `/apply` and
+    `/api/quality-profile` return (parsed ranked_targets, real booleans,
+    `preset`), so the Settings UI can load a profile's settings into the page
+    for viewing/editing WITHOUT the side effects `/apply` has (making it the
+    default, pushing into live config) — purely a SELECT."""
+    try:
+        from core.quality.selection import load_profile_by_id
+        from database.music_database import MusicDatabase
+
+        db = MusicDatabase()
+        if not any(p['id'] == profile_id for p in db.list_quality_profiles()):
+            return jsonify({"success": False, "error": "Profile not found"}), 404
+
+        return jsonify({"success": True, "profile": load_profile_by_id(profile_id)})
+    except Exception as e:
+        logger.error(f"Error loading quality profile {profile_id}: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/quality-profile/custom/<int:profile_id>/apply', methods=['POST'])
+def apply_custom_quality_profile(profile_id):
+    """Make a named profile the app-wide default AND push every setting it
+    captures (AcoustID strictness, downsample, deep verify, import
+    quality-filter/replace-lower-quality, lossy-copy) into the live global
+    settings — not just the ranked-target ladder."""
+    try:
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+
+        profile = db.apply_quality_profile_to_settings(profile_id)
+        if profile is None:
+            return jsonify({"success": False, "error": "Profile not found"}), 404
+
+        add_activity_item("", "Quality Profile Applied", f"Now using '{profile.get('preset', 'custom')}'", "Now")
+        return jsonify({"success": True, "profile": profile})
+    except Exception as e:
+        logger.error(f"Error applying quality profile: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/quality-profile/custom/<int:profile_id>/update', methods=['POST'])
+def update_custom_quality_profile(profile_id):
+    """Overwrite a named profile's captured settings with whatever is
+    currently on the Quality page (edit-in-place, keeps the name)."""
+    try:
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+
+        data = request.get_json() or {}
+        if not db.update_quality_profile(profile_id, data):
+            return jsonify({"success": False, "error": "Profile not found"}), 404
+
+        profiles = db.list_quality_profiles()
+        # Editing the ACTIVE DEFAULT profile must also push the new values
+        # into config.json — every profile-owned key the rest of the app
+        # reads directly (AcoustID, lossy-copy, deep-verify, replace-lower-
+        # quality). Without this, the row and config.json go out of sync,
+        # and the next unrelated Settings save (which mirrors config -> the
+        # default row via sync_default_quality_profile_from_config) silently
+        # reverts this edit back to the stale config values.
+        if any(p['id'] == profile_id and p.get('is_default') for p in profiles):
+            db.apply_quality_profile_to_settings(profile_id)
+            profiles = db.list_quality_profiles()
+
+        add_activity_item("", "Quality Profile Updated", f"Updated saved profile {profile_id}", "Now")
+        return jsonify({"success": True, "profiles": profiles})
+    except Exception as e:
+        logger.error(f"Error updating quality profile: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/quality-profile/custom/<int:profile_id>', methods=['PUT'])
+def rename_custom_quality_profile(profile_id):
+    try:
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+
+        data = request.get_json() or {}
+        name = str(data.get('name') or '').strip()
+        if not name:
+            return jsonify({"success": False, "error": "Name is required"}), 400
+
+        ok, reason = db.rename_quality_profile(profile_id, name)
+        if not ok:
+            status = 404 if reason == "Profile not found" else 400
+            return jsonify({"success": False, "error": reason}), status
+        return jsonify({"success": True, "profiles": db.list_quality_profiles()})
+    except Exception as e:
+        logger.error(f"Error renaming quality profile: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/quality-profile/custom/<int:profile_id>', methods=['DELETE'])
+def delete_custom_quality_profile(profile_id):
+    """Delete any profile, including the built-ins. Only refuses when it
+    would leave zero profiles — deleting the current default auto-promotes
+    another remaining profile first (see `MusicDatabase.delete_quality_profile`)."""
+    try:
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+
+        ok, reason = db.delete_quality_profile(profile_id)
+        if not ok:
+            return jsonify({"success": False, "error": reason}), 400
+        return jsonify({"success": True, "profiles": db.list_quality_profiles()})
+    except Exception as e:
+        logger.error(f"Error deleting quality profile: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 # ===============================
@@ -6670,6 +6832,13 @@ def start_download():
                 # Register download for post-processing (simple transfer to /Transfer)
                 context_key = _make_context_key(username, filename)
                 is_streaming_source = username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud', 'amazon')
+                # Per-download check overrides: skip AcoustID and/or
+                # quality-quarantine checks on request.
+                _skip_checks = []
+                if data.get('skip_acoustid'):
+                    _skip_checks.append('acoustid')
+                if data.get('quality_check') is False:
+                    _skip_checks.extend(['bit_depth', 'quality'])
                 with matched_context_lock:
                     matched_downloads_context[context_key] = {
                         'search_result': {
@@ -6683,7 +6852,8 @@ def start_download():
                         },
                         'spotify_artist': None,  # No Spotify metadata
                         'spotify_album': None,
-                        'track_info': None
+                        'track_info': None,
+                        '_skip_quarantine_check': _skip_checks or None,
                     }
                     source_label = username.title() if is_streaming_source else 'Soulseek'
                     logger.info(f"[{source_label}] Registered simple download for post-processing: {context_key}")
@@ -10992,16 +11162,25 @@ def get_artist_quality_analysis(artist_id):
         artist = result.get('artist', {})
         albums = result.get('albums', [])
 
-        # Get user's quality profile to determine min acceptable tier
+        # Get the app-wide default quality profile (v3 shape — `ranked_targets`,
+        # not the legacy v2 `qualities` dict) to determine min acceptable tier.
         quality_profile = database.get_quality_profile()
-        preferred_qualities = quality_profile.get('qualities', {})
+        ranked_targets = quality_profile.get('ranked_targets') or []
         min_acceptable_tier = 999
-        tier_map = {'flac': 'lossless', 'mp3_320': 'low_lossy', 'mp3_256': 'low_lossy', 'mp3_192': 'low_lossy'}
-        for qname, qconfig in preferred_qualities.items():
-            if qconfig.get('enabled', False):
-                tname = tier_map.get(qname)
-                if tname and tname in QUALITY_TIERS:
-                    min_acceptable_tier = min(min_acceptable_tier, QUALITY_TIERS[tname]['tier'])
+        # Mirrors QUALITY_TIERS' extension groupings so a ranked-target's
+        # `format` (as edited in the Settings ranked-targets picker — see
+        # RT_LOSSLESS_FORMATS/RT_LOSSY_FORMATS in settings.js) lands on the
+        # same tier this scan buckets library files into.
+        format_tier_map = {
+            'flac': 'lossless', 'alac': 'lossless', 'wav': 'lossless', 'dsf': 'lossless',
+            'opus': 'high_lossy', 'ogg': 'high_lossy',
+            'aac': 'standard_lossy',
+            'mp3': 'low_lossy', 'wma': 'low_lossy',
+        }
+        for target in ranked_targets:
+            tname = format_tier_map.get((target or {}).get('format'))
+            if tname and tname in QUALITY_TIERS:
+                min_acceptable_tier = min(min_acceptable_tier, QUALITY_TIERS[tname]['tier'])
 
         tracks = []
         summary = {'total': 0, 'lossless': 0, 'high_lossy': 0, 'standard_lossy': 0, 'low_lossy': 0, 'unknown': 0}
@@ -16334,7 +16513,6 @@ def _get_file_path_from_template(context: dict, template_type: str = 'album_path
 from mutagen import File as MutagenFile
 from mutagen.id3 import ID3, TIT2, TPE1, TALB, TDRC, TRCK, TCON, TPE2, TPOS, TXXX, APIC, UFID, TSRC, TBPM, TCOP, TPUB, TMED, TDOR
 from mutagen.apev2 import APEv2, APENoHeaderError
-import urllib.request
 
 def _wipe_source_tags(file_path: str) -> bool:
     return metadata_enrichment.wipe_source_tags(file_path)
@@ -38610,6 +38788,15 @@ def auto_import_toggle():
 
 @app.route('/api/auto-import/settings', methods=['GET', 'POST'])
 def auto_import_settings():
+    def normalize_quality_profile_id(raw_profile_id):
+        if raw_profile_id in (None, '', 0, '0'):
+            return None
+        try:
+            profile_id = int(raw_profile_id)
+        except (TypeError, ValueError):
+            return None
+        return profile_id if profile_id > 0 else None
+
     if request.method == 'GET':
         return jsonify({
             "success": True,
@@ -38617,9 +38804,34 @@ def auto_import_settings():
             "scan_interval": config_manager.get('auto_import.scan_interval', 60),
             "confidence_threshold": config_manager.get('auto_import.confidence_threshold', 0.9),
             "auto_process": config_manager.get('auto_import.auto_process', True),
+            # Per-context quality profile override (see core/auto_import_worker.py
+            # _process_matches) — None/0 means "use the app-wide default profile",
+            # same as every other context that doesn't specify its own.
+            "quality_profile_id": normalize_quality_profile_id(config_manager.get('auto_import.quality_profile_id')),
         })
     data = request.get_json() or {}
-    for key in ['enabled', 'scan_interval', 'confidence_threshold', 'auto_process']:
+    if 'quality_profile_id' in data:
+        raw_profile_id = data.get('quality_profile_id')
+        if raw_profile_id in (None, '', 0, '0'):
+            data['quality_profile_id'] = None
+        else:
+            profile_id = normalize_quality_profile_id(raw_profile_id)
+            if profile_id is None:
+                return jsonify({"success": False, "error": "Invalid quality profile"}), 400
+
+            try:
+                from database.music_database import MusicDatabase
+                db = MusicDatabase()
+                profile_ids = {int(profile.get('id')) for profile in db.list_quality_profiles()}
+            except Exception as e:
+                logger.error(f"Error validating Auto-Import quality profile: {e}")
+                return jsonify({"success": False, "error": str(e)}), 500
+
+            if profile_id not in profile_ids:
+                return jsonify({"success": False, "error": "Quality profile not found"}), 404
+            data['quality_profile_id'] = profile_id
+
+    for key in ['enabled', 'scan_interval', 'confidence_threshold', 'auto_process', 'quality_profile_id']:
         if key in data:
             config_manager.set(f'auto_import.{key}', data[key])
     return jsonify({"success": True})

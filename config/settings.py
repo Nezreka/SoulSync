@@ -713,18 +713,18 @@ class ConfigManager:
             },
             "import": {
                 "staging_path": "./Staging",
-                # Master toggle for quality-filtering on import. On by default:
-                # downloaded files that don't meet the quality profile are
-                # quarantined instead of imported (same gate the download
-                # pipeline uses). Off → import everything regardless of quality;
-                # the library Quality Upgrade Scanner still flags them.
-                "quality_filter_enabled": True,
+                # `replace_lower_quality` mirrors the Settings -> Quality page's
+                # checkbox. The pipeline enforces the PROFILE row (per item,
+                # live), not this key — it exists as the page's storage and is
+                # kept in sync with the active default profile in both
+                # directions (`apply_quality_profile_to_settings` pushes
+                # profile -> config on Apply; `sync_default_quality_profile_from_config`
+                # pushes config -> default profile on every settings save).
                 "replace_lower_quality": False,
-                # Use the top Staging folder as the artist (Artist/Album layouts,
-                # mixtapes). On by default to preserve the long-standing import
-                # behaviour for existing users. Turn OFF if you stage a mixed pile
-                # of songs under one container folder, otherwise that folder's name
-                # overrides every metadata-identified artist (the "soulsync" case).
+                # `folder_artist_override` is a plain global Auto-Import
+                # setting, read directly by `core/auto_import_worker.py` — a
+                # Staging folder-layout quirk, not a quality preference, so it
+                # deliberately does NOT live on a quality profile.
                 "folder_artist_override": True
             },
             "m3u_export": {
