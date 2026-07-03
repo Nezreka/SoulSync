@@ -228,6 +228,35 @@ def protected_root_dirs():
     return roots
 
 
+def ensure_staging_dir():
+    """Recreate the configured staging/import folder if it went missing.
+
+    Belt-and-suspenders for issue #976: even though the cleanups now protect
+    the staging root, if the folder is missing for any reason (an older build
+    that deleted it, a manual delete, a transient hiccup) the import feature
+    errors until it's back. Recreating it after a cleanup sweep means it
+    self-heals within one automation cycle instead of waiting for the next
+    Auto-Import scan.
+
+    Only creates it when its PARENT already exists, so we never fabricate a
+    not-yet-mounted volume path (which would mask the real mount).
+    """
+    try:
+        from core.imports.paths import docker_resolve_path
+        raw = config_manager.get('soulseek.staging_path', './Staging') or ''
+        if not raw:
+            return
+        staging = os.path.normpath(docker_resolve_path(raw))
+        if os.path.isdir(staging):
+            return
+        parent = os.path.dirname(staging)
+        if parent and os.path.isdir(parent):
+            os.makedirs(staging, exist_ok=True)
+            logger.info(f"Recreated missing staging/import folder: {staging}")
+    except Exception as e:
+        logger.debug(f"ensure_staging_dir: could not ensure staging folder: {e}")
+
+
 def cleanup_empty_directories(download_path, moved_file_path):
     """Remove empty directories after a move, ignoring hidden files.
 

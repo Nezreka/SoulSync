@@ -12,7 +12,11 @@ The fix: every empty-folder cleanup treats all configured roots
 import os
 
 import core.imports.file_ops as file_ops
-from core.imports.file_ops import cleanup_empty_directories, protected_root_dirs
+from core.imports.file_ops import (
+    cleanup_empty_directories,
+    ensure_staging_dir,
+    protected_root_dirs,
+)
 
 
 def _patch_roots(monkeypatch, mapping):
@@ -61,6 +65,40 @@ def test_transient_subfolders_still_removed(tmp_path, monkeypatch):
     assert not sub.exists()
     assert not (downloads / "Some Artist").exists()   # walked up, empty → removed
     assert downloads.is_dir()                          # download root protected
+
+
+def test_ensure_staging_recreates_when_parent_exists(tmp_path, monkeypatch):
+    """#976 self-heal: a missing staging folder is recreated so the import
+    feature doesn't error until the next Auto-Import scan."""
+    downloads = tmp_path / "downloads"
+    staging = downloads / "staging"
+    downloads.mkdir()                       # parent exists, staging does not
+    _patch_roots(monkeypatch, {'soulseek.staging_path': str(staging)})
+
+    assert not staging.exists()
+    ensure_staging_dir()
+    assert staging.is_dir()
+
+
+def test_ensure_staging_skips_when_parent_missing(tmp_path, monkeypatch):
+    """Mount safety: never fabricate a not-yet-mounted volume path — if the
+    parent doesn't exist we leave it alone rather than mask a missing mount."""
+    staging = tmp_path / "not_mounted_yet" / "staging"   # parent absent
+    _patch_roots(monkeypatch, {'soulseek.staging_path': str(staging)})
+
+    ensure_staging_dir()
+    assert not staging.exists()
+    assert not staging.parent.exists()      # didn't fabricate the mount path either
+
+
+def test_ensure_staging_noop_when_present(tmp_path, monkeypatch):
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    (staging / "keep.flac").write_text("x")
+    _patch_roots(monkeypatch, {'soulseek.staging_path': str(staging)})
+
+    ensure_staging_dir()
+    assert (staging / "keep.flac").is_file()   # untouched
 
 
 def test_protected_roots_reads_all_three_configs(tmp_path, monkeypatch):
