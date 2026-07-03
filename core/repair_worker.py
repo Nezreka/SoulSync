@@ -2243,9 +2243,17 @@ class RepairWorker:
         except Exception as e:
             logger.warning(f"Tag write failed during unknown artist fix: {e}")
 
-        # Step 2: Move file if expected path differs
-        final_path = resolved
-        if expected_path:
+        # Step 2: Move file if expected path differs — but ONLY when the file lives
+        # under the SoulSync transfer folder. For a media-server / non-transfer
+        # library the resolved file is elsewhere, and building the destination from
+        # transfer_folder would YANK it into the transfer folder, away from its real
+        # library (same class as #978). There we just re-tag + fix the DB metadata and
+        # leave the file where it is (physical reorg is Library Reorganize's job).
+        transfer_norm = os.path.normpath(self.transfer_folder) if self.transfer_folder else ''
+        under_transfer = bool(transfer_norm) and os.path.normpath(resolved).lower().startswith(
+            transfer_norm.lower() + os.sep)
+        final_path = resolved if under_transfer else file_path
+        if expected_path and under_transfer:
             expected_abs = os.path.normpath(os.path.join(self.transfer_folder, expected_path))
             if os.path.normpath(resolved).lower() != expected_abs.lower():
                 try:
