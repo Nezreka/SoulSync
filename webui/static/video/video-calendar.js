@@ -321,7 +321,12 @@
         // have something on screen — first load uses the entrance instead).
         var grid = $('[data-video-cal-grid]'); if (grid && state.data) grid.classList.add('vcal-fading');
         showEmpty(false); showLoading(true);
-        var base = new Date(); base.setHours(0, 0, 0, 0); base.setDate(base.getDate() + state.offset * 7);
+        // Show the full calendar week (Sun→Sat) that contains the target day, like
+        // Sonarr — so "This Week" includes days already aired earlier this week, not
+        // just today-forward. Snap the start back to that week's Sunday.
+        var base = new Date(); base.setHours(0, 0, 0, 0);
+        base.setDate(base.getDate() + state.offset * 7);   // a day inside the target week
+        base.setDate(base.getDate() - base.getDay());       // → that week's Sunday (getDay 0=Sun)
         fetch(URL + '?days=7&start=' + isoOf(base) + '&scope=' + (state.scope || 'watchlist'),
             { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
