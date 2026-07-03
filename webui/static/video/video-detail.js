@@ -446,6 +446,15 @@
                 '<span class="watchlist-icon">' + (watching ? '✓' : '＋') + '</span>' +
                 '<span class="watchlist-text">' + (watching ? 'In Watchlist' : 'Watchlist') + '</span></button>';
         }
+        // Movies are terminal — no "watch for new" follow, so give them the shared
+        // Get control instead (unowned → add to wishlist, owned → re-download /
+        // upgrade). Opens the same VideoGet modal the discover/search cards use.
+        if (d.kind === 'movie' && window.VideoGet) {
+            html +=
+                '<button class="library-artist-watchlist-btn" type="button" data-vd-act="get">' +
+                '<span class="watchlist-icon">' + (d.owned ? '⬇' : '＋') + '</span>' +
+                '<span class="watchlist-text">' + (d.owned ? 'Get' : 'Add to Wishlist') + '</span></button>';
+        }
         // "Get Missing" filters the OWNED episode list — library shows only.
         if (d.kind === 'show' && d.source !== 'tmdb') {
             html += '<button class="discog-download-btn discog-btn-compact" type="button" data-vd-act="missing">' +
@@ -453,6 +462,19 @@
                 '<span class="discog-btn-shimmer"></span></button>';
         }
         a.innerHTML = html;
+    }
+
+    // Open the shared Get modal for the current item (movies use this in place of
+    // the airing-show watchlist follow). The modal fetches its own details from the
+    // kind/source/id, then offers Download + Add-to-Wishlist.
+    function openGetModal() {
+        if (!window.VideoGet || !data) return;
+        VideoGet.open({
+            kind: data.kind,
+            source: data.source || currentSource || 'library',
+            id: (data.id != null) ? data.id : currentId,
+            title: data.title || '',
+        });
     }
 
     function mediaRes(r) {
@@ -1968,6 +1990,7 @@
         if (act && r.contains(act)) {
             var which = act.getAttribute('data-vd-act');
             if (which === 'watchlist') toggleWatchlist();
+            else if (which === 'get') openGetModal();
             else if (which === 'missing') toggleMissing();
             else if (which === 'yt-follow') toggleYtFollow();
             else if (which === 'yt-pl-follow') toggleYtPlaylistFollowHero();
