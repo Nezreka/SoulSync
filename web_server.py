@@ -15473,6 +15473,11 @@ def _sweep_empty_download_directories():
 
         if removed > 0:
             logger.warning(f"[Folder Cleanup] Removed {removed} empty director{'y' if removed == 1 else 'ies'} from downloads folder")
+        # #976: a sweep must never leave the import/staging folder missing —
+        # recreate it if it went absent (e.g. an older build deleted it) so the
+        # import feature self-heals instead of erroring until the next scan.
+        from core.imports.file_ops import ensure_staging_dir
+        ensure_staging_dir()
         return removed
     except Exception as e:
         logger.error(f"[Folder Cleanup] Error sweeping empty directories: {e}")
