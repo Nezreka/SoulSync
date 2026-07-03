@@ -342,7 +342,7 @@ def test_engine_trending_annotates_library(db):
 
     class Tmdb:
         enabled = True
-        def trending(self):
+        def trending(self, window="week", kind=None):
             return [{"kind": "movie", "tmdb_id": 1, "title": "Owned"},
                     {"kind": "show", "tmdb_id": 2, "title": "Hot show"}]
     eng = VideoEnrichmentEngine(db, {"tmdb": Tmdb()})
@@ -1089,6 +1089,7 @@ def test_tmdb_discover_builds_filtered_params(monkeypatch):
     assert p["primary_release_date.gte"] == "2010-01-01" and p["primary_release_date.lte"] == "2019-12-31"
     assert res[0] == {"kind": "movie", "tmdb_id": 1, "title": "A", "year": "2015",
                       "rating": 7.5, "overview": "O",
+                      "original_language": None, "popularity": None,
                       "poster": "https://image.tmdb.org/t/p/w300/a.jpg",
                       "backdrop": "https://image.tmdb.org/t/p/w780/b.jpg"}
 
@@ -1135,7 +1136,7 @@ def test_engine_discover_filter_normalizes_kind_and_passes_filters(db):
     class Tmdb:
         enabled = True
         def discover(self, kind, *, genre=None, year=None, decade=None, providers=None,
-                     sort_by="popularity.desc", page=1, region="US"):
+                     sort_by="popularity.desc", page=1, region="US", **_):
             captured.update(kind=kind, genre=genre, decade=decade, providers=providers, sort_by=sort_by)
             return [{"kind": "movie", "tmdb_id": 9, "title": "X"}]
     eng = VideoEnrichmentEngine(db, {"tmdb": Tmdb()})
