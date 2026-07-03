@@ -206,11 +206,41 @@ def safe_move_file(src, dst):
         raise
 
 
-def cleanup_empty_directories(download_path, moved_file_path):
-    """Remove empty directories after a move, ignoring hidden files."""
+def protected_root_dirs():
+    """Configured root folders that must NEVER be auto-removed as 'empty'.
+
+    The user's staging / download / transfer roots. Deleting one breaks the
+    import feature — issue #976: when a staging folder is nested under the
+    download folder (common on UnRaid single-share setups), the post-import
+    cleanup walked up past it and `rmdir`'d the staging root, because the
+    cleanups only protected the *download* root. Every empty-folder cleanup
+    consults this so no configured root is ever removed, however it's nested.
+    """
+    roots = set()
     try:
+        from core.imports.paths import docker_resolve_path
+        for key in ('soulseek.staging_path', 'soulseek.download_path', 'soulseek.transfer_path'):
+            raw = config_manager.get(key, '') or ''
+            if raw:
+                roots.add(os.path.normpath(docker_resolve_path(raw)))
+    except Exception as e:
+        logger.debug(f"protected_root_dirs: could not resolve configured roots: {e}")
+    return roots
+
+
+def cleanup_empty_directories(download_path, moved_file_path):
+    """Remove empty directories after a move, ignoring hidden files.
+
+    Never removes a configured root folder (staging/download/transfer), even
+    when it is empty and nested under `download_path` (issue #976).
+    """
+    try:
+        protected = protected_root_dirs()
+        protected.add(os.path.normpath(download_path))
         current_dir = os.path.dirname(moved_file_path)
         while current_dir != download_path and current_dir.startswith(download_path):
+            if os.path.normpath(current_dir) in protected:
+                break  # #976: never delete a configured root, even nested + empty
             is_empty = not any(not f.startswith(".") for f in os.listdir(current_dir))
             if is_empty:
                 logger.warning(f"Removing empty directory: {current_dir}")

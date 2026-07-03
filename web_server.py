@@ -15408,9 +15408,14 @@ def _search_track_in_album_context(original_search: dict, artist: dict) -> dict:
 def _cleanup_empty_directories(download_path, moved_file_path):
     """Cleans up empty directories after a file move, ignoring hidden files."""
     import os
+    from core.imports.file_ops import protected_root_dirs
     try:
+        protected = protected_root_dirs()
+        protected.add(os.path.normpath(download_path))
         current_dir = os.path.dirname(moved_file_path)
         while current_dir != download_path and current_dir.startswith(download_path):
+            if os.path.normpath(current_dir) in protected:
+                break  # #976: never delete a configured root, even nested + empty
             is_empty = not any(not f.startswith('.') for f in os.listdir(current_dir))
             if is_empty:
                 logger.warning(f"Removing empty directory: {current_dir}")
@@ -15430,16 +15435,22 @@ def _sweep_empty_download_directories():
     empty only after all sibling downloads in a batch have been processed.
     """
     import os
+    from core.imports.file_ops import protected_root_dirs
     try:
         download_path = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
         if not os.path.isdir(download_path):
             return 0
 
+        # #976: never sweep away a configured root (e.g. a staging folder nested
+        # under downloads), only its transient sub-folders.
+        protected = protected_root_dirs()
+        protected.add(os.path.normpath(download_path))
+
         removed = 0
         # os.walk bottom-up: deepest directories first so parents become empty after children removed
         for dirpath, _dirnames, _filenames in os.walk(download_path, topdown=False):
-            # Never remove the root download directory itself
-            if os.path.normpath(dirpath) == os.path.normpath(download_path):
+            # Never remove a configured root directory itself
+            if os.path.normpath(dirpath) in protected:
                 continue
             # Re-read actual contents — os.walk's lists are stale after child removal
             try:
