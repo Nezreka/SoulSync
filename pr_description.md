@@ -1,27 +1,40 @@
-# soulsync 2.8.3 — `dev` → `main`
+# soulsync 2.8.4 — `dev` → `main`
 
-the big one is **Discover** — a full Spotify-level rebuild plus a real recommendation engine behind it. the goal was simple: make Discover good enough that you don't reach for anything else. on top of that, a batch of bug fixes (lyrics, imports, library matching) and a few great contributor PRs.
+the headliner is **Artist Web** — an interactive, WebGL map of your whole library that doubles as a discovery tool. on top of that, **Quality Profiles** land (a big contributor PR), the Discover **Adventurousness dial** goes from "looks pretty" to actually reshaping your recs, and a batch of fixes + contributor PRs.
 
 ---
 
 ## what's new
 
-### 🎨 Discover, rebuilt
-- **a Spotify-level redesign** — consistent cards everywhere, "mix" cards that open into full track-list modals (sync or download a mix right from there), year + decade mixes, and Last.fm Radio / ListenBrainz folded in. plus a **2-column layout** so you scroll less.
-- **the Adventurousness dial** — an animated "living wave" you drag to set how exploratory your recommendations are. it's not just one knob: turning it up **loosens the genre leash** (lets artists outside your usual taste in), **leans into the unheard**, and **demotes the famous** — all at once. synced with a slider in Settings → Discovery.
-- **recommendations that actually know you** — both rec rows ("Based On Your Listening" + "Recommended For You") are now scored on genre/tag affinity (matches what you actually play), novelty (already-heard picks pushed down), and a popularity penalty driven by the dial.
-- **"why this rec" chips** — every recommendation card shows *why* it's there: 🎯 Your genres · 💎 Deep cut · 👥 N of your artists. no more guessing.
-- **self-filling popularity data** — a background job quietly fills artist popularity from Spotify Free → Last.fm → Deezer (rate-limited, resumable, runs on its own), so the dial has real data to push against. nothing to click.
+### 🕸️ Artist Web — your library as a living map
+- **a real similarity graph** — every artist you own, laid out by how they relate. it settles live (physics running in a background worker so the UI never freezes), and you can pan/zoom around thousands of nodes smoothly.
+- **three lenses / front doors** — **Taste Map** (clustered by genre), **Communities** (who groups with who), and the **Discovery Web** (below).
+- **Discovery Web** — the map's discovery mode: your owned artists become anchors, and it grows out to **similar artists you *don't* own yet**. click any node to **expand the map** from there, follow the thread, and **add anything to your watchlist** on the spot.
+- **play from the map** — start **artist radio** off an owned node, or hear a **30s preview** on a candidate you don't own, without leaving the graph.
+- **it explains itself** — a first-run hint + a guide modal, hover tooltips with the artist's photo, and real empty/error states so it never feels broken.
+
+### 🎚️ Quality Profiles (#974 — thanks @nick2000713)
+- the single global quality setting becomes **named, editable Quality Profiles**. quality targets, upgrade behavior, AcoustID strictness, downsampling, and lossy-copy rules all resolve **per profile**.
+- **Auto-Import can run its own profile** independent of your default, wishlist/library rows can carry their own, and there's an **"upgrade until target"** cutoff that lives on the profile itself.
+- a Manage view shows what's active for what (default vs. Auto-Import vs. per-item), separate from previewing/editing a profile.
+
+### 🧭 the Adventurousness dial, for real this time
+- turns out the dial was mostly cosmetic — moving it barely changed anything (a browser-cache bug was serving the same recs). now it genuinely **drives which artists surface**, not just how they're sorted.
+- **deeper the further you push it** — the far right reaches real deep cuts (validated on a live library: safe end = your household names, adventurous end = obscure-but-relevant picks), with a distinct middle instead of two ends that felt the same.
+- **genre diversity** so one genre can't hog the row, **freshness rotation** so you get different deep cuts each visit, and adaptive **"🧭 off your usual path"** chips at the exploratory end.
 
 ### 🐛 fixes
-- **Lyrics Filler false "missing" (#955 — thanks @diegocade1)** — on Docker / path-mapped setups it flagged tracks that already had `.lrc` files, because the scan checked the raw database path instead of the real on-disk one. it resolves the path now (same as the apply step + the Cover Art tool already did).
-- **import page re-scanning + match timeout (#957 — thanks @ramonskie)** — switching tabs on the import page re-scanned your entire staging folder every time (no caching) — now cached, so tab switches are instant and Refresh still forces a fresh scan. and the album-match call no longer times out on a slow NAS / big album (it was on a 10s client timeout; now uses the long import timeout).
-- **library matching picked remixes (#958 → #960 — thanks @ramonskie)** — a bare "Ratata" could match "Ratata (Afro Bros Remix)" when both were in your library. matching now prefers an exact title over a stripped-qualifier fallback.
-- **Deezer hybrid** — Deezer was getting dropped from hybrid downloads and showing a red status dot even though it worked fine as a primary source. fixed.
+- **repair job stop button actually cancels (#970)** — hitting stop now interrupts the running scan and flips responsively to "Stopping…", instead of the job grinding on.
+- **playlist stuck "syncing" (#972)** — a socket-driven sync could leave a playlist wedged in the syncing state server-side. fixed.
+- **JioSaavn worker no longer wedges (#964)** — a single unresolvable row could jam the whole enrichment worker; it skips and moves on now.
+- **duplicate cleanup is safer** — quarantines instead of hard-deleting, and surfaces Docker permission failures instead of swallowing them.
+- **Jellyfin playlist align** — reorders correctly without relying on the user-scoped Move endpoint.
+- **matching + sync** — "(live)" vs "- live" no longer blocks a legit match; a stale match-cache no longer blocks the durable manual-match self-heal.
+- **Tidal downloads** — added instrumentation that logs the request rate right before Tidal pushes back (429/deauth), to chase down a download-only rate-limit some users hit.
 
 ### 🤝 contributor PRs
-- **one matcher for imports (#954 — thanks HellRa1SeR)** — auto-import and manual album import now share the same matching engine the rest of the app uses (consistent handling of initials, unicode, version penalties), plus album-variant disambiguation that picks the right release by matching track durations.
-- **JioSaavn metadata (#956 — thanks HellRa1SeR)** — an experimental, opt-in metadata source for Bollywood / Asian catalogs that Spotify & Deezer cover poorly. off by default; enable it under Settings → Advanced → Experimental.
-- **platform-agnostic tests (#953 — thanks HellRa1SeR)** — the unit suite now passes on Windows dev machines, not just Linux CI.
+- **Quality Profiles (#974 — @nick2000713)** — the whole feature above.
+- **JioSaavn enrichment service (#964 — thanks HellRa1SeR)** — JioSaavn graduates from experimental metadata to a full enrichment worker.
+- **unicode / Japanese dedup matching (#965, #967 — thanks bluejorts)** — self-titled tracks match correctly, and normalization preserves all scripts instead of only CJK.
 
 enjoy 🎶
