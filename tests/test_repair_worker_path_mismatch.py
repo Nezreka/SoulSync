@@ -59,6 +59,28 @@ def test_abs_paths_outside_transfer_are_moved(tmp_path):
         assert conn.execute("SELECT file_path FROM tracks WHERE id=10").fetchone()[0] == os.path.normpath(str(dst))
 
 
+def test_media_server_path_updates_db_by_track_id(tmp_path):
+    """The real cross-path case: the DB stores a media-server path that DIFFERS from
+    the resolved abs path we move. The DB row must still be updated to the new
+    location (by track id, like the live executor) instead of staying stale."""
+    db, w = _worker(tmp_path)
+    lib = tmp_path / "plex_library"
+    src = lib / "Artist" / "Wrong Folder" / "song.flac"
+    dst = lib / "Artist" / "Album" / "01 - song.flac"
+    os.makedirs(src.parent, exist_ok=True)
+    src.write_text("audio")
+    # DB stores a DIFFERENT (media-server) path than the resolved abs src.
+    _insert_track(db, 20, "/plex/media/Artist/Wrong Folder/song.flac")
+
+    details = {'from': 'x', 'to': 'y', 'from_abs': str(src), 'to_abs': str(dst)}
+    res = w._fix_path_mismatch('track', '20', str(src), details)
+    assert res['success'] is True, res
+    assert dst.is_file() and not src.exists()
+    with db._get_connection() as conn:
+        # Updated by id despite the stored path not matching the moved path.
+        assert conn.execute("SELECT file_path FROM tracks WHERE id=20").fetchone()[0] == os.path.normpath(str(dst))
+
+
 def test_legacy_finding_without_abs_outside_transfer_is_guarded(tmp_path):
     """Old findings (no _abs) whose reconstructed path escapes the transfer folder
     are rejected with a clear 're-scan' message — never silently mangled."""
