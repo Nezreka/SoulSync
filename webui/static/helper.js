@@ -722,8 +722,8 @@ const HELPER_CONTENT = {
     },
     '.sync-tab-button[data-tab="import-file"]': {
         title: 'Import from File',
-        description: 'Import track lists from CSV, TSV, or plain text files. Drag and drop or browse for a file, map columns, then create a playlist for sync.',
-        tips: ['Supports CSV, TSV, and plain text (one track per line)', 'Column mapping for CSV/TSV files', 'Creates a mirrored playlist for persistent state'],
+        description: 'Import track lists from CSV, TSV, M3U/M3U8, or plain text files. Drag and drop or browse for a file, map columns, then create a playlist for sync.',
+        tips: ['Supports CSV, TSV, M3U/M3U8, and plain text (one track per line)', 'M3U/M3U8 is read automatically (artist, title, duration from #EXTINF)', 'Column mapping for CSV/TSV files', 'Creates a mirrored playlist for persistent state'],
         docsId: 'sync-import-file'
     },
     '.sync-tab-button[data-tab="mirrored"]': {
@@ -1862,9 +1862,9 @@ const HELPER_CONTENT = {
         title: 'Quality Preset',
         description: 'One-click quality configuration. Presets set all format enables, priorities, and bitrate ranges at once.',
     },
-    '.bit-depth-btn': {
-        title: 'FLAC Bit Depth',
-        description: 'Prefer 16-bit (CD quality, smaller), 24-bit (hi-res, larger), or Any. When a specific depth is chosen, the fallback toggle controls whether other depths are accepted.',
+    '.ranked-targets-editor': {
+        title: 'Quality Priority List',
+        description: 'Ordered list of acceptable qualities (1st = most preferred). Each source is checked top-down; the first target it can satisfy wins. Lossless matches on bit depth + sample rate; MP3/AAC use a minimum bitrate (≥) so VBR/mono files aren\'t falsely rejected. Drag to reorder.',
         docsId: 'set-quality'
     },
     '#quality-fallback-enabled': {
@@ -3404,21 +3404,19 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Convention: keep only the CURRENT release here, plus a single brief
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '2.7.2': [
-        { date: 'June 2026 — 2.7.2 release' },
-        { title: 'Organize playlists into folders', desc: 'optionally mirror each playlist into its own folder on disk — symlink (no extra space) or copy — so external players (plex / jellyfin / music assistant) see your soulsync playlists as real folders. rebuilds itself after every sync, prunes removed tracks, and there\'s a manual rebuild button in settings.', page: 'settings' },
-        { title: 'Export server playlists as M3U', desc: 'one-click "Export M3U" button in the Server Playlists compare/editor toolbar — writes a standard .m3u of the playlist\'s tracks and downloads it to your browser. handy for music assistant and friends.', page: 'sync' },
-        { title: 'Follow-only watchlist', desc: 'each watchlist artist now has an "auto-download" toggle (on by default). turn it off to just follow an artist — scans still discover and surface new releases, they just don\'t get auto-added to the wishlist.', page: 'artists' },
-        { title: 'Download from a SoundCloud link (#865)', desc: 'paste a soundcloud track url — including unlisted / private share links — into manual search and it resolves + downloads directly.', page: 'downloads' },
-        { title: 'YouTube playlists keep the artist (#863)', desc: 'youtube / youtube-music playlists that used to import as "Unknown Artist" now recover the real artist from the track\'s music metadata, the "Artist - Title" pattern, or the uploading channel — and fall back to the matched artist when youtube gives nothing.', page: 'sync' },
-        { title: 'Rename mirrored playlists', desc: 'a mirrored playlist now has a rename (✏️) button — set a custom name that changes how it shows in soulsync and how it syncs, survives upstream refreshes, and still tracks the same server playlist.', page: 'sync' },
-        { title: 'New maintenance jobs', desc: 'ReplayGain Filler (#437) computes + writes missing replaygain tags across your library, and Empty Folder Cleaner sweeps out leftover empty directories. both under Tools → library maintenance.', page: 'tools' },
-        { title: 'Export your watchlist + library', desc: 'one Export button with a scope selector dumps your watchlist roster and/or whole library roster to JSON / CSV / text.', page: 'artists' },
-        { title: 'Custom completed-download path for Torrent/Usenet (#857)', desc: 'point soulsync at the in-container folder your torrent/usenet client drops finished files into (e.g. a category subfolder), so completed grabs are found instead of going missing.', page: 'settings' },
-        { title: 'HiFi instances: restore + new working instance', desc: 'a "Restore Defaults" button re-adds any built-in instances you removed (keeps your own), the ✔/✖ controls have bigger tap targets, and a freshly-confirmed working instance is auto-pushed to everyone (thanks Sokhi).', page: 'settings' },
-        { title: 'Artist DB Record inspector', desc: 'an artist\'s detail page can now show the raw "DB Record" — everything the database knows about that artist — for debugging metadata.', page: 'library' },
-        { title: 'Fixes', desc: 'a hung database update self-heals now instead of wedging on "Starting..." forever (#859); Library Reorganize finally works on media-server libraries by falling back to tag mode (#862); spotify (no-auth) shows as connected and the dashboard test reports it correctly instead of claiming deezer; navidrome reconnects itself instead of latching disconnected; the orphan detector hard-bails on a mass-orphan flood; plus more #852 lock-screen hardening and login-password management in Manage Profiles.', page: 'settings' },
-        { title: 'Earlier versions', desc: '2.7.1 added download verification & a review queue (acoustid fingerprint-checks every download), closed the websocket login-bypass (#852), and the acoustid Relocate fix. 2.7.0 brought multi-user for real — per-profile streaming accounts, opt-in login, reverse-proxy support. before that the 2.6.x cycle brought the blocklist, the download-retry overhaul, Download Origins, Spotify-no-auth metadata, and Library Re-tag.' },
+    '2.8.4': [
+        { date: 'July 2026 — 2.8.4 release' },
+        { title: 'Artist Web — your library as a map', desc: 'an interactive WebGL graph of every artist you own, laid out by how they relate. it settles live (physics in a background worker, so the UI never freezes) and pans/zooms smoothly across thousands of nodes. three lenses: Taste Map (by genre), Communities, and the Discovery Web.', page: 'discover' },
+        { title: 'Discovery Web', desc: 'the map\'s discovery mode — your owned artists anchor a graph that grows out to similar artists you don\'t own yet. click any node to expand the map from there, follow the thread, and add anything to your watchlist on the spot.', page: 'discover' },
+        { title: 'Play from the map', desc: 'start artist radio off an owned node, or hear a 30s preview on a candidate you don\'t own — without leaving the graph. plus a first-run hint, a guide modal, and hover tooltips with the artist\'s photo.', page: 'discover' },
+        { title: 'Quality Profiles (#974)', desc: 'the single global quality setting becomes named, editable profiles — targets, upgrade behavior, AcoustID strictness, downsampling + lossy-copy all resolve per profile. Auto-Import can run its own, and there\'s an "upgrade until target" cutoff. (thanks @nick2000713.)', page: 'settings' },
+        { title: 'The Adventurousness dial, for real', desc: 'it was mostly cosmetic before (a browser-cache bug served the same recs). now it actually drives which artists surface — deeper the further you push it, genre-diverse so one genre can\'t hog the row, freshly rotated each visit, with "off your usual path" chips at the exploratory end.', page: 'discover' },
+        { title: 'Repair stop button actually cancels (#970)', desc: 'hitting stop now interrupts the running scan and flips responsively to "Stopping…", instead of the job grinding on to completion.', page: 'tools' },
+        { title: 'Playlist stuck "syncing" fixed (#972)', desc: 'a socket-driven sync could leave a playlist wedged in the syncing state server-side. fixed.', page: 'sync' },
+        { title: 'JioSaavn full enrichment worker (#964)', desc: 'JioSaavn graduates from experimental metadata to a full enrichment worker — and no longer wedges the whole worker on a single unresolvable row. (thanks HellRa1SeR.)', page: 'settings' },
+        { title: 'Unicode / Japanese dedup matching (#965)', desc: 'self-titled tracks match correctly and normalization preserves all scripts instead of only CJK, so the duplicate detector stops mis-grouping Japanese titles. (#967 — thanks bluejorts.)', page: 'tools' },
+        { title: 'Safer duplicate cleanup', desc: 'the duplicate cleaner quarantines instead of hard-deleting, and surfaces Docker permission failures instead of silently swallowing them.', page: 'tools' },
+        { title: 'Earlier versions', desc: '2.8.3 rebuilt Discover — a Spotify-level redesign plus a real recommendation engine (genre/novelty scoring, "why this rec" chips, self-filling popularity data). 2.8.2 fixed the Spotify Docker boot hang (#949) + added Max Performance mode; 2.8.1 added playlist export to Spotify & Deezer (#945); 2.8.0 brought the Unverified-queue cleanup (#934); 2.7.0 made multi-user real.' },
     ],
 };
 
@@ -3449,58 +3447,118 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "Organize playlists into folders",
-        description: "soulsync can now mirror each of your playlists into its own folder on disk, so external players (plex / jellyfin / music assistant) see them as real folders instead of just living inside soulsync.",
+        title: "Artist Web — your library as a map",
+        description: "an interactive WebGL graph of your whole library that doubles as a discovery tool.",
         features: [
-            "symlink (no extra disk space) or copy — your choice",
-            "rebuilds itself after every sync and prunes tracks you removed",
-            "separate output root + a manual rebuild button in settings",
+            "every artist you own, laid out by how they relate — it settles live (physics in a background worker, so the UI never freezes) and pans/zooms smoothly across thousands of nodes",
+            "three lenses / front doors: Taste Map (clustered by genre), Communities (who groups with who), and the Discovery Web",
+            "the Discovery Web — your owned artists anchor a map that grows out to similar artists you don't own yet; click any node to expand from there, follow the thread, and add anything to your watchlist on the spot",
+            "play from the map — artist radio off an owned node, or a 30s preview on a candidate you don't own, without leaving the graph; plus a first-run hint, a guide modal, and hover tooltips with the artist's photo",
         ],
-        usage_note: "Settings → Playlists → organize into folders",
+        usage_note: "open Artist Web from Discover — drag to pan, scroll to zoom, click a node to expand or play.",
     },
     {
-        title: "Better YouTube & SoundCloud imports",
-        description: "the two weak spots in playlist/link importing got fixed.",
+        title: "Quality Profiles",
+        description: "the single global quality setting becomes named, editable profiles (#974, thanks @nick2000713).",
         features: [
-            "#863 — youtube / youtube-music playlists that imported as \"Unknown Artist\" now recover the real artist from music metadata, the \"Artist - Title\" pattern, or the uploading channel (and fall back to the matched artist)",
-            "#865 — paste a soundcloud track link, including unlisted / private share urls, into manual search to download it directly",
+            "targets, upgrade behavior, AcoustID strictness, downsampling, and lossy-copy rules all resolve per profile — not one global setting",
+            "Auto-Import can run its own profile independent of your default; wishlist/library rows can carry their own; and there's an \"upgrade until target\" cutoff that lives on the profile",
+            "a Manage view shows what's active for what (default vs. Auto-Import vs. per-item), separate from previewing/editing a profile",
         ],
     },
     {
-        title: "Export server playlists as M3U",
-        description: "a one-click \"Export M3U\" button now sits in the Server Playlists compare/editor toolbar — writes a standard .m3u of the playlist and downloads it to your browser. great for music assistant.",
-        features: [],
-        usage_note: "Sync → Server Playlists → Export M3U",
-    },
-    {
-        title: "Follow-only watchlist + more",
-        description: "a grab-bag of requested features.",
+        title: "The Adventurousness dial, for real this time",
+        description: "the Discover dial goes from cosmetic to actually reshaping your recs.",
         features: [
-            "per-artist \"auto-download\" toggle: turn it off to just follow an artist — scans still surface new releases, they just don't auto-add to the wishlist",
-            "rename mirrored playlists (✏️): a custom name that changes the display + sync name, survives refreshes, still tracks the server playlist",
-            "export your watchlist and/or whole library roster to JSON / CSV / text",
-            "ReplayGain Filler (#437) and Empty Folder Cleaner library-maintenance jobs",
-            "custom in-container completed-download path for Torrent / Usenet sources (#857)",
-            "HiFi instances: Restore Defaults button, bigger tap targets, and a new confirmed-working instance pushed to everyone",
-            "Artist detail \"DB Record\" inspector for debugging metadata",
+            "it was mostly cosmetic before — a browser-cache bug was serving the same recs no matter where you set it. now it genuinely drives which artists surface, not just how they're sorted",
+            "deeper the further you push it — the far right reaches real deep cuts, with a distinct middle instead of two ends that felt the same",
+            "genre diversity so one genre can't hog the row, freshness rotation so you get different deep cuts each visit, and \"🧭 off your usual path\" chips at the exploratory end",
         ],
     },
     {
         title: "Fixes this release",
-        description: "a stack of issue fixes on top of 2.7.1.",
+        description: "repair jobs, sync, dedup, and matching.",
         features: [
-            "#859 — a hung database update self-heals instead of wedging on \"Starting...\" forever",
-            "#862 — Library Reorganize now works on media-server libraries (falls back to tag mode when there are no source IDs)",
-            "spotify (no-auth) shows as connected and the dashboard test reports it correctly, instead of claiming a deezer fallback",
-            "navidrome reconnects itself instead of latching \"disconnected\"",
-            "the orphan detector hard-bails on a mass-orphan flood instead of plowing ahead",
-            "more #852 lock-screen hardening + login-password management in Manage Profiles",
-            "Aria2 added to the torrent client list",
+            "#970 — the repair-job stop button actually cancels the running scan (instant \"Stopping…\"), instead of grinding on",
+            "#972 — a playlist could get stuck \"syncing\" server-side after a socket-driven sync; fixed",
+            "#964 — the JioSaavn worker no longer wedges the whole enrichment worker on a single unresolvable row",
+            "duplicate cleanup quarantines instead of hard-deleting (and surfaces Docker permission failures); Jellyfin playlist align + a couple of match/sync fixes",
         ],
     },
     {
-        title: "Earlier in 2.7.1 / 2.7.0",
-        description: "2.7.1 added download verification & an unverified review queue (acoustid fingerprint-checks every download against what you asked for), closed the websocket login-bypass (#852), and added the acoustid Relocate fix action. 2.7.0 made multi-user real: per-profile streaming accounts (My Accounts), auto-sync running as its owner, opt-in username/password login with recovery, and reverse-proxy support. before that, the 2.6.x cycle brought the blocklist, the download-retry overhaul, Download Origins, Spotify-no-auth metadata, and Library Re-tag.",
+        title: "Community contributions",
+        description: "great PRs from contributors this release.",
+        features: [
+            "#974 — named Quality Profiles (the feature above). thanks @nick2000713",
+            "#964 — JioSaavn graduates from experimental metadata to a full enrichment worker. thanks HellRa1SeR",
+            "#965/#967 — unicode / Japanese dedup matching: self-titled tracks match, and normalization preserves all scripts, not just CJK. thanks bluejorts",
+        ],
+    },
+    {
+        title: "Earlier in 2.8.3",
+        description: "2.8.3 was a full Discover rebuild.",
+        features: [
+            "a Spotify-level Discover redesign — consistent cards, \"mix\" cards that open into full track-list modals, year/decade mixes, Last.fm Radio + ListenBrainz, a 2-column layout",
+            "a real recommendation engine — both rec rows scored on genre affinity + novelty + a dial-driven popularity penalty, \"why this rec\" chips, and self-filling artist-popularity data (Spotify Free → Last.fm → Deezer)",
+            "fixes: Lyrics Filler .lrc false-missing (#955), import re-scan caching + match timeout (#957), exact-title matching over remixes (#958/#960); contributor PRs for a shared import matcher (#954) and experimental JioSaavn metadata (#956)",
+        ],
+    },
+    {
+        title: "Earlier in 2.8.2",
+        description: "2.8.2 was a stability + performance release.",
+        features: [
+            "Spotify Docker boot hang fixed (#949) — deferred auth probes so a slow Spotify can't block startup; \"re-auth didn't stick\" + Sync to Spotify fixed too",
+            "the \"slow after update\" fix (#948) — it was browser password managers, not soulsync; non-credential fields are now marked so they skip them, plus a new Max Performance mode",
+            "large-library imports no longer time out (#947) — the staging scan runs in the background with live \"Scanning N of M…\" progress",
+        ],
+    },
+    {
+        title: "Earlier in 2.8.1",
+        description: "2.8.1 was a features + reliability release.",
+        features: [
+            "playlist export to Spotify & Deezer (#945) — send a mirrored playlist back to your streaming account, resolving IDs from the discovery cache + your library",
+            "Rename-only Library Reorganize (#875), broader lossless + DSD handling (#941/#939), a pile of download/search fixes, and a refined reduce-visual-effects pass",
+        ],
+    },
+    {
+        title: "Earlier in 2.8.0",
+        description: "2.8.0 was a quality + reliability release.",
+        features: [
+            "the Unverified review queue stopped inflating and self-heals — the AcoustID scan no longer duplicates rows, a startup reconcile clears the backlog, and a 🧹 Clean orphaned button sweeps dead rows (#934, thanks @nick2000713 for #938)",
+            "Preview Clip Cleanup (a Tools job that finds ~30s preview clips and re-wishlists the real version); Album Completeness handles split albums (#936, thanks @ragnarlotus)",
+            "dashboard performance + bounded memory growth that could lock up big libraries (#935 / #802)",
+        ],
+    },
+    {
+        title: "Earlier in 2.7.9",
+        description: "2.7.9 was a big features release.",
+        features: [
+            "best-quality downloads + a ranked-target quality profile (drag to order every format; pools candidates across every source and grabs the best copy that meets your profile)",
+            "quarantine folded into the Downloads page; Discover \"Based On Your Listening\" + a playable \"Your Listening Mix\"; the Wing It Pool; the horizontal-lane Auto-Sync redesign",
+            "#927 — multi-disc albums no longer show disc-2 tracks as \"missing\" (the scan now reads the real disc number; re-scan once to backfill)",
+        ],
+    },
+    {
+        title: "Earlier in 2.7.8",
+        description: "2.7.8 was about playlist order + a couple of reported fixes.",
+        features: [
+            "Align playlists — reorder the server playlist to match the source (Plex/Navidrome/Jellyfin), with an \"out of order\" badge; order-only, never adds missing tracks",
+            "re-add a missed track to the wishlist straight from Recent Syncs → details, with the exact same context the sync used",
+            "#922 — import label said \"Deezer\" for Spotify Free users (now reads \"Spotify\"); #918 — iTunes albums over 50 tracks self-heal from a stale 50-track cache",
+        ],
+    },
+    {
+        title: "Earlier in 2.7.7 / 2.7.6 / 2.7.5",
+        description: "2.7.7 was fix-heavy (downloads tag + path right the first time #915, the listening-recs foundation #913, a big reported-issue sweep). 2.7.6 exported playlists TO listenbrainz (#903) + youtube liked-music sync (#902); 2.7.5 was matching & artwork accuracy plus quality-of-life features.",
+        features: [
+            "#915 — post-processing + redownload pull the full album from your PRIMARY metadata source, so $year / release date / album type land right the first time",
+            "HiFi 30-second previews disguised as full songs are caught and rejected (#895); special-edition cover art, deezer track numbers, the \"The\" duplicate fix",
+            "import M3U / M3U8 playlists (#893), ignore-list management (#897), Unraid template fixes (#899), and the rest of the #905–#918 batch",
+        ],
+    },
+    {
+        title: "Earlier in 2.7.4 / 2.7.3 / 2.7.2 / 2.7.1 / 2.7.0",
+        description: "2.7.4 added re-identify (re-file an imported track under the right release without re-downloading) plus library/import cleanups (#889/#890/#891). 2.7.3 added the Quality Upgrade Finder and the wishlist ignore-list (#874); 2.7.2 brought playlist-folder mirroring + server-playlist M3U export and ReplayGain / Empty-Folder maintenance jobs; 2.7.1 added download verification (acoustid checks every download) + a review queue and closed the websocket login-bypass (#852); 2.7.0 made multi-user real — per-profile streaming accounts, opt-in login, reverse-proxy support.",
         features: [],
     },
 ];

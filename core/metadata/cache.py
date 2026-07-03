@@ -946,6 +946,8 @@ class MetadataCache:
             return self._extract_beatport_fields(entity_type, raw_data)
         elif source == 'discogs':
             return self._extract_discogs_fields(entity_type, raw_data)
+        elif source == 'jiosaavn':
+            return self._extract_jiosaavn_fields(entity_type, raw_data)
         return {'name': str(raw_data.get('name', raw_data.get('trackName', '')))}
 
     def _extract_spotify_fields(self, entity_type: str, data: dict) -> dict:
@@ -1188,6 +1190,49 @@ class MetadataCache:
                 img = data.get('cover_image') or data.get('thumb')
                 if img and 'spacer.gif' not in img:
                     fields['image_url'] = img
+
+        return fields
+
+    def _extract_jiosaavn_fields(self, entity_type: str, data: dict) -> dict:
+        """Extract fields from JioSaavn API responses."""
+        from core.jiosaavn_client import _artist_names, _best_image, _duration_ms, _popularity, _release_date
+
+        fields: dict = {}
+        urls = {}
+        if data.get("url"):
+            urls["jiosaavn"] = data["url"]
+        fields["external_urls"] = json.dumps(urls)
+
+        if entity_type == "artist":
+            fields["name"] = data.get("name") or data.get("title") or ""
+            fields["image_url"] = _best_image(data.get("image"))
+            fields["genres"] = "[]"
+            fields["popularity"] = 0
+            fields["followers"] = 0
+            return fields
+
+        if entity_type == "album":
+            artists = _artist_names(data.get("artists"))
+            fields["name"] = data.get("name") or data.get("title") or ""
+            fields["artist_name"] = artists[0] if artists else ""
+            fields["release_date"] = _release_date(data.get("year"))
+            fields["total_tracks"] = int(data.get("songCount") or 0)
+            fields["album_type"] = data.get("type") or "album"
+            fields["label"] = data.get("label") or ""
+            fields["image_url"] = _best_image(data.get("image"))
+            return fields
+
+        if entity_type == "track":
+            album = data.get("album") if isinstance(data.get("album"), dict) else {}
+            artists = _artist_names(data.get("artists"))
+            fields["name"] = data.get("name") or data.get("title") or ""
+            fields["artist_name"] = artists[0] if artists else ""
+            fields["album_name"] = album.get("name") or ""
+            fields["album_id"] = str(album.get("id") or "")
+            fields["image_url"] = _best_image(data.get("image"))
+            fields["duration_ms"] = _duration_ms(data.get("duration"))
+            fields["popularity"] = _popularity(data.get("playCount"))
+            return fields
 
         return fields
 

@@ -456,6 +456,7 @@ function initializeWebSocket() {
     socket.on('enrichment:audiodb', (data) => updateAudioDBStatusFromData(data));
     socket.on('enrichment:discogs', (data) => updateDiscogsStatusFromData(data));
     socket.on('enrichment:deezer', (data) => updateDeezerStatusFromData(data));
+    socket.on('enrichment:jiosaavn', (data) => updateJioSaavnStatusFromData(data));
     socket.on('enrichment:spotify-enrichment', (data) => updateSpotifyEnrichmentStatusFromData(data));
     socket.on('enrichment:itunes-enrichment', (data) => updateiTunesEnrichmentStatusFromData(data));
     socket.on('enrichment:lastfm-enrichment', (data) => updateLastFMEnrichmentStatusFromData(data));
@@ -473,7 +474,7 @@ function initializeWebSocket() {
     // Forward enrichment status to the dashboard worker-orbs so the hub fires
     // a pulse on each real item matched / error (additional listener — does not
     // disturb the UI handlers above).
-    ['musicbrainz', 'audiodb', 'discogs', 'deezer', 'spotify-enrichment',
+    ['musicbrainz', 'audiodb', 'discogs', 'deezer', 'jiosaavn', 'spotify-enrichment',
      'itunes-enrichment', 'lastfm-enrichment', 'genius-enrichment', 'tidal-enrichment',
      'qobuz-enrichment', 'amazon-enrichment', 'similar_artists', 'hydrabase',
      'soulid', 'repair'].forEach((ch) => {
@@ -687,7 +688,10 @@ function handleDashboardStats(data) {
     updateStatCard('download-speed-card', data.download_speed, 'Combined speed');
     updateStatCard('active-syncs-card', data.active_syncs, 'Playlists syncing');
     updateStatCard('uptime-card', data.uptime, 'Application runtime');
-    updateStatCard('memory-card', data.memory_usage, 'Current usage');
+    // Headline is system memory %; subtitle shows SoulSync's own RSS so users can see the
+    // app's actual footprint (falls back to the generic label on older backends).
+    updateStatCard('memory-card', data.memory_usage,
+        data.process_memory ? `SoulSync · ${data.process_memory}` : 'Current usage');
 }
 
 function handleDashboardActivity(data) {

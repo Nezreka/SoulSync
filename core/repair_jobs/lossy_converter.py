@@ -1,13 +1,19 @@
-"""Lossy Converter Job — finds FLAC files that don't have a lossy copy.
+"""Lossy Converter Job — finds lossless files that don't have a lossy copy.
 
-Scans the library for FLAC files without a corresponding lossy copy alongside
+Scans the library for lossless files without a corresponding lossy copy alongside
 them, and creates a finding for each. The fix action converts the file using
 ffmpeg with the user's configured codec/bitrate settings.
 """
 
 import os
 
+from core.imports.file_ops import m4a_codec
 from core.library.path_resolver import resolve_library_file_path
+from core.quality.lossless import (
+    LOSSLESS_CANDIDATE_EXTENSIONS,
+    is_lossless_audio_path,
+    lossy_output_would_overwrite_source,
+)
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
@@ -19,6 +25,16 @@ CODEC_MAP = {
     'opus': '.opus',
     'aac':  '.m4a',
 }
+
+
+def _lossless_ext_where(col: str) -> str:
+    """SQL pre-filter matching files whose extension *might* be lossless. The
+    final decision (including ALAC-in-.m4a, which needs a codec probe) is made
+    per-file by is_lossless_audio_path. Extensions are trusted constants from the
+    quality model, never user input — safe to interpolate."""
+    return '(' + ' OR '.join(
+        f"LOWER({col}) LIKE '%{ext}'" for ext in sorted(LOSSLESS_CANDIDATE_EXTENSIONS)
+    ) + ')'
 
 
 def _resolve_file_path(file_path, transfer_folder, download_folder=None, config_manager=None):
@@ -35,15 +51,15 @@ def _resolve_file_path(file_path, transfer_folder, download_folder=None, config_
 class LossyConverterJob(RepairJob):
     job_id = 'lossy_converter'
     display_name = 'Lossy Converter'
-    description = 'Finds FLAC files without a lossy copy'
+    description = 'Finds lossless files without a lossy copy'
     help_text = (
-        'Scans your library for FLAC files that don\'t already have a lossy copy '
+        'Scans your library for lossless files (FLAC/ALAC/WAV/AIFF/DSD) that don\'t already have a lossy copy '
         '(MP3, Opus, or AAC) alongside them.\n\n'
         'Uses the codec setting from your Lossy Copy configuration on the Settings '
         'page. Enable Lossy Copy in Settings first, then run this job to find FLAC '
         'files missing a lossy copy.\n\n'
         'Each finding can be fixed individually or in bulk — the fix action converts '
-        'the FLAC file using ffmpeg at your configured bitrate.\n\n'
+        'the lossless file using ffmpeg at your configured bitrate.\n\n'
         'Requires ffmpeg to be installed.'
     )
     icon = 'repair-icon-lossy'
@@ -81,14 +97,14 @@ class LossyConverterJob(RepairJob):
         try:
             conn = context.db._get_connection()
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(f"""
                 SELECT t.id, t.title, ar.name, al.title, t.file_path,
                        al.thumb_url, ar.thumb_url
                 FROM tracks t
                 LEFT JOIN artists ar ON ar.id = t.artist_id
                 LEFT JOIN albums al ON al.id = t.album_id
                 WHERE t.file_path IS NOT NULL AND t.file_path != ''
-                  AND LOWER(t.file_path) LIKE '%.flac'
+                  AND {_lossless_ext_where('t.file_path')}
             """)
             tracks = cursor.fetchall()
         except Exception as e:
@@ -104,7 +120,7 @@ class LossyConverterJob(RepairJob):
             context.update_progress(0, total)
         if context.report_progress:
             context.report_progress(
-                phase=f'Scanning {total} FLAC files for missing {quality_label} copies...',
+                phase=f'Scanning {total} lossless files for missing {quality_label} copies...',
                 total=total
             )
 
@@ -135,8 +151,17 @@ class LossyConverterJob(RepairJob):
             if not resolved or not os.path.exists(resolved):
                 continue
 
+            # Confirm it's actually lossless — the SQL pre-filter lets .m4a through,
+            # which is ALAC (lossless) OR AAC (lossy); only a codec probe decides.
+            if not is_lossless_audio_path(resolved, probe_codec=m4a_codec):
+                continue
+
             # Check if lossy copy already exists
             out_path = os.path.splitext(resolved)[0] + out_ext
+            # Never offer to convert a file onto itself (e.g. .m4a ALAC + AAC target
+            # lands on the same path) — that conversion would destroy the original.
+            if lossy_output_would_overwrite_source(resolved, out_path):
+                continue
             if os.path.exists(out_path):
                 continue
 
@@ -159,7 +184,7 @@ class LossyConverterJob(RepairJob):
                         file_path=file_path,
                         title=f'No {quality_label} copy: {title or "Unknown"}',
                         description=(
-                            f'FLAC file "{title}" by {artist_name or "Unknown"} does not have '
+                            f'Lossless file "{title}" by {artist_name or "Unknown"} does not have '
                             f'a {quality_label} copy alongside it'
                         ),
                         details={
@@ -195,7 +220,7 @@ class LossyConverterJob(RepairJob):
             context.report_progress(
                 scanned=total, total=total,
                 phase='Complete',
-                log_line=f'Found {result.findings_created} FLAC files without {quality_label} copies',
+                log_line=f'Found {result.findings_created} lossless files without {quality_label} copies',
                 log_type='success' if result.findings_created == 0 else 'info'
             )
 
@@ -208,10 +233,10 @@ class LossyConverterJob(RepairJob):
         try:
             conn = context.db._get_connection()
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(f"""
                 SELECT COUNT(*) FROM tracks
                 WHERE file_path IS NOT NULL AND file_path != ''
-                  AND LOWER(file_path) LIKE '%.flac'
+                  AND {_lossless_ext_where('file_path')}
             """)
             row = cursor.fetchone()
             return row[0] if row else 0

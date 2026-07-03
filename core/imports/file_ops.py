@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import logging
 import os
 import re
@@ -102,6 +103,41 @@ def cleanup_slskd_dedup_siblings(source_path) -> List[str]:
     return deleted
 
 
+def _atomic_cross_device_move(src: Path, dst: Path) -> None:
+    """Move ``src`` to ``dst`` across filesystems WITHOUT ever exposing a partial file at
+    the final path.
+
+    Copies into a hidden temp sibling of ``dst`` (same filesystem), fsyncs, then does an
+    atomic ``os.replace`` into place, then deletes ``src``. A media-server file watcher
+    (Jellyfin/Plex real-time monitoring) therefore only ever indexes the COMPLETE file —
+    an incremental in-place copy was what Jellyfin could catch mid-write and cache with
+    null/incomplete metadata (tracks landing with no disc). Cleans up the temp on failure.
+    """
+    src, dst = Path(src), Path(dst)
+    tmp = dst.parent / f".{dst.name}.ssync-tmp"
+    try:
+        with open(src, "rb") as f_src, open(tmp, "wb") as f_dst:
+            shutil.copyfileobj(f_src, f_dst)
+            f_dst.flush()
+            os.fsync(f_dst.fileno())
+        try:
+            shutil.copystat(str(src), str(tmp))   # preserve mtime/permissions (copy2-like)
+        except OSError:
+            pass
+        os.replace(str(tmp), str(dst))            # atomic within dst's filesystem
+    except Exception:
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except OSError:
+            pass
+        raise
+    try:
+        src.unlink()
+    except OSError:
+        logger.info(f"Could not delete source after cross-device move (may be owned by another process): {src}")
+
+
 def safe_move_file(src, dst):
     """Move a file safely across filesystems."""
     src = Path(src)
@@ -129,7 +165,13 @@ def safe_move_file(src, dst):
                 break
 
     try:
-        shutil.move(str(src), str(dst))
+        # Same-filesystem move: an atomic rename that also overwrites dst. A media-server
+        # watcher (Jellyfin/Plex real-time monitoring) therefore never sees a partial file
+        # at the final name. Cross-filesystem raises EXDEV (some network mounts raise
+        # EPERM/EACCES) and we copy atomically below instead of letting the move write the
+        # destination incrementally — the partial-file-at-final-name is what caused tracks
+        # to land in Jellyfin with null/incomplete metadata (no disc).
+        os.replace(str(src), str(dst))
         return
     except FileNotFoundError:
         if dst.exists():
@@ -137,8 +179,6 @@ def safe_move_file(src, dst):
             return
         raise
     except (OSError, PermissionError) as e:
-        error_msg = str(e).lower()
-
         if dst.exists() and dst.stat().st_size > 0:
             logger.warning(f"Move raised {type(e).__name__} but destination exists, treating as success: {e}")
             try:
@@ -147,23 +187,21 @@ def safe_move_file(src, dst):
                 logger.info(f"Could not delete source file (may be owned by another process): {src}")
             return
 
-        if "cross-device" in error_msg or "operation not permitted" in error_msg or "permission denied" in error_msg:
-            logger.warning(f"Cross-device move detected, using fallback copy method: {e}")
+        error_msg = str(e).lower()
+        cross_device = (
+            getattr(e, "errno", None) in (errno.EXDEV, errno.EPERM, errno.EACCES)
+            or "cross-device" in error_msg
+            or "operation not permitted" in error_msg
+            or "permission denied" in error_msg
+        )
+        if cross_device:
+            logger.warning(f"Cross-device move, using atomic copy+rename: {e}")
             try:
-                with open(src, "rb") as f_src:
-                    with open(dst, "wb") as f_dst:
-                        shutil.copyfileobj(f_src, f_dst)
-                        f_dst.flush()
-                        os.fsync(f_dst.fileno())
-
-                try:
-                    src.unlink()
-                except PermissionError:
-                    logger.info(f"Could not delete source file (may be owned by another process): {src}")
-                logger.info(f"Successfully moved file using fallback method: {src} -> {dst}")
+                _atomic_cross_device_move(src, dst)
+                logger.info(f"Successfully moved file atomically across filesystems: {src} -> {dst}")
                 return
             except Exception as fallback_error:
-                logger.error(f"Fallback copy also failed: {fallback_error}")
+                logger.error(f"Atomic cross-device move failed: {fallback_error}")
                 raise
         raise
 
@@ -192,6 +230,9 @@ def get_audio_quality_string(file_path):
         if ext == ".flac":
             from mutagen.flac import FLAC
             audio = FLAC(file_path)
+            sr = getattr(audio.info, "sample_rate", 0) or 0
+            if sr:
+                return f"FLAC {audio.info.bits_per_sample}bit/{sr / 1000:g}kHz"
             return f"FLAC {audio.info.bits_per_sample}bit"
 
         if ext == ".mp3":
@@ -223,6 +264,122 @@ def get_audio_quality_string(file_path):
     except Exception as e:
         logger.debug(f"Could not determine audio quality for {file_path}: {e}")
         return ""
+
+
+def probe_audio_quality(file_path: str):
+    """Read the actual file and return an AudioQuality with real measured values.
+
+    Uses mutagen to extract sample_rate, bit_depth, and bitrate from the
+    downloaded file — these are ground-truth values, not estimates.
+    Returns None when the file cannot be read.
+    """
+    from core.quality.model import AudioQuality
+    try:
+        ext = os.path.splitext(file_path)[1].lower().lstrip('.')
+
+        if ext == 'flac':
+            from mutagen.flac import FLAC
+            audio = FLAC(file_path)
+            return AudioQuality(
+                format='flac',
+                bitrate=audio.info.bitrate // 1000 if audio.info.bitrate else None,
+                sample_rate=audio.info.sample_rate,
+                bit_depth=audio.info.bits_per_sample,
+            )
+
+        if ext == 'mp3':
+            from mutagen.mp3 import MP3
+            audio = MP3(file_path)
+            return AudioQuality(
+                format='mp3',
+                bitrate=audio.info.bitrate // 1000,
+                sample_rate=audio.info.sample_rate,
+            )
+
+        if ext in ('m4a', 'aac', 'mp4'):
+            from mutagen.mp4 import MP4
+            audio = MP4(file_path)
+            # .m4a can carry AAC (lossy) OR ALAC (lossless) — only the real
+            # codec tells them apart, which is why extension-based classification
+            # defaults to 'aac' and we correct it here from the probed file.
+            codec = (getattr(audio.info, 'codec', '') or '').lower()
+            if 'alac' in codec:
+                return AudioQuality(
+                    format='alac',
+                    bitrate=audio.info.bitrate // 1000 if audio.info.bitrate else None,
+                    sample_rate=audio.info.sample_rate,
+                    bit_depth=getattr(audio.info, 'bits_per_sample', None) or None,
+                )
+            return AudioQuality(
+                format='aac',
+                bitrate=audio.info.bitrate // 1000,
+                sample_rate=audio.info.sample_rate,
+            )
+
+        if ext == 'ogg':
+            from mutagen.oggvorbis import OggVorbis
+            audio = OggVorbis(file_path)
+            return AudioQuality(
+                format='ogg',
+                bitrate=audio.info.bitrate // 1000,
+                sample_rate=audio.info.sample_rate,
+            )
+
+        if ext == 'opus':
+            from mutagen.oggopus import OggOpus
+            audio = OggOpus(file_path)
+            return AudioQuality(
+                format='opus',
+                bitrate=audio.info.bitrate // 1000,
+                sample_rate=audio.info.sample_rate,
+            )
+
+        if ext in ('wav', 'aiff', 'aif'):
+            # AIFF must use mutagen.aiff.AIFF — WAVE() can't parse it and would
+            # raise, making the file fail open and silently bypass the quality
+            # filter. Both are uncompressed PCM, so they share the 'wav' tier.
+            if ext == 'wav':
+                from mutagen.wave import WAVE
+                audio = WAVE(file_path)
+            else:
+                from mutagen.aiff import AIFF
+                audio = AIFF(file_path)
+            return AudioQuality(
+                format='wav',
+                bitrate=audio.info.bitrate // 1000 if audio.info.bitrate else None,
+                sample_rate=audio.info.sample_rate,
+                bit_depth=getattr(audio.info, 'bits_per_sample', None),
+            )
+
+        if ext == 'wma':
+            from mutagen.asf import ASF
+            audio = ASF(file_path)
+            return AudioQuality(
+                format='wma',
+                bitrate=audio.info.bitrate // 1000 if audio.info.bitrate else None,
+                sample_rate=getattr(audio.info, 'sample_rate', None),
+            )
+
+        if ext in ('dsf', 'dff'):
+            # DSD (DSD Stream File / DSDIFF) — 1-bit hi-res lossless (#939). mutagen
+            # reads .dsf (rate/bitrate/bit_depth); .dff has no mutagen reader, so it
+            # still classifies as the lossless 'dsf' tier just without measured detail.
+            sr = bd = br = None
+            if ext == 'dsf':
+                try:
+                    from mutagen.dsf import DSF
+                    info = DSF(file_path).info
+                    sr = getattr(info, 'sample_rate', None)
+                    bd = getattr(info, 'bits_per_sample', None)
+                    br = info.bitrate // 1000 if getattr(info, 'bitrate', None) else None
+                except Exception:  # noqa: S110 — unreadable DSF still classifies lossless, just without measured detail
+                    pass
+            return AudioQuality(format='dsf', bitrate=br, sample_rate=sr, bit_depth=bd)
+
+        return None
+    except Exception as e:
+        logger.debug("probe_audio_quality failed for %s: %s", file_path, e)
+        return None
 
 
 def get_quality_tier_from_extension(file_path):
@@ -257,11 +414,17 @@ def get_quality_tier_from_extension(file_path):
     return ("unknown", 999)
 
 
-def downsample_hires_flac(final_path, context):
-    """Downsample a hi-res FLAC to 16-bit/44.1kHz if enabled."""
+def downsample_hires_flac(final_path, context, enabled=None):
+    """Downsample a hi-res FLAC to 16-bit/44.1kHz if enabled.
+
+    ``enabled`` comes from the item's quality profile (see
+    `core/imports/pipeline.py::_resolve_context_quality_profile`); ``None``
+    falls back to the legacy global setting for callers with no profile."""
     from mutagen.flac import FLAC
 
-    if not config_manager.get("lossy_copy.downsample_hires", False):
+    if enabled is None:
+        enabled = config_manager.get("lossy_copy.downsample_hires", False)
+    if not enabled:
         return None
 
     if os.path.splitext(final_path)[1].lower() != ".flac":
@@ -367,18 +530,48 @@ def downsample_hires_flac(final_path, context):
     return None
 
 
-def create_lossy_copy(final_path):
-    """Convert a FLAC file to a lossy copy using the configured codec."""
-    from mutagen.flac import FLAC
-
-    if not config_manager.get("lossy_copy.enabled", False):
+def m4a_codec(path):
+    """Codec of an .m4a/.mp4 container ('alac', 'aac', …) or None — lets the
+    lossless check tell ALAC (lossless) from AAC (lossy), since both are .m4a."""
+    try:
+        from mutagen.mp4 import MP4
+        return (getattr(MP4(path).info, 'codec', '') or '').lower() or None
+    except Exception:
         return None
 
-    if os.path.splitext(final_path)[1].lower() != ".flac":
+
+def create_lossy_copy(final_path, settings=None):
+    """Convert a lossless file (FLAC / ALAC / WAV / AIFF / DSD) to a lossy copy
+    using the configured codec. Non-lossless inputs are skipped (#941).
+
+    ``settings`` is an optional dict from the item's quality profile
+    (``enabled``/``codec``/``bitrate``/``delete_original`` — see
+    `core/imports/pipeline.py::_resolve_context_quality_profile`); missing/None
+    values fall back to the legacy global settings, so callers with no profile
+    (e.g. the lossy-converter repair job) keep today's behavior."""
+    from core.quality.lossless import (
+        is_lossless_audio_path,
+        lossy_output_would_overwrite_source,
+    )
+
+    settings = settings or {}
+
+    enabled = settings.get("enabled")
+    if enabled is None:
+        enabled = config_manager.get("lossy_copy.enabled", False)
+    if not enabled:
         return None
 
-    codec = config_manager.get("lossy_copy.codec", "mp3").lower()
-    bitrate = config_manager.get("lossy_copy.bitrate", "320")
+    # Was FLAC-only; now any lossless source. .m4a is probed (ALAC vs AAC).
+    if not is_lossless_audio_path(final_path, probe_codec=m4a_codec):
+        return None
+
+    codec = str(settings.get("codec") or config_manager.get("lossy_copy.codec", "mp3")).lower()
+    bitrate = str(settings.get("bitrate") or config_manager.get("lossy_copy.bitrate", "320"))
+
+    delete_original = settings.get("delete_original")
+    if delete_original is None:
+        delete_original = config_manager.get("lossy_copy.delete_original", False)
 
     if codec == "opus" and int(bitrate) > 256:
         bitrate = "256"
@@ -402,6 +595,16 @@ def create_lossy_copy(final_path):
         if original_quality in out_basename:
             out_basename = out_basename.replace(original_quality, quality_label)
             out_path = os.path.join(os.path.dirname(out_path), out_basename)
+
+    # Safety invariant: never write the lossy copy over its own source (an .m4a
+    # ALAC source + AAC target lands on the same .m4a path). ffmpeg runs with -y,
+    # so this guard MUST precede it — the later delete-original guard is too late.
+    if lossy_output_would_overwrite_source(final_path, out_path):
+        logger.info(
+            f"[Lossy Copy] Skipping — {codec.upper()} output would overwrite the "
+            f"source: {os.path.basename(final_path)}"
+        )
+        return None
 
     ffmpeg_bin = shutil.which("ffmpeg")
     if not ffmpeg_bin:
@@ -441,11 +644,11 @@ def create_lossy_copy(final_path):
             except Exception as tag_err:
                 logger.error(f"[Lossy Copy] Could not update QUALITY tag: {tag_err}")
 
-            # Honor the lossy_copy.delete_original setting — without this
-            # the original FLAC was always kept alongside the converted
-            # MP3/OPUS/AAC even when the user explicitly opted into a
-            # lossy-only library (Discord-reported by CAL).
-            if config_manager.get("lossy_copy.delete_original", False):
+            # Honor the delete-original setting — without this the original
+            # FLAC was always kept alongside the converted MP3/OPUS/AAC even
+            # when the user explicitly opted into a lossy-only library
+            # (Discord-reported by CAL).
+            if delete_original:
                 if os.path.normpath(out_path) != os.path.normpath(final_path):
                     try:
                         os.remove(final_path)

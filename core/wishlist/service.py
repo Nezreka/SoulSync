@@ -100,6 +100,7 @@ class WishlistService:
         source_type: str = "manual",
         source_context: Dict[str, Any] = None,
         profile_id: int = 1,
+        user_initiated: bool = False,
     ) -> bool:
         """
         Directly add a track to the wishlist.
@@ -110,6 +111,8 @@ class WishlistService:
             source_type: Source type ('playlist', 'album', 'manual')
             source_context: Additional context information
             profile_id: Profile to add to
+            user_initiated: True for an explicit user add — bypasses + clears the
+                ignore-list while keeping the real source_type (#874/#897).
         """
         if track_data is None:
             track_data = spotify_track_data
@@ -124,6 +127,7 @@ class WishlistService:
             source_type=source_type,
             source_info=source_context or {},
             profile_id=profile_id,
+            user_initiated=user_initiated,
         )
 
     def add_spotify_track_to_wishlist(
@@ -206,6 +210,12 @@ class WishlistService:
                     "last_attempted": wishlist_track["last_attempted"],
                     "source_type": wishlist_track["source_type"],
                     "source_info": wishlist_track["source_info"],
+                    # Per-item quality-profile pointer, resolved once at
+                    # wishlist-insert time (see core/quality/migrate_to_profiles.py).
+                    # The download/import pipeline resolves the profile's actual
+                    # settings LIVE via core/quality/selection.py::load_profile_by_id
+                    # when it needs them — this is only ever the pointer.
+                    "quality_profile_id": wishlist_track.get("quality_profile_id"),
                     "id": track_id,
                     "name": track_name,
                     "artists": artists,
@@ -214,7 +224,11 @@ class WishlistService:
                     "preview_url": track_data.get("preview_url") if isinstance(track_data, dict) else None,
                     "external_urls": track_data.get("external_urls", {}) if isinstance(track_data, dict) else {},
                     "popularity": track_data.get("popularity", 0) if isinstance(track_data, dict) else 0,
-                    "track_number": track_data.get("track_number", 1) if isinstance(track_data, dict) else 1,
+                    # "Track 01" bug: 0 = "unknown position", NOT a fabricated 1.
+                    # A fake 1 looks authoritative and blocks the import
+                    # pipeline's track-number recovery; 0 lets it recover the
+                    # real position (file tag / source lookup) before the floor.
+                    "track_number": track_data.get("track_number", 0) if isinstance(track_data, dict) else 0,
                     "disc_number": track_data.get("disc_number", 1) if isinstance(track_data, dict) else 1,
                 }
 

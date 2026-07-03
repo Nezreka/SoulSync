@@ -56,6 +56,12 @@ def get_primary_source() -> str:
     return _get_primary_source()
 
 
+def get_primary_source_label() -> str:
+    from core.metadata_service import get_primary_source_label as _get_primary_source_label
+
+    return _get_primary_source_label()
+
+
 def get_source_priority(preferred_source: str):
     from core.metadata_service import get_source_priority as _get_source_priority
 

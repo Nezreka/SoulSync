@@ -24,7 +24,7 @@ from database.music_database import MusicDatabase
 # should_pin_manual_canonical — pure
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize('source', ['spotify', 'itunes', 'deezer', 'discogs', 'hydrabase'])
+@pytest.mark.parametrize('source', ['spotify', 'itunes', 'deezer', 'discogs', 'hydrabase', 'musicbrainz'])
 def test_pins_album_on_recognised_source(source):
     assert should_pin_manual_canonical('album', source) is True
 
@@ -34,7 +34,7 @@ def test_does_not_pin_non_album(entity):
     assert should_pin_manual_canonical(entity, 'spotify') is False
 
 
-@pytest.mark.parametrize('source', ['lastfm', 'genius', 'musicbrainz', 'audiodb', 'tidal'])
+@pytest.mark.parametrize('source', ['lastfm', 'genius', 'audiodb', 'tidal'])
 def test_does_not_pin_source_canonical_cant_read(source):
     # No album-version data the canonical tools read → nothing to pin.
     assert should_pin_manual_canonical('album', source) is False

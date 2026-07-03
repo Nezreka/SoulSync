@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Optional, Set
+from typing import Any, Dict, Iterable, List, Optional
 
 from core.imports.context import normalize_import_context
 from core.imports.staging import collect_staging_files
@@ -10,6 +10,7 @@ from utils.logging_config import get_logger
 
 
 logger = get_logger("imports.album")
+
 
 def get_client_for_source(source: str):
     from core.metadata_service import get_client_for_source as _get_client_for_source
@@ -31,26 +32,6 @@ def get_artist_album_tracks(
         album_name=album_name,
         source_override=source,
     )
-
-
-try:
-    from core.matching_engine import MusicMatchingEngine
-    _MATCHING_ENGINE_IMPORT_ERROR = None
-except Exception as exc:  # pragma: no cover - only hits in stripped-down environments
-    MusicMatchingEngine = None  # type: ignore[assignment]
-    _MATCHING_ENGINE_IMPORT_ERROR = exc
-
-
-_MATCHING_ENGINE = None
-
-
-def _get_matching_engine() -> Any:
-    global _MATCHING_ENGINE
-    if _MATCHING_ENGINE is None:
-        if MusicMatchingEngine is None:
-            raise RuntimeError("Music matching engine is unavailable") from _MATCHING_ENGINE_IMPORT_ERROR
-        _MATCHING_ENGINE = MusicMatchingEngine()
-    return _MATCHING_ENGINE
 
 
 def _normalize_artist_entries(artists: Any) -> List[Dict[str, Any]]:
@@ -106,27 +87,6 @@ def _strip_legacy_source_fields(payload: Any) -> Any:
     return cleaned
 
 
-def _extract_track_artist_name(track: Dict[str, Any]) -> str:
-    artists = track.get("artists") or []
-    if isinstance(artists, (str, bytes)):
-        artists = [artists]
-    elif isinstance(artists, dict):
-        artists = [artists]
-    else:
-        try:
-            artists = list(artists)
-        except TypeError:
-            artists = [artists]
-
-    if not artists:
-        return ""
-
-    first = artists[0]
-    if isinstance(first, dict):
-        return str(first.get("name") or first.get("artist_name") or first.get("title") or "").strip()
-    return str(first or "").strip()
-
-
 def _coerce_track_int(value: Any, default: int = 1) -> int:
     if value in (None, ""):
         return default
@@ -157,49 +117,6 @@ def _normalize_match_track(track: Dict[str, Any], source: str, album: Dict[str, 
         "album": track_album,
         "source": track_source,
     }
-
-
-def _score_album_track_match(track: Dict[str, Any], staging_file: Dict[str, Any], album_name: str) -> float:
-    engine = _get_matching_engine()
-
-    track_name = track.get("name", "")
-    staging_title = staging_file.get("title", "")
-    score = 0.0
-
-    title_sim = engine.similarity_score(
-        engine.normalize_string(track_name),
-        engine.normalize_string(staging_title or ""),
-    )
-    score += title_sim * 0.45
-
-    track_artist_name = _extract_track_artist_name(track)
-    staging_artist = staging_file.get("artist") or ""
-    if track_artist_name and staging_artist:
-        artist_sim = engine.similarity_score(
-            engine.normalize_string(track_artist_name),
-            engine.normalize_string(staging_artist),
-        )
-        score += artist_sim * 0.15
-    else:
-        score += 0.075
-
-    track_number = _coerce_track_int(track.get("track_number", 1), default=1)
-    staging_track_number = _coerce_track_int(staging_file.get("track_number", 1), default=1)
-    if staging_track_number and track_number:
-        if staging_track_number == track_number:
-            score += 0.30
-        elif abs(staging_track_number - track_number) <= 1:
-            score += 0.12
-
-    staging_album = staging_file.get("album") or ""
-    if staging_album and album_name:
-        album_sim = engine.similarity_score(
-            engine.normalize_string(staging_album),
-            engine.normalize_string(album_name),
-        )
-        score += album_sim * 0.10
-
-    return score
 
 
 def _fetch_artist_data_for_source(client: Any, artist_id: str, source: str) -> Any:
@@ -441,35 +358,53 @@ def build_album_import_match_payload(
 
     staging_files = collect_staging_files(file_paths)
     album_name_for_match = album.get("name") or album_name or ""
+    normalized_tracks = [
+        _normalize_match_track(track, source, album) for track in tracks
+    ]
+
+    from core.imports.album_matching import default_quality_rank, match_files_to_tracks
+
+    audio_files = [sf["full_path"] for sf in staging_files]
+    staging_by_path = {sf["full_path"]: sf for sf in staging_files}
+    file_tags = {
+        sf["full_path"]: {
+            "title": sf.get("title") or "",
+            "artist": sf.get("artist") or "",
+            "album": sf.get("album") or "",
+            "track_number": sf.get("track_number") or 0,
+            "disc_number": sf.get("disc_number") or 1,
+        }
+        for sf in staging_files
+    }
+
+    match_result = match_files_to_tracks(
+        audio_files,
+        file_tags,
+        normalized_tracks,
+        target_album=album_name_for_match,
+        quality_rank=default_quality_rank,
+    )
+    # Re-map matches back to tracks by object identity, NOT track["id"]. match_files_to_tracks stores
+    # the same track object on each match (both the exact-id and fuzzy phases), so identity is exact +
+    # unique. Keying on track["id"] collided when a source omitted track ids — every id-less track
+    # ("") mapped to one match, pairing several tracks to the same file.
+    match_by_track = {id(m["track"]): m for m in match_result["matches"]}
+
     matches: List[Dict[str, Any]] = []
-    used_files: Set[int] = set()
-
-    for track in tracks:
-        normalized_track = _normalize_match_track(track, source, album)
-        best_match = None
-        best_score = 0.0
-
-        for index, staging_file in enumerate(staging_files):
-            if index in used_files:
-                continue
-
-            score = _score_album_track_match(normalized_track, staging_file, album_name_for_match)
-            if score > best_score and score >= 0.4:
-                best_score = score
-                best_match = index
-
+    for track in normalized_tracks:
+        hit = match_by_track.get(id(track))
         matches.append(
             {
-                "track": normalized_track,
-                "staging_file": staging_files[best_match] if best_match is not None else None,
-                "confidence": round(best_score, 2) if best_match is not None else 0,
+                "track": track,
+                "staging_file": staging_by_path.get(hit["file"]) if hit else None,
+                "confidence": round(hit["confidence"], 2) if hit else 0,
             }
         )
 
-        if best_match is not None:
-            used_files.add(best_match)
-
-    unmatched_files = [sf for index, sf in enumerate(staging_files) if index not in used_files]
+    unmatched_paths = set(match_result["unmatched_files"])
+    unmatched_files = [
+        sf for sf in staging_files if sf["full_path"] in unmatched_paths
+    ]
 
     return {
         "success": True,

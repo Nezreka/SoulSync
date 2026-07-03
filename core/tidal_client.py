@@ -520,8 +520,18 @@ class TidalClient:
         
         return True
     
-    def is_authenticated(self):
+    def is_authenticated(self) -> bool:
         """Check if client is authenticated, refreshing expired tokens if possible"""
+        from core.boot_phase import is_boot_phase
+
+        if is_boot_phase():
+            if self.access_token and time.time() < self.token_expires_at:
+                return True
+            return bool(self.access_token and self.refresh_token)
+
+        # Token still valid — no refresh needed. (Restored: #949 moved this short-circuit
+        # into the boot-phase branch only, so every post-boot call fell through to the
+        # refresh below — a constant silent-refresh loop on a perfectly valid token.)
         if self.access_token and time.time() < self.token_expires_at:
             return True
 
@@ -1655,6 +1665,8 @@ class TidalClient:
 
         ids: List[str] = []
         next_path: Optional[str] = None
+        consecutive_429 = 0
+        MAX_PAGE_RETRIES = 4
 
         while True:
             if next_path:
@@ -1687,6 +1699,28 @@ class TidalClient:
                 logger.warning(f"Tidal collection page request failed: {e}")
                 break
 
+            # Rate limited mid-walk → retry the SAME cursor page with backoff
+            # rather than silently truncating the collection. Without this a 429
+            # on page ~5 capped a 513-track favorites list at ~98 (issue #880);
+            # the regular-playlist paginator already retries 429 the same way.
+            if resp.status_code == 429:
+                consecutive_429 += 1
+                if consecutive_429 <= MAX_PAGE_RETRIES:
+                    backoff = 5.0 * consecutive_429  # 5s, 10s, 15s, 20s
+                    logger.warning(
+                        f"Tidal collection {expected_type} rate limited (429) — "
+                        f"retry {consecutive_429}/{MAX_PAGE_RETRIES} in {backoff}s "
+                        f"({len(ids)} fetched so far)"
+                    )
+                    time.sleep(backoff)
+                    continue  # next_path/cursor unchanged → re-request same page
+                logger.error(
+                    f"Tidal collection {expected_type} still rate limited after "
+                    f"{MAX_PAGE_RETRIES} retries — returning {len(ids)} IDs "
+                    f"(PARTIAL: the collection may be larger)"
+                )
+                break
+
             if resp.status_code != 200:
                 # 401/403 = scope/permission issue. Token predates the
                 # `collection.read` scope expansion or the user revoked
@@ -1703,6 +1737,8 @@ class TidalClient:
                         f"Tidal collection page returned {resp.status_code}: {resp.text[:500]}"
                     )
                 break
+
+            consecutive_429 = 0  # a good page → reset the retry budget
 
             try:
                 data = resp.json()

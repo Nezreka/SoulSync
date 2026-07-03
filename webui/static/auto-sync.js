@@ -73,6 +73,17 @@ function autoSyncIntervalLabel(hours) {
     return `Every ${hours} hour${hours === 1 ? '' : 's'}`;
 }
 
+// Short cadence word for the lane badge (under the interval number).
+function autoSyncLaneCadence(hours) {
+    if (hours === 1) return 'Hourly';
+    if (hours === 12) return 'Twice a day';
+    if (hours === 24) return 'Daily';
+    if (hours === 168) return 'Weekly';
+    if (hours < 24) return `Every ${hours}h`;
+    const days = hours / 24;
+    return `Every ${days} days`;
+}
+
 // Browser-detected default tz for new schedules. Used when the user
 // creates a weekly schedule and hasn't picked an explicit tz — falls
 // back to UTC on browsers where Intl is unavailable (very old ones).
@@ -354,6 +365,12 @@ function renderAutoSyncScheduleModal() {
     const overlay = document.getElementById('auto-sync-schedule-modal');
     if (!overlay) return;
 
+    // Preserve the visible lane board's scroll across the full re-render so dropping /
+    // removing a playlist doesn't snap it back to the top (the user used to have to scroll
+    // back). Targets the ACTIVE tab so it works for both the hourly + weekly boards.
+    const _prevLanes = overlay.querySelector('.auto-sync-tab-panel.active .auto-sync-lanes');
+    const _prevScroll = _prevLanes ? _prevLanes.scrollTop : null;
+
     const { playlists, playlistSchedules, weeklySchedules, automationPipelines, runHistory, runHistoryTotal } = _autoSyncScheduleState;
     const scheduledCount = Object.keys(playlistSchedules).length + Object.keys(weeklySchedules || {}).length;
     const enabledCount = Object.values(playlistSchedules).filter(s => s.enabled).length
@@ -408,6 +425,11 @@ function renderAutoSyncScheduleModal() {
     `;
     populateAutoSyncHistoryList(overlay);
     bindAutoSyncHistoryCardInteractions(overlay);
+
+    if (_prevScroll != null) {
+        const nl = overlay.querySelector('.auto-sync-tab-panel.active .auto-sync-lanes');
+        if (nl) nl.scrollTop = _prevScroll;
+    }
 }
 
 function setAutoSyncTab(tab) {
@@ -479,17 +501,23 @@ function renderAutoSyncSchedulePanel(playlists, playlistSchedules) {
         .map(s => parseInt(s?.hours, 10))
         .filter(h => Number.isFinite(h) && h > 0 && !AUTO_SYNC_BUCKETS.includes(h));
     const allBuckets = [...new Set([...AUTO_SYNC_BUCKETS, ...customHours])].sort((a, b) => a - b);
+    // Concept 1 — interval LANES (horizontal rows) instead of columns: no side-scroll,
+    // empty intervals collapse to thin strips, busy ones grow. Same drag handlers + card.
     const bucketHtml = allBuckets.map(hours => {
         const assigned = schedulablePlaylists.filter(p => playlistSchedules[p.id]?.hours === hours);
         const isCustom = !AUTO_SYNC_BUCKETS.includes(hours);
+        const filled = assigned.length > 0;
         return `
-            <div class="auto-sync-column ${isCustom ? 'custom' : ''}" data-hours="${hours}" ondragover="autoSyncDragOver(event)" ondragleave="autoSyncDragLeave(event)" ondrop="autoSyncDrop(event, ${hours})">
-                <div class="auto-sync-column-head">
-                    <span>${autoSyncBucketLabel(hours)}${isCustom ? ' <em>custom</em>' : ''}</span>
-                    <small>${assigned.length} playlist${assigned.length === 1 ? '' : 's'}</small>
+            <div class="auto-sync-lane ${filled ? 'filled' : 'empty'} ${isCustom ? 'custom' : ''}" data-hours="${hours}" ondragover="autoSyncDragOver(event)" ondragleave="autoSyncDragLeave(event)" ondrop="autoSyncDrop(event, ${hours})">
+                <div class="auto-sync-lane-badge">
+                    <b>${autoSyncBucketLabel(hours)}</b>
+                    <span>${_esc(autoSyncLaneCadence(hours))}${isCustom ? ' · custom' : ''}</span>
+                    ${filled ? `<em class="auto-sync-lane-count">${assigned.length}</em>` : ''}
                 </div>
-                <div class="auto-sync-column-list">
-                    ${assigned.length ? assigned.map(p => autoSyncScheduledCardHtml(p, playlistSchedules[p.id])).join('') : '<div class="auto-sync-drop-hint"><strong>Drop here</strong><span>Schedule playlists at this interval</span></div>'}
+                <div class="auto-sync-lane-track">
+                    ${filled
+                        ? assigned.map(p => autoSyncScheduledCardHtml(p, playlistSchedules[p.id])).join('')
+                        : `<div class="auto-sync-lane-hint"><span class="auto-sync-lane-hint-ic">+</span> Drag a playlist here to sync ${_esc(autoSyncIntervalLabel(hours).toLowerCase())}</div>`}
                 </div>
             </div>
         `;
@@ -514,7 +542,7 @@ function renderAutoSyncSchedulePanel(playlists, playlistSchedules) {
                     </div>
                     <div class="auto-sync-source-list">${sidebarHtml}${unavailableHtml}</div>
                 </aside>
-                <main class="auto-sync-board">${bucketHtml}</main>
+                <main class="auto-sync-lanes">${bucketHtml}</main>
             </div>
     `;
 }
@@ -598,21 +626,24 @@ function renderAutoSyncWeeklyPanel(playlists, playlistSchedules) {
         });
     });
 
+    // Day LANES (horizontal rows, Mon–Sun) — mirrors the hourly board's lane layout.
     const dayColumnsHtml = AUTO_SYNC_WEEKDAYS.map(day => {
         const cards = cardsByDay[day];
-        const cardHtml = cards.length
+        const filled = cards.length > 0;
+        const cardHtml = filled
             ? cards.map(({ playlist, schedule }) => autoSyncWeeklyCardHtml(playlist, schedule)).join('')
-            : '<div class="auto-sync-drop-hint"><strong>Drop here</strong><span>Schedule playlists on this day</span></div>';
+            : `<div class="auto-sync-lane-hint"><span class="auto-sync-lane-hint-ic">+</span> Drag a playlist here to sync every ${_esc(AUTO_SYNC_WEEKDAY_LABELS[day])}</div>`;
         return `
-            <div class="auto-sync-column auto-sync-weekly-column" data-day="${day}"
+            <div class="auto-sync-lane ${filled ? 'filled' : 'empty'}" data-day="${day}"
                  ondragover="autoSyncWeeklyDragOver(event)"
                  ondragleave="autoSyncWeeklyDragLeave(event)"
                  ondrop="autoSyncWeeklyDrop(event, '${day}')">
-                <div class="auto-sync-column-head">
-                    <span>${AUTO_SYNC_WEEKDAY_LABELS[day]}</span>
-                    <small>${cards.length} playlist${cards.length === 1 ? '' : 's'}</small>
+                <div class="auto-sync-lane-badge">
+                    <b>${_esc(AUTO_SYNC_WEEKDAY_LABELS[day])}</b>
+                    <span>Weekly</span>
+                    ${filled ? `<em class="auto-sync-lane-count">${cards.length}</em>` : ''}
                 </div>
-                <div class="auto-sync-column-list">${cardHtml}</div>
+                <div class="auto-sync-lane-track">${cardHtml}</div>
             </div>
         `;
     }).join('');
@@ -637,7 +668,7 @@ function renderAutoSyncWeeklyPanel(playlists, playlistSchedules) {
                 </div>
                 <div class="auto-sync-source-list">${sidebarHtml}${unavailableHtml}</div>
             </aside>
-            <main class="auto-sync-board auto-sync-weekly-board">${dayColumnsHtml}</main>
+            <main class="auto-sync-lanes auto-sync-weekly-lanes">${dayColumnsHtml}</main>
         </div>
         ${editorHtml}
     `;

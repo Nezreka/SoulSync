@@ -171,6 +171,21 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
             logger.info(f"[Post-Processing] Task {task_id} already completed by stream processor, skipping verification")
             return
 
+        # RACE GUARD: the monitor sets status -> 'post_processing' immediately
+        # before submitting this worker. If the status is now anything else, the
+        # browser-poll post-processor already took ownership of this task — e.g.
+        # it quarantined the file and requeued the next-best candidate (status
+        # -> 'searching', source identity cleared). Bail WITHOUT marking failed
+        # or notifying batch completion: otherwise we clobber that in-flight
+        # retry with a bogus "missing file or source information" failure while a
+        # parallel attempt is importing the song.
+        if task['status'] != 'post_processing':
+            logger.info(
+                f"[Post-Processing] Task {task_id} no longer in 'post_processing' "
+                f"(now '{task['status']}') — another path took over, skipping"
+            )
+            return
+
         # Extract file information for verification
         track_info = task.get('track_info', {})
         task_filename = task.get('filename') or track_info.get('filename')
@@ -438,7 +453,19 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
                         logger.error(f"[Post-Processing] Task {task_id} was completed by stream processor - not marking as failed")
                         return
                     download_tasks[task_id]['status'] = 'failed'
-                    download_tasks[task_id]['error_message'] = f'File not found on disk after {_file_search_max_retries} search attempts. Expected: {os.path.basename(task_filename)}'
+                    # slskd reported the transfer complete, but the finder never located
+                    # the file under the configured download folder. Name the folder we
+                    # searched and the two real causes — "still being written" (timing)
+                    # or "SoulSync's download path doesn't match slskd's" (the classic
+                    # standalone config mismatch) — so the user can self-diagnose instead
+                    # of getting an opaque "not found". (Discord: Shdjfgatdif.)
+                    _searched_name = os.path.basename((task_filename or '').replace('\\', '/')) or task_filename
+                    download_tasks[task_id]['error_message'] = (
+                        f"slskd reported '{_searched_name}' downloaded, but it never appeared "
+                        f"under the download folder ({download_dir}) after {_file_search_max_retries} "
+                        f"checks. Either it's still being written, or SoulSync's download path "
+                        f"doesn't match slskd's download directory — they must point at the same folder."
+                    )
             deps.on_download_completed(batch_id, task_id, False)
             return
 

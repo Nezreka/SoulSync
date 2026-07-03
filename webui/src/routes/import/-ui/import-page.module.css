@@ -56,6 +56,25 @@
   color: rgba(255, 255, 255, 0.5);
 }
 
+.importOptionsRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 22px;
+  padding: 10px 16px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.importOption {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .importStagingPath {
   flex: 1;
   overflow: hidden;

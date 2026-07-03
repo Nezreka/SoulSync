@@ -1,6 +1,8 @@
 import os
 from concurrent.futures import Future
 
+import pytest
+
 import core.imports.routes as import_routes
 from core.imports.routes import (
     ImportRouteRuntime,
@@ -15,6 +17,15 @@ from core.imports.routes import (
     staging_hints,
     staging_suggestions,
 )
+
+
+@pytest.fixture(autouse=True)
+def _clear_staging_scan_cache():
+    # The shared staging scan is cached at module level; clear it between tests so
+    # one test's scan can't satisfy another within the TTL.
+    import_routes.invalidate_staging_scan_cache()
+    yield
+    import_routes.invalidate_staging_scan_cache()
 
 
 class _FakeLogger:
@@ -181,14 +192,21 @@ def test_staging_hints_prefers_tag_queries_then_folder_queries(tmp_path):
     _touch(tmp_path / "Folder_Album" / "02.mp3")
     _touch(tmp_path / "Loose" / "track.flac")
 
-    def _read_tags(file_path):
-        if file_path.endswith("01.mp3") or file_path.endswith("02.mp3"):
-            return {"album": ["Tagged Album"], "artist": ["Tagged Artist"]}
-        return {}
+    def _empty(artist="", album="", track_number=0):
+        return {"title": "", "artist": artist, "albumartist": "",
+                "album": album, "track_number": track_number, "disc_number": 1}
+
+    # hints now derives from the shared staging scan (read_staging_file_metadata),
+    # the same reader files/groups use — not a separate read_tags pass.
+    metadata = {
+        os.path.join("Folder_Album", "01.mp3"): _empty(artist="Tagged Artist", album="Tagged Album", track_number=1),
+        os.path.join("Folder_Album", "02.mp3"): _empty(artist="Tagged Artist", album="Tagged Album", track_number=2),
+        os.path.join("Loose", "track.flac"): _empty(),
+    }
 
     runtime = ImportRouteRuntime(
         get_staging_path=lambda: str(tmp_path),
-        read_tags=_read_tags,
+        read_staging_file_metadata=_metadata_for(metadata),
         logger=_FakeLogger(),
     )
 
@@ -207,7 +225,7 @@ def test_staging_suggestions_returns_cache_payload(monkeypatch):
         "get_import_suggestions_cache",
         lambda: {"suggestions": [{"album": "Album"}], "built": True},
     )
-    monkeypatch.setattr(import_routes, "_get_primary_source", lambda: "deezer")
+    monkeypatch.setattr(import_routes, "_get_primary_source_label", lambda: "deezer")
 
     payload, status = staging_suggestions()
 
@@ -296,6 +314,7 @@ def test_search_albums_enqueues_hydrabase_and_caps_limit():
     calls = []
     runtime = ImportRouteRuntime(
         get_primary_source=lambda: "hydrabase",
+        get_primary_source_label=lambda: "hydrabase",
         hydrabase_worker=worker,
         dev_mode_enabled=True,
         search_import_albums=lambda query, limit: calls.append((query, limit)) or [{"id": "album-1"}],
@@ -327,10 +346,15 @@ def test_search_albums_exposes_primary_source_when_chain_falls_back():
     # serves results from a different source, the response must carry both
     # `primary_source` (what the user configured) and per-album `source`
     # (what actually served the result) so the UI can warn the user.
+    #
+    # The configured source for the BANNER is the label, NOT the functional
+    # source (issue #922): a Spotify Free user's functional source downgrades to
+    # the deezer fallback, but the banner must still name what they configured.
     runtime = ImportRouteRuntime(
-        get_primary_source=lambda: "musicbrainz",
+        get_primary_source=lambda: "deezer",          # functional (downgraded fallback)
+        get_primary_source_label=lambda: "spotify",   # configured intent (Spotify Free)
         search_import_albums=lambda query, limit: [
-            {"id": "deezer-1", "name": "Album", "source": "deezer"},
+            {"id": "discogs-1", "name": "Album", "source": "discogs"},
         ],
         logger=_FakeLogger(),
     )
@@ -339,8 +363,8 @@ def test_search_albums_exposes_primary_source_when_chain_falls_back():
 
     assert status == 200
     assert payload["success"] is True
-    assert payload["primary_source"] == "musicbrainz"
-    assert payload["albums"][0]["source"] == "deezer"
+    assert payload["primary_source"] == "spotify"          # label, not the deezer fallback
+    assert payload["albums"][0]["source"] == "discogs"
 
 
 def test_search_tracks_enqueues_hydrabase_and_caps_limit():
@@ -348,6 +372,7 @@ def test_search_tracks_enqueues_hydrabase_and_caps_limit():
     calls = []
     runtime = ImportRouteRuntime(
         get_primary_source=lambda: "hydrabase",
+        get_primary_source_label=lambda: "hydrabase",
         hydrabase_worker=worker,
         dev_mode_enabled=True,
         search_import_tracks=lambda query, limit: calls.append((query, limit)) or [{"id": "track-1"}],
@@ -599,3 +624,31 @@ def test_singles_process_requires_files():
 
     assert status == 400
     assert payload == {"success": False, "error": "No files provided"}
+
+
+def test_staging_scan_is_shared_across_files_groups_hints(tmp_path):
+    """#935: opening Import fires files+groups+hints together; they must share ONE
+    staging scan (one walk + one tag read per file), not re-read every file 3×."""
+    _touch(tmp_path / "Album" / "01.mp3")
+    _touch(tmp_path / "Album" / "02.mp3")
+
+    reads = []
+
+    def _meta(full_path, rel_path):
+        reads.append(rel_path)
+        return {"title": "T", "artist": "Artist", "albumartist": "Artist",
+                "album": "Album", "track_number": 1, "disc_number": 1}
+
+    runtime = ImportRouteRuntime(
+        get_staging_path=lambda: str(tmp_path),
+        read_staging_file_metadata=_meta,
+        logger=_FakeLogger(),
+    )
+
+    # All three page-open endpoints, back to back (within the cache TTL).
+    staging_files(runtime)
+    staging_groups(runtime)
+    staging_hints(runtime)
+
+    # 2 files × ONE shared scan = 2 reads — not 6 (which is 2 files × 3 endpoints).
+    assert sorted(reads) == [os.path.join("Album", "01.mp3"), os.path.join("Album", "02.mp3")]

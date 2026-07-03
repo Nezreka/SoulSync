@@ -662,10 +662,23 @@ class ConfigManager:
                 # source whose art is smaller is skipped so the next source is
                 # tried — stops a low-res Cover Art Archive upload from winning.
                 # 0 disables the size gate.
-                "min_art_size": 1000
+                "min_art_size": 1000,
+                # When a track matches a SINGLE release, look up the parent ALBUM
+                # that contains it and tag it as that album, so it groups with its
+                # album-mates and gets the album cover (not the single's). Off by
+                # default — it's an extra per-import metadata lookup.
+                "single_to_album": False
             },
             "musicbrainz": {
                 "embed_tags": True
+            },
+            "jiosaavn": {
+                "embed_tags": True,
+                "tags": {
+                    "track_id": True,
+                    "artist_id": True,
+                    "album_id": True,
+                },
             },
             "playlist_sync": {
                 "create_backup": True,
@@ -700,17 +713,25 @@ class ConfigManager:
             },
             "import": {
                 "staging_path": "./Staging",
+                # `replace_lower_quality` mirrors the Settings -> Quality page's
+                # checkbox. The pipeline enforces the PROFILE row (per item,
+                # live), not this key — it exists as the page's storage and is
+                # kept in sync with the active default profile in both
+                # directions (`apply_quality_profile_to_settings` pushes
+                # profile -> config on Apply; `sync_default_quality_profile_from_config`
+                # pushes config -> default profile on every settings save).
                 "replace_lower_quality": False,
-                # Use the top Staging folder as the artist (Artist/Album layouts,
-                # mixtapes). On by default to preserve the long-standing import
-                # behaviour for existing users. Turn OFF if you stage a mixed pile
-                # of songs under one container folder, otherwise that folder's name
-                # overrides every metadata-identified artist (the "soulsync" case).
+                # `folder_artist_override` is a plain global Auto-Import
+                # setting, read directly by `core/auto_import_worker.py` — a
+                # Staging folder-layout quirk, not a quality preference, so it
+                # deliberately does NOT live on a quality profile.
                 "folder_artist_override": True
             },
             "m3u_export": {
                 "enabled": False,
-                "entry_base_path": ""
+                "entry_base_path": "",
+                "library_enabled": False,
+                "library_path": ""
             },
             "playlists": {
                 # Where "Organize by playlist" materializes playlist folders.
@@ -735,7 +756,11 @@ class ConfigManager:
             },
             "content_filter": {
                 "allow_explicit": True
-            }
+            },
+            "experimental": {
+                # JioSaavn is opt-in only — see Settings → Advanced → Experimental.
+                "jiosaavn_enabled": False,
+            },
         }
 
     def _load_config(self):

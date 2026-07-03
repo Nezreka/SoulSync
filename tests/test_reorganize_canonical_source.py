@@ -7,7 +7,11 @@ canonical_source/canonical_album_id, and an explicit user source pick
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import core.library_reorganize as lr
+import core.metadata.registry as metadata_registry
+from core.musicbrainz_search import MusicBrainzSearchClient
 
 
 def _patch_fetch(monkeypatch, tracklists):
@@ -73,3 +77,82 @@ def test_no_canonical_unchanged(monkeypatch):
     album_data = {"spotify_album_id": "sp1"}
     source, _, _ = lr._resolve_source(album_data, "spotify")
     assert source == "spotify"
+
+
+def test_musicbrainz_release_id_is_used_by_priority_walk(monkeypatch):
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.get_release_group.return_value = None
+    client._client.get_release.return_value = {
+        "id": "mb-release-1",
+        "title": "Test Album",
+        "date": "2024-01-01",
+        "artist-credit": [{"name": "Test Artist"}],
+        "release-group": {
+            "id": "mb-group-1",
+            "primary-type": "Album",
+            "secondary-types": [],
+        },
+        "media": [
+            {
+                "position": 1,
+                "tracks": [
+                    {
+                        "id": "track-1",
+                        "number": "1",
+                        "position": 1,
+                        "length": 180000,
+                        "recording": {
+                            "id": "recording-1",
+                            "title": "Test Track",
+                            "artist-credit": [{"name": "Test Artist"}],
+                            "length": 180000,
+                        },
+                    },
+                ],
+            },
+        ],
+    }
+
+    monkeypatch.setattr(
+        metadata_registry,
+        "get_musicbrainz_client",
+        lambda *args, **kwargs: client,
+    )
+    monkeypatch.setattr(
+        lr,
+        "get_source_priority",
+        lambda primary: ["musicbrainz", "spotify"],
+    )
+
+    album_data = {
+        "musicbrainz_release_id": "mb-release-1",
+    }
+
+    source, api_album, items = lr._resolve_source(
+        album_data,
+        "musicbrainz",
+    )
+
+    assert source == "musicbrainz"
+    assert api_album["id"] == "mb-release-1"
+    assert api_album["name"] == "Test Album"
+    assert items == api_album["tracks"]
+    assert items == [
+        {
+            "id": "recording-1",
+            "name": "Test Track",
+            "artists": [{"name": "Test Artist"}],
+            "duration_ms": 180000,
+            "track_number": 1,
+            "disc_number": 1,
+        },
+    ]
+    client._client.get_release_group.assert_any_call(
+        "mb-release-1",
+        includes=["releases", "artist-credits"],
+    )
+    client._client.get_release.assert_any_call(
+        "mb-release-1",
+        includes=["recordings", "artist-credits", "release-groups"],
+    )

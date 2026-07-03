@@ -2,8 +2,24 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+import os
 import threading
 from typing import Any, Callable, Dict, List, Optional
+
+
+def skip_deleted_quarantine(root: str, dirs: list, transfer_folder: str) -> None:
+    """In-place prune of the ``<transfer>/deleted`` quarantine from an ``os.walk``
+    ``dirs`` list (topdown walks only).
+
+    Removed duplicates / dead files are MOVED into ``<transfer>/deleted`` rather
+    than hard-deleted (recoverable; the reorganizer already skips it, #746). The
+    transfer-walking repair jobs must not re-scan that quarantine, or a
+    just-de-duplicated file immediately reappears as an orphan/finding on the next
+    pass. Anchored to the top-level ``<transfer>/deleted`` so a legitimately-named
+    ``deleted`` folder deeper in the library is untouched."""
+    deleted_root = os.path.normpath(os.path.join(transfer_folder, 'deleted'))
+    dirs[:] = [d for d in dirs
+               if os.path.normpath(os.path.join(root, d)) != deleted_root]
 
 
 @dataclass

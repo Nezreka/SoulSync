@@ -179,6 +179,14 @@ function initAccentColorListeners() {
             applyReduceEffects(reduceEffectsCheckbox.checked);
         });
     }
+
+    // Max Performance toggle — apply immediately on change
+    const maxPerfCheckbox = document.getElementById('max-performance-enabled');
+    if (maxPerfCheckbox) {
+        maxPerfCheckbox.addEventListener('change', () => {
+            applyMaxPerformance(maxPerfCheckbox.checked);
+        });
+    }
 }
 
 function applyReduceEffects(enabled) {
@@ -211,18 +219,146 @@ function applyReduceEffects(enabled) {
     }
 }
 
+// Max Performance overrides Worker Orbs / Particles / Reduce Effects, so while it's
+// on we lock those checkboxes (greyed + visually off) and restore them when it's
+// off. We never fire their change handlers, so the user's real saved prefs
+// (window._workerOrbsEnabled / _particlesEnabled / the reduce-effects localStorage)
+// stay intact — saving reads those, not these forced-off boxes.
+function _syncMaxPerfDependentToggles(maxPerfOn) {
+    const ids = ['worker-orbs-enabled', 'particles-enabled', 'reduce-effects-enabled'];
+    ids.forEach(id => {
+        const cb = document.getElementById(id);
+        if (!cb) return;
+        const group = cb.closest('.form-group');
+        if (maxPerfOn) {
+            cb.disabled = true;
+            cb.checked = false;
+            if (group) group.classList.add('setting-overridden');
+        } else {
+            cb.disabled = false;
+            if (group) group.classList.remove('setting-overridden');
+            // Restore each box to the user's real per-device preference.
+            if (id === 'worker-orbs-enabled') cb.checked = window._workerOrbsEnabled !== false;
+            else if (id === 'particles-enabled') cb.checked = window._particlesEnabled === true;
+            else if (id === 'reduce-effects-enabled') cb.checked = localStorage.getItem('soulsync-reduce-effects') === '1';
+        }
+    });
+}
+
+// Max Performance — the nuclear low-power switch for software-rendered / no-GPU
+// setups (e.g. Docker). Superset of Reduce Visual Effects: body.max-performance CSS
+// kills the expensive GPU properties AND all animation/transitions, while here we
+// halt every JS canvas loop (particles + worker orbs; cursor-glow + API sparks gate
+// on window._maxPerfActive themselves).
+function applyMaxPerformance(enabled) {
+    if (enabled) {
+        document.body.classList.add('max-performance');
+    } else {
+        document.body.classList.remove('max-performance');
+    }
+    window._maxPerfActive = enabled;
+    localStorage.setItem('soulsync-max-performance', enabled ? '1' : '0');
+
+    const pcanvas = document.getElementById('page-particles-canvas');
+    if (enabled) {
+        if (window.pageParticles) window.pageParticles.stop();
+        if (pcanvas) pcanvas.style.display = 'none';
+        if (window.workerOrbs) window.workerOrbs.setPage('_disabled');
+    } else {
+        // Restore whatever the user's own toggles (and reduce-effects) still allow.
+        const reduce = window._reduceEffectsActive === true;
+        const activePage = document.querySelector('.page.active');
+        const activeId = activePage ? activePage.id.replace('-page', '') : null;
+        if (!reduce && window._particlesEnabled !== false) {
+            if (pcanvas) pcanvas.style.display = '';
+            if (window.pageParticles && activeId) window.pageParticles.setPage(activeId);
+        }
+        if (window._workerOrbsEnabled !== false && window.workerOrbs && activeId) {
+            window.workerOrbs.setPage(activeId);
+        }
+    }
+    _syncMaxPerfDependentToggles(enabled);
+}
+
 // Bootstrap accent and reduce-effects from localStorage instantly (prevents flash)
 (function () {
-    if (localStorage.getItem('soulsync-reduce-effects') === '1') {
+    // Auto performance mode on likely-weak hardware. Only acts when this device has
+    // NO stored preference yet (null) — so it runs at most once and never overrides
+    // a choice the user (or a prior auto-run) made. Device-scoped via localStorage on
+    // purpose: a weak laptop shouldn't flip the server setting for the user's other
+    // machines. Mobile already disables these effects elsewhere, so skip it here.
+    if (localStorage.getItem('soulsync-reduce-effects') === null) {
+        const ua = navigator.userAgent || '';
+        const isMobile = window.innerWidth <= 768 || /Mobi|Android|iPhone|iPad|iPod/i.test(ua);
+        const cores = navigator.hardwareConcurrency || 0;   // widely supported
+        const mem = navigator.deviceMemory || 0;            // Chromium only; 0 elsewhere
+        // Conservative — avoid flagging capable machines: <=2 cores, or <=2GB, or a
+        // low-mid box that's low on BOTH (<=4 cores AND <=4GB). A 4-core/8GB laptop
+        // (mem>4) is NOT flagged; Firefox/Safari (mem unknown) only trip on <=2 cores.
+        const weak = !isMobile && (
+            (cores > 0 && cores <= 2) ||
+            (mem > 0 && mem <= 2) ||
+            (cores > 0 && cores <= 4 && mem > 0 && mem <= 4)
+        );
+        if (weak) {
+            localStorage.setItem('soulsync-reduce-effects', '1');
+            window._autoPerfModeApplied = true;   // show the explainer toast once the UI is up
+        }
+    }
+
+    if (window._autoPerfModeApplied) {
+        // Toast lives in downloads.js (loaded separately) — retry until it's defined.
+        const fireToast = (tries) => {
+            if (typeof showToast === 'function') {
+                showToast('Performance mode is on — this looks like a lower-power device. ' +
+                          'Turn effects back on in Settings → Appearance.', 'info');
+            } else if (tries < 40) {
+                setTimeout(() => fireToast(tries + 1), 250);
+            }
+        };
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', () => fireToast(0));
+        } else {
+            fireToast(0);
+        }
+    }
+
+    const reduceEffectsSaved = localStorage.getItem('soulsync-reduce-effects');
+    if (reduceEffectsSaved === '1') {
         document.body.classList.add('reduce-effects');
         window._reduceEffectsActive = true;
+    } else if (reduceEffectsSaved === '0') {
+        document.body.classList.remove('reduce-effects');
+        window._reduceEffectsActive = false;
+    } else if (window._reduceEffectsActive) {
+        document.body.classList.add('reduce-effects');
+    }
+    // Max Performance — device-scoped (localStorage wins over the server default,
+    // same as reduce-effects). The window flag is seeded server-side in index.html
+    // for a flash-free first paint; localStorage reconciles it here.
+    const maxPerfSaved = localStorage.getItem('soulsync-max-performance');
+    if (maxPerfSaved === '1') {
+        document.body.classList.add('max-performance');
+        window._maxPerfActive = true;
+    } else if (maxPerfSaved === '0') {
+        document.body.classList.remove('max-performance');
+        window._maxPerfActive = false;
+    } else if (window._maxPerfActive) {
+        document.body.classList.add('max-performance');
     }
     const saved = localStorage.getItem('soulsync-accent');
     if (saved) applyAccentColor(saved);
-    // Bootstrap particles setting from localStorage
+    // Bootstrap particles setting from localStorage — OFF by default (continuous
+    // full-page canvas = real GPU cost); only on when the user explicitly enabled it.
     const particlesSaved = localStorage.getItem('soulsync-particles');
-    if (particlesSaved === 'false') {
+    if (particlesSaved === 'true') {
+        window._particlesEnabled = true;
+    } else if (particlesSaved === 'false') {
         window._particlesEnabled = false;
+    } else if (typeof window._particlesEnabled !== 'boolean') {
+        window._particlesEnabled = false;
+    }
+    if (!window._particlesEnabled) {
         const canvas = document.getElementById('page-particles-canvas');
         if (canvas) canvas.style.display = 'none';
     }
@@ -230,7 +366,123 @@ function applyReduceEffects(enabled) {
     const workerOrbsSaved = localStorage.getItem('soulsync-worker-orbs');
     if (workerOrbsSaved === 'false') {
         window._workerOrbsEnabled = false;
+    } else if (workerOrbsSaved === 'true') {
+        window._workerOrbsEnabled = true;
+    } else if (typeof window._workerOrbsEnabled !== 'boolean') {
+        window._workerOrbsEnabled = true;
     }
+})();
+
+async function bootstrapServerAppearanceSettings() {
+    try {
+        const response = await fetch('/api/settings', { credentials: 'same-origin' });
+        const settings = await response.json();
+        if (!response.ok || !settings || typeof settings !== 'object' || settings.error) return;
+
+        const appearance = settings.ui_appearance || {};
+        const preset = appearance.accent_preset || '#1db954';
+        const custom = appearance.accent_color || '#1db954';
+        const accent = preset === 'custom' ? custom : preset;
+        applyAccentColor(accent);
+
+        if (Object.prototype.hasOwnProperty.call(appearance, 'particles_enabled')) {
+            applyParticlesSetting(appearance.particles_enabled !== false);
+        }
+        if (Object.prototype.hasOwnProperty.call(appearance, 'worker_orbs_enabled')) {
+            applyWorkerOrbsSetting(appearance.worker_orbs_enabled !== false);
+        }
+        if (localStorage.getItem('soulsync-reduce-effects') === null) {
+            applyReduceEffects(appearance.reduce_effects === true);
+        }
+    } catch (error) {
+        console.warn('Could not bootstrap appearance settings:', error);
+    }
+}
+
+bootstrapServerAppearanceSettings();
+
+// ── Password-manager autofill suppression ──────────────────────────────
+// Bitwarden / 1Password / LastPass etc. attach an inline autofill overlay to
+// every <input>/<select>/<textarea> and REBUILD it on every DOM mutation. This
+// app mutates the DOM continuously (live service status, download/automation
+// progress bars, the per-second "next run" countdown, innerHTML hub rebuilds),
+// so the managers' whole-document MutationObserver storms the main thread. A
+// captured DevTools trace (2026-06-29) showed Bitwarden's
+// bootstrap-autofill-overlay.js (setupOverlayOnField / setupOverlayListeners)
+// using ~6× the CPU of the entire SoulSync app — almost the whole freeze.
+//
+// None of these fields are credentials (they're search boxes, filters, config),
+// so we mark them ignored and the managers skip them: once a field carries the
+// ignore hint, the overlay is never (re)attached, so the mutation→re-setup storm
+// stops. Real sign-in fields (password type + the auth overlays) are left alone
+// so the user can still autofill the login / PIN screen. Purely additive data-*
+// attributes — no functional effect on the app, and a no-op for any manager that
+// doesn't honour them.
+(function suppressPasswordManagerAutofill() {
+    const SKIP_CONTAINERS = ['#login-overlay', '#launch-pin-overlay', '#profile-pin-dialog'];
+    const isCredentialField = (el) => {
+        if (el.type === 'password') return true;
+        return SKIP_CONTAINERS.some(sel => typeof el.closest === 'function' && el.closest(sel));
+    };
+    const IGNORE_ATTRS = ['data-bwignore', 'data-1p-ignore', 'data-lpignore', 'data-form-type'];
+    const tag = (el) => {
+        if (el.dataset.pmTagged) return;            // tagged once — never touch again
+        if (isCredentialField(el)) return;          // leave real login fields for the manager
+        el.dataset.pmTagged = '1';
+        el.setAttribute('data-bwignore', 'true');   // Bitwarden
+        el.setAttribute('data-1p-ignore', '');      // 1Password
+        el.setAttribute('data-lpignore', 'true');   // LastPass
+        el.setAttribute('data-form-type', 'other'); // Dashlane
+        if (!el.hasAttribute('autocomplete')) el.setAttribute('autocomplete', 'off');
+    };
+    const sweep = () => {
+        document.querySelectorAll(
+            'input:not([data-pm-tagged]),textarea:not([data-pm-tagged]),select:not([data-pm-tagged])'
+        ).forEach(tag);
+    };
+
+    // Debounce: a burst of DOM mutations triggers at most one sweep per idle slot.
+    // The `:not([data-pm-tagged])` selector makes the steady-state sweep a no-op
+    // (it only ever processes freshly-added inputs), and our own attribute writes
+    // don't re-arm the observer (it watches childList, not attributes).
+    let pending = false, observer = null, disabled = false;
+    const scheduleSweep = () => {
+        if (disabled || pending) return;
+        pending = true;
+        const run = () => { pending = false; if (!disabled) sweep(); };
+        if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 400 });
+        else setTimeout(run, 300);
+    };
+
+    const startObserving = () => {
+        if (observer) return;
+        observer = new MutationObserver(scheduleSweep);
+        observer.observe(document.body, { childList: true, subtree: true });
+    };
+    const start = () => { sweep(); startObserving(); };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+    else start();
+
+    // Benchmark hook (not used by the app): toggle the suppression at runtime so a
+    // before/after can be measured without rebuilding. disable() strips the ignore
+    // hints + stops the observer, so password managers re-attach their autofill
+    // overlay — i.e. the pre-fix "before" behaviour. enable() re-tags + resumes.
+    window.__pmSuppress = {
+        disable() {
+            disabled = true;
+            if (observer) { observer.disconnect(); observer = null; }
+            document.querySelectorAll('[data-pm-tagged]').forEach((el) => {
+                IGNORE_ATTRS.forEach((a) => el.removeAttribute(a));
+                delete el.dataset.pmTagged;
+            });
+        },
+        enable() {
+            disabled = false;
+            sweep();
+            startObserving();
+        },
+        get isActive() { return !disabled; },
+    };
 })();
 
 // ── Profile System ─────────────────────────────────────────────
@@ -1115,6 +1367,15 @@ function updateProfileIndicator() {
     // for non-admins so it doesn't look interactive.
     const statusSection = document.querySelector('.status-section--clickable');
     if (statusSection) statusSection.classList.toggle('status-section--locked', !currentProfile.is_admin);
+
+    // My Accounts (per-profile streaming OAuth) and My Settings (per-profile
+    // server library) are inert for admin — admin uses the global app account
+    // for every service and the full Settings page. Hide both for admin; keep
+    // them for non-admins, who actually get a connect/library UI.
+    const myAccountsBtn = document.getElementById('my-accounts-btn');
+    const personalSettingsBtn = document.getElementById('personal-settings-btn');
+    if (myAccountsBtn) myAccountsBtn.style.display = currentProfile.is_admin ? 'none' : '';
+    if (personalSettingsBtn) personalSettingsBtn.style.display = currentProfile.is_admin ? 'none' : '';
 
     indicator.onclick = async () => {
         const res = await fetch('/api/profiles');
@@ -2629,6 +2890,44 @@ function initializeMobileNavigation() {
             }
         });
     });
+
+    restoreNavSections();
+}
+
+// --- Collapsible sidebar sections (persisted per section in localStorage) ---
+function _navSectionItems(label) {
+    const items = [];
+    let el = label.nextElementSibling;
+    while (el && !el.classList.contains('nav-section-label')) {
+        if (el.classList.contains('nav-button')) items.push(el);
+        el = el.nextElementSibling;
+    }
+    return items;
+}
+function _setNavSectionCollapsed(label, collapsed) {
+    label.classList.toggle('collapsed', collapsed);
+    _navSectionItems(label).forEach(it => it.classList.toggle('nav-item-hidden', collapsed));
+}
+function toggleNavSection(label) {
+    const collapsed = !label.classList.contains('collapsed');
+    _setNavSectionCollapsed(label, collapsed);
+    try {
+        const saved = JSON.parse(localStorage.getItem('navSections') || '{}');
+        saved[label.dataset.section] = collapsed;
+        localStorage.setItem('navSections', JSON.stringify(saved));
+    } catch (e) { /* localStorage unavailable — collapse still works for the session */ }
+}
+function restoreNavSections() {
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem('navSections') || '{}'); } catch (e) { saved = {}; }
+    const path = window.location.pathname;
+    document.querySelectorAll('.nav-section-label').forEach(label => {
+        // Expanded by default; collapsed only when the user explicitly collapsed it.
+        let collapsed = saved[label.dataset.section] === true;
+        // Never collapse the section holding the current page — the active item must stay visible.
+        if (_navSectionItems(label).some(it => it.getAttribute('href') === path)) collapsed = false;
+        _setNavSectionCollapsed(label, collapsed);
+    });
 }
 
 function initializeWatchlist() {
@@ -2900,7 +3199,8 @@ async function loadPageData(pageId) {
     const RECENTER_DELAY_MS = 1500;
     let recenterTimer = 0;
 
-    const isReduced = () => document.body.classList.contains('reduce-effects');
+    const isReduced = () => document.body.classList.contains('reduce-effects')
+        || document.body.classList.contains('max-performance');
 
     const gridCenter = () => {
         const r = grid.getBoundingClientRect();

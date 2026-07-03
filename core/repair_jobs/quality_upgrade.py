@@ -14,9 +14,10 @@ is queued until you review and Apply the finding — at which point the matched
 track (carrying its album context) is added to the wishlist, exactly like every
 other acquisition path.
 
-The quality decision (``meets_preferred_quality``) is a pure function so it can be
-unit-tested without a database or network. Transcode/"fake lossless" detection is
-intentionally NOT done here — that's the separate Fake Lossless Detector job.
+Quality is judged using the real file (mutagen-measured bit depth / sample rate /
+bitrate) checked against the user's v3 ranked profile targets — fully profile-driven,
+no hardcoded thresholds. Transcode/"fake lossless" detection is the separate Fake
+Lossless Detector job.
 """
 
 from __future__ import annotations
@@ -39,30 +40,91 @@ from core.discovery.quality_scanner import (
 )
 from core.library.file_tags import read_embedded_tags
 from core.library.path_resolver import resolve_library_file_path
+# v3 quality: probe the real file + check it against the ranked profile targets,
+# the SAME definition the download import guard uses. Module-level so they're
+# monkeypatchable in tests.
+from core.imports.file_ops import probe_audio_quality
+from core.quality.model import rank_candidate
+from core.quality.selection import targets_from_profile, quality_meets_profile, load_profile_by_id
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_jobs.quality_upgrade")
 
 
-# Quality ranks — higher is better. Lossless tops everything; lossy tiers fall out
-# of bitrate. 0 means "below the lowest tracked tier / unknown".
-RANK_LOSSLESS = 4
-RANK_320 = 3
-RANK_256 = 2
-RANK_192 = 1
-RANK_BELOW = 0
+def _to_bool(val) -> bool:
+    """Coerce a setting value to bool. Handles Python bool, string 'true'/'false', and int."""
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, str):
+        return val.lower() == 'true'
+    return bool(val) if val is not None else False
 
-LOSSLESS_EXTENSIONS = {'.flac', '.alac', '.ape', '.wav', '.aiff', '.aif', '.dsf', '.dff', '.m4a'}
-# NB: .m4a is ambiguous (ALAC vs AAC); we treat the *format* as lossy-capable and
-# rely on bitrate below — a true ALAC .m4a reports a lossless-scale bitrate.
 
-# Quality-profile bucket key -> rank.
-_PROFILE_KEY_RANK = {
-    'flac': RANK_LOSSLESS,
-    'mp3_320': RANK_320,
-    'mp3_256': RANK_256,
-    'mp3_192': RANK_192,
-}
+def _upgrade_cutoff_index(profile: dict, targets: list, settings: dict) -> Optional[int]:
+    """Return the ranked-target index that stops upgrade findings.
+
+    ``None`` means any configured target is acceptable. ``until_top`` is kept
+    as a compatibility alias for rows created by the first profile branch.
+
+    The legacy job-level ``require_top_target`` setting (pre-dates
+    ``upgrade_policy`` existing on the profile at all — not exposed in any
+    current settings UI, but still honored for installs upgrading with it
+    already set in config.json) used to bridge in only when ``policy is
+    None``. But a profile loaded from the DB never actually IS ``None`` —
+    ``MusicDatabase._quality_profile_row_to_dict`` always coerces it to a
+    real string (``row["upgrade_policy"] or "acceptable"``), and the
+    quality-profile migration has no legacy field to carry it forward from
+    either (``preferences.quality_profile`` never had an ``upgrade_policy``
+    key), so every migrated profile lands on the "acceptable" fallback. That
+    made this bridge permanently dead code post-migration, silently dropping
+    anyone who had "upgrade until top quality" enabled at the job level down
+    to "flag below any accepted target". Honoring it on "acceptable" too
+    (not just ``None``) fixes that without touching an EXPLICIT ``until_cutoff``/
+    ``acceptable`` choice made elsewhere (there is no UI path that sets both
+    an explicit "acceptable" policy AND this legacy flag going forward).
+    """
+    policy = profile.get("upgrade_policy")
+    if policy == "until_top":
+        policy = "until_cutoff"
+    if policy in (None, "acceptable") and settings.get("require_top_target"):
+        policy = "until_cutoff"
+    if policy != "until_cutoff" or not targets:
+        return None
+    try:
+        idx = int(profile.get("upgrade_cutoff_index") or 0)
+    except (TypeError, ValueError):
+        idx = 0
+    return max(0, min(idx, len(targets) - 1))
+
+
+def _config_fingerprint(targets: list, cutoff_index: Optional[int]) -> str:
+    """Stable string identifying the exact upgrade decision this bundle would
+    make — the ranked targets themselves (not just the profile id, which
+    stays the same if the user edits an existing profile's targets in place)
+    plus the cutoff index. Stored on every finding at creation time so a
+    dismissed finding can be told apart from one that's stale only because
+    the profile/cutoff genuinely changed since — see
+    ``_load_dismissed_findings`` / the dismissed-track branch in ``scan``.
+    """
+    import json
+    return json.dumps({'targets': [t.to_dict() for t in targets], 'cutoff_index': cutoff_index},
+                       sort_keys=True)
+
+
+def _profile_bundle(profile: dict, settings: dict) -> Dict[str, Any]:
+    """Precompute the per-profile values the scan loop needs (targets, cutoff
+    index, id/name for the finding) once per distinct profile, so a per-track
+    override only costs a DB lookup the first time that profile is seen."""
+    targets, _fallback = targets_from_profile(profile)
+    cutoff_index = _upgrade_cutoff_index(profile, targets, settings)
+    return {
+        'targets': targets,
+        'cutoff_index': cutoff_index,
+        'id': profile.get('id'),
+        'name': profile.get('name') or profile.get('preset') or 'default',
+        'config_fingerprint': _config_fingerprint(targets, cutoff_index),
+    }
+
 
 # Per-source file-tag key holding that source's own track ID (written by enrichment).
 _SOURCE_TRACK_ID_TAG = {
@@ -79,93 +141,6 @@ _SOURCE_TRACK_ID_TAG = {
 _DURATION_TOLERANCE_MS = 5000
 
 
-def _normalize_kbps(bitrate: Optional[int]) -> Optional[int]:
-    """Library bitrate may be stored in bps (e.g. 320000) or kbps (320).
-    Normalize to kbps. Returns None when unknown/zero."""
-    if not bitrate:
-        return None
-    try:
-        b = int(bitrate)
-    except (TypeError, ValueError):
-        return None
-    if b <= 0:
-        return None
-    return b // 1000 if b > 4000 else b
-
-
-def classify_track_quality(file_path: str, bitrate: Optional[int]) -> Optional[int]:
-    """Rank a file by format + bitrate. Returns a RANK_* value, or None when it
-    can't be judged (a lossy file with no known bitrate)."""
-    ext = os.path.splitext(file_path or '')[1].lower()
-    kbps = _normalize_kbps(bitrate)
-
-    # Lossless containers: a real lossless file has a high bitrate; a low one is a
-    # lossy stream in a lossless container — but flagging that is the Fake Lossless
-    # Detector's job, so here we treat the lossless *format* as top rank.
-    if ext in {'.flac', '.alac', '.ape', '.wav', '.aiff', '.aif', '.dsf', '.dff'}:
-        return RANK_LOSSLESS
-    # .m4a / lossy: judge purely by bitrate. A lossless-scale bitrate (ALAC in m4a,
-    # or a mislabeled lossless) ranks as lossless.
-    if kbps is None:
-        return None
-    if kbps >= 800:
-        return RANK_LOSSLESS
-    if kbps >= 280:
-        return RANK_320
-    if kbps >= 200:
-        return RANK_256
-    if kbps >= 150:
-        return RANK_192
-    return RANK_BELOW
-
-
-def preferred_quality_floor(quality_profile: Dict[str, Any]) -> Optional[int]:
-    """The lowest acceptable quality rank from the profile's ENABLED buckets — the
-    floor a track must meet. Returns None when nothing is enabled (caller should
-    then flag nothing, rather than flagging everything)."""
-    qualities = (quality_profile or {}).get('qualities', {}) or {}
-    enabled_ranks = [
-        _PROFILE_KEY_RANK[key]
-        for key, cfg in qualities.items()
-        if isinstance(cfg, dict) and cfg.get('enabled') and key in _PROFILE_KEY_RANK
-    ]
-    if not enabled_ranks:
-        return None
-    return min(enabled_ranks)
-
-
-def meets_preferred_quality(file_path: str, bitrate: Optional[int],
-                            quality_profile: Dict[str, Any]) -> bool:
-    """Pure decision: does this track already meet the user's preferred quality?
-
-    A track meets quality when its format+bitrate rank is at least the profile's
-    floor (the worst quality the user still accepts). This honors a profile that
-    enables, say, FLAC *and* MP3-320: a 320 kbps MP3 passes, a 128 kbps MP3 does
-    not. With nothing enabled, everything passes (we never flag the whole library
-    on an empty profile)."""
-    floor = preferred_quality_floor(quality_profile)
-    if floor is None:
-        return True
-
-    file_rank = classify_track_quality(file_path, bitrate)
-    if file_rank is None:
-        # Lossy file with unknown bitrate: only judgeable when the floor is
-        # lossless (then any lossy file is below it). Otherwise don't flag.
-        ext = os.path.splitext(file_path or '')[1].lower()
-        if floor == RANK_LOSSLESS and ext not in LOSSLESS_EXTENSIONS:
-            return False
-        return True
-
-    return file_rank >= floor
-
-
-def _rank_label(rank: Optional[int]) -> str:
-    return {
-        RANK_LOSSLESS: 'Lossless', RANK_320: 'MP3 320', RANK_256: 'MP3 256',
-        RANK_192: 'MP3 192', RANK_BELOW: 'low bitrate',
-    }.get(rank, 'unknown')
-
-
 def _norm_isrc(value: Any) -> str:
     """Canonicalize an ISRC for comparison: uppercase, strip dashes/spaces."""
     if not value:
@@ -173,14 +148,14 @@ def _norm_isrc(value: Any) -> str:
     return str(value).upper().replace('-', '').replace(' ', '').strip()
 
 
-def _read_file_ids(file_path: str) -> Dict[str, str]:
+def _read_file_ids(file_path: str, resolved_path: Optional[str] = None) -> Dict[str, str]:
     """Read the identifiers enrichment embedded in the file's tags.
 
     Enrichment matches every track to the metadata sources and writes the IDs
     (ISRC + per-source track IDs) into the file — so an already-enriched track
     carries its exact identity. Returns a dict with a normalized ``isrc`` plus any
     ``<source>_track_id`` tags present; empty dict when unreadable / not enriched."""
-    resolved = resolve_library_file_path(file_path) if file_path else None
+    resolved = resolved_path or (resolve_library_file_path(file_path) if file_path else None)
     if not resolved and file_path and os.path.isfile(file_path):
         resolved = file_path
     if not resolved:
@@ -277,7 +252,7 @@ def _match_via_isrc(isrc: str, source_priority: List[str]) -> Tuple[Optional[Any
 _TRACK_COLS = (
     'id', 'title', 'file_path', 'bitrate', 'duration', 'artist_name', 'album_title',
     'album_id', 'track_number', 'spotify_album_id', 'itunes_album_id', 'deezer_id',
-    'musicbrainz_release_id', 'audiodb_id',
+    'musicbrainz_release_id', 'audiodb_id', 'quality_profile_id',
 )
 
 # Human-readable note per match tier (search uses a confidence % instead).
@@ -436,45 +411,61 @@ def _find_best_match(engine: Any, source_priority: List[str], title: str, artist
 @register_job
 class QualityUpgradeJob(RepairJob):
     job_id = 'quality_upgrade'
-    display_name = 'Quality Upgrade Finder'
-    description = 'Finds library tracks below your preferred quality and proposes a better version'
+    display_name = 'Quality Upgrade Finder (active — proposes a replacement)'
+    description = 'Finds library tracks below your quality profile and actively searches a better version to add to the wishlist'
     help_text = (
-        'Scans your library (or just your watchlist artists) and compares each '
-        "track against your Quality Profile using BOTH the file format and its "
-        'bitrate — so a 128 kbps MP3 is no longer treated the same as a 320 kbps '
-        'one, and enabling MP3-320/256 in your profile actually counts.\n\n'
-        'For every track below your preferred quality it resolves the exact better '
-        'version using the most precise identity available, in order: the source '
-        "track ID enrichment wrote into the file → the file's ISRC → the album's "
-        'tracklist (by stored album ID or album search) → a name/artist search. The '
-        'fuzzy steps also reject candidates whose length is off (wrong live/edit cut). '
-        'It skips tracks it already proposed, so re-runs are cheap. Nothing is queued '
-        'automatically: applying a finding adds that matched track — with its album '
-        'context — to the wishlist, the same as any other download.\n\n'
+        'ACTIVE quality job. For every library track below your quality profile it '
+        'goes one step further than the Quality Check (flag-only) scanner: it '
+        'actively SEARCHES your metadata source for the exact better version and '
+        'attaches it to the finding, so Apply adds that track straight to your '
+        'wishlist.\n\n'
+        'Quality is judged the SAME way as the download/import pipeline — it reads '
+        'the REAL file with mutagen (measured bit depth / sample rate / bitrate) and '
+        'checks it against your v3 quality profile targets (strict: fallback is '
+        'ignored, that\'s a download-time concession, not "good enough" for an '
+        'upgrade). So a 128 kbps MP3, a 16-bit FLAC where you want 24-bit, etc. are '
+        'all caught accurately.\n\n'
+        'For every below-profile track it resolves the better version by the most '
+        'precise identity available, in order: the source track ID enrichment wrote '
+        "into the file → the file's ISRC → the album's tracklist (by stored album ID "
+        'or album search) → a name/artist search (with a duration guard against wrong '
+        'live/edit cuts). It skips tracks it already proposed, so re-runs are cheap. '
+        'Nothing is queued automatically — applying a finding adds the matched track '
+        '(with album context) to the wishlist, like any other download.\n\n'
         'Settings:\n'
         '- Scope: "watchlist" (watchlisted artists only) or "all" (whole library)\n'
-        '- Min confidence: minimum match confidence (0-1) to surface a finding\n\n'
-        'Note: detecting fake/transcoded lossless files is handled by the separate '
-        'Fake Lossless Detector job.'
+        '- Min confidence: minimum match confidence (0-1) to surface a finding\n'
+        '- Deep audio verify (default OFF): also run the ffmpeg decode guard '
+        '(truncation + silence) per track — catches broken/incomplete files the '
+        'header hides, but decodes every file (seconds per track, CPU-heavy).\n\n'
+        'Sibling job: "Quality Check (flag only)" finds the same below-profile tracks '
+        'but only flags them for you to decide per finding (re-download / delete / '
+        'ignore) instead of searching a replacement. Fake/transcoded lossless '
+        'detection is the separate Fake Lossless Detector job.'
     )
     icon = 'repair-icon-lossy'
     default_enabled = False
     default_interval_hours = 168
-    default_settings = {'scope': 'watchlist', 'min_confidence': 0.7}
-    setting_options = {'scope': ['watchlist', 'all']}
+    default_settings = {'scope': 'all', 'min_confidence': 0.7, 'deep_audio_verify': False}
+    setting_options = {'scope': ['all', 'watchlist'], 'deep_audio_verify': [True, False]}
     auto_fix = False
 
     def _get_settings(self, context: JobContext) -> Dict[str, Any]:
-        cfg = context.config_manager
-        scope = 'watchlist'
-        min_conf = 0.7
-        if cfg:
-            scope = cfg.get(self.get_config_key('settings.scope'), 'watchlist') or 'watchlist'
+        merged = dict(self.default_settings)
+        if context.config_manager:
             try:
-                min_conf = float(cfg.get(self.get_config_key('settings.min_confidence'), 0.7))
-            except (TypeError, ValueError):
-                min_conf = 0.7
-        return {'scope': scope, 'min_confidence': min_conf}
+                cfg = context.config_manager.get(f'repair.jobs.{self.job_id}.settings', {})
+                if isinstance(cfg, dict):
+                    merged.update(cfg)
+            except Exception as e:
+                logger.debug("settings read failed: %s", e)
+        try:
+            merged['min_confidence'] = float(merged.get('min_confidence', 0.7))
+        except (TypeError, ValueError):
+            merged['min_confidence'] = 0.7
+        merged['deep_audio_verify'] = _to_bool(merged.get('deep_audio_verify'))
+        merged['require_top_target'] = _to_bool(merged.get('require_top_target'))
+        return merged
 
     def _load_tracks(self, db: Any, scope: str) -> List[dict]:
         conn = db._get_connection()
@@ -483,7 +474,7 @@ class QualityUpgradeJob(RepairJob):
                 "SELECT t.id, t.title, t.file_path, t.bitrate, t.duration, "
                 "a.name AS artist_name, al.title AS album_title, t.album_id, t.track_number, "
                 "al.spotify_album_id, al.itunes_album_id, al.deezer_id, "
-                "al.musicbrainz_release_id, al.audiodb_id "
+                "al.musicbrainz_release_id, al.audiodb_id, t.quality_profile_id "
                 "FROM tracks t "
                 "JOIN artists a ON t.artist_id = a.id "
                 "JOIN albums al ON t.album_id = al.id "
@@ -505,17 +496,76 @@ class QualityUpgradeJob(RepairJob):
             conn.close()
 
     def _load_existing_finding_ids(self, db: Any) -> set:
-        """Track IDs that already have a finding for this job (any status). Lets a
-        re-run skip tracks we've already proposed/dismissed without re-hitting the
-        metadata API — pending stays deduped, and a dismissed track stays dismissed."""
+        """Track IDs with a still-open (pending) or already-actioned
+        (resolved/auto_fixed) finding for this job — safe to skip re-matching
+        entirely on a re-run, without re-hitting the metadata API.
+
+        Deliberately excludes ``dismissed`` rows: a user dismissing one
+        proposal shouldn't permanently block re-evaluation forever. If the
+        profile changes later (stricter targets, a lowered upgrade cutoff),
+        a previously-dismissed track should get a fresh look — see
+        ``_load_dismissed_findings`` / ``_clear_stale_dismissed_finding``.
+        """
         conn = db._get_connection()
         try:
             rows = conn.execute(
-                "SELECT entity_id FROM repair_findings WHERE job_id = ? AND entity_type = 'track'",
+                "SELECT entity_id FROM repair_findings WHERE job_id = ? AND entity_type = 'track' "
+                "AND status IN ('pending', 'resolved', 'auto_fixed')",
                 (self.job_id,)).fetchall()
             return {str(r[0]) for r in rows if r and r[0] is not None}
         except Exception:
             return set()
+        finally:
+            conn.close()
+
+    def _load_dismissed_findings(self, db: Any) -> Dict[str, Optional[str]]:
+        """Map of {track_id: config_fingerprint} for tracks with a DISMISSED
+        finding for this job. The fingerprint (see ``_config_fingerprint``) is
+        whatever was stored in the finding's ``details_json`` at creation
+        time, so ``scan`` can tell a genuinely-stale dismissal (profile or
+        upgrade cutoff changed since) apart from one where nothing changed —
+        a track re-measuring as below-profile on every re-run must NOT keep
+        resurrecting a proposal the user already said no to. Findings created
+        before this fingerprint existed have no ``profile_config_fingerprint``
+        key and map to ``None``, which never equals a real fingerprint — that
+        one-time re-flag is an acceptable tradeoff for older installs."""
+        import json
+        conn = db._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT entity_id, details_json FROM repair_findings WHERE job_id = ? "
+                "AND entity_type = 'track' AND status = 'dismissed'",
+                (self.job_id,)).fetchall()
+            out: Dict[str, Optional[str]] = {}
+            for r in rows:
+                if not r or r[0] is None:
+                    continue
+                fingerprint = None
+                try:
+                    details = json.loads(r[1]) if r[1] else {}
+                    fingerprint = details.get('profile_config_fingerprint')
+                except (TypeError, ValueError):
+                    pass
+                out[str(r[0])] = fingerprint
+            return out
+        except Exception:
+            return {}
+        finally:
+            conn.close()
+
+    def _clear_stale_dismissed_finding(self, db: Any, track_id: Any) -> None:
+        """Delete a track's old dismissed finding for this job right before
+        re-flagging it under a changed profile, so the shared dedup in
+        ``RepairWorker._create_finding`` doesn't silently drop the new one."""
+        conn = db._get_connection()
+        try:
+            conn.execute(
+                "DELETE FROM repair_findings WHERE job_id = ? AND entity_type = 'track' "
+                "AND entity_id = ? AND status = 'dismissed'",
+                (self.job_id, str(track_id)))
+            conn.commit()
+        except Exception as e:
+            logger.debug("[Quality Upgrade] Could not clear stale dismissed finding for track %s: %s", track_id, e)
         finally:
             conn.close()
 
@@ -530,12 +580,52 @@ class QualityUpgradeJob(RepairJob):
         settings = self._get_settings(context)
         scope = settings['scope']
         min_conf = settings['min_confidence']
+        deep_verify = settings['deep_audio_verify']
 
+        # v3 quality: judge the REAL file (mutagen-measured bit depth / sample rate
+        # / bitrate) against the profile's ranked targets — the SAME definition the
+        # download import guard uses. Strict: fallback is ignored (a download-time
+        # concession, not "good enough" for an upgrade). targets_from_profile /
+        # quality_meets_profile / probe_audio_quality are imported at module level.
         db = context.db
         quality_profile = db.get_quality_profile()
-        if preferred_quality_floor(quality_profile) is None:
-            logger.info("[Quality Upgrade] No quality buckets enabled in profile — nothing to flag")
-            return result
+        default_bundle = _profile_bundle(quality_profile, settings)
+        targets = default_bundle['targets']
+        cutoff_index = default_bundle['cutoff_index']
+        if not targets:
+            # The default profile alone has nothing to enforce, but we can't
+            # bail out here: a per-track profile override (`_bundle_for_track`
+            # below) may still have real targets, and deep-audio-verify (if
+            # enabled) still needs to probe every file for broken/silent audio
+            # regardless of quality targets. `quality_meets_profile`/
+            # `rank_candidate` already treat an empty target list as "anything
+            # passes", so tracks resolving to this bundle simply skip cleanly
+            # further down instead of being excluded from the scan entirely.
+            logger.info("[Quality Upgrade] Default profile has no quality targets — "
+                        "scanning will still run deep-audio-verify (if enabled) and "
+                        "honor any stricter per-track profile overrides")
+
+        logger.info(
+            "[Quality Upgrade] scope=%s cutoff=%s · all targets: %s",
+            scope,
+            targets[cutoff_index].label if cutoff_index is not None else "any accepted target",
+            [t.label for t in targets] if targets else '(none — all pass)',
+        )
+
+        # Per-track profile override (`tracks.quality_profile_id`, still NULL
+        # for almost every install — there's no assignment UI yet, only the
+        # migration backfill): resolved lazily and cached per distinct id so a
+        # library with one profile everywhere costs exactly one DB read, same
+        # as before this existed.
+        profile_bundle_cache: Dict[Any, Dict[str, Any]] = {default_bundle['id']: default_bundle}
+
+        def _bundle_for_track(row_profile_id) -> Dict[str, Any]:
+            if not row_profile_id or row_profile_id == default_bundle['id']:
+                return default_bundle
+            if row_profile_id not in profile_bundle_cache:
+                profile_bundle_cache[row_profile_id] = _profile_bundle(
+                    load_profile_by_id(row_profile_id), settings)
+            return profile_bundle_cache[row_profile_id]
 
         try:
             tracks = self._load_tracks(db, scope)
@@ -550,9 +640,14 @@ class QualityUpgradeJob(RepairJob):
         if context.report_progress:
             context.report_progress(phase=f'Checking quality on {total} tracks...', total=total)
 
-        # Tracks we've already proposed/dismissed — skip them so a re-run doesn't
-        # re-resolve the same tracks against the metadata API.
+        # Tracks with an open/actioned finding already — skip them so a re-run
+        # doesn't re-resolve the same tracks against the metadata API. Dismissed
+        # tracks are handled separately below: still evaluated, and only
+        # actually re-flagged if the applicable bundle's config_fingerprint has
+        # changed since the dismissal (a real profile/cutoff change) — not on
+        # every re-run just because the track still measures below profile.
         already_found = self._load_existing_finding_ids(db)
+        previously_dismissed = self._load_dismissed_findings(db)
 
         # Metadata source for matching — resolved lazily so we only fail if we
         # actually find a low-quality track that needs a match.
@@ -583,13 +678,71 @@ class QualityUpgradeJob(RepairJob):
                 result.findings_skipped_dedup += 1
                 continue
 
-            if meets_preferred_quality(file_path, bitrate, quality_profile):
+            bundle = _bundle_for_track(row.get('quality_profile_id'))
+            targets = bundle['targets']
+            cutoff_index = bundle['cutoff_index']
+            config_fingerprint = bundle['config_fingerprint']
+            quality_profile_id = bundle['id']
+            quality_profile_name = bundle['name']
+
+            # A dismissed finding whose profile/cutoff hasn't changed since
+            # must NOT keep resurrecting on every re-run — skip before doing
+            # any audio probe or metadata matching at all, same as
+            # `already_found`. A CHANGED fingerprint falls through and is
+            # handled right before `create_finding` below (clear + re-flag).
+            if (str(track_id) in previously_dismissed
+                    and previously_dismissed[str(track_id)] == config_fingerprint):
+                result.findings_skipped_dedup += 1
+                continue
+
+            # v3 quality decision — probe the REAL file. Resolve the library path
+            # first (the DB stores a possibly-relative path). Pass config_manager so
+            # the resolver can find the transfer/music folders and expand relative paths.
+            resolved_path = resolve_library_file_path(
+                file_path,
+                transfer_folder=context.transfer_folder,
+                config_manager=context.config_manager,
+            ) if file_path else None
+            if not resolved_path and file_path and os.path.isfile(file_path):
+                resolved_path = file_path
+
+            measured_aq = probe_audio_quality(resolved_path) if resolved_path else None
+
+            # Optional ffmpeg deep verify (default off): a truncated/silent file is
+            # treated as "needs a replacement" just like a below-profile one.
+            broken_reason = None
+            if deep_verify and resolved_path:
+                try:
+                    from core.imports.silence import detect_broken_audio
+                    broken_reason = detect_broken_audio(resolved_path)
+                except Exception as e:
+                    logger.debug("[Quality Upgrade] deep verify failed for %s: %s", file_path, e)
+
+            if measured_aq is None and not broken_reason:
+                # Can't read the file → can't judge it; leave it alone.
                 result.skipped += 1
                 if context.update_progress and (i + 1) % 25 == 0:
                     context.update_progress(i + 1, total)
                 continue
 
-            # Below preferred quality — find a better version to propose.
+            if not broken_reason and measured_aq is not None:
+                if cutoff_index is not None:
+                    # ranking-based: skip only if the file already sits at the
+                    # configured cutoff rank or better. Any lower rank triggers
+                    # a proposed upgrade.
+                    idx, _ = rank_candidate(measured_aq, targets)
+                    already_best = idx <= cutoff_index
+                else:
+                    # default: skip if the file meets ANY configured target (i.e.
+                    # it's not below the acceptable floor).
+                    already_best = quality_meets_profile(measured_aq, targets)
+                if already_best:
+                    result.skipped += 1
+                    if context.update_progress and (i + 1) % 25 == 0:
+                        context.update_progress(i + 1, total)
+                    continue
+
+            # Below profile (or broken) — find a better version to propose.
             if engine is None:
                 from core.matching_engine import MusicMatchingEngine
                 engine = MusicMatchingEngine()
@@ -602,17 +755,20 @@ class QualityUpgradeJob(RepairJob):
                 logger.info("[Quality Upgrade] Spotify rate-limited — stopping scan early")
                 return result
 
-            current_rank = classify_track_quality(file_path, bitrate)
-            current_label = _rank_label(current_rank)
+            current_label = measured_aq.label() if measured_aq is not None else 'broken/unreadable'
+            if broken_reason:
+                current_label = f'{current_label} (broken: {broken_reason})' if measured_aq is not None else f'broken ({broken_reason})'
             if context.report_progress:
+                _why = 'broken audio' if broken_reason else 'low quality'
                 context.report_progress(
                     scanned=i + 1, total=total,
-                    log_line=f'Low quality ({current_label}): {artist_name} - {title}',
+                    log_line=f'{_why} ({current_label}): {artist_name} - {title}',
                     log_type='info')
 
             # Read the identifiers enrichment embedded in the file once (ISRC +
             # per-source track IDs), used by the two most-exact tiers below.
-            file_ids = _read_file_ids(file_path)
+            # Pass resolved_path so the inner resolver doesn't redo the lookup.
+            file_ids = _read_file_ids(file_path, resolved_path=resolved_path)
 
             # Tiered match, best identity first, loosest last:
             #   0. The active source's OWN track ID, embedded in the file by
@@ -674,6 +830,15 @@ class QualityUpgradeJob(RepairJob):
             if (not isinstance(alb, dict) or not alb.get('name')) and album_title:
                 matched['album'] = {'name': album_title, 'images': (alb or {}).get('images', []) if isinstance(alb, dict) else []}
 
+            if str(track_id) in previously_dismissed:
+                # Reaching this point at all means the fingerprint check near
+                # the top of the loop already found this dismissal stale
+                # (config genuinely changed) — clear the old dismissed row
+                # before re-inserting, or the shared dedup in
+                # RepairWorker._create_finding would silently drop the new
+                # one (same job_id+entity, any status).
+                self._clear_stale_dismissed_finding(db, track_id)
+
             if context.create_finding:
                 try:
                     inserted = context.create_finding(
@@ -685,8 +850,10 @@ class QualityUpgradeJob(RepairJob):
                         file_path=file_path,
                         title=f'Upgrade: {artist_name} - {title} ({current_label})',
                         description=(
-                            f'"{title}" by {artist_name} is {current_label}, below your preferred '
-                            f'quality. Best match: "{_track_name(best)}" via {source} '
+                            f'"{title}" by {artist_name} is {current_label}'
+                            + (f', below your upgrade cutoff ({targets[cutoff_index].label})'
+                               if cutoff_index is not None else ', below your preferred quality')
+                            + f'. Best match: "{_track_name(best)}" via {source} '
                             f'({_MATCH_NOTE.get(matched_via, "matched") if matched_via != "search" else f"confidence {conf:.0%}"}). '
                             'Apply to add it to the wishlist.'),
                         details={
@@ -697,6 +864,9 @@ class QualityUpgradeJob(RepairJob):
                             'album_title': album_title,
                             'current_format': current_label,
                             'current_bitrate': bitrate,
+                            'quality_profile_id': quality_profile_id,
+                            'quality_profile_name': quality_profile_name,
+                            'profile_config_fingerprint': config_fingerprint,
                             'match_confidence': conf,
                             'matched_via': matched_via,
                             'provider': source,
@@ -715,6 +885,13 @@ class QualityUpgradeJob(RepairJob):
 
         if context.update_progress:
             context.update_progress(total, total)
-        logger.info("[Quality Upgrade] %d scanned, %d upgrades found, %d met/skip",
+        logger.info("[Quality Upgrade] %d scanned, %d upgrades found, %d already met profile / skipped",
                     result.scanned, result.findings_created, result.skipped)
+        if result.scanned > 0 and result.findings_created == 0 and result.errors == 0:
+            logger.info(
+                "[Quality Upgrade] All tracks already satisfy the configured targets. "
+                "If you expected upgrades, check your quality profile — the current "
+                "top target is: %s",
+                targets[0].label if targets else '(none)',
+            )
         return result

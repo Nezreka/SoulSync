@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import logging
 import os
+import re
 import shutil
 import uuid
 from typing import Any, Callable, Dict, Optional
@@ -120,6 +121,20 @@ def import_existing_track_for_album_slot(album_id: str, payload: dict, deps: Mis
     album_data, source_track = _load_album_and_source_track(database, album_id, source_track_id)
     if album_data.get("server_source") and source_track.get("server_source") and album_data["server_source"] != source_track["server_source"]:
         raise MissingTrackImportError("Selected track belongs to a different library source", 400)
+
+    # #917: "I have this" rebuilds the destination path from album metadata. When the album row
+    # has no year, the rebuilt path drops the $year and the copied file lands in a NEW, yearless
+    # directory instead of the album's existing folder. Recover the year from a sibling track so
+    # the import reuses the same directory.
+    if not album_data.get("year"):
+        recovered_year = _existing_album_year_from_sibling(
+            database, album_id, deps.resolve_library_file_path_fn,
+            int(expected.get("disc_number") or 1), int(expected.get("track_number") or 1),
+        )
+        if recovered_year:
+            album_data["year"] = recovered_year
+            logger.info("[I Have This] recovered album year %s from existing folder for album %s",
+                        recovered_year, album_id)
 
     source_path = deps.resolve_library_file_path_fn(source_track.get("file_path"))
     if not source_path:
@@ -424,6 +439,50 @@ def _sync_imported_track(deps: MissingTrackImportDeps, track_id, expected_title:
             )
     except Exception as sync_err:
         logger.debug("Existing-track import server sync skipped/failed: %s", sync_err)
+
+
+def _existing_album_year_from_sibling(
+    database,
+    album_id: str,
+    resolve_library_file_path_fn: Callable[[Optional[str]], Optional[str]],
+    target_disc: int,
+    target_track: int,
+) -> Optional[str]:
+    """Find the release year already baked into this album's on-disk folder (#917).
+
+    Read from a sibling track — its own ``year`` column first, else a ``(YYYY)`` /
+    ``[YYYY]`` in the album folder name — so an "I have this" import reuses the album's
+    existing directory instead of rebuilding a yearless one. Returns the 4-digit year
+    string, or None when no signal exists.
+    """
+    try:
+        with database._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT file_path, year FROM tracks
+                WHERE album_id = ?
+                  AND file_path IS NOT NULL AND file_path != ''
+                  AND NOT (COALESCE(disc_number, 1) = ? AND track_number = ?)
+                ORDER BY COALESCE(disc_number, 1), track_number
+                LIMIT 12
+                """,
+                (album_id, target_disc, target_track),
+            )
+            rows = cursor.fetchall()
+        for row in rows:
+            year = row["year"]
+            if year is not None and str(year).strip()[:4].isdigit():
+                return str(year).strip()[:4]
+            resolved = resolve_library_file_path_fn(row["file_path"])
+            if resolved:
+                folder = os.path.basename(os.path.dirname(resolved))
+                match = re.search(r"[(\[](\d{4})[)\]]", folder)   # "Album (2019)" / "Album [2019]"
+                if match:
+                    return match.group(1)
+    except Exception as exc:
+        logger.debug("Could not recover album year from sibling for %s: %s", album_id, exc)
+    return None
 
 
 def copy_album_identity_from_target_sibling(

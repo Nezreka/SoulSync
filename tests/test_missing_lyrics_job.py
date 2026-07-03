@@ -143,6 +143,29 @@ def test_scan_skips_tracks_that_already_have_lrc(tmp_path, monkeypatch):
     assert findings == []
 
 
+def test_scan_resolves_db_path_before_lrc_check(tmp_path, monkeypatch):
+    """#955: the .lrc check must run on the RESOLVED on-disk path, not the raw DB path. A path-mapped
+    (docker) user stores e.g. /data/... but the file lives elsewhere, with the .lrc next to the REAL
+    file. The scan must resolve + skip it — checking the raw path flagged every such track as missing
+    even though the sidecar was right there."""
+    real_audio = tmp_path / "08. Tomorrow (Album Version).flac"; real_audio.write_bytes(b"x")
+    (tmp_path / "08. Tomorrow (Album Version).lrc").write_text("[00:01]hi")   # sidecar by the REAL file
+    db_path = "/data/Sean Kingston/Tomorrow (2009)/08. Tomorrow (Album Version).flac"   # not real here
+    rows = [(626, "Tomorrow", "Sean Kingston", "Tomorrow", db_path, 200000)]
+    # resolver maps the stored container path -> the real file on disk
+    monkeypatch.setattr("core.repair_jobs.missing_lyrics.resolve_library_file_path",
+                        lambda p, **k: str(real_audio) if p == db_path else None)
+    # LRClib WOULD have lyrics — so without the fix (raw-path check) this gets wrongly flagged.
+    fake_client = SimpleNamespace(api=object(), has_remote_lyrics=lambda *a, **k: True)
+    monkeypatch.setattr("core.lyrics_client.lyrics_client", fake_client)
+
+    findings = []
+    result = MissingLyricsJob().scan(_ctx(_DB(rows), findings))
+    assert result.skipped == 1            # resolved -> .lrc found -> skipped
+    assert result.findings_created == 0
+    assert findings == []                 # NOT flagged despite LRClib having lyrics
+
+
 def test_scan_noops_when_lrclib_disabled(monkeypatch):
     db = _DB([(1, "Song", "Artist", "Album", "/x.flac", 200)])
     ctx = _ctx(db, [])

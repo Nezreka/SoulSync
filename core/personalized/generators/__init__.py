@@ -25,3 +25,4 @@ from core.personalized.generators import daily_mix  # noqa: F401
 from core.personalized.generators import fresh_tape  # noqa: F401
 from core.personalized.generators import archives  # noqa: F401
 from core.personalized.generators import seasonal_mix  # noqa: F401
+from core.personalized.generators import listening_mix  # noqa: F401

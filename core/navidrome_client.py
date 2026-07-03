@@ -110,6 +110,7 @@ class NavidromeTrack:
         self.title = navidrome_data.get('title', 'Unknown Track')
         self.duration = navidrome_data.get('duration', 0) * 1000  # Convert to milliseconds
         self.trackNumber = navidrome_data.get('track')
+        self.discNumber = navidrome_data.get('discNumber')  # multi-disc: disc number
         self.year = navidrome_data.get('year')
         self.userRating = navidrome_data.get('userRating')
         self.addedAt = self._parse_date(navidrome_data.get('created'))
@@ -1022,6 +1023,34 @@ class NavidromeClient(MediaServerClient):
             logger.error(f"Error {'updating' if playlist_id else 'creating'} Navidrome playlist '{name}': {e}")
             return False
 
+    def rewrite_playlist_order(self, playlist_id: str, name: str, ordered_song_ids) -> bool:
+        """Rewrite a playlist's tracks to an exact ordered id list (Subsonic has no
+        per-track move — the only reorder primitive is overwriting the whole song
+        list). Overwrites in place via createPlaylist + playlistId, so the playlist
+        identity (id/name) survives. Used ONLY by the 'Align playlists' path with
+        ids already present in the playlist — never adds a new track.
+
+        NOTE: like every createPlaylist+playlistId overwrite (same as replace-mode
+        sync), Navidrome may not carry the playlist's comment forward — the caller
+        re-applies it if needed."""
+        if not self.ensure_connection():
+            return False
+        ids = [str(i) for i in (ordered_song_ids or []) if str(i)]
+        if not ids:
+            logger.warning(f"rewrite_playlist_order: no song ids for '{name}'")
+            return False
+        try:
+            params = {'name': name, 'songId': ids, 'playlistId': playlist_id}
+            response = self._make_request('createPlaylist', params)
+            if response and response.get('status') == 'ok':
+                logger.info(f"Aligned Navidrome playlist '{name}' order ({len(ids)} tracks)")
+                return True
+            logger.error(f"rewrite_playlist_order failed for '{name}'")
+            return False
+        except Exception as e:
+            logger.error(f"Error rewriting Navidrome playlist order '{name}': {e}")
+            return False
+
     def copy_playlist(self, source_name: str, target_name: str) -> bool:
         """Copy a playlist to create a backup"""
         if not self.ensure_connection():
@@ -1192,7 +1221,11 @@ class NavidromeClient(MediaServerClient):
 
             primary = existing_playlists[0]
             existing_tracks = self.get_playlist_tracks(primary.id)
-            current_ids = [str(t.id) for t in existing_tracks if getattr(t, 'id', None)]
+            # #905: NavidromeTrack exposes the Subsonic song id as `ratingKey` (NOT `.id`,
+            # which doesn't exist) — same as append_to_playlist reads it. Reading `t.id` here
+            # made current_ids ALWAYS empty, so reconcile thought the playlist was empty and
+            # re-added every track each sync (playlists doubling) while removing nothing.
+            current_ids = [str(t.ratingKey) for t in existing_tracks if getattr(t, 'ratingKey', None)]
             desired_ids = []
             for t in tracks:
                 tid = (str(t.ratingKey) if hasattr(t, 'ratingKey')

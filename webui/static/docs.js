@@ -714,9 +714,10 @@ const DOCS_SECTIONS = [
             </div>
             <div class="docs-subsection" id="sync-import-file">
                 <h3 class="docs-subsection-title">Import from File</h3>
-                <p class="docs-text">Import track lists from <strong>CSV, TSV, or plain text files</strong>. Drag and drop a file or click to browse. SoulSync parses the file, lets you preview and map columns, then creates a mirrored playlist for discovery and download.</p>
+                <p class="docs-text">Import track lists from <strong>CSV, TSV, M3U/M3U8, or plain text files</strong>. Drag and drop a file or click to browse. SoulSync parses the file, lets you preview and map columns, then creates a mirrored playlist for discovery and download.</p>
                 <ul class="docs-list">
                     <li><strong>CSV/TSV</strong>: Auto-detects columns; map Artist, Title, and Album from dropdowns</li>
+                    <li><strong>M3U/M3U8</strong>: Read automatically — artist, title and duration come from <code>#EXTINF</code> lines (or the file name for simple playlists). Round-trips with SoulSync's own M3U export</li>
                     <li><strong>Text files</strong>: One track per line; choose Artist-Title or Title-Artist order and separator (dash, tab, pipe, etc.)</li>
                     <li>Preview parsed tracks before importing</li>
                     <li>Name your playlist and it becomes a mirrored playlist for sync</li>
@@ -1308,7 +1309,7 @@ const DOCS_SECTIONS = [
             </div>
             <div class="docs-subsection" id="imp-textfile">
                 <h3 class="docs-subsection-title">Import from Text File</h3>
-                <p class="docs-text">Import track lists from <strong>CSV</strong>, <strong>TSV</strong>, or <strong>TXT</strong> files. Upload a file with columns for artist, album, and track title:</p>
+                <p class="docs-text">Import track lists from <strong>CSV</strong>, <strong>TSV</strong>, <strong>TXT</strong>, or <strong>M3U/M3U8</strong> files. Upload a file with columns for artist, album, and track title (M3U playlists are read automatically):</p>
                 <ol class="docs-steps">
                     <li>Click <strong>Import from File</strong> and select your text file</li>
                     <li>Choose the <strong>separator</strong> (comma, tab, or pipe)</li>

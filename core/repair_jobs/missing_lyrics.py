@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 
+from core.library.path_resolver import resolve_library_file_path
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
@@ -91,6 +92,14 @@ class MissingLyricsJob(RepairJob):
             if conn:
                 conn.close()
 
+        # The stored file_path may not exist as-is in this process's filesystem view (docker mounts,
+        # a Plex/SoulSync path mismatch). The .lrc check below MUST run against the resolved on-disk
+        # path — exactly like the apply (_fix_missing_lyrics) and the Cover Art sibling already do.
+        # Checking the raw DB path made every path-mapped user's tracks read as ".lrc missing" even
+        # though the sidecar was right there (issue #955).
+        download_folder = (context.config_manager.get('soulseek.download_path', '')
+                           if context.config_manager else '') or None
+
         total = len(rows)
         if context.update_progress:
             context.update_progress(0, total)
@@ -106,8 +115,18 @@ class MissingLyricsJob(RepairJob):
             track_id, title, artist_name, album_title, file_path, duration = row[:6]
             result.scanned += 1
 
+            # Resolve the stored path to the real file before checking for the sidecar (see note
+            # above). Fall back to the raw path when the resolver returns nothing — the common docker
+            # case where the container path already equals the stored path.
+            resolved_path = resolve_library_file_path(
+                file_path,
+                transfer_folder=getattr(context, 'transfer_folder', None),
+                download_folder=download_folder,
+                config_manager=context.config_manager,
+            ) or file_path
+
             # Already has a sidecar on disk → nothing to do.
-            if _has_lrc_sidecar(file_path):
+            if _has_lrc_sidecar(resolved_path):
                 result.skipped += 1
                 continue
 

@@ -44,6 +44,7 @@ def build_source_only_artist_detail(
     itunes_client: Optional[Any] = None,
     discogs_client: Optional[Any] = None,
     amazon_client: Optional[Any] = None,
+    jiosaavn_client: Optional[Any] = None,
     lastfm_api_key: Optional[str] = None,
 ) -> Tuple[Dict[str, Any], int]:
     """Build the artist-detail payload for a source-only artist.
@@ -101,6 +102,19 @@ def build_source_only_artist_detail(
                 source_genres = az_artist.get("genres") or []
                 if not image_url and az_artist.get("images"):
                     image_url = az_artist["images"][0].get("url")
+        elif source == "jiosaavn" and jiosaavn_client is not None:
+            js_artist = jiosaavn_client.get_artist(artist_id)
+            if js_artist:
+                if not artist_name and js_artist.get("name"):
+                    resolved_name = js_artist["name"]
+                source_genres = js_artist.get("genres") or []
+                source_followers = (js_artist.get("followers") or {}).get("total")
+                if not image_url:
+                    images = js_artist.get("images") or []
+                    if images:
+                        image_url = images[0].get("url")
+                    elif js_artist.get("image_url"):
+                        image_url = js_artist["image_url"]
         elif source == "musicbrainz":
             try:
                 from core.musicbrainz_search import MusicBrainzSearchClient

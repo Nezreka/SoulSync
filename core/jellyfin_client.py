@@ -5,6 +5,7 @@ from datetime import datetime
 import json
 from utils.logging_config import get_logger
 from config.settings import config_manager
+from core.library.bulk_paginate import paginate_all_items
 
 # Shared dataclasses live in the neutral media_server package — every
 # server client used to define a near-identical XTrackInfo /
@@ -105,6 +106,7 @@ class JellyfinTrack:
         self.title = jellyfin_data.get('Name', 'Unknown Track')
         self.duration = jellyfin_data.get('RunTimeTicks', 0) // 10000  # Convert from ticks to milliseconds
         self.trackNumber = jellyfin_data.get('IndexNumber')
+        self.discNumber = jellyfin_data.get('ParentIndexNumber')  # multi-disc: disc number
         self.year = jellyfin_data.get('ProductionYear')
         self.userRating = jellyfin_data.get('UserData', {}).get('Rating')
         self.addedAt = self._parse_date(jellyfin_data.get('DateCreated'))
@@ -511,12 +513,8 @@ class JellyfinClient(MediaServerClient):
         try:
             # SIMPLIFIED APPROACH: Fetch all tracks, then all albums separately (robust and fast)
             logger.info("Fetching all tracks in bulk...")
-            all_tracks = []
-            start_index = 0
-            limit = 10000
-            consecutive_failures = 0
-            
-            while True:
+
+            def _fetch_tracks_page(start_index, limit):
                 params = {
                     'ParentId': self.music_library_id,
                     'IncludeItemTypes': 'Audio',
@@ -527,41 +525,19 @@ class JellyfinClient(MediaServerClient):
                     'StartIndex': start_index,
                     'Limit': limit
                 }
-                
                 response = self._make_request(f'/Users/{self.user_id}/Items', params)
-                
-                if not response:
-                    consecutive_failures += 1
-                    # Wait before retrying — the server may still be processing the timed-out request
-                    time.sleep(5)
-                    if limit > 1000:
-                        limit = limit // 2
-                        consecutive_failures = 0  # Reset — give the smaller batch a fair chance
-                        logger.warning(f"Track fetch failed - reducing batch size to {limit}")
-                        continue
-                    elif consecutive_failures >= 2:
-                        logger.warning("Multiple track fetch failures at minimum batch size - stopping")
-                        break
-                    else:
-                        logger.warning("Track fetch failed at minimum batch size - retrying once")
-                        continue
+                return response.get('Items', []) if response else None  # None = failed page
 
-                consecutive_failures = 0
-                batch_tracks = response.get('Items', [])
-                if not batch_tracks:
-                    break
-                    
-                all_tracks.extend(batch_tracks)
-                
-                if len(batch_tracks) < limit:
-                    break
-                    
-                start_index += limit
-                progress_msg = f"Fetched {len(all_tracks)} tracks so far..."
-                logger.info(f"   {progress_msg} (batch size: {limit})")
-                if self._progress_callback:
-                    self._progress_callback(progress_msg)
-            
+            # Page in modest chunks so progress is reported every page — a single
+            # huge silent request used to trip the 300s no-progress watchdog on
+            # slow servers even though it was alive (see bulk_paginate docstring).
+            all_tracks = paginate_all_items(
+                _fetch_tracks_page,
+                report_progress=self._progress_callback,
+                label="tracks",
+                on_retry_wait=lambda: time.sleep(5),
+            )
+
             # Group tracks by album ID for instant lookup
             self._track_cache = {}
             for track_data in all_tracks:
@@ -577,12 +553,8 @@ class JellyfinClient(MediaServerClient):
             
             # STEP 2: Fetch all albums in bulk (same proven pattern)
             logger.info("Fetching all albums in bulk...")
-            all_albums = []
-            start_index = 0
-            limit = 10000
-            consecutive_failures = 0
-            
-            while True:
+
+            def _fetch_albums_page(start_index, limit):
                 params = {
                     'ParentId': self.music_library_id,
                     'IncludeItemTypes': 'MusicAlbum',
@@ -593,41 +565,16 @@ class JellyfinClient(MediaServerClient):
                     'StartIndex': start_index,
                     'Limit': limit
                 }
-                
                 response = self._make_request(f'/Users/{self.user_id}/Items', params)
-                
-                if not response:
-                    consecutive_failures += 1
-                    # Wait before retrying — the server may still be processing the timed-out request
-                    time.sleep(5)
-                    if limit > 1000:
-                        limit = limit // 2
-                        consecutive_failures = 0  # Reset — give the smaller batch a fair chance
-                        logger.warning(f"Album fetch failed - reducing batch size to {limit}")
-                        continue
-                    elif consecutive_failures >= 2:
-                        logger.warning("Multiple album fetch failures at minimum batch size - stopping")
-                        break
-                    else:
-                        logger.warning("Album fetch failed at minimum batch size - retrying once")
-                        continue
+                return response.get('Items', []) if response else None  # None = failed page
 
-                consecutive_failures = 0
-                batch_albums = response.get('Items', [])
-                if not batch_albums:
-                    break
-                    
-                all_albums.extend(batch_albums)
-                
-                if len(batch_albums) < limit:
-                    break
-                    
-                start_index += limit
-                progress_msg = f"Fetched {len(all_albums)} albums so far..."
-                logger.info(f"   {progress_msg} (batch size: {limit})")
-                if self._progress_callback:
-                    self._progress_callback(progress_msg)
-            
+            all_albums = paginate_all_items(
+                _fetch_albums_page,
+                report_progress=self._progress_callback,
+                label="albums",
+                on_retry_wait=lambda: time.sleep(5),
+            )
+
             # Group albums by artist ID for instant lookup
             self._album_cache = {}
             for album_data in all_albums:
@@ -1709,6 +1656,93 @@ class JellyfinClient(MediaServerClient):
             return True
         except Exception as e:
             logger.error(f"Error reconciling Jellyfin playlist '{playlist_name}': {e}")
+            return False
+
+    def get_playlist_track_ids(self, playlist_id: str) -> List[str]:
+        """The playlist's current track ids (Item Ids), in current order. [] on miss."""
+        if not self.ensure_connection():
+            return []
+        try:
+            resp = self._make_request(f'/Playlists/{playlist_id}/Items', {'UserId': self.user_id})
+            if not resp:
+                return []
+            return [str(i.get('Id')) for i in resp.get('Items', []) if i.get('Id')]
+        except Exception as e:
+            logger.error(f"Error getting Jellyfin playlist track ids '{playlist_id}': {e}")
+            return []
+
+    def reorder_playlist(self, playlist_id, playlist_name: str, ordered_ids) -> bool:
+        """In-place reorder a playlist to an exact ordered track-id list ('Align
+        playlists'). Operates on the existing playlist object so its poster, name
+        and Id survive — no delete/recreate of the playlist itself.
+
+        Does NOT use Jellyfin's per-item Move endpoint (Items/{entryId}/Move/{i}):
+        that endpoint is user-scoped and — unlike the add/remove item endpoints,
+        which take an explicit ``UserId`` — has no way to resolve a user from a
+        server API key, so it returns HTTP 400 for every playlist (Ashh, Docker).
+        Instead we re-add the desired ids IN ORDER via the same UserId-scoped
+        ``POST /Items`` the sync uses (append order is preserved), THEN remove the
+        original entries. Add-before-remove means a mid-operation failure never
+        leaves the playlist emptied — worst case is transient duplicates that the
+        next reconcile collapses."""
+        if not self.ensure_connection():
+            return False
+        try:
+            import requests
+            # plan_align_rewrite already guarantees ordered ⊆ current, but filter to
+            # valid GUIDs anyway — an invalid id makes Jellyfin 400 the whole add.
+            ordered = [str(i) for i in (ordered_ids or [])
+                       if str(i) and self._is_valid_guid(str(i))]
+            if not ordered:
+                logger.error(f"Jellyfin reorder: no valid ids for playlist {playlist_id}")
+                return False
+
+            # Current entries (track_id, entry_id) in current order. The entry id
+            # (PlaylistItemId) is what removal operates on.
+            entries = []
+            resp = self._make_request(f'/Playlists/{playlist_id}/Items', {'UserId': self.user_id})
+            if resp:
+                for item in resp.get('Items', []):
+                    tid = str(item.get('Id') or '')
+                    eid = str(item.get('PlaylistItemId') or '')
+                    if tid:
+                        entries.append((tid, eid))
+            if not entries:
+                logger.error(f"Jellyfin reorder: no entries for playlist {playlist_id}")
+                return False
+
+            old_eids = [eid for _tid, eid in entries if eid]
+            hdr = {'X-Emby-Token': self.api_key}
+
+            # 1) Append the desired ids in order (new entries; existing copies stay
+            #    for now — Jellyfin playlists allow duplicates).
+            for i in range(0, len(ordered), 100):
+                batch = ordered[i:i + 100]
+                r = requests.post(
+                    f"{self.base_url}/Playlists/{playlist_id}/Items",
+                    params={'Ids': ','.join(batch), 'UserId': self.user_id},
+                    headers=hdr, timeout=30,
+                )
+                if r.status_code not in (200, 204):
+                    logger.warning(f"Jellyfin reorder re-add failed: HTTP {r.status_code}")
+                    return False
+
+            # 2) Remove the ORIGINAL entries, leaving exactly the freshly-added
+            #    ones in `ordered` order.
+            for i in range(0, len(old_eids), 100):
+                batch = old_eids[i:i + 100]
+                r = requests.delete(
+                    f"{self.base_url}/Playlists/{playlist_id}/Items",
+                    params={'EntryIds': ','.join(batch)}, headers=hdr, timeout=30,
+                )
+                if r.status_code not in (200, 204):
+                    logger.warning(f"Jellyfin reorder cleanup-remove failed: HTTP {r.status_code}")
+                    return False
+
+            logger.info(f"Aligned Jellyfin playlist '{playlist_name}' order ({len(ordered)} tracks)")
+            return True
+        except Exception as e:
+            logger.error(f"Error reordering Jellyfin playlist '{playlist_name}': {e}")
             return False
 
     def update_playlist(self, playlist_name: str, tracks) -> bool:

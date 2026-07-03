@@ -47,12 +47,14 @@ def build_metadata_enrichment_runtime(
     genius_worker: Any | None = None,
     spotify_enrichment_worker: Any | None = None,
     itunes_enrichment_worker: Any | None = None,
+    jiosaavn_worker: Any | None = None,
 ) -> SimpleNamespace:
     """Build the runtime object consumed by core.metadata.enrichment/source."""
     return SimpleNamespace(
         mb_worker=mb_worker,
         deezer_worker=deezer_worker,
         audiodb_worker=audiodb_worker,
+        jiosaavn_worker=jiosaavn_worker,
         tidal_client=tidal_client,
         hifi_client=hifi_client,
         qobuz_enrichment_worker=qobuz_enrichment_worker,
@@ -131,6 +133,14 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
             track_num_str = format_track_number_tag(
                 metadata.get('track_number'), metadata.get('total_tracks')
             )
+            # Disc number is written UNCONDITIONALLY (floored to >=1), like the
+            # track number above. The old code only wrote it when truthy, so a
+            # track whose disc came back 0/None/'' (e.g. matched to a different
+            # edition) lost its disc tag on the clear-then-rewrite and floated
+            # ungrouped above the disc sections in Jellyfin/Plex (Sokhi).
+            from core.imports.track_number import normalize_disc_number
+            _disc_num = normalize_disc_number(metadata.get('disc_number'))
+            disc_num_str = str(_disc_num)
             write_multi = cfg.get("metadata_enhancement.tags.write_multi_artist", False)
             artists_list = metadata.get("_artists_list", [])
 
@@ -162,8 +172,7 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
                 if metadata.get("genre"):
                     audio_file.tags.add(symbols.TCON(encoding=3, text=[metadata["genre"]]))
                 audio_file.tags.add(symbols.TRCK(encoding=3, text=[track_num_str]))
-                if metadata.get("disc_number"):
-                    audio_file.tags.add(symbols.TPOS(encoding=3, text=[str(metadata["disc_number"])]))
+                audio_file.tags.add(symbols.TPOS(encoding=3, text=[disc_num_str]))
             elif is_vorbis_like(audio_file, symbols):
                 if metadata.get("title"):
                     audio_file["title"] = [metadata["title"]]
@@ -180,8 +189,7 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
                 if metadata.get("genre"):
                     audio_file["genre"] = [metadata["genre"]]
                 audio_file["tracknumber"] = [track_num_str]
-                if metadata.get("disc_number"):
-                    audio_file["discnumber"] = [str(metadata["disc_number"])]
+                audio_file["discnumber"] = [disc_num_str]
             elif isinstance(audio_file, symbols.MP4):
                 if metadata.get("title"):
                     audio_file["\xa9nam"] = [metadata["title"]]
@@ -198,8 +206,7 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
                 audio_file["trkn"] = [format_track_number_tuple(
                     metadata.get("track_number"), metadata.get("total_tracks")
                 )]
-                if metadata.get("disc_number"):
-                    audio_file["disk"] = [(metadata["disc_number"], 0)]
+                audio_file["disk"] = [(_disc_num, 0)]
 
             embed_source_ids(audio_file, metadata, context, runtime=runtime)
 
@@ -242,18 +249,25 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
             logger.warning("[Metadata Debug] Artist: %s", artist.get("name", "MISSING") if artist else "None")
             logger.warning("[Metadata Debug] Album info: %s", album_info.get("album_name", "MISSING") if album_info else "None")
             logger.error("[Metadata Debug] Traceback:\n%s", traceback.format_exc())
-            # We cleared the file's art early; if the rewrite then crashed
-            # before re-embedding, the on-disk file (already saved cleared at
-            # the start) would be left art-less. Best-effort: put the original
-            # art back and persist it so a mid-enrichment crash never destroys
-            # the cover (#764). Guarded so a failure here can't mask the
-            # original error.
+            # The file was saved with tags CLEARED up front (so stale tags never
+            # linger), then the failure-prone enrichment ran. By the time most
+            # failures hit — the external source-id embed / cover-art fetch — the
+            # core tags (album/artist/title/track from the matched context) are
+            # already on the in-memory object but NOT yet on disk; the on-disk
+            # file is still the cleared one. Persist the in-memory tags now (and
+            # restore the original art too, #764) so a mid-enrichment crash leaves
+            # a correctly-tagged file instead of an UNTAGGED one (Sokhi: tracks
+            # landing in Rockbox's 'untagged' bucket after a 'processing failed').
+            #
+            # Previously this save was gated on there being original art to
+            # restore, so an art-less file lost its tags entirely on any crash.
+            # Guarded so a failure here can't mask the original error.
             try:
-                if audio_file is not None and art_snapshot and restore_embedded_art(
-                    audio_file, symbols, art_snapshot
-                ):
+                if audio_file is not None:
+                    if art_snapshot:
+                        restore_embedded_art(audio_file, symbols, art_snapshot)
                     save_audio_file(audio_file, symbols)
-                    logger.info("Restored original cover art after enrichment error.")
+                    logger.info("Persisted core tags (and restored art) after enrichment error.")
             except Exception as restore_exc:
-                logger.debug("Art restore after error failed: %s", restore_exc)
+                logger.debug("Tag/art persist after error failed: %s", restore_exc)
             return False

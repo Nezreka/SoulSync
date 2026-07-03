@@ -92,6 +92,14 @@ def test_single_column_provider_maps_per_entity():
     assert plan.filled == 3
 
 
+def test_jiosaavn_single_column_provider_maps_per_entity():
+    tags = {'jiosaavn_track_id': 'JT', 'jiosaavn_album_id': 'JA', 'jiosaavn_artist_id': 'JR'}
+    plan = plan_reconcile(tags, {'track': {}, 'album': {}, 'artist': {}})
+    vals = {f.entity: f.value for f in plan.fills}
+    assert vals == {'track': 'JT', 'album': 'JA', 'artist': 'JR'}
+    assert plan.filled == 3
+
+
 def test_mb_album_and_artist_filled_track_recording_skipped():
     tags = {'musicbrainz_albumid': 'MBA', 'musicbrainz_artistid': 'MBR', 'musicbrainz_trackid': 'MBT'}
     plan = plan_reconcile(tags, {'track': {}, 'album': {}, 'artist': {}})

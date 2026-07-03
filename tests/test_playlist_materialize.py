@@ -8,6 +8,9 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import pytest
+
+from tests.conftest import requires_symlinks
 from core.playlists.materialize import (
     DEFAULT_MODE,
     materialize_one,
@@ -34,6 +37,7 @@ def test_normalize_mode():
     assert normalize_mode("nonsense") == DEFAULT_MODE
 
 
+@requires_symlinks
 def test_symlink_mode_creates_relative_links(tmp_path: Path):
     real = _library(tmp_path)
     s = rebuild_playlist_folder(str(tmp_path / "Playlists"), "Road Trip", real, mode="symlink")
@@ -45,6 +49,7 @@ def test_symlink_mode_creates_relative_links(tmp_path: Path):
     assert link.read_bytes() == b"audio"
 
 
+@requires_symlinks
 def test_symlink_mode_idempotent(tmp_path: Path):
     real = _library(tmp_path)
     root = str(tmp_path / "Playlists")
@@ -102,6 +107,7 @@ def test_prune_stale_can_be_disabled(tmp_path: Path):
     assert (Path(s.playlist_dir) / "Bohemian Rhapsody.mp3").exists()
 
 
+@requires_symlinks
 def test_switching_mode_replaces_links_with_copies(tmp_path: Path):
     real = _library(tmp_path)
     root = str(tmp_path / "Playlists")
@@ -124,6 +130,7 @@ def test_basename_collision_is_disambiguated_not_overwritten(tmp_path: Path):
     assert s.copied == 2
 
 
+@requires_symlinks
 def test_missing_source_is_counted_not_fatal(tmp_path: Path):
     real = _library(tmp_path)
     s = rebuild_playlist_folder(str(tmp_path / "Playlists"), "Mix",

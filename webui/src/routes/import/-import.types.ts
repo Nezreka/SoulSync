@@ -23,11 +23,21 @@ export interface ImportStagingFile {
   manual_match?: ImportTrackResult;
 }
 
+/** While a large staging folder is still being scanned in the background (#947), the
+ * staging endpoints return `scanning: true` + progress instead of files/groups; the query
+ * polls until the scan completes and real data arrives. */
+export interface ImportScanProgress {
+  scanned: number;
+  total: number;
+}
+
 export interface ImportStagingFilesPayload {
   success: boolean;
   files?: ImportStagingFile[];
   staging_path?: string;
   error?: string;
+  scanning?: boolean;
+  progress?: ImportScanProgress;
 }
 
 export interface ImportStagingGroup {
@@ -47,6 +57,8 @@ export interface ImportStagingGroupsPayload {
   success: boolean;
   groups?: ImportStagingGroup[];
   error?: string;
+  scanning?: boolean;
+  progress?: ImportScanProgress;
 }
 
 export interface ImportAlbumResult {
@@ -172,6 +184,23 @@ export interface ImportAutoImportSettingsPayload {
   scan_interval?: number;
   confidence_threshold?: number;
   auto_process?: boolean;
+  // Per-context quality-profile override — null/undefined means "use the
+  // app-wide default profile" (Settings -> Quality), same as every other
+  // context that doesn't specify its own.
+  quality_profile_id?: number | null;
+  error?: string;
+}
+
+// Minimal shape from GET /api/quality-profile/custom.
+export interface AutoImportQualityProfile {
+  id: number;
+  name: string;
+  is_default: boolean;
+}
+
+export interface QualityProfilesPayload {
+  success: boolean;
+  profiles?: AutoImportQualityProfile[];
   error?: string;
 }
 

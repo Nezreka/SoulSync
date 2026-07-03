@@ -93,6 +93,56 @@ def _backfill_album_context(
                 album_context['image_url'] = first['url']
 
 
+# Placeholder album ids used when no real source album id is known — never queryable.
+_SENTINEL_ALBUM_IDS = {'explicit_album', 'from_sync_modal', ''}
+
+
+def backfill_album_context_from_source(
+    album_context: Dict[str, Any],
+    primary_source: Optional[str],
+    get_album_for_source_fn: Any,
+) -> bool:
+    """Hydrate a lean album context from the user's PRIMARY metadata source (#915).
+
+    Post-processing's only album backfill (:func:`hydrate_download_metadata`) goes through
+    ``spotify_client.get_track_details`` — Spotify-only. An iTunes/Deezer-primary user's
+    download therefore kept a lean context (no ``release_date``), so the path dropped the
+    ``$year`` and the date defaulted to ``YYYY-01-01`` — until they ran a Reorganize, which
+    reads the full album from the PRIMARY source. This closes that gap by doing the same:
+    fetch the full album from the primary source and backfill, so a download's pathing/tags
+    match what a later reorganize would produce.
+
+    ``get_album_for_source_fn(source, album_id)`` is injected (the real one is
+    ``core.metadata.album_tracks.get_album_for_source``) so this stays pure + testable.
+    No-op when: the context is already complete; the primary source is spotify (the existing
+    track-details path covers it); or no real source album id is present. Returns True when
+    it filled anything. Never raises — a backfill failure must not break a download.
+    """
+    if not isinstance(album_context, dict) or not _album_is_lean(album_context):
+        return False
+    if not primary_source or primary_source == 'spotify':
+        return False
+    album_id = album_context.get('id')
+    if not album_id or str(album_id) in _SENTINEL_ALBUM_IDS:
+        return False
+    try:
+        album = get_album_for_source_fn(primary_source, str(album_id))
+    except Exception as e:  # noqa: BLE001 — defensive: never let backfill break a download
+        logger.warning("[Context] primary-source (%s) album backfill failed: %s", primary_source, e)
+        return False
+    if not isinstance(album, dict):
+        return False
+    before = album_context.get('release_date')
+    _backfill_album_context(album_context, {'album': album})
+    if album_context.get('release_date') and album_context.get('release_date') != before:
+        logger.info(
+            "[Context] Hydrated lean album context from primary source %s "
+            "(release_date=%r, total_tracks=%r)",
+            primary_source, album_context.get('release_date'), album_context.get('total_tracks'),
+        )
+    return True
+
+
 def hydrate_download_metadata(
     track: Any,
     track_info: Any,
@@ -172,4 +222,5 @@ def hydrate_download_metadata(
 __all__ = [
     'ResolvedTrackMetadata',
     'hydrate_download_metadata',
+    'backfill_album_context_from_source',
 ]

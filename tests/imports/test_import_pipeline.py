@@ -235,6 +235,48 @@ def test_post_process_matched_download_forwards_separate_metadata_runtime(tmp_pa
 # write to the task directly — it stashes on context and the wrapper applies it)
 # ---------------------------------------------------------------------------
 
+def test_quality_gate_runs_before_acoustid(tmp_path, monkeypatch):
+    """The quality check must run BEFORE AcoustID: a wrong-quality file is
+    quarantined with trigger='quality' and AcoustID is never fingerprinted (so
+    quality is known on every quarantine entry, and no wasted AcoustID call)."""
+    src = tmp_path / "source.flac"
+    src.write_bytes(b"fLaC")
+
+    # Reach the quality gate: bypass integrity + silence guards.
+    from core.imports.file_integrity import IntegrityResult
+    monkeypatch.setattr(import_pipeline, "check_audio_integrity",
+                        lambda *_a, **_kw: IntegrityResult(ok=True, checks={}))
+    monkeypatch.setattr(import_pipeline, "detect_broken_audio", lambda *_a, **_kw: None)
+
+    # Wrong quality → rejection.
+    monkeypatch.setattr(import_pipeline, "get_audio_quality_string", lambda fp: "FLAC 16bit/44.1kHz")
+    monkeypatch.setattr(import_pipeline, "check_quality_target", lambda fp, ctx: "Quality mismatch: FLAC 16bit")
+
+    triggers = []
+    monkeypatch.setattr(import_pipeline, "move_to_quarantine",
+                        lambda fp, ctx, reason, eng, trigger=None: triggers.append(trigger) or "/q/x.flac.quarantined")
+    monkeypatch.setattr(import_pipeline, "_mark_task_quarantined", lambda *a, **k: None)
+    monkeypatch.setattr(import_pipeline, "_requeue_quarantined_task_for_retry", lambda *a, **k: False)
+
+    # Spy: AcoustID must NOT be constructed when quality already rejected.
+    acoustid_constructed = []
+    fake_mod = types.SimpleNamespace(
+        AcoustIDVerification=lambda *a, **k: acoustid_constructed.append(True),
+        VerificationResult=types.SimpleNamespace(FAIL="fail"),
+    )
+    monkeypatch.setitem(sys.modules, "core.acoustid_verification", fake_mod)
+
+    runtime = types.SimpleNamespace(automation_engine=None, on_download_completed=None,
+                                    web_scan_manager=None, repair_worker=None)
+    context = {"track_info": {}, "task_id": None, "batch_id": None}
+
+    import_pipeline.post_process_matched_download("ctx", context, str(src), runtime)
+
+    assert triggers == ["quality"]            # quarantined for quality
+    assert acoustid_constructed == []         # AcoustID never ran
+    assert context.get("_audio_quality") == "FLAC 16bit/44.1kHz"  # recorded for the sidecar
+
+
 def test_mark_task_quarantined_stashes_entry_id_when_task_id_absent():
     ctx = {}  # wrapper popped task_id before the inner pipeline ran
     import_pipeline._mark_task_quarantined(ctx, "/q/20260514_120000_song.flac.quarantined")
@@ -669,3 +711,73 @@ def test_exhaustive_single_source_exhausted_fails(monkeypatch):
     assert task["status"] == "failed"
     assert submitted == []
     assert completion == [("rbatch", "rtask", False)]
+
+
+def test_quarantine_failure_preserves_file_instead_of_deleting(tmp_path, monkeypatch):
+    """REGRESSION: when move_to_quarantine itself FAILS (e.g. a cross-device move on
+    a NAS), the rejected file must be LEFT IN PLACE for retry — never deleted.
+
+    Deleting a download we couldn't even quarantine is data loss that forces a
+    re-download (Discord: Shdjfgatdif). The task is still marked failed + the batch
+    still notified — only the destructive os.remove is gone. Drives the real pipeline
+    through the integrity-rejection path with quarantine forced to raise."""
+    source_path = tmp_path / "source.flac"
+    source_path.write_bytes(b"audio")
+
+    context_key, task_id, batch_id = "ctx-q", "task-q", "batch-q"
+    context = {
+        "search_result": {"is_simple_download": True, "filename": "Album/source.flac", "album": "Album"},
+        "track_info": {}, "original_search_result": {}, "is_album_download": False,
+        "task_id": task_id, "batch_id": batch_id,
+    }
+    completion_calls = []
+
+    snap = (dict(runtime_state.matched_downloads_context), dict(runtime_state.download_tasks),
+            dict(runtime_state.download_batches), set(runtime_state.processed_download_ids),
+            dict(runtime_state.post_process_locks))
+    for d in (runtime_state.matched_downloads_context, runtime_state.download_tasks,
+              runtime_state.download_batches, runtime_state.processed_download_ids,
+              runtime_state.post_process_locks):
+        d.clear()
+
+    runtime = types.SimpleNamespace(
+        automation_engine=None,
+        on_download_completed=lambda b, t, success: completion_calls.append((b, t, success)),
+        web_scan_manager=types.SimpleNamespace(request_scan=lambda r: None),
+        repair_worker=None,
+    )
+    fake_acoustid = types.ModuleType("core.acoustid_verification")
+    fake_acoustid.AcoustIDVerification = _FakeAcoustidVerifier
+    fake_acoustid.VerificationResult = types.SimpleNamespace(FAIL="FAIL")
+    monkeypatch.setitem(sys.modules, "core.acoustid_verification", fake_acoustid)
+
+    from core.imports.file_integrity import IntegrityResult
+    # Integrity FAILS → enters the quarantine block.
+    monkeypatch.setattr(import_pipeline, "check_audio_integrity",
+                        lambda *_a, **_k: IntegrityResult(ok=False, reason="broken (test)", checks={}))
+    # The quarantine MOVE itself raises → exercises the except branch (the fix).
+    def _boom(*_a, **_k):
+        raise OSError("cross-device link not permitted (simulated NAS)")
+    monkeypatch.setattr(import_pipeline, "move_to_quarantine", _boom)
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _Config(str(tmp_path / "Transfer")))
+    monkeypatch.setattr(import_pipeline, "add_activity_item", lambda *a, **k: None)
+
+    runtime_state.matched_downloads_context[context_key] = context
+    runtime_state.download_tasks[task_id] = {"track_info": {}, "status": "running"}
+
+    try:
+        import_pipeline.post_process_matched_download_with_verification(
+            context_key, context, str(source_path), task_id, batch_id, runtime)
+
+        # THE regression: a file we couldn't quarantine is preserved, not deleted.
+        assert source_path.exists(), "file must be LEFT IN PLACE when quarantine fails"
+        # Downstream still correct — task failed, batch notified of failure.
+        assert runtime_state.download_tasks[task_id]["status"] == "failed"
+        assert completion_calls == [(batch_id, task_id, False)]
+    finally:
+        for d, original in zip(
+            (runtime_state.matched_downloads_context, runtime_state.download_tasks,
+             runtime_state.download_batches, runtime_state.processed_download_ids,
+             runtime_state.post_process_locks), snap):
+            d.clear()
+            d.update(original)

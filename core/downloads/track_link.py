@@ -13,8 +13,47 @@ Pure + import-safe: parsing only, no network.
 from __future__ import annotations
 
 import re
-from typing import Any, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 from urllib.parse import urlparse
+
+
+def linked_track_id(track: Any) -> str:
+    """The source track id stamped on a search result, read from
+    ``_source_metadata['track_id']`` — the field every ID-downloadable source
+    (Tidal, Qobuz) records. Empty string when absent. ``TrackResult`` has no
+    top-level ``id``, so callers must NOT use ``getattr(t, 'id')`` (that always
+    missed and left the pasted-link bubble a silent no-op — #932)."""
+    meta = getattr(track, '_source_metadata', None)
+    if not isinstance(meta, dict):
+        return ''
+    return str(meta.get('track_id') or '')
+
+
+def bubble_linked_track_first(tracks: List[Any], link_track_id: str) -> List[Any]:
+    """Float the result whose source id matches a pasted link to the top so the
+    user sees the EXACT track they linked, not a fuzzy text-search lookalike
+    (#813/#932). Stable + a graceful no-op when no result carries the id."""
+    if not link_track_id or not tracks:
+        return tracks
+    target = str(link_track_id)
+    return sorted(tracks, key=lambda t: linked_track_id(t) != target)
+
+
+def inject_linked_track_first(
+    tracks: List[Any], linked_result: Any, link_track_id: str
+) -> List[Any]:
+    """Put the EXACT linked track first.
+
+    When ``linked_result`` is the track fetched directly by id, prepend it and
+    drop any search duplicate of it — so an obscure track a text search never
+    surfaced is still present and downloadable (#932). When it's None (the source
+    can't fetch one), fall back to bubbling a matching search result. Pure."""
+    if not link_track_id:
+        return tracks
+    target = str(link_track_id)
+    if linked_result is not None:
+        return [linked_result] + [t for t in tracks if linked_track_id(t) != target]
+    return bubble_linked_track_first(tracks, target)
 
 # host substring → download source id. Only ID-downloadable streaming sources.
 _HOSTS = (

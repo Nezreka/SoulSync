@@ -4,10 +4,53 @@ from __future__ import annotations
 
 from core.sync.playlist_edit import (
     normalize_sync_mode,
+    plan_align_rewrite,
     plan_playlist_add,
     plan_playlist_reconcile,
     remove_one_occurrence,
 )
+
+
+# ── plan_align_rewrite: "Align playlists" ordered rewrite (order-only) ─────────
+
+def test_align_mirror_reorders_and_drops_extras():
+    # Server: [A, C, B, X(extra)]; source order wants [A, B, C]. Mirror => A,B,C, X dropped.
+    out = plan_align_rewrite(current_ids=["A", "C", "B", "X"], matched_ids=["A", "B", "C"], keep_extras=False)
+    assert out == ["A", "B", "C"]
+
+
+def test_align_keep_extras_parks_them_at_end():
+    out = plan_align_rewrite(current_ids=["A", "C", "B", "X"], matched_ids=["A", "B", "C"], keep_extras=True)
+    assert out == ["A", "B", "C", "X"]            # X kept, after the aligned block
+
+
+def test_align_keep_extras_preserves_extra_current_order():
+    out = plan_align_rewrite(current_ids=["X1", "A", "X2", "B"], matched_ids=["A", "B"], keep_extras=True)
+    assert out == ["A", "B", "X1", "X2"]          # extras in their existing server order
+
+
+def test_align_rejects_when_matched_id_not_in_playlist():
+    # Stale editor data: a matched id that's no longer on the server -> None (reject).
+    assert plan_align_rewrite(current_ids=["A", "B"], matched_ids=["A", "GONE"]) is None
+
+
+def test_align_never_injects_foreign_track():
+    # Every output id must already be in the playlist (order-only, never adds).
+    out = plan_align_rewrite(current_ids=["A", "B", "C"], matched_ids=["C", "A", "B"], keep_extras=True)
+    assert set(out) <= {"A", "B", "C"}
+    assert out == ["C", "A", "B"]                 # pure reorder, full membership
+
+
+def test_align_handles_partial_membership_order_only():
+    # Server is missing nothing relevant; matched is a subset (some source tracks
+    # missing on server). Mirror keeps only the present matched, in source order.
+    out = plan_align_rewrite(current_ids=["B", "A"], matched_ids=["A", "B"], keep_extras=False)
+    assert out == ["A", "B"]
+
+
+def test_align_ids_coerced_to_str():
+    out = plan_align_rewrite(current_ids=[1, 2, 3], matched_ids=[3, 1], keep_extras=True)
+    assert out == ["3", "1", "2"]
 
 
 # ── plan_playlist_add: link must not duplicate ────────────────────────────

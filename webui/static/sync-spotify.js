@@ -1639,7 +1639,7 @@ function renderSpotifyPlaylists() {
     container.innerHTML = spotifyPlaylists.map(p => {
         let statusClass = 'status-never-synced';
         if (p.sync_status.startsWith('Synced')) statusClass = 'status-synced';
-        if (p.sync_status === 'Needs Sync') statusClass = 'status-needs-sync';
+        if (p.sync_status === 'Needs Sync' || p.sync_status.startsWith('Last Sync')) statusClass = 'status-needs-sync';
 
         // This HTML structure creates the interactive playlist cards
         return `

@@ -137,6 +137,36 @@ def plan_playlist_append(
     return out
 
 
+def plan_align_rewrite(current_ids, matched_ids, keep_extras: bool = False):
+    """Plan the ordered server-track id list to rewrite a playlist as, to align its
+    ORDER to the source. Pure — no I/O, no metadata. Used only by the "Align
+    playlists" path (never the normal sync); it reshuffles tracks already on the
+    server by id and never adds one.
+
+    ``matched_ids``  — server ids of the source-matched tracks, IN SOURCE ORDER
+                       (the desired sequence). Every one MUST already be in the
+                       playlist — align never injects a track that isn't there.
+    ``current_ids``  — the playlist's current server ids, in current server order.
+    ``keep_extras``  — True: server tracks not in ``matched_ids`` (extras) are
+                       appended after the aligned block, in their current order.
+                       False: extras are dropped (server mirrors the source).
+
+    Returns the ordered id list, or ``None`` if any matched id isn't currently in
+    the playlist (stale editor data — the caller should reject and have the user
+    reload rather than write a list referencing a vanished track).
+    """
+    current = [str(c) for c in current_ids]
+    current_set = set(current)
+    matched = [str(m) for m in matched_ids]
+    if any(m not in current_set for m in matched):
+        return None
+    ordered = list(matched)
+    if keep_extras:
+        matched_set = set(matched)
+        ordered.extend(c for c in current if c not in matched_set)
+    return ordered
+
+
 VALID_SYNC_MODES = ("replace", "append", "reconcile")
 
 
@@ -158,6 +188,7 @@ __all__ = [
     "remove_one_occurrence",
     "plan_playlist_reconcile",
     "plan_playlist_append",
+    "plan_align_rewrite",
     "normalize_sync_mode",
     "VALID_SYNC_MODES",
 ]
