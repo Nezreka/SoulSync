@@ -191,6 +191,7 @@ class VideoLibraryScanner:
 
             known_movies = self.db.server_ids("movies", server) if (incremental and do_movies) else set()
             known_shows = self.db.server_ids("shows", server) if (incremental and do_shows) else set()
+            known_eps = self.db.server_ids("episodes", server) if (incremental and do_shows) else set()
 
             # ── Movies ── (skipped entirely on a TV-only scan)
             seen_movies: set[str] = set()
@@ -244,11 +245,21 @@ class VideoLibraryScanner:
                     if self._cancel:
                         return self._finish_cancelled(movies, shows, episodes)
                     sid = str(show["server_id"])
-                    if incremental and sid in known_shows:
-                        consec += 1
-                        if consec >= INCREMENTAL_STOP_AFTER:
-                            break
-                        continue
+                    if incremental:
+                        # A known show is 'complete' only when we already have EVERY
+                        # episode. A show's add-date doesn't move when episodes arrive,
+                        # so the source sorts by recent activity and we open each show
+                        # to check for new episodes (mirrors the music side re-checking
+                        # a known album's tracks) — skip only fully-present shows, and
+                        # stop after a run of them.
+                        ep_ids = [str(e.get("server_id")) for s in show.get("seasons", [])
+                                  for e in s.get("episodes", []) if e.get("server_id")]
+                        complete = sid in known_shows and all(eid in known_eps for eid in ep_ids)
+                        if complete:
+                            consec += 1
+                            if consec >= INCREMENTAL_STOP_AFTER:
+                                break
+                            continue
                     consec = 0
                     try:
                         self.db.upsert_show_tree(server, show, preserve_enrichment=preserve)

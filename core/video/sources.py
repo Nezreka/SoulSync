@@ -385,7 +385,11 @@ class PlexVideoSource:
 
     def iter_shows(self, incremental=False):
         for section in self._scan_sections("show", self._tv_lib):
-            items = section.search(sort="addedAt:desc", maxresults=50) if incremental else section.all()
+            # Incremental sorts by updatedAt (bumps when a show gains episodes), NOT
+            # addedAt (the show's original add-date, which never moves) — so shows with
+            # new episodes actually surface. Wider window than movies since we then
+            # open each to check for new episodes.
+            items = section.search(sort="updatedAt:desc", maxresults=200) if incremental else section.all()
             for sh in items:
                 try:
                     yield self._show(sh)
@@ -825,7 +829,11 @@ class JellyfinVideoSource:
             params = {"ParentId": view["Id"], "IncludeItemTypes": "Series",
                       "Recursive": "true", "Fields": _JF_SHOW_FIELDS}
             if incremental:
-                params.update({"SortBy": "DateCreated", "SortOrder": "Descending", "Limit": "50"})
+                # DateLastContentAdded bumps when a series gains episodes (DateCreated
+                # is the series' original add-date and never moves) — so shows with new
+                # episodes surface. Fall back to DateCreated. Wider window than movies.
+                params.update({"SortBy": "DateLastContentAdded,DateCreated",
+                               "SortOrder": "Descending", "Limit": "200"})
                 items = (self._req(path, params) or {}).get("Items", [])
             else:
                 items = self._paged(path, params)

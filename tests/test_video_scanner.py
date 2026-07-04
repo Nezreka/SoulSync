@@ -49,6 +49,39 @@ def test_scan_sync_populates_library(db):
     assert (lib["movies"], lib["shows"], lib["episodes"]) == (1, 1, 1)
 
 
+def test_incremental_picks_up_new_episodes_of_known_show(db, monkeypatch):
+    """The core fix: an incremental scan must catch NEW EPISODES of a show it already
+    knows (a show's add-date doesn't move when episodes arrive)."""
+    import core.video.scanner as sc
+    monkeypatch.setattr(sc, "INCREMENTAL_MIN_LIBRARY", 1)   # let incremental run on a tiny DB
+    scanner = sc.VideoLibraryScanner(db)
+    show_v1 = {"server_id": "s1", "title": "Show", "seasons": [
+        {"season_number": 1, "episodes": [{"server_id": "e1", "episode_number": 1, "title": "E1"}]}]}
+    scanner.scan_sync(lambda: FakeSource([], [show_v1]), mode="full")
+    assert db.dashboard_stats()["library"]["episodes"] == 1
+
+    show_v2 = {"server_id": "s1", "title": "Show", "seasons": [
+        {"season_number": 1, "episodes": [
+            {"server_id": "e1", "episode_number": 1, "title": "E1"},
+            {"server_id": "e2", "episode_number": 2, "title": "E2"}]}]}
+    st = scanner.scan_sync(lambda: FakeSource([], [show_v2]), mode="incremental")
+    assert st["shows"] == 1                                   # re-processed (had a new episode)
+    assert db.dashboard_stats()["library"]["episodes"] == 2   # the new episode landed
+
+
+def test_incremental_skips_fully_present_show(db, monkeypatch):
+    """A known show with no new episodes is 'complete' → skipped (not re-processed)."""
+    import core.video.scanner as sc
+    monkeypatch.setattr(sc, "INCREMENTAL_MIN_LIBRARY", 1)
+    scanner = sc.VideoLibraryScanner(db)
+    show = {"server_id": "s1", "title": "Show", "seasons": [
+        {"season_number": 1, "episodes": [{"server_id": "e1", "episode_number": 1, "title": "E1"}]}]}
+    scanner.scan_sync(lambda: FakeSource([], [show]), mode="full")
+    st = scanner.scan_sync(lambda: FakeSource([], [show]), mode="incremental")
+    assert st["shows"] == 0                                   # fully present → not touched
+    assert db.dashboard_stats()["library"]["episodes"] == 1
+
+
 def test_scan_pauses_and_resumes_enrichment_workers(db):
     events = []
     scanner = VideoLibraryScanner(

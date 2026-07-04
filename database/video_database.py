@@ -2089,13 +2089,16 @@ class VideoDatabase:
             conn.close()
 
     def server_ids(self, table: str, server_source: str) -> set:
-        """All server_ids already stored for a server (for incremental early-stop)."""
-        if table not in ("movies", "shows"):
+        """All server_ids already stored for a server (for incremental early-stop).
+        'episodes' lets an incremental scan tell a fully-present show from one that
+        gained episodes (a show's add-date doesn't move when episodes arrive)."""
+        if table not in ("movies", "shows", "episodes"):
             return set()
         conn = self._get_connection()
         try:
             return {str(r[0]) for r in conn.execute(
-                f"SELECT server_id FROM {table} WHERE server_source=?", (server_source,)).fetchall()}
+                f"SELECT server_id FROM {table} WHERE server_source=? AND server_id IS NOT NULL",
+                (server_source,)).fetchall()}
         finally:
             conn.close()
 
