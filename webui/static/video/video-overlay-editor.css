@@ -19,6 +19,12 @@
 .voe-overlay ::-webkit-scrollbar { width: 10px; height: 10px; }
 .voe-overlay ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.13); border-radius: 5px; }
 .voe-overlay ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.22); }
+/* The icon set is stroke-based (fill:none) but the strings omit stroke="currentColor",
+ * so give every editor/dialog icon a currentColor stroke — otherwise icon-only
+ * buttons (card duplicate/delete, undo/redo) render blank. */
+.voe-overlay svg, .voe-confirm-back svg { stroke: currentColor; }
+.voe-topbar .voe-brand-mark svg { stroke: #fff; }
+.voe-lr-grip svg { stroke: none; }   /* fill-based dots — keep them fill-only */
 
 /* ── shared top bar ──────────────────────────────────────────────────────── */
 .voe-topbar {
