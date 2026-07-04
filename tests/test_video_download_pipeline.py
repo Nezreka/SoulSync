@@ -3,6 +3,8 @@ file location + destination resolution, and the video.db downloads CRUD. Isolate
 
 from __future__ import annotations
 
+import json
+
 from core.video.download_pipeline import (
     basename_of,
     dest_path_for,
@@ -115,6 +117,40 @@ def test_process_download_queued_reports_queued():
     upd = process_download(_dl(), [_xfer("Queued, Remotely")], "/dl",
                            lister=lambda d: [], mover=lambda s, d: None)
     assert upd["status"] == "queued"
+
+
+class _WlDB:
+    def __init__(self):
+        self.eps = None
+        self.movie = None
+    def add_episodes_to_wishlist(self, tmdb_id, title, episodes, *, poster_url=None, library_id=None, server_source=None):
+        self.eps = (tmdb_id, title, episodes, library_id)
+        return len(episodes)
+    def add_movie_to_wishlist(self, tmdb_id, title, *, year=None, poster_url=None, library_id=None, server_source=None):
+        self.movie = (tmdb_id, title, library_id)
+        return True
+    def show_tmdb_id(self, show_id):
+        return 999
+    def movie_tmdb_id(self, movie_id):
+        return 888
+
+
+def test_wishlist_failed_episode_tmdb_source():
+    """A gave-up TMDB episode grab goes back on the wishlist under the show's tmdb_id."""
+    from core.video.download_monitor import _wishlist_failed
+    db = _WlDB()
+    _wishlist_failed(db, {"id": 1, "kind": "show", "title": "The Show", "media_id": "123",
+                          "media_source": "tmdb", "search_ctx": json.dumps({"season": 1, "episode": 3})})
+    assert db.eps == (123, "The Show", [{"season_number": 1, "episode_number": 3}], None)
+
+
+def test_wishlist_failed_episode_library_resolves_tmdb():
+    """A library episode grab resolves the show's tmdb_id from the DB and keeps library_id."""
+    from core.video.download_monitor import _wishlist_failed
+    db = _WlDB()
+    _wishlist_failed(db, {"id": 2, "kind": "show", "title": "Lib Show", "media_id": "42",
+                          "media_source": "library", "search_ctx": {"season": 2, "episode": 5}})
+    assert db.eps == (999, "Lib Show", [{"season_number": 2, "episode_number": 5}], "42")
 
 
 def test_process_download_failed():

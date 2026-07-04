@@ -212,6 +212,8 @@ def _walk(root: str):
 
 _GIVE_UP_AFTER = 8       # consecutive 'transfer gone, no file' polls before failing it
 _misses: dict = {}       # download id -> consecutive missing polls
+_STALL_TIMEOUT = 1800    # seconds of zero % movement (queued or frozen) before giving up
+_stall: dict = {}        # download id -> (last_pct, monotonic time of last progress)
 _db_provider = None      # set by ensure_started; used by the requery worker thread
 _requerying: set = set()  # download ids with a requery thread in flight
 
@@ -253,9 +255,53 @@ def _archive_history(db, dl, upd) -> None:
         logger.exception("video download %s: history snapshot failed", dl.get("id"))
 
 
+def _wishlist_failed(db, dl) -> None:
+    """A download gave up for good — put the item back on the video wishlist so it's
+    not lost (mirrors the music side's failed-tracks-to-wishlist). Best-effort."""
+    try:
+        kind = str(dl.get("kind") or "").lower()
+        ctx = dl.get("search_ctx")
+        if isinstance(ctx, str):
+            try:
+                ctx = json.loads(ctx)
+            except (ValueError, TypeError):
+                ctx = {}
+        ctx = ctx or {}
+        media_source = str(dl.get("media_source") or "").lower()
+        media_id = dl.get("media_id")
+        title = dl.get("title") or ctx.get("title") or ""
+        poster, year = dl.get("poster_url"), dl.get("year")
+        is_tmdb = media_source == "tmdb"
+        lib_id = None if is_tmdb else media_id
+        if not title:
+            return
+        if kind == "movie":
+            tmdb_id = _as_int(media_id) if is_tmdb else db.movie_tmdb_id(media_id)
+            if tmdb_id:
+                db.add_movie_to_wishlist(int(tmdb_id), title, year=year, poster_url=poster, library_id=lib_id)
+        else:   # show/episode
+            sn, en = ctx.get("season"), ctx.get("episode")
+            if sn is None or en is None:
+                return
+            tmdb_id = _as_int(media_id) if is_tmdb else db.show_tmdb_id(media_id)
+            if tmdb_id:
+                db.add_episodes_to_wishlist(int(tmdb_id), title,
+                    [{"season_number": sn, "episode_number": en}], poster_url=poster, library_id=lib_id)
+    except Exception:
+        logger.exception("video download %s: wishlist-on-fail failed", dl.get("id"))
+
+
+def _as_int(v):
+    try:
+        return int(v)
+    except (ValueError, TypeError):
+        return None
+
+
 def _fail_or_retry(db, dl, error_msg) -> None:
     """A download just failed/disappeared. Try the next candidate inline; if none,
-    hand off to a requery thread; if nothing left, mark it failed for real."""
+    hand off to a requery thread; if nothing left, mark it failed for real — and
+    put it back on the wishlist so it isn't silently lost."""
     from core.video.retry import plan_retry
     plan = plan_retry(dl)
     if plan["action"] == "candidate" and _apply_candidate(db, dl["id"], dl, plan["candidate"], plan["rest"]):
@@ -267,6 +313,7 @@ def _fail_or_retry(db, dl, error_msg) -> None:
     err = error_msg or "Download failed"
     completed = _now()
     db.update_video_download(dl["id"], status="failed", error=err, completed_at=completed)
+    _wishlist_failed(db, dl)
     _archive_history(db, dl, {"status": "failed", "error": err, "completed_at": completed})
 
 
@@ -361,8 +408,13 @@ def _requery_worker(dl_id) -> None:
             if fresh and _apply_candidate(db, dl_id, row2, fresh[0], fresh[1:]):
                 return
             # this query gave nothing usable → loop tries the next query (or fails)
-        db.update_video_download(dl_id, status="failed",
-                                 error="No working release found after retries", completed_at=_now())
+        # Exhausted every retry — fail for real, and (like _fail_or_retry) put it
+        # back on the wishlist + archive it so it isn't silently lost.
+        err = "No working release found after retries"
+        final = db.get_video_download(dl_id) or {"id": dl_id}
+        db.update_video_download(dl_id, status="failed", error=err, completed_at=_now())
+        _wishlist_failed(db, final)
+        _archive_history(db, final, {"status": "failed", "error": err, "completed_at": _now()})
     except Exception:
         logger.exception("video download %s: requery worker failed", dl_id)
         try:
@@ -416,6 +468,21 @@ def _tick(db) -> None:
         if upd.get("status") == "failed":
             _fail_or_retry(db, dl, upd.get("error"))      # auto-retry before truly failing
             continue
+        # Stall/queue timeout — a transfer sitting with no % movement for too long
+        # (queued behind a dead peer, or frozen mid-download) is treated like a
+        # disappeared one: try alternates/requery, then fail + wishlist it.
+        _st = upd.get("status")
+        if _st in ("queued", "downloading"):
+            _pct = upd.get("progress") or 0
+            _prev = _stall.get(dl["id"])
+            if _prev is None or _pct > _prev[0]:
+                _stall[dl["id"]] = (_pct, time.monotonic())   # progress (or first sight) → reset clock
+            elif time.monotonic() - _prev[1] > _STALL_TIMEOUT:
+                _stall.pop(dl["id"], None)
+                _fail_or_retry(db, dl, "Stalled — no progress for %d min" % (_STALL_TIMEOUT // 60))
+                continue
+        else:
+            _stall.pop(dl["id"], None)
         # import_failed = the file downloaded fine but couldn't be placed (sample, wrong
         # episode, not an upgrade, …). Terminal + needs manual import — NOT a download
         # failure, so don't burn the retry budget re-downloading the same good file.
@@ -431,6 +498,8 @@ def _tick(db) -> None:
             logger.exception("video download %s: failed to persist update", dl.get("id"))
     for k in [k for k in _misses if k not in live_ids]:
         _misses.pop(k, None)
+    for k in [k for k in _stall if k not in live_ids]:
+        _stall.pop(k, None)
     # Batch complete: we finished ≥1 download this tick AND nothing is left in
     # flight (queued/downloading/searching). Fires once, on the transition to
     # empty — the next tick early-returns. Publishes to the event bridge so the
