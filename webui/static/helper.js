@@ -3404,19 +3404,16 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Convention: keep only the CURRENT release here, plus a single brief
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '2.8.4': [
-        { date: 'July 2026 — 2.8.4 release' },
-        { title: 'Artist Web — your library as a map', desc: 'an interactive WebGL graph of every artist you own, laid out by how they relate. it settles live (physics in a background worker, so the UI never freezes) and pans/zooms smoothly across thousands of nodes. three lenses: Taste Map (by genre), Communities, and the Discovery Web.', page: 'discover' },
-        { title: 'Discovery Web', desc: 'the map\'s discovery mode — your owned artists anchor a graph that grows out to similar artists you don\'t own yet. click any node to expand the map from there, follow the thread, and add anything to your watchlist on the spot.', page: 'discover' },
-        { title: 'Play from the map', desc: 'start artist radio off an owned node, or hear a 30s preview on a candidate you don\'t own — without leaving the graph. plus a first-run hint, a guide modal, and hover tooltips with the artist\'s photo.', page: 'discover' },
-        { title: 'Quality Profiles (#974)', desc: 'the single global quality setting becomes named, editable profiles — targets, upgrade behavior, AcoustID strictness, downsampling + lossy-copy all resolve per profile. Auto-Import can run its own, and there\'s an "upgrade until target" cutoff. (thanks @nick2000713.)', page: 'settings' },
-        { title: 'The Adventurousness dial, for real', desc: 'it was mostly cosmetic before (a browser-cache bug served the same recs). now it actually drives which artists surface — deeper the further you push it, genre-diverse so one genre can\'t hog the row, freshly rotated each visit, with "off your usual path" chips at the exploratory end.', page: 'discover' },
-        { title: 'Repair stop button actually cancels (#970)', desc: 'hitting stop now interrupts the running scan and flips responsively to "Stopping…", instead of the job grinding on to completion.', page: 'tools' },
-        { title: 'Playlist stuck "syncing" fixed (#972)', desc: 'a socket-driven sync could leave a playlist wedged in the syncing state server-side. fixed.', page: 'sync' },
-        { title: 'JioSaavn full enrichment worker (#964)', desc: 'JioSaavn graduates from experimental metadata to a full enrichment worker — and no longer wedges the whole worker on a single unresolvable row. (thanks HellRa1SeR.)', page: 'settings' },
-        { title: 'Unicode / Japanese dedup matching (#965)', desc: 'self-titled tracks match correctly and normalization preserves all scripts instead of only CJK, so the duplicate detector stops mis-grouping Japanese titles. (#967 — thanks bluejorts.)', page: 'tools' },
-        { title: 'Safer duplicate cleanup', desc: 'the duplicate cleaner quarantines instead of hard-deleting, and surfaces Docker permission failures instead of silently swallowing them.', page: 'tools' },
-        { title: 'Earlier versions', desc: '2.8.3 rebuilt Discover — a Spotify-level redesign plus a real recommendation engine (genre/novelty scoring, "why this rec" chips, self-filling popularity data). 2.8.2 fixed the Spotify Docker boot hang (#949) + added Max Performance mode; 2.8.1 added playlist export to Spotify & Deezer (#945); 2.8.0 brought the Unverified-queue cleanup (#934); 2.7.0 made multi-user real.' },
+    '2.8.5': [
+        { date: 'July 2026 — 2.8.5 release' },
+        { title: 'A focused bug-fix release', desc: 'no new features this time — just a batch of import, library, repair, and webui fixes, several straight from user reports this week.' },
+        { title: 'Import & Stats black screen fixed (#979)', desc: 'those two React-built pages could load as a blank black screen on some setups (mostly Windows, where the OS handed the app\'s JS bundle over with the wrong file type and the browser refused to run it). we force the correct type now, so they load for everyone.', page: 'import' },
+        { title: 'iTunes singles no longer "Unknown Artist" (#980)', desc: 'an iTunes single reached the importer with no album name, so it dropped into Unknown Artist / Unknown Album, got no album tag, and didn\'t match its release. a single\'s album is its own title now, so it files and tags correctly.', page: 'import' },
+        { title: 'No more "01-" on single-disc albums (#981)', desc: '$disc / $discnum in a file template always stamped the disc number, even on a 1-disc album. they\'re smart now like $cdnum — empty on single-disc, shown only for real multi-disc sets. applies to both import and rename/reorganize.', page: 'tools' },
+        { title: 'Cleanup never deletes a configured root (#976)', desc: 'the empty-dir cleanup could remove a folder you\'d set as a root; it leaves configured roots alone now, and self-heals a missing staging/import folder if a sweep removed it.', page: 'tools' },
+        { title: 'Repair "Fix All" works outside the transfer path (#978)', desc: 'path-mismatch "Fix All" did nothing for libraries stored outside the transfer folder; it works everywhere now, updates the DB by track id for media-server parity, and stops pulling media-server files into transfer.', page: 'tools' },
+        { title: 'Discography backfill only touches artists you own (#977)', desc: 'the repair backfill was reaching beyond your owned artists; scoped back to what you actually have.', page: 'tools' },
+        { title: 'Earlier versions', desc: '2.8.4 added Artist Web (an interactive WebGL map of your whole library + a discovery graph), named Quality Profiles (#974), and made the Discover adventurousness dial actually reshape your recs. 2.8.3 rebuilt Discover with a real recommendation engine; 2.8.2 fixed the Spotify Docker boot hang (#949) + added Max Performance mode; 2.8.1 added playlist export to Spotify & Deezer (#945); 2.7.0 made multi-user real.' },
     ],
 };
 
@@ -3447,51 +3444,24 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "Artist Web — your library as a map",
-        description: "an interactive WebGL graph of your whole library that doubles as a discovery tool.",
+        title: "2.8.5 — bug fixes",
+        description: "a focused fix release across import, library, repair, and the webui — several straight from user reports this week.",
         features: [
-            "every artist you own, laid out by how they relate — it settles live (physics in a background worker, so the UI never freezes) and pans/zooms smoothly across thousands of nodes",
-            "three lenses / front doors: Taste Map (clustered by genre), Communities (who groups with who), and the Discovery Web",
-            "the Discovery Web — your owned artists anchor a map that grows out to similar artists you don't own yet; click any node to expand from there, follow the thread, and add anything to your watchlist on the spot",
-            "play from the map — artist radio off an owned node, or a 30s preview on a candidate you don't own, without leaving the graph; plus a first-run hint, a guide modal, and hover tooltips with the artist's photo",
-        ],
-        usage_note: "open Artist Web from Discover — drag to pan, scroll to zoom, click a node to expand or play.",
-    },
-    {
-        title: "Quality Profiles",
-        description: "the single global quality setting becomes named, editable profiles (#974, thanks @nick2000713).",
-        features: [
-            "targets, upgrade behavior, AcoustID strictness, downsampling, and lossy-copy rules all resolve per profile — not one global setting",
-            "Auto-Import can run its own profile independent of your default; wishlist/library rows can carry their own; and there's an \"upgrade until target\" cutoff that lives on the profile",
-            "a Manage view shows what's active for what (default vs. Auto-Import vs. per-item), separate from previewing/editing a profile",
+            "#979 — Import & Stats loaded as a black screen on some setups (mostly Windows, where the OS served the app's JS bundle with the wrong MIME type and the browser refused it). we force the correct type now, so they load for everyone",
+            "#980 — iTunes singles were landing in \"Unknown Artist\" with no album tag; a single's album is its own title now, so they file and tag correctly",
+            "#981 — $disc/$discnum stamped a \"01-\" prefix on single-disc albums; they're smart now like $cdnum (empty on single-disc, shown only for real multi-disc), for both import and rename/reorganize",
+            "#976 — cleanup never deletes a folder you've set as a root, and self-heals a missing staging/import folder if a sweep removed it",
+            "#978 — repair \"Fix All\" now works for libraries outside the transfer path and stops pulling media-server files into transfer; #977 — discography backfill only touches artists you own",
         ],
     },
     {
-        title: "The Adventurousness dial, for real this time",
-        description: "the Discover dial goes from cosmetic to actually reshaping your recs.",
+        title: "Earlier in 2.8.4",
+        description: "2.8.4 was the Artist Web + Quality Profiles release.",
         features: [
-            "it was mostly cosmetic before — a browser-cache bug was serving the same recs no matter where you set it. now it genuinely drives which artists surface, not just how they're sorted",
-            "deeper the further you push it — the far right reaches real deep cuts, with a distinct middle instead of two ends that felt the same",
-            "genre diversity so one genre can't hog the row, freshness rotation so you get different deep cuts each visit, and \"🧭 off your usual path\" chips at the exploratory end",
-        ],
-    },
-    {
-        title: "Fixes this release",
-        description: "repair jobs, sync, dedup, and matching.",
-        features: [
-            "#970 — the repair-job stop button actually cancels the running scan (instant \"Stopping…\"), instead of grinding on",
-            "#972 — a playlist could get stuck \"syncing\" server-side after a socket-driven sync; fixed",
-            "#964 — the JioSaavn worker no longer wedges the whole enrichment worker on a single unresolvable row",
-            "duplicate cleanup quarantines instead of hard-deleting (and surfaces Docker permission failures); Jellyfin playlist align + a couple of match/sync fixes",
-        ],
-    },
-    {
-        title: "Community contributions",
-        description: "great PRs from contributors this release.",
-        features: [
-            "#974 — named Quality Profiles (the feature above). thanks @nick2000713",
-            "#964 — JioSaavn graduates from experimental metadata to a full enrichment worker. thanks HellRa1SeR",
-            "#965/#967 — unicode / Japanese dedup matching: self-titled tracks match, and normalization preserves all scripts, not just CJK. thanks bluejorts",
+            "Artist Web — an interactive WebGL map of your whole library, laid out by how artists relate, in three lenses (Taste Map, Communities, Discovery Web); the Discovery Web grows out to similar artists you don't own, and you can play artist radio / 30s previews right from the graph",
+            "Quality Profiles (#974, thanks @nick2000713) — the single global quality setting becomes named, editable profiles (targets, upgrade behavior, AcoustID strictness, downsampling, lossy-copy), with an \"upgrade until target\" cutoff and a per-profile Auto-Import option",
+            "the Adventurousness dial went from cosmetic to actually reshaping your recs — deeper the further you push it, genre-diverse, freshly rotated, with \"off your usual path\" chips",
+            "fixes: repair stop button actually cancels (#970), playlists no longer stuck \"syncing\" (#972), JioSaavn worker no longer wedges (#964), safer duplicate cleanup; contributor PRs for JioSaavn enrichment (#964, HellRa1SeR) and unicode/Japanese dedup matching (#965/#967, bluejorts)",
         ],
     },
     {
