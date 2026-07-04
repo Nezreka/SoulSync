@@ -45,6 +45,14 @@ def test_videos_to_enqueue_drops_idless():
     assert videos_to_enqueue([{"video_title": "no id"}], []) == []
 
 
+def test_videos_to_enqueue_skips_repeatedly_failed():
+    """Bug 2: a video that has failed max_fail+ times (deleted/private/geo-gated) is not
+    re-queued — otherwise it retries every run forever."""
+    wanted = [_v("a"), _v("b"), _v("c")]
+    out = videos_to_enqueue(wanted, already_ids=[], failed_counts={"a": 3, "b": 2}, max_fail=3)
+    assert [v["video_id"] for v in out] == ["b", "c"]   # a hit the cap; b (2<3) + c still tried
+
+
 def test_slots_free():
     assert slots_free(running=0, max_concurrent=3) == 3
     assert slots_free(running=2, max_concurrent=3) == 1
@@ -181,6 +189,17 @@ def test_youtube_wishlist_to_download_shape(db):
     top = rows[0]
     assert top["channel_id"] == "UC1" and top["channel_title"] == "Cool Channel"
     assert top["video_title"] == "Second" and top["published_at"] == "2024-05-01"
+
+
+def test_add_videos_skips_already_downloaded(db):
+    """Bug 4: the manual add path (re-follow a channel) skips videos already downloaded."""
+    db.record_download_history({"id": 1, "status": "completed", "source": "youtube",
+                                "media_id": "vid1", "kind": "youtube", "title": "V1"})
+    n = db.add_videos_to_wishlist({"youtube_id": "UC1", "title": "Chan"},
+                                  [{"youtube_id": "vid1", "title": "V1"},
+                                   {"youtube_id": "vid2", "title": "V2"}])
+    assert n == 1                                            # vid1 already downloaded → skipped
+    assert [r["video_id"] for r in db.youtube_wishlist_to_download()] == ["vid2"]
 
 
 def test_downloaded_youtube_video_ids_only_completed_youtube(db):

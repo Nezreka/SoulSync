@@ -27,15 +27,25 @@ from typing import Any, Callable, Dict, Iterable, List, Optional
 from core.automation.deps import AutomationDeps
 
 
-def videos_to_enqueue(wanted: List[Dict[str, Any]], already_ids: Iterable) -> List[Dict[str, Any]]:
-    """Wished videos not already queued or downloading. NO cap — the whole backlog is
-    queued; concurrency is bounded at start time, not here. Pure."""
+YT_MAX_FAIL = 3   # give up re-grabbing a video after this many failed attempts
+
+
+def videos_to_enqueue(wanted: List[Dict[str, Any]], already_ids: Iterable,
+                      failed_counts: Optional[Dict[Any, int]] = None,
+                      max_fail: int = YT_MAX_FAIL) -> List[Dict[str, Any]]:
+    """Wished videos not already queued/downloading and not stuck failing. No concurrency
+    cap here (bounded at start time); ``failed_counts`` skips videos that have failed
+    ``max_fail``+ times (deleted / private / geo-gated) so they don't retry forever. Pure."""
     already = {str(x) for x in (already_ids or ()) if x}
+    fails = failed_counts or {}
     out: List[Dict[str, Any]] = []
     for v in wanted or []:
         vid = v.get("video_id")
-        if vid and str(vid) not in already:
-            out.append(v)
+        if not vid or str(vid) in already:
+            continue
+        if int(fails.get(vid, 0) or 0) >= max_fail:
+            continue   # keeps failing — stop retrying it every run
+        out.append(v)
     return out
 
 
@@ -74,6 +84,11 @@ def _default_active_ids() -> List[Any]:
     from api.video import get_video_db
     return [d.get("media_id") for d in get_video_db().get_active_video_downloads()
             if d.get("source") == "youtube" and d.get("media_id")]
+
+
+def _default_failed_counts() -> Dict[Any, int]:
+    from api.video import get_video_db
+    return get_video_db().youtube_failed_counts()
 
 
 def _default_running_count() -> int:
@@ -124,6 +139,7 @@ def auto_video_process_youtube_wishlist(
     enqueue: Optional[Callable[[Dict[str, Any], str], Any]] = None,
     start_next: Optional[Callable[[], Any]] = None,
     reap: Optional[Callable[[], int]] = None,
+    failed_counts: Optional[Callable[[], Dict[Any, int]]] = None,
 ) -> Dict[str, Any]:
     """Queue the whole YouTube wishlist for download and start up to ``max_concurrent`` now.
 
@@ -135,6 +151,7 @@ def auto_video_process_youtube_wishlist(
     enqueue = enqueue or _default_enqueue
     start_next = start_next or _default_start_next
     reap = reap or _default_reap
+    failed_counts = failed_counts or _default_failed_counts
     automation_id = config.get('_automation_id')
     max_concurrent = max(1, int(config.get('max_concurrent', 3) or 3))
 
@@ -160,7 +177,7 @@ def auto_video_process_youtube_wishlist(
                              log_line='Queueing new videos for download', log_type='info')
         wanted = fetch_wanted() or []
         already = list(active_ids() or [])
-        new = videos_to_enqueue(wanted, already)
+        new = videos_to_enqueue(wanted, already, failed_counts() or {})
 
         queued = 0
         for v in new:
