@@ -114,6 +114,35 @@ def test_explicit_compilation_routes_through_album_path() -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_single_with_empty_album_falls_back_to_track_title() -> None:
+    """#980: an iTunes single reached import with no album name at all — the
+    collection name never made it into the context. It was flagged is_album (good)
+    but with album_name='' it landed in Unknown Artist/Unknown Album, got no album
+    tag, and didn't match its release. A single's album is effectively its title,
+    so an empty single album falls back to the track title."""
+    context = _make_context(
+        album_type="single",
+        total_tracks=1,
+        album_name="",           # source dropped the collection name
+        track_name="CHAOSRIFT",
+    )
+    info = build_import_album_info(context)
+    assert info["is_album"] is True
+    assert info["album_name"] == "CHAOSRIFT"   # not '' → not Unknown Album
+
+
+def test_single_with_real_album_name_is_not_overridden() -> None:
+    """The fallback only fills an EMPTY album — a real single name is preserved."""
+    context = _make_context(
+        album_type="single",
+        total_tracks=1,
+        album_name="Hello (Single Version)",
+        track_name="Hello",
+    )
+    info = build_import_album_info(context)
+    assert info["album_name"] == "Hello (Single Version)"
+
+
 def test_normal_album_still_detected_as_album() -> None:
     """Multi-track albums must keep being detected — the original
     heuristic is preserved as a fallback when album_type is generic."""
