@@ -528,7 +528,7 @@
         // wipe existing layer nodes (keep placeholder + drop hint)
         stage.querySelectorAll('.voe-layer').forEach(function (n) { n.remove(); });
         var ph = stage.querySelector('[data-voe-ph]');
-        if (ph) ph.style.display = ed.layers.length ? 'none' : '';
+        if (ph) ph.style.display = (ed.bg || ed.layers.length) ? 'none' : '';
         ed.layers.forEach(function (l) {
             var el = document.createElement('div');
             el.className = 'voe-layer voe-layer--' + l.type + (l.id === ed.selected ? ' voe-layer--sel' : '') + (l.hidden ? ' voe-layer--hidden' : '');
