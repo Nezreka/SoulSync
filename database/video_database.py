@@ -2417,6 +2417,71 @@ class VideoDatabase:
         return self.create_overlay_template(
             (src.get("name") or "Untitled") + " (copy)", src.get("definition") or {})
 
+    def overlay_sample_data(self, kind: str, item_id: int) -> dict | None:
+        """Real badge values for one library item — the "load from a real title"
+        source for the overlay editor's sample data. Raw values (e.g. resolution
+        '2160p', ratings as numbers); the editor formats them for display."""
+        kind = str(kind).lower()
+        table = {"movie": "movies", "show": "shows"}.get(kind)
+        if not table:
+            return None
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                f"SELECT title, year, runtime_minutes, status, content_rating, "
+                f"rating, imdb_rating, rt_rating, metacritic, "
+                f"{'studio' if kind == 'movie' else 'network'} AS org, "
+                f"(poster_url IS NOT NULL AND poster_url <> '') AS has_poster, "
+                f"(backdrop_url IS NOT NULL AND backdrop_url <> '') AS has_backdrop "
+                f"FROM {table} WHERE id=?", (int(item_id),)).fetchone()
+            if not row:
+                return None
+            d = dict(row)
+            out = {
+                "title": d.get("title"), "year": d.get("year"),
+                "runtime": d.get("runtime_minutes"), "status": d.get("status"),
+                "content_rating": d.get("content_rating"),
+                "tmdb": d.get("rating"), "imdb": d.get("imdb_rating"),
+                "rt": d.get("rt_rating"), "metacritic": d.get("metacritic"),
+                "studio": d.get("org") if kind == "movie" else None,
+                "network": d.get("org") if kind == "show" else None,
+                "resolution": None, "video_codec": None, "audio_codec": None, "source": None,
+                "season_count": None, "episode_count": None,
+            }
+            # Best owned file drives the quality badges.
+            _res_rank = ("CASE mf.resolution WHEN '2160p' THEN 4 WHEN '1080p' THEN 3 "
+                         "WHEN '720p' THEN 2 ELSE 1 END DESC")
+            if kind == "movie":
+                mf = conn.execute(
+                    "SELECT resolution, video_codec, audio_codec, release_source FROM media_files mf "
+                    f"WHERE mf.movie_id=? ORDER BY {_res_rank}, mf.size_bytes DESC LIMIT 1",
+                    (int(item_id),)).fetchone()
+            else:
+                mf = conn.execute(
+                    "SELECT resolution, video_codec, audio_codec, release_source FROM media_files mf "
+                    "JOIN episodes e ON e.id=mf.episode_id WHERE e.show_id=? "
+                    f"ORDER BY {_res_rank} LIMIT 1", (int(item_id),)).fetchone()
+                counts = conn.execute(
+                    "SELECT COUNT(DISTINCT season_number) AS seasons, COUNT(*) AS eps "
+                    "FROM episodes WHERE show_id=?", (int(item_id),)).fetchone()
+                if counts:
+                    out["season_count"] = counts["seasons"]
+                    out["episode_count"] = counts["eps"]
+            if mf:
+                m = dict(mf)
+                out["resolution"] = m.get("resolution")
+                out["video_codec"] = m.get("video_codec")
+                out["audio_codec"] = m.get("audio_codec")
+                out["source"] = m.get("release_source")
+            out["has_poster"] = bool(d.get("has_poster"))
+            out["has_backdrop"] = bool(d.get("has_backdrop"))
+            return out
+        except (sqlite3.Error, ValueError, TypeError):
+            logger.exception("overlay_sample_data failed for %s %s", kind, item_id)
+            return None
+        finally:
+            conn.close()
+
     # ── detail payloads (drill-in pages) ──────────────────────────────────────
     @staticmethod
     def _genres_for(conn, link_table: str, owner_col: str, owner_id: int) -> list:

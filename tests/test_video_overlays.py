@@ -87,3 +87,34 @@ def test_duplicate_copies_definition(db):
 def test_bad_definition_string_parses_to_empty(db):
     tid = db.create_overlay_template("Broken", definition="{not valid json")
     assert db.get_overlay_template(tid)["definition"] == {}   # tolerated, not crashed
+
+
+# ── sample data (dynamic-badge preview) ───────────────────────────────────────
+def test_overlay_sample_data_movie(db):
+    mid = db.upsert_movie("plex", {
+        "server_id": "p1", "title": "Dune", "year": 2021, "runtime_minutes": 155,
+        "status": "released", "studio": "Legendary", "content_rating": "PG-13",
+        "file": {"relative_path": "Dune.mkv", "size_bytes": 9000, "resolution": "2160p",
+                 "video_codec": "hevc", "audio_codec": "truehd", "release_source": "bluray"}})
+    with db.connect() as c:
+        c.execute("UPDATE movies SET imdb_rating=8.0, rt_rating=83, metacritic=74, rating=7.9 WHERE id=?", (mid,))
+        c.commit()
+    s = db.overlay_sample_data("movie", mid)
+    assert s["title"] == "Dune" and s["year"] == 2021 and s["runtime"] == 155
+    assert s["resolution"] == "2160p" and s["video_codec"] == "hevc" and s["source"] == "bluray"
+    assert s["imdb"] == 8.0 and s["rt"] == 83 and s["metacritic"] == 74 and s["studio"] == "Legendary"
+    assert db.overlay_sample_data("movie", 99999) is None
+    assert db.overlay_sample_data("bogus", mid) is None
+
+
+def test_overlay_sample_data_show_counts_and_best_res(db):
+    sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "Show", "network": "HBO", "seasons": [
+        {"season_number": 1, "episodes": [
+            {"server_id": "e1", "episode_number": 1, "title": "A",
+             "file": {"relative_path": "a.mkv", "size_bytes": 5, "resolution": "1080p"}},
+            {"server_id": "e2", "episode_number": 2, "title": "B",
+             "file": {"relative_path": "b.mkv", "size_bytes": 5, "resolution": "2160p"}}]}]})
+    s = db.overlay_sample_data("show", sid)
+    assert s["title"] == "Show" and s["network"] == "HBO"
+    assert s["season_count"] == 1 and s["episode_count"] == 2
+    assert s["resolution"] == "2160p"          # best across the show's episode files
