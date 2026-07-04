@@ -4162,3 +4162,52 @@ body[data-side="video"] #gsearch-aura {
 .vd-season-getbtn:active { transform: scale(0.97); }
 .vd-season-getbtn:disabled { opacity: 0.6; cursor: default; }
 .vd-season-wishbtn:hover { color: #fff; }
+
+/* ── Live download status on episode rows ── */
+.vd-ep-dl { display: none; align-items: center; gap: 8px; min-width: 108px; }
+.vd-ep-get--busy .vd-ep-dl, .vd-ep-get--done .vd-ep-dl { display: inline-flex; }
+/* while a grab is in flight / finished, the action buttons give way to status */
+.vd-ep-get--busy .vd-ep-getbtn, .vd-ep-get--done .vd-ep-getbtn { display: none; }
+.vd-ep-dl-bar {
+    position: relative; width: 54px; height: 5px; border-radius: 3px; overflow: hidden;
+    background: rgba(255,255,255,0.12);
+}
+.vd-ep-dl-bar > span {
+    position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px;
+    background: var(--accent, #38bdf8); transition: width .4s ease;
+}
+.vd-ep-dl-txt { font-size: 12px; font-weight: 600; color: rgba(255,255,255,0.72); white-space: nowrap; }
+.vd-ep-dl-txt--done { color: #4ade80; }
+
+/* Manual-search buttons (episode + season) share the getbtn/season chrome */
+.vd-ep-search:hover { color: var(--accent, #38bdf8); border-color: var(--accent, #38bdf8); }
+
+/* ── Manual (interactive) search modal — matches the get-modal / download chrome ── */
+.vms-overlay {
+    position: fixed; inset: 0; z-index: 4000; display: flex; align-items: flex-start; justify-content: center;
+    padding: 6vh 16px 40px; overflow-y: auto; background: rgba(4,6,12,0.72); backdrop-filter: blur(6px);
+    animation: vms-fade .18s ease;
+}
+@keyframes vms-fade { from { opacity: 0; } to { opacity: 1; } }
+.vms-modal {
+    position: relative; width: min(860px, 100%); border-radius: 16px;
+    background: linear-gradient(180deg, #171a24 0%, #12141d 100%);
+    border: 1px solid rgba(255,255,255,0.08); box-shadow: 0 30px 80px rgba(0,0,0,0.55);
+    animation: vms-rise .2s ease;
+}
+@keyframes vms-rise { from { transform: translateY(12px); opacity: 0; } to { transform: none; opacity: 1; } }
+.vms-close {
+    position: absolute; top: 12px; right: 14px; z-index: 2; width: 32px; height: 32px; border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.8);
+    font-size: 20px; line-height: 1; cursor: pointer;
+}
+.vms-close:hover { background: rgba(255,255,255,0.14); color: #fff; }
+.vms-head { padding: 22px 24px 16px; border-bottom: 1px solid rgba(255,255,255,0.06); }
+.vms-eyebrow { font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--accent, #38bdf8); }
+.vms-title { font-size: 22px; font-weight: 700; color: #fff; margin-top: 4px; }
+.vms-scope { font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.6); margin-top: 2px; }
+.vms-sub { font-size: 12px; color: rgba(255,255,255,0.45); margin-top: 8px; }
+.vms-body { padding: 16px 24px 24px; display: flex; flex-direction: column; gap: 18px; }
+.vms-src-head { font-size: 13px; font-weight: 700; color: rgba(255,255,255,0.85); margin-bottom: 8px; }
+.vms-grabbed { color: #4ade80 !important; border-color: rgba(74,222,128,0.5) !important; }
+@media (max-width: 620px) { .vms-body { padding: 14px 14px 20px; } .vms-head { padding: 18px 16px 14px; } }

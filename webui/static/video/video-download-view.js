@@ -1047,5 +1047,85 @@
         }
     }
 
-    window.VideoDownload = { render: render };
+    // ── Manual (interactive) search — a dedicated modal that auto-searches EVERY
+    //    configured source and lets you pick any release (single or season pack).
+    //    Reuses searchInto / renderResults / buildGrabPayload so results + grab
+    //    behave and look exactly like the get-modal's download view.
+    //    opts: { title, scope:'episode'|'season'|'series', season, episode,
+    //            mediaId, mediaSource, year, poster }
+    function _closeManual(ov) {
+        if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
+        if (!document.querySelector('.vms-overlay, .vgm-overlay')) document.body.style.overflow = '';
+    }
+    function manualSearch(opts) {
+        opts = opts || {};
+        var scope = opts.scope || (opts.episode != null ? 'episode' : 'season');
+        var scopeLabel = scope === 'episode'
+            ? ('S' + opts.season + 'E' + opts.episode)
+            : (scope === 'series' ? 'Complete series' : ('Season ' + opts.season));
+        var ov = document.createElement('div');
+        ov.className = 'vms-overlay';
+        ov.innerHTML =
+            '<div class="vms-modal">' +
+                '<button class="vms-close" type="button" data-vms-close aria-label="Close">&times;</button>' +
+                '<div class="vms-head">' +
+                    '<div class="vms-eyebrow">Manual search</div>' +
+                    '<div class="vms-title">' + esc(opts.title || '') + '</div>' +
+                    '<div class="vms-scope">' + esc(scopeLabel) + '</div>' +
+                    '<div class="vms-sub" data-vms-sub>Searching your sources…</div>' +
+                '</div>' +
+                '<div class="vms-body" data-vms-body data-vgm-dl-content></div>' +
+            '</div>';
+        document.body.appendChild(ov);
+        document.body.style.overflow = 'hidden';
+        var body = ov.querySelector('[data-vms-body]');
+        // buildGrabPayload reads media context off the nearest [data-vgm-dl-content]._opts
+        body._opts = { id: opts.mediaId, mediaId: opts.mediaId, source: opts.mediaSource,
+            mediaSource: opts.mediaSource, year: opts.year, poster: opts.poster };
+
+        ov.addEventListener('click', function (e) {
+            if (e.target === ov || e.target.closest('[data-vms-close]')) { _closeManual(ov); return; }
+            var gb = e.target.closest('[data-vdl-grab]');
+            if (gb) {
+                var panel = gb.closest('.vdl-results');
+                var r = panel && panel._rows && panel._rows[parseInt(gb.getAttribute('data-vdl-grab'), 10)];
+                if (!panel || !r) return;
+                gb.disabled = true; gb.textContent = '[ … ]';
+                sendGrab(buildGrabPayload(panel, r)).then(function (res) {
+                    if (res && res.ok) {
+                        gb.textContent = '[ GRABBED ]'; gb.classList.add('vms-grabbed');
+                        document.dispatchEvent(new CustomEvent('soulsync:video-download-started'));
+                        toast('Download started — track it on the episode row', 'success');
+                    } else { gb.disabled = false; gb.textContent = '[ GET ]'; toast((res && res.error) || 'Grab failed', 'error'); }
+                });
+            }
+        });
+        var onKey = function (e) { if (e.key === 'Escape') { _closeManual(ov); document.removeEventListener('keydown', onKey); } };
+        document.addEventListener('keydown', onKey);
+
+        getJSON('/api/video/downloads/config').then(function (c) {
+            // Only search sources that return REAL, grabbable results. Torrent/Usenet/
+            // YouTube currently fall through to mock_search (demo data, live:false) and
+            // grab is Soulseek-only — including them would show placeholder releases.
+            // As the engine wires a source for real, add it here.
+            var REAL = { soulseek: 1 };
+            var srcs = sourcesFromConfig(c).filter(function (s) { return SRC_META[s] && REAL[s]; });
+            if (!srcs.length) srcs = ['soulseek'];
+            var sub = ov.querySelector('[data-vms-sub]');
+            if (sub) sub.textContent = 'Searching ' + srcs.map(function (s) { return SRC_META[s].name; }).join(' · ') + '…';
+            body.innerHTML = srcs.map(function (s) {
+                return '<div class="vms-src" data-vms-src="' + s + '">' +
+                    '<div class="vms-src-head">' + (SRC_META[s].emoji || '') + ' ' + esc(SRC_META[s].name) + '</div>' +
+                    '<div class="vdl-results" data-vms-results-for="' + s + '"></div>' +
+                '</div>';
+            }).join('');
+            srcs.forEach(function (s) {
+                var res = body.querySelector('[data-vms-results-for="' + s + '"]');
+                searchInto(ov, res, { scope: scope, title: opts.title, season: opts.season,
+                    episode: (scope === 'episode' ? opts.episode : null), source: s }, []);
+            });
+        });
+    }
+
+    window.VideoDownload = { render: render, manualSearch: manualSearch };
 })();

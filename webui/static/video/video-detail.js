@@ -1127,8 +1127,11 @@
             (ep.owned || !window.VideoGrab
                 ? '<div class="vd-ep-badge">' + (ep.owned ? 'Owned' : 'Missing') + '</div>'
                 : '<div class="vd-ep-get" data-vd-ep-get="' + ep.episode_number + '">' +
+                    '<span class="vd-ep-dl" data-vd-ep-dl></span>' +
                     '<button class="vd-ep-getbtn vd-ep-grab" type="button" data-vd-ep-grab="' + ep.episode_number +
-                        '" title="Auto-search & download this episode" aria-label="Get episode">⌕</button>' +
+                        '" title="Auto-search &amp; download this episode" aria-label="Get episode">⭳</button>' +
+                    '<button class="vd-ep-getbtn vd-ep-search" type="button" data-vd-ep-search="' + ep.episode_number +
+                        '" title="Manual search — pick a release" aria-label="Manual search">⌕</button>' +
                     '<button class="vd-ep-getbtn vd-ep-wish" type="button" data-vd-ep-wish="' + ep.episode_number +
                         '" title="Add this episode to the wishlist" aria-label="Wishlist episode">＋</button>' +
                   '</div>') +
@@ -1234,6 +1237,8 @@
                 '<span class="vd-season-actions-count">' + seasonMissing.length + ' missing</span>' +
                 '<button class="vd-season-getbtn" type="button" data-vd-season-grab ' +
                     'title="Auto-search &amp; download every missing episode in this season">⭳ Grab season</button>' +
+                '<button class="vd-season-getbtn" type="button" data-vd-season-search ' +
+                    'title="Manual search — pick releases for this season">⌕ Manual search</button>' +
                 '<button class="vd-season-getbtn vd-season-wishbtn" type="button" data-vd-season-wish ' +
                     'title="Add every missing episode in this season to the wishlist">＋ Wishlist season</button>' +
               '</div>'
@@ -1241,6 +1246,7 @@
         host.innerHTML = seasonBar +
             (eps.length ? eps.map(episodeRow).join('') : '<div class="vd-ep-empty">' + emptyMsg + '</div>');
         host.classList.remove('vd-ep-anim'); void host.offsetWidth; host.classList.add('vd-ep-anim');
+        applyDlStates();   // repaint any in-flight/finished grabs on the fresh rows
     }
 
     function selectSeason(n) {
@@ -1467,6 +1473,7 @@
                 if (mt) { mt.hidden = !(d.seasons && d.seasons.length); mt.classList.remove('vd-missing-toggle--on'); }
                 renderBillboard(d);
                 renderViewToggle(); renderSeasonNav(); ensureSeasonEpisodes();
+                startDlTracking();   // resume any in-flight grabs for this show
                 var sub = document.querySelector('.video-subpage[data-video-subpage="video-show-detail"]');
                 if (sub) sub.scrollTop = 0;
                 if (currentSource === 'tmdb') {
@@ -1964,6 +1971,7 @@
     // ── events ────────────────────────────────────────────────────────────────
     function onOpen(e) {
         if (!e || !e.detail) return;
+        stopDlTracking(); _dlReset();   // fresh download-tracking state per opened title
         var src = e.detail.source || 'library';
         if (e.detail.kind === 'movie') loadMovie(e.detail.id, src);
         else if (e.detail.kind === 'show') loadShow(e.detail.id, src);
@@ -2027,10 +2035,14 @@
         // grab/wishlist buttons live inside the episode row.
         var epGrab = e.target.closest('[data-vd-ep-grab]');
         if (epGrab && r.contains(epGrab)) { e.preventDefault(); e.stopPropagation(); grabEpisodeInline(epGrab); return; }
+        var epSearch = e.target.closest('[data-vd-ep-search]');
+        if (epSearch && r.contains(epSearch)) { e.preventDefault(); e.stopPropagation(); manualSearchEpisode(epSearch); return; }
         var epWish = e.target.closest('[data-vd-ep-wish]');
         if (epWish && r.contains(epWish)) { e.preventDefault(); e.stopPropagation(); wishEpisodeInline(epWish); return; }
         var seasonGrab = e.target.closest('[data-vd-season-grab]');
         if (seasonGrab && r.contains(seasonGrab)) { e.preventDefault(); grabSeasonInline(seasonGrab); return; }
+        var seasonSearch = e.target.closest('[data-vd-season-search]');
+        if (seasonSearch && r.contains(seasonSearch)) { e.preventDefault(); manualSearchSeason(); return; }
         var seasonWish = e.target.closest('[data-vd-season-wish]');
         if (seasonWish && r.contains(seasonWish)) { e.preventDefault(); wishSeasonInline(seasonWish); return; }
         var epRow = e.target.closest('[data-vd-ep-key]');
@@ -2097,24 +2109,25 @@
         return { title: data.title, source: src, season: selectedSeason, episode: en,
             mediaId: (data.source !== 'tmdb' ? data.id : null), mediaSource: data.source, year: data.year };
     }
-    function _markEpState(en, state) {   // reflect a grab on the episode row
-        var row = q('[data-vd-ep-key="' + selectedSeason + '_' + en + '"]');
-        var box = row && row.querySelector('[data-vd-ep-get]');
-        if (!box) return;
-        box.classList.toggle('vd-ep-get--searching', state === 'searching');
-        box.classList.toggle('vd-ep-get--grabbing', state === 'grabbing' || state === 'done');
+    // Optimistic per-episode state for the search phase — the grab has no row in
+    // /downloads/active yet. The live tracker takes over once it appears.
+    function _setEpSynthetic(en, state) {
+        var key = selectedSeason + '_' + en;
+        if (state === 'none') delete _dlActive[key];
+        else if (!_dlDone[key]) _dlActive[key] = { status: state === 'grabbing' ? 'queued' : 'searching', progress: 0 };
+        applyDlStates();
     }
 
     function grabEpisodeInline(btn) {
         if (!window.VideoGrab || !data) return;
         var en = parseInt(btn.getAttribute('data-vd-ep-grab'), 10);
-        btn.disabled = true; _markEpState(en, 'searching');
+        btn.disabled = true; _setEpSynthetic(en, 'searching'); startDlTracking();
         VideoGrab.pickSource()
             .then(function (src) { return VideoGrab.episode(_grabParams(en, src)); })
             .then(function (res) {
-                if (res && res.ok) { _markEpState(en, 'grabbing'); toast('Downloading S' + selectedSeason + 'E' + en, 'success'); }
+                if (res && res.ok) { _setEpSynthetic(en, 'grabbing'); startDlTracking(); }
                 else {
-                    _markEpState(en, 'idle'); btn.disabled = false;
+                    _setEpSynthetic(en, 'none'); btn.disabled = false;
                     toast(res && res.error === 'no release found'
                         ? 'No release found for S' + selectedSeason + 'E' + en : 'Could not grab that episode', 'error');
                 }
@@ -2134,13 +2147,14 @@
         if (!window.VideoGrab || !data) return;
         var missing = _seasonMissing();
         if (!missing.length) { toast('No missing episodes in this season', 'info'); return; }
-        btn.disabled = true; btn.textContent = '⭳ Grabbing…';
+        btn.disabled = true; btn.textContent = '⭳ Grabbing…'; startDlTracking();
         VideoGrab.pickSource().then(function (src) {
             return VideoGrab.season({ title: data.title, source: src, season: selectedSeason,
                 episodes: missing.map(function (e) { return e.episode_number; }),
-                mediaId: (data.source !== 'tmdb' ? data.id : null), mediaSource: data.source, year: data.year }, _markEpState);
+                mediaId: (data.source !== 'tmdb' ? data.id : null), mediaSource: data.source, year: data.year },
+                function (en, state) { _setEpSynthetic(en, state); });
         }).then(function (res) {
-            btn.disabled = false; btn.textContent = '⭳ Grab season';
+            btn.disabled = false; btn.textContent = '⭳ Grab season'; startDlTracking();
             toast('Grabbing ' + res.grabbed + ' of ' + res.total + ' episode' + (res.total === 1 ? '' : 's'), res.grabbed ? 'success' : 'info');
         });
     }
@@ -2155,6 +2169,80 @@
             if (ok) { btn.textContent = '✓ Wishlisted'; toast('Added ' + eps.length + ' episode' + (eps.length === 1 ? '' : 's') + ' to wishlist', 'success'); }
             else { btn.disabled = false; toast('Could not add to wishlist', 'error'); }
         });
+    }
+
+    // Manual search — a dedicated modal that auto-searches every configured source
+    // and lets you pick any release (single episode or season pack).
+    function _openManualSearch(scope, en) {
+        if (!window.VideoDownload || !window.VideoDownload.manualSearch || !data) return;
+        VideoDownload.manualSearch({ title: data.title, scope: scope, season: selectedSeason, episode: en,
+            mediaId: (data.source !== 'tmdb' ? data.id : null), mediaSource: data.source, year: data.year, poster: _showPoster() });
+    }
+    function manualSearchEpisode(btn) { _openManualSearch('episode', parseInt(btn.getAttribute('data-vd-ep-search'), 10)); }
+    function manualSearchSeason() { _openManualSearch('season'); }
+
+    // ── Live download tracking on episode rows ──
+    // Poll /downloads/active while viewing a show; match grabs to episode rows by
+    // title+season+episode (the grab's search_ctx) and paint live status. States
+    // are re-applied after every episode re-render so a season switch / filter
+    // toggle doesn't lose them. Keyed 'season_episode' so all seasons persist.
+    function _djson(u) { return fetch(u).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }); }
+    var _dlTimer = null, _dlActive = {}, _dlDone = {}, _dlPrev = {};
+    function _dlReset() { _dlActive = {}; _dlDone = {}; _dlPrev = {}; }
+    function startDlTracking() {
+        stopDlTracking();
+        if (!data || data.kind !== 'show') return;
+        pollDl();
+        _dlTimer = setInterval(pollDl, 2500);
+    }
+    function stopDlTracking() { if (_dlTimer) { clearInterval(_dlTimer); _dlTimer = null; } }
+    function pollDl() {
+        if (!data || data.kind !== 'show' || !root()) { stopDlTracking(); return; }
+        var showTitle = data.title;
+        _djson('/api/video/downloads/active').then(function (d) {
+            if (!data || data.kind !== 'show' || data.title !== showTitle) return;
+            var cur = {};
+            ((d && d.downloads) || []).forEach(function (dl) {
+                var ctx = dl.search_ctx;
+                if (typeof ctx === 'string') { try { ctx = JSON.parse(ctx); } catch (e) { ctx = null; } }
+                ctx = ctx || {};
+                if (String(ctx.title || dl.title) !== String(showTitle)) return;
+                if (ctx.season == null || ctx.episode == null) return;
+                var key = ctx.season + '_' + ctx.episode;
+                cur[key] = dl;
+                if (dl.status === 'completed') { _dlDone[key] = 1; delete _dlActive[key]; }
+                else if (dl.status === 'failed' || dl.status === 'cancelled') { delete _dlActive[key]; }
+                else { _dlActive[key] = dl; }
+            });
+            // An active grab that vanished from the list finished + imported → done.
+            Object.keys(_dlPrev).forEach(function (key) {
+                if (!cur[key] && _dlActive[key]) { _dlDone[key] = 1; delete _dlActive[key]; }
+            });
+            _dlPrev = cur;
+            applyDlStates();
+            // Everything settled → stop the interval until the next grab.
+            if (!Object.keys(_dlActive).length) stopDlTracking();
+        });
+    }
+    function applyDlStates() {
+        var host = q('[data-vd-episodes]'); if (!host) return;
+        var boxes = host.querySelectorAll('[data-vd-ep-get]');
+        for (var i = 0; i < boxes.length; i++) {
+            var box = boxes[i];
+            var key = selectedSeason + '_' + box.getAttribute('data-vd-ep-get');
+            var stEl = box.querySelector('[data-vd-ep-dl]');
+            box.classList.remove('vd-ep-get--busy', 'vd-ep-get--done');
+            if (_dlDone[key]) {
+                box.classList.add('vd-ep-get--done');
+                if (stEl) stEl.innerHTML = '<span class="vd-ep-dl-txt vd-ep-dl-txt--done">✓ Downloaded</span>';
+            } else if (_dlActive[key]) {
+                var dl = _dlActive[key], pct = Math.max(0, Math.min(100, dl.progress || 0));
+                var label = dl.status === 'downloading' ? (pct + '%') : (dl.status === 'searching' ? 'Searching' : 'Queued');
+                box.classList.add('vd-ep-get--busy');
+                if (stEl) stEl.innerHTML = '<span class="vd-ep-dl-bar"><span style="width:' + pct + '%"></span></span>' +
+                    '<span class="vd-ep-dl-txt">' + esc(label) + '</span>';
+            } else if (stEl) { stEl.innerHTML = ''; }
+        }
     }
 
     function init() {
@@ -2175,7 +2263,12 @@
         });
         // Kill the billboard trailer (audio!) when navigating to a non-detail page.
         document.addEventListener('soulsync:video-page-shown', function (e) {
-            if (e && e.detail !== 'video-movie-detail' && e.detail !== 'video-show-detail') stopBillboardTrailer();
+            if (e && e.detail !== 'video-movie-detail' && e.detail !== 'video-show-detail') { stopBillboardTrailer(); stopDlTracking(); }
+        });
+        // A grab started anywhere (inline buttons or the get-modal) — pick up live
+        // progress for this show's episode rows.
+        document.addEventListener('soulsync:video-download-started', function () {
+            if (data && data.kind === 'show') startDlTracking();
         });
         // Keep the movie Get button's "In Wishlist" state fresh — re-check whenever
         // the wishlist changes (e.g. after the Get modal adds/removes this movie).
