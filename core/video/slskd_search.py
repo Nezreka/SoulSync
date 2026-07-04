@@ -170,19 +170,28 @@ def group_video_files(responses: Any) -> list:
             if g is None:
                 g = groups[rel] = {"title": rel, "size_bytes": 0, "users": set(),
                                    "best": (-99.0, -1), "username": None, "slots": 0,
-                                   "queue": 0, "speed": 0, "availability": -99.0, "filename": fn}
+                                   "queue": 0, "speed": 0, "availability": -99.0, "filename": fn,
+                                   "peer_files": {}}
             g["size_bytes"] = max(g["size_bytes"], f.get("size", 0) or 0)
             if user:
                 g["users"].add(user)
+                # Remember each peer's video files in this folder so a pack grab can
+                # pull the WHOLE folder from one source (mirrors the music album flow).
+                g["peer_files"].setdefault(user, []).append(
+                    {"filename": fn, "size_bytes": f.get("size", 0) or 0})
             if (avail, speed) > g["best"]:          # most available, then fastest, peer wins
                 g["best"] = (avail, speed)
                 g["username"], g["slots"], g["queue"] = user, slots, queue
                 g["speed"], g["availability"], g["filename"] = speed, avail, fn
     out = []
     for g in groups.values():
+        # The chosen peer's files in this folder — what a pack grab would actually pull.
+        files = g["peer_files"].get(g["username"], [])
+        folder_size = sum((x.get("size_bytes") or 0) for x in files) or g["size_bytes"]
         out.append({"title": g["title"], "size_bytes": g["size_bytes"], "peers": len(g["users"]),
                     "username": g["username"], "slots": g["slots"], "queue": g["queue"],
-                    "speed": g["speed"], "availability": g["availability"], "filename": g["filename"]})
+                    "speed": g["speed"], "availability": g["availability"], "filename": g["filename"],
+                    "files": files, "file_count": len(files), "folder_size_bytes": folder_size})
     # availability first, then more peers, then bigger; the quality profile still gates the
     # final pick downstream (_evaluate_hits), this just orders within a quality tier.
     out.sort(key=lambda h: (h["availability"], h["peers"], h["size_bytes"]), reverse=True)

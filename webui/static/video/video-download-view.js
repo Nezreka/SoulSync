@@ -523,7 +523,42 @@
     // a plain-English quality summary with the verdict pill; the raw release name is
     // demoted to a mono one-liner; a stat strip (size / uploader / group) sits below.
     // The card is a column so a live download tracker can drop in under it on grab.
+    function _pk2(n) { n = String(n); return n.length < 2 ? '0' + n : n; }
+    function _baseName(p) { p = String(p || '').replace(/\\/g, '/'); return p.slice(p.lastIndexOf('/') + 1); }
+    function _gb(b) { return (Math.round(((b || 0) / (1024 * 1024 * 1024)) * 10) / 10) + ' GB'; }
+
+    // Season/complete pack — an expandable card listing the folder's episode files,
+    // with one [ GET PACK ] that fans them all out into per-episode downloads.
+    function _packCardHTML(r, i) {
+        var files = (r.files || []).slice().sort(function (a, b) {
+            return String(a.filename).localeCompare(String(b.filename));
+        });
+        var rows = files.map(function (f) {
+            var m = /[Ss](\d{1,2})[\s._-]*[Ee](\d{1,2})/.exec(_baseName(f.filename));
+            var tag = m ? ('S' + _pk2(m[1]) + 'E' + _pk2(m[2])) : '·';
+            return '<div class="vdl-pack-ep">' +
+                '<span class="vdl-pack-ep-tag">' + tag + '</span>' +
+                '<span class="vdl-pack-ep-name" title="' + esc(_baseName(f.filename)) + '">' + esc(_baseName(f.filename)) + '</span>' +
+                '<span class="vdl-pack-ep-sz">' + _gb(f.size_bytes) + '</span></div>';
+        }).join('');
+        var getBtn = r.username
+            ? '<button class="vdl-res-grab vdl-pack-get' + (r.accepted ? '' : ' vdl-res-grab--override') + '" type="button" data-vdl-grab-pack="' + i +
+                '" title="' + (r.accepted ? 'Download every episode in this pack' : 'Below your quality profile — download anyway') + '">[ GET PACK ]</button>'
+            : '';
+        return '<div class="vdl-res vdl-pack' + (r.accepted ? ' vdl-res--ok' : ' vdl-res--rejected') + '" data-vdl-card="' + i + '">' +
+            '<div class="vdl-pack-head" data-vdl-pack-toggle="' + i + '">' +
+                '<span class="vdl-pack-caret" aria-hidden="true">▸</span>' +
+                '<span class="vdl-r-q vdl-r-q--' + resKind(r.resolution) + '">' + esc(RES_LABEL[r.resolution] || r.resolution || '?') + '</span>' +
+                '<span class="vdl-r-title" title="' + esc(r.title) + '">' + esc(r.title) + '</span>' +
+                '<span class="vdl-pack-meta">' + r.file_count + ' ep' + (r.file_count === 1 ? '' : 's') + ' · ' + _gb(r.folder_size_bytes) + '</span>' +
+                getBtn +
+            '</div>' +
+            '<div class="vdl-pack-list">' + rows + '</div>' +
+        '</div>';
+    }
+
     function resultCardHTML(r, i) {
+        if (r.files && r.files.length > 1) return _packCardHTML(r, i);
         // Flat / brutalist release card: a bracketed quality block + release name on
         // line 1, an UPPERCASE dot-separated spec line, then the verdict + a hard
         // [ GET ] button. Monospace, sharp, no chrome. .vdl-res stays a column so the
@@ -539,8 +574,11 @@
         var verdict = r.accepted
             ? '<span class="vdl-r-verdict vdl-r-verdict--ok">&#10003; MEETS PROFILE</span>'
             : '<span class="vdl-r-verdict vdl-r-verdict--no" title="' + esc(r.rejected || '') + '">&#10007; ' + esc((r.rejected || 'FILTERED').toUpperCase()) + '</span>';
-        var grab = (r.accepted && r.username)
-            ? '<button class="vdl-res-grab" type="button" data-vdl-grab="' + i + '" title="Download this release">[ GET ]</button>'
+        // Manual pick = the user overrides the quality profile. Auto-grab still only
+        // takes accepted releases; here we let them GET a below-profile one anyway.
+        var grab = r.username
+            ? '<button class="vdl-res-grab' + (r.accepted ? '' : ' vdl-res-grab--override') + '" type="button" data-vdl-grab="' + i +
+                '" title="' + (r.accepted ? 'Download this release' : 'Below your quality profile — download anyway') + '">[ GET ]</button>'
             : '';
         return '<div class="vdl-res' + (r.accepted ? ' vdl-res--ok' : ' vdl-res--rejected') + '" data-vdl-card="' + i + '">' +
             '<div class="vdl-res-main">' +
@@ -759,6 +797,7 @@
 
     function onShowClick(e) {
         var container = e.currentTarget; var st = container._dl; if (!st) return;
+        if (_handlePackClick(e)) return;
         var grab = e.target.closest('[data-vdl-grab]');
         if (grab) { doGrab(grab); return; }
         // Episode-scope Manual search (a source row inside an expanded episode).
@@ -1053,6 +1092,43 @@
     //    behave and look exactly like the get-modal's download view.
     //    opts: { title, scope:'episode'|'season'|'series', season, episode,
     //            mediaId, mediaSource, year, poster }
+    function _grabPack(panel, r) {
+        var o = ((panel.closest('[data-vgm-dl-content]') || {})._opts) || {};
+        var p = panel._search || {};
+        return postJSON('/api/video/downloads/grab-pack', {
+            username: r.username, files: r.files || [],
+            title: p.title || o.title || '', quality_label: r.quality_label,
+            media_id: o.id || o.mediaId, media_source: o.source || o.mediaSource,
+            year: o.year, poster_url: o.poster
+        });
+    }
+    // Shared expandable-pack interactions (toggle + [ GET PACK ]) — used by the
+    // manual-search modal AND the get-modal's season search. Returns true if handled.
+    function _handlePackClick(e) {
+        // Check GET PACK first — it lives inside the toggle header, so matching the
+        // toggle first would swallow the grab click (just expand/collapse).
+        var gp = e.target.closest('[data-vdl-grab-pack]');
+        if (!gp) {
+            var tog = e.target.closest('[data-vdl-pack-toggle]');
+            if (tog) { var card = tog.closest('.vdl-pack'); if (card) card.classList.toggle('vdl-pack--open'); return true; }
+            return false;
+        }
+        var panel = gp.closest('.vdl-results');
+        var r = panel && panel._rows && panel._rows[parseInt(gp.getAttribute('data-vdl-grab-pack'), 10)];
+        if (panel && r) {
+            gp.disabled = true; gp.textContent = '[ … ]';
+            _grabPack(panel, r).then(function (res) {
+                if (res && res.ok) {
+                    gp.textContent = '[ GRABBING ' + res.started + ' ]'; gp.classList.add('vms-grabbed');
+                    document.dispatchEvent(new CustomEvent('soulsync:video-download-started'));
+                    toast('Grabbing ' + res.started + ' episode' + (res.started === 1 ? '' : 's') +
+                        (res.skipped ? ' · ' + res.skipped + ' skipped' : ''), 'success');
+                } else { gp.disabled = false; gp.textContent = '[ GET PACK ]'; toast((res && res.error) || 'Pack grab failed', 'error'); }
+            });
+        }
+        return true;
+    }
+
     function _closeManual(ov) {
         if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
         if (!document.querySelector('.vms-overlay, .vgm-overlay')) document.body.style.overflow = '';
@@ -1085,6 +1161,7 @@
 
         ov.addEventListener('click', function (e) {
             if (e.target === ov || e.target.closest('[data-vms-close]')) { _closeManual(ov); return; }
+            if (_handlePackClick(e)) return;
             var gb = e.target.closest('[data-vdl-grab]');
             if (gb) {
                 var panel = gb.closest('.vdl-results');
