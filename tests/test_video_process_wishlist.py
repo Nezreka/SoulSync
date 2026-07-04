@@ -207,3 +207,25 @@ def test_episode_wishlist_to_download_shape(db):
     top = rows[0]
     assert top["show_tmdb_id"] == 9 and top["show_title"] == "Breaking Bad"
     assert top["season_number"] == 1 and top["episode_number"] == 2   # newest air date first
+
+
+def test_movie_wishlist_skips_owned(db):
+    """Bug 3: a wished movie already in the library is not re-grabbed."""
+    db.add_movie_to_wishlist(1, "Owned", year="2020", status="wanted")
+    db.add_movie_to_wishlist(2, "Missing", year="2020", status="wanted")
+    db.upsert_movie("plex", {"server_id": "m1", "tmdb_id": 1, "title": "Owned",
+                             "file": {"relative_path": "owned.mkv", "size_bytes": 5}})
+    assert [r["tmdb_id"] for r in db.movie_wishlist_to_download()] == [2]   # owned excluded
+
+
+def test_episode_wishlist_skips_owned(db):
+    """Bug 3: a wished episode already owned (has_file) is not re-grabbed."""
+    db.add_episodes_to_wishlist(9, "Show", [
+        {"season_number": 1, "episode_number": 1, "air_date": "2020-01-01"},
+        {"season_number": 1, "episode_number": 2, "air_date": "2020-01-08"}])
+    db.upsert_show_tree("plex", {"server_id": "s9", "tmdb_id": 9, "title": "Show", "seasons": [
+        {"season_number": 1, "episodes": [
+            {"server_id": "e1", "episode_number": 1, "title": "E1",
+             "file": {"relative_path": "e1.mkv", "size_bytes": 5}}]}]})
+    keys = {(r["season_number"], r["episode_number"]) for r in db.episode_wishlist_to_download()}
+    assert keys == {(1, 2)}   # owned S1E1 excluded; missing S1E2 kept

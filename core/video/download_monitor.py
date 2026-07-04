@@ -260,47 +260,65 @@ def _archive_history(db, dl, upd) -> None:
         logger.exception("video download %s: history snapshot failed", dl.get("id"))
 
 
-def _wishlist_failed(db, dl) -> None:
-    """A download gave up for good — put the item back on the video wishlist so it's
-    not lost (mirrors the music side's failed-tracks-to-wishlist). Best-effort."""
-    try:
-        kind = str(dl.get("kind") or "").lower()
-        ctx = dl.get("search_ctx")
-        if isinstance(ctx, str):
-            try:
-                ctx = json.loads(ctx)
-            except (ValueError, TypeError):
-                ctx = {}
-        ctx = ctx or {}
-        media_source = str(dl.get("media_source") or "").lower()
-        media_id = dl.get("media_id")
-        title = dl.get("title") or ctx.get("title") or ""
-        poster, year = dl.get("poster_url"), dl.get("year")
-        is_tmdb = media_source == "tmdb"
-        lib_id = None if is_tmdb else media_id
-        if not title:
-            return
-        if kind == "movie":
-            tmdb_id = _as_int(media_id) if is_tmdb else db.movie_tmdb_id(media_id)
-            if tmdb_id:
-                db.add_movie_to_wishlist(int(tmdb_id), title, year=year, poster_url=poster, library_id=lib_id)
-        else:   # show/episode
-            sn, en = ctx.get("season"), ctx.get("episode")
-            if sn is None or en is None:
-                return
-            tmdb_id = _as_int(media_id) if is_tmdb else db.show_tmdb_id(media_id)
-            if tmdb_id:
-                db.add_episodes_to_wishlist(int(tmdb_id), title,
-                    [{"season_number": sn, "episode_number": en}], poster_url=poster, library_id=lib_id)
-    except Exception:
-        logger.exception("video download %s: wishlist-on-fail failed", dl.get("id"))
-
-
 def _as_int(v):
     try:
         return int(v)
     except (ValueError, TypeError):
         return None
+
+
+def _wishlist_ids(db, dl):
+    """Resolve a download row to its wishlist identity: (kind, tmdb_id, season, episode,
+    ctx). tmdb_id comes from media_id (tmdb-sourced) or the DB (library-sourced)."""
+    kind = str(dl.get("kind") or "").lower()
+    ctx = dl.get("search_ctx")
+    if isinstance(ctx, str):
+        try:
+            ctx = json.loads(ctx)
+        except (ValueError, TypeError):
+            ctx = {}
+    ctx = ctx or {}
+    is_tmdb = str(dl.get("media_source") or "").lower() == "tmdb"
+    media_id = dl.get("media_id")
+    if kind == "movie":
+        return "movie", (_as_int(media_id) if is_tmdb else db.movie_tmdb_id(media_id)), None, None, ctx
+    return ("show", (_as_int(media_id) if is_tmdb else db.show_tmdb_id(media_id)),
+            ctx.get("season"), ctx.get("episode"), ctx)
+
+
+def _wishlist_failed(db, dl) -> None:
+    """A download gave up for good — put the item back on the video wishlist so it's
+    not lost (mirrors the music side's failed-tracks-to-wishlist). Best-effort."""
+    try:
+        kind, tmdb_id, sn, en, ctx = _wishlist_ids(db, dl)
+        title = dl.get("title") or ctx.get("title") or ""
+        if not tmdb_id or not title:
+            return
+        lib_id = None if str(dl.get("media_source") or "").lower() == "tmdb" else dl.get("media_id")
+        poster, year = dl.get("poster_url"), dl.get("year")
+        if kind == "movie":
+            db.add_movie_to_wishlist(int(tmdb_id), title, year=year, poster_url=poster, library_id=lib_id)
+        elif sn is not None and en is not None:
+            db.add_episodes_to_wishlist(int(tmdb_id), title,
+                [{"season_number": sn, "episode_number": en}], poster_url=poster, library_id=lib_id)
+    except Exception:
+        logger.exception("video download %s: wishlist-on-fail failed", dl.get("id"))
+
+
+def _wishlist_obtained(db, dl) -> None:
+    """A wished item downloaded + imported — remove it from the wishlist so it isn't
+    re-grabbed every run (the movie/TV mirror of the YouTube clear-on-complete). The
+    absence of this was a real re-download loop on every hourly tick. Best-effort."""
+    try:
+        kind, tmdb_id, sn, en, _ctx = _wishlist_ids(db, dl)
+        if not tmdb_id:
+            return
+        if kind == "movie":
+            db.remove_from_wishlist("movie", tmdb_id=int(tmdb_id))
+        elif sn is not None and en is not None:
+            db.remove_from_wishlist("episode", tmdb_id=int(tmdb_id), season_number=sn, episode_number=en)
+    except Exception:
+        logger.exception("video download %s: wishlist-on-obtain failed", dl.get("id"))
 
 
 def _fail_or_retry(db, dl, error_msg) -> None:
@@ -503,6 +521,10 @@ def _tick(db) -> None:
             upd.setdefault("completed_at", _now())
         try:
             db.update_video_download(dl["id"], **upd)
+            # A wished item that just landed is done — drop it from the wishlist so the
+            # hourly processor doesn't re-grab it forever (mirrors the YouTube path).
+            if upd.get("status") == "completed":
+                _wishlist_obtained(db, dl)
             # Snapshot terminal outcomes into the permanent history (survives the
             # queue cleanup; powers the History modal + smart post-download scan).
             if upd.get("status") in ("completed", "cancelled", "import_failed"):

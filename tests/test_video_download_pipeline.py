@@ -123,16 +123,38 @@ class _WlDB:
     def __init__(self):
         self.eps = None
         self.movie = None
+        self.removed = None
     def add_episodes_to_wishlist(self, tmdb_id, title, episodes, *, poster_url=None, library_id=None, server_source=None):
         self.eps = (tmdb_id, title, episodes, library_id)
         return len(episodes)
     def add_movie_to_wishlist(self, tmdb_id, title, *, year=None, poster_url=None, library_id=None, server_source=None):
         self.movie = (tmdb_id, title, library_id)
         return True
+    def remove_from_wishlist(self, scope, *, tmdb_id, season_number=None, episode_number=None):
+        self.removed = (scope, tmdb_id, season_number, episode_number)
+        return 1
     def show_tmdb_id(self, show_id):
         return 999
     def movie_tmdb_id(self, movie_id):
         return 888
+
+
+def test_wishlist_obtained_removes_episode():
+    """Bug 1: a wished episode that downloads is REMOVED from the wishlist (else it
+    re-grabs every hourly run forever)."""
+    from core.video.download_monitor import _wishlist_obtained
+    db = _WlDB()
+    _wishlist_obtained(db, {"id": 1, "kind": "show", "title": "T", "media_id": "123",
+                            "media_source": "tmdb", "search_ctx": json.dumps({"season": 1, "episode": 3})})
+    assert db.removed == ("episode", 123, 1, 3)
+
+
+def test_wishlist_obtained_removes_movie_and_resolves_library_tmdb():
+    from core.video.download_monitor import _wishlist_obtained
+    db = _WlDB()
+    _wishlist_obtained(db, {"id": 2, "kind": "movie", "title": "M", "media_id": "42",
+                            "media_source": "library"})
+    assert db.removed == ("movie", 888, None, None)   # tmdb resolved from the library id
 
 
 def test_wishlist_failed_episode_tmdb_source():

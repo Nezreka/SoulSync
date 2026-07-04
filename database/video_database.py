@@ -1514,6 +1514,19 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def youtube_failed_counts(self) -> dict:
+        """{video_id: failed-attempt count} from the permanent history — so the processor
+        can stop re-grabbing a video that keeps failing (deleted / private / geo- or
+        age-gated) instead of retrying it every run forever."""
+        conn = self._get_connection()
+        try:
+            return {r["media_id"]: r["n"] for r in conn.execute(
+                "SELECT media_id, COUNT(*) AS n FROM video_download_history "
+                "WHERE source='youtube' AND outcome='failed' AND media_id IS NOT NULL "
+                "GROUP BY media_id")}
+        finally:
+            conn.close()
+
     def youtube_video_detail(self, youtube_id) -> dict | None:
         """Cached metadata for one YouTube video (title / thumbnail / duration / views) — the
         extra detail the download drawer shows. None if it was never cached by a channel scan."""
@@ -2644,6 +2657,9 @@ class VideoDatabase:
             return [dict(r) for r in conn.execute(
                 "SELECT tmdb_id, title, year, poster_url FROM video_wishlist "
                 "WHERE kind='movie' AND status='wanted' AND tmdb_id IS NOT NULL "
+                # Don't re-grab a movie already in the library (owned via any path, or a
+                # prior grab that import_failed as 'not an upgrade') — that was a loop.
+                "AND tmdb_id NOT IN (SELECT tmdb_id FROM movies WHERE has_file=1 AND tmdb_id IS NOT NULL) "
                 "ORDER BY year DESC, id DESC")]
         finally:
             conn.close()
@@ -2654,10 +2670,15 @@ class VideoDatabase:
         conn = self._get_connection()
         try:
             return [dict(r) for r in conn.execute(
-                "SELECT tmdb_id AS show_tmdb_id, title AS show_title, season_number, "
-                "episode_number, episode_title, air_date, poster_url, library_id "
-                "FROM video_wishlist WHERE kind='episode' AND tmdb_id IS NOT NULL "
-                "ORDER BY air_date DESC, id DESC")]
+                "SELECT w.tmdb_id AS show_tmdb_id, w.title AS show_title, w.season_number, "
+                "w.episode_number, w.episode_title, w.air_date, w.poster_url, w.library_id "
+                "FROM video_wishlist w WHERE w.kind='episode' AND w.tmdb_id IS NOT NULL "
+                # Don't re-grab an episode already owned (has_file) — matched show tmdb +
+                # SxE against the library. Breaks the import_failed-owned re-download loop.
+                "AND NOT EXISTS (SELECT 1 FROM episodes e JOIN shows s ON e.show_id = s.id "
+                "  WHERE s.tmdb_id = w.tmdb_id AND e.season_number = w.season_number "
+                "  AND e.episode_number = w.episode_number AND e.has_file = 1) "
+                "ORDER BY w.air_date DESC, w.id DESC")]
         finally:
             conn.close()
 
@@ -3101,9 +3122,15 @@ class VideoDatabase:
         conn = self._get_connection()
         n = 0
         try:
+            # Don't re-wish videos already downloaded. The channel SCAN pre-filters these,
+            # but the manual follow / wishlist-add API doesn't — re-following a channel
+            # would otherwise re-queue everything you already have.
+            downloaded = {r["media_id"] for r in conn.execute(
+                "SELECT DISTINCT media_id FROM video_download_history "
+                "WHERE source='youtube' AND outcome='completed' AND media_id IS NOT NULL")}
             for v in videos:
                 vid = v.get("youtube_id")
-                if not vid:
+                if not vid or vid in downloaded:
                     continue
                 conn.execute(
                     """INSERT INTO video_wishlist
