@@ -454,8 +454,15 @@ select.voe-input option { background: #17171d; }
 .voe-apply-bar { height: 8px; border-radius: 5px; background: rgba(255,255,255,.1); overflow: hidden; }
 .voe-apply-bar-fill { height: 100%; width: 0; border-radius: 5px; background: rgb(var(--a)); transition: width .25s ease; }
 .voe-apply-prog-txt { font-size: 12px; color: rgba(255,255,255,.6); margin-top: 8px; }
-.voe-apply-foot { display: flex; align-items: center; gap: 10px; margin-top: 22px; }
-.voe-apply-foot .voe-spacer { flex: 1; }
+.voe-apply-foot { display: flex; align-items: center; gap: 8px; margin-top: 22px; flex-wrap: wrap; }
+.voe-apply-foot .voe-spacer { flex: 1; min-width: 8px; }
+.voe-apply-foot .voe-btn { padding: 9px 14px; }   /* fit Remove · Reset · Close · Apply */
+
+/* keyboard-focus rings across the studio + its dialogs (accessibility) */
+.voe-overlay button:focus-visible, .voe-overlay input:focus-visible, .voe-overlay select:focus-visible,
+.voe-overlay [tabindex]:focus-visible, .voe-confirm-back button:focus-visible, .voe-card:focus-visible {
+    outline: 2px solid rgba(var(--a),.75); outline-offset: 2px;
+}
 
 @media (max-width: 900px) {
     .voe-palette { flex-basis: 88px; }
