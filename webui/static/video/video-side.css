@@ -4124,24 +4124,31 @@ body[data-side="video"] #gsearch-aura {
     display: none !important;
 }
 
-/* ── Inline acquisition on the show detail page (per-episode + per-season) ── */
+/* ── Inline acquisition on the show detail page (per-episode + per-season) ──
+   Buttons follow the app standard (the .discog-download-btn accent language):
+   episode rows use a compact icon variant; season row uses the full discog
+   pills (same as the "Get Show" button). */
 .vd-ep-get { display: inline-flex; align-items: center; gap: 6px; }
 .vd-ep-getbtn {
     display: inline-flex; align-items: center; justify-content: center;
-    width: 26px; height: 26px; border-radius: 7px; cursor: pointer;
-    border: 1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.06);
-    color: rgba(255,255,255,0.82); font-size: 14px; line-height: 1;
-    transition: background .15s, border-color .15s, color .15s, transform .1s;
+    width: 28px; height: 28px; border-radius: 8px; cursor: pointer; line-height: 1;
+    font-size: 14px; font-weight: 700; font-family: inherit;
+    color: rgb(var(--accent-light-rgb));
+    border: 1px solid rgba(var(--accent-rgb), 0.25);
+    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.15) 0%, rgba(var(--accent-rgb), 0.05) 100%);
+    transition: all 0.2s ease;
 }
-.vd-ep-getbtn:hover { background: rgba(255,255,255,0.14); color: #fff; border-color: rgba(255,255,255,0.28); }
-.vd-ep-getbtn:active { transform: scale(0.92); }
-.vd-ep-getbtn:disabled { opacity: 0.55; cursor: default; }
-.vd-ep-grab:hover { color: var(--accent, #38bdf8); border-color: var(--accent, #38bdf8); }
-.vd-ep-wish--done { color: #4ade80 !important; border-color: rgba(74,222,128,0.5) !important; }
-/* searching = pulse; grabbing = steady accent so the row reads "in flight" */
-.vd-ep-get--searching .vd-ep-grab { color: var(--accent, #38bdf8); border-color: var(--accent, #38bdf8); animation: vd-ep-pulse 1s ease-in-out infinite; }
-.vd-ep-get--grabbing .vd-ep-grab { color: #4ade80; border-color: rgba(74,222,128,0.5); }
-@keyframes vd-ep-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+.vd-ep-getbtn:hover {
+    border-color: rgba(var(--accent-rgb), 0.45);
+    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.28) 0%, rgba(var(--accent-rgb), 0.1) 100%);
+    transform: translateY(-1px); box-shadow: 0 4px 14px rgba(var(--accent-rgb), 0.18);
+}
+.vd-ep-getbtn:active { transform: translateY(0) scale(0.94); }
+.vd-ep-getbtn:disabled { opacity: 0.5; cursor: default; box-shadow: none; transform: none; }
+.vd-ep-wish--done {
+    color: #4ade80 !important; border-color: rgba(74,222,128,0.5) !important;
+    background: linear-gradient(135deg, rgba(74,222,128,0.16), rgba(74,222,128,0.05)) !important;
+}
 
 .vd-season-actions {
     display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -4152,16 +4159,6 @@ body[data-side="video"] #gsearch-aura {
     font-size: 12px; font-weight: 600; letter-spacing: .02em;
     color: rgba(255,255,255,0.55); margin-right: auto;
 }
-.vd-season-getbtn {
-    display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
-    padding: 7px 13px; border-radius: 9px; font-size: 13px; font-weight: 600;
-    border: 1px solid rgba(255,255,255,0.16); background: rgba(255,255,255,0.06);
-    color: rgba(255,255,255,0.9); transition: background .15s, border-color .15s, transform .1s;
-}
-.vd-season-getbtn:hover { background: rgba(255,255,255,0.14); border-color: rgba(255,255,255,0.3); }
-.vd-season-getbtn:active { transform: scale(0.97); }
-.vd-season-getbtn:disabled { opacity: 0.6; cursor: default; }
-.vd-season-wishbtn:hover { color: #fff; }
 
 /* ── Live download status on episode rows ── */
 .vd-ep-dl { display: none; align-items: center; gap: 8px; min-width: 108px; }
@@ -4179,8 +4176,6 @@ body[data-side="video"] #gsearch-aura {
 .vd-ep-dl-txt { font-size: 12px; font-weight: 600; color: rgba(255,255,255,0.72); white-space: nowrap; }
 .vd-ep-dl-txt--done { color: #4ade80; }
 
-/* Manual-search buttons (episode + season) share the getbtn/season chrome */
-.vd-ep-search:hover { color: var(--accent, #38bdf8); border-color: var(--accent, #38bdf8); }
 
 /* ── Manual (interactive) search modal — matches the get-modal / download chrome ── */
 .vms-overlay {
