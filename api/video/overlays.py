@@ -83,6 +83,44 @@ def register_routes(bp):
             return jsonify({"ok": False, "error": "Could not duplicate"}), 404
         return jsonify({"ok": True, "id": tid})
 
+    # ── apply: assignment + run ───────────────────────────────────────────────
+    @bp.route("/overlays/assignments", methods=["GET"])
+    def overlay_assignments_get():
+        from . import get_video_db
+        db = get_video_db()
+        templates = [{"id": t["id"], "name": t["name"]} for t in db.list_overlay_templates()]
+        return jsonify({"assignments": db.get_overlay_assignments(), "templates": templates,
+                        "applied": db.overlay_applied_count()})
+
+    @bp.route("/overlays/assignments", methods=["PUT"])
+    def overlay_assignments_set():
+        from . import get_video_db
+        data = request.get_json(silent=True) or {}
+        scope = data.get("scope")
+        ok = get_video_db().set_overlay_assignment(scope, data.get("template_id"), bool(data.get("enabled")))
+        return jsonify({"ok": bool(ok)}), (200 if ok else 400)
+
+    @bp.route("/overlays/apply", methods=["POST"])
+    def overlay_apply_run():
+        from . import get_video_db
+        from core.video.overlays import service
+        data = request.get_json(silent=True) or {}
+        scope = data.get("scope") or "both"
+        scopes = ["movie", "show"] if scope == "both" else [scope]
+        scopes = [s for s in scopes if s in ("movie", "show")]
+        if not scopes:
+            return jsonify({"ok": False, "error": "bad scope"}), 400
+        started = service.start(get_video_db(), scopes, force=bool(data.get("force")),
+                                remove=bool(data.get("remove")))
+        if not started:
+            return jsonify({"ok": False, "error": "A run is already in progress"}), 409
+        return jsonify({"ok": True, "started": True})
+
+    @bp.route("/overlays/apply/status", methods=["GET"])
+    def overlay_apply_status():
+        from core.video.overlays import service
+        return jsonify(service.status())
+
     @bp.route("/overlays/sample/<kind>/<int:item_id>", methods=["GET"])
     def overlay_sample(kind, item_id):
         """Real badge values for a library item — the editor's "load from a real
