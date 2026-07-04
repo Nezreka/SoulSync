@@ -755,6 +755,40 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             conn.close()
         return jsonify({"success": True, "canonical_track_id": canonical_id})
 
+    @app.route("/api/library/v2/tracks/<int:track_id>/move-file", methods=["POST"])
+    def lib2_move_track_file(track_id):
+        """Move this track's file link onto another track (single↔album move).
+
+        Body ``{"to_track_id": <id>}``. The file on disk is untouched — only
+        the library's file↔track link moves; run Rename/Reorganize afterwards
+        to re-folder it. The source track is unmonitored so the consolidated-
+        away variant isn't immediately re-downloaded."""
+        guard = _guard()
+        if guard:
+            return guard
+        body = request.json or {}
+        try:
+            to_track_id = int(body.get("to_track_id") or 0)
+        except (TypeError, ValueError):
+            to_track_id = 0
+        if not to_track_id:
+            return jsonify({"success": False, "error": "to_track_id required"}), 400
+        from core.library2.track_file_move import MoveError, move_track_file
+        db = get_database()
+        conn = db._get_connection()
+        try:
+            result = move_track_file(db, conn, track_id, to_track_id,
+                                     wishlist_profile_id=_profile())
+        except MoveError as e:
+            return jsonify({"success": False, "error": str(e)}), e.status
+        except Exception as e:  # noqa: BLE001
+            logger.error("track file move failed (%s → %s): %s", track_id,
+                         to_track_id, e, exc_info=True)
+            return jsonify({"success": False, "error": str(e)}), 500
+        finally:
+            conn.close()
+        return jsonify({"success": True, **result})
+
     @app.route("/api/library/v2/artists/<int:artist_id>/history")
     def lib2_artist_history(artist_id):
         """Recent download/import provenance for this artist (Lidarr's History

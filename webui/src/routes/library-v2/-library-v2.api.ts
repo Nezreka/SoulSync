@@ -272,6 +272,21 @@ export interface LibraryV2DuplicatePair {
   album: LibraryV2DuplicateSide;
 }
 
+/** Re-home a file link onto the other track of a duplicate pair. The file on
+ *  disk is untouched (run Rename/Reorganize afterwards); the source track is
+ *  unmonitored so the consolidated-away variant isn't re-downloaded. */
+export async function moveLibraryV2TrackFile(
+  fromTrackId: number,
+  toTrackId: number,
+): Promise<void> {
+  const payload = await readJson<{ success: boolean; error?: string }>(
+    apiClient.post(`library/v2/tracks/${fromTrackId}/move-file`, {
+      json: { to_track_id: toTrackId },
+    }),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Move failed');
+}
+
 /** Unlink a duplicate pair: the single stops pointing at the album version
  *  (it becomes its own canonical recording again). */
 export async function unlinkLibraryV2Duplicate(trackId: number): Promise<void> {

@@ -18,6 +18,7 @@ import {
   libraryV2ArtistQueryOptions,
   libraryV2ArtistsQueryOptions,
   libraryV2EnabledQueryOptions,
+  moveLibraryV2TrackFile,
   refreshLibraryV2,
   refreshLibraryV2Discography,
   runRepairJob,
@@ -575,19 +576,30 @@ function ManageTracksModal({ artistId, onClose }: { artistId: number; onClose: (
     queryFn: () => fetchLibraryV2Duplicates(artistId),
   });
   const pairs = dupesQuery.data ?? [];
-  const [unlinking, setUnlinking] = useState<Set<number>>(new Set());
+  const [busyTracks, setBusyTracks] = useState<Set<number>>(new Set());
+  const [rowError, setRowError] = useState<string | null>(null);
 
-  function unlink(trackId: number) {
-    setUnlinking((s) => new Set(s).add(trackId));
-    void unlinkLibraryV2Duplicate(trackId)
+  function withBusy(trackId: number, action: Promise<unknown>) {
+    setRowError(null);
+    setBusyTracks((s) => new Set(s).add(trackId));
+    void action
       .then(() => queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY }))
+      .catch((e) => setRowError(e instanceof Error ? e.message : 'Action failed'))
       .finally(() =>
-        setUnlinking((s) => {
+        setBusyTracks((s) => {
           const next = new Set(s);
           next.delete(trackId);
           return next;
         }),
       );
+  }
+
+  function unlink(trackId: number) {
+    withBusy(trackId, unlinkLibraryV2Duplicate(trackId));
+  }
+
+  function moveFile(fromTrackId: number, toTrackId: number) {
+    withBusy(fromTrackId, moveLibraryV2TrackFile(fromTrackId, toTrackId));
   }
 
   function fileText(side: { file: { format: string | null; bitrate: number | null } | null }) {
@@ -605,9 +617,11 @@ function ManageTracksModal({ artistId, onClose }: { artistId: number; onClose: (
     <ModalShell title="Manage Tracks — single ↔ album duplicates" wide onClose={onClose}>
       <p className={styles.qpSubtitle}>
         The same recording released as a single and on an album. Unmonitor the version you
-        don't want kept up to date; removing duplicate <em>files</em> is the
-        "Single/Album Dedup" job under Maintenance.
+        don't want kept up to date; <strong>Move file</strong> re-homes the only existing
+        file onto the other version (disk untouched — run Rename/Reorganize after);
+        removing duplicate <em>files</em> is the "Single/Album Dedup" job under Maintenance.
       </p>
+      {rowError ? <div className={styles.searchError}>{rowError}</div> : null}
       <div className={styles.resultsWrap}>
         {dupesQuery.isLoading ? (
           <div className={styles.inlineLoading}>Scanning for duplicates…</div>
@@ -653,15 +667,37 @@ function ManageTracksModal({ artistId, onClose }: { artistId: number; onClose: (
                       monitored={p.album.monitored}
                     />
                   </td>
-                  <td>
+                  <td className={styles.trackActions}>
+                    {p.single.file && !p.album.file ? (
+                      <button
+                        type="button"
+                        className={styles.toolButton}
+                        disabled={busyTracks.has(p.single.track_id)}
+                        title="Attach the single's file to the album version instead (file stays on disk; the single stops being wanted)"
+                        onClick={() => moveFile(p.single.track_id, p.album.track_id)}
+                      >
+                        {busyTracks.has(p.single.track_id) ? '…' : 'Move → album'}
+                      </button>
+                    ) : null}
+                    {p.album.file && !p.single.file ? (
+                      <button
+                        type="button"
+                        className={styles.toolButton}
+                        disabled={busyTracks.has(p.album.track_id)}
+                        title="Attach the album's file to the single version instead (file stays on disk; the album track stops being wanted)"
+                        onClick={() => moveFile(p.album.track_id, p.single.track_id)}
+                      >
+                        {busyTracks.has(p.album.track_id) ? '…' : 'Move → single'}
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       className={styles.toolButton}
-                      disabled={unlinking.has(p.single.track_id)}
+                      disabled={busyTracks.has(p.single.track_id)}
                       title="Not the same recording? Unlink the pair — the single becomes independent again"
                       onClick={() => unlink(p.single.track_id)}
                     >
-                      {unlinking.has(p.single.track_id) ? '…' : 'Unlink'}
+                      {busyTracks.has(p.single.track_id) ? '…' : 'Unlink'}
                     </button>
                   </td>
                 </tr>
