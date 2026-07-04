@@ -131,6 +131,7 @@
         redo: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14l5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h1"/></svg>',
         dupe: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
         apply: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2 4 4 .5-3 3 .8 4.2L12 16l-3.8 1.7.8-4.2-3-3 4-.5 2-4Z"/><path d="M5 20h14"/></svg>',
+        help: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.8.4-1 .9-1 1.7"/><path d="M12 17h.01"/></svg>',
         poster: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M4 15l4-4 3 3 3-3 6 6"/></svg>',
         image: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>',
         logo: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 7v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V7M9 12h6"/></svg>',
@@ -414,6 +415,32 @@
         });
     }
 
+    var _SHORTCUTS = [
+        ['Drag on the poster', 'Move a layer'],
+        ['Corner handle', 'Resize (scale)'],
+        ['Top handle', 'Rotate — hold Shift to snap 15°'],
+        ['Double-click text', 'Edit the text inline'],
+        ['Arrow keys', 'Nudge 1px — Shift for 10px'],
+        ['Delete / Backspace', 'Remove the selected layer'],
+        ['Ctrl / ⌘ + D', 'Duplicate'],
+        ['Ctrl / ⌘ + Z', 'Undo — add Shift to redo'],
+        ['Ctrl / ⌘ + S', 'Save'],
+    ];
+    function openShortcuts() {
+        var back = document.createElement('div');
+        back.className = 'voe-confirm-back';
+        back.innerHTML = '<div class="voe-shortcuts-modal"><div class="voe-starter-h">Keyboard &amp; canvas</div>' +
+            '<div class="voe-shortcuts-list">' + _SHORTCUTS.map(function (s) {
+                return '<div class="voe-shortcut-row"><span class="voe-shortcut-k">' + esc(s[0]) + '</span>' +
+                    '<span class="voe-shortcut-d">' + esc(s[1]) + '</span></div>';
+            }).join('') + '</div>' +
+            '<div class="voe-confirm-row"><button class="voe-btn voe-btn--primary" data-sc-close>Got it</button></div></div>';
+        document.body.appendChild(back);
+        requestAnimationFrame(function () { back.classList.add('voe-confirm-back--on'); });
+        function done() { back.classList.remove('voe-confirm-back--on'); setTimeout(function () { back.remove(); }, 180); }
+        back.addEventListener('click', function (e) { if (e.target === back || e.target.closest('[data-sc-close]')) done(); });
+    }
+
     function loadTemplate(id) {
         api('GET', '/api/video/overlays/templates/' + id).then(function (t) {
             var def = t.definition || {};
@@ -483,6 +510,7 @@
                 '<button class="voe-btn voe-btn--ghost voe-icon-btn" data-voe-undo title="Undo (Ctrl+Z)">' + I.undo + '</button>' +
                 '<button class="voe-btn voe-btn--ghost voe-icon-btn" data-voe-redo title="Redo (Ctrl+Shift+Z)">' + I.redo + '</button>' +
                 '<div class="voe-top-spacer"></div>' +
+                '<button class="voe-btn voe-btn--ghost voe-icon-btn" data-voe-help title="Keyboard shortcuts">' + I.help + '</button>' +
                 '<span class="voe-save-state" data-voe-savestate></span>' +
                 '<button class="voe-btn voe-btn--primary" data-voe-save>' + I.save + ' Save</button>' +
                 '<button class="voe-x" data-voe-close aria-label="Close">&times;</button>' +
@@ -523,6 +551,7 @@
         overlay.querySelector('[data-voe-sampledata]').addEventListener('click', function (e) { openSamplePop(e.currentTarget); });
         overlay.querySelector('[data-voe-undo]').addEventListener('click', undo);
         overlay.querySelector('[data-voe-redo]').addEventListener('click', redo);
+        overlay.querySelector('[data-voe-help]').addEventListener('click', openShortcuts);
 
         resizeBound = function () { measureStage(); relayoutAll(); };
         window.addEventListener('resize', resizeBound);
@@ -630,6 +659,8 @@
         renderStageLayers();
         renderLayersPanel();
         renderInspector();
+        var node = ed.stage && ed.stage.querySelector('.voe-layer[data-voe-layer="' + l.id + '"]');
+        if (node) { node.classList.add('voe-layer--pop'); setTimeout(function () { node.classList.remove('voe-layer--pop'); }, 260); }
         return l;
     }
 
@@ -1094,7 +1125,8 @@
     }
     function row2(a, b) { return '<div class="voe-row2">' + a + b + '</div>'; }
     function inspSection(title, body) {
-        return '<div class="voe-insp-sec"><div class="voe-insp-sec-h">' + title + '</div><div class="voe-insp-body">' + body + '</div></div>';
+        return '<div class="voe-insp-sec"><button class="voe-insp-sec-h" data-voe-sectoggle type="button">' +
+            title + '<span class="voe-insp-chev">' + I.chev + '</span></button><div class="voe-insp-body">' + body + '</div></div>';
     }
     function numInput(key, val, unit) {
         return '<input class="voe-input voe-input--num" type="number" step="0.1" data-insp="' + key + '" value="' + val + '">' +
@@ -1242,6 +1274,10 @@
     }
 
     function wireInspector(l) {
+        var _ib = overlay.querySelector('[data-voe-inspector]');
+        if (_ib) _ib.querySelectorAll('[data-voe-sectoggle]').forEach(function (h) {
+            h.addEventListener('click', function () { h.parentNode.classList.toggle('voe-sec-collapsed'); });
+        });
         var box = overlay.querySelector('[data-voe-inspector]');
         box.querySelectorAll('[data-insp]').forEach(function (inp) {
             var key = inp.getAttribute('data-insp');
