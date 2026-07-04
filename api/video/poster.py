@@ -150,3 +150,98 @@ def register_routes(bp):
         except Exception:
             logger.exception("video image proxy failed for %s", url)
             abort(404)
+
+    @bp.route("/poster/options/<kind>/<int:tmdb_id>", methods=["GET"])
+    def video_poster_options(kind, tmdb_id):
+        """Candidate posters for a title (the poster manager grid). Keyed by TMDB id
+        so it works for a library item or a fresh search hit alike."""
+        from flask import jsonify
+        if kind not in ("movie", "show"):
+            return jsonify({"posters": []}), 400
+        try:
+            from core.video.enrichment.engine import get_video_enrichment_engine
+            posters = get_video_enrichment_engine().poster_options(kind, tmdb_id) or []
+        except Exception:
+            logger.exception("poster options failed for %s %s", kind, tmdb_id)
+            posters = []
+        return jsonify({"posters": posters})
+
+    @bp.route("/poster/set", methods=["POST"])
+    def video_set_poster():
+        """Change a movie/show poster: write the chosen image into the item's folder
+        as poster.jpg (the server picks it up on its own scan), point the local DB at
+        it so it shows immediately, and best-effort push it straight to the media
+        server + nudge a rescan.
+
+        Body: {kind: 'movie'|'show', id: <library id>, poster_url: <http(s) image>}.
+        Everything after the image fetch is best-effort — a poster still changes even
+        if the folder is a container path we can't reach or the server upload API fails;
+        the next scan reconciles whatever we couldn't do here."""
+        from flask import jsonify, request
+        from . import get_video_db
+        from core.video.sources import refresh_video_server_sections, set_video_poster
+
+        data = request.get_json(silent=True) or {}
+        kind = str(data.get("kind") or "").lower()
+        item_id = data.get("id")
+        poster_url = str(data.get("poster_url") or "").strip()
+
+        if kind not in ("movie", "show"):
+            return jsonify({"ok": False, "error": "kind must be 'movie' or 'show'"}), 400
+        if not (poster_url.startswith("http://") or poster_url.startswith("https://")):
+            return jsonify({"ok": False, "error": "poster_url must be an http(s) image URL"}), 400
+        try:
+            item_id = int(item_id)
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "id must be an integer"}), 400
+
+        db = get_video_db()
+        target = db.poster_set_target(kind, item_id)
+        if not target:
+            return jsonify({"ok": False, "error": "Item not found"}), 404
+
+        # Fetch the chosen poster once, server-side (so the browser never has to).
+        # This is the only genuine failure — everything after is best-effort.
+        try:
+            import requests
+            r = requests.get(poster_url, timeout=20)
+            r.raise_for_status()
+            img_bytes = r.content
+        except Exception as e:
+            logger.exception("set_poster: failed to fetch %s", poster_url)
+            return jsonify({"ok": False, "error": "Couldn't fetch that image: %s" % e}), 502
+
+        # (1) Best-effort — drop poster.jpg into the item's folder; the server picks
+        # this up on its own scan (this is the primary path).
+        wrote_folder = False
+        path = target.get("path")
+        if path:
+            try:
+                import os
+                if os.path.isdir(path):
+                    with open(os.path.join(path, "poster.jpg"), "wb") as f:
+                        f.write(img_bytes)
+                    wrote_folder = True
+            except Exception:
+                logger.warning("set_poster: folder write skipped for %s", path, exc_info=True)
+
+        # (2) Best-effort — show it now; the next scan reconciles with the server.
+        db.set_item_poster_url(kind, item_id, poster_url)
+
+        # (3) Best-effort — push straight to the server so it changes without waiting
+        # for a scan (nice-to-have; the server will get it from poster.jpg regardless).
+        pushed_server = False
+        if target.get("server_id"):
+            try:
+                pushed_server = bool(set_video_poster(
+                    target["server_id"], image_bytes=img_bytes, kind=kind).get("ok"))
+            except Exception:
+                logger.warning("set_poster: server upload skipped", exc_info=True)
+
+        # (4) Best-effort — nudge the server to re-read the section.
+        try:
+            refresh_video_server_sections(kind)
+        except Exception:
+            logger.warning("set_poster: rescan nudge failed", exc_info=True)
+
+        return jsonify({"ok": True, "wrote_folder": wrote_folder, "pushed_server": pushed_server})

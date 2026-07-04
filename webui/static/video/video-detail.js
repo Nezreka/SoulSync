@@ -485,6 +485,13 @@
                 '<span class="discog-btn-icon">⭳</span><span class="discog-btn-text">' + showGetLabel + '</span>' +
                 '<span class="discog-btn-shimmer"></span></button>';
         }
+        // Manage Poster — library items only (we need a server id + folder to push a
+        // new poster to) and a tmdb id (to fetch the alternates). Opens VideoPoster.
+        var ownLibItem = (d.source !== 'tmdb') || d.owned;
+        if (ownLibItem && d.tmdb_id && window.VideoPoster) {
+            html += '<button class="vd-trailer-btn" type="button" data-vd-act="poster" title="Change poster">' +
+                '<span class="vd-trailer-ic">🖼</span> Manage Poster</button>';
+        }
         a.innerHTML = html;
     }
 
@@ -500,6 +507,16 @@
             title: data.title || '',
             // "Get Missing" jumps straight to the season/episode grab view.
             startDownload: !!startDownload,
+        });
+    }
+
+    // Manage Poster — open the poster manager for this item (library id + tmdb id).
+    function openPosterModal() {
+        if (!window.VideoPoster || !data) return;
+        var libId = (data.source !== 'tmdb') ? ((data.id != null) ? data.id : currentId) : (data.library_id || null);
+        VideoPoster.open({
+            kind: data.kind, tmdbId: data.tmdb_id || null, libraryId: libId,
+            title: data.title || '', year: data.year || null,
         });
     }
 
@@ -2067,6 +2084,7 @@
             if (which === 'watchlist') toggleWatchlist();
             else if (which === 'get') openGetModal();
             else if (which === 'missing') openGetModal(true);
+            else if (which === 'poster') openPosterModal();
             else if (which === 'yt-follow') toggleYtFollow();
             else if (which === 'yt-pl-follow') toggleYtPlaylistFollowHero();
             else if (which === 'trailer' && data && data.trailer) openTrailer(data.trailer.key);
@@ -2282,6 +2300,20 @@
         // the wishlist changes (e.g. after the Get modal adds/removes this movie).
         document.addEventListener('soulsync:video-wishlist-changed', function () {
             if (currentKind === 'movie' && data) { data._wl_checked = false; renderActions(data); }
+        });
+        // Poster changed via the Poster Manager → bust the on-page poster/backdrop
+        // (the proxy now serves the new art, but the browser cached the old one).
+        document.addEventListener('soulsync:video-poster-changed', function (e) {
+            var det = e && e.detail;
+            if (!data || !det || det.kind !== data.kind) return;
+            var libId = (data.source !== 'tmdb') ? data.id : (data.library_id || null);
+            if (String(det.id) !== String(libId)) return;
+            data.has_poster = true;
+            var cb = '_cb=' + Date.now();
+            var poster = q('[data-vd-poster]');
+            if (poster) { poster.onload = function () { applyAccent(poster); }; poster.src = '/api/video/poster/' + data.kind + '/' + libId + '?' + cb; }
+            var bg = q('[data-vd-backdrop]');
+            if (bg && !data.has_backdrop) bg.style.backgroundImage = "url('/api/video/poster/" + data.kind + '/' + libId + '?' + cb + "')";
         });
         document.addEventListener('keydown', function (e) {
             if (e.key === 'Escape') { closeTrailer(); closeLightbox(); closeCastModal(); }

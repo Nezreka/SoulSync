@@ -196,6 +196,15 @@
         loadStats();
     }
 
+    // Poster Manager quick-action tile → open the full-screen poster picker (its
+    // own self-contained module). Delegated so it survives dashboard re-renders.
+    document.addEventListener('click', function (e) {
+        var t = e.target.closest && e.target.closest('[data-video-poster-manager]');
+        if (!t) return;
+        e.preventDefault();
+        if (window.VideoPoster) VideoPoster.openSearch();
+    });
+
     document.addEventListener('soulsync:video-page-shown', onPageShown);
     document.addEventListener('soulsync:video-scan-progress', onDashScanProgress);
     document.addEventListener('soulsync:video-scan-done', onDashScanDone);

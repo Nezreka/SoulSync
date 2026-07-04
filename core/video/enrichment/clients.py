@@ -197,6 +197,27 @@ class TMDBClient:
         self._fill_collection(out)
         return out
 
+    def poster_options(self, kind, tmdb_id):
+        """Just the poster art for a title (for the poster manager) — a light
+        /images call, no detail/credits. Returns [{thumb, full, lang, vote}] with
+        English + textless posters first so the grid leads with clean covers."""
+        if not self.api_key or tmdb_id is None:
+            return []
+        import requests
+        path = ("/movie/" if kind == "movie" else "/tv/") + str(tmdb_id) + "/images"
+        r = requests.get(self.BASE + path, params={"api_key": self.api_key}, timeout=15)
+        r.raise_for_status()
+        out = []
+        for p in (r.json() or {}).get("posters") or []:
+            fp = p.get("file_path")
+            if not fp:
+                continue
+            out.append({"thumb": self.POSTER_W + fp, "full": self.IMG + fp,
+                        "lang": p.get("iso_639_1") or None, "vote": p.get("vote_average") or 0})
+        # en → textless(null) → other language, each by descending vote.
+        out.sort(key=lambda x: (0 if x["lang"] == "en" else 1 if not x["lang"] else 2, -x["vote"]))
+        return out[:40]
+
     def _fill_collection(self, out):
         """Second call: pull the films of a movie collection (franchise)."""
         coll = out.get("collection")
