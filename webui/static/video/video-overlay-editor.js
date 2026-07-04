@@ -38,6 +38,71 @@
     ];
     function fontStack(id) { for (var i = 0; i < FONTS.length; i++) if (FONTS[i].id === id) return FONTS[i].stack; return FONTS[0].stack; }
 
+    // ── dynamic-badge fields: each maps sample data → the badge's display text.
+    // `fmt` returns null when there's no value (the editor then shows a placeholder;
+    // at apply time such a badge would simply not render). `opts`/`num`/text drive
+    // the sample-data editor controls. ─────────────────────────────────────────
+    function up(v) { return String(v).toUpperCase(); }
+    var FIELDS = {
+        resolution: { label: 'Resolution', cat: 'Quality', opts: ['2160p', '1080p', '720p', '480p'], fmt: function (v) {
+            if (!v) return null; var s = String(v).toLowerCase();
+            if (s.indexOf('2160') > -1 || s === '4k') return '4K';
+            if (s.indexOf('1080') > -1) return '1080p';
+            if (s.indexOf('720') > -1) return '720p';
+            if (s.indexOf('480') > -1 || s.indexOf('576') > -1) return 'SD'; return up(v); } },
+        hdr: { label: 'HDR / DV', cat: 'Quality', opts: ['HDR', 'HDR10+', 'Dolby Vision', ''], fmt: function (v) { return v ? up(v) : null; } },
+        video_codec: { label: 'Video codec', cat: 'Quality', opts: ['hevc', 'h264', 'av1', 'vp9'], fmt: function (v) {
+            if (!v) return null; var s = String(v).toLowerCase();
+            if (s.indexOf('hevc') > -1 || s.indexOf('265') > -1) return 'HEVC';
+            if (s.indexOf('264') > -1 || s === 'avc') return 'H.264';
+            if (s.indexOf('av1') > -1) return 'AV1'; if (s.indexOf('vp9') > -1) return 'VP9'; return up(v); } },
+        audio_codec: { label: 'Audio codec', cat: 'Quality', opts: ['atmos', 'truehd', 'dts-hd', 'dts', 'ac3', 'aac'], fmt: function (v) {
+            if (!v) return null; var s = String(v).toLowerCase();
+            if (s.indexOf('atmos') > -1) return 'ATMOS'; if (s.indexOf('truehd') > -1) return 'TrueHD'; return up(v); } },
+        source: { label: 'Source', cat: 'Quality', opts: ['bluray', 'web-dl', 'webrip', 'hdtv', 'remux', 'dvd'], fmt: function (v) {
+            if (!v) return null; var m = { bluray: 'BluRay', 'web-dl': 'WEB-DL', webdl: 'WEB-DL', webrip: 'WEBRip', hdtv: 'HDTV', remux: 'REMUX', dvd: 'DVD' };
+            return m[String(v).toLowerCase()] || up(v); } },
+        imdb: { label: 'IMDb rating', cat: 'Ratings', num: true, fmt: function (v) { return v == null ? null : 'IMDb ' + (Math.round(v * 10) / 10); } },
+        rt: { label: 'Rotten Tomatoes', cat: 'Ratings', num: true, fmt: function (v) { return v == null ? null : 'RT ' + v + '%'; } },
+        metacritic: { label: 'Metacritic', cat: 'Ratings', num: true, fmt: function (v) { return v == null ? null : 'MC ' + v; } },
+        tmdb: { label: 'TMDB rating', cat: 'Ratings', num: true, fmt: function (v) { return v == null ? null : 'TMDB ' + (Math.round(v * 10) / 10); } },
+        content_rating: { label: 'Content rating', cat: 'Details', opts: ['G', 'PG', 'PG-13', 'R', 'NC-17', 'TV-Y', 'TV-PG', 'TV-14', 'TV-MA'], fmt: function (v) { return v ? up(v) : null; } },
+        status: { label: 'Status', cat: 'Details', opts: ['Returning', 'Ended', 'Released', 'Upcoming', 'Canceled'], fmt: function (v) {
+            if (!v) return null; var s = String(v).toLowerCase();
+            if (s.indexOf('cancel') > -1) return 'Canceled'; if (s.indexOf('end') > -1) return 'Ended';
+            if (s.indexOf('continu') > -1 || s.indexOf('return') > -1) return 'Returning';
+            if (s.indexOf('releas') > -1) return 'Released';
+            if (s.indexOf('upcom') > -1 || s.indexOf('announc') > -1 || s.indexOf('production') > -1) return 'Upcoming'; return up(v); } },
+        year: { label: 'Year', cat: 'Details', num: true, fmt: function (v) { return v == null ? null : String(v); } },
+        runtime: { label: 'Runtime', cat: 'Details', num: true, fmt: function (v) {
+            if (v == null) return null; var h = Math.floor(v / 60), m = v % 60; return h ? (h + 'h' + (m ? ' ' + m + 'm' : '')) : (m + 'm'); } },
+        season_count: { label: 'Seasons', cat: 'Details', num: true, fmt: function (v) { return v == null ? null : v + ' Season' + (v == 1 ? '' : 's'); } },
+        episode_count: { label: 'Episodes', cat: 'Details', num: true, fmt: function (v) { return v == null ? null : v + ' Episodes'; } },
+        title: { label: 'Title', cat: 'Details', text: true, fmt: function (v) { return v ? String(v) : null; } },
+        network: { label: 'Network', cat: 'Details', text: true, fmt: function (v) { return v ? String(v) : null; } },
+        studio: { label: 'Studio', cat: 'Details', text: true, fmt: function (v) { return v ? String(v) : null; } },
+    };
+    var FIELD_ORDER = ['resolution', 'hdr', 'video_codec', 'audio_codec', 'source', 'imdb', 'rt', 'metacritic', 'tmdb',
+        'content_rating', 'status', 'year', 'runtime', 'season_count', 'episode_count', 'title', 'network', 'studio'];
+    var FIELD_CATS = ['Quality', 'Ratings', 'Details'];
+
+    function defaultSample() {
+        return { resolution: '2160p', hdr: 'HDR', video_codec: 'hevc', audio_codec: 'atmos', source: 'bluray',
+            imdb: 8.4, rt: 92, metacritic: 81, tmdb: 8.1, content_rating: 'PG-13', status: 'Returning',
+            year: 2021, runtime: 148, season_count: 4, episode_count: 62, title: 'Example Title', network: 'HBO', studio: 'A24' };
+    }
+    // real values win; nulls fall back to the defaults so no badge previews blank.
+    function mergeSample(real) {
+        var d = defaultSample(); if (!real) return d;
+        FIELD_ORDER.forEach(function (k) { if (real[k] != null && real[k] !== '') d[k] = real[k]; });
+        return d;
+    }
+    function resolveBinding(b) {
+        var f = FIELDS[b.field]; if (!f) return '?';
+        var out = f.fmt(ed.sample ? ed.sample[b.field] : null);
+        return out == null ? '[' + f.label + ']' : out;
+    }
+
     // ── 9-point anchors: fraction of the ELEMENT that pins to (x,y). ───────────
     var ANCHORS = {
         'top-left': [0, 0], 'top-center': [0.5, 0], 'top-right': [1, 0],
@@ -57,7 +122,13 @@
         copy: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
         back: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>',
         save: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>',
+        badge: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="10" rx="3"/><path d="M7 12h2m3 0h5"/></svg>',
+        star: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.2l5.9-.9L12 3Z"/></svg>',
+        info: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>',
+        chev: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>',
+        poster: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M4 15l4-4 3 3 3-3 6 6"/></svg>',
     };
+    function catIcon(cat) { return cat === 'Ratings' ? I.star : cat === 'Quality' ? I.badge : I.info; }
 
     // ── overlay + view state ────────────────────────────────────────────────────
     var overlay = null;         // the .voe-overlay root
@@ -82,6 +153,7 @@
 
     function hardClose() {
         if (!overlay) return;
+        closePop();
         overlay.classList.remove('voe-overlay--on');
         document.body.classList.remove('vdh-locked');
         if (resizeBound) { window.removeEventListener('resize', resizeBound); resizeBound = null; }
@@ -195,6 +267,7 @@
                 layers: (def.layers || []).map(normalizeLayer),
                 selected: null, dirty: false,
                 stage: null, W: 0, H: 0,
+                sample: defaultSample(), previewTitle: null, bg: null,
             };
             renderEditor();
         }).catch(function () { toast('Could not open template', 'error'); showGallery(); });
@@ -244,6 +317,10 @@
             '<div class="voe-editor">' +
                 '<div class="voe-palette">' + paletteHTML() + '</div>' +
                 '<div class="voe-canvas-wrap" data-voe-canvaswrap>' +
+                    '<div class="voe-canvas-bar">' +
+                        '<button class="voe-btn" data-voe-preview>' + I.poster + ' <span data-voe-previewname>Sample poster</span> ' + I.chev + '</button>' +
+                        '<button class="voe-btn" data-voe-sampledata>' + I.info + ' Sample data ' + I.chev + '</button>' +
+                    '</div>' +
                     '<div class="voe-stage" data-voe-stage>' +
                         '<div class="voe-stage-ph" data-voe-ph>Drag elements from the left onto the poster.<br>This background is just a preview — only the overlay is saved.</div>' +
                         '<div class="voe-drop-hint">Drop to add</div>' +
@@ -267,15 +344,30 @@
         wirePalette();
         var stage = overlay.querySelector('[data-voe-stage]');
         stage.addEventListener('pointerdown', onStagePointerDown);
+        overlay.querySelector('[data-voe-preview]').addEventListener('click', function (e) { openPreviewPop(e.currentTarget); });
+        overlay.querySelector('[data-voe-sampledata]').addEventListener('click', function (e) { openSamplePop(e.currentTarget); });
 
         resizeBound = function () { measureStage(); relayoutAll(); };
         window.addEventListener('resize', resizeBound);
 
         measureStage();
+        applyStageBg();
         renderStageLayers();
         renderLayersPanel();
         renderInspector();
         updateSaveState();
+        updatePreviewName();
+    }
+
+    function applyStageBg() {
+        if (!ed.stage) return;
+        ed.stage.style.backgroundImage = ed.bg ? "url('" + ed.bg + "')" : '';
+        var ph = ed.stage.querySelector('[data-voe-ph]');
+        if (ph) ph.style.display = (ed.bg || ed.layers.length) ? 'none' : '';
+    }
+    function updatePreviewName() {
+        var n = overlay && overlay.querySelector('[data-voe-previewname]');
+        if (n) n.textContent = ed.previewTitle ? ed.previewTitle.title : 'Sample poster';
     }
 
     function measureStage() {
@@ -285,14 +377,19 @@
         ed.stage = stage; ed.W = r.width; ed.H = r.height;
     }
 
-    // ── palette (1a: Text only; grows in later phases) ──────────────────────────
+    // ── palette (Text + dynamic data badges grouped by category) ────────────────
     function paletteHTML() {
-        return '<div class="voe-pal-section"><div class="voe-pal-h">Basics</div><div class="voe-pal-grid">' +
-            palItem('text', 'Text', I.text) +
-            '</div></div>';
+        var html = '<div class="voe-pal-section"><div class="voe-pal-h">Basics</div><div class="voe-pal-grid">' +
+            palItem('text', 'Text', I.text, '') + '</div></div>';
+        FIELD_CATS.forEach(function (cat) {
+            var items = FIELD_ORDER.filter(function (k) { return FIELDS[k].cat === cat; });
+            html += '<div class="voe-pal-section"><div class="voe-pal-h">' + cat + '</div><div class="voe-pal-grid">' +
+                items.map(function (k) { return palItem('badge', FIELDS[k].label, catIcon(cat), k); }).join('') + '</div></div>';
+        });
+        return html;
     }
-    function palItem(kind, label, icon) {
-        return '<div class="voe-pal-item" data-voe-add="' + kind + '" title="' + esc(label) + '">' +
+    function palItem(kind, label, icon, field) {
+        return '<div class="voe-pal-item" data-voe-add="' + kind + '" data-field="' + esc(field || '') + '" title="' + esc(label) + '">' +
             '<span class="voe-pal-ic">' + icon + '</span><span class="voe-pal-label">' + esc(label) + '</span></div>';
     }
     function wirePalette() {
@@ -302,23 +399,30 @@
     }
 
     // ── add / create layers ─────────────────────────────────────────────────────
-    function defaultLayer(kind, x, y) {
-        var base = { id: uid(), type: kind, anchor: 'center', x: x, y: y, hidden: false, opacity: 1 };
-        if (kind === 'text') {
-            base.name = 'Text'; base.text = 'New Text'; base.size = 0.06;
-            base.color = '#ffffff'; base.font = 'Inter'; base.weight = 800; base.align = 'center';
-            base.shadow = true;
-            base.bg = { enabled: false, color: '#000000', opacity: 0.6, radius: 0.014, padX: 0.022, padY: 0.012 };
+    // All layers are text under the hood; a `binding` makes one a dynamic badge, so
+    // every text/pill style control applies to badges too.
+    function defaultLayer(kind, x, y, field) {
+        var base = { id: uid(), type: 'text', anchor: 'center', x: x, y: y, hidden: false, opacity: 1,
+            text: 'New Text', size: 0.06, color: '#ffffff', font: 'Inter', weight: 800, align: 'center', shadow: true,
+            bg: { enabled: false, color: '#000000', opacity: 0.6, radius: 0.014, padX: 0.022, padY: 0.012 } };
+        if (kind === 'badge' && field && FIELDS[field]) {
+            base.binding = { field: field };
+            base.name = FIELDS[field].label;
+            base.size = 0.045; base.shadow = false;
+            base.bg = { enabled: true, color: '#000000', opacity: 0.72, radius: 0.022, padX: 0.032, padY: 0.017 };
+        } else {
+            base.name = 'Text';
         }
         return base;
     }
-    function addLayer(kind, x, y) {
-        var l = defaultLayer(kind, x, y);
+    function addLayer(kind, x, y, field) {
+        var l = defaultLayer(kind, x, y, field);
         ed.layers.push(l);              // paint order: last = front
         ed.selected = l.id;
         markDirty();
         renderStageLayers();
         renderLayersPanel();
+        renderInspector();
         return l;
     }
 
@@ -326,6 +430,7 @@
     function startPaletteDrag(e, item) {
         e.preventDefault();
         var kind = item.getAttribute('data-voe-add');
+        var field = item.getAttribute('data-field') || '';
         var startX = e.clientX, startY = e.clientY, dragging = false, ghost = null;
         var stage = ed.stage;
 
@@ -350,10 +455,10 @@
             item.classList.remove('voe-dragging');
             stage.classList.remove('voe-stage--dropping');
             if (ghost) ghost.remove();
-            if (!dragging) { addLayer(kind, 0.5, 0.5); return; }   // a click → add centered
+            if (!dragging) { addLayer(kind, 0.5, 0.5, field); return; }   // a click → add centered
             if (overStage(ev)) {
                 var r = stage.getBoundingClientRect();
-                addLayer(kind, clamp01((ev.clientX - r.left) / r.width), clamp01((ev.clientY - r.top) / r.height));
+                addLayer(kind, clamp01((ev.clientX - r.left) / r.width), clamp01((ev.clientY - r.top) / r.height), field);
             }
         }
         document.addEventListener('pointermove', move);
@@ -394,7 +499,7 @@
         el.style.opacity = (l.opacity != null ? l.opacity : 1);
         if (l.type === 'text') {
             el.classList.add('voe-layer-text');
-            el.textContent = l.text || '';
+            el.textContent = l.binding ? resolveBinding(l.binding) : (l.text || '');
             el.style.color = l.color;
             el.style.fontFamily = fontStack(l.font);
             el.style.fontWeight = l.weight;
@@ -522,8 +627,8 @@
     }
 
     // ── layers panel (scene list) ───────────────────────────────────────────────
-    function layerIcon(l) { return l.type === 'text' ? I.text : I.text; }
-    function layerName(l) { return l.name || (l.type === 'text' ? (l.text || 'Text') : l.type); }
+    function layerIcon(l) { return l.binding ? catIcon((FIELDS[l.binding.field] || {}).cat) : I.text; }
+    function layerName(l) { return l.name || (l.binding ? (FIELDS[l.binding.field] || {}).label : (l.text || 'Text')); }
 
     function renderLayersPanel() {
         var box = overlay && overlay.querySelector('[data-voe-layers]');
@@ -671,6 +776,12 @@
             '<input class="voe-input" data-insphex="' + key + '" value="' + esc(val) + '" spellcheck="false"></div>';
     }
     function toggle(key, on) { return '<button class="voe-toggle' + (on ? ' voe-toggle--on' : '') + '" data-insptoggle="' + key + '"></button>'; }
+    function dataFieldSelect(cur) {
+        return '<select class="voe-input" data-inspbind>' + FIELD_CATS.map(function (cat) {
+            return '<optgroup label="' + cat + '">' + FIELD_ORDER.filter(function (k) { return FIELDS[k].cat === cat; })
+                .map(function (k) { return '<option value="' + k + '"' + (k === cur ? ' selected' : '') + '>' + esc(FIELDS[k].label) + '</option>'; }).join('') + '</optgroup>';
+        }).join('') + '</select>';
+    }
     function anchorGrid(l) {
         return field('Anchor', '<div class="voe-anchor-grid">' + ANCHOR_ORDER.map(function (a) {
             return '<div class="voe-anchor-cell' + (a === l.anchor ? ' voe-anchor-cell--on' : '') + '" data-anchor="' + a + '" title="' + a + '"></div>';
@@ -691,8 +802,13 @@
             (l.type === 'text' ? field('Size', numInput('size', pct(l.size), '%')) : '') +
             field('Opacity', sliderInput('opacity', Math.round(l.opacity * 100))));
         if (l.type === 'text') {
-            html += inspSection('Text',
-                field('Text', '<textarea class="voe-input voe-textarea" data-insptext>' + esc(l.text) + '</textarea>') +
+            if (l.binding) {
+                html += inspSection('Data',
+                    field('Field', dataFieldSelect(l.binding.field)) +
+                    field('Shows', '<span class="voe-data-preview">' + esc(resolveBinding(l.binding)) + '</span>'));
+            }
+            html += inspSection(l.binding ? 'Style' : 'Text',
+                (l.binding ? '' : field('Text', '<textarea class="voe-input voe-textarea" data-insptext>' + esc(l.text) + '</textarea>')) +
                 field('Font', fontSelect(l.font)) +
                 field('Weight', weightSelect(l.weight)) +
                 field('Align', alignSeg(l.align)) +
@@ -738,6 +854,11 @@
         var ta = box.querySelector('[data-insptext]');
         if (ta) ta.addEventListener('input', function () {
             l.text = ta.value; refreshLayer(l.id); updateRowName(l.id); markDirty();
+        });
+        var bind = box.querySelector('[data-inspbind]');
+        if (bind) bind.addEventListener('change', function () {
+            l.binding.field = bind.value; l.name = FIELDS[bind.value].label;
+            refreshLayer(l.id); updateRowName(l.id); markDirty(); renderInspector();
         });
         box.querySelectorAll('[data-inspsel]').forEach(function (sel) {
             var key = sel.getAttribute('data-inspsel');
@@ -816,6 +937,119 @@
             .catch(function () { toast('Could not save template', 'error'); });
     }
 
+    // ── preview poster + sample data (dynamic-badge preview) ────────────────────
+    function refreshBoundLayers() {
+        ed.layers.forEach(function (l) { if (l.binding) refreshLayer(l.id); });
+        if (ed.selected) { var s = layerById(ed.selected); if (s && s.binding) renderInspector(); }
+    }
+
+    var openPop = null;
+    function closePop() { if (openPop) { openPop.close(); openPop = null; } }
+    function popover(anchor, html) {
+        closePop();
+        var el = document.createElement('div');
+        el.className = 'voe-pop';
+        el.innerHTML = html;
+        document.body.appendChild(el);
+        var r = anchor.getBoundingClientRect();
+        el.style.left = Math.max(12, Math.min(r.left, window.innerWidth - el.offsetWidth - 12)) + 'px';
+        el.style.top = (r.bottom + 8) + 'px';
+        requestAnimationFrame(function () { el.classList.add('voe-pop--on'); });
+        function outside(e) { if (!el.contains(e.target) && !anchor.contains(e.target)) closePop(); }
+        setTimeout(function () { document.addEventListener('pointerdown', outside); }, 0);
+        openPop = { el: el, close: function () {
+            document.removeEventListener('pointerdown', outside);
+            el.classList.remove('voe-pop--on'); setTimeout(function () { if (el.parentNode) el.remove(); }, 160);
+        } };
+        return el;
+    }
+
+    function openPreviewPop(anchor) {
+        var el = popover(anchor,
+            '<div class="voe-pop-h">Preview poster</div>' +
+            '<div class="voe-pop-note">Pick a real title to preview against — it also loads that title’s real values into your badges. Preview only, never saved.</div>' +
+            '<div class="voe-pop-search"><input class="voe-input" data-pop-search placeholder="Search your library…" autocomplete="off"></div>' +
+            (ed.bg ? '<div class="voe-pop-clear"><button class="voe-btn" data-pop-blank style="width:100%;justify-content:center">Use blank poster</button></div>' : '') +
+            '<div class="voe-pop-body" data-pop-results><div class="voe-pop-empty">Type to search your movies &amp; shows.</div></div>');
+        var input = el.querySelector('[data-pop-search]');
+        var blank = el.querySelector('[data-pop-blank]');
+        if (blank) blank.addEventListener('click', function () { ed.bg = null; ed.previewTitle = null; applyStageBg(); updatePreviewName(); closePop(); });
+        var t = null;
+        input.addEventListener('input', function () { clearTimeout(t); var q = input.value.trim(); t = setTimeout(function () { previewSearch(q, el); }, 240); });
+        setTimeout(function () { input.focus(); }, 40);
+    }
+    function previewSearch(q, el) {
+        var box = el.querySelector('[data-pop-results]');
+        if (q.length < 2) { box.innerHTML = '<div class="voe-pop-empty">Type to search your movies &amp; shows.</div>'; return; }
+        box.innerHTML = '<div class="voe-pop-empty">Searching…</div>';
+        function one(kind) {
+            return api('GET', '/api/video/library?kind=' + kind + '&search=' + encodeURIComponent(q) + '&limit=8')
+                .then(function (d) { return (d && d.items) || []; }).catch(function () { return []; });
+        }
+        Promise.all([one('movies'), one('shows')]).then(function (r) {
+            var rows = [];
+            (r[0] || []).forEach(function (m) { rows.push({ kind: 'movie', id: m.id, title: m.title, year: m.year, hasPoster: m.has_poster }); });
+            (r[1] || []).forEach(function (s) { rows.push({ kind: 'show', id: s.id, title: s.title, year: s.year, hasPoster: s.has_poster }); });
+            if (!rows.length) { box.innerHTML = '<div class="voe-pop-empty">No matches in your library.</div>'; return; }
+            box.innerHTML = rows.map(function (it) {
+                var thumb = it.hasPoster ? '/api/video/poster/' + it.kind + '/' + it.id + '?w=60' : '';
+                return '<div class="voe-pop-result" data-pick="' + esc(JSON.stringify(it)) + '">' +
+                    (thumb ? '<img src="' + esc(thumb) + '" alt="">' : '<img alt="">') +
+                    '<div style="min-width:0"><div class="voe-pop-result-t">' + esc(it.title) + '</div>' +
+                    '<div class="voe-pop-result-m">' + (it.kind === 'show' ? 'TV' : 'Movie') + (it.year ? ' · ' + esc(it.year) : '') + '</div></div></div>';
+            }).join('');
+            box.querySelectorAll('[data-pick]').forEach(function (row) {
+                row.addEventListener('click', function () { setPreviewTitle(JSON.parse(row.getAttribute('data-pick'))); });
+            });
+        });
+    }
+    function setPreviewTitle(it) {
+        ed.previewTitle = { kind: it.kind, id: it.id, title: it.title };
+        ed.bg = '/api/video/poster/' + it.kind + '/' + it.id;
+        applyStageBg(); updatePreviewName(); closePop();
+        api('GET', '/api/video/overlays/sample/' + it.kind + '/' + it.id).then(function (d) {
+            if (d && d.sample) { ed.sample = mergeSample(d.sample); refreshBoundLayers(); }
+        }).catch(function () { /* keep defaults */ });
+    }
+
+    function openSamplePop(anchor) {
+        var used = [];
+        ed.layers.forEach(function (l) { if (l.binding && used.indexOf(l.binding.field) === -1) used.push(l.binding.field); });
+        var rest = FIELD_ORDER.filter(function (k) { return used.indexOf(k) === -1; });
+        function group(title, keys) {
+            if (!keys.length) return '';
+            return '<div class="voe-pop-grp">' + title + '</div>' + keys.map(sampleRow).join('');
+        }
+        var body = (used.length ? group('In this template', used) : '') + group(used.length ? 'Other fields' : 'All fields', rest);
+        var el = popover(anchor,
+            '<div class="voe-pop-h">Sample data</div>' +
+            '<div class="voe-pop-note">Tweak values to preview how badges react in different cases. Preview only — never changes your library or the template.</div>' +
+            '<div class="voe-pop-body">' + body + '</div>');
+        el.querySelectorAll('[data-sfield]').forEach(function (inp) {
+            var key = inp.getAttribute('data-sfield');
+            inp.addEventListener('input', function () {
+                var f = FIELDS[key], v = inp.value;
+                ed.sample[key] = f.num ? (v === '' ? null : parseFloat(v)) : v;
+                refreshBoundLayers();
+            });
+        });
+    }
+    function sampleRow(key) {
+        var f = FIELDS[key], v = ed.sample[key];
+        var ctrl;
+        if (f.opts) {
+            ctrl = '<select class="voe-input" data-sfield="' + key + '">' + f.opts.map(function (o) {
+                var lbl = o === '' ? '—' : (f.fmt(o) || o);
+                return '<option value="' + esc(o) + '"' + (String(o) === String(v == null ? '' : v) ? ' selected' : '') + '>' + esc(lbl) + '</option>';
+            }).join('') + '</select>';
+        } else if (f.num) {
+            ctrl = '<input class="voe-input voe-input--num" type="number" step="any" data-sfield="' + key + '" value="' + (v == null ? '' : v) + '">';
+        } else {
+            ctrl = '<input class="voe-input" data-sfield="' + key + '" value="' + esc(v == null ? '' : v) + '">';
+        }
+        return '<div class="voe-pop-row"><div class="voe-pop-row-l">' + esc(f.label) + '</div><div class="voe-pop-row-c">' + ctrl + '</div></div>';
+    }
+
     // ── confirm dialog ──────────────────────────────────────────────────────────
     function confirmDialog(title, msg, action, onYes) {
         var back = document.createElement('div');
@@ -844,6 +1078,7 @@
     // Esc closes (unless editing text / a confirm is up)
     document.addEventListener('keydown', function (e) {
         if (e.key !== 'Escape' || !overlay || !overlay.classList.contains('voe-overlay--on')) return;
+        if (openPop) { closePop(); return; }
         if (document.querySelector('.voe-confirm-back')) return;
         if (document.activeElement && document.activeElement.getAttribute('contenteditable') === 'true') return;
         if (document.activeElement && document.activeElement.classList.contains('voe-name-input')) return;

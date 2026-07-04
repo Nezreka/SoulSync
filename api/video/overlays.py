@@ -82,3 +82,15 @@ def register_routes(bp):
         if tid is None:
             return jsonify({"ok": False, "error": "Could not duplicate"}), 404
         return jsonify({"ok": True, "id": tid})
+
+    @bp.route("/overlays/sample/<kind>/<int:item_id>", methods=["GET"])
+    def overlay_sample(kind, item_id):
+        """Real badge values for a library item — the editor's "load from a real
+        title" so dynamic badges preview against actual data."""
+        from . import get_video_db
+        if kind not in ("movie", "show"):
+            return jsonify({"error": "kind must be 'movie' or 'show'"}), 400
+        data = get_video_db().overlay_sample_data(kind, item_id)
+        if data is None:
+            return jsonify({"error": "Not found"}), 404
+        return jsonify({"sample": data})
