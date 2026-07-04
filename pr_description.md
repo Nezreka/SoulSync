@@ -1,19 +1,13 @@
-# soulsync 2.8.5 — `dev` → `main`
+# soulsync 2.8.51 — `dev` → `main`
 
-a focused bug-fix release. no new features — just a batch of import, library, repair, and webui fixes, several from user reports this week.
+quick hotfix on top of 2.8.5 for one fresh-install bug.
 
 ---
 
-## 🐛 fixes
+## #983 — watchlist artist settings errored on a fresh install
 
-### import & metadata
-- **Import & Stats were a black screen for some people (#979)** — those two pages are the React-built ones, loaded as module scripts. on setups where the OS handed the `.js` bundle over with the wrong MIME type (common on Windows), the browser refused to run it and the page went black while everything else worked. we now force the correct type ourselves, so the OS can't blank those pages.
-- **iTunes singles landed in "Unknown Artist" with no album tag (#980)** — an iTunes single reached the importer with no album name, so it dropped into `Unknown Artist/Unknown Album`, got no album tag, and didn't match its release. a single's album is effectively its own title now, so it files correctly and tags properly.
-- **single-disc albums got a "01-" on every track (#981)** — `$disc`/`$discnum` in a file template always stamped the disc number, even on a 1-disc album. they're smart now (like `$cdnum`): empty on single-disc, shown only for real multi-disc sets. applies to both fresh imports and rename/reorganize.
+on a brand-new database, opening a watchlist artist's settings could fail with `no such column: preferred_metadata_source` (restarting worked around it).
 
-### library safety & repair
-- **never delete a configured root folder during cleanup (#976)** — the empty-dir cleanup could remove a folder you'd set as a root; it leaves configured roots alone now, and self-heals a missing staging/import folder if a sweep removed it.
-- **repair "Fix All" for libraries outside the transfer path (#978)** — path-mismatch "Fix All" did nothing for libraries stored outside the transfer folder; it works everywhere now, updates the DB by track id for media-server parity, and the unknown-artist fix no longer yanks media-server files into the transfer folder.
-- **discography backfill only touches artists you own (#977)** — the repair backfill was reaching beyond your owned artists; scoped back to what you actually have.
+root cause: first-run setup rebuilds the `watchlist_artists` table (for profile-scoped uniqueness) by copying it from a hardcoded column list — and that list was missing two newer columns (`preferred_metadata_source`, `auto_download`) that get added by later ALTER migrations. on a fresh install the rebuild fires right after those columns are created, silently dropping them. the artist-config endpoint reads `preferred_metadata_source` directly, so it 500'd until a restart's ALTER re-added it. upgraders never hit it — their columns already existed before that rebuild ran.
 
-enjoy 🎶
+fix: added both columns to every rebuild path so they survive. regression tests added that fail on the old code with the exact error and pass on the fix. same bug class as the earlier `amazon_artist_id` fix.
