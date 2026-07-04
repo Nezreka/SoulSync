@@ -170,6 +170,22 @@
     background: radial-gradient(120% 90% at 50% 0%, #262631, #101016 72%);
     color: rgba(255,255,255,.28); font-size: 13px; font-weight: 600;
 }
+/* selection frame — corner resize handles + a rotate handle */
+.voe-selbox { position: absolute; z-index: 38; box-sizing: border-box; pointer-events: none;
+    border: 1.5px solid rgb(var(--a)); box-shadow: 0 0 0 1px rgba(0,0,0,.35); }
+.voe-sel-h { position: absolute; width: 11px; height: 11px; border-radius: 3px; pointer-events: auto;
+    background: #fff; border: 1.5px solid rgb(var(--a)); box-shadow: 0 1px 3px rgba(0,0,0,.5); }
+.voe-sel-h--tl { left: -6px; top: -6px; cursor: nwse-resize; }
+.voe-sel-h--tr { right: -6px; top: -6px; cursor: nesw-resize; }
+.voe-sel-h--br { right: -6px; bottom: -6px; cursor: nwse-resize; }
+.voe-sel-h--bl { left: -6px; bottom: -6px; cursor: nesw-resize; }
+.voe-sel-rot-line { position: absolute; left: 50%; top: -22px; width: 1.5px; height: 22px;
+    background: rgb(var(--a)); transform: translateX(-50%); pointer-events: none; }
+.voe-sel-rot { position: absolute; left: 50%; top: -30px; width: 15px; height: 15px; border-radius: 50%;
+    transform: translateX(-50%); pointer-events: auto; cursor: grab; background: #fff;
+    border: 1.5px solid rgb(var(--a)); box-shadow: 0 1px 4px rgba(0,0,0,.5); }
+.voe-sel-rot:active { cursor: grabbing; }
+
 .voe-guide { position: absolute; z-index: 35; display: none; background: rgb(var(--a)); pointer-events: none;
     box-shadow: 0 0 6px rgba(var(--a),.85); }
 .voe-guide--v { top: 0; bottom: 0; width: 1px; }

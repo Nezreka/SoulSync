@@ -236,9 +236,18 @@ def render_overlay(base_bytes: bytes, definition: dict, values: dict | None = No
         opacity = _as_float(layer.get("opacity"), 1.0)
         if opacity < 1.0:
             tile.putalpha(tile.getchannel("A").point(lambda a, o=opacity: int(a * o)))
+        # Anchor the un-rotated box, then rotate around its centre (matches the
+        # editor's transform-origin:center). CSS rotate() is clockwise; PIL is CCW,
+        # so negate. expand=True grows the tile; re-centre it on the same point.
+        ew0, eh0 = tile.size
+        ax, ay = _ANCHOR.get(layer.get("anchor") or "center", _ANCHOR["center"])
+        cx = _as_float(layer.get("x"), 0.5) * W - ax * ew0 + ew0 / 2
+        cy = _as_float(layer.get("y"), 0.5) * H - ay * eh0 + eh0 / 2
+        rot = _as_float(layer.get("rotation"), 0.0)
+        if rot:
+            tile = tile.rotate(-rot, resample=Image.BICUBIC, expand=True)
         ew, eh = tile.size
-        left, top = _place(_as_float(layer.get("x"), 0.5), _as_float(layer.get("y"), 0.5),
-                            W, H, ew, eh, layer.get("anchor") or "center")
+        left, top = int(round(cx - ew / 2)), int(round(cy - eh / 2))
         stamp = Image.new("RGBA", (W, H), (0, 0, 0, 0))
         stamp.paste(tile, (left, top), tile)   # paste clips to canvas bounds
         canvas = Image.alpha_composite(canvas, stamp)
