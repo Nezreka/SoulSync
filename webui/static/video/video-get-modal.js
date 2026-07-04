@@ -534,6 +534,10 @@
             renderOwned(d);
         }
         updateFooter();
+        // "Get Missing" (show detail page) asks to land straight in the download
+        // view — the season/episode grab tree — rather than the details step.
+        // Only meaningful for shows; the detail (_detail) it needs is set above.
+        if (o && o.startDownload && o.kind === 'show') enterDownload(modalEl, o);
     }
 
     // Ratings strip: branded chips for whichever scores the payload carries.
