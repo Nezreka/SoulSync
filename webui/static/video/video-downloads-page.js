@@ -16,6 +16,8 @@
     var _timer = null, _wired = false, _filter = 'all';
     var _cards = {};
     var _expanded = {};   // id -> true while a card's detail drawer is open (survives re-patches)
+    var _groups = {};     // group key -> parent element (same-show+season episode batches)
+    var _gcollapse = {};  // group key -> true while collapsed
     var _meta = {};       // id -> TMDB detail (overview/cast) once lazily fetched (null = in flight)
 
     function esc(s) {
@@ -70,6 +72,65 @@
     var R_SVG = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>';
     var OPEN_SVG = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>';
 
+    // Downloads of the same show + season collapse into one parent card (≥2 members).
+    function groupKey(d) {
+        if ((d.kind || '').toLowerCase() !== 'show') return null;
+        var c = parseCtx(d);
+        if (c.season == null || c.episode == null) return null;
+        return 'g:' + (d.media_id || d.title || '?') + ':s' + c.season;
+    }
+
+    function makeGroup(key) {
+        var el = document.createElement('div');
+        el.className = 'vdpg-group';
+        el.setAttribute('data-vdpg-group', key);
+        el.innerHTML =
+            '<div class="vdpg-group-head" data-vdpg-group-toggle="' + esc(key) + '">' +
+                '<span class="vdpg-group-caret" data-f="caret">▾</span>' +
+                '<div class="vdpg-group-art" data-f="art">📺</div>' +
+                '<div class="vdpg-group-info">' +
+                    '<div class="vdpg-group-title" data-f="title"></div>' +
+                    '<div class="vdpg-group-sub" data-f="sub"></div>' +
+                    '<div class="vdpg-prog vdpg-group-prog" data-f="bar" style="display:none"><div class="vdpg-prog-fill" data-f="fill"></div></div>' +
+                '</div>' +
+                '<div class="vdpg-group-status" data-f="status"></div>' +
+                '<div class="vdpg-group-act" data-f="act"></div>' +
+            '</div>' +
+            '<div class="vdpg-group-body" data-vdpg-group-body></div>';
+        return el;
+    }
+
+    function patchGroup(el, members, key) {
+        var first = members[0], c0 = parseCtx(first);
+        var total = members.length, done = 0, act = 0, fail = 0, pctSum = 0;
+        members.forEach(function (d) {
+            if (d.status === 'completed') { done++; pctSum += 100; }
+            else if (isActive(d.status)) { act++; pctSum += Math.max(0, Math.min(100, d.progress || 0)); }
+            else { fail++; }
+        });
+        var t = el.querySelector('[data-f="title"]'); if (t) t.textContent = first.title || 'Show';
+        var seasonTxt = (c0.season != null) ? ('Season ' + c0.season) : 'Episodes';
+        var sub = el.querySelector('[data-f="sub"]');
+        if (sub) sub.textContent = seasonTxt + '  ·  ' + done + '/' + total + ' done' + (fail ? '  ·  ' + fail + ' failed' : '');
+        var bar = el.querySelector('[data-f="bar"]'), fill = el.querySelector('[data-f="fill"]');
+        if (bar) { if (act) { bar.style.display = ''; if (fill) fill.style.width = Math.round(pctSum / total) + '%'; } else { bar.style.display = 'none'; } }
+        var status = el.querySelector('[data-f="status"]');
+        if (status) status.textContent = act ? (act + ' active') : (done === total ? '✓ done' : (fail + ' failed'));
+        var art = el.querySelector('[data-f="art"]');
+        if (art && first.poster_url && art._p !== first.poster_url) {
+            art._p = first.poster_url; art.style.backgroundImage = "url('" + first.poster_url + "')";
+            art.classList.add('vdpg-has-poster'); art.textContent = '';
+        }
+        var act2 = el.querySelector('[data-f="act"]');
+        if (act2) {
+            var wantAct = act ? '<button class="adl-row-cancel" type="button" data-vdpg-group-cancel="' + esc(key) + '" title="Cancel all in this batch">' + X_SVG + '</button>' : '';
+            if (act2.innerHTML !== wantAct) act2.innerHTML = wantAct;
+        }
+        var collapsed = !!_gcollapse[key];
+        el.classList.toggle('vdpg-group--collapsed', collapsed);
+        var caret = el.querySelector('[data-f="caret"]'); if (caret) caret.textContent = collapsed ? '▸' : '▾';
+    }
+
     function makeCard(d) {
         var el = document.createElement('div');
         el.className = 'vdpg-card adl-row';
@@ -120,6 +181,12 @@
         }
 
         var name = (d.title || d.release_title || 'Download') + (d.year ? '  (' + d.year + ')' : '');
+        // Episode downloads all share the show title — disambiguate with SxxExx so a
+        // whole season's grabs aren't 14 identical rows (the season-pack case).
+        var _nctx = parseCtx(d);
+        if (_nctx && _nctx.season != null && _nctx.episode != null) {
+            name = (d.title || d.release_title || 'Episode') + ' · S' + pad2(_nctx.season) + 'E' + pad2(_nctx.episode);
+        }
         var nm = q('name'); if (nm.textContent !== name) nm.textContent = name;
 
         // meta: quality chip + a context line (release / size·user·pct / dest)
@@ -368,18 +435,50 @@
             sub.textContent = parts.join('  ·  ');
         }
 
-        var seen = {}, shown = 0;
+        // Group same-show+season episode batches (≥2) into one parent card; keep
+        // everything else standalone. Server order preserved — a group sits where its
+        // first member appears.
+        var gcount = {};
+        list.forEach(function (d) { var k = groupKey(d); if (k) gcount[k] = (gcount[k] || 0) + 1; });
+        var order = [], gidx = {};
         list.forEach(function (d) {
-            seen[d.id] = true;
-            var el = _cards[d.id] || (_cards[d.id] = makeCard(d));
-            patchCard(el, d);
-            var vis = matches(d.status);
-            el.style.display = vis ? '' : 'none';
-            if (vis) shown++;
-            host.appendChild(el);   // keep order = server order (active first); no re-anim
+            var k = groupKey(d);
+            if (k && gcount[k] >= 2) {
+                if (gidx[k] == null) { gidx[k] = order.length; order.push({ group: k, members: [d] }); }
+                else { order[gidx[k]].members.push(d); }
+            } else { order.push({ single: d }); }
+        });
+
+        var seen = {}, seenG = {}, shown = 0;
+        order.forEach(function (u) {
+            if (u.single) {
+                var d = u.single; seen[d.id] = true;
+                var el = _cards[d.id] || (_cards[d.id] = makeCard(d));
+                patchCard(el, d);
+                var vis = matches(d.status); el.style.display = vis ? '' : 'none'; if (vis) shown++;
+                host.appendChild(el);   // server order (active first); no re-anim
+                return;
+            }
+            seenG[u.group] = true;
+            var g = _groups[u.group] || (_groups[u.group] = makeGroup(u.group));
+            host.appendChild(g);
+            var body = g.querySelector('[data-vdpg-group-body]');
+            var visN = 0;
+            u.members.forEach(function (d) {
+                seen[d.id] = true;
+                var el = _cards[d.id] || (_cards[d.id] = makeCard(d));
+                patchCard(el, d);
+                var vis = matches(d.status); el.style.display = vis ? '' : 'none'; if (vis) { visN++; shown++; }
+                body.appendChild(el);
+            });
+            patchGroup(g, u.members, u.group);
+            g.style.display = visN ? '' : 'none';
         });
         Object.keys(_cards).forEach(function (id) {
             if (!seen[id]) { var e = _cards[id]; if (e && e.parentNode) e.parentNode.removeChild(e); delete _cards[id]; }
+        });
+        Object.keys(_groups).forEach(function (k) {
+            if (!seenG[k]) { var e = _groups[k]; if (e && e.parentNode) e.parentNode.removeChild(e); delete _groups[k]; }
         });
 
         if (empty) {
@@ -434,6 +533,30 @@
         });
         var list = document.querySelector('[data-vdpg-list]');
         if (list) list.addEventListener('click', function (e) {
+            // Group header: cancel the whole batch, or collapse/expand it.
+            var gcan = e.target.closest('[data-vdpg-group-cancel]');
+            if (gcan) {
+                var gbody = gcan.closest('.vdpg-group').querySelector('[data-vdpg-group-body]');
+                var ids = [];
+                Array.prototype.forEach.call(gbody.querySelectorAll('.adl-row[data-dl-id]'), function (c) {
+                    if (c.classList.contains('adl-row-active') || c.classList.contains('adl-row-queued')) ids.push(+c.getAttribute('data-dl-id'));
+                });
+                gcan.disabled = true;
+                Promise.all(ids.map(function (id) { return postJSON(URL_CANCEL, { id: id }); }))
+                    .then(function () { toast('Cancelled ' + ids.length + ' download' + (ids.length === 1 ? '' : 's'), 'info'); poll(); });
+                return;
+            }
+            var gtog = e.target.closest('[data-vdpg-group-toggle]');
+            if (gtog) {
+                var gk = gtog.getAttribute('data-vdpg-group-toggle');
+                _gcollapse[gk] = !_gcollapse[gk];
+                var gel = gtog.closest('.vdpg-group');
+                if (gel) {
+                    gel.classList.toggle('vdpg-group--collapsed', _gcollapse[gk]);
+                    var cr = gel.querySelector('[data-f="caret"]'); if (cr) cr.textContent = _gcollapse[gk] ? '▸' : '▾';
+                }
+                return;
+            }
             var op = e.target.closest('[data-vdpg-open]');
             if (op) {
                 var kind = op.getAttribute('data-kind') === 'movie' ? 'movie' : 'show';
