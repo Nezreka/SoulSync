@@ -45,6 +45,11 @@ def _complete_via_file(dl, download_dir, lister, mover, organizer):
     back to the legacy flat move by basename."""
     src = find_completed_file(download_dir, dl.get("filename"), lister)
     if not src:
+        # No file in the download dir. If we already placed it (dest_path set), the
+        # import finished — mark completed rather than looping at 'importing'/100%
+        # (e.g. the process died right after the move but before the status flip).
+        if dl.get("dest_path"):
+            return {"status": "completed", "progress": 100.0, "dest_path": dl.get("dest_path")}
         return {"progress": 100.0}
     if organizer is not None:
         return organizer(dl, src)
@@ -436,9 +441,17 @@ def _spawn_requery(dl_id) -> None:
 
 
 def _tick(db) -> None:
+    all_active = db.get_active_video_downloads()
+    # Re-adopt any 'searching' row whose requery thread is gone (its state is in-memory,
+    # so a restart/crash mid-requery would otherwise strand it forever — _tick skips
+    # 'searching'). _spawn_requery is a no-op if a thread is already running.
+    for d in all_active:
+        if d.get("status") == "searching" and d.get("source") != "youtube" and d["id"] not in _requerying:
+            logger.info("video download %s: re-adopting orphaned 'searching' row", d["id"])
+            _spawn_requery(d["id"])
     # 'searching' rows are owned by their requery thread; 'youtube' rows are owned by
     # their yt-dlp worker thread (no slskd transfer to match) — skip both here.
-    active = [d for d in db.get_active_video_downloads()
+    active = [d for d in all_active
               if d.get("status") != "searching" and d.get("source") != "youtube"]
     if not active:
         _misses.clear()
