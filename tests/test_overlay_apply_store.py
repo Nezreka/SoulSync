@@ -102,6 +102,40 @@ def test_reset_item_poster_pushes_clean_and_clears_our_state(tmp_path, db, monke
     assert store.has_base("movie", 5) is False           # base cleared → next apply re-fetches clean
 
 
+def test_random_overlay_preview_item(db):
+    assert db.random_overlay_preview_item() is None            # empty library
+    db.upsert_movie("plex", {"server_id": "m1", "tmdb_id": 603, "title": "The Matrix",
+                             "poster_url": "/p.jpg", "file": {"relative_path": "m.mkv", "size_bytes": 5}})
+    db.upsert_movie("plex", {"server_id": "m2", "title": "No TMDB", "poster_url": "/q.jpg",
+                             "file": {"relative_path": "n.mkv", "size_bytes": 5}})   # no tmdb_id → excluded
+    pick = db.random_overlay_preview_item()
+    assert pick and pick["kind"] == "movie" and pick["tmdb_id"] == 603
+
+
+def test_preview_thumbnail_renders_on_a_random_title(db, monkeypatch):
+    import io
+    from PIL import Image
+    import core.video.overlays.service as svc
+    db.upsert_movie("plex", {"server_id": "m1", "tmdb_id": 603, "title": "The Matrix", "poster_url": "/p.jpg",
+                             "file": {"relative_path": "m.mkv", "size_bytes": 5, "resolution": "2160p"}})
+
+    class _Eng:
+        def poster_options(self, k, t):
+            return [{"thumb": "http://x/t.jpg", "full": "http://x/f.jpg"}]
+    monkeypatch.setattr("core.video.enrichment.engine.get_video_enrichment_engine", lambda: _Eng())
+    poster = io.BytesIO(); Image.new("RGB", (200, 300), (10, 10, 10)).save(poster, format="JPEG")
+    monkeypatch.setattr(svc, "_fetch_external", lambda u: poster.getvalue())
+
+    definition = {"layers": [{"type": "text", "binding": {"field": "resolution"}, "anchor": "top-right",
+                              "x": 0.95, "y": 0.05, "size": 0.08, "color": "#fff",
+                              "bg": {"enabled": True, "color": "#000", "opacity": 1, "radius": 0.02, "padX": 0.03, "padY": 0.02}}]}
+    data = svc.preview_thumbnail(db, definition)
+    assert data and Image.open(io.BytesIO(data)).format == "JPEG"
+
+    monkeypatch.setattr(db, "random_overlay_preview_item", lambda: None)   # no title → caller uses neutral
+    assert svc.preview_thumbnail(db, definition) is None
+
+
 def test_upload_is_content_addressed_and_readable(tmp_path):
     s = AssetStore(tmp_path / "assets")
     n1 = s.save_upload(b"logo-bytes", "png")

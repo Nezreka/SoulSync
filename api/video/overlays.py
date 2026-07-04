@@ -82,14 +82,23 @@ def register_routes(bp):
         from flask import Response, abort
         from . import get_video_db
         from core.video.overlays.compositor import render_template_thumbnail
-        t = get_video_db().get_overlay_template(template_id)
+        db = get_video_db()
+        t = db.get_overlay_template(template_id)
         if not t:
             abort(404)
-        try:
-            data = render_template_thumbnail(t.get("definition") or {})
+        definition = t.get("definition") or {}
+        data = None
+        try:                                # prefer a random real title's clean poster
+            from core.video.overlays.service import preview_thumbnail
+            data = preview_thumbnail(db, definition)
         except Exception:
-            logger.exception("overlay thumbnail failed for %s", template_id)
-            abort(404)
+            logger.warning("overlay preview thumbnail failed for %s", template_id, exc_info=True)
+        if data is None:                    # fall back to the neutral gradient poster
+            try:
+                data = render_template_thumbnail(definition)
+            except Exception:
+                logger.exception("overlay thumbnail failed for %s", template_id)
+                abort(404)
         resp = Response(data, content_type="image/jpeg")
         resp.headers["Cache-Control"] = "public, max-age=3600"
         return resp
