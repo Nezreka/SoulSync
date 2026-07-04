@@ -95,6 +95,7 @@
     function mergeSample(real) {
         var d = defaultSample(); if (!real) return d;
         FIELD_ORDER.forEach(function (k) { if (real[k] != null && real[k] !== '') d[k] = real[k]; });
+        d.logo_url = real.logo_url || null;   // logo art (not a text field) for logo layers
         return d;
     }
     function resolveBinding(b) {
@@ -127,6 +128,10 @@
         info: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>',
         chev: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>',
         poster: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M4 15l4-4 3 3 3-3 6 6"/></svg>',
+        image: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>',
+        logo: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 7v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V7M9 12h6"/></svg>',
+        shape: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="12" rx="2"/></svg>',
+        scrim: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 14h18" opacity=".5"/><path d="M3 17h18" opacity=".8"/></svg>',
     };
     function catIcon(cat) { return cat === 'Ratings' ? I.star : cat === 'Quality' ? I.badge : I.info; }
 
@@ -283,6 +288,20 @@
         if (typeof l.y !== 'number') l.y = 0.5;
         l.hidden = !!l.hidden;
         if (typeof l.opacity !== 'number') l.opacity = 1;
+        if (l.type === 'image') {
+            if (typeof l.w !== 'number') l.w = 0.4;
+            l.src = l.src || '';
+        }
+        if (l.type === 'shape') {
+            if (typeof l.w !== 'number') l.w = 0.5;
+            if (typeof l.h !== 'number') l.h = 0.12;
+            if (typeof l.radius !== 'number') l.radius = 0.02;
+            l.fill = l.fill || {};
+            l.fill.grad = !!l.fill.grad;
+            l.fill.c1 = l.fill.c1 || '#000000'; if (typeof l.fill.a1 !== 'number') l.fill.a1 = 0.72;
+            l.fill.c2 = l.fill.c2 || '#000000'; if (typeof l.fill.a2 !== 'number') l.fill.a2 = 0;
+            if (typeof l.fill.dir !== 'number') l.fill.dir = 180;
+        }
         if (l.type === 'text') {
             if (l.text == null) l.text = 'Text';
             if (typeof l.size !== 'number') l.size = 0.06;
@@ -386,6 +405,10 @@
             html += '<div class="voe-pal-section"><div class="voe-pal-h">' + cat + '</div><div class="voe-pal-grid">' +
                 items.map(function (k) { return palItem('badge', FIELDS[k].label, catIcon(cat), k); }).join('') + '</div></div>';
         });
+        html += '<div class="voe-pal-section"><div class="voe-pal-h">Artwork</div><div class="voe-pal-grid">' +
+            palItem('logo', 'Title Logo', I.logo, '') + palItem('image', 'Image', I.image, '') + '</div></div>';
+        html += '<div class="voe-pal-section"><div class="voe-pal-h">Shapes</div><div class="voe-pal-grid">' +
+            palItem('shape', 'Rectangle', I.shape, '') + palItem('scrim', 'Scrim', I.scrim, '') + '</div></div>';
         return html;
     }
     function palItem(kind, label, icon, field) {
@@ -410,9 +433,27 @@
             base.name = FIELDS[field].label;
             base.size = 0.045; base.shadow = false;
             base.bg = { enabled: true, color: '#000000', opacity: 0.72, radius: 0.022, padX: 0.032, padY: 0.017 };
-        } else {
-            base.name = 'Text';
+            return base;
         }
+        if (kind === 'logo') {
+            return { id: uid(), type: 'image', name: 'Title Logo', logo: true, src: '', anchor: 'center',
+                x: x, y: y, w: 0.55, hidden: false, opacity: 1 };
+        }
+        if (kind === 'image') {
+            return { id: uid(), type: 'image', name: 'Image', src: '', anchor: 'center',
+                x: x, y: y, w: 0.4, hidden: false, opacity: 1 };
+        }
+        if (kind === 'scrim') {
+            return { id: uid(), type: 'shape', name: 'Scrim', anchor: 'bottom-center', x: 0.5, y: 1,
+                w: 1, h: 0.42, radius: 0, opacity: 1, hidden: false,
+                fill: { grad: true, c1: '#000000', a1: 0, c2: '#000000', a2: 0.85, dir: 180 } };
+        }
+        if (kind === 'shape') {
+            return { id: uid(), type: 'shape', name: 'Rectangle', anchor: 'center', x: x, y: y,
+                w: 0.5, h: 0.12, radius: 0.02, opacity: 1, hidden: false,
+                fill: { grad: false, c1: '#000000', a1: 0.72, c2: '#000000', a2: 0, dir: 180 } };
+        }
+        base.name = 'Text';
         return base;
     }
     function addLayer(kind, x, y, field) {
@@ -495,8 +536,37 @@
         return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
     }
 
+    function fillCss(f) {
+        if (f.grad) return 'linear-gradient(' + f.dir + 'deg,' + hexToRgba(f.c1, f.a1) + ',' + hexToRgba(f.c2, f.a2) + ')';
+        return hexToRgba(f.c1, f.a1);
+    }
+    function imgPlaceholder(l) {
+        var h = l.w * ed.W * (l.logo ? 0.34 : 0.62);
+        return '<div class="voe-img-ph" style="height:' + h + 'px">' + (l.logo ? 'LOGO' : 'IMAGE') + '</div>';
+    }
+
     function styleLayerEl(el, l) {
         el.style.opacity = (l.opacity != null ? l.opacity : 1);
+        if (l.type === 'image') {
+            el.style.width = (l.w * ed.W) + 'px'; el.style.height = 'auto';
+            var src = l.logo ? (ed.sample && ed.sample.logo_url) : l.src;
+            if (src) {
+                el.innerHTML = '<img src="' + esc(src) + '" style="width:100%;display:block" draggable="false">';
+                var img = el.querySelector('img');
+                img.onload = function () { layoutLayer(el, l); };
+                img.onerror = function () { el.innerHTML = imgPlaceholder(l); layoutLayer(el, l); };
+            } else {
+                el.innerHTML = imgPlaceholder(l);
+            }
+            return;
+        }
+        if (l.type === 'shape') {
+            el.style.width = (l.w * ed.W) + 'px';
+            el.style.height = (l.h * ed.H) + 'px';
+            el.style.background = fillCss(l.fill);
+            el.style.borderRadius = (l.radius * ed.H) + 'px';
+            return;
+        }
         if (l.type === 'text') {
             el.classList.add('voe-layer-text');
             el.textContent = l.binding ? resolveBinding(l.binding) : (l.text || '');
@@ -627,8 +697,19 @@
     }
 
     // ── layers panel (scene list) ───────────────────────────────────────────────
-    function layerIcon(l) { return l.binding ? catIcon((FIELDS[l.binding.field] || {}).cat) : I.text; }
-    function layerName(l) { return l.name || (l.binding ? (FIELDS[l.binding.field] || {}).label : (l.text || 'Text')); }
+    function layerIcon(l) {
+        if (l.binding) return catIcon((FIELDS[l.binding.field] || {}).cat);
+        if (l.type === 'image') return l.logo ? I.logo : I.image;
+        if (l.type === 'shape') return I.shape;
+        return I.text;
+    }
+    function layerName(l) {
+        if (l.name) return l.name;
+        if (l.binding) return (FIELDS[l.binding.field] || {}).label;
+        if (l.type === 'image') return l.logo ? 'Logo' : 'Image';
+        if (l.type === 'shape') return 'Shape';
+        return l.text || 'Text';
+    }
 
     function renderLayersPanel() {
         var box = overlay && overlay.querySelector('[data-voe-layers]');
@@ -796,10 +877,14 @@
             box.innerHTML = '<div class="voe-insp-empty">Select a layer to edit its position, size &amp; style.</div>';
             return;
         }
+        var sizeCtrl = '';
+        if (l.type === 'text') sizeCtrl = field('Size', numInput('size', pct(l.size), '%'));
+        else if (l.type === 'image') sizeCtrl = field('Width', numInput('w', pct(l.w), '%'));
+        else if (l.type === 'shape') sizeCtrl = row2(field('Width', numInput('w', pct(l.w), '%')), field('Height', numInput('h', pct(l.h), '%')));
         var html = inspSection('Transform',
             anchorGrid(l) +
             row2(field('X', numInput('x', pct(l.x), '%')), field('Y', numInput('y', pct(l.y), '%'))) +
-            (l.type === 'text' ? field('Size', numInput('size', pct(l.size), '%')) : '') +
+            sizeCtrl +
             field('Opacity', sliderInput('opacity', Math.round(l.opacity * 100))));
         if (l.type === 'text') {
             if (l.binding) {
@@ -823,6 +908,23 @@
                       row2(field('Pad X', numInput('bgPadX', pct(l.bg.padX), '%')), field('Pad Y', numInput('bgPadY', pct(l.bg.padY), '%')))
                     : ''));
         }
+        if (l.type === 'image') {
+            html += inspSection('Source', l.logo
+                ? '<div class="voe-insp-hint">Uses the previewed title’s logo. Pick a title under “Preview poster” to see it.</div>'
+                : field('URL', '<input class="voe-input" data-inspsrc placeholder="https://…" value="' + esc(l.src) + '">'));
+        }
+        if (l.type === 'shape') {
+            html += inspSection('Fill',
+                field('Gradient', toggle('fillGrad', l.fill.grad)) +
+                field('Color', colorField('fillC1', l.fill.c1)) +
+                field('Opacity', sliderInput('fillA1', Math.round(l.fill.a1 * 100))) +
+                (l.fill.grad
+                    ? field('Color 2', colorField('fillC2', l.fill.c2)) +
+                      field('Opacity 2', sliderInput('fillA2', Math.round(l.fill.a2 * 100))) +
+                      field('Angle', numInput('fillDir', l.fill.dir, '°'))
+                    : '') +
+                field('Radius', numInput('radius', pct(l.radius), '%')));
+        }
         box.innerHTML = html;
         wireInspector(l);
     }
@@ -837,8 +939,19 @@
         else if (key === 'bgRadius') l.bg.radius = Math.max(0, num / 100);
         else if (key === 'bgPadX') l.bg.padX = Math.max(0, num / 100);
         else if (key === 'bgPadY') l.bg.padY = Math.max(0, num / 100);
+        else if (key === 'w') l.w = Math.max(0.02, num / 100);
+        else if (key === 'h') l.h = Math.max(0.02, num / 100);
+        else if (key === 'radius') l.radius = Math.max(0, num / 100);
+        else if (key === 'fillA1') l.fill.a1 = clamp01(num / 100);
+        else if (key === 'fillA2') l.fill.a2 = clamp01(num / 100);
+        else if (key === 'fillDir') l.fill.dir = num;
     }
-    function setColor(l, key, val) { if (key === 'color') l.color = val; else if (key === 'bgColor') l.bg.color = val; }
+    function setColor(l, key, val) {
+        if (key === 'color') l.color = val;
+        else if (key === 'bgColor') l.bg.color = val;
+        else if (key === 'fillC1') l.fill.c1 = val;
+        else if (key === 'fillC2') l.fill.c2 = val;
+    }
 
     function wireInspector(l) {
         var box = overlay.querySelector('[data-voe-inspector]');
@@ -860,6 +973,8 @@
             l.binding.field = bind.value; l.name = FIELDS[bind.value].label;
             refreshLayer(l.id); updateRowName(l.id); markDirty(); renderInspector();
         });
+        var srcInp = box.querySelector('[data-inspsrc]');
+        if (srcInp) srcInp.addEventListener('input', function () { l.src = srcInp.value.trim(); refreshLayer(l.id); markDirty(); });
         box.querySelectorAll('[data-inspsel]').forEach(function (sel) {
             var key = sel.getAttribute('data-inspsel');
             sel.addEventListener('change', function () {
@@ -896,10 +1011,11 @@
             var key = t.getAttribute('data-insptoggle');
             t.addEventListener('click', function () {
                 if (key === 'shadow') l.shadow = !l.shadow;
-                else if (key === 'bgEnabled') { l.bg.enabled = !l.bg.enabled; }
+                else if (key === 'bgEnabled') l.bg.enabled = !l.bg.enabled;
+                else if (key === 'fillGrad') l.fill.grad = !l.fill.grad;
                 t.classList.toggle('voe-toggle--on');
                 refreshLayer(l.id); markDirty();
-                if (key === 'bgEnabled') renderInspector();   // reveal/hide the pill sub-fields
+                if (key === 'bgEnabled' || key === 'fillGrad') renderInspector();   // reveal/hide sub-fields
             });
         });
         box.querySelectorAll('[data-anchor]').forEach(function (cell) {
@@ -939,7 +1055,7 @@
 
     // ── preview poster + sample data (dynamic-badge preview) ────────────────────
     function refreshBoundLayers() {
-        ed.layers.forEach(function (l) { if (l.binding) refreshLayer(l.id); });
+        ed.layers.forEach(function (l) { if (l.binding || (l.type === 'image' && l.logo)) refreshLayer(l.id); });
         if (ed.selected) { var s = layerById(ed.selected); if (s && s.binding) renderInspector(); }
     }
 

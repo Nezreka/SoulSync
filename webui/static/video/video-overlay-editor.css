@@ -301,6 +301,11 @@ select.voe-input option { background: #17171d; }
 .voe-toggle--on { background: rgb(var(--a)); }
 .voe-toggle--on::after { transform: translateX(16px); }
 .voe-sec-collapsed .voe-insp-body { display: none; }
+.voe-insp-hint { font-size: 12px; color: rgba(255,255,255,.5); line-height: 1.5; }
+.voe-img-ph { display: grid; place-items: center; border: 1.5px dashed rgba(255,255,255,.32); border-radius: 6px;
+    color: rgba(255,255,255,.5); font-size: 12px; font-weight: 800; letter-spacing: .06em; background: rgba(255,255,255,.05); }
+.voe-layer--image, .voe-layer--shape { border-radius: 4px; }
+.voe-layer--image img { pointer-events: none; }
 
 /* ── canvas floating popovers (preview title · sample data) ──────────────── */
 .voe-pop {
