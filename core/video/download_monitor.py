@@ -70,6 +70,8 @@ def process_download(dl: dict, transfers: list, download_dir: str, *, lister, mo
             return done
         return {"_missing": True}
     state = classify_state(t.get("state"))
+    if state == "queued":
+        return {"status": "queued", "progress": progress_pct(t)}
     if state == "active":
         return {"status": "downloading", "progress": progress_pct(t)}
     if state == "cancelled":

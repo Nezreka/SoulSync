@@ -467,7 +467,7 @@ def register_routes(bp):
                 "kind": "show", "title": title, "release_title": _os.path.basename(str(fn)),
                 "source": "soulseek", "username": username, "filename": fn,
                 "size_bytes": int(f.get("size_bytes") or 0), "quality_label": body.get("quality_label"),
-                "target_dir": target, "status": "downloading",
+                "target_dir": target, "status": "queued",
                 "media_id": (str(body.get("media_id")) if body.get("media_id") is not None else None),
                 "media_source": body.get("media_source"), "year": body.get("year"),
                 "poster_url": body.get("poster_url"),
