@@ -51,6 +51,41 @@ def test_keyed_by_id_not_path(tmp_path):
     assert s.read_base("movie", 1) == b"a" and s.read_base("movie", 2) == b"b"
 
 
+def test_fetch_clean_base_prefers_external_then_tmdb_then_server():
+    """Clean-base resolution must never inherit a media-server tool's burn-in
+    (Kometa): an external poster URL wins; else the TMDB original; else, only as a
+    last resort, the current server poster."""
+    from core.video.overlays.service import fetch_clean_base
+
+    class _DB:
+        def __init__(self, url, tid):
+            self._url, self._tid = url, tid
+        def get_art_ref(self, k, i, a):
+            return {"poster_url": self._url}
+        def item_tmdb_id(self, k, i):
+            return self._tid
+
+    seen = []
+    ext = lambda u: (seen.append("ext"), b"EXT")[1] if u else None      # noqa: E731
+    tmdb = lambda t: (seen.append("tmdb"), b"TMDB")[1]                   # noqa: E731
+    server = lambda: (seen.append("server"), b"SRV")[1]                 # noqa: E731
+
+    seen[:] = []
+    assert fetch_clean_base(_DB("https://img/x.jpg", 9), "movie", 1, external=ext, tmdb=tmdb, server=server) == b"EXT"
+    assert seen == ["ext"]                                              # external short-circuits
+
+    seen[:] = []                                                       # server-path url → skip external, use TMDB
+    assert fetch_clean_base(_DB("/library/metadata/9/thumb", 9), "movie", 1, external=ext, tmdb=tmdb, server=server) == b"TMDB"
+    assert seen == ["tmdb"]
+
+    seen[:] = []                                                       # no tmdb match → server (last resort)
+    assert fetch_clean_base(_DB("/library/x", None), "movie", 1, external=ext, tmdb=tmdb, server=server) == b"SRV"
+    assert seen == ["server"]
+
+    seen[:] = []                                                       # external fails → fall through to TMDB
+    assert fetch_clean_base(_DB("https://img/x.jpg", 9), "movie", 1, external=lambda u: None, tmdb=tmdb, server=server) == b"TMDB"
+
+
 def test_upload_is_content_addressed_and_readable(tmp_path):
     s = AssetStore(tmp_path / "assets")
     n1 = s.save_upload(b"logo-bytes", "png")

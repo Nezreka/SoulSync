@@ -54,6 +54,57 @@ def fetch_poster_bytes(db, kind: str, item_id: int) -> bytes | None:
         return None
 
 
+def _fetch_external(url):
+    """Fetch an http(s) image → bytes (used for clean external/TMDB posters)."""
+    if not url:
+        return None
+    import requests
+    try:
+        r = requests.get(url, timeout=20)
+        return r.content if r.status_code == 200 else None
+    except Exception:
+        logger.warning("fetch external poster failed: %s", url, exc_info=True)
+        return None
+
+
+def _fetch_tmdb_poster(db, kind: str, tmdb_id) -> bytes | None:
+    """The clean TMDB poster for a title — the canonical 'original', untouched by
+    whatever a media-server tool (e.g. Kometa) burned onto the local copy."""
+    try:
+        from core.video.enrichment.engine import get_video_enrichment_engine
+        posters = get_video_enrichment_engine().poster_options(kind, tmdb_id) or []
+    except Exception:
+        logger.warning("tmdb poster lookup failed for %s %s", kind, tmdb_id, exc_info=True)
+        return None
+    return _fetch_external(posters[0].get("full")) if posters else None
+
+
+def fetch_clean_base(db, kind: str, item_id: int, *, external=None, tmdb=None, server=None) -> bytes | None:
+    """Resolve a CLEAN base poster to composite overlays onto, preferring sources
+    that can't carry another tool's burned-in overlays:
+
+      1. an external poster URL on the item — a deliberate choice (Poster Manager /
+         enrichment), and clean by construction,
+      2. the TMDB original by tmdb_id — bypasses a media-server tool's local burn-in,
+      3. the current server poster — last resort (may carry foreign overlays).
+    """
+    external = external or _fetch_external
+    tmdb = tmdb or (lambda t: _fetch_tmdb_poster(db, kind, t))
+    server = server or (lambda: fetch_poster_bytes(db, kind, item_id))
+    ref = db.get_art_ref(kind, item_id, "poster")
+    url = (ref or {}).get("poster_url")
+    if url and (str(url).startswith("http://") or str(url).startswith("https://")):
+        b = external(url)
+        if b:
+            return b
+    tid = db.item_tmdb_id(kind, item_id)
+    if tid:
+        b = tmdb(tid)
+        if b:
+            return b
+    return server()
+
+
 def push_poster_bytes(db, kind: str, item_id: int, jpeg: bytes) -> bool:
     """Push composited art to the server for an item (best-effort)."""
     from core.video.sources import set_video_poster
@@ -75,7 +126,7 @@ class OverlayApplyService:
     def applier(self) -> OverlayApplier:
         return OverlayApplier(
             self.db, self.store,
-            fetch_base=lambda k, i: fetch_poster_bytes(self.db, k, i),
+            fetch_base=lambda k, i: fetch_clean_base(self.db, k, i),
             push_poster=lambda k, i, b: push_poster_bytes(self.db, k, i, b))
 
     def build_jobs(self, scopes, force=False) -> list:

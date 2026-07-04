@@ -1510,8 +1510,8 @@
         }
         Promise.all([one('movies'), one('shows')]).then(function (r) {
             var rows = [];
-            (r[0] || []).forEach(function (m) { rows.push({ kind: 'movie', id: m.id, title: m.title, year: m.year, hasPoster: m.has_poster }); });
-            (r[1] || []).forEach(function (s) { rows.push({ kind: 'show', id: s.id, title: s.title, year: s.year, hasPoster: s.has_poster }); });
+            (r[0] || []).forEach(function (m) { rows.push({ kind: 'movie', id: m.id, title: m.title, year: m.year, hasPoster: m.has_poster, tmdbId: m.tmdb_id }); });
+            (r[1] || []).forEach(function (s) { rows.push({ kind: 'show', id: s.id, title: s.title, year: s.year, hasPoster: s.has_poster, tmdbId: s.tmdb_id }); });
             if (!rows.length) { box.innerHTML = '<div class="voe-pop-empty">No matches in your library.</div>'; return; }
             box.innerHTML = rows.map(function (it) {
                 var thumb = it.hasPoster ? '/api/video/poster/' + it.kind + '/' + it.id + '?w=60' : '';
@@ -1527,8 +1527,16 @@
     }
     function setPreviewTitle(it) {
         ed.previewTitle = { kind: it.kind, id: it.id, title: it.title };
+        // Prefer the CLEAN TMDB poster for the preview — the server copy may already
+        // carry another tool's burned-in overlays (Kometa), which you'd design over.
         ed.bg = '/api/video/poster/' + it.kind + '/' + it.id;
         applyStageBg(); updatePreviewName(); closePop();
+        if (it.tmdbId) {
+            api('GET', '/api/video/poster/options/' + it.kind + '/' + it.tmdbId).then(function (d) {
+                var posters = (d && d.posters) || [];
+                if (posters.length && ed.previewTitle && ed.previewTitle.id === it.id) { ed.bg = posters[0].full; applyStageBg(); }
+            }).catch(function () { /* keep the server proxy fallback */ });
+        }
         api('GET', '/api/video/overlays/sample/' + it.kind + '/' + it.id).then(function (d) {
             if (d && d.sample) { ed.sample = mergeSample(d.sample); refreshBoundLayers(); }
         }).catch(function () { /* keep defaults */ });
