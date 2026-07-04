@@ -3404,16 +3404,10 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Convention: keep only the CURRENT release here, plus a single brief
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '2.8.5': [
-        { date: 'July 2026 — 2.8.5 release' },
-        { title: 'A focused bug-fix release', desc: 'no new features this time — just a batch of import, library, repair, and webui fixes, several straight from user reports this week.' },
-        { title: 'Import & Stats black screen fixed (#979)', desc: 'those two React-built pages could load as a blank black screen on some setups (mostly Windows, where the OS handed the app\'s JS bundle over with the wrong file type and the browser refused to run it). we force the correct type now, so they load for everyone.', page: 'import' },
-        { title: 'iTunes singles no longer "Unknown Artist" (#980)', desc: 'an iTunes single reached the importer with no album name, so it dropped into Unknown Artist / Unknown Album, got no album tag, and didn\'t match its release. a single\'s album is its own title now, so it files and tags correctly.', page: 'import' },
-        { title: 'No more "01-" on single-disc albums (#981)', desc: '$disc / $discnum in a file template always stamped the disc number, even on a 1-disc album. they\'re smart now like $cdnum — empty on single-disc, shown only for real multi-disc sets. applies to both import and rename/reorganize.', page: 'tools' },
-        { title: 'Cleanup never deletes a configured root (#976)', desc: 'the empty-dir cleanup could remove a folder you\'d set as a root; it leaves configured roots alone now, and self-heals a missing staging/import folder if a sweep removed it.', page: 'tools' },
-        { title: 'Repair "Fix All" works outside the transfer path (#978)', desc: 'path-mismatch "Fix All" did nothing for libraries stored outside the transfer folder; it works everywhere now, updates the DB by track id for media-server parity, and stops pulling media-server files into transfer.', page: 'tools' },
-        { title: 'Discography backfill only touches artists you own (#977)', desc: 'the repair backfill was reaching beyond your owned artists; scoped back to what you actually have.', page: 'tools' },
-        { title: 'Earlier versions', desc: '2.8.4 added Artist Web (an interactive WebGL map of your whole library + a discovery graph), named Quality Profiles (#974), and made the Discover adventurousness dial actually reshape your recs. 2.8.3 rebuilt Discover with a real recommendation engine; 2.8.2 fixed the Spotify Docker boot hang (#949) + added Max Performance mode; 2.8.1 added playlist export to Spotify & Deezer (#945); 2.7.0 made multi-user real.' },
+    '2.8.51': [
+        { date: 'July 2026 — 2.8.51 hotfix' },
+        { title: 'Watchlist artist settings no longer error on a fresh install (#983)', desc: 'on a brand-new database, opening a watchlist artist\'s settings could fail with "no such column: preferred_metadata_source" (a restart worked around it). the table was being rebuilt during first-run setup from a column list that dropped two newer columns; they survive the rebuild now, so it works from the first boot.', page: 'artists' },
+        { title: 'Earlier versions', desc: '2.8.5 was a fix batch: Import & Stats black screen (#979), iTunes singles landing in Unknown Artist (#980), a stray "01-" on single-disc albums (#981), cleanup deleting a configured root (#976), repair Fix All outside the transfer path (#978), and backfill overreaching past owned artists (#977). 2.8.4 added Artist Web + named Quality Profiles (#974); 2.8.3 rebuilt Discover with a real recommendation engine; 2.8.2 fixed the Spotify Docker boot hang (#949); 2.7.0 made multi-user real.' },
     ],
 };
 
@@ -3444,8 +3438,15 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "2.8.5 — bug fixes",
-        description: "a focused fix release across import, library, repair, and the webui — several straight from user reports this week.",
+        title: "2.8.51 — hotfix",
+        description: "a one-fix follow-up to 2.8.5.",
+        features: [
+            "#983 — on a fresh install, opening a watchlist artist's settings could fail with \"no such column: preferred_metadata_source\" (a restart worked around it). first-run setup was rebuilding the watchlist table from a column list that dropped two newer columns; they survive now, so it works from the first boot",
+        ],
+    },
+    {
+        title: "Earlier in 2.8.5",
+        description: "2.8.5 was a focused fix release across import, library, repair, and the webui.",
         features: [
             "#979 — Import & Stats loaded as a black screen on some setups (mostly Windows, where the OS served the app's JS bundle with the wrong MIME type and the browser refused it). we force the correct type now, so they load for everyone",
             "#980 — iTunes singles were landing in \"Unknown Artist\" with no album tag; a single's album is its own title now, so they file and tag correctly",
