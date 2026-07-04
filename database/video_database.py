@@ -824,6 +824,19 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def owned_episode_keys(self, show_id) -> set:
+        """(season_number, episode_number) pairs already in the library for a show —
+        so a season-pack grab can skip episodes you already own."""
+        conn = self._get_connection()
+        try:
+            return {(r["season_number"], r["episode_number"]) for r in conn.execute(
+                "SELECT season_number, episode_number FROM episodes WHERE show_id=? AND has_file=1",
+                (int(show_id),))}
+        except (sqlite3.Error, ValueError, TypeError):
+            return set()
+        finally:
+            conn.close()
+
     # ── Discover ignore list ("Not interested") ──────────────────────────────
     def add_ignored(self, kind: str, tmdb_id, title=None, year=None, poster_url=None) -> bool:
         """Hide a title from Discover (movie/show level). Idempotent."""

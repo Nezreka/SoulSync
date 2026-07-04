@@ -77,6 +77,10 @@ def _evaluate_hits(raw, profile, scope, want_season, want_episode) -> list:
             "username": hit.get("username"), "slots": hit.get("slots"),
             "queue": hit.get("queue"), "speed": hit.get("speed"),
             "filename": hit.get("filename"), "_avail": avail,
+            # Folder contents for a pack: the chosen peer's video files (episodes),
+            # so the UI can expand a season card and a pack grab can pull them all.
+            "files": hit.get("files") or [], "file_count": hit.get("file_count") or 0,
+            "folder_size_bytes": hit.get("folder_size_bytes") or 0,
             "quality_label": verdict["quality_label"], "accepted": verdict["accepted"],
             "rejected": verdict["rejected"], "score": verdict["score"],
             "resolution": parsed.get("resolution"), "source": parsed.get("source"),
@@ -403,6 +407,79 @@ def register_routes(bp):
         })
         ensure_started(get_video_db)
         return jsonify({"ok": True, "id": dl_id})
+
+    @bp.route("/downloads/grab-pack", methods=["POST"])
+    def video_downloads_grab_pack():
+        """Grab a whole season pack: fan the folder's episode files out into individual
+        episode downloads so each imports through the normal per-episode pipeline
+        (parse → ffprobe-verify → template rename → file into TV/Show/Season).
+        Body: {username, files:[{filename, size_bytes}], title, media_id,
+        media_source, year, poster_url, quality_label}."""
+        from . import get_video_db
+        from core.video.download_monitor import ensure_started
+        from core.video.download_pipeline import target_dir_for
+        from core.video.slskd_download import start_download
+        from core.video.release_parse import parse_release
+        from core.video.slskd_search import build_query
+        import json as _json
+        import os as _os
+
+        body = request.get_json(silent=True) or {}
+        username = body.get("username")
+        files = [f for f in (body.get("files") or []) if isinstance(f, dict) and f.get("filename")]
+        if not username or not files:
+            return jsonify({"ok": False, "error": "Missing the pack's source info."}), 400
+
+        db = get_video_db()
+        paths = {k: db.get_setting(k) or "" for k in ("movies_path", "tv_path", "youtube_path")}
+        target = target_dir_for("show", paths)
+        if not target:
+            return jsonify({"ok": False, "error": "Set the TV library folder on Settings → Downloads."}), 400
+
+        # Skip episodes already in the library (media_id is the library show id for a
+        # library-sourced grab) so a pack doesn't re-download what you already own.
+        owned = set()
+        if body.get("media_id") is not None and str(body.get("media_source") or "").lower() != "tmdb":
+            try:
+                owned = db.owned_episode_keys(int(body["media_id"]))
+            except (ValueError, TypeError):
+                owned = set()
+
+        title = body.get("title") or ""
+        started, ids, skipped = 0, [], 0
+        for f in files:
+            fn = f.get("filename")
+            parsed = parse_release(_os.path.basename(str(fn).replace("\\", "/")))
+            sn, en = parsed.get("season"), parsed.get("episode")
+            if sn is None or en is None:
+                skipped += 1
+                continue   # not a parseable single episode (samples/extras) — skip
+            if (sn, en) in owned:
+                skipped += 1
+                continue   # already in the library — don't re-download
+            res = start_download(username, fn, f.get("size_bytes") or 0)
+            if not res.get("ok"):
+                skipped += 1
+                continue
+            ctx = {"scope": "episode", "title": title, "season": sn, "episode": en, "year": body.get("year")}
+            first_query = build_query("episode", title, season=sn, episode=en)
+            dl_id = db.add_video_download({
+                "kind": "show", "title": title, "release_title": _os.path.basename(str(fn)),
+                "source": "soulseek", "username": username, "filename": fn,
+                "size_bytes": int(f.get("size_bytes") or 0), "quality_label": body.get("quality_label"),
+                "target_dir": target, "status": "downloading",
+                "media_id": (str(body.get("media_id")) if body.get("media_id") is not None else None),
+                "media_source": body.get("media_source"), "year": body.get("year"),
+                "poster_url": body.get("poster_url"),
+                "candidates": _json.dumps([]), "search_ctx": _json.dumps(ctx),
+                "tried_queries": _json.dumps([first_query] if first_query else []),
+                "tried_files": _json.dumps([fn]), "attempts": 0,
+            })
+            started += 1
+            ids.append(dl_id)
+        if started:
+            ensure_started(get_video_db)
+        return jsonify({"ok": started > 0, "started": started, "skipped": skipped, "ids": ids})
 
     @bp.route("/downloads/active", methods=["GET"])
     def video_downloads_active():

@@ -51,6 +51,26 @@ def test_group_handles_garbage():
     assert group_video_files([{"nope": 1}, "junk"]) == []
 
 
+def test_group_exposes_pack_contents():
+    """A season-pack card carries the chosen peer's full video-file list so the UI
+    can expand it and a pack grab can pull the whole folder (non-video excluded)."""
+    responses = [
+        {"username": "packer", "uploadSpeed": 2000, "freeUploadSlots": 3, "files": [
+            {"filename": r"TV\I Will Find You S01 1080p\iwfy.s01e01.mkv", "size": 1_300_000_000},
+            {"filename": r"TV\I Will Find You S01 1080p\iwfy.s01e02.mkv", "size": 1_350_000_000},
+            {"filename": r"TV\I Will Find You S01 1080p\iwfy.s01e03.mkv", "size": 1_400_000_000},
+            {"filename": r"TV\I Will Find You S01 1080p\poster.jpg", "size": 200_000},
+        ]},
+    ]
+    hits = group_video_files(responses)
+    assert len(hits) == 1
+    h = hits[0]
+    assert h["username"] == "packer"
+    assert h["file_count"] == 3                       # 3 episodes, poster.jpg excluded
+    assert h["folder_size_bytes"] == 1_300_000_000 + 1_350_000_000 + 1_400_000_000
+    assert all(f["filename"].endswith(".mkv") for f in h["files"])
+
+
 # ── search-creation rate-limit throttle (avoids slskd 429s) ──────────────────
 import core.video.slskd_search as _ss  # noqa: E402
 
