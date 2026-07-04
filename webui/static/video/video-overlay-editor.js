@@ -132,6 +132,7 @@
         dupe: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
         apply: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2 4 4 .5-3 3 .8 4.2L12 16l-3.8 1.7.8-4.2-3-3 4-.5 2-4Z"/><path d="M5 20h14"/></svg>',
         help: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.8.4-1 .9-1 1.7"/><path d="M12 17h.01"/></svg>',
+        dice: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="4"/><circle cx="8.5" cy="8.5" r="1.2" fill="currentColor" stroke="none"/><circle cx="15.5" cy="15.5" r="1.2" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/></svg>',
         poster: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M4 15l4-4 3 3 3-3 6 6"/></svg>',
         image: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>',
         logo: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 7v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V7M9 12h6"/></svg>',
@@ -529,6 +530,7 @@
                 '<div class="voe-canvas-wrap" data-voe-canvaswrap>' +
                     '<div class="voe-canvas-bar">' +
                         '<button class="voe-btn" data-voe-preview>' + I.poster + ' <span data-voe-previewname>Sample poster</span> ' + I.chev + '</button>' +
+                        '<button class="voe-btn voe-icon-btn" data-voe-random title="Surprise me — a random title">' + I.dice + '</button>' +
                         '<button class="voe-btn" data-voe-sampledata>' + I.info + ' Sample data ' + I.chev + '</button>' +
                     '</div>' +
                     '<div class="voe-stage" data-voe-stage>' +
@@ -557,6 +559,7 @@
         var stage = overlay.querySelector('[data-voe-stage]');
         stage.addEventListener('pointerdown', onStagePointerDown);
         overlay.querySelector('[data-voe-preview]').addEventListener('click', function (e) { openPreviewPop(e.currentTarget); });
+        overlay.querySelector('[data-voe-random]').addEventListener('click', loadRandomPreview);
         overlay.querySelector('[data-voe-sampledata]').addEventListener('click', function (e) { openSamplePop(e.currentTarget); });
         overlay.querySelector('[data-voe-undo]').addEventListener('click', undo);
         overlay.querySelector('[data-voe-redo]').addEventListener('click', redo);
@@ -1500,10 +1503,12 @@
             '<div class="voe-pop-h">Preview poster</div>' +
             '<div class="voe-pop-note">Pick a real title to preview against — it also loads that title’s real values into your badges. Preview only, never saved.</div>' +
             '<div class="voe-pop-search"><input class="voe-input" data-pop-search placeholder="Search your library…" autocomplete="off"></div>' +
-            (ed.bg ? '<div class="voe-pop-clear"><button class="voe-btn" data-pop-blank style="width:100%;justify-content:center">Use blank poster</button></div>' : '') +
+            '<div class="voe-pop-clear"><button class="voe-btn" data-pop-random style="width:100%;justify-content:center">' + I.dice + ' Surprise me</button></div>' +
+            (ed.bg ? '<div class="voe-pop-clear" style="margin-top:0"><button class="voe-btn" data-pop-blank style="width:100%;justify-content:center">Use blank poster</button></div>' : '') +
             '<div class="voe-pop-body" data-pop-results><div class="voe-pop-empty">Type to search your movies &amp; shows.</div></div>');
         var input = el.querySelector('[data-pop-search]');
         var blank = el.querySelector('[data-pop-blank]');
+        el.querySelector('[data-pop-random]').addEventListener('click', function () { closePop(); loadRandomPreview(); });
         if (blank) blank.addEventListener('click', function () { ed.bg = null; ed.previewTitle = null; applyStageBg(); updatePreviewName(); closePop(); });
         var t = null;
         input.addEventListener('input', function () { clearTimeout(t); var q = input.value.trim(); t = setTimeout(function () { previewSearch(q, el); }, 240); });
@@ -1534,6 +1539,16 @@
             });
         });
     }
+    // "Surprise me" — drop a random owned title into the preview.
+    function loadRandomPreview() {
+        api('GET', '/api/video/overlays/preview/random').then(function (d) {
+            var it = d && d.item;
+            if (!it) { toast('No library titles to preview yet', 'info'); return; }
+            setPreviewTitle({ kind: it.kind, id: it.id, title: it.title, tmdbId: it.tmdb_id });
+            toast('Previewing “' + (it.title || 'a title') + '”', 'success');
+        }).catch(function () { toast('Could not load a random title', 'error'); });
+    }
+
     function setPreviewTitle(it) {
         ed.previewTitle = { kind: it.kind, id: it.id, title: it.title };
         // Prefer the CLEAN TMDB poster for the preview — the server copy may already
