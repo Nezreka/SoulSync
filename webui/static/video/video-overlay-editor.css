@@ -232,6 +232,76 @@
 .voe-layer-row--dropafter { box-shadow: 0 2px 0 rgb(var(--a)); }
 .voe-layers-empty { padding: 30px 16px; text-align: center; color: rgba(255,255,255,.32); font-size: 12.5px; line-height: 1.6; }
 
+/* right side is two stacked panels: layers (top) + inspector (below) */
+.voe-side-layers { display: flex; flex-direction: column; min-height: 0; max-height: 46%; }
+.voe-inspector { flex: 1; overflow-y: auto; border-top: 1px solid rgba(255,255,255,.07); min-height: 0; }
+.voe-insp-empty { padding: 34px 18px; text-align: center; color: rgba(255,255,255,.32); font-size: 12.5px; line-height: 1.6; }
+.voe-insp-sec { padding: 14px 15px; border-bottom: 1px solid rgba(255,255,255,.05); }
+.voe-insp-sec-h { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .07em;
+    color: rgba(255,255,255,.42); margin-bottom: 12px; }
+.voe-field { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.voe-field:last-child { margin-bottom: 0; }
+.voe-field-l { flex: 0 0 62px; font-size: 12px; color: rgba(255,255,255,.55); }
+.voe-field-c { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
+.voe-row2 { display: flex; gap: 10px; }
+.voe-row2 .voe-field { flex: 1; margin-bottom: 10px; }
+.voe-row2 .voe-field-l { flex: 0 0 auto; }
+.voe-input {
+    width: 100%; min-width: 0; font: inherit; font-size: 12.5px; color: #eef1f7;
+    background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1); border-radius: 8px;
+    padding: 7px 9px; outline: none; transition: border-color .13s, box-shadow .13s;
+}
+.voe-input:focus { border-color: rgba(var(--a),.6); box-shadow: 0 0 0 2px rgba(var(--a),.14); }
+.voe-input--num { text-align: right; }
+.voe-unit { font-size: 11px; color: rgba(255,255,255,.35); flex: 0 0 auto; }
+select.voe-input { cursor: pointer; -webkit-appearance: none; appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 12 12'%3E%3Cpath fill='none' stroke='rgba(255,255,255,.4)' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round' d='M2.5 4.5 6 8l3.5-3.5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 9px center; padding-right: 26px; }
+select.voe-input option { background: #17171d; }
+.voe-textarea { width: 100%; resize: vertical; min-height: 40px; font: inherit; font-size: 12.5px; }
+
+/* 9-point anchor picker */
+.voe-anchor-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; width: 96px; }
+.voe-anchor-cell { aspect-ratio: 1; border-radius: 6px; cursor: pointer; position: relative;
+    background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.09); transition: all .12s; }
+.voe-anchor-cell::after { content: ""; position: absolute; inset: 0; margin: auto; width: 5px; height: 5px;
+    border-radius: 50%; background: rgba(255,255,255,.3); }
+.voe-anchor-cell:hover { background: rgba(255,255,255,.1); }
+.voe-anchor-cell--on { background: rgba(var(--a),.28); border-color: rgb(var(--a)); }
+.voe-anchor-cell--on::after { background: rgb(var(--a)); }
+
+/* segmented control (alignment, weight) */
+.voe-seg { display: inline-flex; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1);
+    border-radius: 9px; padding: 2px; gap: 2px; }
+.voe-seg-btn { border: none; background: transparent; color: rgba(255,255,255,.55); cursor: pointer;
+    padding: 6px 10px; border-radius: 7px; font: inherit; font-size: 12px; font-weight: 700; transition: all .12s; display: grid; place-items: center; }
+.voe-seg-btn svg { width: 15px; height: 15px; }
+.voe-seg-btn:hover { color: #fff; }
+.voe-seg-btn--on { background: rgba(var(--a),.25); color: #fff; }
+
+/* color field */
+.voe-color { display: flex; align-items: center; gap: 8px; flex: 1; }
+.voe-color-sw { width: 30px; height: 30px; border-radius: 8px; border: 1px solid rgba(255,255,255,.18);
+    padding: 0; cursor: pointer; overflow: hidden; background: none; }
+.voe-color-sw::-webkit-color-swatch-wrapper { padding: 0; }
+.voe-color-sw::-webkit-color-swatch { border: none; border-radius: 6px; }
+
+/* slider */
+.voe-slider { -webkit-appearance: none; appearance: none; width: 100%; height: 4px; border-radius: 3px;
+    background: rgba(255,255,255,.14); outline: none; cursor: pointer; }
+.voe-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 15px; height: 15px; border-radius: 50%;
+    background: rgb(var(--a)); box-shadow: 0 2px 6px rgba(0,0,0,.4); cursor: pointer; }
+.voe-slider::-moz-range-thumb { width: 15px; height: 15px; border: none; border-radius: 50%; background: rgb(var(--a)); }
+
+/* toggle switch */
+.voe-toggle { flex: 0 0 auto; width: 38px; height: 22px; border-radius: 11px; cursor: pointer; position: relative;
+    background: rgba(255,255,255,.14); border: none; transition: background .15s; }
+.voe-toggle::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%;
+    background: #fff; transition: transform .16s; box-shadow: 0 1px 3px rgba(0,0,0,.4); }
+.voe-toggle--on { background: rgb(var(--a)); }
+.voe-toggle--on::after { transform: translateX(16px); }
+.voe-sec-collapsed .voe-insp-body { display: none; }
+
 /* ── little confirm dialog (delete) ──────────────────────────────────────── */
 .voe-confirm-back {
     position: fixed; inset: 0; z-index: 9400; display: grid; place-items: center;
