@@ -127,6 +127,20 @@ def test_hidden_layer_not_rendered():
     assert max(sum(p) for p in _open(render_overlay(base, definition, {})).getdata()) < 30
 
 
+def test_rotation_changes_the_render_and_stays_valid():
+    base = _poster(color=(0, 0, 0))
+    layer = {"type": "shape", "anchor": "center", "x": 0.5, "y": 0.5, "w": 0.6, "h": 0.1, "radius": 0,
+             "opacity": 1, "fill": {"grad": False, "c1": "#ff0000", "a1": 1}}
+    flat = render_overlay(base, {"layers": [dict(layer, rotation=0)]}, {})
+    tilted = render_overlay(base, {"layers": [dict(layer, rotation=45)]}, {})
+    assert Image.open(io.BytesIO(tilted)).format == "JPEG"
+    assert flat != tilted                                    # rotation actually changed the pixels
+    # a flat bar spans y≈405–495 at the centre column; the 45°-tilted bar reaches
+    # higher. at (300, 400) the tilted bar is red but the flat one is untouched.
+    assert _open(tilted).getpixel((300, 400))[0] > 150
+    assert sum(_open(flat).getpixel((300, 400))) < 30
+
+
 def test_broken_layer_does_not_sink_the_render():
     base = _poster()
     # a garbage layer shouldn't crash the whole composite

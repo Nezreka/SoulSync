@@ -395,6 +395,7 @@
         if (typeof l.y !== 'number') l.y = 0.5;
         l.hidden = !!l.hidden;
         if (typeof l.opacity !== 'number') l.opacity = 1;
+        if (typeof l.rotation !== 'number') l.rotation = 0;
         if (l.type === 'image') {
             if (typeof l.w !== 'number') l.w = 0.4;
             l.src = l.src || '';
@@ -640,6 +641,7 @@
             stage.appendChild(el);
             layoutLayer(el, l);
         });
+        updateSelBox();
     }
 
     function hexToRgba(hex, a) {
@@ -663,6 +665,8 @@
 
     function styleLayerEl(el, l) {
         el.style.opacity = (l.opacity != null ? l.opacity : 1);
+        el.style.transform = l.rotation ? 'rotate(' + l.rotation + 'deg)' : '';
+        el.style.transformOrigin = 'center';
         if (l.type === 'image') {
             el.style.width = (l.w * ed.W) + 'px'; el.style.height = 'auto';
             var src = l.logo ? (ed.sample && ed.sample.logo_url) : l.src;
@@ -741,6 +745,7 @@
             layoutLayer(node, l);
             showGuides(s.gx, s.gy);
             syncInspectorPos(l);
+            updateSelBox();
         }
         function up() {
             document.removeEventListener('pointermove', move);
@@ -785,6 +790,7 @@
         });
         syncLayersPanelSelection();
         renderInspector();
+        updateSelBox();
     }
 
     // update just one layer's node in place (no full re-render → keeps inspector focus)
@@ -793,11 +799,86 @@
         var node = ed.stage.querySelector('.voe-layer[data-voe-layer="' + id + '"]');
         var l = layerById(id);
         if (node && l) { styleLayerEl(node, l); layoutLayer(node, l); }
+        if (id === ed.selected) updateSelBox();
     }
     function updateRowName(id) {
         var row = overlay && overlay.querySelector('[data-voe-row="' + id + '"] .voe-lr-name');
         var l = layerById(id);
         if (row && l) row.textContent = layerName(l);
+    }
+
+    // ── selection frame: corner-drag resize + a rotate handle ───────────────────
+    function updateSelBox() {
+        var stage = ed.stage; if (!stage) return;
+        var old = stage.querySelector('.voe-selbox'); if (old) old.remove();
+        var l = ed.selected ? layerById(ed.selected) : null;
+        if (!l || l.hidden) return;
+        var node = stage.querySelector('.voe-layer[data-voe-layer="' + l.id + '"]'); if (!node) return;
+        var box = document.createElement('div');
+        box.className = 'voe-selbox';
+        box.style.left = node.offsetLeft + 'px';
+        box.style.top = node.offsetTop + 'px';
+        box.style.width = node.offsetWidth + 'px';
+        box.style.height = node.offsetHeight + 'px';
+        box.style.transform = l.rotation ? 'rotate(' + l.rotation + 'deg)' : '';
+        box.innerHTML =
+            '<span class="voe-sel-h voe-sel-h--tl" data-h="c"></span>' +
+            '<span class="voe-sel-h voe-sel-h--tr" data-h="c"></span>' +
+            '<span class="voe-sel-h voe-sel-h--br" data-h="c"></span>' +
+            '<span class="voe-sel-h voe-sel-h--bl" data-h="c"></span>' +
+            '<span class="voe-sel-rot-line"></span>' +
+            '<span class="voe-sel-rot" data-h="rot" title="Rotate (Shift = snap 15°)"></span>';
+        stage.appendChild(box);
+        box.querySelectorAll('[data-h]').forEach(function (h) {
+            h.addEventListener('pointerdown', function (e) {
+                e.preventDefault(); e.stopPropagation();
+                if (h.getAttribute('data-h') === 'rot') startHandleRotate(e, l, node);
+                else startHandleResize(e, l, node);
+            });
+        });
+    }
+    function _layerCenter(node) { return { cx: node.offsetLeft + node.offsetWidth / 2, cy: node.offsetTop + node.offsetHeight / 2 }; }
+    function _stagePt(ev) { var r = ed.stage.getBoundingClientRect(); return { x: ev.clientX - r.left, y: ev.clientY - r.top }; }
+
+    // Corner handles do uniform scale-from-centre (rotation-agnostic): the metric
+    // scales with the pointer's distance from the element's centre.
+    function startHandleResize(e, l, node) {
+        var c = _layerCenter(node), p0 = _stagePt(e);
+        var d0 = Math.max(4, Math.hypot(p0.x - c.cx, p0.y - c.cy));
+        var base = { size: l.size, w: l.w, h: l.h }, moved = false;
+        function move(ev) {
+            moved = true;
+            var p = _stagePt(ev), scale = Math.max(0.05, Math.hypot(p.x - c.cx, p.y - c.cy) / d0);
+            if (l.type === 'text') l.size = Math.max(0.008, base.size * scale);
+            else if (l.type === 'image') l.w = clamp01(base.w * scale);
+            else if (l.type === 'shape') { l.w = clamp01(base.w * scale); l.h = clamp01(base.h * scale); }
+            refreshLayer(l.id); updateSelBox(); syncInspectorSize(l);
+        }
+        function up() { document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up); if (moved) markDirty(); }
+        document.addEventListener('pointermove', move); document.addEventListener('pointerup', up);
+    }
+    function startHandleRotate(e, l, node) {
+        var c = _layerCenter(node), p0 = _stagePt(e);
+        var a0 = Math.atan2(p0.y - c.cy, p0.x - c.cx), baseRot = l.rotation || 0, moved = false;
+        function move(ev) {
+            moved = true;
+            var p = _stagePt(ev), a = Math.atan2(p.y - c.cy, p.x - c.cx);
+            var deg = baseRot + (a - a0) * 180 / Math.PI;
+            if (ev.shiftKey) deg = Math.round(deg / 15) * 15;
+            l.rotation = Math.round(deg) % 360;
+            refreshLayer(l.id); updateSelBox();
+            var ri = overlay && overlay.querySelector('[data-insp="rotation"]');
+            if (ri && document.activeElement !== ri) ri.value = l.rotation;
+        }
+        function up() { document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up); if (moved) markDirty(); }
+        document.addEventListener('pointermove', move); document.addEventListener('pointerup', up);
+    }
+    function syncInspectorSize(l) {
+        var box = overlay && overlay.querySelector('[data-voe-inspector]'); if (!box) return;
+        function set(key, val) { var i = box.querySelector('[data-insp="' + key + '"]'); if (i && document.activeElement !== i) i.value = pct(val); }
+        if (l.type === 'text') set('size', l.size);
+        else if (l.type === 'image') set('w', l.w);
+        else if (l.type === 'shape') { set('w', l.w); set('h', l.h); }
     }
 
     // Change a layer's anchor WITHOUT moving it on screen: recompute x,y so the new
@@ -1006,7 +1087,8 @@
             anchorGrid(l) +
             row2(field('X', numInput('x', pct(l.x), '%')), field('Y', numInput('y', pct(l.y), '%'))) +
             sizeCtrl +
-            field('Opacity', sliderInput('opacity', Math.round(l.opacity * 100))));
+            row2(field('Rotate', numInput('rotation', l.rotation || 0, '°')),
+                 field('Opacity', sliderInput('opacity', Math.round(l.opacity * 100)))));
         if (l.type === 'text') {
             if (l.binding) {
                 html += inspSection('Data',
@@ -1056,6 +1138,7 @@
         if (key === 'x') l.x = clamp01(num / 100);
         else if (key === 'y') l.y = clamp01(num / 100);
         else if (key === 'size') l.size = Math.max(0.005, num / 100);
+        else if (key === 'rotation') l.rotation = ((Math.round(num) % 360) + 360) % 360;
         else if (key === 'opacity') l.opacity = clamp01(num / 100);
         else if (key === 'bgOpacity') l.bg.opacity = clamp01(num / 100);
         else if (key === 'bgRadius') l.bg.radius = Math.max(0, num / 100);
