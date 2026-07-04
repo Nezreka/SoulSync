@@ -31,7 +31,7 @@ logger = get_logger("video_database")
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 20
+SCHEMA_VERSION = 21
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -2480,6 +2480,90 @@ class VideoDatabase:
         except (sqlite3.Error, ValueError, TypeError):
             logger.exception("overlay_sample_data failed for %s %s", kind, item_id)
             return None
+        finally:
+            conn.close()
+
+    # ── overlay apply: assignment (template → scope) + ledger ─────────────────
+    def get_overlay_assignments(self) -> dict:
+        """{'movie': {template_id, enabled, template_name}, 'show': {...}} — which
+        template the apply pipeline burns onto each library scope."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT a.scope, a.template_id, a.enabled, t.name AS template_name "
+                "FROM overlay_assignment a LEFT JOIN overlay_templates t ON t.id = a.template_id").fetchall()
+            out = {}
+            for r in rows:
+                d = dict(r)
+                out[d["scope"]] = {"template_id": d["template_id"], "enabled": bool(d["enabled"]),
+                                   "template_name": d["template_name"]}
+            return out
+        finally:
+            conn.close()
+
+    def set_overlay_assignment(self, scope: str, template_id, enabled: bool) -> bool:
+        if scope not in ("movie", "show"):
+            return False
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                "INSERT INTO overlay_assignment (scope, template_id, enabled, updated_at) "
+                "VALUES (?,?,?,datetime('now')) ON CONFLICT(scope) DO UPDATE SET "
+                "template_id=excluded.template_id, enabled=excluded.enabled, updated_at=datetime('now')",
+                (scope, template_id, 1 if enabled else 0))
+            conn.commit()
+            return True
+        except sqlite3.Error:
+            logger.exception("set_overlay_assignment failed for %s", scope)
+            return False
+        finally:
+            conn.close()
+
+    def record_overlay_apply(self, kind: str, item_id: int, template_id,
+                             base_sha=None, values_sig=None) -> None:
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                "INSERT INTO overlay_apply (kind, item_id, template_id, base_sha, values_sig, applied_at) "
+                "VALUES (?,?,?,?,?,datetime('now')) ON CONFLICT(kind, item_id) DO UPDATE SET "
+                "template_id=excluded.template_id, base_sha=excluded.base_sha, "
+                "values_sig=excluded.values_sig, applied_at=datetime('now')",
+                (kind, int(item_id), template_id, base_sha, values_sig))
+            conn.commit()
+        except sqlite3.Error:
+            logger.exception("record_overlay_apply failed for %s %s", kind, item_id)
+        finally:
+            conn.close()
+
+    def get_overlay_apply(self, kind: str, item_id: int) -> dict | None:
+        conn = self._get_connection()
+        try:
+            r = conn.execute(
+                "SELECT kind, item_id, template_id, base_sha, values_sig, applied_at "
+                "FROM overlay_apply WHERE kind=? AND item_id=?", (kind, int(item_id))).fetchone()
+            return dict(r) if r else None
+        finally:
+            conn.close()
+
+    def delete_overlay_apply(self, kind: str, item_id: int) -> bool:
+        conn = self._get_connection()
+        try:
+            cur = conn.execute("DELETE FROM overlay_apply WHERE kind=? AND item_id=?", (kind, int(item_id)))
+            conn.commit()
+            return cur.rowcount > 0
+        except (sqlite3.Error, ValueError, TypeError):
+            return False
+        finally:
+            conn.close()
+
+    def overlay_applied_count(self, template_id=None) -> int:
+        conn = self._get_connection()
+        try:
+            if template_id is None:
+                r = conn.execute("SELECT COUNT(*) FROM overlay_apply").fetchone()
+            else:
+                r = conn.execute("SELECT COUNT(*) FROM overlay_apply WHERE template_id=?", (template_id,)).fetchone()
+            return r[0] if r else 0
         finally:
             conn.close()
 

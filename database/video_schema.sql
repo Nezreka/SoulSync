@@ -621,3 +621,24 @@ CREATE TABLE IF NOT EXISTS overlay_templates (
     updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_overlay_templates_updated ON overlay_templates(updated_at DESC);
+
+-- Which template applies to which library scope (one per movie/show scope). The
+-- apply pipeline reads this to know what to burn onto each poster.
+CREATE TABLE IF NOT EXISTS overlay_assignment (
+    scope       TEXT PRIMARY KEY,                -- 'movie' | 'show'
+    template_id INTEGER,                          -- overlay_templates.id (NULL = none)
+    enabled     INTEGER NOT NULL DEFAULT 0,
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Ledger: what we last burned onto each item, so re-runs render from the clean
+-- base (no stacking) and reconcile can spot staleness (template or data changed).
+CREATE TABLE IF NOT EXISTS overlay_apply (
+    kind        TEXT NOT NULL,                    -- 'movie' | 'show'
+    item_id     INTEGER NOT NULL,
+    template_id INTEGER,
+    base_sha    TEXT,                             -- sha1 of the clean base we composited
+    values_sig  TEXT,                             -- signature of the data that drove the badges
+    applied_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (kind, item_id)
+);
