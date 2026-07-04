@@ -1202,7 +1202,9 @@
         if (!box) return;
         var l = ed.selected ? layerById(ed.selected) : null;
         if (!l) {
-            box.innerHTML = '<div class="voe-insp-empty">Select a layer to edit its position, size &amp; style.</div>';
+            box.innerHTML = '<div class="voe-insp-empty">' +
+                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4l7 16 2-6 6-2z"/></svg>' +
+                '<span>Select a layer to edit its position, size &amp; style.</span></div>';
             return;
         }
         var sizeCtrl = '';
