@@ -135,6 +135,54 @@ def preview_thumbnail(db, definition: dict) -> bytes | None:
         return None
 
 
+def _def_hash(definition: dict) -> str:
+    import hashlib
+    import json
+    return hashlib.sha1(json.dumps(definition or {}, sort_keys=True, default=str).encode("utf-8")).hexdigest()[:12]
+
+
+def render_and_cache_thumb(db, template_id, definition, store=None) -> bytes | None:
+    """Render a template's gallery thumbnail (random real title → neutral fallback)
+    and cache it to disk keyed by the definition hash."""
+    from .compositor import render_template_thumbnail
+    store = store or AssetStore.default()
+    data = preview_thumbnail(db, definition)
+    if data is None:
+        try:
+            data = render_template_thumbnail(definition or {})
+        except Exception:
+            logger.warning("thumbnail render failed for template %s", template_id, exc_info=True)
+            return None
+    try:
+        store.write_thumb(template_id, _def_hash(definition), data)
+    except Exception:
+        logger.warning("thumbnail cache write failed for template %s", template_id, exc_info=True)
+    return data
+
+
+def get_or_render_thumb(db, template_id, definition, store=None) -> bytes | None:
+    """Serve the cached thumbnail for this definition, else render + cache it. The
+    gallery view path hits the cache (instant) once a save has pre-rendered it."""
+    store = store or AssetStore.default()
+    cached = store.read_thumb(template_id, _def_hash(definition))
+    if cached is not None:
+        return cached
+    return render_and_cache_thumb(db, template_id, definition, store)
+
+
+def prerender_thumb_async(db, template_id) -> None:
+    """Kick a background render+cache of a template's thumbnail (off the request
+    thread) so the gallery serves it instantly next view."""
+    def _work():
+        try:
+            t = db.get_overlay_template(template_id)
+            if t:
+                render_and_cache_thumb(db, template_id, t.get("definition") or {})
+        except Exception:
+            logger.warning("prerender thumb failed for %s", template_id, exc_info=True)
+    threading.Thread(target=_work, daemon=True).start()
+
+
 def push_poster_bytes(db, kind: str, item_id: int, jpeg: bytes) -> bool:
     """Push composited art to the server for an item (best-effort)."""
     from core.video.sources import set_video_poster

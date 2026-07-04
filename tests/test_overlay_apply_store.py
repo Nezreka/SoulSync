@@ -38,6 +38,30 @@ def test_backup_is_first_touch_only(tmp_path):
     assert s.read_backup("show", 9) == b"original-art"
 
 
+def test_thumb_cache_write_read_and_stale_cleanup(tmp_path):
+    s = AssetStore(tmp_path / "a")
+    assert s.read_thumb(5, "h1") is None
+    s.write_thumb(5, "h1", b"IMG1")
+    assert s.read_thumb(5, "h1") == b"IMG1"
+    s.write_thumb(5, "h2", b"IMG2")                    # new def-hash replaces the old
+    assert s.read_thumb(5, "h2") == b"IMG2" and s.read_thumb(5, "h1") is None
+    s.write_thumb(6, "h1", b"OTHER")                   # a different template is untouched
+    s.clear_thumb(5)
+    assert s.read_thumb(5, "h2") is None and s.read_thumb(6, "h1") == b"OTHER"
+
+
+def test_get_or_render_thumb_caches_and_reuses(db, tmp_path, monkeypatch):
+    import core.video.overlays.service as svc
+    store = AssetStore(tmp_path / "a")
+    renders = []
+    monkeypatch.setattr(svc, "preview_thumbnail", lambda d, defn: (renders.append(1), b"RENDERED")[1])
+    definition = {"layers": []}
+    assert svc.get_or_render_thumb(db, 7, definition, store) == b"RENDERED" and len(renders) == 1
+    assert svc.get_or_render_thumb(db, 7, definition, store) == b"RENDERED" and len(renders) == 1   # cache hit
+    svc.get_or_render_thumb(db, 7, {"layers": [{"type": "text"}]}, store)                            # def changed → re-render
+    assert len(renders) == 2
+
+
 def test_clear_removes_item(tmp_path):
     s = AssetStore(tmp_path / "assets")
     s.write_base("movie", 1, b"x"); s.ensure_backup("movie", 1, b"y")

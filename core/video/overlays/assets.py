@@ -108,3 +108,36 @@ class AssetStore:
         safe = Path(str(name)).name
         p = self._uploads_dir() / safe
         return p.read_bytes() if p.is_file() else None
+
+    # ── cached gallery thumbnails (rendered once, keyed by definition hash) ────
+    def _thumbs_dir(self) -> Path:
+        return self.root / "_thumbs"
+
+    def _thumb_prefix(self, template_id) -> str:
+        return str(int(template_id)) + "_"
+
+    def read_thumb(self, template_id, defhash: str) -> bytes | None:
+        p = self._thumbs_dir() / (self._thumb_prefix(template_id) + str(defhash) + ".jpg")
+        return p.read_bytes() if p.is_file() else None
+
+    def write_thumb(self, template_id, defhash: str, data: bytes) -> None:
+        """Cache a rendered thumbnail; drops any older cache for this template so
+        stale definition-hashes don't accumulate."""
+        d = self._thumbs_dir()
+        d.mkdir(parents=True, exist_ok=True)
+        for f in d.glob(self._thumb_prefix(template_id) + "*.jpg"):
+            try:
+                f.unlink()
+            except OSError:
+                pass
+        (d / (self._thumb_prefix(template_id) + str(defhash) + ".jpg")).write_bytes(data)
+
+    def clear_thumb(self, template_id) -> None:
+        d = self._thumbs_dir()
+        if not d.is_dir():
+            return
+        for f in d.glob(self._thumb_prefix(template_id) + "*.jpg"):
+            try:
+                f.unlink()
+            except OSError:
+                pass

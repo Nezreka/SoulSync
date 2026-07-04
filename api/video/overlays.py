@@ -21,6 +21,15 @@ from utils.logging_config import get_logger
 logger = get_logger("video_api.overlays")
 
 
+def _prerender_thumb(db, template_id):
+    """Fire a background render+cache of a template's gallery thumbnail (best-effort)."""
+    try:
+        from core.video.overlays.service import prerender_thumb_async
+        prerender_thumb_async(db, template_id)
+    except Exception:
+        logger.warning("prerender thumb kickoff failed for %s", template_id, exc_info=True)
+
+
 def register_routes(bp):
     @bp.route("/overlays/templates", methods=["GET"])
     def overlay_templates_list():
@@ -38,9 +47,11 @@ def register_routes(bp):
         name = data.get("name") or "Untitled template"
         definition = data.get("definition")
         try:
-            tid = get_video_db().create_overlay_template(name, definition=definition)
+            db = get_video_db()
+            tid = db.create_overlay_template(name, definition=definition)
             if tid is None:
                 return jsonify({"ok": False, "error": "Could not create template"}), 500
+            _prerender_thumb(db, tid)
             return jsonify({"ok": True, "id": tid})
         except Exception:
             logger.exception("create overlay template failed")
@@ -59,11 +70,14 @@ def register_routes(bp):
         from . import get_video_db
         data = request.get_json(silent=True) or {}
         try:
-            ok = get_video_db().update_overlay_template(
+            db = get_video_db()
+            ok = db.update_overlay_template(
                 template_id,
                 name=data.get("name"),
                 definition=data.get("definition"),
                 thumbnail=data.get("thumbnail"))
+            if ok and data.get("definition") is not None:   # re-render the cached thumb off-thread
+                _prerender_thumb(db, template_id)
             return jsonify({"ok": bool(ok)})
         except Exception:
             logger.exception("update overlay template failed for %s", template_id)
@@ -73,6 +87,12 @@ def register_routes(bp):
     def overlay_template_delete(template_id):
         from . import get_video_db
         ok = get_video_db().delete_overlay_template(template_id)
+        if ok:
+            try:
+                from core.video.overlays.assets import AssetStore
+                AssetStore.default().clear_thumb(template_id)
+            except Exception:
+                logger.warning("clear cached thumb failed for %s", template_id, exc_info=True)
         return jsonify({"ok": bool(ok)})
 
     @bp.route("/overlays/templates/<int:template_id>/thumb", methods=["GET"])
@@ -88,12 +108,12 @@ def register_routes(bp):
             abort(404)
         definition = t.get("definition") or {}
         data = None
-        try:                                # prefer a random real title's clean poster
-            from core.video.overlays.service import preview_thumbnail
-            data = preview_thumbnail(db, definition)
+        try:                                # cached (from save-time pre-render) → render on miss
+            from core.video.overlays.service import get_or_render_thumb
+            data = get_or_render_thumb(db, template_id, definition)
         except Exception:
-            logger.warning("overlay preview thumbnail failed for %s", template_id, exc_info=True)
-        if data is None:                    # fall back to the neutral gradient poster
+            logger.warning("overlay thumbnail cache path failed for %s", template_id, exc_info=True)
+        if data is None:                    # last-resort neutral render (never cached)
             try:
                 data = render_template_thumbnail(definition)
             except Exception:
@@ -106,9 +126,11 @@ def register_routes(bp):
     @bp.route("/overlays/templates/<int:template_id>/duplicate", methods=["POST"])
     def overlay_template_duplicate(template_id):
         from . import get_video_db
-        tid = get_video_db().duplicate_overlay_template(template_id)
+        db = get_video_db()
+        tid = db.duplicate_overlay_template(template_id)
         if tid is None:
             return jsonify({"ok": False, "error": "Could not duplicate"}), 404
+        _prerender_thumb(db, tid)
         return jsonify({"ok": True, "id": tid})
 
     # ── apply: assignment + run ───────────────────────────────────────────────
