@@ -2280,11 +2280,11 @@ class VideoDatabase:
         conn = self._get_connection()
         try:
             r = conn.execute(
-                "SELECT kind, id, tmdb_id FROM ("
-                f"  SELECT 'movie' AS kind, id, tmdb_id FROM movies "
+                "SELECT kind, id, tmdb_id, title FROM ("
+                f"  SELECT 'movie' AS kind, id, tmdb_id, title FROM movies "
                 f"   WHERE tmdb_id IS NOT NULL AND poster_url IS NOT NULL AND poster_url <> ''{srcm}"
                 "   UNION ALL "
-                f"  SELECT 'show' AS kind, id, tmdb_id FROM shows "
+                f"  SELECT 'show' AS kind, id, tmdb_id, title FROM shows "
                 f"   WHERE tmdb_id IS NOT NULL AND poster_url IS NOT NULL AND poster_url <> ''{srcs}"
                 ") ORDER BY RANDOM() LIMIT 1", params).fetchone()
             return dict(r) if r else None

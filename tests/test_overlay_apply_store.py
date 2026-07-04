@@ -133,7 +133,7 @@ def test_random_overlay_preview_item(db):
     db.upsert_movie("plex", {"server_id": "m2", "title": "No TMDB", "poster_url": "/q.jpg",
                              "file": {"relative_path": "n.mkv", "size_bytes": 5}})   # no tmdb_id → excluded
     pick = db.random_overlay_preview_item()
-    assert pick and pick["kind"] == "movie" and pick["tmdb_id"] == 603
+    assert pick and pick["kind"] == "movie" and pick["tmdb_id"] == 603 and pick["title"] == "The Matrix"
 
 
 def test_preview_thumbnail_renders_on_a_random_title(db, monkeypatch):

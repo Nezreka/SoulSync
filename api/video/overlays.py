@@ -204,6 +204,13 @@ def register_routes(bp):
         resp.headers["Cache-Control"] = "public, max-age=31536000"
         return resp
 
+    @bp.route("/overlays/preview/random", methods=["GET"])
+    def overlay_preview_random():
+        """A random owned title (with tmdb_id + poster) to drop into the editor's
+        preview — the "surprise me" companion to the search."""
+        from . import get_video_db
+        return jsonify({"item": get_video_db().random_overlay_preview_item()})
+
     @bp.route("/overlays/sample/<kind>/<int:item_id>", methods=["GET"])
     def overlay_sample(kind, item_id):
         """Real badge values for a library item — the editor's "load from a real
