@@ -11151,6 +11151,9 @@
     <!-- Download VIEW renderer (movie / show / youtube): per-source search + quality verdict;
          rendered inline inside the get-modal (not its own modal) -->
     <script src="{{ url_for('static', filename='video/video-download-view.js', v=static_v) }}"></script>
+    <!-- Headless per-episode / per-season auto-grab + wishlist helper (VideoGrab),
+         used by the detail page's inline acquisition buttons -->
+    <script src="{{ url_for('static', filename='video/video-grab.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='video/video-download-history.js', v=static_v) }}"></script>
     <!-- Downloads page (isolated): live status of every grab from the video side -->
     <script src="{{ url_for('static', filename='video/video-downloads-page.js', v=static_v) }}"></script>

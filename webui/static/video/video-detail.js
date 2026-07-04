@@ -55,6 +55,7 @@
     }
     function root() { return document.querySelector('[data-video-detail="' + currentKind + '"]'); }
     function q(sel) { var r = root(); return r ? r.querySelector(sel) : null; }
+    function toast(msg, type) { if (typeof showToast === 'function') showToast(msg, type); }
     function setText(sel, t) { var n = q(sel); if (n) n.textContent = t || ''; }
     function runtimeLabel(m) {
         if (!m) return '';
@@ -470,10 +471,16 @@
                     }).catch(function () { /* keep default */ });
             }
         }
-        // "Get Missing" filters the OWNED episode list — library shows only.
-        if (d.kind === 'show' && d.source !== 'tmdb') {
+        // Acquisition CTA for shows — opens the season/episode grab view. Shown on
+        // EVERY show page, owned or not: a show already in the library reads "Get
+        // Missing" (fill the gaps), one you don't have reads "Get Show" (grab it
+        // all). A library-sourced page is inherently owned; a TMDB page keys off
+        // d.owned (the same flag that drives the "In library" badge).
+        if (d.kind === 'show' && window.VideoGet) {
+            var haveShow = (d.source !== 'tmdb') || !!d.owned;
+            var showGetLabel = haveShow ? 'Get Missing' : 'Get Show';
             html += '<button class="discog-download-btn discog-btn-compact" type="button" data-vd-act="missing">' +
-                '<span class="discog-btn-icon">⭳</span><span class="discog-btn-text">Get Missing</span>' +
+                '<span class="discog-btn-icon">⭳</span><span class="discog-btn-text">' + showGetLabel + '</span>' +
                 '<span class="discog-btn-shimmer"></span></button>';
         }
         a.innerHTML = html;
@@ -482,13 +489,15 @@
     // Open the shared Get modal for the current item (movies use this in place of
     // the airing-show watchlist follow). The modal fetches its own details from the
     // kind/source/id, then offers Download + Add-to-Wishlist.
-    function openGetModal() {
+    function openGetModal(startDownload) {
         if (!window.VideoGet || !data) return;
         VideoGet.open({
             kind: data.kind,
             source: data.source || currentSource || 'library',
             id: (data.id != null) ? data.id : currentId,
             title: data.title || '',
+            // "Get Missing" jumps straight to the season/episode grab view.
+            startDownload: !!startDownload,
         });
     }
 
@@ -1115,7 +1124,14 @@
             esc(ep.title || 'Episode ' + ep.episode_number) + '</span>' +
             (meta.length ? '<span class="vd-ep-rt">' + esc(meta.join(' · ')) + '</span>' : '') + '</div>' +
             (ep.overview ? '<p class="vd-ep-desc">' + esc(ep.overview) + '</p>' : '') + '</div>' +
-            '<div class="vd-ep-badge">' + (ep.owned ? 'Owned' : 'Missing') + '</div>' +
+            (ep.owned || !window.VideoGrab
+                ? '<div class="vd-ep-badge">' + (ep.owned ? 'Owned' : 'Missing') + '</div>'
+                : '<div class="vd-ep-get" data-vd-ep-get="' + ep.episode_number + '">' +
+                    '<button class="vd-ep-getbtn vd-ep-grab" type="button" data-vd-ep-grab="' + ep.episode_number +
+                        '" title="Auto-search & download this episode" aria-label="Get episode">⌕</button>' +
+                    '<button class="vd-ep-getbtn vd-ep-wish" type="button" data-vd-ep-wish="' + ep.episode_number +
+                        '" title="Add this episode to the wishlist" aria-label="Wishlist episode">＋</button>' +
+                  '</div>') +
             '<span class="vd-ep-chev" aria-hidden="true">⌄</span></div>' +
             '<div class="vd-ep-extra" data-vd-ep-panel="' + key + '" hidden></div>';
     }
@@ -1209,7 +1225,21 @@
         var emptyMsg = (data && data.source === 'youtube')
             ? (ytFilter.q ? 'No videos match “' + esc(ytFilter.q) + '”.' : 'No videos here.')
             : 'No ' + (missingOnly ? 'missing ' : '') + 'episodes here. 🎉';
-        host.innerHTML = eps.length ? eps.map(episodeRow).join('') : '<div class="vd-ep-empty">' + emptyMsg + '</div>';
+        // Season-level acquisition bar — grab / wishlist every missing episode in
+        // one click (TV shows only, when something is actually missing).
+        var seasonMissing = (data && data.source !== 'youtube')
+            ? season.episodes.filter(function (e) { return !e.owned; }) : [];
+        var seasonBar = (seasonMissing.length && window.VideoGrab)
+            ? '<div class="vd-season-actions">' +
+                '<span class="vd-season-actions-count">' + seasonMissing.length + ' missing</span>' +
+                '<button class="vd-season-getbtn" type="button" data-vd-season-grab ' +
+                    'title="Auto-search &amp; download every missing episode in this season">⭳ Grab season</button>' +
+                '<button class="vd-season-getbtn vd-season-wishbtn" type="button" data-vd-season-wish ' +
+                    'title="Add every missing episode in this season to the wishlist">＋ Wishlist season</button>' +
+              '</div>'
+            : '';
+        host.innerHTML = seasonBar +
+            (eps.length ? eps.map(episodeRow).join('') : '<div class="vd-ep-empty">' + emptyMsg + '</div>');
         host.classList.remove('vd-ep-anim'); void host.offsetWidth; host.classList.add('vd-ep-anim');
     }
 
@@ -1993,6 +2023,16 @@
         if (ytPlW && r.contains(ytPlW)) { e.preventDefault(); e.stopPropagation(); toggleYtPlaylistWatch(ytPlW); return; }
         var ytPl = e.target.closest('[data-vd-yt-pl-toggle]');
         if (ytPl && r.contains(ytPl)) { toggleYtPlaylist(ytPl); return; }
+        // Inline acquisition — must win over the row-expand handler below since the
+        // grab/wishlist buttons live inside the episode row.
+        var epGrab = e.target.closest('[data-vd-ep-grab]');
+        if (epGrab && r.contains(epGrab)) { e.preventDefault(); e.stopPropagation(); grabEpisodeInline(epGrab); return; }
+        var epWish = e.target.closest('[data-vd-ep-wish]');
+        if (epWish && r.contains(epWish)) { e.preventDefault(); e.stopPropagation(); wishEpisodeInline(epWish); return; }
+        var seasonGrab = e.target.closest('[data-vd-season-grab]');
+        if (seasonGrab && r.contains(seasonGrab)) { e.preventDefault(); grabSeasonInline(seasonGrab); return; }
+        var seasonWish = e.target.closest('[data-vd-season-wish]');
+        if (seasonWish && r.contains(seasonWish)) { e.preventDefault(); wishSeasonInline(seasonWish); return; }
         var epRow = e.target.closest('[data-vd-ep-key]');
         if (epRow && r.contains(epRow)) { toggleEpisode(epRow); return; }
         var seasonBtn = e.target.closest('[data-vd-season]');
@@ -2006,7 +2046,7 @@
             var which = act.getAttribute('data-vd-act');
             if (which === 'watchlist') toggleWatchlist();
             else if (which === 'get') openGetModal();
-            else if (which === 'missing') toggleMissing();
+            else if (which === 'missing') openGetModal(true);
             else if (which === 'yt-follow') toggleYtFollow();
             else if (which === 'yt-pl-follow') toggleYtPlaylistFollowHero();
             else if (which === 'trailer' && data && data.trailer) openTrailer(data.trailer.key);
@@ -2022,6 +2062,99 @@
         var mt = q('[data-vd-missing-toggle]');
         if (mt) mt.classList.toggle('vd-missing-toggle--on', missingOnly);
         renderEpisodes();
+    }
+
+    // ── Inline acquisition (per-episode / per-season) — drives the headless VideoGrab ──
+    // The video_wishlist episode row needs full context or it renders as an
+    // art-less, un-matched orb: show poster_url + library_id, and per-episode
+    // still_url / overview / season_poster_url / air_date (mirrors the get-modal's
+    // submitWishlist exactly). A null poster was the "no context" bug.
+    function _showPoster() {
+        if (!data) return null;
+        return (data.source !== 'tmdb' && data.has_poster)
+            ? '/api/video/poster/show/' + data.id
+            : (data.poster_url || data.poster || null);
+    }
+    function _showIdentity() {
+        return { tmdb_id: data && data.tmdb_id, title: data && data.title, poster_url: _showPoster(),
+            library_id: (data && (data.source !== 'tmdb' ? data.id : (data.library_id || null))) || null };
+    }
+    function _epMeta(en) {
+        var s = seasonByNum(selectedSeason);
+        var ep = (s && (s.episodes || []).filter(function (e) { return e.episode_number === en; })[0]) || {};
+        var still = (data && data.source === 'tmdb')
+            ? (ep.still_url || null)
+            : (ep.has_still && ep.id != null ? '/api/video/poster/episode/' + ep.id : null);
+        return { season_number: selectedSeason, episode_number: en, title: ep.title,
+            air_date: ep.air_date, still_url: still, overview: ep.overview,
+            season_poster_url: seasonArt(s) || null };
+    }
+    function _seasonMissing() {
+        var s = seasonByNum(selectedSeason);
+        return s ? (s.episodes || []).filter(function (e) { return !e.owned; }) : [];
+    }
+    function _grabParams(en, src) {
+        return { title: data.title, source: src, season: selectedSeason, episode: en,
+            mediaId: (data.source !== 'tmdb' ? data.id : null), mediaSource: data.source, year: data.year };
+    }
+    function _markEpState(en, state) {   // reflect a grab on the episode row
+        var row = q('[data-vd-ep-key="' + selectedSeason + '_' + en + '"]');
+        var box = row && row.querySelector('[data-vd-ep-get]');
+        if (!box) return;
+        box.classList.toggle('vd-ep-get--searching', state === 'searching');
+        box.classList.toggle('vd-ep-get--grabbing', state === 'grabbing' || state === 'done');
+    }
+
+    function grabEpisodeInline(btn) {
+        if (!window.VideoGrab || !data) return;
+        var en = parseInt(btn.getAttribute('data-vd-ep-grab'), 10);
+        btn.disabled = true; _markEpState(en, 'searching');
+        VideoGrab.pickSource()
+            .then(function (src) { return VideoGrab.episode(_grabParams(en, src)); })
+            .then(function (res) {
+                if (res && res.ok) { _markEpState(en, 'grabbing'); toast('Downloading S' + selectedSeason + 'E' + en, 'success'); }
+                else {
+                    _markEpState(en, 'idle'); btn.disabled = false;
+                    toast(res && res.error === 'no release found'
+                        ? 'No release found for S' + selectedSeason + 'E' + en : 'Could not grab that episode', 'error');
+                }
+            });
+    }
+    function wishEpisodeInline(btn) {
+        if (!window.VideoGrab || !data) return;
+        if (!data.tmdb_id) { toast('Can’t wishlist — this show isn’t matched to TMDB yet', 'error'); return; }
+        var en = parseInt(btn.getAttribute('data-vd-ep-wish'), 10);
+        btn.disabled = true;
+        VideoGrab.wishlistEpisodes(_showIdentity(), [_epMeta(en)]).then(function (ok) {
+            if (ok) { btn.textContent = '✓'; btn.classList.add('vd-ep-wish--done'); toast('S' + selectedSeason + 'E' + en + ' added to wishlist', 'success'); }
+            else { btn.disabled = false; toast('Could not add to wishlist', 'error'); }
+        });
+    }
+    function grabSeasonInline(btn) {
+        if (!window.VideoGrab || !data) return;
+        var missing = _seasonMissing();
+        if (!missing.length) { toast('No missing episodes in this season', 'info'); return; }
+        btn.disabled = true; btn.textContent = '⭳ Grabbing…';
+        VideoGrab.pickSource().then(function (src) {
+            return VideoGrab.season({ title: data.title, source: src, season: selectedSeason,
+                episodes: missing.map(function (e) { return e.episode_number; }),
+                mediaId: (data.source !== 'tmdb' ? data.id : null), mediaSource: data.source, year: data.year }, _markEpState);
+        }).then(function (res) {
+            btn.disabled = false; btn.textContent = '⭳ Grab season';
+            toast('Grabbing ' + res.grabbed + ' of ' + res.total + ' episode' + (res.total === 1 ? '' : 's'), res.grabbed ? 'success' : 'info');
+        });
+    }
+    function wishSeasonInline(btn) {
+        if (!window.VideoGrab || !data) return;
+        if (!data.tmdb_id) { toast('Can’t wishlist — this show isn’t matched to TMDB yet', 'error'); return; }
+        var missing = _seasonMissing();
+        if (!missing.length) { toast('No missing episodes in this season', 'info'); return; }
+        btn.disabled = true;
+        var eps = missing.map(function (e) { return _epMeta(e.episode_number); });
+        VideoGrab.wishlistEpisodes(_showIdentity(), eps).then(function (ok) {
+            if (ok) { btn.textContent = '✓ Wishlisted'; toast('Added ' + eps.length + ' episode' + (eps.length === 1 ? '' : 's') + ' to wishlist', 'success'); }
+            else { btn.disabled = false; toast('Could not add to wishlist', 'error'); }
+        });
     }
 
     function init() {
