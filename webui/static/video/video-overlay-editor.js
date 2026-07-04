@@ -881,6 +881,21 @@
         else if (l.type === 'shape') { set('w', l.w); set('h', l.h); }
     }
 
+    // Snap the selected layer's box to a stage edge/centre (uses the measured box).
+    function alignSelected(dir) {
+        var l = ed.selected ? layerById(ed.selected) : null; if (!l) return;
+        var node = ed.stage.querySelector('.voe-layer[data-voe-layer="' + l.id + '"]'); if (!node) return;
+        var ew = node.offsetWidth, eh = node.offsetHeight, W = ed.W, H = ed.H;
+        var af = anchorFrac(l.anchor), ax = af[0], ay = af[1];
+        if (dir === 'left') l.x = ax * ew / W;
+        else if (dir === 'hcenter') l.x = 0.5 - ew / (2 * W) + ax * ew / W;
+        else if (dir === 'right') l.x = 1 - ew / W + ax * ew / W;
+        else if (dir === 'top') l.y = ay * eh / H;
+        else if (dir === 'vmiddle') l.y = 0.5 - eh / (2 * H) + ay * eh / H;
+        else if (dir === 'bottom') l.y = 1 - eh / H + ay * eh / H;
+        refreshLayer(l.id); syncInspectorPos(l); updateSelBox(); markDirty();
+    }
+
     // Change a layer's anchor WITHOUT moving it on screen: recompute x,y so the new
     // anchor point maps to the element's current pixel box.
     function changeAnchor(l, na) {
@@ -1070,6 +1085,22 @@
             return '<div class="voe-anchor-cell' + (a === l.anchor ? ' voe-anchor-cell--on' : '') + '" data-anchor="' + a + '" title="' + a + '"></div>';
         }).join('') + '</div>');
     }
+    var ALIGN_ICONS = {
+        left: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 4v16"/><path d="M4 9h11M4 15h7"/></svg>',
+        hcenter: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 4v16"/><path d="M6 9h12M8 15h8"/></svg>',
+        right: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 4v16"/><path d="M9 9h11M13 15h7"/></svg>',
+        top: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 4h16"/><path d="M9 4v11M15 4v7"/></svg>',
+        vmiddle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 12h16"/><path d="M9 6v12M15 8v8"/></svg>',
+        bottom: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20h16"/><path d="M9 9h0M9 9v11M15 13v7"/></svg>',
+    };
+    function _alignSeg(dirs) {
+        return '<div class="voe-seg" data-voe-alignbar>' + dirs.map(function (d) {
+            return '<button class="voe-seg-btn" data-voe-align="' + d + '" title="Align ' + d + '">' + ALIGN_ICONS[d] + '</button>';
+        }).join('') + '</div>';
+    }
+    function alignBar() {
+        return '<div style="display:flex;gap:6px">' + _alignSeg(['left', 'hcenter', 'right']) + _alignSeg(['top', 'vmiddle', 'bottom']) + '</div>';
+    }
 
     function renderInspector() {
         var box = overlay && overlay.querySelector('[data-voe-inspector]');
@@ -1085,6 +1116,7 @@
         else if (l.type === 'shape') sizeCtrl = row2(field('Width', numInput('w', pct(l.w), '%')), field('Height', numInput('h', pct(l.h), '%')));
         var html = inspSection('Transform',
             anchorGrid(l) +
+            field('Align', alignBar()) +
             row2(field('X', numInput('x', pct(l.x), '%')), field('Y', numInput('y', pct(l.y), '%'))) +
             sizeCtrl +
             row2(field('Rotate', numInput('rotation', l.rotation || 0, '°')),
@@ -1203,6 +1235,11 @@
             sel.addEventListener('change', function () {
                 if (key === 'weight') l.weight = parseInt(sel.value, 10); else l[key] = sel.value;
                 refreshLayer(l.id); markDirty();
+            });
+        });
+        box.querySelectorAll('[data-voe-alignbar]').forEach(function (bar) {
+            bar.addEventListener('click', function (e) {
+                var b = e.target.closest('[data-voe-align]'); if (b) alignSelected(b.getAttribute('data-voe-align'));
             });
         });
         var seg = box.querySelector('[data-inspseg="align"]');
