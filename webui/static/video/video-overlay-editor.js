@@ -654,6 +654,8 @@
         if (f.grad) return 'linear-gradient(' + f.dir + 'deg,' + hexToRgba(f.c1, f.a1) + ',' + hexToRgba(f.c2, f.a2) + ')';
         return hexToRgba(f.c1, f.a1);
     }
+    // uploaded images are stored as asset:// refs; serve them same-origin for display
+    function srcUrl(s) { return !s ? '' : (s.indexOf('asset://') === 0 ? '/api/video/overlays/asset/' + s.slice(8) : s); }
     function imgPlaceholder(l) {
         var h = l.w * ed.W * (l.logo ? 0.34 : 0.62);
         return '<div class="voe-img-ph" style="height:' + h + 'px">' + (l.logo ? 'LOGO' : 'IMAGE') + '</div>';
@@ -665,7 +667,7 @@
             el.style.width = (l.w * ed.W) + 'px'; el.style.height = 'auto';
             var src = l.logo ? (ed.sample && ed.sample.logo_url) : l.src;
             if (src) {
-                el.innerHTML = '<img src="' + esc(src) + '" style="width:100%;display:block" draggable="false">';
+                el.innerHTML = '<img src="' + esc(srcUrl(src)) + '" style="width:100%;display:block" draggable="false">';
                 var img = el.querySelector('img');
                 img.onload = function () { layoutLayer(el, l); };
                 img.onerror = function () { el.innerHTML = imgPlaceholder(l); layoutLayer(el, l); };
@@ -1030,7 +1032,8 @@
         if (l.type === 'image') {
             html += inspSection('Source', l.logo
                 ? '<div class="voe-insp-hint">Uses the previewed title’s logo. Pick a title under “Preview poster” to see it.</div>'
-                : field('URL', '<input class="voe-input" data-inspsrc placeholder="https://…" value="' + esc(l.src) + '">'));
+                : field('URL', '<input class="voe-input" data-inspsrc placeholder="https://…" value="' + esc(l.src || '') + '">') +
+                  field('Upload', '<button class="voe-btn" data-inspupload style="width:100%;justify-content:center">Choose image…</button>'));
         }
         if (l.type === 'shape') {
             html += inspSection('Fill',
@@ -1094,6 +1097,24 @@
         });
         var srcInp = box.querySelector('[data-inspsrc]');
         if (srcInp) srcInp.addEventListener('input', function () { l.src = srcInp.value.trim(); refreshLayer(l.id); markDirty(); });
+        var upBtn = box.querySelector('[data-inspupload]');
+        if (upBtn) upBtn.addEventListener('click', function () {
+            var fi = document.createElement('input'); fi.type = 'file'; fi.accept = 'image/*';
+            fi.addEventListener('change', function () {
+                var file = fi.files && fi.files[0]; if (!file) return;
+                upBtn.disabled = true; upBtn.textContent = 'Uploading…';
+                var fd = new FormData(); fd.append('file', file);
+                fetch('/api/video/overlays/upload', { method: 'POST', body: fd })
+                    .then(function (r) { return r.json(); })
+                    .then(function (d) {
+                        upBtn.disabled = false; upBtn.textContent = 'Choose image…';
+                        if (!d || !d.ok) { toast((d && d.error) || 'Upload failed', 'error'); return; }
+                        l.src = d.src; if (srcInp) srcInp.value = d.src; refreshLayer(l.id); markDirty();
+                    })
+                    .catch(function () { upBtn.disabled = false; upBtn.textContent = 'Choose image…'; toast('Upload failed', 'error'); });
+            });
+            fi.click();
+        });
         box.querySelectorAll('[data-inspsel]').forEach(function (sel) {
             var key = sel.getAttribute('data-inspsel');
             sel.addEventListener('change', function () {

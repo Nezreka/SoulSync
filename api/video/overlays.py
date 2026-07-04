@@ -121,6 +121,39 @@ def register_routes(bp):
         from core.video.overlays import service
         return jsonify(service.status())
 
+    # ── uploaded template images ──────────────────────────────────────────────
+    @bp.route("/overlays/upload", methods=["POST"])
+    def overlay_upload():
+        """Store an uploaded image for use as an Image layer. Returns an
+        ``asset://<name>`` ref (rendered/served same-origin)."""
+        from core.video.overlays.assets import AssetStore
+        f = request.files.get("file")
+        if not f or not f.filename:
+            return jsonify({"ok": False, "error": "No file"}), 400
+        data = f.read()
+        if not data or len(data) > 8 * 1024 * 1024:
+            return jsonify({"ok": False, "error": "Empty or over 8 MB"}), 400
+        ext = (f.filename.rsplit(".", 1)[-1] if "." in f.filename else "png")
+        try:
+            name = AssetStore.default().save_upload(data, ext)
+        except Exception:
+            logger.exception("overlay upload failed")
+            return jsonify({"ok": False, "error": "Could not save"}), 500
+        return jsonify({"ok": True, "src": "asset://" + name})
+
+    @bp.route("/overlays/asset/<name>", methods=["GET"])
+    def overlay_asset(name):
+        from flask import Response, abort
+        from core.video.overlays.assets import AssetStore
+        data = AssetStore.default().read_upload(name)
+        if data is None:
+            abort(404)
+        ext = name.rsplit(".", 1)[-1].lower() if "." in name else "png"
+        ctype = "image/jpeg" if ext in ("jpg", "jpeg") else ("image/" + ext)
+        resp = Response(data, content_type=ctype)
+        resp.headers["Cache-Control"] = "public, max-age=31536000"
+        return resp
+
     @bp.route("/overlays/sample/<kind>/<int:item_id>", methods=["GET"])
     def overlay_sample(kind, item_id):
         """Real badge values for a library item — the editor's "load from a real

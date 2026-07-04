@@ -51,6 +51,33 @@ def test_keyed_by_id_not_path(tmp_path):
     assert s.read_base("movie", 1) == b"a" and s.read_base("movie", 2) == b"b"
 
 
+def test_upload_is_content_addressed_and_readable(tmp_path):
+    s = AssetStore(tmp_path / "assets")
+    n1 = s.save_upload(b"logo-bytes", "png")
+    n2 = s.save_upload(b"logo-bytes", "png")       # identical → same name (dedup)
+    assert n1 == n2 and n1.endswith(".png")
+    assert s.read_upload(n1) == b"logo-bytes"
+    assert s.read_upload("nope.png") is None
+    assert s.read_upload("../../etc/passwd") is None   # traversal guarded to basename
+
+
+def test_compositor_asset_loader_reads_uploads(tmp_path, monkeypatch):
+    import io
+    from PIL import Image
+    from core.video.overlays import assets as assets_mod
+    from core.video.overlays.compositor import render_overlay
+    store = AssetStore(tmp_path / "assets")
+    logo = io.BytesIO(); Image.new("RGBA", (60, 30), (0, 0, 255, 255)).save(logo, format="PNG")
+    name = store.save_upload(logo.getvalue(), "png")
+    monkeypatch.setattr(assets_mod.AssetStore, "default", classmethod(lambda cls: store))
+    base = io.BytesIO(); Image.new("RGB", (200, 300), (0, 0, 0)).save(base, format="JPEG")
+    definition = {"layers": [{"type": "image", "src": "asset://" + name, "anchor": "center",
+                              "x": 0.5, "y": 0.5, "w": 0.5, "opacity": 1}]}
+    out = render_overlay(base.getvalue(), definition, {})   # default loader resolves asset://
+    img = Image.open(io.BytesIO(out)).convert("RGB")
+    assert img.getpixel((100, 150))[2] > 200               # blue upload painted centre
+
+
 # ── assignment ────────────────────────────────────────────────────────────────
 def test_assignment_roundtrip(db):
     tid = db.create_overlay_template("My overlay")

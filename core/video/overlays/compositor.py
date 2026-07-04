@@ -203,6 +203,12 @@ def _tile_for(layer, W, H, values, image_loader):
 
 
 def _default_loader(url):
+    if str(url).startswith("asset://"):
+        from .assets import AssetStore
+        data = AssetStore.default().read_upload(str(url)[len("asset://"):])
+        if data is None:
+            raise FileNotFoundError(url)
+        return data
     import requests
     r = requests.get(url, timeout=20)
     r.raise_for_status()
