@@ -209,12 +209,22 @@
         if (typeof l.x !== 'number') l.x = 0.5;
         if (typeof l.y !== 'number') l.y = 0.5;
         l.hidden = !!l.hidden;
+        if (typeof l.opacity !== 'number') l.opacity = 1;
         if (l.type === 'text') {
             if (l.text == null) l.text = 'Text';
             if (typeof l.size !== 'number') l.size = 0.06;
             l.color = l.color || '#ffffff';
             l.font = l.font || 'Inter';
             if (typeof l.weight !== 'number') l.weight = 800;
+            l.align = l.align || 'center';
+            if (typeof l.shadow !== 'boolean') l.shadow = true;
+            l.bg = l.bg || {};
+            l.bg.enabled = !!l.bg.enabled;
+            l.bg.color = l.bg.color || '#000000';
+            if (typeof l.bg.opacity !== 'number') l.bg.opacity = 0.6;
+            if (typeof l.bg.radius !== 'number') l.bg.radius = 0.014;
+            if (typeof l.bg.padX !== 'number') l.bg.padX = 0.022;
+            if (typeof l.bg.padY !== 'number') l.bg.padY = 0.012;
         }
         return l;
     }
@@ -240,8 +250,11 @@
                     '</div>' +
                 '</div>' +
                 '<div class="voe-side">' +
-                    '<div class="voe-side-h"><span>Layers</span><span class="voe-side-count" data-voe-count></span></div>' +
-                    '<div class="voe-layers" data-voe-layers></div>' +
+                    '<div class="voe-side-layers">' +
+                        '<div class="voe-side-h"><span>Layers</span><span class="voe-side-count" data-voe-count></span></div>' +
+                        '<div class="voe-layers" data-voe-layers></div>' +
+                    '</div>' +
+                    '<div class="voe-inspector" data-voe-inspector></div>' +
                 '</div>' +
             '</div>';
 
@@ -261,6 +274,7 @@
         measureStage();
         renderStageLayers();
         renderLayersPanel();
+        renderInspector();
         updateSaveState();
     }
 
@@ -289,10 +303,12 @@
 
     // ── add / create layers ─────────────────────────────────────────────────────
     function defaultLayer(kind, x, y) {
-        var base = { id: uid(), type: kind, anchor: 'center', x: x, y: y, hidden: false };
+        var base = { id: uid(), type: kind, anchor: 'center', x: x, y: y, hidden: false, opacity: 1 };
         if (kind === 'text') {
             base.name = 'Text'; base.text = 'New Text'; base.size = 0.06;
-            base.color = '#ffffff'; base.font = 'Inter'; base.weight = 800;
+            base.color = '#ffffff'; base.font = 'Inter'; base.weight = 800; base.align = 'center';
+            base.shadow = true;
+            base.bg = { enabled: false, color: '#000000', opacity: 0.6, radius: 0.014, padX: 0.022, padY: 0.012 };
         }
         return base;
     }
@@ -366,7 +382,16 @@
         });
     }
 
+    function hexToRgba(hex, a) {
+        var h = String(hex || '#000000').replace('#', '');
+        if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+        var n = parseInt(h, 16);
+        if (isNaN(n)) return 'rgba(0,0,0,' + a + ')';
+        return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
+    }
+
     function styleLayerEl(el, l) {
+        el.style.opacity = (l.opacity != null ? l.opacity : 1);
         if (l.type === 'text') {
             el.classList.add('voe-layer-text');
             el.textContent = l.text || '';
@@ -374,6 +399,16 @@
             el.style.fontFamily = fontStack(l.font);
             el.style.fontWeight = l.weight;
             el.style.fontSize = (l.size * ed.H) + 'px';
+            el.style.textAlign = l.align || 'center';
+            el.style.textShadow = l.shadow ? '0 0.12em 0.3em rgba(0,0,0,.55)' : 'none';
+            var bg = l.bg || {};
+            if (bg.enabled) {
+                el.style.background = hexToRgba(bg.color, bg.opacity);
+                el.style.padding = (bg.padY * ed.H) + 'px ' + (bg.padX * ed.H) + 'px';
+                el.style.borderRadius = (bg.radius * ed.H) + 'px';
+            } else {
+                el.style.background = 'none'; el.style.padding = '0'; el.style.borderRadius = '3px';
+            }
         }
     }
 
@@ -412,6 +447,7 @@
             l.x = clamp01(startX + (ev.clientX - px) / r.width);
             l.y = clamp01(startY + (ev.clientY - py) / r.height);
             layoutLayer(node, l);
+            syncInspectorPos(l);
         }
         function up() {
             document.removeEventListener('pointermove', move);
@@ -434,7 +470,7 @@
         function commit() {
             node.removeAttribute('contenteditable'); node.style.cursor = '';
             var txt = node.textContent.replace(/\s+$/, '');
-            if (txt !== l.text) { l.text = txt || ' '; markDirty(); renderLayersPanel(); }
+            if (txt !== l.text) { l.text = txt || ' '; markDirty(); renderLayersPanel(); renderInspector(); }
             layoutLayer(node, l);
             node.removeEventListener('blur', commit);
             node.removeEventListener('keydown', key);
@@ -454,6 +490,35 @@
             el.classList.toggle('voe-layer--sel', el.getAttribute('data-voe-layer') === id);
         });
         syncLayersPanelSelection();
+        renderInspector();
+    }
+
+    // update just one layer's node in place (no full re-render → keeps inspector focus)
+    function refreshLayer(id) {
+        if (!ed.stage) return;
+        var node = ed.stage.querySelector('.voe-layer[data-voe-layer="' + id + '"]');
+        var l = layerById(id);
+        if (node && l) { styleLayerEl(node, l); layoutLayer(node, l); }
+    }
+    function updateRowName(id) {
+        var row = overlay && overlay.querySelector('[data-voe-row="' + id + '"] .voe-lr-name');
+        var l = layerById(id);
+        if (row && l) row.textContent = layerName(l);
+    }
+
+    // Change a layer's anchor WITHOUT moving it on screen: recompute x,y so the new
+    // anchor point maps to the element's current pixel box.
+    function changeAnchor(l, na) {
+        var node = ed.stage.querySelector('.voe-layer[data-voe-layer="' + l.id + '"]');
+        if (node) {
+            var ew = node.offsetWidth, eh = node.offsetHeight;
+            var o = anchorFrac(l.anchor), n = anchorFrac(na);
+            var tlx = l.x * ed.W - o[0] * ew, tly = l.y * ed.H - o[1] * eh;
+            l.x = clamp01((tlx + n[0] * ew) / ed.W);
+            l.y = clamp01((tly + n[1] * eh) / ed.H);
+        }
+        l.anchor = na;
+        refreshLayer(l.id); markDirty();
     }
 
     // ── layers panel (scene list) ───────────────────────────────────────────────
@@ -509,7 +574,7 @@
     function removeLayer(id) {
         ed.layers = ed.layers.filter(function (l) { return l.id !== id; });
         if (ed.selected === id) ed.selected = null;
-        markDirty(); renderStageLayers(); renderLayersPanel();
+        markDirty(); renderStageLayers(); renderLayersPanel(); renderInspector();
     }
 
     // drag-to-reorder rows → changes z-order (paint order)
@@ -562,6 +627,175 @@
             arr.splice(insert, 0, moved);
         }
         markDirty(); renderStageLayers(); renderLayersPanel();
+    }
+
+    // ── inspector (selected-layer properties) ───────────────────────────────────
+    var ANCHOR_ORDER = ['top-left', 'top-center', 'top-right', 'mid-left', 'center', 'mid-right',
+        'bottom-left', 'bottom-center', 'bottom-right'];
+    var WEIGHTS = [[400, 'Regular'], [600, 'Semibold'], [700, 'Bold'], [800, 'Extrabold'], [900, 'Black']];
+
+    function pct(frac) { return Math.round(frac * 1000) / 10; }
+    function field(label, control) {
+        return '<div class="voe-field"><div class="voe-field-l">' + label + '</div><div class="voe-field-c">' + control + '</div></div>';
+    }
+    function row2(a, b) { return '<div class="voe-row2">' + a + b + '</div>'; }
+    function inspSection(title, body) {
+        return '<div class="voe-insp-sec"><div class="voe-insp-sec-h">' + title + '</div><div class="voe-insp-body">' + body + '</div></div>';
+    }
+    function numInput(key, val, unit) {
+        return '<input class="voe-input voe-input--num" type="number" step="0.1" data-insp="' + key + '" value="' + val + '">' +
+            (unit ? '<span class="voe-unit">' + unit + '</span>' : '');
+    }
+    function sliderInput(key, val) {
+        return '<input class="voe-slider" type="range" min="0" max="100" data-insp="' + key + '" value="' + val + '">' +
+            '<span class="voe-unit" data-insp-val="' + key + '">' + val + '%</span>';
+    }
+    function fontSelect(cur) {
+        return '<select class="voe-input" data-inspsel="font">' + FONTS.map(function (f) {
+            return '<option value="' + f.id + '"' + (f.id === cur ? ' selected' : '') + '>' + esc(f.label) + '</option>';
+        }).join('') + '</select>';
+    }
+    function weightSelect(cur) {
+        return '<select class="voe-input" data-inspsel="weight">' + WEIGHTS.map(function (w) {
+            return '<option value="' + w[0] + '"' + (w[0] === cur ? ' selected' : '') + '>' + w[1] + '</option>';
+        }).join('') + '</select>';
+    }
+    function alignSeg(cur) {
+        return '<div class="voe-seg" data-inspseg="align">' + ['left', 'center', 'right'].map(function (a) {
+            return '<button class="voe-seg-btn' + (a === cur ? ' voe-seg-btn--on' : '') + '" data-val="' + a + '" title="' + a + '">' +
+                a.charAt(0).toUpperCase() + '</button>';
+        }).join('') + '</div>';
+    }
+    function colorField(key, val) {
+        return '<div class="voe-color"><input type="color" class="voe-color-sw" data-inspcolor="' + key + '" value="' + esc(val) + '">' +
+            '<input class="voe-input" data-insphex="' + key + '" value="' + esc(val) + '" spellcheck="false"></div>';
+    }
+    function toggle(key, on) { return '<button class="voe-toggle' + (on ? ' voe-toggle--on' : '') + '" data-insptoggle="' + key + '"></button>'; }
+    function anchorGrid(l) {
+        return field('Anchor', '<div class="voe-anchor-grid">' + ANCHOR_ORDER.map(function (a) {
+            return '<div class="voe-anchor-cell' + (a === l.anchor ? ' voe-anchor-cell--on' : '') + '" data-anchor="' + a + '" title="' + a + '"></div>';
+        }).join('') + '</div>');
+    }
+
+    function renderInspector() {
+        var box = overlay && overlay.querySelector('[data-voe-inspector]');
+        if (!box) return;
+        var l = ed.selected ? layerById(ed.selected) : null;
+        if (!l) {
+            box.innerHTML = '<div class="voe-insp-empty">Select a layer to edit its position, size &amp; style.</div>';
+            return;
+        }
+        var html = inspSection('Transform',
+            anchorGrid(l) +
+            row2(field('X', numInput('x', pct(l.x), '%')), field('Y', numInput('y', pct(l.y), '%'))) +
+            (l.type === 'text' ? field('Size', numInput('size', pct(l.size), '%')) : '') +
+            field('Opacity', sliderInput('opacity', Math.round(l.opacity * 100))));
+        if (l.type === 'text') {
+            html += inspSection('Text',
+                field('Text', '<textarea class="voe-input voe-textarea" data-insptext>' + esc(l.text) + '</textarea>') +
+                field('Font', fontSelect(l.font)) +
+                field('Weight', weightSelect(l.weight)) +
+                field('Align', alignSeg(l.align)) +
+                field('Color', colorField('color', l.color)) +
+                field('Shadow', toggle('shadow', l.shadow)));
+            html += inspSection('Background',
+                field('Pill', toggle('bgEnabled', l.bg.enabled)) +
+                (l.bg.enabled
+                    ? field('Color', colorField('bgColor', l.bg.color)) +
+                      field('Fill', sliderInput('bgOpacity', Math.round(l.bg.opacity * 100))) +
+                      field('Radius', numInput('bgRadius', pct(l.bg.radius), '%')) +
+                      row2(field('Pad X', numInput('bgPadX', pct(l.bg.padX), '%')), field('Pad Y', numInput('bgPadY', pct(l.bg.padY), '%')))
+                    : ''));
+        }
+        box.innerHTML = html;
+        wireInspector(l);
+    }
+
+    function setNum(l, key, num) {
+        if (isNaN(num)) return;
+        if (key === 'x') l.x = clamp01(num / 100);
+        else if (key === 'y') l.y = clamp01(num / 100);
+        else if (key === 'size') l.size = Math.max(0.005, num / 100);
+        else if (key === 'opacity') l.opacity = clamp01(num / 100);
+        else if (key === 'bgOpacity') l.bg.opacity = clamp01(num / 100);
+        else if (key === 'bgRadius') l.bg.radius = Math.max(0, num / 100);
+        else if (key === 'bgPadX') l.bg.padX = Math.max(0, num / 100);
+        else if (key === 'bgPadY') l.bg.padY = Math.max(0, num / 100);
+    }
+    function setColor(l, key, val) { if (key === 'color') l.color = val; else if (key === 'bgColor') l.bg.color = val; }
+
+    function wireInspector(l) {
+        var box = overlay.querySelector('[data-voe-inspector]');
+        box.querySelectorAll('[data-insp]').forEach(function (inp) {
+            var key = inp.getAttribute('data-insp');
+            inp.addEventListener('input', function () {
+                setNum(l, key, parseFloat(inp.value));
+                var out = box.querySelector('[data-insp-val="' + key + '"]');
+                if (out) out.textContent = Math.round(parseFloat(inp.value)) + '%';
+                refreshLayer(l.id); markDirty();
+            });
+        });
+        var ta = box.querySelector('[data-insptext]');
+        if (ta) ta.addEventListener('input', function () {
+            l.text = ta.value; refreshLayer(l.id); updateRowName(l.id); markDirty();
+        });
+        box.querySelectorAll('[data-inspsel]').forEach(function (sel) {
+            var key = sel.getAttribute('data-inspsel');
+            sel.addEventListener('change', function () {
+                if (key === 'weight') l.weight = parseInt(sel.value, 10); else l[key] = sel.value;
+                refreshLayer(l.id); markDirty();
+            });
+        });
+        var seg = box.querySelector('[data-inspseg="align"]');
+        if (seg) seg.addEventListener('click', function (e) {
+            var b = e.target.closest('[data-val]'); if (!b) return;
+            l.align = b.getAttribute('data-val');
+            seg.querySelectorAll('.voe-seg-btn').forEach(function (x) { x.classList.toggle('voe-seg-btn--on', x === b); });
+            refreshLayer(l.id); markDirty();
+        });
+        box.querySelectorAll('[data-inspcolor]').forEach(function (c) {
+            var key = c.getAttribute('data-inspcolor');
+            c.addEventListener('input', function () {
+                setColor(l, key, c.value);
+                var hex = box.querySelector('[data-insphex="' + key + '"]'); if (hex) hex.value = c.value;
+                refreshLayer(l.id); markDirty();
+            });
+        });
+        box.querySelectorAll('[data-insphex]').forEach(function (h) {
+            var key = h.getAttribute('data-insphex');
+            h.addEventListener('change', function () {
+                var v = h.value.trim(); if (!/^#?[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(v)) return;
+                if (v[0] !== '#') v = '#' + v;
+                setColor(l, key, v);
+                var sw = box.querySelector('[data-inspcolor="' + key + '"]'); if (sw) sw.value = v;
+                refreshLayer(l.id); markDirty();
+            });
+        });
+        box.querySelectorAll('[data-insptoggle]').forEach(function (t) {
+            var key = t.getAttribute('data-insptoggle');
+            t.addEventListener('click', function () {
+                if (key === 'shadow') l.shadow = !l.shadow;
+                else if (key === 'bgEnabled') { l.bg.enabled = !l.bg.enabled; }
+                t.classList.toggle('voe-toggle--on');
+                refreshLayer(l.id); markDirty();
+                if (key === 'bgEnabled') renderInspector();   // reveal/hide the pill sub-fields
+            });
+        });
+        box.querySelectorAll('[data-anchor]').forEach(function (cell) {
+            cell.addEventListener('click', function () {
+                changeAnchor(l, cell.getAttribute('data-anchor'));
+                renderInspector();   // anchor change moves x,y → refresh fields + active cell
+            });
+        });
+    }
+
+    // keep the inspector's X/Y fields live while dragging on the stage
+    function syncInspectorPos(l) {
+        var box = overlay && overlay.querySelector('[data-voe-inspector]');
+        if (!box) return;
+        var xi = box.querySelector('[data-insp="x"]'), yi = box.querySelector('[data-insp="y"]');
+        if (xi && document.activeElement !== xi) xi.value = pct(l.x);
+        if (yi && document.activeElement !== yi) yi.value = pct(l.y);
     }
 
     // ── dirty + save ────────────────────────────────────────────────────────────
