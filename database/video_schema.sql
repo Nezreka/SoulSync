@@ -605,3 +605,19 @@ CREATE INDEX IF NOT EXISTS idx_vdl_history_completed ON video_download_history(c
 -- one history row per terminal download (idempotent re-persist / restart-safe)
 CREATE UNIQUE INDEX IF NOT EXISTS idx_vdl_history_dedup
     ON video_download_history(download_id, outcome, dest_path);
+
+-- ─── Overlay templates (Artwork Studio) ──────────────────────────────────────
+-- A saved, reusable overlay design: a named scene of positioned "layers" (badges,
+-- text, logos, images, shapes) that later gets composited onto poster art. This
+-- table stores only the DESIGN — the layer list + canvas meta as a JSON blob in
+-- `definition`; the actual poster compositing/apply lives elsewhere. Positions in
+-- the JSON are normalized (0..1) + anchored so one template fits every poster.
+CREATE TABLE IF NOT EXISTS overlay_templates (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL,
+    definition  TEXT NOT NULL DEFAULT '{}',       -- JSON: {version, canvas:{...}, layers:[...]}
+    thumbnail   TEXT,                              -- optional data-URL preview for the gallery card
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_overlay_templates_updated ON overlay_templates(updated_at DESC);
