@@ -239,7 +239,8 @@
             '<div class="voe-apply-prog" data-apply-prog hidden><div class="voe-apply-bar"><div class="voe-apply-bar-fill" data-apply-fill></div></div>' +
             '<div class="voe-apply-prog-txt" data-apply-progtxt></div></div>' +
             '<div class="voe-apply-foot">' +
-                '<button class="voe-btn voe-btn--ghost" data-apply-remove>Remove overlays</button>' +
+                '<button class="voe-btn voe-btn--ghost" data-apply-remove title="Restore each poster from its backup">Remove overlays</button>' +
+                '<button class="voe-btn voe-btn--ghost" data-apply-reset title="Re-pull the clean TMDB poster and push it (wipes Kometa overlays too)">Reset to originals</button>' +
                 '<div class="voe-spacer"></div>' +
                 '<button class="voe-btn" data-apply-cancel>Close</button>' +
                 '<button class="voe-btn voe-btn--primary" data-apply-run>' + I.apply + ' Apply now</button>' +
@@ -258,9 +259,12 @@
         });
         back.querySelector('[data-apply-cancel]').addEventListener('click', done);
         back.addEventListener('click', function (e) { if (e.target === back) done(); });
-        back.querySelector('[data-apply-run]').addEventListener('click', function () { startApply(back, false); });
+        back.querySelector('[data-apply-run]').addEventListener('click', function () { startApply(back, {}); });
         back.querySelector('[data-apply-remove]').addEventListener('click', function () {
-            confirmDialog('Remove all overlays?', 'Every overlaid poster is restored from its backup on the server. Your templates are kept.', 'Remove', function () { startApply(back, true); });
+            confirmDialog('Remove all overlays?', 'Every overlaid poster is restored from its backup on the server. Your templates are kept.', 'Remove', function () { startApply(back, { remove: true }); });
+        });
+        back.querySelector('[data-apply-reset]').addEventListener('click', function () {
+            confirmDialog('Reset posters to originals?', 'Re-pulls each title\'s clean TMDB poster and pushes it to your server — this also wipes overlays burned in by other tools (e.g. Kometa). Your templates are kept.', 'Reset', function () { startApply(back, { reset: true }); });
         });
     }
     function saveAssign(back, scope) {
@@ -271,17 +275,23 @@
         api('PUT', '/api/video/overlays/assignments', { scope: scope, template_id: tid, enabled: enabled })
             .catch(function () { toast('Could not save assignment', 'error'); });
     }
-    function startApply(back, remove) {
-        var runBtn = back.querySelector('[data-apply-run]'), rmBtn = back.querySelector('[data-apply-remove]');
-        runBtn.disabled = true; rmBtn.disabled = true;
+    function _applyBtns(back) { return back.querySelectorAll('[data-apply-run],[data-apply-remove],[data-apply-reset]'); }
+    function startApply(back, opts) {
+        opts = opts || {};
+        _applyBtns(back).forEach(function (b) { b.disabled = true; });
         var prog = back.querySelector('[data-apply-prog]'); prog.hidden = false;
         setApplyProg(back, { phase: 'starting', done: 0, total: 0 });
-        api('POST', '/api/video/overlays/apply', { scope: 'both', remove: remove })
+        api('POST', '/api/video/overlays/apply', { scope: 'both', remove: !!opts.remove, reset: !!opts.reset })
             .then(function (r) {
-                if (!r || !r.ok) { toast((r && r.error) || 'Could not start', 'error'); runBtn.disabled = false; rmBtn.disabled = false; return; }
+                if (!r || !r.ok) { toast((r && r.error) || 'Could not start', 'error'); _applyBtns(back).forEach(function (b) { b.disabled = false; }); return; }
                 applyPollTimer = setInterval(function () { pollApply(back); }, 700);
             })
-            .catch(function () { toast('Could not start apply', 'error'); runBtn.disabled = false; rmBtn.disabled = false; });
+            .catch(function () { toast('Could not start', 'error'); _applyBtns(back).forEach(function (b) { b.disabled = false; }); });
+    }
+    function _modeVerb(mode, ing) {
+        if (mode === 'remove') return ing ? 'Removing' : 'Removed overlays';
+        if (mode === 'reset') return ing ? 'Resetting' : 'Reset posters';
+        return ing ? 'Applying' : 'Overlays applied';
     }
     function pollApply(back) {
         api('GET', '/api/video/overlays/apply/status').then(function (s) {
@@ -289,11 +299,10 @@
             setApplyProg(back, s);
             if (!s.running && s.phase !== 'starting') {
                 clearInterval(applyPollTimer); applyPollTimer = null;
-                var run = back.querySelector('[data-apply-run]'), rm = back.querySelector('[data-apply-remove]');
-                if (run) run.disabled = false; if (rm) rm.disabled = false;
-                if (s.phase === 'error') toast('Apply failed: ' + (s.error || ''), 'error');
-                else toast((s.mode === 'remove' ? 'Removed overlays · ' : 'Overlays applied · ') +
-                    (s.applied || 0) + ' done, ' + (s.skipped || 0) + ' unchanged' + (s.failed ? ', ' + s.failed + ' failed' : ''), 'success');
+                _applyBtns(back).forEach(function (b) { b.disabled = false; });
+                if (s.phase === 'error') toast('Failed: ' + (s.error || ''), 'error');
+                else toast(_modeVerb(s.mode, false) + ' · ' + (s.applied || 0) + ' done' +
+                    (s.mode === 'apply' ? ', ' + (s.skipped || 0) + ' unchanged' : '') + (s.failed ? ', ' + s.failed + ' failed' : ''), 'success');
                 document.dispatchEvent(new CustomEvent('soulsync:video-overlays-applied'));
             }
         }).catch(function () { /* keep polling */ });
@@ -303,7 +312,7 @@
         var pct = s.total ? Math.round((s.done / s.total) * 100) : (s.phase === 'done' ? 100 : 5);
         if (fill) fill.style.width = pct + '%';
         if (txt) {
-            if (s.phase === 'running' || s.phase === 'starting') txt.textContent = (s.mode === 'remove' ? 'Removing… ' : 'Applying… ') + (s.done || 0) + ' / ' + (s.total || '…') + (s.title ? ' · ' + s.title : '');
+            if (s.phase === 'running' || s.phase === 'starting') txt.textContent = _modeVerb(s.mode, true) + '… ' + (s.done || 0) + ' / ' + (s.total || '…') + (s.title ? ' · ' + s.title : '');
             else if (s.phase === 'done') txt.textContent = 'Done — ' + (s.applied || 0) + ' applied, ' + (s.skipped || 0) + ' unchanged' + (s.failed ? ', ' + s.failed + ' failed' : '');
             else if (s.phase === 'error') txt.textContent = 'Failed.';
         }

@@ -86,6 +86,22 @@ def test_fetch_clean_base_prefers_external_then_tmdb_then_server():
     assert fetch_clean_base(_DB("https://img/x.jpg", 9), "movie", 1, external=lambda u: None, tmdb=tmdb, server=server) == b"TMDB"
 
 
+def test_reset_item_poster_pushes_clean_and_clears_our_state(tmp_path, db, monkeypatch):
+    """Reset re-pushes the clean poster and drops our overlay ledger + base so a
+    later apply starts fresh (the un-Kometa path)."""
+    import core.video.overlays.service as svc
+    store = AssetStore(tmp_path / "a")
+    store.write_base("movie", 5, b"stale-base")
+    db.record_overlay_apply("movie", 5, template_id=1, base_sha="x", values_sig="y")
+    pushes = []
+    monkeypatch.setattr(svc, "fetch_clean_base", lambda d, k, i: b"CLEAN")
+    monkeypatch.setattr(svc, "push_poster_bytes", lambda d, k, i, b: (pushes.append(b), True)[1])
+    res = svc.reset_item_poster(db, "movie", 5, store)
+    assert res["ok"] and res["pushed"] and pushes == [b"CLEAN"]
+    assert db.get_overlay_apply("movie", 5) is None     # ledger cleared
+    assert store.has_base("movie", 5) is False           # base cleared → next apply re-fetches clean
+
+
 def test_upload_is_content_addressed_and_readable(tmp_path):
     s = AssetStore(tmp_path / "assets")
     n1 = s.save_upload(b"logo-bytes", "png")

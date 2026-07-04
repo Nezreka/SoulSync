@@ -130,7 +130,7 @@ def register_routes(bp):
         if not scopes:
             return jsonify({"ok": False, "error": "bad scope"}), 400
         started = service.start(get_video_db(), scopes, force=bool(data.get("force")),
-                                remove=bool(data.get("remove")))
+                                remove=bool(data.get("remove")), reset=bool(data.get("reset")))
         if not started:
             return jsonify({"ok": False, "error": "A run is already in progress"}), 409
         return jsonify({"ok": True, "started": True})

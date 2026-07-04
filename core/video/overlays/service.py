@@ -164,18 +164,45 @@ def _reset(mode):
                 applied=0, skipped=0, failed=0, title=None, error=None)
 
 
-def start(db, scopes, *, force=False, remove=False) -> bool:
+def reset_item_poster(db, kind, item_id, store=None) -> dict:
+    """Restore a title's CLEAN poster (TMDB original / the item's chosen art),
+    push it to the server — wiping another tool's burned-in overlays (Kometa) —
+    and drop our own overlay ledger + base so a later apply starts fresh."""
+    store = store or AssetStore.default()
+    clean = fetch_clean_base(db, kind, item_id)
+    pushed = bool(clean) and push_poster_bytes(db, kind, item_id, clean)
+    db.delete_overlay_apply(kind, item_id)
+    store.clear(kind, item_id)
+    return {"ok": bool(clean), "pushed": pushed}
+
+
+def start(db, scopes, *, force=False, remove=False, reset=False) -> bool:
     with _lock:
         if _JOB["running"]:
             return False
-        _reset("remove" if remove else "apply")
-    threading.Thread(target=_run, args=(db, scopes, force, remove), daemon=True).start()
+        _reset("reset" if reset else ("remove" if remove else "apply"))
+    threading.Thread(target=_run, args=(db, scopes, force, remove, reset), daemon=True).start()
     return True
 
 
-def _run(db, scopes, force, remove):
+def _run(db, scopes, force, remove, reset=False):
     try:
         svc = OverlayApplyService(db)
+        if reset:
+            items = [(scope, it) for scope in scopes for it in db.overlay_scope_items(scope)]
+            _JOB.update(total=len(items), phase="running")
+            applied = failed = 0
+            for idx, (scope, it) in enumerate(items):
+                try:
+                    ok = reset_item_poster(db, scope, it["id"], svc.store).get("ok")
+                except Exception:
+                    logger.exception("overlay reset failed for %s %s", scope, it.get("id"))
+                    ok = False
+                applied += 1 if ok else 0
+                failed += 0 if ok else 1
+                _JOB.update(done=idx + 1, applied=applied, failed=failed, title=it.get("title"))
+            _JOB["phase"] = "done"
+            return
         jobs = svc.build_remove_jobs(scopes) if remove else svc.build_jobs(scopes, force=force)
         _JOB.update(total=len(jobs), phase="running")
         run_apply(svc.applier(), jobs, on_progress=lambda p: _JOB.update(p), remove=remove)
