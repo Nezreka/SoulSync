@@ -564,6 +564,23 @@ class VideoEnrichmentEngine:
         self._cache_put(("detail", kind, tmdb_id, region), d)
         return d
 
+    def poster_options(self, kind, tmdb_id) -> list:
+        """Candidate posters for the poster manager — TMDB's poster art for a title,
+        cached (it doesn't change often). Empty list if TMDB isn't configured."""
+        w = self.workers.get("tmdb")
+        if not w or not w.enabled:
+            return []
+        cached = self._cache_get(("posters", kind, tmdb_id))
+        if cached is not None:
+            return list(cached)
+        try:
+            out = w.client.poster_options(kind, tmdb_id) or []
+        except Exception:
+            logger.exception("poster_options failed for %s %s", kind, tmdb_id)
+            return []
+        self._cache_put(("posters", kind, tmdb_id), out)
+        return out
+
     def _fill_tmdb_ratings(self, d) -> None:
         imdb_id = d.get("imdb_id")
         ow = self.workers.get("omdb")

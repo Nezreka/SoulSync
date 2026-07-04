@@ -2271,6 +2271,40 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def poster_set_target(self, kind: str, item_id: int) -> dict | None:
+        """Server id + on-disk folder for a movie/show, so a new poster can be pushed
+        to the media server and (best-effort) written into the item's folder."""
+        table = {"movie": "movies", "show": "shows"}.get(str(kind).lower())
+        if not table:
+            return None
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                f"SELECT server_source, server_id, path FROM {table} WHERE id=?",
+                (int(item_id),)).fetchone()
+            return dict(row) if row else None
+        except (sqlite3.Error, ValueError, TypeError):
+            return None
+        finally:
+            conn.close()
+
+    def set_item_poster_url(self, kind: str, item_id: int, poster_url: str) -> bool:
+        """Best-effort: point a movie/show at a new poster path/URL so SoulSync shows it
+        immediately (the next scan reconciles it with the server's own copy)."""
+        table = {"movie": "movies", "show": "shows"}.get(str(kind).lower())
+        if not table:
+            return False
+        conn = self._get_connection()
+        try:
+            conn.execute(f"UPDATE {table} SET poster_url=? WHERE id=?",
+                         (poster_url, int(item_id)))
+            conn.commit()
+            return True
+        except (sqlite3.Error, ValueError, TypeError):
+            return False
+        finally:
+            conn.close()
+
     # ── detail payloads (drill-in pages) ──────────────────────────────────────
     @staticmethod
     def _genres_for(conn, link_table: str, owner_col: str, owner_id: int) -> list:
@@ -3636,7 +3670,7 @@ class VideoDatabase:
                       "(SELECT COUNT(*) FROM episodes e WHERE e.show_id=s.id AND e.has_file=1) AS owned_count "
                       "FROM shows s")
         else:
-            select = ("SELECT m.id, m.title, m.year, m.has_file, "
+            select = ("SELECT m.id, m.title, m.year, m.has_file, m.tmdb_id, "
                       "(m.poster_url IS NOT NULL AND m.poster_url <> '') AS has_poster, "
                       "(SELECT mf.resolution FROM media_files mf WHERE mf.movie_id=m.id LIMIT 1) AS resolution "
                       "FROM movies m")

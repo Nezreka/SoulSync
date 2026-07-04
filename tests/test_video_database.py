@@ -205,6 +205,26 @@ def test_upsert_movie_inserts_updates_and_attaches_file(db):
     assert db.dashboard_stats()["library"]["movies"] == 1
 
 
+def test_poster_set_target_and_update(db):
+    """The poster-manager helpers: resolve where to push a new poster (server id +
+    on-disk folder), then best-effort point the DB at it so it shows immediately."""
+    mid = db.upsert_movie("plex", {"server_id": "p9", "title": "Dune", "year": 2021,
+                                   "poster_url": "/old.jpg"})
+    with db.connect() as c:
+        c.execute("UPDATE movies SET path=? WHERE id=?", ("/movies/Dune (2021)", mid))
+        c.commit()
+
+    tgt = db.poster_set_target("movie", mid)
+    assert tgt == {"server_source": "plex", "server_id": "p9", "path": "/movies/Dune (2021)"}
+    assert db.poster_set_target("movie", 99999) is None      # unknown id
+    assert db.poster_set_target("bogus", mid) is None        # bad kind
+
+    # best-effort update points get_art_ref at the new poster immediately
+    assert db.set_item_poster_url("movie", mid, "https://img/new.jpg") is True
+    assert db.get_art_ref("movie", mid)["poster_url"] == "https://img/new.jpg"
+    assert db.set_item_poster_url("bogus", mid, "x") is False
+
+
 def test_upsert_show_tree_builds_seasons_episodes_and_prunes(db):
     item = {"server_id": "s1", "title": "Show", "seasons": [
         {"season_number": 1, "server_id": "se1", "episodes": [

@@ -924,17 +924,17 @@
                                     <p class="dash-card__sub">Jump straight into the video side.</p>
                                 </header>
                                 <div class="dash-card__body qa-bento">
-                                    <button class="qa-tile qa-tile--hero" type="button" data-video-goto="video-search" aria-label="Add a movie or show">
+                                    <button class="qa-tile qa-tile--hero" type="button" data-video-poster-manager aria-label="Open the Poster Manager">
                                         <div class="qa-tile__topline">
                                             <span class="qa-tile__pulse" aria-hidden="true"></span>
-                                            <span class="qa-tile__kicker">Find &amp; add</span>
+                                            <span class="qa-tile__kicker">Artwork</span>
                                         </div>
                                         <div class="qa-tile__heading">
-                                            <strong class="qa-tile__title">Add Movie or Show</strong>
-                                            <p class="qa-tile__desc">Search across sources and start tracking something new.</p>
+                                            <strong class="qa-tile__title">Poster Manager</strong>
+                                            <p class="qa-tile__desc">Search your library and swap in a new poster — pushed straight to your server.</p>
                                         </div>
                                         <div class="qa-tile__cta">
-                                            <span class="qa-tile__cta-label">Search</span>
+                                            <span class="qa-tile__cta-label">Open</span>
                                             <span class="qa-tile__cta-arrow" aria-hidden="true">&rarr;</span>
                                         </div>
                                     </button>
@@ -11148,6 +11148,8 @@
     <script src="{{ url_for('static', filename='video/video-watchlist-btn.js', v=static_v) }}"></script>
     <!-- Video "get" button + detail/download modal (shared; movies + ended shows) -->
     <script src="{{ url_for('static', filename='video/video-get-modal.js', v=static_v) }}"></script>
+    <!-- Poster Manager (full-screen modal; "Manage Poster" on detail pages + dashboard quick action) -->
+    <script src="{{ url_for('static', filename='video/video-poster-modal.js', v=static_v) }}"></script>
     <!-- Download VIEW renderer (movie / show / youtube): per-source search + quality verdict;
          rendered inline inside the get-modal (not its own modal) -->
     <script src="{{ url_for('static', filename='video/video-download-view.js', v=static_v) }}"></script>

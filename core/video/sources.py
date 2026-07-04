@@ -296,6 +296,20 @@ def refresh_video_server_sections(media_type="all"):
         return {"ok": False, "error": str(e)}
 
 
+def set_video_poster(server_id, *, image_url=None, image_bytes=None, kind="movie") -> dict:
+    """Push a poster to the active media server (Plex/Jellyfin) for the given item."""
+    src = get_active_video_source()
+    if src is None:
+        return {"ok": False, "error": "No video server configured"}
+    if not hasattr(src, "set_poster"):
+        return {"ok": False, "error": "This server doesn't support setting a poster"}
+    try:
+        return src.set_poster(server_id, image_url=image_url, image_bytes=image_bytes, kind=kind)
+    except Exception as e:   # noqa: BLE001 - surface any server error to the caller
+        logger.exception("video sources: set_poster failed")
+        return {"ok": False, "error": str(e)}
+
+
 def video_server_scan_in_progress(media_type="all"):
     """True if the active video server is mid-scan for the given library (or either,
     for 'all'); False if idle; None if it can't be determined — no server, or an
@@ -411,6 +425,33 @@ class PlexVideoSource:
                 except Exception:
                     logger.exception("Plex: refresh failed for section %s", getattr(s, "title", "?"))
         return {"ok": n > 0, "sections": n}
+
+    def set_poster(self, server_id, *, image_url=None, image_bytes=None, kind="movie") -> dict:
+        """Set the poster on a Plex item (by ratingKey). Plex fetches a URL itself;
+        raw bytes upload via a temp file. Returns {ok[, error]}."""
+        try:
+            item = self._server.fetchItem(int(server_id))
+            if image_url:
+                item.uploadPoster(url=image_url)
+            elif image_bytes:
+                import os as _os
+                import tempfile as _tf
+                fd, tmp = _tf.mkstemp(suffix=".jpg")
+                try:
+                    with _os.fdopen(fd, "wb") as f:
+                        f.write(image_bytes)
+                    item.uploadPoster(filepath=tmp)
+                finally:
+                    try:
+                        _os.unlink(tmp)
+                    except OSError:
+                        pass
+            else:
+                return {"ok": False, "error": "No image provided"}
+            return {"ok": True}
+        except Exception as e:   # noqa: BLE001 - surface any Plex/network error
+            logger.exception("Plex: set_poster failed for %s", server_id)
+            return {"ok": False, "error": str(e)}
 
     def is_scanning(self, media_type="all") -> bool:
         """True if any SELECTED video section (scoped by media_type) is currently
@@ -664,6 +705,29 @@ class JellyfinVideoSource:
             except Exception:
                 logger.exception("Jellyfin: refresh failed for view %s", vid)
         return {"ok": n > 0, "sections": n}
+
+    def set_poster(self, server_id, *, image_url=None, image_bytes=None, kind="movie") -> dict:
+        """Upload a Primary image to a Jellyfin item — the raw image, base64-encoded in
+        the body with the image content-type (Jellyfin's image-upload contract). Fetches
+        the URL's bytes when only a URL is given. Returns {ok[, error]}."""
+        import base64 as _b64
+        import requests as _rq
+        try:
+            if image_bytes is None and image_url:
+                image_bytes = _rq.get(image_url, timeout=20).content
+            if not image_bytes:
+                return {"ok": False, "error": "No image provided"}
+            base = (self._c.base_url or "").rstrip("/")
+            if not base:
+                return {"ok": False, "error": "Jellyfin not configured"}
+            headers = {"X-Emby-Token": self._c.api_key or "", "Content-Type": "image/jpeg"}
+            r = _rq.post(base + "/Items/" + str(server_id) + "/Images/Primary",
+                         data=_b64.b64encode(image_bytes), headers=headers, timeout=30)
+            r.raise_for_status()
+            return {"ok": True}
+        except Exception as e:   # noqa: BLE001 - surface any Jellyfin/network error
+            logger.exception("Jellyfin: set_poster failed for %s", server_id)
+            return {"ok": False, "error": str(e)}
 
     def is_scanning(self, media_type="all") -> bool:
         """True if Jellyfin's library-scan scheduled task is running. Jellyfin's
