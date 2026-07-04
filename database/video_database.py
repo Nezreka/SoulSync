@@ -2556,6 +2556,26 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def overlay_scope_items(self, scope: str, server_source=None) -> list:
+        """[{id, title}] for every on-server item in a scope — the apply targets
+        (only items with a server_id can receive a pushed poster)."""
+        table = {"movie": "movies", "show": "shows"}.get(scope)
+        if not table:
+            return []
+        where = ["server_id IS NOT NULL", "server_id <> ''"]
+        params = []
+        if server_source:
+            where.append("server_source = ?")
+            params.append(server_source)
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                f"SELECT id, title FROM {table} WHERE {' AND '.join(where)} "
+                f"ORDER BY COALESCE(sort_title, title) COLLATE NOCASE", params).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
     def overlay_applied_count(self, template_id=None) -> int:
         conn = self._get_connection()
         try:
