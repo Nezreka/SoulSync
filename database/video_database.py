@@ -2429,7 +2429,7 @@ class VideoDatabase:
         try:
             row = conn.execute(
                 f"SELECT title, year, runtime_minutes, status, content_rating, "
-                f"rating, imdb_rating, rt_rating, metacritic, "
+                f"rating, imdb_rating, rt_rating, metacritic, logo_url, "
                 f"{'studio' if kind == 'movie' else 'network'} AS org, "
                 f"(poster_url IS NOT NULL AND poster_url <> '') AS has_poster, "
                 f"(backdrop_url IS NOT NULL AND backdrop_url <> '') AS has_backdrop "
@@ -2445,6 +2445,7 @@ class VideoDatabase:
                 "rt": d.get("rt_rating"), "metacritic": d.get("metacritic"),
                 "studio": d.get("org") if kind == "movie" else None,
                 "network": d.get("org") if kind == "show" else None,
+                "logo_url": d.get("logo_url"),
                 "resolution": None, "video_codec": None, "audio_codec": None, "source": None,
                 "season_count": None, "episode_count": None,
             }
