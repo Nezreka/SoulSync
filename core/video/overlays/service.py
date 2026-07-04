@@ -105,6 +105,36 @@ def fetch_clean_base(db, kind: str, item_id: int, *, external=None, tmdb=None, s
     return server()
 
 
+def preview_thumbnail(db, definition: dict) -> bytes | None:
+    """Render a template onto a RANDOM real library title's clean TMDB poster with
+    that title's real data (representative fallbacks fill any gaps), so a gallery
+    card shows the overlay accurately. None if no suitable title → caller falls
+    back to the neutral poster."""
+    from .compositor import _THUMB_SAMPLE, render_overlay
+    pick = db.random_overlay_preview_item()
+    if not pick or not pick.get("tmdb_id"):
+        return None
+    try:
+        from core.video.enrichment.engine import get_video_enrichment_engine
+        posters = get_video_enrichment_engine().poster_options(pick["kind"], pick["tmdb_id"]) or []
+    except Exception:
+        posters = []
+    if not posters:
+        return None
+    base = _fetch_external(posters[0].get("thumb") or posters[0].get("full"))
+    if not base:
+        return None
+    sample = dict(_THUMB_SAMPLE)
+    for k, v in (db.overlay_sample_data(pick["kind"], pick["id"]) or {}).items():
+        if v not in (None, ""):
+            sample[k] = v          # real values win; representative defaults fill gaps
+    try:
+        return render_overlay(base, definition or {}, sample)
+    except Exception:
+        logger.warning("preview_thumbnail render failed", exc_info=True)
+        return None
+
+
 def push_poster_bytes(db, kind: str, item_id: int, jpeg: bytes) -> bool:
     """Push composited art to the server for an item (best-effort)."""
     from core.video.sources import set_video_poster

@@ -2271,6 +2271,28 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def random_overlay_preview_item(self, server_source=None) -> dict | None:
+        """A random owned movie/show that has a tmdb_id + poster — so an overlay
+        template can be previewed on a real title's clean art."""
+        srcm = " AND server_source = ?" if server_source else ""
+        srcs = " AND server_source = ?" if server_source else ""
+        params = ([server_source] if server_source else []) + ([server_source] if server_source else [])
+        conn = self._get_connection()
+        try:
+            r = conn.execute(
+                "SELECT kind, id, tmdb_id FROM ("
+                f"  SELECT 'movie' AS kind, id, tmdb_id FROM movies "
+                f"   WHERE tmdb_id IS NOT NULL AND poster_url IS NOT NULL AND poster_url <> ''{srcm}"
+                "   UNION ALL "
+                f"  SELECT 'show' AS kind, id, tmdb_id FROM shows "
+                f"   WHERE tmdb_id IS NOT NULL AND poster_url IS NOT NULL AND poster_url <> ''{srcs}"
+                ") ORDER BY RANDOM() LIMIT 1", params).fetchone()
+            return dict(r) if r else None
+        except sqlite3.Error:
+            return None
+        finally:
+            conn.close()
+
     def item_tmdb_id(self, kind: str, item_id: int):
         """TMDB id for a movie/show — the key to re-fetch its clean original poster."""
         table = {"movie": "movies", "show": "shows"}.get(str(kind).lower())
