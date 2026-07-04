@@ -824,6 +824,28 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def show_tmdb_id(self, show_id):
+        """The TMDB id for a library show row (so a failed grab can be re-wishlisted)."""
+        conn = self._get_connection()
+        try:
+            r = conn.execute("SELECT tmdb_id FROM shows WHERE id=?", (int(show_id),)).fetchone()
+            return r["tmdb_id"] if r and r["tmdb_id"] else None
+        except (sqlite3.Error, ValueError, TypeError):
+            return None
+        finally:
+            conn.close()
+
+    def movie_tmdb_id(self, movie_id):
+        """The TMDB id for a library movie row (so a failed grab can be re-wishlisted)."""
+        conn = self._get_connection()
+        try:
+            r = conn.execute("SELECT tmdb_id FROM movies WHERE id=?", (int(movie_id),)).fetchone()
+            return r["tmdb_id"] if r and r["tmdb_id"] else None
+        except (sqlite3.Error, ValueError, TypeError):
+            return None
+        finally:
+            conn.close()
+
     def owned_episode_keys(self, show_id) -> set:
         """(season_number, episode_number) pairs already in the library for a show —
         so a season-pack grab can skip episodes you already own."""
