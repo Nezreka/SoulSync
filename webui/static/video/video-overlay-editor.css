@@ -170,6 +170,12 @@
     background: radial-gradient(120% 90% at 50% 0%, #262631, #101016 72%);
     color: rgba(255,255,255,.28); font-size: 13px; font-weight: 600;
 }
+.voe-guide { position: absolute; z-index: 35; display: none; background: rgb(var(--a)); pointer-events: none;
+    box-shadow: 0 0 6px rgba(var(--a),.85); }
+.voe-guide--v { top: 0; bottom: 0; width: 1px; }
+.voe-guide--h { left: 0; right: 0; height: 1px; }
+.voe-icon-btn { padding: 9px; }
+.voe-icon-btn svg { width: 16px; height: 16px; }
 .voe-drop-hint { position: absolute; inset: 0; z-index: 40; display: none; place-items: center;
     background: rgba(var(--a),.14); border: 2.5px dashed rgba(var(--a),.7); border-radius: 8px;
     color: #fff; font-size: 15px; font-weight: 700; pointer-events: none; }

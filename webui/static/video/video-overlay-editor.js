@@ -127,6 +127,9 @@
         star: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.2l5.9-.9L12 3Z"/></svg>',
         info: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>',
         chev: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>',
+        undo: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-1"/></svg>',
+        redo: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14l5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h1"/></svg>',
+        dupe: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
         poster: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M4 15l4-4 3 3 3-3 6 6"/></svg>',
         image: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>',
         logo: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 7v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V7M9 12h6"/></svg>',
@@ -273,6 +276,7 @@
                 selected: null, dirty: false,
                 stage: null, W: 0, H: 0,
                 sample: defaultSample(), previewTitle: null, bg: null,
+                history: [], histPos: -1,
             };
             renderEditor();
         }).catch(function () { toast('Could not open template', 'error'); showGallery(); });
@@ -328,6 +332,8 @@
                 '<button class="voe-btn voe-btn--ghost" data-voe-back>' + I.back + ' Studio</button>' +
                 '<div class="voe-brand" style="margin-left:2px"><span class="voe-brand-mark">' + I.brand + '</span></div>' +
                 '<input class="voe-name-input" data-voe-name value="' + esc(ed.name) + '" spellcheck="false">' +
+                '<button class="voe-btn voe-btn--ghost voe-icon-btn" data-voe-undo title="Undo (Ctrl+Z)">' + I.undo + '</button>' +
+                '<button class="voe-btn voe-btn--ghost voe-icon-btn" data-voe-redo title="Redo (Ctrl+Shift+Z)">' + I.redo + '</button>' +
                 '<div class="voe-top-spacer"></div>' +
                 '<span class="voe-save-state" data-voe-savestate></span>' +
                 '<button class="voe-btn voe-btn--primary" data-voe-save>' + I.save + ' Save</button>' +
@@ -342,6 +348,8 @@
                     '</div>' +
                     '<div class="voe-stage" data-voe-stage>' +
                         '<div class="voe-stage-ph" data-voe-ph>Drag elements from the left onto the poster.<br>This background is just a preview — only the overlay is saved.</div>' +
+                        '<div class="voe-guide voe-guide--v" data-voe-gv></div>' +
+                        '<div class="voe-guide voe-guide--h" data-voe-gh></div>' +
                         '<div class="voe-drop-hint">Drop to add</div>' +
                     '</div>' +
                 '</div>' +
@@ -365,6 +373,8 @@
         stage.addEventListener('pointerdown', onStagePointerDown);
         overlay.querySelector('[data-voe-preview]').addEventListener('click', function (e) { openPreviewPop(e.currentTarget); });
         overlay.querySelector('[data-voe-sampledata]').addEventListener('click', function (e) { openSamplePop(e.currentTarget); });
+        overlay.querySelector('[data-voe-undo]').addEventListener('click', undo);
+        overlay.querySelector('[data-voe-redo]').addEventListener('click', redo);
 
         resizeBound = function () { measureStage(); relayoutAll(); };
         window.addEventListener('resize', resizeBound);
@@ -376,6 +386,7 @@
         renderInspector();
         updateSaveState();
         updatePreviewName();
+        seedHistory();
     }
 
     function applyStageBg() {
@@ -619,14 +630,17 @@
 
         function move(ev) {
             moved = true;
-            l.x = clamp01(startX + (ev.clientX - px) / r.width);
-            l.y = clamp01(startY + (ev.clientY - py) / r.height);
+            var s = applySnap(clamp01(startX + (ev.clientX - px) / r.width),
+                              clamp01(startY + (ev.clientY - py) / r.height));
+            l.x = s.x; l.y = s.y;
             layoutLayer(node, l);
+            showGuides(s.gx, s.gy);
             syncInspectorPos(l);
         }
         function up() {
             document.removeEventListener('pointermove', move);
             document.removeEventListener('pointerup', up);
+            hideGuides();
             if (moved) markDirty();
         }
         document.addEventListener('pointermove', move);
@@ -730,6 +744,7 @@
                     '<span class="voe-lr-ic">' + layerIcon(l) + '</span>' +
                     '<span class="voe-lr-name">' + esc(layerName(l)) + '</span>' +
                     '<button class="voe-lr-btn' + (l.hidden ? ' voe-lr-btn--off' : '') + '" data-voe-vis title="Show/Hide">' + (l.hidden ? I.eyeOff : I.eye) + '</button>' +
+                    '<button class="voe-lr-btn" data-voe-dupelayer title="Duplicate (Ctrl+D)">' + I.dupe + '</button>' +
                     '<button class="voe-lr-btn" data-voe-rmlayer title="Delete layer">' + I.trash + '</button>' +
                 '</div>');
         }
@@ -737,10 +752,11 @@
         box.querySelectorAll('[data-voe-row]').forEach(function (row) {
             var id = row.getAttribute('data-voe-row');
             row.addEventListener('click', function (e) {
-                if (e.target.closest('[data-voe-vis],[data-voe-rmlayer],[data-voe-grip]')) return;
+                if (e.target.closest('[data-voe-vis],[data-voe-rmlayer],[data-voe-dupelayer],[data-voe-grip]')) return;
                 select(id);
             });
             row.querySelector('[data-voe-vis]').addEventListener('click', function (e) { e.stopPropagation(); toggleHidden(id); });
+            row.querySelector('[data-voe-dupelayer]').addEventListener('click', function (e) { e.stopPropagation(); duplicateLayer(id); });
             row.querySelector('[data-voe-rmlayer]').addEventListener('click', function (e) { e.stopPropagation(); removeLayer(id); });
             row.querySelector('[data-voe-grip]').addEventListener('pointerdown', function (e) { startRowReorder(e, id); });
         });
@@ -1026,6 +1042,23 @@
         });
     }
 
+    // snap the dragged anchor point to the stage's edges/centre (0, .5, 1) and
+    // return which axes snapped so we can flash guide lines.
+    function applySnap(nx, ny) {
+        var TH = 6, gx = null, gy = null;
+        [0, 0.5, 1].forEach(function (t) {
+            if (Math.abs(nx * ed.W - t * ed.W) < TH) { nx = t; gx = t; }
+            if (Math.abs(ny * ed.H - t * ed.H) < TH) { ny = t; gy = t; }
+        });
+        return { x: nx, y: ny, gx: gx, gy: gy };
+    }
+    function showGuides(gx, gy) {
+        var gv = ed.stage.querySelector('[data-voe-gv]'), gh = ed.stage.querySelector('[data-voe-gh]');
+        if (gv) { if (gx == null) gv.style.display = 'none'; else { gv.style.display = 'block'; gv.style.left = (gx * ed.W) + 'px'; } }
+        if (gh) { if (gy == null) gh.style.display = 'none'; else { gh.style.display = 'block'; gh.style.top = (gy * ed.H) + 'px'; } }
+    }
+    function hideGuides() { showGuides(null, null); }
+
     // keep the inspector's X/Y fields live while dragging on the stage
     function syncInspectorPos(l) {
         var box = overlay && overlay.querySelector('[data-voe-inspector]');
@@ -1035,8 +1068,50 @@
         if (yi && document.activeElement !== yi) yi.value = pct(l.y);
     }
 
+    // ── history (undo / redo) ────────────────────────────────────────────────────
+    // Snapshots of the layer list. Records are debounced so a burst of edits (a
+    // drag, a slider sweep) collapses into one undo step.
+    var histTimer = null;
+    function cloneLayers() { return JSON.parse(JSON.stringify(ed.layers)); }
+    function seedHistory() { ed.history = [cloneLayers()]; ed.histPos = 0; updateUndoRedo(); }
+    function recordHistory() {
+        if (!ed) return;
+        if (histTimer) { clearTimeout(histTimer); histTimer = null; }
+        ed.history = ed.history.slice(0, ed.histPos + 1);
+        ed.history.push(cloneLayers());
+        if (ed.history.length > 60) ed.history.shift();
+        ed.histPos = ed.history.length - 1;
+        updateUndoRedo();
+    }
+    function scheduleRecord() { if (histTimer) clearTimeout(histTimer); histTimer = setTimeout(recordHistory, 350); }
+    function flushHistory() { if (histTimer) { clearTimeout(histTimer); histTimer = null; recordHistory(); } }
+    function restoreHistory() {
+        ed.layers = JSON.parse(JSON.stringify(ed.history[ed.histPos]));
+        if (ed.selected && !layerById(ed.selected)) ed.selected = null;
+        ed.dirty = true; updateSaveState();
+        renderStageLayers(); renderLayersPanel(); renderInspector(); updateUndoRedo();
+    }
+    function undo() { flushHistory(); if (ed && ed.histPos > 0) { ed.histPos--; restoreHistory(); } }
+    function redo() { if (ed && ed.histPos < ed.history.length - 1) { ed.histPos++; restoreHistory(); } }
+    function updateUndoRedo() {
+        var u = overlay && overlay.querySelector('[data-voe-undo]'), r = overlay && overlay.querySelector('[data-voe-redo]');
+        if (u) u.disabled = !(ed && ed.histPos > 0);
+        if (r) r.disabled = !(ed && ed.history && ed.histPos < ed.history.length - 1);
+    }
+
+    function duplicateLayer(id) {
+        var l = layerById(id); if (!l) return;
+        var copy = JSON.parse(JSON.stringify(l));
+        copy.id = uid();
+        copy.x = clamp01(copy.x + 0.03); copy.y = clamp01(copy.y + 0.03);
+        var idx = ed.layers.indexOf(l);
+        ed.layers.splice(idx + 1, 0, copy);
+        ed.selected = copy.id;
+        markDirty(); renderStageLayers(); renderLayersPanel(); renderInspector();
+    }
+
     // ── dirty + save ────────────────────────────────────────────────────────────
-    function markDirty() { if (ed) { ed.dirty = true; updateSaveState(); } }
+    function markDirty() { if (ed) { ed.dirty = true; updateSaveState(); scheduleRecord(); } }
     function updateSaveState() {
         var s = overlay && overlay.querySelector('[data-voe-savestate]');
         var btn = overlay && overlay.querySelector('[data-voe-save]');
@@ -1191,6 +1266,33 @@
         var l = layerById(node.getAttribute('data-voe-layer'));
         if (l) enableInlineEdit(node, l);
     });
+    // Editor keyboard shortcuts (nudge / delete / duplicate / undo / redo / save).
+    function isTyping(t) {
+        if (!t) return false;
+        var tag = t.tagName;
+        return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t.getAttribute('contenteditable') === 'true';
+    }
+    document.addEventListener('keydown', function (e) {
+        if (!ed || !overlay || !overlay.classList.contains('voe-overlay--on')) return;
+        if (isTyping(e.target)) return;
+        var meta = e.ctrlKey || e.metaKey;
+        if (meta && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
+        if (meta && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); redo(); return; }
+        if (meta && (e.key === 's' || e.key === 'S')) { e.preventDefault(); saveTemplate(); return; }
+        if (meta && (e.key === 'd' || e.key === 'D')) { e.preventDefault(); if (ed.selected) duplicateLayer(ed.selected); return; }
+        if ((e.key === 'Delete' || e.key === 'Backspace') && ed.selected) { e.preventDefault(); removeLayer(ed.selected); return; }
+        if (e.key.indexOf('Arrow') === 0 && ed.selected) {
+            e.preventDefault();
+            var l = layerById(ed.selected); if (!l) return;
+            var step = e.shiftKey ? 10 : 1;
+            if (e.key === 'ArrowLeft') l.x = clamp01(l.x - step / ed.W);
+            else if (e.key === 'ArrowRight') l.x = clamp01(l.x + step / ed.W);
+            else if (e.key === 'ArrowUp') l.y = clamp01(l.y - step / ed.H);
+            else if (e.key === 'ArrowDown') l.y = clamp01(l.y + step / ed.H);
+            refreshLayer(l.id); syncInspectorPos(l); markDirty();
+        }
+    });
+
     // Esc closes (unless editing text / a confirm is up)
     document.addEventListener('keydown', function (e) {
         if (e.key !== 'Escape' || !overlay || !overlay.classList.contains('voe-overlay--on')) return;
