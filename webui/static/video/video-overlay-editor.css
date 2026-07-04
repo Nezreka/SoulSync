@@ -43,46 +43,51 @@
 .voe-brand-name { font-size: 15px; font-weight: 800; letter-spacing: -.01em; }
 .voe-brand-name span { color: rgba(255,255,255,.4); font-weight: 600; }
 .voe-top-spacer { flex: 1; }
+/* Close matches the get-modal / poster-manager standard: a circular dark button,
+ * separated from the action cluster. */
 .voe-x {
-    flex: 0 0 auto; width: 36px; height: 36px; border-radius: 10px; cursor: pointer;
-    font-size: 22px; line-height: 1; color: rgba(255,255,255,.6);
-    background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1);
-    transition: all .15s ease; display: grid; place-items: center;
+    flex: 0 0 auto; width: 36px; height: 36px; border-radius: 50%; cursor: pointer; margin-left: 4px;
+    font-size: 22px; line-height: 1; color: rgba(255,255,255,.7);
+    background: rgba(0,0,0,.4); border: 1px solid rgba(255,255,255,.16);
+    backdrop-filter: blur(6px); transition: all .15s ease; display: grid; place-items: center;
 }
-.voe-x:hover { color: #fff; background: rgba(255,255,255,.12); }
+.voe-x:hover { color: #fff; background: rgba(0,0,0,.68); border-color: rgba(255,255,255,.4); }
 
-/* generic buttons */
+/* generic buttons — same shape/weight as .vgm-btn / .vpm-apply across the video UI */
 .voe-btn {
     display: inline-flex; align-items: center; gap: 8px; font: inherit;
-    font-size: 13px; font-weight: 700; padding: 9px 16px; border-radius: 10px; cursor: pointer;
+    font-size: 13px; font-weight: 700; padding: 10px 18px; border-radius: 11px; cursor: pointer;
     color: rgba(255,255,255,.82); background: rgba(255,255,255,.06);
-    border: 1px solid rgba(255,255,255,.11); transition: all .15s ease;
+    border: 1px solid rgba(255,255,255,.12); transition: all .15s ease;
 }
 .voe-btn:hover { color: #fff; background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.2); }
 .voe-btn svg { width: 15px; height: 15px; }
 .voe-btn--primary {
     color: #fff; background: rgb(var(--a)); border-color: transparent;
-    box-shadow: 0 8px 22px rgba(var(--a),.38);
+    box-shadow: 0 8px 24px rgba(var(--a),.4);
 }
-.voe-btn--primary:hover { filter: brightness(1.08); background: rgb(var(--a)); }
-.voe-btn--primary:disabled, .voe-btn:disabled { opacity: .45; cursor: default; box-shadow: none; filter: none; }
-.voe-btn--ghost { background: transparent; border-color: transparent; }
-.voe-btn--ghost:hover { background: rgba(255,255,255,.08); }
+.voe-btn--primary:hover { filter: brightness(1.08); background: rgb(var(--a)); transform: translateY(-1px); }
+.voe-btn--primary:disabled, .voe-btn:disabled { opacity: .45; cursor: default; box-shadow: none; filter: none; transform: none; }
+.voe-btn--ghost { background: transparent; border-color: transparent; color: rgba(255,255,255,.6); }
+.voe-btn--ghost:hover { background: rgba(255,255,255,.08); color: #fff; }
 
 /* ── GALLERY ─────────────────────────────────────────────────────────────── */
 .voe-gallery { flex: 1; overflow-y: auto; }
-.voe-gallery-inner { max-width: 1180px; margin: 0 auto; padding: 44px 32px 60px; }
-.voe-gallery-head { margin-bottom: 30px; }
+.voe-gallery-inner { max-width: 1120px; margin: 0 auto; padding: 56px 32px 64px; }
+.voe-gallery-head { margin-bottom: 40px; text-align: center; }
 .voe-gallery-kick {
     font-size: 12px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase;
-    color: rgb(var(--a)); display: flex; align-items: center; gap: 8px;
+    color: rgb(var(--a)); display: inline-flex; align-items: center; gap: 8px;
 }
 .voe-gallery-kick::before { content: ""; width: 7px; height: 7px; border-radius: 50%;
     background: rgb(var(--a)); box-shadow: 0 0 10px rgb(var(--a)); }
-.voe-gallery-title { font-size: 32px; font-weight: 900; letter-spacing: -.03em; margin: 12px 0 6px; }
-.voe-gallery-sub { font-size: 14px; color: rgba(255,255,255,.5); max-width: 560px; line-height: 1.55; }
+.voe-gallery-title { font-size: 34px; font-weight: 900; letter-spacing: -.03em; margin: 12px 0 8px; }
+.voe-gallery-sub { font-size: 14.5px; color: rgba(255,255,255,.5); max-width: 600px; line-height: 1.6; margin: 0 auto; }
+/* Fixed-width, centred cards so any count stays balanced on wide screens (was
+ * auto-fill 1fr, which stranded a couple of cards at the left with empty stretch
+ * columns to the right). */
 .voe-grid {
-    display: grid; grid-template-columns: repeat(auto-fill, minmax(216px, 1fr)); gap: 20px;
+    display: grid; grid-template-columns: repeat(auto-fill, 236px); justify-content: center; gap: 24px;
 }
 .voe-card {
     position: relative; border-radius: 16px; overflow: hidden; cursor: pointer;
