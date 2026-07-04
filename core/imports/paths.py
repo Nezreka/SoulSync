@@ -257,8 +257,10 @@ def _replace_template_variables(template: str, context: dict) -> str:
         "title": clean_context.get("title", "Unknown Track"),
         "track": f"{_coerce_int(clean_context.get('track_number', 1), 1):02d}",
         "cdnum": cdnum_value,
-        "disc": str(_coerce_int(clean_context.get("disc_number", 1), 1)),
-        "discnum": str(_coerce_int(clean_context.get("disc_number", 1), 1)),
+        # #981: ${disc}/${discnum} vanish on single-disc albums, matching ${cdnum}
+        # (a track on disc 2+ still shows even if total_discs wasn't populated).
+        "disc": (str(_disc_number) if (_total_discs > 1 or _disc_number > 1) else ""),
+        "discnum": (str(_disc_number) if (_total_discs > 1 or _disc_number > 1) else ""),
         "year": str(clean_context.get("year", "")),
         "quality": clean_context.get("quality", ""),
     }
@@ -296,8 +298,10 @@ def get_file_path_from_template_raw(template: str, context: dict) -> tuple[str, 
 
     quality_value = context.get("quality", "")
     disc_number = _coerce_int(context.get("disc_number", 1), 1)
-    disc_value = f"{disc_number:02d}"
-    disc_value_raw = str(disc_number)
+    # #981: single-disc albums drop $disc/$discnum (like $cdnum) so no "01-" prefix.
+    _multi_disc = _coerce_int(context.get("total_discs", 1), 1) > 1 or disc_number > 1
+    disc_value = f"{disc_number:02d}" if _multi_disc else ""
+    disc_value_raw = str(disc_number) if _multi_disc else ""
 
     path_parts = full_path.split("/")
     if len(path_parts) > 1:
@@ -367,8 +371,14 @@ def get_file_path_from_template(context: dict, template_type: str = "album_path"
     path_parts = full_path.split("/")
     quality_value = context.get("quality", "")
     disc_number = _coerce_int(context.get("disc_number", 1), 1)
-    disc_value = f"{disc_number:02d}"
-    disc_value_raw = str(disc_number)
+    # #981: $disc/$discnum are empty on single-disc albums, same as $cdnum — a
+    # single-disc album shouldn't stamp "01-" on every filename. Multi-disc is
+    # either 2+ total discs OR a track that's itself on disc 2+ (so a known disc-3
+    # track still shows even if total_discs wasn't populated). The leading-dash
+    # cleanup below drops the orphaned separator (e.g. "$disc-$track" -> "$track").
+    _multi_disc = _coerce_int(context.get("total_discs", 1), 1) > 1 or disc_number > 1
+    disc_value = f"{disc_number:02d}" if _multi_disc else ""
+    disc_value_raw = str(disc_number) if _multi_disc else ""
 
     if len(path_parts) > 1:
         folder_parts = path_parts[:-1]
