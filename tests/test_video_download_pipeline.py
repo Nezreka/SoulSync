@@ -20,7 +20,10 @@ from core.video.slskd_download import (
 def test_classify_state():
     assert classify_state("Completed, Succeeded") == "completed"
     assert classify_state("InProgress") == "active"
-    assert classify_state("Queued, Remotely") == "active"
+    # Queued != downloading — waiting for a slot, not moving bytes yet.
+    assert classify_state("Queued, Remotely") == "queued"
+    assert classify_state("Queued, Locally") == "queued"
+    assert classify_state("Requested") == "queued"
     assert classify_state("Completed, Errored") == "failed"
     assert classify_state("Completed, Cancelled") == "cancelled"
     assert classify_state("Completed, TimedOut") == "failed"
@@ -103,6 +106,15 @@ def test_process_download_active_reports_progress():
     upd = process_download(_dl(), [_xfer("InProgress")], "/dl",
                            lister=lambda d: [], mover=lambda s, d: None)
     assert upd == {"status": "downloading", "progress": 40.0}
+
+
+def test_process_download_queued_reports_queued():
+    """A slskd-queued transfer must read as 'queued', not 'downloading' (the disconnect
+    where a whole batch waiting for slots showed as actively downloading)."""
+    from core.video.download_monitor import process_download
+    upd = process_download(_dl(), [_xfer("Queued, Remotely")], "/dl",
+                           lister=lambda d: [], mover=lambda s, d: None)
+    assert upd["status"] == "queued"
 
 
 def test_process_download_failed():

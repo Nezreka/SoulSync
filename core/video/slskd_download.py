@@ -71,7 +71,11 @@ def flatten_downloads(data: Any) -> list:
 
 
 def classify_state(state: Any) -> str:
-    """slskd state string → 'completed' | 'cancelled' | 'failed' | 'active'. Pure."""
+    """slskd state string → 'completed' | 'cancelled' | 'failed' | 'queued' | 'active'. Pure.
+
+    slskd queues a transfer ("Queued, Remotely/Locally") before a slot frees up and
+    it actually starts moving bytes ("InProgress") — those are distinct and must not
+    both read as 'downloading'."""
     s = str(state or "").lower()
     if "completed" in s and "succeed" in s:
         return "completed"
@@ -81,6 +85,8 @@ def classify_state(state: Any) -> str:
         return "failed"
     if "completed" in s:        # completed but not succeeded → treat as failed
         return "failed"
+    if "queued" in s or "requested" in s:   # waiting for a slot, not moving bytes yet
+        return "queued"
     return "active"
 
 
