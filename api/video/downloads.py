@@ -95,6 +95,29 @@ def _evaluate_hits(raw, profile, scope, want_season, want_episode) -> list:
     return results[:40]
 
 
+def _active_episode_keys(db, title) -> set:
+    """(season, episode) pairs already downloading/queued for a show (by title) — for
+    in-flight dedup so a grab/pack doesn't create a duplicate row for the same episode."""
+    import json as _j
+    keys = set()
+    try:
+        for d in (db.get_active_video_downloads() or []):
+            if str(d.get("kind") or "").lower() != "show" or str(d.get("title") or "") != str(title):
+                continue
+            ctx = d.get("search_ctx")
+            if isinstance(ctx, str):
+                try:
+                    ctx = _j.loads(ctx)
+                except (ValueError, TypeError):
+                    ctx = {}
+            ctx = ctx or {}
+            if ctx.get("season") is not None and ctx.get("episode") is not None:
+                keys.add((ctx["season"], ctx["episode"]))
+    except Exception:
+        return set()
+    return keys
+
+
 def _search_ints(body):
     def _int(v):
         try:
@@ -380,6 +403,14 @@ def register_routes(bp):
         if not target:
             return jsonify({"ok": False, "error": "Set the library folder for this type on Settings → Downloads."}), 400
 
+        # In-flight dedup — if this exact episode is already downloading/queued, don't
+        # start a duplicate (e.g. grabbing an episode that a pack grab already queued).
+        _ctx = body.get("search_ctx") if isinstance(body.get("search_ctx"), dict) else {}
+        if (str(body.get("kind") or "").lower() == "show"
+                and _ctx.get("season") is not None and _ctx.get("episode") is not None
+                and (_ctx["season"], _ctx["episode"]) in _active_episode_keys(db, body.get("title") or "")):
+            return jsonify({"ok": True, "already": True})
+
         started = start_download(username, filename, body.get("size_bytes") or 0)
         if not started.get("ok"):
             return jsonify({"ok": False, "error": started.get("error") or "slskd refused the download."}), 502
@@ -436,16 +467,17 @@ def register_routes(bp):
         if not target:
             return jsonify({"ok": False, "error": "Set the TV library folder on Settings → Downloads."}), 400
 
-        # Skip episodes already in the library (media_id is the library show id for a
-        # library-sourced grab) so a pack doesn't re-download what you already own.
+        title = body.get("title") or ""
+        # Skip episodes already in the library (owned) OR already downloading/queued
+        # (in-flight) so a pack doesn't re-download what you have or duplicate a row.
         owned = set()
         if body.get("media_id") is not None and str(body.get("media_source") or "").lower() != "tmdb":
             try:
                 owned = db.owned_episode_keys(int(body["media_id"]))
             except (ValueError, TypeError):
                 owned = set()
+        in_flight = _active_episode_keys(db, title)
 
-        title = body.get("title") or ""
         started, ids, skipped = 0, [], 0
         for f in files:
             fn = f.get("filename")
@@ -454,9 +486,9 @@ def register_routes(bp):
             if sn is None or en is None:
                 skipped += 1
                 continue   # not a parseable single episode (samples/extras) — skip
-            if (sn, en) in owned:
+            if (sn, en) in owned or (sn, en) in in_flight:
                 skipped += 1
-                continue   # already in the library — don't re-download
+                continue   # already in the library or already downloading — don't dup
             res = start_download(username, fn, f.get("size_bytes") or 0)
             if not res.get("ok"):
                 skipped += 1

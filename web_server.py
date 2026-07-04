@@ -39424,6 +39424,16 @@ app.register_blueprint(_create_enrichment_blueprint())
 from api.video import create_video_blueprint as _create_video_blueprint
 app.register_blueprint(_create_video_blueprint(), url_prefix='/api/video')
 
+# Resume video downloads at boot: without this the monitor only starts on a grab or
+# when the Downloads page opens, so in-flight downloads (and orphaned 'searching' rows)
+# after a restart would sit untracked until the user happened to visit the page.
+try:
+    from core.video.download_monitor import ensure_started as _ensure_video_download_monitor
+    from api.video import get_video_db as _get_video_db
+    _ensure_video_download_monitor(_get_video_db)
+except Exception:
+    logger.warning("could not start the video download monitor at boot", exc_info=True)
+
 
 def _emit_rate_monitor_loop():
     """Background thread that pushes API call rate data every 1 second for speedometer gauges.

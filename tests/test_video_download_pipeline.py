@@ -153,6 +153,52 @@ def test_wishlist_failed_episode_library_resolves_tmdb():
     assert db.eps == (999, "Lib Show", [{"season_number": 2, "episode_number": 5}], "42")
 
 
+def test_complete_via_file_marks_done_when_already_placed():
+    """#4: a completed transfer whose file is gone but was already placed (dest_path set)
+    resolves to 'completed' instead of looping at importing/100%."""
+    from core.video.download_monitor import _complete_via_file
+    upd = _complete_via_file({"id": 1, "filename": "x.mkv", "dest_path": "/lib/x.mkv"},
+                             "/dl", lambda d: [], lambda s, d: None, None)
+    assert upd == {"status": "completed", "progress": 100.0, "dest_path": "/lib/x.mkv"}
+
+
+def test_complete_via_file_waits_when_no_file_and_no_dest():
+    from core.video.download_monitor import _complete_via_file
+    upd = _complete_via_file({"id": 2, "filename": "x.mkv"}, "/dl", lambda d: [], lambda s, d: None, None)
+    assert upd == {"progress": 100.0}
+
+
+def test_tick_readopts_orphaned_searching_row(monkeypatch):
+    """#1: a 'searching' row whose requery thread is gone (restart) gets re-adopted."""
+    import core.video.download_monitor as m
+    spawned = []
+    monkeypatch.setattr(m, "_spawn_requery", lambda dl_id: spawned.append(dl_id))
+    m._requerying.clear()
+
+    class _DB:
+        def get_active_video_downloads(self):
+            return [{"id": 7, "status": "searching", "source": "soulseek"}]
+
+    m._tick(_DB())
+    assert spawned == [7]
+
+
+def test_active_episode_keys_dedups_by_title():
+    """#3: only same-show (by title) episode downloads count toward in-flight dedup."""
+    from api.video.downloads import _active_episode_keys
+
+    class _DB:
+        def get_active_video_downloads(self):
+            return [
+                {"kind": "show", "title": "The Show", "search_ctx": json.dumps({"season": 1, "episode": 1})},
+                {"kind": "show", "title": "The Show", "search_ctx": {"season": 1, "episode": 2}},
+                {"kind": "show", "title": "Other Show", "search_ctx": {"season": 1, "episode": 9}},
+                {"kind": "movie", "title": "The Show", "search_ctx": {}},
+            ]
+
+    assert _active_episode_keys(_DB(), "The Show") == {(1, 1), (1, 2)}
+
+
 def test_process_download_failed():
     from core.video.download_monitor import process_download
     upd = process_download(_dl(), [_xfer("Completed, Errored")], "/dl",
