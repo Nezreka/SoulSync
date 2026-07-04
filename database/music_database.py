@@ -2601,6 +2601,8 @@ class MusicDatabase:
                             discogs_artist_id TEXT,
                             musicbrainz_artist_id TEXT,
                             amazon_artist_id TEXT,
+                            preferred_metadata_source TEXT DEFAULT NULL,
+                            auto_download INTEGER NOT NULL DEFAULT 1,
                             profile_id INTEGER DEFAULT 1,
                             UNIQUE(profile_id, spotify_artist_id),
                             UNIQUE(profile_id, itunes_artist_id)
@@ -2630,7 +2632,9 @@ class MusicDatabase:
                             deezer_artist_id TEXT,
                             discogs_artist_id TEXT,
                             musicbrainz_artist_id TEXT,
-                            amazon_artist_id TEXT
+                            amazon_artist_id TEXT,
+                            preferred_metadata_source TEXT DEFAULT NULL,
+                            auto_download INTEGER NOT NULL DEFAULT 1
                         )
                     """)
 
@@ -2643,7 +2647,8 @@ class MusicDatabase:
                             'include_remixes', 'include_acoustic', 'include_compilations',
                             'include_instrumentals', 'lookback_days',
                             'itunes_artist_id', 'deezer_artist_id', 'discogs_artist_id',
-                            'musicbrainz_artist_id', 'amazon_artist_id', 'profile_id']
+                            'musicbrainz_artist_id', 'amazon_artist_id',
+                            'preferred_metadata_source', 'auto_download', 'profile_id']
                 shared_cols = [c for c in new_cols if c in old_cols]
                 cols_str = ', '.join(shared_cols)
                 cursor.execute(f"INSERT INTO watchlist_artists_new ({cols_str}) SELECT {cols_str} FROM watchlist_artists")
@@ -3573,6 +3578,8 @@ class MusicDatabase:
                             discogs_artist_id TEXT,
                             musicbrainz_artist_id TEXT,
                             amazon_artist_id TEXT,
+                            preferred_metadata_source TEXT DEFAULT NULL,
+                            auto_download INTEGER NOT NULL DEFAULT 1,
                             profile_id INTEGER DEFAULT 1,
                             UNIQUE(profile_id, spotify_artist_id),
                             UNIQUE(profile_id, itunes_artist_id)
@@ -3586,7 +3593,8 @@ class MusicDatabase:
                                 'include_remixes', 'include_acoustic', 'include_compilations',
                                 'include_instrumentals', 'lookback_days',
                                 'itunes_artist_id', 'deezer_artist_id', 'discogs_artist_id',
-                                'musicbrainz_artist_id', 'amazon_artist_id', 'profile_id']
+                                'musicbrainz_artist_id', 'amazon_artist_id',
+                            'preferred_metadata_source', 'auto_download', 'profile_id']
                     shared_cols = [c for c in new_cols if c in col_names]
                     cols_str = ', '.join(shared_cols)
 
