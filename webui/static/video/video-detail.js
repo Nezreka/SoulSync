@@ -56,6 +56,8 @@
     function root() { return document.querySelector('[data-video-detail="' + currentKind + '"]'); }
     function q(sel) { var r = root(); return r ? r.querySelector(sel) : null; }
     function toast(msg, type) { if (typeof showToast === 'function') showToast(msg, type); }
+    // Set a discog-style button's label without clobbering its icon/shimmer spans.
+    function _btnLabel(btn, text) { var t = btn.querySelector('.discog-btn-text'); if (t) t.textContent = text; else btn.textContent = text; }
     function setText(sel, t) { var n = q(sel); if (n) n.textContent = t || ''; }
     function runtimeLabel(m) {
         if (!m) return '';
@@ -1235,12 +1237,18 @@
         var seasonBar = (seasonMissing.length && window.VideoGrab)
             ? '<div class="vd-season-actions">' +
                 '<span class="vd-season-actions-count">' + seasonMissing.length + ' missing</span>' +
-                '<button class="vd-season-getbtn" type="button" data-vd-season-grab ' +
-                    'title="Auto-search &amp; download every missing episode in this season">⭳ Grab season</button>' +
-                '<button class="vd-season-getbtn" type="button" data-vd-season-search ' +
-                    'title="Manual search — pick releases for this season">⌕ Manual search</button>' +
-                '<button class="vd-season-getbtn vd-season-wishbtn" type="button" data-vd-season-wish ' +
-                    'title="Add every missing episode in this season to the wishlist">＋ Wishlist season</button>' +
+                '<button class="discog-download-btn discog-btn-compact" type="button" data-vd-season-grab ' +
+                    'title="Auto-search &amp; download every missing episode in this season">' +
+                    '<span class="discog-btn-icon">⭳</span><span class="discog-btn-text">Grab season</span>' +
+                    '<span class="discog-btn-shimmer"></span></button>' +
+                '<button class="discog-download-btn discog-btn-compact" type="button" data-vd-season-search ' +
+                    'title="Manual search — pick releases for this season">' +
+                    '<span class="discog-btn-icon">⌕</span><span class="discog-btn-text">Manual search</span>' +
+                    '<span class="discog-btn-shimmer"></span></button>' +
+                '<button class="discog-download-btn discog-btn-compact" type="button" data-vd-season-wish ' +
+                    'title="Add every missing episode in this season to the wishlist">' +
+                    '<span class="discog-btn-icon">＋</span><span class="discog-btn-text">Wishlist season</span>' +
+                    '<span class="discog-btn-shimmer"></span></button>' +
               '</div>'
             : '';
         host.innerHTML = seasonBar +
@@ -2147,14 +2155,14 @@
         if (!window.VideoGrab || !data) return;
         var missing = _seasonMissing();
         if (!missing.length) { toast('No missing episodes in this season', 'info'); return; }
-        btn.disabled = true; btn.textContent = '⭳ Grabbing…'; startDlTracking();
+        btn.disabled = true; _btnLabel(btn, 'Grabbing…'); startDlTracking();
         VideoGrab.pickSource().then(function (src) {
             return VideoGrab.season({ title: data.title, source: src, season: selectedSeason,
                 episodes: missing.map(function (e) { return e.episode_number; }),
                 mediaId: (data.source !== 'tmdb' ? data.id : null), mediaSource: data.source, year: data.year },
                 function (en, state) { _setEpSynthetic(en, state); });
         }).then(function (res) {
-            btn.disabled = false; btn.textContent = '⭳ Grab season'; startDlTracking();
+            btn.disabled = false; _btnLabel(btn, 'Grab season'); startDlTracking();
             toast('Grabbing ' + res.grabbed + ' of ' + res.total + ' episode' + (res.total === 1 ? '' : 's'), res.grabbed ? 'success' : 'info');
         });
     }
@@ -2166,7 +2174,7 @@
         btn.disabled = true;
         var eps = missing.map(function (e) { return _epMeta(e.episode_number); });
         VideoGrab.wishlistEpisodes(_showIdentity(), eps).then(function (ok) {
-            if (ok) { btn.textContent = '✓ Wishlisted'; toast('Added ' + eps.length + ' episode' + (eps.length === 1 ? '' : 's') + ' to wishlist', 'success'); }
+            if (ok) { _btnLabel(btn, 'Wishlisted'); toast('Added ' + eps.length + ' episode' + (eps.length === 1 ? '' : 's') + ' to wishlist', 'success'); }
             else { btn.disabled = false; toast('Could not add to wishlist', 'error'); }
         });
     }
