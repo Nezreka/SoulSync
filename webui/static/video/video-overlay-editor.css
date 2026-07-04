@@ -362,6 +362,25 @@ select.voe-input option { background: #17171d; }
 .voe-btn--danger { background: #ef4444; color: #fff; border-color: transparent; }
 .voe-btn--danger:hover { background: #dc2626; }
 
+/* ── apply-to-library dialog ─────────────────────────────────────────────── */
+.voe-apply-modal { width: min(500px, 94vw); padding: 24px; border-radius: 18px;
+    background: linear-gradient(180deg, #1a1a22, #141419); border: 1px solid rgba(255,255,255,.1);
+    box-shadow: 0 30px 80px rgba(0,0,0,.7); transform: scale(.96); transition: transform .16s; }
+.voe-confirm-back--on .voe-apply-modal { transform: none; }
+.voe-apply-t { font-size: 19px; font-weight: 800; }
+.voe-apply-sub { font-size: 13px; color: rgba(255,255,255,.55); line-height: 1.55; margin: 6px 0 18px; }
+.voe-apply-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid rgba(255,255,255,.06); }
+.voe-apply-row-l { flex: 0 0 66px; font-size: 13.5px; font-weight: 700; }
+.voe-apply-row .voe-input { flex: 1; }
+.voe-apply-applied { font-size: 12.5px; color: rgba(255,255,255,.45); margin: 14px 0 4px; }
+.voe-apply-prog { margin: 16px 0 6px; }
+.voe-apply-prog[hidden] { display: none; }
+.voe-apply-bar { height: 8px; border-radius: 5px; background: rgba(255,255,255,.1); overflow: hidden; }
+.voe-apply-bar-fill { height: 100%; width: 0; border-radius: 5px; background: rgb(var(--a)); transition: width .25s ease; }
+.voe-apply-prog-txt { font-size: 12px; color: rgba(255,255,255,.6); margin-top: 8px; }
+.voe-apply-foot { display: flex; align-items: center; gap: 10px; margin-top: 22px; }
+.voe-apply-foot .voe-spacer { flex: 1; }
+
 @media (max-width: 900px) {
     .voe-palette { flex-basis: 88px; }
     .voe-pal-grid { grid-template-columns: 1fr; }

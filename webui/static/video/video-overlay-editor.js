@@ -130,6 +130,7 @@
         undo: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-1"/></svg>',
         redo: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14l5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h1"/></svg>',
         dupe: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+        apply: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2 4 4 .5-3 3 .8 4.2L12 16l-3.8 1.7.8-4.2-3-3 4-.5 2-4Z"/><path d="M5 20h14"/></svg>',
         poster: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M4 15l4-4 3 3 3-3 6 6"/></svg>',
         image: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>',
         logo: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 7v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V7M9 12h6"/></svg>',
@@ -191,6 +192,7 @@
                 '<div class="voe-brand"><span class="voe-brand-mark">' + I.brand + '</span>' +
                     '<span class="voe-brand-name">Overlay Studio</span></div>' +
                 '<div class="voe-top-spacer"></div>' +
+                '<button class="voe-btn" data-voe-apply-open>' + I.apply + ' Apply to library</button>' +
                 '<button class="voe-x" data-voe-close aria-label="Close">&times;</button>' +
             '</div>' +
             '<div class="voe-gallery"><div class="voe-gallery-inner">' +
@@ -202,7 +204,108 @@
                 '<div class="voe-grid" data-voe-grid><div class="voe-gallery-empty">Loading…</div></div>' +
             '</div></div>';
         overlay.querySelector('[data-voe-close]').addEventListener('click', close);
+        overlay.querySelector('[data-voe-apply-open]').addEventListener('click', openApplyDialog);
         loadGallery();
+    }
+
+    // ── apply overlays to the library ────────────────────────────────────────────
+    var applyPollTimer = null;
+    function openApplyDialog() {
+        api('GET', '/api/video/overlays/assignments').then(function (d) {
+            renderApplyDialog(d || { assignments: {}, templates: [], applied: 0 });
+        }).catch(function () { toast('Could not load apply settings', 'error'); });
+    }
+    function scopeRow(label, scope, assign, templates) {
+        var cur = (assign && assign.template_id) || '';
+        var opts = '<option value="">— None —</option>' + templates.map(function (t) {
+            return '<option value="' + t.id + '"' + (String(t.id) === String(cur) ? ' selected' : '') + '>' + esc(t.name) + '</option>';
+        }).join('');
+        var on = !!(assign && assign.enabled && assign.template_id);
+        return '<div class="voe-apply-row"><div class="voe-apply-row-l">' + label + '</div>' +
+            '<select class="voe-input" data-apply-tpl="' + scope + '">' + opts + '</select>' +
+            '<button class="voe-toggle' + (on ? ' voe-toggle--on' : '') + '" data-apply-en="' + scope + '"></button></div>';
+    }
+    function renderApplyDialog(d) {
+        var templates = d.templates || [], a = d.assignments || {};
+        var back = document.createElement('div');
+        back.className = 'voe-confirm-back';
+        back.innerHTML = '<div class="voe-apply-modal">' +
+            '<div class="voe-apply-t">Apply overlays</div>' +
+            '<div class="voe-apply-sub">Pick a template for each library and burn it onto every poster. Runs from a clean copy each time and pushes to your server; originals are backed up so you can remove them anytime.</div>' +
+            scopeRow('Movies', 'movie', a.movie, templates) +
+            scopeRow('TV Shows', 'show', a.show, templates) +
+            '<div class="voe-apply-applied" data-apply-count>' + (d.applied || 0) + ' item' + (d.applied === 1 ? '' : 's') + ' currently overlaid</div>' +
+            '<div class="voe-apply-prog" data-apply-prog hidden><div class="voe-apply-bar"><div class="voe-apply-bar-fill" data-apply-fill></div></div>' +
+            '<div class="voe-apply-prog-txt" data-apply-progtxt></div></div>' +
+            '<div class="voe-apply-foot">' +
+                '<button class="voe-btn voe-btn--ghost" data-apply-remove>Remove overlays</button>' +
+                '<div class="voe-spacer"></div>' +
+                '<button class="voe-btn" data-apply-cancel>Close</button>' +
+                '<button class="voe-btn voe-btn--primary" data-apply-run>' + I.apply + ' Apply now</button>' +
+            '</div></div>';
+        document.body.appendChild(back);
+        requestAnimationFrame(function () { back.classList.add('voe-confirm-back--on'); });
+        function done() {
+            if (applyPollTimer) { clearInterval(applyPollTimer); applyPollTimer = null; }
+            back.classList.remove('voe-confirm-back--on'); setTimeout(function () { back.remove(); }, 180);
+        }
+        back.querySelectorAll('[data-apply-tpl]').forEach(function (sel) {
+            sel.addEventListener('change', function () { saveAssign(back, sel.getAttribute('data-apply-tpl')); });
+        });
+        back.querySelectorAll('[data-apply-en]').forEach(function (btn) {
+            btn.addEventListener('click', function () { btn.classList.toggle('voe-toggle--on'); saveAssign(back, btn.getAttribute('data-apply-en')); });
+        });
+        back.querySelector('[data-apply-cancel]').addEventListener('click', done);
+        back.addEventListener('click', function (e) { if (e.target === back) done(); });
+        back.querySelector('[data-apply-run]').addEventListener('click', function () { startApply(back, false); });
+        back.querySelector('[data-apply-remove]').addEventListener('click', function () {
+            confirmDialog('Remove all overlays?', 'Every overlaid poster is restored from its backup on the server. Your templates are kept.', 'Remove', function () { startApply(back, true); });
+        });
+    }
+    function saveAssign(back, scope) {
+        var sel = back.querySelector('[data-apply-tpl="' + scope + '"]');
+        var en = back.querySelector('[data-apply-en="' + scope + '"]');
+        var tid = sel.value ? parseInt(sel.value, 10) : null;
+        var enabled = en.classList.contains('voe-toggle--on') && !!tid;
+        api('PUT', '/api/video/overlays/assignments', { scope: scope, template_id: tid, enabled: enabled })
+            .catch(function () { toast('Could not save assignment', 'error'); });
+    }
+    function startApply(back, remove) {
+        var runBtn = back.querySelector('[data-apply-run]'), rmBtn = back.querySelector('[data-apply-remove]');
+        runBtn.disabled = true; rmBtn.disabled = true;
+        var prog = back.querySelector('[data-apply-prog]'); prog.hidden = false;
+        setApplyProg(back, { phase: 'starting', done: 0, total: 0 });
+        api('POST', '/api/video/overlays/apply', { scope: 'both', remove: remove })
+            .then(function (r) {
+                if (!r || !r.ok) { toast((r && r.error) || 'Could not start', 'error'); runBtn.disabled = false; rmBtn.disabled = false; return; }
+                applyPollTimer = setInterval(function () { pollApply(back); }, 700);
+            })
+            .catch(function () { toast('Could not start apply', 'error'); runBtn.disabled = false; rmBtn.disabled = false; });
+    }
+    function pollApply(back) {
+        api('GET', '/api/video/overlays/apply/status').then(function (s) {
+            if (!document.body.contains(back)) { if (applyPollTimer) { clearInterval(applyPollTimer); applyPollTimer = null; } return; }
+            setApplyProg(back, s);
+            if (!s.running && s.phase !== 'starting') {
+                clearInterval(applyPollTimer); applyPollTimer = null;
+                var run = back.querySelector('[data-apply-run]'), rm = back.querySelector('[data-apply-remove]');
+                if (run) run.disabled = false; if (rm) rm.disabled = false;
+                if (s.phase === 'error') toast('Apply failed: ' + (s.error || ''), 'error');
+                else toast((s.mode === 'remove' ? 'Removed overlays · ' : 'Overlays applied · ') +
+                    (s.applied || 0) + ' done, ' + (s.skipped || 0) + ' unchanged' + (s.failed ? ', ' + s.failed + ' failed' : ''), 'success');
+                document.dispatchEvent(new CustomEvent('soulsync:video-overlays-applied'));
+            }
+        }).catch(function () { /* keep polling */ });
+    }
+    function setApplyProg(back, s) {
+        var fill = back.querySelector('[data-apply-fill]'), txt = back.querySelector('[data-apply-progtxt]');
+        var pct = s.total ? Math.round((s.done / s.total) * 100) : (s.phase === 'done' ? 100 : 5);
+        if (fill) fill.style.width = pct + '%';
+        if (txt) {
+            if (s.phase === 'running' || s.phase === 'starting') txt.textContent = (s.mode === 'remove' ? 'Removing… ' : 'Applying… ') + (s.done || 0) + ' / ' + (s.total || '…') + (s.title ? ' · ' + s.title : '');
+            else if (s.phase === 'done') txt.textContent = 'Done — ' + (s.applied || 0) + ' applied, ' + (s.skipped || 0) + ' unchanged' + (s.failed ? ', ' + s.failed + ' failed' : '');
+            else if (s.phase === 'error') txt.textContent = 'Failed.';
+        }
     }
 
     function loadGallery() {
