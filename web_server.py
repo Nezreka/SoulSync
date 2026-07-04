@@ -20,6 +20,11 @@ from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from core.webui.mimetypes_fix import ensure_web_mimetypes
+# Register correct web-asset MIME types before the app serves anything — a bad OS
+# registry (Windows: .js -> text/plain) otherwise blanks the module-loaded React
+# pages (Import/Stats) via strict module MIME checking. (#979)
+ensure_web_mimetypes()
 from flask import Flask, abort, render_template, request, jsonify, redirect, send_file, send_from_directory, Response, session, g
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from utils.logging_config import get_logger, setup_logging
@@ -40,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "2.8.4"
+_SOULSYNC_BASE_VERSION = "2.8.5"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -15408,9 +15413,14 @@ def _search_track_in_album_context(original_search: dict, artist: dict) -> dict:
 def _cleanup_empty_directories(download_path, moved_file_path):
     """Cleans up empty directories after a file move, ignoring hidden files."""
     import os
+    from core.imports.file_ops import protected_root_dirs
     try:
+        protected = protected_root_dirs()
+        protected.add(os.path.normpath(download_path))
         current_dir = os.path.dirname(moved_file_path)
         while current_dir != download_path and current_dir.startswith(download_path):
+            if os.path.normpath(current_dir) in protected:
+                break  # #976: never delete a configured root, even nested + empty
             is_empty = not any(not f.startswith('.') for f in os.listdir(current_dir))
             if is_empty:
                 logger.warning(f"Removing empty directory: {current_dir}")
@@ -15430,16 +15440,22 @@ def _sweep_empty_download_directories():
     empty only after all sibling downloads in a batch have been processed.
     """
     import os
+    from core.imports.file_ops import protected_root_dirs
     try:
         download_path = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
         if not os.path.isdir(download_path):
             return 0
 
+        # #976: never sweep away a configured root (e.g. a staging folder nested
+        # under downloads), only its transient sub-folders.
+        protected = protected_root_dirs()
+        protected.add(os.path.normpath(download_path))
+
         removed = 0
         # os.walk bottom-up: deepest directories first so parents become empty after children removed
         for dirpath, _dirnames, _filenames in os.walk(download_path, topdown=False):
-            # Never remove the root download directory itself
-            if os.path.normpath(dirpath) == os.path.normpath(download_path):
+            # Never remove a configured root directory itself
+            if os.path.normpath(dirpath) in protected:
                 continue
             # Re-read actual contents — os.walk's lists are stale after child removal
             try:
@@ -15462,6 +15478,11 @@ def _sweep_empty_download_directories():
 
         if removed > 0:
             logger.warning(f"[Folder Cleanup] Removed {removed} empty director{'y' if removed == 1 else 'ies'} from downloads folder")
+        # #976: a sweep must never leave the import/staging folder missing —
+        # recreate it if it went absent (e.g. an older build deleted it) so the
+        # import feature self-heals instead of erroring until the next scan.
+        from core.imports.file_ops import ensure_staging_dir
+        ensure_staging_dir()
         return removed
     except Exception as e:
         logger.error(f"[Folder Cleanup] Error sweeping empty directories: {e}")

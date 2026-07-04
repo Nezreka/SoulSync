@@ -153,6 +153,41 @@ def test_get_file_path_from_template_raw_handles_quality_and_disc_placeholders(m
     assert filename == "3 - Song One [FLAC 16bit]"
 
 
+def test_disc_placeholder_drops_on_single_disc_album(monkeypatch):
+    """#981: $disc must NOT stamp '01-' on every track of a single-disc album
+    (reported on 'The Best of Snoop Dogg (2005)'). Empty like $cdnum; the
+    leading-dash cleanup removes the orphaned separator."""
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _Config({}))
+    folder_path, filename = import_paths.get_file_path_from_template_raw(
+        "$artist/$album/$disc-$track - $title",
+        {"artist": "Snoop Dogg", "album": "The Best of Snoop Dogg (2005)",
+         "title": "Bitch Please", "track_number": 7, "disc_number": 1, "total_discs": 1},
+    )
+    assert filename == "07 - Bitch Please"          # not "01-07 - Bitch Please"
+
+
+def test_disc_placeholder_kept_on_multi_disc_album(monkeypatch):
+    """The disc prefix stays for a genuine multi-disc album."""
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _Config({}))
+    folder_path, filename = import_paths.get_file_path_from_template_raw(
+        "$artist/$album/$disc-$track - $title",
+        {"artist": "A", "album": "B", "title": "Song",
+         "track_number": 7, "disc_number": 2, "total_discs": 2},
+    )
+    assert filename == "02-07 - Song"
+
+
+def test_disc_placeholder_kept_when_track_is_on_disc_two_without_total(monkeypatch):
+    """A track known to be on disc 2 shows its disc even if total_discs wasn't
+    populated — disc_number > 1 is itself proof of a multi-disc release."""
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _Config({}))
+    folder_path, filename = import_paths.get_file_path_from_template_raw(
+        "$artist/$album/$disc-$track - $title",
+        {"artist": "A", "album": "B", "title": "Song", "track_number": 3, "disc_number": 2},
+    )
+    assert filename == "02-03 - Song"
+
+
 def test_get_file_path_from_template_raw_substitutes_cdnum_for_multi_disc(monkeypatch):
     """$cdnum should expand to 'CDxx' on multi-disc albums (regression).
 

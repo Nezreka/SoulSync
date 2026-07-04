@@ -2243,9 +2243,17 @@ class RepairWorker:
         except Exception as e:
             logger.warning(f"Tag write failed during unknown artist fix: {e}")
 
-        # Step 2: Move file if expected path differs
-        final_path = resolved
-        if expected_path:
+        # Step 2: Move file if expected path differs — but ONLY when the file lives
+        # under the SoulSync transfer folder. For a media-server / non-transfer
+        # library the resolved file is elsewhere, and building the destination from
+        # transfer_folder would YANK it into the transfer folder, away from its real
+        # library (same class as #978). There we just re-tag + fix the DB metadata and
+        # leave the file where it is (physical reorg is Library Reorganize's job).
+        transfer_norm = os.path.normpath(self.transfer_folder) if self.transfer_folder else ''
+        under_transfer = bool(transfer_norm) and os.path.normpath(resolved).lower().startswith(
+            transfer_norm.lower() + os.sep)
+        final_path = resolved if under_transfer else file_path
+        if expected_path and under_transfer:
             expected_abs = os.path.normpath(os.path.join(self.transfer_folder, expected_path))
             if os.path.normpath(resolved).lower() != expected_abs.lower():
                 try:
@@ -3391,17 +3399,31 @@ class RepairWorker:
             logger.warning("Path mismatch fix: missing from/to in details")
             return {'success': False, 'error': 'Missing from/to paths in finding details'}
 
+        # Prefer the authoritative ABSOLUTE paths the preview computed (#978). The
+        # from/to above are display-TRIMMED for the UI; rebuilding them from the
+        # transfer folder broke every library not rooted under transfer_path
+        # (Plex/media-server, Docker host<->container splits) — the trimmed `from`
+        # was already absolute, os.path.join returned it unchanged, and the guard
+        # then rejected it as "escapes transfer folder" ("Fix All fixes nothing").
+        # The live reorganize executor moves these _abs paths directly; do the same.
         transfer = self.transfer_folder
-        src = os.path.normpath(os.path.join(transfer, rel_from))
-        dst = os.path.normpath(os.path.join(transfer, rel_to))
+        transfer_norm = os.path.normpath(transfer) if transfer else ''
+        abs_from = details.get('from_abs') or ''
+        abs_to = details.get('to_abs') or ''
+        if abs_from and abs_to:
+            src = os.path.normpath(abs_from)
+            dst = os.path.normpath(abs_to)
+        else:
+            # Legacy finding written before _abs was persisted — reconstruct from the
+            # transfer folder and keep the safety guard (re-scan to refresh a finding
+            # whose library lives outside transfer_path).
+            src = os.path.normpath(os.path.join(transfer, rel_from))
+            dst = os.path.normpath(os.path.join(transfer, rel_to))
+            if not src.startswith(transfer_norm + os.sep) or not dst.startswith(transfer_norm + os.sep):
+                logger.warning("Path mismatch fix: legacy finding escapes transfer folder — re-scan to refresh. src=%s, dst=%s, transfer=%s", src, dst, transfer_norm)
+                return {'success': False, 'error': 'Path escapes transfer folder (legacy finding — re-scan the library to refresh)'}
 
-        logger.info("Path mismatch fix: src=%s dst=%s transfer=%s", src, dst, transfer)
-
-        # Safety: both paths must be inside transfer folder
-        transfer_norm = os.path.normpath(transfer)
-        if not src.startswith(transfer_norm + os.sep) or not dst.startswith(transfer_norm + os.sep):
-            logger.warning("Path mismatch fix: path escapes transfer folder. src=%s, dst=%s, transfer=%s", src, dst, transfer_norm)
-            return {'success': False, 'error': 'Path escapes transfer folder'}
+        logger.info("Path mismatch fix: src=%s dst=%s", src, dst)
 
         if not os.path.isfile(src):
             # Source may have been moved already — check if destination already exists
@@ -3446,8 +3468,19 @@ class RepairWorker:
             try:
                 conn = self.db._get_connection()
                 cursor = conn.cursor()
-                # Try exact match
-                cursor.execute("UPDATE tracks SET file_path = ? WHERE file_path = ?", (dst, src))
+                # Prefer updating the exact track by id — authoritative, the way the
+                # live reorganize executor does it. Path-matching below is a fallback:
+                # it can MISS for media-server libraries whose stored file_path differs
+                # from the resolved path we just moved, which is exactly the #978
+                # population (so without this the file moves but the DB stays stale).
+                try:
+                    tid = int(entity_id) if entity_id not in (None, '') else None
+                except (TypeError, ValueError):
+                    tid = None
+                if tid is not None:
+                    cursor.execute("UPDATE tracks SET file_path = ? WHERE id = ?", (dst, tid))
+                if tid is None or cursor.rowcount == 0:
+                    cursor.execute("UPDATE tracks SET file_path = ? WHERE file_path = ?", (dst, src))
                 if cursor.rowcount == 0:
                     cursor.execute("UPDATE tracks SET file_path = ? WHERE file_path = ?",
                                    (dst, os.path.normpath(src)))
