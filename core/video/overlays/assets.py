@@ -86,3 +86,25 @@ class AssetStore:
         d = self._dir(kind, item_id)
         if d.is_dir():
             shutil.rmtree(d, ignore_errors=True)
+
+    # ── uploaded template images (logos/ribbons a user drops in) ──────────────
+    def _uploads_dir(self) -> Path:
+        return self.root / "_uploads"
+
+    def save_upload(self, data: bytes, ext: str = "png") -> str:
+        """Content-address an uploaded image (dedups identical files); returns the
+        stored name to reference as ``asset://<name>``."""
+        ext = "".join(c for c in (ext or "png").lower().lstrip(".") if c.isalnum())[:5] or "png"
+        name = sha1(data)[:16] + "." + ext
+        d = self._uploads_dir()
+        d.mkdir(parents=True, exist_ok=True)
+        p = d / name
+        if not p.is_file():
+            p.write_bytes(data)
+        return name
+
+    def read_upload(self, name: str) -> bytes | None:
+        # basename-only guard against path traversal
+        safe = Path(str(name)).name
+        p = self._uploads_dir() / safe
+        return p.read_bytes() if p.is_file() else None
