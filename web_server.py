@@ -20,6 +20,11 @@ from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from core.webui.mimetypes_fix import ensure_web_mimetypes
+# Register correct web-asset MIME types before the app serves anything — a bad OS
+# registry (Windows: .js -> text/plain) otherwise blanks the module-loaded React
+# pages (Import/Stats) via strict module MIME checking. (#979)
+ensure_web_mimetypes()
 from flask import Flask, abort, render_template, request, jsonify, redirect, send_file, send_from_directory, Response, session, g
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from utils.logging_config import get_logger, setup_logging
