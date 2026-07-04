@@ -177,7 +177,7 @@
         repeating-conic-gradient(#0c0c11 0% 25%, #0e0e14 0% 50%) 50% / 26px 26px;
 }
 .voe-stage {
-    position: relative; height: min(72vh, 660px); aspect-ratio: 2 / 3;
+    position: relative; height: min(80vh, 740px); aspect-ratio: 2 / 3;
     background: #16161d center/cover no-repeat;
     border-radius: 8px; box-shadow: 0 30px 80px -20px rgba(0,0,0,.85), 0 0 0 1px rgba(255,255,255,.06);
     overflow: hidden; user-select: none;
@@ -236,6 +236,7 @@
     box-shadow: 0 8px 24px rgba(0,0,0,.4);
 }
 .voe-canvas-bar .voe-btn { padding: 7px 12px; font-size: 12px; }
+.voe-canvas-bar .voe-icon-btn { padding: 7px 9px; }
 
 /* right: layers panel */
 .voe-side {
@@ -274,7 +275,9 @@
 /* right side is two stacked panels: layers (top) + inspector (below) */
 .voe-side-layers { display: flex; flex-direction: column; min-height: 0; max-height: 46%; }
 .voe-inspector { flex: 1; overflow-y: auto; border-top: 1px solid rgba(255,255,255,.07); min-height: 0; }
-.voe-insp-empty { padding: 34px 18px; text-align: center; color: rgba(255,255,255,.32); font-size: 12.5px; line-height: 1.6; }
+.voe-insp-empty { padding: 40px 22px; text-align: center; color: rgba(255,255,255,.34); font-size: 12.5px; line-height: 1.6;
+    display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.voe-insp-empty svg { width: 30px; height: 30px; stroke: rgba(255,255,255,.2); }
 .voe-insp-sec { padding: 14px 15px; border-bottom: 1px solid rgba(255,255,255,.05); }
 .voe-insp-sec-h { display: flex; align-items: center; justify-content: space-between; width: 100%;
     font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .07em;
