@@ -193,7 +193,7 @@
                 '<div class="voe-brand"><span class="voe-brand-mark">' + I.brand + '</span>' +
                     '<span class="voe-brand-name">Overlay Studio</span></div>' +
                 '<div class="voe-top-spacer"></div>' +
-                '<button class="voe-btn" data-voe-apply-open>' + I.apply + ' Apply to library</button>' +
+                '<button class="voe-btn voe-btn--primary" data-voe-apply-open>' + I.apply + ' Apply to library</button>' +
                 '<button class="voe-x" data-voe-close aria-label="Close">&times;</button>' +
             '</div>' +
             '<div class="voe-gallery"><div class="voe-gallery-inner">' +
