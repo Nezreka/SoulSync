@@ -53,6 +53,7 @@ def create_video_blueprint() -> Blueprint:
     from .downloads import register_routes as reg_downloads
     from .manual_import import register_routes as reg_manual_import
     from .automations import register_routes as reg_automations
+    from .overlays import register_routes as reg_overlays
     reg_dashboard(bp)
     reg_scan(bp)
     reg_library(bp)
@@ -69,5 +70,6 @@ def create_video_blueprint() -> Blueprint:
     reg_downloads(bp)
     reg_manual_import(bp)
     reg_automations(bp)
+    reg_overlays(bp)
 
     return bp

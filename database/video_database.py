@@ -31,7 +31,7 @@ logger = get_logger("video_database")
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 19
+SCHEMA_VERSION = 20
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -2304,6 +2304,118 @@ class VideoDatabase:
             return False
         finally:
             conn.close()
+
+    # ── overlay templates (Artwork Studio) ────────────────────────────────────
+    # CRUD for saved overlay designs. `definition` is a JSON scene (canvas meta +
+    # ordered layer list); we store it as text and parse on read so callers get a
+    # dict. The gallery list omits the (potentially large) definition + thumbnail.
+    @staticmethod
+    def _parse_definition(raw) -> dict:
+        try:
+            d = json.loads(raw) if raw else {}
+            return d if isinstance(d, dict) else {}
+        except (ValueError, TypeError):
+            return {}
+
+    def list_overlay_templates(self) -> list:
+        """Every saved template, newest-edited first — light rows for the gallery
+        (id, name, timestamps, layer count, thumbnail). No full definition."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT id, name, thumbnail, definition, created_at, updated_at "
+                "FROM overlay_templates ORDER BY updated_at DESC, id DESC").fetchall()
+            out = []
+            for r in rows:
+                d = dict(r)
+                defn = self._parse_definition(d.pop("definition", None))
+                d["layer_count"] = len(defn.get("layers") or [])
+                out.append(d)
+            return out
+        finally:
+            conn.close()
+
+    def get_overlay_template(self, template_id: int) -> dict | None:
+        """One template with its parsed `definition` dict, or None."""
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT id, name, thumbnail, definition, created_at, updated_at "
+                "FROM overlay_templates WHERE id=?", (int(template_id),)).fetchone()
+            if not row:
+                return None
+            d = dict(row)
+            d["definition"] = self._parse_definition(d.get("definition"))
+            return d
+        except (ValueError, TypeError):
+            return None
+        finally:
+            conn.close()
+
+    def create_overlay_template(self, name: str, definition=None, thumbnail=None) -> int | None:
+        """Insert a new template; returns its id. `definition` may be a dict or a
+        JSON string (dicts are serialized)."""
+        name = (name or "").strip() or "Untitled template"
+        raw = json.dumps(definition) if isinstance(definition, (dict, list)) else (definition or "{}")
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                "INSERT INTO overlay_templates (name, definition, thumbnail) VALUES (?,?,?)",
+                (name, raw, thumbnail))
+            conn.commit()
+            return cur.lastrowid
+        except sqlite3.Error:
+            logger.exception("create_overlay_template failed")
+            return None
+        finally:
+            conn.close()
+
+    def update_overlay_template(self, template_id: int, *, name=None,
+                                definition=None, thumbnail=None) -> bool:
+        """Patch a template's name / definition / thumbnail (only the provided
+        fields) and bump updated_at. Returns True if a row was changed."""
+        sets, params = [], []
+        if name is not None:
+            sets.append("name=?"); params.append((name or "").strip() or "Untitled template")
+        if definition is not None:
+            raw = json.dumps(definition) if isinstance(definition, (dict, list)) else definition
+            sets.append("definition=?"); params.append(raw)
+        if thumbnail is not None:
+            sets.append("thumbnail=?"); params.append(thumbnail)
+        if not sets:
+            return False
+        sets.append("updated_at=datetime('now')")
+        params.append(int(template_id))
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                f"UPDATE overlay_templates SET {', '.join(sets)} WHERE id=?", params)
+            conn.commit()
+            return cur.rowcount > 0
+        except sqlite3.Error:
+            logger.exception("update_overlay_template failed for %s", template_id)
+            return False
+        finally:
+            conn.close()
+
+    def delete_overlay_template(self, template_id: int) -> bool:
+        conn = self._get_connection()
+        try:
+            cur = conn.execute("DELETE FROM overlay_templates WHERE id=?", (int(template_id),))
+            conn.commit()
+            return cur.rowcount > 0
+        except (sqlite3.Error, ValueError, TypeError):
+            return False
+        finally:
+            conn.close()
+
+    def duplicate_overlay_template(self, template_id: int) -> int | None:
+        """Copy a template into a new "… (copy)" row; returns the new id or None."""
+        src = self.get_overlay_template(template_id)
+        if not src:
+            return None
+        return self.create_overlay_template(
+            (src.get("name") or "Untitled") + " (copy)", src.get("definition") or {})
 
     # ── detail payloads (drill-in pages) ──────────────────────────────────────
     @staticmethod

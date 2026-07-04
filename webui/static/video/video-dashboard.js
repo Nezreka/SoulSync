@@ -205,6 +205,14 @@
         if (window.VideoPoster) VideoPoster.openSearch();
     });
 
+    // Overlay Studio launcher → the full-bleed overlay-template editor.
+    document.addEventListener('click', function (e) {
+        var t = e.target.closest && e.target.closest('[data-video-overlay-studio]');
+        if (!t) return;
+        e.preventDefault();
+        if (window.VideoOverlayEditor) VideoOverlayEditor.open();
+    });
+
     document.addEventListener('soulsync:video-page-shown', onPageShown);
     document.addEventListener('soulsync:video-scan-progress', onDashScanProgress);
     document.addEventListener('soulsync:video-scan-done', onDashScanDone);

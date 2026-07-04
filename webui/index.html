@@ -14,6 +14,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='mobile.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='setup-wizard.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='video/video-side.css', v=static_v) }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='video/video-overlay-editor.css', v=static_v) }}">
     <style id="soulsync-initial-appearance">
         :root {
             --accent-rgb: {{ initial_accent_rgb }};
@@ -964,6 +965,28 @@
                                             <span class="qa-tile__cta-arrow" aria-hidden="true">&rarr;</span>
                                         </div>
                                     </button>
+                                </div>
+                            </article>
+
+                            <!-- Overlay Studio launcher (Artwork Studio) -->
+                            <article class="dash-card" data-card="overlay-studio">
+                                <header class="dash-card__head">
+                                    <h3 class="dash-card__title">Overlay Studio</h3>
+                                    <p class="dash-card__sub">Design poster badge overlays — visually.</p>
+                                </header>
+                                <div class="dash-card__body" style="display:flex;flex-direction:column;gap:16px;">
+                                    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                                        <span style="font-size:11px;font-weight:800;letter-spacing:.03em;padding:5px 11px;border-radius:8px;background:rgba(var(--accent-rgb),.16);color:rgb(var(--accent-rgb));border:1px solid rgba(var(--accent-rgb),.3);">4K</span>
+                                        <span style="font-size:11px;font-weight:800;letter-spacing:.03em;padding:5px 11px;border-radius:8px;background:rgba(245,197,24,.14);color:#f5c518;border:1px solid rgba(245,197,24,.3);">★ 8.4</span>
+                                        <span style="font-size:11px;font-weight:800;letter-spacing:.03em;padding:5px 11px;border-radius:8px;background:rgba(255,255,255,.07);color:rgba(255,255,255,.75);border:1px solid rgba(255,255,255,.14);">HDR</span>
+                                        <span style="font-size:11px;font-weight:800;letter-spacing:.03em;padding:5px 11px;border-radius:8px;background:rgba(108,211,145,.14);color:#6cd391;border:1px solid rgba(108,211,145,.3);">ATMOS</span>
+                                    </div>
+                                    <p style="margin:0;font-size:13px;line-height:1.6;color:rgba(255,255,255,.55);">
+                                        Drag resolution, rating &amp; logo badges onto a poster on a visual canvas — relative placement that fits every title. A native, no-YAML take on artwork overlays.</p>
+                                    <button type="button" data-video-overlay-studio aria-label="Open Overlay Studio"
+                                        style="align-self:flex-start;display:inline-flex;align-items:center;gap:8px;padding:11px 20px;border:none;border-radius:12px;font-size:13.5px;font-weight:800;cursor:pointer;color:#fff;background:rgb(var(--accent-rgb));box-shadow:0 8px 22px rgba(var(--accent-rgb),.35);transition:filter .15s,transform .15s;"
+                                        onmouseover="this.style.filter='brightness(1.08)';this.style.transform='translateY(-1px)'"
+                                        onmouseout="this.style.filter='';this.style.transform=''">Open Studio &rarr;</button>
                                 </div>
                             </article>
 
@@ -11150,6 +11173,8 @@
     <script src="{{ url_for('static', filename='video/video-get-modal.js', v=static_v) }}"></script>
     <!-- Poster Manager (full-screen modal; "Manage Poster" on detail pages + dashboard quick action) -->
     <script src="{{ url_for('static', filename='video/video-poster-modal.js', v=static_v) }}"></script>
+    <!-- Overlay Studio (full-bleed visual editor for poster-overlay templates; Artwork Studio) -->
+    <script src="{{ url_for('static', filename='video/video-overlay-editor.js', v=static_v) }}"></script>
     <!-- Download VIEW renderer (movie / show / youtube): per-source search + quality verdict;
          rendered inline inside the get-modal (not its own modal) -->
     <script src="{{ url_for('static', filename='video/video-download-view.js', v=static_v) }}"></script>
