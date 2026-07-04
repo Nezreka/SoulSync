@@ -336,7 +336,7 @@
                 '</div>');
         });
         grid.innerHTML = cards.join('');
-        grid.querySelector('[data-voe-new]').addEventListener('click', createTemplate);
+        grid.querySelector('[data-voe-new]').addEventListener('click', openStarterPicker);
         grid.querySelectorAll('[data-voe-open]').forEach(function (c) {
             c.addEventListener('click', function (e) {
                 if (e.target.closest('[data-voe-dupe],[data-voe-del]')) return;
@@ -363,11 +363,53 @@
         });
     }
 
-    function createTemplate() {
-        var def = { version: 1, canvas: { aspect: '2:3' }, layers: [] };
-        api('POST', '/api/video/overlays/templates', { name: 'Untitled template', definition: def })
+    function createTemplate(name, def) {
+        api('POST', '/api/video/overlays/templates',
+            { name: name || 'Untitled template', definition: def || { version: 1, canvas: { aspect: '2:3' }, layers: [] } })
             .then(function (d) { if (d && d.id) loadTemplate(d.id); })
             .catch(function () { toast('Could not create template', 'error'); });
+    }
+
+    // ── starter templates (skip the blank-canvas cold start) ────────────────────
+    function _def(layers) { return { version: 1, canvas: { aspect: '2:3' }, layers: layers }; }
+    function _badge(field, anchor, x, y, size) {
+        var l = defaultLayer('badge', x, y, field);
+        l.anchor = anchor; if (size) l.size = size; return l;
+    }
+    function STARTERS() {
+        return [
+            { name: 'Blank', desc: 'Start from an empty poster.', icon: '📄', build: function () { return _def([]); } },
+            { name: 'Quality corner', desc: 'Resolution + audio badges, top-right.', icon: '🏷️',
+                build: function () { return _def([_badge('resolution', 'top-right', 0.95, 0.05), _badge('audio_codec', 'top-right', 0.95, 0.14, 0.038)]); } },
+            { name: 'Ratings bar', desc: 'IMDb + Rotten Tomatoes, bottom-left.', icon: '⭐',
+                build: function () { return _def([_badge('imdb', 'bottom-left', 0.05, 0.95), _badge('rt', 'bottom-left', 0.30, 0.95)]); } },
+            { name: 'The works', desc: 'Scrim, title logo, quality + rating.', icon: '✨',
+                build: function () {
+                    var scrim = defaultLayer('scrim');
+                    var logo = defaultLayer('logo', 0.5, 0.82); logo.anchor = 'bottom-center'; logo.w = 0.6;
+                    return _def([scrim, logo, _badge('resolution', 'top-right', 0.95, 0.05), _badge('imdb', 'bottom-left', 0.05, 0.7)]);
+                } },
+        ];
+    }
+    function openStarterPicker() {
+        var back = document.createElement('div');
+        back.className = 'voe-confirm-back';
+        back.innerHTML = '<div class="voe-starter-modal"><div class="voe-starter-h">New overlay template</div>' +
+            '<div class="voe-starter-sub">Start from a preset or a blank poster — you can change anything after.</div>' +
+            '<div class="voe-starter-grid">' + STARTERS().map(function (s, i) {
+                return '<button class="voe-starter-card" data-starter="' + i + '"><span class="voe-starter-ic">' + s.icon + '</span>' +
+                    '<span class="voe-starter-name">' + esc(s.name) + '</span><span class="voe-starter-desc">' + esc(s.desc) + '</span></button>';
+            }).join('') + '</div>' +
+            '<div class="voe-confirm-row"><button class="voe-btn" data-starter-cancel>Cancel</button></div></div>';
+        document.body.appendChild(back);
+        requestAnimationFrame(function () { back.classList.add('voe-confirm-back--on'); });
+        function done() { back.classList.remove('voe-confirm-back--on'); setTimeout(function () { back.remove(); }, 180); }
+        var list = STARTERS();
+        back.addEventListener('click', function (e) {
+            if (e.target === back || e.target.closest('[data-starter-cancel]')) { done(); return; }
+            var c = e.target.closest('[data-starter]');
+            if (c) { var s = list[parseInt(c.getAttribute('data-starter'), 10)]; done(); createTemplate(s.name === 'Blank' ? 'Untitled template' : s.name, s.build()); }
+        });
     }
 
     function loadTemplate(id) {

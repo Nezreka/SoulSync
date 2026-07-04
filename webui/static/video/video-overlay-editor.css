@@ -378,6 +378,22 @@ select.voe-input option { background: #17171d; }
 .voe-btn--danger { background: #ef4444; color: #fff; border-color: transparent; }
 .voe-btn--danger:hover { background: #dc2626; }
 
+/* ── starter-template picker ─────────────────────────────────────────────── */
+.voe-starter-modal { width: min(560px, 94vw); padding: 24px; border-radius: 18px;
+    background: linear-gradient(180deg, #1a1a22, #141419); border: 1px solid rgba(255,255,255,.1);
+    box-shadow: 0 30px 80px rgba(0,0,0,.7); transform: scale(.96); transition: transform .16s; }
+.voe-confirm-back--on .voe-starter-modal { transform: none; }
+.voe-starter-h { font-size: 19px; font-weight: 800; }
+.voe-starter-sub { font-size: 13px; color: rgba(255,255,255,.55); line-height: 1.5; margin: 6px 0 18px; }
+.voe-starter-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.voe-starter-card { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left;
+    padding: 15px; border-radius: 13px; cursor: pointer; font: inherit;
+    background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.09); transition: all .14s ease; }
+.voe-starter-card:hover { background: rgba(var(--a),.12); border-color: rgba(var(--a),.45); transform: translateY(-2px); }
+.voe-starter-ic { font-size: 22px; margin-bottom: 4px; }
+.voe-starter-name { font-size: 14px; font-weight: 700; color: #f2f4fa; }
+.voe-starter-desc { font-size: 12px; color: rgba(255,255,255,.5); line-height: 1.4; }
+
 /* ── apply-to-library dialog ─────────────────────────────────────────────── */
 .voe-apply-modal { width: min(500px, 94vw); padding: 24px; border-radius: 18px;
     background: linear-gradient(180deg, #1a1a22, #141419); border: 1px solid rgba(255,255,255,.1);
