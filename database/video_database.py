@@ -2271,6 +2271,20 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def item_tmdb_id(self, kind: str, item_id: int):
+        """TMDB id for a movie/show — the key to re-fetch its clean original poster."""
+        table = {"movie": "movies", "show": "shows"}.get(str(kind).lower())
+        if not table:
+            return None
+        conn = self._get_connection()
+        try:
+            r = conn.execute(f"SELECT tmdb_id FROM {table} WHERE id=?", (int(item_id),)).fetchone()
+            return r["tmdb_id"] if r else None
+        except (sqlite3.Error, ValueError, TypeError):
+            return None
+        finally:
+            conn.close()
+
     def poster_set_target(self, kind: str, item_id: int) -> dict | None:
         """Server id + on-disk folder for a movie/show, so a new poster can be pushed
         to the media server and (best-effort) written into the item's folder."""
