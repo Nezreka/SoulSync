@@ -17,7 +17,7 @@ from mutagen.oggvorbis import OggVorbis
 from mutagen.mp4 import MP4
 
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import get_scope_artist, JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.album_tag_consistency")
@@ -117,6 +117,7 @@ def _write_tag(audio, tag_name, value):
 @register_job
 class AlbumTagConsistencyJob(RepairJob):
     job_id = 'album_tag_consistency'
+    supports_artist_scope = True
     display_name = 'Album Tag Consistency'
     description = 'Finds albums where tracks have inconsistent tags causing media server splits'
     help_text = (
@@ -160,22 +161,27 @@ class AlbumTagConsistencyJob(RepairJob):
         if not any([check_album, check_artist, check_mbid]):
             return result
 
+        scope_artist = get_scope_artist(context)
+        scope_clause = "AND lower(ar.name) = lower(?)" if scope_artist else ""
+        scope_params = (scope_artist,) if scope_artist else ()
+
         try:
             conn = context.db._get_connection()
             cursor = conn.cursor()
 
             # Get all albums with 2+ tracks that have file paths
-            cursor.execute("""
+            cursor.execute(f"""
                 SELECT al.id, al.title, ar.name as artist_name,
                        COUNT(t.id) as track_count
                 FROM albums al
                 JOIN artists ar ON ar.id = al.artist_id
                 JOIN tracks t ON t.album_id = al.id
                 WHERE t.file_path IS NOT NULL AND t.file_path != ''
+                  {scope_clause}
                 GROUP BY al.id
                 HAVING COUNT(t.id) >= 2
                 ORDER BY ar.name, al.title
-            """)
+            """, scope_params)
             albums = cursor.fetchall()
             total = len(albums)
 

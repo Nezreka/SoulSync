@@ -22,7 +22,7 @@ from core.library.retag_planner import (
 from core.metadata.album_tracks import get_album_for_source, get_album_tracks_for_source
 from core.metadata_service import get_primary_source, get_source_priority
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import get_scope_artist, JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.library_retag")
@@ -224,6 +224,7 @@ def _track_list(result):
 @register_job
 class LibraryRetagJob(RepairJob):
     job_id = 'library_retag'
+    supports_artist_scope = True
     display_name = 'Library Re-tag'
     description = 'Rewrites tags + cover art from a fresh metadata-source pull, in place'
     help_text = (
@@ -299,6 +300,9 @@ class LibraryRetagJob(RepairJob):
 
         # Albums that carry at least one usable source id.
         cols = ', '.join(f'al.{c}' for c in _ALBUM_SOURCE_COLUMNS.values())
+        scope_artist = get_scope_artist(context)
+        scope_clause = "AND lower(ar.name) = lower(?)" if scope_artist else ""
+        scope_params = (scope_artist,) if scope_artist else ()
         try:
             with context.db._get_connection() as conn:
                 cursor = conn.cursor()
@@ -307,7 +311,8 @@ class LibraryRetagJob(RepairJob):
                     FROM albums al
                     LEFT JOIN artists ar ON ar.id = al.artist_id
                     WHERE al.title IS NOT NULL AND al.title != ''
-                """)
+                      {scope_clause}
+                """, scope_params)
                 albums = cursor.fetchall()
         except Exception as e:
             logger.error("Library re-tag: album query failed: %s", e, exc_info=True)

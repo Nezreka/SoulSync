@@ -178,6 +178,9 @@ class RepairWorker:
         # Forced job queue (for "Run Now" button — processed by main loop)
         self._force_run_queue: List[str] = []
         self._force_run_lock = threading.Lock()
+        # Optional per-run scope for user-triggered runs (job_id -> scope dict,
+        # e.g. {'artist_name': ...}); consumed by _run_job, never persisted.
+        self._force_run_scopes: Dict[str, dict] = {}
 
         # Config manager (set externally after init)
         self._config_manager = None
@@ -717,11 +720,16 @@ class RepairWorker:
                 except Exception as e:
                     logger.debug("on_job_progress callback failed: %s", e)
 
+        # Per-run scope (user-triggered only; scheduled runs never carry one).
+        with self._force_run_lock:
+            run_scope = self._force_run_scopes.pop(job_id, None) if forced else None
+
         # Build context
         context = JobContext(
             db=self.db,
             transfer_folder=self.transfer_folder,
             config_manager=self._config_manager,
+            scope=run_scope,
             spotify_client=self.spotify_client,
             itunes_client=self.itunes_client,
             mb_client=self.mb_client,
@@ -784,11 +792,15 @@ class RepairWorker:
             remaining -= chunk
         return self._stop_event.is_set()
 
-    def run_job_now(self, job_id: str):
+    def run_job_now(self, job_id: str, scope: Optional[dict] = None):
         """Queue a job for immediate execution by the main worker loop.
 
         Uses a thread-safe queue instead of spawning a separate thread
         to avoid race conditions with the main loop's _run_job().
+
+        ``scope`` (e.g. ``{'artist_name': 'Drake'}``) narrows the run for jobs
+        that declare ``supports_artist_scope``; others ignore it and run
+        library-wide as always.
         """
         self._ensure_jobs_loaded()
         if job_id not in self._jobs:
@@ -796,9 +808,12 @@ class RepairWorker:
             return
 
         with self._force_run_lock:
+            if scope:
+                self._force_run_scopes[job_id] = scope
             if job_id not in self._force_run_queue:
                 self._force_run_queue.append(job_id)
-                logger.info("Job %s queued for immediate run", job_id)
+                logger.info("Job %s queued for immediate run%s", job_id,
+                            f" (scope: {scope})" if scope else "")
 
     def _update_progress(self, scanned: int, total: int):
         """Callback for jobs to report progress."""

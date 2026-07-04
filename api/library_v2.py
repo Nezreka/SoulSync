@@ -713,6 +713,48 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             conn.close()
         return jsonify({"success": True, "pairs": pairs})
 
+    @app.route("/api/library/v2/tracks/<int:track_id>/canonical", methods=["POST"])
+    def lib2_set_canonical(track_id):
+        """Link/unlink a track to the canonical recording it duplicates.
+
+        Body ``{"canonical_track_id": <id>}`` links (the importer's automatic
+        single↔album detection can then be corrected/extended manually);
+        ``{"canonical_track_id": null}`` unlinks — the track becomes its own
+        canonical again and stops showing as "also on album"."""
+        guard = _guard()
+        if guard:
+            return guard
+        body = request.json or {}
+        raw = body.get("canonical_track_id")
+        conn = _conn()
+        try:
+            if not conn.execute("SELECT 1 FROM lib2_tracks WHERE id=?", (track_id,)).fetchone():
+                return jsonify({"success": False, "error": "Track not found"}), 404
+            if raw in (None, "", 0):
+                conn.execute(
+                    "UPDATE lib2_tracks SET canonical_track_id=NULL, "
+                    "updated_at=CURRENT_TIMESTAMP WHERE id=?", (track_id,))
+                conn.commit()
+                return jsonify({"success": True, "canonical_track_id": None})
+            canonical_id = int(raw)
+            if canonical_id == track_id:
+                return jsonify({"success": False, "error": "A track cannot duplicate itself"}), 400
+            target = conn.execute(
+                "SELECT canonical_track_id FROM lib2_tracks WHERE id=?", (canonical_id,)
+            ).fetchone()
+            if not target:
+                return jsonify({"success": False, "error": "Canonical track not found"}), 404
+            if target["canonical_track_id"]:
+                return jsonify({"success": False,
+                                "error": "Target is itself a duplicate — link to its canonical instead"}), 400
+            conn.execute(
+                "UPDATE lib2_tracks SET canonical_track_id=?, "
+                "updated_at=CURRENT_TIMESTAMP WHERE id=?", (canonical_id, track_id))
+            conn.commit()
+        finally:
+            conn.close()
+        return jsonify({"success": True, "canonical_track_id": canonical_id})
+
     @app.route("/api/library/v2/artists/<int:artist_id>/history")
     def lib2_artist_history(artist_id):
         """Recent download/import provenance for this artist (Lidarr's History
@@ -935,6 +977,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             _import_state.update(running=True, stage="starting", current=0, total=0,
                                  stats=None, error=None, finished_at=None)
 
+        # Resolve the active profile OUTSIDE the thread (request context).
+        active_profile = _profile()
+
         def _run():
             from core.library2.importer import import_legacy_library
             import time as _t
@@ -943,7 +988,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 _import_state.update(stage=stage, current=current, total=total)
 
             try:
-                stats = import_legacy_library(get_database(), reset=reset, progress=_progress)
+                stats = import_legacy_library(get_database(), reset=reset, progress=_progress,
+                                              profile_id=active_profile)
                 _import_state.update(stats=stats, stage="tracklists")
 
                 # Resolve missing-track titles before artwork: cached tracklists

@@ -217,12 +217,15 @@ def _normalize_genres(raw: Any) -> str:
     return json.dumps(parts)
 
 
-def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb = None) -> Dict[str, int]:
+def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb = None,
+                          profile_id: Optional[int] = None) -> Dict[str, int]:
     """Populate ``lib2_*`` from the legacy library. Returns a stats dict.
 
     ``database`` is a ``MusicDatabase`` instance (we use its ``_get_connection``).
     ``reset`` wipes the v2 tables first. ``progress(stage, current, total)`` is an
-    optional callback for UI progress.
+    optional callback for UI progress. ``profile_id`` scopes the watchlist/
+    wishlist-derived monitoring to one user profile (None = legacy behavior,
+    read everything).
     """
     stats = {
         "artists": 0,
@@ -419,9 +422,9 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
             if progress and i % 200 == 0:
                 progress("tracks", i, len(track_rows))
 
-        stats["wishlist_tracks"] = seed_wishlist_tracks(cursor, resolver)
+        stats["wishlist_tracks"] = seed_wishlist_tracks(cursor, resolver, profile_id)
         stats["linked_duplicates"] = link_single_album_duplicates(cursor)
-        apply_monitoring_from_watchlist_wishlist(cursor)
+        apply_monitoring_from_watchlist_wishlist(cursor, profile_id)
         conn.commit()
         logger.info("Library v2 import complete: %s", stats)
     finally:
@@ -506,7 +509,8 @@ def _album_type_from_payload(album: Dict[str, Any], total_tracks: int) -> str:
     return "album"
 
 
-def seed_wishlist_tracks(cursor, resolver: _ArtistResolver) -> int:
+def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
+                         profile_id: Optional[int] = None) -> int:
     """Create lib2 metadata rows for wishlist-only tracks.
 
     The legacy library import only sees downloaded/scanned files. A user can have
@@ -514,12 +518,16 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver) -> int:
     so the Lidarr-style UI can show the concrete songs as monitored + missing.
     Importantly, a wishlisted song must not make the whole artist monitored:
     artist-level monitoring is the watchlist's job.
+    ``profile_id`` scopes to one user profile's wishlist (None = all).
     """
     if not _table_exists(cursor, "wishlist_tracks"):
         return 0
 
+    clause, params = _profile_filter(cursor, "wishlist_tracks", profile_id)
     rows = cursor.execute(
         "SELECT spotify_track_id, spotify_data, source_type, date_added FROM wishlist_tracks"
+        + (f" WHERE {clause}" if clause else ""),
+        params,
     ).fetchall()
     created_or_updated = 0
 
@@ -708,7 +716,18 @@ def _table_exists(cursor, name: str) -> bool:
     return cursor.fetchone() is not None
 
 
-def apply_monitoring_from_watchlist_wishlist(cursor) -> None:
+def _profile_filter(cursor, table: str, profile_id: Optional[int]) -> Tuple[str, tuple]:
+    """WHERE fragment scoping a legacy table to one user profile.
+
+    Empty when no ``profile_id`` is given (single-profile installs / legacy
+    behavior) or the table predates the ``profile_id`` column.
+    """
+    if profile_id is None or "profile_id" not in _existing_columns(cursor, table):
+        return "", ()
+    return "profile_id = ?", (int(profile_id),)
+
+
+def apply_monitoring_from_watchlist_wishlist(cursor, profile_id: Optional[int] = None) -> None:
     """Make ``monitored`` reflect reality instead of defaulting everything to on.
 
     Monitoring is the same concept as the existing systems:
@@ -724,13 +743,19 @@ def apply_monitoring_from_watchlist_wishlist(cursor) -> None:
     wishlist rows turn tracks on, but successful downloads or explicit user
     choices must not be turned off just because the wishlist row disappeared.
     No-op when those tables are absent (unit-test DBs).
+
+    ``profile_id`` scopes the derivation to one user profile's watchlist/
+    wishlist rows so Library v2 doesn't leak another profile's wanted state
+    into this view. ``None`` keeps the legacy read-everything behavior.
     """
     # Artists ← watchlist
     if _table_exists(cursor, "watchlist_artists"):
+        clause, params = _profile_filter(cursor, "watchlist_artists", profile_id)
         cursor.execute("UPDATE lib2_artists SET monitored=0")
         wl = cursor.execute(
             "SELECT spotify_artist_id, musicbrainz_artist_id, lower(artist_name) AS n "
-            "FROM watchlist_artists"
+            "FROM watchlist_artists" + (f" WHERE {clause}" if clause else ""),
+            params,
         ).fetchall()
         ext_ids = {x for r in wl for x in (r["spotify_artist_id"], r["musicbrainz_artist_id"]) if x}
         names = {r["n"] for r in wl if r["n"]}
@@ -745,10 +770,14 @@ def apply_monitoring_from_watchlist_wishlist(cursor) -> None:
     # Tracks ← wishlist. Do not reset non-wishlist tracks: monitored also powers
     # Lidarr-style upgrade checks after a file has already been downloaded.
     if _table_exists(cursor, "wishlist_tracks"):
+        clause, params = _profile_filter(cursor, "wishlist_tracks", profile_id)
         wanted = {
             str(r[0]).split("::", 1)[0]
             for r in cursor.execute(
-                "SELECT spotify_track_id FROM wishlist_tracks WHERE spotify_track_id IS NOT NULL"
+                "SELECT spotify_track_id FROM wishlist_tracks "
+                "WHERE spotify_track_id IS NOT NULL"
+                + (f" AND {clause}" if clause else ""),
+                params,
             )
             if r[0]
         }

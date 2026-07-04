@@ -55,6 +55,7 @@ _JOB_MODULES = [
     'core.repair_jobs.short_preview_track',
     'core.repair_jobs.audio_corruption_detector',
     'core.repair_jobs.lib2_upgrade_scan',
+    'core.repair_jobs.lib2_skips_cleanup',
 ]
 
 

@@ -7,6 +7,19 @@ import threading
 from typing import Any, Callable, Dict, List, Optional
 
 
+def get_scope_artist(context: Any) -> Optional[str]:
+    """The artist a user-triggered run is scoped to, or None for library-wide.
+
+    Free function (not a JobContext method) so jobs stay compatible with the
+    SimpleNamespace context fakes the test suite builds.
+    """
+    scope = getattr(context, "scope", None)
+    if isinstance(scope, dict):
+        name = str(scope.get("artist_name") or "").strip()
+        return name or None
+    return None
+
+
 def skip_deleted_quarantine(root: str, dirs: list, transfer_folder: str) -> None:
     """In-place prune of the ``<transfer>/deleted`` quarantine from an ``os.walk``
     ``dirs`` list (topdown walks only).
@@ -41,6 +54,11 @@ class JobContext:
     transfer_folder: str             # Resolved transfer folder path
     config_manager: Any              # ConfigManager instance
 
+    # Optional run scope for user-triggered runs (e.g. {'artist_name': 'Drake'}
+    # from a Library artist page). Only jobs declaring supports_artist_scope
+    # honor it; scheduled runs never carry one.
+    scope: Optional[Dict[str, Any]] = None
+
     # API clients (may be None if unavailable)
     spotify_client: Any = None
     itunes_client: Any = None
@@ -61,6 +79,10 @@ class JobContext:
         if self.stop_event and self.stop_event.is_set():
             return True
         return self.should_stop() if self.should_stop else False
+
+    def scope_artist_name(self) -> Optional[str]:
+        """The artist this run is scoped to, or None for a full-library run."""
+        return get_scope_artist(self)
 
     def is_spotify_rate_limited(self) -> bool:
         """Check if Spotify is currently under a global rate limit ban.
@@ -120,6 +142,9 @@ class RepairJob(ABC):
     # these instead of a free-text box. Keys not listed render by value type.
     setting_options: Dict[str, list] = {}
     auto_fix: bool = False
+    # Whether this job's scan honors JobContext.scope['artist_name'] (user-
+    # triggered runs from a Library artist page). Library-wide otherwise.
+    supports_artist_scope: bool = False
 
     @abstractmethod
     def scan(self, context: JobContext) -> JobResult:

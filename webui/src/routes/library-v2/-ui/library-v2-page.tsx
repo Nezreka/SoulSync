@@ -24,6 +24,7 @@ import {
   setLibraryV2Monitored,
   startLibraryV2Import,
   startLibraryV2UpgradeScan,
+  unlinkLibraryV2Duplicate,
 } from '../-library-v2.api';
 import type {
   LibraryV2AlbumSummary,
@@ -475,24 +476,26 @@ function DeleteConfirmModal({
   );
 }
 
-/** Library-wide maintenance jobs (the existing repair workers), runnable from
- *  the artist page like Lidarr's Tasks. These scan the WHOLE library — per-
- *  artist scoping needs job-level support and stays on the roadmap. */
-const MAINTENANCE_JOBS: Array<{ id: string; label: string; desc: string }> = [
+/** Maintenance jobs (the existing repair workers), runnable from the artist
+ *  page like Lidarr's Tasks. Jobs with `scoped: true` honor an artist scope
+ *  when triggered from here; the rest scan the whole library. */
+const MAINTENANCE_JOBS: Array<{ id: string; label: string; desc: string; scoped?: boolean }> = [
   {
     id: 'metadata_gap_filler',
     label: 'Metadata Gap Fill',
-    desc: 'Fill missing tag fields (genre, year, cover, …) from metadata providers.',
+    desc: 'Fill missing metadata identifiers (ISRC, MusicBrainz) from providers.',
+    scoped: true,
   },
   {
     id: 'unknown_artist_fixer',
     label: 'Fix Unknown Artist',
-    desc: 'Resolve tracks filed under Unknown/placeholder artists.',
+    desc: 'Resolve tracks filed under Unknown/placeholder artists (always library-wide).',
   },
   {
     id: 'album_tag_consistency',
     label: 'Album Tag Consistency',
     desc: 'Align album-level tags (album artist, year, art) across each album.',
+    scoped: true,
   },
   {
     id: 'library_reorganize',
@@ -506,8 +509,9 @@ const MAINTENANCE_JOBS: Array<{ id: string; label: string; desc: string }> = [
   },
   {
     id: 'library_retag',
-    label: 'Full Library Retag',
-    desc: 'Rewrite tags from library metadata across the whole library.',
+    label: 'Library Retag',
+    desc: 'Rewrite tags from library metadata.',
+    scoped: true,
   },
   {
     id: 'lib2_upgrade_scan',
@@ -516,13 +520,20 @@ const MAINTENANCE_JOBS: Array<{ id: string; label: string; desc: string }> = [
   },
 ];
 
-function MaintenanceModal({ onClose }: { onClose: () => void }) {
+function MaintenanceModal({
+  artistName,
+  onClose,
+}: {
+  artistName: string;
+  onClose: () => void;
+}) {
   const [state, setState] = useState<Record<string, 'queued' | 'error'>>({});
   return (
     <ModalShell title="Maintenance" onClose={onClose}>
       <p className={styles.qpSubtitle}>
-        These jobs run <strong>library-wide</strong> in the background (progress under
-        Stats → Repair jobs).
+        Jobs marked <span className={styles.qpCurrent}>this artist</span> run scoped to{' '}
+        <strong>{artistName}</strong>; the rest scan the whole library. Progress under
+        Stats → Repair jobs.
       </p>
       <div className={styles.qpList}>
         {MAINTENANCE_JOBS.map((job) => (
@@ -532,14 +543,15 @@ function MaintenanceModal({ onClose }: { onClose: () => void }) {
             className={styles.qpOption}
             disabled={state[job.id] === 'queued'}
             onClick={() => {
-              void runRepairJob(job.id)
+              void runRepairJob(job.id, job.scoped ? artistName : undefined)
                 .then(() => setState((s) => ({ ...s, [job.id]: 'queued' })))
                 .catch(() => setState((s) => ({ ...s, [job.id]: 'error' })));
             }}
           >
             <span className={styles.qpName}>
               {job.label}
-              {state[job.id] === 'queued' ? <span className={styles.qpCurrent}>queued</span> : null}
+              {job.scoped ? <span className={styles.qpCurrent}>this artist</span> : null}
+              {state[job.id] === 'queued' ? <span className={styles.statusOk}>queued</span> : null}
               {state[job.id] === 'error' ? (
                 <span className={styles.statusWarn}>failed to queue</span>
               ) : null}
@@ -557,11 +569,26 @@ function MaintenanceModal({ onClose }: { onClose: () => void }) {
  *  quality and lets the user decide which version stays wanted; file-level
  *  dedup is the single_album_dedup maintenance job. */
 function ManageTracksModal({ artistId, onClose }: { artistId: number; onClose: () => void }) {
+  const queryClient = useQueryClient();
   const dupesQuery = useQuery({
     queryKey: [...LIBRARY_V2_QUERY_KEY, 'duplicates', artistId],
     queryFn: () => fetchLibraryV2Duplicates(artistId),
   });
   const pairs = dupesQuery.data ?? [];
+  const [unlinking, setUnlinking] = useState<Set<number>>(new Set());
+
+  function unlink(trackId: number) {
+    setUnlinking((s) => new Set(s).add(trackId));
+    void unlinkLibraryV2Duplicate(trackId)
+      .then(() => queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY }))
+      .finally(() =>
+        setUnlinking((s) => {
+          const next = new Set(s);
+          next.delete(trackId);
+          return next;
+        }),
+      );
+  }
 
   function fileText(side: { file: { format: string | null; bitrate: number | null } | null }) {
     if (!side.file) return 'no file';
@@ -597,6 +624,7 @@ function ManageTracksModal({ artistId, onClose }: { artistId: number; onClose: (
                 <th className={styles.colMonitor}>Mon.</th>
                 <th>Album version</th>
                 <th className={styles.colMonitor}>Mon.</th>
+                <th className={styles.colActions}></th>
               </tr>
             </thead>
             <tbody>
@@ -624,6 +652,17 @@ function ManageTracksModal({ artistId, onClose }: { artistId: number; onClose: (
                       id={p.album.track_id}
                       monitored={p.album.monitored}
                     />
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      className={styles.toolButton}
+                      disabled={unlinking.has(p.single.track_id)}
+                      title="Not the same recording? Unlink the pair — the single becomes independent again"
+                      onClick={() => unlink(p.single.track_id)}
+                    >
+                      {unlinking.has(p.single.track_id) ? '…' : 'Unlink'}
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -1227,7 +1266,9 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             />
           ) : null}
           {showHistory ? <HistoryModal artistId={artistId} onClose={() => setShowHistory(false)} /> : null}
-          {showMaintenance ? <MaintenanceModal onClose={() => setShowMaintenance(false)} /> : null}
+          {showMaintenance ? (
+            <MaintenanceModal artistName={artist.name} onClose={() => setShowMaintenance(false)} />
+          ) : null}
           {showManageTracks ? (
             <ManageTracksModal artistId={artistId} onClose={() => setShowManageTracks(false)} />
           ) : null}

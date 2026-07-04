@@ -2,7 +2,7 @@
 
 from core.metadata_service import get_client_for_source, get_primary_source, get_source_priority
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import get_scope_artist, JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.metadata_gap")
@@ -31,6 +31,7 @@ class MetadataGapFillerJob(RepairJob):
         'fill_musicbrainz_id': True,
     }
     auto_fix = False
+    supports_artist_scope = True
 
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
@@ -51,6 +52,9 @@ class MetadataGapFillerJob(RepairJob):
             return result
 
         where = " OR ".join(conditions)
+        scope_artist = get_scope_artist(context)
+        scope_clause = "AND lower(ar.name) = lower(?)" if scope_artist else ""
+        scope_params = (scope_artist,) if scope_artist else ()
 
         # Fetch tracks with gaps, prioritizing those with source track IDs.
         tracks = []
@@ -89,8 +93,9 @@ class MetadataGapFillerJob(RepairJob):
                 LEFT JOIN albums al ON al.id = t.album_id
                 WHERE t.title IS NOT NULL AND t.title != ''
                   AND ({where})
+                  {scope_clause}
                 LIMIT 500
-            """)
+            """, scope_params)
             tracks = cursor.fetchall()
             tracks = sorted(tracks, key=lambda row: _track_row_priority(row, column_index, source_priority))
         except Exception as e:

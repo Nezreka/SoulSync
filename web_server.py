@@ -39290,14 +39290,23 @@ def repair_job_settings(job_id):
 
 @app.route('/api/repair/jobs/<job_id>/run', methods=['POST'])
 def repair_job_run(job_id):
-    """Trigger immediate run of a specific job"""
+    """Trigger immediate run of a specific job.
+
+    Optional JSON body ``{"artist_name": "..."}`` scopes the run to one artist
+    for jobs that declare ``supports_artist_scope`` (triggered from a Library
+    artist page); other jobs ignore it and run library-wide."""
     try:
         if repair_worker is None:
             return jsonify({'error': 'Repair worker not initialized'}), 400
 
-        repair_worker.run_job_now(job_id)
-        logger.info("Repair job %s triggered manually via UI", job_id)
-        return jsonify({'success': True, 'job_id': job_id}), 200
+        body = request.get_json(silent=True) or {}
+        artist_name = str(body.get('artist_name') or '').strip()
+        scope = {'artist_name': artist_name} if artist_name else None
+        repair_worker.run_job_now(job_id, scope=scope)
+        logger.info("Repair job %s triggered manually via UI%s", job_id,
+                    f" (artist scope: {artist_name})" if artist_name else "")
+        return jsonify({'success': True, 'job_id': job_id,
+                        'scoped_to': artist_name or None}), 200
     except Exception as e:
         logger.error(f"Error running repair job {job_id}: {e}")
         return jsonify({'error': str(e)}), 500

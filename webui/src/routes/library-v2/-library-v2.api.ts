@@ -272,6 +272,17 @@ export interface LibraryV2DuplicatePair {
   album: LibraryV2DuplicateSide;
 }
 
+/** Unlink a duplicate pair: the single stops pointing at the album version
+ *  (it becomes its own canonical recording again). */
+export async function unlinkLibraryV2Duplicate(trackId: number): Promise<void> {
+  const payload = await readJson<{ success: boolean; error?: string }>(
+    apiClient.post(`library/v2/tracks/${trackId}/canonical`, {
+      json: { canonical_track_id: null },
+    }),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Unlink failed');
+}
+
 export async function fetchLibraryV2Duplicates(
   artistId: number,
 ): Promise<LibraryV2DuplicatePair[]> {
@@ -284,10 +295,13 @@ export async function fetchLibraryV2Duplicates(
   return payload.pairs ?? [];
 }
 
-/** Trigger a library-wide repair job (Stats → Repair jobs) immediately. */
-export async function runRepairJob(jobId: string): Promise<void> {
+/** Trigger a repair job (Stats → Repair jobs) immediately. Jobs that support
+ *  artist scoping honor `artistName`; the rest run library-wide. */
+export async function runRepairJob(jobId: string, artistName?: string): Promise<void> {
   const payload = await readJson<{ success?: boolean; error?: string }>(
-    apiClient.post(`repair/jobs/${jobId}/run`, { json: {} }),
+    apiClient.post(`repair/jobs/${jobId}/run`, {
+      json: artistName ? { artist_name: artistName } : {},
+    }),
   );
   if (payload.error) throw new Error(payload.error);
 }

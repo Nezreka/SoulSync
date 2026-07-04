@@ -118,8 +118,29 @@ tests `tests/library2/`.
 - `GET /api/library/v2/artists/<id>/duplicates`: single↔album duplicate pairs from the
   importer's `canonical_track_id` links, each side with file quality + monitor state.
 - Manage Tracks modal shows the pairs with per-side monitor toggles ("which version
-  stays wanted"); duplicate-FILE removal remains the `single_album_dedup` maintenance
+  stays wanted") and an **Unlink** action (`POST /tracks/<id>/canonical`, also accepts
+  a manual link); duplicate-FILE removal remains the `single_album_dedup` maintenance
   job (now in the Maintenance modal). Single↔album move stays on the roadmap.
+
+### Per-artist scope for repair jobs
+- `JobContext.scope` + `RepairWorker.run_job_now(job_id, scope=…)` +
+  `/api/repair/jobs/<id>/run` body `{"artist_name": …}`. Jobs declaring
+  `supports_artist_scope` filter their scan SQL: **metadata_gap_filler,
+  album_tag_consistency, library_retag**. The Maintenance modal sends the artist
+  automatically and labels scoped jobs "this artist" (unknown_artist_fixer stays
+  library-wide by nature — its tracks ARE Unknown Artist). Scheduled runs never
+  carry a scope.
+
+### Profile-scoped import
+- `import_legacy_library(profile_id=…)`: the watchlist/wishlist-derived monitoring
+  (and wishlist-only seeding) is scoped to the active user profile, so another
+  profile's wanted state no longer leaks into this view. `None` keeps legacy
+  read-everything behavior; tables predating the `profile_id` column are handled.
+
+### Skip-audit housekeeping
+- Repair job `lib2_skips_cleanup` (default-off, weekly): expires `lib2_manual_skips`
+  rows whose file vanished or that are past retention (default 180 days). Audit rows
+  only — never files, never findings.
 
 ### Interactive Search (Lidarr-style result table, source-aware)
 - Usenet/torrent plugins now pass `publish_date` in `_source_metadata` → **Age** column
@@ -161,21 +182,15 @@ tests `tests/library2/`.
   were REMOVED rather than left as dead placeholders — they return with Phase C.
 
 ## TODO (next)
-1. **Profile-scoped monitoring/import**: the importer currently reads all
-   `watchlist_artists` / `wishlist_tracks` rows it can see. Before multi-profile use,
-   pass the active `profile_id` into the import/sync path so Library v2 does not
-   leak another profile's wanted/monitored state into the current view.
-2. **Per-artist scope for repair jobs**: the Maintenance modal runs the jobs
-   library-wide; scoping (e.g. gap-fill just this artist) needs a scope parameter in
-   the repair-job base.
-3. **Phase D remainder**: single↔album MOVE (re-home a track between releases);
-   Manage Tracks currently reviews duplicates + monitor state.
-4. **Explicit monitor provenance**: if album-level monitoring must survive re-imports
+1. **Phase D remainder**: single↔album MOVE (re-home a track between releases);
+   Manage Tracks reviews duplicates + monitor state + link/unlink today.
+2. **Explicit monitor provenance**: if album-level monitoring must survive re-imports
    independently from track-level wishlist monitoring, add provenance/mode columns
    instead of deriving parent release flags from child tracks.
-5. **Optional**: cleanup job that consumes `lib2_manual_skips`; periodic discography
-   re-expansion (today it refreshes on demand — the watchlist scanner already covers
-   new-release queueing on its own cadence).
+3. **Optional**: periodic discography re-expansion (today it refreshes on demand —
+   the watchlist scanner already covers new-release queueing on its own cadence);
+   artist scope for more repair jobs (reorganize/dedup walk the transfer folder, so
+   they need path-level scoping, not a SQL filter).
 
 ## Run / verify (no Node/Flask locally — use Docker)
 ```
