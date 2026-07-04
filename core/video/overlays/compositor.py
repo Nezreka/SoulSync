@@ -215,6 +215,46 @@ def _default_loader(url):
     return r.content
 
 
+# Representative values so a gallery thumbnail's dynamic badges render something.
+_THUMB_SAMPLE = {
+    "resolution": "2160p", "hdr": "HDR", "video_codec": "hevc", "audio_codec": "atmos",
+    "source": "bluray", "imdb": 8.4, "rt": 92, "metacritic": 81, "tmdb": 8.1,
+    "content_rating": "PG-13", "status": "Returning", "year": 2021, "runtime": 148,
+    "season_count": 4, "episode_count": 62, "title": "Example", "network": "HBO", "studio": "A24",
+}
+
+
+def _neutral_base(w: int, h: int) -> bytes:
+    """A dark vertical-gradient poster to preview a template against (no title art)."""
+    img = Image.new("RGB", (w, h))
+    top, bot = (38, 38, 49), (16, 16, 22)
+    px = img.load()
+    for y in range(h):
+        t = y / max(1, h - 1)
+        row = tuple(int(top[i] + (bot[i] - top[i]) * t) for i in range(3))
+        for x in range(w):
+            px[x, y] = row
+    out = io.BytesIO()
+    img.save(out, format="JPEG", quality=85)
+    return out.getvalue()
+
+
+def _thumb_loader(url):
+    """Thumbnail image loader: resolve uploaded asset:// files from disk, skip
+    external http (a gallery preview shouldn't block on the network)."""
+    if str(url).startswith("asset://"):
+        from .assets import AssetStore
+        return AssetStore.default().read_upload(str(url)[len("asset://"):])
+    return None
+
+
+def render_template_thumbnail(definition: dict, *, size=(300, 450), image_loader=None) -> bytes:
+    """Render a template onto a neutral poster for the gallery. Dynamic badges use
+    representative sample values so they show real-looking text."""
+    return render_overlay(_neutral_base(size[0], size[1]), definition, _THUMB_SAMPLE,
+                          image_loader=image_loader or _thumb_loader)
+
+
 def render_overlay(base_bytes: bytes, definition: dict, values: dict | None = None,
                    *, image_loader=None) -> bytes:
     """Composite a template's layers onto poster art. Returns JPEG bytes at the

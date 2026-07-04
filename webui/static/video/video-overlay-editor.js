@@ -325,7 +325,9 @@
             cards.push(
                 '<div class="voe-card" data-voe-open="' + t.id + '">' +
                     '<div class="voe-card-canvas">' +
-                        (t.thumbnail ? '<img src="' + esc(t.thumbnail) + '" alt="">' : '<span class="voe-card-empty-ic">🎬</span>') +
+                        '<span class="voe-card-empty-ic">🎬</span>' +
+                        '<img class="voe-card-thumb" src="/api/video/overlays/templates/' + t.id + '/thumb?v=' + encodeURIComponent(t.updated_at || '') + '"' +
+                        ' alt="" loading="lazy" onload="this.classList.add(\'voe-card-thumb--on\')" onerror="this.remove()">' +
                         '<div class="voe-card-actions">' +
                             '<div class="voe-card-act" data-voe-dupe="' + t.id + '" title="Duplicate">' + I.copy + '</div>' +
                             '<div class="voe-card-act voe-card-act--danger" data-voe-del="' + t.id + '" data-voe-delname="' + esc(t.name) + '" title="Delete">' + I.trash + '</div>' +
@@ -569,8 +571,15 @@
         return html;
     }
     function palItem(kind, label, icon, field) {
+        var head = '<span class="voe-pal-ic">' + icon + '</span>';
+        // For a data badge, preview the actual value it produces (e.g. "4K", "IMDb 8.4")
+        // instead of a generic icon — you see exactly what you'll drop in.
+        if (kind === 'badge' && field && FIELDS[field]) {
+            var v = FIELDS[field].fmt(((ed && ed.sample) ? ed.sample : defaultSample())[field]);
+            if (v) head = '<span class="voe-pal-chip">' + esc(v) + '</span>';
+        }
         return '<div class="voe-pal-item" data-voe-add="' + kind + '" data-field="' + esc(field || '') + '" title="' + esc(label) + '">' +
-            '<span class="voe-pal-ic">' + icon + '</span><span class="voe-pal-label">' + esc(label) + '</span></div>';
+            head + '<span class="voe-pal-label">' + esc(label) + '</span></div>';
     }
     function wirePalette() {
         overlay.querySelectorAll('[data-voe-add]').forEach(function (it) {

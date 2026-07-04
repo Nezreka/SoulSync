@@ -141,6 +141,19 @@ def test_rotation_changes_the_render_and_stays_valid():
     assert sum(_open(flat).getpixel((300, 400))) < 30
 
 
+def test_template_thumbnail_renders_valid_jpeg_with_sample_badges():
+    from core.video.overlays.compositor import render_template_thumbnail
+    definition = {"layers": [{"type": "text", "binding": {"field": "resolution"}, "anchor": "top-right",
+                              "x": 0.95, "y": 0.05, "size": 0.06, "color": "#ffffff",
+                              "bg": {"enabled": True, "color": "#000000", "opacity": 1, "radius": 0.02, "padX": 0.03, "padY": 0.02}}]}
+    data = render_template_thumbnail(definition, size=(200, 300))
+    img = Image.open(io.BytesIO(data))
+    assert img.format == "JPEG" and img.size == (200, 300)
+    # the sample resolution badge (2160p → "4K") paints a bright pill top-right
+    top_right = img.convert("RGB").crop((120, 0, 200, 60))
+    assert max(sum(p) for p in top_right.getdata()) > 500
+
+
 def test_broken_layer_does_not_sink_the_render():
     base = _poster()
     # a garbage layer shouldn't crash the whole composite

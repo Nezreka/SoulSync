@@ -75,6 +75,25 @@ def register_routes(bp):
         ok = get_video_db().delete_overlay_template(template_id)
         return jsonify({"ok": bool(ok)})
 
+    @bp.route("/overlays/templates/<int:template_id>/thumb", methods=["GET"])
+    def overlay_template_thumb(template_id):
+        """A rendered mini-preview of the template (compositor onto a neutral poster)
+        for the gallery cards."""
+        from flask import Response, abort
+        from . import get_video_db
+        from core.video.overlays.compositor import render_template_thumbnail
+        t = get_video_db().get_overlay_template(template_id)
+        if not t:
+            abort(404)
+        try:
+            data = render_template_thumbnail(t.get("definition") or {})
+        except Exception:
+            logger.exception("overlay thumbnail failed for %s", template_id)
+            abort(404)
+        resp = Response(data, content_type="image/jpeg")
+        resp.headers["Cache-Control"] = "public, max-age=3600"
+        return resp
+
     @bp.route("/overlays/templates/<int:template_id>/duplicate", methods=["POST"])
     def overlay_template_duplicate(template_id):
         from . import get_video_db

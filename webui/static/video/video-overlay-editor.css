@@ -91,6 +91,8 @@
     background-image: radial-gradient(120% 90% at 50% 0%, #23232e, #0e0e13 70%);
 }
 .voe-card-canvas img { width: 100%; height: 100%; object-fit: cover; }
+.voe-card-thumb { position: absolute; inset: 0; opacity: 0; transition: opacity .25s ease; }
+.voe-card-thumb--on { opacity: 1; }
 .voe-card-empty-ic { font-size: 30px; opacity: .3; }
 .voe-card-meta { padding: 12px 14px 14px; }
 .voe-card-name { font-size: 14px; font-weight: 700; color: #f2f4fa; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -150,6 +152,10 @@
 .voe-pal-ic { width: 22px; height: 22px; display: grid; place-items: center; color: rgba(255,255,255,.85); }
 .voe-pal-ic svg { width: 20px; height: 20px; }
 .voe-pal-label { font-size: 11px; font-weight: 600; color: rgba(255,255,255,.7); line-height: 1.2; }
+.voe-pal-chip { display: inline-flex; align-items: center; min-height: 22px; padding: 2px 8px; border-radius: 6px;
+    font-size: 10.5px; font-weight: 800; letter-spacing: .02em; color: #fff;
+    background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.16); max-width: 100%;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* center: stage */
 .voe-canvas-wrap {
