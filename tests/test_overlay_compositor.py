@@ -120,6 +120,35 @@ def test_image_layer_uses_injected_loader():
     assert img.getpixel((300, 450))[1] > 200            # green logo painted centre
 
 
+def test_shape_ellipse_masks_corners():
+    """An ellipse shape fills its centre but leaves the tile corners transparent."""
+    base = _poster(color=(0, 0, 0), size=(600, 900))
+    layer = {"type": "shape", "shapeKind": "ellipse", "anchor": "center", "x": 0.5, "y": 0.5,
+             "w": 0.6, "h": 0.4, "opacity": 1, "fill": {"grad": False, "c1": "#ff0000", "a1": 1}}
+    img = _open(render_overlay(base, {"layers": [layer]}, {}))
+    assert img.getpixel((300, 450))[0] > 200          # centre is red
+    # top-left corner of the ellipse's bounding box is outside the ellipse → still black
+    assert sum(img.getpixel((int(0.5 * 600 - 0.28 * 600), int(0.5 * 900 - 0.19 * 900)))) < 40
+
+
+def test_shape_line_is_thin():
+    from core.video.overlays.compositor import _shape_tile
+    line = _shape_tile({"type": "shape", "shapeKind": "line", "w": 0.5, "thickness": 0.006,
+                        "fill": {"grad": False, "c1": "#fff", "a1": 1}}, 600, 900)
+    assert line.size[1] < line.size[0]                 # a line is much wider than tall
+
+
+def test_shape_border_paints_outline():
+    base = _poster(color=(0, 0, 0), size=(600, 900))
+    layer = {"type": "shape", "shapeKind": "rect", "anchor": "center", "x": 0.5, "y": 0.5,
+             "w": 0.5, "h": 0.3, "radius": 0, "opacity": 1,
+             "fill": {"grad": False, "c1": "#000000", "a1": 1},   # black fill on black poster
+             "border": {"enabled": True, "color": "#00ff00", "w": 0.01}}
+    img = _open(render_overlay(base, {"layers": [layer]}, {}))
+    greens = [p for p in img.getdata() if p[1] > 150 and p[0] < 90 and p[2] < 90]
+    assert len(greens) > 50                             # the green border painted
+
+
 def test_hidden_layer_not_rendered():
     base = _poster(color=(0, 0, 0))
     definition = {"layers": [{

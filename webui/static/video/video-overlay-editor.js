@@ -141,6 +141,8 @@
         scrim: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 14h18" opacity=".5"/><path d="M3 17h18" opacity=".8"/></svg>',
         row: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="9" width="6" height="6" rx="1.5"/><rect x="9.5" y="9" width="5" height="6" rx="1.5"/><rect x="16" y="9" width="6" height="6" rx="1.5"/></svg>',
         film: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16M3 9h4M17 9h4M3 15h4M17 15h4"/></svg>',
+        ellipse: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2"><ellipse cx="12" cy="12" rx="9" ry="6.5"/></svg>',
+        line: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M4 12h16"/></svg>',
     };
     function catIcon(cat) { return cat === 'Ratings' ? I.star : cat === 'Quality' ? I.badge : I.info; }
 
@@ -521,9 +523,15 @@
             l.src = l.src || '';
         }
         if (l.type === 'shape') {
+            l.shapeKind = l.shapeKind || 'rect';
             if (typeof l.w !== 'number') l.w = 0.5;
             if (typeof l.h !== 'number') l.h = 0.12;
+            if (typeof l.thickness !== 'number') l.thickness = 0.006;
             if (typeof l.radius !== 'number') l.radius = 0.02;
+            l.border = l.border || {};
+            l.border.enabled = !!l.border.enabled;
+            l.border.color = l.border.color || '#ffffff';
+            if (typeof l.border.w !== 'number') l.border.w = 0.004;
             l.fill = l.fill || {};
             l.fill.grad = !!l.fill.grad;
             l.fill.c1 = l.fill.c1 || '#000000'; if (typeof l.fill.a1 !== 'number') l.fill.a1 = 0.72;
@@ -771,7 +779,8 @@
         html += '<div class="voe-pal-section"><div class="voe-pal-h">Artwork</div><div class="voe-pal-grid">' +
             palItem('logo', 'Title Logo', I.logo, '') + palItem('image', 'Image', I.image, '') + '</div></div>';
         html += '<div class="voe-pal-section"><div class="voe-pal-h">Shapes</div><div class="voe-pal-grid">' +
-            palItem('shape', 'Rectangle', I.shape, '') + palItem('scrim', 'Scrim', I.scrim, '') + '</div></div>';
+            palItem('shape', 'Rectangle', I.shape, '') + palItem('ellipse', 'Ellipse', I.ellipse, '') +
+            palItem('line', 'Line', I.line, '') + palItem('scrim', 'Scrim', I.scrim, '') + '</div></div>';
         return html;
     }
     function palItem(kind, label, icon, field) {
@@ -832,9 +841,13 @@
                 w: 1, h: 0.42, radius: 0, opacity: 1, hidden: false,
                 fill: { grad: true, c1: '#000000', a1: 0, c2: '#000000', a2: 0.85, dir: 180 } };
         }
-        if (kind === 'shape') {
-            return { id: uid(), type: 'shape', name: 'Rectangle', anchor: 'center', x: x, y: y,
-                w: 0.5, h: 0.12, radius: 0.02, opacity: 1, hidden: false,
+        if (kind === 'shape' || kind === 'ellipse' || kind === 'line') {
+            var sk = kind === 'shape' ? 'rect' : kind;
+            var nm = { rect: 'Rectangle', ellipse: 'Ellipse', line: 'Line' }[sk];
+            return { id: uid(), type: 'shape', shapeKind: sk, name: nm, anchor: 'center', x: x, y: y,
+                w: sk === 'line' ? 0.4 : 0.5, h: 0.12, thickness: 0.006, radius: sk === 'ellipse' ? 0.5 : 0.02,
+                opacity: 1, hidden: false,
+                border: { enabled: false, color: '#ffffff', w: 0.004 },
                 fill: { grad: false, c1: '#000000', a1: 0.72, c2: '#000000', a2: 0, dir: 180 } };
         }
         base.name = 'Text';
@@ -1018,10 +1031,16 @@
             return;
         }
         if (l.type === 'shape') {
+            var sk = l.shapeKind || 'rect';
             el.style.width = (l.w * ed.W) + 'px';
-            el.style.height = (l.h * ed.H) + 'px';
+            el.style.height = ((sk === 'line' ? (l.thickness || 0.006) : l.h) * ed.H) + 'px';
             el.style.background = fillCss(l.fill);
-            el.style.borderRadius = (l.radius * ed.H) + 'px';
+            el.style.borderRadius = sk === 'ellipse' ? '50%' : sk === 'line' ? '999px' : (l.radius * ed.H) + 'px';
+            var bd = l.border || {};
+            if (bd.enabled && sk !== 'line') {
+                el.style.border = ((bd.w || 0.004) * ed.H) + 'px solid ' + (bd.color || '#ffffff');
+                el.style.boxSizing = 'border-box';
+            } else { el.style.border = 'none'; }
             return;
         }
         if (l.type === 'text') {
@@ -1355,7 +1374,7 @@
         if (l.type === 'row') return I.row;
         if (l.binding) return catIcon((FIELDS[l.binding.field] || {}).cat);
         if (l.type === 'image') return l.logo ? I.logo : I.image;
-        if (l.type === 'shape') return I.shape;
+        if (l.type === 'shape') return l.shapeKind === 'ellipse' ? I.ellipse : l.shapeKind === 'line' ? I.line : I.shape;
         return I.text;
     }
     function layerName(l) {
@@ -1650,7 +1669,9 @@
         var sizeCtrl = '';
         if (l.type === 'text') sizeCtrl = field('Size', numInput('size', pct(l.size), '%'));
         else if (l.type === 'image') sizeCtrl = field('Width', numInput('w', pct(l.w), '%'));
-        else if (l.type === 'shape') sizeCtrl = row2(field('Width', numInput('w', pct(l.w), '%')), field('Height', numInput('h', pct(l.h), '%')));
+        else if (l.type === 'shape') sizeCtrl = l.shapeKind === 'line'
+            ? row2(field('Width', numInput('w', pct(l.w), '%')), field('Thickness', numInput('thickness', pct(l.thickness), '%')))
+            : row2(field('Width', numInput('w', pct(l.w), '%')), field('Height', numInput('h', pct(l.h), '%')));
         else if (l.type === 'row') sizeCtrl = row2(field('Badge size', numInput('rowSize', pct(l.style.size), '%')), field('Gap', numInput('gap', pct(l.gap), '%')));
         var html = inspSection('Transform',
             placeGrid(l) +
@@ -1736,7 +1757,14 @@
                       field('Opacity 2', sliderInput('fillA2', Math.round(l.fill.a2 * 100))) +
                       field('Angle', numInput('fillDir', l.fill.dir, '°'))
                     : '') +
-                field('Radius', numInput('radius', pct(l.radius), '%')));
+                (l.shapeKind === 'rect' ? field('Radius', numInput('radius', pct(l.radius), '%')) : '') +
+                (l.shapeKind !== 'line'
+                    ? field('Border', toggle('borderEnabled', l.border.enabled)) +
+                      (l.border.enabled
+                        ? field('Color', colorField('borderColor', l.border.color)) +
+                          field('Width', numInput('borderW', pct(l.border.w), '%'))
+                        : '')
+                    : ''));
         }
         box.innerHTML = html;
         wireInspector(l);
@@ -1773,6 +1801,8 @@
         else if (key === 'w') l.w = Math.max(0.02, num / 100);
         else if (key === 'h') l.h = Math.max(0.02, num / 100);
         else if (key === 'radius') l.radius = Math.max(0, num / 100);
+        else if (key === 'thickness') l.thickness = Math.max(0.001, num / 100);
+        else if (key === 'borderW') l.border.w = Math.max(0, num / 100);
         else if (key === 'fillA1') l.fill.a1 = clamp01(num / 100);
         else if (key === 'fillA2') l.fill.a2 = clamp01(num / 100);
         else if (key === 'fillDir') l.fill.dir = num;
@@ -1786,6 +1816,7 @@
         else if (key === 'rowBgColor') l.style.bg.color = val;
         else if (key === 'rowStrokeColor') l.style.stroke.color = val;
         else if (key === 'rowShadowColor') l.style.shadowColor = val;
+        else if (key === 'borderColor') l.border.color = val;
         else if (key === 'fillC1') l.fill.c1 = val;
         else if (key === 'fillC2') l.fill.c2 = val;
     }
@@ -1906,12 +1937,13 @@
                 else if (key === 'bgEnabled') l.bg.enabled = !l.bg.enabled;
                 else if (key === 'strokeEnabled') l.stroke.enabled = !l.stroke.enabled;
                 else if (key === 'fillGrad') l.fill.grad = !l.fill.grad;
+                else if (key === 'borderEnabled') l.border.enabled = !l.border.enabled;
                 else if (key === 'rowShadow') l.style.shadow = !l.style.shadow;
                 else if (key === 'rowBgEnabled') l.style.bg.enabled = !l.style.bg.enabled;
                 else if (key === 'rowStrokeEnabled') l.style.stroke.enabled = !l.style.stroke.enabled;
                 t.classList.toggle('voe-toggle--on');
                 refreshLayer(l.id); markDirty();
-                if (['bgEnabled', 'fillGrad', 'strokeEnabled', 'rowBgEnabled', 'rowStrokeEnabled', 'shadow', 'rowShadow'].indexOf(key) > -1) renderInspector();   // reveal/hide sub-fields
+                if (['bgEnabled', 'fillGrad', 'strokeEnabled', 'rowBgEnabled', 'rowStrokeEnabled', 'shadow', 'rowShadow', 'borderEnabled'].indexOf(key) > -1) renderInspector();   // reveal/hide sub-fields
             });
         });
         box.querySelectorAll('[data-anchor]').forEach(function (cell) {
