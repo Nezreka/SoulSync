@@ -949,7 +949,12 @@ class MusicDatabase:
             # legitimately sharing an id) are left alone via the DISTINCT-name
             # check, so this only touches genuine corruption.
             try:
-                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='_source_id_dedupe_v1'")
+                # v2 re-runs the sweep: #988 found the Deezer album/track "id
+                # correction" path could still smear an id (e.g. The Beatles' id 1
+                # onto The Outfield) after v1 ran, via a blank result-artist-name
+                # bypass. That path is now fully gated (name match + conflict check),
+                # so one more clear heals any smears that slipped through before the fix.
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='_source_id_dedupe_v2'")
                 if not cursor.fetchone():
                     _dedupe_id_cols = [
                         ('deezer_id', 'deezer_match_status'),
@@ -977,7 +982,7 @@ class MusicDatabase:
                             total_cleared += cursor.rowcount
                         except Exception as col_err:
                             logger.debug("Source-id dedupe skipped %s: %s", id_col, col_err)
-                    cursor.execute("CREATE TABLE _source_id_dedupe_v1 (applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+                    cursor.execute("CREATE TABLE _source_id_dedupe_v2 (applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
                     if total_cleared > 0:
                         logger.info(
                             f"Cleared {total_cleared} duplicated source ids shared across "
