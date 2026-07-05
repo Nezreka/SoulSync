@@ -144,6 +144,9 @@
         ellipse: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2"><ellipse cx="12" cy="12" rx="9" ry="6.5"/></svg>',
         line: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M4 12h16"/></svg>',
         ribbon: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15L15 4l5 5L9 20z"/></svg>',
+        lock: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>',
+        unlock: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/></svg>',
+        front: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="12" height="12" rx="2"/><path d="M9 15v4a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-4"/></svg>',
     };
     function catIcon(cat) { return cat === 'Ratings' ? I.star : cat === 'Quality' ? I.badge : I.info; }
 
@@ -151,6 +154,7 @@
     var overlay = null;         // the .voe-overlay root
     var ed = null;              // editor state (null while in gallery)
     var resizeBound = null;
+    var _clipboard = [];   // copied layers — survives across templates in one session
 
     function ensureOverlay() {
         if (overlay) return overlay;
@@ -445,6 +449,9 @@
         ['Space-drag / middle-drag', 'Pan the canvas'],
         ['0', 'Reset zoom to fit'],
         ['Shift-click', 'Multi-select — then align / distribute / move together'],
+        ['Ctrl / ⌘ + C / V', 'Copy / paste layers (works across templates)'],
+        ['[  /  ]', 'Send backward / bring forward — add Ctrl for back / front'],
+        ['Ctrl / ⌘ + L', 'Lock / unlock the selected layer'],
     ];
     function openShortcuts() {
         var back = document.createElement('div');
@@ -517,6 +524,7 @@
         if (typeof l.x !== 'number') l.x = 0.5;
         if (typeof l.y !== 'number') l.y = 0.5;
         l.hidden = !!l.hidden;
+        l.locked = !!l.locked;
         if (typeof l.opacity !== 'number') l.opacity = 1;
         if (typeof l.rotation !== 'number') l.rotation = 0;
         if (l.type === 'image') {
@@ -1198,6 +1206,7 @@
         if (!node) { if (!e.shiftKey) select(null); return; }
         var l = layerById(node.getAttribute('data-voe-layer'));
         if (!l) return;
+        if (l.locked) { select(l.id); return; }          // locked → select to edit/unlock, no drag
         if (e.shiftKey) { toggleExtra(l.id); return; }   // shift-click toggles group membership (no drag)
         if (!inGroup(l.id)) select(l.id);                // plain click on a non-member → single select
         if (node.getAttribute('contenteditable') === 'true') return;   // editing text, don't drag
@@ -1206,7 +1215,8 @@
         var members = groupIds().map(function (id) {
             var m = layerById(id);
             return m ? { l: m, node: nodeById(id), sx: m.x, sy: m.y } : null;
-        }).filter(Boolean);
+        }).filter(Boolean).filter(function (m) { return !m.l.locked; });   // don't move locked members
+        if (!members.length) return;
         var group = members.length > 1, px = e.clientX, py = e.clientY, moved = false;
 
         function move(ev) {
@@ -1310,6 +1320,43 @@
         var ids = groupIds(); if (!ids.length) return;
         ed.layers = ed.layers.filter(function (l) { return ids.indexOf(l.id) === -1; });
         ed.selected = null; ed.extra = [];
+        markDirty(); renderStageLayers(); renderLayersPanel(); renderInspector();
+    }
+    function layerIndex(id) { for (var i = 0; i < ed.layers.length; i++) if (ed.layers[i].id === id) return i; return -1; }
+    // z-order: layers paint in array order (last = front).
+    function reorderLayer(id, mode) {
+        var i = layerIndex(id); if (i < 0) return;
+        var l = ed.layers.splice(i, 1)[0];
+        if (mode === 'front') ed.layers.push(l);
+        else if (mode === 'back') ed.layers.unshift(l);
+        else if (mode === 'fwd') ed.layers.splice(Math.min(ed.layers.length, i + 1), 0, l);
+        else ed.layers.splice(Math.max(0, i - 1), 0, l);   // 'bwd'
+        markDirty(); renderStageLayers(); renderLayersPanel();
+    }
+    function toggleLock(id) {
+        var l = layerById(id); if (!l) return;
+        l.locked = !l.locked;
+        if (l.locked) { ed.extra = ed.extra.filter(function (x) { return x !== id; }); }
+        markDirty(); renderLayersPanel();
+        if (id === ed.selected) renderInspector();
+    }
+    // copy / paste (survives across templates in one session)
+    function copyGroup() {
+        var ids = groupIds(); if (!ids.length) return;
+        _clipboard = ids.map(function (id) { return JSON.parse(JSON.stringify(layerById(id))); }).filter(Boolean);
+        if (_clipboard.length) toast(_clipboard.length + ' layer' + (_clipboard.length > 1 ? 's' : '') + ' copied', 'success');
+    }
+    function pasteClipboard() {
+        if (!_clipboard || !_clipboard.length) return;
+        var pasted = [];
+        _clipboard.forEach(function (src) {
+            var l = normalizeLayer(JSON.parse(JSON.stringify(src)));
+            l.id = uid(); l.locked = false;
+            if (typeof l.x === 'number') l.x = clamp01(l.x + 0.03);
+            if (typeof l.y === 'number') l.y = clamp01(l.y + 0.03);
+            ed.layers.push(l); pasted.push(l.id);
+        });
+        ed.selected = pasted[pasted.length - 1]; ed.extra = pasted.slice(0, -1);
         markDirty(); renderStageLayers(); renderLayersPanel(); renderInspector();
     }
 
@@ -1522,10 +1569,11 @@
         for (var i = ed.layers.length - 1; i >= 0; i--) {
             var l = ed.layers[i];
             rows.push(
-                '<div class="voe-layer-row' + (l.id === ed.selected ? ' voe-layer-row--sel' : '') + '" data-voe-row="' + l.id + '">' +
+                '<div class="voe-layer-row' + (l.id === ed.selected ? ' voe-layer-row--sel' : '') + (l.locked ? ' voe-layer-row--locked' : '') + '" data-voe-row="' + l.id + '">' +
                     '<span class="voe-lr-grip" data-voe-grip title="Drag to reorder">' + I.grip + '</span>' +
                     '<span class="voe-lr-ic">' + layerIcon(l) + '</span>' +
                     '<span class="voe-lr-name">' + esc(layerName(l)) + '</span>' +
+                    '<button class="voe-lr-btn' + (l.locked ? ' voe-lr-btn--on' : '') + '" data-voe-lock title="Lock (Ctrl+L)">' + (l.locked ? I.lock : I.unlock) + '</button>' +
                     '<button class="voe-lr-btn' + (l.hidden ? ' voe-lr-btn--off' : '') + '" data-voe-vis title="Show/Hide">' + (l.hidden ? I.eyeOff : I.eye) + '</button>' +
                     '<button class="voe-lr-btn" data-voe-dupelayer title="Duplicate (Ctrl+D)">' + I.dupe + '</button>' +
                     '<button class="voe-lr-btn" data-voe-rmlayer title="Delete layer">' + I.trash + '</button>' +
@@ -1535,9 +1583,10 @@
         box.querySelectorAll('[data-voe-row]').forEach(function (row) {
             var id = row.getAttribute('data-voe-row');
             row.addEventListener('click', function (e) {
-                if (e.target.closest('[data-voe-vis],[data-voe-rmlayer],[data-voe-dupelayer],[data-voe-grip]')) return;
+                if (e.target.closest('[data-voe-vis],[data-voe-rmlayer],[data-voe-dupelayer],[data-voe-grip],[data-voe-lock]')) return;
                 if (e.shiftKey) toggleExtra(id); else select(id);
             });
+            row.querySelector('[data-voe-lock]').addEventListener('click', function (e) { e.stopPropagation(); toggleLock(id); });
             row.querySelector('[data-voe-vis]').addEventListener('click', function (e) { e.stopPropagation(); toggleHidden(id); });
             row.querySelector('[data-voe-dupelayer]').addEventListener('click', function (e) { e.stopPropagation(); duplicateLayer(id); });
             row.querySelector('[data-voe-rmlayer]').addEventListener('click', function (e) { e.stopPropagation(); removeLayer(id); });
@@ -1817,7 +1866,7 @@
             : row2(field('Width', numInput('w', pct(l.w), '%')), field('Height', numInput('h', pct(l.h), '%')));
         else if (l.type === 'row') sizeCtrl = row2(field('Badge size', numInput('rowSize', pct(l.style.size), '%')), field('Gap', numInput('gap', pct(l.gap), '%')));
         else if (l.type === 'rating') sizeCtrl = row2(field('Star size', numInput('size', pct(l.size), '%')), field('Stars', numInput('stars', l.stars, '')));
-        var html = inspSection('Transform',
+        var html = arrangeBar(l) + inspSection('Transform',
             placeGrid(l) +
             anchorGrid(l) +
             row2(field('X', numInput('x', pct(l.x), '%')), field('Y', numInput('y', pct(l.y), '%'))) +
@@ -1938,6 +1987,15 @@
         box.innerHTML = html;
         wireInspector(l);
     }
+    // z-order + lock toolbar at the top of the inspector.
+    function arrangeBar(l) {
+        function b(a, label, title, on) { return '<button class="voe-seg-btn' + (on ? ' voe-seg-btn--on' : '') + '" data-arrange="' + a + '" title="' + title + '">' + label + '</button>'; }
+        return '<div class="voe-arrange">' +
+            b('front', '⤒', 'To front (Ctrl+])') + b('fwd', '↑', 'Forward (])') +
+            b('bwd', '↓', 'Backward ([)') + b('back', '⤓', 'To back (Ctrl+[)') +
+            '<span class="voe-arrange-sp"></span>' +
+            b('lock', l.locked ? I.lock : I.unlock, 'Lock (Ctrl+L)', l.locked) + '</div>';
+    }
     // "Show only when" rule builder — on any standard layer.
     function visibilitySection(l) {
         var w = l.when || {}, on = !!(l.when && l.when.field);
@@ -2032,6 +2090,12 @@
         var ta = box.querySelector('[data-insptext]');
         if (ta) ta.addEventListener('input', function () {
             l.text = ta.value; refreshLayer(l.id); updateRowName(l.id); markDirty();
+        });
+        box.querySelectorAll('[data-arrange]').forEach(function (b) {
+            b.addEventListener('click', function () {
+                var m = b.getAttribute('data-arrange');
+                if (m === 'lock') toggleLock(l.id); else reorderLayer(l.id, m);
+            });
         });
         var cval = box.querySelector('[data-condval]');
         if (cval) cval.addEventListener('input', function () {
@@ -2420,6 +2484,11 @@
         if (meta && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); redo(); return; }
         if (meta && (e.key === 's' || e.key === 'S')) { e.preventDefault(); saveTemplate(); return; }
         if (meta && (e.key === 'd' || e.key === 'D')) { e.preventDefault(); if (ed.selected) duplicateLayer(ed.selected); return; }
+        if (meta && (e.key === 'c' || e.key === 'C')) { e.preventDefault(); copyGroup(); return; }
+        if (meta && (e.key === 'v' || e.key === 'V')) { e.preventDefault(); pasteClipboard(); return; }
+        if (meta && (e.key === 'l' || e.key === 'L')) { e.preventDefault(); if (ed.selected) toggleLock(ed.selected); return; }
+        if ((e.key === ']' || e.key === '}') && ed.selected) { e.preventDefault(); reorderLayer(ed.selected, (meta || e.shiftKey) ? 'front' : 'fwd'); return; }
+        if ((e.key === '[' || e.key === '{') && ed.selected) { e.preventDefault(); reorderLayer(ed.selected, (meta || e.shiftKey) ? 'back' : 'bwd'); return; }
         if (e.key === '=' || e.key === '+') { e.preventDefault(); zoomBy(1.25); return; }
         if (e.key === '-' || e.key === '_') { e.preventDefault(); zoomBy(1 / 1.25); return; }
         if (e.key === '0') { e.preventDefault(); resetView(); return; }

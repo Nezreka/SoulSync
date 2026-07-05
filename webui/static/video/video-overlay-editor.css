@@ -226,6 +226,13 @@
     box-shadow: 0 0 0 1px rgba(0,0,0,.4);
 }
 .voe-layer--hidden { display: none; }
+.voe-layer-row--locked .voe-lr-grip { opacity: .3; pointer-events: none; }
+/* inspector arrange toolbar */
+.voe-arrange { display: flex; align-items: center; gap: 3px; margin-bottom: 14px; }
+.voe-arrange .voe-seg-btn { background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1);
+    border-radius: 8px; min-width: 30px; height: 30px; font-size: 15px; }
+.voe-arrange .voe-seg-btn svg { width: 15px; height: 15px; }
+.voe-arrange-sp { flex: 1; }
 /* secondary (shift-selected) layers in a multi-selection */
 .voe-layer--gsel { outline-color: rgba(var(--a),.7); outline-style: dashed; }
 .voe-layer-row--gsel { background: rgba(var(--a),.1); }
