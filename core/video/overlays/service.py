@@ -105,13 +105,10 @@ def fetch_clean_base(db, kind: str, item_id: int, *, external=None, tmdb=None, s
     return server()
 
 
-def preview_thumbnail(db, definition: dict) -> bytes | None:
-    """Render a template onto a RANDOM real library title's clean TMDB poster with
-    that title's real data (representative fallbacks fill any gaps), so a gallery
-    card shows the overlay accurately. None if no suitable title → caller falls
-    back to the neutral poster."""
+def _render_for_item(db, definition: dict, pick: dict) -> bytes | None:
+    """Render a template onto one real title's clean TMDB poster with that title's
+    real data (representative fallbacks fill gaps). None if the title has no art."""
     from .compositor import _THUMB_SAMPLE, render_overlay
-    pick = db.random_overlay_preview_item()
     if not pick or not pick.get("tmdb_id"):
         return None
     try:
@@ -131,8 +128,28 @@ def preview_thumbnail(db, definition: dict) -> bytes | None:
     try:
         return render_overlay(base, definition or {}, sample)
     except Exception:
-        logger.warning("preview_thumbnail render failed", exc_info=True)
+        logger.warning("overlay preview render failed", exc_info=True)
         return None
+
+
+def preview_thumbnail(db, definition: dict) -> bytes | None:
+    """Render a template onto a RANDOM real library title's clean poster, so a
+    gallery card shows the overlay accurately. None → caller falls back to neutral."""
+    return _render_for_item(db, definition, db.random_overlay_preview_item())
+
+
+def preview_filmstrip(db, definition: dict, n: int = 4) -> list:
+    """Render a template onto N distinct real titles (base64 data URIs + titles) so
+    the editor can show it holds across varying real data — a 4K blockbuster with
+    every badge, an SD show with almost none. Skips titles that fail to render."""
+    import base64
+    frames = []
+    for pick in (db.random_overlay_preview_items(n) or []):
+        data = _render_for_item(db, definition, pick)
+        if data:
+            frames.append({"title": pick.get("title"), "kind": pick.get("kind"),
+                           "data_uri": "data:image/jpeg;base64," + base64.b64encode(data).decode("ascii")})
+    return frames
 
 
 def _def_hash(definition: dict) -> str:

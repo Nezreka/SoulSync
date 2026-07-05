@@ -107,6 +107,41 @@ def test_overlay_sample_data_movie(db):
     assert db.overlay_sample_data("bogus", mid) is None
 
 
+def test_overlay_sample_data_includes_genre(db):
+    mid = db.upsert_movie("plex", {"server_id": "g1", "title": "Dune",
+                                   "genres": ["Science Fiction", "Adventure"]})
+    s = db.overlay_sample_data("movie", mid)
+    assert s["genre"] == "Adventure"          # first genre by name
+
+
+def test_random_overlay_preview_items(db):
+    assert db.random_overlay_preview_items(4) == []          # empty library → nothing to preview
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "Dune", "year": 2021})
+    with db.connect() as c:
+        c.execute("UPDATE movies SET tmdb_id=438631, poster_url='http://x/p.jpg' WHERE id=?", (mid,))
+        c.commit()
+    items = db.random_overlay_preview_items(4)
+    assert len(items) == 1 and items[0]["kind"] == "movie" and items[0]["tmdb_id"] == 438631
+
+
+def test_preview_filmstrip_assembles_and_skips_failures(monkeypatch):
+    from core.video.overlays import service
+
+    class FakeDB:
+        def random_overlay_preview_items(self, n):
+            return [{"kind": "movie", "id": 1, "tmdb_id": 10, "title": "A"},
+                    {"kind": "show", "id": 2, "tmdb_id": 20, "title": "B"},
+                    {"kind": "movie", "id": 3, "tmdb_id": 30, "title": "C"}]
+
+    def fake_render(dbx, definition, pick):
+        return None if pick["title"] == "B" else b"\xff\xd8jpeg"   # B fails to render
+
+    monkeypatch.setattr(service, "_render_for_item", fake_render)
+    frames = service.preview_filmstrip(FakeDB(), {"layers": []}, 3)
+    assert [f["title"] for f in frames] == ["A", "C"]        # the failed one is skipped, no hole
+    assert all(f["data_uri"].startswith("data:image/jpeg;base64,") for f in frames)
+
+
 def test_overlay_sample_data_show_counts_and_best_res(db):
     sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "Show", "network": "HBO", "seasons": [
         {"season_number": 1, "episodes": [

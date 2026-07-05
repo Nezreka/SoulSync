@@ -140,6 +140,7 @@
         shape: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="12" rx="2"/></svg>',
         scrim: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 14h18" opacity=".5"/><path d="M3 17h18" opacity=".8"/></svg>',
         row: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="9" width="6" height="6" rx="1.5"/><rect x="9.5" y="9" width="5" height="6" rx="1.5"/><rect x="16" y="9" width="6" height="6" rx="1.5"/></svg>',
+        film: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16M3 9h4M17 9h4M3 15h4M17 15h4"/></svg>',
     };
     function catIcon(cat) { return cat === 'Ratings' ? I.star : cat === 'Quality' ? I.badge : I.info; }
 
@@ -456,6 +457,37 @@
         back.addEventListener('click', function (e) { if (e.target === back || e.target.closest('[data-sc-close]')) done(); });
     }
 
+    // Render the current (unsaved) template onto several real library posters so you
+    // can check it holds across varying data — different resolutions, missing ratings.
+    function openFilmstrip() {
+        var back = document.createElement('div');
+        back.className = 'voe-confirm-back';
+        back.innerHTML = '<div class="voe-starter-modal voe-filmstrip-modal">' +
+            '<div class="voe-starter-h">On real titles <span class="voe-fs-sub">your template on random library posters</span></div>' +
+            '<div class="voe-filmstrip" data-voe-fs></div>' +
+            '<div class="voe-confirm-row"><button class="voe-btn" data-fs-more>' + I.dice + ' Shuffle</button>' +
+            '<button class="voe-btn voe-btn--primary" data-fs-close>Done</button></div></div>';
+        document.body.appendChild(back);
+        requestAnimationFrame(function () { back.classList.add('voe-confirm-back--on'); });
+        function done() { back.classList.remove('voe-confirm-back--on'); setTimeout(function () { back.remove(); }, 180); }
+        function load() {
+            var strip = back.querySelector('[data-voe-fs]');
+            strip.innerHTML = '<div class="voe-fs-loading">Rendering on your library…</div>';
+            api('POST', '/api/video/overlays/preview/filmstrip', { definition: definition(), n: 5 }).then(function (d) {
+                var frames = (d && d.frames) || [];
+                strip.innerHTML = frames.length ? frames.map(function (f) {
+                    return '<figure class="voe-fs-card"><img src="' + f.data_uri + '" alt="" loading="lazy">' +
+                        '<figcaption>' + esc(f.title || '') + '</figcaption></figure>';
+                }).join('') : '<div class="voe-fs-loading">No library titles with art to preview on yet.</div>';
+            }).catch(function () { strip.innerHTML = '<div class="voe-fs-loading">Preview failed — try again.</div>'; });
+        }
+        back.addEventListener('click', function (e) {
+            if (e.target === back || e.target.closest('[data-fs-close]')) { done(); return; }
+            if (e.target.closest('[data-fs-more]')) load();
+        });
+        load();
+    }
+
     function loadTemplate(id) {
         api('GET', '/api/video/overlays/templates/' + id).then(function (t) {
             var def = t.definition || {};
@@ -563,6 +595,7 @@
                         '<button class="voe-btn" data-voe-preview>' + I.poster + ' <span data-voe-previewname>Sample poster</span> ' + I.chev + '</button>' +
                         '<button class="voe-btn voe-icon-btn" data-voe-random title="Surprise me — a random title">' + I.dice + '</button>' +
                         '<button class="voe-btn" data-voe-sampledata>' + I.info + ' Sample data ' + I.chev + '</button>' +
+                        '<button class="voe-btn voe-icon-btn" data-voe-filmstrip title="Preview on real titles">' + I.film + '</button>' +
                         '<div class="voe-zoomctl">' +
                             '<button class="voe-btn voe-icon-btn" data-voe-zoomout title="Zoom out (−)">&minus;</button>' +
                             '<button class="voe-btn voe-zoomlabel" data-voe-zoomlabel data-voe-zoomfit title="Reset zoom (0)">100%</button>' +
@@ -600,6 +633,7 @@
         overlay.querySelector('[data-voe-zoomfit]').addEventListener('click', resetView);
         overlay.querySelector('[data-voe-preview]').addEventListener('click', function (e) { openPreviewPop(e.currentTarget); });
         overlay.querySelector('[data-voe-random]').addEventListener('click', loadRandomPreview);
+        overlay.querySelector('[data-voe-filmstrip]').addEventListener('click', openFilmstrip);
         overlay.querySelector('[data-voe-sampledata]').addEventListener('click', function (e) { openSamplePop(e.currentTarget); });
         overlay.querySelector('[data-voe-undo]').addEventListener('click', undo);
         overlay.querySelector('[data-voe-redo]').addEventListener('click', redo);
