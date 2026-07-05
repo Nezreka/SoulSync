@@ -441,6 +441,7 @@
         ['Scroll / + −', 'Zoom in & out (toward the cursor)'],
         ['Space-drag / middle-drag', 'Pan the canvas'],
         ['0', 'Reset zoom to fit'],
+        ['Shift-click', 'Multi-select — then align / distribute / move together'],
     ];
     function openShortcuts() {
         var back = document.createElement('div');
@@ -494,7 +495,7 @@
             ed = {
                 id: t.id, name: t.name || 'Untitled template',
                 layers: (def.layers || []).map(normalizeLayer),
-                selected: null, dirty: false,
+                selected: null, extra: [], dirty: false,
                 stage: null, W: 0, H: 0,
                 zoom: 1, panX: 0, panY: 0, space: false,
                 sample: defaultSample(), previewTitle: null, bg: null,
@@ -895,6 +896,7 @@
             stage.appendChild(el);
             layoutLayer(el, l);
         });
+        if (ed.extra && ed.extra.length) refreshGroupSelection();   // restore multi-select outlines
         updateSelBox();
     }
 
@@ -1052,23 +1054,37 @@
     function onStagePointerDown(e) {
         if (ed.space || e.button === 1) { startPan(e); return; }   // space-drag / middle-drag = pan
         var node = e.target.closest('.voe-layer');
-        if (!node) { select(null); return; }
+        if (!node) { if (!e.shiftKey) select(null); return; }
         var l = layerById(node.getAttribute('data-voe-layer'));
         if (!l) return;
-        select(l.id);
+        if (e.shiftKey) { toggleExtra(l.id); return; }   // shift-click toggles group membership (no drag)
+        if (!inGroup(l.id)) select(l.id);                // plain click on a non-member → single select
         if (node.getAttribute('contenteditable') === 'true') return;   // editing text, don't drag
         e.preventDefault();
         var r = ed.stage.getBoundingClientRect();
-        var startX = l.x, startY = l.y, px = e.clientX, py = e.clientY, moved = false;
+        var members = groupIds().map(function (id) {
+            var m = layerById(id);
+            return m ? { l: m, node: nodeById(id), sx: m.x, sy: m.y } : null;
+        }).filter(Boolean);
+        var group = members.length > 1, px = e.clientX, py = e.clientY, moved = false;
 
         function move(ev) {
             moved = true;
-            var s = applySnap(clamp01(startX + (ev.clientX - px) / r.width),
-                              clamp01(startY + (ev.clientY - py) / r.height));
-            l.x = s.x; l.y = s.y;
-            layoutLayer(node, l);
-            showGuides(s.gx, s.gy);
-            syncInspectorPos(l);
+            var dnx = (ev.clientX - px) / r.width, dny = (ev.clientY - py) / r.height;
+            if (group) {
+                members.forEach(function (m) {
+                    m.l.x = clamp01(m.sx + dnx); m.l.y = clamp01(m.sy + dny);
+                    if (m.node) layoutLayer(m.node, m.l);
+                });
+                hideGuides();
+            } else {
+                var m0 = members[0];
+                var s = applySnap(clamp01(m0.sx + dnx), clamp01(m0.sy + dny));
+                m0.l.x = s.x; m0.l.y = s.y;
+                if (m0.node) layoutLayer(m0.node, m0.l);
+                showGuides(s.gx, s.gy);
+                syncInspectorPos(m0.l);
+            }
             updateSelBox();
         }
         function up() {
@@ -1107,14 +1123,53 @@
     }
 
     function select(id) {
-        if (ed.selected === id) return;
+        if (ed.selected === id && !ed.extra.length) return;
         ed.selected = id;
-        if (ed.stage) ed.stage.querySelectorAll('.voe-layer').forEach(function (el) {
-            el.classList.toggle('voe-layer--sel', el.getAttribute('data-voe-layer') === id);
-        });
-        syncLayersPanelSelection();
+        ed.extra = [];                 // a plain select collapses any multi-selection
+        refreshGroupSelection();
         renderInspector();
         updateSelBox();
+    }
+
+    // ── multi-selection (shift-click) — additive over the single-select model ────
+    // The group = the primary (ed.selected) + ed.extra. Single-select is the group
+    // of one, so all existing behaviour is unchanged when nothing extra is picked.
+    function groupIds() {
+        if (!ed.selected) return [];
+        return [ed.selected].concat(ed.extra.filter(function (id) { return id !== ed.selected; }));
+    }
+    function inGroup(id) { return groupIds().indexOf(id) > -1; }
+    function nodeById(id) { return ed.stage && ed.stage.querySelector('.voe-layer[data-voe-layer="' + id + '"]'); }
+    function toggleExtra(id) {
+        if (!id) return;
+        if (!ed.selected) { select(id); return; }
+        if (id === ed.selected) {                       // drop the primary; promote an extra if any
+            ed.selected = ed.extra.length ? ed.extra.pop() : null;
+        } else {
+            var i = ed.extra.indexOf(id);
+            if (i > -1) ed.extra.splice(i, 1);          // remove from group
+            else { ed.extra.push(ed.selected); ed.selected = id; }   // add as new primary
+        }
+        refreshGroupSelection();
+        renderInspector();
+        updateSelBox();
+    }
+    function refreshGroupSelection() {
+        if (ed.stage) {
+            var g = groupIds();
+            ed.stage.querySelectorAll('.voe-layer').forEach(function (el) {
+                var id = el.getAttribute('data-voe-layer');
+                el.classList.toggle('voe-layer--sel', id === ed.selected);
+                el.classList.toggle('voe-layer--gsel', id !== ed.selected && g.indexOf(id) > -1);
+            });
+        }
+        syncLayersPanelSelection();
+    }
+    function removeGroup() {
+        var ids = groupIds(); if (!ids.length) return;
+        ed.layers = ed.layers.filter(function (l) { return ids.indexOf(l.id) === -1; });
+        ed.selected = null; ed.extra = [];
+        markDirty(); renderStageLayers(); renderLayersPanel(); renderInspector();
     }
 
     // update just one layer's node in place (no full re-render → keeps inspector focus)
@@ -1311,7 +1366,7 @@
             var id = row.getAttribute('data-voe-row');
             row.addEventListener('click', function (e) {
                 if (e.target.closest('[data-voe-vis],[data-voe-rmlayer],[data-voe-dupelayer],[data-voe-grip]')) return;
-                select(id);
+                if (e.shiftKey) toggleExtra(id); else select(id);
             });
             row.querySelector('[data-voe-vis]').addEventListener('click', function (e) { e.stopPropagation(); toggleHidden(id); });
             row.querySelector('[data-voe-dupelayer]').addEventListener('click', function (e) { e.stopPropagation(); duplicateLayer(id); });
@@ -1321,8 +1376,11 @@
     }
     function syncLayersPanelSelection() {
         if (!overlay) return;
+        var g = groupIds();
         overlay.querySelectorAll('[data-voe-row]').forEach(function (r) {
-            r.classList.toggle('voe-layer-row--sel', r.getAttribute('data-voe-row') === ed.selected);
+            var id = r.getAttribute('data-voe-row');
+            r.classList.toggle('voe-layer-row--sel', id === ed.selected);
+            r.classList.toggle('voe-layer-row--gsel', id !== ed.selected && g.indexOf(id) > -1);
         });
     }
 
@@ -1334,6 +1392,7 @@
     function removeLayer(id) {
         ed.layers = ed.layers.filter(function (l) { return l.id !== id; });
         if (ed.selected === id) ed.selected = null;
+        ed.extra = ed.extra.filter(function (x) { return x !== id; });   // don't leave a dead id in the group
         markDirty(); renderStageLayers(); renderLayersPanel(); renderInspector();
     }
 
@@ -1481,6 +1540,73 @@
         return '<div class="voe-rowchips">' + (chips || '<span class="voe-insp-hint">No badges — add one below.</span>') + '</div>' + addSel;
     }
 
+    // ── multi-selection inspector: align + distribute ───────────────────────────
+    function groupInspectorHTML() {
+        function gb(dir, label) { return '<button class="voe-seg-btn" data-galign="' + dir + '" title="Align ' + dir + '">' + label + '</button>'; }
+        function gd(axis, label) { return '<button class="voe-seg-btn" data-gdist="' + axis + '">' + label + '</button>'; }
+        return '<div class="voe-insp-sec"><div class="voe-insp-sec-h voe-insp-sec-h--static">Selection · ' + groupIds().length + ' layers</div>' +
+            '<div class="voe-insp-body">' +
+            field('Align', '<div class="voe-seg" data-voe-galign>' + gb('left', 'L') + gb('hcenter', 'C') + gb('right', 'R') + '</div>' +
+                '<div class="voe-seg" data-voe-galign style="margin-left:6px">' + gb('top', 'T') + gb('vmiddle', 'M') + gb('bottom', 'B') + '</div>') +
+            field('Distribute', '<div class="voe-seg" data-voe-gdist>' + gd('h', 'Horizontal') + gd('v', 'Vertical') + '</div>') +
+            '<div class="voe-insp-hint">Shift-click layers to add/remove · drag to move together · arrows nudge all.</div>' +
+            '</div></div>';
+    }
+    // Box metrics (layout px) for each group member from its stage node.
+    function groupBoxes() {
+        return groupIds().map(function (id) {
+            var l = layerById(id), n = nodeById(id);
+            if (!l || !n) return null;
+            var left = n.offsetLeft, top = n.offsetTop, w = n.offsetWidth, h = n.offsetHeight;
+            return { l: l, left: left, top: top, right: left + w, bottom: top + h, cx: left + w / 2, cy: top + h / 2 };
+        }).filter(Boolean);
+    }
+    // Move a member by a pixel delta → its normalized x/y shift by delta/(W|H) (the
+    // anchor offset is constant, so the whole box translates).
+    function _shift(b, dxPx, dyPx) { b.l.x = clamp01(b.l.x + dxPx / ed.W); b.l.y = clamp01(b.l.y + dyPx / ed.H); }
+    function alignGroup(dir) {
+        var bs = groupBoxes(); if (bs.length < 2) return;
+        var minL = Math.min.apply(null, bs.map(function (b) { return b.left; }));
+        var maxR = Math.max.apply(null, bs.map(function (b) { return b.right; }));
+        var minT = Math.min.apply(null, bs.map(function (b) { return b.top; }));
+        var maxB = Math.max.apply(null, bs.map(function (b) { return b.bottom; }));
+        var cx = (minL + maxR) / 2, cy = (minT + maxB) / 2;
+        bs.forEach(function (b) {
+            if (dir === 'left') _shift(b, minL - b.left, 0);
+            else if (dir === 'right') _shift(b, maxR - b.right, 0);
+            else if (dir === 'hcenter') _shift(b, cx - b.cx, 0);
+            else if (dir === 'top') _shift(b, 0, minT - b.top);
+            else if (dir === 'bottom') _shift(b, 0, maxB - b.bottom);
+            else if (dir === 'vmiddle') _shift(b, 0, cy - b.cy);
+            refreshLayer(b.l.id);
+        });
+        updateSelBox(); markDirty();
+    }
+    function distributeGroup(axis) {
+        var bs = groupBoxes(); if (bs.length < 3) return;   // needs ≥3 to space between
+        var key = axis === 'h' ? 'cx' : 'cy';
+        bs.sort(function (a, b) { return a[key] - b[key]; });
+        var first = bs[0][key], last = bs[bs.length - 1][key], step = (last - first) / (bs.length - 1);
+        bs.forEach(function (b, i) {
+            var target = first + step * i;
+            if (axis === 'h') _shift(b, target - b.cx, 0); else _shift(b, 0, target - b.cy);
+            refreshLayer(b.l.id);
+        });
+        updateSelBox(); markDirty();
+    }
+    function wireGroupInspector() {
+        var box = overlay.querySelector('[data-voe-inspector]');
+        box.querySelectorAll('[data-voe-galign]').forEach(function (bar) {
+            bar.addEventListener('click', function (e) {
+                var b = e.target.closest('[data-galign]'); if (b) alignGroup(b.getAttribute('data-galign'));
+            });
+        });
+        var gd = box.querySelector('[data-voe-gdist]');
+        if (gd) gd.addEventListener('click', function (e) {
+            var b = e.target.closest('[data-gdist]'); if (b) distributeGroup(b.getAttribute('data-gdist'));
+        });
+    }
+
     function renderInspector() {
         var box = overlay && overlay.querySelector('[data-voe-inspector]');
         if (!box) return;
@@ -1491,6 +1617,7 @@
                 '<span>Select a layer to edit its position, size &amp; style.</span></div>';
             return;
         }
+        if (groupIds().length >= 2) { box.innerHTML = groupInspectorHTML(); wireGroupInspector(); return; }
         var sizeCtrl = '';
         if (l.type === 'text') sizeCtrl = field('Size', numInput('size', pct(l.size), '%'));
         else if (l.type === 'image') sizeCtrl = field('Width', numInput('w', pct(l.w), '%'));
@@ -2004,16 +2131,18 @@
         if (e.key === '-' || e.key === '_') { e.preventDefault(); zoomBy(1 / 1.25); return; }
         if (e.key === '0') { e.preventDefault(); resetView(); return; }
         if (e.key === ' ' && !ed.space) { e.preventDefault(); ed.space = true; setPanCursor(true); return; }
-        if ((e.key === 'Delete' || e.key === 'Backspace') && ed.selected) { e.preventDefault(); removeLayer(ed.selected); return; }
+        if ((e.key === 'Delete' || e.key === 'Backspace') && ed.selected) { e.preventDefault(); removeGroup(); return; }
         if (e.key.indexOf('Arrow') === 0 && ed.selected) {
             e.preventDefault();
-            var l = layerById(ed.selected); if (!l) return;
             var step = e.shiftKey ? 10 : 1;
-            if (e.key === 'ArrowLeft') l.x = clamp01(l.x - step / ed.W);
-            else if (e.key === 'ArrowRight') l.x = clamp01(l.x + step / ed.W);
-            else if (e.key === 'ArrowUp') l.y = clamp01(l.y - step / ed.H);
-            else if (e.key === 'ArrowDown') l.y = clamp01(l.y + step / ed.H);
-            refreshLayer(l.id); syncInspectorPos(l); markDirty();
+            var dx = e.key === 'ArrowLeft' ? -step / ed.W : e.key === 'ArrowRight' ? step / ed.W : 0;
+            var dy = e.key === 'ArrowUp' ? -step / ed.H : e.key === 'ArrowDown' ? step / ed.H : 0;
+            groupIds().forEach(function (id) {   // nudge the whole selection
+                var l = layerById(id); if (!l) return;
+                l.x = clamp01(l.x + dx); l.y = clamp01(l.y + dy); refreshLayer(l.id);
+            });
+            var pr = layerById(ed.selected); if (pr) syncInspectorPos(pr);
+            markDirty();
         }
     });
 

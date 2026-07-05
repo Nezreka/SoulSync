@@ -226,6 +226,10 @@
     box-shadow: 0 0 0 1px rgba(0,0,0,.4);
 }
 .voe-layer--hidden { display: none; }
+/* secondary (shift-selected) layers in a multi-selection */
+.voe-layer--gsel { outline-color: rgba(var(--a),.7); outline-style: dashed; }
+.voe-layer-row--gsel { background: rgba(var(--a),.1); }
+.voe-insp-sec-h--static { cursor: default; }
 .voe-layer-text { line-height: 1.05; }
 
 /* canvas floating toolbar (top of stage area) */
