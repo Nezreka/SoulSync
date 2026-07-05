@@ -131,27 +131,37 @@ def _text_tile(layer, W, H, values):
     px = max(1, int(_as_float(layer.get("size"), 0.06) * H))
     font = _font(layer.get("font") or "Inter", layer.get("weight"), px)
     probe = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
-    l, t, r, b = probe.textbbox((0, 0), text, font=font)
-    tw, th = r - l, b - t
+    # Width hugs the glyphs (tight horizontal box → clean horizontal anchoring), but
+    # HEIGHT comes from the font's line metrics (ascent+descent), NOT the glyph-tight
+    # bbox. That makes a badge the SAME height for "1080p" and "SD" — content with or
+    # without descenders/ascenders stays vertically aligned in the burn, exactly like
+    # the editor (which measures the DOM line box). Measure/draw off the baseline
+    # (anchor "ls") for a content-independent vertical origin.
+    l, _t, r, _b = probe.textbbox((0, 0), text, font=font, anchor="ls")
+    tw = int(math.ceil(r - l))
+    ascent, descent = font.getmetrics()
+    th = ascent + descent
     bg = layer.get("bg") or {}
     pill = bool(bg.get("enabled"))
     padx = int(_as_float(bg.get("padX"), 0) * H) if pill else 0
     pady = int(_as_float(bg.get("padY"), 0) * H) if pill else 0
     shadow = bool(layer.get("shadow"))
     sh = int(px * 0.12) if shadow else 0
-    tile_w = tw + 2 * padx + sh
-    tile_h = th + 2 * pady + sh
-    tile = Image.new("RGBA", (max(1, tile_w), max(1, tile_h)), (0, 0, 0, 0))
+    tile_w = max(1, tw + 2 * padx + sh)
+    tile_h = max(1, th + 2 * pady + sh)
+    tile = Image.new("RGBA", (tile_w, tile_h), (0, 0, 0, 0))
     d = ImageDraw.Draw(tile)
     if pill:
         radius = int(_as_float(bg.get("radius"), 0) * H)
         fill = _hex_rgba(bg.get("color"), bg.get("opacity", 0.6))
         d.rounded_rectangle([0, 0, tw + 2 * padx - 1, th + 2 * pady - 1],
                             radius=max(0, min(radius, (th + 2 * pady) // 2)), fill=fill)
-    tx, ty = padx - l, pady - t
+    # Hug left (remove the left side-bearing); baseline sits `ascent` below the box top.
+    bx = padx - l
+    by = pady + ascent
     if shadow:
-        d.text((tx + sh, ty + sh), text, font=font, fill=(0, 0, 0, 140))
-    d.text((tx, ty), text, font=font, fill=_hex_rgba(layer.get("color"), 1.0))
+        d.text((bx + sh, by + sh), text, font=font, fill=(0, 0, 0, 140), anchor="ls")
+    d.text((bx, by), text, font=font, fill=_hex_rgba(layer.get("color"), 1.0), anchor="ls")
     return tile
 
 
