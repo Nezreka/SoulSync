@@ -357,6 +357,21 @@ select.voe-input option { background: #17171d; }
 .voe-place-margin { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: rgba(255,255,255,.55); }
 .voe-place-margin input.voe-input--num { width: 54px; }
 
+/* badge-row: on-stage bar + inspector chips */
+.voe-layer-rowbar { align-items: center; }
+.voe-rowbar-empty { padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 700;
+    color: rgba(255,255,255,.6); background: rgba(255,255,255,.12); border: 1px dashed rgba(255,255,255,.25); }
+.voe-rowchips { display: flex; flex-wrap: wrap; gap: 6px; }
+.voe-rowchip { display: inline-flex; align-items: center; gap: 2px; padding: 3px 3px 3px 4px; border-radius: 7px;
+    background: rgba(var(--a),.16); border: 1px solid rgba(var(--a),.4); font-size: 12px; }
+.voe-rowchip-t { padding: 0 2px; }
+.voe-rowchip-mv, .voe-rowchip-x { border: none; background: transparent; color: rgba(255,255,255,.6);
+    cursor: pointer; font-size: 13px; line-height: 1; padding: 1px 4px; border-radius: 5px; }
+.voe-rowchip-mv:hover, .voe-rowchip-x:hover { background: rgba(255,255,255,.15); color: #fff; }
+.voe-rowchip-mv:disabled { opacity: .3; cursor: default; }
+.voe-rowchip-x { font-size: 15px; }
+.voe-rowadd { margin-top: 8px; }
+
 /* segmented control (alignment, weight) */
 .voe-seg { display: inline-flex; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1);
     border-radius: 9px; padding: 2px; gap: 2px; }
