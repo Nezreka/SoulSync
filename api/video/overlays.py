@@ -211,6 +211,21 @@ def register_routes(bp):
         from . import get_video_db
         return jsonify({"item": get_video_db().random_overlay_preview_item()})
 
+    @bp.route("/overlays/preview/filmstrip", methods=["POST"])
+    def overlay_preview_filmstrip():
+        """Render the (unsaved) template onto N random real titles so the editor can
+        show it holds across varying data. Body: {definition, n}."""
+        from . import get_video_db
+        from core.video.overlays import service
+        data = request.get_json(silent=True) or {}
+        n = max(1, min(6, int(data.get("n") or 4)))
+        try:
+            frames = service.preview_filmstrip(get_video_db(), data.get("definition") or {}, n)
+        except Exception:
+            logger.exception("overlay filmstrip render failed")
+            return jsonify({"ok": False, "frames": [], "error": "Render failed"}), 500
+        return jsonify({"ok": True, "frames": frames})
+
     @bp.route("/overlays/sample/<kind>/<int:item_id>", methods=["GET"])
     def overlay_sample(kind, item_id):
         """Real badge values for a library item — the editor's "load from a real

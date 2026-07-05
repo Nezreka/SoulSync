@@ -484,6 +484,18 @@ select.voe-input option { background: #17171d; }
 .voe-shortcut-k { flex: 0 0 42%; font-size: 12.5px; font-weight: 700; color: #eef1f7; }
 .voe-shortcut-d { font-size: 12.5px; color: rgba(255,255,255,.55); }
 
+/* ── filmstrip: template on real posters ─────────────────────────────────── */
+.voe-filmstrip-modal { width: min(860px, 94vw); }
+.voe-fs-sub { font-size: 12px; font-weight: 500; color: rgba(255,255,255,.45); margin-left: 8px; }
+.voe-filmstrip { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px;
+    margin: 16px 0 6px; max-height: 62vh; overflow-y: auto; padding: 2px; }
+.voe-fs-card { margin: 0; }
+.voe-fs-card img { width: 100%; aspect-ratio: 2/3; object-fit: cover; border-radius: 8px; display: block;
+    background: #16161d; box-shadow: 0 8px 20px rgba(0,0,0,.5); }
+.voe-fs-card figcaption { margin-top: 6px; font-size: 11px; color: rgba(255,255,255,.6); text-align: center;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.voe-fs-loading { grid-column: 1 / -1; text-align: center; color: rgba(255,255,255,.5); padding: 46px 0; font-size: 13px; }
+
 /* ── micro-animation ─────────────────────────────────────────────────────── */
 .voe-selbox { animation: voe-sel-in .14s ease; }
 @keyframes voe-sel-in { from { opacity: 0; } to { opacity: 1; } }

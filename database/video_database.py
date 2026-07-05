@@ -2293,6 +2293,29 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def random_overlay_preview_items(self, n: int = 4, server_source=None) -> list:
+        """Up to N distinct random owned titles (tmdb_id + poster) — powers the
+        multi-poster filmstrip that checks a template across varying real data."""
+        n = max(1, min(12, int(n)))
+        srcm = " AND server_source = ?" if server_source else ""
+        srcs = " AND server_source = ?" if server_source else ""
+        params = ([server_source] if server_source else []) + ([server_source] if server_source else [])
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT kind, id, tmdb_id, title FROM ("
+                f"  SELECT 'movie' AS kind, id, tmdb_id, title FROM movies "
+                f"   WHERE tmdb_id IS NOT NULL AND poster_url IS NOT NULL AND poster_url <> ''{srcm}"
+                "   UNION ALL "
+                f"  SELECT 'show' AS kind, id, tmdb_id, title FROM shows "
+                f"   WHERE tmdb_id IS NOT NULL AND poster_url IS NOT NULL AND poster_url <> ''{srcs}"
+                ") ORDER BY RANDOM() LIMIT ?", params + [n]).fetchall()
+            return [dict(r) for r in rows]
+        except sqlite3.Error:
+            return []
+        finally:
+            conn.close()
+
     def item_tmdb_id(self, kind: str, item_id: int):
         """TMDB id for a movie/show — the key to re-fetch its clean original poster."""
         table = {"movie": "movies", "show": "shows"}.get(str(kind).lower())
