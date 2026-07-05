@@ -122,6 +122,7 @@ _FORMATTERS = {
     "title": lambda v: str(v) if v else None,
     "network": lambda v: str(v) if v else None,
     "studio": lambda v: str(v) if v else None,
+    "genre": lambda v: str(v) if v else None,
 }
 
 

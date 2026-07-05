@@ -231,6 +231,7 @@ _THUMB_SAMPLE = {
     "source": "bluray", "imdb": 8.4, "rt": 92, "metacritic": 81, "tmdb": 8.1,
     "content_rating": "PG-13", "status": "Returning", "year": 2021, "runtime": 148,
     "season_count": 4, "episode_count": 62, "title": "Example", "network": "HBO", "studio": "A24",
+    "genre": "Sci-Fi",
 }
 
 

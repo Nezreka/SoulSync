@@ -31,6 +31,8 @@ def test_formatters_mirror_editor():
     assert fields.format_field("runtime", 148) == "2h 28m"
     assert fields.format_field("season_count", 1) == "1 Season"
     assert fields.format_field("season_count", 4) == "4 Seasons"
+    assert fields.format_field("genre", "Sci-Fi") == "Sci-Fi"
+    assert fields.format_field("genre", "") is None
 
 
 def test_formatter_none_when_no_value():

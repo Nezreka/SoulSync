@@ -81,15 +81,16 @@
         title: { label: 'Title', cat: 'Details', text: true, fmt: function (v) { return v ? String(v) : null; } },
         network: { label: 'Network', cat: 'Details', text: true, fmt: function (v) { return v ? String(v) : null; } },
         studio: { label: 'Studio', cat: 'Details', text: true, fmt: function (v) { return v ? String(v) : null; } },
+        genre: { label: 'Genre', cat: 'Details', text: true, fmt: function (v) { return v ? String(v) : null; } },
     };
     var FIELD_ORDER = ['resolution', 'hdr', 'video_codec', 'audio_codec', 'source', 'imdb', 'rt', 'metacritic', 'tmdb',
-        'content_rating', 'status', 'year', 'runtime', 'season_count', 'episode_count', 'title', 'network', 'studio'];
+        'content_rating', 'genre', 'status', 'year', 'runtime', 'season_count', 'episode_count', 'title', 'network', 'studio'];
     var FIELD_CATS = ['Quality', 'Ratings', 'Details'];
 
     function defaultSample() {
         return { resolution: '2160p', hdr: 'HDR', video_codec: 'hevc', audio_codec: 'atmos', source: 'bluray',
             imdb: 8.4, rt: 92, metacritic: 81, tmdb: 8.1, content_rating: 'PG-13', status: 'Returning',
-            year: 2021, runtime: 148, season_count: 4, episode_count: 62, title: 'Example Title', network: 'HBO', studio: 'A24' };
+            year: 2021, runtime: 148, season_count: 4, episode_count: 62, title: 'Example Title', network: 'HBO', studio: 'A24', genre: 'Sci-Fi' };
     }
     // real values win; nulls fall back to the defaults so no badge previews blank.
     function mergeSample(real) {
@@ -1085,18 +1086,28 @@
     }
 
     // Snap the selected layer's box to a stage edge/centre (uses the measured box).
-    function alignSelected(dir) {
+    // Snap the element into a region of the poster: set x/y to a margin inset AND set
+    // the matching anchor so content grows inward — a top-right placement pins the
+    // element's top-right corner at the inset, so "1080p" and "SD" share that corner
+    // and grow left (this is what keeps varying data aligned). The margin is an even
+    // VISUAL inset (equal px on every side) despite the 2:3 poster aspect.
+    function placeAt(anchor) {
         var l = ed.selected ? layerById(ed.selected) : null; if (!l) return;
-        var node = ed.stage.querySelector('.voe-layer[data-voe-layer="' + l.id + '"]'); if (!node) return;
-        var ew = node.offsetWidth, eh = node.offsetHeight, W = ed.W, H = ed.H;
-        var af = anchorFrac(l.anchor), ax = af[0], ay = af[1];
-        if (dir === 'left') l.x = ax * ew / W;
-        else if (dir === 'hcenter') l.x = 0.5 - ew / (2 * W) + ax * ew / W;
-        else if (dir === 'right') l.x = 1 - ew / W + ax * ew / W;
-        else if (dir === 'top') l.y = ay * eh / H;
-        else if (dir === 'vmiddle') l.y = 0.5 - eh / (2 * H) + ay * eh / H;
-        else if (dir === 'bottom') l.y = 1 - eh / H + ay * eh / H;
+        var m = Math.max(0, Math.min(45, ed.placeMargin != null ? ed.placeMargin : 5)) / 100;
+        var mx = m, my = m * (ed.W / ed.H);
+        l.x = anchor.indexOf('left') >= 0 ? mx : anchor.indexOf('right') >= 0 ? 1 - mx : 0.5;
+        l.y = anchor.indexOf('top') >= 0 ? my : anchor.indexOf('bottom') >= 0 ? 1 - my : 0.5;
+        l.anchor = anchor;
         refreshLayer(l.id); syncInspectorPos(l); updateSelBox(); markDirty();
+        var box = overlay && overlay.querySelector('[data-voe-inspector]');
+        if (box) {
+            box.querySelectorAll('.voe-anchor-cell').forEach(function (c) {
+                c.classList.toggle('voe-anchor-cell--on', c.getAttribute('data-anchor') === anchor);
+            });
+            box.querySelectorAll('.voe-place-cell').forEach(function (c) {
+                c.classList.toggle('voe-place-cell--on', c.getAttribute('data-place') === anchor);
+            });
+        }
     }
 
     // Change a layer's anchor WITHOUT moving it on screen: recompute x,y so the new
@@ -1289,21 +1300,23 @@
             return '<div class="voe-anchor-cell' + (a === l.anchor ? ' voe-anchor-cell--on' : '') + '" data-anchor="' + a + '" title="' + a + '"></div>';
         }).join('') + '</div>');
     }
-    var ALIGN_ICONS = {
-        left: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 4v16"/><path d="M4 9h11M4 15h7"/></svg>',
-        hcenter: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 4v16"/><path d="M6 9h12M8 15h8"/></svg>',
-        right: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 4v16"/><path d="M9 9h11M13 15h7"/></svg>',
-        top: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 4h16"/><path d="M9 4v11M15 4v7"/></svg>',
-        vmiddle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 12h16"/><path d="M9 6v12M15 8v8"/></svg>',
-        bottom: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20h16"/><path d="M9 9h0M9 9v11M15 13v7"/></svg>',
-    };
-    function _alignSeg(dirs) {
-        return '<div class="voe-seg" data-voe-alignbar>' + dirs.map(function (d) {
-            return '<button class="voe-seg-btn" data-voe-align="' + d + '" title="Align ' + d + '">' + ALIGN_ICONS[d] + '</button>';
-        }).join('') + '</div>';
-    }
-    function alignBar() {
-        return '<div style="display:flex;gap:6px">' + _alignSeg(['left', 'hcenter', 'right']) + _alignSeg(['top', 'vmiddle', 'bottom']) + '</div>';
+    // Quick-place grid: click a region to snap the element there (margin inset +
+    // matching anchor). The inline margin drives the inset for every corner/edge.
+    function placeGrid(l) {
+        var m = (ed.placeMargin != null ? ed.placeMargin : 5);
+        var cells = ANCHOR_ORDER.map(function (a) {
+            return '<button type="button" class="voe-place-cell' + (a === l.anchor ? ' voe-place-cell--on' : '') +
+                '" data-place="' + a + '" title="Place ' + a.replace('-', ' ') + '"><i></i></button>';
+        }).join('');
+        return field('Place',
+            '<div class="voe-place">' +
+                '<div class="voe-place-grid">' + cells + '</div>' +
+                '<label class="voe-place-margin" title="Inset from the poster edge (even on all sides)">' +
+                    '<span>Margin</span>' +
+                    '<input class="voe-input voe-input--num" type="number" step="1" min="0" max="45" data-voe-margin value="' + m + '">' +
+                    '<span class="voe-unit">%</span>' +
+                '</label>' +
+            '</div>');
     }
 
     function renderInspector() {
@@ -1321,8 +1334,8 @@
         else if (l.type === 'image') sizeCtrl = field('Width', numInput('w', pct(l.w), '%'));
         else if (l.type === 'shape') sizeCtrl = row2(field('Width', numInput('w', pct(l.w), '%')), field('Height', numInput('h', pct(l.h), '%')));
         var html = inspSection('Transform',
+            placeGrid(l) +
             anchorGrid(l) +
-            field('Align', alignBar()) +
             row2(field('X', numInput('x', pct(l.x), '%')), field('Y', numInput('y', pct(l.y), '%'))) +
             sizeCtrl +
             row2(field('Rotate', numInput('rotation', l.rotation || 0, '°')),
@@ -1447,10 +1460,13 @@
                 refreshLayer(l.id); markDirty();
             });
         });
-        box.querySelectorAll('[data-voe-alignbar]').forEach(function (bar) {
-            bar.addEventListener('click', function (e) {
-                var b = e.target.closest('[data-voe-align]'); if (b) alignSelected(b.getAttribute('data-voe-align'));
-            });
+        box.querySelectorAll('[data-place]').forEach(function (cell) {
+            cell.addEventListener('click', function () { placeAt(cell.getAttribute('data-place')); });
+        });
+        var marg = box.querySelector('[data-voe-margin]');
+        if (marg) marg.addEventListener('input', function () {
+            var v = parseFloat(marg.value);
+            if (!isNaN(v)) ed.placeMargin = Math.max(0, Math.min(45, v));
         });
         var seg = box.querySelector('[data-inspseg="align"]');
         if (seg) seg.addEventListener('click', function (e) {

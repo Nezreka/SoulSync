@@ -2485,6 +2485,15 @@ class VideoDatabase:
                 "resolution": None, "video_codec": None, "audio_codec": None, "source": None,
                 "season_count": None, "episode_count": None,
             }
+            # primary genre (first of the owned item's genres) for a Genre badge —
+            # isolated so a genre hiccup can't null out the whole sample payload
+            out["genre"] = None
+            try:
+                g_link, g_owner = ("movie_genres", "movie_id") if kind == "movie" else ("show_genres", "show_id")
+                genres = self._genres_for(conn, g_link, g_owner, int(item_id))
+                out["genre"] = genres[0] if genres else None
+            except sqlite3.Error:
+                logger.debug("overlay genre lookup failed for %s %s", kind, item_id, exc_info=True)
             # Best owned file drives the quality badges.
             _res_rank = ("CASE mf.resolution WHEN '2160p' THEN 4 WHEN '1080p' THEN 3 "
                          "WHEN '720p' THEN 2 ELSE 1 END DESC")
