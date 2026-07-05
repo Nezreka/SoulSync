@@ -521,6 +521,12 @@
         if (l.type === 'image') {
             if (typeof l.w !== 'number') l.w = 0.4;
             l.src = l.src || '';
+            if (typeof l.radius !== 'number') l.radius = 0;
+            if (typeof l.grayscale !== 'boolean') l.grayscale = false;
+            l.border = l.border || {};
+            l.border.enabled = !!l.border.enabled;
+            l.border.color = l.border.color || '#ffffff';
+            if (typeof l.border.w !== 'number') l.border.w = 0.004;
         }
         if (l.type === 'shape') {
             l.shapeKind = l.shapeKind || 'rect';
@@ -830,11 +836,13 @@
         }
         if (kind === 'logo') {
             return { id: uid(), type: 'image', name: 'Title Logo', logo: true, src: '', anchor: 'center',
-                x: x, y: y, w: 0.55, hidden: false, opacity: 1 };
+                x: x, y: y, w: 0.55, hidden: false, opacity: 1,
+                radius: 0, grayscale: false, border: { enabled: false, color: '#ffffff', w: 0.004 } };
         }
         if (kind === 'image') {
             return { id: uid(), type: 'image', name: 'Image', src: '', anchor: 'center',
-                x: x, y: y, w: 0.4, hidden: false, opacity: 1 };
+                x: x, y: y, w: 0.4, hidden: false, opacity: 1,
+                radius: 0, grayscale: false, border: { enabled: false, color: '#ffffff', w: 0.004 } };
         }
         if (kind === 'scrim') {
             return { id: uid(), type: 'shape', name: 'Scrim', anchor: 'bottom-center', x: 0.5, y: 1,
@@ -1018,7 +1026,14 @@
         }
         el.style.transformOrigin = 'center';
         if (l.type === 'image') {
-            el.style.width = (l.w * ed.W) + 'px'; el.style.height = 'auto';
+            var iw = l.w * ed.W;
+            el.style.width = iw + 'px'; el.style.height = 'auto';
+            el.style.borderRadius = (l.radius ? l.radius * iw : 0) + 'px';
+            el.style.overflow = l.radius ? 'hidden' : '';
+            el.style.filter = l.grayscale ? 'grayscale(1)' : '';
+            var ib = l.border || {};
+            el.style.border = ib.enabled ? ((ib.w || 0.004) * ed.H) + 'px solid ' + (ib.color || '#ffffff') : 'none';
+            el.style.boxSizing = 'border-box';
             var src = l.logo ? (ed.sample && ed.sample.logo_url) : l.src;
             if (src) {
                 el.innerHTML = '<img src="' + esc(srcUrl(src)) + '" style="width:100%;display:block" draggable="false">';
@@ -1746,6 +1761,14 @@
                 ? '<div class="voe-insp-hint">Uses the previewed title’s logo. Pick a title under “Preview poster” to see it.</div>'
                 : field('URL', '<input class="voe-input" data-inspsrc placeholder="https://…" value="' + esc(l.src || '') + '">') +
                   field('Upload', '<button class="voe-btn" data-inspupload style="width:100%;justify-content:center">Choose image…</button>'));
+            html += inspSection('Style',
+                field('Corner', numInput('radius', pct(l.radius), '%')) +
+                field('Grayscale', toggle('grayscale', l.grayscale)) +
+                field('Border', toggle('borderEnabled', l.border.enabled)) +
+                (l.border.enabled
+                    ? field('Color', colorField('borderColor', l.border.color)) +
+                      field('Width', numInput('borderW', pct(l.border.w), '%'))
+                    : ''));
         }
         if (l.type === 'shape') {
             html += inspSection('Fill',
@@ -1938,6 +1961,7 @@
                 else if (key === 'strokeEnabled') l.stroke.enabled = !l.stroke.enabled;
                 else if (key === 'fillGrad') l.fill.grad = !l.fill.grad;
                 else if (key === 'borderEnabled') l.border.enabled = !l.border.enabled;
+                else if (key === 'grayscale') l.grayscale = !l.grayscale;
                 else if (key === 'rowShadow') l.style.shadow = !l.style.shadow;
                 else if (key === 'rowBgEnabled') l.style.bg.enabled = !l.style.bg.enabled;
                 else if (key === 'rowStrokeEnabled') l.style.stroke.enabled = !l.style.stroke.enabled;

@@ -149,6 +149,21 @@ def test_shape_border_paints_outline():
     assert len(greens) > 50                             # the green border painted
 
 
+def test_image_grayscale_and_radius(tmp_path):
+    from core.video.overlays.compositor import _image_tile
+    logo = io.BytesIO()
+    Image.new("RGBA", (100, 100), (255, 0, 0, 255)).save(logo, format="PNG")
+    load = lambda url: logo.getvalue()  # noqa: E731
+    # grayscale: a pure-red image becomes gray (r == g == b)
+    g = _image_tile({"type": "image", "src": "x", "w": 0.4, "grayscale": True}, 600, 900, {}, load)
+    px = g.getpixel((g.size[0] // 2, g.size[1] // 2))
+    assert px[0] == px[1] == px[2]
+    # corner radius punches the corners transparent
+    rimg = _image_tile({"type": "image", "src": "x", "w": 0.4, "radius": 0.4}, 600, 900, {}, load)
+    assert rimg.getpixel((0, 0))[3] == 0          # top-left corner cut out
+    assert rimg.getpixel((rimg.size[0] // 2, rimg.size[1] // 2))[3] > 0   # centre solid
+
+
 def test_hidden_layer_not_rendered():
     base = _poster(color=(0, 0, 0))
     definition = {"layers": [{

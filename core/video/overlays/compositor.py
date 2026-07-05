@@ -13,7 +13,7 @@ from __future__ import annotations
 import io
 import math
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont, ImageOps
 
 from utils.logging_config import get_logger
 
@@ -235,7 +235,22 @@ def _image_tile(layer, W, H, values, image_loader):
     tw = max(1, int(_as_float(layer.get("w"), 0.4) * W))
     scale = tw / img.width if img.width else 1
     th = max(1, int(img.height * scale))
-    return img.resize((tw, th))
+    img = img.resize((tw, th))
+    if layer.get("grayscale"):
+        a = img.getchannel("A")
+        g = ImageOps.grayscale(img)
+        img = Image.merge("RGBA", (g, g, g, a))
+    radius = int(_as_float(layer.get("radius"), 0) * tw)   # corner radius as fraction of width
+    if radius > 0:
+        img.putalpha(ImageChops.multiply(img.getchannel("A"), _rounded_mask(tw, th, radius)))
+    border = layer.get("border") or {}
+    if border.get("enabled"):
+        bw = max(1, int(_as_float(border.get("w"), 0.004) * H))
+        off = bw / 2
+        ImageDraw.Draw(img).rounded_rectangle(
+            [off, off, tw - 1 - off, th - 1 - off],
+            radius=max(0, radius - bw // 2), outline=_hex_rgba(border.get("color"), 1.0), width=bw)
+    return img
 
 
 def _shape_tile(layer, W, H):
