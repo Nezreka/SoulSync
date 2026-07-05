@@ -356,6 +356,27 @@ def test_varying_badges_align_vertically_in_burn():
     assert abs(a - b) <= 2      # glyph tops line up → the badges are level
 
 
+def test_corner_ribbon_paints_in_its_corner():
+    """A top-right ribbon paints its band near the top-right corner, not the others."""
+    base = _poster(color=(0, 0, 0), size=(600, 900))
+    layer = {"type": "ribbon", "corner": "top-right", "dist": 0.3, "thickness": 0.07,
+             "color": "#ff0000", "text": "NEW", "textColor": "#ffffff", "opacity": 1}
+    img = _open(render_overlay(base, {"layers": [layer]}, {}))
+    def red(box):
+        return sum(1 for p in img.crop(box).getdata() if p[0] > 150 and p[1] < 90 and p[2] < 90)
+    assert red((450, 0, 600, 150)) > 100        # top-right corner has the red band
+    assert red((0, 750, 150, 900)) == 0         # bottom-left corner is clear
+
+
+def test_ribbon_placement_flips_by_corner():
+    from core.video.overlays.compositor import _ribbon_placement
+    tl = _ribbon_placement({"corner": "top-left", "dist": 0.28}, 600, 900)
+    br = _ribbon_placement({"corner": "bottom-right", "dist": 0.28}, 600, 900)
+    assert tl[0] < 300 and tl[1] < 450          # top-left centre is up-left
+    assert br[0] > 300 and br[1] > 450          # bottom-right centre is down-right
+    assert tl[2] == -45 and br[2] == -45
+
+
 def test_broken_layer_does_not_sink_the_render():
     base = _poster()
     # a garbage layer shouldn't crash the whole composite
