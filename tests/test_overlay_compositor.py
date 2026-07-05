@@ -156,6 +156,24 @@ def test_template_thumbnail_renders_valid_jpeg_with_sample_badges():
     assert max(sum(p) for p in top_right.getdata()) > 500
 
 
+def test_text_stroke_paints_an_outline():
+    """A text outline must paint its stroke colour. Fill the glyph with the same
+    colour as the background so ONLY the red stroke can show up."""
+    base = _poster(color=(0, 0, 0), size=(600, 900))
+    layer = {"type": "text", "text": "O", "anchor": "center", "x": 0.5, "y": 0.5,
+             "size": 0.2, "color": "#000000", "font": "Inter", "weight": 800, "opacity": 1,
+             "stroke": {"enabled": True, "color": "#ff0000", "w": 0.2}}
+    img = _open(render_overlay(base, {"layers": [layer]}, {}))
+    crop = img.crop((200, 350, 400, 550))
+    reds = [p for p in crop.getdata() if p[0] > 150 and p[1] < 90 and p[2] < 90]
+    assert len(reds) > 20, "the red outline did not paint"
+    # disabled stroke → no red
+    layer["stroke"]["enabled"] = False
+    img2 = _open(render_overlay(base, {"layers": [layer]}, {}))
+    reds2 = [p for p in img2.crop((200, 350, 400, 550)).getdata() if p[0] > 150 and p[1] < 90 and p[2] < 90]
+    assert len(reds2) == 0
+
+
 def test_text_tile_height_is_content_independent():
     """The heart of "1080p vs SD sitting correctly": a badge's box height must not
     depend on the specific glyphs (descenders/ascenders). "1080p" (has a descender)

@@ -137,10 +137,13 @@ def _text_tile(layer, W, H, values):
     # without descenders/ascenders stays vertically aligned in the burn, exactly like
     # the editor (which measures the DOM line box). Measure/draw off the baseline
     # (anchor "ls") for a content-independent vertical origin.
-    l, _t, r, _b = probe.textbbox((0, 0), text, font=font, anchor="ls")
+    stroke = layer.get("stroke") or {}
+    stroke_w = int(round(_as_float(stroke.get("w"), 0) * px)) if stroke.get("enabled") else 0
+    stroke_fill = _hex_rgba(stroke.get("color"), 1.0) if stroke_w > 0 else None
+    l, _t, r, _b = probe.textbbox((0, 0), text, font=font, anchor="ls", stroke_width=stroke_w)
     tw = int(math.ceil(r - l))
     ascent, descent = font.getmetrics()
-    th = ascent + descent
+    th = ascent + descent + 2 * stroke_w   # stroke extends past ascent/descent — keep it in the box
     bg = layer.get("bg") or {}
     pill = bool(bg.get("enabled"))
     padx = int(_as_float(bg.get("padX"), 0) * H) if pill else 0
@@ -156,12 +159,14 @@ def _text_tile(layer, W, H, values):
         fill = _hex_rgba(bg.get("color"), bg.get("opacity", 0.6))
         d.rounded_rectangle([0, 0, tw + 2 * padx - 1, th + 2 * pady - 1],
                             radius=max(0, min(radius, (th + 2 * pady) // 2)), fill=fill)
-    # Hug left (remove the left side-bearing); baseline sits `ascent` below the box top.
+    # Hug left (remove the left side-bearing); baseline sits `ascent` below the box top
+    # (+ stroke room so the outline isn't clipped at the top).
     bx = padx - l
-    by = pady + ascent
+    by = pady + ascent + stroke_w
     if shadow:
         d.text((bx + sh, by + sh), text, font=font, fill=(0, 0, 0, 140), anchor="ls")
-    d.text((bx, by), text, font=font, fill=_hex_rgba(layer.get("color"), 1.0), anchor="ls")
+    d.text((bx, by), text, font=font, fill=_hex_rgba(layer.get("color"), 1.0), anchor="ls",
+           stroke_width=stroke_w, stroke_fill=stroke_fill)
     return tile
 
 
