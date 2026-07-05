@@ -239,20 +239,45 @@ def _image_tile(layer, W, H, values, image_loader):
 
 
 def _shape_tile(layer, W, H):
+    kind = layer.get("shapeKind") or "rect"
     tw = max(1, int(_as_float(layer.get("w"), 0.5) * W))
-    th = max(1, int(_as_float(layer.get("h"), 0.12) * H))
+    if kind == "line":
+        th = max(1, int(_as_float(layer.get("thickness"), 0.006) * H))
+    else:
+        th = max(1, int(_as_float(layer.get("h"), 0.12) * H))
     fill = layer.get("fill") or {}
     if fill.get("grad"):
-        tile = _linear_gradient(tw, th, _hex_rgba(fill.get("c1"), fill.get("a1", 1)),
-                                _hex_rgba(fill.get("c2"), fill.get("a2", 0)), fill.get("dir", 180))
+        paint = _linear_gradient(tw, th, _hex_rgba(fill.get("c1"), fill.get("a1", 1)),
+                                 _hex_rgba(fill.get("c2"), fill.get("a2", 0)), fill.get("dir", 180))
     else:
-        tile = Image.new("RGBA", (tw, th), _hex_rgba(fill.get("c1"), fill.get("a1", 1)))
+        paint = Image.new("RGBA", (tw, th), _hex_rgba(fill.get("c1"), fill.get("a1", 1)))
     radius = int(_as_float(layer.get("radius"), 0) * H)
-    if radius > 0:
-        mask = _rounded_mask(tw, th, radius)
-        out = Image.new("RGBA", (tw, th), (0, 0, 0, 0))
-        out.paste(tile, (0, 0), mask)
-        tile = out
+    # build the shape mask by kind
+    mask = Image.new("L", (tw, th), 0)
+    md = ImageDraw.Draw(mask)
+    if kind == "ellipse":
+        md.ellipse([0, 0, tw - 1, th - 1], fill=255)
+    elif kind == "line":
+        md.rounded_rectangle([0, 0, tw - 1, th - 1], radius=th // 2, fill=255)   # rounded caps
+    else:
+        r = int(max(0, min(radius, min(tw, th) / 2)))
+        (md.rounded_rectangle if r > 0 else md.rectangle)(
+            [0, 0, tw - 1, th - 1], **({"radius": r, "fill": 255} if r > 0 else {"fill": 255}))
+    tile = Image.new("RGBA", (tw, th), (0, 0, 0, 0))
+    tile.paste(paint, (0, 0), mask)
+    # optional border (not on lines)
+    border = layer.get("border") or {}
+    if border.get("enabled") and kind != "line":
+        bw = max(1, int(_as_float(border.get("w"), 0.004) * H))
+        bcol = _hex_rgba(border.get("color"), 1.0)
+        bd = ImageDraw.Draw(tile)
+        off = bw / 2
+        box = [off, off, tw - 1 - off, th - 1 - off]
+        if kind == "ellipse":
+            bd.ellipse(box, outline=bcol, width=bw)
+        else:
+            r = int(max(0, min(radius, min(tw, th) / 2)))
+            bd.rounded_rectangle(box, radius=max(0, r - bw // 2), outline=bcol, width=bw)
     return tile
 
 
