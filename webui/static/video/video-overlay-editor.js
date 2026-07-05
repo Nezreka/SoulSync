@@ -143,6 +143,7 @@
         film: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16M3 9h4M17 9h4M3 15h4M17 15h4"/></svg>',
         ellipse: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2"><ellipse cx="12" cy="12" rx="9" ry="6.5"/></svg>',
         line: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M4 12h16"/></svg>',
+        ribbon: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15L15 4l5 5L9 20z"/></svg>',
     };
     function catIcon(cat) { return cat === 'Ratings' ? I.star : cat === 'Quality' ? I.badge : I.info; }
 
@@ -544,6 +545,19 @@
             l.fill.c2 = l.fill.c2 || '#000000'; if (typeof l.fill.a2 !== 'number') l.fill.a2 = 0;
             if (typeof l.fill.dir !== 'number') l.fill.dir = 180;
         }
+        if (l.type === 'ribbon') {
+            l.corner = l.corner || 'top-right';
+            if (typeof l.dist !== 'number') l.dist = 0.28;
+            if (typeof l.thickness !== 'number') l.thickness = 0.06;
+            l.color = l.color || '#d11e2a';
+            l.textColor = l.textColor || '#ffffff';
+            if (l.text == null) l.text = 'NEW';
+            l.font = l.font || 'Inter';
+            if (typeof l.weight !== 'number') l.weight = 800;
+            if (typeof l.upper !== 'boolean') l.upper = true;
+            if (typeof l.textScale !== 'number') l.textScale = 0.5;
+            if (typeof l.bandOpacity !== 'number') l.bandOpacity = 1;
+        }
         if (l.type === 'rating') {
             l.field = l.field || 'imdb';
             if (typeof l.stars !== 'number') l.stars = 5;
@@ -796,7 +810,8 @@
             palItem('logo', 'Title Logo', I.logo, '') + palItem('image', 'Image', I.image, '') + '</div></div>';
         html += '<div class="voe-pal-section"><div class="voe-pal-h">Shapes</div><div class="voe-pal-grid">' +
             palItem('shape', 'Rectangle', I.shape, '') + palItem('ellipse', 'Ellipse', I.ellipse, '') +
-            palItem('line', 'Line', I.line, '') + palItem('scrim', 'Scrim', I.scrim, '') + '</div></div>';
+            palItem('line', 'Line', I.line, '') + palItem('ribbon', 'Corner ribbon', I.ribbon, '') +
+            palItem('scrim', 'Scrim', I.scrim, '') + '</div></div>';
         return html;
     }
     function palItem(kind, label, icon, field) {
@@ -820,6 +835,11 @@
     // All layers are text under the hood; a `binding` makes one a dynamic badge, so
     // every text/pill style control applies to badges too.
     function defaultLayer(kind, x, y, field) {
+        if (kind === 'ribbon') {
+            return { id: uid(), type: 'ribbon', name: 'Ribbon', corner: 'top-right', dist: 0.28, thickness: 0.06,
+                color: '#d11e2a', textColor: '#ffffff', text: 'NEW', font: 'Inter', weight: 800, upper: true,
+                textScale: 0.5, bandOpacity: 1, opacity: 1, hidden: false, x: 0.5, y: 0.5, anchor: 'center', rotation: 0 };
+        }
         if (kind === 'rating') {
             return { id: uid(), type: 'rating', name: 'Rating stars', anchor: 'bottom-left',
                 x: 0.06, y: 0.9, hidden: false, opacity: 1, rotation: 0,
@@ -1040,6 +1060,21 @@
             }
             return;
         }
+        if (l.type === 'ribbon') {
+            var rm = Math.min(ed.W, ed.H);
+            var rlen = 2 * l.dist * rm, rth = l.thickness * rm;
+            el.style.width = rlen + 'px'; el.style.height = rth + 'px';
+            el.style.background = hexToRgba(l.color, l.bandOpacity != null ? l.bandOpacity : 1);
+            el.style.display = 'flex'; el.style.alignItems = 'center'; el.style.justifyContent = 'center';
+            el.style.transformOrigin = 'center'; el.style.overflow = 'hidden';
+            el.innerHTML = '<span></span>';
+            var rsp = el.querySelector('span');
+            rsp.textContent = l.upper ? String(l.text || '').toUpperCase() : (l.text || '');
+            rsp.style.color = l.textColor; rsp.style.fontFamily = fontStack(l.font);
+            rsp.style.fontWeight = l.weight; rsp.style.fontSize = (rth * (l.textScale || 0.5)) + 'px';
+            rsp.style.whiteSpace = 'nowrap'; rsp.style.lineHeight = '1';
+            return;
+        }
         if (l.type === 'rating') {
             var rval = (ed.sample || {})[l.field];
             var rmax = (l.field === 'rt' || l.field === 'metacritic') ? 100 : 10;
@@ -1132,6 +1167,16 @@
     function layoutLayer(el, l) {
         var W = ed.W, H = ed.H;
         var ew = el.offsetWidth, eh = el.offsetHeight;
+        if (l.type === 'ribbon') {   // seated across a corner, not by the anchor model
+            var m = Math.min(W, H), s = l.dist * m / Math.SQRT2;
+            var c = { 'top-left': [0, 0, 1, 1, -45], 'top-right': [1, 0, -1, 1, 45],
+                'bottom-left': [0, 1, 1, -1, 45], 'bottom-right': [1, 1, -1, -1, -45] }[l.corner] || [1, 0, -1, 1, 45];
+            var cx = c[0] * W + c[2] * s, cy = c[1] * H + c[3] * s;
+            el.style.left = (cx - ew / 2) + 'px';
+            el.style.top = (cy - eh / 2) + 'px';
+            el.style.transform = 'rotate(' + c[4] + 'deg)';
+            return;
+        }
         var af = anchorFrac(l.anchor);
         el.style.left = (l.x * W - af[0] * ew) + 'px';
         el.style.top = (l.y * H - af[1] * eh) + 'px';
@@ -1420,6 +1465,7 @@
     function layerIcon(l) {
         if (l.type === 'row') return I.row;
         if (l.type === 'rating') return I.star;
+        if (l.type === 'ribbon') return I.ribbon;
         if (l.binding) return catIcon((FIELDS[l.binding.field] || {}).cat);
         if (l.type === 'image') return l.logo ? I.logo : I.image;
         if (l.type === 'shape') return l.shapeKind === 'ellipse' ? I.ellipse : l.shapeKind === 'line' ? I.line : I.shape;
@@ -1715,6 +1761,27 @@
             return;
         }
         if (groupIds().length >= 2) { box.innerHTML = groupInspectorHTML(); wireGroupInspector(); return; }
+        if (l.type === 'ribbon') {
+            var corners = { 'top-left': 'Top-left', 'top-right': 'Top-right', 'bottom-left': 'Bottom-left', 'bottom-right': 'Bottom-right' };
+            var csel = '<select class="voe-input" data-inspsel="corner">' + Object.keys(corners).map(function (k) {
+                return '<option value="' + k + '"' + (k === l.corner ? ' selected' : '') + '>' + corners[k] + '</option>';
+            }).join('') + '</select>';
+            box.innerHTML =
+                inspSection('Ribbon',
+                    field('Corner', csel) +
+                    row2(field('Distance', numInput('dist', pct(l.dist), '%')), field('Thickness', numInput('thickness', pct(l.thickness), '%'))) +
+                    field('Color', colorField('color', l.color)) +
+                    field('Opacity', sliderInput('bandOpacity', Math.round(l.bandOpacity * 100)))) +
+                inspSection('Label',
+                    field('Text', '<input class="voe-input" data-insptext value="' + esc(l.text) + '">') +
+                    field('Caps', toggle('upper', l.upper)) +
+                    field('Color', colorField('textColor', l.textColor)) +
+                    field('Size', numInput('textScale', pct(l.textScale), '%')) +
+                    field('Font', fontSelect(l.font)) +
+                    field('Weight', weightSelect(l.weight)));
+            wireInspector(l);
+            return;
+        }
         var sizeCtrl = '';
         if (l.type === 'text') sizeCtrl = field('Size', numInput('size', pct(l.size), '%'));
         else if (l.type === 'image') sizeCtrl = field('Width', numInput('w', pct(l.w), '%'));
@@ -1879,6 +1946,9 @@
         else if (key === 'borderW') l.border.w = Math.max(0, num / 100);
         else if (key === 'stars') l.stars = Math.max(1, Math.min(10, Math.round(num)));
         else if (key === 'emptyOpacity') l.emptyOpacity = clamp01(num / 100);
+        else if (key === 'dist') l.dist = Math.max(0.05, num / 100);
+        else if (key === 'textScale') l.textScale = Math.max(0.1, num / 100);
+        else if (key === 'bandOpacity') l.bandOpacity = clamp01(num / 100);
         else if (key === 'fillA1') l.fill.a1 = clamp01(num / 100);
         else if (key === 'fillA2') l.fill.a2 = clamp01(num / 100);
         else if (key === 'fillDir') l.fill.dir = num;
@@ -1894,6 +1964,7 @@
         else if (key === 'rowShadowColor') l.style.shadowColor = val;
         else if (key === 'borderColor') l.border.color = val;
         else if (key === 'emptyColor') l.emptyColor = val;
+        else if (key === 'textColor') l.textColor = val;
         else if (key === 'fillC1') l.fill.c1 = val;
         else if (key === 'fillC2') l.fill.c2 = val;
     }

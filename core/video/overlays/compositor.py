@@ -371,6 +371,40 @@ def _row_tile(layer, W, H, values):
     return out
 
 
+def _ribbon_tile(layer, W, H):
+    """The (un-rotated) diagonal band for a corner ribbon: a coloured bar with centred
+    text. render_overlay positions + rotates it onto the chosen corner."""
+    m = min(W, H)
+    dist = _as_float(layer.get("dist"), 0.28) * m
+    thick = max(2, int(_as_float(layer.get("thickness"), 0.06) * m))
+    length = max(2, int(round(2 * dist)))
+    tile = Image.new("RGBA", (length, thick), _hex_rgba(layer.get("color", "#d11e2a"),
+                                                        _as_float(layer.get("bandOpacity"), 1.0)))
+    text = str(layer.get("text") or "")
+    if layer.get("upper"):
+        text = text.upper()
+    if text:
+        px = max(1, int(thick * _as_float(layer.get("textScale"), 0.5)))
+        font = _font(layer.get("font") or "Inter", layer.get("weight"), px)
+        ImageDraw.Draw(tile).text((length / 2, thick / 2), text, font=font,
+                                  fill=_hex_rgba(layer.get("textColor", "#ffffff"), 1.0), anchor="mm")
+    return tile
+
+
+# corner → (unit centre offset from corner along the inward diagonal, CSS rotation).
+_RIBBON = {
+    "top-left": ((0, 0), 1, 1, -45), "top-right": ((1, 0), -1, 1, 45),
+    "bottom-left": ((0, 1), 1, -1, 45), "bottom-right": ((1, 1), -1, -1, -45),
+}
+
+
+def _ribbon_placement(layer, W, H):
+    """(cx, cy, rotation°) that seats the band across its corner, ends on the two edges."""
+    (ox, oy), sx, sy, rot = _RIBBON.get(layer.get("corner") or "top-right", _RIBBON["top-right"])
+    s = _as_float(layer.get("dist"), 0.28) * min(W, H) / math.sqrt(2)
+    return ox * W + sx * s, oy * H + sy * s, rot
+
+
 def _tile_for(layer, W, H, values, image_loader):
     kind = layer.get("type")
     if kind == "text":
@@ -379,6 +413,8 @@ def _tile_for(layer, W, H, values, image_loader):
         return _row_tile(layer, W, H, values)
     if kind == "rating":
         return _rating_tile(layer, W, H, values)
+    if kind == "ribbon":
+        return _ribbon_tile(layer, W, H)
     if kind == "image":
         return _image_tile(layer, W, H, values, image_loader)
     if kind == "shape":
@@ -465,10 +501,13 @@ def render_overlay(base_bytes: bytes, definition: dict, values: dict | None = No
         # editor's transform-origin:center). CSS rotate() is clockwise; PIL is CCW,
         # so negate. expand=True grows the tile; re-centre it on the same point.
         ew0, eh0 = tile.size
-        ax, ay = _ANCHOR.get(layer.get("anchor") or "center", _ANCHOR["center"])
-        cx = _as_float(layer.get("x"), 0.5) * W - ax * ew0 + ew0 / 2
-        cy = _as_float(layer.get("y"), 0.5) * H - ay * eh0 + eh0 / 2
-        rot = _as_float(layer.get("rotation"), 0.0)
+        if layer.get("type") == "ribbon":
+            cx, cy, rot = _ribbon_placement(layer, W, H)
+        else:
+            ax, ay = _ANCHOR.get(layer.get("anchor") or "center", _ANCHOR["center"])
+            cx = _as_float(layer.get("x"), 0.5) * W - ax * ew0 + ew0 / 2
+            cy = _as_float(layer.get("y"), 0.5) * H - ay * eh0 + eh0 / 2
+            rot = _as_float(layer.get("rotation"), 0.0)
         if rot:
             tile = tile.rotate(-rot, resample=Image.BICUBIC, expand=True)
         ew, eh = tile.size
