@@ -333,6 +333,29 @@ select.voe-input option { background: #17171d; }
 .voe-anchor-cell--on { background: rgba(var(--a),.28); border-color: rgb(var(--a)); }
 .voe-anchor-cell--on::after { background: rgb(var(--a)); }
 
+/* quick-place grid — the dot mirrors the poster region the click targets */
+.voe-place { display: flex; flex-direction: column; gap: 9px; }
+.voe-place-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; width: 96px; }
+.voe-place-cell { aspect-ratio: 1; border-radius: 6px; cursor: pointer; position: relative; padding: 0;
+    background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.09); transition: all .12s; }
+.voe-place-cell i { position: absolute; width: 5px; height: 5px; border-radius: 50%;
+    background: rgba(255,255,255,.35); top: 50%; left: 50%; transform: translate(-50%, -50%); transition: background .12s; }
+.voe-place-cell:hover { background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.18); }
+.voe-place-cell:hover i { background: rgba(255,255,255,.7); }
+.voe-place-cell--on { background: rgba(var(--a),.28); border-color: rgb(var(--a)); }
+.voe-place-cell--on i { background: rgb(var(--a)); }
+.voe-place-cell:nth-child(1) i { left: 24%; top: 24%; }
+.voe-place-cell:nth-child(2) i { left: 50%; top: 24%; }
+.voe-place-cell:nth-child(3) i { left: 76%; top: 24%; }
+.voe-place-cell:nth-child(4) i { left: 24%; top: 50%; }
+.voe-place-cell:nth-child(5) i { left: 50%; top: 50%; }
+.voe-place-cell:nth-child(6) i { left: 76%; top: 50%; }
+.voe-place-cell:nth-child(7) i { left: 24%; top: 76%; }
+.voe-place-cell:nth-child(8) i { left: 50%; top: 76%; }
+.voe-place-cell:nth-child(9) i { left: 76%; top: 76%; }
+.voe-place-margin { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: rgba(255,255,255,.55); }
+.voe-place-margin input.voe-input--num { width: 54px; }
+
 /* segmented control (alignment, weight) */
 .voe-seg { display: inline-flex; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1);
     border-radius: 9px; padding: 2px; gap: 2px; }
