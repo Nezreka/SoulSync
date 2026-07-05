@@ -504,6 +504,7 @@
             if (typeof l.weight !== 'number') l.weight = 800;
             l.align = l.align || 'center';
             if (typeof l.shadow !== 'boolean') l.shadow = true;
+            if (typeof l.maxW !== 'number') l.maxW = 0;   // 0 = no width cap
             l.stroke = l.stroke || {};
             l.stroke.enabled = !!l.stroke.enabled;
             l.stroke.color = l.stroke.color || '#000000';
@@ -734,6 +735,7 @@
             base.binding = { field: field };
             base.name = FIELDS[field].label;
             base.size = 0.045; base.shadow = false;
+            if (field === 'title') { base.size = 0.07; base.maxW = 0.88; }   // titles auto-fit by default
             base.bg = { enabled: true, color: '#000000', opacity: 0.72, radius: 0.022, padX: 0.032, padY: 0.017 };
             return base;
         }
@@ -851,6 +853,13 @@
         var h = l.w * ed.W * (l.logo ? 0.34 : 0.62);
         return '<div class="voe-img-ph" style="height:' + h + 'px">' + (l.logo ? 'LOGO' : 'IMAGE') + '</div>';
     }
+    // Glyph width in px at a given font size — canvas measure, so it matches the
+    // compositor's textbbox width for auto-fit (maxW) without needing the DOM.
+    function measureTextPx(text, l, fpx) {
+        var c = measureTextPx._c || (measureTextPx._c = document.createElement('canvas').getContext('2d'));
+        c.font = (l.weight || 400) + ' ' + fpx + 'px ' + fontStack(l.font);
+        return c.measureText(text).width;
+    }
 
     function styleLayerEl(el, l) {
         el.style.opacity = (l.opacity != null ? l.opacity : 1);
@@ -878,16 +887,22 @@
         }
         if (l.type === 'text') {
             el.classList.add('voe-layer-text');
-            el.textContent = l.binding ? resolveBinding(l.binding) : (l.text || '');
+            var txt = l.binding ? resolveBinding(l.binding) : (l.text || '');
+            el.textContent = txt;
             el.style.color = l.color;
             el.style.fontFamily = fontStack(l.font);
             el.style.fontWeight = l.weight;
-            el.style.fontSize = (l.size * ed.H) + 'px';
+            var fpx = l.size * ed.H;
+            if (l.maxW > 0 && txt) {                         // auto-fit: shrink to maxW·W
+                var twpx = measureTextPx(txt, l, fpx), maxpx = l.maxW * ed.W;
+                if (twpx > maxpx && twpx > 0) fpx = fpx * (maxpx / twpx);
+            }
+            el.style.fontSize = fpx + 'px';
             el.style.textAlign = l.align || 'center';
             el.style.textShadow = l.shadow ? '0 0.12em 0.3em rgba(0,0,0,.55)' : 'none';
             var st = l.stroke || {};
             if (st.enabled && st.w > 0) {
-                el.style.webkitTextStrokeWidth = (st.w * l.size * ed.H) + 'px';
+                el.style.webkitTextStrokeWidth = (st.w * fpx) + 'px';
                 el.style.webkitTextStrokeColor = st.color;
                 el.style.paintOrder = 'stroke fill';   // stroke behind the fill → clean outer outline
             } else {
@@ -1363,6 +1378,7 @@
                 (l.binding ? '' : field('Text', '<textarea class="voe-input voe-textarea" data-insptext>' + esc(l.text) + '</textarea>')) +
                 field('Font', fontSelect(l.font)) +
                 field('Weight', weightSelect(l.weight)) +
+                field('Max width', numInput('maxW', pct(l.maxW), '%') + '<span class="voe-field-hint">0 = off</span>') +
                 field('Align', alignSeg(l.align)) +
                 field('Color', colorField('color', l.color)) +
                 field('Shadow', toggle('shadow', l.shadow)) +
@@ -1414,6 +1430,7 @@
         else if (key === 'bgPadX') l.bg.padX = Math.max(0, num / 100);
         else if (key === 'bgPadY') l.bg.padY = Math.max(0, num / 100);
         else if (key === 'strokeW') l.stroke.w = Math.max(0, num / 100);
+        else if (key === 'maxW') l.maxW = Math.max(0, num / 100);
         else if (key === 'w') l.w = Math.max(0.02, num / 100);
         else if (key === 'h') l.h = Math.max(0.02, num / 100);
         else if (key === 'radius') l.radius = Math.max(0, num / 100);

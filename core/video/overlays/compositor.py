@@ -131,6 +131,16 @@ def _text_tile(layer, W, H, values):
     px = max(1, int(_as_float(layer.get("size"), 0.06) * H))
     font = _font(layer.get("font") or "Inter", layer.get("weight"), px)
     probe = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+    # Auto-fit: cap the glyph width at maxW·W by shrinking the font (matches the
+    # editor's canvas-measured shrink). Keeps a long title on the poster.
+    max_w = _as_float(layer.get("maxW"), 0)
+    if max_w > 0:
+        bb0 = probe.textbbox((0, 0), text, font=font, anchor="ls")
+        tw0 = bb0[2] - bb0[0]
+        cap = max_w * W
+        if tw0 > cap > 0:
+            px = max(1, int(px * (cap / tw0)))
+            font = _font(layer.get("font") or "Inter", layer.get("weight"), px)
     # Width hugs the glyphs (tight horizontal box → clean horizontal anchoring), but
     # HEIGHT comes from the font's line metrics (ascent+descent), NOT the glyph-tight
     # bbox. That makes a badge the SAME height for "1080p" and "SD" — content with or

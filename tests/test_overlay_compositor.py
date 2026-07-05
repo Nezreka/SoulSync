@@ -156,6 +156,22 @@ def test_template_thumbnail_renders_valid_jpeg_with_sample_badges():
     assert max(sum(p) for p in top_right.getdata()) > 500
 
 
+def test_maxw_shrinks_long_text_to_fit():
+    """A long title must shrink to stay within maxW·W (no overflow off the poster).
+    Without maxW it renders full width; with maxW its tile is capped."""
+    from core.video.overlays.compositor import _text_tile
+    long = "The Lord of the Rings: The Return of the King"
+    layer = {"type": "text", "text": long, "size": 0.09, "color": "#ffffff", "font": "Inter", "weight": 800}
+    unbounded = _text_tile(dict(layer), 600, 900, {})
+    bounded = _text_tile(dict(layer, maxW=0.6), 600, 900, {})
+    assert bounded.size[0] < unbounded.size[0]
+    assert bounded.size[0] <= int(0.6 * 600) + 6          # within the cap (+rounding)
+    # short text under the cap is untouched
+    short = _text_tile({"type": "text", "text": "Hi", "size": 0.09, "maxW": 0.6,
+                        "color": "#fff", "font": "Inter", "weight": 800}, 600, 900, {})
+    assert short.size[0] < int(0.6 * 600)
+
+
 def test_text_stroke_paints_an_outline():
     """A text outline must paint its stroke colour. Fill the glyph with the same
     colour as the background so ONLY the red stroke can show up."""
