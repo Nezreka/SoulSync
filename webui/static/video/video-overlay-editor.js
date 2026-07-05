@@ -504,6 +504,10 @@
             if (typeof l.weight !== 'number') l.weight = 800;
             l.align = l.align || 'center';
             if (typeof l.shadow !== 'boolean') l.shadow = true;
+            l.stroke = l.stroke || {};
+            l.stroke.enabled = !!l.stroke.enabled;
+            l.stroke.color = l.stroke.color || '#000000';
+            if (typeof l.stroke.w !== 'number') l.stroke.w = 0.08;   // fraction of font size
             l.bg = l.bg || {};
             l.bg.enabled = !!l.bg.enabled;
             l.bg.color = l.bg.color || '#000000';
@@ -724,6 +728,7 @@
     function defaultLayer(kind, x, y, field) {
         var base = { id: uid(), type: 'text', anchor: 'center', x: x, y: y, hidden: false, opacity: 1,
             text: 'New Text', size: 0.06, color: '#ffffff', font: 'Inter', weight: 800, align: 'center', shadow: true,
+            stroke: { enabled: false, color: '#000000', w: 0.08 },
             bg: { enabled: false, color: '#000000', opacity: 0.6, radius: 0.014, padX: 0.022, padY: 0.012 } };
         if (kind === 'badge' && field && FIELDS[field]) {
             base.binding = { field: field };
@@ -880,6 +885,14 @@
             el.style.fontSize = (l.size * ed.H) + 'px';
             el.style.textAlign = l.align || 'center';
             el.style.textShadow = l.shadow ? '0 0.12em 0.3em rgba(0,0,0,.55)' : 'none';
+            var st = l.stroke || {};
+            if (st.enabled && st.w > 0) {
+                el.style.webkitTextStrokeWidth = (st.w * l.size * ed.H) + 'px';
+                el.style.webkitTextStrokeColor = st.color;
+                el.style.paintOrder = 'stroke fill';   // stroke behind the fill → clean outer outline
+            } else {
+                el.style.webkitTextStrokeWidth = '0';
+            }
             var bg = l.bg || {};
             if (bg.enabled) {
                 el.style.background = hexToRgba(bg.color, bg.opacity);
@@ -1352,7 +1365,12 @@
                 field('Weight', weightSelect(l.weight)) +
                 field('Align', alignSeg(l.align)) +
                 field('Color', colorField('color', l.color)) +
-                field('Shadow', toggle('shadow', l.shadow)));
+                field('Shadow', toggle('shadow', l.shadow)) +
+                field('Outline', toggle('strokeEnabled', l.stroke.enabled)) +
+                (l.stroke.enabled
+                    ? field('Color', colorField('strokeColor', l.stroke.color)) +
+                      field('Width', numInput('strokeW', pct(l.stroke.w), '%'))
+                    : ''));
             html += inspSection('Background',
                 field('Pill', toggle('bgEnabled', l.bg.enabled)) +
                 (l.bg.enabled
@@ -1395,6 +1413,7 @@
         else if (key === 'bgRadius') l.bg.radius = Math.max(0, num / 100);
         else if (key === 'bgPadX') l.bg.padX = Math.max(0, num / 100);
         else if (key === 'bgPadY') l.bg.padY = Math.max(0, num / 100);
+        else if (key === 'strokeW') l.stroke.w = Math.max(0, num / 100);
         else if (key === 'w') l.w = Math.max(0.02, num / 100);
         else if (key === 'h') l.h = Math.max(0.02, num / 100);
         else if (key === 'radius') l.radius = Math.max(0, num / 100);
@@ -1405,6 +1424,7 @@
     function setColor(l, key, val) {
         if (key === 'color') l.color = val;
         else if (key === 'bgColor') l.bg.color = val;
+        else if (key === 'strokeColor') l.stroke.color = val;
         else if (key === 'fillC1') l.fill.c1 = val;
         else if (key === 'fillC2') l.fill.c2 = val;
     }
@@ -1498,10 +1518,11 @@
             t.addEventListener('click', function () {
                 if (key === 'shadow') l.shadow = !l.shadow;
                 else if (key === 'bgEnabled') l.bg.enabled = !l.bg.enabled;
+                else if (key === 'strokeEnabled') l.stroke.enabled = !l.stroke.enabled;
                 else if (key === 'fillGrad') l.fill.grad = !l.fill.grad;
                 t.classList.toggle('voe-toggle--on');
                 refreshLayer(l.id); markDirty();
-                if (key === 'bgEnabled' || key === 'fillGrad') renderInspector();   // reveal/hide sub-fields
+                if (key === 'bgEnabled' || key === 'fillGrad' || key === 'strokeEnabled') renderInspector();   // reveal/hide sub-fields
             });
         });
         box.querySelectorAll('[data-anchor]').forEach(function (cell) {
