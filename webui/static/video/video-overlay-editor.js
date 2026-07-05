@@ -544,6 +544,15 @@
             l.fill.c2 = l.fill.c2 || '#000000'; if (typeof l.fill.a2 !== 'number') l.fill.a2 = 0;
             if (typeof l.fill.dir !== 'number') l.fill.dir = 180;
         }
+        if (l.type === 'rating') {
+            l.field = l.field || 'imdb';
+            if (typeof l.stars !== 'number') l.stars = 5;
+            if (typeof l.size !== 'number') l.size = 0.05;
+            if (typeof l.gap !== 'number') l.gap = 0.2;
+            l.color = l.color || '#f5c518';
+            l.emptyColor = l.emptyColor || '#ffffff';
+            if (typeof l.emptyOpacity !== 'number') l.emptyOpacity = 0.28;
+        }
         if (l.type === 'row') {
             if (typeof l.gap !== 'number') l.gap = 0.014;
             if (!Array.isArray(l.fields)) l.fields = [];
@@ -776,7 +785,8 @@
     // ── palette (Text + dynamic data badges grouped by category) ────────────────
     function paletteHTML() {
         var html = '<div class="voe-pal-section"><div class="voe-pal-h">Basics</div><div class="voe-pal-grid">' +
-            palItem('text', 'Text', I.text, '') + palItem('row', 'Badge row', I.row, '') + '</div></div>';
+            palItem('text', 'Text', I.text, '') + palItem('row', 'Badge row', I.row, '') +
+            palItem('rating', 'Rating stars', I.star, '') + '</div></div>';
         FIELD_CATS.forEach(function (cat) {
             var items = FIELD_ORDER.filter(function (k) { return FIELDS[k].cat === cat; });
             html += '<div class="voe-pal-section"><div class="voe-pal-h">' + cat + '</div><div class="voe-pal-grid">' +
@@ -810,6 +820,12 @@
     // All layers are text under the hood; a `binding` makes one a dynamic badge, so
     // every text/pill style control applies to badges too.
     function defaultLayer(kind, x, y, field) {
+        if (kind === 'rating') {
+            return { id: uid(), type: 'rating', name: 'Rating stars', anchor: 'bottom-left',
+                x: 0.06, y: 0.9, hidden: false, opacity: 1, rotation: 0,
+                field: 'imdb', stars: 5, size: 0.05, gap: 0.2,
+                color: '#f5c518', emptyColor: '#ffffff', emptyOpacity: 0.28 };
+        }
         if (kind === 'row') {
             return { id: uid(), type: 'row', name: 'Badge row', anchor: 'bottom-left',
                 x: 0.06, y: 0.94, hidden: false, opacity: 1, rotation: 0, gap: 0.014,
@@ -1022,6 +1038,22 @@
                 ph.textContent = 'Badge row (no values)';
                 el.appendChild(ph);
             }
+            return;
+        }
+        if (l.type === 'rating') {
+            var rval = (ed.sample || {})[l.field];
+            var rmax = (l.field === 'rt' || l.field === 'metacritic') ? 100 : 10;
+            var rfrac = (rval == null || rval === '') ? 0 : Math.max(0, Math.min(1, parseFloat(rval) / rmax));
+            var ssz = l.size * ed.H, sgap = l.gap * ssz, stars = '';
+            for (var si = 0; si < l.stars; si++) stars += '★';
+            el.style.position = 'absolute'; el.style.whiteSpace = 'nowrap'; el.style.transformOrigin = 'center';
+            el.innerHTML = '<span class="voe-rating-track">' + stars + '</span><span class="voe-rating-fill">' + stars + '</span>';
+            el.querySelectorAll('span').forEach(function (s) { s.style.fontSize = ssz + 'px'; s.style.letterSpacing = sgap + 'px'; s.style.lineHeight = '1'; s.style.display = 'block'; });
+            var trk = el.querySelector('.voe-rating-track'), fll = el.querySelector('.voe-rating-fill');
+            trk.style.color = hexToRgba(l.emptyColor, l.emptyOpacity);
+            fll.style.color = l.color;
+            fll.style.position = 'absolute'; fll.style.left = '0'; fll.style.top = '0';
+            fll.style.overflow = 'hidden'; fll.style.width = (rfrac * 100) + '%';
             return;
         }
         el.style.transformOrigin = 'center';
@@ -1387,6 +1419,7 @@
     // ── layers panel (scene list) ───────────────────────────────────────────────
     function layerIcon(l) {
         if (l.type === 'row') return I.row;
+        if (l.type === 'rating') return I.star;
         if (l.binding) return catIcon((FIELDS[l.binding.field] || {}).cat);
         if (l.type === 'image') return l.logo ? I.logo : I.image;
         if (l.type === 'shape') return l.shapeKind === 'ellipse' ? I.ellipse : l.shapeKind === 'line' ? I.line : I.shape;
@@ -1395,6 +1428,7 @@
     function layerName(l) {
         if (l.name) return l.name;
         if (l.type === 'row') return 'Badge row';
+        if (l.type === 'rating') return 'Rating stars';
         if (l.binding) return (FIELDS[l.binding.field] || {}).label;
         if (l.type === 'image') return l.logo ? 'Logo' : 'Image';
         if (l.type === 'shape') return 'Shape';
@@ -1688,6 +1722,7 @@
             ? row2(field('Width', numInput('w', pct(l.w), '%')), field('Thickness', numInput('thickness', pct(l.thickness), '%')))
             : row2(field('Width', numInput('w', pct(l.w), '%')), field('Height', numInput('h', pct(l.h), '%')));
         else if (l.type === 'row') sizeCtrl = row2(field('Badge size', numInput('rowSize', pct(l.style.size), '%')), field('Gap', numInput('gap', pct(l.gap), '%')));
+        else if (l.type === 'rating') sizeCtrl = row2(field('Star size', numInput('size', pct(l.size), '%')), field('Stars', numInput('stars', l.stars, '')));
         var html = inspSection('Transform',
             placeGrid(l) +
             anchorGrid(l) +
@@ -1721,6 +1756,22 @@
                       field('Radius', numInput('rowRadius', pct(rst.bg.radius), '%')) +
                       row2(field('Pad X', numInput('rowPadX', pct(rst.bg.padX), '%')), field('Pad Y', numInput('rowPadY', pct(rst.bg.padY), '%')))
                     : ''));
+        }
+        if (l.type === 'rating') {
+            var rlbls = { imdb: 'IMDb', tmdb: 'TMDB', rt: 'Rotten Tomatoes', metacritic: 'Metacritic' };
+            var rsel = '<select class="voe-input" data-inspsel="ratingField">' +
+                ['imdb', 'tmdb', 'rt', 'metacritic'].map(function (k) {
+                    return '<option value="' + k + '"' + (k === l.field ? ' selected' : '') + '>' + rlbls[k] + '</option>';
+                }).join('') + '</select>';
+            var rv = (ed.sample || {})[l.field];
+            html += inspSection('Rating',
+                field('Source', rsel) +
+                field('Shows', '<span class="voe-data-preview">' + esc(rv == null || rv === '' ? '—' : String(rv) + ' / ' + (l.field === 'rt' || l.field === 'metacritic' ? 100 : 10)) + '</span>'));
+            html += inspSection('Style',
+                field('Fill', colorField('color', l.color)) +
+                field('Empty', colorField('emptyColor', l.emptyColor)) +
+                field('Empty α', sliderInput('emptyOpacity', Math.round(l.emptyOpacity * 100))) +
+                field('Gap', numInput('gap', pct(l.gap), '%')));
         }
         if (l.type === 'text') {
             if (l.binding) {
@@ -1826,6 +1877,8 @@
         else if (key === 'radius') l.radius = Math.max(0, num / 100);
         else if (key === 'thickness') l.thickness = Math.max(0.001, num / 100);
         else if (key === 'borderW') l.border.w = Math.max(0, num / 100);
+        else if (key === 'stars') l.stars = Math.max(1, Math.min(10, Math.round(num)));
+        else if (key === 'emptyOpacity') l.emptyOpacity = clamp01(num / 100);
         else if (key === 'fillA1') l.fill.a1 = clamp01(num / 100);
         else if (key === 'fillA2') l.fill.a2 = clamp01(num / 100);
         else if (key === 'fillDir') l.fill.dir = num;
@@ -1840,6 +1893,7 @@
         else if (key === 'rowStrokeColor') l.style.stroke.color = val;
         else if (key === 'rowShadowColor') l.style.shadowColor = val;
         else if (key === 'borderColor') l.border.color = val;
+        else if (key === 'emptyColor') l.emptyColor = val;
         else if (key === 'fillC1') l.fill.c1 = val;
         else if (key === 'fillC2') l.fill.c2 = val;
     }
@@ -1894,8 +1948,11 @@
                 if (key === 'rowFont') l.style.font = sel.value;
                 else if (key === 'rowWeight') l.style.weight = parseInt(sel.value, 10);
                 else if (key === 'weight') l.weight = parseInt(sel.value, 10);
+                else if (key === 'ratingField') l.field = sel.value;
                 else l[key] = sel.value;
-                refreshLayer(l.id); markDirty();
+                refreshLayer(l.id);
+                if (key === 'ratingField') renderInspector();   // update the "Shows" preview
+                markDirty();
             });
         });
         box.querySelectorAll('[data-rowrm]').forEach(function (b) {
@@ -2069,9 +2126,9 @@
         // Anything that reads sample data must re-render when the sample title changes:
         // bound badges, the title logo, AND badge rows (their pills are all data-bound).
         ed.layers.forEach(function (l) {
-            if (l.binding || l.type === 'row' || (l.type === 'image' && l.logo)) refreshLayer(l.id);
+            if (l.binding || l.type === 'row' || l.type === 'rating' || (l.type === 'image' && l.logo)) refreshLayer(l.id);
         });
-        if (ed.selected) { var s = layerById(ed.selected); if (s && (s.binding || s.type === 'row')) renderInspector(); }
+        if (ed.selected) { var s = layerById(ed.selected); if (s && (s.binding || s.type === 'row' || s.type === 'rating')) renderInspector(); }
     }
 
     var openPop = null;

@@ -200,6 +200,21 @@ def test_template_thumbnail_renders_valid_jpeg_with_sample_badges():
     assert max(sum(p) for p in top_right.getdata()) > 500
 
 
+def test_rating_stars_fill_proportional():
+    from core.video.overlays.compositor import _rating_tile
+    def gold(t):
+        return sum(1 for p in t.getdata() if p[0] > 200 and p[1] > 160 and p[2] < 90 and p[3] > 0)
+    base = {"type": "rating", "field": "imdb", "stars": 5, "size": 0.06, "color": "#f5c518"}
+    full = _rating_tile(dict(base), 600, 900, {"imdb": 10})
+    half = _rating_tile(dict(base), 600, 900, {"imdb": 5})
+    empty = _rating_tile(dict(base), 600, 900, {"imdb": 0})
+    assert gold(full) > gold(half) > gold(empty)          # more rating → more gold
+    assert gold(empty) == 0                                # 0 → nothing filled
+    assert _rating_tile(dict(base), 600, 900, {}) is None  # no value → skipped
+    # rt is out of 100
+    assert gold(_rating_tile({**base, "field": "rt"}, 600, 900, {"rt": 100})) > 0
+
+
 def test_badge_row_reflows_and_stays_valid():
     """A badge row renders its fields as a bar; a field with no value is SKIPPED so
     the bar closes up (no hole). Fewer values → a narrower row tile."""
