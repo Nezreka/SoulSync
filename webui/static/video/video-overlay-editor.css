@@ -238,6 +238,19 @@
 .voe-canvas-bar .voe-btn { padding: 7px 12px; font-size: 12px; }
 .voe-canvas-bar .voe-icon-btn { padding: 7px 9px; }
 
+/* zoom controls */
+.voe-zoomctl { display: flex; align-items: center; gap: 3px; margin-left: 2px;
+    padding-left: 8px; border-left: 1px solid rgba(255,255,255,.12); }
+.voe-zoomctl .voe-icon-btn { font-size: 15px; line-height: 1; font-weight: 700; min-width: 30px; }
+.voe-zoomlabel { min-width: 50px; justify-content: center; text-align: center;
+    font-variant-numeric: tabular-nums; }
+
+/* pan affordances */
+.voe-canvas-wrap.voe-space { cursor: grab; }
+.voe-canvas-wrap.voe-space .voe-stage,
+.voe-canvas-wrap.voe-space .voe-layer { cursor: grab !important; }
+.voe-stage.voe-panning, .voe-canvas-wrap.voe-space .voe-stage.voe-panning { cursor: grabbing !important; }
+
 /* right: layers panel */
 .voe-side {
     flex: 0 0 268px; display: flex; flex-direction: column; min-height: 0;

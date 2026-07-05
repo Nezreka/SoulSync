@@ -435,6 +435,9 @@
         ['Ctrl / ⌘ + D', 'Duplicate'],
         ['Ctrl / ⌘ + Z', 'Undo — add Shift to redo'],
         ['Ctrl / ⌘ + S', 'Save'],
+        ['Scroll / + −', 'Zoom in & out (toward the cursor)'],
+        ['Space-drag / middle-drag', 'Pan the canvas'],
+        ['0', 'Reset zoom to fit'],
     ];
     function openShortcuts() {
         var back = document.createElement('div');
@@ -459,6 +462,7 @@
                 layers: (def.layers || []).map(normalizeLayer),
                 selected: null, dirty: false,
                 stage: null, W: 0, H: 0,
+                zoom: 1, panX: 0, panY: 0, space: false,
                 sample: defaultSample(), previewTitle: null, bg: null,
                 history: [], histPos: -1,
             };
@@ -532,6 +536,11 @@
                         '<button class="voe-btn" data-voe-preview>' + I.poster + ' <span data-voe-previewname>Sample poster</span> ' + I.chev + '</button>' +
                         '<button class="voe-btn voe-icon-btn" data-voe-random title="Surprise me — a random title">' + I.dice + '</button>' +
                         '<button class="voe-btn" data-voe-sampledata>' + I.info + ' Sample data ' + I.chev + '</button>' +
+                        '<div class="voe-zoomctl">' +
+                            '<button class="voe-btn voe-icon-btn" data-voe-zoomout title="Zoom out (−)">&minus;</button>' +
+                            '<button class="voe-btn voe-zoomlabel" data-voe-zoomlabel data-voe-zoomfit title="Reset zoom (0)">100%</button>' +
+                            '<button class="voe-btn voe-icon-btn" data-voe-zoomin title="Zoom in (+)">+</button>' +
+                        '</div>' +
                     '</div>' +
                     '<div class="voe-stage" data-voe-stage>' +
                         '<div class="voe-stage-ph" data-voe-ph>Drag elements from the left onto the poster.<br>This background is just a preview — only the overlay is saved.</div>' +
@@ -558,6 +567,10 @@
         wirePalette();
         var stage = overlay.querySelector('[data-voe-stage]');
         stage.addEventListener('pointerdown', onStagePointerDown);
+        overlay.querySelector('[data-voe-canvaswrap]').addEventListener('wheel', onCanvasWheel, { passive: false });
+        overlay.querySelector('[data-voe-zoomin]').addEventListener('click', function () { zoomBy(1.25); });
+        overlay.querySelector('[data-voe-zoomout]').addEventListener('click', function () { zoomBy(1 / 1.25); });
+        overlay.querySelector('[data-voe-zoomfit]').addEventListener('click', resetView);
         overlay.querySelector('[data-voe-preview]').addEventListener('click', function (e) { openPreviewPop(e.currentTarget); });
         overlay.querySelector('[data-voe-random]').addEventListener('click', loadRandomPreview);
         overlay.querySelector('[data-voe-sampledata]').addEventListener('click', function (e) { openSamplePop(e.currentTarget); });
@@ -565,7 +578,7 @@
         overlay.querySelector('[data-voe-redo]').addEventListener('click', redo);
         overlay.querySelector('[data-voe-help]').addEventListener('click', openShortcuts);
 
-        resizeBound = function () { measureStage(); relayoutAll(); };
+        resizeBound = function () { measureStage(); relayoutAll(); applyView(); };
         window.addEventListener('resize', resizeBound);
 
         measureStage();
@@ -576,6 +589,7 @@
         updateSaveState();
         updatePreviewName();
         seedHistory();
+        applyView();
     }
 
     function applyStageBg() {
@@ -593,7 +607,82 @@
         var stage = overlay && overlay.querySelector('[data-voe-stage]');
         if (!stage) return;
         var r = stage.getBoundingClientRect();
-        ed.stage = stage; ed.W = r.width; ed.H = r.height;
+        // getBoundingClientRect is post-transform; divide out the zoom so W/H stay
+        // the stage's natural (layout) size that layer sizing/positioning uses.
+        var z = ed.zoom || 1;
+        ed.stage = stage; ed.W = r.width / z; ed.H = r.height / z;
+    }
+
+    // ── zoom / pan ───────────────────────────────────────────────────────────────
+    // The stage carries a `translate(pan) scale(zoom)` transform (origin 0,0). Every
+    // pointer→normalized conversion reads the live getBoundingClientRect, which is
+    // post-transform, so drag/drop/handle math stays correct at any zoom (see the
+    // divide-by-zoom in measureStage + _stagePt). We never touch the layer model.
+    var MIN_ZOOM = 1, MAX_ZOOM = 8;
+    function applyView() {
+        if (!ed || !ed.stage) return;
+        clampPan();
+        ed.stage.style.transformOrigin = '0 0';
+        ed.stage.style.transform = 'translate(' + ed.panX + 'px,' + ed.panY + 'px) scale(' + ed.zoom + ')';
+        updateZoomLabel();
+        rescaleSelBox();   // re-apply the handles' inverse-zoom counter-scale (no rebuild → no flicker)
+    }
+    // Keep the stage overlapping the canvas: when it's larger than the viewport it
+    // must cover it; when smaller it must stay inside. Screen-space so it's origin/
+    // transform agnostic.
+    function clampPan() {
+        var wrap = ed.stage.parentElement; if (!wrap) return;
+        ed.stage.style.transform = 'translate(' + ed.panX + 'px,' + ed.panY + 'px) scale(' + ed.zoom + ')';
+        var wr = wrap.getBoundingClientRect(), sr = ed.stage.getBoundingClientRect();
+        function axis(sLo, sHi, wLo, wHi) {
+            if (sHi - sLo <= wHi - wLo) {           // stage smaller → keep inside
+                if (sLo < wLo) return wLo - sLo;
+                if (sHi > wHi) return wHi - sHi;
+            } else {                                 // stage larger → cover viewport
+                if (sLo > wLo) return wLo - sLo;
+                if (sHi < wHi) return wHi - sHi;
+            }
+            return 0;
+        }
+        ed.panX += axis(sr.left, sr.right, wr.left, wr.right);
+        ed.panY += axis(sr.top, sr.bottom, wr.top, wr.bottom);
+    }
+    // Zoom toward a screen point, holding the content under it fixed.
+    function zoomAt(cx, cy, next) {
+        next = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, next));
+        if (Math.abs(next - ed.zoom) < 1e-4) return;
+        var r = ed.stage.getBoundingClientRect(), k = 1 - next / ed.zoom;
+        ed.panX += (cx - r.left) * k;
+        ed.panY += (cy - r.top) * k;
+        ed.zoom = next;
+        applyView();
+    }
+    function zoomBy(factor) {
+        var w = ed.stage.parentElement.getBoundingClientRect();
+        zoomAt(w.left + w.width / 2, w.top + w.height / 2, ed.zoom * factor);
+    }
+    function resetView() { ed.zoom = 1; ed.panX = 0; ed.panY = 0; applyView(); }
+    function updateZoomLabel() {
+        var lb = overlay && overlay.querySelector('[data-voe-zoomlabel]');
+        if (lb) lb.textContent = Math.round(ed.zoom * 100) + '%';
+    }
+    function onCanvasWheel(e) {
+        if (!ed || !ed.stage) return;
+        e.preventDefault();
+        zoomAt(e.clientX, e.clientY, ed.zoom * (e.deltaY < 0 ? 1.12 : 1 / 1.12));
+    }
+    function startPan(e) {
+        e.preventDefault();
+        var sx = e.clientX, sy = e.clientY, px = ed.panX, py = ed.panY;
+        ed.stage.classList.add('voe-panning');
+        function move(ev) { ed.panX = px + (ev.clientX - sx); ed.panY = py + (ev.clientY - sy); applyView(); }
+        function up() {
+            document.removeEventListener('pointermove', move);
+            document.removeEventListener('pointerup', up);
+            ed.stage.classList.remove('voe-panning');
+        }
+        document.addEventListener('pointermove', move);
+        document.addEventListener('pointerup', up);
     }
 
     // ── palette (Text + dynamic data badges grouped by category) ────────────────
@@ -821,6 +910,7 @@
 
     // ── select + drag a layer on the stage ──────────────────────────────────────
     function onStagePointerDown(e) {
+        if (ed.space || e.button === 1) { startPan(e); return; }   // space-drag / middle-drag = pan
         var node = e.target.closest('.voe-layer');
         if (!node) { select(null); return; }
         var l = layerById(node.getAttribute('data-voe-layer'));
@@ -923,6 +1013,7 @@
             '<span class="voe-sel-rot-line"></span>' +
             '<span class="voe-sel-rot" data-h="rot" title="Rotate (Shift = snap 15°)"></span>';
         stage.appendChild(box);
+        scaleSelHandles(box);
         box.querySelectorAll('[data-h]').forEach(function (h) {
             h.addEventListener('pointerdown', function (e) {
                 e.preventDefault(); e.stopPropagation();
@@ -931,8 +1022,26 @@
             });
         });
     }
+    // The selbox lives inside the transformed stage, so it scales with zoom. Counter-
+    // scale the handles + border so they stay a constant on-screen size (grabbable at
+    // any zoom). Called on create and re-applied on each zoom/pan without rebuilding
+    // the box (a rebuild would re-trigger its entrance animation → flicker).
+    function scaleSelHandles(box) {
+        var iz = 1 / (ed.zoom || 1);
+        box.style.borderWidth = (1.5 * iz) + 'px';
+        box.querySelectorAll('.voe-sel-h').forEach(function (h) { h.style.transform = 'scale(' + iz + ')'; });
+        var rot = box.querySelector('.voe-sel-rot'), rl = box.querySelector('.voe-sel-rot-line');
+        if (rot) rot.style.transform = 'translateX(-50%) scale(' + iz + ')';
+        if (rl) rl.style.transform = 'translateX(-50%) scaleX(' + iz + ')';
+    }
+    function rescaleSelBox() {
+        var box = ed.stage && ed.stage.querySelector('.voe-selbox');
+        if (box) scaleSelHandles(box);
+    }
     function _layerCenter(node) { return { cx: node.offsetLeft + node.offsetWidth / 2, cy: node.offsetTop + node.offsetHeight / 2 }; }
-    function _stagePt(ev) { var r = ed.stage.getBoundingClientRect(); return { x: ev.clientX - r.left, y: ev.clientY - r.top }; }
+    // Pointer → stage LAYOUT coords (unscaled), matching offsetLeft/offsetWidth that
+    // _layerCenter uses. r is post-transform, so divide the visual offset by zoom.
+    function _stagePt(ev) { var r = ed.stage.getBoundingClientRect(), z = ed.zoom || 1; return { x: (ev.clientX - r.left) / z, y: (ev.clientY - r.top) / z }; }
 
     // Corner handles do uniform scale-from-centre (rotation-agnostic): the metric
     // scales with the pointer's distance from the element's centre.
@@ -1645,6 +1754,10 @@
         if (meta && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); redo(); return; }
         if (meta && (e.key === 's' || e.key === 'S')) { e.preventDefault(); saveTemplate(); return; }
         if (meta && (e.key === 'd' || e.key === 'D')) { e.preventDefault(); if (ed.selected) duplicateLayer(ed.selected); return; }
+        if (e.key === '=' || e.key === '+') { e.preventDefault(); zoomBy(1.25); return; }
+        if (e.key === '-' || e.key === '_') { e.preventDefault(); zoomBy(1 / 1.25); return; }
+        if (e.key === '0') { e.preventDefault(); resetView(); return; }
+        if (e.key === ' ' && !ed.space) { e.preventDefault(); ed.space = true; setPanCursor(true); return; }
         if ((e.key === 'Delete' || e.key === 'Backspace') && ed.selected) { e.preventDefault(); removeLayer(ed.selected); return; }
         if (e.key.indexOf('Arrow') === 0 && ed.selected) {
             e.preventDefault();
@@ -1657,6 +1770,18 @@
             refreshLayer(l.id); syncInspectorPos(l); markDirty();
         }
     });
+
+    function setPanCursor(on) {
+        var w = overlay && overlay.querySelector('[data-voe-canvaswrap]');
+        if (w) w.classList.toggle('voe-space', on);
+    }
+    // Release space-to-pan on keyup, and defensively if focus leaves the window
+    // mid-hold (else the space flag would stick).
+    document.addEventListener('keyup', function (e) {
+        if (!ed || e.key !== ' ' || !ed.space) return;
+        ed.space = false; setPanCursor(false);
+    });
+    window.addEventListener('blur', function () { if (ed && ed.space) { ed.space = false; setPanCursor(false); } });
 
     // Esc closes (unless editing text / a confirm is up)
     document.addEventListener('keydown', function (e) {
