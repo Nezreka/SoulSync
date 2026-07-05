@@ -1230,7 +1230,7 @@
                 hideGuides();
             } else {
                 var m0 = members[0];
-                var s = applySnap(clamp01(m0.sx + dnx), clamp01(m0.sy + dny));
+                var s = snapToPeers(clamp01(m0.sx + dnx), clamp01(m0.sy + dny), m0.l, m0.node);
                 m0.l.x = s.x; m0.l.y = s.y;
                 if (m0.node) layoutLayer(m0.node, m0.l);
                 showGuides(s.gx, s.gy);
@@ -2224,13 +2224,25 @@
 
     // snap the dragged anchor point to the stage's edges/centre (0, .5, 1) and
     // return which axes snapped so we can flash guide lines.
-    function applySnap(nx, ny) {
-        var TH = 6, gx = null, gy = null;
-        [0, 0.5, 1].forEach(function (t) {
-            if (Math.abs(nx * ed.W - t * ed.W) < TH) { nx = t; gx = t; }
-            if (Math.abs(ny * ed.H - t * ed.H) < TH) { ny = t; gy = t; }
+    // Snap the dragged layer's box edges (left/centre/right, top/middle/bottom) to the
+    // stage's lines AND to other layers' edges — Figma-style smart guides.
+    function snapToPeers(nx, ny, l, node) {
+        var TH = 6, ew = node.offsetWidth, eh = node.offsetHeight, af = anchorFrac(l.anchor);
+        var L = nx * ed.W - af[0] * ew, T = ny * ed.H - af[1] * eh;
+        var edgesX = [L, L + ew / 2, L + ew], edgesY = [T, T + eh / 2, T + eh];
+        var tx = [0, ed.W / 2, ed.W], ty = [0, ed.H / 2, ed.H];   // stage lines
+        ed.layers.forEach(function (o) {
+            if (o.id === l.id || o.hidden) return;
+            var on = nodeById(o.id); if (!on) return;
+            tx.push(on.offsetLeft, on.offsetLeft + on.offsetWidth / 2, on.offsetLeft + on.offsetWidth);
+            ty.push(on.offsetTop, on.offsetTop + on.offsetHeight / 2, on.offsetTop + on.offsetHeight);
         });
-        return { x: nx, y: ny, gx: gx, gy: gy };
+        var dx = null, gx = null, dy = null, gy = null, bx = TH + 1, by = TH + 1;
+        edgesX.forEach(function (e) { tx.forEach(function (t) { var d = Math.abs(e - t); if (d < bx) { bx = d; dx = t - e; gx = t; } }); });
+        edgesY.forEach(function (e) { ty.forEach(function (t) { var d = Math.abs(e - t); if (d < by) { by = d; dy = t - e; gy = t; } }); });
+        if (dx !== null) nx += dx / ed.W;
+        if (dy !== null) ny += dy / ed.H;
+        return { x: clamp01(nx), y: clamp01(ny), gx: gx != null ? gx / ed.W : null, gy: gy != null ? gy / ed.H : null };
     }
     function showGuides(gx, gy) {
         var gv = ed.stage.querySelector('[data-voe-gv]'), gh = ed.stage.querySelector('[data-voe-gh]');
