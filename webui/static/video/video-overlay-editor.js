@@ -540,6 +540,8 @@
             s.font = s.font || 'Inter';
             if (typeof s.weight !== 'number') s.weight = 800;
             if (typeof s.shadow !== 'boolean') s.shadow = false;
+            if (typeof s.upper !== 'boolean') s.upper = false;
+            if (typeof s.tracking !== 'number') s.tracking = 0;
             s.stroke = s.stroke || {}; s.stroke.enabled = !!s.stroke.enabled;
             s.stroke.color = s.stroke.color || '#000000';
             if (typeof s.stroke.w !== 'number') s.stroke.w = 0.08;
@@ -559,6 +561,8 @@
             l.align = l.align || 'center';
             if (typeof l.shadow !== 'boolean') l.shadow = true;
             if (typeof l.maxW !== 'number') l.maxW = 0;   // 0 = no width cap
+            if (typeof l.upper !== 'boolean') l.upper = false;
+            if (typeof l.tracking !== 'number') l.tracking = 0;
             l.stroke = l.stroke || {};
             l.stroke.enabled = !!l.stroke.enabled;
             l.stroke.color = l.stroke.color || '#000000';
@@ -788,11 +792,13 @@
                 x: 0.06, y: 0.94, hidden: false, opacity: 1, rotation: 0, gap: 0.014,
                 fields: ['resolution', 'video_codec', 'audio_codec'],   // all backed by real per-title data
                 style: { size: 0.036, color: '#ffffff', font: 'Inter', weight: 800, shadow: false,
+                    upper: false, tracking: 0,
                     stroke: { enabled: false, color: '#000000', w: 0.08 },
                     bg: { enabled: true, color: '#000000', opacity: 0.72, radius: 0.02, padX: 0.03, padY: 0.016 } } };
         }
         var base = { id: uid(), type: 'text', anchor: 'center', x: x, y: y, hidden: false, opacity: 1,
             text: 'New Text', size: 0.06, color: '#ffffff', font: 'Inter', weight: 800, align: 'center', shadow: true,
+            upper: false, tracking: 0,
             stroke: { enabled: false, color: '#000000', w: 0.08 },
             bg: { enabled: false, color: '#000000', opacity: 0.6, radius: 0.014, padX: 0.022, padY: 0.012 } };
         if (kind === 'badge' && field && FIELDS[field]) {
@@ -929,13 +935,14 @@
     // Style one badge element inside a row from the row's shared style object.
     function styleBadgeEl(el, s, text) {
         var fpx = (s.size || 0.036) * ed.H;
-        el.textContent = text;
+        el.textContent = s.upper ? String(text).toUpperCase() : text;
         el.style.whiteSpace = 'nowrap';
         el.style.lineHeight = '1.05';
         el.style.color = s.color || '#ffffff';
         el.style.fontFamily = fontStack(s.font);
         el.style.fontWeight = s.weight || 800;
         el.style.fontSize = fpx + 'px';
+        el.style.letterSpacing = s.tracking ? (s.tracking * fpx) + 'px' : 'normal';
         el.style.textShadow = s.shadow ? '0 0.12em 0.3em rgba(0,0,0,.55)' : 'none';
         var st = s.stroke || {};
         if (st.enabled && st.w > 0) {
@@ -1001,16 +1008,19 @@
         if (l.type === 'text') {
             el.classList.add('voe-layer-text');
             var txt = l.binding ? resolveBinding(l.binding) : (l.text || '');
+            if (l.upper) txt = txt.toUpperCase();
             el.textContent = txt;
             el.style.color = l.color;
             el.style.fontFamily = fontStack(l.font);
             el.style.fontWeight = l.weight;
             var fpx = l.size * ed.H;
-            if (l.maxW > 0 && txt) {                         // auto-fit: shrink to maxW·W
-                var twpx = measureTextPx(txt, l, fpx), maxpx = l.maxW * ed.W;
+            if (l.maxW > 0 && txt) {                         // auto-fit: shrink to maxW·W (incl. tracking)
+                var twpx = measureTextPx(txt, l, fpx) + (l.tracking ? l.tracking * fpx * Math.max(0, txt.length - 1) : 0);
+                var maxpx = l.maxW * ed.W;
                 if (twpx > maxpx && twpx > 0) fpx = fpx * (maxpx / twpx);
             }
             el.style.fontSize = fpx + 'px';
+            el.style.letterSpacing = l.tracking ? (l.tracking * fpx) + 'px' : 'normal';
             el.style.textAlign = l.align || 'center';
             el.style.textShadow = l.shadow ? '0 0.12em 0.3em rgba(0,0,0,.55)' : 'none';
             var st = l.stroke || {};
@@ -1637,6 +1647,7 @@
                 field('Text', colorField('rowColor', rst.color)) +
                 field('Font', fontSelect(rst.font, 'rowFont')) +
                 field('Weight', weightSelect(rst.weight, 'rowWeight')) +
+                row2(field('Caps', toggle('rowUpper', rst.upper)), field('Tracking', numInput('rowTracking', pct(rst.tracking), '%'))) +
                 field('Shadow', toggle('rowShadow', rst.shadow)) +
                 field('Outline', toggle('rowStrokeEnabled', rst.stroke.enabled)) +
                 (rst.stroke.enabled
@@ -1661,6 +1672,7 @@
                 (l.binding ? '' : field('Text', '<textarea class="voe-input voe-textarea" data-insptext>' + esc(l.text) + '</textarea>')) +
                 field('Font', fontSelect(l.font)) +
                 field('Weight', weightSelect(l.weight)) +
+                row2(field('Caps', toggle('upper', l.upper)), field('Tracking', numInput('tracking', pct(l.tracking), '%'))) +
                 field('Max width', numInput('maxW', pct(l.maxW), '%') + '<span class="voe-field-hint">0 = off</span>') +
                 field('Align', alignSeg(l.align)) +
                 field('Color', colorField('color', l.color)) +
@@ -1714,6 +1726,8 @@
         else if (key === 'bgPadY') l.bg.padY = Math.max(0, num / 100);
         else if (key === 'strokeW') l.stroke.w = Math.max(0, num / 100);
         else if (key === 'maxW') l.maxW = Math.max(0, num / 100);
+        else if (key === 'tracking') l.tracking = num / 100;
+        else if (key === 'rowTracking') l.style.tracking = num / 100;
         else if (key === 'gap') l.gap = Math.max(0, num / 100);
         else if (key === 'rowSize') l.style.size = Math.max(0.008, num / 100);
         else if (key === 'rowBgOpacity') l.style.bg.opacity = clamp01(num / 100);
@@ -1850,6 +1864,8 @@
             var key = t.getAttribute('data-insptoggle');
             t.addEventListener('click', function () {
                 if (key === 'shadow') l.shadow = !l.shadow;
+                else if (key === 'upper') l.upper = !l.upper;
+                else if (key === 'rowUpper') l.style.upper = !l.style.upper;
                 else if (key === 'bgEnabled') l.bg.enabled = !l.bg.enabled;
                 else if (key === 'strokeEnabled') l.stroke.enabled = !l.stroke.enabled;
                 else if (key === 'fillGrad') l.fill.grad = !l.fill.grad;

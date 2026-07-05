@@ -208,6 +208,24 @@ def test_maxw_shrinks_long_text_to_fit():
     assert short.size[0] < int(0.6 * 600)
 
 
+def test_text_uppercase_matches_manual_upper():
+    from core.video.overlays.compositor import _text_tile
+    a = _text_tile({"type": "text", "text": "hello", "upper": True, "size": 0.06,
+                    "color": "#fff", "font": "Inter", "weight": 800}, 600, 900, {})
+    b = _text_tile({"type": "text", "text": "HELLO", "size": 0.06,
+                    "color": "#fff", "font": "Inter", "weight": 800}, 600, 900, {})
+    assert a.size == b.size          # uppercasing "hello" renders the same box as "HELLO"
+
+
+def test_letter_spacing_widens_text_same_height():
+    from core.video.overlays.compositor import _text_tile
+    base = {"type": "text", "text": "WIDE", "size": 0.06, "color": "#fff", "font": "Inter", "weight": 800}
+    tight = _text_tile(dict(base), 600, 900, {})
+    tracked = _text_tile(dict(base, tracking=0.2), 600, 900, {})
+    assert tracked.size[0] > tight.size[0]        # tracking widens the box
+    assert tracked.size[1] == tight.size[1]       # but height is unchanged
+
+
 def test_text_stroke_paints_an_outline():
     """A text outline must paint its stroke colour. Fill the glyph with the same
     colour as the background so ONLY the red stroke can show up."""

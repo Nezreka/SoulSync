@@ -128,18 +128,29 @@ def _text_tile(layer, W, H, values):
     text = str(text)
     if text == "":
         return None
+    if layer.get("upper"):
+        text = text.upper()
     px = max(1, int(_as_float(layer.get("size"), 0.06) * H))
     font = _font(layer.get("font") or "Inter", layer.get("weight"), px)
     probe = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
-    # Auto-fit: cap the glyph width at maxW·W by shrinking the font (matches the
-    # editor's canvas-measured shrink). Keeps a long title on the poster.
+    track_px = _as_float(layer.get("tracking"), 0) * px   # letter-spacing (fraction of font size)
+
+    def _text_w(f, t, tp):
+        if tp:
+            return sum(f.getlength(ch) for ch in t) + tp * max(0, len(t) - 1)
+        bb = probe.textbbox((0, 0), t, font=f, anchor="ls")
+        return bb[2] - bb[0]
+
+    # Auto-fit: cap the (tracked) glyph width at maxW·W by shrinking the font (matches
+    # the editor's canvas-measured shrink). Keeps a long title on the poster.
     max_w = _as_float(layer.get("maxW"), 0)
     if max_w > 0:
-        bb0 = probe.textbbox((0, 0), text, font=font, anchor="ls")
-        tw0 = bb0[2] - bb0[0]
+        w0 = _text_w(font, text, track_px)
         cap = max_w * W
-        if tw0 > cap > 0:
-            px = max(1, int(px * (cap / tw0)))
+        if w0 > cap > 0:
+            ratio = cap / w0
+            px = max(1, int(px * ratio))
+            track_px *= ratio
             font = _font(layer.get("font") or "Inter", layer.get("weight"), px)
     # Width hugs the glyphs (tight horizontal box → clean horizontal anchoring), but
     # HEIGHT comes from the font's line metrics (ascent+descent), NOT the glyph-tight
@@ -150,8 +161,15 @@ def _text_tile(layer, W, H, values):
     stroke = layer.get("stroke") or {}
     stroke_w = int(round(_as_float(stroke.get("w"), 0) * px)) if stroke.get("enabled") else 0
     stroke_fill = _hex_rgba(stroke.get("color"), 1.0) if stroke_w > 0 else None
-    l, _t, r, _b = probe.textbbox((0, 0), text, font=font, anchor="ls", stroke_width=stroke_w)
-    tw = int(math.ceil(r - l))
+    if track_px:
+        tw = int(math.ceil(_text_w(font, text, track_px)))   # advance-based; excludes stroke
+        left_bearing = 0
+        extra = stroke_w                        # tracked path adds its own stroke room on each side
+    else:
+        l, _t, r, _b = probe.textbbox((0, 0), text, font=font, anchor="ls", stroke_width=stroke_w)
+        tw = int(math.ceil(r - l))              # already includes the stroke extent
+        left_bearing = l
+        extra = 0
     ascent, descent = font.getmetrics()
     th = ascent + descent + 2 * stroke_w   # stroke extends past ascent/descent — keep it in the box
     bg = layer.get("bg") or {}
@@ -160,23 +178,32 @@ def _text_tile(layer, W, H, values):
     pady = int(_as_float(bg.get("padY"), 0) * H) if pill else 0
     shadow = bool(layer.get("shadow"))
     sh = int(px * 0.12) if shadow else 0
-    tile_w = max(1, tw + 2 * padx + sh)
+    tile_w = max(1, tw + 2 * (padx + extra) + sh)
     tile_h = max(1, th + 2 * pady + sh)
     tile = Image.new("RGBA", (tile_w, tile_h), (0, 0, 0, 0))
     d = ImageDraw.Draw(tile)
     if pill:
         radius = int(_as_float(bg.get("radius"), 0) * H)
         fill = _hex_rgba(bg.get("color"), bg.get("opacity", 0.6))
-        d.rounded_rectangle([0, 0, tw + 2 * padx - 1, th + 2 * pady - 1],
+        d.rounded_rectangle([0, 0, tw + 2 * (padx + extra) - 1, th + 2 * pady - 1],
                             radius=max(0, min(radius, (th + 2 * pady) // 2)), fill=fill)
     # Hug left (remove the left side-bearing); baseline sits `ascent` below the box top
     # (+ stroke room so the outline isn't clipped at the top).
-    bx = padx - l
+    bx = padx + extra - left_bearing
     by = pady + ascent + stroke_w
+
+    def _draw(dr, ox, oy, fill, sw=0, sf=None):
+        if track_px:
+            x = ox
+            for ch in text:
+                dr.text((x, oy), ch, font=font, fill=fill, anchor="ls", stroke_width=sw, stroke_fill=sf)
+                x += font.getlength(ch) + track_px
+        else:
+            dr.text((ox, oy), text, font=font, fill=fill, anchor="ls", stroke_width=sw, stroke_fill=sf)
+
     if shadow:
-        d.text((bx + sh, by + sh), text, font=font, fill=(0, 0, 0, 140), anchor="ls")
-    d.text((bx, by), text, font=font, fill=_hex_rgba(layer.get("color"), 1.0), anchor="ls",
-           stroke_width=stroke_w, stroke_fill=stroke_fill)
+        _draw(d, bx + sh, by + sh, (0, 0, 0, 140))
+    _draw(d, bx, by, _hex_rgba(layer.get("color"), 1.0), stroke_w, stroke_fill)
     return tile
 
 
