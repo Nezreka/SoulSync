@@ -296,6 +296,54 @@ def _shape_tile(layer, W, H):
     return tile
 
 
+def _star_points(cx, cy, r_out, r_in, n=5):
+    pts = []
+    for i in range(n * 2):
+        r = r_out if i % 2 == 0 else r_in
+        ang = -math.pi / 2 + i * math.pi / n
+        pts.append((cx + r * math.cos(ang), cy + r * math.sin(ang)))
+    return pts
+
+
+# rating field → its max (so value/max fills the stars correctly)
+_RATING_MAX = {"rt": 100.0, "metacritic": 100.0, "imdb": 10.0, "tmdb": 10.0}
+
+
+def _rating_tile(layer, W, H, values):
+    """A row of stars filled proportionally to a bound rating (imdb/tmdb/rt/metacritic).
+    Skipped when the title has no such rating."""
+    field = layer.get("field") or "imdb"
+    val = (values or {}).get(field)
+    if val is None or val == "":
+        return None
+    try:
+        val = float(val)
+    except (TypeError, ValueError):
+        return None
+    frac = max(0.0, min(1.0, val / _RATING_MAX.get(field, 10.0)))
+    n = max(1, int(_as_float(layer.get("stars"), 5)))
+    sz = max(4, int(_as_float(layer.get("size"), 0.05) * H))
+    gap = int(_as_float(layer.get("gap"), 0.2) * sz)
+    r_out, r_in = sz / 2.0, sz * 0.21
+    total_w = n * sz + (n - 1) * gap
+    track = _hex_rgba(layer.get("emptyColor", "#ffffff"), _as_float(layer.get("emptyOpacity"), 0.28))
+    fillc = _hex_rgba(layer.get("color", "#f5c518"), 1.0)   # IMDb gold default
+
+    def _stars(color):
+        im = Image.new("RGBA", (total_w, sz), (0, 0, 0, 0))
+        dd = ImageDraw.Draw(im)
+        for i in range(n):
+            dd.polygon(_star_points(i * (sz + gap) + sz / 2.0, sz / 2.0, r_out, r_in), fill=color)
+        return im
+
+    tile = _stars(track)
+    fill_layer = _stars(fillc)
+    reveal = Image.new("L", (total_w, sz), 0)
+    ImageDraw.Draw(reveal).rectangle([0, 0, max(0, int(round(frac * total_w)) - 1), sz], fill=255)
+    tile.paste(fill_layer, (0, 0), ImageChops.multiply(fill_layer.getchannel("A"), reveal))
+    return tile
+
+
 def _row_tile(layer, W, H, values):
     """Auto-layout badge row: render each bound field as a badge in the row's shared
     style, flow them left-to-right with a gap, and SKIP any field with no value so the
@@ -329,6 +377,8 @@ def _tile_for(layer, W, H, values, image_loader):
         return _text_tile(layer, W, H, values)
     if kind == "row":
         return _row_tile(layer, W, H, values)
+    if kind == "rating":
+        return _rating_tile(layer, W, H, values)
     if kind == "image":
         return _image_tile(layer, W, H, values, image_loader)
     if kind == "shape":
