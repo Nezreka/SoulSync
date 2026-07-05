@@ -154,6 +154,45 @@ def test_template_thumbnail_renders_valid_jpeg_with_sample_badges():
     assert max(sum(p) for p in top_right.getdata()) > 500
 
 
+def test_text_tile_height_is_content_independent():
+    """The heart of "1080p vs SD sitting correctly": a badge's box height must not
+    depend on the specific glyphs (descenders/ascenders). "1080p" (has a descender)
+    and "SD" (none) must produce the SAME tile height, so they stay vertically
+    aligned when anchored — width still hugs the content."""
+    from core.video.overlays.compositor import _text_tile
+    base = {"type": "text", "size": 0.06, "color": "#ffffff", "font": "Inter", "weight": 800}
+    tall = _text_tile({**base, "text": "1080p"}, 600, 900, {})
+    short = _text_tile({**base, "text": "SD"}, 600, 900, {})
+    assert tall.size[1] == short.size[1]         # same height regardless of glyphs
+    assert tall.size[0] > short.size[0]          # but width hugs the content
+    # and it holds with a pill background (equal padding either way)
+    pill = {**base, "bg": {"enabled": True, "color": "#000", "opacity": 1, "radius": 0.02, "padX": 0.03, "padY": 0.02}}
+    assert _text_tile({**pill, "text": "1080p"}, 600, 900, {}).size[1] == \
+           _text_tile({**pill, "text": "SD"}, 600, 900, {}).size[1]
+
+
+def test_varying_badges_align_vertically_in_burn():
+    """Two bottom-anchored badges with different content must sit on the same line in
+    the actual composite — the property that keeps a row of badges level. "1080p" and
+    "SD" have equal cap/digit heights on a shared baseline, so the TOP of their ink
+    must line up (the p-descender differs, but that's ink, not placement)."""
+    base = _poster(color=(0, 0, 0), size=(600, 900))
+    def badge(text):
+        return {"type": "text", "text": text, "anchor": "bottom-left", "x": 0.1, "y": 0.9,
+                "size": 0.06, "color": "#ffffff", "font": "Inter", "weight": 800}
+    def top_white_row(img):
+        px = img.load()
+        for y in range(img.size[1]):
+            for x in range(img.size[0]):
+                if px[x, y][0] > 180:
+                    return y
+        return -1
+    a = top_white_row(_open(render_overlay(base, {"layers": [badge("1080p")]}, {})))
+    b = top_white_row(_open(render_overlay(base, {"layers": [badge("SD")]}, {})))
+    assert a >= 0 and b >= 0
+    assert abs(a - b) <= 2      # glyph tops line up → the badges are level
+
+
 def test_broken_layer_does_not_sink_the_render():
     base = _poster()
     # a garbage layer shouldn't crash the whole composite
