@@ -542,6 +542,10 @@
             if (typeof s.shadow !== 'boolean') s.shadow = false;
             if (typeof s.upper !== 'boolean') s.upper = false;
             if (typeof s.tracking !== 'number') s.tracking = 0;
+            s.shadowColor = s.shadowColor || '#000000';
+            if (typeof s.shadowOpacity !== 'number') s.shadowOpacity = 0.55;
+            if (typeof s.shadowBlur !== 'number') s.shadowBlur = 0.3;
+            if (typeof s.shadowDy !== 'number') s.shadowDy = 0.12;
             s.stroke = s.stroke || {}; s.stroke.enabled = !!s.stroke.enabled;
             s.stroke.color = s.stroke.color || '#000000';
             if (typeof s.stroke.w !== 'number') s.stroke.w = 0.08;
@@ -560,6 +564,10 @@
             if (typeof l.weight !== 'number') l.weight = 800;
             l.align = l.align || 'center';
             if (typeof l.shadow !== 'boolean') l.shadow = true;
+            l.shadowColor = l.shadowColor || '#000000';
+            if (typeof l.shadowOpacity !== 'number') l.shadowOpacity = 0.55;
+            if (typeof l.shadowBlur !== 'number') l.shadowBlur = 0.3;
+            if (typeof l.shadowDy !== 'number') l.shadowDy = 0.12;
             if (typeof l.maxW !== 'number') l.maxW = 0;   // 0 = no width cap
             if (typeof l.upper !== 'boolean') l.upper = false;
             if (typeof l.tracking !== 'number') l.tracking = 0;
@@ -792,12 +800,14 @@
                 x: 0.06, y: 0.94, hidden: false, opacity: 1, rotation: 0, gap: 0.014,
                 fields: ['resolution', 'video_codec', 'audio_codec'],   // all backed by real per-title data
                 style: { size: 0.036, color: '#ffffff', font: 'Inter', weight: 800, shadow: false,
+                    shadowColor: '#000000', shadowOpacity: 0.55, shadowBlur: 0.3, shadowDy: 0.12,
                     upper: false, tracking: 0,
                     stroke: { enabled: false, color: '#000000', w: 0.08 },
                     bg: { enabled: true, color: '#000000', opacity: 0.72, radius: 0.02, padX: 0.03, padY: 0.016 } } };
         }
         var base = { id: uid(), type: 'text', anchor: 'center', x: x, y: y, hidden: false, opacity: 1,
             text: 'New Text', size: 0.06, color: '#ffffff', font: 'Inter', weight: 800, align: 'center', shadow: true,
+            shadowColor: '#000000', shadowOpacity: 0.55, shadowBlur: 0.3, shadowDy: 0.12,
             upper: false, tracking: 0,
             stroke: { enabled: false, color: '#000000', w: 0.08 },
             bg: { enabled: false, color: '#000000', opacity: 0.6, radius: 0.014, padX: 0.022, padY: 0.012 } };
@@ -932,6 +942,15 @@
         return c.measureText(text).width;
     }
 
+    // CSS text-shadow from a text/style object (offsets in em = fraction of font size,
+    // matching the compositor's fraction-of-px shadow).
+    function shadowCss(o) {
+        var dx = o.shadowDx != null ? o.shadowDx : 0;
+        var dy = o.shadowDy != null ? o.shadowDy : 0.12;
+        var bl = o.shadowBlur != null ? o.shadowBlur : 0.3;
+        return dx + 'em ' + dy + 'em ' + bl + 'em ' + hexToRgba(o.shadowColor || '#000000', o.shadowOpacity != null ? o.shadowOpacity : 0.55);
+    }
+
     // Style one badge element inside a row from the row's shared style object.
     function styleBadgeEl(el, s, text) {
         var fpx = (s.size || 0.036) * ed.H;
@@ -943,7 +962,7 @@
         el.style.fontWeight = s.weight || 800;
         el.style.fontSize = fpx + 'px';
         el.style.letterSpacing = s.tracking ? (s.tracking * fpx) + 'px' : 'normal';
-        el.style.textShadow = s.shadow ? '0 0.12em 0.3em rgba(0,0,0,.55)' : 'none';
+        el.style.textShadow = s.shadow ? shadowCss(s) : 'none';
         var st = s.stroke || {};
         if (st.enabled && st.w > 0) {
             el.style.webkitTextStrokeWidth = (st.w * fpx) + 'px';
@@ -1022,7 +1041,7 @@
             el.style.fontSize = fpx + 'px';
             el.style.letterSpacing = l.tracking ? (l.tracking * fpx) + 'px' : 'normal';
             el.style.textAlign = l.align || 'center';
-            el.style.textShadow = l.shadow ? '0 0.12em 0.3em rgba(0,0,0,.55)' : 'none';
+            el.style.textShadow = l.shadow ? shadowCss(l) : 'none';
             var st = l.stroke || {};
             if (st.enabled && st.w > 0) {
                 el.style.webkitTextStrokeWidth = (st.w * fpx) + 'px';
@@ -1649,6 +1668,11 @@
                 field('Weight', weightSelect(rst.weight, 'rowWeight')) +
                 row2(field('Caps', toggle('rowUpper', rst.upper)), field('Tracking', numInput('rowTracking', pct(rst.tracking), '%'))) +
                 field('Shadow', toggle('rowShadow', rst.shadow)) +
+                (rst.shadow
+                    ? field('Color', colorField('rowShadowColor', rst.shadowColor)) +
+                      row2(field('Blur', numInput('rowShadowBlur', pct(rst.shadowBlur), '%')), field('Offset', numInput('rowShadowDy', pct(rst.shadowDy), '%'))) +
+                      field('Opacity', sliderInput('rowShadowOpacity', Math.round(rst.shadowOpacity * 100)))
+                    : '') +
                 field('Outline', toggle('rowStrokeEnabled', rst.stroke.enabled)) +
                 (rst.stroke.enabled
                     ? field('Color', colorField('rowStrokeColor', rst.stroke.color)) +
@@ -1677,6 +1701,11 @@
                 field('Align', alignSeg(l.align)) +
                 field('Color', colorField('color', l.color)) +
                 field('Shadow', toggle('shadow', l.shadow)) +
+                (l.shadow
+                    ? field('Color', colorField('shadowColor', l.shadowColor)) +
+                      row2(field('Blur', numInput('shadowBlur', pct(l.shadowBlur), '%')), field('Offset', numInput('shadowDy', pct(l.shadowDy), '%'))) +
+                      field('Opacity', sliderInput('shadowOpacity', Math.round(l.shadowOpacity * 100)))
+                    : '') +
                 field('Outline', toggle('strokeEnabled', l.stroke.enabled)) +
                 (l.stroke.enabled
                     ? field('Color', colorField('strokeColor', l.stroke.color)) +
@@ -1728,6 +1757,12 @@
         else if (key === 'maxW') l.maxW = Math.max(0, num / 100);
         else if (key === 'tracking') l.tracking = num / 100;
         else if (key === 'rowTracking') l.style.tracking = num / 100;
+        else if (key === 'shadowBlur') l.shadowBlur = Math.max(0, num / 100);
+        else if (key === 'shadowDy') l.shadowDy = num / 100;
+        else if (key === 'shadowOpacity') l.shadowOpacity = clamp01(num / 100);
+        else if (key === 'rowShadowBlur') l.style.shadowBlur = Math.max(0, num / 100);
+        else if (key === 'rowShadowDy') l.style.shadowDy = num / 100;
+        else if (key === 'rowShadowOpacity') l.style.shadowOpacity = clamp01(num / 100);
         else if (key === 'gap') l.gap = Math.max(0, num / 100);
         else if (key === 'rowSize') l.style.size = Math.max(0.008, num / 100);
         else if (key === 'rowBgOpacity') l.style.bg.opacity = clamp01(num / 100);
@@ -1746,9 +1781,11 @@
         if (key === 'color') l.color = val;
         else if (key === 'bgColor') l.bg.color = val;
         else if (key === 'strokeColor') l.stroke.color = val;
+        else if (key === 'shadowColor') l.shadowColor = val;
         else if (key === 'rowColor') l.style.color = val;
         else if (key === 'rowBgColor') l.style.bg.color = val;
         else if (key === 'rowStrokeColor') l.style.stroke.color = val;
+        else if (key === 'rowShadowColor') l.style.shadowColor = val;
         else if (key === 'fillC1') l.fill.c1 = val;
         else if (key === 'fillC2') l.fill.c2 = val;
     }
@@ -1874,7 +1911,7 @@
                 else if (key === 'rowStrokeEnabled') l.style.stroke.enabled = !l.style.stroke.enabled;
                 t.classList.toggle('voe-toggle--on');
                 refreshLayer(l.id); markDirty();
-                if (['bgEnabled', 'fillGrad', 'strokeEnabled', 'rowBgEnabled', 'rowStrokeEnabled'].indexOf(key) > -1) renderInspector();   // reveal/hide sub-fields
+                if (['bgEnabled', 'fillGrad', 'strokeEnabled', 'rowBgEnabled', 'rowStrokeEnabled', 'shadow', 'rowShadow'].indexOf(key) > -1) renderInspector();   // reveal/hide sub-fields
             });
         });
         box.querySelectorAll('[data-anchor]').forEach(function (cell) {

@@ -208,6 +208,20 @@ def test_maxw_shrinks_long_text_to_fit():
     assert short.size[0] < int(0.6 * 600)
 
 
+def test_soft_shadow_spreads_beyond_hard():
+    """A blurred drop-shadow paints a softer, wider footprint than a hard one — the
+    blurred tile is larger and has semi-transparent shadow pixels around the text."""
+    from core.video.overlays.compositor import _text_tile
+    base = {"type": "text", "text": "Yg", "size": 0.12, "color": "#ffffff", "font": "Inter", "weight": 800,
+            "shadow": True, "shadowColor": "#000000", "shadowOpacity": 0.6, "shadowDy": 0.1}
+    hard = _text_tile(dict(base, shadowBlur=0), 600, 900, {})
+    soft = _text_tile(dict(base, shadowBlur=0.5), 600, 900, {})
+    assert soft.size[0] >= hard.size[0] and soft.size[1] >= hard.size[1]   # blur reserves more room
+    # soft shadow has partial-alpha pixels (feathered edge); a hard shadow is binary
+    alphas = {p[3] for p in soft.getdata()}
+    assert any(0 < a < 255 for a in alphas)
+
+
 def test_text_uppercase_matches_manual_upper():
     from core.video.overlays.compositor import _text_tile
     a = _text_tile({"type": "text", "text": "hello", "upper": True, "size": 0.06,

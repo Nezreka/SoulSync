@@ -13,7 +13,7 @@ from __future__ import annotations
 import io
 import math
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from utils.logging_config import get_logger
 
@@ -177,7 +177,14 @@ def _text_tile(layer, W, H, values):
     padx = int(_as_float(bg.get("padX"), 0) * H) if pill else 0
     pady = int(_as_float(bg.get("padY"), 0) * H) if pill else 0
     shadow = bool(layer.get("shadow"))
-    sh = int(px * 0.12) if shadow else 0
+    if shadow:
+        sdx = _as_float(layer.get("shadowDx"), 0.0) * px
+        sdy = _as_float(layer.get("shadowDy"), 0.12) * px
+        sblur = max(0.0, _as_float(layer.get("shadowBlur"), 0.3) * px)
+        scol = _hex_rgba(layer.get("shadowColor", "#000000"), _as_float(layer.get("shadowOpacity"), 0.55))
+        sh = int(math.ceil(max(abs(sdx), abs(sdy)) + sblur * 2)) + 1
+    else:
+        sh = 0
     tile_w = max(1, tw + 2 * (padx + extra) + sh)
     tile_h = max(1, th + 2 * pady + sh)
     tile = Image.new("RGBA", (tile_w, tile_h), (0, 0, 0, 0))
@@ -202,7 +209,13 @@ def _text_tile(layer, W, H, values):
             dr.text((ox, oy), text, font=font, fill=fill, anchor="ls", stroke_width=sw, stroke_fill=sf)
 
     if shadow:
-        _draw(d, bx + sh, by + sh, (0, 0, 0, 140))
+        if sblur > 0.5:
+            shl = Image.new("RGBA", tile.size, (0, 0, 0, 0))
+            _draw(ImageDraw.Draw(shl), bx + sdx, by + sdy, scol)
+            tile = Image.alpha_composite(tile, shl.filter(ImageFilter.GaussianBlur(sblur)))
+            d = ImageDraw.Draw(tile)
+        else:
+            _draw(d, bx + int(round(sdx)), by + int(round(sdy)), scol)
     _draw(d, bx, by, _hex_rgba(layer.get("color"), 1.0), stroke_w, stroke_fill)
     return tile
 
