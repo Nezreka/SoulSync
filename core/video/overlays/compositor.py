@@ -405,6 +405,32 @@ def _ribbon_placement(layer, W, H):
     return ox * W + sx * s, oy * H + sy * s, rot
 
 
+def _passes_when(layer, values):
+    """Conditional visibility: a layer with a `when` rule renders only if the title's
+    data satisfies it. Mirrors the editor's whenPasses() exactly."""
+    w = layer.get("when")
+    if not w or not w.get("field"):
+        return True
+    raw = (values or {}).get(w.get("field"))
+    has = raw is not None and raw != ""
+    op = w.get("op") or "exists"
+    if op == "exists":
+        return has
+    if op == "neq":
+        return (not has) or str(raw).lower() != str(w.get("value")).lower()
+    if not has:
+        return False
+    if op == "eq":
+        return str(raw).lower() == str(w.get("value")).lower()
+    if op == "contains":
+        return str(w.get("value")).lower() in str(raw).lower()
+    try:
+        a, b = float(raw), float(w.get("value"))
+    except (TypeError, ValueError):
+        return False
+    return {"gt": a > b, "gte": a >= b, "lt": a < b, "lte": a <= b}.get(op, True)
+
+
 def _tile_for(layer, W, H, values, image_loader):
     kind = layer.get("type")
     if kind == "text":
@@ -486,6 +512,8 @@ def render_overlay(base_bytes: bytes, definition: dict, values: dict | None = No
     layers = (definition or {}).get("layers") or []
     for layer in layers:
         if not isinstance(layer, dict) or layer.get("hidden"):
+            continue
+        if not _passes_when(layer, values):
             continue
         try:
             tile = _tile_for(layer, W, H, values, image_loader)

@@ -377,6 +377,31 @@ def test_ribbon_placement_flips_by_corner():
     assert tl[2] == -45 and br[2] == -45
 
 
+def test_conditional_visibility_gates_a_layer():
+    from core.video.overlays.compositor import _passes_when
+    only4k = {"when": {"field": "resolution", "op": "eq", "value": "2160p"}}
+    assert _passes_when(only4k, {"resolution": "2160p"}) is True
+    assert _passes_when(only4k, {"resolution": "1080p"}) is False
+    assert _passes_when(only4k, {}) is False                       # missing → hide
+    hi = {"when": {"field": "imdb", "op": "gte", "value": "8"}}
+    assert _passes_when(hi, {"imdb": 8.4}) is True
+    assert _passes_when(hi, {"imdb": 6.1}) is False
+    assert _passes_when({"when": {"field": "season_count", "op": "exists"}}, {"season_count": 4}) is True
+    assert _passes_when({"when": {"field": "season_count", "op": "exists"}}, {}) is False
+    assert _passes_when({}, {}) is True                            # no rule → always show
+
+
+def test_conditional_layer_skipped_in_full_render():
+    base = _poster(color=(0, 0, 0), size=(600, 900))
+    layer = {"type": "shape", "anchor": "top-left", "x": 0, "y": 0, "w": 1, "h": 1, "opacity": 1,
+             "fill": {"grad": False, "c1": "#ffffff", "a1": 1},
+             "when": {"field": "resolution", "op": "eq", "value": "2160p"}}
+    # 1080p title → rule fails → nothing painted (stays black)
+    assert max(sum(p) for p in _open(render_overlay(base, {"layers": [layer]}, {"resolution": "1080p"})).getdata()) < 30
+    # 2160p title → rule passes → white paints
+    assert max(sum(p) for p in _open(render_overlay(base, {"layers": [layer]}, {"resolution": "2160p"})).getdata()) > 600
+
+
 def test_broken_layer_does_not_sink_the_render():
     base = _poster()
     # a garbage layer shouldn't crash the whole composite

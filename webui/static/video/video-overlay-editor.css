@@ -230,6 +230,11 @@
 .voe-layer--gsel { outline-color: rgba(var(--a),.7); outline-style: dashed; }
 .voe-layer-row--gsel { background: rgba(var(--a),.1); }
 .voe-insp-sec-h--static { cursor: default; }
+/* a conditional layer that wouldn't render for the current sample title */
+.voe-layer--cond { opacity: .38 !important; }
+.voe-layer--cond::before { content: "⊘"; position: absolute; top: -7px; left: -7px; z-index: 5;
+    font-size: 12px; color: #fff; background: rgba(var(--a),.9); width: 15px; height: 15px;
+    border-radius: 50%; display: grid; place-items: center; pointer-events: none; }
 .voe-layer-text { line-height: 1.05; }
 
 /* canvas floating toolbar (top of stage area) */

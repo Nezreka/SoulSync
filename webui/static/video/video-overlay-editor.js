@@ -968,6 +968,7 @@
             styleLayerEl(el, l);
             stage.appendChild(el);
             layoutLayer(el, l);
+            markConditional(el, l);
         });
         if (ed.extra && ed.extra.length) refreshGroupSelection();   // restore multi-select outlines
         updateSelBox();
@@ -1313,11 +1314,37 @@
     }
 
     // update just one layer's node in place (no full re-render → keeps inspector focus)
+    // Conditional visibility — must mirror the compositor's _passes_when exactly.
+    function whenPasses(l, sample) {
+        var w = l.when;
+        if (!w || !w.field) return true;
+        var raw = (sample || {})[w.field];
+        var has = raw != null && raw !== '';
+        var op = w.op || 'exists';
+        if (op === 'exists') return has;
+        if (op === 'neq') return !has || String(raw).toLowerCase() !== String(w.value).toLowerCase();
+        if (!has) return false;
+        if (op === 'eq') return String(raw).toLowerCase() === String(w.value).toLowerCase();
+        if (op === 'contains') return String(raw).toLowerCase().indexOf(String(w.value).toLowerCase()) > -1;
+        var a = parseFloat(raw), b = parseFloat(w.value);
+        if (isNaN(a) || isNaN(b)) return false;
+        if (op === 'gt') return a > b;
+        if (op === 'gte') return a >= b;
+        if (op === 'lt') return a < b;
+        if (op === 'lte') return a <= b;
+        return true;
+    }
+    // In the editor a conditional layer stays visible+editable, but is marked when it
+    // wouldn't render for the current sample title (the burn respects the rule).
+    function markConditional(node, l) {
+        node.classList.toggle('voe-layer--cond', !!(l.when && l.when.field) && !whenPasses(l, ed.sample));
+    }
+
     function refreshLayer(id) {
         if (!ed.stage) return;
         var node = ed.stage.querySelector('.voe-layer[data-voe-layer="' + id + '"]');
         var l = layerById(id);
-        if (node && l) { styleLayerEl(node, l); layoutLayer(node, l); }
+        if (node && l) { styleLayerEl(node, l); layoutLayer(node, l); markConditional(node, l); }
         if (id === ed.selected) updateSelBox();
     }
     function updateRowName(id) {
@@ -1907,8 +1934,26 @@
                         : '')
                     : ''));
         }
+        html += visibilitySection(l);
         box.innerHTML = html;
         wireInspector(l);
+    }
+    // "Show only when" rule builder — on any standard layer.
+    function visibilitySection(l) {
+        var w = l.when || {}, on = !!(l.when && l.when.field);
+        var fieldSel = '<select class="voe-input" data-inspsel="condField">' + FIELD_ORDER.map(function (k) {
+            return '<option value="' + k + '"' + (k === w.field ? ' selected' : '') + '>' + esc(FIELDS[k].label) + '</option>';
+        }).join('') + '</select>';
+        var ops = [['exists', 'has any value'], ['eq', 'is'], ['neq', 'is not'], ['gte', '≥'], ['gt', '>'], ['lte', '≤'], ['lt', '<'], ['contains', 'contains']];
+        var opSel = '<select class="voe-input" data-inspsel="condOp">' + ops.map(function (o) {
+            return '<option value="' + o[0] + '"' + (o[0] === (w.op || 'exists') ? ' selected' : '') + '>' + o[1] + '</option>';
+        }).join('') + '</select>';
+        return inspSection('Show only when',
+            field('Rule', toggle('condOn', on)) +
+            (on
+                ? field('Field', fieldSel) + field('Is', opSel) +
+                  ((w.op && w.op !== 'exists') ? field('Value', '<input class="voe-input" data-condval value="' + esc(w.value != null ? w.value : '') + '" spellcheck="false">') : '')
+                : ''));
     }
 
     function setNum(l, key, num) {
@@ -1988,6 +2033,10 @@
         if (ta) ta.addEventListener('input', function () {
             l.text = ta.value; refreshLayer(l.id); updateRowName(l.id); markDirty();
         });
+        var cval = box.querySelector('[data-condval]');
+        if (cval) cval.addEventListener('input', function () {
+            (l.when = l.when || {}).value = cval.value; refreshLayer(l.id); markDirty();
+        });
         var bind = box.querySelector('[data-inspbind]');
         if (bind) bind.addEventListener('change', function () {
             l.binding.field = bind.value; l.name = FIELDS[bind.value].label;
@@ -2020,9 +2069,11 @@
                 else if (key === 'rowWeight') l.style.weight = parseInt(sel.value, 10);
                 else if (key === 'weight') l.weight = parseInt(sel.value, 10);
                 else if (key === 'ratingField') l.field = sel.value;
+                else if (key === 'condField') (l.when = l.when || {}).field = sel.value;
+                else if (key === 'condOp') (l.when = l.when || {}).op = sel.value;
                 else l[key] = sel.value;
                 refreshLayer(l.id);
-                if (key === 'ratingField') renderInspector();   // update the "Shows" preview
+                if (key === 'ratingField' || key === 'condOp') renderInspector();   // update preview / reveal value field
                 markDirty();
             });
         });
@@ -2090,12 +2141,13 @@
                 else if (key === 'fillGrad') l.fill.grad = !l.fill.grad;
                 else if (key === 'borderEnabled') l.border.enabled = !l.border.enabled;
                 else if (key === 'grayscale') l.grayscale = !l.grayscale;
+                else if (key === 'condOn') l.when = (l.when && l.when.field) ? null : { field: (l.binding ? l.binding.field : 'resolution'), op: 'exists', value: '' };
                 else if (key === 'rowShadow') l.style.shadow = !l.style.shadow;
                 else if (key === 'rowBgEnabled') l.style.bg.enabled = !l.style.bg.enabled;
                 else if (key === 'rowStrokeEnabled') l.style.stroke.enabled = !l.style.stroke.enabled;
                 t.classList.toggle('voe-toggle--on');
                 refreshLayer(l.id); markDirty();
-                if (['bgEnabled', 'fillGrad', 'strokeEnabled', 'rowBgEnabled', 'rowStrokeEnabled', 'shadow', 'rowShadow', 'borderEnabled'].indexOf(key) > -1) renderInspector();   // reveal/hide sub-fields
+                if (['bgEnabled', 'fillGrad', 'strokeEnabled', 'rowBgEnabled', 'rowStrokeEnabled', 'shadow', 'rowShadow', 'borderEnabled', 'condOn'].indexOf(key) > -1) renderInspector();   // reveal/hide sub-fields
             });
         });
         box.querySelectorAll('[data-anchor]').forEach(function (cell) {
@@ -2197,7 +2249,7 @@
         // Anything that reads sample data must re-render when the sample title changes:
         // bound badges, the title logo, AND badge rows (their pills are all data-bound).
         ed.layers.forEach(function (l) {
-            if (l.binding || l.type === 'row' || l.type === 'rating' || (l.type === 'image' && l.logo)) refreshLayer(l.id);
+            if (l.binding || l.type === 'row' || l.type === 'rating' || (l.type === 'image' && l.logo) || (l.when && l.when.field)) refreshLayer(l.id);
         });
         if (ed.selected) { var s = layerById(ed.selected); if (s && (s.binding || s.type === 'row' || s.type === 'rating')) renderInspector(); }
     }
