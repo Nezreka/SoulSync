@@ -786,7 +786,7 @@
         if (kind === 'row') {
             return { id: uid(), type: 'row', name: 'Badge row', anchor: 'bottom-left',
                 x: 0.06, y: 0.94, hidden: false, opacity: 1, rotation: 0, gap: 0.014,
-                fields: ['resolution', 'hdr', 'audio_codec'],
+                fields: ['resolution', 'video_codec', 'audio_codec'],   // all backed by real per-title data
                 style: { size: 0.036, color: '#ffffff', font: 'Inter', weight: 800, shadow: false,
                     stroke: { enabled: false, color: '#000000', w: 0.08 },
                     bg: { enabled: true, color: '#000000', opacity: 0.72, radius: 0.02, padX: 0.03, padY: 0.016 } } };
@@ -1957,8 +1957,12 @@
 
     // ── preview poster + sample data (dynamic-badge preview) ────────────────────
     function refreshBoundLayers() {
-        ed.layers.forEach(function (l) { if (l.binding || (l.type === 'image' && l.logo)) refreshLayer(l.id); });
-        if (ed.selected) { var s = layerById(ed.selected); if (s && s.binding) renderInspector(); }
+        // Anything that reads sample data must re-render when the sample title changes:
+        // bound badges, the title logo, AND badge rows (their pills are all data-bound).
+        ed.layers.forEach(function (l) {
+            if (l.binding || l.type === 'row' || (l.type === 'image' && l.logo)) refreshLayer(l.id);
+        });
+        if (ed.selected) { var s = layerById(ed.selected); if (s && (s.binding || s.type === 'row')) renderInspector(); }
     }
 
     var openPop = null;
