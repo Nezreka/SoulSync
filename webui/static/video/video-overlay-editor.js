@@ -139,6 +139,7 @@
         logo: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 7v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V7M9 12h6"/></svg>',
         shape: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="12" rx="2"/></svg>',
         scrim: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 14h18" opacity=".5"/><path d="M3 17h18" opacity=".8"/></svg>',
+        row: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="9" width="6" height="6" rx="1.5"/><rect x="9.5" y="9" width="5" height="6" rx="1.5"/><rect x="16" y="9" width="6" height="6" rx="1.5"/></svg>',
     };
     function catIcon(cat) { return cat === 'Ratings' ? I.star : cat === 'Quality' ? I.badge : I.info; }
 
@@ -496,6 +497,26 @@
             l.fill.c2 = l.fill.c2 || '#000000'; if (typeof l.fill.a2 !== 'number') l.fill.a2 = 0;
             if (typeof l.fill.dir !== 'number') l.fill.dir = 180;
         }
+        if (l.type === 'row') {
+            if (typeof l.gap !== 'number') l.gap = 0.014;
+            if (!Array.isArray(l.fields)) l.fields = [];
+            l.fields = l.fields.filter(function (f) { return FIELDS[f]; });
+            var s = l.style = l.style || {};
+            if (typeof s.size !== 'number') s.size = 0.036;
+            s.color = s.color || '#ffffff';
+            s.font = s.font || 'Inter';
+            if (typeof s.weight !== 'number') s.weight = 800;
+            if (typeof s.shadow !== 'boolean') s.shadow = false;
+            s.stroke = s.stroke || {}; s.stroke.enabled = !!s.stroke.enabled;
+            s.stroke.color = s.stroke.color || '#000000';
+            if (typeof s.stroke.w !== 'number') s.stroke.w = 0.08;
+            s.bg = s.bg || {}; s.bg.enabled = s.bg.enabled !== false;   // pill on by default
+            s.bg.color = s.bg.color || '#000000';
+            if (typeof s.bg.opacity !== 'number') s.bg.opacity = 0.72;
+            if (typeof s.bg.radius !== 'number') s.bg.radius = 0.02;
+            if (typeof s.bg.padX !== 'number') s.bg.padX = 0.03;
+            if (typeof s.bg.padY !== 'number') s.bg.padY = 0.016;
+        }
         if (l.type === 'text') {
             if (l.text == null) l.text = 'Text';
             if (typeof l.size !== 'number') l.size = 0.06;
@@ -694,7 +715,7 @@
     // ── palette (Text + dynamic data badges grouped by category) ────────────────
     function paletteHTML() {
         var html = '<div class="voe-pal-section"><div class="voe-pal-h">Basics</div><div class="voe-pal-grid">' +
-            palItem('text', 'Text', I.text, '') + '</div></div>';
+            palItem('text', 'Text', I.text, '') + palItem('row', 'Badge row', I.row, '') + '</div></div>';
         FIELD_CATS.forEach(function (cat) {
             var items = FIELD_ORDER.filter(function (k) { return FIELDS[k].cat === cat; });
             html += '<div class="voe-pal-section"><div class="voe-pal-h">' + cat + '</div><div class="voe-pal-grid">' +
@@ -727,6 +748,14 @@
     // All layers are text under the hood; a `binding` makes one a dynamic badge, so
     // every text/pill style control applies to badges too.
     function defaultLayer(kind, x, y, field) {
+        if (kind === 'row') {
+            return { id: uid(), type: 'row', name: 'Badge row', anchor: 'bottom-left',
+                x: 0.06, y: 0.94, hidden: false, opacity: 1, rotation: 0, gap: 0.014,
+                fields: ['resolution', 'hdr', 'audio_codec'],
+                style: { size: 0.036, color: '#ffffff', font: 'Inter', weight: 800, shadow: false,
+                    stroke: { enabled: false, color: '#000000', w: 0.08 },
+                    bg: { enabled: true, color: '#000000', opacity: 0.72, radius: 0.02, padX: 0.03, padY: 0.016 } } };
+        }
         var base = { id: uid(), type: 'text', anchor: 'center', x: x, y: y, hidden: false, opacity: 1,
             text: 'New Text', size: 0.06, color: '#ffffff', font: 'Inter', weight: 800, align: 'center', shadow: true,
             stroke: { enabled: false, color: '#000000', w: 0.08 },
@@ -861,9 +890,57 @@
         return c.measureText(text).width;
     }
 
+    // Style one badge element inside a row from the row's shared style object.
+    function styleBadgeEl(el, s, text) {
+        var fpx = (s.size || 0.036) * ed.H;
+        el.textContent = text;
+        el.style.whiteSpace = 'nowrap';
+        el.style.lineHeight = '1.05';
+        el.style.color = s.color || '#ffffff';
+        el.style.fontFamily = fontStack(s.font);
+        el.style.fontWeight = s.weight || 800;
+        el.style.fontSize = fpx + 'px';
+        el.style.textShadow = s.shadow ? '0 0.12em 0.3em rgba(0,0,0,.55)' : 'none';
+        var st = s.stroke || {};
+        if (st.enabled && st.w > 0) {
+            el.style.webkitTextStrokeWidth = (st.w * fpx) + 'px';
+            el.style.webkitTextStrokeColor = st.color;
+            el.style.paintOrder = 'stroke fill';
+        }
+        var bg = s.bg || {};
+        if (bg.enabled) {
+            el.style.background = hexToRgba(bg.color, bg.opacity);
+            el.style.padding = (bg.padY * ed.H) + 'px ' + (bg.padX * ed.H) + 'px';
+            el.style.borderRadius = (bg.radius * ed.H) + 'px';
+        }
+    }
+
     function styleLayerEl(el, l) {
         el.style.opacity = (l.opacity != null ? l.opacity : 1);
         el.style.transform = l.rotation ? 'rotate(' + l.rotation + 'deg)' : '';
+        if (l.type === 'row') {
+            el.classList.add('voe-layer-rowbar');
+            el.style.display = 'flex';
+            el.style.alignItems = 'center';
+            el.style.gap = (l.gap * ed.W) + 'px';
+            el.innerHTML = '';
+            var rs = l.style || {};
+            (l.fields || []).forEach(function (f) {
+                var fmt = FIELDS[f] && FIELDS[f].fmt;
+                var val = fmt ? fmt((ed.sample || {})[f]) : null;
+                if (val == null || val === '') return;   // no value → skip (this is the reflow)
+                var pill = document.createElement('div');
+                styleBadgeEl(pill, rs, String(val));
+                el.appendChild(pill);
+            });
+            if (!el.children.length) {
+                var ph = document.createElement('div');
+                ph.className = 'voe-rowbar-empty';
+                ph.textContent = 'Badge row (no values)';
+                el.appendChild(ph);
+            }
+            return;
+        }
         el.style.transformOrigin = 'center';
         if (l.type === 'image') {
             el.style.width = (l.w * ed.W) + 'px'; el.style.height = 'auto';
@@ -1077,11 +1154,12 @@
     function startHandleResize(e, l, node) {
         var c = _layerCenter(node), p0 = _stagePt(e);
         var d0 = Math.max(4, Math.hypot(p0.x - c.cx, p0.y - c.cy));
-        var base = { size: l.size, w: l.w, h: l.h }, moved = false;
+        var base = { size: (l.type === 'row' ? (l.style && l.style.size) : l.size), w: l.w, h: l.h }, moved = false;
         function move(ev) {
             moved = true;
             var p = _stagePt(ev), scale = Math.max(0.05, Math.hypot(p.x - c.cx, p.y - c.cy) / d0);
             if (l.type === 'text') l.size = Math.max(0.008, base.size * scale);
+            else if (l.type === 'row') l.style.size = Math.max(0.008, base.size * scale);
             else if (l.type === 'image') l.w = clamp01(base.w * scale);
             else if (l.type === 'shape') { l.w = clamp01(base.w * scale); l.h = clamp01(base.h * scale); }
             refreshLayer(l.id); updateSelBox(); syncInspectorSize(l);
@@ -1109,6 +1187,7 @@
         var box = overlay && overlay.querySelector('[data-voe-inspector]'); if (!box) return;
         function set(key, val) { var i = box.querySelector('[data-insp="' + key + '"]'); if (i && document.activeElement !== i) i.value = pct(val); }
         if (l.type === 'text') set('size', l.size);
+        else if (l.type === 'row') set('rowSize', l.style.size);
         else if (l.type === 'image') set('w', l.w);
         else if (l.type === 'shape') { set('w', l.w); set('h', l.h); }
     }
@@ -1155,6 +1234,7 @@
 
     // ── layers panel (scene list) ───────────────────────────────────────────────
     function layerIcon(l) {
+        if (l.type === 'row') return I.row;
         if (l.binding) return catIcon((FIELDS[l.binding.field] || {}).cat);
         if (l.type === 'image') return l.logo ? I.logo : I.image;
         if (l.type === 'shape') return I.shape;
@@ -1162,6 +1242,7 @@
     }
     function layerName(l) {
         if (l.name) return l.name;
+        if (l.type === 'row') return 'Badge row';
         if (l.binding) return (FIELDS[l.binding.field] || {}).label;
         if (l.type === 'image') return l.logo ? 'Logo' : 'Image';
         if (l.type === 'shape') return 'Shape';
@@ -1296,13 +1377,13 @@
         return '<input class="voe-slider" type="range" min="0" max="100" data-insp="' + key + '" value="' + val + '">' +
             '<span class="voe-unit" data-insp-val="' + key + '">' + val + '%</span>';
     }
-    function fontSelect(cur) {
-        return '<select class="voe-input" data-inspsel="font">' + FONTS.map(function (f) {
+    function fontSelect(cur, key) {
+        return '<select class="voe-input" data-inspsel="' + (key || 'font') + '">' + FONTS.map(function (f) {
             return '<option value="' + f.id + '"' + (f.id === cur ? ' selected' : '') + '>' + esc(f.label) + '</option>';
         }).join('') + '</select>';
     }
-    function weightSelect(cur) {
-        return '<select class="voe-input" data-inspsel="weight">' + WEIGHTS.map(function (w) {
+    function weightSelect(cur, key) {
+        return '<select class="voe-input" data-inspsel="' + (key || 'weight') + '">' + WEIGHTS.map(function (w) {
             return '<option value="' + w[0] + '"' + (w[0] === cur ? ' selected' : '') + '>' + w[1] + '</option>';
         }).join('') + '</select>';
     }
@@ -1347,6 +1428,25 @@
             '</div>');
     }
 
+    // Badge-row field manager: chips (remove + nudge left to reorder) + an add picker.
+    function rowBadgesUI(l) {
+        var chips = (l.fields || []).map(function (f, i) {
+            return '<span class="voe-rowchip">' +
+                '<button class="voe-rowchip-mv" data-rowmv="' + i + '" title="Move left"' + (i === 0 ? ' disabled' : '') + '>‹</button>' +
+                '<span class="voe-rowchip-t">' + esc((FIELDS[f] || {}).label || f) + '</span>' +
+                '<button class="voe-rowchip-x" data-rowrm="' + i + '" title="Remove">&times;</button></span>';
+        }).join('');
+        var avail = FIELD_ORDER.filter(function (f) { return (l.fields || []).indexOf(f) === -1; });
+        var addSel = '<select class="voe-input voe-rowadd" data-rowadd><option value="">+ Add badge…</option>' +
+            FIELD_CATS.map(function (cat) {
+                var items = avail.filter(function (k) { return FIELDS[k].cat === cat; });
+                return items.length ? '<optgroup label="' + cat + '">' + items.map(function (k) {
+                    return '<option value="' + k + '">' + esc(FIELDS[k].label) + '</option>';
+                }).join('') + '</optgroup>' : '';
+            }).join('') + '</select>';
+        return '<div class="voe-rowchips">' + (chips || '<span class="voe-insp-hint">No badges — add one below.</span>') + '</div>' + addSel;
+    }
+
     function renderInspector() {
         var box = overlay && overlay.querySelector('[data-voe-inspector]');
         if (!box) return;
@@ -1361,6 +1461,7 @@
         if (l.type === 'text') sizeCtrl = field('Size', numInput('size', pct(l.size), '%'));
         else if (l.type === 'image') sizeCtrl = field('Width', numInput('w', pct(l.w), '%'));
         else if (l.type === 'shape') sizeCtrl = row2(field('Width', numInput('w', pct(l.w), '%')), field('Height', numInput('h', pct(l.h), '%')));
+        else if (l.type === 'row') sizeCtrl = row2(field('Badge size', numInput('rowSize', pct(l.style.size), '%')), field('Gap', numInput('gap', pct(l.gap), '%')));
         var html = inspSection('Transform',
             placeGrid(l) +
             anchorGrid(l) +
@@ -1368,6 +1469,27 @@
             sizeCtrl +
             row2(field('Rotate', numInput('rotation', l.rotation || 0, '°')),
                  field('Opacity', sliderInput('opacity', Math.round(l.opacity * 100)))));
+        if (l.type === 'row') {
+            html += inspSection('Badges', rowBadgesUI(l));
+            var rst = l.style;
+            html += inspSection('Badge style',
+                field('Text', colorField('rowColor', rst.color)) +
+                field('Font', fontSelect(rst.font, 'rowFont')) +
+                field('Weight', weightSelect(rst.weight, 'rowWeight')) +
+                field('Shadow', toggle('rowShadow', rst.shadow)) +
+                field('Outline', toggle('rowStrokeEnabled', rst.stroke.enabled)) +
+                (rst.stroke.enabled
+                    ? field('Color', colorField('rowStrokeColor', rst.stroke.color)) +
+                      field('Width', numInput('rowStrokeW', pct(rst.stroke.w), '%'))
+                    : '') +
+                field('Pill', toggle('rowBgEnabled', rst.bg.enabled)) +
+                (rst.bg.enabled
+                    ? field('Color', colorField('rowBgColor', rst.bg.color)) +
+                      field('Fill', sliderInput('rowBgOpacity', Math.round(rst.bg.opacity * 100))) +
+                      field('Radius', numInput('rowRadius', pct(rst.bg.radius), '%')) +
+                      row2(field('Pad X', numInput('rowPadX', pct(rst.bg.padX), '%')), field('Pad Y', numInput('rowPadY', pct(rst.bg.padY), '%')))
+                    : ''));
+        }
         if (l.type === 'text') {
             if (l.binding) {
                 html += inspSection('Data',
@@ -1431,6 +1553,13 @@
         else if (key === 'bgPadY') l.bg.padY = Math.max(0, num / 100);
         else if (key === 'strokeW') l.stroke.w = Math.max(0, num / 100);
         else if (key === 'maxW') l.maxW = Math.max(0, num / 100);
+        else if (key === 'gap') l.gap = Math.max(0, num / 100);
+        else if (key === 'rowSize') l.style.size = Math.max(0.008, num / 100);
+        else if (key === 'rowBgOpacity') l.style.bg.opacity = clamp01(num / 100);
+        else if (key === 'rowRadius') l.style.bg.radius = Math.max(0, num / 100);
+        else if (key === 'rowPadX') l.style.bg.padX = Math.max(0, num / 100);
+        else if (key === 'rowPadY') l.style.bg.padY = Math.max(0, num / 100);
+        else if (key === 'rowStrokeW') l.style.stroke.w = Math.max(0, num / 100);
         else if (key === 'w') l.w = Math.max(0.02, num / 100);
         else if (key === 'h') l.h = Math.max(0.02, num / 100);
         else if (key === 'radius') l.radius = Math.max(0, num / 100);
@@ -1442,6 +1571,9 @@
         if (key === 'color') l.color = val;
         else if (key === 'bgColor') l.bg.color = val;
         else if (key === 'strokeColor') l.stroke.color = val;
+        else if (key === 'rowColor') l.style.color = val;
+        else if (key === 'rowBgColor') l.style.bg.color = val;
+        else if (key === 'rowStrokeColor') l.style.stroke.color = val;
         else if (key === 'fillC1') l.fill.c1 = val;
         else if (key === 'fillC2') l.fill.c2 = val;
     }
@@ -1493,9 +1625,32 @@
         box.querySelectorAll('[data-inspsel]').forEach(function (sel) {
             var key = sel.getAttribute('data-inspsel');
             sel.addEventListener('change', function () {
-                if (key === 'weight') l.weight = parseInt(sel.value, 10); else l[key] = sel.value;
+                if (key === 'rowFont') l.style.font = sel.value;
+                else if (key === 'rowWeight') l.style.weight = parseInt(sel.value, 10);
+                else if (key === 'weight') l.weight = parseInt(sel.value, 10);
+                else l[key] = sel.value;
                 refreshLayer(l.id); markDirty();
             });
+        });
+        box.querySelectorAll('[data-rowrm]').forEach(function (b) {
+            b.addEventListener('click', function (e) {
+                e.stopPropagation();
+                l.fields.splice(parseInt(b.getAttribute('data-rowrm'), 10), 1);
+                refreshLayer(l.id); markDirty(); renderInspector();
+            });
+        });
+        box.querySelectorAll('[data-rowmv]').forEach(function (b) {
+            b.addEventListener('click', function () {
+                var i = parseInt(b.getAttribute('data-rowmv'), 10);
+                if (i > 0) {
+                    var t = l.fields[i - 1]; l.fields[i - 1] = l.fields[i]; l.fields[i] = t;
+                    refreshLayer(l.id); markDirty(); renderInspector();
+                }
+            });
+        });
+        var radd = box.querySelector('[data-rowadd]');
+        if (radd) radd.addEventListener('change', function () {
+            if (radd.value) { l.fields.push(radd.value); refreshLayer(l.id); markDirty(); renderInspector(); }
         });
         box.querySelectorAll('[data-place]').forEach(function (cell) {
             cell.addEventListener('click', function () { placeAt(cell.getAttribute('data-place')); });
@@ -1537,9 +1692,12 @@
                 else if (key === 'bgEnabled') l.bg.enabled = !l.bg.enabled;
                 else if (key === 'strokeEnabled') l.stroke.enabled = !l.stroke.enabled;
                 else if (key === 'fillGrad') l.fill.grad = !l.fill.grad;
+                else if (key === 'rowShadow') l.style.shadow = !l.style.shadow;
+                else if (key === 'rowBgEnabled') l.style.bg.enabled = !l.style.bg.enabled;
+                else if (key === 'rowStrokeEnabled') l.style.stroke.enabled = !l.style.stroke.enabled;
                 t.classList.toggle('voe-toggle--on');
                 refreshLayer(l.id); markDirty();
-                if (key === 'bgEnabled' || key === 'fillGrad' || key === 'strokeEnabled') renderInspector();   // reveal/hide sub-fields
+                if (['bgEnabled', 'fillGrad', 'strokeEnabled', 'rowBgEnabled', 'rowStrokeEnabled'].indexOf(key) > -1) renderInspector();   // reveal/hide sub-fields
             });
         });
         box.querySelectorAll('[data-anchor]').forEach(function (cell) {

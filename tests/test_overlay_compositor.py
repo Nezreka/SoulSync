@@ -156,6 +156,42 @@ def test_template_thumbnail_renders_valid_jpeg_with_sample_badges():
     assert max(sum(p) for p in top_right.getdata()) > 500
 
 
+def test_badge_row_reflows_and_stays_valid():
+    """A badge row renders its fields as a bar; a field with no value is SKIPPED so
+    the bar closes up (no hole). Fewer values → a narrower row tile."""
+    from core.video.overlays.compositor import _row_tile
+    style = {"size": 0.05, "color": "#fff", "font": "Inter", "weight": 800,
+             "bg": {"enabled": True, "color": "#000", "opacity": 1, "radius": 0.02, "padX": 0.03, "padY": 0.016}}
+    layer = {"type": "row", "gap": 0.02, "fields": ["resolution", "hdr", "audio_codec"], "style": style}
+    full = _row_tile(layer, 600, 900, {"resolution": "2160p", "hdr": "HDR", "audio_codec": "atmos"})
+    partial = _row_tile(layer, 600, 900, {"resolution": "2160p", "audio_codec": "atmos"})  # no HDR
+    assert full is not None and partial is not None
+    assert partial.width < full.width                    # the missing badge closed up
+    # all-empty → nothing to draw
+    assert _row_tile(layer, 600, 900, {}) is None
+
+
+def test_badge_row_children_are_level():
+    """Every badge in a row shares the style → equal (content-independent) heights →
+    the row tile height equals a single badge's height (they sit on one line)."""
+    from core.video.overlays.compositor import _row_tile, _text_tile
+    style = {"size": 0.05, "color": "#fff", "font": "Inter", "weight": 800}
+    layer = {"type": "row", "gap": 0.02, "fields": ["resolution", "audio_codec"], "style": style}
+    row = _row_tile(layer, 600, 900, {"resolution": "1080p", "audio_codec": "atmos"})
+    one = _text_tile({**style, "type": "text", "binding": {"field": "resolution"}}, 600, 900, {"resolution": "1080p"})
+    assert row.height == one.height
+
+
+def test_badge_row_renders_in_full_composite():
+    base = _poster(color=(0, 0, 0), size=(600, 900))
+    layer = {"type": "row", "anchor": "bottom-left", "x": 0.06, "y": 0.94, "opacity": 1, "gap": 0.02,
+             "fields": ["resolution"], "style": {"size": 0.06, "color": "#ffffff", "font": "Inter", "weight": 800,
+             "bg": {"enabled": True, "color": "#ffffff", "opacity": 1, "radius": 0.02, "padX": 0.03, "padY": 0.02}}}
+    img = _open(render_overlay(base, {"layers": [layer]}, {"resolution": "2160p"}))
+    # bottom-left white pill painted
+    assert max(sum(p) for p in img.crop((0, 800, 200, 900)).getdata()) > 600
+
+
 def test_maxw_shrinks_long_text_to_fit():
     """A long title must shrink to stay within maxW·W (no overflow off the poster).
     Without maxW it renders full width; with maxW its tile is capped."""

@@ -216,10 +216,39 @@ def _shape_tile(layer, W, H):
     return tile
 
 
+def _row_tile(layer, W, H, values):
+    """Auto-layout badge row: render each bound field as a badge in the row's shared
+    style, flow them left-to-right with a gap, and SKIP any field with no value so the
+    bar closes up (no holes). All badges share a style → equal content-independent
+    heights → they're level; centre them vertically for safety."""
+    style = layer.get("style") or {}
+    gap = int(round(_as_float(layer.get("gap"), 0.014) * W))
+    tiles = []
+    for f in (layer.get("fields") or []):
+        child = dict(style)
+        child["type"] = "text"
+        child["binding"] = {"field": f}
+        t = _text_tile(child, W, H, values)
+        if t is not None:
+            tiles.append(t)
+    if not tiles:
+        return None
+    total_w = sum(t.width for t in tiles) + gap * (len(tiles) - 1)
+    max_h = max(t.height for t in tiles)
+    out = Image.new("RGBA", (max(1, total_w), max(1, max_h)), (0, 0, 0, 0))
+    x = 0
+    for t in tiles:
+        out.alpha_composite(t, (x, (max_h - t.height) // 2))
+        x += t.width + gap
+    return out
+
+
 def _tile_for(layer, W, H, values, image_loader):
     kind = layer.get("type")
     if kind == "text":
         return _text_tile(layer, W, H, values)
+    if kind == "row":
+        return _row_tile(layer, W, H, values)
     if kind == "image":
         return _image_tile(layer, W, H, values, image_loader)
     if kind == "shape":
