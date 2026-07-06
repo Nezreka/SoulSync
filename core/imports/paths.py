@@ -539,6 +539,14 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
                     _album_artist_name = _first_sa
                 _album_artists_for_collab = _sa_artists
 
+        # #989: an iTunes single's collection carries a placeholder album artist
+        # ("Unknown Artist") — or none — while the track artist ($artist) is real.
+        # Don't let that bury the file under "Unknown Artist"; fall back to the real
+        # track artist so $albumartist matches $artist.
+        if (not _album_artist_name or _album_artist_name == "Unknown Artist") and \
+                _artist_name and _artist_name != "Unknown Artist":
+            _album_artist_name = _artist_name
+
         template_context = {
             "artist": _artist_name,
             "albumartist": _album_artist_name,

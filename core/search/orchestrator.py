@@ -150,6 +150,21 @@ def _single_source_response(
 ) -> dict:
     """Run a single-source search — bypasses the fan-out."""
     client, available = resolve_client(requested_source, deps)
+
+    # Explicit Spotify pick that the normal gate rejected (no auth, and 'Spotify
+    # Free' isn't the chosen metadata source). If the no-creds SpotipyFree package
+    # is installed, honor the deliberate selection via the free source instead of
+    # returning nothing — the explicit per-search pick is the user's consent, and
+    # this stays out of every background/fan-out path (which never reaches here).
+    prefer_free = False
+    if not client and requested_source == 'spotify' and deps.spotify_client:
+        try:
+            if deps.spotify_client._free_installed():
+                client = deps.spotify_client
+                prefer_free = True
+        except Exception as e:
+            logger.debug(f"Spotify free-fallback availability check failed: {e}")
+
     if not client:
         return {
             'db_artists': db_artists,
@@ -163,7 +178,7 @@ def _single_source_response(
         }
 
     try:
-        source_results = sources.search_source(query, client, requested_source)
+        source_results = sources.search_source(query, client, requested_source, prefer_free=prefer_free)
     except Exception as e:
         logger.warning(f"Single-source search ({requested_source}) failed: {e}")
         source_results = {'artists': [], 'albums': [], 'tracks': [], 'available': False}

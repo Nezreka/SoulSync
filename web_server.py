@@ -20,7 +20,7 @@ from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from core.webui.mimetypes_fix import ensure_web_mimetypes
+from core.webui.mimetypes_fix import corrected_script_content_type, ensure_web_mimetypes
 # Register correct web-asset MIME types before the app serves anything — a bad OS
 # registry (Windows: .js -> text/plain) otherwise blanks the module-loaded React
 # pages (Import/Stats) via strict module MIME checking. (#979)
@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "2.8.51"
+_SOULSYNC_BASE_VERSION = "2.8.6"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -647,6 +647,21 @@ def _log_slow_request(response):
     except Exception as e:
         logger.debug("slow request log failed: %s", e)
 
+    return response
+
+
+@app.after_request
+def _force_module_script_mimetype(response):
+    """#979/#986: force a valid JS Content-Type on .js/.mjs responses so the
+    React bundle's <script type="module"> is never refused (Import/Stats black
+    screen). HTTP-layer, so it doesn't depend on the OS mimetypes registry —
+    which is unreliable across Docker base images."""
+    try:
+        fixed = corrected_script_content_type(request.path, response.headers.get('Content-Type'))
+        if fixed:
+            response.headers['Content-Type'] = fixed
+    except Exception as e:
+        logger.debug("module-script mimetype fix failed: %s", e)
     return response
 
 
@@ -35988,6 +36003,10 @@ def mirror_playlist_endpoint():
             logger.debug("mirrored_playlist_created emit failed: %s", e)
 
         return jsonify({"success": True, "playlist_id": playlist_id})
+    except ValueError as ve:
+        # #990: malformed/all-empty track payload — a client error, not a 500.
+        logger.warning(f"mirror-playlist rejected: {ve}")
+        return jsonify({"error": str(ve)}), 400
     except Exception as e:
         logger.error(f"Error mirroring playlist: {e}")
         return jsonify({"error": str(e)}), 500
