@@ -473,3 +473,33 @@ def test_authed_official_nonempty_never_touches_free(monkeypatch):
     assert c.search_tracks('q', limit=5) == [('T', 'off1')]
     c._free_meta_client.search_tracks.assert_not_called()
     c._fallback.search_tracks.assert_not_called()
+
+
+def test_prefer_free_serves_when_not_authed_and_not_opted_in(monkeypatch):
+    # Boulder's case: no auth, and 'Spotify Free' isn't the chosen metadata source
+    # (free_available=False), so the normal gates are all shut. An explicit Spotify
+    # search pick passes prefer_free=True; with the package installed it must take
+    # the no-creds path. Differential: SAME client, only the flag changes.
+    c = _search_client([], [{'id': 'free1'}], free_available=False, monkeypatch=monkeypatch)
+    monkeypatch.setattr(SpotifyClient, 'is_spotify_authenticated', lambda self: False)
+    monkeypatch.setattr(SpotifyClient, '_free_installed', lambda self: True)
+
+    # Without the flag → no unofficial scraping, falls to iTunes exactly as before.
+    assert c.search_tracks('q', limit=5) == ['ITUNES']
+    c._free_meta_client.search_tracks.assert_not_called()
+
+    # With the flag (the explicit pick) → Free serves instead of a blank page.
+    c._free_meta_client.search_tracks.reset_mock()
+    assert c.search_tracks('q', limit=5, prefer_free=True) == [('T', 'free1')]
+    c._free_meta_client.search_tracks.assert_called_once()
+
+
+def test_prefer_free_inert_when_package_not_installed(monkeypatch):
+    # prefer_free must not conjure free out of nothing: package missing → it stays
+    # off and falls to iTunes (the orchestrator also guards on _free_installed, but
+    # the client is defensive too).
+    c = _search_client([], [{'id': 'free1'}], free_available=False, monkeypatch=monkeypatch)
+    monkeypatch.setattr(SpotifyClient, 'is_spotify_authenticated', lambda self: False)
+    monkeypatch.setattr(SpotifyClient, '_free_installed', lambda self: False)
+    assert c.search_tracks('q', limit=5, prefer_free=True) == ['ITUNES']
+    c._free_meta_client.search_tracks.assert_not_called()
