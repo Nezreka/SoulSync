@@ -111,7 +111,14 @@ def _search_albums_for_source(source: str, client: Any, query: str, limit: int =
 
 
 def _pick_best_artist_match(search_results: List[Any], artist_name: str) -> Optional[Any]:
-    """Prefer an exact artist-name match, otherwise use the first result."""
+    """Prefer an exact artist-name match, otherwise use the first result.
+
+    NOTE: intentionally loose — the only caller is the similar-artists / musicmap
+    enrichment, which resolves a suggestion name to a source's *canonical* entry
+    whose name legitimately differs (e.g. a Last.fm map name vs the source's
+    canonical spelling). The strict, name-gated matcher for looking up a KNOWN
+    artist's own discography/top-tracks lives in ``album_tracks`` (#988).
+    """
     if not search_results:
         return None
 
