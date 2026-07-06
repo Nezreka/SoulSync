@@ -3404,10 +3404,15 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Convention: keep only the CURRENT release here, plus a single brief
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '2.8.51': [
-        { date: 'July 2026 — 2.8.51 hotfix' },
-        { title: 'Watchlist artist settings no longer error on a fresh install (#983)', desc: 'on a brand-new database, opening a watchlist artist\'s settings could fail with "no such column: preferred_metadata_source" (a restart worked around it). the table was being rebuilt during first-run setup from a column list that dropped two newer columns; they survive the rebuild now, so it works from the first boot.', page: 'artists' },
-        { title: 'Earlier versions', desc: '2.8.5 was a fix batch: Import & Stats black screen (#979), iTunes singles landing in Unknown Artist (#980), a stray "01-" on single-disc albums (#981), cleanup deleting a configured root (#976), repair Fix All outside the transfer path (#978), and backfill overreaching past owned artists (#977). 2.8.4 added Artist Web + named Quality Profiles (#974); 2.8.3 rebuilt Discover with a real recommendation engine; 2.8.2 fixed the Spotify Docker boot hang (#949); 2.7.0 made multi-user real.' },
+    '2.8.6': [
+        { date: 'July 2026 — 2.8.6' },
+        { title: 'Spotify search works without a connected account', desc: 'picking "Spotify" as your search source now returns results even if you haven\'t connected an account — it uses the no-auth Spotify Free source. and if you are connected but the official search comes back empty, it falls back to Free instead of a blank page.', page: 'search' },
+        { title: 'Import & Stats black screen on Docker (#986)', desc: 'a follow-up to the 2.8.5 fix — some Docker setups still got a blank Import/Stats page because the JS module bundle was served with a non-JS content type. we now force the correct type at the HTTP layer, so the module scripts always run.', page: 'import' },
+        { title: 'Mirrored playlists can\'t be silently wiped anymore (#990)', desc: 'a wrong-shaped refresh could overwrite a mirror with thousands of empty rows and still report success. it now accepts the Spotify track shape directly and validates before deleting — a malformed payload is rejected and your existing mirror is left intact.', page: 'playlists' },
+        { title: 'Browsing an artist no longer shows a different artist\'s tracks (#988)', desc: 'a Deezer name-search was accepting the first result even on a poor name match, so e.g. The Outfield could show Beatles tracks. it now requires a real name match before using a result.', page: 'artists' },
+        { title: 'iTunes singles no longer land in "Unknown Artist" (#989)', desc: 'when a single\'s album-artist came back empty, the track could file and tag under "Unknown Artist"; it now falls back to the real track artist.', page: 'import' },
+        { title: 'Library Reorganize cleans up the folders it empties (#985)', desc: 'after moving files it left the old, now-empty disc/album folders behind; it prunes them now — safely, never climbing up to the artist or library root.', page: 'library' },
+        { title: 'Earlier versions', desc: '2.8.51 was a one-fix hotfix (#983 fresh-install watchlist settings). 2.8.5 was a fix batch: Import & Stats black screen (#979), iTunes singles landing in Unknown Artist (#980), a stray "01-" on single-disc albums (#981), cleanup deleting a configured root (#976), repair Fix All outside the transfer path (#978), and backfill overreaching past owned artists (#977). 2.8.4 added Artist Web + named Quality Profiles (#974); 2.8.3 rebuilt Discover with a real recommendation engine; 2.8.2 fixed the Spotify Docker boot hang (#949); 2.7.0 made multi-user real.' },
     ],
 };
 
@@ -3438,7 +3443,19 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "2.8.51 — hotfix",
+        title: "2.8.6 — fix batch",
+        description: "a focused fix release across search, import, library, and playlists.",
+        features: [
+            "Spotify search without a connected account — picking \"Spotify\" as your search source now works even if you haven't authenticated, using the no-auth Spotify Free source; and a connected account whose official search returns empty falls back to Free instead of a blank page",
+            "#986 — a follow-up to the 2.8.5 black-screen fix: some Docker setups still loaded Import & Stats blank because the JS module bundle was served with a non-JS content type. we force the correct type at the HTTP layer now, so the module scripts always run",
+            "#990 — a wrong-shaped playlist refresh could overwrite a mirror with thousands of empty rows and still report success; it accepts the Spotify track shape directly now and validates before deleting, so a malformed payload is rejected and your existing mirror is left intact",
+            "#988 — browsing an artist could surface a completely different artist's tracks (e.g. The Outfield showing Beatles) because a Deezer name-search accepted the first result on a poor match; it requires a real name match now",
+            "#989 — iTunes singles could file and tag under \"Unknown Artist\" when the album-artist came back empty; they fall back to the real track artist now",
+            "#985 — Library Reorganize left the old, now-empty disc/album folders behind after moving files; it prunes them now, safely (never climbing to the artist or library root)",
+        ],
+    },
+    {
+        title: "Earlier in 2.8.51",
         description: "a one-fix follow-up to 2.8.5.",
         features: [
             "#983 — on a fresh install, opening a watchlist artist's settings could fail with \"no such column: preferred_metadata_source\" (a restart worked around it). first-run setup was rebuilding the watchlist table from a column list that dropped two newer columns; they survive now, so it works from the first boot",
