@@ -15196,6 +15196,32 @@ class MusicDatabase:
     def mirror_playlist(self, source: str, source_playlist_id: str, name: str,
                         tracks: List[Dict], profile_id: int = 1, **kwargs) -> Optional[int]:
         """Upsert a mirrored playlist and replace all its tracks."""
+        from core.playlists.source_refs import coalesce_mirror_track, stable_source_track_id
+
+        # #990: accept mirror-shaped AND Spotify-shaped tracks (the GET playlist
+        # endpoints return the Spotify shape, which users feed straight back in).
+        tracks = [coalesce_mirror_track(t) for t in (tracks or [])]
+
+        # #990: refuse to REPLACE an existing mirror with an all-empty payload — a
+        # wrong-shaped POST once silently rewrote 21k rows to empty strings and
+        # returned success, breaking sync and hammering Deezer for days. A payload
+        # where every track has neither a name nor an id is unambiguously malformed
+        # (a real playlist always has named tracks); reject it BEFORE any DB write so
+        # the existing mirror is preserved.
+        empty = sum(1 for t in tracks
+                    if not str(t.get("track_name", "")).strip() and not stable_source_track_id(t))
+        if tracks and empty == len(tracks):
+            raise ValueError(
+                f"Refusing to mirror '{name}': all {len(tracks)} tracks are empty after "
+                "mapping (no track_name and no id) — the payload looks malformed. Expected "
+                "mirror-shaped tracks (track_name, artist_name, album_name, source_track_id); "
+                "Spotify-shaped (name, artists, album, id) is also accepted."
+            )
+        if empty:
+            logger.warning(
+                "[Mirror] %s/%d of tracks for playlist '%s' have no name/id — stored anyway",
+                empty, len(tracks), name)
+
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()

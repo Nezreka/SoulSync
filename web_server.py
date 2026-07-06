@@ -36003,6 +36003,10 @@ def mirror_playlist_endpoint():
             logger.debug("mirrored_playlist_created emit failed: %s", e)
 
         return jsonify({"success": True, "playlist_id": playlist_id})
+    except ValueError as ve:
+        # #990: malformed/all-empty track payload — a client error, not a 500.
+        logger.warning(f"mirror-playlist rejected: {ve}")
+        return jsonify({"error": str(ve)}), 400
     except Exception as e:
         logger.error(f"Error mirroring playlist: {e}")
         return jsonify({"error": str(e)}), 500

@@ -1,3 +1,5 @@
+import pytest
+
 from database.music_database import MusicDatabase
 
 
@@ -125,3 +127,48 @@ def test_backfill_leaves_native_ids_untouched(tmp_path):
     db._backfill_mirrored_track_source_ids()
     rows = db.get_mirrored_playlist_tracks(pid)
     assert rows[0]["source_track_id"] == "spotify123"
+
+
+# ── #990: accept the Spotify shape + reject all-empty (silent 21k-empty-rows bug) ──
+def test_mirror_accepts_spotify_shaped_tracks(tmp_path):
+    """The GET playlist endpoints return Spotify-shaped tracks; feeding them straight
+    back must map cleanly instead of storing empty rows."""
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    spotify_tracks = [{
+        "name": "Because of You", "artists": [{"name": "Ne-Yo"}],
+        "album": {"name": "Because of You"}, "id": "sp_track_1", "duration_ms": 217000,
+    }]
+    pid = db.mirror_playlist(source="spotify", source_playlist_id="liked", name="Liked",
+                             tracks=spotify_tracks, profile_id=1)
+    rows = db.get_mirrored_playlist_tracks(pid)
+    assert rows[0]["track_name"] == "Because of You"
+    assert rows[0]["artist_name"] == "Ne-Yo"
+    assert rows[0]["album_name"] == "Because of You"
+    assert rows[0]["source_track_id"] == "sp_track_1"
+    assert rows[0]["duration_ms"] == 217000
+
+
+def test_mirror_rejects_all_empty_payload_and_preserves_existing(tmp_path):
+    """A wrong-shaped payload where every track maps to empty must be rejected —
+    and must NOT wipe the existing mirror (the reported 21k-row disaster)."""
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    pid = db.mirror_playlist(source="spotify", source_playlist_id="liked", name="Liked",
+                             tracks=[{"track_name": "Real Song", "artist_name": "A", "source_track_id": "x1"}],
+                             profile_id=1)
+    with pytest.raises(ValueError):
+        db.mirror_playlist(source="spotify", source_playlist_id="liked", name="Liked",
+                           tracks=[{"duration_ms": 1000}, {"duration_ms": 2000}], profile_id=1)
+    rows = db.get_mirrored_playlist_tracks(pid)          # existing mirror untouched
+    assert len(rows) == 1 and rows[0]["track_name"] == "Real Song"
+
+
+def test_coalesce_mirror_track_shapes():
+    from core.playlists.source_refs import coalesce_mirror_track
+    sp = coalesce_mirror_track({"name": "T", "artists": [{"name": "A"}],
+                                "album": {"name": "Al"}, "id": 7, "duration_ms": 5})
+    assert (sp["track_name"], sp["artist_name"], sp["album_name"], sp["source_track_id"]) == ("T", "A", "Al", "7")
+    assert sp["duration_ms"] == 5                          # non-mapped keys preserved
+    m = {"track_name": "X", "artist_name": "Y", "album_name": "Z", "source_track_id": "id1"}
+    assert coalesce_mirror_track(m) == m                   # mirror shape untouched
+    s = coalesce_mirror_track({"name": "N", "artist": "Solo", "album": "AlbumStr"})
+    assert s["artist_name"] == "Solo" and s["album_name"] == "AlbumStr"

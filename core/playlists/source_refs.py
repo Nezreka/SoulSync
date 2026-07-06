@@ -48,6 +48,41 @@ def stable_source_track_id(track: Mapping, existing: Optional[str] = None) -> st
     digest = hashlib.md5(f"{artist}|{title}|{album}".encode("utf-8")).hexdigest()[:16]
     return f"file:{digest}"
 
+
+def coalesce_mirror_track(track: Mapping) -> dict:
+    """Normalize a track dict to the mirror shape, accepting the Spotify shape too.
+
+    The mirror stores ``track_name`` / ``artist_name`` / ``album_name`` /
+    ``source_track_id``. The GET playlist endpoints return Spotify-shaped tracks
+    (``name`` / ``artists[].name`` / ``album.name`` / ``id``) — and feeding those
+    straight back into the mirror wrote all-empty rows (#990), because the mapper
+    used ``t.get('track_name', '')`` with silent defaults. The two shapes are
+    unambiguous, so map the Spotify fields ONLY when the mirror key is absent;
+    everything else (duration_ms, image_url, extra_data, …) is preserved.
+    """
+    if not isinstance(track, Mapping):
+        return {}
+    out = dict(track)
+    if not out.get("track_name"):
+        out["track_name"] = track.get("name") or ""
+    if not out.get("artist_name"):
+        artists = track.get("artists")
+        if isinstance(artists, list) and artists:
+            first = artists[0]
+            out["artist_name"] = (first.get("name") if isinstance(first, Mapping) else str(first)) or ""
+        elif isinstance(track.get("artist"), str):
+            out["artist_name"] = track["artist"]
+    if not out.get("album_name"):
+        album = track.get("album")
+        if isinstance(album, Mapping):
+            out["album_name"] = album.get("name") or ""
+        elif isinstance(album, str):
+            out["album_name"] = album
+    if not out.get("source_track_id") and track.get("id"):
+        out["source_track_id"] = str(track["id"])
+    return out
+
+
 # Synthetic batch playlist_id prefixes that wrap a mirrored_playlists PK.
 # Download/discovery flows build a batch playlist_id as f"{prefix}{pk}" — e.g.
 # auto_mirror_<pk> (core/automation/handlers/sync_playlist.py), youtube_mirrored_<pk>
