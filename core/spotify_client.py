@@ -1569,11 +1569,17 @@ class SpotifyClient:
             return []
 
     @rate_limited
-    def search_tracks(self, query: str, limit: int = 10, allow_fallback: bool = True) -> List[Track]:
+    def search_tracks(self, query: str, limit: int = 10, allow_fallback: bool = True,
+                      prefer_free: bool = False) -> List[Track]:
         """Search for tracks.
 
         When allow_fallback is True, falls back to the configured metadata source
         if Spotify is unavailable or returns an error.
+
+        ``prefer_free`` forces the no-creds SpotipyFree path when the package is
+        installed, even without auth or the 'Spotify Free' source opt-in. The
+        orchestrator sets it only for an EXPLICIT per-search Spotify pick (a
+        deliberate user action = consent), so background flows are unaffected.
         """
         cache = get_metadata_cache()
         effective_limit = min(limit, 50)  # Spotify API max is 50
@@ -1595,7 +1601,7 @@ class SpotifyClient:
         # (no-auth / rate-limited — where auth is already False — plus the
         # budget-bridge and the worker's prefer-free opt-in, where auth is True
         # but we deliberately defer to free). The free branch below then runs.
-        use_spotify = self.is_spotify_authenticated() and not self._free_active()
+        use_spotify = self.is_spotify_authenticated() and not self._free_active() and not prefer_free
 
         if use_spotify:
             try:
@@ -1629,7 +1635,8 @@ class SpotifyClient:
         # Free should serve (no-auth / rate-limited / budget / worker prefer-free) OR
         # when it's simply available (opted-in) and official above returned nothing —
         # so an authed-but-broken official Spotify falls back to Free instead of empty.
-        if allow_fallback and (self._free_active() or self._free_available()):
+        if allow_fallback and (self._free_active() or self._free_available()
+                               or (prefer_free and self._free_installed())):
             try:
                 objs = [Track.from_spotify_track(t)
                         for t in self._free_meta.search_tracks(query, effective_limit)]
@@ -1645,11 +1652,14 @@ class SpotifyClient:
         return []
 
     @rate_limited
-    def search_artists(self, query: str, limit: int = 10, allow_fallback: bool = True) -> List[Artist]:
+    def search_artists(self, query: str, limit: int = 10, allow_fallback: bool = True,
+                       prefer_free: bool = False) -> List[Artist]:
         """Search for artists.
 
         When allow_fallback is True, falls back to the configured metadata source
         if Spotify is unavailable or returns an error.
+
+        ``prefer_free`` forces the no-creds SpotipyFree path (see search_tracks).
         """
         cache = get_metadata_cache()
         # Check Spotify cache first so cached data remains usable even when
@@ -1671,7 +1681,7 @@ class SpotifyClient:
         # (no-auth / rate-limited — where auth is already False — plus the
         # budget-bridge and the worker's prefer-free opt-in, where auth is True
         # but we deliberately defer to free). The free branch below then runs.
-        use_spotify = self.is_spotify_authenticated() and not self._free_active()
+        use_spotify = self.is_spotify_authenticated() and not self._free_active() and not prefer_free
 
         if use_spotify:
             try:
@@ -1708,7 +1718,8 @@ class SpotifyClient:
         # No-creds Spotify (SpotipyFree): keep Spotify catalog/matching when official
         # can't serve (no auth / rate-limited / worker prefer-free) OR when it's opted-in
         # and official above returned nothing — before the iTunes/Deezer fallback.
-        if allow_fallback and (self._free_active() or self._free_available()):
+        if allow_fallback and (self._free_active() or self._free_available()
+                               or (prefer_free and self._free_installed())):
             try:
                 objs = [Artist.from_spotify_artist(a)
                         for a in self._free_meta.search_artists(query, limit)]
@@ -1730,7 +1741,8 @@ class SpotifyClient:
 
     @rate_limited
     def search_albums(self, query: str, limit: int = 10, allow_fallback: bool = True,
-                      artist: str = None, album: str = None) -> List[Album]:
+                      artist: str = None, album: str = None,
+                      prefer_free: bool = False) -> List[Album]:
         """Search for albums.
 
         When allow_fallback is True, falls back to the configured metadata source
@@ -1759,7 +1771,7 @@ class SpotifyClient:
         # (no-auth / rate-limited — where auth is already False — plus the
         # budget-bridge and the worker's prefer-free opt-in, where auth is True
         # but we deliberately defer to free). The free branch below then runs.
-        use_spotify = self.is_spotify_authenticated() and not self._free_active()
+        use_spotify = self.is_spotify_authenticated() and not self._free_active() and not prefer_free
 
         if use_spotify:
             try:
@@ -1792,7 +1804,8 @@ class SpotifyClient:
         # opted-in and official above returned nothing — before the iTunes/Deezer fallback.
         # Albums have no name-search upstream, so resolve via the artist's discography —
         # needs artist + album names.
-        if allow_fallback and (self._free_active() or self._free_available()) and artist and album:
+        if allow_fallback and (self._free_active() or self._free_available()
+                               or (prefer_free and self._free_installed())) and artist and album:
             try:
                 objs = [Album.from_spotify_album(a)
                         for a in self._free_meta.search_albums_via_artist(artist, album, min(limit, 10))]

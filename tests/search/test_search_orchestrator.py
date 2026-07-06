@@ -50,7 +50,8 @@ class _Track:
 
 class _Client:
     def __init__(self, *, name='fake', artists=None, albums=None, tracks=None,
-                 fail_search=False, authed=True, connected=True, meta_available=None):
+                 fail_search=False, authed=True, connected=True, meta_available=None,
+                 free_installed=False):
         self.name = name
         self._artists = artists or []
         self._albums = albums or []
@@ -62,18 +63,25 @@ class _Client:
         # explicitly to model the no-creds SpotipyFree fallback: not authed but
         # metadata still available.
         self._meta_available = meta_available
+        self._free_installed_flag = free_installed
+        # Records the prefer_free kwarg the last search call received (None if it
+        # was never passed) — lets a test assert the explicit-pick free routing.
+        self.prefer_free_seen = None
 
-    def search_artists(self, q, limit=10):
+    def search_artists(self, q, limit=10, prefer_free=False):
+        self.prefer_free_seen = prefer_free
         if self._fail:
             raise RuntimeError("client search boom")
         return self._artists
 
-    def search_albums(self, q, limit=10):
+    def search_albums(self, q, limit=10, prefer_free=False):
+        self.prefer_free_seen = prefer_free
         if self._fail:
             raise RuntimeError("client search boom")
         return self._albums
 
-    def search_tracks(self, q, limit=10):
+    def search_tracks(self, q, limit=10, prefer_free=False):
+        self.prefer_free_seen = prefer_free
         if self._fail:
             raise RuntimeError("client search boom")
         return self._tracks
@@ -83,6 +91,9 @@ class _Client:
 
     def is_spotify_metadata_available(self):
         return self._authed if self._meta_available is None else self._meta_available
+
+    def _free_installed(self):
+        return self._free_installed_flag
 
     def is_connected(self):
         return self._connected
@@ -282,6 +293,35 @@ def test_single_source_unavailable_returns_empty_with_source_available_false():
     assert result['source_available'] is False
     assert result['spotify_artists'] == []
     assert result['primary_source'] == 'spotify'
+
+
+def test_single_source_spotify_uses_free_when_unauthed_but_package_installed():
+    # The reported case: no Spotify auth, and 'Spotify Free' isn't the chosen
+    # metadata source (is_spotify_metadata_available False), but the no-creds
+    # SpotipyFree package IS installed. An EXPLICIT Spotify search pick must still
+    # serve results via the free source — and the client must be told prefer_free
+    # so it takes the no-creds path instead of returning a blank page.
+    spot = _Client(authed=False, meta_available=False, free_installed=True,
+                   artists=[_Artist('s1', 'Free Spot Artist')])
+    deps = _build_deps(spotify_client=spot)
+    result = orchestrator.run_enhanced_search('kendrick lamar', 'spotify', deps)
+
+    assert result['source_available'] is True
+    assert result['spotify_artists'][0]['name'] == 'Free Spot Artist'
+    assert spot.prefer_free_seen is True          # client routed to free for this pick
+
+
+def test_single_source_spotify_unavailable_when_package_missing():
+    # Same no-auth / not-'Spotify Free'-source case but SpotipyFree NOT installed →
+    # nothing to serve, so it stays unavailable exactly as before (no regression,
+    # no silent free scraping when the package can't back it).
+    spot = _Client(authed=False, meta_available=False, free_installed=False)
+    deps = _build_deps(spotify_client=spot)
+    result = orchestrator.run_enhanced_search('kendrick lamar', 'spotify', deps)
+
+    assert result['source_available'] is False
+    assert result['spotify_artists'] == []
+    assert spot.prefer_free_seen is None          # search never ran
 
 
 def test_single_source_search_failure_returns_empty():
