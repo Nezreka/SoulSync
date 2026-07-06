@@ -109,6 +109,15 @@ class _FakeJellyfin:
         return True
 
 
+class _FakeNavidrome:
+    def __init__(self):
+        self.image_calls = []
+
+    def set_playlist_image(self, name, url):
+        self.image_calls.append((name, url))
+        return True
+
+
 class _FakeAutomationEngine:
     def __init__(self):
         self.events = []
@@ -133,6 +142,7 @@ def _build_deps(
     config=None,
     plex=None,
     jellyfin=None,
+    navidrome=None,
     automation=None,
     sync_states=None,
     sync_lock=None,
@@ -150,6 +160,7 @@ def _build_deps(
         media_server_engine=_FakeMediaServerEngine(
             plex=plex or _FakePlex(),
             jellyfin=jellyfin or _FakeJellyfin(),
+            navidrome=navidrome or _FakeNavidrome(),
         ),
         automation_engine=automation or _FakeAutomationEngine(),
         run_async=run_async or _run_async_sync,
@@ -362,6 +373,36 @@ def test_playlist_image_uploaded_to_jellyfin(patched_db):
                      playlist_image_url='https://img/y.png', deps=deps)
 
     assert jf.image_calls == [('PJF', 'https://img/y.png')]
+
+
+def test_playlist_image_uploaded_to_navidrome(patched_db):
+    """Navidrome active → navidrome_client.set_playlist_image (#993). Subsonic has
+    no cover field, so this rides the native-API upload path."""
+    nd = _FakeNavidrome()
+    cfg = _FakeConfig(server='navidrome')
+    result = _FakeSyncResult(synced_tracks=4)
+    svc = _FakeSyncService(media_client=_FakeMediaClient(), sync_result=result)
+    deps = _build_deps(sync_service=svc, navidrome=nd, config=cfg)
+
+    ds.run_sync_task('pND', 'PND', [_track()],
+                     playlist_image_url='https://img/z.png', deps=deps)
+
+    assert nd.image_calls == [('PND', 'https://img/z.png')]
+
+
+def test_navidrome_append_mode_preserves_playlist_image(patched_db):
+    """Append edits in place — Navidrome must NOT re-push the source cover over a
+    user's custom one either (same guard as Plex/Jellyfin)."""
+    nd = _FakeNavidrome()
+    cfg = _FakeConfig(server='navidrome')
+    result = _FakeSyncResult(synced_tracks=4)
+    svc = _FakeSyncService(media_client=_FakeMediaClient(), sync_result=result)
+    deps = _build_deps(sync_service=svc, navidrome=nd, config=cfg)
+
+    ds.run_sync_task('pNDa', 'PNDa', [_track()],
+                     playlist_image_url='https://img/z.png', deps=deps, sync_mode='append')
+
+    assert nd.image_calls == []   # preserved, not clobbered
 
 
 def test_append_mode_preserves_playlist_image(patched_db):

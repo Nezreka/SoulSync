@@ -543,7 +543,12 @@ def run_sync_task(
                 elif active_server in ('jellyfin', 'emby') and _engine and _engine.client('jellyfin'):
                     ok = _engine.client('jellyfin').set_playlist_image(playlist_name, playlist_image_url)
                     logger.info(f"[PLAYLIST IMAGE] Jellyfin upload result: {ok}")
-                # Navidrome doesn't support custom playlist images
+                elif active_server == 'navidrome' and _engine and _engine.client('navidrome'):
+                    # Subsonic has no playlist-cover field, but Navidrome's native
+                    # API accepts a multipart upload (same creds). See
+                    # NavidromeClient.set_playlist_image.
+                    ok = _engine.client('navidrome').set_playlist_image(playlist_name, playlist_image_url)
+                    logger.info(f"[PLAYLIST IMAGE] Navidrome upload result: {ok}")
             except Exception as img_err:
                 logger.error(f"[PLAYLIST IMAGE] Exception: {img_err}")
 
