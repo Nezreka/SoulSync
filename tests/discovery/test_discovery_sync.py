@@ -92,8 +92,14 @@ class _FakeConfig:
 
 
 class _FakePlex:
-    def __init__(self):
+    def __init__(self, existing=()):
         self.image_calls = []
+        # Names the test declares already present on the server (#993 existence
+        # probe). Anything not listed reads as a brand-new playlist.
+        self._existing = {n.lower() for n in existing}
+
+    def get_playlist_by_name(self, name):
+        return object() if name.lower() in self._existing else None
 
     def set_playlist_image(self, name, url):
         self.image_calls.append((name, url))
@@ -101,8 +107,12 @@ class _FakePlex:
 
 
 class _FakeJellyfin:
-    def __init__(self):
+    def __init__(self, existing=()):
         self.image_calls = []
+        self._existing = {n.lower() for n in existing}
+
+    def get_playlist_by_name(self, name):
+        return object() if name.lower() in self._existing else None
 
     def set_playlist_image(self, name, url):
         self.image_calls.append((name, url))
@@ -110,8 +120,12 @@ class _FakeJellyfin:
 
 
 class _FakeNavidrome:
-    def __init__(self):
+    def __init__(self, existing=()):
         self.image_calls = []
+        self._existing = {n.lower() for n in existing}
+
+    def get_playlist_by_name(self, name):
+        return object() if name.lower() in self._existing else None
 
     def set_playlist_image(self, name, url):
         self.image_calls.append((name, url))
@@ -403,6 +417,51 @@ def test_navidrome_append_mode_preserves_playlist_image(patched_db):
                      playlist_image_url='https://img/z.png', deps=deps, sync_mode='append')
 
     assert nd.image_calls == []   # preserved, not clobbered
+
+
+def test_playlist_image_skipped_when_playlist_already_exists(patched_db):
+    """#993: a playlist that already exists on the server keeps its current cover.
+    The source cover is pushed only to a brand-new playlist (first mirror), so a
+    recurring replace-mode sync no longer stomps a hand-set (or prior) cover."""
+    nd = _FakeNavidrome(existing=('PND',))
+    cfg = _FakeConfig(server='navidrome')
+    result = _FakeSyncResult(synced_tracks=4)
+    svc = _FakeSyncService(media_client=_FakeMediaClient(), sync_result=result)
+    deps = _build_deps(sync_service=svc, navidrome=nd, config=cfg)
+
+    ds.run_sync_task('pND', 'PND', [_track()],
+                     playlist_image_url='https://img/z.png', deps=deps)
+
+    assert nd.image_calls == []   # already existed → cover left untouched
+
+
+def test_playlist_image_new_playlist_still_pushes(patched_db):
+    """The complement: a genuinely new playlist (not present pre-sync) still gets
+    the source cover — the guard only suppresses re-pushes, never first fills."""
+    nd = _FakeNavidrome()   # no existing playlists → 'PNew' is brand new
+    cfg = _FakeConfig(server='navidrome')
+    result = _FakeSyncResult(synced_tracks=4)
+    svc = _FakeSyncService(media_client=_FakeMediaClient(), sync_result=result)
+    deps = _build_deps(sync_service=svc, navidrome=nd, config=cfg)
+
+    ds.run_sync_task('pNew', 'PNew', [_track()],
+                     playlist_image_url='https://img/n.png', deps=deps)
+
+    assert nd.image_calls == [('PNew', 'https://img/n.png')]
+
+
+def test_playlist_image_skip_on_existing_applies_to_plex_too(patched_db):
+    """The new-playlist-only rule is uniform across servers, not Navidrome-only."""
+    plex = _FakePlex(existing=('PImg',))
+    cfg = _FakeConfig(server='plex')
+    result = _FakeSyncResult(synced_tracks=5)
+    svc = _FakeSyncService(media_client=_FakeMediaClient(), sync_result=result)
+    deps = _build_deps(sync_service=svc, plex=plex, config=cfg)
+
+    ds.run_sync_task('pImg', 'PImg', [_track()],
+                     playlist_image_url='https://img/x.png', deps=deps)
+
+    assert plex.image_calls == []   # already existed → not re-pushed
 
 
 def test_append_mode_preserves_playlist_image(patched_db):
