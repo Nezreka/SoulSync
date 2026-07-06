@@ -424,3 +424,52 @@ def test_interactive_metadata_availability_unaffected_by_prefer_free():
     assert _metadata_available(prefer_free=False, installed=True) is False
     # ...and authed is available as before.
     assert _metadata_available(prefer_free=False, installed=True, authed=True) is True
+
+
+# ── (spotify-free) fall back to Free when the AUTHED official search returns empty ──
+from unittest.mock import MagicMock  # noqa: E402
+import core.spotify_client as _sc  # noqa: E402
+
+
+def _search_client(official_items, free_result, *, free_available, monkeypatch):
+    c = SpotifyClient.__new__(SpotifyClient)
+    c.sp = MagicMock()
+    c.sp.search.return_value = {'tracks': {'items': official_items}}
+    c._free_meta_client = MagicMock()
+    c._free_meta_client.search_tracks.return_value = free_result
+    fallback = MagicMock()
+    fallback.search_tracks.return_value = ['ITUNES']
+    monkeypatch.setattr(SpotifyClient, '_fallback', fallback)             # property → class-patch
+    monkeypatch.setattr(SpotifyClient, '_fallback_source', 'itunes')     # property → class-patch
+    monkeypatch.setattr(SpotifyClient, 'is_spotify_authenticated', lambda self: True)
+    monkeypatch.setattr(SpotifyClient, '_free_active', lambda self: False)      # authed + healthy
+    monkeypatch.setattr(SpotifyClient, '_free_available', lambda self: free_available)
+    monkeypatch.setattr(_sc, '_is_globally_rate_limited', lambda: True)         # bypass decorator retry loop
+    cache = MagicMock()
+    cache.get_search_results.return_value = None
+    monkeypatch.setattr(_sc, 'get_metadata_cache', lambda: cache)
+    monkeypatch.setattr(_sc.Track, 'from_spotify_track', staticmethod(lambda t: ('T', t.get('id'))))
+    return c
+
+
+def test_authed_official_empty_falls_back_to_free_when_opted_in(monkeypatch):
+    # The reported case: authed but official returns nothing; with Free opted in it
+    # must serve Free results instead of a blank page.
+    c = _search_client([], [{'id': 'free1'}], free_available=True, monkeypatch=monkeypatch)
+    assert c.search_tracks('q', limit=5) == [('T', 'free1')]
+    c._fallback.search_tracks.assert_not_called()          # Free won, not iTunes
+
+
+def test_authed_official_empty_uses_itunes_when_free_not_opted_in(monkeypatch):
+    # Without the opt-in, no unofficial scraping — falls to iTunes as before.
+    c = _search_client([], [{'id': 'free1'}], free_available=False, monkeypatch=monkeypatch)
+    assert c.search_tracks('q', limit=5) == ['ITUNES']
+    c._free_meta_client.search_tracks.assert_not_called()
+
+
+def test_authed_official_nonempty_never_touches_free(monkeypatch):
+    # A working official account is unaffected — Free/iTunes never consulted.
+    c = _search_client([{'id': 'off1'}], [{'id': 'free1'}], free_available=True, monkeypatch=monkeypatch)
+    assert c.search_tracks('q', limit=5) == [('T', 'off1')]
+    c._free_meta_client.search_tracks.assert_not_called()
+    c._fallback.search_tracks.assert_not_called()
