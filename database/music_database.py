@@ -949,7 +949,12 @@ class MusicDatabase:
             # legitimately sharing an id) are left alone via the DISTINCT-name
             # check, so this only touches genuine corruption.
             try:
-                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='_source_id_dedupe_v1'")
+                # v2 re-runs the sweep: #988 found the Deezer album/track "id
+                # correction" path could still smear an id (e.g. The Beatles' id 1
+                # onto The Outfield) after v1 ran, via a blank result-artist-name
+                # bypass. That path is now fully gated (name match + conflict check),
+                # so one more clear heals any smears that slipped through before the fix.
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='_source_id_dedupe_v2'")
                 if not cursor.fetchone():
                     _dedupe_id_cols = [
                         ('deezer_id', 'deezer_match_status'),
@@ -977,7 +982,7 @@ class MusicDatabase:
                             total_cleared += cursor.rowcount
                         except Exception as col_err:
                             logger.debug("Source-id dedupe skipped %s: %s", id_col, col_err)
-                    cursor.execute("CREATE TABLE _source_id_dedupe_v1 (applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+                    cursor.execute("CREATE TABLE _source_id_dedupe_v2 (applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
                     if total_cleared > 0:
                         logger.info(
                             f"Cleared {total_cleared} duplicated source ids shared across "
@@ -15191,6 +15196,32 @@ class MusicDatabase:
     def mirror_playlist(self, source: str, source_playlist_id: str, name: str,
                         tracks: List[Dict], profile_id: int = 1, **kwargs) -> Optional[int]:
         """Upsert a mirrored playlist and replace all its tracks."""
+        from core.playlists.source_refs import coalesce_mirror_track, stable_source_track_id
+
+        # #990: accept mirror-shaped AND Spotify-shaped tracks (the GET playlist
+        # endpoints return the Spotify shape, which users feed straight back in).
+        tracks = [coalesce_mirror_track(t) for t in (tracks or [])]
+
+        # #990: refuse to REPLACE an existing mirror with an all-empty payload — a
+        # wrong-shaped POST once silently rewrote 21k rows to empty strings and
+        # returned success, breaking sync and hammering Deezer for days. A payload
+        # where every track has neither a name nor an id is unambiguously malformed
+        # (a real playlist always has named tracks); reject it BEFORE any DB write so
+        # the existing mirror is preserved.
+        empty = sum(1 for t in tracks
+                    if not str(t.get("track_name", "")).strip() and not stable_source_track_id(t))
+        if tracks and empty == len(tracks):
+            raise ValueError(
+                f"Refusing to mirror '{name}': all {len(tracks)} tracks are empty after "
+                "mapping (no track_name and no id) — the payload looks malformed. Expected "
+                "mirror-shaped tracks (track_name, artist_name, album_name, source_track_id); "
+                "Spotify-shaped (name, artists, album, id) is also accepted."
+            )
+        if empty:
+            logger.warning(
+                "[Mirror] %s/%d of tracks for playlist '%s' have no name/id — stored anyway",
+                empty, len(tracks), name)
+
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
