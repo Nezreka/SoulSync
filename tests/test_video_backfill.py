@@ -13,8 +13,8 @@ import pytest
 from database.video_database import VideoDatabase
 from core.video.enrichment.backfill import (
     RydWorker, SponsorBlockWorker, FanartWorker, OpenSubtitlesWorker, TraktWorker, TVmazeWorker,
-    AniListWorker, DeArrowWorker, WikidataWorker, VideoBackfillWorker, _RateLimited, _Unauthorized,
-    build_backfill_workers,
+    AniListWorker, DeArrowWorker, WikidataWorker, TmdbStreamingWorker, VideoBackfillWorker,
+    _RateLimited, _Unauthorized, build_backfill_workers,
 )
 
 
@@ -181,7 +181,51 @@ def test_get_stats_shape_matches_matcher_worker(db):
 def test_build_backfill_workers_set(db):
     assert set(build_backfill_workers(db)) == {
         "ryd", "sponsorblock", "fanart", "opensubtitles",
-        "trakt", "tvmaze", "anilist", "dearrow", "wikidata"}
+        "trakt", "tvmaze", "anilist", "dearrow", "wikidata", "streaming"}
+
+
+# ── Streaming (TMDB watch providers → primary service) ────────────────────────
+def test_streaming_key_gated_and_queued_on_tmdb(db):
+    assert TmdbStreamingWorker(db).enabled is False          # no TMDB key
+    db.set_setting("tmdb_api_key", "KEY")
+    assert TmdbStreamingWorker(db).enabled is True
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "Dune"})
+    assert db.backfill_next("streaming") is None             # no tmdb id → not queued
+    with db.connect() as c:
+        c.execute("UPDATE movies SET tmdb_id=438631 WHERE id=?", (mid,)); c.commit()
+    assert db.backfill_next("streaming")["kind"] == "movie"
+
+
+def test_streaming_fetch_picks_primary_flatrate_provider(db, monkeypatch):
+    import core.video.enrichment.backfill as bf
+    db.set_setting("tmdb_api_key", "KEY")
+    monkeypatch.setattr(bf, "_http_get_json", lambda url, params=None, headers=None, timeout=12: {
+        "results": {"US": {"flatrate": [
+            {"provider_name": "Hulu", "display_priority": 5},
+            {"provider_name": "Netflix", "display_priority": 1},   # lower priority = primary
+        ]}}})
+    out = TmdbStreamingWorker(db).fetch({"kind": "movie", "tmdb_id": 438631})
+    assert out == {"streaming": "Netflix"}
+
+
+def test_streaming_fetch_empty_when_no_providers(db, monkeypatch):
+    import core.video.enrichment.backfill as bf
+    db.set_setting("tmdb_api_key", "KEY")
+    monkeypatch.setattr(bf, "_http_get_json", lambda *a, **k: {"results": {"US": {}}})
+    assert TmdbStreamingWorker(db).fetch({"kind": "movie", "tmdb_id": 1}) is None
+
+
+def test_streaming_worker_records_provider(db):
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "M"})
+    db.set_setting("tmdb_api_key", "KEY")
+    with db.connect() as c:
+        c.execute("UPDATE movies SET tmdb_id=1 WHERE id=?", (mid,)); c.commit()
+    w = TmdbStreamingWorker(db)
+    w.fetch = lambda item: {"streaming": "Disney Plus"}
+    assert w.process_one() is True
+    with db.connect() as c:
+        r = c.execute("SELECT streaming, streaming_status FROM movies WHERE id=?", (mid,)).fetchone()
+    assert r["streaming"] == "Disney Plus" and r["streaming_status"] == "ok"
 
 
 # ── Wikidata (no-key, official-website lookup by imdb id) ─────────────────────
