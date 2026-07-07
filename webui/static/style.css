@@ -12669,6 +12669,85 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     color: rgb(var(--accent-light-rgb));
 }
 
+/* Collapsible variant-kind group (Time Machine decades, Genres, ...) in the
+   sidebar — one expandable header instead of every variant listed inline. */
+.auto-sync-kind-group {
+    margin-bottom: 8px;
+}
+
+.auto-sync-kind-group-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 11px 14px;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 10px;
+    background: rgba(22, 22, 22, 0.95);
+    cursor: pointer;
+    transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.auto-sync-kind-group-head:hover {
+    border-color: rgba(var(--accent-rgb), 0.25);
+    background: rgba(28, 28, 28, 0.98);
+}
+
+.auto-sync-kind-group.has-active .auto-sync-kind-group-head {
+    border-color: rgba(var(--accent-rgb), 0.22);
+}
+
+.auto-sync-kind-group-chevron {
+    flex-shrink: 0;
+    font-size: 9px;
+    color: rgba(255, 255, 255, 0.4);
+    transition: transform 0.2s ease;
+}
+
+.auto-sync-kind-group.expanded .auto-sync-kind-group-chevron {
+    transform: rotate(90deg);
+}
+
+.auto-sync-kind-group-label {
+    flex: 1;
+    min-width: 0;
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 13px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.auto-sync-kind-group-active {
+    flex-shrink: 0;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: rgba(var(--accent-rgb), 0.16);
+    color: rgb(var(--accent-light-rgb));
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.auto-sync-kind-group-count {
+    flex-shrink: 0;
+    min-width: 18px;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.auto-sync-kind-group-body {
+    display: none;
+    padding: 8px 0 2px 12px;
+}
+
+.auto-sync-kind-group.expanded .auto-sync-kind-group-body {
+    display: block;
+}
+
 /* Bulk-schedule popover for a source group */
 .auto-sync-bulk-menu {
     position: fixed;

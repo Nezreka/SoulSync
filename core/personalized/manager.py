@@ -111,7 +111,25 @@ class PersonalizedPlaylistManager:
                 (profile_id,),
             )
             rows = cursor.fetchall()
-        return [self._row_to_record(r) for r in rows]
+        return self._drop_unregistered([self._row_to_record(r) for r in rows])
+
+    def _drop_unregistered(self, records: List[PlaylistRecord]) -> List[PlaylistRecord]:
+        """Hide playlists whose ``kind`` is no longer registered.
+
+        A generator that was removed or reverted (e.g. an experimental
+        ``year_mix``) leaves its persisted rows behind; those kinds can
+        never be regenerated or synced, so they shouldn't surface. Fails
+        OPEN: if the registry hasn't been populated in this context
+        (generators not imported), return everything rather than hiding
+        every playlist.
+        """
+        try:
+            known = {spec.kind for spec in self.registry.all()}
+        except Exception:
+            return records
+        if not known:
+            return records
+        return [r for r in records if r.kind in known]
 
     def update_config(self, kind: str, variant: str, profile_id: int, overrides: Dict[str, Any]) -> PlaylistRecord:
         """Patch the per-playlist config with the provided overrides."""
