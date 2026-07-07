@@ -51,6 +51,12 @@ _CORE_ID_COLUMNS: Dict[str, Dict[str, str]] = {
         "audiodb": "audiodb_id",
         "hydrabase": "soul_id",
         "jiosaavn": "jiosaavn_id",
+        # Bandcamp has no id->page lookup endpoint; the release URL is its
+        # stable, resolvable handle (get_release_metadata takes a URL), so the
+        # URL is Bandcamp's canonical match id. The numeric bandcamp_id column
+        # is a supplementary key. Same signal used by
+        # _backfill_match_status_for_existing_ids.
+        "bandcamp": "bandcamp_url",
     },
     "track": {
         "spotify": "spotify_track_id",
@@ -64,6 +70,7 @@ _CORE_ID_COLUMNS: Dict[str, Dict[str, str]] = {
         "genius": "genius_id",
         "hydrabase": "soul_id",
         "jiosaavn": "jiosaavn_id",
+        "bandcamp": "bandcamp_url",  # see the album note above
     },
 }
 

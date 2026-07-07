@@ -205,6 +205,19 @@ def test_reset_builder_does_not_clear_track_id():
     assert 'spotify_track_id = NULL' not in sql
 
 
+def test_reset_builder_clears_bandcamp_url_and_id_on_album_and_track():
+    # PR #968 review: reset must forget the Bandcamp match or the worker's
+    # existing-url short-circuit re-confirms the old release. Bandcamp's
+    # canonical handle (bandcamp_url) lives in a real column on BOTH albums and
+    # tracks — unlike other sources, its track id must be cleared too — and the
+    # supplementary bandcamp_id must also go so no stale id lingers.
+    for entity in ('album', 'track'):
+        sql, _ = build_reset_query('bandcamp', entity, 'item', entity_id=5)
+        assert 'bandcamp_match_status = NULL' in sql
+        assert 'bandcamp_url = NULL' in sql, f'{entity}: bandcamp_url must be cleared'
+        assert 'bandcamp_id = NULL' in sql, f'{entity}: bandcamp_id must be cleared'
+
+
 def test_reset_item_requeues_to_pending(db):
     n = db.reset_enrichment('spotify', 'artist', 'item', entity_id='a2')  # was not_found
     assert n == 1
