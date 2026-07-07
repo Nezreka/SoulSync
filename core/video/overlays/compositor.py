@@ -18,6 +18,7 @@ from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont, ImageOps
 from utils.logging_config import get_logger
 
 from .fields import format_field
+from .logos import logo_ref
 
 logger = get_logger("video.overlays.compositor")
 
@@ -513,7 +514,7 @@ def _passes_when(layer, values):
     return {"gt": a > b, "gte": a >= b, "lt": a < b, "lte": a <= b}.get(op, True)
 
 
-def _tile_for(layer, W, H, values, image_loader):
+def _tile_for(layer, W, H, values, image_loader, logo_loader=None):
     kind = layer.get("type")
     if kind == "text":
         return _text_tile(layer, W, H, values)
@@ -525,6 +526,8 @@ def _tile_for(layer, W, H, values, image_loader):
         return _ribbon_tile(layer, W, H)
     if kind == "image":
         return _image_tile(layer, W, H, values, image_loader)
+    if kind == "logobadge":
+        return _logobadge_tile(layer, W, H, values, logo_loader)
     if kind == "shape":
         return _shape_tile(layer, W, H)
     return None
@@ -541,6 +544,42 @@ def _default_loader(url):
     r = requests.get(url, timeout=20)
     r.raise_for_status()
     return r.content
+
+
+def _default_logo_loader(pack, name):
+    try:
+        from .assets import AssetStore
+        return AssetStore.default().read_logo(pack, name)
+    except Exception:
+        return None
+
+
+def _logobadge_tile(layer, W, H, values, logo_loader):
+    """A field value shown as a brand logo from a drop-in pack, scaled to `w`
+    (fraction of poster width) and optionally seated on the bg pill. Falls back to
+    a formatted text badge when no matching logo file is present."""
+    field = layer.get("field") or ""
+    value = (values or {}).get(field)
+    ref = logo_ref(field, value)
+    if ref and logo_loader:
+        try:
+            data = logo_loader(ref[0], ref[1])
+        except Exception:
+            data = None
+        if data:
+            try:
+                img = Image.open(io.BytesIO(data)).convert("RGBA")
+                tw = max(1, int(_as_float(layer.get("w"), 0.12) * W))
+                if img.width:
+                    img = img.resize((tw, max(1, round(img.height * tw / img.width))), Image.LANCZOS)
+                return _bg_wrap(img, layer, W, H)
+            except Exception:
+                logger.warning("logo badge image failed (%s/%s)", ref[0], ref[1], exc_info=True)
+    # No pack / no match → render the value as a styled text badge instead.
+    text = format_field(field, value)
+    if not text:
+        return None
+    return _text_tile({**layer, "text": text}, W, H, values)
 
 
 # Representative values so a gallery thumbnail's dynamic badges render something.
@@ -585,10 +624,11 @@ def render_template_thumbnail(definition: dict, *, size=(300, 450), image_loader
 
 
 def render_overlay(base_bytes: bytes, definition: dict, values: dict | None = None,
-                   *, image_loader=None) -> bytes:
+                   *, image_loader=None, logo_loader=None) -> bytes:
     """Composite a template's layers onto poster art. Returns JPEG bytes at the
     base image's native resolution."""
     image_loader = image_loader or _default_loader
+    logo_loader = logo_loader or _default_logo_loader
     canvas = Image.open(io.BytesIO(base_bytes)).convert("RGBA")
     W, H = canvas.size
     layers = (definition or {}).get("layers") or []
@@ -598,7 +638,7 @@ def render_overlay(base_bytes: bytes, definition: dict, values: dict | None = No
         if not _passes_when(layer, values):
             continue
         try:
-            tile = _tile_for(layer, W, H, values, image_loader)
+            tile = _tile_for(layer, W, H, values, image_loader, logo_loader)
         except Exception:
             logger.warning("overlay layer render failed (%s)", layer.get("type"), exc_info=True)
             tile = None

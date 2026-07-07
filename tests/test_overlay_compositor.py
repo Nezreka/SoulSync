@@ -232,6 +232,36 @@ def test_rating_stars_optional_background():
     assert off.size == plain.size
 
 
+def test_logobadge_text_fallback_then_pack_logo():
+    import io
+    from PIL import Image
+    from core.video.overlays.compositor import _logobadge_tile
+    base = {"type": "logobadge", "field": "audio_codec", "w": 0.2, "size": 0.05,
+            "color": "#ffffff", "font": "Inter", "weight": 800}
+    # no pack → the value renders as a styled text badge ('ATMOS')
+    fb = _logobadge_tile(base, 1000, 1500, {"audio_codec": "atmos"}, lambda p, n: None)
+    assert fb is not None and fb.width > 0
+    # pack present → the logo image, scaled to w (0.2*1000=200 wide) keeping aspect
+    buf = io.BytesIO(); Image.new("RGBA", (300, 120), (0, 120, 255, 255)).save(buf, "PNG")
+    lg = _logobadge_tile(base, 1000, 1500, {"audio_codec": "atmos"}, lambda p, n: buf.getvalue())
+    assert lg.size == (200, 80)
+    # no value for the field → nothing to draw
+    assert _logobadge_tile(base, 1000, 1500, {}, lambda p, n: None) is None
+
+
+def test_render_overlay_threads_logo_loader():
+    import io
+    from PIL import Image
+    from core.video.overlays.compositor import render_overlay
+    base = io.BytesIO(); Image.new("RGB", (400, 600), (0, 0, 0)).save(base, "JPEG")
+    logo = io.BytesIO(); Image.new("RGBA", (100, 40), (255, 0, 0, 255)).save(logo, "PNG")
+    defn = {"layers": [{"type": "logobadge", "field": "audio_codec", "w": 0.3, "x": 0.5, "y": 0.5,
+                        "anchor": "center", "size": 0.05, "color": "#fff"}]}
+    out = _open(render_overlay(base.getvalue(), defn, {"audio_codec": "atmos"},
+                               logo_loader=lambda p, n: logo.getvalue()))
+    assert any(p[0] > 150 and p[1] < 90 and p[2] < 90 for p in out.getdata())  # red logo composited
+
+
 def test_bg_box_fixed_size_and_align():
     from core.video.overlays.compositor import _bg_wrap, _bg_align
     from PIL import Image
