@@ -9,7 +9,25 @@ from __future__ import annotations
 
 import json
 
-from core.video.mediainfo import parse_ffprobe, probe, resolution_from_dimensions
+from core.video.mediainfo import parse_ffprobe, probe, resolution_from_dimensions, canonical_aspect
+
+
+def test_canonical_aspect_buckets_floats_and_strings():
+    assert canonical_aspect(1.33) == "4:3"          # Plex-style float
+    assert canonical_aspect(1.78) == "16:9"
+    assert canonical_aspect("16:9") == "16:9"        # Jellyfin-style string
+    assert canonical_aspect(2.0) == "2:1"
+    assert canonical_aspect(2.39) == "2.40:1"        # cinemascope
+    assert canonical_aspect("2.35:1") == "2.40:1"
+    assert canonical_aspect(None) is None
+    assert canonical_aspect("") is None
+    assert canonical_aspect("garbage") is None
+
+
+def test_parse_ffprobe_derives_aspect_from_dimensions():
+    p = parse_ffprobe({"streams": [{"codec_type": "video", "width": 3840, "height": 1600}]})
+    assert p["aspect"] == "2.40:1"
+    assert parse_ffprobe({"streams": [{"codec_type": "audio"}]})["aspect"] is None
 
 
 def test_resolution_buckets_use_the_long_axis():

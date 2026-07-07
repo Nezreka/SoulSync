@@ -208,6 +208,8 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
         parsed = dict(parsed)
         if probe.get("resolution"):
             parsed["resolution"] = probe["resolution"]
+        if probe.get("aspect"):
+            parsed["aspect"] = probe["aspect"]
         if probe.get("video_codec") and not parsed.get("codec"):
             parsed["codec"] = probe["video_codec"]
 

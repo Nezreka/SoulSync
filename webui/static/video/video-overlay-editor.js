@@ -62,6 +62,7 @@
         source: { label: 'Source', cat: 'Quality', opts: ['bluray', 'web-dl', 'webrip', 'hdtv', 'remux', 'dvd'], fmt: function (v) {
             if (!v) return null; var m = { bluray: 'BluRay', 'web-dl': 'WEB-DL', webdl: 'WEB-DL', webrip: 'WEBRip', hdtv: 'HDTV', remux: 'REMUX', dvd: 'DVD' };
             return m[String(v).toLowerCase()] || up(v); } },
+        aspect: { label: 'Aspect ratio', cat: 'Quality', opts: ['4:3', '16:9', '2:1', '2.40:1'], fmt: function (v) { return v ? String(v) : null; } },
         imdb: { label: 'IMDb rating', cat: 'Ratings', num: true, fmt: function (v) { return v == null ? null : 'IMDb ' + (Math.round(v * 10) / 10); } },
         rt: { label: 'Rotten Tomatoes', cat: 'Ratings', num: true, fmt: function (v) { return v == null ? null : 'RT ' + v + '%'; } },
         metacritic: { label: 'Metacritic', cat: 'Ratings', num: true, fmt: function (v) { return v == null ? null : 'MC ' + v; } },
@@ -97,15 +98,15 @@
         'Drama', 'Family', 'Fantasy', 'History', 'Horror', 'Kids', 'Music', 'Mystery', 'News', 'Reality',
         'Romance', 'Science Fiction', 'Sci-Fi & Fantasy', 'Soap', 'Talk', 'TV Movie', 'Thriller', 'War',
         'War & Politics', 'Western'];
-    var FIELD_ORDER = ['resolution', 'hdr', 'video_codec', 'audio_codec', 'source', 'imdb', 'rt', 'metacritic', 'tmdb', 'trakt', 'tvmaze', 'anilist',
+    var FIELD_ORDER = ['resolution', 'hdr', 'video_codec', 'audio_codec', 'source', 'aspect', 'imdb', 'rt', 'metacritic', 'tmdb', 'trakt', 'tvmaze', 'anilist',
         'content_rating', 'genre', 'status', 'year', 'runtime', 'season_count', 'episode_count', 'subtitles', 'versions', 'mediastinger', 'title', 'streaming', 'network', 'studio'];
     var FIELD_CATS = ['Quality', 'Ratings', 'Details'];
     // Fields a Logo badge can resolve to a drop-in pack image (mirrors logos.py
     // LOGO_FIELDS, limited to the ones we actually carry data for).
-    var LOGO_BADGE_FIELDS = ['resolution', 'hdr', 'video_codec', 'audio_codec', 'source', 'content_rating', 'status', 'streaming', 'network', 'studio', 'mediastinger'];
+    var LOGO_BADGE_FIELDS = ['resolution', 'hdr', 'video_codec', 'audio_codec', 'source', 'aspect', 'content_rating', 'status', 'streaming', 'network', 'studio', 'mediastinger'];
 
     function defaultSample() {
-        return { resolution: '2160p', hdr: 'HDR', video_codec: 'hevc', audio_codec: 'atmos', source: 'bluray',
+        return { resolution: '2160p', hdr: 'HDR', video_codec: 'hevc', audio_codec: 'atmos', source: 'bluray', aspect: '2.40:1',
             imdb: 8.4, rt: 92, metacritic: 81, tmdb: 8.1, trakt: 8.3, tvmaze: 8.0, anilist: 82, content_rating: 'PG-13', status: 'Returning',
             year: 2021, runtime: 148, season_count: 4, episode_count: 62, subtitles: 7, versions: 2, mediastinger: 1, title: 'Example Title', streaming: 'Netflix', network: 'HBO', studio: 'A24', genre: 'Sci-Fi' };
     }

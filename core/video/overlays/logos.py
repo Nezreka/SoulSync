@@ -101,6 +101,7 @@ _NORMALIZERS = {
     "audio_codec": _audio_codec,
     "source": _source,
     # generic slug is right for these — the file name is just the sanitized value
+    "aspect": _slug,
     "content_rating": _slug,
     "status": _slug,
     "network": _slug,
