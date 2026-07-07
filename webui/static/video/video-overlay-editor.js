@@ -66,6 +66,7 @@
         rt: { label: 'Rotten Tomatoes', cat: 'Ratings', num: true, fmt: function (v) { return v == null ? null : 'RT ' + v + '%'; } },
         metacritic: { label: 'Metacritic', cat: 'Ratings', num: true, fmt: function (v) { return v == null ? null : 'MC ' + v; } },
         tmdb: { label: 'TMDB rating', cat: 'Ratings', num: true, fmt: function (v) { return v == null ? null : 'TMDB ' + (Math.round(v * 10) / 10); } },
+        trakt: { label: 'Trakt rating', cat: 'Ratings', num: true, fmt: function (v) { return v == null ? null : 'Trakt ' + (Math.round(v * 10) / 10); } },
         content_rating: { label: 'Content rating', cat: 'Details', opts: ['G', 'PG', 'PG-13', 'R', 'NC-17', 'TV-Y', 'TV-PG', 'TV-14', 'TV-MA'], fmt: function (v) { return v ? up(v) : null; } },
         status: { label: 'Status', cat: 'Details', opts: ['Returning', 'Ended', 'Released', 'Upcoming', 'Canceled'], fmt: function (v) {
             if (!v) return null; var s = String(v).toLowerCase();
@@ -90,13 +91,13 @@
         'Drama', 'Family', 'Fantasy', 'History', 'Horror', 'Kids', 'Music', 'Mystery', 'News', 'Reality',
         'Romance', 'Science Fiction', 'Sci-Fi & Fantasy', 'Soap', 'Talk', 'TV Movie', 'Thriller', 'War',
         'War & Politics', 'Western'];
-    var FIELD_ORDER = ['resolution', 'hdr', 'video_codec', 'audio_codec', 'source', 'imdb', 'rt', 'metacritic', 'tmdb',
+    var FIELD_ORDER = ['resolution', 'hdr', 'video_codec', 'audio_codec', 'source', 'imdb', 'rt', 'metacritic', 'tmdb', 'trakt',
         'content_rating', 'genre', 'status', 'year', 'runtime', 'season_count', 'episode_count', 'title', 'network', 'studio'];
     var FIELD_CATS = ['Quality', 'Ratings', 'Details'];
 
     function defaultSample() {
         return { resolution: '2160p', hdr: 'HDR', video_codec: 'hevc', audio_codec: 'atmos', source: 'bluray',
-            imdb: 8.4, rt: 92, metacritic: 81, tmdb: 8.1, content_rating: 'PG-13', status: 'Returning',
+            imdb: 8.4, rt: 92, metacritic: 81, tmdb: 8.1, trakt: 8.3, content_rating: 'PG-13', status: 'Returning',
             year: 2021, runtime: 148, season_count: 4, episode_count: 62, title: 'Example Title', network: 'HBO', studio: 'A24', genre: 'Sci-Fi' };
     }
     // real values win; nulls fall back to the defaults so no badge previews blank.
@@ -1964,9 +1965,9 @@
         }
         if (l.type === 'rating') {
             if (!l.bg) l.bg = { enabled: false, color: '#000000', opacity: 0.6, radius: 0.02, padX: 0.02, padY: 0.012, line: false, lineColor: '#ffffff', lineW: 0.004 };
-            var rlbls = { imdb: 'IMDb', tmdb: 'TMDB', rt: 'Rotten Tomatoes', metacritic: 'Metacritic' };
+            var rlbls = { imdb: 'IMDb', tmdb: 'TMDB', trakt: 'Trakt', rt: 'Rotten Tomatoes', metacritic: 'Metacritic' };
             var rsel = '<select class="voe-input" data-inspsel="ratingField">' +
-                ['imdb', 'tmdb', 'rt', 'metacritic'].map(function (k) {
+                ['imdb', 'tmdb', 'trakt', 'rt', 'metacritic'].map(function (k) {
                     return '<option value="' + k + '"' + (k === l.field ? ' selected' : '') + '>' + rlbls[k] + '</option>';
                 }).join('') + '</select>';
             var rv = (ed.sample || {})[l.field];
