@@ -930,6 +930,16 @@
     }
     function addLayer(kind, x, y, field) {
         var l = defaultLayer(kind, x, y, field);
+        // Every kind spawns at a fixed default spot, so adding a second of the
+        // same kind would stack it invisibly on the first. Cascade the new layer
+        // off any existing layer already sitting at that position.
+        var guard = 0;
+        while (guard++ < 20 && ed.layers.some(function (o) {
+            return Math.abs((o.x || 0) - (l.x || 0)) < 0.005 && Math.abs((o.y || 0) - (l.y || 0)) < 0.005;
+        })) {
+            l.x = clamp01((l.x || 0) + 0.03);
+            l.y = clamp01((l.y || 0) + 0.03);
+        }
         ed.layers.push(l);              // paint order: last = front
         ed.selected = l.id;
         markDirty();
