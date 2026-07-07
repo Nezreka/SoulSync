@@ -7,7 +7,8 @@ from datetime import datetime, timedelta
 from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.bandcamp_client import BandcampClient
-from core.worker_utils import interruptible_sleep
+from core.worker_utils import interruptible_sleep, set_album_api_track_count
+from core.enrichment.manual_match_honoring import honor_stored_match
 
 logger = get_logger("bandcamp_worker")
 
@@ -305,23 +306,53 @@ class BandcampWorker:
             except Exception as e2:
                 logger.error(f"Error updating item status: {e2}")
 
-    def _process_album(self, album_id: int, album_name: str, artist_name: str):
-        """Process an album: search Bandcamp, get release metadata.
+    def _release_to_result(self, release: Dict[str, Any], stored_url: str, fallback_title: str) -> Dict[str, Any]:
+        """Shape a get_release_metadata() release into the dict _update_entity
+        expects. The release page carries no numeric id, so id stays None and
+        _update_entity's COALESCE preserves any previously-recorded bandcamp_id."""
+        return {
+            'id': None,
+            'url': release.get('url') or stored_url,
+            'title': release.get('title', fallback_title),
+            'tags': release.get('tags') or [],
+            'label': release.get('label'),
+            'release_date': release.get('release_date'),
+            'total_tracks': release.get('total_tracks'),
+        }
 
-        If the album already has a bandcamp_url (e.g. from manual match),
-        re-fetches its release metadata directly instead of searching by name."""
-        existing_url = self._get_existing_url('album', album_id)
-        if existing_url:
-            release = self.client.get_release_metadata(existing_url)
-            if release:
-                self._update_entity('album', album_id, {
-                    'id': None, 'url': existing_url, 'title': release.get('title', album_name),
-                    'tags': release.get('tags') or [], 'label': release.get('label'),
-                })
-                self.stats['matched'] += 1
-                logger.info(f"Enriched album '{album_name}' from existing Bandcamp URL: {existing_url}")
-                return
-            logger.debug(f"Preserving manual match for album '{album_name}' (Bandcamp URL: {existing_url})")
+    def _refresh_album_via_stored_url(self, album_id, stored_url, release):
+        """honor_stored_match callback: an album already has a bandcamp_url
+        (manual match or prior auto-match) and its release page re-fetched
+        cleanly. Refresh metadata without ever re-searching or stomping the
+        stored URL."""
+        self._update_entity('album', album_id, self._release_to_result(release, stored_url, ''))
+
+    def _refresh_track_via_stored_url(self, track_id, stored_url, release):
+        """honor_stored_match callback for tracks — same pattern as albums."""
+        self._update_entity('track', track_id, self._release_to_result(release, stored_url, ''))
+
+    def _process_album(self, album_id: int, album_name: str, artist_name: str):
+        """Process an album: honor a stored match by id-refresh, else search."""
+        # #501: if the album already has a stored bandcamp_url (manual match or
+        # prior match), refresh directly by that URL instead of re-searching —
+        # never overwriting a manual match. Bandcamp's canonical id IS the
+        # release URL (no id->page lookup exists), so it stands in for the
+        # numeric id other workers pass here.
+        if honor_stored_match(
+            db=self.db, entity_table='albums', entity_id=album_id,
+            id_column='bandcamp_url',
+            client_fetch_fn=self.client.get_release_metadata,
+            on_match_fn=self._refresh_album_via_stored_url,
+            log_prefix='Bandcamp',
+        ):
+            self.stats['matched'] += 1
+            return
+        # honor_stored_match also returns False when the stored URL failed to
+        # re-fetch (transient error / rate limit). In that case DON'T fall
+        # through to a name search — it could clobber the manual match. Only
+        # search when there's genuinely no stored URL.
+        if self._get_existing_url('album', album_id):
+            logger.debug(f"Preserving Bandcamp match for album '{album_name}' despite a refresh miss")
             return
 
         result = self.client.search_album(artist_name, album_name)
@@ -335,22 +366,18 @@ class BandcampWorker:
             logger.debug(f"No confident Bandcamp match for album '{album_name}'")
 
     def _process_track(self, track_id: int, track_name: str, artist_name: str):
-        """Process a track: search Bandcamp, get release metadata.
-
-        If the track already has a bandcamp_url (e.g. from manual match),
-        re-fetches its release metadata directly instead of searching by name."""
-        existing_url = self._get_existing_url('track', track_id)
-        if existing_url:
-            release = self.client.get_release_metadata(existing_url)
-            if release:
-                self._update_entity('track', track_id, {
-                    'id': None, 'url': existing_url, 'title': release.get('title', track_name),
-                    'tags': release.get('tags') or [], 'label': release.get('label'),
-                })
-                self.stats['matched'] += 1
-                logger.info(f"Enriched track '{track_name}' from existing Bandcamp URL: {existing_url}")
-                return
-            logger.debug(f"Preserving manual match for track '{track_name}' (Bandcamp URL: {existing_url})")
+        """Process a track: honor a stored match by id-refresh, else search."""
+        if honor_stored_match(
+            db=self.db, entity_table='tracks', entity_id=track_id,
+            id_column='bandcamp_url',
+            client_fetch_fn=self.client.get_release_metadata,
+            on_match_fn=self._refresh_track_via_stored_url,
+            log_prefix='Bandcamp',
+        ):
+            self.stats['matched'] += 1
+            return
+        if self._get_existing_url('track', track_id):
+            logger.debug(f"Preserving Bandcamp match for track '{track_name}' despite a refresh miss")
             return
 
         result = self.client.search_track(artist_name, track_name)
@@ -396,6 +423,34 @@ class BandcampWorker:
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
             """, (bandcamp_id, bandcamp_url, tags_json, label, entity_id))
+
+            # Feed the shared album columns the peer workers write, so a Bandcamp
+            # match enriches the album's real metadata — not just its bandcamp_*
+            # namespace. The release JSON-LD already carries all of this in the
+            # one fetch. Backfill-only (WHERE ... IS NULL) so we never clobber a
+            # value another source or the user set. Albums only: tracks have no
+            # album-level columns. Bandcamp's hotlink-protected art is served via
+            # image_cache, so thumb_url is deliberately left alone.
+            if entity_type == 'album':
+                if label:
+                    cursor.execute(
+                        "UPDATE albums SET label = ? WHERE id = ? AND (label IS NULL OR label = '')",
+                        (label, entity_id))
+                release_date = result.get('release_date')
+                if release_date:
+                    cursor.execute(
+                        "UPDATE albums SET release_date = ? WHERE id = ? AND (release_date IS NULL OR release_date = '')",
+                        (release_date, entity_id))
+                if tags:
+                    from core.genre_filter import filter_genres
+                    from config.settings import config_manager as _cfg
+                    genre_names = filter_genres(list(tags), _cfg)
+                    if genre_names:
+                        cursor.execute(
+                            "UPDATE albums SET genres = ? WHERE id = ? AND (genres IS NULL OR genres = '' OR genres = '[]')",
+                            (json.dumps(genre_names), entity_id))
+                # Expected track count for the Album Completeness repair job.
+                set_album_api_track_count(cursor, entity_id, result.get('total_tracks'))
 
             conn.commit()
 
