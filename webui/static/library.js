@@ -4563,11 +4563,14 @@ function _attachTableDelegation(table, album) {
                 e.stopPropagation();
                 const svc = chip.dataset.service;
                 const aId = artistDetailPageState.enhancedData ? artistDetailPageState.enhancedData.artist.id : null;
-                // Include the album name alongside the track title so the search
-                // has more to narrow down on (a bare track title alone is often
-                // ambiguous — compilations, remixes, and cover versions all share
-                // titles across many releases).
-                const trackDefaultQuery = [album.title, track.title].filter(Boolean).join(' ');
+                // Bandcamp only: include the album name alongside the track title
+                // so its release-page search has more to narrow down on (a bare
+                // track title is ambiguous — compilations, remixes, covers share
+                // titles across releases). Other services take a track ID directly
+                // and searched better with just the bare title, so leave them be.
+                const trackDefaultQuery = svc === 'bandcamp'
+                    ? [album.title, track.title].filter(Boolean).join(' ')
+                    : (track.title || '');
                 openManualMatchModal('track', track.id, svc, trackDefaultQuery, aId);
                 return;
             }
