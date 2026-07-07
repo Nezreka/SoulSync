@@ -1141,3 +1141,106 @@ describe('autoSyncSidebarGroupHtml + toggleAutoSyncKindGroup', () => {
         assert.ok(!html.includes(' on</span>'));
     });
 });
+
+// =========================================================================
+// Enriching already-generated discovery rows so they group with the rest
+// =========================================================================
+
+describe('autoSyncKindLabel', () => {
+    test('strips the {variant} suffix and separator', () => {
+        const sb = makeSandbox();
+        assert.equal(sb.autoSyncKindLabel({ kind: 'time_machine', name_template: 'Time Machine — {variant}' }), 'Time Machine');
+        assert.equal(sb.autoSyncKindLabel({ kind: 'genre_playlist', name_template: 'Genre: {variant}' }), 'Genre');
+    });
+    test('falls back to the kind when no template', () => {
+        const sb = makeSandbox();
+        assert.equal(sb.autoSyncKindLabel({ kind: 'seasonal_mix' }), 'seasonal_mix');
+    });
+});
+
+describe('autoSyncEnrichDiscoveryRows', () => {
+    const KINDS = [
+        { kind: 'hidden_gems', name_template: 'Hidden Gems' },
+        { kind: 'time_machine', requires_variant: true, variants: ['1960s', '1970s'], name_template: 'Time Machine — {variant}' },
+        { kind: 'genre_playlist', requires_variant: true, variants: ['rock'], name_template: 'Genre — {variant}' },
+    ];
+
+    test('tags a generated variant mirror row with kind/variant/kind_label', () => {
+        const sb = makeSandbox();
+        const rows = [
+            { id: 1397, source: 'soulsync_discovery', source_playlist_id: 'ssd_time_machine_1960s',
+              name: 'Time Machine — 1960s', track_count: 45 },
+        ];
+        const [r] = sb.autoSyncEnrichDiscoveryRows(rows, KINDS);
+        assert.equal(r.kind, 'time_machine');
+        assert.equal(r.variant, '1960s');
+        assert.equal(r.kind_label, 'Time Machine');
+        assert.equal(r.id, 1397);          // unchanged
+        assert.equal(r.track_count, 45);   // unchanged
+        assert.ok(!r._personalized);       // still a real row → schedules via playlist_pipeline
+    });
+
+    test('registered singleton row passes through flat and untouched', () => {
+        const sb = makeSandbox();
+        const rows = [
+            { id: 939, source: 'soulsync_discovery', source_playlist_id: 'ssd_hidden_gems',
+              name: 'Hidden Gems', track_count: 50 },
+        ];
+        const [r] = sb.autoSyncEnrichDiscoveryRows(rows, KINDS);
+        assert.equal(r.id, 939);
+        assert.ok(!('variant' in r) || !r.variant);  // no variant → stays flat
+        assert.ok(!('kind' in r));                    // not tagged
+    });
+
+    test('drops an orphaned mirror whose kind is no longer registered', () => {
+        const sb = makeSandbox();
+        const rows = [
+            { id: 1398, source: 'soulsync_discovery', source_playlist_id: 'ssd_year_mix_1970',
+              name: 'Year Mix — 1970', track_count: 32 },
+            { id: 939, source: 'soulsync_discovery', source_playlist_id: 'ssd_hidden_gems', name: 'Hidden Gems' },
+        ];
+        const out = sb.autoSyncEnrichDiscoveryRows(rows, KINDS);
+        assert.equal(out.length, 1);                       // year_mix dropped
+        assert.equal(out[0].source_playlist_id, 'ssd_hidden_gems');
+    });
+
+    test('non-discovery rows pass through unchanged', () => {
+        const sb = makeSandbox();
+        const rows = [{ id: 5, source: 'spotify', name: 'Discover Weekly' }];
+        deepShapeEqual(sb.autoSyncEnrichDiscoveryRows(rows, KINDS), rows);
+    });
+
+    test('fails open with no kinds metadata (keeps every row, orphans included)', () => {
+        const sb = makeSandbox();
+        const rows = [
+            { id: 1398, source: 'soulsync_discovery', source_playlist_id: 'ssd_year_mix_1970', name: 'Year Mix — 1970' },
+        ];
+        deepShapeEqual(sb.autoSyncEnrichDiscoveryRows(rows, []), rows);
+        deepShapeEqual(sb.autoSyncEnrichDiscoveryRows(rows, null), rows);
+    });
+
+    test('generated + synthetic variants merge into ONE group', () => {
+        const sb = makeSandbox();
+        // Only a variant kind, so no singleton noise: a generated 1960s (real)
+        // plus the not-yet-generated decades (synthetic).
+        const TM_ONLY = [KINDS[1]];  // time_machine with variants 1960s, 1970s
+        const real = [
+            { id: 1397, source: 'soulsync_discovery', source_playlist_id: 'ssd_time_machine_1960s',
+              name: 'Time Machine — 1960s', track_count: 45 },
+        ];
+        const enriched = sb.autoSyncEnrichDiscoveryRows(real, TM_ONLY);
+        const synthetic = sb.autoSyncExpandPersonalizedRows(TM_ONLY, enriched);  // dedups 1960s
+        const { flat, groups } = sb.autoSyncGroupSidebarRows([...enriched, ...synthetic]);
+        assert.equal(flat.length, 0);  // nothing flat
+        assert.equal(groups.length, 1);
+        const tm = groups[0];
+        assert.equal(tm.kind, 'time_machine');
+        // 1960s (generated) + 1970s (synthetic) all under the one Time Machine group
+        deepShapeEqual(tm.rows.map(r => r.variant).sort(), ['1960s', '1970s']);
+        // the generated one kept its real id + track count
+        const gen = tm.rows.find(r => r.variant === '1960s');
+        assert.equal(gen.id, 1397);
+        assert.equal(gen.track_count, 45);
+        assert.ok(!gen._personalized);  // real row → still schedules as a mirrored playlist
+    });
+});
