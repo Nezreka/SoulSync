@@ -118,6 +118,27 @@ def test_overlay_sample_data_includes_genre(db):
     assert format_field("genre", s["genre"]) == "Adventure"   # badge = primary only
 
 
+def test_overlay_sample_data_versions_and_subtitles(db):
+    import json
+    mid = db.upsert_movie("plex", {"server_id": "v1", "title": "Dune"})
+    with db.connect() as c:
+        c.execute("INSERT INTO media_files(movie_id, relative_path) VALUES (?, 'a.mkv')", (mid,))
+        c.execute("INSERT INTO media_files(movie_id, relative_path) VALUES (?, 'b.mkv')", (mid,))
+        c.execute("UPDATE movies SET subtitle_langs=? WHERE id=?", (json.dumps(["en", "es", "fr"]), mid))
+        c.commit()
+    s = db.overlay_sample_data("movie", mid)
+    assert s["versions"] == 2      # two owned copies → "2 Versions" badge
+    assert s["subtitles"] == 3     # three subtitle languages
+
+    mid2 = db.upsert_movie("plex", {"server_id": "v2", "title": "Solo"})
+    with db.connect() as c:
+        c.execute("INSERT INTO media_files(movie_id, relative_path) VALUES (?, 'x.mkv')", (mid2,))
+        c.commit()
+    s2 = db.overlay_sample_data("movie", mid2)
+    assert s2["versions"] == 1      # single copy (formatter hides the badge)
+    assert s2["subtitles"] is None  # no subs → None
+
+
 def test_random_overlay_preview_items(db):
     assert db.random_overlay_preview_items(4) == []          # empty library → nothing to preview
     mid = db.upsert_movie("plex", {"server_id": "m1", "title": "Dune", "year": 2021})
