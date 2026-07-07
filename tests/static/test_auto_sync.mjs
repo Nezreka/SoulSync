@@ -684,3 +684,315 @@ describe('autoSyncWeeklyLabel', () => {
         assert.equal(label, 'Daily @ 09:00');
     });
 });
+
+// =========================================================================
+// Personalized (SoulSync Discovery) rows in the Auto-Sync board
+// =========================================================================
+
+describe('autoSyncExpandPersonalizedRows', () => {
+    test('singleton kind → one synthetic row, no variant', () => {
+        const sb = makeSandbox();
+        const rows = sb.autoSyncExpandPersonalizedRows(
+            [{ kind: 'popular_picks', name_template: 'Popular Picks' }], []);
+        deepShapeEqual(rows, [{
+            id: -1, source: 'soulsync_discovery', name: 'Popular Picks', track_count: 0,
+            kind: 'popular_picks', variant: '', source_playlist_id: 'ssd_popular_picks',
+            _personalized: true,
+        }]);
+    });
+
+    test('variant kind → one synthetic row per variant, ids stay negative', () => {
+        const sb = makeSandbox();
+        const rows = sb.autoSyncExpandPersonalizedRows([{
+            kind: 'time_machine', requires_variant: true,
+            variants: ['1980s', '1990s', '2000s'],
+            name_template: 'Time Machine — {variant}',
+        }], []);
+        assert.equal(rows.length, 3);
+        deepShapeEqual(rows.map(r => r.id), [-1, -2, -3]);
+        deepShapeEqual(rows.map(r => r.variant), ['1980s', '1990s', '2000s']);
+        deepShapeEqual(rows.map(r => r.source_playlist_id),
+            ['ssd_time_machine_1980s', 'ssd_time_machine_1990s', 'ssd_time_machine_2000s']);
+        assert.equal(rows[0].name, 'Time Machine — 1980s');
+        assert.equal(rows[0].kind, 'time_machine');
+        assert.equal(rows[0]._personalized, true);
+    });
+
+    test('skips a variant already present as a real mirrored row', () => {
+        const sb = makeSandbox();
+        const existing = [{
+            id: 42, source: 'soulsync_discovery', source_playlist_id: 'ssd_time_machine_1980s',
+            name: 'Time Machine — 1980s',
+        }];
+        const rows = sb.autoSyncExpandPersonalizedRows([{
+            kind: 'time_machine', requires_variant: true,
+            variants: ['1980s', '1990s'], name_template: 'Time Machine — {variant}',
+        }], existing);
+        // 1980s exists as real → skipped; only 1990s becomes synthetic.
+        assert.equal(rows.length, 1);
+        assert.equal(rows[0].variant, '1990s');
+        assert.equal(rows[0].source_playlist_id, 'ssd_time_machine_1990s');
+    });
+
+    test('skips a singleton already present as a real mirrored row', () => {
+        const sb = makeSandbox();
+        const existing = [{
+            id: 7, source: 'soulsync_discovery', source_playlist_id: 'ssd_hidden_gems',
+        }];
+        const rows = sb.autoSyncExpandPersonalizedRows(
+            [{ kind: 'hidden_gems', name_template: 'Hidden Gems' }], existing);
+        deepShapeEqual(rows, []);
+    });
+
+    test('variant kind with empty variants list produces nothing', () => {
+        const sb = makeSandbox();
+        const rows = sb.autoSyncExpandPersonalizedRows(
+            [{ kind: 'genre_playlist', requires_variant: true, variants: [] }], []);
+        deepShapeEqual(rows, []);
+    });
+
+    test('non-array kinds and skips malformed entries', () => {
+        const sb = makeSandbox();
+        deepShapeEqual(sb.autoSyncExpandPersonalizedRows(null, []), []);
+        deepShapeEqual(sb.autoSyncExpandPersonalizedRows(undefined, []), []);
+        // an entry with no `kind` is skipped
+        const rows = sb.autoSyncExpandPersonalizedRows(
+            [{ name_template: 'orphan' }, { kind: 'archives', name_template: 'The Archives' }], []);
+        assert.equal(rows.length, 1);
+        assert.equal(rows[0].kind, 'archives');
+    });
+
+    test('name_template with {variant} placeholder is substituted; falls back without it', () => {
+        const sb = makeSandbox();
+        const withTpl = sb.autoSyncExpandPersonalizedRows(
+            [{ kind: 'genre_playlist', requires_variant: true, variants: ['rock'],
+               name_template: 'Genre — {variant}' }], []);
+        assert.equal(withTpl[0].name, 'Genre — rock');
+        // no template → "<kind> <variant>" default
+        const noTpl = sb.autoSyncExpandPersonalizedRows(
+            [{ kind: 'genre_playlist', requires_variant: true, variants: ['rock'] }], []);
+        assert.equal(noTpl[0].name, 'genre_playlist rock');
+    });
+});
+
+describe('autoSyncActionForPlaylist', () => {
+    test('personalized row → personalized_pipeline with single kind entry (with variant)', () => {
+        const sb = makeSandbox();
+        const pl = { id: -2, _personalized: true, kind: 'time_machine', variant: '1990s' };
+        deepShapeEqual(sb.autoSyncActionForPlaylist(pl, -2), {
+            action_type: 'personalized_pipeline',
+            action_config: { kinds: [{ kind: 'time_machine', variant: '1990s' }], refresh_first: true },
+        });
+    });
+
+    test('personalized singleton row → personalized_pipeline, no variant key', () => {
+        const sb = makeSandbox();
+        const pl = { id: -1, _personalized: true, kind: 'hidden_gems', variant: '' };
+        const action = sb.autoSyncActionForPlaylist(pl, -1);
+        deepShapeEqual(action, {
+            action_type: 'personalized_pipeline',
+            action_config: { kinds: [{ kind: 'hidden_gems' }], refresh_first: true },
+        });
+        assert.ok(!('variant' in action.action_config.kinds[0]));
+    });
+
+    test('regression: ordinary mirrored row → playlist_pipeline by numeric id (unchanged)', () => {
+        const sb = makeSandbox();
+        const pl = { id: 5, name: 'Discover Weekly' };
+        deepShapeEqual(sb.autoSyncActionForPlaylist(pl, 5), {
+            action_type: 'playlist_pipeline',
+            action_config: { playlist_id: '5', all: false },
+        });
+    });
+
+    test('regression: null playlist still yields playlist_pipeline (defensive)', () => {
+        const sb = makeSandbox();
+        deepShapeEqual(sb.autoSyncActionForPlaylist(null, 9), {
+            action_type: 'playlist_pipeline',
+            action_config: { playlist_id: '9', all: false },
+        });
+    });
+});
+
+describe('autoSyncIsPersonalizedAutomation / autoSyncPersonalizedEntry', () => {
+    test('recognizes a single-kind personalized_pipeline', () => {
+        const sb = makeSandbox();
+        const auto = { action_type: 'personalized_pipeline',
+                       action_config: { kinds: [{ kind: 'time_machine', variant: '1980s' }] } };
+        assert.equal(sb.autoSyncIsPersonalizedAutomation(auto), true);
+        deepShapeEqual(sb.autoSyncPersonalizedEntry(auto), { kind: 'time_machine', variant: '1980s' });
+    });
+
+    test('single-kind without variant → empty-string variant', () => {
+        const sb = makeSandbox();
+        const auto = { action_type: 'personalized_pipeline',
+                       action_config: { kinds: [{ kind: 'popular_picks' }] } };
+        deepShapeEqual(sb.autoSyncPersonalizedEntry(auto), { kind: 'popular_picks', variant: '' });
+    });
+
+    test('multi-kind pipeline (Automations-page built) is NOT a per-row board schedule', () => {
+        const sb = makeSandbox();
+        const auto = { action_type: 'personalized_pipeline',
+                       action_config: { kinds: [{ kind: 'a' }, { kind: 'b' }] } };
+        assert.equal(sb.autoSyncIsPersonalizedAutomation(auto), true);
+        assert.equal(sb.autoSyncPersonalizedEntry(auto), null);
+    });
+
+    test('playlist_pipeline is not personalized', () => {
+        const sb = makeSandbox();
+        const auto = { action_type: 'playlist_pipeline', action_config: { playlist_id: '1' } };
+        assert.equal(sb.autoSyncIsPersonalizedAutomation(auto), false);
+        assert.equal(sb.autoSyncPersonalizedEntry(auto), null);
+    });
+
+    test('missing/empty kinds → null entry', () => {
+        const sb = makeSandbox();
+        assert.equal(sb.autoSyncPersonalizedEntry(
+            { action_type: 'personalized_pipeline', action_config: {} }), null);
+        assert.equal(sb.autoSyncPersonalizedEntry(
+            { action_type: 'personalized_pipeline', action_config: { kinds: [] } }), null);
+        assert.equal(sb.autoSyncPersonalizedEntry(
+            { action_type: 'personalized_pipeline', action_config: { kinds: [{}] } }), null);
+    });
+});
+
+describe('autoSyncRowIdForPersonalized', () => {
+    test('prefers the real mirrored row id when the kind is already generated', () => {
+        const sb = makeSandbox();
+        const playlists = [
+            { id: 88, source: 'soulsync_discovery', source_playlist_id: 'ssd_time_machine_1980s' },
+            { id: -3, _personalized: true, kind: 'time_machine', variant: '1980s' },
+        ];
+        assert.equal(
+            sb.autoSyncRowIdForPersonalized({ kind: 'time_machine', variant: '1980s' }, playlists), 88);
+    });
+
+    test('falls back to the synthetic negative id when not yet generated', () => {
+        const sb = makeSandbox();
+        const playlists = [{ id: -3, _personalized: true, kind: 'time_machine', variant: '1980s' }];
+        assert.equal(
+            sb.autoSyncRowIdForPersonalized({ kind: 'time_machine', variant: '1980s' }, playlists), -3);
+    });
+
+    test('null when neither real nor synthetic row exists', () => {
+        const sb = makeSandbox();
+        assert.equal(sb.autoSyncRowIdForPersonalized({ kind: 'ghost', variant: '' }, []), null);
+        assert.equal(sb.autoSyncRowIdForPersonalized(null, []), null);
+    });
+});
+
+describe('buildAutoSyncScheduleState — personalized integration', () => {
+    test('bucket a personalized schedule onto its synthetic row', () => {
+        const sb = makeSandbox();
+        const playlists = [
+            { id: 1, name: 'Discover Weekly' },
+            { id: -1, _personalized: true, source: 'soulsync_discovery', kind: 'time_machine',
+              variant: '1980s', source_playlist_id: 'ssd_time_machine_1980s', name: 'Time Machine — 1980s' },
+        ];
+        const automations = [
+            { id: 50, action_type: 'personalized_pipeline', trigger_type: 'schedule',
+              trigger_config: { interval: 1, unit: 'days' },
+              action_config: { kinds: [{ kind: 'time_machine', variant: '1980s' }], refresh_first: true },
+              owned_by: 'auto_sync', enabled: 1 },
+        ];
+        const state = sb.buildAutoSyncScheduleState(playlists, automations);
+        // keyed on the synthetic id -1
+        assert.equal(state.playlistSchedules[-1].automation_id, 50);
+        assert.equal(state.playlistSchedules[-1].hours, 24);
+        assert.equal(state.playlistSchedules[-1].owned, true);
+        // personalized schedules never leak into the "custom pipelines" list
+        deepShapeEqual(state.automationPipelines, []);
+    });
+
+    test('weekly personalized schedule buckets into weeklySchedules', () => {
+        const sb = makeSandbox();
+        const playlists = [
+            { id: -1, _personalized: true, source: 'soulsync_discovery', kind: 'genre_playlist',
+              variant: 'rock', source_playlist_id: 'ssd_genre_playlist_rock', name: 'Genre — rock' },
+        ];
+        const automations = [
+            { id: 51, action_type: 'personalized_pipeline', trigger_type: 'weekly_time',
+              trigger_config: { time: '08:00', days: ['mon', 'thu'], tz: 'UTC' },
+              action_config: { kinds: [{ kind: 'genre_playlist', variant: 'rock' }] },
+              owned_by: 'auto_sync', enabled: 1 },
+        ];
+        const state = sb.buildAutoSyncScheduleState(playlists, automations);
+        assert.equal(state.weeklySchedules[-1].automation_id, 51);
+        assert.equal(state.weeklySchedules[-1].time, '08:00');
+        deepShapeEqual(state.weeklySchedules[-1].days, ['mon', 'thu']);
+    });
+
+    test('personalized schedule re-keys onto the REAL row once generated', () => {
+        const sb = makeSandbox();
+        const playlists = [
+            { id: 90, source: 'soulsync_discovery', source_playlist_id: 'ssd_time_machine_1980s',
+              name: 'Time Machine — 1980s' },
+        ];
+        const automations = [
+            { id: 52, action_type: 'personalized_pipeline', trigger_type: 'schedule',
+              trigger_config: { interval: 6, unit: 'hours' },
+              action_config: { kinds: [{ kind: 'time_machine', variant: '1980s' }] },
+              owned_by: 'auto_sync', enabled: 1 },
+        ];
+        const state = sb.buildAutoSyncScheduleState(playlists, automations);
+        assert.equal(state.playlistSchedules[90].automation_id, 52);
+        assert.equal(state.playlistSchedules[90].hours, 6);
+    });
+
+    test('non-owned personalized pipeline is ignored (not a board schedule)', () => {
+        const sb = makeSandbox();
+        const playlists = [
+            { id: -1, _personalized: true, source: 'soulsync_discovery', kind: 'time_machine',
+              variant: '1980s', source_playlist_id: 'ssd_time_machine_1980s' },
+        ];
+        const automations = [
+            { id: 53, action_type: 'personalized_pipeline', trigger_type: 'schedule',
+              trigger_config: { interval: 1, unit: 'days' },
+              action_config: { kinds: [{ kind: 'time_machine', variant: '1980s' }] },
+              enabled: 1 },  // no owned_by
+        ];
+        const state = sb.buildAutoSyncScheduleState(playlists, automations);
+        deepShapeEqual(state.playlistSchedules, {});
+        deepShapeEqual(state.weeklySchedules, {});
+    });
+
+    test('multi-kind personalized pipeline never binds to a row', () => {
+        const sb = makeSandbox();
+        const playlists = [
+            { id: -1, _personalized: true, source: 'soulsync_discovery', kind: 'time_machine',
+              variant: '1980s', source_playlist_id: 'ssd_time_machine_1980s' },
+        ];
+        const automations = [
+            { id: 54, action_type: 'personalized_pipeline', trigger_type: 'schedule',
+              trigger_config: { interval: 1, unit: 'days' },
+              action_config: { kinds: [{ kind: 'time_machine', variant: '1980s' }, { kind: 'hidden_gems' }] },
+              owned_by: 'auto_sync', enabled: 1 },
+        ];
+        const state = sb.buildAutoSyncScheduleState(playlists, automations);
+        deepShapeEqual(state.playlistSchedules, {});
+    });
+
+    test('regression: mirrored playlist_pipeline schedules coexist untouched', () => {
+        const sb = makeSandbox();
+        const playlists = [
+            { id: 1, name: 'Discover Weekly' },
+            { id: -1, _personalized: true, source: 'soulsync_discovery', kind: 'time_machine',
+              variant: '1980s', source_playlist_id: 'ssd_time_machine_1980s' },
+        ];
+        const automations = [
+            { id: 10, action_type: 'playlist_pipeline', trigger_type: 'schedule',
+              trigger_config: { interval: 1, unit: 'hours' },
+              action_config: { playlist_id: '1' }, owned_by: 'auto_sync', enabled: 1 },
+            { id: 50, action_type: 'personalized_pipeline', trigger_type: 'schedule',
+              trigger_config: { interval: 1, unit: 'days' },
+              action_config: { kinds: [{ kind: 'time_machine', variant: '1980s' }] },
+              owned_by: 'auto_sync', enabled: 1 },
+        ];
+        const state = sb.buildAutoSyncScheduleState(playlists, automations);
+        // both bucketed independently
+        assert.equal(state.playlistSchedules[1].automation_id, 10);
+        assert.equal(state.playlistSchedules[1].hours, 1);
+        assert.equal(state.playlistSchedules[-1].automation_id, 50);
+        assert.equal(Object.keys(state.playlistSchedules).length, 2);
+    });
+});
