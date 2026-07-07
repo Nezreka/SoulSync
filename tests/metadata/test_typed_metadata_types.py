@@ -572,7 +572,7 @@ def test_to_context_dict_shape_is_uniform_across_providers(factory, raw):
     expected_keys = {
         'id', 'name', 'artist', 'artist_name', 'artist_id', 'artists',
         'image_url', 'images', 'release_date', 'album_type',
-        'total_tracks', 'source', 'genres', 'label', 'barcode',
+        'secondary_types', 'total_tracks', 'source', 'genres', 'label', 'barcode',
         'external_ids', 'external_urls',
     }
     assert set(ctx.keys()) == expected_keys
