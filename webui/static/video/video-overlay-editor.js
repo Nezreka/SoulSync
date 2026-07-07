@@ -81,8 +81,15 @@
         title: { label: 'Title', cat: 'Details', text: true, fmt: function (v) { return v ? String(v) : null; } },
         network: { label: 'Network', cat: 'Details', text: true, fmt: function (v) { return v ? String(v) : null; } },
         studio: { label: 'Studio', cat: 'Details', text: true, fmt: function (v) { return v ? String(v) : null; } },
-        genre: { label: 'Genre', cat: 'Details', text: true, fmt: function (v) { return v ? String(v) : null; } },
+        genre: { label: 'Genre', cat: 'Details', text: true, fmt: function (v) { return v ? (String(v).split(',')[0].trim() || null) : null; } },
     };
+    // Canonical TMDB genres (movie + TV sets, unioned) for the conditional value
+    // dropdown. `genre` values carry a title's FULL comma-joined genre list, so a
+    // "genre includes X" condition matches any of them.
+    var GENRES = ['Action', 'Action & Adventure', 'Adventure', 'Animation', 'Comedy', 'Crime', 'Documentary',
+        'Drama', 'Family', 'Fantasy', 'History', 'Horror', 'Kids', 'Music', 'Mystery', 'News', 'Reality',
+        'Romance', 'Science Fiction', 'Sci-Fi & Fantasy', 'Soap', 'Talk', 'TV Movie', 'Thriller', 'War',
+        'War & Politics', 'Western'];
     var FIELD_ORDER = ['resolution', 'hdr', 'video_codec', 'audio_codec', 'source', 'imdb', 'rt', 'metacritic', 'tmdb',
         'content_rating', 'genre', 'status', 'year', 'runtime', 'season_count', 'episode_count', 'title', 'network', 'studio'];
     var FIELD_CATS = ['Quality', 'Ratings', 'Details'];
@@ -2008,21 +2015,60 @@
             '<span class="voe-arrange-sp"></span>' +
             b('lock', l.locked ? I.lock : I.unlock, 'Lock (Ctrl+L)', l.locked) + '</div>';
     }
+    // Operators offered per field type: numbers get comparisons, known-value
+    // (enumerated) fields only is / is not, free-text fields get contains.
+    function condOps(fieldKey) {
+        // Genre is multi-valued (a title has several) — membership, not equality.
+        if (fieldKey === 'genre') return [['exists', 'has any value'], ['contains', 'includes']];
+        var f = FIELDS[fieldKey] || {};
+        if (f.num) return [['exists', 'has any value'], ['eq', 'is'], ['neq', 'is not'], ['gte', '≥'], ['gt', '>'], ['lte', '≤'], ['lt', '<']];
+        if (f.opts) return [['exists', 'has any value'], ['eq', 'is'], ['neq', 'is not']];
+        return [['exists', 'has any value'], ['eq', 'is'], ['neq', 'is not'], ['contains', 'contains']];
+    }
+    // Value control: a dropdown of the field's known values, a number box, or
+    // free text — so you can't fat-finger e.g. "PG13" and have it silently never
+    // match. Mirrors sampleRow()'s field-type-aware control.
+    function condValueCtrl(f, w) {
+        // Genre uses its own canonical list (with membership matching); other enum
+        // fields use their own opts and show the friendly formatted label.
+        var isGenre = w.field === 'genre';
+        var vals = isGenre ? GENRES : (f.opts ? f.opts.filter(function (o) { return o !== ''; }) : null);
+        if (vals) {
+            return '<select class="voe-input" data-inspsel="condVal">' +
+                vals.map(function (o) {
+                    var lbl = isGenre ? o : (f.fmt(o) || o);
+                    return '<option value="' + esc(o) + '"' + (String(o) === String(w.value == null ? '' : w.value) ? ' selected' : '') +
+                        '>' + esc(lbl) + '</option>';
+                }).join('') + '</select>';
+        }
+        var t = f.num ? ' type="number" step="any"' : '';
+        return '<input class="voe-input"' + t + ' data-condval value="' + esc(w.value != null ? w.value : '') + '" spellcheck="false">';
+    }
+    // Keep the stored value valid for the current field+op (called on field/op change).
+    function seedCondValue(w) {
+        if (!w.op || w.op === 'exists') return;
+        if (w.field === 'genre') { if (GENRES.indexOf(w.value) < 0) w.value = GENRES[0]; return; }
+        var f = FIELDS[w.field] || {};
+        if (f.opts) {
+            var ov = f.opts.filter(function (o) { return o !== ''; });
+            if (ov.indexOf(w.value) < 0) w.value = ov[0];
+        }
+    }
     // "Show only when" rule builder — on any standard layer.
     function visibilitySection(l) {
         var w = l.when || {}, on = !!(l.when && l.when.field);
+        var f = FIELDS[w.field] || FIELDS[FIELD_ORDER[0]];
         var fieldSel = '<select class="voe-input" data-inspsel="condField">' + FIELD_ORDER.map(function (k) {
             return '<option value="' + k + '"' + (k === w.field ? ' selected' : '') + '>' + esc(FIELDS[k].label) + '</option>';
         }).join('') + '</select>';
-        var ops = [['exists', 'has any value'], ['eq', 'is'], ['neq', 'is not'], ['gte', '≥'], ['gt', '>'], ['lte', '≤'], ['lt', '<'], ['contains', 'contains']];
-        var opSel = '<select class="voe-input" data-inspsel="condOp">' + ops.map(function (o) {
+        var opSel = '<select class="voe-input" data-inspsel="condOp">' + condOps(w.field).map(function (o) {
             return '<option value="' + o[0] + '"' + (o[0] === (w.op || 'exists') ? ' selected' : '') + '>' + o[1] + '</option>';
         }).join('') + '</select>';
         return inspSection('Show only when',
             field('Rule', toggle('condOn', on)) +
             (on
                 ? field('Field', fieldSel) + field('Is', opSel) +
-                  ((w.op && w.op !== 'exists') ? field('Value', '<input class="voe-input" data-condval value="' + esc(w.value != null ? w.value : '') + '" spellcheck="false">') : '')
+                  ((w.op && w.op !== 'exists') ? field('Value', condValueCtrl(f, w)) : '')
                 : ''));
     }
 
@@ -2144,11 +2190,16 @@
                 else if (key === 'rowWeight') l.style.weight = parseInt(sel.value, 10);
                 else if (key === 'weight') l.weight = parseInt(sel.value, 10);
                 else if (key === 'ratingField') l.field = sel.value;
-                else if (key === 'condField') (l.when = l.when || {}).field = sel.value;
-                else if (key === 'condOp') (l.when = l.when || {}).op = sel.value;
+                else if (key === 'condField') {
+                    var wf = (l.when = l.when || {});
+                    wf.field = sel.value;
+                    if (condOps(sel.value).map(function (o) { return o[0]; }).indexOf(wf.op) < 0) wf.op = 'exists';
+                    seedCondValue(wf);
+                } else if (key === 'condOp') { var wo = (l.when = l.when || {}); wo.op = sel.value; seedCondValue(wo); }
+                else if (key === 'condVal') (l.when = l.when || {}).value = sel.value;
                 else l[key] = sel.value;
                 refreshLayer(l.id);
-                if (key === 'ratingField' || key === 'condOp') renderInspector();   // update preview / reveal value field
+                if (key === 'ratingField' || key === 'condField' || key === 'condOp') renderInspector();   // swap op list / value control
                 markDirty();
             });
         });
