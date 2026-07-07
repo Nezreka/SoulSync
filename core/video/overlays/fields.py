@@ -124,6 +124,7 @@ _FORMATTERS = {
     # Only a badge when there's actually more than one version (a single copy is the norm).
     "versions": lambda v: None if (_num(v) is None or int(v) <= 1) else str(v) + " Versions",
     "title": lambda v: str(v) if v else None,
+    "streaming": lambda v: str(v) if v else None,
     "network": lambda v: str(v) if v else None,
     "studio": lambda v: str(v) if v else None,
     # `genre` carries the full comma-joined genre list (so conditions can match
