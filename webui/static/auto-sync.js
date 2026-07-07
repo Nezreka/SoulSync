@@ -294,7 +294,22 @@ function autoSyncEnrichDiscoveryRows(playlists, kinds) {
     return out;
 }
 
-function autoSyncExpandPersonalizedRows(kinds, existingPlaylists) {
+// Map (kind, variant) → current generated track count, from
+// /api/personalized/playlists. A playlist that's been GENERATED (refreshed on
+// the Sync page) but not yet SYNCED has a real count here even though it has no
+// mirrored_playlists row yet — this lets the board show that count instead of 0.
+function autoSyncGeneratedCountMap(playlistsData) {
+    const map = new Map();
+    const list = playlistsData && playlistsData.success && Array.isArray(playlistsData.playlists)
+        ? playlistsData.playlists : [];
+    for (const p of list) {
+        if (!p || !p.kind) continue;
+        map.set(`${p.kind} ${p.variant || ''}`, parseInt(p.track_count, 10) || 0);
+    }
+    return map;
+}
+
+function autoSyncExpandPersonalizedRows(kinds, existingPlaylists, generatedCounts) {
     const rows = [];
     if (!Array.isArray(kinds)) return rows;
     // Skip anything already present as a real mirrored soulsync_discovery row
@@ -318,11 +333,14 @@ function autoSyncExpandPersonalizedRows(kinds, existingPlaylists) {
                 ? String(k.name_template || `${k.kind} ${variant}`).replace('{variant}', variant)
                 : String(k.name_template || k.kind);
             const kindLabel = k.requires_variant ? autoSyncKindLabel(k) : '';
+            // A generated-but-not-yet-synced playlist has no mirror row, so show
+            // its real generated count instead of 0 when we know it.
+            const generated = generatedCounts ? (generatedCounts.get(`${k.kind} ${variant}`) || 0) : 0;
             rows.push({
                 id: nextId--,
                 source: 'soulsync_discovery',
                 name,
-                track_count: 0,
+                track_count: generated,
                 kind: k.kind,
                 variant,
                 kind_label: kindLabel,
@@ -585,11 +603,12 @@ async function refreshAutoSyncScheduleModal() {
     const overlay = document.getElementById('auto-sync-schedule-modal');
     if (!overlay) return;
     try {
-        const [playlistRes, automationRes, historyRes, kindsRes] = await Promise.all([
+        const [playlistRes, automationRes, historyRes, kindsRes, genRes] = await Promise.all([
             fetch('/api/mirrored-playlists'),
             fetch('/api/automations'),
             fetch(`/api/playlist-pipeline/history?limit=${_autoSyncHistoryLimit}`),
-            fetch('/api/personalized/kinds').catch(() => null),   // best-effort; never blocks the board
+            fetch('/api/personalized/kinds').catch(() => null),      // best-effort; never blocks the board
+            fetch('/api/personalized/playlists').catch(() => null),  // generated counts; best-effort
         ]);
         const playlists = await playlistRes.json();
         const automations = await automationRes.json();
@@ -604,10 +623,14 @@ async function refreshAutoSyncScheduleModal() {
         try {
             const kindsData = kindsRes && kindsRes.ok ? await kindsRes.json() : null;
             if (kindsData && kindsData.success && Array.isArray(kindsData.kinds)) {
+                // Generated (but maybe unsynced) counts, so a refreshed-not-synced
+                // variant shows its real track count instead of 0.
+                const genData = genRes && genRes.ok ? await genRes.json() : null;
+                const genCounts = autoSyncGeneratedCountMap(genData);
                 // Tag generated variant rows + drop orphaned mirrors, THEN append
                 // the not-yet-generated variants; both flow into one group per kind.
                 const enriched = autoSyncEnrichDiscoveryRows(playlists, kindsData.kinds);
-                allPlaylists = [...enriched, ...autoSyncExpandPersonalizedRows(kindsData.kinds, enriched)];
+                allPlaylists = [...enriched, ...autoSyncExpandPersonalizedRows(kindsData.kinds, enriched, genCounts)];
             }
         } catch (e) { /* personalized kinds optional */ }
         _autoSyncScheduleState = buildAutoSyncScheduleState(allPlaylists, automations, historyData);

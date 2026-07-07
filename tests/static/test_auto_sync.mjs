@@ -701,6 +701,31 @@ describe('autoSyncExpandPersonalizedRows', () => {
         }]);
     });
 
+    test('uses generated counts when provided (refreshed-but-unsynced variant)', () => {
+        const sb = makeSandbox();
+        // time_machine 2000s has been generated (100 tracks) but not synced, so it
+        // has no mirror row; the synthetic row should still show 100, not 0.
+        const genCounts = sb.autoSyncGeneratedCountMap({
+            success: true,
+            playlists: [{ kind: 'time_machine', variant: '2000s', track_count: 100 }],
+        });
+        const rows = sb.autoSyncExpandPersonalizedRows([{
+            kind: 'time_machine', requires_variant: true, variants: ['2000s', '2010s'],
+            name_template: 'Time Machine — {variant}',
+        }], [], genCounts);
+        const r2000 = rows.find(r => r.variant === '2000s');
+        const r2010 = rows.find(r => r.variant === '2010s');
+        assert.equal(r2000.track_count, 100);  // real generated count
+        assert.equal(r2010.track_count, 0);    // never generated
+    });
+
+    test('track_count is 0 when no generated-counts map is passed', () => {
+        const sb = makeSandbox();
+        const rows = sb.autoSyncExpandPersonalizedRows(
+            [{ kind: 'hidden_gems', name_template: 'Hidden Gems' }], []);
+        assert.equal(rows[0].track_count, 0);
+    });
+
     test('variant kind → one synthetic row per variant, ids stay negative', () => {
         const sb = makeSandbox();
         const rows = sb.autoSyncExpandPersonalizedRows([{
@@ -772,6 +797,26 @@ describe('autoSyncExpandPersonalizedRows', () => {
         const noTpl = sb.autoSyncExpandPersonalizedRows(
             [{ kind: 'genre_playlist', requires_variant: true, variants: ['rock'] }], []);
         assert.equal(noTpl[0].name, 'genre_playlist rock');
+    });
+});
+
+describe('autoSyncGeneratedCountMap', () => {
+    test('keys by kind+variant → track_count', () => {
+        const sb = makeSandbox();
+        const map = sb.autoSyncGeneratedCountMap({ success: true, playlists: [
+            { kind: 'time_machine', variant: '2000s', track_count: 100 },
+            { kind: 'hidden_gems', variant: '', track_count: 50 },
+        ]});
+        assert.equal(map.get('time_machine 2000s'), 100);
+        assert.equal(map.get('hidden_gems '), 50);
+        assert.equal(map.get('genre_playlist rock'), undefined);
+    });
+
+    test('empty / failed response → empty map', () => {
+        const sb = makeSandbox();
+        assert.equal(sb.autoSyncGeneratedCountMap(null).size, 0);
+        assert.equal(sb.autoSyncGeneratedCountMap({ success: false }).size, 0);
+        assert.equal(sb.autoSyncGeneratedCountMap({ success: true, playlists: [] }).size, 0);
     });
 });
 
