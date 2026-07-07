@@ -582,6 +582,13 @@
             l.color = l.color || '#f5c518';
             l.emptyColor = l.emptyColor || '#ffffff';
             if (typeof l.emptyOpacity !== 'number') l.emptyOpacity = 0.28;
+            l.bg = l.bg || {};
+            l.bg.enabled = !!l.bg.enabled;
+            l.bg.color = l.bg.color || '#000000';
+            if (typeof l.bg.opacity !== 'number') l.bg.opacity = 0.6;
+            if (typeof l.bg.radius !== 'number') l.bg.radius = 0.02;
+            if (typeof l.bg.padX !== 'number') l.bg.padX = 0.02;
+            if (typeof l.bg.padY !== 'number') l.bg.padY = 0.012;
         }
         if (l.type === 'row') {
             if (typeof l.gap !== 'number') l.gap = 0.014;
@@ -1112,8 +1119,18 @@
             var ssz = l.size * ed.H, sgap = l.gap * ssz, stars = '';
             for (var si = 0; si < l.stars; si++) stars += '★';
             el.style.position = 'absolute'; el.style.whiteSpace = 'nowrap'; el.style.transformOrigin = 'center';
-            el.innerHTML = '<span class="voe-rating-track">' + stars + '</span><span class="voe-rating-fill">' + stars + '</span>';
-            el.querySelectorAll('span').forEach(function (s) { s.style.fontSize = ssz + 'px'; s.style.letterSpacing = sgap + 'px'; s.style.lineHeight = '1'; s.style.display = 'block'; });
+            var rbg = l.bg || {};
+            el.style.boxSizing = 'content-box';
+            el.style.background = rbg.enabled ? hexToRgba(rbg.color, rbg.opacity) : 'none';
+            el.style.borderRadius = rbg.enabled ? (rbg.radius * ed.H) + 'px' : '0';
+            el.style.padding = rbg.enabled ? ((rbg.padY * ed.H) + 'px ' + (rbg.padX * ed.H) + 'px') : '0';
+            // Inner wrapper keeps the absolute fill overlay aligned with the track
+            // regardless of the background padding.
+            el.innerHTML = '<span class="voe-rating-inner" style="position:relative;display:block">' +
+                '<span class="voe-rating-track">' + stars + '</span><span class="voe-rating-fill">' + stars + '</span></span>';
+            el.querySelectorAll('.voe-rating-track,.voe-rating-fill').forEach(function (s) {
+                s.style.fontSize = ssz + 'px'; s.style.letterSpacing = sgap + 'px'; s.style.lineHeight = '1'; s.style.display = 'block';
+            });
             var trk = el.querySelector('.voe-rating-track'), fll = el.querySelector('.voe-rating-fill');
             trk.style.color = hexToRgba(l.emptyColor, l.emptyOpacity);
             fll.style.color = l.color;
@@ -1934,6 +1951,14 @@
                 field('Empty', colorField('emptyColor', l.emptyColor)) +
                 field('Empty α', sliderInput('emptyOpacity', Math.round(l.emptyOpacity * 100))) +
                 field('Gap', numInput('gap', pct(l.gap), '%')));
+            html += inspSection('Background',
+                field('Pill', toggle('bgEnabled', l.bg.enabled)) +
+                (l.bg.enabled
+                    ? field('Color', colorField('bgColor', l.bg.color)) +
+                      field('Fill', sliderInput('bgOpacity', Math.round(l.bg.opacity * 100))) +
+                      field('Radius', numInput('bgRadius', pct(l.bg.radius), '%')) +
+                      row2(field('Pad X', numInput('bgPadX', pct(l.bg.padX), '%')), field('Pad Y', numInput('bgPadY', pct(l.bg.padY), '%')))
+                    : ''));
         }
         if (l.type === 'text') {
             if (l.binding) {
