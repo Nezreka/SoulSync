@@ -111,7 +111,11 @@ def test_overlay_sample_data_includes_genre(db):
     mid = db.upsert_movie("plex", {"server_id": "g1", "title": "Dune",
                                    "genres": ["Science Fiction", "Adventure"]})
     s = db.overlay_sample_data("movie", mid)
-    assert s["genre"] == "Adventure"          # first genre by name
+    # Full comma-joined genre list (sorted by name) so a "genre includes X"
+    # condition can match ANY of them; the Genre badge shows just the first.
+    assert s["genre"] == "Adventure, Science Fiction"
+    from core.video.overlays.fields import format_field
+    assert format_field("genre", s["genre"]) == "Adventure"   # badge = primary only
 
 
 def test_random_overlay_preview_items(db):

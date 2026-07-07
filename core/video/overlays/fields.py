@@ -122,7 +122,9 @@ _FORMATTERS = {
     "title": lambda v: str(v) if v else None,
     "network": lambda v: str(v) if v else None,
     "studio": lambda v: str(v) if v else None,
-    "genre": lambda v: str(v) if v else None,
+    # `genre` carries the full comma-joined genre list (so conditions can match
+    # ANY of a title's genres); the badge shows just the primary (first) one.
+    "genre": lambda v: (str(v).split(",")[0].strip() or None) if v else None,
 }
 
 
