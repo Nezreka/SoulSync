@@ -96,6 +96,9 @@
     var FIELD_ORDER = ['resolution', 'hdr', 'video_codec', 'audio_codec', 'source', 'imdb', 'rt', 'metacritic', 'tmdb', 'trakt',
         'content_rating', 'genre', 'status', 'year', 'runtime', 'season_count', 'episode_count', 'subtitles', 'versions', 'title', 'network', 'studio'];
     var FIELD_CATS = ['Quality', 'Ratings', 'Details'];
+    // Fields a Logo badge can resolve to a drop-in pack image (mirrors logos.py
+    // LOGO_FIELDS, limited to the ones we actually carry data for).
+    var LOGO_BADGE_FIELDS = ['resolution', 'hdr', 'video_codec', 'audio_codec', 'source', 'content_rating', 'status', 'network', 'studio'];
 
     function defaultSample() {
         return { resolution: '2160p', hdr: 'HDR', video_codec: 'hevc', audio_codec: 'atmos', source: 'bluray',
@@ -600,6 +603,24 @@
             l.bg.lineColor = l.bg.lineColor || '#ffffff';
             if (typeof l.bg.lineW !== 'number') l.bg.lineW = 0.004;
         }
+        if (l.type === 'logobadge') {
+            l.field = (l.field && LOGO_BADGE_FIELDS.indexOf(l.field) > -1) ? l.field : 'audio_codec';
+            if (typeof l.w !== 'number') l.w = 0.14;
+            if (typeof l.size !== 'number') l.size = 0.035;   // fallback-text font size
+            l.color = l.color || '#ffffff';
+            l.font = l.font || 'Inter';
+            if (typeof l.weight !== 'number') l.weight = 800;
+            l.bg = l.bg || {};
+            l.bg.enabled = !!l.bg.enabled;
+            l.bg.color = l.bg.color || '#000000';
+            if (typeof l.bg.opacity !== 'number') l.bg.opacity = 0.6;
+            if (typeof l.bg.radius !== 'number') l.bg.radius = 0.02;
+            if (typeof l.bg.padX !== 'number') l.bg.padX = 0.02;
+            if (typeof l.bg.padY !== 'number') l.bg.padY = 0.012;
+            l.bg.line = !!l.bg.line;
+            l.bg.lineColor = l.bg.lineColor || '#ffffff';
+            if (typeof l.bg.lineW !== 'number') l.bg.lineW = 0.004;
+        }
         if (l.type === 'row') {
             if (typeof l.gap !== 'number') l.gap = 0.014;
             if (!Array.isArray(l.fields)) l.fields = [];
@@ -846,7 +867,8 @@
                 items.map(function (k) { return palItem('badge', FIELDS[k].label, catIcon(cat), k); }).join('') + '</div></div>';
         });
         html += '<div class="voe-pal-section"><div class="voe-pal-h">Artwork</div><div class="voe-pal-grid">' +
-            palItem('logo', 'Title Logo', I.logo, '') + palItem('image', 'Image', I.image, '') + '</div></div>';
+            palItem('logo', 'Title Logo', I.logo, '') + palItem('image', 'Image', I.image, '') +
+            palItem('logobadge', 'Logo badge', I.logo, '') + '</div></div>';
         html += '<div class="voe-pal-section"><div class="voe-pal-h">Shapes</div><div class="voe-pal-grid">' +
             palItem('shape', 'Rectangle', I.shape, '') + palItem('ellipse', 'Ellipse', I.ellipse, '') +
             palItem('line', 'Line', I.line, '') + palItem('ribbon', 'Corner ribbon', I.ribbon, '') +
@@ -874,6 +896,13 @@
     // All layers are text under the hood; a `binding` makes one a dynamic badge, so
     // every text/pill style control applies to badges too.
     function defaultLayer(kind, x, y, field) {
+        if (kind === 'logobadge') {
+            return { id: uid(), type: 'logobadge', name: 'Logo badge', anchor: 'top-right',
+                x: 0.95, y: 0.06, hidden: false, opacity: 1, rotation: 0,
+                field: (field && LOGO_BADGE_FIELDS.indexOf(field) > -1) ? field : 'audio_codec', w: 0.14,
+                size: 0.035, color: '#ffffff', font: 'Inter', weight: 800,
+                bg: { enabled: false, color: '#000000', opacity: 0.6, radius: 0.02, padX: 0.02, padY: 0.012, line: false, lineColor: '#ffffff', lineW: 0.004 } };
+        }
         if (kind === 'ribbon') {
             return { id: uid(), type: 'ribbon', name: 'Ribbon', corner: 'top-right', size: 0.2,
                 color: '#d11e2a', textColor: '#ffffff', text: 'NEW', font: 'Inter', weight: 800, upper: true,
@@ -1032,6 +1061,16 @@
         return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
     }
 
+    // Apply the shared bg pill (fill + radius + padding + inset border) to a preview element.
+    function applyBadgeBg(el, bg) {
+        bg = bg || {};
+        el.style.boxSizing = 'content-box';
+        el.style.background = bg.enabled ? hexToRgba(bg.color, bg.opacity) : 'none';
+        el.style.borderRadius = bg.enabled ? (bg.radius * ed.H) + 'px' : '0';
+        el.style.padding = bg.enabled ? ((bg.padY * ed.H) + 'px ' + (bg.padX * ed.H) + 'px') : '0';
+        el.style.boxShadow = (bg.enabled && bg.line) ? ('inset 0 0 0 ' + (bg.lineW * ed.H) + 'px ' + bg.lineColor) : 'none';
+    }
+
     function fillCss(f) {
         if (f.grad) return 'linear-gradient(' + f.dir + 'deg,' + hexToRgba(f.c1, f.a1) + ',' + hexToRgba(f.c2, f.a2) + ')';
         return hexToRgba(f.c1, f.a1);
@@ -1185,6 +1224,28 @@
             } else {
                 el.innerHTML = imgPlaceholder(l);
             }
+            return;
+        }
+        if (l.type === 'logobadge') {
+            var lbw = l.w * ed.W;
+            var lval = (ed.sample || {})[l.field];
+            el.style.transformOrigin = 'center';
+            applyBadgeBg(el, l.bg);
+            if (lval == null || lval === '') { el.innerHTML = ''; el.style.width = 'auto'; return; }
+            el.style.width = 'auto';
+            var lsrc = '/api/video/overlays/logo/' + encodeURIComponent(l.field) + '/' + encodeURIComponent(String(lval));
+            el.innerHTML = '<img src="' + esc(lsrc) + '" style="width:' + lbw + 'px;height:auto;display:block" draggable="false">';
+            var lim = el.querySelector('img');
+            lim.onload = function () { layoutLayer(el, l); };
+            lim.onerror = function () {   // no pack → styled text fallback
+                var txt = FIELDS[l.field] ? (FIELDS[l.field].fmt(lval) || String(lval)) : String(lval);
+                el.innerHTML = '<span></span>';
+                var sp = el.querySelector('span');
+                sp.textContent = txt;
+                sp.style.color = l.color; sp.style.fontFamily = fontStack(l.font); sp.style.fontWeight = l.weight;
+                sp.style.fontSize = (l.size * ed.H) + 'px'; sp.style.whiteSpace = 'nowrap'; sp.style.lineHeight = '1'; sp.style.display = 'block';
+                layoutLayer(el, l);
+            };
             return;
         }
         if (l.type === 'shape') {
@@ -1603,6 +1664,7 @@
     function layerIcon(l) {
         if (l.type === 'row') return I.row;
         if (l.type === 'rating') return I.star;
+        if (l.type === 'logobadge') return I.logo;
         if (l.type === 'ribbon') return I.ribbon;
         if (l.binding) return catIcon((FIELDS[l.binding.field] || {}).cat);
         if (l.type === 'image') return l.logo ? I.logo : I.image;
@@ -1613,6 +1675,7 @@
         if (l.name) return l.name;
         if (l.type === 'row') return 'Badge row';
         if (l.type === 'rating') return 'Rating stars';
+        if (l.type === 'logobadge') return (FIELDS[l.field] || {}).label ? (FIELDS[l.field].label + ' logo') : 'Logo badge';
         if (l.binding) return (FIELDS[l.binding.field] || {}).label;
         if (l.type === 'image') return l.logo ? 'Logo' : 'Image';
         if (l.type === 'shape') return 'Shape';
@@ -1995,6 +2058,24 @@
                           : '')
                     : ''));
         }
+        if (l.type === 'logobadge') {
+            if (!l.bg) l.bg = { enabled: false, color: '#000000', opacity: 0.6, radius: 0.02, padX: 0.02, padY: 0.012, line: false, lineColor: '#ffffff', lineW: 0.004 };
+            var lbsel = '<select class="voe-input" data-inspsel="field">' + LOGO_BADGE_FIELDS.map(function (k) {
+                return '<option value="' + k + '"' + (k === l.field ? ' selected' : '') + '>' + esc(FIELDS[k].label) + '</option>';
+            }).join('') + '</select>';
+            var lbv = FIELDS[l.field] ? FIELDS[l.field].fmt((ed.sample || {})[l.field]) : null;
+            html += inspSection('Logo',
+                field('Field', lbsel) +
+                field('Size', numInput('w', pct(l.w), '%')) +
+                field('Shows', '<span class="voe-data-preview">' + esc(lbv || '—') + '</span>') +
+                field('', '<div class="voe-insp-hint">Uses a logo from a drop-in pack; falls back to the text below when none is present.</div>'));
+            html += inspSection('Fallback text',
+                field('Color', colorField('color', l.color)) +
+                field('Size', numInput('size', pct(l.size), '%')) +
+                field('Font', fontSelect(l.font)) +
+                field('Weight', weightSelect(l.weight)));
+            html += bgInspSection(l);
+        }
         if (l.type === 'text') {
             if (l.binding) {
                 html += inspSection('Data',
@@ -2120,6 +2201,22 @@
         }
     }
     // "Show only when" rule builder — on any standard layer.
+    // The shared 'Background' pill section (fill + radius + padding + border).
+    function bgInspSection(l) {
+        return inspSection('Background',
+            field('Pill', toggle('bgEnabled', l.bg.enabled)) +
+            (l.bg.enabled
+                ? field('Color', colorField('bgColor', l.bg.color)) +
+                  field('Fill', sliderInput('bgOpacity', Math.round(l.bg.opacity * 100))) +
+                  field('Radius', numInput('bgRadius', pct(l.bg.radius), '%')) +
+                  row2(field('Pad X', numInput('bgPadX', pct(l.bg.padX), '%')), field('Pad Y', numInput('bgPadY', pct(l.bg.padY), '%'))) +
+                  field('Border', toggle('bgLine', l.bg.line)) +
+                  (l.bg.line
+                      ? field('Color', colorField('bgLineColor', l.bg.lineColor)) +
+                        field('Width', numInput('bgLineW', pct(l.bg.lineW), '%'))
+                      : '')
+                : ''));
+    }
     function visibilitySection(l) {
         var w = l.when || {}, on = !!(l.when && l.when.field);
         var f = FIELDS[w.field] || FIELDS[FIELD_ORDER[0]];
@@ -2266,7 +2363,7 @@
                 else if (key === 'condVal') (l.when = l.when || {}).value = sel.value;
                 else l[key] = sel.value;
                 refreshLayer(l.id);
-                if (key === 'ratingField' || key === 'condField' || key === 'condOp') renderInspector();   // swap op list / value control
+                if (key === 'ratingField' || key === 'field' || key === 'condField' || key === 'condOp') renderInspector();   // swap op list / value control / logo field
                 markDirty();
             });
         });
