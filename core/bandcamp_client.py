@@ -77,10 +77,19 @@ def rate_limited(func):
                     f"Bandcamp in backoff for another {remaining:.0f}s — skipping"
                 )
 
-            elapsed = now - _last_call_time
-            if elapsed < MIN_CALL_INTERVAL:
-                time.sleep(MIN_CALL_INTERVAL - elapsed)
-            _last_call_time = time.time()
+            # Reserve this call's slot one interval after the previous
+            # reservation, then sleep to it OUTSIDE the lock. Sleeping while
+            # holding _call_lock would stall a foreground request (e.g. a user
+            # clicking a Bandcamp album) ~1s behind the background worker. By
+            # advancing _last_call_time to the scheduled time under the lock,
+            # concurrent callers still serialize into distinct, correctly-spaced
+            # slots without blocking each other during the wait.
+            scheduled = max(now, _last_call_time + MIN_CALL_INTERVAL)
+            _last_call_time = scheduled
+
+        wait = scheduled - time.time()
+        if wait > 0:
+            time.sleep(wait)
 
         try:
             result = func(*args, **kwargs)
