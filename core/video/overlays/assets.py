@@ -109,6 +109,25 @@ class AssetStore:
         p = self._uploads_dir() / safe
         return p.read_bytes() if p.is_file() else None
 
+    # ── drop-in logo packs (field value -> brand mark), one folder per field ──
+    def _logos_dir(self) -> Path:
+        return self.root / "logos"
+
+    def read_logo(self, pack: str, name: str) -> bytes | None:
+        """Bytes of a logo in a drop-in pack, or None if that pack/name isn't
+        present. Tries common raster extensions. basename-guarded (no traversal)."""
+        safe_pack = Path(str(pack)).name
+        safe_name = Path(str(name)).name
+        d = self._logos_dir() / safe_pack
+        for ext in ("png", "webp", "jpg", "jpeg"):
+            p = d / f"{safe_name}.{ext}"
+            if p.is_file():
+                return p.read_bytes()
+        return None
+
+    def has_logo_pack(self, pack: str) -> bool:
+        return (self._logos_dir() / Path(str(pack)).name).is_dir()
+
     # ── cached gallery thumbnails (rendered once, keyed by definition hash) ────
     def _thumbs_dir(self) -> Path:
         return self.root / "_thumbs"
