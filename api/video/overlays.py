@@ -204,6 +204,26 @@ def register_routes(bp):
         resp.headers["Cache-Control"] = "public, max-age=31536000"
         return resp
 
+    @bp.route("/overlays/logo/<field>/<path:value>", methods=["GET"])
+    def overlay_logo(field, value):
+        """Serve the drop-in-pack logo for a field value, so the editor previews
+        the real mark. 404 when no pack/match — the editor falls back to text."""
+        from flask import Response, abort
+        from core.video.overlays.assets import AssetStore
+        from core.video.overlays.logos import logo_ref
+        ref = logo_ref(field, value)
+        if not ref:
+            abort(404)
+        data = AssetStore.default().read_logo(ref[0], ref[1])
+        if data is None:
+            abort(404)
+        head = data[:12]
+        ctype = "image/png" if head.startswith(b"\x89PNG") else \
+            ("image/webp" if head[8:12] == b"WEBP" else "image/jpeg")
+        resp = Response(data, content_type=ctype)
+        resp.headers["Cache-Control"] = "public, max-age=86400"
+        return resp
+
     @bp.route("/overlays/preview/random", methods=["GET"])
     def overlay_preview_random():
         """A random owned title (with tmdb_id + poster) to drop into the editor's
