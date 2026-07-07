@@ -307,7 +307,7 @@ def _star_points(cx, cy, r_out, r_in, n=5):
 
 
 # rating field → its max (so value/max fills the stars correctly)
-_RATING_MAX = {"rt": 100.0, "metacritic": 100.0, "imdb": 10.0, "tmdb": 10.0}
+_RATING_MAX = {"rt": 100.0, "metacritic": 100.0, "imdb": 10.0, "tmdb": 10.0, "trakt": 10.0}
 
 
 def _bg_wrap(tile, layer, W, H):

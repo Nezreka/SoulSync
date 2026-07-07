@@ -113,6 +113,7 @@ _FORMATTERS = {
     "rt": lambda v: None if _num(v) is None else "RT " + str(v) + "%",
     "metacritic": lambda v: None if _num(v) is None else "MC " + str(v),
     "tmdb": lambda v: None if _num(v) is None else "TMDB " + str(_round1(v)),
+    "trakt": lambda v: None if _num(v) is None else "Trakt " + str(_round1(v)),
     "content_rating": lambda v: _up(v) if v else None,
     "status": _status,
     "year": lambda v: None if _num(v) is None else str(v),

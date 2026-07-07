@@ -232,6 +232,15 @@ def test_rating_stars_optional_background():
     assert off.size == plain.size
 
 
+def test_trakt_is_a_rating_field():
+    from core.video.overlays.fields import format_field
+    from core.video.overlays.compositor import _RATING_MAX, _rating_tile
+    assert format_field("trakt", 8.34) == "Trakt 8.3"      # text badge
+    assert _RATING_MAX["trakt"] == 10.0                    # scored out of 10 like imdb/tmdb
+    assert _rating_tile({"field": "trakt", "stars": 5, "size": 0.06}, 600, 900, {"trakt": 9}) is not None
+    assert _rating_tile({"field": "trakt", "stars": 5, "size": 0.06}, 600, 900, {}) is None  # no value → skip
+
+
 def test_bg_box_optional_border():
     from core.video.overlays.compositor import _bg_wrap, _text_tile
     from PIL import Image
