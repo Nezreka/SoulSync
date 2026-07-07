@@ -754,3 +754,19 @@ def test_get_artist_detail_discography_splits_eps_from_singles(monkeypatch):
     assert [r["id"] for r in result["albums"]] == ["a1"]
     assert [r["id"] for r in result["eps"]] == ["e1"]
     assert [r["id"] for r in result["singles"]] == ["s1"]
+
+
+def test_musicbrainz_secondary_types_reach_artist_detail_cards():
+    # The artist-detail declutter filter classifies Live/Compilation from
+    # secondary_types, so they MUST survive the projection into the card dict.
+    release = types.SimpleNamespace(
+        id='rg-live', name='Unlabelled Concert', artists=['Example Artist'],
+        release_date='2025-01-01', total_tracks=0, album_type='album',
+        image_url=None, external_urls={}, explicit=None, secondary_types=['Live'],
+    )
+    normalized = metadata_discography._build_discography_release_dict(
+        release, artist_id='artist-id', source='musicbrainz')
+    card = metadata_discography._build_artist_detail_release_card(normalized)
+
+    assert normalized['secondary_types'] == ['Live']
+    assert card['secondary_types'] == ['Live']

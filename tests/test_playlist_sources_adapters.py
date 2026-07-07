@@ -631,6 +631,29 @@ def test_soulsync_discovery_adapter_refresh_invokes_manager():
     assert manager.refresh_calls == [("hidden_gems", "", 1)]
 
 
+def _discovery_record(id, kind, track_count, name="X", variant=""):
+    return SimpleNamespace(
+        id=id, profile_id=1, kind=kind, variant=variant, name=name, config=None,
+        track_count=track_count, last_generated_at="2026-05-26T00:00:00Z",
+        last_synced_at=None, last_generation_source="discovery_pool",
+        last_generation_error=None, is_stale=False,
+    )
+
+
+def test_soulsync_discovery_adapter_hides_empty_playlists():
+    # A 0-track playlist (e.g. a no-op generator's "Daily Mix 1") can't be
+    # synced — the sync board should not list it, only the ones with tracks.
+    manager = _FakeDiscoveryManager()
+    manager._records = [
+        _discovery_record(42, "hidden_gems", 50, "Hidden Gems"),
+        _discovery_record(9, "daily_mix", 0, "Daily Mix 1", variant="1"),
+    ]
+    src = SoulSyncDiscoveryPlaylistSource(lambda: manager, profile_id_getter=lambda: 1)
+    metas = src.list_playlists()
+    assert [m.source_playlist_id for m in metas] == ["42"]  # empty daily_mix dropped
+    assert all(m.track_count > 0 for m in metas)
+
+
 # ─── Registry ───────────────────────────────────────────────────────────
 
 

@@ -736,9 +736,19 @@ if (typeof window !== 'undefined') {
 // Discography filter state
 let discographyFilterState = {
     categories: { albums: true, eps: true, singles: true },
+    // Content defaults to show-all. The declutter (hide non-studio by default)
+    // is applied ONLY for MusicBrainz discographies, in populateDiscographySections
+    // once the discography's true source is known. Other sources are already clean
+    // commercial catalogues, so their default is unchanged.
     content: { live: true, compilations: true, featured: true },
     ownership: 'all'  // 'all', 'owned', 'missing'
 };
+
+// Non-studio MusicBrainz release-group secondary types (EXCLUDING Compilation,
+// which has its own toggle). Mirrors core/musicbrainz_search _NON_STUDIO_SECONDARY_TYPES
+// so backend + UI agree. Only used to declutter MusicBrainz artist pages by default.
+const _NON_STUDIO_SECONDARY = new Set(['live', 'soundtrack', 'remix', 'demo',
+    'mixtape/street', 'interview', 'audiobook', 'audio drama']);
 
 // Maximum visible characters of an artist name in the sidebar Library
 // breadcrumb. Names longer than this get truncated with an ellipsis so the
@@ -1830,6 +1840,42 @@ function populateDiscographySections(discography) {
     // Populate singles
     populateReleaseSection('singles', discography.singles);
 
+    // MusicBrainz lists an artist's WHOLE catalogue (live, soundtracks, remixes,
+    // etc.), which buries the studio albums. ONLY for a MusicBrainz discography,
+    // hide non-studio content by default (compilations stay shown; owned releases
+    // are never hidden; the user can toggle it back on). Other sources are already
+    // clean commercial catalogues, so this leaves their default untouched. Gated
+    // on the discography's real source, which is known now that data has loaded.
+    if ((discography && String(discography.source || '').toLowerCase()) === 'musicbrainz') {
+        discographyFilterState.content.live = false;
+        discographyFilterState._mbDeclutter = true;
+
+        // MusicBrainz tags live/non-studio authoritatively, so recompute each
+        // card's data-is-live from its secondary_types instead of the title guess.
+        // This fixes the false positive where a studio album titled "Live Through
+        // This" would be hidden, and covers soundtrack/remix/demo too. MB cards only.
+        ['albums', 'eps', 'singles'].forEach(cat => {
+            const grid = document.getElementById(`${cat}-grid`);
+            if (!grid) return;
+            grid.querySelectorAll('.release-card').forEach(card => {
+                const rd = card._releaseData;
+                const secs = (rd && Array.isArray(rd.secondary_types))
+                    ? rd.secondary_types.map(s => String(s).trim().toLowerCase()) : [];
+                const nonStudio = secs.some(s => _NON_STUDIO_SECONDARY.has(s));
+                card.setAttribute('data-is-live', nonStudio ? 'true' : 'false');
+            });
+        });
+
+        // The toggle governs the broader non-studio set on MB, so label it honestly.
+        const container = document.getElementById('discography-filters');
+        const liveBtn = container && container.querySelector(
+            '.discography-filter-btn[data-filter="content"][data-value="live"]');
+        if (liveBtn) {
+            liveBtn.classList.remove('active');
+            liveBtn.textContent = 'Non-Studio';
+        }
+    }
+
     // Apply any active filters after populating
     applyDiscographyFilters();
 }
@@ -2393,8 +2439,11 @@ function initializeDiscographyFilters() {
 
 function resetDiscographyFilters() {
     discographyFilterState.categories = { albums: true, eps: true, singles: true };
+    // Neutral show-all. The MusicBrainz-only declutter is applied later, in
+    // populateDiscographySections, once the discography's real source is known.
     discographyFilterState.content = { live: true, compilations: true, featured: true };
     discographyFilterState.ownership = 'all';
+    discographyFilterState._mbDeclutter = false;
 
     // Reset button visual states
     const container = document.getElementById('discography-filters');
@@ -2408,6 +2457,9 @@ function resetDiscographyFilters() {
             btn.classList.add('active');
         }
     });
+    // Restore the default "Live" label; the MB path relabels it to "Non-Studio".
+    const liveBtn = container.querySelector('.discography-filter-btn[data-filter="content"][data-value="live"]');
+    if (liveBtn) liveBtn.textContent = 'Live';
 }
 
 function applyDiscographyFilters() {
@@ -2435,15 +2487,24 @@ function applyDiscographyFilters() {
         grid.querySelectorAll('.release-card').forEach(card => {
             let hidden = false;
 
-            // Content filters
-            if (!discographyFilterState.content.live && card.getAttribute('data-is-live') === 'true') {
-                hidden = true;
-            }
-            if (!discographyFilterState.content.compilations && card.getAttribute('data-is-compilation') === 'true') {
-                hidden = true;
-            }
-            if (!discographyFilterState.content.featured && card.getAttribute('data-is-featured') === 'true') {
-                hidden = true;
+            // Content filters. On MusicBrainz pages (where non-studio is hidden by
+            // an automatic default the user didn't set) never hide something the
+            // user OWNS. Elsewhere the toggles are entirely user-driven, so they are
+            // respected as-is (no owned exemption) — keeps non-MB behaviour identical
+            // to before. (owned is null while its completion check is pending; the
+            // filter re-runs once checks resolve, so an owned card reappears then.)
+            const _ownedExempt = discographyFilterState._mbDeclutter
+                && card._releaseData && card._releaseData.owned === true;
+            if (!_ownedExempt) {
+                if (!discographyFilterState.content.live && card.getAttribute('data-is-live') === 'true') {
+                    hidden = true;
+                }
+                if (!discographyFilterState.content.compilations && card.getAttribute('data-is-compilation') === 'true') {
+                    hidden = true;
+                }
+                if (!discographyFilterState.content.featured && card.getAttribute('data-is-featured') === 'true') {
+                    hidden = true;
+                }
             }
 
             // Ownership filter (only apply if card is not still checking)
@@ -2611,6 +2672,10 @@ function _esc(s) { const d = document.createElement('div'); d.textContent = s; r
 // Artist Detail cards and the Download Discography modal so they can't drift.
 function _classifyReleaseContent(release) {
     const t = (release && (release.title || release.name)) || '';
+    // Title-based classification, shared by all sources and the download modal.
+    // On MusicBrainz artist pages the data-is-live attribute is recomputed
+    // authoritatively from secondary_types in populateDiscographySections (MB tags
+    // live/non-studio reliably), so this title heuristic only governs non-MB here.
     const livePattern = /\b(live)\b|\(live[^)]*\)|\[live[^\]]*\]/i;
     const compilationPattern = /\b(greatest hits|best of|collection|anthology|essential)\b/i;
     const featuredPattern = /\(?\bfeat\.?\s|\bft\.?\s|\bfeaturing\b/i;

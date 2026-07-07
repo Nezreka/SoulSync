@@ -65,6 +65,7 @@ def _make_soulsync_db():
             track_artist TEXT,
             musicbrainz_recording_id TEXT,
             isrc TEXT,
+            quality_profile_id INTEGER,
             server_source TEXT,
             created_at TEXT,
             updated_at TEXT,
@@ -153,6 +154,54 @@ def test_record_soulsync_library_entry_writes_artist_album_and_track(tmp_path, m
     # Read via os.path.getsize at insert time since SoulSync standalone is
     # the only flow where the file is local at the moment we write the row.
     assert track_row["file_size"] == os.path.getsize(str(final_path))
+    # No override on this item — NULL means "follow the app-wide default at
+    # read time" (same semantics as wishlist_tracks.quality_profile_id).
+    assert track_row["quality_profile_id"] is None
+
+
+def test_record_soulsync_library_entry_persists_quality_profile_id(tmp_path, monkeypatch):
+    """Whatever the pipeline resolved for this item (a wishlist row's or
+    Auto-Import's own profile override) must land on the library track row —
+    otherwise a later Quality Check / Quality Upgrade Finder pass re-judges
+    the track against the default profile instead of the one it was actually
+    imported under (see `_resolve_context_quality_profile` in
+    core/imports/pipeline.py)."""
+    conn = _make_soulsync_db()
+    fake_db = _FakeDB(conn)
+    final_path = tmp_path / "track.flac"
+    final_path.write_bytes(b"audio")
+
+    monkeypatch.setattr(side_effects, "get_database", lambda: fake_db)
+    monkeypatch.setattr(
+        side_effects,
+        "_get_config_manager",
+        lambda: SimpleNamespace(get_active_media_server=lambda: "soulsync"),
+    )
+
+    import core.genre_filter as genre_filter
+
+    monkeypatch.setattr(genre_filter, "filter_genres", lambda genres, _cfg: genres)
+
+    context = {
+        "source": "spotify",
+        "artist": {"id": "sp-artist", "name": "Artist One"},
+        "album": {"id": "sp-album", "name": "Album One"},
+        "track_info": {
+            "id": "sp-track",
+            "name": "Song One",
+            "quality_profile_id": 42,
+            "_source": "spotify",
+        },
+        "original_search_result": {"title": "Song One", "_source": "spotify"},
+        "_final_processed_path": str(final_path),
+    }
+    artist_context = {"name": "Artist One", "genres": []}
+    album_info = {"is_album": True, "album_name": "Album One"}
+
+    side_effects.record_soulsync_library_entry(context, artist_context, album_info)
+
+    track_row = conn.execute("SELECT * FROM tracks").fetchone()
+    assert track_row["quality_profile_id"] == 42
 
 
 def test_record_soulsync_library_entry_ignores_numeric_spotify_ids(tmp_path, monkeypatch):
