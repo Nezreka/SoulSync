@@ -48,7 +48,7 @@ function realAutoParseUTC(ts) {
 function makeSandbox() {
     const sandbox = {
         window: {},
-        document: { getElementById: () => null, body: {} },
+        document: { getElementById: () => null, body: {}, querySelectorAll: () => [] },
         console: { debug: () => {}, error: () => {}, log: () => {} },
         fetch: async () => { throw new Error('fetch not stubbed for this test'); },
         // Globals that auto-sync.js expects to find in the window namespace
@@ -696,7 +696,7 @@ describe('autoSyncExpandPersonalizedRows', () => {
             [{ kind: 'popular_picks', name_template: 'Popular Picks' }], []);
         deepShapeEqual(rows, [{
             id: -1, source: 'soulsync_discovery', name: 'Popular Picks', track_count: 0,
-            kind: 'popular_picks', variant: '', source_playlist_id: 'ssd_popular_picks',
+            kind: 'popular_picks', variant: '', kind_label: '', source_playlist_id: 'ssd_popular_picks',
             _personalized: true,
         }]);
     });
@@ -994,5 +994,150 @@ describe('buildAutoSyncScheduleState — personalized integration', () => {
         assert.equal(state.playlistSchedules[1].hours, 1);
         assert.equal(state.playlistSchedules[-1].automation_id, 50);
         assert.equal(Object.keys(state.playlistSchedules).length, 2);
+    });
+});
+
+// =========================================================================
+// Collapsible variant-kind groups in the sidebar
+// =========================================================================
+
+describe('autoSyncExpandPersonalizedRows — kind_label', () => {
+    test('variant kind gets a group label with the {variant} suffix stripped', () => {
+        const sb = makeSandbox();
+        const rows = sb.autoSyncExpandPersonalizedRows([{
+            kind: 'time_machine', requires_variant: true, variants: ['1980s'],
+            name_template: 'Time Machine — {variant}',
+        }], []);
+        assert.equal(rows[0].kind_label, 'Time Machine');
+    });
+
+    test('colon / dash separators are trimmed too', () => {
+        const sb = makeSandbox();
+        const colon = sb.autoSyncExpandPersonalizedRows([{
+            kind: 'genre_playlist', requires_variant: true, variants: ['rock'],
+            name_template: 'Genre: {variant}',
+        }], []);
+        assert.equal(colon[0].kind_label, 'Genre');
+        const dash = sb.autoSyncExpandPersonalizedRows([{
+            kind: 'genre_playlist', requires_variant: true, variants: ['rock'],
+            name_template: 'Genre - {variant}',
+        }], []);
+        assert.equal(dash[0].kind_label, 'Genre');
+    });
+
+    test('no name_template → kind_label falls back to the kind', () => {
+        const sb = makeSandbox();
+        const rows = sb.autoSyncExpandPersonalizedRows([{
+            kind: 'seasonal_mix', requires_variant: true, variants: ['halloween'],
+        }], []);
+        assert.equal(rows[0].kind_label, 'seasonal_mix');
+    });
+
+    test('singleton kind has an empty kind_label (never grouped)', () => {
+        const sb = makeSandbox();
+        const rows = sb.autoSyncExpandPersonalizedRows(
+            [{ kind: 'hidden_gems', name_template: 'Hidden Gems' }], []);
+        assert.equal(rows[0].kind_label, '');
+    });
+});
+
+describe('autoSyncGroupSidebarRows', () => {
+    test('variant kinds bucket by kind; singletons and real rows stay flat', () => {
+        const sb = makeSandbox();
+        const rows = [
+            { id: 5, name: 'Discover Weekly' },                       // real mirrored → flat
+            { id: -1, _personalized: true, kind: 'popular_picks', variant: '' },  // singleton → flat
+            { id: -2, _personalized: true, kind: 'time_machine', variant: '1980s', kind_label: 'Time Machine' },
+            { id: -3, _personalized: true, kind: 'time_machine', variant: '1990s', kind_label: 'Time Machine' },
+            { id: -4, _personalized: true, kind: 'genre_playlist', variant: 'rock', kind_label: 'Genre' },
+        ];
+        const { flat, groups } = sb.autoSyncGroupSidebarRows(rows);
+        deepShapeEqual(flat.map(p => p.id), [5, -1]);
+        assert.equal(groups.length, 2);
+        assert.equal(groups[0].kind, 'time_machine');
+        assert.equal(groups[0].label, 'Time Machine');
+        deepShapeEqual(groups[0].rows.map(p => p.variant), ['1980s', '1990s']);
+        assert.equal(groups[1].kind, 'genre_playlist');
+        assert.equal(groups[1].label, 'Genre');
+        assert.equal(groups[1].rows.length, 1);
+    });
+
+    test('group label falls back to the kind when kind_label is missing', () => {
+        const sb = makeSandbox();
+        const { groups } = sb.autoSyncGroupSidebarRows([
+            { id: -1, _personalized: true, kind: 'time_machine', variant: '1980s' },
+        ]);
+        assert.equal(groups[0].label, 'time_machine');
+    });
+
+    test('empty / null input yields empty flat + groups', () => {
+        const sb = makeSandbox();
+        deepShapeEqual(sb.autoSyncGroupSidebarRows([]), { flat: [], groups: [] });
+        deepShapeEqual(sb.autoSyncGroupSidebarRows(null), { flat: [], groups: [] });
+    });
+});
+
+describe('autoSyncSidebarGroupHtml + toggleAutoSyncKindGroup', () => {
+    // A tiny card renderer that tags id and the display name it was given, so we
+    // can assert flat-vs-grouped placement and the variant-only labels.
+    const renderer = (p, displayName) => `[card:${p.id}:${displayName || p.name}]`;
+
+    test('flat cards render outside groups; variant cards inside, labelled by variant', () => {
+        const sb = makeSandbox();
+        const rows = [
+            { id: -1, _personalized: true, kind: 'popular_picks', variant: '', name: 'Popular Picks' },
+            { id: -2, _personalized: true, kind: 'time_machine', variant: '1980s', kind_label: 'Time Machine' },
+            { id: -3, _personalized: true, kind: 'time_machine', variant: '1990s', kind_label: 'Time Machine' },
+        ];
+        const html = sb.autoSyncSidebarGroupHtml(rows, renderer);
+        assert.ok(html.includes('[card:-1:Popular Picks]'), 'singleton flat card present');
+        // grouped cards labelled by variant, not full name
+        assert.ok(html.includes('[card:-2:1980s]'), 'grouped card uses variant label');
+        assert.ok(html.includes('[card:-3:1990s]'));
+        // one collapsible header with the kind label + a count of 2
+        assert.ok(html.includes('auto-sync-kind-group'), 'group wrapper present');
+        assert.ok(html.includes('data-kind="time_machine"'));
+        assert.ok(html.includes('Time Machine'), 'group heading present');
+        assert.ok(html.includes('>2</span>'), 'count reflects 2 variants');
+    });
+
+    test('collapsed by default; expanded once its kind is toggled on', () => {
+        const sb = makeSandbox();
+        const rows = [
+            { id: -2, _personalized: true, kind: 'time_machine', variant: '1980s', kind_label: 'Time Machine' },
+        ];
+        const collapsed = sb.autoSyncSidebarGroupHtml(rows, renderer);
+        assert.ok(!/auto-sync-kind-group expanded|auto-sync-kind-group .*expanded/.test(collapsed),
+            'no expanded class before toggle');
+        sb.toggleAutoSyncKindGroup('time_machine');
+        const expanded = sb.autoSyncSidebarGroupHtml(rows, renderer);
+        assert.ok(expanded.includes('auto-sync-kind-group expanded'),
+            'expanded class present after toggle');
+        // toggling again collapses
+        sb.toggleAutoSyncKindGroup('time_machine');
+        const recollapsed = sb.autoSyncSidebarGroupHtml(rows, renderer);
+        assert.ok(!recollapsed.includes('auto-sync-kind-group expanded'));
+    });
+
+    test('"N on" badge counts scheduled variants via isScheduled predicate', () => {
+        const sb = makeSandbox();
+        const rows = [
+            { id: -2, _personalized: true, kind: 'time_machine', variant: '1980s', kind_label: 'Time Machine' },
+            { id: -3, _personalized: true, kind: 'time_machine', variant: '1990s', kind_label: 'Time Machine' },
+        ];
+        const isScheduled = (p) => p.id === -2;  // one of the two is scheduled
+        const html = sb.autoSyncSidebarGroupHtml(rows, renderer, isScheduled);
+        assert.ok(html.includes('has-active'), 'group flagged active');
+        assert.ok(html.includes('1 on'), 'active badge shows 1');
+    });
+
+    test('no active badge when nothing in the group is scheduled', () => {
+        const sb = makeSandbox();
+        const rows = [
+            { id: -2, _personalized: true, kind: 'time_machine', variant: '1980s', kind_label: 'Time Machine' },
+        ];
+        const html = sb.autoSyncSidebarGroupHtml(rows, renderer, () => false);
+        assert.ok(!html.includes('has-active'));
+        assert.ok(!html.includes(' on</span>'));
     });
 });
