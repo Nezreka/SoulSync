@@ -502,6 +502,44 @@ class TestRateLimiting:
             call()
         assert bc._rate_limit_until == 0
 
+    def test_inter_call_wait_does_not_hold_the_lock(self, monkeypatch):
+        # PR #968 review: sleeping under _call_lock stalls a foreground request
+        # ~1s behind the background worker. The inter-call wait must happen with
+        # the lock released.
+        _fresh_rate_limit_state(monkeypatch)
+        monkeypatch.setattr(bc, '_last_call_time', time.time())  # force a wait
+        observed = {}
+
+        def fake_sleep(_seconds):
+            got = bc._call_lock.acquire(blocking=False)
+            observed['lock_free'] = got
+            if got:
+                bc._call_lock.release()
+
+        monkeypatch.setattr(bc.time, 'sleep', fake_sleep)
+
+        @bc.rate_limited
+        def call():
+            return 'ok'
+
+        assert call() == 'ok'
+        assert observed.get('lock_free') is True, "lock must be released before the inter-call sleep"
+
+    def test_concurrent_calls_reserve_spaced_slots(self, monkeypatch):
+        # Reservation-based spacing: two back-to-back calls must still be
+        # scheduled MIN_CALL_INTERVAL apart even though the sleep is outside the
+        # lock (otherwise releasing the lock would break rate limiting).
+        _fresh_rate_limit_state(monkeypatch)
+        monkeypatch.setattr(bc.time, 'sleep', lambda _s: None)  # don't actually wait
+
+        @bc.rate_limited
+        def call():
+            return bc._last_call_time
+
+        first = call()
+        second = call()
+        assert second - first >= bc.MIN_CALL_INTERVAL - 1e-6
+
 
 # ---------------------------------------------------------------------------
 # _best_name_match — pure artist-name resolution (no second field to
