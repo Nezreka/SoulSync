@@ -249,6 +249,51 @@ function autoSyncIsScheduleOwned(auto) {
 // Scheduling one creates a single-kind personalized_pipeline automation, which
 // auto-generates on its first run — no manual pre-generation.
 
+// Collapsible-group heading for a variant kind: the name_template with the
+// "{variant}" placeholder (and any trailing separator) stripped, e.g.
+// "Time Machine — {variant}" → "Time Machine". Falls back to the kind id.
+function autoSyncKindLabel(k) {
+    return String((k && k.name_template) || (k && k.kind) || '')
+        .split('{variant}')[0]
+        .replace(/[\s—–:>·.\-]+$/, '')
+        .trim() || (k && k.kind) || '';
+}
+
+// Tag already-generated SoulSync Discovery rows (real mirrored playlists) with
+// the kind/variant parsed from their 'ssd_<kind>_<variant>' source id, so a
+// generated Time Machine decade groups under the same collapsible header as the
+// not-yet-generated ones. Rows whose kind is no longer registered (e.g. a
+// reverted 'year_mix' left in mirrored_playlists) are DROPPED — they can't be
+// regenerated and shouldn't clutter the board. Fails open: with no kinds
+// metadata, every row passes through untouched.
+function autoSyncEnrichDiscoveryRows(playlists, kinds) {
+    if (!Array.isArray(playlists)) return [];
+    if (!Array.isArray(kinds) || !kinds.length) return playlists;
+    const singletons = new Map();   // 'ssd_<kind>' → true
+    const variantKinds = [];        // [{ prefix, k }]
+    for (const k of kinds) {
+        if (!k || !k.kind) continue;
+        if (k.requires_variant) variantKinds.push({ prefix: `ssd_${k.kind}_`, k });
+        else singletons.set(`ssd_${k.kind}`, true);
+    }
+    // Longest prefix first so a shorter kind can't shadow a longer one.
+    variantKinds.sort((a, b) => b.prefix.length - a.prefix.length);
+    const out = [];
+    for (const p of playlists) {
+        if (!p || p.source !== 'soulsync_discovery' || !p.source_playlist_id) { out.push(p); continue; }
+        const sid = String(p.source_playlist_id);
+        if (singletons.has(sid)) { out.push(p); continue; }  // registered singleton → flat, as-is
+        const vk = variantKinds.find(v => sid.startsWith(v.prefix));
+        if (vk) {
+            out.push({ ...p, kind: vk.k.kind, variant: sid.slice(vk.prefix.length),
+                       kind_label: autoSyncKindLabel(vk.k) });
+            continue;
+        }
+        // Unregistered kind (orphaned mirror row) → drop.
+    }
+    return out;
+}
+
 function autoSyncExpandPersonalizedRows(kinds, existingPlaylists) {
     const rows = [];
     if (!Array.isArray(kinds)) return rows;
@@ -272,13 +317,7 @@ function autoSyncExpandPersonalizedRows(kinds, existingPlaylists) {
             const name = k.requires_variant
                 ? String(k.name_template || `${k.kind} ${variant}`).replace('{variant}', variant)
                 : String(k.name_template || k.kind);
-            // Collapsible-group heading for variant kinds: the name_template with
-            // the "{variant}" placeholder (and any trailing separator) stripped,
-            // e.g. "Time Machine — {variant}" → "Time Machine".
-            const kindLabel = k.requires_variant
-                ? (String(k.name_template || k.kind).split('{variant}')[0]
-                       .replace(/[\s—–:>·.\-]+$/, '').trim() || k.kind)
-                : '';
+            const kindLabel = k.requires_variant ? autoSyncKindLabel(k) : '';
             rows.push({
                 id: nextId--,
                 source: 'soulsync_discovery',
@@ -353,7 +392,11 @@ function autoSyncGroupSidebarRows(rows) {
     const groups = [];
     const byKind = new Map();
     (rows || []).forEach(p => {
-        if (p && p._personalized && p.variant) {
+        // Group any variant-kind row — synthetic (not-yet-generated) OR an
+        // already-generated mirrored row enriched with kind/variant — so both
+        // land under one collapsible header. Singletons (no variant) and other
+        // sources (no kind) stay flat.
+        if (p && p.variant && p.kind) {
             let g = byKind.get(p.kind);
             if (!g) {
                 g = { kind: p.kind, label: p.kind_label || p.kind, rows: [] };
@@ -561,7 +604,10 @@ async function refreshAutoSyncScheduleModal() {
         try {
             const kindsData = kindsRes && kindsRes.ok ? await kindsRes.json() : null;
             if (kindsData && kindsData.success && Array.isArray(kindsData.kinds)) {
-                allPlaylists = [...playlists, ...autoSyncExpandPersonalizedRows(kindsData.kinds, playlists)];
+                // Tag generated variant rows + drop orphaned mirrors, THEN append
+                // the not-yet-generated variants; both flow into one group per kind.
+                const enriched = autoSyncEnrichDiscoveryRows(playlists, kindsData.kinds);
+                allPlaylists = [...enriched, ...autoSyncExpandPersonalizedRows(kindsData.kinds, enriched)];
             }
         } catch (e) { /* personalized kinds optional */ }
         _autoSyncScheduleState = buildAutoSyncScheduleState(allPlaylists, automations, historyData);
