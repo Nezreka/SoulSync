@@ -20,6 +20,7 @@ from __future__ import annotations
 import sqlite3
 
 from core.bandcamp_worker import BandcampWorker
+from database.music_database import MusicDatabase
 
 
 class _NonClosingConn:
@@ -137,3 +138,41 @@ def test_track_reenrichment_also_preserves_id():
         "SELECT bandcamp_id FROM tracks WHERE id = 1"
     ).fetchone()
     assert row['bandcamp_id'] == '3131312045'
+
+
+# ---------------------------------------------------------------------------
+# _get_next_item honors the Manage Enrichment Workers priority override.
+# ---------------------------------------------------------------------------
+
+
+def _real_db_worker(tmp_path):
+    db = MusicDatabase(str(tmp_path / "bc.db"))
+    conn = db._get_connection()
+    cur = conn.cursor()
+    cur.execute("INSERT INTO artists (id, name) VALUES ('a1', 'Some Artist')")
+    cur.execute("INSERT INTO albums (id, artist_id, title) VALUES ('al1', 'a1', 'Pending Album')")
+    cur.execute("INSERT INTO tracks (id, album_id, artist_id, title) VALUES ('t1', 'al1', 'a1', 'Pending Track')")
+    conn.commit()
+    conn.close()
+    return BandcampWorker(database=db)
+
+
+def test_get_next_item_defaults_to_album_first(tmp_path):
+    worker = _real_db_worker(tmp_path)
+    item = worker._get_next_item()
+    assert item['type'] == 'album' and item['id'] == 'al1'
+
+
+def test_get_next_item_honors_track_priority_override(tmp_path):
+    """PR #968 review: the Bandcamp worker must respect the Manage Enrichment
+    Workers 'process this group first' override like the other workers."""
+    from config.settings import config_manager
+    worker = _real_db_worker(tmp_path)
+    key = 'bandcamp_enrichment_priority'
+    old = config_manager.get(key, '')
+    try:
+        config_manager.set(key, 'track')
+        item = worker._get_next_item()
+        assert item['type'] == 'track' and item['id'] == 't1', "pinned track group must jump ahead of the album"
+    finally:
+        config_manager.set(key, old)

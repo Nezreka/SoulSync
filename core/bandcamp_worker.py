@@ -176,6 +176,17 @@ class BandcampWorker:
             conn = self.db._get_connection()
             cursor = conn.cursor()
 
+            # Manage Enrichment Workers override: if the user pinned an entity
+            # type to run first, drain it before the normal album->track chain.
+            # Read every call so toggling it takes effect live (bandcamp has no
+            # artist pass, so only album/track are meaningful here).
+            from core.worker_utils import read_enrichment_priority, priority_pending_item
+            _prio = read_enrichment_priority('bandcamp')
+            if _prio:
+                _pi = priority_pending_item(cursor, 'bandcamp', _prio)
+                if _pi:
+                    return _pi
+
             # Priority 1: Unattempted albums
             cursor.execute("""
                 SELECT al.id, al.title, ar.name AS artist_name
