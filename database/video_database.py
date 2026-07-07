@@ -104,6 +104,10 @@ _BACKFILL = {
         "movie": ("movies", "wikidata_status", "wikidata_attempted", "imdb_id IS NOT NULL"),
         "show": ("shows", "wikidata_status", "wikidata_attempted", "imdb_id IS NOT NULL"),
     },
+    "streaming": {  # TMDB watch providers (movies + shows), by tmdb id
+        "movie": ("movies", "streaming_status", "streaming_attempted", "tmdb_id IS NOT NULL"),
+        "show": ("shows", "streaming_status", "streaming_attempted", "tmdb_id IS NOT NULL"),
+    },
 }
 # Columns each backfill service may gap-fill (whitelist; never clobbers server data).
 # A worker visits each item once (status IS NULL), so these NULL columns are written
@@ -115,6 +119,7 @@ _BACKFILL_COLS = {
     "tvmaze": {"tvmaze_rating"},
     "anilist": {"anilist_score"},
     "wikidata": {"wikidata_url"},
+    "streaming": {"streaming"},
 }
 
 # Columns ensured on existing DBs (ALTER TABLE ADD COLUMN; idempotent).
@@ -209,6 +214,11 @@ _COLUMN_MIGRATIONS = [
     ("movies", "wikidata_status", "TEXT"), ("movies", "wikidata_attempted", "TEXT"),
     ("shows", "wikidata_url", "TEXT"),
     ("shows", "wikidata_status", "TEXT"), ("shows", "wikidata_attempted", "TEXT"),
+    # Streaming provider (TMDB watch providers) for the Streaming overlay badge
+    ("movies", "streaming", "TEXT"),
+    ("movies", "streaming_status", "TEXT"), ("movies", "streaming_attempted", "TEXT"),
+    ("shows", "streaming", "TEXT"),
+    ("shows", "streaming_status", "TEXT"), ("shows", "streaming_attempted", "TEXT"),
     # DeArrow crowd-sourced better titles for cached YouTube videos
     ("youtube_video_stats", "dearrow_title", "TEXT"),
     ("youtube_video_stats", "dearrow_status", "TEXT"),

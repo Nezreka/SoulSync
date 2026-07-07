@@ -805,10 +805,73 @@ class WikidataWorker(VideoBackfillWorker):
         return self.db.backfill_breakdown("wikidata")
 
 
+class TmdbStreamingWorker(VideoBackfillWorker):
+    """TMDB 'watch providers' → the primary streaming service a title is on, for
+    the Streaming overlay badge (and its logo pack via the resolver)."""
+    BASE = "https://api.themoviedb.org/3"
+    requires_key = True
+
+    def __init__(self, db):
+        super().__init__(db, "streaming", "Streaming", interval=1.0)
+
+    def _key(self):
+        return (self.db.get_setting("tmdb_api_key") or "").strip()
+
+    def _region(self):
+        return ((self.db.get_setting("streaming_region") or "US").strip().upper() or "US")
+
+    def _enabled(self):
+        return bool(self._key())
+
+    def test(self):
+        if not self._key():
+            return (False, "No TMDB API key")
+        try:
+            j = _http_get_json(self.BASE + "/movie/550/watch/providers", {"api_key": self._key()})
+            return (j is not None, "TMDB key OK" if j is not None else "No response")
+        except _Unauthorized:
+            return (False, "TMDB rejected the API key")
+        except Exception as e:
+            return (False, str(e))
+
+    def next_item(self):
+        return self.db.backfill_next("streaming")
+
+    def fetch(self, item):
+        key = self._key()
+        tmdb = item.get("tmdb_id")
+        if not key or not tmdb:
+            return None
+        path = "/movie/" if item["kind"] == "movie" else "/tv/"
+        j = _http_get_json(self.BASE + path + str(tmdb) + "/watch/providers", {"api_key": key})
+        if not isinstance(j, dict):
+            return None
+        region = (j.get("results") or {}).get(self._region()) or {}
+        flat = region.get("flatrate") or []
+        if not flat:
+            return None
+        # the primary provider for the region, by TMDB's display priority
+        best = sorted(flat, key=lambda p: p.get("display_priority", 999))[0]
+        name = (best or {}).get("provider_name")
+        return {"streaming": name} if name else None
+
+    def record_ok(self, item, data):
+        self.db.backfill_mark("streaming", item["kind"], item["id"], "ok", columns=data)
+
+    def record_empty(self, item):
+        self.db.backfill_mark("streaming", item["kind"], item["id"], "not_found")
+
+    def record_error(self, item):
+        self.db.backfill_mark("streaming", item["kind"], item["id"], "error")
+
+    def breakdown(self):
+        return self.db.backfill_breakdown("streaming")
+
+
 def build_backfill_workers(db) -> dict:
     """All backfill workers, keyed by service id, for the engine registry."""
     return {w.service: w for w in (
         RydWorker(db), SponsorBlockWorker(db), FanartWorker(db), OpenSubtitlesWorker(db),
         TraktWorker(db), TVmazeWorker(db), AniListWorker(db), DeArrowWorker(db),
-        WikidataWorker(db),
+        WikidataWorker(db), TmdbStreamingWorker(db),
     )}
