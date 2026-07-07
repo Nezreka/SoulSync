@@ -6699,6 +6699,8 @@ class MusicDatabase:
                         'style', 'mood', 'label', 'explicit', 'record_type',
                         'deezer_id', 'deezer_match_status', 'deezer_last_attempted',
                         'jiosaavn_id', 'jiosaavn_match_status', 'jiosaavn_last_attempted',
+                        'bandcamp_id', 'bandcamp_match_status', 'bandcamp_last_attempted',
+                        'bandcamp_url', 'bandcamp_tags', 'bandcamp_label',
                         # api_track_count is metadata-source-derived enrichment cache;
                         # losing it on a ratingKey rekey would force the next
                         # completeness scan back to live API lookups (kettui PR #374).
