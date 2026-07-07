@@ -555,8 +555,9 @@
         }
         if (l.type === 'ribbon') {
             l.corner = l.corner || 'top-right';
-            if (typeof l.dist !== 'number') l.dist = 0.28;
-            if (typeof l.thickness !== 'number') l.thickness = 0.06;
+            // Filled corner-flag model: one `size` (leg length). Migrate old
+            // dist/thickness ribbons by seeding size from their `dist`.
+            if (typeof l.size !== 'number') l.size = (typeof l.dist === 'number' ? l.dist : 0.2);
             l.color = l.color || '#d11e2a';
             l.textColor = l.textColor || '#ffffff';
             if (l.text == null) l.text = 'NEW';
@@ -844,9 +845,9 @@
     // every text/pill style control applies to badges too.
     function defaultLayer(kind, x, y, field) {
         if (kind === 'ribbon') {
-            return { id: uid(), type: 'ribbon', name: 'Ribbon', corner: 'top-right', dist: 0.28, thickness: 0.06,
+            return { id: uid(), type: 'ribbon', name: 'Ribbon', corner: 'top-right', size: 0.2,
                 color: '#d11e2a', textColor: '#ffffff', text: 'NEW', font: 'Inter', weight: 800, upper: true,
-                textScale: 0.5, bandOpacity: 1, opacity: 1, hidden: false, x: 0.5, y: 0.5, anchor: 'center', rotation: 0 };
+                textScale: 0.42, bandOpacity: 1, opacity: 1, hidden: false, x: 0.5, y: 0.5, anchor: 'center', rotation: 0 };
         }
         if (kind === 'rating') {
             return { id: uid(), type: 'rating', name: 'Rating stars', anchor: 'bottom-left',
@@ -1070,17 +1071,30 @@
             return;
         }
         if (l.type === 'ribbon') {
-            var rm = Math.min(ed.W, ed.H);
-            var rlen = 2 * l.dist * rm, rth = l.thickness * rm;
-            el.style.width = rlen + 'px'; el.style.height = rth + 'px';
+            var rL = l.size * Math.min(ed.W, ed.H);   // L×L square seated in the corner
+            var clip = {
+                'top-right': 'polygon(100% 0, 0 0, 100% 100%)', 'top-left': 'polygon(0 0, 100% 0, 0 100%)',
+                'bottom-right': 'polygon(100% 100%, 100% 0, 0 100%)', 'bottom-left': 'polygon(0 100%, 0 0, 100% 100%)'
+            }[l.corner] || 'polygon(100% 0, 0 0, 100% 100%)';
+            var cen = {
+                'top-right': [66.67, 33.33], 'top-left': [33.33, 33.33],
+                'bottom-right': [66.67, 66.67], 'bottom-left': [33.33, 66.67]
+            }[l.corner] || [66.67, 33.33];
+            var rot = { 'top-left': -45, 'top-right': 45, 'bottom-left': 45, 'bottom-right': -45 }[l.corner];
+            if (rot == null) rot = 45;
+            el.style.width = rL + 'px'; el.style.height = rL + 'px';
             el.style.background = hexToRgba(l.color, l.bandOpacity != null ? l.bandOpacity : 1);
-            el.style.display = 'flex'; el.style.alignItems = 'center'; el.style.justifyContent = 'center';
-            el.style.transformOrigin = 'center'; el.style.overflow = 'hidden';
+            el.style.clipPath = clip; el.style.webkitClipPath = clip;
+            el.style.transformOrigin = 'center'; el.style.overflow = 'visible';
             el.innerHTML = '<span></span>';
             var rsp = el.querySelector('span');
             rsp.textContent = l.upper ? String(l.text || '').toUpperCase() : (l.text || '');
+            rsp.style.position = 'absolute';
+            rsp.style.left = cen[0] + '%'; rsp.style.top = cen[1] + '%';
+            rsp.style.transform = 'translate(-50%, -50%) rotate(' + rot + 'deg)';
             rsp.style.color = l.textColor; rsp.style.fontFamily = fontStack(l.font);
-            rsp.style.fontWeight = l.weight; rsp.style.fontSize = (rth * (l.textScale || 0.5)) + 'px';
+            rsp.style.fontWeight = l.weight;
+            rsp.style.fontSize = ((rL / Math.SQRT2) * (l.textScale || 0.42)) + 'px';
             rsp.style.whiteSpace = 'nowrap'; rsp.style.lineHeight = '1';
             return;
         }
@@ -1176,14 +1190,11 @@
     function layoutLayer(el, l) {
         var W = ed.W, H = ed.H;
         var ew = el.offsetWidth, eh = el.offsetHeight;
-        if (l.type === 'ribbon') {   // seated across a corner, not by the anchor model
-            var m = Math.min(W, H), s = l.dist * m / Math.SQRT2;
-            var c = { 'top-left': [0, 0, 1, 1, -45], 'top-right': [1, 0, -1, 1, 45],
-                'bottom-left': [0, 1, 1, -1, 45], 'bottom-right': [1, 1, -1, -1, -45] }[l.corner] || [1, 0, -1, 1, 45];
-            var cx = c[0] * W + c[2] * s, cy = c[1] * H + c[3] * s;
-            el.style.left = (cx - ew / 2) + 'px';
-            el.style.top = (cy - eh / 2) + 'px';
-            el.style.transform = 'rotate(' + c[4] + 'deg)';
+        if (l.type === 'ribbon') {   // filled flag seated flush in a corner, not by the anchor model
+            var rL = l.size * Math.min(W, H);
+            el.style.left = ((l.corner === 'top-left' || l.corner === 'bottom-left') ? 0 : (W - rL)) + 'px';
+            el.style.top = ((l.corner === 'top-left' || l.corner === 'top-right') ? 0 : (H - rL)) + 'px';
+            el.style.transform = 'none';   // triangle via clip-path; text rotates itself
             return;
         }
         var af = anchorFrac(l.anchor);
@@ -1845,7 +1856,7 @@
             box.innerHTML =
                 inspSection('Ribbon',
                     field('Corner', csel) +
-                    row2(field('Distance', numInput('dist', pct(l.dist), '%')), field('Thickness', numInput('thickness', pct(l.thickness), '%'))) +
+                    field('Size', numInput('size', pct(l.size), '%')) +
                     field('Color', colorField('color', l.color)) +
                     field('Opacity', sliderInput('bandOpacity', Math.round(l.bandOpacity * 100)))) +
                 inspSection('Label',
@@ -1854,7 +1865,8 @@
                     field('Color', colorField('textColor', l.textColor)) +
                     field('Size', numInput('textScale', pct(l.textScale), '%')) +
                     field('Font', fontSelect(l.font)) +
-                    field('Weight', weightSelect(l.weight)));
+                    field('Weight', weightSelect(l.weight))) +
+                visibilitySection(l);
             wireInspector(l);
             return;
         }
@@ -2049,7 +2061,6 @@
         else if (key === 'borderW') l.border.w = Math.max(0, num / 100);
         else if (key === 'stars') l.stars = Math.max(1, Math.min(10, Math.round(num)));
         else if (key === 'emptyOpacity') l.emptyOpacity = clamp01(num / 100);
-        else if (key === 'dist') l.dist = Math.max(0.05, num / 100);
         else if (key === 'textScale') l.textScale = Math.max(0.1, num / 100);
         else if (key === 'bandOpacity') l.bandOpacity = clamp01(num / 100);
         else if (key === 'fillA1') l.fill.a1 = clamp01(num / 100);

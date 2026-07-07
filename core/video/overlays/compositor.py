@@ -371,38 +371,68 @@ def _row_tile(layer, W, H, values):
     return out
 
 
+# A corner ribbon is a FILLED right-triangle "flag" seated flush in a corner
+# (right-angle at the corner tip), with its label along the diagonal. One `size`
+# knob = leg length as a fraction of the short side, i.e. how far down each edge
+# the flag reaches; it stays glued to the corner as it grows.
+_FLAG_TRI = {   # triangle vertices inside an L×L tile, right-angle at the poster corner
+    "top-right":    lambda L: [(L, 0), (0, 0), (L, L)],
+    "top-left":     lambda L: [(0, 0), (L, 0), (0, L)],
+    "bottom-right": lambda L: [(L, L), (L, 0), (0, L)],
+    "bottom-left":  lambda L: [(0, L), (0, 0), (L, L)],
+}
+_FLAG_CENTROID = {   # label anchor (fraction of the L×L tile)
+    "top-right": (2 / 3, 1 / 3), "top-left": (1 / 3, 1 / 3),
+    "bottom-right": (2 / 3, 2 / 3), "bottom-left": (1 / 3, 2 / 3),
+}
+_FLAG_CSS_ROT = {   # label angle (CSS clockwise), parallel to the corner's diagonal
+    "top-left": -45, "top-right": 45, "bottom-left": 45, "bottom-right": -45,
+}
+
+
+def _ribbon_size(layer):
+    s = layer.get("size")
+    if s is None:
+        s = layer.get("dist", 0.2)   # migrate pre-flag ribbons that only stored `dist`
+    return _as_float(s, 0.2)
+
+
 def _ribbon_tile(layer, W, H):
-    """The (un-rotated) diagonal band for a corner ribbon: a coloured bar with centred
-    text. render_overlay positions + rotates it onto the chosen corner."""
+    """A filled corner-flag triangle with its label along the diagonal.
+    render_overlay pastes it flush into the corner (no rotation — baked in here)."""
     m = min(W, H)
-    dist = _as_float(layer.get("dist"), 0.28) * m
-    thick = max(2, int(_as_float(layer.get("thickness"), 0.06) * m))
-    length = max(2, int(round(2 * dist)))
-    tile = Image.new("RGBA", (length, thick), _hex_rgba(layer.get("color", "#d11e2a"),
-                                                        _as_float(layer.get("bandOpacity"), 1.0)))
+    L = max(4, int(round(_ribbon_size(layer) * m)))
+    corner = layer.get("corner") or "top-right"
+    tile = Image.new("RGBA", (L, L), (0, 0, 0, 0))
+    verts = _FLAG_TRI.get(corner, _FLAG_TRI["top-right"])(L)
+    ImageDraw.Draw(tile).polygon(
+        verts, fill=_hex_rgba(layer.get("color", "#d11e2a"), _as_float(layer.get("bandOpacity"), 1.0)))
     text = str(layer.get("text") or "")
     if layer.get("upper"):
         text = text.upper()
     if text:
-        px = max(1, int(thick * _as_float(layer.get("textScale"), 0.5)))
+        band = L / math.sqrt(2)   # perpendicular width of the flag's strip
+        px = max(1, int(band * _as_float(layer.get("textScale"), 0.42)))
         font = _font(layer.get("font") or "Inter", layer.get("weight"), px)
-        ImageDraw.Draw(tile).text((length / 2, thick / 2), text, font=font,
-                                  fill=_hex_rgba(layer.get("textColor", "#ffffff"), 1.0), anchor="mm")
+        tw = int(ImageDraw.Draw(Image.new("RGBA", (1, 1))).textlength(text, font=font))
+        ttile = Image.new("RGBA", (tw + 6, px * 2 + 6), (0, 0, 0, 0))
+        ImageDraw.Draw(ttile).text((ttile.width / 2, ttile.height / 2), text, font=font,
+                                   fill=_hex_rgba(layer.get("textColor", "#ffffff"), 1.0), anchor="mm")
+        ttile = ttile.rotate(-_FLAG_CSS_ROT.get(corner, 45), resample=Image.BICUBIC, expand=True)
+        fx, fy = _FLAG_CENTROID.get(corner, _FLAG_CENTROID["top-right"])
+        cx, cy = int(fx * L), int(fy * L)
+        tile.alpha_composite(ttile, (cx - ttile.width // 2, cy - ttile.height // 2))
     return tile
 
 
-# corner → (unit centre offset from corner along the inward diagonal, CSS rotation).
-_RIBBON = {
-    "top-left": ((0, 0), 1, 1, -45), "top-right": ((1, 0), -1, 1, 45),
-    "bottom-left": ((0, 1), 1, -1, 45), "bottom-right": ((1, 1), -1, -1, -45),
-}
-
-
 def _ribbon_placement(layer, W, H):
-    """(cx, cy, rotation°) that seats the band across its corner, ends on the two edges."""
-    (ox, oy), sx, sy, rot = _RIBBON.get(layer.get("corner") or "top-right", _RIBBON["top-right"])
-    s = _as_float(layer.get("dist"), 0.28) * min(W, H) / math.sqrt(2)
-    return ox * W + sx * s, oy * H + sy * s, rot
+    """Seat the L×L flag flush in its corner. No rotation — the tile is already oriented."""
+    m = min(W, H)
+    L = _ribbon_size(layer) * m
+    corner = layer.get("corner") or "top-right"
+    cx = (L / 2) if "left" in corner else (W - L / 2)
+    cy = (L / 2) if "top" in corner else (H - L / 2)
+    return cx, cy, 0
 
 
 def _passes_when(layer, values):
