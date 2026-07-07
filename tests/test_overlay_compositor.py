@@ -232,6 +232,21 @@ def test_rating_stars_optional_background():
     assert off.size == plain.size
 
 
+def test_bg_box_fixed_size_and_align():
+    from core.video.overlays.compositor import _bg_wrap, _bg_align
+    from PIL import Image
+    c = Image.new("RGBA", (100, 40), (255, 255, 255, 255))
+    base = {"enabled": True, "color": "#000000", "opacity": 0.6, "padX": 0.02, "padY": 0.012}
+    # hug-content when no fixed size (padX*H=30, padY*H=18 on a 1500-tall poster)
+    assert _bg_wrap(c, {"bg": base}, 1000, 1500).size == (160, 76)
+    # back_width/back_height override the box size
+    assert _bg_wrap(c, {"bg": dict(base, w=0.3, h=0.06)}, 1000, 1500).size == (300, 90)
+    # back_align maps 'h v' strings to fractions
+    assert _bg_align("left top") == (0.0, 0.0)
+    assert _bg_align("right bottom") == (1.0, 1.0)
+    assert _bg_align(None) == (0.5, 0.5)
+
+
 def test_trakt_is_a_rating_field():
     from core.video.overlays.fields import format_field
     from core.video.overlays.compositor import _RATING_MAX, _rating_tile

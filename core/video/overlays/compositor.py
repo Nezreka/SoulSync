@@ -310,23 +310,42 @@ def _star_points(cx, cy, r_out, r_in, n=5):
 _RATING_MAX = {"rt": 100.0, "metacritic": 100.0, "imdb": 10.0, "tmdb": 10.0, "trakt": 10.0}
 
 
+_BG_ALIGN = {"left": 0.0, "center": 0.5, "right": 1.0, "top": 0.0, "middle": 0.5, "bottom": 1.0}
+
+
+def _bg_align(align):
+    """(ax, ay) in 0..1 from a 'h v' align string (e.g. 'left top'); defaults centred."""
+    parts = str(align or "center middle").split()
+    ax = _BG_ALIGN.get(parts[0] if parts else "center", 0.5)
+    ay = _BG_ALIGN.get(parts[1] if len(parts) > 1 else "middle", 0.5)
+    return ax, ay
+
+
 def _bg_wrap(tile, layer, W, H):
     """Wrap a content tile in a rounded-rectangle background — the shared `bg`
-    model (enabled/color/opacity/radius/padX/padY, fractions of H). No-op when the
-    layer's bg isn't enabled. Lets non-text layers (e.g. rating stars) sit on a pill."""
+    model (enabled/color/opacity/radius/padX/padY + optional line border, fixed
+    w/h and content align). No-op when the layer's bg isn't enabled. Lets non-text
+    layers (e.g. rating stars, logo badges) sit on a pill."""
     bg = layer.get("bg") or {}
     if not bg.get("enabled"):
         return tile
     padx = int(_as_float(bg.get("padX"), 0) * H)
     pady = int(_as_float(bg.get("padY"), 0) * H)
     cw, ch = tile.size
-    ow, oh = max(1, cw + 2 * padx), max(1, ch + 2 * pady)
+    # Fixed box size (back_width/back_height) overrides content-hugging when > 0.
+    fw, fh = _as_float(bg.get("w"), 0) * W, _as_float(bg.get("h"), 0) * H
+    ow = max(1, int(round(fw)) if fw > 0 else cw + 2 * padx)
+    oh = max(1, int(round(fh)) if fh > 0 else ch + 2 * pady)
     out = Image.new("RGBA", (ow, oh), (0, 0, 0, 0))
     radius = max(0, min(int(_as_float(bg.get("radius"), 0) * H), oh // 2))
     ImageDraw.Draw(out).rounded_rectangle(
         [0, 0, ow - 1, oh - 1], radius=radius,
         fill=_hex_rgba(bg.get("color", "#000000"), bg.get("opacity", 0.6)))
-    out.alpha_composite(tile, (padx, pady))
+    # Align content within the box (matters once the box is fixed/larger than it).
+    ax, ay = _bg_align(bg.get("align"))
+    ix = padx + int(round(ax * (ow - 2 * padx - cw)))
+    iy = pady + int(round(ay * (oh - 2 * pady - ch)))
+    out.alpha_composite(tile, (max(0, min(ix, ow - cw)), max(0, min(iy, oh - ch))))
     _bg_border(out, bg, ow, oh, radius, H)
     return out
 
