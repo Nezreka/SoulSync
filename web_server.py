@@ -9375,7 +9375,12 @@ def get_artist_detail(artist_id):
                                      ('deezer', 'deezer_id'), ('lastfm', 'lastfm_url'),
                                      ('itunes', 'itunes_track_id'), ('audiodb', 'audiodb_id'),
                                      ('genius', 'genius_id'), ('tidal', 'tidal_id'),
-                                     ('qobuz', 'qobuz_id'), ('bandcamp', 'bandcamp_id')]:
+                                     ('qobuz', 'qobuz_id'),
+                                     # bandcamp_url, not bandcamp_id: the URL is Bandcamp's
+                                     # canonical match signal and is always written on a match,
+                                     # whereas bandcamp_id stays null on url-only/manual matches
+                                     # (which showed a match badge but 0% coverage). PR #968 review.
+                                     ('bandcamp', 'bandcamp_url')]:
                         try:
                             cursor.execute(f"""
                                 SELECT COUNT(*) FROM tracks t
