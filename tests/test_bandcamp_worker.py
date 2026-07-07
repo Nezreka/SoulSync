@@ -61,6 +61,7 @@ def _make_db():
             id INTEGER PRIMARY KEY, artist_id INTEGER, title TEXT,
             bandcamp_id TEXT, bandcamp_url TEXT, bandcamp_match_status TEXT,
             bandcamp_last_attempted TEXT, bandcamp_tags TEXT, bandcamp_label TEXT,
+            label TEXT, release_date TEXT, genres TEXT, api_track_count INTEGER,
             updated_at TEXT
         )
     """)
@@ -155,6 +156,147 @@ def _real_db_worker(tmp_path):
     conn.commit()
     conn.close()
     return BandcampWorker(database=db)
+
+
+# ---------------------------------------------------------------------------
+# Shared-column persistence: a match enriches the album's real metadata, not
+# just the bandcamp_* namespace (PR #968 review).
+# ---------------------------------------------------------------------------
+
+
+def _album_row(worker, cols):
+    return worker.db._get_connection().execute(
+        f"SELECT {cols} FROM albums WHERE id = 1"
+    ).fetchone()
+
+
+def test_album_match_persists_shared_columns():
+    worker = _worker()
+    worker._update_entity('album', 1, {
+        'id': 555, 'url': 'https://x.bandcamp.com/album/y', 'title': 'Y',
+        'tags': ['Techno', 'Detroit'], 'label': 'Underground Resistance',
+        'release_date': '1992-05-01', 'total_tracks': 8,
+    })
+    row = _album_row(worker, "label, release_date, genres, api_track_count, bandcamp_label")
+    assert row['label'] == 'Underground Resistance'
+    assert row['release_date'] == '1992-05-01'
+    assert row['api_track_count'] == 8
+    assert 'Techno' in (row['genres'] or '')
+    assert row['bandcamp_label'] == 'Underground Resistance'  # namespace still written too
+
+
+def test_shared_columns_are_backfill_only():
+    """Must never clobber a value another source or the user already set."""
+    worker = _worker()
+    conn = worker.db._get_connection()
+    conn.execute("UPDATE albums SET label = 'Original Label', release_date = '2000-01-01' WHERE id = 1")
+    conn.commit()
+
+    worker._update_entity('album', 1, {
+        'id': 555, 'url': 'https://x.bandcamp.com/album/y', 'title': 'Y',
+        'tags': ['rock'], 'label': 'Bandcamp Label',
+        'release_date': '1999-09-09', 'total_tracks': 3,
+    })
+    row = _album_row(worker, "label, release_date")
+    assert row['label'] == 'Original Label'
+    assert row['release_date'] == '2000-01-01'
+
+
+def test_track_match_does_not_touch_album_shared_columns():
+    # Tracks have no album-level shared columns — the shared-col block is
+    # album-only, so a track update must not error on missing columns.
+    worker = _worker()
+    worker._update_entity('track', 1, {
+        'id': 9, 'url': 'https://x.bandcamp.com/track/t', 'title': 'T',
+        'tags': ['ambient'], 'label': 'L', 'release_date': '2010-01-01', 'total_tracks': 1,
+    })
+    row = worker.db._get_connection().execute(
+        "SELECT bandcamp_url FROM tracks WHERE id = 1"
+    ).fetchone()
+    assert row['bandcamp_url'] == 'https://x.bandcamp.com/track/t'
+
+
+# ---------------------------------------------------------------------------
+# honor_stored_match: a stored bandcamp_url refreshes by direct fetch, never
+# by re-searching, and a transient refresh failure preserves the match.
+# ---------------------------------------------------------------------------
+
+
+class _FakeClient:
+    def __init__(self, release=None, search_result=None):
+        self._release = release
+        self._search_result = search_result
+        self.release_calls = []
+        self.search_calls = []
+
+    def get_release_metadata(self, url):
+        self.release_calls.append(url)
+        return self._release
+
+    def search_album(self, artist, album):
+        self.search_calls.append((artist, album))
+        return self._search_result
+
+    def search_track(self, artist, title):
+        self.search_calls.append((artist, title))
+        return self._search_result
+
+
+def test_stored_url_refreshes_by_fetch_not_search():
+    worker = _worker()
+    conn = worker.db._get_connection()
+    conn.execute("UPDATE albums SET bandcamp_url = 'https://x.bandcamp.com/album/y', "
+                 "bandcamp_id = '555', bandcamp_match_status = 'matched' WHERE id = 1")
+    conn.commit()
+    worker.client = _FakeClient(release={
+        'url': 'https://x.bandcamp.com/album/y', 'title': 'Y', 'tags': ['idm'],
+        'label': 'FBR', 'release_date': '2021-01-01', 'total_tracks': 4,
+    })
+
+    worker._process_album(1, 'Y', 'Artist')
+
+    assert worker.client.release_calls == ['https://x.bandcamp.com/album/y']
+    assert worker.client.search_calls == []  # never re-searched
+    row = _album_row(worker, "bandcamp_id, label, api_track_count")
+    assert row['bandcamp_id'] == '555'          # preserved via COALESCE
+    assert row['label'] == 'FBR'                # shared cols refreshed
+    assert row['api_track_count'] == 4
+
+
+def test_stored_url_refresh_failure_preserves_match_without_searching():
+    worker = _worker()
+    conn = worker.db._get_connection()
+    conn.execute("UPDATE albums SET bandcamp_url = 'https://x.bandcamp.com/album/y', "
+                 "bandcamp_match_status = 'matched' WHERE id = 1")
+    conn.commit()
+    worker.client = _FakeClient(release=None, search_result={
+        'id': 1, 'url': 'https://other.bandcamp.com/album/z', 'title': 'Y', 'tags': [], 'label': None,
+    })
+
+    worker._process_album(1, 'Y', 'Artist')
+
+    # Transient fetch miss must NOT fall through to a name search that could
+    # overwrite the manual match.
+    assert worker.client.search_calls == []
+    row = _album_row(worker, "bandcamp_url, bandcamp_match_status")
+    assert row['bandcamp_url'] == 'https://x.bandcamp.com/album/y'
+    assert row['bandcamp_match_status'] == 'matched'
+
+
+def test_no_stored_url_falls_through_to_search():
+    worker = _worker()
+    worker.client = _FakeClient(search_result={
+        'id': 777, 'url': 'https://x.bandcamp.com/album/y', 'title': 'Episode 1',
+        'tags': ['idm'], 'label': 'FBR', 'release_date': '2021-01-01', 'total_tracks': 2,
+    })
+
+    worker._process_album(1, 'Episode 1', 'Artist')
+
+    assert worker.client.search_calls == [('Artist', 'Episode 1')]
+    row = _album_row(worker, "bandcamp_id, bandcamp_url, bandcamp_match_status")
+    assert row['bandcamp_id'] == '777'
+    assert row['bandcamp_url'] == 'https://x.bandcamp.com/album/y'
+    assert row['bandcamp_match_status'] == 'matched'
 
 
 def test_get_next_item_defaults_to_album_first(tmp_path):
