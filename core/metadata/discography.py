@@ -82,6 +82,20 @@ def _normalize_artist_name(value: Any) -> str:
     return (value or '').strip().casefold()
 
 
+def _normalize_secondary_types(value: Any) -> List[str]:
+    """Return provider release-group qualifiers (Live, Compilation, ...) as a
+    clean string list. Tolerates None, a bare string, or any iterable."""
+    if not value:
+        return []
+    if isinstance(value, (str, bytes)):
+        value = [value]
+    try:
+        items = list(value)
+    except TypeError:
+        items = [value]
+    return [str(item).strip() for item in items if str(item).strip()]
+
+
 def _search_artists_for_source(source: str, client: Any, artist_name: str, limit: int = 5) -> List[Any]:
     if not client or not hasattr(client, 'search_artists'):
         return []
@@ -158,6 +172,7 @@ def _build_discography_release_dict(release: Any, artist_id: str,
             'total_tracks': typed_album.total_tracks or 0,
             'external_urls': typed_album.external_urls or {},
             'explicit': typed_album.explicit,
+            'secondary_types': _normalize_secondary_types(getattr(typed_album, 'secondary_types', None)),
         }
 
     release_id = _extract_lookup_value(release, 'id', 'album_id', 'release_id')
@@ -177,6 +192,9 @@ def _build_discography_release_dict(release: Any, artist_id: str,
         'total_tracks': _extract_lookup_value(release, 'total_tracks', default=0) or 0,
         'external_urls': _extract_lookup_value(release, 'external_urls', default={}) or {},
         'explicit': _extract_lookup_value(release, 'explicit'),
+        'secondary_types': _normalize_secondary_types(
+            _extract_lookup_value(release, 'secondary_types', 'secondary-types', default=[])
+        ),
     }
 
 
@@ -446,6 +464,7 @@ def _build_artist_detail_release_card(release: Dict[str, Any],
             'owned': None,
             'track_completion': 'checking',
             'explicit': typed_album.explicit,
+            'secondary_types': _normalize_secondary_types(getattr(typed_album, 'secondary_types', None)),
         }
         if typed_album.release_date:
             card['release_date'] = typed_album.release_date
@@ -481,6 +500,9 @@ def _build_artist_detail_release_card(release: Dict[str, Any],
         'owned': None,
         'track_completion': 'checking',
         'explicit': _extract_lookup_value(release, 'explicit'),
+        'secondary_types': _normalize_secondary_types(
+            _extract_lookup_value(release, 'secondary_types', 'secondary-types', default=[])
+        ),
     }
 
     if release_date:

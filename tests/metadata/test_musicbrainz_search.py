@@ -1326,3 +1326,17 @@ def test_get_artist_albums_swallows_browse_errors():
     client._client.browse_artist_release_groups.side_effect = RuntimeError('mb down')
 
     assert client.get_artist_albums('mbid-x') == []
+
+
+def test_release_group_projection_preserves_secondary_types():
+    # _release_group_to_album must stamp the MB secondary-types onto the Album so
+    # the artist-detail page can classify live/compilation releases (declutter).
+    client = MusicBrainzSearchClient.__new__(MusicBrainzSearchClient)
+    client._cached_art = MagicMock(return_value=None)
+    rg = {'id': 'rg-live', 'title': 'Unlabelled Concert', 'primary-type': 'Album',
+          'secondary-types': ['Live', 'Compilation'], 'first-release-date': '2025'}
+
+    album = client._release_group_to_album(rg, 'Example Artist')
+
+    assert album.album_type == 'compilation'          # Compilation secondary → compilation bucket
+    assert album.secondary_types == ['Live', 'Compilation']
