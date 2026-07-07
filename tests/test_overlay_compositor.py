@@ -232,6 +232,20 @@ def test_rating_stars_optional_background():
     assert off.size == plain.size
 
 
+def test_bg_box_optional_border():
+    from core.video.overlays.compositor import _bg_wrap, _text_tile
+    from PIL import Image
+    def gold(t):
+        return sum(1 for p in t.getdata() if p[0] > 200 and 140 < p[1] < 190 and p[2] < 90 and p[3] > 200)
+    content = Image.new("RGBA", (100, 40), (255, 255, 255, 255))
+    box = {"enabled": True, "color": "#000000", "opacity": 0.6, "radius": 0.02,
+           "padX": 0.02, "padY": 0.012, "line": True, "lineColor": "#e3a63b", "lineW": 0.01}
+    assert gold(_bg_wrap(content, {"bg": box}, 1000, 1500)) > 0               # border drawn on the pill
+    assert gold(_bg_wrap(content, {"bg": dict(box, line=False)}, 1000, 1500)) == 0  # off = no border
+    # a text pill gets the same back_line border
+    assert gold(_text_tile({"text": "4K", "color": "#fff", "size": 0.05, "bg": box}, 1000, 1500, {})) > 0
+
+
 def test_badge_row_reflows_and_stays_valid():
     """A badge row renders its fields as a bar; a field with no value is SKIPPED so
     the bar closes up (no hole). Fewer values → a narrower row tile."""
