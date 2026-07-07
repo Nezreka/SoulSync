@@ -189,9 +189,13 @@
         setTimeout(function () { if (overlay) overlay.innerHTML = ''; }, 260);
     }
 
-    // Leaving the editor auto-saves (it's the user's own template — no data loss).
+    // Saving only happens when the user clicks Save (or Cmd/Ctrl+S). Leaving with
+    // unsaved changes warns instead of silently persisting.
     function close() {
-        if (ed && ed.dirty) { saveTemplate().finally(hardClose); return; }
+        if (ed && ed.dirty) {
+            confirmDialog('Discard unsaved changes?', 'Your edits since the last save will be lost. Cancel and hit Save to keep them.', 'Discard', hardClose);
+            return;
+        }
         hardClose();
     }
 
@@ -691,7 +695,10 @@
                 '</div>' +
             '</div>';
 
-        overlay.querySelector('[data-voe-back]').addEventListener('click', function () { if (ed && ed.dirty) saveTemplate().finally(showGallery); else showGallery(); });
+        overlay.querySelector('[data-voe-back]').addEventListener('click', function () {
+            if (ed && ed.dirty) confirmDialog('Discard unsaved changes?', 'Your edits since the last save will be lost. Cancel and hit Save to keep them.', 'Discard', showGallery);
+            else showGallery();
+        });
         overlay.querySelector('[data-voe-close]').addEventListener('click', close);
         overlay.querySelector('[data-voe-save]').addEventListener('click', function () { saveTemplate(); });
         var nameInput = overlay.querySelector('[data-voe-name]');
@@ -867,7 +874,8 @@
             return { id: uid(), type: 'rating', name: 'Rating stars', anchor: 'bottom-left',
                 x: 0.06, y: 0.9, hidden: false, opacity: 1, rotation: 0,
                 field: 'imdb', stars: 5, size: 0.05, gap: 0.2,
-                color: '#f5c518', emptyColor: '#ffffff', emptyOpacity: 0.28 };
+                color: '#f5c518', emptyColor: '#ffffff', emptyOpacity: 0.28,
+                bg: { enabled: false, color: '#000000', opacity: 0.6, radius: 0.02, padX: 0.02, padY: 0.012 } };
         }
         if (kind === 'row') {
             return { id: uid(), type: 'row', name: 'Badge row', anchor: 'bottom-left',
@@ -1937,6 +1945,7 @@
                     : ''));
         }
         if (l.type === 'rating') {
+            if (!l.bg) l.bg = { enabled: false, color: '#000000', opacity: 0.6, radius: 0.02, padX: 0.02, padY: 0.012 };
             var rlbls = { imdb: 'IMDb', tmdb: 'TMDB', rt: 'Rotten Tomatoes', metacritic: 'Metacritic' };
             var rsel = '<select class="voe-input" data-inspsel="ratingField">' +
                 ['imdb', 'tmdb', 'rt', 'metacritic'].map(function (k) {
