@@ -67,6 +67,8 @@
         metacritic: { label: 'Metacritic', cat: 'Ratings', num: true, fmt: function (v) { return v == null ? null : 'MC ' + v; } },
         tmdb: { label: 'TMDB rating', cat: 'Ratings', num: true, fmt: function (v) { return v == null ? null : 'TMDB ' + (Math.round(v * 10) / 10); } },
         trakt: { label: 'Trakt rating', cat: 'Ratings', num: true, fmt: function (v) { return v == null ? null : 'Trakt ' + (Math.round(v * 10) / 10); } },
+        tvmaze: { label: 'TVmaze rating', cat: 'Ratings', num: true, fmt: function (v) { return v == null ? null : 'TVmaze ' + (Math.round(v * 10) / 10); } },
+        anilist: { label: 'AniList score', cat: 'Ratings', num: true, fmt: function (v) { return v == null ? null : 'AniList ' + Math.round(v); } },
         content_rating: { label: 'Content rating', cat: 'Details', opts: ['G', 'PG', 'PG-13', 'R', 'NC-17', 'TV-Y', 'TV-PG', 'TV-14', 'TV-MA'], fmt: function (v) { return v ? up(v) : null; } },
         status: { label: 'Status', cat: 'Details', opts: ['Returning', 'Ended', 'Released', 'Upcoming', 'Canceled'], fmt: function (v) {
             if (!v) return null; var s = String(v).toLowerCase();
@@ -95,7 +97,7 @@
         'Drama', 'Family', 'Fantasy', 'History', 'Horror', 'Kids', 'Music', 'Mystery', 'News', 'Reality',
         'Romance', 'Science Fiction', 'Sci-Fi & Fantasy', 'Soap', 'Talk', 'TV Movie', 'Thriller', 'War',
         'War & Politics', 'Western'];
-    var FIELD_ORDER = ['resolution', 'hdr', 'video_codec', 'audio_codec', 'source', 'imdb', 'rt', 'metacritic', 'tmdb', 'trakt',
+    var FIELD_ORDER = ['resolution', 'hdr', 'video_codec', 'audio_codec', 'source', 'imdb', 'rt', 'metacritic', 'tmdb', 'trakt', 'tvmaze', 'anilist',
         'content_rating', 'genre', 'status', 'year', 'runtime', 'season_count', 'episode_count', 'subtitles', 'versions', 'mediastinger', 'title', 'streaming', 'network', 'studio'];
     var FIELD_CATS = ['Quality', 'Ratings', 'Details'];
     // Fields a Logo badge can resolve to a drop-in pack image (mirrors logos.py
@@ -104,7 +106,7 @@
 
     function defaultSample() {
         return { resolution: '2160p', hdr: 'HDR', video_codec: 'hevc', audio_codec: 'atmos', source: 'bluray',
-            imdb: 8.4, rt: 92, metacritic: 81, tmdb: 8.1, trakt: 8.3, content_rating: 'PG-13', status: 'Returning',
+            imdb: 8.4, rt: 92, metacritic: 81, tmdb: 8.1, trakt: 8.3, tvmaze: 8.0, anilist: 82, content_rating: 'PG-13', status: 'Returning',
             year: 2021, runtime: 148, season_count: 4, episode_count: 62, subtitles: 7, versions: 2, mediastinger: 1, title: 'Example Title', streaming: 'Netflix', network: 'HBO', studio: 'A24', genre: 'Sci-Fi' };
     }
     // real values win; nulls fall back to the defaults so no badge previews blank.
@@ -1182,7 +1184,7 @@
         }
         if (l.type === 'rating') {
             var rval = (ed.sample || {})[l.field];
-            var rmax = (l.field === 'rt' || l.field === 'metacritic') ? 100 : 10;
+            var rmax = (l.field === 'rt' || l.field === 'metacritic' || l.field === 'anilist') ? 100 : 10;
             var rfrac = (rval == null || rval === '') ? 0 : Math.max(0, Math.min(1, parseFloat(rval) / rmax));
             var ssz = l.size * ed.H, sgap = l.gap * ssz, stars = '';
             for (var si = 0; si < l.stars; si++) stars += '★';
@@ -2032,15 +2034,15 @@
         }
         if (l.type === 'rating') {
             if (!l.bg) l.bg = { enabled: false, color: '#000000', opacity: 0.6, radius: 0.02, padX: 0.02, padY: 0.012, line: false, lineColor: '#ffffff', lineW: 0.004 };
-            var rlbls = { imdb: 'IMDb', tmdb: 'TMDB', trakt: 'Trakt', rt: 'Rotten Tomatoes', metacritic: 'Metacritic' };
+            var rlbls = { imdb: 'IMDb', tmdb: 'TMDB', trakt: 'Trakt', tvmaze: 'TVmaze', anilist: 'AniList', rt: 'Rotten Tomatoes', metacritic: 'Metacritic' };
             var rsel = '<select class="voe-input" data-inspsel="ratingField">' +
-                ['imdb', 'tmdb', 'trakt', 'rt', 'metacritic'].map(function (k) {
+                ['imdb', 'tmdb', 'trakt', 'tvmaze', 'anilist', 'rt', 'metacritic'].map(function (k) {
                     return '<option value="' + k + '"' + (k === l.field ? ' selected' : '') + '>' + rlbls[k] + '</option>';
                 }).join('') + '</select>';
             var rv = (ed.sample || {})[l.field];
             html += inspSection('Rating',
                 field('Source', rsel) +
-                field('Shows', '<span class="voe-data-preview">' + esc(rv == null || rv === '' ? '—' : String(rv) + ' / ' + (l.field === 'rt' || l.field === 'metacritic' ? 100 : 10)) + '</span>'));
+                field('Shows', '<span class="voe-data-preview">' + esc(rv == null || rv === '' ? '—' : String(rv) + ' / ' + (l.field === 'rt' || l.field === 'metacritic' || l.field === 'anilist' ? 100 : 10)) + '</span>'));
             html += inspSection('Style',
                 field('Fill', colorField('color', l.color)) +
                 field('Empty', colorField('emptyColor', l.emptyColor)) +

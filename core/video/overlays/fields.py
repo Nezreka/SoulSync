@@ -114,6 +114,8 @@ _FORMATTERS = {
     "metacritic": lambda v: None if _num(v) is None else "MC " + str(v),
     "tmdb": lambda v: None if _num(v) is None else "TMDB " + str(_round1(v)),
     "trakt": lambda v: None if _num(v) is None else "Trakt " + str(_round1(v)),
+    "tvmaze": lambda v: None if _num(v) is None else "TVmaze " + str(_round1(v)),
+    "anilist": lambda v: None if _num(v) is None else "AniList " + str(int(v)),
     "content_rating": lambda v: _up(v) if v else None,
     "status": _status,
     "year": lambda v: None if _num(v) is None else str(v),

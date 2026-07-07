@@ -308,7 +308,8 @@ def _star_points(cx, cy, r_out, r_in, n=5):
 
 
 # rating field → its max (so value/max fills the stars correctly)
-_RATING_MAX = {"rt": 100.0, "metacritic": 100.0, "imdb": 10.0, "tmdb": 10.0, "trakt": 10.0}
+_RATING_MAX = {"rt": 100.0, "metacritic": 100.0, "imdb": 10.0, "tmdb": 10.0, "trakt": 10.0,
+               "tvmaze": 10.0, "anilist": 100.0}
 
 
 _BG_ALIGN = {"left": 0.0, "center": 0.5, "right": 1.0, "top": 0.0, "middle": 0.5, "bottom": 1.0}
