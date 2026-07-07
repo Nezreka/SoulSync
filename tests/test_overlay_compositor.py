@@ -215,6 +215,23 @@ def test_rating_stars_fill_proportional():
     assert gold(_rating_tile({**base, "field": "rt"}, 600, 900, {"rt": 100})) > 0
 
 
+def test_rating_stars_optional_background():
+    from core.video.overlays.compositor import _rating_tile
+    base = {"type": "rating", "field": "imdb", "stars": 5, "size": 0.06, "color": "#f5c518"}
+    plain = _rating_tile(dict(base), 600, 900, {"imdb": 8})
+    withbg = _rating_tile({**base, "bg": {"enabled": True, "color": "#000000",
+                                          "opacity": 0.6, "radius": 0.02, "padX": 0.02, "padY": 0.012}},
+                          600, 900, {"imdb": 8})
+    # padding grows the tile on both axes
+    assert withbg.width > plain.width and withbg.height > plain.height
+    # a semi-transparent black pill sits behind the stars (sample a mid-left edge pixel)
+    px = withbg.getpixel((3, withbg.height // 2))
+    assert px[3] > 0 and px[0] < 40 and px[1] < 40 and px[2] < 40
+    # disabled bg is a no-op (same size as plain)
+    off = _rating_tile({**base, "bg": {"enabled": False}}, 600, 900, {"imdb": 8})
+    assert off.size == plain.size
+
+
 def test_badge_row_reflows_and_stays_valid():
     """A badge row renders its fields as a bar; a field with no value is SKIPPED so
     the bar closes up (no hole). Fewer values → a narrower row tile."""

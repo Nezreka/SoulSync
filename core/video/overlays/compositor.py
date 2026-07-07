@@ -309,6 +309,26 @@ def _star_points(cx, cy, r_out, r_in, n=5):
 _RATING_MAX = {"rt": 100.0, "metacritic": 100.0, "imdb": 10.0, "tmdb": 10.0}
 
 
+def _bg_wrap(tile, layer, W, H):
+    """Wrap a content tile in a rounded-rectangle background — the shared `bg`
+    model (enabled/color/opacity/radius/padX/padY, fractions of H). No-op when the
+    layer's bg isn't enabled. Lets non-text layers (e.g. rating stars) sit on a pill."""
+    bg = layer.get("bg") or {}
+    if not bg.get("enabled"):
+        return tile
+    padx = int(_as_float(bg.get("padX"), 0) * H)
+    pady = int(_as_float(bg.get("padY"), 0) * H)
+    cw, ch = tile.size
+    ow, oh = max(1, cw + 2 * padx), max(1, ch + 2 * pady)
+    out = Image.new("RGBA", (ow, oh), (0, 0, 0, 0))
+    radius = int(_as_float(bg.get("radius"), 0) * H)
+    ImageDraw.Draw(out).rounded_rectangle(
+        [0, 0, ow - 1, oh - 1], radius=max(0, min(radius, oh // 2)),
+        fill=_hex_rgba(bg.get("color", "#000000"), bg.get("opacity", 0.6)))
+    out.alpha_composite(tile, (padx, pady))
+    return out
+
+
 def _rating_tile(layer, W, H, values):
     """A row of stars filled proportionally to a bound rating (imdb/tmdb/rt/metacritic).
     Skipped when the title has no such rating."""
@@ -341,7 +361,7 @@ def _rating_tile(layer, W, H, values):
     reveal = Image.new("L", (total_w, sz), 0)
     ImageDraw.Draw(reveal).rectangle([0, 0, max(0, int(round(frac * total_w)) - 1), sz], fill=255)
     tile.paste(fill_layer, (0, 0), ImageChops.multiply(fill_layer.getchannel("A"), reveal))
-    return tile
+    return _bg_wrap(tile, layer, W, H)
 
 
 def _row_tile(layer, W, H, values):
