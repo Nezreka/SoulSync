@@ -593,6 +593,9 @@
             if (typeof l.bg.radius !== 'number') l.bg.radius = 0.02;
             if (typeof l.bg.padX !== 'number') l.bg.padX = 0.02;
             if (typeof l.bg.padY !== 'number') l.bg.padY = 0.012;
+            l.bg.line = !!l.bg.line;
+            l.bg.lineColor = l.bg.lineColor || '#ffffff';
+            if (typeof l.bg.lineW !== 'number') l.bg.lineW = 0.004;
         }
         if (l.type === 'row') {
             if (typeof l.gap !== 'number') l.gap = 0.014;
@@ -646,6 +649,9 @@
             if (typeof l.bg.radius !== 'number') l.bg.radius = 0.014;
             if (typeof l.bg.padX !== 'number') l.bg.padX = 0.022;
             if (typeof l.bg.padY !== 'number') l.bg.padY = 0.012;
+            l.bg.line = !!l.bg.line;
+            l.bg.lineColor = l.bg.lineColor || '#ffffff';
+            if (typeof l.bg.lineW !== 'number') l.bg.lineW = 0.004;
         }
         return l;
     }
@@ -875,7 +881,7 @@
                 x: 0.06, y: 0.9, hidden: false, opacity: 1, rotation: 0,
                 field: 'imdb', stars: 5, size: 0.05, gap: 0.2,
                 color: '#f5c518', emptyColor: '#ffffff', emptyOpacity: 0.28,
-                bg: { enabled: false, color: '#000000', opacity: 0.6, radius: 0.02, padX: 0.02, padY: 0.012 } };
+                bg: { enabled: false, color: '#000000', opacity: 0.6, radius: 0.02, padX: 0.02, padY: 0.012, line: false, lineColor: '#ffffff', lineW: 0.004 } };
         }
         if (kind === 'row') {
             return { id: uid(), type: 'row', name: 'Badge row', anchor: 'bottom-left',
@@ -1142,6 +1148,7 @@
             el.style.background = rbg.enabled ? hexToRgba(rbg.color, rbg.opacity) : 'none';
             el.style.borderRadius = rbg.enabled ? (rbg.radius * ed.H) + 'px' : '0';
             el.style.padding = rbg.enabled ? ((rbg.padY * ed.H) + 'px ' + (rbg.padX * ed.H) + 'px') : '0';
+            el.style.boxShadow = rbg.enabled && rbg.line ? ('inset 0 0 0 ' + (rbg.lineW * ed.H) + 'px ' + rbg.lineColor) : 'none';
             // Inner wrapper keeps the absolute fill overlay aligned with the track
             // regardless of the background padding.
             el.innerHTML = '<span class="voe-rating-inner" style="position:relative;display:block">' +
@@ -1221,8 +1228,9 @@
                 el.style.background = hexToRgba(bg.color, bg.opacity);
                 el.style.padding = (bg.padY * ed.H) + 'px ' + (bg.padX * ed.H) + 'px';
                 el.style.borderRadius = (bg.radius * ed.H) + 'px';
+                el.style.boxShadow = bg.line ? ('inset 0 0 0 ' + (bg.lineW * ed.H) + 'px ' + bg.lineColor) : 'none';
             } else {
-                el.style.background = 'none'; el.style.padding = '0'; el.style.borderRadius = '3px';
+                el.style.background = 'none'; el.style.padding = '0'; el.style.borderRadius = '3px'; el.style.boxShadow = 'none';
             }
         }
     }
@@ -1955,7 +1963,7 @@
                     : ''));
         }
         if (l.type === 'rating') {
-            if (!l.bg) l.bg = { enabled: false, color: '#000000', opacity: 0.6, radius: 0.02, padX: 0.02, padY: 0.012 };
+            if (!l.bg) l.bg = { enabled: false, color: '#000000', opacity: 0.6, radius: 0.02, padX: 0.02, padY: 0.012, line: false, lineColor: '#ffffff', lineW: 0.004 };
             var rlbls = { imdb: 'IMDb', tmdb: 'TMDB', rt: 'Rotten Tomatoes', metacritic: 'Metacritic' };
             var rsel = '<select class="voe-input" data-inspsel="ratingField">' +
                 ['imdb', 'tmdb', 'rt', 'metacritic'].map(function (k) {
@@ -1976,7 +1984,12 @@
                     ? field('Color', colorField('bgColor', l.bg.color)) +
                       field('Fill', sliderInput('bgOpacity', Math.round(l.bg.opacity * 100))) +
                       field('Radius', numInput('bgRadius', pct(l.bg.radius), '%')) +
-                      row2(field('Pad X', numInput('bgPadX', pct(l.bg.padX), '%')), field('Pad Y', numInput('bgPadY', pct(l.bg.padY), '%')))
+                      row2(field('Pad X', numInput('bgPadX', pct(l.bg.padX), '%')), field('Pad Y', numInput('bgPadY', pct(l.bg.padY), '%'))) +
+                      field('Border', toggle('bgLine', l.bg.line)) +
+                      (l.bg.line
+                          ? field('Color', colorField('bgLineColor', l.bg.lineColor)) +
+                            field('Width', numInput('bgLineW', pct(l.bg.lineW), '%'))
+                          : '')
                     : ''));
         }
         if (l.type === 'text') {
@@ -2010,7 +2023,12 @@
                     ? field('Color', colorField('bgColor', l.bg.color)) +
                       field('Fill', sliderInput('bgOpacity', Math.round(l.bg.opacity * 100))) +
                       field('Radius', numInput('bgRadius', pct(l.bg.radius), '%')) +
-                      row2(field('Pad X', numInput('bgPadX', pct(l.bg.padX), '%')), field('Pad Y', numInput('bgPadY', pct(l.bg.padY), '%')))
+                      row2(field('Pad X', numInput('bgPadX', pct(l.bg.padX), '%')), field('Pad Y', numInput('bgPadY', pct(l.bg.padY), '%'))) +
+                      field('Border', toggle('bgLine', l.bg.line)) +
+                      (l.bg.line
+                          ? field('Color', colorField('bgLineColor', l.bg.lineColor)) +
+                            field('Width', numInput('bgLineW', pct(l.bg.lineW), '%'))
+                          : '')
                     : ''));
         }
         if (l.type === 'image') {
@@ -2127,6 +2145,7 @@
         else if (key === 'bgRadius') l.bg.radius = Math.max(0, num / 100);
         else if (key === 'bgPadX') l.bg.padX = Math.max(0, num / 100);
         else if (key === 'bgPadY') l.bg.padY = Math.max(0, num / 100);
+        else if (key === 'bgLineW') l.bg.lineW = Math.max(0, num / 100);
         else if (key === 'strokeW') l.stroke.w = Math.max(0, num / 100);
         else if (key === 'maxW') l.maxW = Math.max(0, num / 100);
         else if (key === 'tracking') l.tracking = num / 100;
@@ -2160,6 +2179,7 @@
     function setColor(l, key, val) {
         if (key === 'color') l.color = val;
         else if (key === 'bgColor') l.bg.color = val;
+        else if (key === 'bgLineColor') l.bg.lineColor = val;
         else if (key === 'strokeColor') l.stroke.color = val;
         else if (key === 'shadowColor') l.shadowColor = val;
         else if (key === 'rowColor') l.style.color = val;
@@ -2307,6 +2327,7 @@
                 else if (key === 'upper') l.upper = !l.upper;
                 else if (key === 'rowUpper') l.style.upper = !l.style.upper;
                 else if (key === 'bgEnabled') l.bg.enabled = !l.bg.enabled;
+                else if (key === 'bgLine') l.bg.line = !l.bg.line;
                 else if (key === 'strokeEnabled') l.stroke.enabled = !l.stroke.enabled;
                 else if (key === 'fillGrad') l.fill.grad = !l.fill.grad;
                 else if (key === 'borderEnabled') l.border.enabled = !l.border.enabled;
@@ -2317,7 +2338,7 @@
                 else if (key === 'rowStrokeEnabled') l.style.stroke.enabled = !l.style.stroke.enabled;
                 t.classList.toggle('voe-toggle--on');
                 refreshLayer(l.id); markDirty();
-                if (['bgEnabled', 'fillGrad', 'strokeEnabled', 'rowBgEnabled', 'rowStrokeEnabled', 'shadow', 'rowShadow', 'borderEnabled', 'condOn'].indexOf(key) > -1) renderInspector();   // reveal/hide sub-fields
+                if (['bgEnabled', 'bgLine', 'fillGrad', 'strokeEnabled', 'rowBgEnabled', 'rowStrokeEnabled', 'shadow', 'rowShadow', 'borderEnabled', 'condOn'].indexOf(key) > -1) renderInspector();   // reveal/hide sub-fields
             });
         });
         box.querySelectorAll('[data-anchor]').forEach(function (cell) {

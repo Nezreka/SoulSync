@@ -190,10 +190,11 @@ def _text_tile(layer, W, H, values):
     tile = Image.new("RGBA", (tile_w, tile_h), (0, 0, 0, 0))
     d = ImageDraw.Draw(tile)
     if pill:
-        radius = int(_as_float(bg.get("radius"), 0) * H)
-        fill = _hex_rgba(bg.get("color"), bg.get("opacity", 0.6))
-        d.rounded_rectangle([0, 0, tw + 2 * (padx + extra) - 1, th + 2 * pady - 1],
-                            radius=max(0, min(radius, (th + 2 * pady) // 2)), fill=fill)
+        bw, bh = tw + 2 * (padx + extra), th + 2 * pady
+        radius = max(0, min(int(_as_float(bg.get("radius"), 0) * H), bh // 2))
+        d.rounded_rectangle([0, 0, bw - 1, bh - 1], radius=radius,
+                            fill=_hex_rgba(bg.get("color"), bg.get("opacity", 0.6)))
+        _bg_border(tile, bg, bw, bh, radius, H)
     # Hug left (remove the left side-bearing); baseline sits `ascent` below the box top
     # (+ stroke room so the outline isn't clipped at the top).
     bx = padx + extra - left_bearing
@@ -321,12 +322,24 @@ def _bg_wrap(tile, layer, W, H):
     cw, ch = tile.size
     ow, oh = max(1, cw + 2 * padx), max(1, ch + 2 * pady)
     out = Image.new("RGBA", (ow, oh), (0, 0, 0, 0))
-    radius = int(_as_float(bg.get("radius"), 0) * H)
+    radius = max(0, min(int(_as_float(bg.get("radius"), 0) * H), oh // 2))
     ImageDraw.Draw(out).rounded_rectangle(
-        [0, 0, ow - 1, oh - 1], radius=max(0, min(radius, oh // 2)),
+        [0, 0, ow - 1, oh - 1], radius=radius,
         fill=_hex_rgba(bg.get("color", "#000000"), bg.get("opacity", 0.6)))
     out.alpha_composite(tile, (padx, pady))
+    _bg_border(out, bg, ow, oh, radius, H)
     return out
+
+
+def _bg_border(img, bg, ow, oh, radius, H):
+    """Draw the optional back_line border on a background box, inset so it isn't clipped."""
+    lw = int(round(_as_float(bg.get("lineW"), 0) * H))
+    if not (bg.get("line") and lw > 0):
+        return
+    inset = lw // 2
+    ImageDraw.Draw(img).rounded_rectangle(
+        [inset, inset, ow - 1 - inset, oh - 1 - inset], radius=max(0, radius - inset),
+        outline=_hex_rgba(bg.get("lineColor", "#ffffff"), 1.0), width=lw)
 
 
 def _rating_tile(layer, W, H, values):
