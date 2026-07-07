@@ -229,6 +229,8 @@ _COLUMN_MIGRATIONS = [
     ("movies", "mediastinger_status", "TEXT"), ("movies", "mediastinger_attempted", "TEXT"),
     ("shows", "mediastinger", "INTEGER"),
     ("shows", "mediastinger_status", "TEXT"), ("shows", "mediastinger_attempted", "TEXT"),
+    # Aspect ratio (from the media file / server), for the Aspect overlay badge
+    ("media_files", "aspect", "TEXT"),
     # DeArrow crowd-sourced better titles for cached YouTube videos
     ("youtube_video_stats", "dearrow_title", "TEXT"),
     ("youtube_video_stats", "dearrow_status", "TEXT"),
@@ -1888,15 +1890,16 @@ class VideoDatabase:
         conn.execute(f"DELETE FROM media_files WHERE {owner_col} = ?", (owner_id,))
         if not file:
             return
+        from core.video.mediainfo import canonical_aspect
         conn.execute(
             f"INSERT INTO media_files ({owner_col}, relative_path, size_bytes, resolution, "
-            "video_codec, audio_codec, release_source, quality, runtime_seconds) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "video_codec, audio_codec, release_source, quality, runtime_seconds, aspect) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (owner_id,
              file.get("relative_path") or file.get("path") or "",
              file.get("size_bytes"), file.get("resolution"), file.get("video_codec"),
              file.get("audio_codec"), file.get("release_source"), file.get("quality"),
-             file.get("runtime_seconds")),
+             file.get("runtime_seconds"), canonical_aspect(file.get("aspect"))),
         )
 
     @staticmethod
@@ -2532,6 +2535,7 @@ class VideoDatabase:
                 "logo_url": d.get("logo_url"),
                 "subtitles": len(_subtitle_langs_list(d.get("subtitle_langs"))) or None,
                 "resolution": None, "video_codec": None, "audio_codec": None, "source": None,
+                "aspect": None,
                 "season_count": None, "episode_count": None, "versions": None,
             }
             # ALL of the item's genres, comma-joined — a Genre badge shows the
@@ -2549,7 +2553,7 @@ class VideoDatabase:
                          "WHEN '720p' THEN 2 ELSE 1 END DESC")
             if kind == "movie":
                 mf = conn.execute(
-                    "SELECT resolution, video_codec, audio_codec, release_source FROM media_files mf "
+                    "SELECT resolution, video_codec, audio_codec, release_source, aspect FROM media_files mf "
                     f"WHERE mf.movie_id=? ORDER BY {_res_rank}, mf.size_bytes DESC LIMIT 1",
                     (int(item_id),)).fetchone()
                 vc = conn.execute("SELECT COUNT(*) AS n FROM media_files WHERE movie_id=?",
@@ -2557,7 +2561,7 @@ class VideoDatabase:
                 out["versions"] = (vc["n"] if vc else 0) or None
             else:
                 mf = conn.execute(
-                    "SELECT resolution, video_codec, audio_codec, release_source FROM media_files mf "
+                    "SELECT resolution, video_codec, audio_codec, release_source, aspect FROM media_files mf "
                     "JOIN episodes e ON e.id=mf.episode_id WHERE e.show_id=? "
                     f"ORDER BY {_res_rank} LIMIT 1", (int(item_id),)).fetchone()
                 counts = conn.execute(
@@ -2572,6 +2576,7 @@ class VideoDatabase:
                 out["video_codec"] = m.get("video_codec")
                 out["audio_codec"] = m.get("audio_codec")
                 out["source"] = m.get("release_source")
+                out["aspect"] = m.get("aspect")
             out["has_poster"] = bool(d.get("has_poster"))
             out["has_backdrop"] = bool(d.get("has_backdrop"))
             return out

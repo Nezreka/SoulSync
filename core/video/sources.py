@@ -520,6 +520,7 @@ class PlexVideoSource:
                 "relative_path": part.file,
                 "size_bytes": getattr(part, "size", None),
                 "resolution": getattr(media, "videoResolution", None),
+                "aspect": getattr(media, "aspectRatio", None),
                 "video_codec": getattr(media, "videoCodec", None),
                 "audio_codec": getattr(media, "audioCodec", None),
                 "runtime_seconds": int(obj.duration / 1000) if getattr(obj, "duration", None) else None,
@@ -840,6 +841,8 @@ class JellyfinVideoSource:
             "relative_path": src.get("Path") or item.get("Path") or "",
             "size_bytes": src.get("Size"),
             "resolution": (str(vid.get("Height")) + "p") if vid.get("Height") else None,
+            "aspect": vid.get("AspectRatio") or (
+                (vid.get("Width") / vid.get("Height")) if vid.get("Width") and vid.get("Height") else None),
             "video_codec": vid.get("Codec"),
             "audio_codec": aud.get("Codec"),
             "runtime_seconds": JellyfinVideoSource._ticks_to_seconds(item.get("RunTimeTicks")),

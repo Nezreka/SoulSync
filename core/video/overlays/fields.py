@@ -71,6 +71,10 @@ def _source(v):
     return _SOURCE_MAP.get(str(v).lower(), _up(v))
 
 
+def _aspect(v):
+    return str(v) if v else None   # stored canonical already (e.g. '16:9', '2.40:1')
+
+
 def _status(v):
     if not v:
         return None
@@ -109,6 +113,7 @@ _FORMATTERS = {
     "video_codec": _video_codec,
     "audio_codec": _audio_codec,
     "source": _source,
+    "aspect": _aspect,
     "imdb": lambda v: None if _num(v) is None else "IMDb " + str(_round1(v)),
     "rt": lambda v: None if _num(v) is None else "RT " + str(v) + "%",
     "metacritic": lambda v: None if _num(v) is None else "MC " + str(v),

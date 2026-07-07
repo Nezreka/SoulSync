@@ -70,6 +70,43 @@ def _norm_codec(name: Any) -> str | None:
     return s
 
 
+def _aspect_ratio_num(v: Any):
+    """A numeric width/height ratio from a float, an 'a:b' string, or a decimal string."""
+    if v is None or v == "":
+        return None
+    if isinstance(v, (int, float)):
+        return float(v) if v > 0 else None
+    s = str(v).strip()
+    if ":" in s:
+        a, _, b = s.partition(":")
+        try:
+            a, b = float(a), float(b)
+            return (a / b) if b else None
+        except ValueError:
+            return None
+    try:
+        f = float(s)
+        return f if f > 0 else None
+    except ValueError:
+        return None
+
+
+def canonical_aspect(v: Any) -> str | None:
+    """Bucket an aspect ratio (a float, an 'a:b' string, or a w/h ratio) into a
+    common label. Servers report it differently (Plex 1.78, Jellyfin '16:9'), so
+    we normalize once at store time and the overlay just shows the label."""
+    r = _aspect_ratio_num(v)
+    if r is None:
+        return None
+    if r < 1.4:
+        return "4:3"
+    if r < 1.9:
+        return "16:9"
+    if r < 2.1:
+        return "2:1"
+    return "2.40:1"
+
+
 def parse_ffprobe(data: Any) -> dict:
     """Parse ffprobe's ``-show_format -show_streams`` JSON into the fields we use.
     ``ok`` is True only when a video stream is present (else: corrupt / not a video)."""
@@ -87,6 +124,7 @@ def parse_ffprobe(data: Any) -> dict:
         "width": _int(width),
         "height": _int(height),
         "resolution": resolution_from_dimensions(width, height) if video else None,
+        "aspect": canonical_aspect(_int(width) / _int(height)) if (video and _int(height)) else None,
         "video_codec": _norm_codec((video or {}).get("codec_name")),
         "audio_codec": str((audio or {}).get("codec_name") or "") or None,
     }
