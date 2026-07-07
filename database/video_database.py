@@ -2488,7 +2488,7 @@ class VideoDatabase:
         try:
             row = conn.execute(
                 f"SELECT title, year, runtime_minutes, status, content_rating, "
-                f"rating, imdb_rating, rt_rating, metacritic, trakt_rating, logo_url, "
+                f"rating, imdb_rating, rt_rating, metacritic, trakt_rating, subtitle_langs, logo_url, "
                 f"{'studio' if kind == 'movie' else 'network'} AS org, "
                 f"(poster_url IS NOT NULL AND poster_url <> '') AS has_poster, "
                 f"(backdrop_url IS NOT NULL AND backdrop_url <> '') AS has_backdrop "
@@ -2506,8 +2506,9 @@ class VideoDatabase:
                 "studio": d.get("org") if kind == "movie" else None,
                 "network": d.get("org") if kind == "show" else None,
                 "logo_url": d.get("logo_url"),
+                "subtitles": len(_subtitle_langs_list(d.get("subtitle_langs"))) or None,
                 "resolution": None, "video_codec": None, "audio_codec": None, "source": None,
-                "season_count": None, "episode_count": None,
+                "season_count": None, "episode_count": None, "versions": None,
             }
             # ALL of the item's genres, comma-joined — a Genre badge shows the
             # primary (first) one, while a "genre includes X" condition can match
@@ -2527,6 +2528,9 @@ class VideoDatabase:
                     "SELECT resolution, video_codec, audio_codec, release_source FROM media_files mf "
                     f"WHERE mf.movie_id=? ORDER BY {_res_rank}, mf.size_bytes DESC LIMIT 1",
                     (int(item_id),)).fetchone()
+                vc = conn.execute("SELECT COUNT(*) AS n FROM media_files WHERE movie_id=?",
+                                  (int(item_id),)).fetchone()
+                out["versions"] = (vc["n"] if vc else 0) or None
             else:
                 mf = conn.execute(
                     "SELECT resolution, video_codec, audio_codec, release_source FROM media_files mf "

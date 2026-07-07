@@ -120,6 +120,9 @@ _FORMATTERS = {
     "runtime": _runtime,
     "season_count": lambda v: None if _num(v) is None else str(v) + (" Season" if int(v) == 1 else " Seasons"),
     "episode_count": lambda v: None if _num(v) is None else str(v) + " Episodes",
+    "subtitles": lambda v: None if _num(v) is None else str(v) + (" Subtitle" if int(v) == 1 else " Subtitles"),
+    # Only a badge when there's actually more than one version (a single copy is the norm).
+    "versions": lambda v: None if (_num(v) is None or int(v) <= 1) else str(v) + " Versions",
     "title": lambda v: str(v) if v else None,
     "network": lambda v: str(v) if v else None,
     "studio": lambda v: str(v) if v else None,
