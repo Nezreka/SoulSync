@@ -1959,6 +1959,7 @@ def _shutdown_runtime_components():
         (discogs_worker, "discogs worker"),
         (deezer_worker, "deezer worker"),
         (jiosaavn_worker, "jiosaavn worker"),
+        (bandcamp_worker, "bandcamp worker"),
         (spotify_enrichment_worker, "spotify enrichment worker"),
         (itunes_enrichment_worker, "itunes enrichment worker"),
         (lastfm_worker, "lastfm worker"),
@@ -2275,6 +2276,7 @@ SERVICE_CONFIG_REGISTRY = {
     'musicbrainz':  {'always': True},   # public API, no credentials required
     'amazon':       {'always': True},   # T2Tunes proxy, no credentials required
     'jiosaavn':     {'always': True},   # public proxy API, no credentials required
+    'bandcamp':     {'always': True},   # public search + release-page scrape, no credentials
     'discogs':      {'required': ['token']},
     'tidal':        {'custom': lambda _svc: _tidal_has_auth_token()},
     'qobuz':        {'any_of': [['email', 'password'], ['token'], ['user_auth_token']]},
@@ -2406,7 +2408,7 @@ def _get_windowed_calls(key, current_total):
 def _get_enrichment_status():
     """Get lightweight status for all enrichment services (no DB queries).
     Reads worker properties directly to avoid expensive get_stats() calls."""
-    from core.metadata.registry import is_jiosaavn_enabled
+    from core.metadata.registry import is_jiosaavn_enabled, is_source_enabled
 
     services = {}
 
@@ -2424,6 +2426,7 @@ def _get_enrichment_status():
         ('discogs', 'Discogs', lambda: discogs_worker),
         ('amazon_enrichment', 'Amazon Music', lambda: amazon_worker),
         ('jiosaavn_enrichment', 'JioSaavn', lambda: jiosaavn_worker),
+        ('bandcamp_enrichment', 'Bandcamp', lambda: bandcamp_worker),
     ]
 
     # Config-based "configured" checks for services that need API keys/credentials
@@ -2434,10 +2437,13 @@ def _get_enrichment_status():
         'lastfm': lambda: bool(config_manager.get('lastfm.api_key', '')),
         'genius': lambda: bool(config_manager.get('genius.access_token', '')),
         'jiosaavn_enrichment': is_jiosaavn_enabled,
+        'bandcamp_enrichment': lambda: is_source_enabled('bandcamp'),
     }
 
     for key, name, get_worker in workers_info:
         if key == 'jiosaavn_enrichment' and not is_jiosaavn_enabled():
+            continue
+        if key == 'bandcamp_enrichment' and not is_source_enabled('bandcamp'):
             continue
         worker = get_worker()
         if worker is not None:
@@ -17318,6 +17324,7 @@ def _pause_workers_for_scan():
         'deezer': deezer_worker, 'audiodb': audiodb_worker, 'discogs': discogs_worker, 'lastfm': lastfm_worker,
         'genius': genius_worker, 'tidal': tidal_enrichment_worker, 'qobuz': qobuz_enrichment_worker,
         'amazon': amazon_worker, 'repair': repair_worker, 'soulid': soulid_worker, 'jiosaavn': jiosaavn_worker,
+        'bandcamp': bandcamp_worker,
     }
     for name, w in workers.items():
         if w and hasattr(w, 'pause') and not getattr(w, 'paused', True):
@@ -17334,6 +17341,7 @@ def _resume_workers_after_scan():
         'deezer': deezer_worker, 'audiodb': audiodb_worker, 'discogs': discogs_worker, 'lastfm': lastfm_worker,
         'genius': genius_worker, 'tidal': tidal_enrichment_worker, 'qobuz': qobuz_enrichment_worker,
         'amazon': amazon_worker, 'repair': repair_worker, 'soulid': soulid_worker, 'jiosaavn': jiosaavn_worker,
+        'bandcamp': bandcamp_worker,
     }
     resumed = 0
     for name, w in workers.items():
