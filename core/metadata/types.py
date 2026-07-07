@@ -106,6 +106,7 @@ class Album:
     source: str = ''                             # 'spotify' / 'itunes' / etc — set by converter
     external_ids: Dict[str, str] = field(default_factory=dict)
     external_urls: Dict[str, str] = field(default_factory=dict)
+    secondary_types: List[str] = field(default_factory=list)  # provider release-group qualifiers (Live, Compilation, ...)
 
     # ------------------------------------------------------------------
     # Per-source converters. Each one is the SINGLE source of truth for
@@ -364,6 +365,15 @@ class Album:
             if raw.get('id'):
                 external_ids['musicbrainz'] = _str(raw['id'])
 
+            raw_secondary_types = raw.get('secondary_types')
+            if raw_secondary_types is None:
+                raw_secondary_types = raw.get('secondary-types')
+            secondary_types = [
+                _str(value).strip()
+                for value in (raw_secondary_types or [])
+                if _str(value).strip()
+            ]
+
             return cls(
                 id=_str(raw.get('id')),
                 name=_str(raw.get('name')),
@@ -377,6 +387,7 @@ class Album:
                 source='musicbrainz',
                 external_ids=external_ids,
                 external_urls=dict(raw.get('external_urls') or {}),
+                secondary_types=secondary_types,
             )
 
         artist_credit = raw.get('artist-credit') or []
@@ -434,6 +445,7 @@ class Album:
             source='musicbrainz',
             external_ids=external_ids,
             external_urls={},
+            secondary_types=[_str(value).strip() for value in secondary_types if _str(value).strip()],
         )
 
     @classmethod
@@ -614,6 +626,7 @@ class Album:
             'images': images,
             'release_date': self.release_date,
             'album_type': self.album_type,
+            'secondary_types': list(self.secondary_types),
             'total_tracks': self.total_tracks,
             'source': self.source,
             'genres': list(self.genres),

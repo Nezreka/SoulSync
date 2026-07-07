@@ -3404,15 +3404,13 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Convention: keep only the CURRENT release here, plus a single brief
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '2.8.6': [
-        { date: 'July 2026 — 2.8.6' },
-        { title: 'Spotify search works without a connected account', desc: 'picking "Spotify" as your search source now returns results even if you haven\'t connected an account — it uses the no-auth Spotify Free source. and if you are connected but the official search comes back empty, it falls back to Free instead of a blank page.', page: 'search' },
-        { title: 'Import & Stats black screen on Docker (#986)', desc: 'a follow-up to the 2.8.5 fix — some Docker setups still got a blank Import/Stats page because the JS module bundle was served with a non-JS content type. we now force the correct type at the HTTP layer, so the module scripts always run.', page: 'import' },
-        { title: 'Mirrored playlists can\'t be silently wiped anymore (#990)', desc: 'a wrong-shaped refresh could overwrite a mirror with thousands of empty rows and still report success. it now accepts the Spotify track shape directly and validates before deleting — a malformed payload is rejected and your existing mirror is left intact.', page: 'playlists' },
-        { title: 'Browsing an artist no longer shows a different artist\'s tracks (#988)', desc: 'a Deezer name-search was accepting the first result even on a poor name match, so e.g. The Outfield could show Beatles tracks. it now requires a real name match before using a result.', page: 'artists' },
-        { title: 'iTunes singles no longer land in "Unknown Artist" (#989)', desc: 'when a single\'s album-artist came back empty, the track could file and tag under "Unknown Artist"; it now falls back to the real track artist.', page: 'import' },
-        { title: 'Library Reorganize cleans up the folders it empties (#985)', desc: 'after moving files it left the old, now-empty disc/album folders behind; it prunes them now — safely, never climbing up to the artist or library root.', page: 'library' },
-        { title: 'Earlier versions', desc: '2.8.51 was a one-fix hotfix (#983 fresh-install watchlist settings). 2.8.5 was a fix batch: Import & Stats black screen (#979), iTunes singles landing in Unknown Artist (#980), a stray "01-" on single-disc albums (#981), cleanup deleting a configured root (#976), repair Fix All outside the transfer path (#978), and backfill overreaching past owned artists (#977). 2.8.4 added Artist Web + named Quality Profiles (#974); 2.8.3 rebuilt Discover with a real recommendation engine; 2.8.2 fixed the Spotify Docker boot hang (#949); 2.7.0 made multi-user real.' },
+    '2.8.7': [
+        { date: 'July 2026 — 2.8.7' },
+        { title: 'Schedule SoulSync Discovery playlists straight from Auto-Sync', desc: 'every soulsync-made discovery playlist (Time Machine decades, Genre, Seasonal, Daily Mix, plus Popular Picks / Hidden Gems / The Archives / Fresh Tape / Discovery Shuffle) now shows up in the auto-sync schedule modal. flip one on and it generates itself on the first run and keeps syncing on your interval, no manual "generate" step. the many-variant kinds collapse into one expandable row so the list stays tidy, and track counts show even before a playlist has synced.', page: 'playlists' },
+        { title: 'Artist discography hides non-studio releases by default', desc: 'a browsed artist now shows just the studio catalog by default, hiding live albums, compilations, and singles. it reads strictly from MusicBrainz, so the main view stays clean.', page: 'artists' },
+        { title: 'Navidrome playlist cover art (#993)', desc: 'mirrored playlists now push their cover art to Navidrome when they sync, so synced playlists show the right artwork instead of a blank tile. the art goes up on the first mirror, not re-pushed on every sync.', page: 'playlists' },
+        { title: 'Saving settings can\'t wipe a stored API secret anymore (#992)', desc: 'a saved secret could get blanked by the settings page auto-save if it fired while a masked field was mid-edit. that showed up as Spotify failing to authenticate with "invalid_client" even after re-entering the secret, and it could quietly clear other API keys (Last.fm, Genius, Discogs, and so on) too. a settings save can no longer empty a saved secret.', page: 'settings' },
+        { title: 'Earlier versions', desc: '2.8.6 was a fix batch: Spotify search without a connected account, the Import/Stats black screen on Docker (#986), mirrored playlists no longer wiped by a bad refresh (#990), artist browse showing another artist\'s tracks (#988), iTunes singles landing in Unknown Artist (#989), and Reorganize pruning the folders it empties (#985). 2.8.51 fixed fresh-install watchlist settings (#983). 2.8.4 added Artist Web + named Quality Profiles (#974); 2.8.3 rebuilt Discover with a real recommendation engine; 2.7.0 made multi-user real.' },
     ],
 };
 
@@ -3443,7 +3441,18 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "2.8.6 — fix batch",
+        title: "2.8.7 — schedule your discovery playlists + a credential-wipe fix",
+        description: "the soulsync-made discovery playlists become first-class Auto-Sync items, plus a fix for the settings page quietly wiping saved API secrets.",
+        features: [
+            "Schedule SoulSync Discovery playlists from Auto-Sync — every discovery playlist (Time Machine decades, Genre, Seasonal, Daily Mix, plus Popular Picks / Hidden Gems / The Archives / Fresh Tape / Discovery Shuffle) now shows in the schedule modal; turn one on and it generates itself on the first run and keeps syncing on your interval, no manual \"generate\" step",
+            "the many-variant kinds (Time Machine, Genre, Seasonal) collapse into one expandable row per kind so the list stays tidy, and track counts show even for a playlist you've generated but not yet synced to the server",
+            "#992 — a saved API secret could be wiped by the settings auto-save firing while a masked field was mid-edit; it surfaced as Spotify failing with \"invalid_client\" even after re-entering the secret, and could silently clear other keys (Last.fm, Genius, Discogs, and the rest). a settings save can no longer blank a saved secret",
+            "#993 — mirrored playlists now push their cover art to Navidrome on sync (on the first mirror, not every sync), so synced playlists show the right artwork",
+            "artist discography hides non-studio releases (live, compilations, singles) by default, strictly from MusicBrainz, so you see the studio catalog cleanly",
+        ],
+    },
+    {
+        title: "Earlier in 2.8.6",
         description: "a focused fix release across search, import, library, and playlists.",
         features: [
             "Spotify search without a connected account — picking \"Spotify\" as your search source now works even if you haven't authenticated, using the no-auth Spotify Free source; and a connected account whose official search returns empty falls back to Free instead of a blank page",
