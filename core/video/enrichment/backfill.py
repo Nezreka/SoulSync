@@ -868,10 +868,66 @@ class TmdbStreamingWorker(VideoBackfillWorker):
         return self.db.backfill_breakdown("streaming")
 
 
+class TmdbStingerWorker(VideoBackfillWorker):
+    """TMDB keywords → whether a title has an after/during-credits scene, for the
+    Mediastinger overlay badge. Records 1 when present; absent → not_found (NULL)."""
+    BASE = "https://api.themoviedb.org/3"
+    requires_key = True
+
+    def __init__(self, db):
+        super().__init__(db, "mediastinger", "Mediastinger", interval=1.0)
+
+    def _key(self):
+        return (self.db.get_setting("tmdb_api_key") or "").strip()
+
+    def _enabled(self):
+        return bool(self._key())
+
+    def test(self):
+        if not self._key():
+            return (False, "No TMDB API key")
+        try:
+            j = _http_get_json(self.BASE + "/movie/550/keywords", {"api_key": self._key()})
+            return (j is not None, "TMDB key OK" if j is not None else "No response")
+        except _Unauthorized:
+            return (False, "TMDB rejected the API key")
+        except Exception as e:
+            return (False, str(e))
+
+    def next_item(self):
+        return self.db.backfill_next("mediastinger")
+
+    def fetch(self, item):
+        key = self._key()
+        tmdb = item.get("tmdb_id")
+        if not key or not tmdb:
+            return None
+        path = "/movie/" if item["kind"] == "movie" else "/tv/"
+        j = _http_get_json(self.BASE + path + str(tmdb) + "/keywords", {"api_key": key})
+        if not isinstance(j, dict):
+            return None
+        # movies -> 'keywords', TV -> 'results'
+        kws = j.get("keywords") or j.get("results") or []
+        has = any("stinger" in str((k or {}).get("name") or "").lower() for k in kws)
+        return {"mediastinger": 1} if has else None   # None → not_found (no stinger)
+
+    def record_ok(self, item, data):
+        self.db.backfill_mark("mediastinger", item["kind"], item["id"], "ok", columns=data)
+
+    def record_empty(self, item):
+        self.db.backfill_mark("mediastinger", item["kind"], item["id"], "not_found")
+
+    def record_error(self, item):
+        self.db.backfill_mark("mediastinger", item["kind"], item["id"], "error")
+
+    def breakdown(self):
+        return self.db.backfill_breakdown("mediastinger")
+
+
 def build_backfill_workers(db) -> dict:
     """All backfill workers, keyed by service id, for the engine registry."""
     return {w.service: w for w in (
         RydWorker(db), SponsorBlockWorker(db), FanartWorker(db), OpenSubtitlesWorker(db),
         TraktWorker(db), TVmazeWorker(db), AniListWorker(db), DeArrowWorker(db),
-        WikidataWorker(db), TmdbStreamingWorker(db),
+        WikidataWorker(db), TmdbStreamingWorker(db), TmdbStingerWorker(db),
     )}
