@@ -885,9 +885,21 @@ class ConfigManager:
         return data
 
     def set(self, key: str, value: Any):
-        # The UI round-trips REDACTED_SENTINEL for any secret the user didn't
-        # touch — never let the mask overwrite the real value (#832 follow-up).
-        if value == self.REDACTED_SENTINEL and key in self._SENSITIVE_PATHS:
+        # Never let a bulk/settings save blank out a stored secret. Two ways it
+        # tried to:
+        #   1. The UI round-trips REDACTED_SENTINEL for an untouched masked field
+        #      (#832) — that mask must not overwrite the real value.
+        #   2. The settings auto-save fires 2s after any input; a masked secret
+        #      field is cleared to '' on focus, so a timer landing in that window
+        #      posted '' and WIPED the real secret. That surfaced as Spotify
+        #      "invalid_client" (an empty secret was being sent) even after the
+        #      user re-entered it (#992).
+        # So an empty ('' / None) value for a sensitive path means "keep the
+        # existing one"; clearing a credential is done via its explicit
+        # disconnect action, never by saving an empty settings form.
+        if key in self._SENSITIVE_PATHS and (
+            value == self.REDACTED_SENTINEL or value is None or value == ''
+        ):
             return
 
         keys = key.split('.')
