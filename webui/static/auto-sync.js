@@ -23,6 +23,7 @@ let _autoSyncScheduleState = {
 };
 let _autoSyncActiveTab = 'schedule';
 let _autoSyncSidebarFilter = '';
+let _autoSyncExpandedKinds = new Set();  // variant-kind groups the user has expanded
 let _autoSyncHistoryFilter = 'all';  // 'all' | 'error' | 'completed' | 'skipped'
 let _autoSyncHistoryLimit = 50;
 // Open weekly-editor popover state. ``null`` when no popover is open.
@@ -271,6 +272,13 @@ function autoSyncExpandPersonalizedRows(kinds, existingPlaylists) {
             const name = k.requires_variant
                 ? String(k.name_template || `${k.kind} ${variant}`).replace('{variant}', variant)
                 : String(k.name_template || k.kind);
+            // Collapsible-group heading for variant kinds: the name_template with
+            // the "{variant}" placeholder (and any trailing separator) stripped,
+            // e.g. "Time Machine — {variant}" → "Time Machine".
+            const kindLabel = k.requires_variant
+                ? (String(k.name_template || k.kind).split('{variant}')[0]
+                       .replace(/[\s—–:>·.\-]+$/, '').trim() || k.kind)
+                : '';
             rows.push({
                 id: nextId--,
                 source: 'soulsync_discovery',
@@ -278,6 +286,7 @@ function autoSyncExpandPersonalizedRows(kinds, existingPlaylists) {
                 track_count: 0,
                 kind: k.kind,
                 variant,
+                kind_label: kindLabel,
                 source_playlist_id: ssdId,
                 _personalized: true,
             });
@@ -331,6 +340,71 @@ function autoSyncRowIdForPersonalized(entry, playlists) {
     const synth = (playlists || []).find(
         p => p && p._personalized && p.kind === entry.kind && (p.variant || '') === entry.variant);
     return synth ? synth.id : null;
+}
+
+// Split a sidebar source-group's rows into flat rows and collapsible variant
+// groups. Ungenerated variant kinds (Time Machine decades, Genres, ...) come in
+// as many synthetic rows at once; bucketing them by kind lets the sidebar show a
+// single expandable header per kind instead of every variant inline. Everything
+// else (singletons, already-generated rows) stays flat. Encounter order is
+// preserved; each group keeps its first row's `kind_label` as the heading.
+function autoSyncGroupSidebarRows(rows) {
+    const flat = [];
+    const groups = [];
+    const byKind = new Map();
+    (rows || []).forEach(p => {
+        if (p && p._personalized && p.variant) {
+            let g = byKind.get(p.kind);
+            if (!g) {
+                g = { kind: p.kind, label: p.kind_label || p.kind, rows: [] };
+                byKind.set(p.kind, g);
+                groups.push(g);
+            }
+            g.rows.push(p);
+        } else {
+            flat.push(p);
+        }
+    });
+    return { flat, groups };
+}
+
+// Render a source group's rows: flat cards first, then one collapsible block per
+// variant kind. `cardRenderer(p, displayName)` builds a single draggable card
+// (displayName lets a grouped card show just its variant). `isScheduled(p)`
+// (optional) drives the "N on" badge shown on a collapsed header.
+function autoSyncSidebarGroupHtml(rows, cardRenderer, isScheduled) {
+    const { flat, groups } = autoSyncGroupSidebarRows(rows);
+    const flatHtml = flat.map(p => cardRenderer(p)).join('');
+    const groupsHtml = groups.map(g => {
+        const expanded = _autoSyncExpandedKinds.has(g.kind);
+        const activeCount = typeof isScheduled === 'function'
+            ? g.rows.filter(isScheduled).length : 0;
+        const cards = g.rows.map(p => cardRenderer(p, p.variant)).join('');
+        return `
+            <div class="auto-sync-kind-group ${expanded ? 'expanded' : ''} ${activeCount ? 'has-active' : ''}" data-kind="${_escAttr(g.kind)}">
+                <div class="auto-sync-kind-group-head" onclick="toggleAutoSyncKindGroup('${_escAttr(g.kind)}')">
+                    <span class="auto-sync-kind-group-chevron">&#9654;</span>
+                    <span class="auto-sync-kind-group-label">${_esc(g.label)}</span>
+                    ${activeCount ? `<span class="auto-sync-kind-group-active">${activeCount} on</span>` : ''}
+                    <span class="auto-sync-kind-group-count">${g.rows.length}</span>
+                </div>
+                <div class="auto-sync-kind-group-body">${cards}</div>
+            </div>
+        `;
+    }).join('');
+    return flatHtml + groupsHtml;
+}
+
+// Toggle a variant-kind group open/closed. Flips the class on the live element
+// (both boards can have rendered it) and records the state so a full modal
+// re-render keeps it open.
+function toggleAutoSyncKindGroup(kind) {
+    if (_autoSyncExpandedKinds.has(kind)) _autoSyncExpandedKinds.delete(kind);
+    else _autoSyncExpandedKinds.add(kind);
+    const expanded = _autoSyncExpandedKinds.has(kind);
+    document.querySelectorAll(`.auto-sync-kind-group[data-kind="${kind}"]`).forEach(el => {
+        el.classList.toggle('expanded', expanded);
+    });
 }
 
 function buildAutoSyncScheduleState(playlists, automations, historyData = {}) {
@@ -600,6 +674,17 @@ function renderAutoSyncSchedulePanel(playlists, playlistSchedules) {
     }, {});
     const sourceKeys = Object.keys(grouped).sort((a, b) => autoSyncSourceLabel(a).localeCompare(autoSyncSourceLabel(b)));
 
+    const cardRenderer = (p, displayName) => {
+        const schedule = playlistSchedules[p.id];
+        const assigned = schedule ? autoSyncIntervalLabel(schedule.hours) : 'Unscheduled';
+        return `
+                    <div class="auto-sync-playlist ${schedule ? 'scheduled' : ''}" draggable="true" data-playlist-id="${p.id}" ondragstart="autoSyncDragStart(event)" ondragend="autoSyncDragEnd()">
+                        <div class="auto-sync-playlist-name">${_esc(displayName || p.name)}</div>
+                        <div class="auto-sync-playlist-meta">${p.track_count || 0} tracks &middot; ${_esc(assigned)}</div>
+                    </div>
+                `;
+    };
+    const isScheduled = (p) => !!playlistSchedules[p.id];
     const sidebarHtml = sourceKeys.length ? sourceKeys.map(source => `
         <div class="auto-sync-source-group">
             <div class="auto-sync-source-group-head">
@@ -613,16 +698,7 @@ function renderAutoSyncSchedulePanel(playlists, playlistSchedules) {
                     Bulk
                 </button>
             </div>
-            ${grouped[source].map(p => {
-                const schedule = playlistSchedules[p.id];
-                const assigned = schedule ? autoSyncIntervalLabel(schedule.hours) : 'Unscheduled';
-                return `
-                    <div class="auto-sync-playlist ${schedule ? 'scheduled' : ''}" draggable="true" data-playlist-id="${p.id}" ondragstart="autoSyncDragStart(event)" ondragend="autoSyncDragEnd()">
-                        <div class="auto-sync-playlist-name">${_esc(p.name)}</div>
-                        <div class="auto-sync-playlist-meta">${p.track_count || 0} tracks &middot; ${_esc(assigned)}</div>
-                    </div>
-                `;
-            }).join('')}
+            ${autoSyncSidebarGroupHtml(grouped[source], cardRenderer, isScheduled)}
         </div>
     `).join('') : '<div class="auto-sync-empty">No refreshable mirrored playlists yet.</div>';
 
@@ -719,6 +795,22 @@ function renderAutoSyncWeeklyPanel(playlists, playlistSchedules) {
     }, {});
     const sourceKeys = Object.keys(grouped).sort((a, b) => autoSyncSourceLabel(a).localeCompare(autoSyncSourceLabel(b)));
 
+    const cardRenderer = (p, displayName) => {
+        const weekly = weeklySchedules[p.id];
+        const hourly = playlistSchedules[p.id];
+        let assigned = 'Unscheduled';
+        if (weekly) assigned = autoSyncWeeklyLabel(weekly);
+        else if (hourly) assigned = `Hourly (${autoSyncIntervalLabel(hourly.hours).toLowerCase()})`;
+        return `
+                    <div class="auto-sync-playlist ${weekly ? 'scheduled' : (hourly ? 'scheduled-elsewhere' : '')}"
+                         draggable="true" data-playlist-id="${p.id}"
+                         ondragstart="autoSyncWeeklyDragStart(event)" ondragend="autoSyncWeeklyDragEnd()">
+                        <div class="auto-sync-playlist-name">${_esc(displayName || p.name)}</div>
+                        <div class="auto-sync-playlist-meta">${p.track_count || 0} tracks &middot; ${_esc(assigned)}</div>
+                    </div>
+                `;
+    };
+    const isScheduled = (p) => !!(weeklySchedules[p.id] || playlistSchedules[p.id]);
     const sidebarHtml = sourceKeys.length ? sourceKeys.map(source => `
         <div class="auto-sync-source-group">
             <div class="auto-sync-source-group-head">
@@ -727,21 +819,7 @@ function renderAutoSyncWeeklyPanel(playlists, playlistSchedules) {
                     <span class="auto-sync-source-title-label">${_esc(autoSyncSourceLabel(source))}</span>
                 </span>
             </div>
-            ${grouped[source].map(p => {
-                const weekly = weeklySchedules[p.id];
-                const hourly = playlistSchedules[p.id];
-                let assigned = 'Unscheduled';
-                if (weekly) assigned = autoSyncWeeklyLabel(weekly);
-                else if (hourly) assigned = `Hourly (${autoSyncIntervalLabel(hourly.hours).toLowerCase()})`;
-                return `
-                    <div class="auto-sync-playlist ${weekly ? 'scheduled' : (hourly ? 'scheduled-elsewhere' : '')}"
-                         draggable="true" data-playlist-id="${p.id}"
-                         ondragstart="autoSyncWeeklyDragStart(event)" ondragend="autoSyncWeeklyDragEnd()">
-                        <div class="auto-sync-playlist-name">${_esc(p.name)}</div>
-                        <div class="auto-sync-playlist-meta">${p.track_count || 0} tracks &middot; ${_esc(assigned)}</div>
-                    </div>
-                `;
-            }).join('')}
+            ${autoSyncSidebarGroupHtml(grouped[source], cardRenderer, isScheduled)}
         </div>
     `).join('') : '<div class="auto-sync-empty">No refreshable mirrored playlists yet.</div>';
 
