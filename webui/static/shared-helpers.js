@@ -142,6 +142,16 @@ function isJiosaavnExperimentalEnabled() {
     return false;
 }
 
+/** True when Bandcamp experimental opt-in is on (settings, payload, or /status). */
+function isBandcampExperimentalEnabled() {
+    if (document.getElementById('experimental-bandcamp-enabled')?.checked === true) return true;
+    if (window._settingsPayload?.experimental?.bandcamp_enabled === true) return true;
+    if (window._lastStatusPayload && parseEnabledExperimental(window._lastStatusPayload).has('bandcamp')) {
+        return true;
+    }
+    return false;
+}
+
 /** Drop JioSaavn rows from service lists when experimental is off. */
 function filterJiosaavnServiceEntries(items, idKey = 'key') {
     if (isJiosaavnExperimentalEnabled()) return items;
@@ -3908,11 +3918,12 @@ function renderEnrichmentCards(enrichment) {
     if (!grid || !enrichment) return;
 
     const jiosaavnEnabled = isJiosaavnExperimentalEnabled();
+    const bandcampEnabled = isBandcampExperimentalEnabled();
 
     // Service display order
     const serviceOrder = [
         'musicbrainz', 'spotify_enrichment', 'itunes_enrichment', 'deezer_enrichment', 'jiosaavn_enrichment',
-        'tidal_enrichment', 'qobuz_enrichment', 'lastfm', 'genius', 'audiodb',
+        'bandcamp_enrichment', 'tidal_enrichment', 'qobuz_enrichment', 'lastfm', 'genius', 'audiodb',
         'acoustid', 'listenbrainz'
     ];
 
@@ -3930,6 +3941,7 @@ function renderEnrichmentCards(enrichment) {
     const chips = [];
     for (const key of serviceOrder) {
         if (key === 'jiosaavn_enrichment' && !jiosaavnEnabled) continue;
+        if (key === 'bandcamp_enrichment' && !bandcampEnabled) continue;
         const svc = enrichment[key];
         if (!svc) continue;
 

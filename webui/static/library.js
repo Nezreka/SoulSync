@@ -3270,7 +3270,9 @@ function renderArtistMetaPanel(artist) {
             { id: 'genius', label: 'Genius', icon: '🟡' },
             { id: 'tidal', label: 'Tidal', icon: '⬛' },
             { id: 'qobuz', label: 'Qobuz', icon: '🔷' },
-            { id: 'bandcamp', label: 'Bandcamp', icon: '🔹' },
+            // Bandcamp intentionally omitted: this is the artist-level enrich
+            // menu and Bandcamp has no artist pass (album/track only). The
+            // album-level menu below still offers it.
         ], 'id');
         services.forEach(svc => {
             const item = document.createElement('div');
