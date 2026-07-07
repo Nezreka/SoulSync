@@ -717,6 +717,9 @@ def _process_genius_source(pp: dict, metadata: dict, cfg, runtime, track_title: 
 
 
 def _process_bandcamp_source(pp: dict, metadata: dict, cfg, runtime, track_title: str, artist_name: str) -> None:
+    from core.metadata.registry import is_source_enabled
+    if not is_source_enabled("bandcamp"):
+        return
     if cfg.get("bandcamp.embed_tags", True) is False:
         return
     if not track_title or not artist_name:
@@ -1383,9 +1386,11 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
                     pp["tidal_copyright"] = cached_meta["copyright"]
             source_order = [s for s in source_order if s != "tidal"]
 
-        from core.metadata.registry import is_jiosaavn_enabled
+        from core.metadata.registry import is_jiosaavn_enabled, is_source_enabled
         if not is_jiosaavn_enabled():
             source_order = [s for s in source_order if s != "jiosaavn"]
+        if not is_source_enabled("bandcamp"):
+            source_order = [s for s in source_order if s != "bandcamp"]
 
         db = get_database()
 

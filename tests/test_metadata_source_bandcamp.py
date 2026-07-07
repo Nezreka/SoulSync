@@ -13,6 +13,9 @@ from __future__ import annotations
 
 import types
 
+import pytest
+
+import core.metadata.registry as _registry
 from core.metadata import enrichment as me
 from core.metadata import source as ms
 from tests.metadata.test_metadata_enrichment import (
@@ -20,6 +23,18 @@ from tests.metadata.test_metadata_enrichment import (
     _fake_symbols,
     _FakeAudio,
 )
+
+
+@pytest.fixture(autouse=True)
+def _enable_bandcamp(monkeypatch):
+    """Bandcamp is an opt-in experimental source (off by default). These tests
+    exercise the enabled-behavior, so turn it on; the two explicit
+    disabled-gate tests below patch it back off themselves."""
+    _real = _registry.is_source_enabled
+    monkeypatch.setattr(
+        _registry, "is_source_enabled",
+        lambda source=None: True if (source or "").lower() == "bandcamp" else _real(source),
+    )
 
 
 class _FakeBandcampClient:
@@ -126,6 +141,21 @@ class TestProcessBandcampSource:
 
         ms._process_bandcamp_source(pp, {'album': 'Album One'}, cfg, runtime, 'Song One', 'Artist One')
 
+        assert pp['bandcamp_url'] is None
+
+    def test_disabled_experimental_source_skips_entirely(self, monkeypatch):
+        """PR #968 review: with the Bandcamp toggle off, auto-import enrichment
+        must not hit bandcamp.com at all — the gate short-circuits before the
+        client is touched, regardless of embed_tags."""
+        monkeypatch.setattr(_registry, "is_source_enabled", lambda source=None: False)
+        client = _FakeBandcampClient(track_result={'url': 'x', 'tags': ['t'], 'label': 'L'})
+        pp = ms._blank_post_process_state()
+        cfg = _Config({'bandcamp.embed_tags': True})
+
+        ms._process_bandcamp_source(pp, {'album': 'Album One'}, cfg, _runtime(client), 'Song One', 'Artist One')
+
+        assert client.track_calls == []
+        assert client.album_calls == []
         assert pp['bandcamp_url'] is None
 
 

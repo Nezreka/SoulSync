@@ -13391,6 +13391,9 @@ def _run_single_enrichment(service, entity_type, entity_id, name, artist_name):
     elif service == 'bandcamp':
         if not bandcamp_worker:
             return {"success": False, "error": "Bandcamp worker not initialized"}
+        from core.metadata.registry import is_source_enabled
+        if not is_source_enabled('bandcamp'):
+            return {"success": False, "error": "Bandcamp is disabled (experimental feature off)"}
         if entity_type == 'artist':
             return {"success": False, "error": "Bandcamp does not support artist-level enrichment"}
         if entity_type == 'album':
