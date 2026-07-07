@@ -23,6 +23,13 @@ def test_resolver_slugs_free_text_fields():
     assert logo_ref("content_rating", "PG-13") == ("content_rating", "pg_13")
 
 
+def test_resolver_presence_flag_maps_to_single_icon():
+    # mediastinger is a boolean presence → one icon regardless of the truthy value
+    assert logo_ref("mediastinger", 1) == ("mediastinger", "stinger")
+    assert logo_ref("mediastinger", 0) is None
+    assert logo_ref("mediastinger", None) is None
+
+
 def test_resolver_returns_none_for_unknown_or_empty():
     assert logo_ref("resolution", None) is None
     assert logo_ref("resolution", "") is None

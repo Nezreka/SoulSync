@@ -123,6 +123,7 @@ _FORMATTERS = {
     "subtitles": lambda v: None if _num(v) is None else str(v) + (" Subtitle" if int(v) == 1 else " Subtitles"),
     # Only a badge when there's actually more than one version (a single copy is the norm).
     "versions": lambda v: None if (_num(v) is None or int(v) <= 1) else str(v) + " Versions",
+    "mediastinger": lambda v: "After Credits" if v else None,   # presence flag
     "title": lambda v: str(v) if v else None,
     "streaming": lambda v: str(v) if v else None,
     "network": lambda v: str(v) if v else None,
