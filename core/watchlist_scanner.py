@@ -4155,7 +4155,12 @@ class WatchlistScanner:
                 similars_by_seed = group_similars_by_seed(
                     seeds, agg, seed_id_to_name, rank_attr='similarity_rank')
 
-            recs = rank_recommended_artists(seeds, similars_by_seed, owned, limit=40)
+            # Store a DEEP pool (not just the top consensus), so the request-time adventurousness dial
+            # has obscure-but-relevant picks to surface at the adventurous end — consensus and
+            # popularity are independent, so the top-200 already spans pop-96 favourites down to
+            # pop-1 deep cuts. The track-mix fetch below still only touches recs[:20], so the scan
+            # cost is unchanged; the row itself renders 18 and the dial chooses which 18.
+            recs = rank_recommended_artists(seeds, similars_by_seed, owned, limit=200)
             if not recs:
                 logger.info("[Listening Recs] no recommendations yet (no similar-artist coverage)")
                 return

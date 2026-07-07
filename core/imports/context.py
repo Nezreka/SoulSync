@@ -388,6 +388,21 @@ def build_import_album_info(
         )
     )
 
+    # #980: an explicit single can reach import with NO album name — the source's
+    # collection name never made it into the context (e.g. an iTunes single). With
+    # an empty album the track lands in "Unknown Artist/Unknown Album", gets no
+    # album tag, and won't match its release in the discography. A single's album
+    # is effectively its title (how iTunes/streaming model singles), so fall back
+    # to the track title rather than dropping it into Unknown.
+    if (
+        is_album
+        and not normalized_album
+        and (album_type or "").strip().lower() == "single"
+        and clean_track_name
+        and clean_track_name != "Unknown Track"
+    ):
+        album_name = clean_track_name
+
     return {
         "is_album": is_album,
         "album_name": album_name,

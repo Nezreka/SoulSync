@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from difflib import SequenceMatcher
 from typing import Any, Callable, Dict, List, Optional
 
 from core.metadata import registry as metadata_registry
@@ -100,18 +101,33 @@ def _search_albums_for_source(source: str, client: Any, query: str, limit: int =
 
 
 def _pick_best_artist_match(search_results: List[Any], artist_name: str) -> Optional[Any]:
+    """Pick the search result whose artist NAME matches, or None.
+
+    Exact (normalized) name wins; otherwise the closest fuzzy match, but only if
+    it's similar enough. Never a blind first result — that handed back an
+    unrelated popular artist (#988: a Deezer name-search for "The Outfield"
+    returning The Beatles) when the source's search doesn't actually contain the
+    artist we asked for. Returning None lets the caller fall back / show nothing
+    instead of the wrong artist's catalogue.
+    """
     if not search_results:
         return None
-
     target_name = _normalize_artist_name(artist_name)
+    if not target_name:
+        return None
+    best, best_ratio = None, 0.0
     for artist in search_results:
         candidate_name = _normalize_artist_name(
             _extract_lookup_value(artist, 'name', 'artist_name', 'title')
         )
+        if not candidate_name:
+            continue
         if candidate_name == target_name:
             return artist
-
-    return search_results[0]
+        ratio = SequenceMatcher(None, target_name, candidate_name).ratio()
+        if ratio > best_ratio:
+            best, best_ratio = artist, ratio
+    return best if best_ratio >= 0.85 else None
 
 
 def _extract_track_items(api_tracks: Any) -> List[Dict[str, Any]]:

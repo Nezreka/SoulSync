@@ -20,6 +20,11 @@ from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from core.webui.mimetypes_fix import corrected_script_content_type, ensure_web_mimetypes
+# Register correct web-asset MIME types before the app serves anything — a bad OS
+# registry (Windows: .js -> text/plain) otherwise blanks the module-loaded React
+# pages (Import/Stats) via strict module MIME checking. (#979)
+ensure_web_mimetypes()
 from flask import Flask, abort, render_template, request, jsonify, redirect, send_file, send_from_directory, Response, session, g
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from utils.logging_config import get_logger, setup_logging
@@ -40,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "2.8.3"
+_SOULSYNC_BASE_VERSION = "2.8.7"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -648,6 +653,21 @@ def _log_slow_request(response):
 
 
 @app.after_request
+def _force_module_script_mimetype(response):
+    """#979/#986: force a valid JS Content-Type on .js/.mjs responses so the
+    React bundle's <script type="module"> is never refused (Import/Stats black
+    screen). HTTP-layer, so it doesn't depend on the OS mimetypes registry —
+    which is unreliable across Docker base images."""
+    try:
+        fixed = corrected_script_content_type(request.path, response.headers.get('Content-Type'))
+        if fixed:
+            response.headers['Content-Type'] = fixed
+    except Exception as e:
+        logger.debug("module-script mimetype fix failed: %s", e)
+    return response
+
+
+@app.after_request
 def _add_discover_cache_headers(response):
     """Browser-cache discover GETs for 5 minutes.
 
@@ -676,6 +696,12 @@ def _add_discover_cache_headers(response):
         if not (200 <= response.status_code < 300):
             return response
         if response.headers.get('Cache-Control'):
+            return response
+        # The two rec rows re-rank on the live adventurousness dial, which lives in server-side config
+        # (NOT the URL). A browser cache would freeze them at the first load's value — the slider would
+        # flicker but never move (the reported bug). Never cache these; the rest of discover still is.
+        if request.path in ('/api/discover/similar-artists', '/api/discover/listening-recommendations'):
+            response.headers['Cache-Control'] = 'no-store'
             return response
         response.headers['Cache-Control'] = 'private, max-age=300'
     except Exception as exc:
@@ -3349,6 +3375,18 @@ def handle_settings():
             if _primary_override:
                 config_manager.set('metadata.fallback_source', _primary_override)
 
+            # The Settings → Quality page's toggles are saved as config keys
+            # (above), but the pipeline enforces the PROFILE row (live, per
+            # item). Write the quality-owned keys through to the active
+            # default profile so "the page edits the active profile" holds —
+            # without this, a checkbox change here would never reach the
+            # pipeline (see MusicDatabase.sync_default_quality_profile_from_config).
+            if any(s in new_settings for s in ('acoustid', 'lossy_copy', 'post_processing', 'import')):
+                try:
+                    get_database().sync_default_quality_profile_from_config()
+                except Exception as _qp_sync_err:
+                    logger.error(f"Default quality profile sync failed: {_qp_sync_err}")
+
             logger.info("Settings saved successfully via Web UI.")
             
             # Add activity for settings save
@@ -4798,6 +4836,156 @@ def reset_quality_preset(preset_name):
 
     except Exception as e:
         logger.error(f"Error resetting quality preset: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+# ── Named global quality profiles (assignable to Wishlist items / per-context
+# overrides like Auto-Import, not just the single active default) — CRUD over
+# `quality_profiles`. ──────────
+
+@app.route('/api/quality-profile/custom', methods=['GET'])
+def list_custom_quality_profiles():
+    """List every quality profile (built-ins + user-created), default first."""
+    try:
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+        return jsonify({"success": True, "profiles": db.list_quality_profiles()})
+    except Exception as e:
+        logger.error(f"Error listing quality profiles: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/quality-profile/custom', methods=['POST'])
+def create_custom_quality_profile():
+    """Save the current Quality-page settings as a new named profile."""
+    try:
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+
+        data = request.get_json() or {}
+        name = str(data.get('name') or '').strip()
+        if not name:
+            return jsonify({"success": False, "error": "Name is required"}), 400
+
+        profile_id = db.create_quality_profile(name, data)
+        if profile_id is None:
+            return jsonify({"success": False, "error": "A profile with that name may already exist"}), 400
+
+        add_activity_item("", "Quality Profile Created", f"Saved '{name}'", "Now")
+        return jsonify({"success": True, "id": profile_id, "profiles": db.list_quality_profiles()})
+    except Exception as e:
+        logger.error(f"Error creating quality profile: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/quality-profile/custom/<int:profile_id>', methods=['GET'])
+def get_custom_quality_profile(profile_id):
+    """Read-only: a single profile in the same full v3 shape `/apply` and
+    `/api/quality-profile` return (parsed ranked_targets, real booleans,
+    `preset`), so the Settings UI can load a profile's settings into the page
+    for viewing/editing WITHOUT the side effects `/apply` has (making it the
+    default, pushing into live config) — purely a SELECT."""
+    try:
+        from core.quality.selection import load_profile_by_id
+        from database.music_database import MusicDatabase
+
+        db = MusicDatabase()
+        if not any(p['id'] == profile_id for p in db.list_quality_profiles()):
+            return jsonify({"success": False, "error": "Profile not found"}), 404
+
+        return jsonify({"success": True, "profile": load_profile_by_id(profile_id)})
+    except Exception as e:
+        logger.error(f"Error loading quality profile {profile_id}: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/quality-profile/custom/<int:profile_id>/apply', methods=['POST'])
+def apply_custom_quality_profile(profile_id):
+    """Make a named profile the app-wide default AND push every setting it
+    captures (AcoustID strictness, downsample, deep verify, import
+    quality-filter/replace-lower-quality, lossy-copy) into the live global
+    settings — not just the ranked-target ladder."""
+    try:
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+
+        profile = db.apply_quality_profile_to_settings(profile_id)
+        if profile is None:
+            return jsonify({"success": False, "error": "Profile not found"}), 404
+
+        add_activity_item("", "Quality Profile Applied", f"Now using '{profile.get('preset', 'custom')}'", "Now")
+        return jsonify({"success": True, "profile": profile})
+    except Exception as e:
+        logger.error(f"Error applying quality profile: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/quality-profile/custom/<int:profile_id>/update', methods=['POST'])
+def update_custom_quality_profile(profile_id):
+    """Overwrite a named profile's captured settings with whatever is
+    currently on the Quality page (edit-in-place, keeps the name)."""
+    try:
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+
+        data = request.get_json() or {}
+        if not db.update_quality_profile(profile_id, data):
+            return jsonify({"success": False, "error": "Profile not found"}), 404
+
+        profiles = db.list_quality_profiles()
+        # Editing the ACTIVE DEFAULT profile must also push the new values
+        # into config.json — every profile-owned key the rest of the app
+        # reads directly (AcoustID, lossy-copy, deep-verify, replace-lower-
+        # quality). Without this, the row and config.json go out of sync,
+        # and the next unrelated Settings save (which mirrors config -> the
+        # default row via sync_default_quality_profile_from_config) silently
+        # reverts this edit back to the stale config values.
+        if any(p['id'] == profile_id and p.get('is_default') for p in profiles):
+            db.apply_quality_profile_to_settings(profile_id)
+            profiles = db.list_quality_profiles()
+
+        add_activity_item("", "Quality Profile Updated", f"Updated saved profile {profile_id}", "Now")
+        return jsonify({"success": True, "profiles": profiles})
+    except Exception as e:
+        logger.error(f"Error updating quality profile: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/quality-profile/custom/<int:profile_id>', methods=['PUT'])
+def rename_custom_quality_profile(profile_id):
+    try:
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+
+        data = request.get_json() or {}
+        name = str(data.get('name') or '').strip()
+        if not name:
+            return jsonify({"success": False, "error": "Name is required"}), 400
+
+        ok, reason = db.rename_quality_profile(profile_id, name)
+        if not ok:
+            status = 404 if reason == "Profile not found" else 400
+            return jsonify({"success": False, "error": reason}), status
+        return jsonify({"success": True, "profiles": db.list_quality_profiles()})
+    except Exception as e:
+        logger.error(f"Error renaming quality profile: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/quality-profile/custom/<int:profile_id>', methods=['DELETE'])
+def delete_custom_quality_profile(profile_id):
+    """Delete any profile, including the built-ins. Only refuses when it
+    would leave zero profiles — deleting the current default auto-promotes
+    another remaining profile first (see `MusicDatabase.delete_quality_profile`)."""
+    try:
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+
+        ok, reason = db.delete_quality_profile(profile_id)
+        if not ok:
+            return jsonify({"success": False, "error": reason}), 400
+        return jsonify({"success": True, "profiles": db.list_quality_profiles()})
+    except Exception as e:
+        logger.error(f"Error deleting quality profile: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 # ===============================
@@ -6666,6 +6854,13 @@ def start_download():
                 # Register download for post-processing (simple transfer to /Transfer)
                 context_key = _make_context_key(username, filename)
                 is_streaming_source = username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud', 'amazon')
+                # Per-download check overrides: skip AcoustID and/or
+                # quality-quarantine checks on request.
+                _skip_checks = []
+                if data.get('skip_acoustid'):
+                    _skip_checks.append('acoustid')
+                if data.get('quality_check') is False:
+                    _skip_checks.extend(['bit_depth', 'quality'])
                 with matched_context_lock:
                     matched_downloads_context[context_key] = {
                         'search_result': {
@@ -6679,7 +6874,8 @@ def start_download():
                         },
                         'spotify_artist': None,  # No Spotify metadata
                         'spotify_album': None,
-                        'track_info': None
+                        'track_info': None,
+                        '_skip_quarantine_check': _skip_checks or None,
                     }
                     source_label = username.title() if is_streaming_source else 'Soulseek'
                     logger.info(f"[{source_label}] Registered simple download for post-processing: {context_key}")
@@ -9887,7 +10083,7 @@ def _derive_album_folder(db, album_id):
 def _overwrite_cover_jpg(url, folder):
     """Download ``url`` and OVERWRITE cover.jpg in ``folder`` (the picker is *replacing* art, so the
     existing-file guard in download_cover_art doesn't apply). Returns True on success."""
-    import urllib.request
+    import urllib.request  # not bound at module level (only urllib.parse is); matches the local-import pattern used elsewhere
     req = urllib.request.Request(url, headers={"User-Agent": "SoulSync/1.0", "Accept": "image/*"})
     with urllib.request.urlopen(req, timeout=15) as resp:   # noqa: S310 (user-chosen art URL)
         data = resp.read()
@@ -9930,6 +10126,212 @@ def set_album_art(album_id):
     except Exception as e:
         logger.error("[set-art] failed for album %s: %s", album_id, e, exc_info=True)
         return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/graph/library', methods=['GET'])
+def get_library_graph():
+    """Library "Taste Map": EVERY library artist as a node, grouped by genre + wired by similarity.
+
+    Returns {"nodes": [{key,label,kind,owned,primary_genre,popularity,thumb} | {key,label,kind,genre}],
+    "edges": [{source,target,weight,kind}]}. Every artist is included (attached to a per-genre hub node
+    so a force layout clusters them); similarity edges come from similar_artists (resolved in-memory —
+    a SQL self-join is too slow at 75k rows).
+    """
+    try:
+        from core.graph.artist_graph import build_genre_grouped_map
+        db = get_database()
+        conn = db._get_connection()
+        try:
+            cur = conn.cursor()
+            owned = set()
+            meta = {}
+            artists = []
+            for name, thumb, genres, aid, source in cur.execute(
+                "SELECT name, thumb_url, genres, id, server_source FROM artists"
+            ):
+                key = (name or "").strip().lower()
+                owned.add(key)
+                meta[key] = {"thumb_url": thumb, "genres": genres}
+                artists.append((name, genres, thumb, aid, source))
+            rows = cur.execute(
+                "SELECT source_artist_id, similar_artist_name, similar_artist_spotify_id, "
+                "similar_artist_deezer_id, similar_artist_itunes_id, occurrence_count, popularity "
+                "FROM similar_artists WHERE profile_id = ?", (get_current_profile_id(),)
+            ).fetchall()
+        finally:
+            conn.close()
+        graph = build_genre_grouped_map(artists, rows, owned, artist_meta=meta)
+        n_artists = sum(1 for n in graph["nodes"] if n.get("kind") == "artist")
+        n_genres = sum(1 for n in graph["nodes"] if n.get("kind") == "genre")
+        return jsonify({**graph, "counts": {
+            "nodes": len(graph["nodes"]), "edges": len(graph["edges"]),
+            "artists": n_artists, "genres": n_genres,
+        }})
+    except Exception as e:
+        logger.error("[library-graph] failed: %s", e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/graph/discovery', methods=['GET'])
+def get_discovery_graph():
+    """Discovery Web: owned artists as anchors + their UNOWNED similar artists as discovery candidates.
+
+    Candidates are enriched from the metadata cache (image/genres/popularity) so they render as real
+    artists you could add, not bare dots. Returns the WHOLE frontier by default — its real size is
+    modest (only artists whose similars were fetched can anchor); ``seed``/``per`` query params
+    optionally trim to the top anchors / top candidates per anchor.
+    """
+    try:
+        from core.graph.artist_graph import build_discovery_map
+
+        def _opt_int(name):
+            raw = request.args.get(name)
+            if raw is None:
+                return None
+            try:
+                v = int(raw)
+            except (TypeError, ValueError):
+                return None
+            return max(1, v) if v > 0 else None
+
+        seed = _opt_int('seed')
+        per = _opt_int('per')
+        db = get_database()
+        conn = db._get_connection()
+        try:
+            cur = conn.cursor()
+            owned, owned_meta, rows = _discovery_load_inputs(cur)
+            graph = build_discovery_map(rows, owned, owned_meta, seed_count=seed, per_anchor=per)
+        finally:
+            conn.close()
+
+        n_owned = sum(1 for n in graph["nodes"] if n.get("kind") == "owned")
+        n_disc = sum(1 for n in graph["nodes"] if n.get("kind") == "discovery")
+        return jsonify({**graph, "counts": {
+            "nodes": len(graph["nodes"]), "edges": len(graph["edges"]),
+            "owned": n_owned, "discovery": n_disc,
+        }})
+    except Exception as e:
+        logger.error("[discovery-graph] failed: %s", e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+def _discovery_load_inputs(cur):
+    """Shared input load for the discovery routes: owned artists + this profile's similar_artists.
+
+    similar_artists is per-profile (unique on profile_id + source + name); without the filter, a
+    multi-profile install double-counts every anchor->target pair and leaks one profile's discovery
+    taste into another's graph.
+
+    Rows include the table's OWN image_url/genres columns (~99% of rows carry image + real
+    popularity) — enriching from metadata_cache_entities instead measured 18-250s per request
+    (random reads into a 1.3M-row table), for data these rows already have.
+    """
+    owned = set()
+    owned_meta = {}
+    for name, thumb, genres, aid in cur.execute("SELECT name, thumb_url, genres, id FROM artists"):
+        key = (name or "").strip().lower()
+        owned.add(key)
+        owned_meta[key] = {"thumb_url": thumb, "genres": genres, "id": aid}
+    rows = cur.execute(
+        "SELECT source_artist_id, similar_artist_name, similar_artist_spotify_id, "
+        "similar_artist_deezer_id, similar_artist_itunes_id, occurrence_count, popularity, "
+        "image_url, genres "
+        "FROM similar_artists WHERE profile_id = ?", (get_current_profile_id(),)
+    ).fetchall()
+    return owned, owned_meta, rows
+
+
+@app.route('/api/graph/discovery/expand', methods=['POST'])
+def expand_discovery_graph():
+    """Expand-on-click for the Discovery Web: one node's similar artists, minus what's on screen.
+
+    POST JSON: ``key`` (normalized artist name), ``ids`` (external ids — for unowned candidates whose
+    similars are keyed by id), ``exclude`` (node keys already in the graph — JSON body because artist
+    names can contain commas), ``per`` (max new nodes). Same node/edge shape as /api/graph/discovery.
+    """
+    try:
+        from core.graph.artist_graph import expand_discovery_node
+        payload = request.get_json(silent=True) or {}
+        node_key = str(payload.get('key') or '').strip().lower()
+        if not node_key:
+            return jsonify({"error": "missing key"}), 400
+        node_ids = [i for i in (payload.get('ids') or []) if i]
+        exclude = {k for k in (payload.get('exclude') or []) if k}
+        try:
+            per = int(payload.get('per') or 10)
+        except (TypeError, ValueError):
+            per = 10
+        per = max(1, min(per, 30))
+        db = get_database()
+        conn = db._get_connection()
+        try:
+            cur = conn.cursor()
+            owned, owned_meta, rows = _discovery_load_inputs(cur)
+            graph = expand_discovery_node(rows, owned, node_key, node_ids, owned_meta, per=per, exclude=exclude)
+        finally:
+            conn.close()
+        return jsonify({**graph, "counts": {"nodes": len(graph["nodes"]), "edges": len(graph["edges"])}})
+    except Exception as e:
+        logger.error("[discovery-expand] failed: %s", e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/graph/discovery/preview/<deezer_id>', methods=['GET'])
+def get_discovery_preview(deezer_id):
+    """30-second Deezer preview for a discovery candidate's top track (hear it before you add it).
+
+    Deliberately Deezer-only + explicit: the generic top-tracks endpoint routes by the CONFIGURED
+    primary source and resolves ids via the library DB — a candidate isn't in the library, and its
+    Deezer id would be garbage to a Spotify query (whose previews are deprecated anyway).
+    """
+    try:
+        if not str(deezer_id).isdigit():
+            return jsonify({"success": False, "reason": "not_a_deezer_id"}), 400
+        client = _get_deezer_client()
+        if not client:
+            return jsonify({"success": False, "reason": "deezer_unavailable"}), 503
+        tracks = client.get_artist_top_tracks(str(deezer_id), limit=3) or []
+        for t in tracks:
+            if t.get('preview_url'):
+                return jsonify({
+                    "success": True,
+                    "track": t.get('name'),
+                    "artist": ((t.get('artists') or [{}])[0] or {}).get('name'),
+                    "preview_url": t['preview_url'],
+                })
+        return jsonify({"success": False, "reason": "no_preview"})
+    except Exception as e:
+        logger.error("[discovery-preview] failed: %s", e, exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/library/artist/<int:artist_id>/thumb', methods=['GET'])
+def get_library_artist_thumb(artist_id):
+    """Browser-loadable thumb URL for ONE library artist, by library DB id.
+
+    Used by the Artist Web side panel. Two deliberate choices:
+    - Lazily per-click, not eagerly for every node: normalize_image_url registers the URL in the
+      image cache (a DB write transaction each) — doing that for ~5k artists per graph load takes
+      minutes; one artist per panel open is instant.
+    - By LIBRARY id against the artists table — the generic /api/artist/<id>/image resolver sends
+      whatever id it gets to external providers, so a library row id returned whichever Deezer/iTunes
+      artist happened to own that number (wrong photo, essentially always).
+    """
+    try:
+        db = get_database()
+        conn = db._get_connection()
+        try:
+            cur = conn.cursor()
+            row = cur.execute("SELECT thumb_url FROM artists WHERE id = ?", (artist_id,)).fetchone()
+        finally:
+            conn.close()
+        thumb = row['thumb_url'] if row else None
+        url = fix_artist_image_url(thumb) if thumb else None
+        return jsonify({"success": True, "image_url": url})
+    except Exception as e:
+        logger.error("[artist-thumb] failed: %s", e, exc_info=True)
+        return jsonify({"success": False, "image_url": None}), 500
 
 
 @app.route('/api/library/export/m3u', methods=['GET'])
@@ -10816,16 +11218,25 @@ def get_artist_quality_analysis(artist_id):
         artist = result.get('artist', {})
         albums = result.get('albums', [])
 
-        # Get user's quality profile to determine min acceptable tier
+        # Get the app-wide default quality profile (v3 shape — `ranked_targets`,
+        # not the legacy v2 `qualities` dict) to determine min acceptable tier.
         quality_profile = database.get_quality_profile()
-        preferred_qualities = quality_profile.get('qualities', {})
+        ranked_targets = quality_profile.get('ranked_targets') or []
         min_acceptable_tier = 999
-        tier_map = {'flac': 'lossless', 'mp3_320': 'low_lossy', 'mp3_256': 'low_lossy', 'mp3_192': 'low_lossy'}
-        for qname, qconfig in preferred_qualities.items():
-            if qconfig.get('enabled', False):
-                tname = tier_map.get(qname)
-                if tname and tname in QUALITY_TIERS:
-                    min_acceptable_tier = min(min_acceptable_tier, QUALITY_TIERS[tname]['tier'])
+        # Mirrors QUALITY_TIERS' extension groupings so a ranked-target's
+        # `format` (as edited in the Settings ranked-targets picker — see
+        # RT_LOSSLESS_FORMATS/RT_LOSSY_FORMATS in settings.js) lands on the
+        # same tier this scan buckets library files into.
+        format_tier_map = {
+            'flac': 'lossless', 'alac': 'lossless', 'wav': 'lossless', 'dsf': 'lossless',
+            'opus': 'high_lossy', 'ogg': 'high_lossy',
+            'aac': 'standard_lossy',
+            'mp3': 'low_lossy', 'wma': 'low_lossy',
+        }
+        for target in ranked_targets:
+            tname = format_tier_map.get((target or {}).get('format'))
+            if tname and tname in QUALITY_TIERS:
+                min_acceptable_tier = min(min_acceptable_tier, QUALITY_TIERS[tname]['tier'])
 
         tracks = []
         summary = {'total': 0, 'lossless': 0, 'high_lossy': 0, 'standard_lossy': 0, 'low_lossy': 0, 'unknown': 0}
@@ -15064,9 +15475,14 @@ def _search_track_in_album_context(original_search: dict, artist: dict) -> dict:
 def _cleanup_empty_directories(download_path, moved_file_path):
     """Cleans up empty directories after a file move, ignoring hidden files."""
     import os
+    from core.imports.file_ops import protected_root_dirs
     try:
+        protected = protected_root_dirs()
+        protected.add(os.path.normpath(download_path))
         current_dir = os.path.dirname(moved_file_path)
         while current_dir != download_path and current_dir.startswith(download_path):
+            if os.path.normpath(current_dir) in protected:
+                break  # #976: never delete a configured root, even nested + empty
             is_empty = not any(not f.startswith('.') for f in os.listdir(current_dir))
             if is_empty:
                 logger.warning(f"Removing empty directory: {current_dir}")
@@ -15086,16 +15502,22 @@ def _sweep_empty_download_directories():
     empty only after all sibling downloads in a batch have been processed.
     """
     import os
+    from core.imports.file_ops import protected_root_dirs
     try:
         download_path = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
         if not os.path.isdir(download_path):
             return 0
 
+        # #976: never sweep away a configured root (e.g. a staging folder nested
+        # under downloads), only its transient sub-folders.
+        protected = protected_root_dirs()
+        protected.add(os.path.normpath(download_path))
+
         removed = 0
         # os.walk bottom-up: deepest directories first so parents become empty after children removed
         for dirpath, _dirnames, _filenames in os.walk(download_path, topdown=False):
-            # Never remove the root download directory itself
-            if os.path.normpath(dirpath) == os.path.normpath(download_path):
+            # Never remove a configured root directory itself
+            if os.path.normpath(dirpath) in protected:
                 continue
             # Re-read actual contents — os.walk's lists are stale after child removal
             try:
@@ -15118,6 +15540,11 @@ def _sweep_empty_download_directories():
 
         if removed > 0:
             logger.warning(f"[Folder Cleanup] Removed {removed} empty director{'y' if removed == 1 else 'ies'} from downloads folder")
+        # #976: a sweep must never leave the import/staging folder missing —
+        # recreate it if it went absent (e.g. an older build deleted it) so the
+        # import feature self-heals instead of erroring until the next scan.
+        from core.imports.file_ops import ensure_staging_dir
+        ensure_staging_dir()
         return removed
     except Exception as e:
         logger.error(f"[Folder Cleanup] Error sweeping empty directories: {e}")
@@ -16170,7 +16597,6 @@ def _get_file_path_from_template(context: dict, template_type: str = 'album_path
 from mutagen import File as MutagenFile
 from mutagen.id3 import ID3, TIT2, TPE1, TALB, TDRC, TRCK, TCON, TPE2, TPOS, TXXX, APIC, UFID, TSRC, TBPM, TCOP, TPUB, TMED, TDOR
 from mutagen.apev2 import APEv2, APENoHeaderError
-import urllib.request
 
 def _wipe_source_tags(file_path: str) -> bool:
     return metadata_enrichment.wipe_source_tags(file_path)
@@ -28488,10 +28914,16 @@ def add_to_watchlist():
             return jsonify({"success": False, "error": "Missing artist_id or artist_name"}), 400
 
         database = get_database()
+        # Callers that KNOW the id's source (e.g. the Discovery Web, whose candidates carry
+        # [source, id] pairs) can pass it explicitly — numeric Deezer/iTunes ids are ambiguous and
+        # the detection below can otherwise mistake them for a library DB row id.
+        explicit_source = (data.get('source') or '').strip().lower()
+        if explicit_source not in ('spotify', 'deezer', 'itunes', 'discogs', 'musicbrainz'):
+            explicit_source = None
         # Detect source from ID — check if it's a library DB ID first
         is_numeric_id = artist_id.isdigit()
-        source = None
-        if is_numeric_id:
+        source = explicit_source
+        if is_numeric_id and not explicit_source:
             # Could be a library DB ID, iTunes ID, Deezer ID, or Discogs ID
             # Check if this is a library DB artist and use their actual source IDs
             try:
@@ -28532,8 +28964,8 @@ def add_to_watchlist():
                         source = 'musicbrainz'
             except Exception as e:
                 logger.debug("watchlist artist source lookup failed: %s", e)
+        fallback_source = _get_metadata_fallback_source()   # always defined — image block below reads it
         if not source:
-            fallback_source = _get_metadata_fallback_source()
             source = fallback_source if is_numeric_id else 'spotify'
         success = database.add_artist_to_watchlist(artist_id, artist_name, profile_id=get_current_profile_id(), source=source)
         if success:
@@ -29930,6 +30362,20 @@ def _discover_genre_taste(database, profile_id):
     return profile
 
 
+def _discover_primary_genre(item):
+    """First genre of a discover candidate for diversity grouping — its ``genres`` may be a JSON
+    string, an already-parsed list, or missing. Returns a normalized genre string or None."""
+    g = item.get('genres')
+    if isinstance(g, str):
+        try:
+            g = json.loads(g)
+        except (ValueError, TypeError):
+            g = None
+    if isinstance(g, list) and g and isinstance(g[0], str) and g[0].strip():
+        return g[0].strip().lower()
+    return None
+
+
 @app.route('/api/discover/similar-artists', methods=['GET'])
 def get_discover_similar_artists():
     """Get all recommended similar artists (basic data, no enrichment for speed)"""
@@ -29938,12 +30384,19 @@ def get_discover_similar_artists():
         active_source = _get_active_discovery_source()
         from config.settings import config_manager
         active_server = config_manager.get_active_media_server()
+        try:
+            _adv_level = float(config_manager.get('discover.adventurousness', 0.3) or 0)
+        except (TypeError, ValueError):
+            _adv_level = 0.0
 
+        # The dial drives candidate SELECTION here (not just the re-rank below): the pool shifts from
+        # consensus picks toward obscure long-tail deep cuts as you turn it up.
         similar_artists = database.get_top_similar_artists(
             limit=200,
             profile_id=get_current_profile_id(),
             require_source=active_source,
             exclude_library_server=active_server,
+            adventurousness=_adv_level,
         )
 
         if not similar_artists:
@@ -29999,12 +30452,8 @@ def get_discover_similar_artists():
         # Re-rank: genre/tag affinity (always-on) + the adventurousness popularity penalty (dial).
         # Score from the SQL signals (occurrence primary, similarity a minor tiebreak), boosted by how
         # well the candidate's genres match your taste, then popularity-penalised by the dial. We only
-        # re-rank when there's a reason (genre data OR dial > 0) — with neither, the SQL featured-
-        # rotation order is left untouched (no regression). Fail-soft.
-        try:
-            _adv_level = float(config_manager.get('discover.adventurousness', 0.3) or 0)
-        except (TypeError, ValueError):
-            _adv_level = 0.0
+        # re-rank when there's a reason (genre data OR dial > 0) — with neither, the fetch order is
+        # left untouched (no regression). Fail-soft. (_adv_level was read above for the fetch.)
         _pid = get_current_profile_id()
         _taste = _discover_genre_taste(database, _pid)
         _plays = database.get_play_counts_by_name(
@@ -30012,25 +30461,21 @@ def get_discover_similar_artists():
         if result_artists and (_adv_level > 0 or _taste or _plays):
             try:
                 from core.discovery.listening_recommendations import (
-                    adventurousness_weights, apply_adventurousness, genre_affinity, novelty_score)
-                _w = adventurousness_weights(_adv_level)   # dial blends genre leash + novelty weights
+                    apply_adventurous_blend, genre_affinity, novelty_score)
                 for a in result_artists:
                     _oc = float(a.get('occurrence_count') or 0)
                     _rank = min(float(a.get('similarity_rank') or 10), 10.0)
-                    _base = _oc + (10.0 - _rank) * 0.1
+                    a['_base'] = _oc + (10.0 - _rank) * 0.1              # consensus base
                     _aff = genre_affinity(a.get('genres') or [], _taste) if _taste else 0.0
-                    a['_why_genre'] = _aff   # captured for the "why" chips (built always-on below)
-                    _nov = novelty_score(_plays.get((a.get('artist_name') or '').strip().lower(), 0))
-                    a['_adv_score'] = (_base * (1.0 + _w['genre'] * _aff)
-                                       * (1.0 - _w['novelty'] * (1.0 - _nov)))
-                # The genre/novelty re-rank must apply even at dial 0 (apply_adventurousness no-ops
-                # there), so sort by the boosted score first; the dial then layers its penalty on top.
-                result_artists.sort(key=lambda a: -a['_adv_score'])
-                if _adv_level > 0:
-                    result_artists = apply_adventurousness(
-                        result_artists, _adv_level, score_key='_adv_score', tiebreak_key='occurrence_count')
+                    a['_aff'] = a['_why_genre'] = _aff                    # _why_genre feeds the "why" chips
+                    a['_nov'] = novelty_score(_plays.get((a.get('artist_name') or '').strip().lower(), 0))
+                # Blend the sort axis consensus<->obscurity by the dial (scaled by genre/novelty
+                # quality). dial 0 = most-recommended first; dial 1 = least-popular (deep cuts) first.
+                result_artists = apply_adventurous_blend(
+                    result_artists, _adv_level, base_key='_base', pop_key='popularity',
+                    tiebreak_key='occurrence_count')
                 for a in result_artists:
-                    a.pop('_adv_score', None)
+                    a.pop('_base', None); a.pop('_aff', None); a.pop('_nov', None)
             except Exception as _adv_err:
                 logger.debug(f"similar-artists re-rank skipped: {_adv_err}")
 
@@ -30040,12 +30485,25 @@ def get_discover_similar_artists():
             from core.discovery.listening_recommendations import why_chips
             for a in result_artists:
                 _w = why_chips(genre_affinity=a.get('_why_genre', 0.0), popularity=a.get('popularity'),
-                               seed_count=len(a.get('because') or []) or int(a.get('occurrence_count') or 0))
+                               seed_count=len(a.get('because') or []) or int(a.get('occurrence_count') or 0),
+                               level=_adv_level)   # adaptive: "Off your usual path" on the adventurous end
                 if _w:
                     a['why'] = _w
                 a.pop('_why_genre', None)
         except Exception as _why_err:
             logger.debug(f"similar-artists why chips skipped: {_why_err}")
+
+        # Diversity: spread the shown picks across genres so one genre can't hog the row (broader
+        # discovery). No-ops on small lists. Then mark the shown set featured so the next load
+        # rotates in different deep cuts (freshness).
+        try:
+            from core.discovery.listening_recommendations import diversify_by_genre
+            result_artists = diversify_by_genre(result_artists, _discover_primary_genre, cap=3)
+            _shown = [a.get('artist_name') for a in result_artists[:18] if a.get('artist_name')]
+            if _shown:
+                database.mark_artists_featured(_shown)
+        except Exception as _div_err:
+            logger.debug(f"similar-artists diversify/rotate skipped: {_div_err}")
 
         logger.info(
             f"[Similar Artists] {len(similar_artists)} from DB, {len(result_artists)} valid for "
@@ -30209,42 +30667,26 @@ def get_discover_listening_recommendations():
         # leaves the score untouched, and at the default dial the weights equal the old constants.
         try:
             from core.discovery.listening_recommendations import (
-                adventurousness_weights, genre_affinity, novelty_score)
-            _w = adventurousness_weights(level)
+                apply_adventurous_blend, genre_affinity, novelty_score)
             _pid = get_current_profile_id()
             taste = _discover_genre_taste(database, _pid)
             _names = [a.get('name') for a in stored]
             plays = database.get_play_counts_by_name(_names, _pid) if stored else {}
             pops = database.get_similar_artist_popularities(_names) if stored else {}  # for the "why" chips + dial
-            changed = False
             for a in stored:
                 if a.get('popularity') is None:
                     a['popularity'] = pops.get((a.get('name') or '').strip().lower())
                 aff = genre_affinity(a.get('genres') or [], taste) if taste else 0.0
-                a['_why_genre'] = aff   # captured for the "why this rec" chips
-                factor = 1.0
-                if aff > 0:
-                    factor *= (1.0 + _w['genre'] * aff)
-                nov = novelty_score(plays.get((a.get('name') or '').strip().lower(), 0))
-                if nov < 1.0:
-                    factor *= (1.0 - _w['novelty'] * (1.0 - nov))
-                if factor != 1.0:
-                    a['score'] = float(a.get('score') or 0) * factor
-                    changed = True
-            if changed:
-                stored.sort(key=lambda a: -float(a.get('score') or 0))
+                a['_aff'] = a['_why_genre'] = aff   # _why_genre also feeds the "why this rec" chips
+                a['_nov'] = novelty_score(plays.get((a.get('name') or '').strip().lower(), 0))
+            # Blend the sort axis consensus<->obscurity by the dial (base = the recommendation score),
+            # so the adventurous end genuinely surfaces the least-popular on-taste picks.
+            stored = apply_adventurous_blend(
+                stored, level, base_key='score', pop_key='popularity', tiebreak_key='seed_count')
+            for a in stored:
+                a.pop('_aff', None); a.pop('_nov', None)
         except Exception as _qual_err:
             logger.debug(f"genre/novelty re-rank skipped: {_qual_err}")
-
-        # Adventurousness re-rank (aurral-style): push globally-popular picks down per the user's dial.
-        # Popularity was already enriched in the quality block above; `level` was read there too (one
-        # popularity query per request, not two). level 0 -> unchanged. Fail-soft: leaves the order.
-        if level > 0 and stored:
-            try:
-                from core.discovery.listening_recommendations import apply_adventurousness
-                stored = apply_adventurousness(stored, level)
-            except Exception as _adv_err:
-                logger.debug(f"adventurousness re-rank skipped: {_adv_err}")
 
         result_artists = []
         for a in stored:
@@ -30269,7 +30711,8 @@ def get_discover_listening_recommendations():
             try:
                 from core.discovery.listening_recommendations import why_chips
                 _why = why_chips(genre_affinity=a.get('_why_genre', 0.0),
-                                 popularity=a.get('popularity'), seed_count=a.get('seed_count'))
+                                 popularity=a.get('popularity'), seed_count=a.get('seed_count'),
+                                 level=level)   # adaptive: "Off your usual path" on the adventurous end
                 if _why:
                     entry["why"] = _why
             except Exception as _why_err:
@@ -30283,6 +30726,13 @@ def get_discover_listening_recommendations():
             if a.get('seeds'):
                 entry["because"] = a['seeds']
             result_artists.append(entry)
+
+        # Spread the shown picks across genres (broader discovery). No-ops on small lists.
+        try:
+            from core.discovery.listening_recommendations import diversify_by_genre
+            result_artists = diversify_by_genre(result_artists, _discover_primary_genre, cap=3)
+        except Exception as _div_err:
+            logger.debug(f"listening-recs diversify skipped: {_div_err}")
 
         return jsonify({
             "success": True,
@@ -35676,6 +36126,10 @@ def mirror_playlist_endpoint():
             logger.debug("mirrored_playlist_created emit failed: %s", e)
 
         return jsonify({"success": True, "playlist_id": playlist_id})
+    except ValueError as ve:
+        # #990: malformed/all-empty track payload — a client error, not a 500.
+        logger.warning(f"mirror-playlist rejected: {ve}")
+        return jsonify({"error": str(ve)}), 400
     except Exception as e:
         logger.error(f"Error mirroring playlist: {e}")
         return jsonify({"error": str(e)}), 500
@@ -38539,6 +38993,15 @@ def auto_import_toggle():
 
 @app.route('/api/auto-import/settings', methods=['GET', 'POST'])
 def auto_import_settings():
+    def normalize_quality_profile_id(raw_profile_id):
+        if raw_profile_id in (None, '', 0, '0'):
+            return None
+        try:
+            profile_id = int(raw_profile_id)
+        except (TypeError, ValueError):
+            return None
+        return profile_id if profile_id > 0 else None
+
     if request.method == 'GET':
         return jsonify({
             "success": True,
@@ -38546,9 +39009,34 @@ def auto_import_settings():
             "scan_interval": config_manager.get('auto_import.scan_interval', 60),
             "confidence_threshold": config_manager.get('auto_import.confidence_threshold', 0.9),
             "auto_process": config_manager.get('auto_import.auto_process', True),
+            # Per-context quality profile override (see core/auto_import_worker.py
+            # _process_matches) — None/0 means "use the app-wide default profile",
+            # same as every other context that doesn't specify its own.
+            "quality_profile_id": normalize_quality_profile_id(config_manager.get('auto_import.quality_profile_id')),
         })
     data = request.get_json() or {}
-    for key in ['enabled', 'scan_interval', 'confidence_threshold', 'auto_process']:
+    if 'quality_profile_id' in data:
+        raw_profile_id = data.get('quality_profile_id')
+        if raw_profile_id in (None, '', 0, '0'):
+            data['quality_profile_id'] = None
+        else:
+            profile_id = normalize_quality_profile_id(raw_profile_id)
+            if profile_id is None:
+                return jsonify({"success": False, "error": "Invalid quality profile"}), 400
+
+            try:
+                from database.music_database import MusicDatabase
+                db = MusicDatabase()
+                profile_ids = {int(profile.get('id')) for profile in db.list_quality_profiles()}
+            except Exception as e:
+                logger.error(f"Error validating Auto-Import quality profile: {e}")
+                return jsonify({"success": False, "error": str(e)}), 500
+
+            if profile_id not in profile_ids:
+                return jsonify({"success": False, "error": "Quality profile not found"}), 404
+            data['quality_profile_id'] = profile_id
+
+    for key in ['enabled', 'scan_interval', 'confidence_threshold', 'auto_process', 'quality_profile_id']:
         if key in data:
             config_manager.set(f'auto_import.{key}', data[key])
     return jsonify({"success": True})

@@ -63,6 +63,51 @@ def test_create_dirs_false_does_not_create_folders(monkeypatch, tmp_path):
     assert not (tmp_path / "Transfer").exists()
 
 
+def test_itunes_single_albumartist_falls_back_to_track_artist(monkeypatch, tmp_path):
+    """#989: an iTunes single's collection carries a placeholder 'Unknown Artist'
+    album artist while the track artist is real. The album_path must use the real
+    artist for $albumartist, not bury the file under 'Unknown Artist'. FAILS pre-fix
+    (the placeholder album-context artist overrode the real track artist)."""
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _album_path_config(tmp_path))
+    monkeypatch.setattr(import_paths, "_get_album_tracks_for_source", lambda *a: None)
+    ctx = {
+        "source": "itunes",
+        "artist": {"name": "Forevert", "id": "123456"},
+        "album": {"name": "CHAOSRIFT", "id": "999", "album_type": "single", "total_tracks": 1,
+                  "artists": [{"name": "Unknown Artist"}]},   # placeholder collection artist
+        "track_info": {"name": "CHAOSRIFT", "track_number": 1, "disc_number": 1,
+                       "artists": [{"name": "Forevert"}]},
+        "original_search_result": {"title": "CHAOSRIFT", "clean_title": "CHAOSRIFT",
+                                   "artists": [{"name": "Forevert"}]},
+    }
+    info = {"is_album": True, "album_name": "CHAOSRIFT", "track_number": 1, "disc_number": 1}
+    final_path, _ = import_paths.build_final_path_for_track(
+        ctx, {"name": "Forevert", "id": "123456"}, info, ".flac", create_dirs=False)
+    assert final_path == str(tmp_path / "Transfer" / "Forevert" / "Forevert - CHAOSRIFT" / "01 - CHAOSRIFT.flac")
+    assert "Unknown Artist" not in final_path
+
+
+def test_real_album_artist_still_wins_over_track_artist(monkeypatch, tmp_path):
+    """The #989 guard must not clobber a genuine, different album artist (compilations,
+    'various artists' style releases keep their real collection artist)."""
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _album_path_config(tmp_path))
+    monkeypatch.setattr(import_paths, "_get_album_tracks_for_source", lambda *a: None)
+    ctx = {
+        "source": "spotify",
+        "artist": {"name": "Guest Singer"},
+        "album": {"name": "Big Comp", "id": "c1", "album_type": "compilation", "total_tracks": 20,
+                  "artists": [{"name": "Various Artists"}]},
+        "track_info": {"name": "A Song", "track_number": 3, "disc_number": 1,
+                       "artists": [{"name": "Guest Singer"}]},
+        "original_search_result": {"title": "A Song", "clean_title": "A Song",
+                                   "artists": [{"name": "Guest Singer"}]},
+    }
+    info = {"is_album": True, "album_name": "Big Comp", "track_number": 3, "disc_number": 1}
+    final_path, _ = import_paths.build_final_path_for_track(
+        ctx, {"name": "Guest Singer"}, info, ".flac", create_dirs=False)
+    assert "Various Artists" in final_path        # real album artist preserved
+
+
 def test_create_dirs_true_still_creates_folders(monkeypatch, tmp_path):
     # The download/import flow must keep working (default behavior unchanged).
     monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _album_path_config(tmp_path))
@@ -151,6 +196,41 @@ def test_get_file_path_from_template_raw_handles_quality_and_disc_placeholders(m
 
     assert folder_path == os.path.join("Artist One", "Album One")
     assert filename == "3 - Song One [FLAC 16bit]"
+
+
+def test_disc_placeholder_drops_on_single_disc_album(monkeypatch):
+    """#981: $disc must NOT stamp '01-' on every track of a single-disc album
+    (reported on 'The Best of Snoop Dogg (2005)'). Empty like $cdnum; the
+    leading-dash cleanup removes the orphaned separator."""
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _Config({}))
+    folder_path, filename = import_paths.get_file_path_from_template_raw(
+        "$artist/$album/$disc-$track - $title",
+        {"artist": "Snoop Dogg", "album": "The Best of Snoop Dogg (2005)",
+         "title": "Bitch Please", "track_number": 7, "disc_number": 1, "total_discs": 1},
+    )
+    assert filename == "07 - Bitch Please"          # not "01-07 - Bitch Please"
+
+
+def test_disc_placeholder_kept_on_multi_disc_album(monkeypatch):
+    """The disc prefix stays for a genuine multi-disc album."""
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _Config({}))
+    folder_path, filename = import_paths.get_file_path_from_template_raw(
+        "$artist/$album/$disc-$track - $title",
+        {"artist": "A", "album": "B", "title": "Song",
+         "track_number": 7, "disc_number": 2, "total_discs": 2},
+    )
+    assert filename == "02-07 - Song"
+
+
+def test_disc_placeholder_kept_when_track_is_on_disc_two_without_total(monkeypatch):
+    """A track known to be on disc 2 shows its disc even if total_discs wasn't
+    populated — disc_number > 1 is itself proof of a multi-disc release."""
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _Config({}))
+    folder_path, filename = import_paths.get_file_path_from_template_raw(
+        "$artist/$album/$disc-$track - $title",
+        {"artist": "A", "album": "B", "title": "Song", "track_number": 3, "disc_number": 2},
+    )
+    assert filename == "02-03 - Song"
 
 
 def test_get_file_path_from_template_raw_substitutes_cdnum_for_multi_disc(monkeypatch):

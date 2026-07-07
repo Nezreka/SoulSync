@@ -3404,19 +3404,13 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Convention: keep only the CURRENT release here, plus a single brief
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '2.8.3': [
-        { date: 'June 2026 — 2.8.3 release' },
-        { title: 'Discover, rebuilt', desc: 'a Spotify-level redesign — consistent cards everywhere, "mix" cards that open into full track-list modals (sync or download a mix from there), year + decade mixes, Last.fm Radio / ListenBrainz folded in, and a 2-column layout so you scroll less.', page: 'discover' },
-        { title: 'The Adventurousness dial', desc: 'an animated "living wave" you drag to set how exploratory your recommendations are. turning it up loosens the genre leash (lets in artists outside your usual taste), leans into the unheard, and demotes the famous — all at once. synced with a slider in Settings → Discovery.', page: 'discover' },
-        { title: 'Recommendations that know you', desc: 'both rec rows ("Based On Your Listening" + "Recommended For You") are now scored on genre/tag affinity (matches what you actually play), novelty (already-heard picks pushed down), and a popularity penalty driven by the dial.', page: 'discover' },
-        { title: '"Why this rec" chips', desc: 'every recommendation card now shows why it surfaced — Your genres, Deep cut, or N of your artists — so the picks aren\'t a black box.', page: 'discover' },
-        { title: 'Self-filling popularity data', desc: 'a background job quietly fills artist popularity from Spotify Free → Last.fm → Deezer (rate-limited, resumable, runs on its own) so the dial has real data to push against. nothing to click.', page: 'discover' },
-        { title: 'Lyrics Filler false "missing" fixed (#955)', desc: 'on Docker / path-mapped setups the scan flagged tracks that already had .lrc files, because it checked the raw database path instead of the real on-disk one. it resolves the path now. (thanks @diegocade1.)', page: 'downloads' },
-        { title: 'Import page caching + match timeout (#957)', desc: 'switching tabs on the import page re-scanned your whole staging folder every time — now cached, so tab switches are instant (Refresh still forces a fresh scan). and the album-match call no longer times out on a slow NAS / big album. (thanks @ramonskie.)', page: 'downloads' },
-        { title: 'Library matching prefers exact titles (#958)', desc: 'a bare "Ratata" could match "Ratata (Afro Bros Remix)" when both were in your library. matching now ranks an exact title above a stripped-qualifier fallback. (#960 — thanks @ramonskie.)', page: 'playlists' },
-        { title: 'One matcher for imports (#954)', desc: 'auto-import and manual album import now share the same matching engine the rest of the app uses (consistent initials/unicode/version handling), plus album-variant disambiguation that picks the right release by matching track durations. (thanks HellRa1SeR.)', page: 'downloads' },
-        { title: 'JioSaavn metadata — experimental (#956)', desc: 'an opt-in metadata source for Bollywood / Asian catalogs that Spotify & Deezer cover poorly. off by default; enable under Settings → Advanced → Experimental. (thanks HellRa1SeR.)', page: 'settings' },
-        { title: 'Earlier versions', desc: '2.8.2 fixed the Spotify Docker boot hang (#949), the "slow after update" password-manager lag (#948) + added Max Performance mode, and large-library imports that timed out (#947). 2.8.1 added playlist export to Spotify & Deezer (#945) + a Rename-only Library Reorganize (#875); 2.8.0 brought the Unverified-queue cleanup (#934); 2.7.0 made multi-user real.' },
+    '2.8.7': [
+        { date: 'July 2026 — 2.8.7' },
+        { title: 'Schedule SoulSync Discovery playlists straight from Auto-Sync', desc: 'every soulsync-made discovery playlist (Time Machine decades, Genre, Seasonal, Daily Mix, plus Popular Picks / Hidden Gems / The Archives / Fresh Tape / Discovery Shuffle) now shows up in the auto-sync schedule modal. flip one on and it generates itself on the first run and keeps syncing on your interval, no manual "generate" step. the many-variant kinds collapse into one expandable row so the list stays tidy, and track counts show even before a playlist has synced.', page: 'playlists' },
+        { title: 'Artist discography hides non-studio releases by default', desc: 'a browsed artist now shows just the studio catalog by default, hiding live albums, compilations, and singles. it reads strictly from MusicBrainz, so the main view stays clean.', page: 'artists' },
+        { title: 'Navidrome playlist cover art (#993)', desc: 'mirrored playlists now push their cover art to Navidrome when they sync, so synced playlists show the right artwork instead of a blank tile. the art goes up on the first mirror, not re-pushed on every sync.', page: 'playlists' },
+        { title: 'Saving settings can\'t wipe a stored API secret anymore (#992)', desc: 'a saved secret could get blanked by the settings page auto-save if it fired while a masked field was mid-edit. that showed up as Spotify failing to authenticate with "invalid_client" even after re-entering the secret, and it could quietly clear other API keys (Last.fm, Genius, Discogs, and so on) too. a settings save can no longer empty a saved secret.', page: 'settings' },
+        { title: 'Earlier versions', desc: '2.8.6 was a fix batch: Spotify search without a connected account, the Import/Stats black screen on Docker (#986), mirrored playlists no longer wiped by a bad refresh (#990), artist browse showing another artist\'s tracks (#988), iTunes singles landing in Unknown Artist (#989), and Reorganize pruning the folders it empties (#985). 2.8.51 fixed fresh-install watchlist settings (#983). 2.8.4 added Artist Web + named Quality Profiles (#974); 2.8.3 rebuilt Discover with a real recommendation engine; 2.7.0 made multi-user real.' },
     ],
 };
 
@@ -3447,40 +3441,63 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "Discover, rebuilt",
-        description: "a full Spotify-level redesign — and a real recommendation engine behind it.",
+        title: "2.8.7 — schedule your discovery playlists + a credential-wipe fix",
+        description: "the soulsync-made discovery playlists become first-class Auto-Sync items, plus a fix for the settings page quietly wiping saved API secrets.",
         features: [
-            "consistent cards everywhere, \"mix\" cards that open into full track-list modals (sync or download a mix from there), year + decade mixes, Last.fm Radio / ListenBrainz folded in, and a 2-column layout so you scroll less",
-            "the Adventurousness dial — an animated \"living wave\" you drag to set how exploratory your recs are. turn it up and it loosens the genre leash (artists outside your usual taste), leans into the unheard, and demotes the famous, all at once. synced with a slider in Settings → Discovery",
-        ],
-        usage_note: "drag the wave on the Discover page (or the Settings → Discovery slider) — left = safe / on-taste, right = obscure / exploratory.",
-    },
-    {
-        title: "Recommendations that actually know you",
-        description: "both rec rows are scored on what you really listen to — and they show their work.",
-        features: [
-            "genre/tag affinity (matches what you play), novelty (already-heard picks pushed down), and a popularity penalty driven by the dial — across \"Based On Your Listening\" + \"Recommended For You\"",
-            "\"why this rec\" chips on every card — Your genres / Deep cut / N of your artists — so the picks aren't a black box",
-            "a background job quietly fills artist popularity from Spotify Free → Last.fm → Deezer (rate-limited, resumable, runs on its own) so the dial has real data to push against — nothing to click",
+            "Schedule SoulSync Discovery playlists from Auto-Sync — every discovery playlist (Time Machine decades, Genre, Seasonal, Daily Mix, plus Popular Picks / Hidden Gems / The Archives / Fresh Tape / Discovery Shuffle) now shows in the schedule modal; turn one on and it generates itself on the first run and keeps syncing on your interval, no manual \"generate\" step",
+            "the many-variant kinds (Time Machine, Genre, Seasonal) collapse into one expandable row per kind so the list stays tidy, and track counts show even for a playlist you've generated but not yet synced to the server",
+            "#992 — a saved API secret could be wiped by the settings auto-save firing while a masked field was mid-edit; it surfaced as Spotify failing with \"invalid_client\" even after re-entering the secret, and could silently clear other keys (Last.fm, Genius, Discogs, and the rest). a settings save can no longer blank a saved secret",
+            "#993 — mirrored playlists now push their cover art to Navidrome on sync (on the first mirror, not every sync), so synced playlists show the right artwork",
+            "artist discography hides non-studio releases (live, compilations, singles) by default, strictly from MusicBrainz, so you see the studio catalog cleanly",
         ],
     },
     {
-        title: "Fixes this release",
-        description: "lyrics, imports, and library matching.",
+        title: "Earlier in 2.8.6",
+        description: "a focused fix release across search, import, library, and playlists.",
         features: [
-            "#955 — Lyrics Filler no longer flags tracks that already have .lrc files on Docker / path-mapped setups (it now resolves the real on-disk path). thanks @diegocade1",
-            "#957 — the import page stops re-scanning your whole staging folder on every tab switch (now cached), and album-match no longer times out on a slow NAS / big album. thanks @ramonskie",
-            "#958/#960 — library matching prefers an exact title over a remix variant, so a bare \"Ratata\" no longer grabs \"Ratata (Afro Bros Remix)\". thanks @ramonskie",
-            "Deezer no longer drops from hybrid downloads or shows a false red status dot",
+            "Spotify search without a connected account — picking \"Spotify\" as your search source now works even if you haven't authenticated, using the no-auth Spotify Free source; and a connected account whose official search returns empty falls back to Free instead of a blank page",
+            "#986 — a follow-up to the 2.8.5 black-screen fix: some Docker setups still loaded Import & Stats blank because the JS module bundle was served with a non-JS content type. we force the correct type at the HTTP layer now, so the module scripts always run",
+            "#990 — a wrong-shaped playlist refresh could overwrite a mirror with thousands of empty rows and still report success; it accepts the Spotify track shape directly now and validates before deleting, so a malformed payload is rejected and your existing mirror is left intact",
+            "#988 — browsing an artist could surface a completely different artist's tracks (e.g. The Outfield showing Beatles) because a Deezer name-search accepted the first result on a poor match; it requires a real name match now",
+            "#989 — iTunes singles could file and tag under \"Unknown Artist\" when the album-artist came back empty; they fall back to the real track artist now",
+            "#985 — Library Reorganize left the old, now-empty disc/album folders behind after moving files; it prunes them now, safely (never climbing to the artist or library root)",
         ],
     },
     {
-        title: "Community contributions",
-        description: "great PRs from contributors this release.",
+        title: "Earlier in 2.8.51",
+        description: "a one-fix follow-up to 2.8.5.",
         features: [
-            "#954 — auto-import + manual import now share one matcher, with album-variant disambiguation by track duration. thanks HellRa1SeR",
-            "#956 — an experimental, opt-in JioSaavn metadata source for Bollywood / Asian catalogs (Settings → Advanced → Experimental, off by default). thanks HellRa1SeR",
-            "#953 — the unit suite now passes on Windows dev machines too. thanks HellRa1SeR",
+            "#983 — on a fresh install, opening a watchlist artist's settings could fail with \"no such column: preferred_metadata_source\" (a restart worked around it). first-run setup was rebuilding the watchlist table from a column list that dropped two newer columns; they survive now, so it works from the first boot",
+        ],
+    },
+    {
+        title: "Earlier in 2.8.5",
+        description: "2.8.5 was a focused fix release across import, library, repair, and the webui.",
+        features: [
+            "#979 — Import & Stats loaded as a black screen on some setups (mostly Windows, where the OS served the app's JS bundle with the wrong MIME type and the browser refused it). we force the correct type now, so they load for everyone",
+            "#980 — iTunes singles were landing in \"Unknown Artist\" with no album tag; a single's album is its own title now, so they file and tag correctly",
+            "#981 — $disc/$discnum stamped a \"01-\" prefix on single-disc albums; they're smart now like $cdnum (empty on single-disc, shown only for real multi-disc), for both import and rename/reorganize",
+            "#976 — cleanup never deletes a folder you've set as a root, and self-heals a missing staging/import folder if a sweep removed it",
+            "#978 — repair \"Fix All\" now works for libraries outside the transfer path and stops pulling media-server files into transfer; #977 — discography backfill only touches artists you own",
+        ],
+    },
+    {
+        title: "Earlier in 2.8.4",
+        description: "2.8.4 was the Artist Web + Quality Profiles release.",
+        features: [
+            "Artist Web — an interactive WebGL map of your whole library, laid out by how artists relate, in three lenses (Taste Map, Communities, Discovery Web); the Discovery Web grows out to similar artists you don't own, and you can play artist radio / 30s previews right from the graph",
+            "Quality Profiles (#974, thanks @nick2000713) — the single global quality setting becomes named, editable profiles (targets, upgrade behavior, AcoustID strictness, downsampling, lossy-copy), with an \"upgrade until target\" cutoff and a per-profile Auto-Import option",
+            "the Adventurousness dial went from cosmetic to actually reshaping your recs — deeper the further you push it, genre-diverse, freshly rotated, with \"off your usual path\" chips",
+            "fixes: repair stop button actually cancels (#970), playlists no longer stuck \"syncing\" (#972), JioSaavn worker no longer wedges (#964), safer duplicate cleanup; contributor PRs for JioSaavn enrichment (#964, HellRa1SeR) and unicode/Japanese dedup matching (#965/#967, bluejorts)",
+        ],
+    },
+    {
+        title: "Earlier in 2.8.3",
+        description: "2.8.3 was a full Discover rebuild.",
+        features: [
+            "a Spotify-level Discover redesign — consistent cards, \"mix\" cards that open into full track-list modals, year/decade mixes, Last.fm Radio + ListenBrainz, a 2-column layout",
+            "a real recommendation engine — both rec rows scored on genre affinity + novelty + a dial-driven popularity penalty, \"why this rec\" chips, and self-filling artist-popularity data (Spotify Free → Last.fm → Deezer)",
+            "fixes: Lyrics Filler .lrc false-missing (#955), import re-scan caching + match timeout (#957), exact-title matching over remixes (#958/#960); contributor PRs for a shared import matcher (#954) and experimental JioSaavn metadata (#956)",
         ],
     },
     {

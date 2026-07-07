@@ -173,7 +173,12 @@ body.max-performance .sidebar::after {
     top: 0;
     bottom: 0;
     width: 10px;
-    z-index: 100;
+    /* z:1 on purpose: the artist map/web overlays live INSIDE .page (position:relative; z-index:1),
+       so their z:100 is trapped in the page's stacking context — at root level the whole page paints
+       at z:1. The strip must TIE that (not beat it): tie -> DOM order wins -> the page (later in the
+       DOM) and any fullscreen overlay inside it paint over the strip. Anything higher (the old 100,
+       even 5) pokes through the overlays. */
+    z-index: 1;
     opacity: 0;
     transition: opacity 0.5s ease;
     pointer-events: none;
@@ -4178,6 +4183,566 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .preset-reset-icon {
     font-size: 13px;
     line-height: 1;
+}
+
+/* Quality tab: the settings tiles stay exactly on the normal centered 920px
+   settings column. On wide screens only the profile panel protrudes into the
+   empty right margin, so the Quality tab lines up with the other tabs. */
+.qp-layout {
+    --qp-side-width: 320px;
+    --qp-side-gap: 8px;
+    display: flex;
+    align-items: flex-start;
+    gap: var(--qp-side-gap);
+    width: calc(100% + var(--qp-side-width) + var(--qp-side-gap));
+    overflow: visible;
+}
+
+.qp-main {
+    flex: 0 0 calc(100% - var(--qp-side-width) - var(--qp-side-gap));
+    width: calc(100% - var(--qp-side-width) - var(--qp-side-gap));
+    min-width: 0;
+    max-width: calc(100% - var(--qp-side-width) - var(--qp-side-gap));
+}
+
+.qp-side-panel {
+    width: var(--qp-side-width);
+    flex-shrink: 0;
+    border-left: 1px solid rgba(255, 255, 255, 0.06);
+    padding: 0 4px 0 22px;
+    margin-left: 0;
+    position: sticky;
+    top: 80px;
+    max-height: calc(100vh - 120px);
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+}
+.qp-side-panel::-webkit-scrollbar { width: 7px; }
+.qp-side-panel::-webkit-scrollbar-track { background: transparent; }
+.qp-side-panel::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.14); border-radius: 4px; }
+.qp-side-panel::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.24); }
+
+.qp-side-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.qp-side-panel-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.85);
+    margin: 0;
+    white-space: nowrap;
+}
+
+.qp-manage-btn {
+    flex-shrink: 0;
+    padding: 5px 8px;
+    border-radius: 7px;
+    border: 1px solid rgba(var(--accent-rgb), 0.22);
+    background: rgba(var(--accent-rgb), 0.09);
+    color: rgba(var(--accent-light-rgb), 0.86);
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+}
+.qp-manage-btn:hover {
+    border-color: rgba(var(--accent-rgb), 0.42);
+    background: rgba(var(--accent-rgb), 0.15);
+}
+
+.qp-side-panel-hint {
+    font-size: 11px;
+    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.4);
+    margin: 0 0 14px;
+}
+
+.qp-editing-banner {
+    font-size: 11px;
+    line-height: 1.5;
+    padding: 8px 10px;
+    margin: -6px 0 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(245, 191, 66, 0.35);
+    background: rgba(245, 191, 66, 0.08);
+    color: rgba(255, 255, 255, 0.68);
+}
+.qp-editing-banner-name {
+    color: rgb(245, 191, 66);
+}
+
+.qp-profile-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.qp-profile-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    transition: all 0.2s ease;
+}
+
+.qp-profile-row:hover {
+    border-color: rgba(var(--accent-rgb), 0.3);
+}
+
+.qp-profile-row.active {
+    background: linear-gradient(135deg,
+            rgba(var(--accent-rgb), 0.2) 0%,
+            rgba(var(--accent-light-rgb), 0.12) 100%);
+    border-color: rgba(var(--accent-rgb), 0.5);
+    box-shadow: 0 4px 12px rgba(var(--accent-rgb), 0.15);
+}
+
+/* Currently loaded into the tile editor for viewing/editing, but NOT the
+   active default — deliberately a different (amber) accent from .active
+   (accent-colored = live) so the two states are never visually confused. */
+.qp-profile-row.editing {
+    border-color: rgba(245, 191, 66, 0.5);
+    background: linear-gradient(135deg, rgba(245, 191, 66, 0.1) 0%, rgba(245, 191, 66, 0.03) 100%);
+}
+
+.qp-profile-dot {
+    flex-shrink: 0;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.15);
+    cursor: pointer;
+}
+.qp-profile-row.active .qp-profile-dot {
+    background: rgb(var(--accent-light-rgb));
+    box-shadow: 0 0 6px rgba(var(--accent-rgb), 0.6);
+}
+
+.qp-profile-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    cursor: pointer;
+}
+
+.qp-profile-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.75);
+}
+.qp-profile-row.active .qp-profile-name {
+    color: rgb(var(--accent-light-rgb));
+}
+
+.qp-profile-sub {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 9.5px;
+    color: rgba(255, 255, 255, 0.35);
+}
+.qp-profile-row.active .qp-profile-sub {
+    color: rgba(var(--accent-light-rgb), 0.6);
+}
+
+.qp-profile-name-input {
+    flex: 1;
+    min-width: 0;
+    height: 28px;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 16px;
+    padding: 5px 7px;
+    border-radius: 6px;
+    border: 1px solid rgba(var(--accent-rgb), 0.4);
+    background: rgba(0, 0, 0, 0.25);
+    color: #fff;
+}
+
+.qp-profile-tags {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.qp-profile-tag {
+    font-size: 8px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    padding: 2px 5px;
+    border-radius: 5px;
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.5);
+    white-space: nowrap;
+}
+.qp-profile-tag.qp-tag-autoimport {
+    background: rgba(var(--accent-rgb), 0.15);
+    color: rgb(var(--accent-light-rgb));
+}
+.qp-profile-tag.qp-tag-default {
+    background: rgba(74, 222, 128, 0.15);
+    color: rgb(134, 239, 172);
+}
+
+.qp-profile-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
+}
+
+.qp-profile-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 12px;
+    line-height: 1;
+    cursor: pointer;
+    background: none;
+    border: none;
+}
+.qp-profile-action:hover {
+    background: rgba(var(--accent-rgb), 0.25);
+    color: rgb(var(--accent-light-rgb));
+}
+.qp-profile-action.qp-action-delete:hover {
+    background: rgba(248, 113, 113, 0.2);
+    color: #f87171;
+}
+.qp-profile-action.qp-action-autoimport.active {
+    color: rgb(var(--accent-light-rgb));
+    background: rgba(var(--accent-rgb), 0.18);
+}
+
+.qp-profile-new {
+    margin-top: 10px;
+}
+
+.qp-profile-new-btn {
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: 10px;
+    border: 1px dashed rgba(255, 255, 255, 0.15);
+    background: transparent;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+.qp-profile-new-btn:hover {
+    border-color: rgba(var(--accent-rgb), 0.4);
+    color: rgb(var(--accent-light-rgb));
+}
+
+.qp-profile-new-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 34px;
+}
+
+.qp-profile-new-input {
+    flex: 1;
+    min-width: 0;
+    height: 32px;
+    font-size: 12px;
+    line-height: 16px;
+    padding: 7px 9px;
+    border-radius: 8px;
+    border: 1px solid rgba(var(--accent-rgb), 0.4);
+    background: rgba(0, 0, 0, 0.25);
+    color: #fff;
+}
+
+.qp-profile-list-empty {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.4);
+    font-style: italic;
+}
+
+/* Small badge on tiles governed by the active profile. */
+.qp-governed-badge {
+    flex-shrink: 0;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 9px;
+    font-weight: 600;
+    background: rgba(var(--accent-rgb), 0.12);
+    color: rgb(var(--accent-light-rgb));
+    white-space: nowrap;
+}
+
+.quality-upgrade-cutoff-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 8px;
+}
+
+.quality-upgrade-cutoff-group label {
+    flex-shrink: 0;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.quality-upgrade-cutoff-group select {
+    width: 100%;
+    max-width: 420px;
+}
+
+.qp-manager-modal {
+    width: min(720px, calc(100vw - 32px));
+    max-height: min(760px, calc(100vh - 48px));
+}
+
+.qp-manager-body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* Section titles + status rows + profile rows all render into this single
+   wrapper (see renderQualityProfileManager) — needs its own gap, or every
+   row renders flush against its neighbor with nothing but a row's own
+   padding between them. */
+.qp-manager-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+/* Info icon + collapsible body — same #settings-page .info-icon /
+   .setting-help-body look used everywhere else in Settings, reused here via
+   toggleSettingHelp(). Those rules are scoped to #settings-page though, and
+   this modal is appended straight onto <body> (outside that scope), so the
+   visuals are mirrored here rather than the giant explanation block sitting
+   permanently open and dominating the modal. */
+.qp-manager-info-row {
+    justify-content: space-between;
+}
+.qp-manager-info-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.75);
+}
+#qp-manager-overlay .info-icon {
+    cursor: pointer;
+    -webkit-user-select: none;
+    user-select: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 1px solid rgba(var(--accent-rgb), 0.45);
+    background: transparent;
+    color: rgba(var(--accent-rgb), 0.9);
+    font-family: Georgia, 'Times New Roman', serif;
+    font-style: italic;
+    font-weight: 700;
+    font-size: 11px;
+    line-height: 1;
+    text-align: center;
+    margin-left: 6px;
+    flex: 0 0 auto;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+#qp-manager-overlay .info-icon:hover {
+    background: rgba(var(--accent-rgb), 0.16);
+    border-color: rgba(var(--accent-rgb), 0.85);
+    color: rgba(var(--accent-rgb), 1);
+}
+#qp-manager-overlay .info-icon.open {
+    background: rgba(var(--accent-rgb), 0.9);
+    border-color: rgba(var(--accent-rgb), 0.9);
+    color: #0b0f14;
+}
+.qp-manager-info.setting-help-body {
+    margin: 0;
+    padding: 10px 12px;
+    background: rgba(var(--accent-rgb), 0.06);
+    border-left: 2px solid rgba(var(--accent-rgb), 0.5);
+    border-radius: 0 6px 6px 0;
+    font-size: 11.5px;
+    font-style: normal;
+    line-height: 1.55;
+    color: rgba(255, 255, 255, 0.6);
+}
+.qp-manager-info.setting-help-body strong { color: rgba(255, 255, 255, 0.82); font-weight: 600; }
+
+.qp-manager-section-title {
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: rgba(255, 255, 255, 0.4);
+    margin: 4px 2px 4px;
+}
+/* Between "Profiles" and the actual rows specifically — was reading as too
+   cramped, the rows looked glued to the heading. */
+.qp-manager-status-row + .qp-manager-section-title {
+    margin-top: 10px;
+    margin-bottom: 8px;
+}
+
+/* Read-only "what's active" rows — deliberately NOT styled like
+   .qp-manager-row below: mixing these into the same look as the actual
+   profile list is what made a user think "Auto-Import" itself was a saved
+   profile. These only ever show a name; the assignment is changed from a
+   profile's own row (Set default / Use for import), not from here. */
+.qp-manager-status-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: transparent;
+}
+
+.qp-manager-status-label {
+    flex-shrink: 0;
+    width: 130px;
+    font-size: 11.5px;
+    color: rgba(255, 255, 255, 0.45);
+}
+
+.qp-manager-status-value {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12.5px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.qp-manager-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.035);
+}
+
+.qp-manager-row-main {
+    min-width: 0;
+}
+
+.qp-manager-row-name {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.qp-manager-row-sub {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-top: 2px;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.42);
+}
+
+.qp-manager-action {
+    min-width: 94px;
+    padding: 7px 10px;
+    border-radius: 7px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.045);
+    color: rgba(255, 255, 255, 0.68);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.qp-manager-action:hover {
+    border-color: rgba(var(--accent-rgb), 0.32);
+    color: rgb(var(--accent-light-rgb));
+}
+
+.qp-manager-action.active {
+    border-color: rgba(var(--accent-rgb), 0.44);
+    background: rgba(var(--accent-rgb), 0.15);
+    color: rgb(var(--accent-light-rgb));
+}
+
+.qp-manager-action.clear {
+    min-width: 132px;
+}
+
+@media (max-width: 1800px) {
+    .qp-layout {
+        flex-direction: column-reverse;
+        width: 100%;
+    }
+
+    .qp-main {
+        flex-basis: 100%;
+        width: 100%;
+        max-width: 100%;
+    }
+
+    .qp-side-panel {
+        width: 100%;
+        border-left: none;
+        border-top: none;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        padding: 0 0 16px 0;
+        margin-left: 0;
+        margin-top: 0;
+        margin-bottom: 16px;
+        max-height: none;
+        position: static;
+    }
+}
+
+@media (max-width: 640px) {
+    .quality-upgrade-cutoff-group {
+        align-items: stretch;
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    .qp-manager-row {
+        grid-template-columns: 1fr;
+    }
+
+    .qp-manager-action {
+        width: 100%;
+    }
 }
 
 /* Quality tier cards - upgraded inner cards */
@@ -12102,6 +12667,85 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     background: rgba(var(--accent-rgb), 0.16);
     border-color: rgba(var(--accent-rgb), 0.35);
     color: rgb(var(--accent-light-rgb));
+}
+
+/* Collapsible variant-kind group (Time Machine decades, Genres, ...) in the
+   sidebar — one expandable header instead of every variant listed inline. */
+.auto-sync-kind-group {
+    margin-bottom: 8px;
+}
+
+.auto-sync-kind-group-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 11px 14px;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 10px;
+    background: rgba(22, 22, 22, 0.95);
+    cursor: pointer;
+    transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.auto-sync-kind-group-head:hover {
+    border-color: rgba(var(--accent-rgb), 0.25);
+    background: rgba(28, 28, 28, 0.98);
+}
+
+.auto-sync-kind-group.has-active .auto-sync-kind-group-head {
+    border-color: rgba(var(--accent-rgb), 0.22);
+}
+
+.auto-sync-kind-group-chevron {
+    flex-shrink: 0;
+    font-size: 9px;
+    color: rgba(255, 255, 255, 0.4);
+    transition: transform 0.2s ease;
+}
+
+.auto-sync-kind-group.expanded .auto-sync-kind-group-chevron {
+    transform: rotate(90deg);
+}
+
+.auto-sync-kind-group-label {
+    flex: 1;
+    min-width: 0;
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 13px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.auto-sync-kind-group-active {
+    flex-shrink: 0;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: rgba(var(--accent-rgb), 0.16);
+    color: rgb(var(--accent-light-rgb));
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.auto-sync-kind-group-count {
+    flex-shrink: 0;
+    min-width: 18px;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.auto-sync-kind-group-body {
+    display: none;
+    padding: 8px 0 2px 12px;
+}
+
+.auto-sync-kind-group.expanded .auto-sync-kind-group-body {
+    display: block;
 }
 
 /* Bulk-schedule popover for a source group */
@@ -35228,6 +35872,7 @@ div.artist-hero-badge {
 .ya-why-chip.ya-why-genre { background: rgba(29,185,84,0.6); border-color: rgba(29,185,84,0.45); }
 .ya-why-chip.ya-why-obscure { background: rgba(124,92,224,0.6); border-color: rgba(150,118,240,0.45); }
 .ya-why-chip.ya-why-consensus { background: rgba(0,0,0,0.62); }
+.ya-why-chip.ya-why-explore { background: rgba(255,152,0,0.55); border-color: rgba(255,167,38,0.45); }
 /* Owned / missing indicator on album cards (corner badge). */
 .discover-album-badge {
     width: 20px; height: 20px; border-radius: 50%;
@@ -35519,6 +36164,23 @@ div.artist-hero-badge {
     position: fixed; inset: 0; z-index: 100;
     background: #0a0a14; flex-direction: column;
 }
+/* Artist Web "Group by" lens toggle (Genre | Communities) */
+.artweb-lens-toggle {
+    display: inline-flex; align-items: center; gap: 2px;
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 9px; padding: 2px;
+}
+.artweb-lens-btn {
+    border: none; background: transparent; color: rgba(255,255,255,0.6);
+    font-size: 12px; font-weight: 600; padding: 5px 11px; border-radius: 7px; cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+.artweb-lens-btn:hover { color: #fff; }
+.artweb-lens-btn.active { background: rgba(255,255,255,0.14); color: #fff; }
+/* Toolbar toggle buttons (Path, Filter) when engaged */
+#artist-web-container .artmap-tool-btn.active {
+    background: rgba(29,185,84,0.28); border-color: rgba(29,185,84,0.5); color: #fff;
+}
 .artist-map-toolbar {
     display: flex; align-items: center; justify-content: space-between;
     padding: 8px 16px; background: linear-gradient(180deg, rgba(14,14,22,0.98) 0%, rgba(14,14,22,0.92) 100%);
@@ -35688,7 +36350,38 @@ div.artist-hero-badge {
     background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.5);
     text-transform: capitalize;
 }
-.artmap-content-row { display: flex; flex: 1; overflow: hidden; }
+.artmap-content-row { display: flex; flex: 1; overflow: hidden; position: relative; }
+/* Artist Web color legend — floating bottom-left over the canvas, decodes node colors per lens */
+.artweb-legend {
+    position: absolute; left: 14px; bottom: 14px; z-index: 6;
+    display: flex; flex-direction: column; gap: 5px;
+    padding: 10px 12px; max-width: 220px;
+    background: rgba(14, 13, 20, 0.72); backdrop-filter: blur(6px);
+    border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px;
+    pointer-events: none;
+}
+.artweb-legend-row { display: flex; align-items: center; gap: 8px; font-size: 11px; color: rgba(255,255,255,0.72); }
+.artweb-legend-dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; box-shadow: 0 0 6px rgba(0,0,0,0.4); }
+.artweb-legend-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.artweb-legend-count { margin-left: auto; color: rgba(255,255,255,0.38); font-variant-numeric: tabular-nums; }
+/* Artist Web empty/error state card — centered, with an optional Retry action */
+.artweb-state-card {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 14px; text-align: center; padding: 24px;
+}
+.artweb-state-msg { color: rgba(255,255,255,0.5); font-size: 14px; max-width: 380px; line-height: 1.5; }
+.artweb-state-btn {
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14); color: rgba(255,255,255,0.85);
+    padding: 8px 18px; border-radius: 8px; cursor: pointer; font-size: 13px; transition: all 0.15s ease;
+}
+.artweb-state-btn:hover { background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.25); }
+/* Artist Web guide modal (extends the shared shortcuts-modal) */
+.artweb-help-modal { max-width: 520px; }
+.artweb-help-body { padding: 4px 4px 2px; }
+.artweb-help-section { margin-bottom: 14px; }
+.artweb-help-section h4 { margin: 0 0 5px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: rgba(255,255,255,0.5); }
+.artweb-help-section p { margin: 0; font-size: 13px; line-height: 1.55; color: rgba(255,255,255,0.78); }
+.artweb-help-section b { color: rgba(255,255,255,0.95); font-weight: 600; }
 #artist-map-canvas { flex: 1; display: block; cursor: grab; }
 #artist-map-canvas:active { cursor: grabbing; }
 #artist-map-loading {

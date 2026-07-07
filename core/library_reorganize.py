@@ -1789,12 +1789,19 @@ def reorganize_album(
             except Exception:  # noqa: S110 — finally-block cleanup, logger may be torn down
                 pass
 
-        if cleanup_empty_dir_fn:
-            for src_dir in src_dirs_touched:
+        for src_dir in src_dirs_touched:
+            # Injected pruner (transfer-dir-bounded — works when the library lives
+            # under the transfer folder) PLUS the library-safe upward prune (#985)
+            # for libraries that don't.
+            if cleanup_empty_dir_fn:
                 try:
                     cleanup_empty_dir_fn(src_dir)
                 except Exception:  # noqa: S110 — finally-block cleanup, logger may be torn down
                     pass
+            try:
+                _prune_empty_source_dirs(src_dir)
+            except Exception:  # noqa: S110 — finally-block cleanup, logger may be torn down
+                pass
 
         # Prune empty *destination* siblings — e.g. when a previous
         # failed reorganize attempt left ``Artist/Album-Sibling/`` dirs
@@ -1949,12 +1956,16 @@ def reorganize_album_rename_only(
         _emit(moved=summary['moved'],
               processed=summary['moved'] + summary['skipped'] + summary['failed'])
 
-    if cleanup_empty_dir_fn:
-        for src_dir in src_dirs_touched:
+    for src_dir in src_dirs_touched:
+        if cleanup_empty_dir_fn:
             try:
                 cleanup_empty_dir_fn(src_dir)
             except Exception as e:
                 logger.debug("[Reorganize/rename] cleanup of %s failed: %s", src_dir, e)
+        try:
+            _prune_empty_source_dirs(src_dir)   # #985: library-safe prune (transfer-dir-independent)
+        except Exception as e:
+            logger.debug("[Reorganize/rename] source prune of %s failed: %s", src_dir, e)
 
     return summary
 
@@ -2013,6 +2024,62 @@ def _prune_empty_album_dirs(artist_dir: str) -> None:
                 logger.info(f"[Reorganize] Pruned empty album dir: {album_path}")
         except OSError:
             pass
+
+
+# A disc subfolder inside an album: "Disc 1", "CD 2", "Disk 01", "Vol. 3", etc.
+_DISC_DIR_RE = re.compile(r'^(disc|disk|cd|vol|volume)\s*\.?\s*\d+$', re.IGNORECASE)
+
+
+def _rmdir_if_empty(dir_path: str) -> bool:
+    """rmdir ``dir_path`` if it holds no non-hidden entries (clearing hidden junk like
+    .DS_Store first) and isn't a protected/configured root. Returns True if removed."""
+    try:
+        from core.imports.file_ops import protected_root_dirs
+        if os.path.normpath(dir_path) in protected_root_dirs():
+            return False
+    except Exception as e:
+        logger.debug("[Reorganize] protected-root check failed for %s: %s", dir_path, e)
+    try:
+        entries = os.listdir(dir_path)
+    except OSError:
+        return False
+    if any(not e.startswith('.') for e in entries):
+        return False  # real content remains
+    try:
+        for hidden in entries:
+            try:
+                os.remove(os.path.join(dir_path, hidden))
+            except OSError:
+                pass
+        os.rmdir(dir_path)
+        logger.info(f"[Reorganize] Pruned empty source dir: {dir_path}")
+        return True
+    except OSError:
+        return False
+
+
+def _prune_empty_source_dirs(start_dir: str) -> None:
+    """Prune the emptied SOURCE folders after a reorganize move.
+
+    #985: the injected empty-dir cleanup is bounded by the transfer/download folder,
+    but a Library Reorganize moves files that live in the MEDIA library — usually a
+    different path — so that pruner's ``startswith(transfer_dir)`` guard never matches
+    and the emptied source folders (``Album/Disc 1`` and the old ``Album`` dir) are
+    left behind.
+
+    Removes the moved file's own dir, AND the album dir directly above it IF that dir
+    was a disc subfolder (``Disc N``/``CD N``). It deliberately NEVER climbs to the
+    artist dir or the library root — bounded to the album level — so it can only ever
+    delete the album/disc folders the reorganize actually emptied, never a root
+    (which isn't in the protected set when the library lives outside the transfer
+    folder — exactly this bug's setup).
+    """
+    d = os.path.normpath(start_dir)
+    was_disc = bool(_DISC_DIR_RE.match(os.path.basename(d)))
+    if not _rmdir_if_empty(d):
+        return
+    if was_disc:                          # the parent is the album dir — prune if now empty
+        _rmdir_if_empty(os.path.dirname(d))
 
 
 # Sidecar / cleanup helpers --------------------------------------------------
