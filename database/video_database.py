@@ -108,6 +108,10 @@ _BACKFILL = {
         "movie": ("movies", "streaming_status", "streaming_attempted", "tmdb_id IS NOT NULL"),
         "show": ("shows", "streaming_status", "streaming_attempted", "tmdb_id IS NOT NULL"),
     },
+    "mediastinger": {  # TMDB keywords -> after/during-credits scene, by tmdb id
+        "movie": ("movies", "mediastinger_status", "mediastinger_attempted", "tmdb_id IS NOT NULL"),
+        "show": ("shows", "mediastinger_status", "mediastinger_attempted", "tmdb_id IS NOT NULL"),
+    },
 }
 # Columns each backfill service may gap-fill (whitelist; never clobbers server data).
 # A worker visits each item once (status IS NULL), so these NULL columns are written
@@ -120,6 +124,7 @@ _BACKFILL_COLS = {
     "anilist": {"anilist_score"},
     "wikidata": {"wikidata_url"},
     "streaming": {"streaming"},
+    "mediastinger": {"mediastinger"},
 }
 
 # Columns ensured on existing DBs (ALTER TABLE ADD COLUMN; idempotent).
@@ -219,6 +224,11 @@ _COLUMN_MIGRATIONS = [
     ("movies", "streaming_status", "TEXT"), ("movies", "streaming_attempted", "TEXT"),
     ("shows", "streaming", "TEXT"),
     ("shows", "streaming_status", "TEXT"), ("shows", "streaming_attempted", "TEXT"),
+    # Mediastinger (TMDB keywords → after/during-credits scene) for its overlay badge
+    ("movies", "mediastinger", "INTEGER"),
+    ("movies", "mediastinger_status", "TEXT"), ("movies", "mediastinger_attempted", "TEXT"),
+    ("shows", "mediastinger", "INTEGER"),
+    ("shows", "mediastinger_status", "TEXT"), ("shows", "mediastinger_attempted", "TEXT"),
     # DeArrow crowd-sourced better titles for cached YouTube videos
     ("youtube_video_stats", "dearrow_title", "TEXT"),
     ("youtube_video_stats", "dearrow_status", "TEXT"),

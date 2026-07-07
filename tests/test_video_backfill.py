@@ -13,8 +13,8 @@ import pytest
 from database.video_database import VideoDatabase
 from core.video.enrichment.backfill import (
     RydWorker, SponsorBlockWorker, FanartWorker, OpenSubtitlesWorker, TraktWorker, TVmazeWorker,
-    AniListWorker, DeArrowWorker, WikidataWorker, TmdbStreamingWorker, VideoBackfillWorker,
-    _RateLimited, _Unauthorized, build_backfill_workers,
+    AniListWorker, DeArrowWorker, WikidataWorker, TmdbStreamingWorker, TmdbStingerWorker,
+    VideoBackfillWorker, _RateLimited, _Unauthorized, build_backfill_workers,
 )
 
 
@@ -181,7 +181,7 @@ def test_get_stats_shape_matches_matcher_worker(db):
 def test_build_backfill_workers_set(db):
     assert set(build_backfill_workers(db)) == {
         "ryd", "sponsorblock", "fanart", "opensubtitles",
-        "trakt", "tvmaze", "anilist", "dearrow", "wikidata", "streaming"}
+        "trakt", "tvmaze", "anilist", "dearrow", "wikidata", "streaming", "mediastinger"}
 
 
 # ── Streaming (TMDB watch providers → primary service) ────────────────────────
@@ -226,6 +226,36 @@ def test_streaming_worker_records_provider(db):
     with db.connect() as c:
         r = c.execute("SELECT streaming, streaming_status FROM movies WHERE id=?", (mid,)).fetchone()
     assert r["streaming"] == "Disney Plus" and r["streaming_status"] == "ok"
+
+
+# ── Mediastinger (TMDB keywords → after/during-credits scene) ─────────────────
+def test_mediastinger_fetch_detects_stinger_keyword(db, monkeypatch):
+    import core.video.enrichment.backfill as bf
+    db.set_setting("tmdb_api_key", "KEY")
+    monkeypatch.setattr(bf, "_http_get_json", lambda *a, **k: {
+        "keywords": [{"id": 1, "name": "aliens"}, {"id": 2, "name": "aftercreditsstinger"}]})
+    assert TmdbStingerWorker(db).fetch({"kind": "movie", "tmdb_id": 24428}) == {"mediastinger": 1}
+
+
+def test_mediastinger_fetch_none_without_stinger(db, monkeypatch):
+    import core.video.enrichment.backfill as bf
+    db.set_setting("tmdb_api_key", "KEY")
+    # TV uses 'results'; no stinger keyword present → None (recorded not_found)
+    monkeypatch.setattr(bf, "_http_get_json", lambda *a, **k: {"results": [{"id": 1, "name": "space"}]})
+    assert TmdbStingerWorker(db).fetch({"kind": "show", "tmdb_id": 1}) is None
+
+
+def test_mediastinger_worker_records_presence(db):
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "M"})
+    db.set_setting("tmdb_api_key", "KEY")
+    with db.connect() as c:
+        c.execute("UPDATE movies SET tmdb_id=1 WHERE id=?", (mid,)); c.commit()
+    w = TmdbStingerWorker(db)
+    w.fetch = lambda item: {"mediastinger": 1}
+    assert w.process_one() is True
+    with db.connect() as c:
+        r = c.execute("SELECT mediastinger, mediastinger_status FROM movies WHERE id=?", (mid,)).fetchone()
+    assert r["mediastinger"] == 1 and r["mediastinger_status"] == "ok"
 
 
 # ── Wikidata (no-key, official-website lookup by imdb id) ─────────────────────
