@@ -9144,14 +9144,21 @@ body.np-modal-open #helper-float-btn {
     gap: 5px;
 }
 
-/* Page header icon — shown beside all page titles */
+/* Page header icon — compact by default (unified header bar); the Dashboard
+   keeps the full-size hero illustration (see #dashboard-page override below). */
 .page-header-icon {
-    width: 176px;
-    height: 176px;
+    width: 48px;
+    height: 48px;
     object-fit: contain;
     flex-shrink: 0;
     filter: drop-shadow(0 2px 8px rgba(var(--accent-rgb), 0.3));
     transition: transform 0.3s ease, filter 0.3s ease;
+}
+
+/* Dashboard is the one page that keeps the large hero illustration. */
+#dashboard-page .page-header-icon {
+    width: 176px;
+    height: 176px;
 }
 
 .page-header-icon:hover {
