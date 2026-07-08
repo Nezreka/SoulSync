@@ -6556,7 +6556,7 @@ body.np-modal-open #helper-float-btn {
     cursor: pointer;
     transition: all 0.15s;
 }
-.gsearch-tab.active { background: rgba(var(--accent-rgb), 0.12); color: var(--accent); border-color: rgba(var(--accent-rgb), 0.2); }
+.gsearch-tab.active { background: rgba(var(--accent-rgb), 0.12); color: rgb(var(--accent-light-rgb)); border-color: rgba(var(--accent-rgb), 0.2); }
 .gsearch-tab:hover:not(.active) { background: rgba(255,255,255,0.06); }
 
 /* Source icon row in the global widget. The popover itself is already a
@@ -36623,7 +36623,7 @@ div.artist-hero-badge {
     color: rgba(255,255,255,0.4); cursor: pointer; transition: all 0.2s;
 }
 .ya-filter-btn:hover { background: rgba(255,255,255,0.07); color: rgba(255,255,255,0.7); }
-.ya-filter-btn.active { background: rgba(var(--accent-rgb),0.15); border-color: rgba(var(--accent-rgb),0.3); color: var(--accent); }
+.ya-filter-btn.active { background: rgba(var(--accent-rgb),0.15); border-color: rgba(var(--accent-rgb),0.3); color: rgb(var(--accent-light-rgb)); }
 .ya-modal-sort {
     padding: 6px 10px; border-radius: 8px; font-size: 11px;
     background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.07);
@@ -38574,7 +38574,7 @@ div.artist-hero-badge {
 .decade-tab.active,
 .genre-tab.active {
     color: #fff;
-    border-bottom-color: #667eea;
+    border-bottom-color: rgb(var(--accent-light-rgb));
 }
 
 .decade-tab-content,
@@ -38758,11 +38758,11 @@ div.artist-hero-badge {
     left: 4px;
     width: calc(50% - 4px);
     height: calc(100% - 8px);
-    background: linear-gradient(135deg, rgba(138, 43, 226, 0.9), rgba(123, 31, 162, 0.9));
+    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.9), rgba(24, 156, 71, 0.9));
     border-radius: 8px;
     transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     z-index: 1;
-    box-shadow: 0 2px 8px rgba(138, 43, 226, 0.4);
+    box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.4);
 }
 
 .search-mode-toggle[data-active="basic"] .toggle-slider {
@@ -53812,8 +53812,8 @@ tr.tag-diff-same {
 }
 
 .mcache-tab.active {
-    color: var(--accent, #6d5dfc);
-    border-bottom-color: var(--accent, #6d5dfc);
+    color: rgb(var(--accent-light-rgb));
+    border-bottom-color: rgb(var(--accent-light-rgb));
 }
 
 /* Filters */
@@ -54539,8 +54539,8 @@ tr.tag-diff-same {
 }
 
 .repair-tab.active {
-    color: var(--accent-color, #6366f1);
-    border-bottom-color: var(--accent-color, #6366f1);
+    color: rgb(var(--accent-light-rgb));
+    border-bottom-color: rgb(var(--accent-light-rgb));
 }
 
 .repair-tab-badge {
@@ -70026,7 +70026,7 @@ body.em-scroll-lock { overflow: hidden; }
     font: 600 11.5px/1 'JetBrains Mono', ui-monospace, monospace;
     color: #8b93b0; transition: all .15s ease;
 }
-.arec-tab.active { background: rgba(122,162,247,0.22); color: #cdd6f4; }
+.arec-tab.active { background: rgba(var(--accent-rgb),0.22); color: rgb(var(--accent-light-rgb)); }
 .arec-tab:not(.active):hover { color: #cdd6f4; }
 .arec-filter {
     flex: 1; min-width: 120px;
