@@ -231,6 +231,8 @@
     border-radius: 8px; box-shadow: 0 30px 80px -20px rgba(0,0,0,.85), 0 0 0 1px rgba(255,255,255,.06);
     overflow: hidden; user-select: none;
 }
+/* episode templates design on a 16:9 still, so the stage goes landscape */
+.voe-stage--wide { aspect-ratio: 16 / 9; height: auto; width: min(94%, 1120px); }
 .voe-stage-ph {
     position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 20px;
     background: radial-gradient(120% 90% at 50% 0%, #262631, #101016 72%);
@@ -536,6 +538,20 @@ select.voe-input option { background: #17171d; }
 .voe-starter-ic { font-size: 22px; margin-bottom: 4px; }
 .voe-starter-name { font-size: 14px; font-weight: 700; color: #f2f4fa; }
 .voe-starter-desc { font-size: 12px; color: rgba(255,255,255,.5); line-height: 1.4; }
+/* template-type selector (Poster / Season / Episode) */
+.voe-type-tabs { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin: 4px 0 18px; }
+.voe-type-tab { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 14px 8px 12px;
+    border-radius: 12px; cursor: pointer; font: inherit; background: rgba(255,255,255,.03);
+    border: 1px solid rgba(255,255,255,.09); transition: all .14s ease; }
+.voe-type-tab:hover { background: rgba(var(--a),.1); border-color: rgba(var(--a),.35); }
+.voe-type-tab--on { background: rgba(var(--a),.16); border-color: rgb(var(--a)); }
+.voe-type-shape { display: block; border-radius: 3px; background: rgba(255,255,255,.22);
+    border: 1.5px solid rgba(255,255,255,.5); }
+.voe-type-tab--on .voe-type-shape { background: rgba(var(--a),.5); border-color: rgb(var(--a)); }
+.voe-type-shape--tall { width: 22px; height: 33px; }
+.voe-type-shape--wide { width: 40px; height: 22px; margin: 5px 0 6px; }
+.voe-type-name { font-size: 13px; font-weight: 700; color: #f2f4fa; }
+.voe-type-sub { font-size: 10.5px; color: rgba(255,255,255,.5); text-align: center; line-height: 1.35; }
 
 /* ── shortcuts dialog ────────────────────────────────────────────────────── */
 .voe-shortcuts-modal { width: min(440px, 94vw); padding: 24px; border-radius: 18px;

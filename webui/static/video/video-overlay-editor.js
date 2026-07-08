@@ -115,6 +115,30 @@
     // Which logo-badge fields the Kometa installer can actually source art for
     // (mirrors logo_packs.SOURCEABLE_FIELDS); used to word the install popup.
     var LOGO_SOURCEABLE = ['resolution', 'audio_codec', 'hdr', 'source', 'aspect', 'streaming', 'network', 'studio'];
+
+    // Overlay templates come in three types, split by BOTH art shape and which
+    // fields make sense: Poster (movies+shows, 2:3), Season (2:3, season art),
+    // Episode (16:9 still, per-episode data). The type fixes the canvas aspect and
+    // filters the palette so you only see fields that apply.
+    var TEMPLATE_TYPES = {
+        poster:  { label: 'Poster',  aspect: '2:3',  wide: false, scopes: ['movie', 'show'], sub: 'Movies & TV shows' },
+        season:  { label: 'Season',  aspect: '2:3',  wide: false, scopes: ['season'],         sub: 'Season posters' },
+        episode: { label: 'Episode', aspect: '16:9', wide: true,  scopes: ['episode'],        sub: 'Episode stills' },
+    };
+    var TYPE_ORDER = ['poster', 'season', 'episode'];
+    // Fields available per type (poster = everything except the sub-item fields).
+    var TYPE_FIELDS = {
+        season: ['title', 'season_number', 'episode_count', 'year', 'content_rating', 'status', 'network', 'streaming', 'awards', 'genre'],
+        episode: ['title', 'episode_code', 'season_number', 'episode_number', 'year', 'runtime', 'content_rating', 'network',
+            'tmdb', 'imdb', 'resolution', 'hdr', 'video_codec', 'audio_codec', 'source', 'aspect', 'subtitles', 'streaming', 'genre'],
+    };
+    function templateKind() { return (ed && ed.kind) || 'poster'; }
+    function fieldsForType(kind) {
+        if (kind !== 'season' && kind !== 'episode') {
+            return FIELD_ORDER.filter(function (k) { return ['season_number', 'episode_number', 'episode_code'].indexOf(k) === -1; });
+        }
+        return TYPE_FIELDS[kind].filter(function (k) { return !!FIELDS[k]; });
+    }
     // Installed-logo state (per field counts); logo badge is gated until a pack exists.
     var logoPack = { installed: false, counts: {}, loaded: false };
     function anyLogoPack() { return !!logoPack.installed; }
@@ -473,42 +497,83 @@
     }
 
     // ── starter templates (skip the blank-canvas cold start) ────────────────────
-    function _def(layers) { return { version: 1, canvas: { aspect: '2:3' }, layers: layers }; }
+    function _def(layers, kind) {
+        kind = TEMPLATE_TYPES[kind] ? kind : 'poster';
+        return { version: 1, kind: kind, canvas: { aspect: TEMPLATE_TYPES[kind].aspect }, layers: layers };
+    }
     function _badge(field, anchor, x, y, size) {
         var l = defaultLayer('badge', x, y, field);
         l.anchor = anchor; if (size) l.size = size; return l;
     }
-    function STARTERS() {
+    // Starters are per-type — a season/episode template opens with fields that
+    // actually apply, on the right canvas.
+    function STARTERS(kind) {
+        if (kind === 'season') return [
+            { name: 'Blank', desc: 'Empty season poster.', icon: '📄', build: function () { return _def([], 'season'); } },
+            { name: 'Season number', desc: '“Season 1” badge, bottom-left.', icon: '#️⃣',
+                build: function () { return _def([_badge('season_number', 'bottom-left', 0.06, 0.94, 0.05)], 'season'); } },
+            { name: 'Season + count', desc: 'Season number and episode count.', icon: '🗂️',
+                build: function () { return _def([_badge('season_number', 'bottom-left', 0.06, 0.9, 0.05), _badge('episode_count', 'bottom-left', 0.06, 0.97, 0.032)], 'season'); } },
+        ];
+        if (kind === 'episode') return [
+            { name: 'Blank', desc: 'Empty episode still.', icon: '📄', build: function () { return _def([], 'episode'); } },
+            { name: 'Episode code', desc: '“S1E1” badge, bottom-left.', icon: '🎬',
+                build: function () { return _def([_badge('episode_code', 'bottom-left', 0.04, 0.9, 0.07)], 'episode'); } },
+            { name: 'Code + quality', desc: 'S1E1 with a resolution badge.', icon: '🏷️',
+                build: function () { return _def([_badge('episode_code', 'bottom-left', 0.04, 0.9, 0.07), _badge('resolution', 'top-right', 0.96, 0.08, 0.06)], 'episode'); } },
+        ];
         return [
-            { name: 'Blank', desc: 'Start from an empty poster.', icon: '📄', build: function () { return _def([]); } },
+            { name: 'Blank', desc: 'Start from an empty poster.', icon: '📄', build: function () { return _def([], 'poster'); } },
             { name: 'Quality corner', desc: 'Resolution + audio badges, top-right.', icon: '🏷️',
-                build: function () { return _def([_badge('resolution', 'top-right', 0.95, 0.05), _badge('audio_codec', 'top-right', 0.95, 0.14, 0.038)]); } },
+                build: function () { return _def([_badge('resolution', 'top-right', 0.95, 0.05), _badge('audio_codec', 'top-right', 0.95, 0.14, 0.038)], 'poster'); } },
             { name: 'Ratings bar', desc: 'IMDb + Rotten Tomatoes, bottom-left.', icon: '⭐',
-                build: function () { return _def([_badge('imdb', 'bottom-left', 0.05, 0.95), _badge('rt', 'bottom-left', 0.30, 0.95)]); } },
+                build: function () { return _def([_badge('imdb', 'bottom-left', 0.05, 0.95), _badge('rt', 'bottom-left', 0.30, 0.95)], 'poster'); } },
             { name: 'The works', desc: 'Scrim, title logo, quality + rating.', icon: '✨',
                 build: function () {
                     var scrim = defaultLayer('scrim');
                     var logo = defaultLayer('logo', 0.5, 0.82); logo.anchor = 'bottom-center'; logo.w = 0.6;
-                    return _def([scrim, logo, _badge('resolution', 'top-right', 0.95, 0.05), _badge('imdb', 'bottom-left', 0.05, 0.7)]);
+                    return _def([scrim, logo, _badge('resolution', 'top-right', 0.95, 0.05), _badge('imdb', 'bottom-left', 0.05, 0.7)], 'poster');
                 } },
         ];
     }
+    var _newKind = 'poster';
     function openStarterPicker() {
+        _newKind = 'poster';
         var back = document.createElement('div');
         back.className = 'voe-confirm-back';
-        back.innerHTML = '<div class="voe-starter-modal"><div class="voe-starter-h">New overlay template</div>' +
-            '<div class="voe-starter-sub">Start from a preset or a blank poster — you can change anything after.</div>' +
-            '<div class="voe-starter-grid">' + STARTERS().map(function (s, i) {
+        function typeTabs() {
+            return TYPE_ORDER.map(function (k) {
+                var t = TEMPLATE_TYPES[k];
+                return '<button class="voe-type-tab' + (k === _newKind ? ' voe-type-tab--on' : '') + '" data-type="' + k + '">' +
+                    '<span class="voe-type-shape voe-type-shape--' + (t.wide ? 'wide' : 'tall') + '"></span>' +
+                    '<span class="voe-type-name">' + esc(t.label) + '</span>' +
+                    '<span class="voe-type-sub">' + esc(t.sub) + '</span></button>';
+            }).join('');
+        }
+        function starterCards() {
+            return STARTERS(_newKind).map(function (s, i) {
                 return '<button class="voe-starter-card" data-starter="' + i + '"><span class="voe-starter-ic">' + s.icon + '</span>' +
                     '<span class="voe-starter-name">' + esc(s.name) + '</span><span class="voe-starter-desc">' + esc(s.desc) + '</span></button>';
-            }).join('') + '</div>' +
+            }).join('');
+        }
+        back.innerHTML = '<div class="voe-starter-modal"><div class="voe-starter-h">New overlay template</div>' +
+            '<div class="voe-starter-sub">Pick what it overlays — the canvas shape and available fields follow.</div>' +
+            '<div class="voe-type-tabs" data-type-tabs>' + typeTabs() + '</div>' +
+            '<div class="voe-starter-grid" data-starter-grid>' + starterCards() + '</div>' +
             '<div class="voe-confirm-row"><button class="voe-btn" data-starter-cancel>Cancel</button></div></div>';
         document.body.appendChild(back);
         requestAnimationFrame(function () { back.classList.add('voe-confirm-back--on'); });
         function done() { back.classList.remove('voe-confirm-back--on'); setTimeout(function () { back.remove(); }, 180); }
-        var list = STARTERS();
         back.addEventListener('click', function (e) {
+            var tab = e.target.closest('[data-type]');
+            if (tab) {
+                _newKind = tab.getAttribute('data-type');
+                back.querySelector('[data-type-tabs]').innerHTML = typeTabs();
+                back.querySelector('[data-starter-grid]').innerHTML = starterCards();
+                return;
+            }
             if (e.target === back || e.target.closest('[data-starter-cancel]')) { done(); return; }
+            var list = STARTERS(_newKind);
             var c = e.target.closest('[data-starter]');
             if (c) { var s = list[parseInt(c.getAttribute('data-starter'), 10)]; done(); createTemplate(s.name === 'Blank' ? 'Untitled template' : s.name, s.build()); }
         });
@@ -583,6 +648,7 @@
             var def = t.definition || {};
             ed = {
                 id: t.id, name: t.name || 'Untitled template',
+                kind: (TEMPLATE_TYPES[def.kind] ? def.kind : 'poster'),
                 layers: (def.layers || []).map(normalizeLayer),
                 selected: null, extra: [], dirty: false,
                 stage: null, W: 0, H: 0,
@@ -771,7 +837,7 @@
                             '<button class="voe-btn voe-icon-btn" data-voe-zoomin title="Zoom in (+)">+</button>' +
                         '</div>' +
                     '</div>' +
-                    '<div class="voe-stage" data-voe-stage>' +
+                    '<div class="voe-stage' + (TEMPLATE_TYPES[templateKind()].wide ? ' voe-stage--wide' : '') + '" data-voe-stage>' +
                         '<div class="voe-stage-ph" data-voe-ph>Drag elements from the left onto the poster.<br>This background is just a preview — only the overlay is saved.</div>' +
                         '<div class="voe-guide voe-guide--v" data-voe-gv></div>' +
                         '<div class="voe-guide voe-guide--h" data-voe-gh></div>' +
@@ -926,9 +992,10 @@
         var html = palTools('Basics',
             palItem('text', 'Text', I.text) + palItem('row', 'Badge row', I.row) +
             palItem('rating', 'Rating stars', I.star));
+        var avail = fieldsForType(templateKind());
         FIELD_CATS.forEach(function (cat) {
-            var items = FIELD_ORDER.filter(function (k) { return FIELDS[k].cat === cat; });
-            html += palData(cat, items.length, items.map(palTag).join(''));
+            var items = avail.filter(function (k) { return FIELDS[k] && FIELDS[k].cat === cat; });
+            if (items.length) html += palData(cat, items.length, items.map(palTag).join(''));   // hide empty cats (e.g. Season has no Quality)
         });
         html += palTools('Artwork',
             palItem('logo', 'Title Logo', I.logo) + palItem('image', 'Image', I.image) +
@@ -2627,7 +2694,8 @@
         if (btn) btn.disabled = !ed.dirty;
     }
     function definition() {
-        return { version: 1, canvas: { aspect: '2:3' }, layers: ed.layers };
+        var kind = templateKind();
+        return { version: 1, kind: kind, canvas: { aspect: TEMPLATE_TYPES[kind].aspect }, layers: ed.layers };
     }
     function saveTemplate() {
         if (!ed) return Promise.resolve();
