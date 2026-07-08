@@ -65374,8 +65374,11 @@ body.max-performance .dash-card::after {
 
 .qa-tile--hero .qa-tile__cta {
     grid-row: 4;
-    padding-top: clamp(10px, 1cqw + 4px, 16px);
-    border-top: 1px solid rgba(255, 255, 255, 0.07);
+    /* Same clean inline CTA rhythm as the minor tiles — drop the divider
+       "footer" treatment so all three read as one family (D2). The hero
+       keeps its signature (status dot, big title, own icon row). */
+    align-self: start;
+    margin-top: clamp(4px, 0.4cqw, 6px);
 }
 
 .qa-tile__cta-label {
