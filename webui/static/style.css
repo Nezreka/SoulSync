@@ -27761,13 +27761,13 @@ body.np-modal-open #helper-float-btn {
 .watchlist-filter {
     display: flex;
     gap: 8px;
-    justify-content: center;
+    justify-content: flex-start;
     padding: 8px 0;
 }
 
 .library-source-filter {
     display: flex;
-    justify-content: center;
+    justify-content: flex-start;
     padding: 0 0 4px;
 }
 .library-source-filter-select {
@@ -28076,7 +28076,7 @@ body.np-modal-open #helper-float-btn {
     gap: 12px;
     padding: 16px;
     min-width: max-content;
-    justify-content: center;
+    justify-content: flex-start;
     align-items: center;
 }
 
