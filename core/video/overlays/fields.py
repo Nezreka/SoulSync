@@ -132,6 +132,7 @@ _FORMATTERS = {
     "versions": lambda v: None if (_num(v) is None or int(v) <= 1) else str(v) + " Versions",
     "mediastinger": lambda v: "After Credits" if v else None,   # presence flag
     "title": lambda v: str(v) if v else None,
+    "collection": lambda v: str(v) if v else None,   # franchise (TMDB collection)
     "streaming": lambda v: str(v) if v else None,
     "network": lambda v: str(v) if v else None,
     "studio": lambda v: str(v) if v else None,

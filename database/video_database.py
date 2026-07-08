@@ -2510,9 +2510,10 @@ class VideoDatabase:
         conn = self._get_connection()
         try:
             _show_ratings = ", tvmaze_rating, anilist_score" if kind == "show" else ""
+            _movie_only = ", tmdb_collection_name" if kind == "movie" else ""
             row = conn.execute(
                 f"SELECT title, year, runtime_minutes, status, content_rating, "
-                f"rating, imdb_rating, rt_rating, metacritic, trakt_rating{_show_ratings}, subtitle_langs, streaming, mediastinger, logo_url, "
+                f"rating, imdb_rating, rt_rating, metacritic, trakt_rating{_show_ratings}{_movie_only}, subtitle_langs, streaming, mediastinger, logo_url, "
                 f"{'studio' if kind == 'movie' else 'network'} AS org, "
                 f"(poster_url IS NOT NULL AND poster_url <> '') AS has_poster, "
                 f"(backdrop_url IS NOT NULL AND backdrop_url <> '') AS has_backdrop "
@@ -2529,6 +2530,7 @@ class VideoDatabase:
                 "trakt": d.get("trakt_rating"),
                 "tvmaze": d.get("tvmaze_rating"), "anilist": d.get("anilist_score"),
                 "streaming": d.get("streaming"),
+                "collection": d.get("tmdb_collection_name"),
                 "mediastinger": d.get("mediastinger"),
                 "studio": d.get("org") if kind == "movie" else None,
                 "network": d.get("org") if kind == "show" else None,
