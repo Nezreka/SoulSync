@@ -882,35 +882,48 @@
         document.addEventListener('pointerup', up);
     }
 
-    // ── palette (Text + dynamic data badges grouped by category) ────────────────
+    // ── palette (tool cards + dynamic data-badge chips grouped by category) ─────
     function paletteHTML() {
-        var html = '<div class="voe-pal-section"><div class="voe-pal-h">Basics</div><div class="voe-pal-grid">' +
-            palItem('text', 'Text', I.text, '') + palItem('row', 'Badge row', I.row, '') +
-            palItem('rating', 'Rating stars', I.star, '') + '</div></div>';
+        // Tools = icon cards (few, distinct actions). Data badges = live-preview
+        // chips that wrap and show exactly what lands on the poster.
+        var html = palTools('Basics',
+            palItem('text', 'Text', I.text) + palItem('row', 'Badge row', I.row) +
+            palItem('rating', 'Rating stars', I.star));
         FIELD_CATS.forEach(function (cat) {
             var items = FIELD_ORDER.filter(function (k) { return FIELDS[k].cat === cat; });
-            html += '<div class="voe-pal-section"><div class="voe-pal-h">' + cat + '</div><div class="voe-pal-grid">' +
-                items.map(function (k) { return palItem('badge', FIELDS[k].label, catIcon(cat), k); }).join('') + '</div></div>';
+            html += palData(cat, items.length, items.map(palTag).join(''));
         });
-        html += '<div class="voe-pal-section"><div class="voe-pal-h">Artwork</div><div class="voe-pal-grid">' +
-            palItem('logo', 'Title Logo', I.logo, '') + palItem('image', 'Image', I.image, '') +
-            palItem('logobadge', 'Logo badge', I.logo, '') + '</div></div>';
-        html += '<div class="voe-pal-section"><div class="voe-pal-h">Shapes</div><div class="voe-pal-grid">' +
-            palItem('shape', 'Rectangle', I.shape, '') + palItem('ellipse', 'Ellipse', I.ellipse, '') +
-            palItem('line', 'Line', I.line, '') + palItem('ribbon', 'Corner ribbon', I.ribbon, '') +
-            palItem('scrim', 'Scrim', I.scrim, '') + '</div></div>';
+        html += palTools('Artwork',
+            palItem('logo', 'Title Logo', I.logo) + palItem('image', 'Image', I.image) +
+            palItem('logobadge', 'Logo badge', I.logo));
+        html += palTools('Shapes',
+            palItem('shape', 'Rectangle', I.shape) + palItem('ellipse', 'Ellipse', I.ellipse) +
+            palItem('line', 'Line', I.line) + palItem('ribbon', 'Corner ribbon', I.ribbon) +
+            palItem('scrim', 'Scrim', I.scrim));
         return html;
     }
-    function palItem(kind, label, icon, field) {
-        var head = '<span class="voe-pal-ic">' + icon + '</span>';
-        // For a data badge, preview the actual value it produces (e.g. "4K", "IMDb 8.4")
-        // instead of a generic icon — you see exactly what you'll drop in.
-        if (kind === 'badge' && field && FIELDS[field]) {
-            var v = FIELDS[field].fmt(((ed && ed.sample) ? ed.sample : defaultSample())[field]);
-            if (v) head = '<span class="voe-pal-chip">' + esc(v) + '</span>';
-        }
-        return '<div class="voe-pal-item" data-voe-add="' + kind + '" data-field="' + esc(field || '') + '" title="' + esc(label) + '">' +
-            head + '<span class="voe-pal-label">' + esc(label) + '</span></div>';
+    function palTools(title, inner) {
+        return '<div class="voe-pal-section"><div class="voe-pal-h">' + esc(title) + '</div>' +
+            '<div class="voe-pal-tools">' + inner + '</div></div>';
+    }
+    function palData(title, n, inner) {
+        return '<div class="voe-pal-section"><div class="voe-pal-h">' + esc(title) +
+            '<span class="voe-pal-n">' + n + '</span></div>' +
+            '<div class="voe-pal-tags">' + inner + '</div></div>';
+    }
+    function palItem(kind, label, icon) {
+        return '<div class="voe-pal-item" data-voe-add="' + kind + '" data-field="" data-label="' + esc(label) + '" title="' + esc(label) + '">' +
+            '<span class="voe-pal-ic">' + icon + '</span>' +
+            '<span class="voe-pal-label">' + esc(label) + '</span></div>';
+    }
+    // A data badge previews the real value it produces (e.g. "4K", "IMDb 8.4",
+    // "S1E1") so the palette is WYSIWYG; the field name rides along as the tooltip.
+    function palTag(field) {
+        var f = FIELDS[field]; if (!f) return '';
+        var v = f.fmt(((ed && ed.sample) ? ed.sample : defaultSample())[field]);
+        return '<div class="voe-pal-tag" data-voe-add="badge" data-field="' + esc(field) + '"' +
+            ' data-label="' + esc(f.label) + '" title="' + esc(f.label) + '">' +
+            '<span class="voe-pal-tag-v">' + esc(v || f.label) + '</span></div>';
     }
     function wirePalette() {
         overlay.querySelectorAll('[data-voe-add]').forEach(function (it) {
@@ -1027,7 +1040,7 @@
             if (!dragging && Math.abs(ev.clientX - startX) + Math.abs(ev.clientY - startY) > 5) {
                 dragging = true; item.classList.add('voe-dragging');
                 ghost = document.createElement('div');
-                ghost.textContent = item.querySelector('.voe-pal-label') ? item.querySelector('.voe-pal-label').textContent : kind;
+                ghost.textContent = item.getAttribute('data-label') || kind;
                 ghost.style.cssText = 'position:fixed;z-index:9500;pointer-events:none;padding:6px 12px;border-radius:8px;' +
                     'background:rgba(var(--accent-rgb,88,101,242),.9);color:#fff;font-size:12px;font-weight:700;box-shadow:0 8px 20px rgba(0,0,0,.5);';
                 document.body.appendChild(ghost);
