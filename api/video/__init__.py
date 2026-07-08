@@ -37,6 +37,22 @@ def create_video_blueprint() -> Blueprint:
     """Build the isolated /api/video blueprint with all video sub-routes."""
     bp = Blueprint("video_api", __name__)
 
+    # Profile permission guards behind the frontend gating. Uses flask.g (set
+    # app-wide by web_server's before_request: profile_id — 1==admin — and
+    # can_download) so this stays isolated from the music DB.
+    #   • Overlay Studio + Import  → admin-only
+    #   • download/wishlist actions → require can_download (mirrors music)
+    @bp.before_request
+    def _video_perm_gate():
+        from flask import request, g, jsonify
+        path = request.path or ""
+        if (path.startswith("/api/video/overlays") or path.startswith("/api/video/import")) \
+                and getattr(g, "profile_id", 1) != 1:
+            return jsonify({"error": "Admin only."}), 403
+        if request.method == "POST" and not getattr(g, "can_download", True) and (
+                path.startswith("/api/video/downloads/grab") or path == "/api/video/wishlist/add"):
+            return jsonify({"error": "Downloads are disabled for this profile."}), 403
+
     from .dashboard import register_routes as reg_dashboard
     from .scan import register_routes as reg_scan
     from .library import register_routes as reg_library
