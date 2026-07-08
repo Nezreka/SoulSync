@@ -40,11 +40,19 @@ def used_fields(definition: dict):
     return fields, needs_logo
 
 
+# Bump when the COMPOSITOR's output changes for the same inputs (e.g. bundling
+# Inter fixed invisible text). It's folded into the signature so every already-
+# overlaid item re-renders once on the next apply, then goes back to skipping.
+_RENDER_VERSION = 2
+
+
 def values_signature(definition: dict, values: dict) -> str:
     """A stable signature of only the values a template consumes, so a quality/
-    rating change re-renders while unrelated edits don't."""
+    rating change re-renders while unrelated edits don't. Includes a render
+    version so a compositor change invalidates every cached render exactly once."""
     fields, needs_logo = used_fields(definition)
-    sub = {k: (values or {}).get(k) for k in sorted(fields)}
+    sub = {"_rv": _RENDER_VERSION}
+    sub.update({k: (values or {}).get(k) for k in sorted(fields)})
     if needs_logo:
         sub["logo_url"] = (values or {}).get("logo_url")
     return sha1(json.dumps(sub, sort_keys=True, default=str).encode("utf-8"))

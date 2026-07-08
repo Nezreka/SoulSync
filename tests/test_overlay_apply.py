@@ -129,3 +129,13 @@ def test_values_signature_only_tracks_used_fields():
     b = values_signature(tpl, {"resolution": "2160p", "imdb": 1.0})   # unused field changed
     c = values_signature(tpl, {"resolution": "1080p"})               # used field changed
     assert a == b and a != c
+
+
+def test_render_version_invalidates_every_cached_render(monkeypatch):
+    import core.video.overlays.apply as ap
+    tpl = {"layers": [{"type": "text", "binding": {"field": "resolution"}}]}
+    vals = {"resolution": "2160p"}
+    before = values_signature(tpl, vals)
+    monkeypatch.setattr(ap, "_RENDER_VERSION", ap._RENDER_VERSION + 1)  # a compositor change
+    after = values_signature(tpl, vals)
+    assert before != after   # same inputs, new signature → item re-renders once
