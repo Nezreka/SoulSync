@@ -319,38 +319,49 @@
     }
     // Which template type a library scope takes (movies+shows share Poster).
     function scopeKind(scope) { return scope === 'season' ? 'season' : scope === 'episode' ? 'episode' : 'poster'; }
-    function scopeRow(label, scope, assign, templates) {
-        var cur = (assign && assign.template_id) || '';
+    // One settings card per library scope: template picker (only type-matching
+    // templates) + enable toggle + an optional note. This is the shared editor —
+    // the same markup the Automations-side config reuses.
+    function scopeCard(label, scope, assign, templates, note) {
         var want = scopeKind(scope);
-        var opts = '<option value="">— None —</option>' + templates
-            .filter(function (t) { return (t.kind || 'poster') === want; })   // only type-matching templates
-            .map(function (t) {
-                return '<option value="' + t.id + '"' + (String(t.id) === String(cur) ? ' selected' : '') + '>' + esc(t.name) + '</option>';
-            }).join('');
+        var pool = (templates || []).filter(function (t) { return (t.kind || 'poster') === want; });
+        var cur = (assign && assign.template_id) || '';
         var on = !!(assign && assign.enabled && assign.template_id);
-        return '<div class="voe-apply-row"><div class="voe-apply-row-l">' + label + '</div>' +
-            '<select class="voe-input" data-apply-tpl="' + scope + '">' + opts + '</select>' +
-            '<button class="voe-toggle' + (on ? ' voe-toggle--on' : '') + '" data-apply-en="' + scope + '"></button></div>';
+        var opts = '<option value="">— None —</option>' + pool.map(function (t) {
+            return '<option value="' + t.id + '"' + (String(t.id) === String(cur) ? ' selected' : '') + '>' + esc(t.name) + '</option>';
+        }).join('');
+        return '<div class="voe-apply-card' + (on ? ' voe-apply-card--on' : '') + '" data-apply-card="' + scope + '">' +
+            '<div class="voe-apply-card-h">' +
+                '<span class="voe-apply-card-name">' + esc(label) + '</span>' +
+                '<button class="voe-toggle' + (on ? ' voe-toggle--on' : '') + '" data-apply-en="' + scope + '" aria-label="Enable overlays for ' + esc(label) + '"></button>' +
+            '</div>' +
+            '<select class="voe-input" data-apply-tpl="' + scope + '"' + (pool.length ? '' : ' disabled') + '>' + opts + '</select>' +
+            (pool.length ? '' : '<div class="voe-apply-card-empty">No ' + esc(want) + ' templates yet — design one first.</div>') +
+            (note ? '<div class="voe-apply-card-note">' + esc(note) + '</div>' : '') +
+            '</div>';
     }
     function renderApplyDialog(d) {
         var templates = d.templates || [], a = d.assignments || {};
         var back = document.createElement('div');
         back.className = 'voe-confirm-back';
-        back.innerHTML = '<div class="voe-apply-modal">' +
-            '<div class="voe-apply-t">Apply overlays</div>' +
-            '<div class="voe-apply-sub">Pick a template for each library and burn it onto every poster. Runs from a clean copy each time and pushes to your server; originals are backed up so you can remove them anytime.</div>' +
-            scopeRow('Movies', 'movie', a.movie, templates) +
-            scopeRow('TV Shows', 'show', a.show, templates) +
-            scopeRow('Seasons', 'season', a.season, templates) +
-            scopeRow('Episodes', 'episode', a.episode, templates) +
-            '<div class="voe-apply-note">Season & episode overlays burn onto each season poster / episode still. Episodes can be tens of thousands of items, so they only run when their toggle is on.</div>' +
-            '<div class="voe-apply-applied" data-apply-count>' + (d.applied || 0) + ' item' + (d.applied === 1 ? '' : 's') + ' currently overlaid</div>' +
+        back.innerHTML = '<div class="voe-apply-modal voe-apply-modal--v2">' +
+            '<div class="voe-apply-t">Overlays</div>' +
+            '<div class="voe-apply-sub">Choose a template for each part of your library. It renders onto a clean copy and pushes to your server; the originals are backed up, so you can remove them anytime.</div>' +
+            '<div class="voe-apply-auto"><span class="voe-apply-auto-ic">' + I.dice + '</span>' +
+                '<div class="voe-apply-auto-tx">These are your overlay settings. Overlays refresh <strong>automatically every night</strong> — only the items that changed get re-rendered. Turn that schedule on or off on the <strong>Automations</strong> page.</div></div>' +
+            '<div class="voe-apply-cards">' +
+                scopeCard('Movies', 'movie', a.movie, templates, '') +
+                scopeCard('TV Shows', 'show', a.show, templates, '') +
+                scopeCard('Seasons', 'season', a.season, templates, 'Season posters') +
+                scopeCard('Episodes', 'episode', a.episode, templates, 'Episode stills · tens of thousands of items, so it runs only when enabled') +
+            '</div>' +
             '<div class="voe-apply-prog" data-apply-prog hidden><div class="voe-apply-bar"><div class="voe-apply-bar-fill" data-apply-fill></div></div>' +
             '<div class="voe-apply-prog-txt" data-apply-progtxt></div></div>' +
             '<div class="voe-apply-foot">' +
-                '<button class="voe-btn voe-btn--ghost" data-apply-remove title="Restore each poster from its backup">Remove overlays</button>' +
-                '<button class="voe-btn voe-btn--ghost" data-apply-reset title="Re-pull the clean TMDB poster and push it (wipes Kometa overlays too)">Reset to originals</button>' +
+                '<div class="voe-apply-applied" data-apply-count>' + (d.applied || 0) + ' item' + (d.applied === 1 ? '' : 's') + ' currently overlaid</div>' +
                 '<div class="voe-spacer"></div>' +
+                '<button class="voe-btn voe-btn--ghost" data-apply-remove title="Restore each poster from its backup">Remove</button>' +
+                '<button class="voe-btn voe-btn--ghost" data-apply-reset title="Re-pull the clean TMDB poster and push it (wipes Kometa overlays too)">Reset</button>' +
                 '<button class="voe-btn" data-apply-cancel>Close</button>' +
                 '<button class="voe-btn voe-btn--primary" data-apply-run>' + I.apply + ' Apply now</button>' +
             '</div></div>';
@@ -364,7 +375,12 @@
             sel.addEventListener('change', function () { saveAssign(back, sel.getAttribute('data-apply-tpl')); });
         });
         back.querySelectorAll('[data-apply-en]').forEach(function (btn) {
-            btn.addEventListener('click', function () { btn.classList.toggle('voe-toggle--on'); saveAssign(back, btn.getAttribute('data-apply-en')); });
+            btn.addEventListener('click', function () {
+                var on = btn.classList.toggle('voe-toggle--on');
+                var card = btn.closest('[data-apply-card]');
+                if (card) card.classList.toggle('voe-apply-card--on', on);
+                saveAssign(back, btn.getAttribute('data-apply-en'));
+            });
         });
         back.querySelector('[data-apply-cancel]').addEventListener('click', done);
         back.addEventListener('click', function (e) { if (e.target === back) done(); });

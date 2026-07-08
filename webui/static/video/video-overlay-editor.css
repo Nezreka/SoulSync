@@ -602,6 +602,28 @@ select.voe-input option { background: #17171d; }
 .voe-apply-foot .voe-spacer { flex: 1; min-width: 8px; }
 .voe-apply-foot .voe-btn { padding: 9px 14px; }   /* fit Remove · Reset · Close · Apply */
 
+/* ── redesigned overlay-settings modal (v2) ─────────────────────────────────── */
+.voe-apply-modal--v2 { width: min(600px, 95vw); padding: 26px 26px 20px; }
+.voe-apply-modal--v2 .voe-apply-sub { margin: 6px 0 16px; }
+.voe-apply-auto { display: flex; gap: 11px; align-items: flex-start; padding: 13px 15px; margin-bottom: 18px;
+    border-radius: 12px; background: rgba(var(--a),.09); border: 1px solid rgba(var(--a),.22); }
+.voe-apply-auto-ic { flex: 0 0 auto; width: 20px; height: 20px; color: rgb(var(--a)); margin-top: 1px; }
+.voe-apply-auto-ic svg { width: 20px; height: 20px; }
+.voe-apply-auto-tx { font-size: 12.5px; color: rgba(255,255,255,.72); line-height: 1.55; }
+.voe-apply-auto-tx strong { color: #fff; font-weight: 700; }
+.voe-apply-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.voe-apply-card { display: flex; flex-direction: column; gap: 9px; padding: 14px; border-radius: 13px;
+    background: rgba(255,255,255,.035); border: 1px solid rgba(255,255,255,.08); transition: border-color .14s, background .14s; }
+.voe-apply-card--on { background: rgba(var(--a),.08); border-color: rgba(var(--a),.4); }
+.voe-apply-card-h { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.voe-apply-card-name { font-size: 14px; font-weight: 700; color: #f2f4fa; }
+.voe-apply-card .voe-input { width: 100%; }
+.voe-apply-card-empty { font-size: 11.5px; color: rgba(255,255,255,.4); }
+.voe-apply-card-note { font-size: 11px; color: rgba(255,255,255,.4); line-height: 1.45; }
+.voe-apply-modal--v2 .voe-apply-foot { margin-top: 20px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,.07); }
+.voe-apply-modal--v2 .voe-apply-applied { margin: 0; }
+@media (max-width: 560px) { .voe-apply-cards { grid-template-columns: 1fr; } }
+
 /* keyboard-focus rings across the studio + its dialogs (accessibility) */
 .voe-overlay button:focus-visible, .voe-overlay input:focus-visible, .voe-overlay select:focus-visible,
 .voe-overlay [tabindex]:focus-visible, .voe-confirm-back button:focus-visible, .voe-card:focus-visible {
