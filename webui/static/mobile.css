@@ -191,6 +191,24 @@
         display: block;
     }
 
+    /* ── Minor tap-target enlargements for touch ── */
+    #watchlist-select-all-cb {
+        width: 18px;
+        height: 18px;
+    }
+    .watchlist-select-all-label {
+        min-height: 32px;
+    }
+    .td-close {
+        width: 36px;
+        height: 36px;
+    }
+    .bp-info-toggle {
+        width: 28px;
+        height: 28px;
+        font-size: 14px;
+    }
+
     .nav-button {
         width: 100%;
     }
