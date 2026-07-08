@@ -127,6 +127,10 @@ _FORMATTERS = {
     "runtime": _runtime,
     "season_count": lambda v: None if _num(v) is None else str(v) + (" Season" if int(v) == 1 else " Seasons"),
     "episode_count": lambda v: None if _num(v) is None else str(v) + " Episodes",
+    # Sub-item (season/episode overlay) fields.
+    "season_number": lambda v: None if _num(v) is None else "Season " + str(int(v)),
+    "episode_number": lambda v: None if _num(v) is None else "Episode " + str(int(v)),
+    "episode_code": lambda v: str(v) if v else None,   # e.g. 'S1E1', built in sample_data
     "subtitles": lambda v: None if _num(v) is None else str(v) + (" Subtitle" if int(v) == 1 else " Subtitles"),
     # Only a badge when there's actually more than one version (a single copy is the norm).
     "versions": lambda v: None if (_num(v) is None or int(v) <= 1) else str(v) + " Versions",
