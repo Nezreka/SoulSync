@@ -178,7 +178,9 @@
     }
 
     .page {
-        padding: 70px 20px 20px 20px;
+        /* Bottom padding clears the fixed floating search bar / FAB buttons
+           (~50px band) so the last row of content stays visible & tappable. */
+        padding: 70px 20px 72px 20px;
         height: auto;
         min-height: 0;
         overflow: visible;
@@ -1887,7 +1889,7 @@
 
     /* Spacing reductions */
     .page {
-        padding: 70px 16px 16px 16px;
+        padding: 70px 16px 72px 16px;
     }
 
     .activity-section {
@@ -1979,7 +1981,7 @@
 @media (max-width: 480px) {
 
     .page {
-        padding: 70px 12px 12px 12px;
+        padding: 70px 12px 72px 12px;
     }
 
     .stats-grid-dashboard {
