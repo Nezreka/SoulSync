@@ -390,7 +390,10 @@ class PlexVideoSource:
 
     def iter_movies(self, incremental=False):
         for section in self._scan_sections("movie", self._movies_lib):
-            items = section.search(sort="addedAt:desc", maxresults=100) if incremental else section.all()
+            # Incremental sorts by updatedAt (bumps on a re-match / metadata edit), NOT
+            # addedAt (the original add-date, which never moves) — so a movie you
+            # re-matched in Plex actually surfaces and its corrected title propagates.
+            items = section.search(sort="updatedAt:desc", maxresults=100) if incremental else section.all()
             for m in items:
                 try:
                     yield self._movie(m)
@@ -854,6 +857,10 @@ class JellyfinVideoSource:
             params = {"ParentId": view["Id"], "IncludeItemTypes": "Movie",
                       "Recursive": "true", "Fields": _JF_MOVIE_FIELDS}
             if incremental:
+                # NOTE: Jellyfin has no reliable "metadata last-modified" sort, so a
+                # re-match on an OLD movie won't surface here (unlike Plex's updatedAt) —
+                # a deep scan catches it. The scanner still re-upserts anything in this
+                # window, so recently-added items reconcile correctly.
                 params.update({"SortBy": "DateCreated", "SortOrder": "Descending", "Limit": "100"})
                 items = (self._req(path, params) or {}).get("Items", [])
             else:
