@@ -14,7 +14,7 @@ from database.video_database import VideoDatabase
 from core.video.enrichment.backfill import (
     RydWorker, SponsorBlockWorker, FanartWorker, OpenSubtitlesWorker, TraktWorker, TVmazeWorker,
     AniListWorker, DeArrowWorker, WikidataWorker, TmdbStreamingWorker, TmdbStingerWorker,
-    VideoBackfillWorker, _RateLimited, _Unauthorized, build_backfill_workers,
+    OmdbAwardsWorker, VideoBackfillWorker, _RateLimited, _Unauthorized, build_backfill_workers,
 )
 
 
@@ -181,7 +181,33 @@ def test_get_stats_shape_matches_matcher_worker(db):
 def test_build_backfill_workers_set(db):
     assert set(build_backfill_workers(db)) == {
         "ryd", "sponsorblock", "fanart", "opensubtitles",
-        "trakt", "tvmaze", "anilist", "dearrow", "wikidata", "streaming", "mediastinger"}
+        "trakt", "tvmaze", "anilist", "dearrow", "wikidata", "streaming", "mediastinger", "awards"}
+
+
+# ── Awards (OMDb Awards string → oscar/winner flag) ──────────────────────────
+def test_awards_fetch_classifies_oscar_and_winner(db, monkeypatch):
+    import core.video.enrichment.backfill as bf
+    db.set_setting("omdb_api_key", "KEY")
+    w = OmdbAwardsWorker(db)
+    monkeypatch.setattr(bf, "_http_get_json", lambda *a, **k: {"Response": "True", "Awards": "Won 3 Oscars. Another 30 wins & 60 nominations."})
+    assert w.fetch({"kind": "movie", "imdb_id": "tt0111161"}) == {"awards": "oscar"}
+    monkeypatch.setattr(bf, "_http_get_json", lambda *a, **k: {"Response": "True", "Awards": "12 wins & 20 nominations."})
+    assert w.fetch({"kind": "movie", "imdb_id": "tt1"}) == {"awards": "winner"}
+    monkeypatch.setattr(bf, "_http_get_json", lambda *a, **k: {"Response": "True", "Awards": "Nominated for 2 Golden Globes."})
+    assert w.fetch({"kind": "movie", "imdb_id": "tt2"}) is None   # nominations only
+    monkeypatch.setattr(bf, "_http_get_json", lambda *a, **k: {"Response": "True", "Awards": "N/A"})
+    assert w.fetch({"kind": "movie", "imdb_id": "tt3"}) is None
+
+
+def test_awards_key_gated_and_queued_on_imdb(db):
+    assert OmdbAwardsWorker(db).enabled is False
+    db.set_setting("omdb_api_key", "KEY")
+    assert OmdbAwardsWorker(db).enabled is True
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "Shawshank"})
+    assert db.backfill_next("awards") is None
+    with db.connect() as c:
+        c.execute("UPDATE movies SET imdb_id='tt0111161' WHERE id=?", (mid,)); c.commit()
+    assert db.backfill_next("awards")["kind"] == "movie"
 
 
 # ── Streaming (TMDB watch providers → primary service) ────────────────────────

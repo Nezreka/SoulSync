@@ -924,10 +924,71 @@ class TmdbStingerWorker(VideoBackfillWorker):
         return self.db.backfill_breakdown("mediastinger")
 
 
+class OmdbAwardsWorker(VideoBackfillWorker):
+    """OMDb 'Awards' string → an award flag ('oscar' for an Oscar win, else
+    'winner' for any win) for the Awards overlay badge. Keyed by imdb id."""
+    BASE = "https://www.omdbapi.com/"
+    requires_key = True
+
+    def __init__(self, db):
+        super().__init__(db, "awards", "Awards", interval=1.0)
+
+    def _key(self):
+        return (self.db.get_setting("omdb_api_key") or "").strip()
+
+    def _enabled(self):
+        return bool(self._key())
+
+    def test(self):
+        if not self._key():
+            return (False, "No OMDb API key")
+        try:
+            j = _http_get_json(self.BASE, {"i": "tt0111161", "apikey": self._key()})
+            ok = isinstance(j, dict) and j.get("Response") == "True"
+            return (ok, "OMDb key OK" if ok else (str((j or {}).get("Error")) or "No response"))
+        except _Unauthorized:
+            return (False, "OMDb rejected the API key")
+        except Exception as e:
+            return (False, str(e))
+
+    def next_item(self):
+        return self.db.backfill_next("awards")
+
+    def fetch(self, item):
+        key = self._key()
+        imdb = str(item.get("imdb_id") or "").strip()
+        if not key or not imdb.lower().startswith("tt"):
+            return None
+        j = _http_get_json(self.BASE, {"i": imdb, "apikey": key})
+        if not isinstance(j, dict) or j.get("Response") != "True":
+            return None
+        aw = str(j.get("Awards") or "").strip().lower()
+        if not aw or aw == "n/a":
+            return None
+        import re
+        if re.search(r"won\s+\d+\s+oscar", aw):
+            return {"awards": "oscar"}
+        if "won" in aw or "wins" in aw:
+            return {"awards": "winner"}
+        return None   # only nominations → not a "winner" badge
+
+    def record_ok(self, item, data):
+        self.db.backfill_mark("awards", item["kind"], item["id"], "ok", columns=data)
+
+    def record_empty(self, item):
+        self.db.backfill_mark("awards", item["kind"], item["id"], "not_found")
+
+    def record_error(self, item):
+        self.db.backfill_mark("awards", item["kind"], item["id"], "error")
+
+    def breakdown(self):
+        return self.db.backfill_breakdown("awards")
+
+
 def build_backfill_workers(db) -> dict:
     """All backfill workers, keyed by service id, for the engine registry."""
     return {w.service: w for w in (
         RydWorker(db), SponsorBlockWorker(db), FanartWorker(db), OpenSubtitlesWorker(db),
         TraktWorker(db), TVmazeWorker(db), AniListWorker(db), DeArrowWorker(db),
-        WikidataWorker(db), TmdbStreamingWorker(db), TmdbStingerWorker(db),
+        WikidataWorker(db), TmdbStreamingWorker(db), TmdbStingerWorker(db), OmdbAwardsWorker(db),
     )}
