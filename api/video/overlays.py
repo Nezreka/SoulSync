@@ -157,7 +157,7 @@ def register_routes(bp):
         data = request.get_json(silent=True) or {}
         scope = data.get("scope") or "both"
         scopes = ["movie", "show"] if scope == "both" else [scope]
-        scopes = [s for s in scopes if s in ("movie", "show")]
+        scopes = [s for s in scopes if s in ("movie", "show", "season", "episode")]
         if not scopes:
             return jsonify({"ok": False, "error": "bad scope"}), 400
         started = service.start(get_video_db(), scopes, force=bool(data.get("force")),
@@ -251,8 +251,8 @@ def register_routes(bp):
         """Real badge values for a library item — the editor's "load from a real
         title" so dynamic badges preview against actual data."""
         from . import get_video_db
-        if kind not in ("movie", "show"):
-            return jsonify({"error": "kind must be 'movie' or 'show'"}), 400
+        if kind not in ("movie", "show", "season", "episode"):
+            return jsonify({"error": "kind must be movie, show, season, or episode"}), 400
         data = get_video_db().overlay_sample_data(kind, item_id)
         if data is None:
             return jsonify({"error": "Not found"}), 404

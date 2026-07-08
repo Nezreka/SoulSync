@@ -2366,11 +2366,23 @@ class VideoDatabase:
     def poster_set_target(self, kind: str, item_id: int) -> dict | None:
         """Server id + on-disk folder for a movie/show, so a new poster can be pushed
         to the media server and (best-effort) written into the item's folder."""
-        table = {"movie": "movies", "show": "shows"}.get(str(kind).lower())
-        if not table:
-            return None
+        kind = str(kind).lower()
         conn = self._get_connection()
         try:
+            if kind == "season":
+                row = conn.execute(
+                    "SELECT sh.server_source, se.server_id, NULL AS path "
+                    "FROM seasons se JOIN shows sh ON sh.id = se.show_id WHERE se.id=?",
+                    (int(item_id),)).fetchone()
+                return dict(row) if row else None
+            if kind == "episode":
+                row = conn.execute(
+                    "SELECT server_source, server_id, NULL AS path FROM episodes WHERE id=?",
+                    (int(item_id),)).fetchone()
+                return dict(row) if row else None
+            table = {"movie": "movies", "show": "shows"}.get(kind)
+            if not table:
+                return None
             row = conn.execute(
                 f"SELECT server_source, server_id, path FROM {table} WHERE id=?",
                 (int(item_id),)).fetchone()
@@ -2514,6 +2526,8 @@ class VideoDatabase:
         source for the overlay editor's sample data. Raw values (e.g. resolution
         '2160p', ratings as numbers); the editor formats them for display."""
         kind = str(kind).lower()
+        if kind in ("season", "episode"):
+            return self._overlay_sample_sub(kind, item_id)
         table = {"movie": "movies", "show": "shows"}.get(kind)
         if not table:
             return None
@@ -2550,6 +2564,7 @@ class VideoDatabase:
                 "resolution": None, "video_codec": None, "audio_codec": None, "source": None,
                 "aspect": None,
                 "season_count": None, "episode_count": None, "versions": None,
+                "season_number": None, "episode_number": None, "episode_code": None,
             }
             # ALL of the item's genres, comma-joined — a Genre badge shows the
             # primary (first) one, while a "genre includes X" condition can match
@@ -2599,6 +2614,88 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    @staticmethod
+    def _empty_overlay_values() -> dict:
+        """Full badge-value key set (all None) so a season/episode payload has the
+        same shape as movie/show — the editor + compositor use .get(), but keeping
+        parity avoids surprises."""
+        return {k: None for k in (
+            "title", "year", "runtime", "status", "content_rating",
+            "tmdb", "imdb", "rt", "metacritic", "trakt", "tvmaze", "anilist",
+            "streaming", "collection", "tagline", "mediastinger", "awards",
+            "studio", "network", "logo_url", "subtitles",
+            "resolution", "video_codec", "audio_codec", "source", "aspect",
+            "season_count", "episode_count", "versions", "genre",
+            "season_number", "episode_number", "episode_code",
+            "has_poster", "has_backdrop")}
+
+    def _overlay_sample_sub(self, kind: str, item_id: int) -> dict | None:
+        """Badge values for a season or episode (the sub-item overlay scopes). A
+        season inherits the show's content_rating/network; an episode adds its own
+        number/code/air-year/rating and quality badges from its owned file."""
+        conn = self._get_connection()
+        try:
+            if kind == "season":
+                row = conn.execute(
+                    "SELECT se.title, se.season_number, sh.title AS show_title, "
+                    "sh.content_rating, sh.network, sh.year, "
+                    "(SELECT COUNT(*) FROM episodes e WHERE e.season_id = se.id) AS episode_count, "
+                    "(se.poster_url IS NOT NULL AND se.poster_url <> '') AS has_poster "
+                    "FROM seasons se JOIN shows sh ON sh.id = se.show_id WHERE se.id=?",
+                    (int(item_id),)).fetchone()
+                if not row:
+                    return None
+                d = dict(row)
+                out = self._empty_overlay_values()
+                out.update({
+                    "title": d.get("show_title"),
+                    "season_number": d.get("season_number"),
+                    "episode_count": d.get("episode_count") or None,
+                    "content_rating": d.get("content_rating"),
+                    "network": d.get("network"), "year": d.get("year"),
+                    "has_poster": bool(d.get("has_poster")),
+                })
+                return out
+            # episode
+            row = conn.execute(
+                "SELECT e.title, e.season_number, e.episode_number, e.air_date, "
+                "e.runtime_minutes, e.rating, sh.title AS show_title, sh.content_rating, sh.network, "
+                "(e.still_url IS NOT NULL AND e.still_url <> '') AS has_poster "
+                "FROM episodes e JOIN shows sh ON sh.id = e.show_id WHERE e.id=?",
+                (int(item_id),)).fetchone()
+            if not row:
+                return None
+            d = dict(row)
+            sn, en = d.get("season_number"), d.get("episode_number")
+            code = ("S%dE%d" % (int(sn), int(en))) if sn is not None and en is not None else None
+            ad = str(d.get("air_date") or "")
+            year = int(ad[:4]) if len(ad) >= 4 and ad[:4].isdigit() else None
+            mf = conn.execute(
+                "SELECT resolution, video_codec, audio_codec, release_source, aspect "
+                "FROM media_files WHERE episode_id=? ORDER BY size_bytes DESC LIMIT 1",
+                (int(item_id),)).fetchone()
+            out = self._empty_overlay_values()
+            out.update({
+                "title": d.get("title"),
+                "season_number": sn, "episode_number": en, "episode_code": code,
+                "runtime": d.get("runtime_minutes"), "tmdb": d.get("rating"),
+                "content_rating": d.get("content_rating"), "network": d.get("network"),
+                "year": year, "has_poster": bool(d.get("has_poster")),
+            })
+            if mf:
+                m = dict(mf)
+                out["resolution"] = m.get("resolution")
+                out["video_codec"] = m.get("video_codec")
+                out["audio_codec"] = m.get("audio_codec")
+                out["source"] = m.get("release_source")
+                out["aspect"] = m.get("aspect")
+            return out
+        except (sqlite3.Error, ValueError, TypeError):
+            logger.exception("overlay_sample_data (sub) failed for %s %s", kind, item_id)
+            return None
+        finally:
+            conn.close()
+
     # ── overlay apply: assignment (template → scope) + ledger ─────────────────
     def get_overlay_assignments(self) -> dict:
         """{'movie': {template_id, enabled, template_name}, 'show': {...}} — which
@@ -2618,7 +2715,7 @@ class VideoDatabase:
             conn.close()
 
     def set_overlay_assignment(self, scope: str, template_id, enabled: bool) -> bool:
-        if scope not in ("movie", "show"):
+        if scope not in ("movie", "show", "season", "episode"):
             return False
         conn = self._get_connection()
         try:
@@ -2674,17 +2771,49 @@ class VideoDatabase:
 
     def overlay_scope_items(self, scope: str, server_source=None) -> list:
         """[{id, title}] for every on-server item in a scope — the apply targets
-        (only items with a server_id can receive a pushed poster)."""
-        table = {"movie": "movies", "show": "shows"}.get(scope)
-        if not table:
-            return []
-        where = ["server_id IS NOT NULL", "server_id <> ''"]
-        params = []
-        if server_source:
-            where.append("server_source = ?")
-            params.append(server_source)
+        (only items with a server_id can receive a pushed poster). Seasons/episodes
+        inherit their show's server_source (seasons don't store one)."""
+        scope = str(scope).lower()
         conn = self._get_connection()
         try:
+            if scope == "season":
+                where = ["se.server_id IS NOT NULL", "se.server_id <> ''"]
+                params = []
+                if server_source:
+                    where.append("sh.server_source = ?")
+                    params.append(server_source)
+                rows = conn.execute(
+                    "SELECT se.id AS id, "
+                    "COALESCE(sh.title,'') || ' — ' "
+                    "|| COALESCE(NULLIF(se.title,''), 'Season ' || se.season_number) AS title "
+                    "FROM seasons se JOIN shows sh ON sh.id = se.show_id "
+                    f"WHERE {' AND '.join(where)} "
+                    "ORDER BY COALESCE(sh.sort_title, sh.title) COLLATE NOCASE, se.season_number",
+                    params).fetchall()
+                return [dict(r) for r in rows]
+            if scope == "episode":
+                where = ["e.server_id IS NOT NULL", "e.server_id <> ''"]
+                params = []
+                if server_source:
+                    where.append("e.server_source = ?")
+                    params.append(server_source)
+                rows = conn.execute(
+                    "SELECT e.id AS id, "
+                    "COALESCE(sh.title,'') || ' — S' || e.season_number || 'E' || e.episode_number "
+                    "|| CASE WHEN e.title IS NOT NULL AND e.title <> '' THEN ' ' || e.title ELSE '' END AS title "
+                    "FROM episodes e JOIN shows sh ON sh.id = e.show_id "
+                    f"WHERE {' AND '.join(where)} "
+                    "ORDER BY COALESCE(sh.sort_title, sh.title) COLLATE NOCASE, e.season_number, e.episode_number",
+                    params).fetchall()
+                return [dict(r) for r in rows]
+            table = {"movie": "movies", "show": "shows"}.get(scope)
+            if not table:
+                return []
+            where = ["server_id IS NOT NULL", "server_id <> ''"]
+            params = []
+            if server_source:
+                where.append("server_source = ?")
+                params.append(server_source)
             rows = conn.execute(
                 f"SELECT id, title FROM {table} WHERE {' AND '.join(where)} "
                 f"ORDER BY COALESCE(sort_title, title) COLLATE NOCASE", params).fetchall()

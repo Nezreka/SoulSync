@@ -178,3 +178,70 @@ def test_overlay_sample_data_show_counts_and_best_res(db):
     assert s["title"] == "Show" and s["network"] == "HBO"
     assert s["season_count"] == 1 and s["episode_count"] == 2
     assert s["resolution"] == "2160p"          # best across the show's episode files
+
+
+# ── season/episode overlay scopes (sub-item overlays) ─────────────────────────
+def _show_with_sub(db):
+    """A show whose season + episodes carry server_ids (poster-push targets)."""
+    sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "Show", "network": "HBO",
+                                       "content_rating": "TV-MA", "year": 2019, "seasons": [
+        {"season_number": 1, "episodes": [
+            {"server_id": "e1", "episode_number": 1, "title": "Pilot", "air_date": "2019-04-14",
+             "runtime_minutes": 58, "rating": 8.2,
+             "file": {"relative_path": "a.mkv", "size_bytes": 9, "resolution": "2160p",
+                      "video_codec": "hevc", "audio_codec": "atmos", "release_source": "bluray"}},
+            {"server_id": "e2", "episode_number": 2, "title": "Next", "air_date": "2019-04-21"}]}]})
+    with db.connect() as c:
+        c.execute("UPDATE seasons SET server_id='se1' WHERE show_id=? AND season_number=1", (sid,))
+        c.commit()
+    return sid
+
+
+def test_overlay_scope_items_season_and_episode(db):
+    _show_with_sub(db)
+    seasons = db.overlay_scope_items("season")
+    assert len(seasons) == 1 and "Show" in seasons[0]["title"] and "Season 1" in seasons[0]["title"]
+    eps = db.overlay_scope_items("episode")
+    assert len(eps) == 2                                   # both episodes carry a server_id
+    assert "S1E1" in eps[0]["title"] and "Pilot" in eps[0]["title"]
+    assert db.overlay_scope_items("bogus") == []
+
+
+def test_overlay_sample_data_season(db):
+    _show_with_sub(db)
+    sea = db.overlay_scope_items("season")[0]
+    s = db.overlay_sample_data("season", sea["id"])
+    assert s["title"] == "Show" and s["network"] == "HBO" and s["content_rating"] == "TV-MA"
+    assert s["season_number"] == 1 and s["episode_count"] == 2
+    from core.video.overlays.fields import format_field
+    assert format_field("season_number", s["season_number"]) == "Season 1"
+
+
+def test_overlay_sample_data_episode(db):
+    _show_with_sub(db)
+    e1 = [e for e in db.overlay_scope_items("episode") if "S1E1" in e["title"]][0]
+    s = db.overlay_sample_data("episode", e1["id"])
+    assert s["title"] == "Pilot" and s["season_number"] == 1 and s["episode_number"] == 1
+    assert s["episode_code"] == "S1E1" and s["year"] == 2019 and s["runtime"] == 58
+    assert s["tmdb"] == 8.2                                # episode rating drives the rating badge
+    assert s["resolution"] == "2160p" and s["audio_codec"] == "atmos"   # from the owned file
+    from core.video.overlays.fields import format_field
+    assert format_field("episode_code", s["episode_code"]) == "S1E1"
+    assert format_field("episode_number", s["episode_number"]) == "Episode 1"
+
+
+def test_poster_set_target_and_assignment_for_sub_scopes(db):
+    _show_with_sub(db)
+    sea = db.overlay_scope_items("season")[0]
+    ep = db.overlay_scope_items("episode")[0]
+    st = db.poster_set_target("season", sea["id"])
+    assert st["server_source"] == "plex" and st["server_id"] == "se1"   # inherits show's source
+    et = db.poster_set_target("episode", ep["id"])
+    assert et["server_source"] == "plex" and et["server_id"] in ("e1", "e2")
+    # assignment now accepts the sub scopes (and still rejects junk)
+    tid = db.create_overlay_template("Ep badge", definition=_scene("S1E1"))
+    assert db.set_overlay_assignment("season", tid, True) is True
+    assert db.set_overlay_assignment("episode", tid, True) is True
+    assert db.set_overlay_assignment("bogus", tid, True) is False
+    a = db.get_overlay_assignments()
+    assert a["episode"]["template_id"] == tid and a["episode"]["enabled"] is True
