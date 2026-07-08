@@ -2013,7 +2013,10 @@ function getProfilePageAccessOptions(profileSettings = {}) {
             if (seen.has(cb.value)) return;
             options.push({
                 value: cb.value,
-                label: cb.parentElement?.textContent?.trim() || getProfilePageLabel(cb.value),
+                // Use the canonical label (keeps the 'Video · …' prefix) so the edit
+                // form's FLAT list stays unambiguous; the create modal groups them
+                // under Music/Video dividers with plain labels instead.
+                label: getProfilePageLabel(cb.value),
                 checked: cb.disabled ? true : (allowedSet ? allowedSet.has(cb.value) : true),
                 disabled: cb.disabled,
             });
