@@ -38,6 +38,8 @@
         'video_clean_youtube_episodes',
         // Library scan / sync
         'video_scan_server', 'video_update_database', 'video_update_database_hourly', 'video_deep_scan_tv', 'video_deep_scan_movies',
+        // Presentation
+        'video_apply_overlays',
         // Maintenance
         'video_clean_search_history', 'video_clean_completed_downloads', 'video_full_cleanup', 'video_backup_database',
     ];
@@ -65,6 +67,28 @@
         var section = window._buildAutomationSection('vauto-section-system', 'System', sys, true, { isProtected: true });
         if (existing) host.replaceChild(section, existing);
         else host.insertBefore(section, host.firstChild);
+        _injectOverlayConfig(section);
+    }
+
+    // The overlay automation's behaviour is driven by the per-scope overlay
+    // settings (which template per movie/show/season/episode). Surface a Configure
+    // button right on its card that opens that settings editor — the same modal
+    // the Studio uses, one source of truth. Re-injected on every section rebuild.
+    function _injectOverlayConfig(section) {
+        var card = section && section.querySelector('.automation-card[data-action-type="video_apply_overlays"]');
+        if (!card || card.querySelector('[data-vauto-overlay-cfg]')) return;
+        var actions = card.querySelector('.automation-actions');
+        if (!actions) return;
+        var btn = document.createElement('button');
+        btn.className = 'automation-edit-btn';
+        btn.setAttribute('data-vauto-overlay-cfg', '');
+        btn.title = 'Configure overlays (which template per movie / show / season / episode)';
+        btn.innerHTML = '🎨';   // 🎨
+        btn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            if (window.VideoOverlayEditor && window.VideoOverlayEditor.openSettings) window.VideoOverlayEditor.openSettings();
+        });
+        actions.insertBefore(btn, actions.firstChild);
     }
 
     // The hub's built-in tabs are MUSIC content (playlist pipelines, music recipes,
