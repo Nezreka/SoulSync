@@ -280,6 +280,37 @@ def start(db, scopes, *, force=False, remove=False, reset=False) -> bool:
     return True
 
 
+def apply_scopes_sync(db, scopes, *, force=False, on_progress=None) -> dict:
+    """Apply overlays over the given scopes SYNCHRONOUSLY (for the daily automation),
+    sharing the singleton job lock so it can never overlap a manual run. The applier
+    skips items whose template + base art + consumed values are unchanged since the
+    last run, so a nightly pass only re-renders what actually changed. Returns
+    {ok, total, applied, skipped, failed} (ok False if a run is already in progress)."""
+    with _lock:
+        if _JOB["running"]:
+            return {"ok": False, "error": "an overlay run is already in progress"}
+        _reset("apply")
+    try:
+        svc = OverlayApplyService(db)
+        jobs = svc.build_jobs(scopes, force=force)   # build_jobs already drops disabled/unassigned scopes
+        _JOB.update(total=len(jobs), phase="running")
+
+        def _prog(p):
+            _JOB.update(p)
+            if on_progress:
+                on_progress(p)
+
+        res = run_apply(svc.applier(), jobs, on_progress=_prog)
+        _JOB["phase"] = "done"
+        return {"ok": True, **res}
+    except Exception as e:
+        logger.exception("overlay apply (sync) failed")
+        _JOB.update(phase="error", error=str(e))
+        return {"ok": False, "error": str(e)}
+    finally:
+        _JOB["running"] = False
+
+
 def _run(db, scopes, force, remove, reset=False):
     try:
         svc = OverlayApplyService(db)
