@@ -142,31 +142,51 @@
 
 /* left: palette */
 .voe-palette {
-    flex: 0 0 232px; overflow-y: auto; padding: 16px 14px;
-    background: #101015; border-right: 1px solid rgba(255,255,255,.07);
+    flex: 0 0 236px; overflow-y: auto; overflow-x: hidden; padding: 16px 14px 26px;
+    background: linear-gradient(180deg, #121218, #0e0e13);
+    border-right: 1px solid rgba(255,255,255,.07);
 }
-.voe-pal-section { margin-bottom: 22px; }
+.voe-pal-section { margin-bottom: 20px; }
+.voe-pal-section:last-child { margin-bottom: 2px; }
 .voe-pal-h {
-    font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .07em;
-    color: rgba(255,255,255,.4); padding: 0 6px; margin-bottom: 9px;
+    display: flex; align-items: center; gap: 7px;
+    font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .085em;
+    color: rgba(255,255,255,.44); padding: 0 3px; margin-bottom: 10px;
 }
-.voe-pal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.voe-pal-n {
+    min-width: 16px; height: 15px; padding: 0 5px; border-radius: 999px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 9.5px; font-weight: 700; letter-spacing: 0;
+    background: rgba(255,255,255,.07); color: rgba(255,255,255,.42);
+}
+/* tool cards — icon actions (Basics / Artwork / Shapes) */
+.voe-pal-tools { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 7px; }
 .voe-pal-item {
-    display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 13px 8px;
+    display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 12px 6px; min-width: 0;
     border-radius: 11px; cursor: grab; text-align: center;
-    background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
-    transition: all .14s ease; user-select: none;
+    background: rgba(255,255,255,.035); border: 1px solid rgba(255,255,255,.07);
+    transition: transform .14s ease, background .14s ease, border-color .14s ease; user-select: none;
 }
-.voe-pal-item:hover { background: rgba(var(--a),.12); border-color: rgba(var(--a),.4); transform: translateY(-2px); }
-.voe-pal-item:active { cursor: grabbing; }
+.voe-pal-item:hover { background: rgba(var(--a),.13); border-color: rgba(var(--a),.42); transform: translateY(-2px); }
+.voe-pal-item:active { cursor: grabbing; transform: translateY(0); }
 .voe-pal-item.voe-dragging { opacity: .5; }
-.voe-pal-ic { width: 22px; height: 22px; display: grid; place-items: center; color: rgba(255,255,255,.85); }
+.voe-pal-ic { width: 24px; height: 24px; display: grid; place-items: center; color: rgba(255,255,255,.82); }
 .voe-pal-ic svg { width: 20px; height: 20px; }
-.voe-pal-label { font-size: 11px; font-weight: 600; color: rgba(255,255,255,.7); line-height: 1.2; }
-.voe-pal-chip { display: inline-flex; align-items: center; min-height: 22px; padding: 2px 8px; border-radius: 6px;
-    font-size: 10.5px; font-weight: 800; letter-spacing: .02em; color: #fff;
-    background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.16); max-width: 100%;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.voe-pal-label { font-size: 10.5px; font-weight: 600; color: rgba(255,255,255,.62); line-height: 1.2;
+    max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* data-badge chips — live WYSIWYG previews that wrap to fit (Quality / Ratings / …) */
+.voe-pal-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.voe-pal-tag {
+    display: inline-flex; align-items: center; max-width: 100%; min-width: 0;
+    padding: 5px 9px; border-radius: 8px; cursor: grab; user-select: none;
+    background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1);
+    transition: transform .14s ease, background .14s ease, border-color .14s ease;
+}
+.voe-pal-tag:hover { background: rgba(var(--a),.16); border-color: rgba(var(--a),.5); transform: translateY(-1px); }
+.voe-pal-tag:active { cursor: grabbing; transform: translateY(0); }
+.voe-pal-tag.voe-dragging { opacity: .5; }
+.voe-pal-tag-v { font-size: 11px; font-weight: 700; letter-spacing: .01em; color: rgba(255,255,255,.9);
+    max-width: 172px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* center: stage */
 .voe-canvas-wrap {
@@ -454,8 +474,6 @@ select.voe-input option { background: #17171d; }
 .voe-data-preview { display: inline-block; padding: 4px 10px; border-radius: 7px; font-size: 12px; font-weight: 700;
     background: rgba(var(--a),.16); color: #fff; border: 1px solid rgba(var(--a),.34); }
 
-.voe-pal-item[data-voe-add="badge"] .voe-pal-ic { color: rgb(var(--a)); }
-
 /* ── little confirm dialog (delete) ──────────────────────────────────────── */
 .voe-confirm-back {
     position: fixed; inset: 0; z-index: 9400; display: grid; place-items: center;
@@ -546,8 +564,8 @@ select.voe-input option { background: #17171d; }
 }
 
 @media (max-width: 900px) {
-    .voe-palette { flex-basis: 88px; }
-    .voe-pal-grid { grid-template-columns: 1fr; }
-    .voe-pal-label { display: none; }
+    .voe-palette { flex-basis: 150px; padding: 14px 10px 22px; }
+    .voe-pal-label { display: none; }              /* tool cards go icon-only */
+    .voe-pal-tag-v { max-width: 116px; }
     .voe-side { flex-basis: 210px; }
 }
