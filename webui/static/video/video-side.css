@@ -84,6 +84,22 @@ body[data-side="video"] .side-toggle-thumb {
 }
 /* Overlay Studio (poster builder) is admin-only — hide its launcher for non-admins. */
 body:not(.video-admin) [data-video-overlay-studio] { display: none !important; }
+
+/* Dashboard "Recently Added" tiles (replaces the old Service Status card). */
+.video-recent-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(94px, 1fr)); gap: 14px; }
+.video-recent-item { display: block; text-decoration: none; color: inherit; min-width: 0; }
+.video-recent-poster { aspect-ratio: 2 / 3; border-radius: 9px; overflow: hidden; position: relative;
+    background: rgba(255, 255, 255, .05); border: 1px solid rgba(255, 255, 255, .08);
+    transition: transform .14s ease, border-color .14s ease; }
+.video-recent-item:hover .video-recent-poster { transform: translateY(-3px); border-color: rgba(56, 189, 248, .55); }
+.video-recent-poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.video-recent-poster.is-empty { display: grid; }
+.video-recent-poster.is-empty img { display: none; }
+.video-recent-poster.is-empty::after { content: "\1F3AC"; place-self: center; font-size: 22px; opacity: .3; }
+.video-recent-title { font-size: 12px; font-weight: 600; color: rgba(255, 255, 255, .85); margin-top: 7px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.video-recent-year { font-size: 11px; color: rgba(255, 255, 255, .4); margin-top: 1px; }
+.video-recent-empty { grid-column: 1 / -1; padding: 24px 8px; text-align: center; font-size: 13px; color: rgba(255, 255, 255, .4); }
 body[data-side="video"] nav.sidebar-nav:not(.video-nav) {
     display: none;
 }

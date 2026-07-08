@@ -20,8 +20,10 @@ def register_routes(bp):
         from core.video.sources import resolve_video_server
         try:
             server = resolve_video_server()                 # the VIDEO server, not music's active
-            stats = get_video_db().dashboard_stats(server_source=server)
+            db = get_video_db()
+            stats = db.dashboard_stats(server_source=server)
             stats["server"] = server
+            stats["recent"] = db.recently_added(server_source=server, limit=12)
             return jsonify(stats)
         except Exception:
             logger.exception("Failed to build video dashboard stats")

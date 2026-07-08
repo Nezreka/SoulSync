@@ -512,8 +512,8 @@
                     <div class="page-shell dashboard-container">
                         <div class="dashboard-header"><div class="dashboard-header-sweep" aria-hidden="true"><span></span></div>
                             <div class="header-text">
-                                <h2 class="header-title"><img src="/static/dashboard.png" class="page-header-icon" alt=""><span>System Dashboard</span></h2>
-                                <p class="header-subtitle">Monitor your video library, downloads and services</p>
+                                <h2 class="header-title"><img src="/static/dashboard.png" class="page-header-icon" alt=""><span>Video Dashboard</span></h2>
+                                <p class="header-subtitle">Monitor your video library and downloads</p>
                             </div>
                             <!-- Video enrichment-worker buttons (isolated; poll
                                  /api/video/enrichment, wired by video-enrichment.js).
@@ -754,47 +754,15 @@
                         </div>
                         <div class="dash-grid">
 
-                            <!-- Service Status -->
-                            <article class="dash-card" data-card="services">
+                            <!-- Recently Added -->
+                            <article class="dash-card" data-card="recent">
                                 <header class="dash-card__head">
-                                    <h3 class="dash-card__title">Service Status</h3>
-                                    <p class="dash-card__sub">Connection health for the video services.</p>
+                                    <h3 class="dash-card__title">Recently Added</h3>
+                                    <p class="dash-card__sub">The newest movies &amp; shows in your library.</p>
                                 </header>
                                 <div class="dash-card__body">
-                                    <div class="service-status-grid">
-                                        <div class="service-card" data-status-ready="false">
-                                            <div class="service-card-header">
-                                                <span class="service-card-title">Media Server</span>
-                                                <span class="service-card-indicator disconnected">&#9679;</span>
-                                            </div>
-                                            <p class="service-card-status-text">Not configured</p>
-                                            <p class="service-card-response-time">Response: --</p>
-                                            <div class="service-card-footer">
-                                                <button class="service-card-button" type="button" data-video-test="media-server">Test</button>
-                                            </div>
-                                        </div>
-                                        <div class="service-card" data-status-ready="false">
-                                            <div class="service-card-header">
-                                                <span class="service-card-title">Download Client</span>
-                                                <span class="service-card-indicator disconnected">&#9679;</span>
-                                            </div>
-                                            <p class="service-card-status-text">Not configured</p>
-                                            <p class="service-card-response-time">Response: --</p>
-                                            <div class="service-card-footer">
-                                                <button class="service-card-button" type="button" data-video-test="download-client">Test</button>
-                                            </div>
-                                        </div>
-                                        <div class="service-card" data-status-ready="false">
-                                            <div class="service-card-header">
-                                                <span class="service-card-title">Metadata Source</span>
-                                                <span class="service-card-indicator disconnected">&#9679;</span>
-                                            </div>
-                                            <p class="service-card-status-text">Not configured</p>
-                                            <p class="service-card-response-time">Response: --</p>
-                                            <div class="service-card-footer">
-                                                <button class="service-card-button" type="button" data-video-test="metadata-source">Test</button>
-                                            </div>
-                                        </div>
+                                    <div class="video-recent-grid" data-video-recent>
+                                        <div class="video-recent-empty">Loading…</div>
                                     </div>
                                 </div>
                             </article>
