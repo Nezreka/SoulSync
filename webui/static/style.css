@@ -56807,17 +56807,28 @@ tr.tag-diff-same {
 /* The growing label pushes the control to a consistent right edge; the ⓘ rides
    immediately after the control as a pair so it can never shove it around. The
    help callout (flex-basis:100%) wraps to its own line below. */
+/* Shared control column — every control type sizes to one width so labels
+   sit left and controls line up in a tidy right-hand column (S1). */
 #settings-page .form-group > select,
-#settings-page .form-group > .form-select {
-    flex: 0 0 auto;
+#settings-page .form-group > .form-select,
+#settings-page .form-group > input[type="text"],
+#settings-page .form-group > input[type="password"],
+#settings-page .form-group > input[type="number"],
+#settings-page .form-group > input[type="url"] {
+    /* flex:none (not a fixed flex-basis) so the 260px comes from `width` on
+       the desktop row layout, while the mobile column layout — which flips
+       flex-direction and would otherwise read 260px as a *height* — falls
+       back to content height. */
+    flex: none;
+    width: 260px;
+    max-width: 260px;
+    box-sizing: border-box;
 }
 
 #settings-page .form-group > input[type="text"],
 #settings-page .form-group > input[type="password"],
 #settings-page .form-group > input[type="number"],
 #settings-page .form-group > input[type="url"] {
-    flex: 1;
-    max-width: 340px;
     padding: 9px 14px;
     background: rgba(255, 255, 255, 0.04);
     border: 1px solid rgba(255, 255, 255, 0.06);
@@ -56871,7 +56882,7 @@ tr.tag-diff-same {
     font-size: 0.88em;
     font-family: inherit;
     cursor: pointer;
-    min-width: 180px;
+    min-width: 0;
     margin: 0;
     transition: border-color 0.25s, background-color 0.25s, box-shadow 0.25s;
 }
@@ -57143,6 +57154,15 @@ tr.tag-diff-same {
 #settings-page .form-group > input[type="text"][id^="template-"] {
     flex: 1;
     max-width: 420px;
+}
+
+/* Inline hints (<small>/.settings-hint) wrap below the control instead of
+   stealing horizontal space and squeezing the input narrower (S1). */
+#settings-page .form-group > small,
+#settings-page .form-group > .settings-hint {
+    flex-basis: 100%;
+    width: 100%;
+    margin: 4px 0 0;
 }
 
 /* ── Setting help text — always wraps to its own line ── */
