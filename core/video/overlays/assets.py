@@ -128,6 +128,29 @@ class AssetStore:
     def has_logo_pack(self, pack: str) -> bool:
         return (self._logos_dir() / Path(str(pack)).name).is_dir()
 
+    def write_logo(self, pack: str, name: str, data: bytes, ext: str = "png") -> None:
+        """Write a logo into a pack folder (used by the Kometa pack installer).
+        basename-guarded; creates the pack folder on first write."""
+        safe_ext = Path(str(ext)).name.lstrip(".") or "png"
+        d = self._logos_dir() / Path(str(pack)).name
+        d.mkdir(parents=True, exist_ok=True)
+        (d / (Path(str(name)).name + "." + safe_ext)).write_bytes(data)
+
+    def logo_pack_counts(self) -> dict:
+        """{pack: file_count} across every installed logo pack — powers the
+        'is a pack installed?' gate and the per-field status in the UI."""
+        base = self._logos_dir()
+        if not base.is_dir():
+            return {}
+        out = {}
+        for d in base.iterdir():
+            if d.is_dir():
+                n = sum(1 for f in d.iterdir()
+                        if f.is_file() and f.suffix.lower() in (".png", ".webp", ".jpg", ".jpeg"))
+                if n:
+                    out[d.name] = n
+        return out
+
     # ── cached gallery thumbnails (rendered once, keyed by definition hash) ────
     def _thumbs_dir(self) -> Path:
         return self.root / "_thumbs"
