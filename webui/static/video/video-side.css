@@ -85,9 +85,12 @@ body[data-side="video"] .side-toggle-thumb {
 /* Overlay Studio (poster builder) is admin-only — hide its launcher for non-admins. */
 body:not(.video-admin) [data-video-overlay-studio] { display: none !important; }
 
-/* Dashboard "Recently Added" tiles (replaces the old Service Status card). */
-.video-recent-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(94px, 1fr)); gap: 14px; }
-.video-recent-item { display: block; text-decoration: none; color: inherit; min-width: 0; }
+/* Dashboard "Recently Added" — a single full-width, horizontally-scrolling row. */
+.dash-card[data-card="recent"] { grid-column: 1 / -1; }
+.video-recent-grid { display: flex; gap: 14px; overflow-x: auto; padding-bottom: 8px; scroll-snap-type: x proximity; }
+.video-recent-grid::-webkit-scrollbar { height: 6px; }
+.video-recent-grid::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, .12); border-radius: 3px; }
+.video-recent-item { flex: 0 0 96px; display: block; text-decoration: none; color: inherit; scroll-snap-align: start; }
 .video-recent-poster { aspect-ratio: 2 / 3; border-radius: 9px; overflow: hidden; position: relative;
     background: rgba(255, 255, 255, .05); border: 1px solid rgba(255, 255, 255, .08);
     transition: transform .14s ease, border-color .14s ease; }
@@ -99,7 +102,7 @@ body:not(.video-admin) [data-video-overlay-studio] { display: none !important; }
 .video-recent-title { font-size: 12px; font-weight: 600; color: rgba(255, 255, 255, .85); margin-top: 7px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .video-recent-year { font-size: 11px; color: rgba(255, 255, 255, .4); margin-top: 1px; }
-.video-recent-empty { grid-column: 1 / -1; padding: 24px 8px; text-align: center; font-size: 13px; color: rgba(255, 255, 255, .4); }
+.video-recent-empty { flex: 1; padding: 24px 8px; text-align: center; font-size: 13px; color: rgba(255, 255, 255, .4); }
 body[data-side="video"] nav.sidebar-nav:not(.video-nav) {
     display: none;
 }

@@ -23,7 +23,7 @@ def register_routes(bp):
             db = get_video_db()
             stats = db.dashboard_stats(server_source=server)
             stats["server"] = server
-            stats["recent"] = db.recently_added(server_source=server, limit=12)
+            stats["recent"] = db.recently_added(server_source=server, limit=20)
             return jsonify(stats)
         except Exception:
             logger.exception("Failed to build video dashboard stats")
