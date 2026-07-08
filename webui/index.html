@@ -2452,7 +2452,7 @@
                         </div>
                         <div class="automations-stats" id="automations-stats"></div>
                         <div class="auto-filter-bar" id="auto-filter-bar" style="display:none;">
-                            <input type="text" class="auto-filter-search" id="auto-filter-search" placeholder="Search automations...">
+                            <input type="text" class="auto-filter-search" id="auto-filter-search" placeholder="Filter automations…">
                             <select class="auto-filter-select" id="auto-filter-trigger"><option value="">All Triggers</option></select>
                             <select class="auto-filter-select" id="auto-filter-action"><option value="">All Actions</option></select>
                             <span class="auto-filter-count" id="auto-filter-count"></span>
@@ -2571,7 +2571,7 @@
                     <div class="library-controls">
                         <div class="library-search-container">
                             <input type="text" id="library-search-input" class="library-search-input"
-                                placeholder="Search artists...">
+                                placeholder="Filter your library…">
                             <div class="library-search-icon">🔍</div>
                         </div>
 
@@ -3450,7 +3450,7 @@
                         </div>
                         <div class="spotify-library-filters" id="your-albums-filters" style="display: none;">
                             <input type="text" class="spotify-library-search" id="your-albums-search"
-                                placeholder="Search by artist or album..." oninput="debouncedYourAlbumsSearch()">
+                                placeholder="Filter your albums…" oninput="debouncedYourAlbumsSearch()">
                             <select id="your-albums-status-filter" class="spotify-library-select" onchange="loadYourAlbumsGrid()">
                                 <option value="all">All Albums</option>
                                 <option value="missing">Missing</option>
@@ -7080,7 +7080,7 @@
                                 </div>
                             </div>
                             <div class="log-viewer-actions">
-                                <input type="text" id="log-viewer-search" class="log-viewer-search" placeholder="Search logs..." oninput="_logViewerOnSearch(this)">
+                                <input type="text" id="log-viewer-search" class="log-viewer-search" placeholder="Filter logs…" oninput="_logViewerOnSearch(this)">
                                 <button class="log-action-btn" onclick="_logViewerCopy()" title="Copy visible logs">Copy</button>
                                 <button class="log-action-btn" onclick="_logViewerClear()" title="Clear display">Clear</button>
                                 <label class="log-autoscroll-label">
@@ -7208,7 +7208,7 @@
                     <nav class="docs-sidebar" id="docs-sidebar">
                         <div class="docs-sidebar-header">
                             <h3>Documentation</h3>
-                            <input type="text" class="docs-search" id="docs-search-input" placeholder="Search docs..." autocomplete="off">
+                            <input type="text" class="docs-search" id="docs-search-input" placeholder="Filter docs…" autocomplete="off">
                         </div>
                         <div class="docs-nav" id="docs-nav">
                             <!-- Populated by JS -->
@@ -7747,7 +7747,7 @@
                     <div class="watchlist-toolbar">
                         <div class="watchlist-search-container">
                             <svg class="watchlist-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="rgba(255,255,255,0.35)"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
-                            <input type="text" id="watchlist-search-input" class="watchlist-search-input" placeholder="Search watchlist..." oninput="filterWatchlistArtists()">
+                            <input type="text" id="watchlist-search-input" class="watchlist-search-input" placeholder="Filter watchlist…" oninput="filterWatchlistArtists()">
                         </div>
                         <select class="watchlist-sort-select" id="watchlist-sort-select" onchange="sortWatchlistArtists(this.value)">
                             <option value="name-asc">Name A-Z</option>
@@ -7842,7 +7842,7 @@
                     <div class="wl-nebula" id="wishlist-nebula">
                         <!-- Action bar -->
                         <div class="wl-nebula-bar">
-                            <input type="text" class="wl-nebula-search" id="wl-nebula-search" placeholder="Search artists, albums..." oninput="_filterNebula()">
+                            <input type="text" class="wl-nebula-search" id="wl-nebula-search" placeholder="Filter wishlist…" oninput="_filterNebula()">
                             <button class="btn btn--primary" onclick="_nebulaDownload()">
                                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                                 Download Wishlist
@@ -8805,7 +8805,7 @@
                 <button class="mcache-tab" data-tab="track" onclick="switchMetadataCacheTab('track')">Tracks</button>
             </div>
             <div class="mcache-filters">
-                <input type="text" class="mcache-search-input" id="mcache-search" placeholder="Search cached metadata..." oninput="debouncedMetadataCacheSearch()">
+                <input type="text" class="mcache-search-input" id="mcache-search" placeholder="Filter cached metadata…" oninput="debouncedMetadataCacheSearch()">
                 <select class="mcache-source-filter" id="mcache-source-filter" onchange="loadMetadataCacheBrowse()">
                     <option value="">All Sources</option>
                     <option value="spotify">Spotify</option>
@@ -8989,7 +8989,7 @@
         <div class="gsearch-icon">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
         </div>
-        <input type="text" class="gsearch-input" id="gsearch-input" placeholder="Search artists, albums, tracks..." autocomplete="off" spellcheck="false">
+        <input type="text" class="gsearch-input" id="gsearch-input" placeholder="Search everything…" autocomplete="off" spellcheck="false">
         <button class="gsearch-clear" id="gsearch-clear" style="display:none" title="Clear">&times;</button>
         <span class="gsearch-shortcut" id="gsearch-shortcut">/</span>
     </div>
