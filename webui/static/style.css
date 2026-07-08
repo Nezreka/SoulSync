@@ -15203,9 +15203,14 @@ body.np-modal-open #helper-float-btn {
 }
 
 .sync-tab-button[data-tab="mirrored"].active {
-    background: #a78bfa;
-    color: #fff;
-    box-shadow: 0 4px 15px rgba(167, 139, 250, 0.3);
+    /* Mirrored is not a real brand — use the app green like the other
+       brandless source (Server Playlists) instead of an arbitrary
+       lavender (SR2). */
+    background: linear-gradient(135deg,
+        rgba(var(--accent-rgb), 0.95),
+        rgba(var(--accent-rgb), 0.75));
+    color: #000;
+    box-shadow: 0 4px 15px rgba(var(--accent-rgb), 0.3);
 }
 
 .sync-tab-button.active .mirrored-icon {
@@ -60981,7 +60986,7 @@ tr.tag-diff-same {
     .server-search-result-art { width: 36px; height: 36px; }
     .server-search-result-details { gap: 3px; }
 
-    .sync-tab-server { flex: 1 !important; }
+    .sync-tab-server { flex: 0 0 auto !important; }
     .sync-tab-divider { display: none; }
 }
 
@@ -67040,11 +67045,11 @@ body.max-performance .dash-card::after {
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
 }
 
-/* Active state — swell into a pill that shows the label inline. */
+/* Active state — stay the same 40px circle as the inactive chips (no
+   swell) so the row never reflows when you switch source (SY1). The active
+   chip reads by its brand-color fill; the source name shows in the panel
+   header below the strip. */
 .sync-tab-button.active {
-    width: auto;
-    padding: 0 14px 0 10px;
-    gap: 8px;
     background: linear-gradient(135deg,
         color-mix(in srgb, var(--sync-tab-accent, rgb(var(--accent-rgb))) 92%, white 8%),
         color-mix(in srgb, var(--sync-tab-accent, rgb(var(--accent-rgb))) 78%, black 22%));
@@ -67104,10 +67109,8 @@ body.max-performance .dash-card::after {
                 opacity 0.22s ease;
 }
 
-.sync-tab-button.active .sync-tab-label {
-    max-width: 200px;
-    opacity: 1;
-}
+/* Labels stay collapsed for every chip (icon-only strip); the active
+   source is named by the panel header, so the chip needn't swell (SY1). */
 
 /* Chain-link badge for the ``Link`` variants (Spotify Link, Deezer
  * Link, iTunes Link). Bottom-right corner of the chip, accent-tinted

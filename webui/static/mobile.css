@@ -599,10 +599,11 @@
         flex-wrap: wrap;
     }
 
+    /* Keep the icon-chip shape on mobile too (was a 50%-width pill for the
+       old labeled-tab design) so the strip stays uniform and reflow-free. */
     .sync-tab-button {
-        min-width: calc(50% - 2px);
-        font-size: 13px;
-        padding: 10px 8px;
+        min-width: 0;
+        padding: 0;
     }
 
     /* Spotify playlist cards - stack vertically on mobile */
@@ -2059,7 +2060,7 @@
     }
 
     .sync-tab-button {
-        min-width: 100%;
+        min-width: 0;
     }
 
     .matching-modal-actions {
