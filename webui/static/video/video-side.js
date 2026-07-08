@@ -261,7 +261,18 @@
     // '/' + pageId. mode: undefined = push a new history entry (user nav),
     // 'replace' = swap the current entry, 'restore' = URL already correct (popstate
     // / boot) so don't touch history.
+    // Same permission model as the sidebar gating (init.js): admin-only control
+    // pages + per-profile allowed_pages. Guards direct-URL access, not just the nav.
+    function videoPageAllowed(pageId) {
+        var cp = (typeof currentProfile !== 'undefined') ? currentProfile : null;
+        if (!cp || cp.is_admin || cp.id === 1) return true;
+        if (pageId === 'video-help' || pageId === 'video-issues' || DETAIL_PAGES[pageId]) return true;
+        if (['video-import', 'video-settings', 'video-automations'].indexOf(pageId) > -1) return false;
+        var ap = cp.allowed_pages;
+        return !ap || ap.indexOf(pageId) > -1;
+    }
     function navigate(pageId, mode) {
+        if (!videoPageAllowed(pageId)) { pageId = DEFAULT_VIDEO_PAGE; mode = 'replace'; }
         setActiveNav(pageId);
         showPage(pageId);
         if (DETAIL_PAGES[pageId] || mode === 'restore') return;

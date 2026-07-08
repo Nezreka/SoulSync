@@ -82,6 +82,8 @@ body[data-side="video"] .side-toggle-thumb {
 .video-nav {
     display: none;
 }
+/* Overlay Studio (poster builder) is admin-only — hide its launcher for non-admins. */
+body:not(.video-admin) [data-video-overlay-studio] { display: none !important; }
 body[data-side="video"] nav.sidebar-nav:not(.video-nav) {
     display: none;
 }
