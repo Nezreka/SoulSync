@@ -148,10 +148,16 @@
             year: 2021, runtime: 148, season_count: 4, episode_count: 62, subtitles: 7, versions: 2, mediastinger: 1, title: 'Example Title', tagline: 'Every legend has a beginning', collection: 'The Collection', awards: 'oscar', streaming: 'Netflix', network: 'HBO', studio: 'A24', genre: 'Sci-Fi',
             season_number: 1, episode_number: 1, episode_code: 'S1E1' };
     }
-    // real values win; nulls fall back to the defaults so no badge previews blank.
+    // A loaded title shows ITS OWN data — fields it genuinely lacks stay blank, so
+    // the preview is truthful and matches what apply actually renders. (Falling
+    // back to defaultSample here fabricated data: a movie has no network, so it
+    // inherited the sample 'HBO'.) The representative defaults are only the
+    // placeholder for the no-title-selected state.
     function mergeSample(real) {
-        var d = defaultSample(); if (!real) return d;
-        FIELD_ORDER.forEach(function (k) { if (real[k] != null && real[k] !== '') d[k] = real[k]; });
+        if (!real) return defaultSample();
+        var d = {};
+        FIELD_ORDER.forEach(function (k) { d[k] = (real[k] != null && real[k] !== '') ? real[k] : null; });
+        Object.keys(real).forEach(function (k) { if (!(k in d)) d[k] = real[k]; });   // has_poster, etc.
         d.logo_url = real.logo_url || null;   // logo art (not a text field) for logo layers
         return d;
     }
