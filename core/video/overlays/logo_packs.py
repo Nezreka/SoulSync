@@ -132,6 +132,49 @@ def build_plan(*, list_folder=_default_list_folder) -> list:
     return jobs
 
 
+def pack_status(store) -> dict:
+    """What's installed, for the UI + the palette gate: per-field counts, whether
+    ANY pack exists, and which fields this installer can source."""
+    counts = store.logo_pack_counts()
+    return {"installed": bool(counts), "counts": counts,
+            "sourceable": list(SOURCEABLE_FIELDS)}
+
+
+# ── single background install job with progress (mirrors the apply job) ────────
+import threading  # noqa: E402
+
+_JOB = {"running": False, "phase": "idle", "done": 0, "total": 0,
+        "installed": 0, "failed": 0, "field": None, "error": None}
+_lock = threading.Lock()
+
+
+def start_install(store) -> bool:
+    """Kick a background install; False if one's already running."""
+    with _lock:
+        if _JOB["running"]:
+            return False
+        _JOB.update(running=True, phase="starting", done=0, total=0,
+                    installed=0, failed=0, field=None, error=None)
+    threading.Thread(target=_run_install, args=(store,), daemon=True).start()
+    return True
+
+
+def _run_install(store):
+    try:
+        _JOB["phase"] = "running"
+        res = install(store, on_progress=lambda p: _JOB.update(p))
+        _JOB.update(installed=res["installed"], failed=res["failed"], phase="done")
+    except Exception as e:
+        logger.exception("logo pack install failed")
+        _JOB.update(phase="error", error=str(e))
+    finally:
+        _JOB["running"] = False
+
+
+def install_status() -> dict:
+    return dict(_JOB)
+
+
 def install(store, *, on_progress=None, list_folder=_default_list_folder, fetch=_default_fetch) -> dict:
     """Download every planned logo into its pack folder. Best-effort per file;
     one failure never sinks the run. Returns totals."""

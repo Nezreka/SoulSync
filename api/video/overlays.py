@@ -230,6 +230,25 @@ def register_routes(bp):
         resp.headers["Cache-Control"] = "public, max-age=86400"
         return resp
 
+    @bp.route("/overlays/logopack", methods=["GET"])
+    def overlay_logopack_status():
+        """What logo art is installed — powers the palette gate (grey out the Logo
+        badge until a pack exists) and the per-field status in the install popup."""
+        from core.video.overlays import logo_packs
+        from core.video.overlays.assets import AssetStore
+        st = logo_packs.pack_status(AssetStore.default())
+        st["job"] = logo_packs.install_status()
+        return jsonify(st)
+
+    @bp.route("/overlays/logopack/install", methods=["POST"])
+    def overlay_logopack_install():
+        """Copy Kometa's public logo set into the local drop-in folders (opt-in;
+        user-initiated). Returns immediately — poll /overlays/logopack for progress."""
+        from core.video.overlays import logo_packs
+        from core.video.overlays.assets import AssetStore
+        started = logo_packs.start_install(AssetStore.default())
+        return jsonify({"ok": True, "started": started, "job": logo_packs.install_status()})
+
     @bp.route("/overlays/preview/random", methods=["GET"])
     def overlay_preview_random():
         """A random owned title (with tmdb_id + poster) to drop into the editor's
