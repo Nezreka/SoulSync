@@ -231,6 +231,19 @@ def register_routes(bp):
         resp.headers["Cache-Control"] = "public, max-age=86400"
         return resp
 
+    @bp.route("/overlays/cleanup", methods=["POST"])
+    def overlay_cleanup_start():
+        """Reclaim Plex space from accumulated overlay-poster uploads (Empty Trash →
+        Clean Bundles → Optimize DB, API-only). Returns immediately; poll status."""
+        from core.video.overlays import cleanup
+        started = cleanup.start_cleanup()
+        return jsonify({"ok": True, "started": started, "job": cleanup.status()})
+
+    @bp.route("/overlays/cleanup/status", methods=["GET"])
+    def overlay_cleanup_status():
+        from core.video.overlays import cleanup
+        return jsonify(cleanup.status())
+
     @bp.route("/overlays/logopack", methods=["GET"])
     def overlay_logopack_status():
         """What logo art is installed — powers the palette gate (grey out the Logo

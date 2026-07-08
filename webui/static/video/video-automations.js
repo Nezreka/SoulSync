@@ -41,6 +41,7 @@
         // Presentation
         'video_apply_overlays',
         // Maintenance
+        'video_clean_plex_images',
         'video_clean_search_history', 'video_clean_completed_downloads', 'video_full_cleanup', 'video_backup_database',
     ];
     function _sysOrderIndex(a) {
