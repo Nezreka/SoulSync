@@ -253,6 +253,37 @@ def test_incremental_skips_known_and_early_stops(db):
     assert db.table_count("movies") == 61
 
 
+def test_incremental_reupserts_known_movie_when_rematched(db):
+    # A movie already stored with a bad (unmatched) title, + padding so the scanner
+    # stays incremental (a <50-item library falls back to a full pass).
+    db.upsert_movie("plex", {"server_id": "m1", "title": "Www UIndex Org the Furious"})
+    for i in range(60):
+        db.upsert_movie("plex", {"server_id": "k%d" % i, "title": "K%d" % i})
+
+    # Incremental re-scan: the re-matched movie comes back FIRST with its fixed title
+    # (a Plex re-match bumps updatedAt, so it sorts to the top), then the knowns.
+    fixed = {"server_id": "m1", "title": "The Furious"}
+    known = [{"server_id": "k%d" % i, "title": "K%d" % i} for i in range(60)]
+
+    class S:
+        server_name = "plex"
+        def counts(self, incremental=False):
+            return {"movies": 61, "shows": 0}
+        def iter_movies(self, incremental=False):
+            assert incremental is True
+            return iter([fixed] + known)
+        def iter_shows(self, incremental=False):
+            return iter([])
+
+    st = VideoLibraryScanner(db).scan_sync(lambda: S(), mode="incremental")
+    assert st["state"] == "done"
+    assert st["movies"] == 0                       # a re-upsert of a KNOWN movie, not a new one
+    with db.connect() as c:
+        title = c.execute("SELECT title FROM movies WHERE server_id='m1'").fetchone()[0]
+    assert title == "The Furious"                  # the corrected title propagated
+    assert db.table_count("movies") == 61          # no duplicate row
+
+
 def test_incremental_falls_back_to_full_on_small_library(db):
     captured = {}
 

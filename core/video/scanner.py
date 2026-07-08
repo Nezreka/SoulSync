@@ -204,10 +204,17 @@ class VideoLibraryScanner:
                     if self._cancel:
                         return self._finish_cancelled(movies, 0, 0)
                     sid = str(item["server_id"])
-                    # Incremental early-stop: skip already-known items and bail after
-                    # a run of consecutive known ones (server lists recent first).
+                    # Known already: re-upsert it anyway (don't skip) so a metadata
+                    # change on an existing movie — e.g. a Plex re-match that fixed a bad
+                    # title — actually propagates; then keep counting toward the early
+                    # stop. The server lists updatedAt-desc, so changed items are first
+                    # and this stays bounded. It isn't a "new" movie, so it isn't tallied.
                     if incremental and sid in known_movies:
                         consec += 1
+                        try:
+                            self.db.upsert_movie(server, item, preserve_enrichment=preserve)
+                        except Exception:
+                            logger.exception("video scan: re-upsert movie %s", sid)
                         if consec >= INCREMENTAL_STOP_AFTER:
                             break
                         continue
