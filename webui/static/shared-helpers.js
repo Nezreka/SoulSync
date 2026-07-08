@@ -3762,7 +3762,8 @@ function getMetadataSourcePresentation(metadataStatus, spotifyStatus) {
     if (source) {
         return {
             statusClass: connected ? 'connected' : 'disconnected',
-            statusText: connected ? (spotifyFamily ? `Connected (${metadataStatus?.response_time}ms)` : sourceLabel) : 'Disconnected',
+            // Uniform state word; the ms lives in the card's Response row (D4).
+            statusText: connected ? 'Connected' : 'Disconnected',
             dotClass: connected ? 'connected' : 'disconnected',
             dotTitle: connected ? sourceLabel : 'Disconnected',
             sessionActive
@@ -3796,7 +3797,7 @@ function updateServiceStatus(service, statusData, spotifyStatus = null) {
         } else {
             if (statusData.connected) {
                 indicator.className = 'service-card-indicator connected';
-                statusText.textContent = `Connected (${statusData.response_time}ms)`;
+                statusText.textContent = 'Connected';
                 statusText.className = 'service-card-status-text connected';
             } else {
                 indicator.className = 'service-card-indicator disconnected';
@@ -3804,6 +3805,16 @@ function updateServiceStatus(service, statusData, spotifyStatus = null) {
                 statusText.className = 'service-card-status-text disconnected';
             }
         }
+    }
+
+    // Response time row — populated uniformly for every service card so all
+    // three read the same way (D4).
+    const responseRow = document.getElementById(`${service}-response-time`);
+    if (responseRow) {
+        const rt = statusData?.response_time;
+        responseRow.textContent = (rt !== undefined && rt !== null)
+            ? `Response: ${rt}ms`
+            : 'Response: --';
     }
 
     // Update music source title based on active source
@@ -3827,14 +3838,6 @@ function updateServiceStatus(service, statusData, spotifyStatus = null) {
         }
 
         syncPrimaryMetadataSourceAvailability(spotifyStatus);
-
-        const responseTimeElement = document.getElementById('metadata-source-response-time');
-        if (responseTimeElement) {
-            const responseTime = statusData.response_time;
-            responseTimeElement.textContent = responseTime !== undefined && responseTime !== null
-                ? `Response: ${responseTime}ms`
-                : 'Response: --';
-        }
 
         const testButton = document.querySelector('#metadata-source-service-card .service-card-button');
         if (testButton) {
