@@ -6390,6 +6390,16 @@ body.helper-mode-active #dashboard-activity-feed:hover {
             transparent 85%);
 }
 
+/* While the immersive Now Playing modal is open, suppress the floating
+   bottom chrome — its very high z-index would otherwise render the global
+   search bar and FAB buttons on top of the player's transport controls. */
+body.np-modal-open #gsearch-bar,
+body.np-modal-open #gsearch-aura,
+body.np-modal-open #notif-bell-btn,
+body.np-modal-open #helper-float-btn {
+    display: none !important;
+}
+
 .gsearch-bar {
     position: fixed;
     bottom: 24px;
