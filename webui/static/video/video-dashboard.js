@@ -210,6 +210,8 @@
         var t = e.target.closest && e.target.closest('[data-video-overlay-studio]');
         if (!t) return;
         e.preventDefault();
+        // Overlay Studio is admin-only (defense in depth behind the hidden launcher).
+        if (typeof currentProfile !== 'undefined' && currentProfile && !currentProfile.is_admin) return;
         if (window.VideoOverlayEditor) VideoOverlayEditor.open();
     });
 
