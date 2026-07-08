@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import threading
 import time
+from datetime import datetime
 
 from utils.logging_config import get_logger
 
@@ -175,6 +176,20 @@ class VideoLibraryScanner:
             if incremental and (self.db.table_count("movies") + self.db.table_count("shows")) < INCREMENTAL_MIN_LIBRARY:
                 incremental = False
 
+            # Modified-since delta: on incremental, ask the server for only what it
+            # changed since our last scan — so a re-match / metadata edit on an EXISTING
+            # item propagates, not just brand-new adds. No baseline yet → the source
+            # uses its recent-window fallback (and the movie loop keeps the early-stop).
+            since = None
+            if incremental:
+                ts = self.db.get_setting("video_last_scan_at")
+                if ts:
+                    try:
+                        since = datetime.fromtimestamp(float(ts))
+                    except (ValueError, TypeError):
+                        since = None
+            scan_started = time.time()
+
             # Totals up front so the progress bar shows a REAL percentage
             # (movies + shows are the unit; episodes ride along under each show).
             total = 0
@@ -200,23 +215,25 @@ class VideoLibraryScanner:
             if do_movies:
                 self._set(phase="scanning movies", total=total, percent=pct())
                 consec = 0
-                for item in source.iter_movies(incremental=incremental):
+                for item in source.iter_movies(incremental=incremental, since=since):
                     if self._cancel:
                         return self._finish_cancelled(movies, 0, 0)
                     sid = str(item["server_id"])
                     # Known already: re-upsert it anyway (don't skip) so a metadata
                     # change on an existing movie — e.g. a Plex re-match that fixed a bad
-                    # title — actually propagates; then keep counting toward the early
-                    # stop. The server lists updatedAt-desc, so changed items are first
-                    # and this stays bounded. It isn't a "new" movie, so it isn't tallied.
+                    # title — actually propagates. In DELTA mode the source already
+                    # returned only what changed since last scan, so process them all. In
+                    # the recent-window fallback (no baseline) we keep the count-based
+                    # early-stop. Either way a re-upsert isn't tallied as a NEW movie.
                     if incremental and sid in known_movies:
-                        consec += 1
                         try:
                             self.db.upsert_movie(server, item, preserve_enrichment=preserve)
                         except Exception:
                             logger.exception("video scan: re-upsert movie %s", sid)
-                        if consec >= INCREMENTAL_STOP_AFTER:
-                            break
+                        if since is None:
+                            consec += 1
+                            if consec >= INCREMENTAL_STOP_AFTER:
+                                break
                         continue
                     consec = 0
                     try:
@@ -248,17 +265,17 @@ class VideoLibraryScanner:
             if do_shows:
                 self._set(phase="scanning shows")
                 consec = 0
-                for show in source.iter_shows(incremental=incremental):
+                for show in source.iter_shows(incremental=incremental, since=since):
                     if self._cancel:
                         return self._finish_cancelled(movies, shows, episodes)
                     sid = str(show["server_id"])
-                    if incremental:
+                    # In DELTA mode the source only returned shows that changed since the
+                    # last scan, so re-upsert every one (apply the change). Only the
+                    # recent-window fallback uses the 'skip fully-present + early-stop'
+                    # optimisation below.
+                    if incremental and since is None:
                         # A known show is 'complete' only when we already have EVERY
-                        # episode. A show's add-date doesn't move when episodes arrive,
-                        # so the source sorts by recent activity and we open each show
-                        # to check for new episodes (mirrors the music side re-checking
-                        # a known album's tracks) — skip only fully-present shows, and
-                        # stop after a run of them.
+                        # episode. Skip only fully-present shows, and stop after a run.
                         ep_ids = [str(e.get("server_id")) for s in show.get("seasons", [])
                                   for e in s.get("episodes", []) if e.get("server_id")]
                         complete = sid in known_shows and all(eid in known_eps for eid in ep_ids)
@@ -283,6 +300,16 @@ class VideoLibraryScanner:
                     self._set(phase="cleaning up removed shows", percent=100)
                 removed_s = (self.db.prune_missing("shows", server, seen_shows)
                              if do_prune and seen_shows else 0)
+
+            # Record the scan baseline (its START time, so a change made mid-scan is
+            # caught next run) — the next incremental deltas from here. Only when the
+            # whole library was read (all media types), so a movie-only scan can't
+            # advance the baseline past unseen show changes.
+            if media_type == "all":
+                try:
+                    self.db.set_setting("video_last_scan_at", str(scan_started))
+                except Exception:
+                    logger.debug("video scan: could not persist last-scan baseline", exc_info=True)
 
             self._set(state="done", phase="complete", finished_at=time.time(),
                       movies=movies, shows=shows, episodes=episodes, percent=100,

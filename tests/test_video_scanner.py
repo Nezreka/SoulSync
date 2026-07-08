@@ -23,11 +23,11 @@ class FakeSource:
         self._movies, self._shows = movies, shows
         self.incremental_calls = []
 
-    def iter_movies(self, incremental=False):
+    def iter_movies(self, incremental=False, since=None):
         self.incremental_calls.append(("movies", incremental))
         return iter(self._movies)
 
-    def iter_shows(self, incremental=False):
+    def iter_shows(self, incremental=False, since=None):
         self.incremental_calls.append(("shows", incremental))
         return iter(self._shows)
 
@@ -70,16 +70,46 @@ def test_incremental_picks_up_new_episodes_of_known_show(db, monkeypatch):
 
 
 def test_incremental_skips_fully_present_show(db, monkeypatch):
-    """A known show with no new episodes is 'complete' → skipped (not re-processed)."""
+    """In DELTA mode an unchanged show falls outside the modified-since window, so the
+    source doesn't return it and nothing is re-processed (and the library isn't wiped)."""
     import core.video.scanner as sc
     monkeypatch.setattr(sc, "INCREMENTAL_MIN_LIBRARY", 1)
     scanner = sc.VideoLibraryScanner(db)
     show = {"server_id": "s1", "title": "Show", "seasons": [
         {"season_number": 1, "episodes": [{"server_id": "e1", "episode_number": 1, "title": "E1"}]}]}
-    scanner.scan_sync(lambda: FakeSource([], [show]), mode="full")
-    st = scanner.scan_sync(lambda: FakeSource([], [show]), mode="incremental")
-    assert st["shows"] == 0                                   # fully present → not touched
-    assert db.dashboard_stats()["library"]["episodes"] == 1
+    scanner.scan_sync(lambda: FakeSource([], [show]), mode="full")   # sets the delta baseline
+    # Unchanged → not in the delta → source yields nothing on the next incremental.
+    st = scanner.scan_sync(lambda: FakeSource([], []), mode="incremental")
+    assert st["shows"] == 0
+    assert db.dashboard_stats()["library"]["episodes"] == 1          # untouched, not pruned
+
+
+def test_incremental_delta_reupserts_a_changed_movie(db, monkeypatch):
+    """DELTA path: after a baseline scan, the source returns only what changed since
+    (a re-matched movie), and the scanner re-upserts it so the fix propagates."""
+    import core.video.scanner as sc
+    monkeypatch.setattr(sc, "INCREMENTAL_MIN_LIBRARY", 1)
+    scanner = sc.VideoLibraryScanner(db)
+    scanner.scan_sync(lambda: FakeSource(
+        [{"server_id": "m1", "title": "Www UIndex Org the Furious"}], []), mode="full")  # baseline
+
+    seen_since = {}
+
+    class S:
+        server_name = "plex"
+        def counts(self, incremental=False):
+            return {"movies": 1, "shows": 0}
+        def iter_movies(self, incremental=False, since=None):
+            seen_since["since"] = since                      # the delta baseline was passed
+            return iter([{"server_id": "m1", "title": "The Furious"}])   # the changed item
+        def iter_shows(self, incremental=False, since=None):
+            return iter([])
+
+    st = scanner.scan_sync(lambda: S(), mode="incremental")
+    assert st["state"] == "done"
+    assert seen_since["since"] is not None                   # ran as a modified-since delta
+    with db.connect() as c:
+        assert c.execute("SELECT title FROM movies WHERE server_id='m1'").fetchone()[0] == "The Furious"
 
 
 def test_scan_pauses_and_resumes_enrichment_workers(db):
@@ -115,11 +145,11 @@ def test_scan_resumes_enrichment_on_cancel(db):
         server_name = "plex"
         def counts(self, incremental=False):
             return {"movies": 5, "shows": 0}
-        def iter_movies(self, incremental=False):
+        def iter_movies(self, incremental=False, since=None):
             for i in range(5):
                 scanner._cancel = True               # cancel mid-iteration
                 yield {"server_id": "m%d" % i, "title": "M%d" % i}
-        def iter_shows(self, incremental=False):
+        def iter_shows(self, incremental=False, since=None):
             return iter([])
 
     scanner.scan_sync(lambda: S())
@@ -199,9 +229,9 @@ def test_scan_reports_percent_from_counts(db):
         server_name = "plex"
         def counts(self, incremental=False):
             return {"movies": 4, "shows": 0}
-        def iter_movies(self, incremental=False):
+        def iter_movies(self, incremental=False, since=None):
             return iter([{"server_id": "m%d" % i, "title": str(i)} for i in range(4)])
-        def iter_shows(self, incremental=False):
+        def iter_shows(self, incremental=False, since=None):
             return iter([])
     st = VideoLibraryScanner(db).scan_sync(lambda: S())
     assert st["state"] == "done"
@@ -220,9 +250,9 @@ def test_scan_cancel_stops_midway(db):
         server_name = "plex"
         def counts(self, incremental=False):
             return {"movies": 2, "shows": 0}
-        def iter_movies(self, incremental=False):
+        def iter_movies(self, incremental=False, since=None):
             return gen()
-        def iter_shows(self, incremental=False):
+        def iter_shows(self, incremental=False, since=None):
             return iter([])
 
     st = scanner.scan_sync(lambda: S())
@@ -241,10 +271,10 @@ def test_incremental_skips_known_and_early_stops(db):
         server_name = "plex"
         def counts(self, incremental=False):
             return {"movies": 61, "shows": 0}
-        def iter_movies(self, incremental=False):
+        def iter_movies(self, incremental=False, since=None):
             assert incremental is True          # NOT fallen back (library big enough)
             return iter([new_item] + known)     # one new, then a long run of known
-        def iter_shows(self, incremental=False):
+        def iter_shows(self, incremental=False, since=None):
             return iter([])
 
     st = VideoLibraryScanner(db).scan_sync(lambda: S(), mode="incremental")
@@ -269,10 +299,10 @@ def test_incremental_reupserts_known_movie_when_rematched(db):
         server_name = "plex"
         def counts(self, incremental=False):
             return {"movies": 61, "shows": 0}
-        def iter_movies(self, incremental=False):
+        def iter_movies(self, incremental=False, since=None):
             assert incremental is True
             return iter([fixed] + known)
-        def iter_shows(self, incremental=False):
+        def iter_shows(self, incremental=False, since=None):
             return iter([])
 
     st = VideoLibraryScanner(db).scan_sync(lambda: S(), mode="incremental")
@@ -291,10 +321,10 @@ def test_incremental_falls_back_to_full_on_small_library(db):
         server_name = "plex"
         def counts(self, incremental=False):
             return {"movies": 3, "shows": 0}
-        def iter_movies(self, incremental=False):
+        def iter_movies(self, incremental=False, since=None):
             captured["incremental"] = incremental
             return iter([{"server_id": "m%d" % i, "title": str(i)} for i in range(3)])
-        def iter_shows(self, incremental=False):
+        def iter_shows(self, incremental=False, since=None):
             return iter([])
 
     st = VideoLibraryScanner(db).scan_sync(lambda: S(), mode="incremental")
