@@ -1919,6 +1919,25 @@
         padding: 70px 16px 72px 16px;
     }
 
+    /* Nested wrappers each add horizontal padding, which compounds on a phone
+       into more chrome than content (~136px of a 375px screen). Trim the
+       biggest offender — the global .page-shell card (margin 20 + padding 24 =
+       44px/side) — and drop the settings content wrappers' inner gutters so
+       controls get the width back. Global, so all 8 .page-shell pages benefit
+       (X4). */
+    .page-shell {
+        margin: 10px;
+        padding: 24px 16px 26px;
+    }
+    #settings-page .settings-content {
+        padding-left: 0;
+        padding-right: 0;
+    }
+    #settings-page .settings-columns {
+        padding-left: 0;
+        padding-right: 0;
+    }
+
     .activity-section {
         padding: 16px;
     }
@@ -2009,6 +2028,12 @@
 
     .page {
         padding: 70px 12px 72px 12px;
+    }
+
+    /* Even tighter card gutters on the smallest phones (X4). */
+    .page-shell {
+        margin: 6px;
+        padding: 20px 12px 22px;
     }
 
     .stats-grid-dashboard {
