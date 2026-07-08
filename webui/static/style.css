@@ -47048,6 +47048,16 @@ body.downloads-disabled [onclick*="DownloadMissing"]:not([onclick*="close"]) {
     margin-bottom: 16px;
     overflow-x: auto;
 }
+@media (max-width: 768px) {
+    /* Fade the right edge to signal the tab row scrolls */
+    .auto-hub-tabs {
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+        -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent);
+        mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent);
+    }
+    .auto-hub-tabs::-webkit-scrollbar { display: none; }
+}
 .auto-hub-tab {
     padding: 8px 16px;
     border: none;
@@ -57716,13 +57726,19 @@ tr.tag-diff-same {
     #settings-page .settings-nav-row .header-actions {
         margin-left: auto;
     }
-    /* Tab bar scrolls horizontally */
+    /* Tab bar scrolls horizontally; fade the right edge to signal more tabs */
     #settings-page .stg-tabbar {
         width: 100%;
         flex: 1 1 100%;
         border-radius: 0;
         justify-content: flex-start;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent);
+        mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent);
     }
+    #settings-page .stg-tabbar::-webkit-scrollbar { display: none; }
     .stg-tab { padding: 8px 14px; font-size: 0.8em; }
     /* Content fills screen */
     #settings-page .settings-columns { max-width: 100% !important; padding: 0 8px; }
