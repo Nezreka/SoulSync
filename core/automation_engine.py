@@ -203,6 +203,18 @@ SYSTEM_AUTOMATIONS = [
         'action_type': 'video_add_airing_episodes',
         'owned_by': 'video',
     },
+    # Daily: re-apply overlays to the library. Reads the per-scope overlay settings
+    # (movie/show/season/episode assignments) and touches ONLY enabled scopes; the
+    # applier skips items whose template + art + consumed data are unchanged since
+    # last run, so a nightly pass re-renders just what changed. Runs at 4am, after
+    # the airing/wishlist jobs and the overnight scans have refreshed the data.
+    {
+        'name': 'Auto-Update Overlays',
+        'trigger_type': 'daily_time',
+        'trigger_config': {'time': '04:00'},
+        'action_type': 'video_apply_overlays',
+        'owned_by': 'video',
+    },
     # Video twins of the music maintenance jobs — same schedule + shared handler,
     # distinct action_type + owned_by='video' so they seed as separate rows and
     # show on the video Automations page (music's copies are untouched).

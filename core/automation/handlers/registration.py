@@ -44,6 +44,7 @@ from core.automation.handlers.video_scan_watchlist_channels import auto_video_sc
 from core.automation.handlers.video_process_youtube_wishlist import auto_video_process_youtube_wishlist
 from core.automation.handlers.video_scan_watchlist_playlists import auto_video_scan_watchlist_playlists
 from core.automation.handlers.video_process_wishlist import auto_video_process_wishlist, is_running
+from core.automation.handlers.video_apply_overlays import auto_video_apply_overlays
 from core.automation.handlers.video_scan_library import (
     auto_video_scan_library, auto_video_scan_server, auto_video_update_database,
 )
@@ -286,6 +287,14 @@ def register_all(deps: AutomationDeps) -> None:
     engine.register_action_handler(
         'video_process_youtube_wishlist',
         lambda config: auto_video_process_youtube_wishlist(config, deps),
+    )
+    # Daily overlay refresh — reads the per-scope overlay settings and re-applies
+    # only enabled scopes, skipping unchanged items. Guarded so it can't overlap a
+    # manual Apply run (shared singleton job).
+    engine.register_action_handler(
+        'video_apply_overlays',
+        lambda config: auto_video_apply_overlays(config, deps),
+        lambda: __import__('core.video.overlays.service', fromlist=['status']).status().get('running'),
     )
 
     # Progress + history callbacks: the engine invokes these around
