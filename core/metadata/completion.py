@@ -98,6 +98,54 @@ def _resolve_completion_track_total(release: Dict[str, Any], source_chain: List[
     return 0
 
 
+def _resolve_canonical_album_completion(db, db_album: Any) -> Optional[Dict[str, Any]]:
+    """Recalculate completion from a local album's exact pinned release.
+
+    A canonical pin is authoritative: when its source is temporarily unavailable,
+    fall back only to the local album's stored count, never to a different release
+    supplied by the discography response.
+    """
+    local_album_id = _extract_lookup_value(db_album, 'id')
+    get_canonical = getattr(db, 'get_album_canonical', None)
+    check_completeness = getattr(db, 'check_album_completeness', None)
+    if not local_album_id or not callable(get_canonical) or not callable(check_completeness):
+        return None
+
+    canonical = get_canonical(local_album_id)
+    if not canonical:
+        return None
+
+    canonical_source = _extract_lookup_value(canonical, 'source', 'canonical_source', default='')
+    canonical_album_id = _extract_lookup_value(canonical, 'album_id', 'canonical_album_id', default='')
+    canonical_total = 0
+
+    if canonical_source and canonical_album_id:
+        api_tracks = get_album_tracks_for_source(str(canonical_source), str(canonical_album_id))
+        canonical_total = len(_extract_track_items(api_tracks))
+
+    if canonical_total == 0:
+        logger.warning(
+            "Could not load canonical release %s:%s for local album %s; "
+            "using only the local stored track count",
+            canonical_source,
+            canonical_album_id,
+            local_album_id,
+        )
+
+    owned_tracks, expected_tracks, is_complete, formats = check_completeness(
+        local_album_id,
+        canonical_total or None,
+    )
+
+    return {
+        'owned_tracks': owned_tracks,
+        'expected_tracks': expected_tracks,
+        'is_complete': is_complete,
+        'formats': formats,
+        'canonical_track_count': canonical_total,
+    }
+
+
 def check_album_completion(
     db,
     album_data: Dict[str, Any],
@@ -134,6 +182,18 @@ def check_album_completion(
                 candidate_albums=candidate_albums,
                 strict_discography_match=True,
             )
+
+            canonical_completion = _resolve_canonical_album_completion(db, db_album)
+            if canonical_completion is not None:
+                owned_tracks = canonical_completion['owned_tracks']
+                expected_tracks = canonical_completion['expected_tracks']
+                is_complete = canonical_completion['is_complete']
+                formats = canonical_completion['formats']
+                total_tracks = (
+                    canonical_completion['canonical_track_count']
+                    or expected_tracks
+                    or 0
+                )
         except Exception as db_error:
             logger.error(f"Database error for album '{album_name}': {db_error}")
             return {
