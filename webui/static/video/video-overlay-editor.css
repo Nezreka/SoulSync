@@ -187,6 +187,35 @@
 .voe-pal-tag.voe-dragging { opacity: .5; }
 .voe-pal-tag-v { font-size: 11px; font-weight: 700; letter-spacing: .01em; color: rgba(255,255,255,.9);
     max-width: 172px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* locked Logo badge — needs an installed pack; click opens the installer */
+.voe-pal-item--locked { cursor: pointer; position: relative; border-style: dashed;
+    border-color: rgba(255,255,255,.14); background: rgba(255,255,255,.02); }
+.voe-pal-item--locked .voe-pal-ic { color: rgba(255,255,255,.4); }
+.voe-pal-item--locked .voe-pal-label { color: rgba(255,255,255,.45); }
+.voe-pal-item--locked:hover { background: rgba(var(--a),.1); border-color: rgba(var(--a),.4); transform: none; }
+.voe-pal-lock { font-size: 8.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em;
+    color: rgb(var(--a)); background: rgba(var(--a),.14); padding: 2px 6px; border-radius: 999px; margin-top: 1px; }
+
+/* logo-pack installer popup */
+.voe-lp { width: min(460px, 92vw); background: #17171e; border: 1px solid rgba(255,255,255,.1);
+    border-radius: 16px; padding: 22px 22px 18px; box-shadow: 0 30px 80px rgba(0,0,0,.6); }
+.voe-lp-t { display: flex; align-items: center; gap: 9px; font-size: 15px; font-weight: 800; color: #fff; }
+.voe-lp-t svg { width: 19px; height: 19px; color: rgb(var(--a)); }
+.voe-lp-m { font-size: 13px; color: rgba(255,255,255,.6); line-height: 1.55; margin: 10px 0 4px; }
+.voe-lp-prog { margin: 14px 0 4px; }
+.voe-lp-ptxt { font-size: 11.5px; color: rgba(255,255,255,.5); margin-top: 6px; font-variant-numeric: tabular-nums; }
+.voe-lp-help { margin: 12px 0 2px; }
+.voe-lp-help summary { font-size: 12px; color: rgba(var(--a),.95); cursor: pointer; user-select: none; list-style: none; }
+.voe-lp-help summary::-webkit-details-marker { display: none; }
+.voe-lp-help summary:hover { color: rgb(var(--a)); }
+.voe-lp-help-b { font-size: 12px; color: rgba(255,255,255,.55); line-height: 1.6; margin-top: 8px; }
+.voe-lp-help-b code, .voe-insp-hint code { font-size: 11px; background: rgba(255,255,255,.08);
+    padding: 1px 5px; border-radius: 4px; color: rgba(255,255,255,.82); }
+.voe-lp-row { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+.voe-lp-ok { color: #63d68b; font-weight: 700; }
+.voe-lp-miss { color: rgba(255,255,255,.5); }
+.voe-lp-link { color: rgb(var(--a)); font-weight: 700; text-decoration: none; }
+.voe-lp-link:hover { text-decoration: underline; }
 
 /* center: stage */
 .voe-canvas-wrap {

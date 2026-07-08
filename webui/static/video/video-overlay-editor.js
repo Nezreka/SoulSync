@@ -112,6 +112,36 @@
     // LOGO_FIELDS, limited to the ones we actually carry data for).
     var LOGO_BADGE_FIELDS = ['resolution', 'hdr', 'video_codec', 'audio_codec', 'source', 'aspect', 'content_rating', 'status', 'streaming', 'network', 'studio', 'mediastinger', 'collection', 'awards'];
 
+    // Which logo-badge fields the Kometa installer can actually source art for
+    // (mirrors logo_packs.SOURCEABLE_FIELDS); used to word the install popup.
+    var LOGO_SOURCEABLE = ['resolution', 'audio_codec', 'hdr', 'source', 'aspect', 'streaming', 'network', 'studio'];
+    // Installed-logo state (per field counts); logo badge is gated until a pack exists.
+    var logoPack = { installed: false, counts: {}, loaded: false };
+    function anyLogoPack() { return !!logoPack.installed; }
+    function logoPackHas(field) { return !!(logoPack.counts && logoPack.counts[field]); }
+    function refreshLogoPack(cb) {
+        api('GET', '/api/video/overlays/logopack').then(function (d) {
+            logoPack = { installed: !!(d && d.installed), counts: (d && d.counts) || {}, loaded: true };
+        }).catch(function () { logoPack.loaded = true; }).then(function () { if (cb) cb(); });
+    }
+    function refreshPaletteDOM() {
+        var pal = overlay && overlay.querySelector('.voe-palette');
+        if (pal) { pal.innerHTML = paletteHTML(); wirePalette(); }
+    }
+    // Inspector guidance for a logo-badge field: where the art lives + whether any
+    // is installed for this field, with a shortcut to the Kometa installer.
+    function logoBadgeHint(field) {
+        var cnt = (logoPack.counts && logoPack.counts[field]) || 0;
+        var sourceable = LOGO_SOURCEABLE.indexOf(field) > -1;
+        var status = cnt
+            ? '<span class="voe-lp-ok">✓ ' + cnt + ' ' + esc(field) + ' logo' + (cnt === 1 ? '' : 's') + ' installed</span>'
+            : '<span class="voe-lp-miss">No ' + esc(field) + ' logos yet — shows the text below</span>';
+        var getpack = (!cnt && (sourceable || !anyLogoPack()))
+            ? ' <a href="#" class="voe-lp-link" data-voe-getpack>Get Kometa pack</a>' : '';
+        return '<div class="voe-insp-hint">' + status + getpack +
+            '<br>Art lives at <code>logos/' + esc(field) + '/&lt;value&gt;.png</code>; each value falls back to text when it has no image.</div>';
+    }
+
     function defaultSample() {
         return { resolution: '2160p', hdr: 'HDR', video_codec: 'hevc', audio_codec: 'atmos', source: 'bluray', aspect: '2.40:1',
             imdb: 8.4, rt: 92, metacritic: 81, tmdb: 8.1, trakt: 8.3, tvmaze: 8.0, anilist: 82, content_rating: 'PG-13', status: 'Returning',
@@ -761,6 +791,7 @@
         nameInput.addEventListener('input', function () { ed.name = nameInput.value; markDirty(); });
 
         wirePalette();
+        if (!logoPack.loaded) refreshLogoPack(refreshPaletteDOM);   // gate the Logo badge once we know what's installed
         var stage = overlay.querySelector('[data-voe-stage]');
         stage.addEventListener('pointerdown', onStagePointerDown);
         overlay.querySelector('[data-voe-canvaswrap]').addEventListener('wheel', onCanvasWheel, { passive: false });
@@ -895,7 +926,7 @@
         });
         html += palTools('Artwork',
             palItem('logo', 'Title Logo', I.logo) + palItem('image', 'Image', I.image) +
-            palItem('logobadge', 'Logo badge', I.logo));
+            palLogoBadge());
         html += palTools('Shapes',
             palItem('shape', 'Rectangle', I.shape) + palItem('ellipse', 'Ellipse', I.ellipse) +
             palItem('line', 'Line', I.line) + palItem('ribbon', 'Corner ribbon', I.ribbon) +
@@ -916,6 +947,15 @@
             '<span class="voe-pal-ic">' + icon + '</span>' +
             '<span class="voe-pal-label">' + esc(label) + '</span></div>';
     }
+    // The Logo badge needs image art we don't ship. Until a pack is installed it's
+    // locked — clicking opens the installer instead of dropping a (text-only) badge.
+    function palLogoBadge() {
+        if (anyLogoPack()) return palItem('logobadge', 'Logo badge', I.logo);
+        return '<div class="voe-pal-item voe-pal-item--locked" data-voe-logopack tabindex="0" role="button" ' +
+            'title="Logo badges need an image pack — click to install">' +
+            '<span class="voe-pal-ic">' + I.lock + '</span>' +
+            '<span class="voe-pal-label">Logo badge</span><span class="voe-pal-lock">Get pack</span></div>';
+    }
     // A data badge previews the real value it produces (e.g. "4K", "IMDb 8.4",
     // "S1E1") so the palette is WYSIWYG; the field name rides along as the tooltip.
     function palTag(field) {
@@ -928,6 +968,10 @@
     function wirePalette() {
         overlay.querySelectorAll('[data-voe-add]').forEach(function (it) {
             it.addEventListener('pointerdown', function (e) { startPaletteDrag(e, it); });
+        });
+        overlay.querySelectorAll('[data-voe-logopack]').forEach(function (it) {
+            it.addEventListener('click', openLogoPackDialog);
+            it.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openLogoPackDialog(); } });
         });
     }
 
@@ -2107,7 +2151,7 @@
                 field('Field', lbsel) +
                 field('Size', numInput('w', pct(l.w), '%')) +
                 field('Shows', '<span class="voe-data-preview">' + esc(lbv || '—') + '</span>') +
-                field('', '<div class="voe-insp-hint">Uses a logo from a drop-in pack; falls back to the text below when none is present.</div>'));
+                field('', logoBadgeHint(l.field)));
             html += inspSection('Fallback text',
                 field('Color', colorField('color', l.color)) +
                 field('Size', numInput('size', pct(l.size), '%')) +
@@ -2724,6 +2768,73 @@
     }
 
     // ── confirm dialog ──────────────────────────────────────────────────────────
+    // ── logo pack installer popup (opened from the locked Logo badge) ────────────
+    var logoPackPoll = null;
+    function openLogoPackDialog() {
+        var back = document.createElement('div');
+        back.className = 'voe-confirm-back';
+        back.innerHTML = '<div class="voe-lp">' +
+            '<div class="voe-lp-t">' + I.logo + ' Logo badges need an image pack</div>' +
+            '<div class="voe-lp-m">SoulSync doesn’t ship logo art. Install Kometa’s public set — ' +
+                'resolution, audio codec, source, HDR, aspect, plus streaming / network / studio logos — ' +
+                'copied into your own library. Or drop your own PNGs in the logos folder.</div>' +
+            '<div class="voe-lp-prog" data-lp-prog hidden><div class="voe-apply-bar"><div class="voe-apply-bar-fill" data-lp-fill></div></div>' +
+                '<div class="voe-lp-ptxt" data-lp-ptxt></div></div>' +
+            '<details class="voe-lp-help"><summary>Where do these go? (use your own art)</summary>' +
+                '<div class="voe-lp-help-b">Drop images at <code>video_poster_assets/logos/&lt;field&gt;/&lt;value&gt;.png</code> ' +
+                '(also .webp / .jpg). The folder is the field name; the file is the value — lowercased, spaces &amp; symbols as ' +
+                'underscores. e.g. <code>audio_codec/atmos.png</code>, <code>resolution/4k.png</code>, <code>network/hbo.png</code>.</div></details>' +
+            '<div class="voe-lp-row">' +
+                '<button class="voe-btn" data-lp-cancel>Cancel</button>' +
+                '<button class="voe-btn voe-btn--primary" data-lp-go>' + I.apply + ' Install Kometa pack</button>' +
+            '</div></div>';
+        document.body.appendChild(back);
+        requestAnimationFrame(function () { back.classList.add('voe-confirm-back--on'); });
+        function done() { if (logoPackPoll) { clearInterval(logoPackPoll); logoPackPoll = null; } back.classList.remove('voe-confirm-back--on'); setTimeout(function () { back.remove(); }, 180); }
+        back.addEventListener('click', function (e) { if (e.target === back) done(); });
+        back.querySelector('[data-lp-cancel]').addEventListener('click', done);
+        back.querySelector('[data-lp-go]').addEventListener('click', function () { startLogoPackInstall(back); });
+    }
+    function setLPProg(back, s) {
+        var prog = back.querySelector('[data-lp-prog]'); if (!prog) return;
+        prog.hidden = false;
+        var pct = s.total ? Math.round(100 * (s.done || 0) / s.total) : (s.phase === 'done' ? 100 : 6);
+        back.querySelector('[data-lp-fill]').style.width = pct + '%';
+        var txt = s.phase === 'done' ? ('Installed ' + (s.installed || 0) + ' logos') :
+            s.phase === 'error' ? ('Failed: ' + (s.error || 'error')) :
+            ('Downloading… ' + (s.done || 0) + ' / ' + (s.total || '?') + (s.field ? '  ·  ' + s.field : ''));
+        back.querySelector('[data-lp-ptxt]').textContent = txt;
+    }
+    function startLogoPackInstall(back) {
+        var go = back.querySelector('[data-lp-go]'); go.disabled = true;
+        back.querySelector('[data-lp-cancel]').disabled = true;
+        setLPProg(back, { phase: 'starting', done: 0, total: 0 });
+        api('POST', '/api/video/overlays/logopack/install').then(function (r) {
+            if (!r || !r.ok) { toast('Could not start install', 'error'); go.disabled = false; return; }
+            logoPackPoll = setInterval(function () { pollLogoPack(back); }, 800);
+        }).catch(function () { toast('Could not start install', 'error'); go.disabled = false; });
+    }
+    function pollLogoPack(back) {
+        api('GET', '/api/video/overlays/logopack').then(function (d) {
+            if (!document.body.contains(back)) { if (logoPackPoll) { clearInterval(logoPackPoll); logoPackPoll = null; } return; }
+            var s = (d && d.job) || {};
+            setLPProg(back, s);
+            if (s.running || (s.phase !== 'done' && s.phase !== 'error')) return;
+            if (logoPackPoll) { clearInterval(logoPackPoll); logoPackPoll = null; }
+            if (s.phase === 'done') {
+                logoPack = { installed: !!(d && d.installed), counts: (d && d.counts) || {}, loaded: true };
+                refreshPaletteDOM();
+                if (ed && ed.selected) renderInspector();     // refresh any open logo-badge guidance
+                toast('Logo pack installed — ' + (s.installed || 0) + ' logos', 'success');
+                setTimeout(function () { back.classList.remove('voe-confirm-back--on'); setTimeout(function () { back.remove(); }, 180); }, 900);
+            } else {
+                toast('Install failed', 'error');
+                back.querySelector('[data-lp-go]').disabled = false;
+                back.querySelector('[data-lp-cancel]').disabled = false;
+            }
+        }).catch(function () {});
+    }
+
     function confirmDialog(title, msg, action, onYes) {
         var back = document.createElement('div');
         back.className = 'voe-confirm-back';
@@ -2740,6 +2851,12 @@
         });
     }
 
+    // "Get Kometa pack" link inside the logo-badge inspector.
+    document.addEventListener('click', function (e) {
+        if (!overlay) return;
+        var gp = e.target.closest('[data-voe-getpack]');
+        if (gp && overlay.contains(gp)) { e.preventDefault(); openLogoPackDialog(); }
+    });
     // double-click on stage text → inline edit (bound at overlay level)
     document.addEventListener('dblclick', function (e) {
         if (!ed) return;
