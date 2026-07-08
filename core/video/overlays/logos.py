@@ -108,6 +108,7 @@ _NORMALIZERS = {
     "studio": _slug,
     "streaming": _slug,
     "collection": _slug,
+    "awards": _slug,
     "edition": _slug,
     # presence flag → a single icon (any truthy value maps to the same file)
     "mediastinger": lambda v: "stinger" if v else None,
