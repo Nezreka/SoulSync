@@ -52567,6 +52567,9 @@ tr.tag-diff-same {
     font-size: 14px;
     line-height: 1.6;
     color: rgba(255, 255, 255, 0.72);
+    /* Long paths/URLs must break so the flex item can shrink instead of clipping */
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 .docs-steps li::before {
@@ -52595,6 +52598,13 @@ tr.tag-diff-same {
     display: flex;
     gap: 12px;
     align-items: flex-start;
+    min-width: 0;
+}
+
+/* Callout body must be able to shrink and wrap long paths/URLs */
+.docs-callout > * {
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 .docs-callout-icon {
@@ -52651,6 +52661,23 @@ tr.tag-diff-same {
 
 .docs-table tr:hover td {
     background: rgba(255, 255, 255, 0.02);
+}
+
+/* Long inline tokens (URLs, docker paths) in prose must wrap, not clip */
+.docs-content p,
+.docs-content li,
+.docs-content strong,
+.docs-content a,
+.docs-table th,
+.docs-table td {
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 768px) {
+    /* Keep data tables inside the viewport by wrapping cell text */
+    .docs-table {
+        table-layout: fixed;
+    }
 }
 
 /* Keyboard shortcut badges */
@@ -53461,6 +53488,44 @@ tr.tag-diff-same {
 
     .docs-section-title {
         font-size: 22px;
+    }
+
+    /* Step rows carry rich inline content (code, badges); let it wrap
+       instead of forcing the flex row wider than the viewport */
+    .docs-steps li {
+        flex-wrap: wrap;
+    }
+
+    /* API param tables pin their first two columns nowrap — release that
+       on small screens and let the fixed layout keep them in-bounds */
+    .api-params-table {
+        table-layout: fixed;
+    }
+    .api-params-table td:first-child,
+    .api-params-table td:nth-child(2),
+    .api-params-table th,
+    .api-params-table td {
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+
+    /* API tester: key bar + endpoint headers are nowrap flex rows with a
+       non-shrinking path — let them wrap and shrink on small screens */
+    .api-key-bar {
+        flex-wrap: wrap;
+    }
+    .api-endpoint-header {
+        flex-wrap: wrap;
+    }
+    .api-endpoint-path {
+        flex-shrink: 1;
+        min-width: 0;
+        overflow-wrap: anywhere;
+    }
+    .api-endpoint-desc {
+        max-width: 100%;
+        text-align: left;
+        white-space: normal;
     }
 }
 
