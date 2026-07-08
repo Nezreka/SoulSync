@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import io
 import math
+import os
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont, ImageOps
 
@@ -29,32 +30,40 @@ _ANCHOR = {
     "bottom-left": (0.0, 1.0), "bottom-center": (0.5, 1.0), "bottom-right": (1.0, 1.0),
 }
 
-# curated family → (regular, bold) TTF Pillow can resolve. We bundle DejaVu today
-# (Pillow ships it); exact browser-matching faces are a later swap — the mapping is
-# the single place to change.
-_SERIF = "Georgia"
+# We BUNDLE Inter (the editor's default/preview face) so the render matches the
+# on-canvas preview AND works in a minimal container that ships no system fonts —
+# the old code trusted system DejaVu, which is absent in the slim Docker image, so
+# every text badge fell back to Pillow's tiny load_default() and rendered invisible.
+# Per-family fidelity (Bebas/Anton/Oswald/… as themselves) is a follow-up; for now
+# all families use Inter at the nearest bundled weight, which always renders.
+_FONT_DIR = os.path.join(os.path.dirname(__file__), "fonts")
+_INTER_WEIGHTS = {
+    400: "Inter-Regular.ttf", 500: "Inter-Medium.ttf", 600: "Inter-SemiBold.ttf",
+    700: "Inter-Bold.ttf", 800: "Inter-ExtraBold.ttf", 900: "Inter-Black.ttf",
+}
 _FONT_CACHE: dict = {}
 
 
 def _font(family: str, weight, px: int):
     px = max(1, int(px))
-    bold = _as_int(weight, 800) >= 700
-    serif = family == _SERIF
-    key = (serif, bold, px)
+    w = _as_int(weight, 800)
+    wsel = min(_INTER_WEIGHTS, key=lambda a: abs(a - w))   # nearest bundled Inter weight
+    key = (wsel, px)
     if key in _FONT_CACHE:
         return _FONT_CACHE[key]
-    names = []
-    if serif:
-        names = ["DejaVuSerif-Bold.ttf", "DejaVuSerif.ttf"] if bold else ["DejaVuSerif.ttf"]
-    names += ["DejaVuSans-Bold.ttf"] if bold else ["DejaVuSans.ttf"]
-    names += ["DejaVuSans.ttf"]
     font = None
-    for n in names:
-        try:
-            font = ImageFont.truetype(n, px)
-            break
-        except Exception:
-            continue
+    # 1) the bundled Inter weight — always present, matches the editor preview.
+    try:
+        font = ImageFont.truetype(os.path.join(_FONT_DIR, _INTER_WEIGHTS[wsel]), px)
+    except Exception:
+        logger.warning("bundled Inter weight %s failed to load", wsel, exc_info=True)
+        # 2) system DejaVu (dev boxes only), then 3) Pillow's default (never invisible-safe).
+        for n in (("DejaVuSans-Bold.ttf" if wsel >= 700 else "DejaVuSans.ttf"), "DejaVuSans.ttf"):
+            try:
+                font = ImageFont.truetype(n, px)
+                break
+            except Exception:
+                continue
     if font is None:
         font = ImageFont.load_default()
     _FONT_CACHE[key] = font
