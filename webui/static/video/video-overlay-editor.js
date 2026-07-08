@@ -87,6 +87,7 @@
         mediastinger: { label: 'Mediastinger', cat: 'Details', num: true, fmt: function (v) { return v ? 'After Credits' : null; } },
         title: { label: 'Title', cat: 'Details', text: true, fmt: function (v) { return v ? String(v) : null; } },
         collection: { label: 'Collection', cat: 'Details', text: true, fmt: function (v) { return v ? String(v) : null; } },
+        tagline: { label: 'Tagline', cat: 'Details', text: true, fmt: function (v) { return v ? String(v) : null; } },
         streaming: { label: 'Streaming', cat: 'Details', text: true, fmt: function (v) { return v ? String(v) : null; } },
         network: { label: 'Network', cat: 'Details', text: true, fmt: function (v) { return v ? String(v) : null; } },
         studio: { label: 'Studio', cat: 'Details', text: true, fmt: function (v) { return v ? String(v) : null; } },
@@ -100,7 +101,7 @@
         'Romance', 'Science Fiction', 'Sci-Fi & Fantasy', 'Soap', 'Talk', 'TV Movie', 'Thriller', 'War',
         'War & Politics', 'Western'];
     var FIELD_ORDER = ['resolution', 'hdr', 'video_codec', 'audio_codec', 'source', 'aspect', 'imdb', 'rt', 'metacritic', 'tmdb', 'trakt', 'tvmaze', 'anilist',
-        'content_rating', 'genre', 'status', 'year', 'runtime', 'season_count', 'episode_count', 'subtitles', 'versions', 'mediastinger', 'title', 'collection', 'streaming', 'network', 'studio'];
+        'content_rating', 'genre', 'status', 'year', 'runtime', 'season_count', 'episode_count', 'subtitles', 'versions', 'mediastinger', 'title', 'tagline', 'collection', 'streaming', 'network', 'studio'];
     var FIELD_CATS = ['Quality', 'Ratings', 'Details'];
     // Fields a Logo badge can resolve to a drop-in pack image (mirrors logos.py
     // LOGO_FIELDS, limited to the ones we actually carry data for).
@@ -109,7 +110,7 @@
     function defaultSample() {
         return { resolution: '2160p', hdr: 'HDR', video_codec: 'hevc', audio_codec: 'atmos', source: 'bluray', aspect: '2.40:1',
             imdb: 8.4, rt: 92, metacritic: 81, tmdb: 8.1, trakt: 8.3, tvmaze: 8.0, anilist: 82, content_rating: 'PG-13', status: 'Returning',
-            year: 2021, runtime: 148, season_count: 4, episode_count: 62, subtitles: 7, versions: 2, mediastinger: 1, title: 'Example Title', collection: 'The Collection', streaming: 'Netflix', network: 'HBO', studio: 'A24', genre: 'Sci-Fi' };
+            year: 2021, runtime: 148, season_count: 4, episode_count: 62, subtitles: 7, versions: 2, mediastinger: 1, title: 'Example Title', tagline: 'Every legend has a beginning', collection: 'The Collection', streaming: 'Netflix', network: 'HBO', studio: 'A24', genre: 'Sci-Fi' };
     }
     // real values win; nulls fall back to the defaults so no badge previews blank.
     function mergeSample(real) {

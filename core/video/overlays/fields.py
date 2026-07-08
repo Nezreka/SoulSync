@@ -133,6 +133,7 @@ _FORMATTERS = {
     "mediastinger": lambda v: "After Credits" if v else None,   # presence flag
     "title": lambda v: str(v) if v else None,
     "collection": lambda v: str(v) if v else None,   # franchise (TMDB collection)
+    "tagline": lambda v: str(v) if v else None,
     "streaming": lambda v: str(v) if v else None,
     "network": lambda v: str(v) if v else None,
     "studio": lambda v: str(v) if v else None,
