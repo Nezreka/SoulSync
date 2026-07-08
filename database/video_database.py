@@ -2490,6 +2490,7 @@ class VideoDatabase:
                 d = dict(r)
                 defn = self._parse_definition(d.pop("definition", None))
                 d["layer_count"] = len(defn.get("layers") or [])
+                d["kind"] = defn.get("kind") or "poster"   # Poster / Season / Episode
                 out.append(d)
             return out
         finally:

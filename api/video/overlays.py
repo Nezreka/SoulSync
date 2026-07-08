@@ -138,7 +138,8 @@ def register_routes(bp):
     def overlay_assignments_get():
         from . import get_video_db
         db = get_video_db()
-        templates = [{"id": t["id"], "name": t["name"]} for t in db.list_overlay_templates()]
+        templates = [{"id": t["id"], "name": t["name"], "kind": t.get("kind") or "poster"}
+                     for t in db.list_overlay_templates()]
         return jsonify({"assignments": db.get_overlay_assignments(), "templates": templates,
                         "applied": db.overlay_applied_count()})
 

@@ -317,11 +317,16 @@
             renderApplyDialog(d || { assignments: {}, templates: [], applied: 0 });
         }).catch(function () { toast('Could not load apply settings', 'error'); });
     }
+    // Which template type a library scope takes (movies+shows share Poster).
+    function scopeKind(scope) { return scope === 'season' ? 'season' : scope === 'episode' ? 'episode' : 'poster'; }
     function scopeRow(label, scope, assign, templates) {
         var cur = (assign && assign.template_id) || '';
-        var opts = '<option value="">— None —</option>' + templates.map(function (t) {
-            return '<option value="' + t.id + '"' + (String(t.id) === String(cur) ? ' selected' : '') + '>' + esc(t.name) + '</option>';
-        }).join('');
+        var want = scopeKind(scope);
+        var opts = '<option value="">— None —</option>' + templates
+            .filter(function (t) { return (t.kind || 'poster') === want; })   // only type-matching templates
+            .map(function (t) {
+                return '<option value="' + t.id + '"' + (String(t.id) === String(cur) ? ' selected' : '') + '>' + esc(t.name) + '</option>';
+            }).join('');
         var on = !!(assign && assign.enabled && assign.template_id);
         return '<div class="voe-apply-row"><div class="voe-apply-row-l">' + label + '</div>' +
             '<select class="voe-input" data-apply-tpl="' + scope + '">' + opts + '</select>' +
