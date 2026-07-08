@@ -167,6 +167,7 @@
                         </select>
                         <label class="profile-settings-label">Page Access</label>
                         <div id="new-profile-allowed-pages" class="profile-page-checkboxes">
+                            <div class="profile-page-group-label profile-page-group-label--first">Music</div>
                             <label><input type="checkbox" value="dashboard" checked> Dashboard</label>
                             <label><input type="checkbox" value="sync" checked> Sync</label>
                             <label><input type="checkbox" value="search" checked> Search</label>
@@ -181,19 +182,19 @@
                             <label><input type="checkbox" value="import" checked> Import</label>
                             <label><input type="checkbox" value="help" checked disabled> Help & Docs</label>
                             <label><input type="checkbox" value="issues" checked disabled> Issues</label>
-                            <div class="profile-page-group-label">Video (Import, Settings &amp; Automations stay admin-only)</div>
-                            <label><input type="checkbox" value="video-dashboard" checked> Video · Dashboard</label>
-                            <label><input type="checkbox" value="video-search" checked> Video · Search</label>
-                            <label><input type="checkbox" value="video-discover" checked> Video · Discover</label>
-                            <label><input type="checkbox" value="video-library" checked> Video · Library</label>
-                            <label><input type="checkbox" value="video-watchlist" checked> Video · Watchlist</label>
-                            <label><input type="checkbox" value="video-wishlist" checked> Video · Wishlist</label>
-                            <label><input type="checkbox" value="video-downloads" checked> Video · Downloads</label>
-                            <label><input type="checkbox" value="video-calendar" checked> Video · Calendar</label>
-                            <label><input type="checkbox" value="video-tools" checked> Video · Tools</label>
+                            <div class="profile-page-group-label">Video<span class="profile-page-group-note">Import, Settings &amp; Automations stay admin-only</span></div>
+                            <label><input type="checkbox" value="video-dashboard" checked> Dashboard</label>
+                            <label><input type="checkbox" value="video-search" checked> Search</label>
+                            <label><input type="checkbox" value="video-discover" checked> Discover</label>
+                            <label><input type="checkbox" value="video-library" checked> Library</label>
+                            <label><input type="checkbox" value="video-watchlist" checked> Watchlist</label>
+                            <label><input type="checkbox" value="video-wishlist" checked> Wishlist</label>
+                            <label><input type="checkbox" value="video-downloads" checked> Downloads</label>
+                            <label><input type="checkbox" value="video-calendar" checked> Calendar</label>
+                            <label><input type="checkbox" value="video-tools" checked> Tools</label>
                         </div>
                         <label class="profile-checkbox-label">
-                            <input type="checkbox" id="new-profile-can-download" checked> Can download music
+                            <input type="checkbox" id="new-profile-can-download" checked> Can download (music &amp; video)
                         </label>
                     </div>
                     <button id="create-profile-btn" class="btn btn--block btn--primary profile-create-btn">Create Profile</button>

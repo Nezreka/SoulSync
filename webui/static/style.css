@@ -45912,6 +45912,20 @@ div.artist-hero-badge {
     letter-spacing: 0.04em;
     color: rgba(255, 255, 255, 0.4);
 }
+.profile-page-group-label--first {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
+}
+.profile-page-group-note {
+    display: block;
+    margin-top: 3px;
+    font-size: 10.5px;
+    font-weight: 500;
+    text-transform: none;
+    letter-spacing: 0;
+    color: rgba(255, 255, 255, 0.3);
+}
 
 .profile-page-checkboxes label {
     display: flex;
