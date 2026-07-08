@@ -3037,5 +3037,8 @@
         close();
     });
 
-    window.VideoOverlayEditor = { open: open, close: close };
+    // openSettings opens JUST the per-scope overlay-settings modal (standalone —
+    // no Studio shell needed), so the Automations page can configure what the
+    // nightly overlay automation applies, from the same single source of truth.
+    window.VideoOverlayEditor = { open: open, close: close, openSettings: openApplyDialog };
 })();
