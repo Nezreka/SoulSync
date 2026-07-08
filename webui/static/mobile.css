@@ -1150,6 +1150,13 @@
         gap: 6px;
     }
 
+    /* On a narrow hero the centered carousel indicators and the bottom-right
+       action buttons both pin to the bottom edge and collide — lift the
+       indicators above the action row so the dots stay usable. */
+    .discover-hero-indicators {
+        bottom: 62px;
+    }
+
     .discover-hero-watch-all,
     .discover-hero-view-all {
         padding: 6px 12px;
