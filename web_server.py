@@ -468,6 +468,9 @@ socketio = SocketIO(app, async_mode='threading', cors_allowed_origins=_socketio_
 _log_socketio_startup_status(_socketio_cors_origins, logger)
 _socketio_rejection_logger = _SocketIORejectionLogger(logger)
 set_activity_toast_emitter(socketio.emit)
+# Live overlay-apply progress → 'overlay:progress' socket events (bell + panel).
+from core.video.overlays.service import set_overlay_progress_emitter as _set_overlay_emit
+_set_overlay_emit(socketio.emit)
 
 # Plex PIN auth requests stored in memory for polling
 _plex_pin_requests = {}

@@ -10,6 +10,7 @@ server, like the Poster Manager push).
 from __future__ import annotations
 
 import threading
+import time
 
 from utils.logging_config import get_logger
 
@@ -253,10 +254,35 @@ _JOB = {"running": False, "phase": "idle", "mode": None,
         "done": 0, "total": 0, "applied": 0, "skipped": 0, "failed": 0, "title": None, "error": None}
 _lock = threading.Lock()
 
+# Live progress over socketio (wired at startup via set_overlay_progress_emitter).
+# Throttled to ~1/s so a 100k-item run doesn't flood the socket; phase changes
+# (start / done / error) always emit so the UI flips state instantly.
+_emit = None
+_last_emit = [0.0]
+
+
+def set_overlay_progress_emitter(fn) -> None:
+    global _emit
+    _emit = fn
+
+
+def _emit_progress(force=False) -> None:
+    if _emit is None:
+        return
+    now = time.monotonic()
+    if not force and (now - _last_emit[0]) < 1.0:
+        return
+    _last_emit[0] = now
+    try:
+        _emit("overlay:progress", dict(_JOB))
+    except Exception:
+        logger.debug("overlay progress emit failed", exc_info=True)
+
 
 def _reset(mode):
     _JOB.update(running=True, phase="starting", mode=mode, done=0, total=0,
                 applied=0, skipped=0, failed=0, title=None, error=None)
+    _emit_progress(force=True)
 
 
 def reset_item_poster(db, kind, item_id, store=None) -> dict:
@@ -297,6 +323,7 @@ def apply_scopes_sync(db, scopes, *, force=False, on_progress=None) -> dict:
 
         def _prog(p):
             _JOB.update(p)
+            _emit_progress()
             if on_progress:
                 on_progress(p)
 
@@ -309,6 +336,7 @@ def apply_scopes_sync(db, scopes, *, force=False, on_progress=None) -> dict:
         return {"ok": False, "error": str(e)}
     finally:
         _JOB["running"] = False
+        _emit_progress(force=True)
 
 
 def _run(db, scopes, force, remove, reset=False):
@@ -327,17 +355,24 @@ def _run(db, scopes, force, remove, reset=False):
                 applied += 1 if ok else 0
                 failed += 0 if ok else 1
                 _JOB.update(done=idx + 1, applied=applied, failed=failed, title=it.get("title"))
+                _emit_progress()
             _JOB["phase"] = "done"
             return
         jobs = svc.build_remove_jobs(scopes) if remove else svc.build_jobs(scopes, force=force)
         _JOB.update(total=len(jobs), phase="running")
-        run_apply(svc.applier(), jobs, on_progress=lambda p: _JOB.update(p), remove=remove)
+
+        def _prog(p):
+            _JOB.update(p)
+            _emit_progress()
+
+        run_apply(svc.applier(), jobs, on_progress=_prog, remove=remove)
         _JOB["phase"] = "done"
     except Exception as e:
         logger.exception("overlay apply run failed")
         _JOB.update(phase="error", error=str(e))
     finally:
         _JOB["running"] = False
+        _emit_progress(force=True)
 
 
 def status() -> dict:
