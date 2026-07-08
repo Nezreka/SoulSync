@@ -605,7 +605,10 @@ def _set_profile_context():
 
     pid = session.get('profile_id', 1)
 
-    # Validate session profile still exists (handles deleted profiles)
+    # Validate session profile still exists (handles deleted profiles), and stash
+    # download permission on g so isolated blueprints (video) can gate without a
+    # music-DB read. Admin (1) is always allowed.
+    g.can_download = True
     if pid != 1 and 'profile_id' in session:
         try:
             database = get_database()
@@ -614,6 +617,7 @@ def _set_profile_context():
                 session.pop('profile_id', None)
                 from flask import jsonify as _jsonify
                 return _jsonify({"error": "profile_required", "message": "Profile no longer exists"}), 401
+            g.can_download = bool((profile or {}).get('can_download', True))
         except Exception as e:
             logger.debug("profile session validate: %s", e)
 
