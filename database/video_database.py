@@ -1841,6 +1841,30 @@ class VideoDatabase:
         self.set_setting(server + ".tv_library", tv or "")
 
     # ── dashboard ─────────────────────────────────────────────────────────────
+    def recently_added(self, server_source=None, limit=12) -> list:
+        """Newest owned movies + shows by added_at, for the dashboard's Recently
+        Added row. [{kind, id, title, year, added_at}], newest first."""
+        limit = max(1, min(50, int(limit)))
+        where = "server_id IS NOT NULL AND server_id <> '' AND added_at IS NOT NULL"
+        if server_source:
+            where += " AND server_source = ?"
+        params = ([server_source] if server_source else [])
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT kind, id, title, year, added_at FROM ("
+                f"  SELECT 'movie' AS kind, id, title, year, added_at FROM movies WHERE {where}"
+                "   UNION ALL "
+                f"  SELECT 'show' AS kind, id, title, year, added_at FROM shows WHERE {where}"
+                ") ORDER BY added_at DESC, id DESC LIMIT ?",
+                params + params + [limit]).fetchall()
+            return [dict(r) for r in rows]
+        except sqlite3.Error:
+            logger.exception("recently_added query failed")
+            return []
+        finally:
+            conn.close()
+
     def dashboard_stats(self, server_source=None) -> dict:
         """Live counts for the video dashboard, straight from video.db. Library
         counts are scoped to the active video server (``server_source``) so Plex

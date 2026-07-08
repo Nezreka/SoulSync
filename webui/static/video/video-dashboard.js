@@ -90,6 +90,33 @@
         }
     }
 
+    function _esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+        });
+    }
+    // Render the "Recently Added" tiles (poster + title), newest first, each linking
+    // to its detail page.
+    function applyRecent(items) {
+        var host = document.querySelector('[data-video-recent]');
+        if (!host) return;
+        items = items || [];
+        if (!items.length) {
+            host.innerHTML = '<div class="video-recent-empty">Nothing added yet.</div>';
+            return;
+        }
+        host.innerHTML = items.map(function (it) {
+            var href = '/video-detail/library/' + it.kind + '/' + it.id;
+            var poster = '/api/video/poster/' + it.kind + '/' + it.id + '?w=160';
+            return '<a class="video-recent-item" href="' + href + '" title="' + _esc(it.title) + '">' +
+                '<div class="video-recent-poster"><img src="' + poster + '" alt="" loading="lazy" ' +
+                'onerror="this.closest(\'.video-recent-poster\').classList.add(\'is-empty\')"></div>' +
+                '<div class="video-recent-title">' + _esc(it.title) + '</div>' +
+                (it.year ? '<div class="video-recent-year">' + _esc(it.year) + '</div>' : '') +
+                '</a>';
+        }).join('');
+    }
+
     function loadStats() {
         fetch(DASHBOARD_URL, { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
@@ -97,6 +124,7 @@
                 if (d && !d.error) {
                     applyStats(flatten(d));
                     applyBadges(d);
+                    applyRecent(d.recent);
                 } else {
                     applyStats(FALLBACK_STATS);
                 }
@@ -137,24 +165,8 @@
         }, 10000);
     }
 
-    // Service "Test" buttons are inert until the video services exist. Mark them
-    // honestly rather than firing a no-op that looks broken.
-    var testWired = false;
-    function wireTestButtons() {
-        if (testWired) return;
-        testWired = true;
-        var buttons = document.querySelectorAll('[data-video-test]');
-        for (var i = 0; i < buttons.length; i++) {
-            (function (btn) {
-                btn.disabled = true;
-                btn.title = 'Coming soon — video services not configured yet';
-            })(buttons[i]);
-        }
-    }
-
     function onPageShown(e) {
         if (!e || e.detail !== DASHBOARD_ID) return;
-        wireTestButtons();
         loadStats();
         loadSystemStats();          // immediate fill (memory/uptime)
         startSystemStatsPolling();  // then keep it live
