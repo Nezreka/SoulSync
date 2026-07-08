@@ -64885,7 +64885,11 @@ body.max-performance .dash-card::after {
     grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
     gap: clamp(8px, 0.8cqw + 4px, 14px);
-    height: clamp(280px, 18cqw + 200px, 340px);
+    /* Size to content (rows are minmax(0,1fr) so the row-spanning hero
+       auto-equalizes to the two stacked minor tiles); keep a floor for
+       visual mass. Forcing a fixed height taller than content is what
+       left the dead gap above the Auto-Sync title (D1). */
+    min-height: clamp(220px, 14cqw + 160px, 280px);
 }
 
 .qa-tile {
@@ -64951,7 +64955,7 @@ body.max-performance .dash-card::after {
 .qa-tile--hero {
     grid-row: span 2;
     padding: clamp(20px, 1.6cqw + 14px, 32px);
-    grid-template-rows: auto auto 1fr auto;
+    grid-template-rows: auto auto auto 1fr;
     gap: clamp(10px, 1cqw + 4px, 18px);
 }
 
@@ -65315,7 +65319,7 @@ body.max-performance .dash-card::after {
 
 .qa-tile--hero .qa-tile__heading {
     grid-row: 3;
-    align-self: end;
+    align-self: start;
 }
 
 .qa-tile__title {
@@ -65409,7 +65413,9 @@ body.max-performance .dash-card::after {
         grid-template-rows: auto auto auto;
         height: auto;
     }
-    .qa-tile--hero { grid-row: auto; aspect-ratio: 4 / 3; }
+    /* Size to content in the single-column layout — a fixed 4:3 box left a
+       big dead gap below the CTA on the narrow dashboard column (D1). */
+    .qa-tile--hero { grid-row: auto; aspect-ratio: auto; }
     .qa-tile--minor { min-height: 90px; }
 }
 
