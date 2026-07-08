@@ -2740,10 +2740,10 @@
         var el = popover(anchor,
             '<div class="voe-pop-h">Preview poster</div>' +
             '<div class="voe-pop-note">Pick a real title to preview against — it also loads that title’s real values into your badges. Preview only, never saved.</div>' +
-            '<div class="voe-pop-search"><input class="voe-input" data-pop-search placeholder="Search your library…" autocomplete="off"></div>' +
+            '<div class="voe-pop-search"><input class="voe-input" data-pop-search placeholder="Search your ' + esc(previewNoun()) + '…" autocomplete="off"></div>' +
             '<div class="voe-pop-clear"><button class="voe-btn" data-pop-random style="width:100%;justify-content:center">' + I.dice + ' Surprise me</button></div>' +
             (ed.bg ? '<div class="voe-pop-clear" style="margin-top:0"><button class="voe-btn" data-pop-blank style="width:100%;justify-content:center">Use blank poster</button></div>' : '') +
-            '<div class="voe-pop-body" data-pop-results><div class="voe-pop-empty">Type to search your movies &amp; shows.</div></div>');
+            '<div class="voe-pop-body" data-pop-results><div class="voe-pop-empty">Type to search your ' + esc(previewNoun()) + '.</div></div>');
         var input = el.querySelector('[data-pop-search]');
         var blank = el.querySelector('[data-pop-blank]');
         el.querySelector('[data-pop-random]').addEventListener('click', function () { closePop(); loadRandomPreview(); });
@@ -2752,36 +2752,52 @@
         input.addEventListener('input', function () { clearTimeout(t); var q = input.value.trim(); t = setTimeout(function () { previewSearch(q, el); }, 240); });
         setTimeout(function () { input.focus(); }, 40);
     }
+    // What a template previews on, in words (drives the search copy + endpoints).
+    function previewNoun() { var k = templateKind(); return k === 'season' ? 'seasons' : k === 'episode' ? 'episodes' : 'movies & shows'; }
+    function _kindLabel(k) { return k === 'season' ? 'Season' : k === 'episode' ? 'Episode' : k === 'show' ? 'TV' : 'Movie'; }
+    function renderPreviewResults(box, rows) {
+        if (!rows.length) { box.innerHTML = '<div class="voe-pop-empty">No matches in your library.</div>'; return; }
+        box.innerHTML = rows.map(function (it) {
+            var thumb = it.hasPoster ? '/api/video/poster/' + it.kind + '/' + it.id + '?w=60' : '';
+            return '<div class="voe-pop-result" data-pick="' + esc(JSON.stringify(it)) + '">' +
+                (thumb ? '<img src="' + esc(thumb) + '" alt="">' : '<img alt="">') +
+                '<div style="min-width:0"><div class="voe-pop-result-t">' + esc(it.title) + '</div>' +
+                '<div class="voe-pop-result-m">' + _kindLabel(it.kind) + (it.year ? ' · ' + esc(it.year) : '') + '</div></div></div>';
+        }).join('');
+        box.querySelectorAll('[data-pick]').forEach(function (row) {
+            row.addEventListener('click', function () { setPreviewTitle(JSON.parse(row.getAttribute('data-pick'))); });
+        });
+    }
     function previewSearch(q, el) {
         var box = el.querySelector('[data-pop-results]');
-        if (q.length < 2) { box.innerHTML = '<div class="voe-pop-empty">Type to search your movies &amp; shows.</div>'; return; }
+        if (q.length < 2) { box.innerHTML = '<div class="voe-pop-empty">Type to search your ' + previewNoun() + '.</div>'; return; }
         box.innerHTML = '<div class="voe-pop-empty">Searching…</div>';
-        function one(kind) {
-            return api('GET', '/api/video/library?kind=' + kind + '&search=' + encodeURIComponent(q) + '&limit=8')
+        var kind = templateKind();
+        if (kind === 'season' || kind === 'episode') {
+            api('GET', '/api/video/overlays/preview/search?kind=' + kind + '&q=' + encodeURIComponent(q))
+                .then(function (d) {
+                    renderPreviewResults(box, ((d && d.items) || []).map(function (it) {
+                        return { kind: kind, id: it.id, title: it.title, hasPoster: !!it.has_poster };
+                    }));
+                }).catch(function () { box.innerHTML = '<div class="voe-pop-empty">Search failed.</div>'; });
+            return;
+        }
+        function one(k) {
+            return api('GET', '/api/video/library?kind=' + k + '&search=' + encodeURIComponent(q) + '&limit=8')
                 .then(function (d) { return (d && d.items) || []; }).catch(function () { return []; });
         }
         Promise.all([one('movies'), one('shows')]).then(function (r) {
             var rows = [];
             (r[0] || []).forEach(function (m) { rows.push({ kind: 'movie', id: m.id, title: m.title, year: m.year, hasPoster: m.has_poster, tmdbId: m.tmdb_id }); });
             (r[1] || []).forEach(function (s) { rows.push({ kind: 'show', id: s.id, title: s.title, year: s.year, hasPoster: s.has_poster, tmdbId: s.tmdb_id }); });
-            if (!rows.length) { box.innerHTML = '<div class="voe-pop-empty">No matches in your library.</div>'; return; }
-            box.innerHTML = rows.map(function (it) {
-                var thumb = it.hasPoster ? '/api/video/poster/' + it.kind + '/' + it.id + '?w=60' : '';
-                return '<div class="voe-pop-result" data-pick="' + esc(JSON.stringify(it)) + '">' +
-                    (thumb ? '<img src="' + esc(thumb) + '" alt="">' : '<img alt="">') +
-                    '<div style="min-width:0"><div class="voe-pop-result-t">' + esc(it.title) + '</div>' +
-                    '<div class="voe-pop-result-m">' + (it.kind === 'show' ? 'TV' : 'Movie') + (it.year ? ' · ' + esc(it.year) : '') + '</div></div></div>';
-            }).join('');
-            box.querySelectorAll('[data-pick]').forEach(function (row) {
-                row.addEventListener('click', function () { setPreviewTitle(JSON.parse(row.getAttribute('data-pick'))); });
-            });
+            renderPreviewResults(box, rows);
         });
     }
-    // "Surprise me" — drop a random owned title into the preview.
+    // "Surprise me" — drop a random owned item (matching the template type) into preview.
     function loadRandomPreview() {
-        api('GET', '/api/video/overlays/preview/random').then(function (d) {
+        api('GET', '/api/video/overlays/preview/random?kind=' + templateKind()).then(function (d) {
             var it = d && d.item;
-            if (!it) { toast('No library titles to preview yet', 'info'); return; }
+            if (!it) { toast('No ' + previewNoun() + ' with art to preview yet', 'info'); return; }
             setPreviewTitle({ kind: it.kind, id: it.id, title: it.title, tmdbId: it.tmdb_id });
             toast('Previewing “' + (it.title || 'a title') + '”', 'success');
         }).catch(function () { toast('Could not load a random title', 'error'); });

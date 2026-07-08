@@ -2304,9 +2304,31 @@ class VideoDatabase:
         finally:
             conn.close()
 
-    def random_overlay_preview_item(self, server_source=None) -> dict | None:
-        """A random owned movie/show that has a tmdb_id + poster — so an overlay
-        template can be previewed on a real title's clean art."""
+    def random_overlay_preview_item(self, kind="poster", server_source=None) -> dict | None:
+        """A random owned item with art, to preview a template on real data. kind
+        'poster' = movie/show (2:3), 'season' = a season poster, 'episode' = an
+        episode still (16:9) — matching the template's type."""
+        kind = str(kind).lower()
+        if kind in ("season", "episode"):
+            conn = self._get_connection()
+            try:
+                if kind == "season":
+                    r = conn.execute(
+                        "SELECT 'season' AS kind, se.id AS id, NULL AS tmdb_id, "
+                        "COALESCE(sh.title,'') || ' — ' || COALESCE(NULLIF(se.title,''), 'Season ' || se.season_number) AS title "
+                        "FROM seasons se JOIN shows sh ON sh.id = se.show_id "
+                        "WHERE se.poster_url IS NOT NULL AND se.poster_url <> '' ORDER BY RANDOM() LIMIT 1").fetchone()
+                else:
+                    r = conn.execute(
+                        "SELECT 'episode' AS kind, e.id AS id, NULL AS tmdb_id, "
+                        "COALESCE(sh.title,'') || ' — S' || e.season_number || 'E' || e.episode_number AS title "
+                        "FROM episodes e JOIN shows sh ON sh.id = e.show_id "
+                        "WHERE e.still_url IS NOT NULL AND e.still_url <> '' ORDER BY RANDOM() LIMIT 1").fetchone()
+                return dict(r) if r else None
+            except sqlite3.Error:
+                return None
+            finally:
+                conn.close()
         srcm = " AND server_source = ?" if server_source else ""
         srcs = " AND server_source = ?" if server_source else ""
         params = ([server_source] if server_source else []) + ([server_source] if server_source else [])
@@ -2323,6 +2345,40 @@ class VideoDatabase:
             return dict(r) if r else None
         except sqlite3.Error:
             return None
+        finally:
+            conn.close()
+
+    def search_overlay_preview(self, kind, q, limit=8) -> list:
+        """[{id, title, has_poster}] seasons/episodes matching a query, to pick a
+        specific one to preview a Season/Episode template on. (Poster templates use
+        the general /library search.)"""
+        kind = str(kind).lower()
+        like = "%" + str(q or "").strip() + "%"
+        limit = max(1, min(20, int(limit)))
+        conn = self._get_connection()
+        try:
+            if kind == "season":
+                rows = conn.execute(
+                    "SELECT se.id AS id, "
+                    "COALESCE(sh.title,'') || ' — ' || COALESCE(NULLIF(se.title,''), 'Season ' || se.season_number) AS title, "
+                    "(se.poster_url IS NOT NULL AND se.poster_url <> '') AS has_poster "
+                    "FROM seasons se JOIN shows sh ON sh.id = se.show_id "
+                    "WHERE sh.title LIKE ? AND se.poster_url IS NOT NULL AND se.poster_url <> '' "
+                    "ORDER BY sh.title, se.season_number LIMIT ?", (like, limit)).fetchall()
+                return [dict(r) for r in rows]
+            if kind == "episode":
+                rows = conn.execute(
+                    "SELECT e.id AS id, "
+                    "COALESCE(sh.title,'') || ' — S' || e.season_number || 'E' || e.episode_number || "
+                    "CASE WHEN e.title IS NOT NULL AND e.title <> '' THEN ' ' || e.title ELSE '' END AS title, "
+                    "(e.still_url IS NOT NULL AND e.still_url <> '') AS has_poster "
+                    "FROM episodes e JOIN shows sh ON sh.id = e.show_id "
+                    "WHERE (sh.title LIKE ? OR e.title LIKE ?) AND e.still_url IS NOT NULL AND e.still_url <> '' "
+                    "ORDER BY sh.title, e.season_number, e.episode_number LIMIT ?", (like, like, limit)).fetchall()
+                return [dict(r) for r in rows]
+            return []
+        except sqlite3.Error:
+            return []
         finally:
             conn.close()
 

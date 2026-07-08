@@ -230,6 +230,36 @@ def test_overlay_sample_data_episode(db):
     assert format_field("episode_number", s["episode_number"]) == "Episode 1"
 
 
+def test_preview_random_and_search_for_sub_types(db):
+    _show_with_sub(db)
+    # season poster exists (set in the fixture); episode still set below
+    with db.connect() as c:
+        c.execute("UPDATE seasons SET poster_url='http://x/season.jpg' WHERE show_id IN (SELECT id FROM shows WHERE title='Show')")
+        c.execute("UPDATE episodes SET still_url='http://x/still.jpg' WHERE show_id IN (SELECT id FROM shows WHERE title='Show')")
+        c.commit()
+    ss = db.random_overlay_preview_item("season")
+    assert ss and ss["kind"] == "season" and "Show" in ss["title"]
+    es = db.random_overlay_preview_item("episode")
+    assert es and es["kind"] == "episode" and "Show — S1E" in es["title"]   # E1 or E2, random
+    # search finds them by show title
+    assert any("Season 1" in r["title"] for r in db.search_overlay_preview("season", "Show"))
+    eps = db.search_overlay_preview("episode", "Show")
+    assert eps and all(r["has_poster"] for r in eps) and any("Pilot" in r["title"] for r in eps)
+    assert db.search_overlay_preview("season", "Nonexistent") == []
+
+
+def test_preview_skips_items_without_art(db):
+    _show_with_sub(db)
+    # no poster/still set on the fixture's season/episode -> nothing to preview
+    with db.connect() as c:
+        c.execute("UPDATE seasons SET poster_url=NULL")
+        c.execute("UPDATE episodes SET still_url=NULL")
+        c.commit()
+    assert db.random_overlay_preview_item("season") is None
+    assert db.random_overlay_preview_item("episode") is None
+    assert db.search_overlay_preview("episode", "Show") == []
+
+
 def test_poster_set_target_and_assignment_for_sub_scopes(db):
     _show_with_sub(db)
     sea = db.overlay_scope_items("season")[0]

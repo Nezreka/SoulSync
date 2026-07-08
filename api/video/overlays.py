@@ -251,10 +251,20 @@ def register_routes(bp):
 
     @bp.route("/overlays/preview/random", methods=["GET"])
     def overlay_preview_random():
-        """A random owned title (with tmdb_id + poster) to drop into the editor's
-        preview — the "surprise me" companion to the search."""
+        """A random owned item to drop into the editor's preview — the "surprise me"
+        companion to the search. ?kind=poster|season|episode matches the template."""
         from . import get_video_db
-        return jsonify({"item": get_video_db().random_overlay_preview_item()})
+        kind = request.args.get("kind") or "poster"
+        return jsonify({"item": get_video_db().random_overlay_preview_item(kind)})
+
+    @bp.route("/overlays/preview/search", methods=["GET"])
+    def overlay_preview_search():
+        """Search seasons/episodes to preview a Season/Episode template on a real
+        one. (Poster templates use the general /library search.)"""
+        from . import get_video_db
+        kind = request.args.get("kind") or "season"
+        q = request.args.get("q") or request.args.get("search") or ""
+        return jsonify({"items": get_video_db().search_overlay_preview(kind, q)})
 
     @bp.route("/overlays/preview/filmstrip", methods=["POST"])
     def overlay_preview_filmstrip():
