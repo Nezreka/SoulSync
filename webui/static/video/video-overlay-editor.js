@@ -93,6 +93,9 @@
         network: { label: 'Network', cat: 'Details', text: true, fmt: function (v) { return v ? String(v) : null; } },
         studio: { label: 'Studio', cat: 'Details', text: true, fmt: function (v) { return v ? String(v) : null; } },
         genre: { label: 'Genre', cat: 'Details', text: true, fmt: function (v) { return v ? (String(v).split(',')[0].trim() || null) : null; } },
+        season_number: { label: 'Season number', cat: 'Episode', num: true, fmt: function (v) { return v == null ? null : 'Season ' + Math.round(v); } },
+        episode_number: { label: 'Episode number', cat: 'Episode', num: true, fmt: function (v) { return v == null ? null : 'Episode ' + Math.round(v); } },
+        episode_code: { label: 'Episode code', cat: 'Episode', text: true, fmt: function (v) { return v ? String(v) : null; } },
     };
     // Canonical TMDB genres (movie + TV sets, unioned) for the conditional value
     // dropdown. `genre` values carry a title's FULL comma-joined genre list, so a
@@ -102,8 +105,9 @@
         'Romance', 'Science Fiction', 'Sci-Fi & Fantasy', 'Soap', 'Talk', 'TV Movie', 'Thriller', 'War',
         'War & Politics', 'Western'];
     var FIELD_ORDER = ['resolution', 'hdr', 'video_codec', 'audio_codec', 'source', 'aspect', 'imdb', 'rt', 'metacritic', 'tmdb', 'trakt', 'tvmaze', 'anilist',
-        'content_rating', 'genre', 'status', 'year', 'runtime', 'season_count', 'episode_count', 'subtitles', 'versions', 'mediastinger', 'title', 'tagline', 'collection', 'awards', 'streaming', 'network', 'studio'];
-    var FIELD_CATS = ['Quality', 'Ratings', 'Details'];
+        'content_rating', 'genre', 'status', 'year', 'runtime', 'season_count', 'episode_count', 'subtitles', 'versions', 'mediastinger', 'title', 'tagline', 'collection', 'awards', 'streaming', 'network', 'studio',
+        'season_number', 'episode_number', 'episode_code'];
+    var FIELD_CATS = ['Quality', 'Ratings', 'Details', 'Episode'];
     // Fields a Logo badge can resolve to a drop-in pack image (mirrors logos.py
     // LOGO_FIELDS, limited to the ones we actually carry data for).
     var LOGO_BADGE_FIELDS = ['resolution', 'hdr', 'video_codec', 'audio_codec', 'source', 'aspect', 'content_rating', 'status', 'streaming', 'network', 'studio', 'mediastinger', 'collection', 'awards'];
@@ -111,7 +115,8 @@
     function defaultSample() {
         return { resolution: '2160p', hdr: 'HDR', video_codec: 'hevc', audio_codec: 'atmos', source: 'bluray', aspect: '2.40:1',
             imdb: 8.4, rt: 92, metacritic: 81, tmdb: 8.1, trakt: 8.3, tvmaze: 8.0, anilist: 82, content_rating: 'PG-13', status: 'Returning',
-            year: 2021, runtime: 148, season_count: 4, episode_count: 62, subtitles: 7, versions: 2, mediastinger: 1, title: 'Example Title', tagline: 'Every legend has a beginning', collection: 'The Collection', awards: 'oscar', streaming: 'Netflix', network: 'HBO', studio: 'A24', genre: 'Sci-Fi' };
+            year: 2021, runtime: 148, season_count: 4, episode_count: 62, subtitles: 7, versions: 2, mediastinger: 1, title: 'Example Title', tagline: 'Every legend has a beginning', collection: 'The Collection', awards: 'oscar', streaming: 'Netflix', network: 'HBO', studio: 'A24', genre: 'Sci-Fi',
+            season_number: 1, episode_number: 1, episode_code: 'S1E1' };
     }
     // real values win; nulls fall back to the defaults so no badge previews blank.
     function mergeSample(real) {
@@ -271,6 +276,9 @@
             '<div class="voe-apply-sub">Pick a template for each library and burn it onto every poster. Runs from a clean copy each time and pushes to your server; originals are backed up so you can remove them anytime.</div>' +
             scopeRow('Movies', 'movie', a.movie, templates) +
             scopeRow('TV Shows', 'show', a.show, templates) +
+            scopeRow('Seasons', 'season', a.season, templates) +
+            scopeRow('Episodes', 'episode', a.episode, templates) +
+            '<div class="voe-apply-note">Season & episode overlays burn onto each season poster / episode still. Episodes can be tens of thousands of items, so they only run when their toggle is on.</div>' +
             '<div class="voe-apply-applied" data-apply-count>' + (d.applied || 0) + ' item' + (d.applied === 1 ? '' : 's') + ' currently overlaid</div>' +
             '<div class="voe-apply-prog" data-apply-prog hidden><div class="voe-apply-bar"><div class="voe-apply-bar-fill" data-apply-fill></div></div>' +
             '<div class="voe-apply-prog-txt" data-apply-progtxt></div></div>' +
@@ -312,12 +320,22 @@
             .catch(function () { toast('Could not save assignment', 'error'); });
     }
     function _applyBtns(back) { return back.querySelectorAll('[data-apply-run],[data-apply-remove],[data-apply-reset]'); }
+    // Movies + TV always run (matches prior behavior); seasons/episodes only when
+    // their toggle is on, since episodes can be a huge, server-hammering job.
+    function _runScopes(back) {
+        var scopes = ['movie', 'show'];
+        ['season', 'episode'].forEach(function (s) {
+            var t = back.querySelector('[data-apply-en="' + s + '"]');
+            if (t && t.classList.contains('voe-toggle--on')) scopes.push(s);
+        });
+        return scopes;
+    }
     function startApply(back, opts) {
         opts = opts || {};
         _applyBtns(back).forEach(function (b) { b.disabled = true; });
         var prog = back.querySelector('[data-apply-prog]'); prog.hidden = false;
         setApplyProg(back, { phase: 'starting', done: 0, total: 0 });
-        api('POST', '/api/video/overlays/apply', { scope: 'both', remove: !!opts.remove, reset: !!opts.reset })
+        api('POST', '/api/video/overlays/apply', { scopes: _runScopes(back), remove: !!opts.remove, reset: !!opts.reset })
             .then(function (r) {
                 if (!r || !r.ok) { toast((r && r.error) || 'Could not start', 'error'); _applyBtns(back).forEach(function (b) { b.disabled = false; }); return; }
                 applyPollTimer = setInterval(function () { pollApply(back); }, 700);

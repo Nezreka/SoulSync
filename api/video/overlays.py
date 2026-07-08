@@ -156,8 +156,14 @@ def register_routes(bp):
         from core.video.overlays import service
         data = request.get_json(silent=True) or {}
         scope = data.get("scope") or "both"
-        scopes = ["movie", "show"] if scope == "both" else [scope]
-        scopes = [s for s in scopes if s in ("movie", "show", "season", "episode")]
+        req_scopes = data.get("scopes")
+        if isinstance(req_scopes, list) and req_scopes:
+            scopes = req_scopes                       # explicit set (movie/show + opted-in sub scopes)
+        else:
+            scopes = ["movie", "show"] if scope == "both" else [scope]
+        seen = set()
+        scopes = [s for s in scopes if s in ("movie", "show", "season", "episode")
+                  and not (s in seen or seen.add(s))]
         if not scopes:
             return jsonify({"ok": False, "error": "bad scope"}), 400
         started = service.start(get_video_db(), scopes, force=bool(data.get("force")),

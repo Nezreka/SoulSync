@@ -525,6 +525,7 @@ select.voe-input option { background: #17171d; }
 .voe-confirm-back--on .voe-apply-modal { transform: none; }
 .voe-apply-t { font-size: 19px; font-weight: 800; }
 .voe-apply-sub { font-size: 13px; color: rgba(255,255,255,.55); line-height: 1.55; margin: 6px 0 18px; }
+.voe-apply-note { font-size: 12px; color: rgba(255,255,255,.42); line-height: 1.5; margin: 10px 2px 4px; }
 .voe-apply-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid rgba(255,255,255,.06); }
 .voe-apply-row-l { flex: 0 0 66px; font-size: 13.5px; font-weight: 700; }
 .voe-apply-row .voe-input { flex: 1; }
