@@ -303,11 +303,70 @@
                     '<h1 class="voe-gallery-title">Overlay Templates</h1>' +
                     '<p class="voe-gallery-sub">Design badge &amp; artwork overlays on a canvas — resolution, ratings, logos, text — then reuse them across your library. Positions are relative, so one template fits every poster.</p>' +
                 '</div>' +
+                '<div class="voe-studio-settings">' +
+                    '<div class="voe-studio-panel voe-studio-panel--assign">' +
+                        '<div class="voe-studio-panel-h">Overlay settings' +
+                            '<span class="voe-studio-panel-tag">applied nightly &amp; on demand</span></div>' +
+                        '<div class="voe-apply-cards" data-voe-assign><div class="voe-gallery-empty">Loading…</div></div>' +
+                        '<div class="voe-studio-note">Auto-updates each night; only changed items re-render. Manage the schedule on the <strong>Automations</strong> page, or hit <strong>Apply to library</strong> to run it now.</div>' +
+                    '</div>' +
+                    '<div class="voe-studio-panel voe-studio-panel--maint">' +
+                        '<div class="voe-studio-panel-h">Maintenance</div>' +
+                        '<p class="voe-studio-maint-desc">Plex keeps every uploaded poster, so overlays add up over time. Reclaim the space — Empty Trash, Clean Bundles, Optimize DB.</p>' +
+                        '<button class="voe-btn" data-voe-cleanup>' + I.trash + ' Clean up Plex images</button>' +
+                        '<div class="voe-studio-cleanup-status" data-voe-cleanup-status hidden></div>' +
+                        '<div class="voe-studio-note">Runs weekly on its own — manage on the <strong>Automations</strong> page.</div>' +
+                    '</div>' +
+                '</div>' +
                 '<div class="voe-grid" data-voe-grid><div class="voe-gallery-empty">Loading…</div></div>' +
             '</div></div>';
         overlay.querySelector('[data-voe-close]').addEventListener('click', close);
         overlay.querySelector('[data-voe-apply-open]').addEventListener('click', openApplyDialog);
+        overlay.querySelector('[data-voe-cleanup]').addEventListener('click', startStudioCleanup);
         loadGallery();
+        renderStudioSettings();
+    }
+
+    // Fill the studio's quick overlay-settings panel (same scope cards + wiring as
+    // the Apply modal — one source of truth) and keep it in sync after edits.
+    function renderStudioSettings() {
+        var host = overlay && overlay.querySelector('[data-voe-assign]');
+        if (!host) return;
+        api('GET', '/api/video/overlays/assignments').then(function (d) {
+            host.innerHTML = assignCardsHTML((d && d.assignments) || {}, (d && d.templates) || []);
+            wireAssign(host);
+        }).catch(function () { host.innerHTML = '<div class="voe-gallery-empty">Could not load settings</div>'; });
+    }
+
+    var _cleanupPoll = null;
+    function startStudioCleanup() {
+        var btn = overlay.querySelector('[data-voe-cleanup]');
+        var box = overlay.querySelector('[data-voe-cleanup-status]');
+        if (!btn || !box) return;
+        confirmDialog('Clean up Plex images?', 'Runs Plex maintenance (Empty Trash, Clean Bundles, Optimize DB) to reclaim space from old overlay uploads. Safe, but heavy — best when nothing else is applying overlays.', 'Clean up', function () {
+            btn.disabled = true;
+            box.hidden = false; box.textContent = 'Starting…';
+            api('POST', '/api/video/overlays/cleanup').then(function (r) {
+                if (!r || !r.ok) { box.textContent = 'Could not start'; btn.disabled = false; return; }
+                _cleanupPoll = setInterval(pollStudioCleanup, 1500);
+            }).catch(function () { box.textContent = 'Could not start'; btn.disabled = false; });
+        });
+    }
+    function pollStudioCleanup() {
+        api('GET', '/api/video/overlays/cleanup/status').then(function (s) {
+            var box = overlay && overlay.querySelector('[data-voe-cleanup-status]');
+            var btn = overlay && overlay.querySelector('[data-voe-cleanup]');
+            if (!box) { if (_cleanupPoll) { clearInterval(_cleanupPoll); _cleanupPoll = null; } return; }
+            if (s && s.running) {
+                var step = s.step ? String(s.step).replace(/_/g, ' ') : 'working';
+                box.textContent = 'Cleaning up… (' + step + ')';
+                return;
+            }
+            if (_cleanupPoll) { clearInterval(_cleanupPoll); _cleanupPoll = null; }
+            if (btn) btn.disabled = false;
+            if (s && s.phase === 'error') box.textContent = 'Failed: ' + (s.error || 'error');
+            else box.textContent = 'Done · cleaned ' + ((s && s.done || []).length) + ' step' + (((s && s.done || []).length) === 1 ? '' : 's') + (((s && s.failed || []).length) ? ', ' + s.failed.length + ' failed' : '');
+        }).catch(function () {});
     }
 
     // ── apply overlays to the library ────────────────────────────────────────────
@@ -340,6 +399,28 @@
             (note ? '<div class="voe-apply-card-note">' + esc(note) + '</div>' : '') +
             '</div>';
     }
+    // The 4 scope cards, shared by the Apply modal AND the studio settings panel.
+    function assignCardsHTML(a, templates) {
+        a = a || {};
+        return scopeCard('Movies', 'movie', a.movie, templates, '') +
+            scopeCard('TV Shows', 'show', a.show, templates, '') +
+            scopeCard('Seasons', 'season', a.season, templates, 'Season posters') +
+            scopeCard('Episodes', 'episode', a.episode, templates, 'Episode stills · runs only when enabled');
+    }
+    // Wire the template pickers + enable toggles within any container (modal or studio).
+    function wireAssign(root) {
+        root.querySelectorAll('[data-apply-tpl]').forEach(function (sel) {
+            sel.addEventListener('change', function () { saveAssign(root, sel.getAttribute('data-apply-tpl')); });
+        });
+        root.querySelectorAll('[data-apply-en]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var on = btn.classList.toggle('voe-toggle--on');
+                var card = btn.closest('[data-apply-card]');
+                if (card) card.classList.toggle('voe-apply-card--on', on);
+                saveAssign(root, btn.getAttribute('data-apply-en'));
+            });
+        });
+    }
     function renderApplyDialog(d) {
         var templates = d.templates || [], a = d.assignments || {};
         var back = document.createElement('div');
@@ -349,12 +430,7 @@
             '<div class="voe-apply-sub">Choose a template for each part of your library. It renders onto a clean copy and pushes to your server; the originals are backed up, so you can remove them anytime.</div>' +
             '<div class="voe-apply-auto"><span class="voe-apply-auto-ic">' + I.dice + '</span>' +
                 '<div class="voe-apply-auto-tx">These are your overlay settings. Overlays refresh <strong>automatically every night</strong> — only the items that changed get re-rendered. Turn that schedule on or off on the <strong>Automations</strong> page.</div></div>' +
-            '<div class="voe-apply-cards">' +
-                scopeCard('Movies', 'movie', a.movie, templates, '') +
-                scopeCard('TV Shows', 'show', a.show, templates, '') +
-                scopeCard('Seasons', 'season', a.season, templates, 'Season posters') +
-                scopeCard('Episodes', 'episode', a.episode, templates, 'Episode stills · tens of thousands of items, so it runs only when enabled') +
-            '</div>' +
+            '<div class="voe-apply-cards">' + assignCardsHTML(a, templates) + '</div>' +
             '<div class="voe-apply-prog" data-apply-prog hidden><div class="voe-apply-bar"><div class="voe-apply-bar-fill" data-apply-fill></div></div>' +
             '<div class="voe-apply-prog-txt" data-apply-progtxt></div></div>' +
             '<div class="voe-apply-foot">' +
@@ -371,17 +447,7 @@
             if (applyPollTimer) { clearInterval(applyPollTimer); applyPollTimer = null; }
             back.classList.remove('voe-confirm-back--on'); setTimeout(function () { back.remove(); }, 180);
         }
-        back.querySelectorAll('[data-apply-tpl]').forEach(function (sel) {
-            sel.addEventListener('change', function () { saveAssign(back, sel.getAttribute('data-apply-tpl')); });
-        });
-        back.querySelectorAll('[data-apply-en]').forEach(function (btn) {
-            btn.addEventListener('click', function () {
-                var on = btn.classList.toggle('voe-toggle--on');
-                var card = btn.closest('[data-apply-card]');
-                if (card) card.classList.toggle('voe-apply-card--on', on);
-                saveAssign(back, btn.getAttribute('data-apply-en'));
-            });
-        });
+        wireAssign(back);
         back.querySelector('[data-apply-cancel]').addEventListener('click', done);
         back.addEventListener('click', function (e) { if (e.target === back) done(); });
         back.querySelector('[data-apply-run]').addEventListener('click', function () { startApply(back, {}); });
