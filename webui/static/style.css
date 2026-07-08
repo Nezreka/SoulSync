@@ -62952,6 +62952,9 @@ body.max-performance #page-particles-canvas {
     letter-spacing: -0.5px;
     line-height: 1.1;
     font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
+    /* Keep values like "1.8 MB" on one line so this tile's baseline matches
+       the single-line sibling tiles (2 / 12 / ...) (D5). */
+    white-space: nowrap;
 }
 
 .library-status-stat-label {
