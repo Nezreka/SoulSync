@@ -2633,11 +2633,12 @@
     // ── preview poster + sample data (dynamic-badge preview) ────────────────────
     function refreshBoundLayers() {
         // Anything that reads sample data must re-render when the sample title changes:
-        // bound badges, the title logo, AND badge rows (their pills are all data-bound).
+        // bound badges, the title logo, badge rows (data-bound pills), AND logo badges
+        // (their image + text fallback come from the field's sample value).
         ed.layers.forEach(function (l) {
-            if (l.binding || l.type === 'row' || l.type === 'rating' || (l.type === 'image' && l.logo) || (l.when && l.when.field)) refreshLayer(l.id);
+            if (l.binding || l.type === 'row' || l.type === 'rating' || l.type === 'logobadge' || (l.type === 'image' && l.logo) || (l.when && l.when.field)) refreshLayer(l.id);
         });
-        if (ed.selected) { var s = layerById(ed.selected); if (s && (s.binding || s.type === 'row' || s.type === 'rating')) renderInspector(); }
+        if (ed.selected) { var s = layerById(ed.selected); if (s && (s.binding || s.type === 'row' || s.type === 'rating' || s.type === 'logobadge')) renderInspector(); }
     }
 
     var openPop = null;
