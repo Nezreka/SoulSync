@@ -5615,6 +5615,70 @@ const _recentToastKeys = new Map();
 
 const _notifIcons = { success: '✓', error: '✕', warning: '⚠', info: 'ℹ' };
 
+// ── Active overlay-apply task (live via the 'overlay:progress' socket event) ────
+// Surfaced two ways: a working indicator on the bell (visible without opening),
+// and a pinned "Active" card at the top of the notification panel. _JOB on the
+// server is the single source of truth for both manual + automation runs.
+let _overlayTask = null;        // latest job state, or null when idle
+let _overlayClearTimer = null;
+
+function updateOverlayTask(data) {
+    if (!data) return;
+    if (_overlayClearTimer) { clearTimeout(_overlayClearTimer); _overlayClearTimer = null; }
+    const active = data.running || data.phase === 'starting' || data.phase === 'running';
+    if (active) {
+        _overlayTask = data;
+    } else if (data.phase === 'done' || data.phase === 'error') {
+        _overlayTask = data;    // keep the final result on screen briefly, then clear
+        _overlayClearTimer = setTimeout(() => { _overlayTask = null; _updateOverlayBell(); _patchOverlayActive(); }, 6000);
+    } else {
+        _overlayTask = null;    // idle
+    }
+    _updateOverlayBell();
+    _patchOverlayActive();
+}
+
+// Pull current state on demand (panel open / page load) so we're accurate even if
+// a socket event was missed or a job was already running before we connected.
+function _seedOverlayTask() {
+    fetch('/api/video/overlays/apply/status')
+        .then(r => r.ok ? r.json() : null)
+        .then(s => { if (s) updateOverlayTask(s); })
+        .catch(() => {});
+}
+
+function _overlayTaskActive() {
+    return !!(_overlayTask && (_overlayTask.running || _overlayTask.phase === 'starting' || _overlayTask.phase === 'running'));
+}
+
+function _updateOverlayBell() {
+    const btn = document.getElementById('notif-bell-btn');
+    if (btn) btn.classList.toggle('notif-bell-working', _overlayTaskActive());
+}
+
+function _overlayActiveHTML() {
+    const t = _overlayTask;
+    if (!t) return '';
+    const total = t.total || 0, done = t.done || 0;
+    const pct = total ? Math.min(100, Math.round(done / total * 100)) : (t.phase === 'done' ? 100 : 4);
+    const verb = t.mode === 'remove' ? 'Removing overlays' : t.mode === 'reset' ? 'Resetting posters' : 'Applying overlays';
+    let line, cls = '';
+    if (t.phase === 'done') { line = `Done · ${t.applied || 0} updated, ${t.skipped || 0} unchanged` + (t.failed ? `, ${t.failed} failed` : ''); cls = 'done'; }
+    else if (t.phase === 'error') { line = 'Failed: ' + _escToast(t.error || 'error'); cls = 'error'; }
+    else line = `${done.toLocaleString()} / ${total ? total.toLocaleString() : '…'}` + (t.title ? ' · ' + _escToast(t.title) : '');
+    return `
+        <div class="notif-active notif-active-${cls}">
+            <div class="notif-active-head"><span class="notif-active-title">${verb}</span><span class="notif-active-pct">${pct}%</span></div>
+            <div class="notif-active-bar"><div class="notif-active-fill" style="width:${pct}%"></div></div>
+            <div class="notif-active-sub">${line}</div>
+        </div>`;
+}
+
+function _patchOverlayActive() {
+    const host = document.querySelector('#notif-panel [data-notif-active-host]');
+    if (host) host.innerHTML = _overlayActiveHTML();
+}
+
 function showToast(message, type = 'success', helpSection = null) {
     const toastKey = `${type}:${message}`;
     const now = Date.now();
@@ -5707,6 +5771,7 @@ function _openNotifPanel() {
             <span class="notif-panel-title">Notifications</span>
             ${entries.length > 0 ? '<button class="notif-panel-clear" onclick="_clearNotifHistory()">Clear All</button>' : ''}
         </div>
+        <div class="notif-active-host" data-notif-active-host>${_overlayActiveHTML()}</div>
         <div class="notif-panel-body">
             ${entries.length === 0 ? '<div class="notif-panel-empty">No notifications yet</div>' :
             entries.map(e => {
@@ -5728,6 +5793,7 @@ function _openNotifPanel() {
     `;
 
     document.body.appendChild(panel);
+    _seedOverlayTask();   // refresh the Active card from the server on open (socket keeps it live after)
 
     // Position above the bell button
     if (btn) {
@@ -5991,6 +6057,14 @@ let _gsController = null;
     const run = () => {
         if (typeof initBasicSearchSources === 'function') initBasicSearchSources();
     };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run);
+    else run();
+})();
+
+// On load, seed the overlay-apply task so the bell reflects a job that was already
+// running before this page connected (the socket keeps it live thereafter).
+(function _overlayTaskInit() {
+    const run = () => setTimeout(() => { if (typeof _seedOverlayTask === 'function') _seedOverlayTask(); }, 1200);
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run);
     else run();
 })();

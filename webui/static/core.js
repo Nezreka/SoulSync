@@ -511,6 +511,7 @@ function initializeWebSocket() {
     socket.on('wishlist:stats', (data) => updateWishlistStatsFromData(data));
     // Phase 6: Automation progress
     socket.on('automation:progress', (data) => { qaSignal('auto'); updateAutomationProgressFromData(data); });
+    socket.on('overlay:progress', (data) => { if (typeof updateOverlayTask === 'function') updateOverlayTask(data); });
 }
 
 // ── Quick Actions tiles: animation == gauge ──

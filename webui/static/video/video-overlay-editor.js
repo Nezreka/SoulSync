@@ -391,6 +391,15 @@
         back.querySelector('[data-apply-reset]').addEventListener('click', function () {
             confirmDialog('Reset posters to originals?', 'Re-pulls each title\'s clean TMDB poster and pushes it to your server — this also wipes overlays burned in by other tools (e.g. Kometa). Your templates are kept.', 'Reset', function () { startApply(back, { reset: true }); });
         });
+        // If a run is already going (started here earlier, or by the nightly automation),
+        // resume the live progress view instead of showing a reset state.
+        api('GET', '/api/video/overlays/apply/status').then(function (s) {
+            if (!s || !(s.running || s.phase === 'starting' || s.phase === 'running')) return;
+            _applyBtns(back).forEach(function (b) { b.disabled = true; });
+            back.querySelector('[data-apply-prog]').hidden = false;
+            setApplyProg(back, s);
+            if (!applyPollTimer) applyPollTimer = setInterval(function () { pollApply(back); }, 700);
+        }).catch(function () {});
     }
     function saveAssign(back, scope) {
         var sel = back.querySelector('[data-apply-tpl="' + scope + '"]');
