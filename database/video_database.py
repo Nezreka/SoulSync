@@ -112,6 +112,10 @@ _BACKFILL = {
         "movie": ("movies", "mediastinger_status", "mediastinger_attempted", "tmdb_id IS NOT NULL"),
         "show": ("shows", "mediastinger_status", "mediastinger_attempted", "tmdb_id IS NOT NULL"),
     },
+    "awards": {  # OMDb Awards string -> oscar/winner flag, by imdb id
+        "movie": ("movies", "awards_status", "awards_attempted", "imdb_id IS NOT NULL"),
+        "show": ("shows", "awards_status", "awards_attempted", "imdb_id IS NOT NULL"),
+    },
 }
 # Columns each backfill service may gap-fill (whitelist; never clobbers server data).
 # A worker visits each item once (status IS NULL), so these NULL columns are written
@@ -125,6 +129,7 @@ _BACKFILL_COLS = {
     "wikidata": {"wikidata_url"},
     "streaming": {"streaming"},
     "mediastinger": {"mediastinger"},
+    "awards": {"awards"},
 }
 
 # Columns ensured on existing DBs (ALTER TABLE ADD COLUMN; idempotent).
@@ -231,6 +236,11 @@ _COLUMN_MIGRATIONS = [
     ("shows", "mediastinger_status", "TEXT"), ("shows", "mediastinger_attempted", "TEXT"),
     # Aspect ratio (from the media file / server), for the Aspect overlay badge
     ("media_files", "aspect", "TEXT"),
+    # Awards (OMDb Awards string → oscar/winner flag) for the Awards overlay badge
+    ("movies", "awards", "TEXT"),
+    ("movies", "awards_status", "TEXT"), ("movies", "awards_attempted", "TEXT"),
+    ("shows", "awards", "TEXT"),
+    ("shows", "awards_status", "TEXT"), ("shows", "awards_attempted", "TEXT"),
     # DeArrow crowd-sourced better titles for cached YouTube videos
     ("youtube_video_stats", "dearrow_title", "TEXT"),
     ("youtube_video_stats", "dearrow_status", "TEXT"),
