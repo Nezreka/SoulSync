@@ -215,6 +215,18 @@ SYSTEM_AUTOMATIONS = [
         'action_type': 'video_apply_overlays',
         'owned_by': 'video',
     },
+    # Weekly: reclaim the Plex space that overlay re-uploads accumulate (Plex keeps
+    # every uploaded poster in its bundles). Runs Empty Trash → Clean Bundles →
+    # Optimize DB via the API. Weekly + a big initial delay so it never overlaps the
+    # nightly overlay run (Plex warns against concurrent bundle cleanup).
+    {
+        'name': 'Clean Up Plex Images',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 7, 'unit': 'days'},
+        'action_type': 'video_clean_plex_images',
+        'initial_delay': 1800,
+        'owned_by': 'video',
+    },
     # Video twins of the music maintenance jobs — same schedule + shared handler,
     # distinct action_type + owned_by='video' so they seed as separate rows and
     # show on the video Automations page (music's copies are untouched).
