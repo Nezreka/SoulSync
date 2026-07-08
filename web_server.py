@@ -824,6 +824,17 @@ VALID_PAGE_IDS = {
     'help',
     'hydrabase',
     'issues',
+    # Video side — per-profile page toggles (admin-only surfaces are gated separately,
+    # not via allowed_pages: overlay studio, video-import, video-settings, video-automations).
+    'video-dashboard',
+    'video-search',
+    'video-discover',
+    'video-library',
+    'video-watchlist',
+    'video-wishlist',
+    'video-downloads',
+    'video-calendar',
+    'video-tools',
 }
 
 def check_download_permission():

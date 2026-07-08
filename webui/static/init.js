@@ -1957,6 +1957,15 @@ const PROFILE_PAGE_LABELS = {
     help: 'Help & Docs',
     settings: 'Settings',
     'artist-detail': 'Artist Detail',
+    'video-dashboard': 'Video · Dashboard',
+    'video-search': 'Video · Search',
+    'video-discover': 'Video · Discover',
+    'video-library': 'Video · Library',
+    'video-watchlist': 'Video · Watchlist',
+    'video-wishlist': 'Video · Wishlist',
+    'video-downloads': 'Video · Downloads',
+    'video-calendar': 'Video · Calendar',
+    'video-tools': 'Video · Tools',
 };
 
 function getProfilePageLabel(pageId) {
