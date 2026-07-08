@@ -63668,10 +63668,16 @@ body.max-performance #page-particles-canvas {
     gap: 6px;
 }
 
-.wishlist-page-header-right {
+/* Wishlist actions live in a left-aligned row below the header, matching
+   its sibling Watchlist page (.watchlist-page-actions) instead of sitting
+   inside the header top-right (WL1). */
+.wishlist-page-actions {
     display: flex;
     gap: 8px;
     align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+    padding: 0 4px;
 }
 
 .wishlist-page-title {
@@ -64361,9 +64367,9 @@ body.max-performance #page-particles-canvas {
         width: 100%;
     }
 
-    .wishlist-page-header-right {
-        width: 100%;
-        justify-content: flex-end;
+    .wishlist-page-actions {
+        flex-direction: column;
+        align-items: stretch;
     }
 
     .wishlist-stat-item {
