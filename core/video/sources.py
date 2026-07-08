@@ -388,25 +388,42 @@ class PlexVideoSource:
             m, sh = min(m, 100), min(sh, 50)
         return {"movies": m, "shows": sh}
 
-    def iter_movies(self, incremental=False):
+    def iter_movies(self, incremental=False, since=None):
         for section in self._scan_sections("movie", self._movies_lib):
-            # Incremental sorts by updatedAt (bumps on a re-match / metadata edit), NOT
-            # addedAt (the original add-date, which never moves) — so a movie you
-            # re-matched in Plex actually surfaces and its corrected title propagates.
-            items = section.search(sort="updatedAt:desc", maxresults=100) if incremental else section.all()
+            if not incremental:
+                items = section.all()
+            elif since is not None:
+                # Delta: everything Plex modified SINCE our last scan — updatedAt bumps
+                # on a re-match / metadata edit, so a corrected title on an EXISTING
+                # movie surfaces, not just brand-new adds. Falls back to a recent window
+                # if the server rejects the filter.
+                try:
+                    items = section.search(filters={"updatedAt>>": since}, sort="updatedAt:desc")
+                except Exception:
+                    logger.warning("Plex: updatedAt delta filter failed; using recent window", exc_info=True)
+                    items = section.search(sort="updatedAt:desc", maxresults=200)
+            else:
+                items = section.search(sort="updatedAt:desc", maxresults=100)   # first run: recent window
             for m in items:
                 try:
                     yield self._movie(m)
                 except Exception:
                     logger.exception("Plex: skipping movie %s", getattr(m, "title", "?"))
 
-    def iter_shows(self, incremental=False):
+    def iter_shows(self, incremental=False, since=None):
         for section in self._scan_sections("show", self._tv_lib):
-            # Incremental sorts by updatedAt (bumps when a show gains episodes), NOT
-            # addedAt (the show's original add-date, which never moves) — so shows with
-            # new episodes actually surface. Wider window than movies since we then
-            # open each to check for new episodes.
-            items = section.search(sort="updatedAt:desc", maxresults=200) if incremental else section.all()
+            # updatedAt bumps when a show gains episodes or is re-matched. Delta =
+            # everything changed since the last scan; first run uses a recent window.
+            if not incremental:
+                items = section.all()
+            elif since is not None:
+                try:
+                    items = section.search(filters={"updatedAt>>": since}, sort="updatedAt:desc")
+                except Exception:
+                    logger.warning("Plex: updatedAt delta filter failed (shows); using recent window", exc_info=True)
+                    items = section.search(sort="updatedAt:desc", maxresults=300)
+            else:
+                items = section.search(sort="updatedAt:desc", maxresults=200)
             for sh in items:
                 try:
                     yield self._show(sh)
@@ -851,16 +868,18 @@ class JellyfinVideoSource:
             "runtime_seconds": JellyfinVideoSource._ticks_to_seconds(item.get("RunTimeTicks")),
         }
 
-    def iter_movies(self, incremental=False):
+    def iter_movies(self, incremental=False, since=None):
         path = f"/Users/{self.uid}/Items"
         for view in self._scan_views("movies", self._movies_lib):
             params = {"ParentId": view["Id"], "IncludeItemTypes": "Movie",
                       "Recursive": "true", "Fields": _JF_MOVIE_FIELDS}
-            if incremental:
-                # NOTE: Jellyfin has no reliable "metadata last-modified" sort, so a
-                # re-match on an OLD movie won't surface here (unlike Plex's updatedAt) —
-                # a deep scan catches it. The scanner still re-upserts anything in this
-                # window, so recently-added items reconcile correctly.
+            if incremental and since is not None:
+                # Delta: DateLastSaved bumps when metadata is (re-)saved — a re-match or
+                # edit on an EXISTING movie — so MinDateLastSaved catches changes, not
+                # just new adds (the Jellyfin twin of Plex's updatedAt delta).
+                params.update({"MinDateLastSaved": since.isoformat()})
+                items = (self._req(path, params) or {}).get("Items", [])
+            elif incremental:
                 params.update({"SortBy": "DateCreated", "SortOrder": "Descending", "Limit": "100"})
                 items = (self._req(path, params) or {}).get("Items", [])
             else:
@@ -897,15 +916,19 @@ class JellyfinVideoSource:
         d.update(_parse_jf_providers(it))
         return d
 
-    def iter_shows(self, incremental=False):
+    def iter_shows(self, incremental=False, since=None):
         path = f"/Users/{self.uid}/Items"
         for view in self._scan_views("tvshows", self._tv_lib):
             params = {"ParentId": view["Id"], "IncludeItemTypes": "Series",
                       "Recursive": "true", "Fields": _JF_SHOW_FIELDS}
-            if incremental:
+            if incremental and since is not None:
+                # Delta: metadata (re-)saved since the last scan — catches re-matches +
+                # edits + shows that gained episodes.
+                params.update({"MinDateLastSaved": since.isoformat()})
+                items = (self._req(path, params) or {}).get("Items", [])
+            elif incremental:
                 # DateLastContentAdded bumps when a series gains episodes (DateCreated
-                # is the series' original add-date and never moves) — so shows with new
-                # episodes surface. Fall back to DateCreated. Wider window than movies.
+                # is the series' original add-date and never moves). Fall back to DateCreated.
                 params.update({"SortBy": "DateLastContentAdded,DateCreated",
                                "SortOrder": "Descending", "Limit": "200"})
                 items = (self._req(path, params) or {}).get("Items", [])
