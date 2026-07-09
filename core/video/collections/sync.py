@@ -167,20 +167,49 @@ def sync_collection(db, definition: Dict[str, Any], *, source,
             "total": len(desired_set), "added": added, "removed": removed, "missing": res.missing}
 
 
+def wishlist_missing_movies(db, definition: Dict[str, Any], missing) -> int:
+    """For a 'list' MOVIE collection with wishlist_missing on, add the members the
+    user doesn't own to the wishlist (idempotent upsert). Franchise/list only —
+    smart collections have no 'missing'. Returns how many were added. No-ops
+    safely if the db doesn't expose the wishlist method (unit-test fakes)."""
+    if not (definition.get("wishlist_missing") and definition.get("kind") == "list"
+            and (definition.get("media_type") or "movie") == "movie"):
+        return 0
+    add = getattr(db, "add_movie_to_wishlist", None)
+    if not callable(add):
+        return 0
+    n = 0
+    for m in missing or []:
+        tid = m.get("tmdb_id")
+        if not tid:
+            continue
+        try:
+            if add(int(tid), m.get("title") or "Untitled", year=m.get("year"),
+                   poster_url=m.get("poster_url"), status="wanted"):
+                n += 1
+        except Exception:   # noqa: BLE001 - one bad wishlist row shouldn't stop the sync
+            logger.debug("wishlist add failed for tmdb %s", tid, exc_info=True)
+    return n
+
+
 def sync_all_collections(db, *, source, list_fetcher: Optional[Callable] = None,
                          force: bool = False, on_progress: Optional[Callable] = None) -> Dict[str, Any]:
     """Sync every enabled collection definition. Aggregates per-definition results;
     one failing definition never stops the rest. ``on_progress(done, total, name)``
-    is called after each."""
+    is called after each. After a successful sync, a list collection with
+    wishlist_missing feeds its unowned members to the wishlist."""
     defs = [d for d in db.list_collection_definitions() if d.get("enabled")]
     total = len(defs)
     results: List[Dict[str, Any]] = []
+    wishlisted = 0
     for i, light in enumerate(defs):
         full = db.get_collection_definition(light["id"])
         if not full:
             continue
         try:
             r = sync_collection(db, full, source=source, list_fetcher=list_fetcher, force=force)
+            if r.get("ok"):
+                wishlisted += wishlist_missing_movies(db, full, r.get("missing"))
         except Exception as e:   # noqa: BLE001 - never let one collection kill the batch
             logger.exception("Collection sync crashed for %s", light.get("name"))
             r = {"ok": False, "definition_id": light["id"], "name": light.get("name"), "error": str(e)}
@@ -198,6 +227,7 @@ def sync_all_collections(db, *, source, list_fetcher: Optional[Callable] = None,
         "failed": len(results) - len(ok),
         "added": sum(r.get("added", 0) for r in ok),
         "removed": sum(r.get("removed", 0) for r in ok),
+        "wishlisted": wishlisted,
         "results": results,
     }
 
@@ -216,16 +246,43 @@ def get_collection_source():
     return src
 
 
+def _default_fetcher(db, list_fetcher):
+    if list_fetcher is not None:
+        return list_fetcher
+    try:
+        from core.video.collections.list_sources import build_list_fetcher
+        return build_list_fetcher(db)
+    except Exception:   # noqa: BLE001 - no fetcher → franchise owned still syncs
+        logger.debug("could not build list fetcher", exc_info=True)
+        return None
+
+
 def run_sync(db, *, force: bool = False, list_fetcher: Optional[Callable] = None,
              on_progress: Optional[Callable] = None) -> Dict[str, Any]:
-    """Shared entry point for the 'Sync now' action and the daily automation:
-    resolve the active server and sync every enabled collection."""
+    """Shared entry point for the 'Sync all' action and the daily automation:
+    resolve the active server and sync every enabled collection (with the real
+    list fetcher + wishlist tie-in by default)."""
     src = get_collection_source()
     if src is None:
         return {"ok": False, "error": "No video server configured (or it can't do collections)"}
-    return sync_all_collections(db, source=src, list_fetcher=list_fetcher,
+    return sync_all_collections(db, source=src, list_fetcher=_default_fetcher(db, list_fetcher),
                                 force=force, on_progress=on_progress)
 
 
+def sync_one_now(db, definition_id, *, force: bool = False) -> Dict[str, Any]:
+    """Sync a single collection now (the studio's 'Sync now' button): active server
+    + real list fetcher + wishlist tie-in."""
+    src = get_collection_source()
+    if src is None:
+        return {"ok": False, "error": "No video server configured for collections"}
+    c = db.get_collection_definition(definition_id)
+    if not c:
+        return {"ok": False, "error": "not found"}
+    r = sync_collection(db, c, source=src, list_fetcher=_default_fetcher(db, None), force=force)
+    if r.get("ok"):
+        r["wishlisted"] = wishlist_missing_movies(db, c, r.get("missing"))
+    return r
+
+
 __all__ = ["sync_collection", "sync_all_collections", "members_signature",
-           "run_sync", "get_collection_source"]
+           "wishlist_missing_movies", "run_sync", "sync_one_now", "get_collection_source"]

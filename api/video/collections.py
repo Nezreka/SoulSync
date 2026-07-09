@@ -132,15 +132,15 @@ def register_routes(bp):
     @bp.route("/collections/<int:cid>/sync", methods=["POST"])
     def collections_sync_one(cid):
         from . import get_video_db
-        from core.video.collections.sync import get_collection_source, sync_collection
+        from core.video.collections.sync import sync_one_now
         db = get_video_db()
-        c = db.get_collection_definition(cid)
-        if not c:
+        if not db.get_collection_definition(cid):
             return jsonify({"ok": False, "error": "not found"}), 404
-        src = get_collection_source()
-        if src is None:
-            return jsonify({"ok": False, "error": "No video server configured for collections"}), 400
-        return jsonify(sync_collection(db, c, source=src))
+        r = sync_one_now(db, cid)
+        # No server configured is a client-actionable 400, not a 500.
+        if not r.get("ok") and "No video server" in (r.get("error") or ""):
+            return jsonify(r), 400
+        return jsonify(r)
 
     @bp.route("/collections/sync", methods=["POST"])
     def collections_sync_all():

@@ -46,6 +46,7 @@ from core.automation.handlers.video_scan_watchlist_playlists import auto_video_s
 from core.automation.handlers.video_process_wishlist import auto_video_process_wishlist, is_running
 from core.automation.handlers.video_apply_overlays import auto_video_apply_overlays
 from core.automation.handlers.video_clean_plex_images import auto_video_clean_plex_images
+from core.automation.handlers.video_sync_collections import auto_video_sync_collections
 from core.automation.handlers.video_scan_library import (
     auto_video_scan_library, auto_video_scan_server, auto_video_update_database,
 )
@@ -302,6 +303,12 @@ def register_all(deps: AutomationDeps) -> None:
         'video_clean_plex_images',
         lambda config: auto_video_clean_plex_images(config, deps),
         lambda: __import__('core.video.overlays.cleanup', fromlist=['status']).status().get('running'),
+    )
+    # Daily: sync SoulSync-managed collections to the server (add/remove members,
+    # art/sort/pin), skipping unchanged; list collections feed missing to wishlist.
+    engine.register_action_handler(
+        'video_sync_collections',
+        lambda config: auto_video_sync_collections(config, deps),
     )
 
     # Progress + history callbacks: the engine invokes these around

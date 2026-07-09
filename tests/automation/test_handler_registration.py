@@ -73,6 +73,9 @@ EXPECTED_ACTION_NAMES = frozenset({
     'video_clean_completed_downloads',
     'video_full_cleanup',
     'video_backup_database',
+    'video_apply_overlays',
+    'video_clean_plex_images',
+    'video_sync_collections',
 })
 
 # Action names that MUST register a guard (duplicate-run prevention).
@@ -88,6 +91,8 @@ EXPECTED_GUARDED_ACTIONS = frozenset({
     'start_quality_scan',
     'video_process_movie_wishlist',
     'video_process_episode_wishlist',
+    'video_apply_overlays',
+    'video_clean_plex_images',
 })
 
 
