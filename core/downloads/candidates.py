@@ -405,10 +405,12 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                     logger.info(f"[Context] Set is_album_download: {is_album_context} (has clean data: {has_clean_spotify_data})")
                 
                 # Update task with successful download info
+                _cancelled_after_start = False
                 with tasks_lock:
                     if task_id in download_tasks:
                         # PHASE 3: Final cancellation check after download started (GUI PARITY)
                         if download_tasks[task_id]['status'] == 'cancelled':
+                            _cancelled_after_start = True
                             logger.warning(f"[Modal Worker] Task {task_id} cancelled after download {download_id} started - attempting to cancel download")
                             # Try to cancel the download immediately
                             try:
@@ -420,19 +422,22 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                                 logger.warning(f"Successfully cancelled active download {download_id}")
                             except Exception as cancel_error:
                                 logger.error(f"Failed to cancel active download {download_id}: {cancel_error}")
-                            
-                            # Free worker slot
-                            if batch_id:
-                                deps.on_download_completed(batch_id, task_id, success=False)
-                            return False
-                        
-                        # Store download information - use real download ID from download_orchestrator
-                        # CRITICAL FIX: Trust the download ID returned by download_orchestrator.download()
-                        download_tasks[task_id]['download_id'] = download_id
-                        
-                        download_tasks[task_id]['username'] = username
-                        download_tasks[task_id]['filename'] = filename
-                        
+                        else:
+                            # Store download information - use real download ID from download_orchestrator
+                            # CRITICAL FIX: Trust the download ID returned by download_orchestrator.download()
+                            download_tasks[task_id]['download_id'] = download_id
+                            download_tasks[task_id]['username'] = username
+                            download_tasks[task_id]['filename'] = filename
+
+                if _cancelled_after_start:
+                    # Free the worker slot OUTSIDE tasks_lock: on_download_completed
+                    # re-acquires it and tasks_lock is non-reentrant, so calling it
+                    # in-lock deadlocked the worker WHILE HOLDING the global lock,
+                    # freezing all downloads. Idempotent, so it's safe here.
+                    if batch_id:
+                        deps.on_download_completed(batch_id, task_id, success=False)
+                    return False
+
                 logger.info(f"[Modal Worker] Download started successfully for '{filename}'. Download ID: {download_id}")
                 return True  # Success!
             else:
