@@ -108,7 +108,8 @@
         host.innerHTML = items.map(function (it) {
             var href = '/video-detail/library/' + it.kind + '/' + it.id;
             var poster = '/api/video/poster/' + it.kind + '/' + it.id + '?w=160';
-            return '<a class="video-recent-item" href="' + href + '" title="' + _esc(it.title) + '">' +
+            return '<a class="video-recent-item" href="' + href + '" title="' + _esc(it.title) + '"' +
+                ' data-video-card-open="' + _esc(it.kind) + '" data-video-card-id="' + it.id + '">' +
                 '<div class="video-recent-poster"><img src="' + poster + '" alt="" loading="lazy" ' +
                 'onerror="this.closest(\'.video-recent-poster\').classList.add(\'is-empty\')"></div>' +
                 '<div class="video-recent-title">' + _esc(it.title) + '</div>' +
@@ -225,6 +226,19 @@
         // Overlay Studio is admin-only (defense in depth behind the hidden launcher).
         if (typeof currentProfile !== 'undefined' && currentProfile && !currentProfile.is_admin) return;
         if (window.VideoOverlayEditor) VideoOverlayEditor.open();
+    });
+
+    // Recently Added tiles → SPA detail navigation (same contract as the library
+    // grid): plain left-click routes in-app; modified clicks use the real href.
+    document.addEventListener('click', function (e) {
+        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        var card = e.target.closest && e.target.closest('[data-video-recent] [data-video-card-open]');
+        if (!card) return;
+        e.preventDefault();
+        document.dispatchEvent(new CustomEvent('soulsync:video-open-detail', {
+            detail: { kind: card.getAttribute('data-video-card-open'),
+                      id: parseInt(card.getAttribute('data-video-card-id'), 10), source: 'library' },
+        }));
     });
 
     document.addEventListener('soulsync:video-page-shown', onPageShown);
