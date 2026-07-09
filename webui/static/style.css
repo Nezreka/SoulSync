@@ -65183,6 +65183,7 @@ body.max-performance .dash-card::after {
     line-height: 1.02;
     letter-spacing: -0.026em;
     margin-bottom: clamp(4px, 0.5cqw, 8px);
+    padding-bottom: 10px;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
