@@ -629,7 +629,15 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                 if context_key in matched_downloads_context:
                     del matched_downloads_context[context_key]
 
-            if web_scan_manager:
+            # Honor the "Auto-Scan After Downloads" toggle. Batch downloads emit
+            # batch_complete and the automation engine only scans when that
+            # automation is enabled — but a simple download never forms a batch,
+            # so this direct scan used to fire unconditionally and kept scanning
+            # even with auto-scan turned off (#995 follow-up). Gate it on the same
+            # automation; fail open when the engine isn't available.
+            _auto_scan_on = (automation_engine is None
+                             or automation_engine.is_event_action_enabled('batch_complete', 'scan_library'))
+            if web_scan_manager and _auto_scan_on:
                 threading.Thread(
                     target=lambda: web_scan_manager.request_scan("Simple download completed"),
                     daemon=True,
