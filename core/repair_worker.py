@@ -3598,7 +3598,15 @@ class RepairWorker:
                         os.remove(out_path)
                     except Exception as e:
                         logger.debug("Failed to remove out_path after ffmpeg failure: %s", e)
-                return {'success': False, 'error': f'ffmpeg conversion failed: {proc.stderr[:200] if proc.stderr else "unknown error"}'}
+                # Surface the REAL ffmpeg error, not the leading version banner —
+                # ffmpeg writes the banner first and the actual reason last, so the
+                # old proc.stderr[:200] only ever showed the banner (#995).
+                from core.imports.ffmpeg_errors import summarize_ffmpeg_error
+                reason = summarize_ffmpeg_error(proc.stderr)
+                logger.error("Lossy conversion failed for %s -> %s (rc=%s): %s",
+                             resolved, out_path, proc.returncode, reason)
+                logger.debug("Full ffmpeg stderr for %s:\n%s", resolved, proc.stderr)
+                return {'success': False, 'error': f'ffmpeg conversion failed: {reason}'}
 
             # Update QUALITY tag
             try:
