@@ -75,7 +75,7 @@ def test_below_strict_threshold_returns_none(tmp_path):
 def test_multi_folder_defers_to_template(tmp_path):
     f1 = _mkfile(tmp_path / "Album" / "Disc 01", "1.mp3")
     f2 = _mkfile(tmp_path / "Album" / "Disc 02", "1.mp3")
-    db = _FakeDb(album=_album(), album_conf=0.95, tracks=[_track(f1), _track(f2)])
+    db = _FakeDb(album=_album(title="A"), album_conf=0.95, tracks=[_track(f1), _track(f2)])
     assert resolve_existing_album_folder(
         db=db, transfer_dir=str(tmp_path), album_name="A", album_artist="B") is None
 
@@ -84,7 +84,7 @@ def test_folder_outside_transfer_returns_none(tmp_path):
     f = _mkfile(tmp_path / "outside", "1.mp3")
     transfer = tmp_path / "transfer"
     transfer.mkdir()
-    db = _FakeDb(album=_album(), album_conf=0.95, tracks=[_track(f)])
+    db = _FakeDb(album=_album(title="A"), album_conf=0.95, tracks=[_track(f)])
     assert resolve_existing_album_folder(
         db=db, transfer_dir=str(transfer), album_name="A", album_artist="B") is None
 
@@ -108,7 +108,62 @@ def test_missing_transfer_dir_returns_none(tmp_path):
 
 def test_album_with_no_files_on_disk_returns_none(tmp_path):
     # Album matched but its tracks have no resolvable file -> nothing to reuse.
-    db = _FakeDb(album=_album(), album_conf=0.95,
+    db = _FakeDb(album=_album(title="A"), album_conf=0.95,
                  tracks=[_track("/gone/1.mp3"), _track(None)])
     assert resolve_existing_album_folder(
         db=db, transfer_dir=str(tmp_path), album_name="A", album_artist="B") is None
+
+
+# --- #1001: edition-variant folder collapse ---------------------------------
+# The edition-aware matcher treats "Grassy Fields" and "Grassy Fields Plus" as
+# the same album. For folder identity that merged two distinct releases into one
+# physical folder (overwriting folder art). Folder reuse must require the SAME
+# album name; the id path stays definitive.
+
+def test_edition_variant_name_not_reused(tmp_path):
+    # On disk: the ORIGINAL "Grassy Fields". A new "Grassy Fields Plus" download
+    # name-matches it via the edition-aware matcher, but must NOT reuse its
+    # folder — it belongs in its own templated folder.
+    album_dir = tmp_path / "Grassy Fields [1995] [Original]"
+    f = _mkfile(album_dir, "01 - Intro.mp3")
+    db = _FakeDb(album=_album(title="Grassy Fields"), album_conf=0.95, tracks=[_track(f)])
+    assert resolve_existing_album_folder(
+        db=db, transfer_dir=str(tmp_path),
+        album_name="Grassy Fields Plus", album_artist="Some Artist") is None
+
+
+def test_same_name_drifted_year_type_still_reused(tmp_path):
+    # #829 must keep working: same album name, only $year/$albumtype drifted ->
+    # reuse the existing folder so the album doesn't split.
+    album_dir = tmp_path / "Grassy Fields [1995] [Original]"
+    f = _mkfile(album_dir, "01 - Intro.mp3")
+    db = _FakeDb(album=_album(title="Grassy Fields"), album_conf=0.95, tracks=[_track(f)])
+    out = resolve_existing_album_folder(
+        db=db, transfer_dir=str(tmp_path),
+        album_name="Grassy Fields", album_artist="Some Artist")
+    assert out == os.path.normpath(str(album_dir))
+
+
+def test_same_name_reuse_ignores_case_and_accents(tmp_path):
+    # Normalization: casefold + strip diacritics, but NOT edition qualifiers.
+    album_dir = tmp_path / "Cafe"
+    f = _mkfile(album_dir, "1.mp3")
+    db = _FakeDb(album=_album(title="Café"), album_conf=0.95, tracks=[_track(f)])
+    out = resolve_existing_album_folder(
+        db=db, transfer_dir=str(tmp_path),
+        album_name="CAFE", album_artist="B")
+    assert out == os.path.normpath(str(album_dir))
+
+
+def test_id_match_bypasses_name_guard(tmp_path):
+    # A definitive stored-id hit reuses even when the stored title differs from
+    # the download name (id is authoritative; the name guard is only for the
+    # fuzzy fallback).
+    album_dir = tmp_path / "Album"
+    f = _mkfile(album_dir, "1.mp3")
+    db = _FakeDb(album=None, album_conf=0.0, tracks=[_track(f)],
+                 by_spotify=_album(title="Totally Different Title"))
+    out = resolve_existing_album_folder(
+        db=db, transfer_dir=str(tmp_path), spotify_album_id="sp123",
+        album_name="Grassy Fields Plus", album_artist="Some Artist")
+    assert out == os.path.normpath(str(album_dir))
