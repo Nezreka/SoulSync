@@ -1,0 +1,149 @@
+"""Collections API (Collection Studio) — CRUD + live preview + sync for the
+SoulSync-managed movie/show collections. Admin-only (gated in __init__.py).
+
+    GET    /api/video/collections                 -> {collections:[...]}   (gallery)
+    POST   /api/video/collections                 -> {ok,id}               (create)
+    GET    /api/video/collections/<id>            -> {collection:{...}}     (full)
+    PUT    /api/video/collections/<id>            -> {ok}                   (patch)
+    DELETE /api/video/collections/<id>            -> {ok}
+    POST   /api/video/collections/<id>/duplicate  -> {ok,id}
+    GET    /api/video/collections/fields          -> {fields,suggestions}   (rule builder)
+    POST   /api/video/collections/preview         -> {ok,count,sample,...}  (live preview)
+    POST   /api/video/collections/<id>/sync       -> {ok,...}               (Sync now, one)
+    POST   /api/video/collections/sync            -> {ok,...}               (Sync now, all)
+"""
+
+from __future__ import annotations
+
+from flask import jsonify, request
+
+from utils.logging_config import get_logger
+
+logger = get_logger("video_api.collections")
+
+_UPDATABLE = ("name", "kind", "media_type", "definition", "poster_url", "summary",
+              "sort_order", "sync_mode", "pinned", "wishlist_missing", "enabled")
+
+
+def _sample_members(rows, limit=24):
+    return [{"id": r.get("id"), "title": r.get("title"), "year": r.get("year"),
+             "has_poster": bool(r.get("poster_url")), "tmdb_id": r.get("tmdb_id")}
+            for r in rows[:limit]]
+
+
+def register_routes(bp):
+    @bp.route("/collections", methods=["GET"])
+    def collections_list():
+        from . import get_video_db
+        try:
+            return jsonify({"collections": get_video_db().list_collection_definitions()})
+        except Exception:
+            logger.exception("list collections failed")
+            return jsonify({"collections": [], "error": "Failed to load collections"}), 500
+
+    @bp.route("/collections", methods=["POST"])
+    def collections_create():
+        from . import get_video_db
+        d = request.get_json(silent=True) or {}
+        try:
+            cid = get_video_db().create_collection_definition(
+                d.get("name") or "Untitled collection",
+                kind=d.get("kind", "smart"), media_type=d.get("media_type", "movie"),
+                definition=d.get("definition"), poster_url=d.get("poster_url"),
+                summary=d.get("summary"), sort_order=d.get("sort_order", "release"),
+                sync_mode=d.get("sync_mode", "sync"), pinned=bool(d.get("pinned")),
+                wishlist_missing=bool(d.get("wishlist_missing")),
+                enabled=False if d.get("enabled") is False else True)
+            if cid is None:
+                return jsonify({"ok": False, "error": "Could not create collection"}), 500
+            return jsonify({"ok": True, "id": cid})
+        except Exception:
+            logger.exception("create collection failed")
+            return jsonify({"ok": False, "error": "Could not create collection"}), 500
+
+    @bp.route("/collections/<int:cid>", methods=["GET"])
+    def collections_get(cid):
+        from . import get_video_db
+        c = get_video_db().get_collection_definition(cid)
+        if not c:
+            return jsonify({"error": "not found"}), 404
+        return jsonify({"collection": c})
+
+    @bp.route("/collections/<int:cid>", methods=["PUT"])
+    def collections_update(cid):
+        from . import get_video_db
+        d = request.get_json(silent=True) or {}
+        fields = {k: d[k] for k in _UPDATABLE if k in d}
+        try:
+            return jsonify({"ok": get_video_db().update_collection_definition(cid, **fields)})
+        except Exception:
+            logger.exception("update collection %s failed", cid)
+            return jsonify({"ok": False, "error": "Could not update collection"}), 500
+
+    @bp.route("/collections/<int:cid>", methods=["DELETE"])
+    def collections_delete(cid):
+        from . import get_video_db
+        db = get_video_db()
+        # Drop our definition + ledger; the server collection is left in place
+        # (the user can remove it) — we never auto-delete server objects.
+        db.delete_collection_sync(cid)
+        return jsonify({"ok": db.delete_collection_definition(cid)})
+
+    @bp.route("/collections/<int:cid>/duplicate", methods=["POST"])
+    def collections_duplicate(cid):
+        from . import get_video_db
+        nid = get_video_db().duplicate_collection_definition(cid)
+        if nid is None:
+            return jsonify({"ok": False, "error": "Could not duplicate"}), 500
+        return jsonify({"ok": True, "id": nid})
+
+    @bp.route("/collections/fields", methods=["GET"])
+    def collections_fields():
+        from . import get_video_db
+        from core.video.collections.smart_filter import field_schema
+        mt = request.args.get("media_type", "movie")
+        mt = "show" if mt in ("show", "shows", "tv", "series") else "movie"
+        genres = []
+        try:
+            for g in (get_video_db().top_owned_genres(mt, limit=40) or []):
+                genres.append(g.get("name") if isinstance(g, dict) else g)
+        except Exception:
+            logger.debug("genre suggestions failed", exc_info=True)
+        return jsonify({"media_type": mt, "fields": field_schema(mt),
+                        "suggestions": {"genre": [g for g in genres if g]}})
+
+    @bp.route("/collections/preview", methods=["POST"])
+    def collections_preview():
+        from . import get_video_db
+        from core.video.collections.resolver import resolve_collection
+        d = request.get_json(silent=True) or {}
+        defn = {"media_type": d.get("media_type", "movie"),
+                "kind": d.get("kind", "smart"),
+                "definition": d.get("definition") or {}}
+        # No list fetcher here: smart + franchise (owned) preview instantly from the
+        # DB; a remote list source reports what's owned and notes it needs a sync.
+        res = resolve_collection(get_video_db(), defn)
+        if not res.ok:
+            return jsonify({"ok": False, "error": res.error})
+        return jsonify({"ok": True, "media_type": res.media_type,
+                        "count": len(res.owned), "missing_count": len(res.missing),
+                        "sample": _sample_members(res.owned)})
+
+    @bp.route("/collections/<int:cid>/sync", methods=["POST"])
+    def collections_sync_one(cid):
+        from . import get_video_db
+        from core.video.collections.sync import get_collection_source, sync_collection
+        db = get_video_db()
+        c = db.get_collection_definition(cid)
+        if not c:
+            return jsonify({"ok": False, "error": "not found"}), 404
+        src = get_collection_source()
+        if src is None:
+            return jsonify({"ok": False, "error": "No video server configured for collections"}), 400
+        return jsonify(sync_collection(db, c, source=src))
+
+    @bp.route("/collections/sync", methods=["POST"])
+    def collections_sync_all():
+        from . import get_video_db
+        from core.video.collections.sync import run_sync
+        return jsonify(run_sync(get_video_db()))

@@ -15,6 +15,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='setup-wizard.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='video/video-side.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='video/video-overlay-editor.css', v=static_v) }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='video/video-collection-editor.css', v=static_v) }}">
     <style id="soulsync-initial-appearance">
         :root {
             --accent-rgb: {{ initial_accent_rgb }};
@@ -967,6 +968,22 @@
                                     <p style="margin:0;font-size:13px;line-height:1.6;color:rgba(255,255,255,.55);">
                                         Drag resolution, rating &amp; logo badges onto a poster on a visual canvas — relative placement that fits every title. A native, no-YAML take on artwork overlays.</p>
                                     <button type="button" data-video-overlay-studio aria-label="Open Overlay Studio"
+                                        style="align-self:flex-start;display:inline-flex;align-items:center;gap:8px;padding:11px 20px;border:none;border-radius:12px;font-size:13.5px;font-weight:800;cursor:pointer;color:#fff;background:rgb(var(--accent-rgb));box-shadow:0 8px 22px rgba(var(--accent-rgb),.35);transition:filter .15s,transform .15s;"
+                                        onmouseover="this.style.filter='brightness(1.08)';this.style.transform='translateY(-1px)'"
+                                        onmouseout="this.style.filter='';this.style.transform=''">Open Studio &rarr;</button>
+                                </div>
+                            </article>
+
+                            <!-- Collection Studio launcher -->
+                            <article class="dash-card" data-card="collection-studio">
+                                <header class="dash-card__head">
+                                    <h3 class="dash-card__title">Collection Studio</h3>
+                                    <p class="dash-card__sub">Build smart &amp; list collections, synced to your server.</p>
+                                </header>
+                                <div class="dash-card__body" style="display:flex;flex-direction:column;gap:14px;">
+                                    <p style="margin:0;font-size:13px;line-height:1.6;color:rgba(255,255,255,.55);">
+                                        Group your library by genre, decade, director, franchise or a TMDB/Trakt list. SoulSync resolves membership and pushes it straight to Plex/Jellyfin.</p>
+                                    <button type="button" data-video-collection-studio aria-label="Open Collection Studio"
                                         style="align-self:flex-start;display:inline-flex;align-items:center;gap:8px;padding:11px 20px;border:none;border-radius:12px;font-size:13.5px;font-weight:800;cursor:pointer;color:#fff;background:rgb(var(--accent-rgb));box-shadow:0 8px 22px rgba(var(--accent-rgb),.35);transition:filter .15s,transform .15s;"
                                         onmouseover="this.style.filter='brightness(1.08)';this.style.transform='translateY(-1px)'"
                                         onmouseout="this.style.filter='';this.style.transform=''">Open Studio &rarr;</button>
@@ -11138,6 +11155,7 @@
     <script src="{{ url_for('static', filename='video/video-poster-modal.js', v=static_v) }}"></script>
     <!-- Overlay Studio (full-bleed visual editor for poster-overlay templates; Artwork Studio) -->
     <script src="{{ url_for('static', filename='video/video-overlay-editor.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='video/video-collection-editor.js', v=static_v) }}"></script>
     <!-- Download VIEW renderer (movie / show / youtube): per-source search + quality verdict;
          rendered inline inside the get-modal (not its own modal) -->
     <script src="{{ url_for('static', filename='video/video-download-view.js', v=static_v) }}"></script>

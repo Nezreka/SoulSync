@@ -204,9 +204,13 @@ def sync_all_collections(db, *, source, list_fetcher: Optional[Callable] = None,
 
 def get_collection_source():
     """The active video server's collection surface, or None when no server is
-    configured / the adapter doesn't support collections."""
-    from core.video.sources import get_active_video_source
-    src = get_active_video_source()
+    configured / the adapter doesn't support collections. Never raises."""
+    try:
+        from core.video.sources import get_active_video_source
+        src = get_active_video_source()
+    except Exception:   # noqa: BLE001 - a config/connection hiccup means "no server"
+        logger.debug("get_active_video_source failed", exc_info=True)
+        return None
     if src is None or not hasattr(src, "create_collection"):
         return None
     return src

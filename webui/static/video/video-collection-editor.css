@@ -1,0 +1,139 @@
+/* Collection Studio — full-bleed pseudo-page (mirrors the Overlay Studio shell). */
+.vce-overlay {
+    position: fixed; inset: 0; z-index: 9300; display: none; opacity: 0;
+    background: rgba(6, 7, 11, 0.86); backdrop-filter: blur(10px);
+    transition: opacity 0.22s ease; overflow-y: auto;
+}
+.vce-overlay--on { display: block; opacity: 1; }
+
+.vce-shell {
+    max-width: 1180px; margin: 34px auto; padding: 0 22px 60px;
+}
+.vce-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+.vce-title { font-size: 26px; font-weight: 900; letter-spacing: -0.02em; color: #fff; margin: 0; }
+.vce-sub { font-size: 13px; color: rgba(255, 255, 255, 0.5); margin: 4px 0 0; }
+.vce-close {
+    flex: 0 0 auto; width: 40px; height: 40px; border-radius: 11px; cursor: pointer;
+    background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #fff; font-size: 22px; line-height: 1; transition: background 0.15s, border-color 0.15s;
+}
+.vce-close:hover { background: rgba(255, 80, 80, 0.16); border-color: rgba(255, 80, 80, 0.4); }
+.vce-loading { padding: 60px; text-align: center; color: rgba(255, 255, 255, 0.4); font-size: 14px; }
+
+/* ── gallery ── */
+.vce-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 16px; }
+.vce-card {
+    background: rgba(255, 255, 255, 0.035); border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 4px;
+    transition: border-color 0.15s, transform 0.15s;
+}
+.vce-card:hover { border-color: rgba(var(--accent-rgb, 56 189 248), 0.5); transform: translateY(-2px); }
+.vce-card--new {
+    align-items: center; justify-content: center; cursor: pointer; min-height: 210px;
+    border-style: dashed; color: rgba(255, 255, 255, 0.55); gap: 8px;
+}
+.vce-card-plus { font-size: 44px; font-weight: 300; line-height: 1; color: rgba(var(--accent-rgb, 56 189 248), 0.9); }
+.vce-card-newlabel { font-size: 13px; font-weight: 600; }
+.vce-card-thumb {
+    position: relative; aspect-ratio: 2 / 3; border-radius: 10px; overflow: hidden;
+    background: rgba(255, 255, 255, 0.05) center/cover; margin-bottom: 6px;
+    display: flex; align-items: flex-start; justify-content: space-between; padding: 8px;
+}
+.vce-card-kind {
+    font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em;
+    background: rgba(0, 0, 0, 0.6); color: #fff; padding: 3px 7px; border-radius: 6px;
+}
+.vce-card-off {
+    font-size: 10px; font-weight: 700; background: rgba(255, 170, 40, 0.22); color: #ffbe55;
+    padding: 3px 7px; border-radius: 6px;
+}
+.vce-card-name { font-size: 14px; font-weight: 700; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vce-card-meta { font-size: 11.5px; color: rgba(255, 255, 255, 0.45); }
+.vce-card-actions { display: flex; gap: 6px; margin-top: 8px; }
+.vce-mini {
+    flex: 1; font-size: 11.5px; font-weight: 600; padding: 6px 4px; border-radius: 7px; cursor: pointer;
+    background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.82);
+}
+.vce-mini:hover { background: rgba(255, 255, 255, 0.12); }
+.vce-mini--danger:hover { background: rgba(255, 70, 70, 0.2); border-color: rgba(255, 70, 70, 0.4); color: #ff8080; }
+
+/* ── editor ── */
+.vce-editor { display: grid; grid-template-columns: 1.35fr 1fr; gap: 22px; align-items: start; }
+@media (max-width: 900px) { .vce-editor { grid-template-columns: 1fr; } }
+.vce-flabel { display: block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+    color: rgba(255, 255, 255, 0.45); margin: 14px 0 5px; }
+.vce-flabel:first-child { margin-top: 0; }
+.vce-input {
+    width: 100%; box-sizing: border-box; padding: 9px 12px; border-radius: 9px; font-size: 13.5px;
+    background: rgba(255, 255, 255, 0.045); border: 1px solid rgba(255, 255, 255, 0.11); color: #fff;
+    font-family: inherit;
+}
+.vce-input:focus { outline: none; border-color: rgba(var(--accent-rgb, 56 189 248), 0.6); }
+select.vce-input { cursor: pointer; }
+.vce-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+/* rule builder */
+.vce-builder { margin-top: 18px; }
+.vce-match { font-size: 13px; color: rgba(255, 255, 255, 0.7); margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+.vce-match-sel { width: auto; padding: 5px 8px; }
+.vce-rules { display: flex; flex-direction: column; gap: 8px; }
+.vce-rule { display: flex; gap: 6px; align-items: center; }
+.vce-rule-field { flex: 0 0 34%; }
+.vce-rule-op { flex: 0 0 22%; }
+.vce-rule-val { flex: 1; display: flex; align-items: center; gap: 4px; min-width: 0; }
+.vce-rule-val .vce-input { min-width: 0; }
+.vce-vnum { width: 72px; }
+.vce-rule-noval { font-size: 12px; color: rgba(255, 255, 255, 0.35); }
+.vce-rule-x {
+    flex: 0 0 auto; width: 28px; height: 28px; border-radius: 7px; cursor: pointer; font-size: 16px;
+    background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.6);
+}
+.vce-rule-x:hover { background: rgba(255, 70, 70, 0.2); color: #ff8080; }
+.vce-addrule {
+    margin-top: 10px; font-size: 12.5px; font-weight: 600; padding: 7px 14px; border-radius: 8px; cursor: pointer;
+    background: rgba(var(--accent-rgb, 56 189 248), 0.14); border: 1px solid rgba(var(--accent-rgb, 56 189 248), 0.3);
+    color: rgb(var(--accent-light-rgb, 56 189 248));
+}
+.vce-addrule:hover { background: rgba(var(--accent-rgb, 56 189 248), 0.24); }
+.vce-note { font-size: 11.5px; color: rgba(255, 255, 255, 0.4); line-height: 1.5; margin: 10px 0 0; }
+
+/* preview + settings */
+.vce-preview { background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; padding: 14px; }
+.vce-preview-count { font-size: 13px; font-weight: 700; color: #fff; margin-bottom: 10px; }
+.vce-preview-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(52px, 1fr)); gap: 6px; }
+.vce-pv {
+    position: relative; aspect-ratio: 2 / 3; border-radius: 6px; overflow: hidden;
+    background: rgba(255, 255, 255, 0.06); display: flex; align-items: center; justify-content: center;
+}
+.vce-pv img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.vce-pv-fallback { font-size: 11px; font-weight: 700; color: rgba(255, 255, 255, 0.4); text-transform: uppercase; }
+.vce-settings { margin-top: 16px; }
+.vce-check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: rgba(255, 255, 255, 0.8); margin-top: 12px; cursor: pointer; }
+.vce-check input { width: 16px; height: 16px; }
+textarea.vce-input { resize: vertical; }
+
+.vce-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+.vce-btn {
+    font-size: 13px; font-weight: 700; padding: 10px 18px; border-radius: 10px; cursor: pointer;
+    background: rgba(255, 255, 255, 0.07); border: 1px solid rgba(255, 255, 255, 0.12); color: rgba(255, 255, 255, 0.85);
+}
+.vce-btn:hover { background: rgba(255, 255, 255, 0.13); }
+.vce-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.vce-btn--primary { background: rgb(var(--accent-rgb, 56 189 248)); border-color: transparent; color: #04121b; }
+.vce-btn--primary:hover { filter: brightness(1.08); background: rgb(var(--accent-rgb, 56 189 248)); }
+.vce-btn--danger { background: rgba(255, 70, 70, 0.14); border-color: rgba(255, 70, 70, 0.34); color: #ff8080; }
+.vce-btn--danger:hover { background: rgba(255, 70, 70, 0.26); }
+.vce-btn--ghost { background: transparent; }
+
+/* toast */
+.vce-toast {
+    position: fixed; bottom: 26px; left: 50%; transform: translate(-50%, 20px); z-index: 9500;
+    background: rgba(20, 22, 30, 0.96); border: 1px solid rgba(255, 255, 255, 0.14); color: #fff;
+    padding: 11px 20px; border-radius: 11px; font-size: 13px; font-weight: 600; opacity: 0;
+    transition: opacity 0.22s ease, transform 0.22s ease; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+.vce-toast--on { opacity: 1; transform: translate(-50%, 0); }
+.vce-toast--err { border-color: rgba(255, 80, 80, 0.5); color: #ff9a9a; }
+
+/* Admin-only launcher (parity with the overlay studio card). */
+body:not(.video-admin) [data-video-collection-studio] { display: none !important; }
