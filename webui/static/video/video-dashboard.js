@@ -118,6 +118,47 @@
         }).join('');
     }
 
+    // ── Upcoming (calendar preview) — mini-billboards for the next few episodes ──
+    var CALENDAR_URL = '/api/video/calendar?days=21&scope=watchlist';
+    var _WD = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    function _parseISO(s) { var p = String(s || '').split('-'); return new Date(+p[0], (+p[1] || 1) - 1, +p[2] || 1); }
+    function _whenLabel(airDate, today) {
+        var diff = Math.round((_parseISO(airDate) - _parseISO(today)) / 86400000);
+        if (diff <= 0) return 'Today';
+        if (diff === 1) return 'Tomorrow';
+        if (diff < 7) return _WD[_parseISO(airDate).getDay()];
+        return _parseISO(airDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    }
+    function loadUpcoming() {
+        var host = document.querySelector('[data-video-upcoming]');
+        if (!host) return;
+        fetch(CALENDAR_URL, { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d || d.error) { host.innerHTML = '<p class="video-empty-note">Couldn\'t load the calendar.</p>'; return; }
+                var eps = (d.episodes || []).slice().sort(function (a, b) {
+                    return a.air_date < b.air_date ? -1 : a.air_date > b.air_date ? 1
+                        : (a.episode_number || 0) - (b.episode_number || 0);
+                }).slice(0, 4);
+                if (!eps.length) { host.innerHTML = '<p class="video-empty-note">Nothing airing soon — follow some shows on the Watchlist.</p>'; return; }
+                host.innerHTML = eps.map(function (ep) {
+                    var bg = ep.show_has_backdrop ? '/api/video/backdrop/show/' + ep.show_id + '?w=640' : '';
+                    var se = 'S' + ep.season_number + ' · E' + ep.episode_number;
+                    var owned = ep.has_file ? '<span class="vup-owned">✓ Owned</span>' : '';
+                    return '<a class="vup-row" href="/video-detail/library/show/' + ep.show_id + '"' +
+                        ' data-video-card-open="show" data-video-card-id="' + ep.show_id + '" title="' + _esc(ep.show_title) + '">' +
+                        (bg ? '<div class="vup-bg" style="background-image:url(\'' + bg + '\')"></div>' : '') +
+                        '<div class="vup-scrim"></div>' +
+                        '<div class="vup-content">' +
+                            '<div class="vup-when"><span class="vup-dot"></span>' + _esc(_whenLabel(ep.air_date, d.today)) + owned + '</div>' +
+                            '<div class="vup-title">' + _esc(ep.show_title) + '</div>' +
+                            '<div class="vup-sub">' + se + (ep.title ? ' · ' + _esc(ep.title) : '') + '</div>' +
+                        '</div></a>';
+                }).join('');
+            })
+            .catch(function () { host.innerHTML = '<p class="video-empty-note">Couldn\'t load the calendar.</p>'; });
+    }
+
     function loadStats() {
         fetch(DASHBOARD_URL, { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
@@ -169,6 +210,7 @@
     function onPageShown(e) {
         if (!e || e.detail !== DASHBOARD_ID) return;
         loadStats();
+        loadUpcoming();
         loadSystemStats();          // immediate fill (memory/uptime)
         startSystemStatsPolling();  // then keep it live
     }
@@ -232,7 +274,8 @@
     // grid): plain left-click routes in-app; modified clicks use the real href.
     document.addEventListener('click', function (e) {
         if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-        var card = e.target.closest && e.target.closest('[data-video-recent] [data-video-card-open]');
+        var card = e.target.closest && e.target.closest(
+            '[data-video-recent] [data-video-card-open], [data-video-upcoming] [data-video-card-open]');
         if (!card) return;
         e.preventDefault();
         document.dispatchEvent(new CustomEvent('soulsync:video-open-detail', {
