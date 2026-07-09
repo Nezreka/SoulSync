@@ -161,14 +161,17 @@
                     }).slice(0, 10);
                 if (!eps.length) { host.innerHTML = '<p class="video-empty-note">Nothing airing today — check the calendar for what\'s coming up.</p>'; return; }
                 _upcomingEps = {};
+                var hueOf = (window.VideoCalendar && window.VideoCalendar.showHue) || function () { return 230; };
                 host.innerHTML = eps.map(function (ep) {
                     _upcomingEps[ep.id] = ep;
                     var bg = ep.show_has_backdrop ? '/api/video/backdrop/show/' + ep.show_id + '?w=640' : '';
-                    var se = 'S' + ep.season_number + ' · E' + ep.episode_number;
+                    var se = '<span class="vup-se">S' + ep.season_number + ' · E' + ep.episode_number + '</span>';
                     var owned = ep.has_file ? '<span class="vup-owned">✓ Owned</span>' : '';
                     // href is the show page (modified-click / new-tab fallback); a plain
                     // click opens the episode modal via the delegated handler below.
-                    return '<a class="vup-row" href="/video-detail/library/show/' + ep.show_id + '"' +
+                    // --vcal-h is the same per-show hue the calendar billboard uses.
+                    return '<a class="vup-row" style="--vcal-h:' + hueOf(ep.show_title || '') + '"' +
+                        ' href="/video-detail/library/show/' + ep.show_id + '"' +
                         ' data-video-cal-ep="' + ep.id + '" title="' + _esc(ep.show_title) + '">' +
                         (bg ? '<div class="vup-bg" style="background-image:url(\'' + bg + '\')"></div>' : '') +
                         '<div class="vup-scrim"></div>' +

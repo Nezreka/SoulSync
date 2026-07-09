@@ -661,7 +661,7 @@
     // exact same episode modal instead of duplicating it. openModal builds its own
     // overlay on document.body and only closes over calendar-internal helpers +ep,
     // so it works standalone from any page once this module has loaded.
-    window.VideoCalendar = { openEpisode: openModal };
+    window.VideoCalendar = { openEpisode: openModal, showHue: showHue };
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);
