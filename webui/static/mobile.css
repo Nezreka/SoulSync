@@ -178,7 +178,9 @@
     }
 
     .page {
-        padding: 70px 20px 20px 20px;
+        /* Bottom padding clears the fixed floating search bar / FAB buttons
+           (~50px band) so the last row of content stays visible & tappable. */
+        padding: 70px 20px 72px 20px;
         height: auto;
         min-height: 0;
         overflow: visible;
@@ -187,6 +189,24 @@
 
     .page.active {
         display: block;
+    }
+
+    /* ── Minor tap-target enlargements for touch ── */
+    #watchlist-select-all-cb {
+        width: 18px;
+        height: 18px;
+    }
+    .watchlist-select-all-label {
+        min-height: 32px;
+    }
+    .td-close {
+        width: 36px;
+        height: 36px;
+    }
+    .bp-info-toggle {
+        width: 28px;
+        height: 28px;
+        font-size: 14px;
     }
 
     .nav-button {
@@ -579,10 +599,11 @@
         flex-wrap: wrap;
     }
 
+    /* Keep the icon-chip shape on mobile too (was a 50%-width pill for the
+       old labeled-tab design) so the strip stays uniform and reflow-free. */
     .sync-tab-button {
-        min-width: calc(50% - 2px);
-        font-size: 13px;
-        padding: 10px 8px;
+        min-width: 0;
+        padding: 0;
     }
 
     /* Spotify playlist cards - stack vertically on mobile */
@@ -1128,6 +1149,13 @@
         bottom: 12px;
         right: 12px;
         gap: 6px;
+    }
+
+    /* On a narrow hero the centered carousel indicators and the bottom-right
+       action buttons both pin to the bottom edge and collide — lift the
+       indicators above the action row so the dots stay usable. */
+    .discover-hero-indicators {
+        bottom: 62px;
     }
 
     .discover-hero-watch-all,
@@ -1829,8 +1857,10 @@
 
     /* --- Phase 9: Touch & Hover Adaptations --- */
 
-    /* Global touch targets - only standalone/action buttons, not inline */
-    button:not(.watchlist-card-remove):not(.wishlist-delete-btn):not(.wishlist-delete-album-btn):not(.wishlist-delete-btn-small):not(.wishlist-back-btn):not(.alphabet-btn):not(.filter-btn):not(.playlist-modal-close):not([data-import-page-result-row]):not([data-import-page-inline-action]) {
+    /* Global touch targets - only standalone/action buttons, not inline.
+       Round icon buttons (fixed-size circles) are excluded so the min-height
+       can't stretch them into vertical ellipses. */
+    button:not(.watchlist-card-remove):not(.wishlist-delete-btn):not(.wishlist-delete-album-btn):not(.wishlist-delete-btn-small):not(.wishlist-back-btn):not(.alphabet-btn):not(.filter-btn):not(.playlist-modal-close):not(.notif-bell-btn):not(.helper-float-btn):not(.hero-indicator):not(.discover-blacklist-btn):not(.tool-help-button):not([data-import-page-result-row]):not([data-import-page-inline-action]) {
         min-height: 38px;
     }
 
@@ -1887,7 +1917,26 @@
 
     /* Spacing reductions */
     .page {
-        padding: 70px 16px 16px 16px;
+        padding: 70px 16px 72px 16px;
+    }
+
+    /* Nested wrappers each add horizontal padding, which compounds on a phone
+       into more chrome than content (~136px of a 375px screen). Trim the
+       biggest offender — the global .page-shell card (margin 20 + padding 24 =
+       44px/side) — and drop the settings content wrappers' inner gutters so
+       controls get the width back. Global, so all 8 .page-shell pages benefit
+       (X4). */
+    .page-shell {
+        margin: 10px;
+        padding: 24px 16px 26px;
+    }
+    #settings-page .settings-content {
+        padding-left: 0;
+        padding-right: 0;
+    }
+    #settings-page .settings-columns {
+        padding-left: 0;
+        padding-right: 0;
     }
 
     .activity-section {
@@ -1979,7 +2028,13 @@
 @media (max-width: 480px) {
 
     .page {
-        padding: 70px 12px 12px 12px;
+        padding: 70px 12px 72px 12px;
+    }
+
+    /* Even tighter card gutters on the smallest phones (X4). */
+    .page-shell {
+        margin: 6px;
+        padding: 20px 12px 22px;
     }
 
     .stats-grid-dashboard {
@@ -2005,7 +2060,7 @@
     }
 
     .sync-tab-button {
-        min-width: 100%;
+        min-width: 0;
     }
 
     .matching-modal-actions {
