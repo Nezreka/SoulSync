@@ -226,7 +226,11 @@ def _maybe_stage_album_track(context, final_path):
     try:
         if not config_manager.get('album_downloads.atomic_publish', False):
             return final_path
-        batch_id = context.get('batch_id')
+        # Real batched downloads run through the verification wrapper, which pops
+        # batch_id out of the context (batch accounting is the wrapper's job) and
+        # stashes it under _atomic_publish_batch_id for us. Manual/base-direct
+        # calls still carry batch_id normally.
+        batch_id = context.get('batch_id') or context.get('_atomic_publish_batch_id')
         if not batch_id:
             logger.debug("[Atomic Publish] track has no batch_id — publishing directly")
             return final_path
@@ -1196,7 +1200,15 @@ def post_process_matched_download_with_verification(context_key, context, file_p
     try:
         original_task_id = context.pop('task_id', None)
         original_batch_id = context.pop('batch_id', None)
+        # #999: the atomic-publish stage redirect runs inside the inner pipeline
+        # and needs the batch id — which we just popped so the inner batch
+        # accounting stays owned by this wrapper. Stash it under a dedicated key
+        # the redirect reads. Flag-gated so flag-off downloads are byte-identical
+        # (no extra context key), and popped again before the wrapper continues.
+        if original_batch_id and config_manager.get('album_downloads.atomic_publish', False):
+            context['_atomic_publish_batch_id'] = original_batch_id
         post_process_matched_download(context_key, context, file_path, runtime, metadata_runtime=metadata_runtime)
+        context.pop('_atomic_publish_batch_id', None)
         if original_task_id:
             context['task_id'] = original_task_id
         if original_batch_id:
