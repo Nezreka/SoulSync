@@ -228,30 +228,49 @@ def _maybe_stage_album_track(context, final_path):
             return final_path
         batch_id = context.get('batch_id')
         if not batch_id:
+            logger.debug("[Atomic Publish] track has no batch_id — publishing directly")
             return final_path
         from core.downloads.atomic_album_publish import (
             staging_root_for_batch, to_staging_path, album_folder_is_fresh)
         with tasks_lock:
             batch = download_batches.get(batch_id)
-            if not batch or not batch.get('is_album_download'):
+            if not batch:
+                logger.debug("[Atomic Publish] batch %s not found — publishing directly", batch_id)
                 return final_path
+            # Decide once per batch, and LOG the decision + reason so an opted-in
+            # user can confirm it in app.log. Cached via _atomic_decided.
             if not batch.get('_atomic_decided'):
-                transfer_dir = docker_resolve_path(
-                    config_manager.get('soulseek.transfer_path', './Transfer'))
-                fresh = album_folder_is_fresh(os.path.dirname(final_path))
                 batch['_atomic_decided'] = True
-                batch['_atomic_active'] = bool(fresh)
-                batch['_atomic_transfer_dir'] = transfer_dir
-                batch['_atomic_staging_root'] = (
-                    staging_root_for_batch(transfer_dir, batch_id) if fresh else None)
-                if fresh:
-                    logger.info("[Atomic Publish] Batch %s: staging album until complete", batch_id)
+                batch['_atomic_active'] = False
+                if not batch.get('is_album_download'):
+                    logger.info("[Atomic Publish] Batch %s: NOT flagged as an album download "
+                                "— publishing directly (atomic only applies to album batches)", batch_id)
+                else:
+                    transfer_dir = docker_resolve_path(
+                        config_manager.get('soulseek.transfer_path', './Transfer'))
+                    album_folder = os.path.dirname(final_path)
+                    if album_folder_is_fresh(album_folder):
+                        batch['_atomic_active'] = True
+                        batch['_atomic_transfer_dir'] = transfer_dir
+                        batch['_atomic_staging_root'] = staging_root_for_batch(transfer_dir, batch_id)
+                        logger.info("[Atomic Publish] Batch %s: STAGING album until complete "
+                                    "(album=%r, transfer=%s)", batch_id,
+                                    os.path.basename(album_folder), transfer_dir)
+                    else:
+                        logger.info("[Atomic Publish] Batch %s: album folder already has tracks "
+                                    "(completeness fill) — publishing directly: %s",
+                                    batch_id, album_folder)
             if not batch.get('_atomic_active'):
                 return final_path
             staging_root = batch.get('_atomic_staging_root')
             transfer_dir = batch.get('_atomic_transfer_dir')
         staged = to_staging_path(final_path, transfer_dir, staging_root)
-        return staged or final_path
+        if not staged:
+            logger.warning("[Atomic Publish] Batch %s: %r is not under the transfer dir %r "
+                           "— publishing directly (check soulseek.transfer_path)",
+                           batch_id, final_path, transfer_dir)
+            return final_path
+        return staged
     except Exception as e:
         logger.error("[Atomic Publish] stage redirect failed (using direct publish): %s", e)
         return final_path
