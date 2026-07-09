@@ -85,8 +85,20 @@ body[data-side="video"] .side-toggle-thumb {
 /* Overlay Studio (poster builder) is admin-only — hide its launcher for non-admins. */
 body:not(.video-admin) [data-video-overlay-studio] { display: none !important; }
 
+/* Video dashboard bento order + column spans. SCOPED to the video subpage because
+   these data-card names (stats/library/tools) also exist on the music dashboard —
+   an unscoped rule would reorder music's grid too. Layout on the 3-col grid:
+     Row 1  Recently Added (full width)
+     Row 2  System Stats · Quick Actions · Library
+     Row 3  Overlay Studio · Upcoming (2 cols) */
+.video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="recent"] { order: 1; grid-column: 1 / -1; }
+.video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="stats"] { order: 2; }
+.video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="tools"] { order: 3; }
+.video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="library"] { order: 4; }
+.video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="overlay-studio"] { order: 5; }
+.video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="upcoming"] { order: 6; grid-column: span 2; }
+
 /* Dashboard "Recently Added" — a single full-width, horizontally-scrolling row. */
-.dash-card[data-card="recent"] { grid-column: 1 / -1; }
 .video-recent-grid { display: flex; align-items: flex-start; gap: 14px; overflow-x: auto; padding-bottom: 8px; scroll-snap-type: x proximity; }
 .video-recent-grid::-webkit-scrollbar { height: 6px; }
 .video-recent-grid::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, .12); border-radius: 3px; }
@@ -109,10 +121,8 @@ body:not(.video-admin) [data-video-overlay-studio] { display: none !important; }
 /* Dashboard "Upcoming" — mini-billboards for the next few calendar episodes. */
 .dash-card__link { font-size: 11px; font-weight: 600; color: rgba(56, 189, 248, .95); text-decoration: none; margin-left: 4px; white-space: nowrap; }
 .dash-card__link:hover { text-decoration: underline; }
-/* Full-width so the previews spread horizontally instead of stacking tall. */
-.dash-card[data-card="upcoming"] { grid-column: 1 / -1; }
-/* A row of landscape backdrop cards (wraps on narrow widths). */
-.video-upcoming { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
+/* A row of landscape backdrop cards inside the 2-col-wide card (wraps on narrow widths). */
+.video-upcoming { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
 .vup-row { position: relative; display: block; aspect-ratio: 16 / 10; border-radius: 12px; overflow: hidden;
     text-decoration: none; color: inherit; border: 1px solid rgba(255, 255, 255, .08); cursor: pointer;
     transition: transform .16s ease, border-color .16s ease; }

@@ -119,16 +119,27 @@
     }
 
     // ── Upcoming (calendar preview) — mini-billboards for the next few episodes ──
-    var CALENDAR_URL = '/api/video/calendar?days=21&scope=watchlist';
-    var _WD = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    function _parseISO(s) { var p = String(s || '').split('-'); return new Date(+p[0], (+p[1] || 1) - 1, +p[2] || 1); }
-    function _whenLabel(airDate, today) {
-        var diff = Math.round((_parseISO(airDate) - _parseISO(today)) / 86400000);
-        if (diff <= 0) return 'Today';
-        if (diff === 1) return 'Tomorrow';
-        if (diff < 7) return _WD[_parseISO(airDate).getDay()];
-        return _parseISO(airDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    var CALENDAR_URL = '/api/video/calendar?days=2&scope=watchlist';
+    // Minutes-since-midnight from an "HH:MM" / "h:MM PM" airs_time (null when unknown),
+    // so today's episodes sort by when they actually air. Mirrors the calendar's airMins.
+    function _airMins(s) {
+        if (!s) return null;
+        var m = String(s).trim().match(/^(\d{1,2}):(\d{2})/);
+        if (!m) return null;
+        var h = +m[1], mi = +m[2];
+        if (/pm/i.test(s) && h < 12) h += 12;
+        if (/am/i.test(s) && h === 12) h = 0;
+        if (h > 23 || mi > 59 || (h === 0 && mi === 0)) return null;
+        return h * 60 + mi;
     }
+    function _fmtMins(mins) {
+        if (mins == null) return '';
+        var h = (mins / 60) | 0, mi = mins % 60, ap = h >= 12 ? 'PM' : 'AM', hh = h % 12 || 12;
+        return hh + ':' + ('0' + mi).slice(-2) + ' ' + ap;
+    }
+    // All rows are today's releases now, so lead with the air time; "Today" only when
+    // the slot is unknown.
+    function _whenLabel(ep) { return _fmtMins(_airMins(ep.airs_time)) || 'Today'; }
     // Full episode objects for whatever's currently rendered, keyed by ep.id — so a
     // click can hand the SAME object the calendar page uses to VideoCalendar.openEpisode().
     var _upcomingEps = {};
@@ -139,11 +150,16 @@
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
                 if (!d || d.error) { host.innerHTML = '<p class="video-empty-note">Couldn\'t load the calendar.</p>'; return; }
-                var eps = (d.episodes || []).slice().sort(function (a, b) {
-                    return a.air_date < b.air_date ? -1 : a.air_date > b.air_date ? 1
-                        : (a.episode_number || 0) - (b.episode_number || 0);
-                }).slice(0, 4);
-                if (!eps.length) { host.innerHTML = '<p class="video-empty-note">Nothing airing soon — follow some shows on the Watchlist.</p>'; return; }
+                // Only what's released today (now → end of day), soonest first, 5 max.
+                var eps = (d.episodes || []).filter(function (ep) { return ep.air_date === d.today; })
+                    .sort(function (a, b) {
+                        var ta = _airMins(a.airs_time), tb = _airMins(b.airs_time);
+                        if (ta == null) ta = 1e9;   // unknown air time sorts last
+                        if (tb == null) tb = 1e9;
+                        if (ta !== tb) return ta - tb;
+                        return (a.show_title || '') < (b.show_title || '') ? -1 : 1;
+                    }).slice(0, 5);
+                if (!eps.length) { host.innerHTML = '<p class="video-empty-note">Nothing airing today — check the calendar for what\'s coming up.</p>'; return; }
                 _upcomingEps = {};
                 host.innerHTML = eps.map(function (ep) {
                     _upcomingEps[ep.id] = ep;
@@ -157,7 +173,7 @@
                         (bg ? '<div class="vup-bg" style="background-image:url(\'' + bg + '\')"></div>' : '') +
                         '<div class="vup-scrim"></div>' +
                         '<div class="vup-content">' +
-                            '<div class="vup-when"><span class="vup-dot"></span>' + _esc(_whenLabel(ep.air_date, d.today)) + owned + '</div>' +
+                            '<div class="vup-when"><span class="vup-dot"></span>' + _esc(_whenLabel(ep)) + owned + '</div>' +
                             '<div class="vup-title">' + _esc(ep.show_title) + '</div>' +
                             '<div class="vup-sub">' + se + (ep.title ? ' · ' + _esc(ep.title) : '') + '</div>' +
                         '</div></a>';
