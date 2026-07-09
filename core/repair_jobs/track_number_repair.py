@@ -747,16 +747,17 @@ def _fix_track_number_tag(file_path: str, correct_num: int, total: int):
         if isinstance(audio.tags, ID3):
             audio.tags.delall('TRCK')
             audio.tags.add(TRCK(encoding=3, text=[track_str]))
-            audio.save(v1=0, v2_version=4)
         elif isinstance(audio, (FLAC, OggVorbis)):
             audio['tracknumber'] = [track_str]
-            if isinstance(audio, FLAC):
-                audio.save(deleteid3=True)
-            else:
-                audio.save()
         elif isinstance(audio, MP4):
             audio['trkn'] = [(correct_num, total)]
-            audio.save()
+        else:
+            return
+
+        # Atomic + audio-integrity-verified save (#819/#1000): never rewrite the
+        # user's library file in place; abort if the write would damage the audio.
+        from core.metadata.common import save_audio_file, get_mutagen_symbols
+        save_audio_file(audio, get_mutagen_symbols())
 
         logger.info("Fixed track tag: %s → %s", os.path.basename(file_path), track_str)
     except Exception as e:
