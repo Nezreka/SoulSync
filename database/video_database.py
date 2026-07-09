@@ -31,7 +31,7 @@ logger = get_logger("video_database")
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 21
+SCHEMA_VERSION = 22
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -2601,6 +2601,229 @@ class VideoDatabase:
             return None
         return self.create_overlay_template(
             (src.get("name") or "Untitled") + " (copy)", src.get("definition") or {})
+
+    # ── Collections (Kometa parity) ───────────────────────────────────────────
+    # SoulSync-managed movie/show collections. A definition (`definition` JSON =
+    # smart rules OR a list source) resolves to a set of owned items and is synced
+    # to the active video server. Same CRUD shape as overlay templates.
+    _COLLECTION_BOOL_COLS = ("pinned", "wishlist_missing", "enabled")
+
+    def list_collection_definitions(self) -> list:
+        """Every collection definition, newest-edited first (light rows for the
+        gallery) with the last-synced member count/time joined in."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT id, name, kind, media_type, poster_url, summary, sort_order, "
+                "sync_mode, pinned, wishlist_missing, enabled, created_at, updated_at "
+                "FROM collection_definitions ORDER BY updated_at DESC, id DESC").fetchall()
+            out = []
+            for r in rows:
+                d = dict(r)
+                s = conn.execute(
+                    "SELECT member_count, synced_at FROM collection_sync WHERE definition_id=?",
+                    (d["id"],)).fetchone()
+                d["member_count"] = s["member_count"] if s else None
+                d["synced_at"] = s["synced_at"] if s else None
+                out.append(d)
+            return out
+        finally:
+            conn.close()
+
+    def get_collection_definition(self, definition_id: int) -> dict | None:
+        """One definition with its parsed `definition` dict, or None."""
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT * FROM collection_definitions WHERE id=?",
+                (int(definition_id),)).fetchone()
+            if not row:
+                return None
+            d = dict(row)
+            d["definition"] = self._parse_definition(d.get("definition"))
+            return d
+        except (ValueError, TypeError):
+            return None
+        finally:
+            conn.close()
+
+    def create_collection_definition(self, name: str, *, kind="smart", media_type="movie",
+                                     definition=None, poster_url=None, summary=None,
+                                     sort_order="release", sync_mode="sync", pinned=False,
+                                     wishlist_missing=False, enabled=True) -> int | None:
+        """Insert a collection definition; returns its id. `definition` may be a
+        dict or a JSON string (dicts are serialized)."""
+        name = (name or "").strip() or "Untitled collection"
+        raw = json.dumps(definition) if isinstance(definition, (dict, list)) else (definition or "{}")
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                "INSERT INTO collection_definitions (name, kind, media_type, definition, "
+                "poster_url, summary, sort_order, sync_mode, pinned, wishlist_missing, enabled) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (name, kind, media_type, raw, poster_url, summary, sort_order, sync_mode,
+                 1 if pinned else 0, 1 if wishlist_missing else 0, 1 if enabled else 0))
+            conn.commit()
+            return cur.lastrowid
+        except sqlite3.Error:
+            logger.exception("create_collection_definition failed")
+            return None
+        finally:
+            conn.close()
+
+    def update_collection_definition(self, definition_id: int, **fields) -> bool:
+        """Patch only the provided fields (None values ignored) and bump
+        updated_at. Booleans coerced to 0/1; `definition` dicts serialized."""
+        allowed = {"name", "kind", "media_type", "definition", "poster_url", "summary",
+                   "sort_order", "sync_mode", "pinned", "wishlist_missing", "enabled"}
+        sets, params = [], []
+        for k, v in fields.items():
+            if k not in allowed or v is None:
+                continue
+            if k == "definition":
+                v = json.dumps(v) if isinstance(v, (dict, list)) else v
+            elif k in self._COLLECTION_BOOL_COLS:
+                v = 1 if v else 0
+            elif k == "name":
+                v = (v or "").strip() or "Untitled collection"
+            sets.append(f"{k}=?")
+            params.append(v)
+        if not sets:
+            return False
+        sets.append("updated_at=datetime('now')")
+        params.append(int(definition_id))
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                f"UPDATE collection_definitions SET {', '.join(sets)} WHERE id=?", params)
+            conn.commit()
+            return cur.rowcount > 0
+        except sqlite3.Error:
+            logger.exception("update_collection_definition failed for %s", definition_id)
+            return False
+        finally:
+            conn.close()
+
+    def delete_collection_definition(self, definition_id: int) -> bool:
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                "DELETE FROM collection_definitions WHERE id=?", (int(definition_id),))
+            conn.commit()
+            return cur.rowcount > 0
+        except (sqlite3.Error, ValueError, TypeError):
+            return False
+        finally:
+            conn.close()
+
+    def duplicate_collection_definition(self, definition_id: int) -> int | None:
+        src = self.get_collection_definition(definition_id)
+        if not src:
+            return None
+        return self.create_collection_definition(
+            (src.get("name") or "Untitled") + " (copy)",
+            kind=src.get("kind", "smart"), media_type=src.get("media_type", "movie"),
+            definition=src.get("definition") or {}, poster_url=src.get("poster_url"),
+            summary=src.get("summary"), sort_order=src.get("sort_order", "release"),
+            sync_mode=src.get("sync_mode", "sync"), pinned=bool(src.get("pinned")),
+            wishlist_missing=bool(src.get("wishlist_missing")), enabled=bool(src.get("enabled")))
+
+    def resolve_smart_members(self, media_type: str, definition: dict) -> list:
+        """Owned library items matching a smart definition's rules. Raises
+        SmartFilterError (from compile_rules) on an empty/invalid rule set — the
+        caller decides how to surface it. Only items that are actually on a
+        server (have a server_id) are returned, since a collection is a server
+        grouping."""
+        from core.video.collections.smart_filter import compile_rules
+        where, params = compile_rules(definition, media_type)
+        table = "movies" if media_type == "movie" else "shows"
+        date_col = "release_date" if media_type == "movie" else "first_air_date"
+        sql = (
+            f"SELECT id, server_source, server_id, tmdb_id, title, year, poster_url, "
+            f"rating, added_at, {date_col} AS release_date "
+            f"FROM {table} "
+            f"WHERE server_id IS NOT NULL AND TRIM(server_id) != '' AND {where}"
+        )
+        conn = self._get_connection()
+        try:
+            return [dict(r) for r in conn.execute(sql, params).fetchall()]
+        finally:
+            conn.close()
+
+    def owned_by_tmdb_ids(self, media_type: str, tmdb_ids) -> list:
+        """Owned (on-server) items whose tmdb_id is in the given set — the
+        intersection step for list/franchise collections."""
+        ids = [int(t) for t in (tmdb_ids or []) if t is not None]
+        if not ids:
+            return []
+        table = "movies" if media_type == "movie" else "shows"
+        date_col = "release_date" if media_type == "movie" else "first_air_date"
+        placeholders = ", ".join("?" for _ in ids)
+        sql = (
+            f"SELECT id, server_source, server_id, tmdb_id, title, year, poster_url, "
+            f"rating, added_at, {date_col} AS release_date "
+            f"FROM {table} "
+            f"WHERE server_id IS NOT NULL AND TRIM(server_id) != '' "
+            f"AND tmdb_id IN ({placeholders})"
+        )
+        conn = self._get_connection()
+        try:
+            return [dict(r) for r in conn.execute(sql, ids).fetchall()]
+        finally:
+            conn.close()
+
+    def franchise_owned_members(self, tmdb_collection_id: int) -> list:
+        """Owned movies belonging to a TMDB franchise (movies only)."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT id, server_source, server_id, tmdb_id, title, year, poster_url, "
+                "rating, added_at, release_date FROM movies "
+                "WHERE server_id IS NOT NULL AND TRIM(server_id) != '' "
+                "AND tmdb_collection_id = ?", (int(tmdb_collection_id),)).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    # ── Collection sync ledger (managed-collection map + skip signature) ──────
+    def get_collection_sync(self, definition_id: int) -> dict | None:
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT * FROM collection_sync WHERE definition_id=?",
+                (int(definition_id),)).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def record_collection_sync(self, definition_id: int, *, server_source, server_id,
+                               members_sig, member_count) -> bool:
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                "INSERT INTO collection_sync (definition_id, server_source, server_id, "
+                "members_sig, member_count, synced_at) VALUES (?,?,?,?,?, datetime('now')) "
+                "ON CONFLICT(definition_id) DO UPDATE SET server_source=excluded.server_source, "
+                "server_id=excluded.server_id, members_sig=excluded.members_sig, "
+                "member_count=excluded.member_count, synced_at=excluded.synced_at",
+                (int(definition_id), server_source, server_id, members_sig, int(member_count)))
+            conn.commit()
+            return True
+        except sqlite3.Error:
+            logger.exception("record_collection_sync failed for %s", definition_id)
+            return False
+        finally:
+            conn.close()
+
+    def delete_collection_sync(self, definition_id: int) -> None:
+        conn = self._get_connection()
+        try:
+            conn.execute("DELETE FROM collection_sync WHERE definition_id=?", (int(definition_id),))
+            conn.commit()
+        except sqlite3.Error:
+            logger.exception("delete_collection_sync failed for %s", definition_id)
+        finally:
+            conn.close()
 
     def overlay_sample_data(self, kind: str, item_id: int) -> dict | None:
         """Real badge values for one library item — the "load from a real title"
