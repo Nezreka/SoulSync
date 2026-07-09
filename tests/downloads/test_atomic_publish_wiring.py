@@ -161,3 +161,38 @@ def test_end_to_end_stage_then_publish(monkeypatch, tmp_path):
     assert (final, staged) in db_updates
     # Consistency roster now points at the published file (album-consistency runs next).
     assert batch["_consistency_files"][0]["path"] == final
+
+
+def test_publish_reregisters_final_folder_with_repair(monkeypatch, tmp_path):
+    from pathlib import Path
+
+    batch = {"is_album_download": True}
+    transfer = _wire(monkeypatch, tmp_path, flag=True, batch=batch)
+    final = os.path.join(transfer, "Artist", "Album", "01.flac")
+    staged = pl._maybe_stage_album_track({"batch_id": "B"}, final)
+    Path(staged).parent.mkdir(parents=True, exist_ok=True)
+    Path(staged).write_bytes(b"A")
+
+    class _FakeConn:
+        def cursor(self): return self
+        def execute(self, q, p): pass
+        def commit(self): pass
+        def close(self): pass
+
+    class _FakeDB:
+        def _get_connection(self): return _FakeConn()
+
+    monkeypatch.setattr("database.music_database.MusicDatabase", _FakeDB)
+
+    registered = []
+
+    class _Deps:
+        class repair_worker:  # noqa: N801 — stand-in
+            @staticmethod
+            def register_folder(bid, folder):
+                registered.append((bid, folder))
+
+    lc._publish_atomic_album("B", batch, _Deps())
+    # The PUBLISHED album folder (not the emptied staging one) is registered so
+    # the post-batch track-number repair scans real files.
+    assert registered == [("B", os.path.join(transfer, "Artist", "Album"))]

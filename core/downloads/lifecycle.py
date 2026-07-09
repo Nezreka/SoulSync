@@ -74,7 +74,7 @@ def _safe_batch_dirname(batch_id: str) -> str:
 _ALBUM_BUNDLE_CLEANED_SOURCES = ('soulseek', 'torrent', 'usenet')
 
 
-def _publish_atomic_album(batch_id: str, batch: dict) -> None:
+def _publish_atomic_album(batch_id: str, batch: dict, deps=None) -> None:
     """#999 atomic album publishing (opt-in): if this batch staged its tracks
     (private mirror, so Plex never saw a partial album), move them into the live
     library NOW — before the batch_complete/scan emit below — then repoint each
@@ -115,6 +115,19 @@ def _publish_atomic_album(batch_id: str, batch: dict) -> None:
         for fi in (batch.get('_consistency_files') or []):
             if fi.get('path') in pubmap:
                 fi['path'] = pubmap[fi['path']]
+
+        # Per-track work registered the STAGING album folder with the repair
+        # worker (now emptied by the publish above), so track-number repair would
+        # scan nothing. Re-register the PUBLISHED album folder(s) so the post-batch
+        # repair pass runs on the real files, same as a non-atomic album.
+        repair_worker = getattr(deps, 'repair_worker', None) if deps is not None else None
+        if repair_worker is not None and pubmap:
+            for _folder in {os.path.dirname(f) for f in pubmap.values()}:
+                try:
+                    repair_worker.register_folder(batch_id, _folder)
+                except Exception as _reg_err:
+                    logger.debug("[Atomic Publish] repair re-register failed for %s: %s",
+                                 _folder, _reg_err)
 
         n_fail = len(result.get('failed', []))
         logger.info("[Atomic Publish] Batch %s: published %d file(s)%s",
@@ -552,7 +565,7 @@ def on_download_completed(batch_id: str, task_id: str, success: bool, deps: Life
                 # #999 atomic album publish (opt-in, no-op unless staged): move
                 # the staged album into the live library BEFORE the scan/emit
                 # below, so Plex sees the whole album at once.
-                _publish_atomic_album(batch_id, batch)
+                _publish_atomic_album(batch_id, batch, deps)
 
                 # Record sync history completion
                 from database.music_database import MusicDatabase
@@ -791,7 +804,7 @@ def check_batch_completion_v2(batch_id: str, deps: LifecycleDeps) -> Optional[bo
                     # #999 atomic album publish (opt-in, no-op unless staged):
                     # publish the staged album into the live library before the
                     # scan/emit below.
-                    _publish_atomic_album(batch_id, batch)
+                    _publish_atomic_album(batch_id, batch, deps)
 
                     # Add activity for batch completion
                     playlist_name = batch.get('playlist_name', 'Unknown Playlist')
