@@ -160,6 +160,30 @@ def publish_album_batch(
     return {"published": published, "failed": failed}
 
 
+def discard_staging_root(staging_root: Optional[str]) -> bool:
+    """Remove a batch's staging tree — quarantine cleanup for a cancelled or
+    abandoned atomic batch (its downloaded-but-unpublished tracks are dropped so
+    they re-download). Returns True if a directory was removed.
+
+    Guarded: only ever removes a path whose immediate parent is the dedicated
+    ``_STAGING_DIRNAME`` folder, so a blank/misconfigured value can never rmtree
+    anything but a genuine staging root. Best-effort; a successfully-published
+    batch already had its staging pruned, so this is a no-op there."""
+    if not staging_root:
+        return False
+    import shutil
+    try:
+        norm = os.path.normpath(staging_root)
+        if os.path.basename(os.path.dirname(norm)) != _STAGING_DIRNAME:
+            return False  # not a staging root — refuse
+        if not os.path.isdir(norm):
+            return False
+        shutil.rmtree(norm, ignore_errors=True)
+        return True
+    except OSError:
+        return False
+
+
 def _prune_empty_tree(root: str) -> None:
     """Remove ``root`` and any now-empty subdirs. Best-effort; leaves anything
     still holding files untouched."""
@@ -179,4 +203,5 @@ __all__ = [
     "album_folder_is_fresh",
     "iter_staged_files",
     "publish_album_batch",
+    "discard_staging_root",
 ]
