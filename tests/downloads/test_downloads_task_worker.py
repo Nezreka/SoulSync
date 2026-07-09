@@ -166,6 +166,31 @@ def test_cancelled_no_batch_id_just_returns():
     assert rec.calls == []
 
 
+def test_legacy_cancel_completion_runs_outside_tasks_lock():
+    """Regression: the legacy-cancel completion callback MUST run outside
+    tasks_lock. tasks_lock is non-reentrant, and on_download_completed re-acquires
+    it — calling it in-lock deadlocked the worker WHILE HOLDING the global lock,
+    freezing all downloads. We prove the lock is free when the callback fires by
+    having the callback try to acquire it: on the buggy (in-lock) version the
+    worker still holds it, so this times out to False; with the fix it's free."""
+    from core.runtime_state import tasks_lock
+
+    _seed_task(status='cancelled')  # no playlist_id → legacy path
+
+    acquired = []
+
+    def _cb(batch_id, task_id, success):
+        got = tasks_lock.acquire(timeout=2)
+        acquired.append(got)
+        if got:
+            tasks_lock.release()
+
+    deps, _ = _build_deps(on_download_completed=_cb)
+    tw.download_track_worker('t1', 'b1', deps)
+
+    assert acquired == [True]   # callback ran AND the lock was not held by the worker
+
+
 # ---------------------------------------------------------------------------
 # Source reuse + staging shortcuts
 # ---------------------------------------------------------------------------

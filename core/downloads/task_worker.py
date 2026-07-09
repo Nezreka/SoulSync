@@ -228,23 +228,34 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
             return
 
         # Cancellation Checkpoint 1: Before doing anything
+        _cancelled_before_start = False
+        _free_legacy_slot = False
         with tasks_lock:
             if task_id not in download_tasks:
                 logger.info(f"[Modal Worker] Task {task_id} was deleted before starting")
                 return
             if download_tasks[task_id]['status'] == 'cancelled':
+                _cancelled_before_start = True
                 logger.warning(f"[Modal Worker] Task {task_id} cancelled before starting")
                 # V2 FIX: Don't call _on_download_completed for cancelled V2 tasks
                 # V2 system handles worker slot freeing in atomic cancel function
                 task_playlist_id = download_tasks[task_id].get('playlist_id')
                 if task_playlist_id:
                     logger.warning(f"[Modal Worker] V2 task {task_id} cancelled - worker slot already freed by V2 system")
-                    return  # V2 system already handled worker slot management
                 elif batch_id:
-                    # Legacy system - use old completion callback
+                    # Legacy system - use old completion callback (fired OUTSIDE the
+                    # lock below).
                     logger.warning(f"[Modal Worker] Legacy task {task_id} cancelled - using legacy completion callback")
-                    deps.on_download_completed(batch_id, task_id, False)
-                return
+                    _free_legacy_slot = True
+        if _cancelled_before_start:
+            # Free the legacy slot OUTSIDE tasks_lock: on_download_completed
+            # re-acquires it, and tasks_lock is a plain non-reentrant Lock — calling
+            # it in-lock deadlocked the worker WHILE HOLDING the global lock, which
+            # freezes the entire download subsystem. Idempotent (_completed_task_ids
+            # dedup), so it's a no-op if the slot was already freed by atomic cancel.
+            if _free_legacy_slot:
+                deps.on_download_completed(batch_id, task_id, False)
+            return
 
         track_data = task['track_info']
         track_name = track_data.get('name', 'Unknown Track')
