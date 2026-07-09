@@ -2266,6 +2266,8 @@ const _autoIcons = {
     video_refresh_airing_schedules: '\uD83D\uDDD3\uFE0F', video_clean_youtube_episodes: '\uD83E\uDDF9',
     video_clean_search_history: '\uD83D\uDDD1\uFE0F', video_clean_completed_downloads: '\u2705',
     video_full_cleanup: '\uD83E\uDDF9', video_backup_database: '\uD83D\uDCBE',
+    video_apply_overlays: '\uD83C\uDFA8', video_clean_plex_images: '\uD83D\uDDBC\uFE0F',
+    video_sync_collections: '\uD83D\uDDC2\uFE0F',
 };
 
 // --- Inspiration Templates ---
@@ -3872,6 +3874,8 @@ function _autoFormatAction(type) {
         video_clean_search_history: 'Clean Search History',
         video_clean_completed_downloads: 'Clean Completed Downloads',
         video_full_cleanup: 'Full Cleanup', video_backup_database: 'Backup Database',
+        video_apply_overlays: 'Auto-Update Overlays', video_clean_plex_images: 'Clean Up Plex Images',
+        video_sync_collections: 'Sync Collections',
     };
     return labels[type] || type || 'Unknown';
 }

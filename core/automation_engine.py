@@ -215,6 +215,17 @@ SYSTEM_AUTOMATIONS = [
         'action_type': 'video_apply_overlays',
         'owned_by': 'video',
     },
+    # Daily: keep SoulSync-managed collections in sync with the library. Resolves
+    # each enabled collection's members and pushes add/remove to the server,
+    # skipping collections whose members + settings are unchanged. Runs at 4:30am,
+    # after the overnight scans + overlay pass so it sees fresh library state.
+    {
+        'name': 'Sync Collections',
+        'trigger_type': 'daily_time',
+        'trigger_config': {'time': '04:30'},
+        'action_type': 'video_sync_collections',
+        'owned_by': 'video',
+    },
     # Weekly: reclaim the Plex space that overlay re-uploads accumulate (Plex keeps
     # every uploaded poster in its bundles). Runs Empty Trash → Clean Bundles →
     # Optimize DB via the API. Weekly + a big initial delay so it never overlaps the
