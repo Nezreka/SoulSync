@@ -19,6 +19,8 @@ database/*.db-shm
 database/*.db-wal
 database/*.db.backup_*
 database/api_call_history.json
+# App-generated video overlay/poster art (logo packs + rendered posters) — can be many GB
+database/video_poster_assets/
 storage/image_cache/
 logs/*.log
 logs/*.log.*
