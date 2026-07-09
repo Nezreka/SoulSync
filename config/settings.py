@@ -699,6 +699,16 @@ class ConfigManager:
                 "delete_original": False,
                 "downsample_hires": False
             },
+            "album_downloads": {
+                # Atomic album publishing (#999): when ON, an album / wishlist-album
+                # batch's tracks are staged privately and only moved into the
+                # media-library path once the WHOLE batch completes, so Plex /
+                # Jellyfin / Navidrome never sees a partial album mid-download.
+                # OFF by default — behavior is byte-for-byte today's (each track
+                # publishes to the library as it finishes). Strictly opt-in; only
+                # ever affects whole-album batches (never singles / completeness-fill).
+                "atomic_publish": False,
+            },
             "listening_stats": {
                 "enabled": True,
                 "poll_interval": 30

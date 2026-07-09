@@ -5875,6 +5875,28 @@
                             </div>
                             </div><!-- end Retry Logic body -->
 
+                            <!-- ═══ ALBUM PUBLISHING (#999 — atomic album publish, opt-in) ═══ -->
+                            <div class="settings-section-header collapsed" data-stg="downloads" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
+                                <h3>Album Publishing</h3>
+                                <span class="settings-section-hint">When album downloads appear in your library</span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="downloads">
+                            <div class="settings-group" data-stg="downloads">
+                                <div class="form-group">
+                                    <div class="setting-row">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="album-atomic-publish">
+                                            Publish albums only when complete
+                                        </label>
+                                        <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    </div>
+                                    <div class="setting-help-body" hidden><strong>Off by default</strong> — with this off, tracks appear in your library as they finish downloading (unchanged behavior). When <strong>on</strong>, the tracks of an album download are staged privately and only moved into your media library once the <strong>whole album</strong> completes, so Plex/Jellyfin/Navidrome never shows a half-loaded album while it's still downloading. If a batch stalls or fails, its tracks stay in staging (never your library) and the failed tracks remain retryable in your wishlist. Only affects full-album and wishlist-album downloads — single tracks and album top-ups (completeness fills) are unaffected.</div>
+                                </div>
+                            </div>
+                            </div><!-- end Album Publishing body -->
+
                             <!-- ═══ PATHS & ORGANIZATION ═══ -->
                             <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
                                 <span class="settings-section-arrow">&#9660;</span>

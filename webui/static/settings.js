@@ -1611,6 +1611,10 @@ async function loadSettingsData() {
         updateLossyBitrateOptions();
         document.getElementById('lossy-copy-delete-original').checked = settings.lossy_copy?.delete_original === true;
 
+        // Album Publishing (#999) — atomic album publish, opt-in, default off.
+        const _atomicPub = document.getElementById('album-atomic-publish');
+        if (_atomicPub) _atomicPub.checked = settings.album_downloads?.atomic_publish === true;
+
         // Populate Listening Stats settings
         document.getElementById('listening-stats-enabled').checked = settings.listening_stats?.enabled === true;
         document.getElementById('listening-stats-interval').value = settings.listening_stats?.poll_interval || 30;
@@ -4492,6 +4496,10 @@ async function saveSettings(quiet = false) {
             bitrate: document.getElementById('lossy-copy-bitrate').value,
             delete_original: document.getElementById('lossy-copy-delete-original').checked,
             downsample_hires: document.getElementById('downsample-hires').checked
+        },
+        album_downloads: {
+            // Atomic album publishing (#999) — opt-in, default off.
+            atomic_publish: document.getElementById('album-atomic-publish')?.checked === true
         },
         listening_stats: {
             enabled: document.getElementById('listening-stats-enabled').checked,
