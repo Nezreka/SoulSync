@@ -395,6 +395,16 @@ def _write_standard_tag(audio, tag_name, value):
         logger.debug(f"Failed to write standard tag {tag_name}: {e}")
 
 
+def _atomic_save(audio):
+    """Persist tag changes through the atomic + audio-integrity-verified saver
+    (#819/#1000): write into a temp copy, verify the audio is byte-for-byte
+    intact, then swap — so a consistency tag write can never truncate or corrupt
+    a library file. Aborts (leaves the original untouched) if the write would
+    damage the audio."""
+    from core.metadata.common import save_audio_file, get_mutagen_symbols
+    return save_audio_file(audio, get_mutagen_symbols())
+
+
 # Audio extensions we consider when looking for an album's existing tracks.
 _AUDIO_EXTS = {'.flac', '.mp3', '.m4a', '.mp4', '.ogg', '.oga', '.opus', '.wav', '.aiff', '.aif'}
 
@@ -576,7 +586,7 @@ def run_album_consistency(
                         _write_standard_tag(audio, 'album', adopt_album)
                     if adopt_artist:
                         _write_standard_tag(audio, 'albumartist', adopt_artist)
-                    audio.save()
+                    _atomic_save(audio)
                     written += 1
             except Exception as e:
                 logger.error(f"Error adopting album tags for {path}: {e}")
@@ -710,7 +720,7 @@ def run_album_consistency(
                 if mb_track and mb_track.get('id'):
                     _write_tag_to_file(audio, 'MUSICBRAINZ_RELEASETRACKID', mb_track['id'])
 
-                audio.save()
+                _atomic_save(audio)
                 tags_written += 1
 
         except Exception as e:

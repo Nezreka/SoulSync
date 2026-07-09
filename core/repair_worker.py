@@ -2633,7 +2633,11 @@ class RepairWorker:
                             changes.append(f'{field}: "{current}" → "{canonical}" in {os.path.basename(resolved)}')
 
                 if file_changed:
-                    audio.save()
+                    # Atomic + audio-integrity-verified save (#819/#1000): never
+                    # rewrite the library file in place; abort if the write would
+                    # damage the audio rather than corrupt it.
+                    from core.metadata.common import save_audio_file, get_mutagen_symbols
+                    save_audio_file(audio, get_mutagen_symbols())
                     fixed_files += 1
             except Exception as e:
                 logger.error(f"Error fixing tag consistency for {resolved}: {e}")
