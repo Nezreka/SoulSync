@@ -473,6 +473,132 @@ class PlexVideoSource:
             logger.exception("Plex: set_poster failed for %s", server_id)
             return {"ok": False, "error": str(e)}
 
+    # ── Collections (SoulSync-managed) ────────────────────────────────────────
+    def _collection_section(self, kind: str):
+        """The library section collections of a kind live in — the mapped one,
+        else the first section of that kind."""
+        name = self._movies_lib if kind == "movie" else self._tv_lib
+        secs = self._sections(kind, name) if name else self._sections(kind)
+        return secs[0] if secs else None
+
+    def _fetch_items(self, ids):
+        items = []
+        for i in ids:
+            try:
+                items.append(self._server.fetchItem(int(i)))
+            except Exception:   # noqa: BLE001 - a stale ratingKey shouldn't fail the batch
+                logger.debug("Plex: fetchItem %s failed for collection op", i)
+        return items
+
+    def find_collection(self, kind: str, name: str):
+        sec = self._collection_section(kind)
+        if not sec:
+            return None
+        try:
+            for c in sec.collections():
+                if (getattr(c, "title", "") or "") == name:
+                    return str(c.ratingKey)
+        except Exception:   # noqa: BLE001
+            logger.exception("Plex: find_collection failed")
+        return None
+
+    def create_collection(self, kind: str, name: str, member_ids) -> dict:
+        sec = self._collection_section(kind)
+        if not sec:
+            return {"ok": False, "error": f"no {kind} library configured on Plex"}
+        items = self._fetch_items(member_ids)
+        if not items:
+            return {"ok": False, "error": "no resolvable items for the collection"}
+        try:
+            col = sec.createCollection(title=name, items=items)
+            return {"ok": True, "server_id": str(col.ratingKey)}
+        except Exception as e:   # noqa: BLE001
+            logger.exception("Plex: createCollection failed")
+            return {"ok": False, "error": str(e)}
+
+    def collection_member_ids(self, collection_id):
+        """Member ratingKeys, or None if the collection no longer exists."""
+        try:
+            col = self._server.fetchItem(int(collection_id))
+        except Exception:   # noqa: BLE001 - gone
+            return None
+        try:
+            return [str(i.ratingKey) for i in col.items()]
+        except Exception:   # noqa: BLE001
+            logger.exception("Plex: collection items() failed for %s", collection_id)
+            return None
+
+    def collection_add(self, collection_id, ids) -> dict:
+        try:
+            col = self._server.fetchItem(int(collection_id))
+            items = self._fetch_items(ids)
+            if items:
+                col.addItems(items)
+            return {"ok": True}
+        except Exception as e:   # noqa: BLE001
+            logger.exception("Plex: collection_add failed")
+            return {"ok": False, "error": str(e)}
+
+    def collection_remove(self, collection_id, ids) -> dict:
+        try:
+            col = self._server.fetchItem(int(collection_id))
+            items = self._fetch_items(ids)
+            if items:
+                col.removeItems(items)
+            return {"ok": True}
+        except Exception as e:   # noqa: BLE001
+            logger.exception("Plex: collection_remove failed")
+            return {"ok": False, "error": str(e)}
+
+    def set_collection_meta(self, collection_id, *, poster_url=None, poster_bytes=None,
+                            summary=None, sort=None, pinned=None) -> dict:
+        try:
+            col = self._server.fetchItem(int(collection_id))
+        except Exception as e:   # noqa: BLE001
+            return {"ok": False, "error": str(e)}
+        try:
+            if summary:
+                col.editSummary(summary)
+            if sort:
+                plex_sort = {"alpha": "alpha", "release": "release", "custom": "custom"}.get(sort)
+                if plex_sort:
+                    try:
+                        col.sortUpdate(sort=plex_sort)
+                    except Exception:   # noqa: BLE001 - older plexapi may lack it
+                        logger.debug("Plex: sortUpdate unsupported", exc_info=True)
+            if poster_url:
+                col.uploadPoster(url=poster_url)
+            elif poster_bytes:
+                import os as _os
+                import tempfile as _tf
+                fd, tmp = _tf.mkstemp(suffix=".jpg")
+                try:
+                    with _os.fdopen(fd, "wb") as f:
+                        f.write(poster_bytes)
+                    col.uploadPoster(filepath=tmp)
+                finally:
+                    try:
+                        _os.unlink(tmp)
+                    except OSError:
+                        pass
+            if pinned is not None:
+                try:
+                    hub = col.visibility()
+                    hub.promoteHome() if pinned else hub.demoteHome()
+                except Exception:   # noqa: BLE001 - hub promotion varies by Plex version
+                    logger.debug("Plex: hub promote/demote unsupported", exc_info=True)
+            return {"ok": True}
+        except Exception as e:   # noqa: BLE001
+            logger.exception("Plex: set_collection_meta failed")
+            return {"ok": False, "error": str(e)}
+
+    def delete_collection(self, collection_id) -> dict:
+        try:
+            self._server.fetchItem(int(collection_id)).delete()
+            return {"ok": True}
+        except Exception as e:   # noqa: BLE001
+            return {"ok": False, "error": str(e)}
+
     def is_scanning(self, media_type="all") -> bool:
         """True if any SELECTED video section (scoped by media_type) is currently
         being scanned by Plex. Checks the per-section refreshing flag, then the
@@ -748,6 +874,92 @@ class JellyfinVideoSource:
             return {"ok": True}
         except Exception as e:   # noqa: BLE001 - surface any Jellyfin/network error
             logger.exception("Jellyfin: set_poster failed for %s", server_id)
+            return {"ok": False, "error": str(e)}
+
+    # ── Collections (BoxSets; SoulSync-managed) ───────────────────────────────
+    def _jf(self):
+        base = (self._c.base_url or "").rstrip("/")
+        return base, {"X-Emby-Token": self._c.api_key or ""}
+
+    def find_collection(self, kind: str, name: str):
+        resp = self._req(f"/Users/{self.uid}/Items", params={
+            "IncludeItemTypes": "BoxSet", "Recursive": "true", "SearchTerm": name}) or {}
+        for it in resp.get("Items", []):
+            if it.get("Name") == name and it.get("Id"):
+                return str(it.get("Id"))
+        return None
+
+    def create_collection(self, kind: str, name: str, member_ids) -> dict:
+        import requests
+        base, headers = self._jf()
+        if not base:
+            return {"ok": False, "error": "Jellyfin not configured"}
+        try:
+            r = requests.post(base + "/Collections", headers=headers,
+                              params={"Name": name, "Ids": ",".join(str(i) for i in member_ids)},
+                              timeout=30)
+            r.raise_for_status()
+            data = r.json() if r.content else {}
+            cid = data.get("Id")
+            if not cid:
+                return {"ok": False, "error": "Jellyfin returned no collection id"}
+            return {"ok": True, "server_id": str(cid)}
+        except Exception as e:   # noqa: BLE001
+            logger.exception("Jellyfin: create_collection failed")
+            return {"ok": False, "error": str(e)}
+
+    def collection_member_ids(self, collection_id):
+        """Member ids, or None if the BoxSet no longer exists."""
+        item = self._req(f"/Users/{self.uid}/Items/{collection_id}")
+        if not item or not item.get("Id"):
+            return None   # gone (GET-only _make_request returns None on 404)
+        resp = self._req(f"/Users/{self.uid}/Items",
+                         params={"ParentId": str(collection_id), "Recursive": "false"}) or {}
+        return [str(it.get("Id")) for it in resp.get("Items", []) if it.get("Id")]
+
+    def collection_add(self, collection_id, ids) -> dict:
+        import requests
+        base, headers = self._jf()
+        try:
+            r = requests.post(base + f"/Collections/{collection_id}/Items", headers=headers,
+                              params={"Ids": ",".join(str(i) for i in ids)}, timeout=30)
+            r.raise_for_status()
+            return {"ok": True}
+        except Exception as e:   # noqa: BLE001
+            logger.exception("Jellyfin: collection_add failed")
+            return {"ok": False, "error": str(e)}
+
+    def collection_remove(self, collection_id, ids) -> dict:
+        import requests
+        base, headers = self._jf()
+        try:
+            r = requests.delete(base + f"/Collections/{collection_id}/Items", headers=headers,
+                                params={"Ids": ",".join(str(i) for i in ids)}, timeout=30)
+            r.raise_for_status()
+            return {"ok": True}
+        except Exception as e:   # noqa: BLE001
+            logger.exception("Jellyfin: collection_remove failed")
+            return {"ok": False, "error": str(e)}
+
+    def set_collection_meta(self, collection_id, *, poster_url=None, poster_bytes=None,
+                            summary=None, sort=None, pinned=None) -> dict:
+        # Poster reuses the Primary-image endpoint. Summary/sort/pin need a full
+        # item-DTO update on Jellyfin and are deferred (a member sync is the point).
+        if poster_url or poster_bytes:
+            return self.set_poster(collection_id, image_url=poster_url,
+                                   image_bytes=poster_bytes, kind="collection")
+        if summary or sort or pinned is not None:
+            logger.debug("Jellyfin: collection summary/sort/pin not yet supported (%s)", collection_id)
+        return {"ok": True}
+
+    def delete_collection(self, collection_id) -> dict:
+        import requests
+        base, headers = self._jf()
+        try:
+            r = requests.delete(base + f"/Items/{collection_id}", headers=headers, timeout=20)
+            r.raise_for_status()
+            return {"ok": True}
+        except Exception as e:   # noqa: BLE001
             return {"ok": False, "error": str(e)}
 
     def is_scanning(self, media_type="all") -> bool:
