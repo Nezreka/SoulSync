@@ -430,10 +430,14 @@
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span>
                     <span class="nav-text">Calendar</span>
                 </a>
-                <a class="nav-button" data-video-page="video-import" href="/video-import">
+                <!-- Import page hidden for now: on the video side the media server does
+                     the identification, so this only ever surfaced the rare download the
+                     auto-filer couldn't place. Route + video-import.js stay in place; just
+                     uncomment this nav entry to bring it back. -->
+                <!-- <a class="nav-button" data-video-page="video-import" href="/video-import">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/><polyline points="7 9 12 4 17 9"/><line x1="12" y1="4" x2="12" y2="16"/></svg></span>
                     <span class="nav-text">Import</span>
-                </a>
+                </a> -->
                 <button type="button" class="nav-section-label" data-section="video-system" onclick="toggleNavSection(this)">
                     <span class="nav-section-title">System</span>
                     <svg class="nav-section-chevron" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
