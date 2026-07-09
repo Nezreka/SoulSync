@@ -87,11 +87,13 @@ body:not(.video-admin) [data-video-overlay-studio] { display: none !important; }
 
 /* Dashboard "Recently Added" — a single full-width, horizontally-scrolling row. */
 .dash-card[data-card="recent"] { grid-column: 1 / -1; }
-.video-recent-grid { display: flex; gap: 14px; overflow-x: auto; padding-bottom: 8px; scroll-snap-type: x proximity; }
+.video-recent-grid { display: flex; align-items: flex-start; gap: 14px; overflow-x: auto; padding-bottom: 8px; scroll-snap-type: x proximity; }
 .video-recent-grid::-webkit-scrollbar { height: 6px; }
 .video-recent-grid::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, .12); border-radius: 3px; }
-.video-recent-item { flex: 0 0 96px; display: block; text-decoration: none; color: inherit; scroll-snap-align: start; }
-.video-recent-poster { aspect-ratio: 2 / 3; border-radius: 9px; overflow: hidden; position: relative;
+/* Fixed-width tiles. min-width:0 stops a long title from ballooning the flex item
+   past its 96px basis (flex items default to min-width:auto = content width). */
+.video-recent-item { flex: 0 0 96px; width: 96px; min-width: 0; display: block; text-decoration: none; color: inherit; scroll-snap-align: start; }
+.video-recent-poster { width: 96px; height: 144px; border-radius: 9px; overflow: hidden; position: relative;
     background: rgba(255, 255, 255, .05); border: 1px solid rgba(255, 255, 255, .08);
     transition: transform .14s ease, border-color .14s ease; }
 .video-recent-item:hover .video-recent-poster { transform: translateY(-3px); border-color: rgba(56, 189, 248, .55); }
