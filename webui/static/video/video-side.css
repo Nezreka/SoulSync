@@ -88,15 +88,16 @@ body:not(.video-admin) [data-video-overlay-studio] { display: none !important; }
 /* Video dashboard bento order + column spans. SCOPED to the video subpage because
    these data-card names (stats/library/tools) also exist on the music dashboard —
    an unscoped rule would reorder music's grid too. Layout on the 3-col grid:
-     Row 1  Recently Added (full width)
+     Row 1  Recently Added (2 cols) · Collection Studio (1 col)
      Row 2  System Stats · Quick Actions · Library
      Row 3  Overlay Studio · Upcoming (2 cols) */
-.video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="recent"] { order: 1; grid-column: 1 / -1; }
-.video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="stats"] { order: 2; }
-.video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="tools"] { order: 3; }
-.video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="library"] { order: 4; }
-.video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="overlay-studio"] { order: 5; }
-.video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="upcoming"] { order: 6; grid-column: span 2; }
+.video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="recent"] { order: 1; grid-column: span 2; }
+.video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="collection-studio"] { order: 2; }
+.video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="stats"] { order: 3; }
+.video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="tools"] { order: 4; }
+.video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="library"] { order: 5; }
+.video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="overlay-studio"] { order: 6; }
+.video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="upcoming"] { order: 7; grid-column: span 2; }
 
 /* Dashboard "Recently Added" — a single full-width, horizontally-scrolling row. */
 .video-recent-grid { display: flex; align-items: flex-start; gap: 14px; overflow-x: auto; padding-bottom: 8px; scroll-snap-type: x proximity; }

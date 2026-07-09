@@ -282,4 +282,50 @@ def known_fields(media_type: str) -> List[str]:
     return sorted(out)
 
 
-__all__ = ["compile_rules", "known_fields", "SmartFilterError"]
+# UI metadata for the non-column (join/special) fields: (value-widget kind, ops).
+_SPECIAL_META = {
+    "genre":      ("multi",     ["in", "not_in"]),
+    "director":   ("person",    ["is", "in"]),
+    "actor":      ("person",    ["is", "in"]),
+    "resolution": ("multi",     ["in", "not_in"]),
+    "source":     ("multi",     ["in", "not_in"]),
+    "decade":     ("decade",    ["in"]),
+    "franchise":  ("franchise", ["exists", "is", "in"]),
+}
+_FIELD_LABELS = {
+    "year": "Year", "rating": "Audience rating", "critic_rating": "Critic rating",
+    "imdb_rating": "IMDb rating", "rt_rating": "Rotten Tomatoes", "runtime": "Runtime (min)",
+    "studio": "Studio", "network": "Network", "content_rating": "Content rating",
+    "status": "Status", "title": "Title", "added": "Date added", "released": "Release date",
+    "genre": "Genre", "director": "Director", "actor": "Actor", "resolution": "Resolution",
+    "source": "Release source", "decade": "Decade", "franchise": "Franchise",
+}
+# Suggested value options for the pick-list widgets.
+_STATIC_OPTIONS = {
+    "resolution": ["480p", "720p", "1080p", "2160p"],
+    "source": ["bluray", "web-dl", "webrip", "hdtv"],
+    "decade": [1960, 1970, 1980, 1990, 2000, 2010, 2020],
+}
+
+
+def field_schema(media_type: str) -> List[Dict[str, Any]]:
+    """Per-field UI metadata (label, value type, allowed ops, static options) for
+    the rule builder — derived from the same registry the compiler uses, so the
+    UI and the SQL never drift."""
+    out = []
+    for f in known_fields(media_type):
+        if f in _COLUMN_FIELDS:
+            ftype = _COLUMN_FIELDS[f]["type"]
+            ops = sorted(_OPS_BY_TYPE[ftype])
+            widget = ftype
+        else:
+            widget, ops = _SPECIAL_META[f]
+        entry = {"field": f, "label": _FIELD_LABELS.get(f, f.replace("_", " ").title()),
+                 "type": widget, "ops": ops}
+        if f in _STATIC_OPTIONS:
+            entry["options"] = _STATIC_OPTIONS[f]
+        out.append(entry)
+    return out
+
+
+__all__ = ["compile_rules", "known_fields", "field_schema", "SmartFilterError"]

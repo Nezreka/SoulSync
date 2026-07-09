@@ -296,6 +296,16 @@
         if (window.VideoOverlayEditor) VideoOverlayEditor.open();
     });
 
+    // Collection Studio launcher → the full-bleed collection builder pseudo-page.
+    document.addEventListener('click', function (e) {
+        var t = e.target.closest && e.target.closest('[data-video-collection-studio]');
+        if (!t) return;
+        e.preventDefault();
+        // Admin-only (defense in depth behind the hidden launcher).
+        if (typeof currentProfile !== 'undefined' && currentProfile && !currentProfile.is_admin) return;
+        if (window.VideoCollectionEditor) VideoCollectionEditor.open();
+    });
+
     // Recently Added tiles → SPA detail navigation (same contract as the library
     // grid): plain left-click routes in-app; modified clicks use the real href.
     document.addEventListener('click', function (e) {
