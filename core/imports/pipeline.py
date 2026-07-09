@@ -213,6 +213,50 @@ def build_import_pipeline_runtime(
 
 
 
+def _maybe_stage_album_track(context, final_path):
+    """#999 atomic album publishing (opt-in, default off). When this track belongs
+    to a FRESH whole-album batch and ``album_downloads.atomic_publish`` is on,
+    return the private staging-mirror path to post-process into instead of the
+    live library path, and mark the batch so batch-completion publishes it as one
+    unit — so Plex never sees a partial album mid-download.
+
+    Returns ``final_path`` UNCHANGED for every normal case (flag off, no batch,
+    not an album batch, not a fresh album, or any error), so default behavior is
+    byte-for-byte today's. The decision is made once per batch and cached."""
+    try:
+        if not config_manager.get('album_downloads.atomic_publish', False):
+            return final_path
+        batch_id = context.get('batch_id')
+        if not batch_id:
+            return final_path
+        from core.downloads.atomic_album_publish import (
+            staging_root_for_batch, to_staging_path, album_folder_is_fresh)
+        with tasks_lock:
+            batch = download_batches.get(batch_id)
+            if not batch or not batch.get('is_album_download'):
+                return final_path
+            if not batch.get('_atomic_decided'):
+                transfer_dir = docker_resolve_path(
+                    config_manager.get('soulseek.transfer_path', './Transfer'))
+                fresh = album_folder_is_fresh(os.path.dirname(final_path))
+                batch['_atomic_decided'] = True
+                batch['_atomic_active'] = bool(fresh)
+                batch['_atomic_transfer_dir'] = transfer_dir
+                batch['_atomic_staging_root'] = (
+                    staging_root_for_batch(transfer_dir, batch_id) if fresh else None)
+                if fresh:
+                    logger.info("[Atomic Publish] Batch %s: staging album until complete", batch_id)
+            if not batch.get('_atomic_active'):
+                return final_path
+            staging_root = batch.get('_atomic_staging_root')
+            transfer_dir = batch.get('_atomic_transfer_dir')
+        staged = to_staging_path(final_path, transfer_dir, staging_root)
+        return staged or final_path
+    except Exception as e:
+        logger.error("[Atomic Publish] stage redirect failed (using direct publish): %s", e)
+        return final_path
+
+
 def _persist_verification_status(context, final_path):
     """Compute + persist the verification status (verified / unverified /
     force_imported) for a finished import: embedded tag on the file, plus
@@ -802,6 +846,9 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
         album_info['disc_number'] = _resolved_disc
 
         final_path, _ = build_final_path_for_track(context, artist_context, album_info, file_ext)
+        # #999 atomic album publish (opt-in): redirect to a private staging mirror
+        # for fresh whole-album batches; returns final_path unchanged otherwise.
+        final_path = _maybe_stage_album_track(context, final_path)
         logger.info(f"Resolved path: '{final_path}'")
         context['_final_processed_path'] = final_path
 
