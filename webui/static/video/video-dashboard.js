@@ -150,7 +150,7 @@
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
                 if (!d || d.error) { host.innerHTML = '<p class="video-empty-note">Couldn\'t load the calendar.</p>'; return; }
-                // Only what's released today (now → end of day), soonest first, 5 max.
+                // Only what's released today (now → end of day), soonest first, 10 max.
                 var eps = (d.episodes || []).filter(function (ep) { return ep.air_date === d.today; })
                     .sort(function (a, b) {
                         var ta = _airMins(a.airs_time), tb = _airMins(b.airs_time);
@@ -158,7 +158,7 @@
                         if (tb == null) tb = 1e9;
                         if (ta !== tb) return ta - tb;
                         return (a.show_title || '') < (b.show_title || '') ? -1 : 1;
-                    }).slice(0, 5);
+                    }).slice(0, 10);
                 if (!eps.length) { host.innerHTML = '<p class="video-empty-note">Nothing airing today — check the calendar for what\'s coming up.</p>'; return; }
                 _upcomingEps = {};
                 host.innerHTML = eps.map(function (ep) {
