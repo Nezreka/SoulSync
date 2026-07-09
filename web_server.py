@@ -19951,33 +19951,39 @@ def cancel_download_task():
         
         if batch_id:
             try:
-                # Check if we need to free a worker slot by examining batch state
+                # Decide whether to free a worker slot by examining batch state.
+                # The actual free happens OUTSIDE the lock: _on_download_completed
+                # re-acquires tasks_lock, which is non-reentrant — calling it in-lock
+                # deadlocked this request WHILE HOLDING the global lock, freezing the
+                # whole download subsystem.
+                _should_free_slot = False
                 with tasks_lock:
                     if batch_id in download_batches:
                         batch = download_batches[batch_id]
                         active_count = batch['active_count']
-                        
+
                         # Free worker slot if there are active workers and task was actively running
                         # This is more reliable than checking task status which can be inconsistent
                         if active_count > 0 and current_status in ['pending', 'searching', 'downloading', 'queued']:
                             logger.info(f"[Cancel] Task {task_id} (status: {current_status}) - freeing worker slot for batch {batch_id}")
                             logger.info(f"[Cancel] Active count before: {active_count}")
-                            
-                            # Use the completion callback with error handling
-                            _on_download_completed(batch_id, task_id, success=False)
-                            worker_slot_freed = True
-                            
-                            # Verify slot was actually freed
-                            new_active = download_batches[batch_id]['active_count']
-                            logger.info(f"[Cancel] Active count after: {new_active}")
-                            
+                            _should_free_slot = True
                         elif active_count == 0:
                             logger.warning(f"[Cancel] Task {task_id} - no active workers to free")
                         else:
                             logger.warning(f"[Cancel] Task {task_id} (status: {current_status}) - not actively running, no slot to free")
                     else:
                         logger.warning(f"[Cancel] Task {task_id} - batch {batch_id} not found")
-                        
+
+                if _should_free_slot:
+                    # Use the completion callback (outside the lock) — idempotent, so
+                    # a no-op if the slot was already freed.
+                    _on_download_completed(batch_id, task_id, success=False)
+                    worker_slot_freed = True
+                    with tasks_lock:
+                        new_active = download_batches.get(batch_id, {}).get('active_count')
+                    logger.info(f"[Cancel] Active count after: {new_active}")
+
             except Exception as slot_error:
                 logger.error(f"[Cancel] Error managing worker slot for {task_id}: {slot_error}")
                 # Attempt emergency recovery if normal completion failed
