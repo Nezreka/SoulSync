@@ -642,3 +642,42 @@ CREATE TABLE IF NOT EXISTS overlay_apply (
     applied_at  TEXT NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (kind, item_id)
 );
+
+-- ── Collections (Kometa parity): SoulSync-managed movie/show collections ─────
+-- A definition resolves (per run) to a set of OWNED library items and is synced
+-- to the server as a Plex Collection / Jellyfin BoxSet. Two builder kinds:
+--   'smart' — filter rules over the owned library (definition.rules, AND/OR)
+--   'list'  — a TMDB franchise/list or Trakt list, intersected with what's owned
+-- SoulSync resolves membership itself and pushes an explicit member list (it does
+-- NOT use native Plex smart collections), so the same definition works on Plex and
+-- Jellyfin and can feed the wishlist with the members you don't own yet.
+CREATE TABLE IF NOT EXISTS collection_definitions (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    name             TEXT NOT NULL,
+    kind             TEXT NOT NULL DEFAULT 'smart',   -- 'smart' | 'list'
+    media_type       TEXT NOT NULL DEFAULT 'movie',   -- 'movie' | 'show'
+    definition       TEXT NOT NULL DEFAULT '{}',      -- JSON: smart rules OR list source
+    poster_url       TEXT,                            -- collection art (server path or URL)
+    summary          TEXT,
+    sort_order       TEXT NOT NULL DEFAULT 'release', -- release | alpha | rating | added | custom
+    sync_mode        TEXT NOT NULL DEFAULT 'sync',    -- 'sync' (add+remove) | 'append' (add only)
+    pinned           INTEGER NOT NULL DEFAULT 0,      -- promote to home/library
+    wishlist_missing INTEGER NOT NULL DEFAULT 0,      -- 'list' kind: wishlist unowned members
+    enabled          INTEGER NOT NULL DEFAULT 1,      -- included in the daily sync
+    created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_collection_defs_updated ON collection_definitions(updated_at DESC);
+
+-- The server object we created for a definition + a signature of the last synced
+-- state. Keyed per definition (collections sync to the one active video server).
+-- Lets us update the right collection, never touch a user's manual collections,
+-- and skip a definition whose resolved members + settings are unchanged.
+CREATE TABLE IF NOT EXISTS collection_sync (
+    definition_id  INTEGER PRIMARY KEY REFERENCES collection_definitions(id) ON DELETE CASCADE,
+    server_source  TEXT,                             -- 'plex' | 'jellyfin' the collection lives on
+    server_id      TEXT,                             -- native collection / BoxSet id we manage
+    members_sig    TEXT,                             -- signature of resolved members + settings
+    member_count   INTEGER NOT NULL DEFAULT 0,
+    synced_at      TEXT
+);
