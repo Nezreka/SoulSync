@@ -141,6 +141,32 @@ def test_publish_keeps_file_staged_on_move_failure(tmp_path):
     assert os.path.isdir(staging)
 
 
+def test_discard_removes_genuine_staging_root(tmp_path):
+    transfer = str(tmp_path / "music")
+    staging = ap.staging_root_for_batch(transfer, "b9")
+    _mk(Path(staging) / "A" / "01.flac")
+    assert os.path.isdir(staging)
+    assert ap.discard_staging_root(staging) is True
+    assert not os.path.exists(staging)
+
+
+def test_discard_refuses_non_staging_path(tmp_path):
+    # SAFETY: a path whose parent isn't the dedicated staging dir must never be
+    # removed, even if it exists — guards against a blank/misconfigured value.
+    victim = tmp_path / "music" / "Artist" / "Album"
+    _mk(victim / "01 - precious.flac")
+    assert ap.discard_staging_root(str(victim)) is False
+    assert os.path.isfile(str(victim / "01 - precious.flac"))  # untouched
+    assert ap.discard_staging_root("") is False
+    assert ap.discard_staging_root(None) is False
+
+
+def test_discard_noop_when_absent(tmp_path):
+    transfer = str(tmp_path / "music")
+    staging = ap.staging_root_for_batch(transfer, "gone")  # never created
+    assert ap.discard_staging_root(staging) is False
+
+
 def test_iter_staged_files_finds_everything(tmp_path):
     staging = str(tmp_path / "stage")
     _mk(Path(staging) / "x" / "1.flac")

@@ -1774,6 +1774,17 @@ def validate_and_heal_batch_states():
 
             # Cleanup stale batches inside the lock (safe - just dict mutations)
             for batch_id in batches_to_cleanup:
+                # #999: discard unpublished atomic staging for an abandoned batch
+                # (no-op for normal batches and for atomic batches that already
+                # published — their staging was pruned at publish).
+                _cleanup_batch = download_batches[batch_id]
+                if _cleanup_batch.get('_atomic_active') and _cleanup_batch.get('_atomic_staging_root'):
+                    try:
+                        from core.downloads.atomic_album_publish import discard_staging_root
+                        if discard_staging_root(_cleanup_batch.get('_atomic_staging_root')):
+                            logger.info(f"[Atomic Publish] Discarded staging for abandoned batch {batch_id}")
+                    except Exception as _atomic_e:
+                        logger.debug(f"[Atomic Publish] staging discard failed: {_atomic_e}")
                 task_ids_to_remove = download_batches[batch_id].get('queue', [])
                 del download_batches[batch_id]
                 # Clean up associated tasks
@@ -20431,6 +20442,16 @@ def cleanup_batch():
 
                 # Get the list of task IDs before deleting the batch
                 task_ids_to_remove = batch.get('queue', [])
+
+                # #999: discard unpublished atomic staging on cleanup/cancel of a
+                # staged album (no-op for normal batches and already-published ones).
+                if batch.get('_atomic_active') and batch.get('_atomic_staging_root'):
+                    try:
+                        from core.downloads.atomic_album_publish import discard_staging_root
+                        if discard_staging_root(batch.get('_atomic_staging_root')):
+                            logger.info(f"[Atomic Publish] Discarded staging for cleaned-up batch {batch_id}")
+                    except Exception as _atomic_e:
+                        logger.debug(f"[Atomic Publish] staging discard failed: {_atomic_e}")
 
                 # Delete the batch record
                 del download_batches[batch_id]
