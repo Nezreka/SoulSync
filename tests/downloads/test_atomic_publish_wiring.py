@@ -55,6 +55,17 @@ def test_flag_on_no_batch_id_unchanged(monkeypatch, tmp_path):
     assert pl._maybe_stage_album_track({}, final) == final
 
 
+def test_batch_id_read_from_wrapper_stash_key(monkeypatch, tmp_path):
+    # Real batched downloads go through the verification wrapper, which pops
+    # batch_id and stashes it under _atomic_publish_batch_id. The redirect must
+    # still find it (this is the fix for "album published directly despite ON").
+    batch = {"is_album_download": True}
+    transfer = _wire(monkeypatch, tmp_path, flag=True, batch=batch)
+    final = os.path.join(transfer, "Artist", "Album", "01.flac")
+    staged = pl._maybe_stage_album_track({"_atomic_publish_batch_id": "B"}, final)
+    assert staged != final and batch["_atomic_active"] is True
+
+
 # --- the gate: flag ON + fresh whole-album batch redirects to staging -------
 
 def test_fresh_album_redirects_to_staging_and_marks_batch(monkeypatch, tmp_path):
