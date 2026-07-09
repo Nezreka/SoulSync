@@ -115,3 +115,49 @@ def test_publish_hook_noop_when_staging_missing(tmp_path):
         "_atomic_staging_root": str(tmp_path / "gone"),
         "_atomic_transfer_dir": str(tmp_path / "music"),
     })
+
+
+# --- end-to-end: pipeline stage-redirect → batch-complete publish -----------
+
+def test_end_to_end_stage_then_publish(monkeypatch, tmp_path):
+    from pathlib import Path
+
+    # 1) The pipeline redirects a fresh-album track to staging.
+    batch = {"is_album_download": True}
+    transfer = _wire(monkeypatch, tmp_path, flag=True, batch=batch)
+    final = os.path.join(transfer, "Artist", "Album", "01 - Song.flac")
+    staged = pl._maybe_stage_album_track({"batch_id": "B"}, final)
+    assert staged != final and batch["_atomic_active"] is True
+
+    # Simulate post-processing having written the file (and a sidecar) into staging,
+    # and the DB/consistency roster recording the staged path (as the pipeline does).
+    Path(staged).parent.mkdir(parents=True, exist_ok=True)
+    Path(staged).write_bytes(b"AUDIO")
+    Path(os.path.join(os.path.dirname(staged), "folder.jpg")).write_bytes(b"ART")
+    batch["_consistency_files"] = [{"path": staged, "track_number": 1}]
+
+    # 2) At batch completion, publish moves staging → library, repoints DB, remaps roster.
+    db_updates = []
+
+    class _FakeConn:
+        def cursor(self): return self
+        def execute(self, q, params): db_updates.append(params)
+        def commit(self): pass
+        def close(self): pass
+
+    class _FakeDB:
+        def _get_connection(self): return _FakeConn()
+
+    monkeypatch.setattr("database.music_database.MusicDatabase", _FakeDB)
+
+    lc._publish_atomic_album("B", batch)
+
+    # File (and sidecar) now live in the library; staging is emptied/pruned.
+    assert os.path.isfile(final)
+    assert os.path.isfile(os.path.join(transfer, "Artist", "Album", "folder.jpg"))
+    assert not os.path.exists(staged)
+    assert not os.path.exists(batch["_atomic_staging_root"])
+    # DB repointed staged → final for the audio track.
+    assert (final, staged) in db_updates
+    # Consistency roster now points at the published file (album-consistency runs next).
+    assert batch["_consistency_files"][0]["path"] == final
