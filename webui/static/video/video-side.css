@@ -121,9 +121,14 @@ body:not(.video-admin) [data-video-overlay-studio] { display: none !important; }
 /* Dashboard "Upcoming" — mini-billboards for the next few calendar episodes. */
 .dash-card__link { font-size: 11px; font-weight: 600; color: rgba(56, 189, 248, .95); text-decoration: none; margin-left: 4px; white-space: nowrap; }
 .dash-card__link:hover { text-decoration: underline; }
-/* A row of landscape backdrop cards inside the 2-col-wide card (wraps on narrow widths). */
-.video-upcoming { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
-.vup-row { position: relative; display: block; aspect-ratio: 16 / 10; border-radius: 12px; overflow: hidden;
+/* A single horizontally-scrolling row of landscape backdrop cards. */
+.video-upcoming { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 8px; scroll-snap-type: x proximity; }
+.video-upcoming::-webkit-scrollbar { height: 6px; }
+.video-upcoming::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, .12); border-radius: 3px; }
+/* Fixed-width tiles (flex:0 0 so they never shrink); min-width:0 stops a long title
+   from ballooning the item past its basis. */
+.vup-row { position: relative; flex: 0 0 232px; width: 232px; min-width: 0; aspect-ratio: 16 / 10;
+    border-radius: 12px; overflow: hidden; scroll-snap-align: start;
     text-decoration: none; color: inherit; border: 1px solid rgba(255, 255, 255, .08); cursor: pointer;
     transition: transform .16s ease, border-color .16s ease; }
 .vup-row:hover { transform: translateY(-3px); border-color: rgba(56, 189, 248, .5); }
