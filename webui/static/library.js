@@ -509,7 +509,7 @@ function _renderWatchAllModalContent(overlay, eligible, ineligible, sourceName) 
 
     // Search filter
     if (eligible.length > 10) {
-        html += '<div class="watch-all-search-wrap"><input type="text" class="watch-all-search" id="watch-all-search" placeholder="Search artists..." oninput="_filterWatchAllList(this.value)"></div>';
+        html += '<div class="watch-all-search-wrap"><input type="text" class="watch-all-search" id="watch-all-search" placeholder="Filter artists…" oninput="_filterWatchAllList(this.value)"></div>';
     }
 
     // Eligible grid
