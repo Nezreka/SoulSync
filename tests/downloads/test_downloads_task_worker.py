@@ -123,9 +123,21 @@ def _seed_task(task_id='t1', status='pending', track_info=None, **extra):
 # Early-return guards
 # ---------------------------------------------------------------------------
 
-def test_missing_task_returns_silently():
+def test_missing_task_frees_batch_slot():
+    # A worker dispatched for a task that was deleted before it ran (cleanup /
+    # dedup / atomic cancel) must FREE the reserved batch slot via
+    # on_download_completed, not just return. Otherwise active_count leaks: the
+    # slot was reserved at dispatch and never released, the next queued task never
+    # starts, and the batch wedges in 'downloading' forever (the reported jam).
     deps, rec = _build_deps()
     tw.download_track_worker('absent', 'b1', deps)
+    assert ('on_download_completed', ('b1', 'absent', False), {}) in rec.calls
+
+
+def test_missing_task_without_batch_returns_silently():
+    # No batch → no reserved slot to free → nothing to call.
+    deps, rec = _build_deps()
+    tw.download_track_worker('absent', None, deps)
     assert rec.calls == []
 
 
