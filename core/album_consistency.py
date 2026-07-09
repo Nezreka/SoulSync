@@ -243,6 +243,63 @@ def _find_best_release(album_name, artist_name, track_count, mb_service):
         return None
 
 
+def _resolve_album_release(album_name, artist_name, track_count, mb_service):
+    """Resolve ONE MusicBrainz release for the album, PINNED across runs.
+
+    The bug this fixes (#999-adjacent, Meshuggah "Catch Thirtythree" split): an
+    album with several close-scoring MB releases gets a DIFFERENT release picked
+    by ``_find_best_release`` on different runs (candidate sets vary with MB API
+    timeouts). Album consistency re-runs on every album-completeness / wishlist
+    cycle and RE-TAGS, so tracks tagged on different runs ended up with different
+    ``MUSICBRAINZ_ALBUMID`` values -> Navidrome split the album.
+
+    So consult the persistent album->release-MBID cache FIRST — the same store
+    per-track enrichment (``core/metadata/source.py``) already uses, whose whole
+    purpose is "every track of the same album gets the same album MBID". On a hit
+    we reuse that exact release forever; on a miss we score a fresh search and
+    record the winner so the next run reuses it. Every cache/DB touch is
+    defensive: any failure falls straight through to today's search behavior.
+    """
+    norm_key = artist_key = None
+    try:
+        from core.metadata.source import normalize_album_cache_key
+        norm_key = normalize_album_cache_key(album_name)
+        artist_key = (artist_name or "").lower().strip()
+    except Exception:   # noqa: BLE001 - key derivation must never break tagging
+        norm_key = artist_key = None
+
+    # 1. Reuse a pinned release if this album has been resolved before.
+    if norm_key and artist_key:
+        try:
+            from core.metadata import album_mbid_cache
+            pinned = album_mbid_cache.lookup(norm_key, artist_key)
+        except Exception:   # noqa: BLE001
+            pinned = None
+        if pinned:
+            try:
+                release = mb_service.mb_client.get_release(
+                    pinned, includes=['recordings', 'release-groups', 'labels',
+                                      'media', 'artist-credits'])
+                if release and release.get('id'):
+                    logger.info("Album consistency reusing pinned release %s... for '%s'",
+                                pinned[:8], album_name)
+                    return release
+            except Exception as e:   # noqa: BLE001 - fall through to a fresh search
+                logger.debug("Pinned release %s fetch failed (%s); re-searching", pinned[:8], e)
+
+    # 2. No usable pin — score a fresh search (today's behavior).
+    release = _find_best_release(album_name, artist_name, track_count, mb_service)
+
+    # 3. Pin the winner so every future run of this album reuses it.
+    if release and release.get('id') and norm_key and artist_key:
+        try:
+            from core.metadata import album_mbid_cache
+            album_mbid_cache.record(norm_key, artist_key, release['id'])
+        except Exception:   # noqa: BLE001
+            pass
+    return release
+
+
 def _match_files_to_tracklist(file_infos, release):
     """Match downloaded files to MB release tracklist entries.
     Returns {file_path: mb_track_entry} for matched files."""
@@ -378,8 +435,10 @@ def run_album_consistency(
         result['error'] = 'MusicBrainz service not available'
         return result
 
-    # Step 1: Find the best release
-    release = _find_best_release(album_name, artist_name, len(file_infos), mb_service)
+    # Step 1: Resolve the album's release — PINNED across runs (via the persistent
+    # album MBID cache) so re-runs can't pick a different release and fracture the
+    # album into multiple MUSICBRAINZ_ALBUMIDs.
+    release = _resolve_album_release(album_name, artist_name, len(file_infos), mb_service)
     if not release:
         result['error'] = f'No MusicBrainz release found for "{album_name}"'
         return result
