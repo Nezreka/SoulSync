@@ -109,14 +109,19 @@ body:not(.video-admin) [data-video-overlay-studio] { display: none !important; }
 /* Dashboard "Upcoming" — mini-billboards for the next few calendar episodes. */
 .dash-card__link { font-size: 11px; font-weight: 600; color: rgba(56, 189, 248, .95); text-decoration: none; margin-left: 4px; white-space: nowrap; }
 .dash-card__link:hover { text-decoration: underline; }
-.video-upcoming { display: flex; flex-direction: column; gap: 10px; }
-.vup-row { position: relative; display: block; min-height: 62px; border-radius: 11px; overflow: hidden;
-    text-decoration: none; color: inherit; border: 1px solid rgba(255, 255, 255, .08); }
+/* Full-width so the previews spread horizontally instead of stacking tall. */
+.dash-card[data-card="upcoming"] { grid-column: 1 / -1; }
+/* A row of landscape backdrop cards (wraps on narrow widths). */
+.video-upcoming { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
+.vup-row { position: relative; display: block; aspect-ratio: 16 / 10; border-radius: 12px; overflow: hidden;
+    text-decoration: none; color: inherit; border: 1px solid rgba(255, 255, 255, .08); cursor: pointer;
+    transition: transform .16s ease, border-color .16s ease; }
+.vup-row:hover { transform: translateY(-3px); border-color: rgba(56, 189, 248, .5); }
 .vup-bg { position: absolute; inset: 0; background-size: cover; background-position: center; transition: transform .35s ease; }
 .vup-row:hover .vup-bg { transform: scale(1.06); }
 .vup-scrim { position: absolute; inset: 0;
-    background: linear-gradient(90deg, rgba(9, 11, 17, .93) 0%, rgba(9, 11, 17, .72) 55%, rgba(9, 11, 17, .35) 100%); }
-.vup-content { position: relative; padding: 11px 14px; }
+    background: linear-gradient(0deg, rgba(9, 11, 17, .96) 6%, rgba(9, 11, 17, .55) 48%, rgba(9, 11, 17, .12) 100%); }
+.vup-content { position: absolute; inset: auto 0 0 0; padding: 11px 13px; }
 .vup-when { display: flex; align-items: center; gap: 6px; font-size: 10px; font-weight: 800;
     text-transform: uppercase; letter-spacing: .06em; color: rgba(56, 189, 248, .95); }
 .vup-dot { width: 6px; height: 6px; border-radius: 50%; background: rgb(56, 189, 248); box-shadow: 0 0 8px rgb(56, 189, 248); }

@@ -657,6 +657,12 @@
         document.addEventListener('soulsync:video-page-shown', onPageShown);
     }
 
+    // Exposed so other video pages (the dashboard's Upcoming preview) can open the
+    // exact same episode modal instead of duplicating it. openModal builds its own
+    // overlay on document.body and only closes over calendar-internal helpers +ep,
+    // so it works standalone from any page once this module has loaded.
+    window.VideoCalendar = { openEpisode: openModal };
+
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);
     } else {
