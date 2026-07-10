@@ -986,7 +986,18 @@
             '<div class="vce-preview-count"><span class="vce-preview-n" data-pv-n>—</span>' +
             '<span class="vce-preview-l" data-pv-l>owned items</span>' +
             '<span class="vce-preview-miss" data-pv-miss></span></div>' +
-            '<div class="vce-preview-grid" data-preview-grid></div>'));
+            '<div class="vce-preview-grid" data-preview-grid></div>' +
+            '<p class="vce-note">Hover a poster and hit × to exclude that title from this collection.</p>'));
+
+        right.appendChild(h('div', 'vce-panel',
+            '<p class="vce-panel-t">Overrides</p>' +
+            '<label class="vce-flabel">Always include</label>' +
+            '<div class="vce-ovr-search"><input class="vce-input" data-ovr-q placeholder="Search your library to pin a title…">' +
+            '<div class="vce-ovr-results" data-ovr-results hidden></div></div>' +
+            '<div class="vce-ovr-chips" data-ovr-include></div>' +
+            '<label class="vce-flabel">Excluded</label>' +
+            '<div class="vce-ovr-chips" data-ovr-exclude></div>' +
+            '<p class="vce-note">Overrides sit on top of the rules or list: pinned titles always belong, excluded titles never do (and are never wishlisted).</p>'));
 
         var poster = ed.poster_url;
         right.appendChild(h('div', 'vce-panel',
@@ -1093,9 +1104,111 @@
         wireGen(page.querySelector('[data-act="genposter"]'), 'auto', I.image + 'Auto artwork');
         wireGen(page.querySelector('[data-act="genposter-collage"]'), 'collage', 'Collage');
 
+        wireOverrides(page);
         toggleWishlistRow();
         renderBuilder();
+        paintOverrides();
         schedulePreview();
+    }
+
+    // ── overrides (pin / exclude specific titles) ─────────────────────────────
+    var titleCache = {};   // "mt:tmdb_id" -> "Title (Year)"
+
+    function ovr(key) {
+        ed.definition[key] = ed.definition[key] || [];
+        return ed.definition[key];
+    }
+    function addOverride(key, id) {
+        id = parseInt(id, 10);
+        if (!id) return;
+        var other = ovr(key === 'include' ? 'exclude' : 'include');
+        var i = other.indexOf(id);
+        if (i >= 0) other.splice(i, 1);          // a title can't be both
+        if (ovr(key).indexOf(id) < 0) ovr(key).push(id);
+        ed.dirty = true;
+        paintOverrides();
+        schedulePreview();
+    }
+    function removeOverride(key, id) {
+        id = parseInt(id, 10);
+        var arr = ovr(key);
+        var i = arr.indexOf(id);
+        if (i >= 0) arr.splice(i, 1);
+        ed.dirty = true;
+        paintOverrides();
+        schedulePreview();
+    }
+
+    function paintOverrides() {
+        ['include', 'exclude'].forEach(function (key) {
+            var hostEl = overlay.querySelector('[data-ovr-' + key + ']');
+            if (!hostEl) return;
+            var ids = ed.definition[key] || [];
+            hostEl.innerHTML = ids.length ? '' : '<span class="vce-rule-noval">none</span>';
+            ids.forEach(function (id) {
+                var label = titleCache[ed.media_type + ':' + id] || ('#' + id);
+                var chip = h('button', 'vce-sugg-chip vce-ovr-chip', esc(label) + ' <b>&times;</b>');
+                chip.type = 'button';
+                chip.title = 'Remove override';
+                chip.addEventListener('click', function () { removeOverride(key, id); });
+                hostEl.appendChild(chip);
+            });
+        });
+        // Resolve missing titles once per batch, then repaint with names.
+        var missing = [];
+        ['include', 'exclude'].forEach(function (key) {
+            (ed.definition[key] || []).forEach(function (id) {
+                if (!titleCache[ed.media_type + ':' + id]) missing.push(id);
+            });
+        });
+        if (!missing.length) return;
+        api('/titles?media_type=' + ed.media_type + '&tmdb_ids=' + missing.join(','), {})
+            .then(function (d) {
+                var got = false;
+                ((d && d.titles) || []).forEach(function (t) {
+                    titleCache[ed.media_type + ':' + t.tmdb_id] =
+                        (t.title || '#' + t.tmdb_id) + (t.year ? ' (' + t.year + ')' : '');
+                    got = true;
+                });
+                missing.forEach(function (id) {   // unowned/unknown ids keep a stable label
+                    if (!titleCache[ed.media_type + ':' + id]) titleCache[ed.media_type + ':' + id] = '#' + id;
+                });
+                if (got) paintOverrides();
+            });
+    }
+
+    function wireOverrides(page) {
+        var q = page.querySelector('[data-ovr-q]');
+        var results = page.querySelector('[data-ovr-results]');
+        if (!q || !results) return;
+        var t;
+        q.addEventListener('input', function () {
+            clearTimeout(t);
+            var v = q.value.trim();
+            if (v.length < 2) { results.hidden = true; return; }
+            t = setTimeout(function () {
+                api('/search_owned?media_type=' + ed.media_type + '&q=' + encodeURIComponent(v), {})
+                    .then(function (d) {
+                        var rows = (d && d.results) || [];
+                        results.innerHTML = rows.length ? '' : '<div class="vce-ovr-empty">Nothing owned matches</div>';
+                        rows.forEach(function (r) {
+                            var b = h('button', 'vce-ovr-row',
+                                esc(r.title || '') + (r.year ? ' <span>' + r.year + '</span>' : ''));
+                            b.type = 'button';
+                            b.addEventListener('click', function () {
+                                titleCache[ed.media_type + ':' + r.tmdb_id] =
+                                    (r.title || '#' + r.tmdb_id) + (r.year ? ' (' + r.year + ')' : '');
+                                addOverride('include', r.tmdb_id);
+                                q.value = '';
+                                results.hidden = true;
+                            });
+                            results.appendChild(b);
+                        });
+                        results.hidden = false;
+                    });
+            }, 250);
+        });
+        q.addEventListener('blur', function () { setTimeout(function () { results.hidden = true; }, 200); });
     }
 
     function sel(field, val, opts) {
@@ -1389,8 +1502,17 @@
                 missEl.textContent = d.missing_count ? ('+' + d.missing_count + ' missing') : '';
                 grid.innerHTML = (d.sample || []).map(function (m) {
                     var img = m.has_poster ? '<img src="' + memberPosterURL(ed.media_type, m.id) + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">' : '';
-                    return '<div class="vce-pv" title="' + esc(m.title || '') + '">' + img + '<span class="vce-pv-fallback">' + esc((m.title || '?').slice(0, 2)) + '</span></div>';
+                    var x = m.tmdb_id ? '<button type="button" class="vce-pv-x" data-x="' + m.tmdb_id + '" data-t="' + esc(m.title || '') + '" title="Exclude from this collection">&times;</button>' : '';
+                    return '<div class="vce-pv" title="' + esc(m.title || '') + '">' + img + '<span class="vce-pv-fallback">' + esc((m.title || '?').slice(0, 2)) + '</span>' + x + '</div>';
                 }).join('');
+                grid.querySelectorAll('[data-x]').forEach(function (b) {
+                    b.addEventListener('click', function (e) {
+                        e.stopPropagation();
+                        var id = b.getAttribute('data-x');
+                        titleCache[ed.media_type + ':' + id] = b.getAttribute('data-t') || ('#' + id);
+                        addOverride('exclude', id);
+                    });
+                });
             })
             .catch(function () { lEl.textContent = 'preview failed'; });
     }
