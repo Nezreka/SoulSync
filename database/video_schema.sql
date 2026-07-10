@@ -701,3 +701,44 @@ CREATE TABLE IF NOT EXISTS collection_sync (
     member_count   INTEGER NOT NULL DEFAULT 0,
     synced_at      TEXT
 );
+
+-- ── Library Maintenance: jobs & findings (mirrors the music repair standard) ──
+-- Jobs are code-defined (core/video/repair); these tables hold what a scan
+-- FOUND (pending → resolved|dismissed; approve == fix == resolved) and each
+-- run's tallies. Dedup treats every status as "already seen" — a re-scan never
+-- resurrects a dismissed or fixed finding.
+CREATE TABLE IF NOT EXISTS video_repair_findings (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id        TEXT NOT NULL,
+    finding_type  TEXT NOT NULL,
+    severity      TEXT NOT NULL DEFAULT 'info',      -- info | warning | critical
+    status        TEXT NOT NULL DEFAULT 'pending',   -- pending | resolved | dismissed
+    entity_type   TEXT,                              -- 'show' | 'movie' | 'episode' | 'file'
+    entity_id     TEXT,
+    file_path     TEXT,
+    title         TEXT NOT NULL,
+    description   TEXT,
+    details_json  TEXT DEFAULT '{}',                 -- per-finding-type payload (fix input)
+    user_action   TEXT,                              -- what the fix did (badge label)
+    resolved_at   TIMESTAMP,
+    created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_vrf_job     ON video_repair_findings(job_id);
+CREATE INDEX IF NOT EXISTS idx_vrf_status  ON video_repair_findings(status);
+CREATE INDEX IF NOT EXISTS idx_vrf_type    ON video_repair_findings(finding_type);
+CREATE INDEX IF NOT EXISTS idx_vrf_created ON video_repair_findings(created_at);
+
+CREATE TABLE IF NOT EXISTS video_repair_job_runs (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id            TEXT NOT NULL,
+    started_at        TIMESTAMP NOT NULL,
+    finished_at       TIMESTAMP,
+    duration_seconds  REAL,
+    items_scanned     INTEGER DEFAULT 0,
+    findings_created  INTEGER DEFAULT 0,
+    auto_fixed        INTEGER DEFAULT 0,
+    errors            INTEGER DEFAULT 0,
+    status            TEXT NOT NULL DEFAULT 'running'   -- running | completed
+);
+CREATE INDEX IF NOT EXISTS idx_vrjr_job ON video_repair_job_runs(job_id);

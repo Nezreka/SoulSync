@@ -490,6 +490,11 @@ _set_colart_emit(socketio.emit)
 # Live bulk-metadata progress → 'video:bulk' socket events (bell + library bar).
 from core.video.bulk_ops import set_bulk_progress_emitter as _set_bulk_emit
 _set_bulk_emit(socketio.emit)
+# Video Library Maintenance (jobs & findings): live 'video:repair:progress'
+# socket events + the scheduler thread (force-runs work even when disabled).
+from core.video.repair.worker import get_video_repair_worker as _get_video_repair
+_get_video_repair().set_emitter(socketio.emit)
+_get_video_repair().start()
 
 # Plex PIN auth requests stored in memory for polling
 _plex_pin_requests = {}

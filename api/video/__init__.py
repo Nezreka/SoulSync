@@ -47,7 +47,8 @@ def create_video_blueprint() -> Blueprint:
         from flask import request, g, jsonify
         path = request.path or ""
         if (path.startswith("/api/video/overlays") or path.startswith("/api/video/import")
-                or path.startswith("/api/video/collections")) \
+                or path.startswith("/api/video/collections")
+                or path.startswith("/api/video/repair")) \
                 and getattr(g, "profile_id", 1) != 1:
             return jsonify({"error": "Admin only."}), 403
         if request.method == "POST" and not getattr(g, "can_download", True) and (
@@ -73,6 +74,7 @@ def create_video_blueprint() -> Blueprint:
     from .overlays import register_routes as reg_overlays
     from .collections import register_routes as reg_collections
     from .bulk import register_routes as reg_bulk
+    from .repair import register_routes as reg_repair
     reg_dashboard(bp)
     reg_scan(bp)
     reg_library(bp)
@@ -92,5 +94,6 @@ def create_video_blueprint() -> Blueprint:
     reg_overlays(bp)
     reg_collections(bp)
     reg_bulk(bp)
+    reg_repair(bp)
 
     return bp
