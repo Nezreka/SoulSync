@@ -128,6 +128,55 @@ def test_generate_batch_counts_successes(db, tmp_path):
     assert n == 1                                 # unknown id skipped, not fatal
 
 
+def test_generate_chart_collection_collages_via_list_fetcher(db, tmp_path):
+    # The 'Generate collage' regression: a chart/franchise collection must
+    # resolve its owned members through the list fetcher — not fall back to the
+    # gradient because membership couldn't resolve.
+    _seed(db)                                            # movies 1..5, no tmdb ids
+    conn = db._get_connection()
+    conn.execute("UPDATE movies SET tmdb_id = 1000 + id")
+    conn.commit(); conn.close()
+    cid = db.create_collection_definition(
+        "Top Rated 250", kind="list", media_type="movie",
+        definition={"source": "tmdb_chart", "chart": "top_movies", "limit": 250})
+    d = db.get_collection_definition(cid)
+    fetched = []
+
+    def fetch(media_type, item_id):
+        fetched.append(item_id)
+        return _jpeg((90, 40, 40))
+
+    url = poster_gen.generate_for_definition(
+        db, d, fetch=fetch,
+        list_fetcher=lambda s, ref: [{"tmdb_id": 1001}, {"tmdb_id": 1002}],
+        root=tmp_path / "gen")
+    assert url is not None
+    assert sorted(fetched) == [1, 2]                     # collaged from owned members
+
+
+def test_generate_with_preresolved_owned_skips_resolve(db, tmp_path):
+    _seed(db, n=1)
+    d = _definition(db)
+    owned = [{"id": 1, "server_id": "srv1", "title": "M1", "rating": 9.0}]
+    url = poster_gen.generate_for_definition(
+        _BoomProxy(db), d, owned=owned, fetch=lambda mt, i: _jpeg((50, 50, 50)),
+        root=tmp_path / "gen")
+    assert url is not None
+
+
+class _BoomProxy:
+    """DB proxy that forbids member resolution (only poster_url update allowed)."""
+
+    def __init__(self, db):
+        self._db = db
+
+    def update_collection_definition(self, *a, **k):
+        return self._db.update_collection_definition(*a, **k)
+
+    def __getattr__(self, name):
+        raise AssertionError(f"unexpected db call {name} — owned= should skip resolve")
+
+
 # ── sync pushes generated poster BYTES, never our relative route ────────────
 class _FakeSource:
     server_name = "plex"
@@ -173,6 +222,48 @@ def test_sync_pushes_generated_poster_bytes(db, tmp_path, monkeypatch):
     assert r["ok"]
     assert src.meta["poster_url"] is None         # our route never reaches the server
     assert isinstance(src.meta["poster_bytes"], bytes) and len(src.meta["poster_bytes"]) > 1000
+
+
+def test_sync_generates_missing_poster_by_default(db, tmp_path, monkeypatch):
+    # Default-on art: a poster-less collection gets generated art on sync via the
+    # injected generator, pushed as bytes in the same pass (no signature churn).
+    from core.video.collections.sync import sync_collection
+    import core.video.collections.sync as sync_mod
+    _seed(db)
+    d = _definition(db)                                   # no poster_url
+    gen_calls = []
+
+    def generator(definition, owned):
+        gen_calls.append((definition["id"], len(owned)))
+        return f"/api/video/collections/{definition['id']}/poster?v=abc12345"
+
+    monkeypatch.setattr(sync_mod, "read_poster", lambda did: b"generated-jpeg-bytes")
+    src = _FakeSource()
+    r = sync_collection(db, d, source=src, poster_generator=generator)
+    assert r["ok"]
+    assert gen_calls == [(d["id"], 5)]                    # got the resolved members
+    assert src.meta["poster_bytes"] == b"generated-jpeg-bytes"
+    assert src.meta["poster_url"] is None
+    # Definition that already HAS a poster → generator not called.
+    db.update_collection_definition(d["id"], poster_url="https://img.example/x.jpg")
+    sync_collection(db, db.get_collection_definition(d["id"]), source=_FakeSource(),
+                    poster_generator=generator)
+    assert len(gen_calls) == 1
+
+
+def test_run_sync_wires_the_default_generator(db, tmp_path, monkeypatch):
+    import core.video.collections.poster_gen as pg
+    from core.video.collections.sync import run_sync
+    _seed(db)
+    _definition(db)
+    called = []
+    monkeypatch.setattr(pg, "generate_for_definition",
+                        lambda dbb, definition, **kw: called.append(definition["id"]) or None)
+    monkeypatch.setattr("core.video.collections.sync.get_collection_source",
+                        lambda: _FakeSource())
+    r = run_sync(db)
+    assert r["ok"] and r["synced"] == 1
+    assert len(called) == 1                               # default-on generator ran
 
 
 def test_sync_passes_external_poster_url_through(db):

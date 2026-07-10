@@ -63,10 +63,14 @@ def _dedup(seq) -> List[str]:
 
 
 def sync_collection(db, definition: Dict[str, Any], *, source,
-                    list_fetcher: Optional[Callable] = None, force: bool = False) -> Dict[str, Any]:
+                    list_fetcher: Optional[Callable] = None, force: bool = False,
+                    poster_generator: Optional[Callable] = None) -> Dict[str, Any]:
     """Sync one collection definition (a full row from ``get_collection_definition``)
     to ``source``. Returns a result dict with ``ok`` and, on success,
-    ``server_id``/``added``/``removed``/``total``/``missing`` (or ``skipped``)."""
+    ``server_id``/``added``/``removed``/``total``/``missing`` (or ``skipped``).
+    ``poster_generator(definition, owned) -> poster_url|None`` (injected by the
+    live entry points) gives a poster-less collection generated collage art
+    before its first push — art is default-on, never a manual chore."""
     did = definition.get("id")
     name = (definition.get("name") or "").strip() or "Untitled collection"
     media_type = definition.get("media_type") or "movie"
@@ -77,6 +81,18 @@ def sync_collection(db, definition: Dict[str, Any], *, source,
     if not res.ok:
         logger.warning("Collection %s (%s) resolve failed: %s", did, name, res.error)
         return {"ok": False, "definition_id": did, "name": name, "error": res.error}
+
+    # Default-on artwork — BEFORE the signature, so the very first sync pushes
+    # the art with no signature churn. Best-effort: a failed render just leaves
+    # the poster empty and tries again next sync.
+    if poster_generator and did is not None and not definition.get("poster_url"):
+        try:
+            url = poster_generator(definition, res.owned)
+        except Exception:   # noqa: BLE001 - art is a nicety, never fail the sync
+            logger.debug("auto poster generation failed for %s", did, exc_info=True)
+            url = None
+        if url:
+            definition = dict(definition, poster_url=url)
 
     desired = _dedup(res.server_ids)
     desired_set = set(desired)
@@ -202,7 +218,8 @@ def wishlist_missing_movies(db, definition: Dict[str, Any], missing) -> int:
 
 
 def sync_all_collections(db, *, source, list_fetcher: Optional[Callable] = None,
-                         force: bool = False, on_progress: Optional[Callable] = None) -> Dict[str, Any]:
+                         force: bool = False, on_progress: Optional[Callable] = None,
+                         poster_generator: Optional[Callable] = None) -> Dict[str, Any]:
     """Sync every enabled collection definition. Aggregates per-definition results;
     one failing definition never stops the rest. ``on_progress(done, total, name)``
     is called after each. After a successful sync, a list collection with
@@ -216,7 +233,8 @@ def sync_all_collections(db, *, source, list_fetcher: Optional[Callable] = None,
         if not full:
             continue
         try:
-            r = sync_collection(db, full, source=source, list_fetcher=list_fetcher, force=force)
+            r = sync_collection(db, full, source=source, list_fetcher=list_fetcher,
+                                force=force, poster_generator=poster_generator)
             if r.get("ok"):
                 wishlisted += wishlist_missing_movies(db, full, r.get("missing"))
         except Exception as e:   # noqa: BLE001 - never let one collection kill the batch
@@ -266,6 +284,15 @@ def _default_fetcher(db, list_fetcher):
         return None
 
 
+def _default_poster_generator(db):
+    """The live poster generator for default-on art (skips the re-resolve —
+    sync already has the owned members)."""
+    def gen(definition, owned):
+        from core.video.collections.poster_gen import generate_for_definition
+        return generate_for_definition(db, definition, owned=owned)
+    return gen
+
+
 def run_sync(db, *, force: bool = False, list_fetcher: Optional[Callable] = None,
              on_progress: Optional[Callable] = None) -> Dict[str, Any]:
     """Shared entry point for the 'Sync all' action and the daily automation:
@@ -275,7 +302,8 @@ def run_sync(db, *, force: bool = False, list_fetcher: Optional[Callable] = None
     if src is None:
         return {"ok": False, "error": "No video server configured (or it can't do collections)"}
     return sync_all_collections(db, source=src, list_fetcher=_default_fetcher(db, list_fetcher),
-                                force=force, on_progress=on_progress)
+                                force=force, on_progress=on_progress,
+                                poster_generator=_default_poster_generator(db))
 
 
 def sync_one_now(db, definition_id, *, force: bool = False) -> Dict[str, Any]:
@@ -287,7 +315,8 @@ def sync_one_now(db, definition_id, *, force: bool = False) -> Dict[str, Any]:
     c = db.get_collection_definition(definition_id)
     if not c:
         return {"ok": False, "error": "not found"}
-    r = sync_collection(db, c, source=src, list_fetcher=_default_fetcher(db, None), force=force)
+    r = sync_collection(db, c, source=src, list_fetcher=_default_fetcher(db, None), force=force,
+                        poster_generator=_default_poster_generator(db))
     if r.get("ok"):
         r["wishlisted"] = wishlist_missing_movies(db, c, r.get("missing"))
     return r

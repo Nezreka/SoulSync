@@ -97,17 +97,16 @@ def _decode(blobs: List[bytes]):
 
 
 def _gradient(title: str):
+    # A 1×H strip resized to full width — the per-pixel loop took seconds.
     from PIL import Image
     top, bottom = _GRADIENTS[int(hashlib.sha1((title or "").encode("utf-8")).hexdigest(), 16)
                              % len(_GRADIENTS)]
-    img = Image.new("RGB", (_W, _H))
-    px = img.load()
+    strip = Image.new("RGB", (1, _H))
+    px = strip.load()
     for y in range(_H):
         t = y / (_H - 1)
-        row = tuple(int(top[i] + (bottom[i] - top[i]) * t) for i in range(3))
-        for x in range(_W):
-            px[x, y] = row
-    return img
+        px[0, y] = tuple(int(top[i] + (bottom[i] - top[i]) * t) for i in range(3))
+    return strip.resize((_W, _H))
 
 
 def _compose_collage(imgs) -> "object":
@@ -216,19 +215,34 @@ def _collage_members(owned: List[Dict[str, Any]], limit: int = 4) -> List[Dict[s
     return sorted(owned, key=rank)[:limit]
 
 
+def _default_list_fetcher(db):
+    try:
+        from core.video.collections.list_sources import build_list_fetcher
+        return build_list_fetcher(db)
+    except Exception:   # noqa: BLE001 - no fetcher → owned-only resolve
+        return None
+
+
 def generate_for_definition(db, definition: Dict[str, Any], *,
                             fetch: Optional[Callable] = None,
+                            owned: Optional[List[Dict[str, Any]]] = None,
+                            list_fetcher: Optional[Callable] = None,
                             root: Optional[Path] = None) -> Optional[str]:
     """Render + store the poster for one definition and point its poster_url at
-    the serve route. Owned members only (no list fetcher — art needs nothing
-    remote). Returns the new poster_url, or None on failure. Never raises."""
+    the serve route. Resolves with the REAL list fetcher by default — a chart/
+    franchise collection must collage from its owned members, not fall back to
+    the gradient because membership couldn't resolve. Pass ``owned`` to skip the
+    resolve (sync already has it). Returns the new poster_url, or None. Never
+    raises."""
     did = (definition or {}).get("id")
     if did is None:
         return None
     try:
-        from core.video.collections.resolver import resolve_collection
-        res = resolve_collection(db, definition)
-        owned = res.owned if res.ok else []
+        if owned is None:
+            from core.video.collections.resolver import resolve_collection
+            res = resolve_collection(db, definition,
+                                     list_fetcher=list_fetcher or _default_list_fetcher(db))
+            owned = res.owned if res.ok else []
         fetch = fetch or _default_fetch(db)
         media_type = definition.get("media_type") or "movie"
         blobs = []
