@@ -660,10 +660,27 @@
             'Ready-made collection packs, built from what you actually own — pick a pack, tick what you want, done.'));
 
         var hostEl = h('div');
-        hostEl.innerHTML = '<div class="vce-loading">Reading your library…</div>';
         page.appendChild(hostEl);
 
         var mt = presetMedia;
+        // Instant first paint: the pack cards appear immediately with shimmering
+        // counts while the library expansion runs (seconds on a big library).
+        if (!presetCache[mt]) {
+            hostEl.innerHTML = '<div class="vce-loading">Reading your library…</div>';
+            api('/presets/catalog?media_type=' + mt, {}).then(function (d) {
+                if (view !== 'presets' || presetMedia !== mt || presetCache[mt]) return;
+                hostEl.innerHTML = '';
+                var grid = h('div', 'vce-packs');
+                ((d && d.packs) || []).forEach(function (p) {
+                    grid.appendChild(h('div', 'vce-pack vce-pack--loading',
+                        '<div class="vce-pack-icon">' + (I[p.icon] || I.spark) + '</div>' +
+                        '<div class="vce-pack-title">' + esc(p.title) + '</div>' +
+                        '<div class="vce-pack-blurb">' + esc(p.blurb) + '</div>' +
+                        '<div class="vce-pack-count"><span class="vce-shimmer"></span></div>'));
+                });
+                hostEl.appendChild(grid);
+            });
+        }
         loadPresets(mt).then(function (packs) {
             if (view !== 'presets' || presetMedia !== mt) return;   // stale response
             hostEl.innerHTML = '';

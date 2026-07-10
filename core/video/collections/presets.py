@@ -527,15 +527,26 @@ def expand_pack(db, pack_id: str, media_type: str, fetcher=None) -> List[Dict[st
     return entries
 
 
+def pack_catalog(media_type: str) -> List[Dict[str, Any]]:
+    """Just the pack identities (title/blurb/icon) — no DB, no network. The
+    browser paints these instantly as skeletons while the expansion runs."""
+    return [{"id": pid, "title": _PACKS[pid]["title"], "blurb": _PACKS[pid]["blurb"],
+             "icon": _PACKS[pid]["icon"], "media_type": media_type}
+            for pid in _PACK_ORDER if media_type in _PACKS[pid]["media"]]
+
+
 def list_packs(db, media_type: str, fetcher=None) -> List[Dict[str, Any]]:
     """The full preset browser payload for one media type: every applicable pack
-    with its expanded entries, available/item totals, and exists-marking."""
+    with its expanded entries, available/item totals, and exists-marking.
+    Packs expand CONCURRENTLY — on a large library the aggregate queries
+    (credits joins, genre scans) are the slow part, and they're independent."""
+    pids = [pid for pid in _PACK_ORDER if media_type in _PACKS[pid]["media"]]
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        expanded = list(ex.map(lambda pid: expand_pack(db, pid, media_type, fetcher), pids))
     out = []
-    for pid in _PACK_ORDER:
+    for pid, entries in zip(pids, expanded, strict=False):
         meta = _PACKS[pid]
-        if media_type not in meta["media"]:
-            continue
-        entries = expand_pack(db, pid, media_type, fetcher)
         out.append({
             "id": pid, "title": meta["title"], "blurb": meta["blurb"],
             "icon": meta["icon"], "media_type": media_type,
@@ -635,5 +646,5 @@ def kick_franchise_backfill(db) -> bool:
     return True
 
 
-__all__ = ["list_packs", "expand_pack", "apply_pack",
+__all__ = ["list_packs", "expand_pack", "apply_pack", "pack_catalog",
            "backfill_missing_franchises", "kick_franchise_backfill"]

@@ -373,6 +373,41 @@ def test_presets_api_browse_and_apply(tmp_path):
     assert r["ok"] and r["created"] == [] and r["skipped"] == ["Action"]
 
 
+def test_presets_catalog_is_instant_and_pure(tmp_path):
+    # The skeleton first-paint source: pack identities only, no DB expansion.
+    client, _ = _make_client(tmp_path)
+    d = client.get("/api/video/collections/presets/catalog?media_type=movie").get_json()
+    ids = [p["id"] for p in d["packs"]]
+    assert "charts" in ids and "studios" in ids and "networks" not in ids
+    assert all("entries" not in p for p in d["packs"])
+
+
+def test_presets_payload_cached_with_fresh_exists_marks(tmp_path, monkeypatch):
+    client, vdb = _make_client(tmp_path)
+    _seed_movies(vdb)
+    import core.video.collections.presets as presets_mod
+    real = presets_mod.list_packs
+    calls = []
+    monkeypatch.setattr(presets_mod, "list_packs",
+                        lambda *a, **k: calls.append(1) or real(*a, **k))
+
+    r1 = client.get("/api/video/collections/presets?media_type=movie").get_json()
+    assert len(calls) == 1
+    a1 = [e for p in r1["packs"] if p["id"] == "genres" for e in p["entries"]
+          if e["name"] == "Action"][0]
+    assert a1["exists"] is False
+
+    # Apply between browses; the second browse serves the CACHE (no recompute)
+    # but re-marks exists — the only part that changed.
+    client.post("/api/video/collections/presets/apply", json={
+        "media_type": "movie", "pack": "genres", "keys": ["genre:Action"]})
+    r2 = client.get("/api/video/collections/presets?media_type=movie").get_json()
+    assert len(calls) == 1                                   # cache hit
+    a2 = [e for p in r2["packs"] if p["id"] == "genres" for e in p["entries"]
+          if e["name"] == "Action"][0]
+    assert a2["exists"] is True
+
+
 def test_presets_api_validates_input(tmp_path):
     client, _ = _make_client(tmp_path)
     assert client.post("/api/video/collections/presets/apply", json={}).status_code == 400

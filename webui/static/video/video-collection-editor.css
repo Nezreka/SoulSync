@@ -372,6 +372,15 @@ textarea.vce-input { resize: vertical; min-height: 58px; }
     box-shadow: 0 20px 40px -18px rgba(0,0,0,.7), inset 0 1px 0 var(--line-lit);
 }
 .vce-pack:disabled { opacity: .4; cursor: default; }
+.vce-pack--loading { cursor: default; }
+.vce-pack--loading:hover { transform: none; box-shadow: inset 0 1px 0 var(--line-lit); border-color: var(--line); }
+.vce-shimmer {
+    display: inline-block; width: 110px; height: 11px; border-radius: 6px; vertical-align: middle;
+    background: linear-gradient(90deg, var(--s1) 25%, var(--s2) 50%, var(--s1) 75%);
+    background-size: 200% 100%; animation: vce-shimmer 1.3s linear infinite;
+}
+@keyframes vce-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .vce-shimmer { animation: none; } }
 .vce-pack-icon {
     width: 42px; height: 42px; border-radius: 13px; display: grid; place-items: center;
     background: linear-gradient(135deg, rgba(var(--a), 0.3), rgba(var(--a), 0.08));
