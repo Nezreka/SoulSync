@@ -146,18 +146,31 @@ class ImageCache:
         except Exception:
             return False
 
+    @staticmethod
+    def _referer_for(url: str) -> str:
+        """Referer header to send when fetching an image, per source.
+
+        Hotlink-protected CDNs differ in what referer they accept:
+          * Deezer's CDN (dzcdn.net) checks against the SITE origin — it wants
+            ``https://www.deezer.com/`` (the value this cache hardcoded for
+            years). A per-origin ``https://…dzcdn.net/`` referer risks a 403 on
+            every cover, so Deezer keeps its known-good site referer.
+          * Everything else uses a SAME-ORIGIN referer — what Bandcamp's bcbits
+            CDN needs, and harmless for referer-agnostic CDNs (Spotify, iTunes).
+        """
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
+        if host == "deezer.com" or host.endswith(".deezer.com") or host.endswith(".dzcdn.net"):
+            return "https://www.deezer.com/"
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}/"
+        return url
+
     def _fetch_and_store(self, url: str, key: str, now: float) -> CachedImage:
         if not self._is_fetch_allowed(url):
             raise ImageCacheError("Image host is not allowed")
 
-        # Referer must match the image's own origin, not a fixed site — this cache
-        # serves artwork from every metadata source (Deezer, Bandcamp, etc.), and a
-        # CDN with hotlink protection (e.g. Bandcamp's bcbits.com) rejects a referer
-        # for an unrelated site. A same-origin referer is what a real browser would
-        # send navigating the source site directly, so it satisfies that check
-        # everywhere instead of only the one host this used to be hardcoded for.
-        parsed_origin = urlparse(url)
-        referer = f"{parsed_origin.scheme}://{parsed_origin.netloc}/" if parsed_origin.netloc else url
+        referer = self._referer_for(url)
 
         response = self.fetcher(
             url,
