@@ -3679,6 +3679,35 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def item_genres(self, kind: str, item_id: int) -> list:
+        """Current genre names for one movie/show (bulk genre add/remove reads
+        these to build the new list per item)."""
+        spec = {"movie": ("movie_genres", "movie_id"), "show": ("show_genres", "show_id")}.get(kind)
+        if not spec:
+            return []
+        conn = self._get_connection()
+        try:
+            return self._genres_for(conn, spec[0], spec[1], item_id)
+        finally:
+            conn.close()
+
+    def item_tmdb_ids(self, kind: str, ids) -> list:
+        """tmdb ids for a set of library rows (order-free, Nones dropped) —
+        bulk add-to-collection maps its selection through this."""
+        table = {"movie": "movies", "show": "shows"}.get(kind)
+        clean = [int(i) for i in (ids or []) if str(i).lstrip("-").isdigit()]
+        if not table or not clean:
+            return []
+        conn = self._get_connection()
+        try:
+            marks = ",".join("?" * len(clean))
+            rows = conn.execute(
+                f"SELECT DISTINCT tmdb_id FROM {table} WHERE id IN ({marks}) "
+                "AND tmdb_id IS NOT NULL", clean).fetchall()
+            return [r["tmdb_id"] for r in rows]
+        finally:
+            conn.close()
+
     # ── User watchlist (curated follow-list: shows + people) ──────────────────
     # Mirrors the music watchlist_artists model: an explicit follow-list that may
     # include shows/people not in the library yet. Keyed on (kind, tmdb_id). The
