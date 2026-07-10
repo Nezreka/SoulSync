@@ -2785,6 +2785,96 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    # ── Preset-pack aggregates (Collection Studio "easy setup") ──────────────
+    # Facet counts over the OWNED, ON-SERVER library — the same base condition
+    # resolve_smart_members uses, so a preset entry's count equals what the
+    # collection will actually contain after apply + sync.
+    _ON_SERVER = "server_id IS NOT NULL AND TRIM(server_id) != ''"
+
+    def owned_genre_counts(self, media_type: str, limit: int = 60) -> list:
+        """Genres across owned items with counts, busiest first —
+        [{value, count}] for the Genres preset pack."""
+        if media_type == "movie":
+            link, owner, tbl = "movie_genres", "movie_id", "movies"
+        elif media_type == "show":
+            link, owner, tbl = "show_genres", "show_id", "shows"
+        else:
+            return []
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                f"SELECT g.name AS v, COUNT(*) AS c FROM {link} lt "
+                f"JOIN genres g ON g.id = lt.genre_id "
+                f"JOIN {tbl} t ON t.id = lt.{owner} "
+                f"WHERE t.server_id IS NOT NULL AND TRIM(t.server_id) != '' "
+                f"GROUP BY g.name ORDER BY c DESC, g.name LIMIT ?", (int(limit),)).fetchall()
+            return [{"value": r["v"], "count": r["c"]} for r in rows]
+        except sqlite3.Error:
+            return []
+        finally:
+            conn.close()
+
+    def owned_decade_counts(self, media_type: str) -> list:
+        """Owned items bucketed by decade — [{value: 1980, count}] newest first."""
+        if media_type not in ("movie", "show"):
+            return []
+        tbl = "movies" if media_type == "movie" else "shows"
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                f"SELECT (year / 10) * 10 AS d, COUNT(*) AS c FROM {tbl} "
+                f"WHERE {self._ON_SERVER} AND year IS NOT NULL AND year >= 1900 "
+                f"GROUP BY d ORDER BY d DESC").fetchall()
+            return [{"value": r["d"], "count": r["c"]} for r in rows]
+        except sqlite3.Error:
+            return []
+        finally:
+            conn.close()
+
+    def owned_studio_counts(self, limit: int = 40) -> list:
+        """Movie studios with owned counts, busiest first — [{value, count}]."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                f"SELECT studio AS v, COUNT(*) AS c FROM movies "
+                f"WHERE {self._ON_SERVER} AND studio IS NOT NULL AND TRIM(studio) != '' "
+                f"GROUP BY studio ORDER BY c DESC, studio LIMIT ?", (int(limit),)).fetchall()
+            return [{"value": r["v"], "count": r["c"]} for r in rows]
+        except sqlite3.Error:
+            return []
+        finally:
+            conn.close()
+
+    def owned_network_counts(self, limit: int = 40) -> list:
+        """Show networks with owned counts, busiest first — [{value, count}]."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                f"SELECT network AS v, COUNT(*) AS c FROM shows "
+                f"WHERE {self._ON_SERVER} AND network IS NOT NULL AND TRIM(network) != '' "
+                f"GROUP BY network ORDER BY c DESC, network LIMIT ?", (int(limit),)).fetchall()
+            return [{"value": r["v"], "count": r["c"]} for r in rows]
+        except sqlite3.Error:
+            return []
+        finally:
+            conn.close()
+
+    def count_smart_members(self, media_type: str, definition: dict) -> int:
+        """COUNT of resolve_smart_members without materializing the rows — sizes
+        the fixed preset entries (4K, Recently Added, …). Raises SmartFilterError
+        for a bad definition, same as resolve."""
+        from core.video.collections.smart_filter import compile_rules
+        where, params = compile_rules(definition, media_type)
+        table = "movies" if media_type == "movie" else "shows"
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                f"SELECT COUNT(*) AS c FROM {table} "
+                f"WHERE {self._ON_SERVER} AND {where}", params).fetchone()
+            return int(row["c"] if row else 0)
+        finally:
+            conn.close()
+
     # ── Collection sync ledger (managed-collection map + skip signature) ──────
     def get_collection_sync(self, definition_id: int) -> dict | None:
         conn = self._get_connection()
