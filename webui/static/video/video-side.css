@@ -4483,3 +4483,93 @@ body[data-side="video"] #gsearch-aura {
     box-shadow: 0 8px 22px rgba(0, 0, 0, 0.5), 0 0 22px rgba(var(--vd-accent-rgb), 0.5);
 }
 .vd-manage-ic { font-size: 12px; color: rgb(var(--vd-accent-rgb)); filter: brightness(1.35); }
+
+/* ── Video Tools: Library Maintenance card internals ───────────────────────
+   The hero/tabs/toggles reuse the music .repair-* styles from style.css;
+   these style the video job/finding/history card layouts. */
+.repair-job-head { display: flex; align-items: center; gap: 12px; }
+.repair-job-dot {
+    width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto;
+    background: rgba(255,255,255,0.22);
+}
+.repair-job-dot--on {
+    background: rgb(var(--accent-rgb, 88 101 242));
+    box-shadow: 0 0 10px rgba(var(--accent-rgb, 88 101 242), 0.8);
+    animation: vjr-pulse 1.6s ease-in-out infinite;
+}
+@keyframes vjr-pulse { 50% { opacity: 0.55; } }
+@media (prefers-reduced-motion: reduce) { .repair-job-dot--on { animation: none; } }
+.repair-job-icon { font-size: 20px; }
+.repair-job-titles { flex: 1; min-width: 0; }
+.repair-job-name { font-size: 14px; font-weight: 800; color: #fff; display: flex; align-items: center; gap: 8px; }
+.repair-job-desc {
+    font-size: 12px; color: rgba(255,255,255,0.5); margin-top: 2px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.repair-master-toggle--sm { transform: scale(0.82); flex: 0 0 auto; }
+.repair-job-meta {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    margin-top: 10px; font-size: 12px; color: rgba(255,255,255,0.55);
+}
+.repair-job-meta label { display: inline-flex; align-items: center; gap: 6px; }
+.repair-job-meta input[type="number"] {
+    width: 54px; padding: 4px 6px; border-radius: 7px; font-size: 12px;
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
+    color: #eef1f7; font-family: inherit;
+}
+.repair-job-setting { display: inline-flex; align-items: center; gap: 6px; }
+.repair-job-setting select, .repair-findings-filters select {
+    padding: 4px 8px; border-radius: 7px; font-size: 12px; font-family: inherit;
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); color: #eef1f7;
+}
+.repair-job-setting select option, .repair-findings-filters select option { background: #16161d; }
+.repair-job-actions { margin-left: auto; }
+.repair-job-progress { margin-top: 10px; }
+
+/* findings */
+.repair-finding-card {
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 12px; padding: 12px 14px; margin-bottom: 8px;
+}
+.repair-finding-row { display: flex; align-items: center; gap: 12px; }
+.repair-finding-cb { flex: 0 0 auto; }
+.repair-finding-sev { font-size: 11px; flex: 0 0 auto; }
+.repair-finding-main { flex: 1; min-width: 0; }
+.repair-finding-title { font-size: 13.5px; font-weight: 700; color: #fff; }
+.repair-finding-type {
+    display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px;
+    font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em;
+    background: rgba(var(--accent-rgb, 88 101 242), 0.18);
+    color: rgb(var(--accent-rgb, 88 101 242));
+}
+.repair-finding-status {
+    display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px;
+    font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em;
+    background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.6);
+}
+.repair-finding-status--resolved { background: rgba(80,200,120,0.16); color: #6fdb96; }
+.repair-finding-desc { font-size: 12px; color: rgba(255,255,255,0.5); margin-top: 2px; }
+.repair-finding-actions { display: inline-flex; gap: 6px; flex: 0 0 auto; }
+.repair-finding-detail { margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 10px; }
+.repair-ep-list { display: flex; flex-direction: column; gap: 3px; max-height: 260px; overflow-y: auto; }
+.repair-ep-row { display: flex; gap: 12px; font-size: 12.5px; padding: 3px 6px; border-radius: 6px; }
+.repair-ep-row:nth-child(odd) { background: rgba(255,255,255,0.03); }
+.repair-ep-code { font-weight: 800; color: rgb(var(--accent-rgb, 88 101 242)); flex: 0 0 58px; }
+.repair-ep-title { flex: 1; color: rgba(255,255,255,0.75); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.repair-ep-date { color: rgba(255,255,255,0.4); flex: 0 0 auto; }
+.repair-finding-hint { font-size: 11.5px; color: rgba(255,255,255,0.4); margin-top: 8px; }
+.repair-finding-json {
+    font-size: 11px; color: rgba(255,255,255,0.6); background: rgba(0,0,0,0.3);
+    padding: 10px; border-radius: 8px; overflow-x: auto;
+}
+
+/* history */
+.repair-history-row {
+    display: flex; align-items: center; gap: 16px; padding: 9px 12px;
+    border-radius: 9px; font-size: 12.5px;
+}
+.repair-history-row:nth-child(odd) { background: rgba(255,255,255,0.03); }
+.repair-history-job { font-weight: 700; color: #fff; flex: 0 0 180px; }
+.repair-history-when { color: rgba(255,255,255,0.5); flex: 0 0 auto; }
+.repair-history-stats { color: rgba(255,255,255,0.6); flex: 1; }
+.repair-history-dur { color: rgba(255,255,255,0.4); font-variant-numeric: tabular-nums; }

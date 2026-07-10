@@ -1708,6 +1708,111 @@
                                 <p class="header-subtitle">Maintenance jobs and library tools</p>
                             </div>
                         </div>
+
+                        <!-- ── Library Maintenance (jobs & findings — the music standard, video-scoped).
+                             Same classes as the music hero (shared styling); ids are video-prefixed
+                             because both Tools pages live in this one document. Driven by
+                             video/video-repair.js against /api/video/repair. -->
+                        <div class="tools-maintenance-hero" data-video-repair>
+                            <div class="tools-maintenance-header">
+                                <div class="tools-maintenance-header-left">
+                                    <img src="/static/whisoul.png" alt="" class="tools-maintenance-logo" />
+                                    <div>
+                                        <h3 class="tools-maintenance-title">Library Maintenance</h3>
+                                        <p class="tools-maintenance-subtitle">Jobs that scan your video library and report findings for review</p>
+                                    </div>
+                                </div>
+                                <label class="repair-master-toggle">
+                                    <input type="checkbox" id="video-repair-master-toggle">
+                                    <span class="repair-toggle-slider"></span>
+                                    <span class="repair-toggle-label" id="video-repair-master-label">Enabled</span>
+                                </label>
+                            </div>
+
+                            <div class="repair-tabs" data-video-repair-tabs>
+                                <button class="repair-tab active" type="button" data-video-repair-tab="jobs">Jobs</button>
+                                <button class="repair-tab" type="button" data-video-repair-tab="findings">
+                                    Findings <span class="repair-tab-badge" id="video-repair-findings-tab-badge" style="display:none">0</span>
+                                </button>
+                                <button class="repair-tab" type="button" data-video-repair-tab="history">History</button>
+                            </div>
+
+                            <div class="repair-tab-content" id="video-repair-tab-jobs">
+                                <div class="repair-jobs-list" id="video-repair-jobs-list">
+                                    <div class="repair-loading">Loading jobs...</div>
+                                </div>
+                            </div>
+
+                            <div class="repair-tab-content" id="video-repair-tab-findings" style="display:none;">
+                                <div class="repair-findings-toolbar">
+                                    <div class="repair-findings-filters">
+                                        <select id="video-repair-findings-job-filter">
+                                            <option value="">All Jobs</option>
+                                        </select>
+                                        <select id="video-repair-findings-severity-filter">
+                                            <option value="">All Severity</option>
+                                            <option value="info">Info</option>
+                                            <option value="warning">Warning</option>
+                                        </select>
+                                        <select id="video-repair-findings-status-filter">
+                                            <option value="pending">Pending</option>
+                                            <option value="">All Status</option>
+                                            <option value="resolved">Resolved</option>
+                                            <option value="dismissed">Dismissed</option>
+                                        </select>
+                                    </div>
+                                    <label class="repair-select-all" title="Select all on this page">
+                                        <input type="checkbox" id="video-repair-select-all-cb">
+                                        <span>Select All</span>
+                                    </label>
+                                    <div class="repair-findings-bulk" id="video-repair-findings-bulk" style="display:none;">
+                                        <span class="repair-bulk-count" id="video-repair-bulk-count"></span>
+                                        <button class="btn btn--sm btn--primary" type="button" data-video-repair-bulk="fix">Approve Selected</button>
+                                        <button class="btn btn--sm btn--secondary" type="button" data-video-repair-bulk="dismiss">Dismiss Selected</button>
+                                    </div>
+                                    <button class="repair-clear-btn" type="button" data-video-repair-clear title="Clear findings matching current filters">Clear Findings</button>
+                                </div>
+                                <div class="repair-findings-list" id="video-repair-findings-list">
+                                    <div class="repair-loading">Loading findings...</div>
+                                </div>
+                                <div class="repair-findings-pagination" id="video-repair-findings-pagination"></div>
+                            </div>
+
+                            <div class="repair-tab-content" id="video-repair-tab-history" style="display:none;">
+                                <div class="repair-history-list" id="video-repair-history-list">
+                                    <div class="repair-loading">Loading history...</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- ── Studios: the visual editors, launchable as tools (they also live
+                             on the dashboard). Admin-only — hidden for non-admin profiles. -->
+                        <div class="tools-section" data-video-studios-section>
+                            <h3 class="tools-section-title">Studios</h3>
+                            <div class="tools-grid">
+                                <div class="tool-card">
+                                    <div class="tool-card-header">
+                                        <h4 class="tool-card-title">🎨 Overlay Studio</h4>
+                                        <button class="tool-help-button" data-tool="video-overlay-studio" title="Learn more about this tool">?</button>
+                                    </div>
+                                    <p class="tool-card-info">Design poster overlays (ratings, resolution, awards…) in a visual editor and apply them to your whole library — filtered targeting, nightly re-apply, clean-art restore.</p>
+                                    <div class="tool-card-controls">
+                                        <button type="button" data-video-overlay-studio>Open Overlay Studio</button>
+                                    </div>
+                                </div>
+                                <div class="tool-card">
+                                    <div class="tool-card-header">
+                                        <h4 class="tool-card-title">🗂️ Collection Studio</h4>
+                                        <button class="tool-help-button" data-tool="video-collection-studio" title="Learn more about this tool">?</button>
+                                    </div>
+                                    <p class="tool-card-info">Build living collections — charts, franchises, universes, seasonal windows, smart rules — with generated posters, server sync, and wishlist tie-ins.</p>
+                                    <div class="tool-card-controls">
+                                        <button type="button" data-video-collection-studio>Open Collection Studio</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
                         <div class="tools-section">
                             <h3 class="tools-section-title">Database &amp; Scanning</h3>
                             <div class="tools-grid">
@@ -11230,6 +11335,8 @@
     <script src="{{ url_for('static', filename='video/video-poster-modal.js', v=static_v) }}"></script>
     <!-- Manage panel (per-item metadata editor slide-over; "Manage" on detail pages) -->
     <script src="{{ url_for('static', filename='video/video-manage-panel.js', v=static_v) }}"></script>
+    <!-- Library Maintenance (jobs & findings on the video Tools page) -->
+    <script src="{{ url_for('static', filename='video/video-repair.js', v=static_v) }}"></script>
     <!-- Overlay Studio (full-bleed visual editor for poster-overlay templates; Artwork Studio) -->
     <script src="{{ url_for('static', filename='video/video-overlay-editor.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='video/video-collection-editor.js', v=static_v) }}"></script>
