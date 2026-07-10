@@ -173,70 +173,103 @@ def _expand_franchises(db, mt: str) -> List[Dict[str, Any]]:
     return out
 
 
-# Studio strings vary per movie ("Hallmark Channel" / "Hallmark Media" /
-# "Hallmark Entertainment" are one brand) — exact-match entries fragmented a
-# studio across variants (Boulder's 23-item Hallmark collection vs ~100 owned).
-# Group by brand and match the variant SET.
-_GENERIC_LEADS = {"the", "new", "a", "an"}      # one word isn't a brand here
+# Studio/network strings vary per title — one real-world brand hides behind many
+# labels ("Walt Disney Productions" / "Walt Disney Pictures" / "Disney";
+# "Hallmark Channel" / "Hallmark Media"). Exact-match entries fragmented brands
+# (Boulder: a 23-item Hallmark, a 22-item Disney missing every classic). Group
+# by SHARED DISTINCTIVE TOKENS: strip the generic industry words, then merge
+# groups that share any real brand word — 'Disney' ∩ 'Walt Disney Pictures'
+# = {disney} → one group. Slight over-merge (the Fox family unifies) beats
+# silently splitting a brand across eras.
+_GENERIC_TOKENS = {
+    "the", "a", "an", "of", "and", "&", "pictures", "picture", "studios", "studio",
+    "entertainment", "films", "film", "animation", "animations", "television", "tv",
+    "media", "channel", "channels", "network", "networks", "productions", "production",
+    "company", "co", "inc", "llc", "ltd", "corp", "corporation", "group", "home",
+    "video", "distribution", "international", "worldwide", "interactive", "originals",
+}
 
 
-def _brand_key(studio: str) -> str:
-    words = studio.split()
-    if not words:
-        return studio.casefold()
-    take = 2 if words[0].casefold() in _GENERIC_LEADS and len(words) > 1 else 1
-    return " ".join(w.casefold() for w in words[:take])
+def _brand_tokens(name: str) -> set:
+    import re
+    words = re.split(r"[^\w]+", name.casefold())
+    return {w for w in words if w and w not in _GENERIC_TOKENS}
 
 
-def _common_word_prefix(names: List[str]) -> str:
-    split = [n.split() for n in names]
+def _group_brands(rows) -> List[dict]:
+    """Union-find over (name, count) rows: variants sharing any distinctive
+    token join one brand group. Returns [{key, label, names, total}]."""
+    entries = []
+    for name, count in rows:
+        toks = _brand_tokens(name)
+        entries.append({"name": name, "count": count,
+                        "toks": toks or {name.casefold()}})   # all-generic → own group
+    parent = list(range(len(entries)))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    by_token: Dict[str, int] = {}
+    for i, e in enumerate(entries):
+        for t in e["toks"]:
+            if t in by_token:
+                parent[find(i)] = find(by_token[t])
+            else:
+                by_token[t] = i
+    groups: Dict[int, list] = {}
+    for i in range(len(entries)):
+        groups.setdefault(find(i), []).append(entries[i])
+
     out = []
-    for parts in zip(*split, strict=False):
-        if len({p.casefold() for p in parts}) == 1:
-            out.append(parts[0])
+    for members in groups.values():
+        members.sort(key=lambda e: -e["count"])
+        names = sorted(e["name"] for e in members)
+        shared = set.intersection(*(e["toks"] for e in members))
+        if len(members) == 1:
+            label = members[0]["name"]
+        elif shared:
+            # Title the shared brand word(s) in the order the top variant uses.
+            top_words = members[0]["name"].split()
+            ordered = [w for w in top_words if _brand_tokens(w) & shared] or [next(iter(shared)).title()]
+            label = " ".join(ordered)
         else:
-            break
-    return " ".join(out)
+            label = members[0]["name"]      # chained merge with no common token
+        out.append({"key": "-".join(sorted(shared)) or names[0].casefold(),
+                    "label": label, "names": names,
+                    "total": sum(e["count"] for e in members)})
+    return out
+
+
+def _expand_brand_pack(db, rows, *, pack: str, field: str, noun: str) -> List[Dict[str, Any]]:
+    grouped = _group_brands([(str(r.get("value") or "").strip(), int(r.get("count") or 0))
+                             for r in rows if str(r.get("value") or "").strip()])
+    out = []
+    for g in grouped:
+        out.append(_entry(
+            f"{field}:" + g["key"], g["label"], g["total"],
+            f"{noun} from {g['label']}." +
+            (f" Covers {len(g['names'])} label variants." if len(g["names"]) > 1 else ""),
+            definition=_smart([{"field": field, "op": "in", "value": g["names"]}]),
+            pack=pack))
+    out.sort(key=lambda e: -e["count"])
+    return out
 
 
 def _expand_studios(db, mt: str) -> List[Dict[str, Any]]:
     if mt != "movie":
         return []
-    groups: Dict[str, list] = {}
-    for s in db.owned_studio_counts(limit=100) or []:
-        name = str(s.get("value") or "").strip()
-        if not name:
-            continue
-        groups.setdefault(_brand_key(name), []).append((name, int(s.get("count") or 0)))
-    out = []
-    for key, variants in groups.items():
-        names = sorted(n for n, _ in variants)
-        label = _common_word_prefix(names) if len(names) > 1 else names[0]
-        label = label or names[0]
-        total = sum(c for _, c in variants)
-        out.append(_entry(
-            "studio:" + key, label, total,
-            f"Movies from {label}." + (f" Covers {len(names)} label variants." if len(names) > 1 else ""),
-            definition=_smart([{"field": "studio", "op": "in", "value": names}]),
-            pack="studios"))
-    out.sort(key=lambda e: -e["count"])
-    return out
+    return _expand_brand_pack(db, db.owned_studio_counts(limit=100) or [],
+                              pack="studios", field="studio", noun="Movies")
 
 
 def _expand_networks(db, mt: str) -> List[Dict[str, Any]]:
     if mt != "show":
         return []
-    out = []
-    for n in db.owned_network_counts(limit=40) or []:
-        name = str(n.get("value") or "").strip()
-        if not name:
-            continue
-        out.append(_entry(
-            "network:" + name, name, n.get("count"),
-            f"Shows from {name}.",
-            definition=_smart([{"field": "network", "op": "is", "value": name}]),
-            pack="networks"))
-    return out
+    return _expand_brand_pack(db, db.owned_network_counts(limit=100) or [],
+                              pack="networks", field="network", noun="Shows")
 
 
 def _expand_directors(db, mt: str) -> List[Dict[str, Any]]:
