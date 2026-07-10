@@ -599,6 +599,29 @@ class PlexVideoSource:
         except Exception as e:   # noqa: BLE001
             return {"ok": False, "error": str(e)}
 
+    def list_collections(self) -> list:
+        """EVERY collection across all movie/show sections (not just the mapped
+        one — foreign collections, e.g. Kometa's, can live anywhere). For the
+        server-cleanup view. [{server_id, name, count, media_type, section}]."""
+        out = []
+        for kind in ("movie", "show"):
+            for sec in self._sections(kind):
+                try:
+                    cols = sec.collections()
+                except Exception:   # noqa: BLE001 - one section failing shouldn't hide the rest
+                    logger.exception("Plex: collections() failed for section %s",
+                                     getattr(sec, "title", "?"))
+                    continue
+                for c in cols:
+                    out.append({
+                        "server_id": str(c.ratingKey),
+                        "name": getattr(c, "title", "") or "",
+                        "count": int(getattr(c, "childCount", 0) or 0),
+                        "media_type": kind,
+                        "section": getattr(sec, "title", None),
+                    })
+        return out
+
     def is_scanning(self, media_type="all") -> bool:
         """True if any SELECTED video section (scoped by media_type) is currently
         being scanned by Plex. Checks the per-section refreshing flag, then the
@@ -961,6 +984,26 @@ class JellyfinVideoSource:
             return {"ok": True}
         except Exception as e:   # noqa: BLE001
             return {"ok": False, "error": str(e)}
+
+    def list_collections(self) -> list:
+        """Every BoxSet on the server, for the server-cleanup view. Jellyfin
+        BoxSets aren't per-library, so media_type is unknown (None).
+        [{server_id, name, count, media_type, section}]."""
+        resp = self._req(f"/Users/{self.uid}/Items", params={
+            "IncludeItemTypes": "BoxSet", "Recursive": "true",
+            "Fields": "ChildCount"}) or {}
+        out = []
+        for it in resp.get("Items", []):
+            if not it.get("Id"):
+                continue
+            out.append({
+                "server_id": str(it.get("Id")),
+                "name": it.get("Name") or "",
+                "count": int(it.get("ChildCount") or 0),
+                "media_type": None,
+                "section": None,
+            })
+        return out
 
     def is_scanning(self, media_type="all") -> bool:
         """True if Jellyfin's library-scan scheduled task is running. Jellyfin's

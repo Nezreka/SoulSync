@@ -78,6 +78,7 @@
         image: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>',
         back: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>',
         copy: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+        server: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="7" rx="2"/><rect x="2" y="14" width="20" height="7" rx="2"/><path d="M6 6.5h.01M6 17.5h.01"/></svg>',
         // preset pack icons
         genres: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h10M4 12h16M7 17h10"/></svg>',
         decades: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>',
@@ -146,10 +147,12 @@
         view = 'gallery';
         var page = shell(
             topBtn('Easy setup', I.spark) +
+            topBtn('On server', I.server) +
             topBtn('Sync all', I.sync) +
             topBtn('New collection', I.plus, 'vce-btn--primary'));
         wireTop(page, {
             'Easy setup': function () { showPresets(); },
+            'On server': function () { showServer(); },
             'Sync all': syncAll,
             'New collection': function () { newCollection(); }
         });
@@ -466,6 +469,111 @@
             createBtn.textContent = n ? ('Create ' + n + ' collection' + (n === 1 ? '' : 's')) : 'Create';
         }
         paintEntries();
+    }
+
+    // ── server-side collections (cleanup view) ──────────────────────────────
+    function showServer() {
+        view = 'server';
+        var page = shell(topBtn('Back to gallery', I.back, 'vce-btn--ghost'));
+        wireTop(page, { 'Back to gallery': function () { showGallery(); } });
+
+        page.appendChild(h('div', 'vce-preshead', '<h2>Collections on your server</h2>'));
+        page.appendChild(h('p', 'vce-servnote',
+            'Everything that currently exists on the media server — including collections made by other tools ' +
+            '(old Kometa runs, hand-made ones). Deleting here removes the collection from the server only; ' +
+            'titles are never touched. Deleting a SoulSync-managed collection just recreates it on the next ' +
+            'sync unless you also pause or delete its definition in the gallery.'));
+
+        var hostEl = h('div');
+        hostEl.innerHTML = '<div class="vce-loading">Reading the server…</div>';
+        page.appendChild(hostEl);
+
+        api('/server', {}).then(function (d) {
+            if (view !== 'server') return;
+            if (!d || d.ok === false) {
+                hostEl.innerHTML = '<div class="vce-loading">' + esc((d && d.error) || 'Could not reach the server') + '</div>';
+                return;
+            }
+            var cols = d.collections || [];
+            if (!cols.length) {
+                hostEl.innerHTML = '<div class="vce-loading">No collections on the server.</div>';
+                return;
+            }
+            hostEl.innerHTML = '';
+            var picked = {};
+
+            var quick = h('div', 'vce-quick');
+            [['Not SoulSync’s', function (c) { return !c.managed; }],
+             ['All', function () { return true; }],
+             ['None', function () { return false; }]].forEach(function (q) {
+                var b = h('button', 'vce-link', esc(q[0]));
+                b.type = 'button';
+                b.addEventListener('click', function () {
+                    picked = {};
+                    cols.forEach(function (c) { if (q[1](c)) picked[c.server_id] = true; });
+                    paintRows();
+                });
+                quick.appendChild(b);
+            });
+            hostEl.appendChild(quick);
+
+            var list = h('div', 'vce-entries vce-entries--rows');
+            hostEl.appendChild(list);
+
+            var foot = h('div', 'vce-picker-foot');
+            foot.appendChild(h('span', 'vce-selsum', ''));
+            foot.appendChild(h('div', 'vce-foot-spacer'));
+            var delBtn = h('button', 'vce-btn vce-btn--danger', I.trash + 'Delete selected');
+            delBtn.type = 'button';
+            delBtn.addEventListener('click', function () {
+                var ids = Object.keys(picked);
+                if (!ids.length) return;
+                var managedN = cols.filter(function (c) { return picked[c.server_id] && c.managed; }).length;
+                var msg = 'Delete ' + ids.length + ' collection' + (ids.length === 1 ? '' : 's') + ' from the server?' +
+                    (managedN ? ('\n\n' + managedN + ' of these are SoulSync-managed and will be recreated on the next sync.') : '') +
+                    '\n\nTitles themselves are never touched.';
+                if (!window.confirm(msg)) return;
+                delBtn.disabled = true;
+                delBtn.textContent = 'Deleting…';
+                api('/server/delete', { method: 'POST', body: JSON.stringify({ ids: ids }) }).then(function (r) {
+                    if (r && r.ok) {
+                        var bits = [r.deleted + ' deleted'];
+                        if (r.failed && r.failed.length) bits.push(r.failed.length + ' failed');
+                        toast(bits.join(' · '), !!(r.failed && r.failed.length));
+                    } else { toast((r && r.error) || 'Delete failed', true); }
+                    showServer();   // re-read the server
+                }).catch(function () {
+                    toast('Delete failed', true);
+                    delBtn.disabled = false;
+                    delBtn.innerHTML = I.trash + 'Delete selected';
+                });
+            });
+            foot.appendChild(delBtn);
+            hostEl.appendChild(foot);
+
+            function paintRows() {
+                list.innerHTML = '';
+                cols.forEach(function (c) {
+                    var on = !!picked[c.server_id];
+                    var row = h('label', 'vce-entry' + (on ? ' vce-entry--on' : ''),
+                        '<span class="vce-cb">' + I.check + '</span>' +
+                        '<span class="vce-entry-name">' + esc(c.name || '(unnamed)') + '</span>' +
+                        (c.media_type ? '<span class="vce-tag">' + esc(mediaWord(c.media_type, true)) + '</span>' : '') +
+                        (c.managed ? '<span class="vce-tag vce-tag--ok" title="Managed by the definition “' + esc(c.definition_name || '') + '”">SoulSync</span>' : '') +
+                        '<span class="vce-entry-count">' + (c.count || 0) + '</span>');
+                    row.addEventListener('click', function () {
+                        if (picked[c.server_id]) delete picked[c.server_id]; else picked[c.server_id] = true;
+                        paintRows();
+                    });
+                    list.appendChild(row);
+                });
+                var n = Object.keys(picked).length;
+                var sum = foot.querySelector('.vce-selsum');
+                if (sum) sum.textContent = n ? (n + ' selected') : 'Nothing selected';
+                delBtn.disabled = !n;
+            }
+            paintRows();
+        });
     }
 
     // ── editor ───────────────────────────────────────────────────────────────
@@ -918,7 +1026,7 @@
         if (e.key !== 'Escape' || !overlay || !overlay.classList.contains('vce-overlay--on')) return;
         if (view === 'editor') leaveEditor();
         else if (view === 'picker') showPresets();
-        else if (view === 'presets') showGallery();
+        else if (view === 'presets' || view === 'server') showGallery();
         else close();
     });
 
