@@ -627,9 +627,10 @@ CREATE INDEX IF NOT EXISTS idx_overlay_templates_updated ON overlay_templates(up
 -- Which template applies to which library scope (one per movie/show scope). The
 -- apply pipeline reads this to know what to burn onto each poster.
 CREATE TABLE IF NOT EXISTS overlay_assignment (
-    scope       TEXT PRIMARY KEY,                -- 'movie' | 'show'
+    scope       TEXT PRIMARY KEY,                -- 'movie' | 'show' | 'season' | 'episode'
     template_id INTEGER,                          -- overlay_templates.id (NULL = none)
     enabled     INTEGER NOT NULL DEFAULT 0,
+    filter      TEXT,                             -- optional smart-rule JSON: only matching items
     updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

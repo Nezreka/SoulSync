@@ -31,7 +31,7 @@ logger = get_logger("video_database")
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 27
+SCHEMA_VERSION = 28
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -256,6 +256,9 @@ _COLUMN_MIGRATIONS = [
     # CREATE TABLE IF NOT EXISTS never upgrades an existing table's shape.
     ("imdb_tmdb_map", "movie_poster", "TEXT"),
     ("imdb_tmdb_map", "show_poster", "TEXT"),
+    # Filtered overlay targeting: apply a scope's template only to items
+    # matching a smart-rule definition (JSON, same language as collections)
+    ("overlay_assignment", "filter", "TEXT"),
     ("youtube_video_stats", "dearrow_attempted", "TEXT"),
     # TMDB details backfill: the server pre-matches shows/movies (so the matcher
     # skips them) but never supplies details-only fields like `status` (airing vs
@@ -3244,27 +3247,33 @@ class VideoDatabase:
         conn = self._get_connection()
         try:
             rows = conn.execute(
-                "SELECT a.scope, a.template_id, a.enabled, t.name AS template_name "
+                "SELECT a.scope, a.template_id, a.enabled, a.filter, t.name AS template_name "
                 "FROM overlay_assignment a LEFT JOIN overlay_templates t ON t.id = a.template_id").fetchall()
             out = {}
             for r in rows:
                 d = dict(r)
                 out[d["scope"]] = {"template_id": d["template_id"], "enabled": bool(d["enabled"]),
-                                   "template_name": d["template_name"]}
+                                   "template_name": d["template_name"],
+                                   "filter": self._parse_definition(d.get("filter")) or None}
             return out
         finally:
             conn.close()
 
-    def set_overlay_assignment(self, scope: str, template_id, enabled: bool) -> bool:
+    def set_overlay_assignment(self, scope: str, template_id, enabled: bool,
+                               filter_definition=None) -> bool:
         if scope not in ("movie", "show", "season", "episode"):
             return False
+        raw = (json.dumps(filter_definition)
+               if isinstance(filter_definition, dict) and filter_definition.get("rules")
+               else None)
         conn = self._get_connection()
         try:
             conn.execute(
-                "INSERT INTO overlay_assignment (scope, template_id, enabled, updated_at) "
-                "VALUES (?,?,?,datetime('now')) ON CONFLICT(scope) DO UPDATE SET "
-                "template_id=excluded.template_id, enabled=excluded.enabled, updated_at=datetime('now')",
-                (scope, template_id, 1 if enabled else 0))
+                "INSERT INTO overlay_assignment (scope, template_id, enabled, filter, updated_at) "
+                "VALUES (?,?,?,?,datetime('now')) ON CONFLICT(scope) DO UPDATE SET "
+                "template_id=excluded.template_id, enabled=excluded.enabled, "
+                "filter=excluded.filter, updated_at=datetime('now')",
+                (scope, template_id, 1 if enabled else 0, raw))
             conn.commit()
             return True
         except sqlite3.Error:
@@ -3310,55 +3319,87 @@ class VideoDatabase:
         finally:
             conn.close()
 
-    def overlay_scope_items(self, scope: str, server_source=None) -> list:
+    def overlay_scope_items(self, scope: str, server_source=None,
+                            filter_definition=None) -> list:
         """[{id, title}] for every on-server item in a scope — the apply targets
         (only items with a server_id can receive a pushed poster). Seasons/episodes
-        inherit their show's server_source (seasons don't store one)."""
+        inherit their show's server_source (seasons don't store one).
+
+        ``filter_definition`` (smart-rule JSON, same language as collections)
+        narrows the targets; for seasons/episodes it filters the PARENT SHOW
+        ("only anime shows get episode overlays"). Raises SmartFilterError on a
+        bad filter — the caller skips the scope rather than mis-applying."""
         scope = str(scope).lower()
+        fwhere, fparams = "", []
+        if filter_definition and (filter_definition.get("rules") or []):
+            from core.video.collections.smart_filter import compile_rules
+            kind = "movie" if scope == "movie" else "show"
+            fwhere, fparams = compile_rules(filter_definition, kind)
         conn = self._get_connection()
         try:
             if scope == "season":
-                where = ["se.server_id IS NOT NULL", "se.server_id <> ''"]
+                where = ["seasons.server_id IS NOT NULL", "seasons.server_id <> ''"]
                 params = []
                 if server_source:
-                    where.append("sh.server_source = ?")
+                    where.append("shows.server_source = ?")
                     params.append(server_source)
+                if fwhere:
+                    where.append(fwhere)
+                    params.extend(fparams)
                 rows = conn.execute(
-                    "SELECT se.id AS id, "
-                    "COALESCE(sh.title,'') || ' — ' "
-                    "|| COALESCE(NULLIF(se.title,''), 'Season ' || se.season_number) AS title "
-                    "FROM seasons se JOIN shows sh ON sh.id = se.show_id "
+                    "SELECT seasons.id AS id, "
+                    "COALESCE(shows.title,'') || ' — ' "
+                    "|| COALESCE(NULLIF(seasons.title,''), 'Season ' || seasons.season_number) AS title "
+                    "FROM seasons JOIN shows ON shows.id = seasons.show_id "
                     f"WHERE {' AND '.join(where)} "
-                    "ORDER BY COALESCE(sh.sort_title, sh.title) COLLATE NOCASE, se.season_number",
+                    "ORDER BY COALESCE(shows.sort_title, shows.title) COLLATE NOCASE, seasons.season_number",
                     params).fetchall()
                 return [dict(r) for r in rows]
             if scope == "episode":
-                where = ["e.server_id IS NOT NULL", "e.server_id <> ''"]
+                where = ["episodes.server_id IS NOT NULL", "episodes.server_id <> ''"]
                 params = []
                 if server_source:
-                    where.append("e.server_source = ?")
+                    where.append("episodes.server_source = ?")
                     params.append(server_source)
+                if fwhere:
+                    where.append(fwhere)
+                    params.extend(fparams)
                 rows = conn.execute(
-                    "SELECT e.id AS id, "
-                    "COALESCE(sh.title,'') || ' — S' || e.season_number || 'E' || e.episode_number "
-                    "|| CASE WHEN e.title IS NOT NULL AND e.title <> '' THEN ' ' || e.title ELSE '' END AS title "
-                    "FROM episodes e JOIN shows sh ON sh.id = e.show_id "
+                    "SELECT episodes.id AS id, "
+                    "COALESCE(shows.title,'') || ' — S' || episodes.season_number || 'E' || episodes.episode_number "
+                    "|| CASE WHEN episodes.title IS NOT NULL AND episodes.title <> '' THEN ' ' || episodes.title ELSE '' END AS title "
+                    "FROM episodes JOIN shows ON shows.id = episodes.show_id "
                     f"WHERE {' AND '.join(where)} "
-                    "ORDER BY COALESCE(sh.sort_title, sh.title) COLLATE NOCASE, e.season_number, e.episode_number",
+                    "ORDER BY COALESCE(shows.sort_title, shows.title) COLLATE NOCASE, episodes.season_number, episodes.episode_number",
                     params).fetchall()
                 return [dict(r) for r in rows]
             table = {"movie": "movies", "show": "shows"}.get(scope)
             if not table:
                 return []
-            where = ["server_id IS NOT NULL", "server_id <> ''"]
+            where = [f"{table}.server_id IS NOT NULL", f"{table}.server_id <> ''"]
             params = []
             if server_source:
-                where.append("server_source = ?")
+                where.append(f"{table}.server_source = ?")
                 params.append(server_source)
+            if fwhere:
+                where.append(fwhere)
+                params.extend(fparams)
             rows = conn.execute(
                 f"SELECT id, title FROM {table} WHERE {' AND '.join(where)} "
                 f"ORDER BY COALESCE(sort_title, title) COLLATE NOCASE", params).fetchall()
             return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def overlay_applied_ids(self, kind: str) -> set:
+        """Item ids with a live overlay ledger row for a kind — the restore pass
+        diffs these against the current (filtered) targets."""
+        conn = self._get_connection()
+        try:
+            return {r["item_id"] for r in conn.execute(
+                "SELECT item_id FROM overlay_apply WHERE kind=?", (kind,))}
+        except sqlite3.Error:
+            return set()
         finally:
             conn.close()
 
