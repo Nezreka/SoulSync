@@ -80,7 +80,7 @@ def _num(value: Any) -> float:
     try:
         return float(value)
     except (TypeError, ValueError):
-        raise SmartFilterError(f"expected a number, got {value!r}")
+        raise SmartFilterError(f"expected a number, got {value!r}") from None
 
 
 def _build_column_rule(field: str, spec: Dict[str, Any], op: str, value: Any, mt: str) -> Tuple[str, list]:

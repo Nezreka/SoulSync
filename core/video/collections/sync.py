@@ -26,6 +26,7 @@ import hashlib
 import json
 from typing import Any, Callable, Dict, List, Optional
 
+from core.video.collections.poster_gen import is_generated_ref, read_poster
 from core.video.collections.resolver import ResolvedCollection, resolve_collection
 from utils.logging_config import get_logger
 
@@ -149,9 +150,17 @@ def sync_collection(db, definition: Dict[str, Any], *, source,
 
     # Metadata (best-effort — a failure here doesn't fail the member sync).
     try:
+        # A generated poster's poster_url is OUR serve route — the media server
+        # can't fetch that relative URL, so push the file bytes instead.
+        poster_url = definition.get("poster_url")
+        poster_bytes = None
+        if is_generated_ref(poster_url):
+            poster_bytes = read_poster(did)
+            poster_url = None
         source.set_collection_meta(
             collection_id,
-            poster_url=definition.get("poster_url"),
+            poster_url=poster_url,
+            poster_bytes=poster_bytes,
             summary=definition.get("summary"),
             sort=definition.get("sort_order"),
             pinned=bool(definition.get("pinned")),
