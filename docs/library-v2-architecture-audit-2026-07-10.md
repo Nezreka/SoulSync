@@ -2151,8 +2151,64 @@ werden, aber die gefährlichsten Grundlagen schließen:
 10. **LIB2-010:** Entscheidung Multi-Profil und Source of Truth als ADR festhalten.
     ✅ *(2026-07-10, ADRs in §25a; Admin-only technisch erzwungen: API-Write-Guard + Import-Guard)*
 
-Damit sind P0-01, P0-02, P0-03, P0-04, P1-08, P1-09, P1-10, P1-11, P1-15,
-P1-16, P1-17, P1-29, P1-30 sowie Teile von P1-18 geschlossen. P0-04 wurde mit
+### 16.1 Konsolidierter Implementierungsstand (Stand 2026-07-11)
+
+Dieser Abschnitt ist die kompakte operative Übersicht über den tatsächlich
+implementierten Stand. Ein Eintrag gilt nur dann als erledigt, wenn Code und
+Regressionstest vorhanden sind; reine Architekturentscheidungen stehen separat im
+ADR-Log in §25a.
+
+#### Abgeschlossene Implementierungspakete
+
+| Paket | Tatsächlich implementiertes Verhalten | Nachweis |
+|---|---|---|
+| LIB2-001 | Library-v2-Route ist im generierten RouteTree und Route-Manifest enthalten; die zuvor fehlerhaften Uniontypen wurden bereinigt und die betroffenen Vitest-Fälle stabilisiert. | `7f34ae3` |
+| LIB2-002 | Ein explizit leerer Refresh-Scope bleibt leer und kann nicht mehr zu einem ungewollten Full-Library-Scan werden; unbekannte Entities liefern 404. | `b87f873` |
+| LIB2-003 | Artist-Delete unterscheidet Primary- von Featured-Zuordnung. Das Löschen eines Featured Artists entfernt keine fremden Releases; die UI kann die Auswirkung vorab anzeigen. | `1efa72d` |
+| LIB2-004 | Wishlist-Upserts verwenden profil-/track-/albumbezogene Composite-Identität, sind bei Wiederholung idempotent und aktualisieren Source-/Quality-Kontext bestehender Rows. | `ebdd8a0` |
+| LIB2-005 | Nur eine direkte Track-Aktion setzt `user_initiated=true`. Album-/Artist-Kaskaden und geplante Mirrors respektieren die Ignore-Liste. | `a531111` |
+| LIB2-006 | Torrent-/Usenet-Candidate-URLs bleiben serverseitig in einem TTL-Store. Der Browser erhält nur eine opaque Candidate-ID; unbekannte oder abgelaufene IDs werden abgelehnt. Eine Profil-/Entity-Bindung des Tokens ist noch offen. | `0168aa0` |
+| LIB2-007 | Manuelle Grabs tragen Lib2-Track-/Album-ID bis zum Post-Processing; der Server validiert die Entity-Zugehörigkeit und löst das zugewiesene Quality-Profil selbst auf, Autolink kann die exakte Ziel-Entity verwenden. | `195e5c6` |
+| LIB2-008 | Quality-Profil-Zuweisung und Monitoring sind getrennte Commands. Eine Profiländerung setzt einen bewusst unmonitorten Track nicht mehr automatisch auf monitored. | `bb7c815` |
+| LIB2-009 | Lib2-Write und Mirror-Outbox-Row entstehen in derselben SQLite-Transaktion. Drain, Retry, Fehlerstatus und API-/UI-Status sind vorhanden; Mirroroperationen sind wiederholbar. | `bdc95b2` |
+| LIB2-010 | Library-v2-Schreibzugriffe sind auf User-Profil 1 begrenzt; Nicht-Admins bleiben read-only. Der Import lehnt explizite Fremdprofile ab. | `10bfdd6` |
+| Outbox-Härtung | Legacy-Wishlist-/Watchlist-Methoden können DB-Ausnahmen im strikten Modus weiterwerfen, statt sie intern in `False` umzuwandeln. Solche Fehler bleiben dadurch pending/retryable; legitime terminale `False`-Ergebnisse (zum Beispiel Ignore-/Blocklist) bleiben erlaubt. | `895d27e` |
+| Grab-Härtung | Der serverseitig aufgelöste `quality_profile_id` landet tatsächlich in `track_info` und damit in der Quality-Pipeline. Nicht-Admins können auch über `/api/download` keinen Lib2-Kontext anhängen; fehlende Downloadparameter liefern 400 statt 500. | `a7b08a8` |
+| Import-Härtung | `profile_id=None` bedeutet im öffentlichen Import und in den exportierten Monitoring-Helfern immer Admin-Profil 1, niemals alle Profile. Fremdprofile werden hart abgelehnt. | `6ab520f` |
+| P1-30 | Wishlist-only-Tracks übernehmen ihr validiertes Quality-Profil. Fehlende/dangling IDs fallen auf das aktuelle Default-Profil zurück; Album/Artist werden nicht aus einem Einzeltrack überschrieben und Konflikte werden geloggt. | `33aeaf0` |
+
+#### Verifizierter Teststand
+
+- Relevante Backend-Regressionssuite: **211 Tests bestanden**.
+- Frontend-Typecheck mit `oxlint --type-check`: **0 Warnungen, 0 Fehler**.
+- Library-v2-spezifische Import-, API-, Outbox-, Profil-, Candidate- und
+  Wishlist-Tests sind in den oben genannten Commits enthalten.
+- Die zuletzt erfasste vollständige Vitest-Baseline hat weiterhin **7
+  vorbestehende Fehler** in Form-Slider-, Import- und Issues-Tests. Diese Fehler
+  wurden durch den Library-v2-Block nicht verursacht und sind nicht als erledigt
+  markiert.
+
+#### Bewusst noch offen
+
+- [ ] P1-01: numerische `DEFAULT 1`-Fallbacks entfernen und belastbare
+  FK-/Replacement-Strategie für Quality Profiles migrieren.
+- [ ] P1-31: fehlgeschlagene Tracklist-Auflösung mit persistentem Retry-/Fehlerstatus
+  versehen, damit auto-monitorierte Releases nicht dauerhaft leer bleiben.
+- [ ] Periodischen Outbox-Reconciler und einen vollständigen Operator-/UI-Status für
+  dauerhaft fehlgeschlagene Mirrors ergänzen.
+- [ ] Candidate-Tokens zusätzlich an Profil/User und Lib2-Entity binden sowie vor
+  einem Multi-Worker-Rollout in einen gemeinsam sichtbaren Store verschieben.
+- [ ] Stabile providerlose IDs, Monitor-Provenance und die verbleibende
+  Legacy-Flag-Projektion umsetzen.
+- [ ] CI-Gate ergänzen, das nach RouteTree-Generierung einen Git-Diff verbietet.
+- [ ] Die sieben bekannten allgemeinen Frontend-Testfehler separat stabilisieren.
+- [ ] Release Group/Edition, Multi-File-Primary-Modell und persistente
+  Acquisition-Korrelation gemäß ADR-03/04/07 implementieren.
+
+Damit sind P0-01, P0-02, der akute URL-/Secret-Leak aus P0-03, der atomare
+Outbox-Kern aus P0-04, P1-08, P1-09, P1-10, P1-11, P1-15, P1-16, P1-17, P1-29,
+P1-30 sowie Teile von P1-18 geschlossen. Die verbleibende Candidate-Bindung und der
+periodische Outbox-Reconciler stehen bewusst in der offenen Liste. P0-04 wurde mit
 strikter Fehlerweitergabe im Outbox-Worker nachgehärtet (`895d27e`); der manuelle
 Grab-Pfad übergibt das serverseitige Profil nun nachweislich an die Pipeline und ist
 für Nicht-Admins gesperrt (`a7b08a8`). Erst danach sollten
