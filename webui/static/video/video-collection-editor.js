@@ -172,6 +172,7 @@
 
         if (!cols.length) {
             var hero = h('div', 'vce-hero',
+                '<div class="vce-hero-fan" aria-hidden="true"><i></i><i></i><i></i></div>' +
                 '<h2>Group your library into collections</h2>' +
                 '<p>Build Plex/Jellyfin collections from smart rules or franchises — and start in one click ' +
                 'with presets expanded from what you actually own. Franchise collections can even wishlist ' +
@@ -251,10 +252,14 @@
         var syncLine = c.synced_at
             ? '<span class="vce-dot vce-dot--ok"></span>Synced ' + esc(relTime(c.synced_at) || '')
             : '<span class="vce-dot"></span>Never synced';
-        if (!c.enabled) syncLine = '<span class="vce-dot vce-dot--warn"></span>Paused (not in daily sync)';
+        if (!c.enabled) syncLine = '<span class="vce-dot vce-dot--warn"></span>Paused';
+        // Poster-forward: the art is a zoomable layer under a scrim; name/meta/state
+        // sit ON the art like a shelf label, and actions slide up over them on hover.
         el.innerHTML =
-            '<div class="vce-card-thumb"' + thumbStyle + '>' +
+            '<div class="vce-card-thumb">' +
+                '<div class="vce-card-art"' + thumbStyle + '></div>' +
                 (c.poster_url ? '' : '<div class="vce-card-mono">' + mono + '</div>') +
+                '<div class="vce-card-scrim"></div>' +
                 '<div class="vce-card-badges">' +
                     '<span class="vce-chip">' + (c.kind === 'list' ? 'List' : 'Smart') + '</span>' +
                     (c.pinned ? '<span class="vce-chip">Pinned</span>' : '') +
@@ -262,16 +267,16 @@
                 '</div>' +
                 '<button type="button" class="vce-toggle' + (c.enabled ? ' vce-toggle--on' : '') + '" data-act="toggle" ' +
                     'title="' + (c.enabled ? 'In daily sync — click to pause' : 'Paused — click to include in daily sync') + '"></button>' +
+                '<div class="vce-card-body">' +
+                    '<div class="vce-card-name">' + esc(c.name) + '</div>' +
+                    '<div class="vce-card-meta">' + mediaWord(c.media_type, true) + (count ? ' · ' + esc(count) : '') +
+                        '<span class="vce-card-sync">' + syncLine + '</span></div>' +
+                '</div>' +
                 '<div class="vce-card-acts">' +
                     '<button type="button" class="vce-mini" data-act="edit">' + I.edit + 'Edit</button>' +
                     '<button type="button" class="vce-mini" data-act="sync">' + I.sync + 'Sync</button>' +
                     '<button type="button" class="vce-mini vce-mini--danger" data-act="del" aria-label="Delete">' + I.trash + '</button>' +
                 '</div>' +
-            '</div>' +
-            '<div class="vce-card-body">' +
-                '<div class="vce-card-name">' + esc(c.name) + '</div>' +
-                '<div class="vce-card-meta">' + mediaWord(c.media_type, true) + (count ? ' · ' + esc(count) : '') + '</div>' +
-                '<div class="vce-card-sync">' + syncLine + '</div>' +
             '</div>';
         el.addEventListener('click', function () { loadEditor(c.id); });
         el.querySelector('[data-act="edit"]').addEventListener('click', function (e) {
