@@ -57,6 +57,12 @@
     function memberPosterURL(mediaType, id) {
         return '/api/video/poster/' + (mediaType === 'show' ? 'show' : 'movie') + '/' + id + '?w=140';
     }
+    // SoulSync's standard yes/no modal (core.js), promise-based; window.confirm
+    // only as a fallback if the shell didn't provide it.
+    function ask(opts) {
+        if (typeof showConfirmDialog === 'function') return showConfirmDialog(opts);
+        return Promise.resolve(window.confirm((opts && (opts.message || opts.title)) || 'Are you sure?'));
+    }
     function relTime(sqliteUtc) {
         // collection_sync.synced_at is SQLite datetime('now') = UTC.
         if (!sqliteUtc) return null;
@@ -139,8 +145,17 @@
     // lives in the page as a ← chip.
     function navGuard(fn) {
         return function () {
-            if (view === 'editor' && ed && ed.dirty &&
-                !window.confirm('Discard unsaved changes?')) return;
+            if (view === 'editor' && ed && ed.dirty) {
+                ask({ title: 'Discard changes?',
+                      message: 'This collection has unsaved changes.',
+                      confirmText: 'Discard', cancelText: 'Keep editing',
+                      destructive: true }).then(function (ok) {
+                    if (!ok) return;
+                    ed.dirty = false;
+                    fn();
+                });
+                return;
+            }
             if (ed) ed.dirty = false;
             fn();
         };
@@ -413,19 +428,23 @@
     // Re-render every generated poster with the current art pipeline (real
     // franchise/studio/director art where it exists). Hand-set URLs untouched.
     function refreshArtwork(btn) {
-        if (!window.confirm('Refresh artwork for all collections?\n\nRe-renders every generated poster with the ' +
-            'latest treatment (real franchise art, studio logos, director portraits). ' +
-            'Poster URLs you set yourself are left alone.')) return;
-        if (btn) btn.disabled = true;
-        api('/posters/regenerate', { method: 'POST' }).then(function (d) {
-            if (d && d.ok) {
-                toast('Refreshing artwork for ' + d.total + ' collection' + (d.total === 1 ? '' : 's') + '…');
-                // Art lands progressively; pick it up in a couple of passes.
-                setTimeout(refreshGallery, 6000);
-                setTimeout(refreshGallery, 20000);
-            } else { toast((d && d.error) || 'Refresh failed', true); }
-        }).catch(function () { toast('Refresh failed', true); })
-          .finally(function () { if (btn) btn.disabled = false; });
+        ask({ title: 'Refresh all artwork?',
+              message: 'Re-renders every generated poster with the latest treatment — real ' +
+                       'franchise art, studio logos, director portraits. Poster URLs you set ' +
+                       'yourself are left alone.',
+              confirmText: 'Refresh artwork', cancelText: 'Cancel' }).then(function (ok) {
+            if (!ok) return;
+            if (btn) btn.disabled = true;
+            api('/posters/regenerate', { method: 'POST' }).then(function (d) {
+                if (d && d.ok) {
+                    toast('Refreshing artwork for ' + d.total + ' collection' + (d.total === 1 ? '' : 's') + '…');
+                    // Art lands progressively; pick it up in a couple of passes.
+                    setTimeout(refreshGallery, 6000);
+                    setTimeout(refreshGallery, 20000);
+                } else { toast((d && d.error) || 'Refresh failed', true); }
+            }).catch(function () { toast('Refresh failed', true); })
+              .finally(function () { if (btn) btn.disabled = false; });
+        });
     }
 
     // Sync-all runs as a background job on the server; follow it live over the
@@ -712,24 +731,27 @@
                 var ids = Object.keys(picked);
                 if (!ids.length) return;
                 var managedN = cols.filter(function (c) { return picked[c.server_id] && c.managed; }).length;
-                var msg = 'Delete ' + ids.length + ' collection' + (ids.length === 1 ? '' : 's') + ' from the server?' +
-                    (managedN ? ('\n\n' + managedN + ' of these are SoulSync-managed and will be recreated on the next sync.') : '') +
-                    '\n\nTitles themselves are never touched.';
-                if (!window.confirm(msg)) return;
-                delBtn.disabled = true;
-                api('/server/delete', { method: 'POST', body: JSON.stringify({ ids: ids }) }).then(function (r) {
-                    if (r && r.ok) {
-                        watchCleanup(foot);          // job started — follow it live
-                    } else if (r && /already running/i.test(r.error || '')) {
-                        toast('A cleanup is already running — showing its progress');
-                        watchCleanup(foot);
-                    } else {
-                        toast((r && r.error) || 'Delete failed', true);
+                var msg = (managedN ? (managedN + ' of these are SoulSync-managed and will be recreated on the next sync. ') : '') +
+                    'Titles themselves are never touched.';
+                ask({ title: 'Delete ' + ids.length + ' collection' + (ids.length === 1 ? '' : 's') + ' from the server?',
+                      message: msg, confirmText: 'Delete', cancelText: 'Cancel',
+                      destructive: true }).then(function (ok) {
+                    if (!ok) return;
+                    delBtn.disabled = true;
+                    api('/server/delete', { method: 'POST', body: JSON.stringify({ ids: ids }) }).then(function (r) {
+                        if (r && r.ok) {
+                            watchCleanup(foot);          // job started — follow it live
+                        } else if (r && /already running/i.test(r.error || '')) {
+                            toast('A cleanup is already running — showing its progress');
+                            watchCleanup(foot);
+                        } else {
+                            toast((r && r.error) || 'Delete failed', true);
+                            delBtn.disabled = false;
+                        }
+                    }).catch(function () {
+                        toast('Delete failed', true);
                         delBtn.disabled = false;
-                    }
-                }).catch(function () {
-                    toast('Delete failed', true);
-                    delBtn.disabled = false;
+                    });
                 });
             });
             foot.appendChild(delBtn);
@@ -845,7 +867,15 @@
     }
 
     function leaveEditor() {
-        if (ed && ed.dirty && !window.confirm('Discard unsaved changes?')) return;
+        if (ed && ed.dirty) {
+            ask({ title: 'Discard changes?',
+                  message: 'This collection has unsaved changes.',
+                  confirmText: 'Discard', cancelText: 'Keep editing',
+                  destructive: true }).then(function (ok) {
+                if (ok) { ed.dirty = false; showGallery(); }
+            });
+            return;
+        }
         showGallery();
     }
 
@@ -930,14 +960,23 @@
                 ed[f] = inp.type === 'checkbox' ? inp.checked : inp.value;
                 ed.dirty = true;
                 if (f === 'media_type') {
-                    if ((ed.definition.rules || []).length &&
-                        !window.confirm('Switching library clears the current rules. Continue?')) {
-                        ed.media_type = inp.value === 'movie' ? 'show' : 'movie';
-                        inp.value = ed.media_type;
-                        return;
-                    }
-                    ed.definition = { match: ed.definition.match || 'all', rules: [] };
-                    renderBuilder(); schedulePreview();
+                    var apply = function () {
+                        ed.definition = { match: ed.definition.match || 'all', rules: [] };
+                        renderBuilder(); schedulePreview();
+                    };
+                    if ((ed.definition.rules || []).length) {
+                        ask({ title: 'Switch library?',
+                              message: 'Switching between Movies and Shows clears the current rules.',
+                              confirmText: 'Switch & clear', cancelText: 'Cancel',
+                              destructive: true }).then(function (ok) {
+                            if (!ok) {
+                                ed.media_type = inp.value === 'movie' ? 'show' : 'movie';
+                                inp.value = ed.media_type;
+                                return;
+                            }
+                            apply();
+                        });
+                    } else { apply(); }
                 }
                 if (f === 'kind') { renderBuilder(); schedulePreview(); }
             });
@@ -1318,11 +1357,16 @@
           .finally(function () { if (btn) { btn.disabled = false; if (lbl != null) btn.innerHTML = lbl; } });
     }
     function delCollection(id, name, backToGallery) {
-        if (!window.confirm('Delete collection "' + (name || '') + '"? (The server collection is left in place.)')) return;
-        api('/' + id, { method: 'DELETE' }).then(function () {
-            toast('Deleted');
-            if (ed) ed.dirty = false;
-            if (backToGallery || view === 'gallery') showGallery(); else refreshGallery();
+        ask({ title: 'Delete "' + (name || 'this collection') + '"?',
+              message: 'Removes the SoulSync definition. The collection already on your server is left in place — remove it from the On server view if you want it gone there too.',
+              confirmText: 'Delete', cancelText: 'Cancel',
+              destructive: true }).then(function (ok) {
+            if (!ok) return;
+            api('/' + id, { method: 'DELETE' }).then(function () {
+                toast('Deleted');
+                if (ed) ed.dirty = false;
+                if (backToGallery || view === 'gallery') showGallery(); else refreshGallery();
+            });
         });
     }
 
