@@ -177,6 +177,69 @@ class _BoomProxy:
         raise AssertionError(f"unexpected db call {name} — owned= should skip resolve")
 
 
+# ── context art: real TMDB artwork beats a collage where the subject has one ─
+class _CtxEngine:
+    def collection_poster(self, cid):
+        return "https://img.tmdb/collection-%s.jpg" % cid if int(cid) in (119, 131292) else None
+
+    def person_photo(self, name):
+        return "https://img.tmdb/nolan.jpg" if name == "Christopher Nolan" else None
+
+
+def _http(url):
+    class R:
+        status_code = 200
+        content = ("ART:" + url).encode()
+    return R()
+
+
+def test_context_art_franchise_verbatim_and_director_overlay():
+    fr = {"kind": "list", "definition": {"source": "tmdb_collection", "collection_id": 119}}
+    art = poster_gen._context_art(fr, engine=_CtxEngine(), http_get=_http)
+    assert art == (b"ART:https://img.tmdb/collection-119.jpg", False)   # verbatim
+
+    uni = {"kind": "list", "definition": {"source": "tmdb_union", "collections": [999, 131292]}}
+    art = poster_gen._context_art(uni, engine=_CtxEngine(), http_get=_http)
+    assert art[0].endswith(b"collection-131292.jpg")                    # first WITH art wins
+
+    di = {"kind": "smart", "definition": {"rules": [
+        {"field": "director", "op": "is", "value": "Christopher Nolan"}]}}
+    art = poster_gen._context_art(di, engine=_CtxEngine(), http_get=_http)
+    assert art == (b"ART:https://img.tmdb/nolan.jpg", True)             # name gets burned in
+
+
+def test_context_art_none_for_charts_and_multi_rule():
+    eng = _CtxEngine()
+    assert poster_gen._context_art(
+        {"kind": "list", "definition": {"source": "tmdb_chart", "chart": "top_movies"}},
+        engine=eng, http_get=_http) is None
+    assert poster_gen._context_art(
+        {"kind": "smart", "definition": {"rules": [
+            {"field": "director", "op": "is", "value": "X"},
+            {"field": "year", "op": "gte", "value": 2000}]}},
+        engine=eng, http_get=_http) is None
+
+
+def test_generate_auto_prefers_context_and_collage_mode_forces(db, tmp_path, monkeypatch):
+    _seed(db, n=2)
+    d = _definition(db)
+    real_jpeg = _jpeg((25, 90, 25), size=(780, 1170))
+    monkeypatch.setattr(poster_gen, "_context_art", lambda definition, **kw: (real_jpeg, False))
+
+    url = poster_gen.generate_for_definition(db, d, root=tmp_path / "gen")
+    assert url is not None
+    # Verbatim context art — stored byte-for-byte, no collage pipeline.
+    assert poster_gen.read_poster(d["id"], tmp_path / "gen") == real_jpeg
+
+    fetched = []
+    url = poster_gen.generate_for_definition(
+        db, db.get_collection_definition(d["id"]), mode="collage",
+        fetch=lambda mt, i: fetched.append(i) or _jpeg((60, 60, 60)),
+        root=tmp_path / "gen")
+    assert url is not None and fetched                     # collage mode ignored context
+    assert poster_gen.read_poster(d["id"], tmp_path / "gen") != real_jpeg
+
+
 # ── sync pushes generated poster BYTES, never our relative route ────────────
 class _FakeSource:
     server_name = "plex"

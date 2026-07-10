@@ -551,6 +551,35 @@ class TMDBClient:
         r.raise_for_status()
         return self._disc_map((r.json() or {}).get("results"), kind)
 
+    def collection_info(self, collection_id):
+        """A TMDB collection's own identity art — {name, poster_url} (w780, real
+        title art) or None. Powers context posters for franchise collections."""
+        if not self.api_key or collection_id is None:
+            return None
+        import requests
+        r = requests.get(self.BASE + "/collection/" + str(collection_id),
+                         params={"api_key": self.api_key}, timeout=15)
+        r.raise_for_status()
+        d = r.json() or {}
+        poster = d.get("poster_path")
+        return {"name": d.get("name"),
+                "poster_url": ("https://image.tmdb.org/t/p/w780" + poster) if poster else None}
+
+    def person_photo(self, name):
+        """A person's TMDB profile photo URL (h632 portrait) by name — first
+        search hit, or None. Powers context posters for director collections."""
+        if not self.api_key or not (name or "").strip():
+            return None
+        import requests
+        r = requests.get(self.BASE + "/search/person",
+                         params={"api_key": self.api_key, "query": name,
+                                 "include_adult": "false"}, timeout=15)
+        r.raise_for_status()
+        for it in (r.json() or {}).get("results") or []:
+            if it.get("profile_path"):
+                return "https://image.tmdb.org/t/p/h632" + it["profile_path"]
+        return None
+
     def keyword_search(self, query):
         """TMDB keyword id for a query ('christmas' → 207317) — first exact-ish
         match wins. Resolved at runtime instead of hardcoding ids so a TMDB-side

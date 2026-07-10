@@ -183,7 +183,7 @@ def test_seasonal_and_stories_packs(db):
     seasonal = {e["name"]: e for e in expand_pack(db, "seasonal", "movie", fetcher)}
     assert "Christmas" in seasonal and "Halloween" in seasonal
     assert seasonal["Christmas"]["definition"] == \
-        {"source": "tmdb_keyword", "query": "christmas", "limit": 100}
+        {"source": "tmdb_keyword", "query": "christmas", "limit": 250}
     assert seasonal["Christmas"]["count"] == 1
     assert all(s == "tmdb_keyword" and r["kind"] == "movie" for s, r in seen)
     stories = {e["name"] for e in expand_pack(db, "stories", "movie", fetcher)}

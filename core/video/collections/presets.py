@@ -349,11 +349,13 @@ def _expand_charts(db, mt: str, fetcher=None) -> List[Dict[str, Any]]:
 
 
 def _expand_keyword_pack(db, mt: str, fetcher, rows, pack: str, blurb_fmt) -> List[Dict[str, Any]]:
-    specs = [("tmdb_keyword", {"kind": mt, "query": q, "limit": 100}) for _, _, q in rows]
+    # 250 (not 100): a theme's owned deep-cuts live in the popularity long tail —
+    # a Christmas movie the user owns must land in the Christmas collection.
+    specs = [("tmdb_keyword", {"kind": mt, "query": q, "limit": 250}) for _, _, q in rows]
     counts = _owned_counts(db, mt, specs, fetcher)
     return [
         _remote_entry(pack + ":" + key, name, counts[i], blurb_fmt(name, mt),
-                      {"source": "tmdb_keyword", "query": q, "limit": 100}, pack, mt)
+                      {"source": "tmdb_keyword", "query": q, "limit": 250}, pack, mt)
         for i, (key, name, q) in enumerate(rows)
     ]
 

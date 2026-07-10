@@ -204,13 +204,18 @@ def register_routes(bp):
 
     @bp.route("/collections/<int:cid>/poster/generate", methods=["POST"])
     def collections_poster_generate(cid):
+        """Render this collection's artwork. mode 'auto' (default) uses the
+        subject's real TMDB art when it has one (franchise/universe title art,
+        a director's portrait); 'collage' forces the member-poster collage."""
         from . import get_video_db
         from core.video.collections.poster_gen import generate_for_definition
         db = get_video_db()
         c = db.get_collection_definition(cid)
         if not c:
             return jsonify({"ok": False, "error": "not found"}), 404
-        url = generate_for_definition(db, c)
+        d = request.get_json(silent=True) or {}
+        mode = "collage" if d.get("mode") == "collage" else "auto"
+        url = generate_for_definition(db, c, mode=mode)
         if not url:
             return jsonify({"ok": False, "error": "Could not generate a poster"}), 500
         return jsonify({"ok": True, "poster_url": url})

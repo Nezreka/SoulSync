@@ -127,8 +127,10 @@ def _fetch_keyword(eng, ref: Any) -> List[Dict[str, Any]]:
         logger.debug("no TMDB keyword for %r", query)
         return []
     limit = _limit_of(ref)
+    # Low vote floor (10, not discover's default 40): an owned deep-cut must
+    # still match its theme — junk is filtered by the popularity sort + limit.
     raw = _fetch_pages(
-        lambda p: eng.discover_filter(kind, keywords=str(kid), page=p, vote_count_min=20),
+        lambda p: eng.discover_filter(kind, keywords=str(kid), page=p, vote_count_min=10),
         limit)
     return _dedup_normed(raw)[:limit]
 
@@ -153,9 +155,11 @@ def _fetch_union(eng, ref: Any) -> List[Dict[str, Any]]:
 
 
 def _fetch_list(eng, ref: Any) -> List[Dict[str, Any]]:
+    # Lists get a higher page cap (500 items) than charts — a public TMDB list
+    # is a complete membership, not a ranking to sample.
     raw: list = []
     page, total = 1, 1
-    while page <= min(total, _MAX_PAGES):
+    while page <= min(total, 25):
         items, total = eng.list_page(ref, page=page)
         if not items:
             break

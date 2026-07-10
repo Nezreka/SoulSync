@@ -223,39 +223,107 @@ def _default_list_fetcher(db):
         return None
 
 
+# ── context art (real artwork beats a collage where the subject HAS one) ────
+def _context_art(definition: Dict[str, Any], *, engine=None,
+                 http_get: Optional[Callable] = None):
+    """(image_bytes, needs_title_overlay) when the definition's subject carries
+    its own artwork on TMDB, else None:
+      · franchise / universe (with franchise ids) → the collection's title art
+        (used VERBATIM — it already carries the branding),
+      · a single-director smart collection → the director's portrait (gets the
+        name burned in via the standard title treatment).
+    Best-effort at every step — any miss falls back to the collage."""
+    try:
+        if engine is None:
+            from core.video.enrichment.engine import get_video_enrichment_engine
+            engine = get_video_enrichment_engine()
+    except Exception:   # noqa: BLE001
+        return None
+    if engine is None:
+        return None
+
+    body = definition.get("definition") or {}
+    url = None
+    overlay = False
+    try:
+        if definition.get("kind") == "list":
+            source = str(body.get("source") or "").lower()
+            if source in ("franchise", "tmdb_collection") and body.get("collection_id"):
+                url = engine.collection_poster(body["collection_id"])
+            elif source == "tmdb_union":
+                for cid in body.get("collections") or []:
+                    url = engine.collection_poster(cid)
+                    if url:
+                        break
+        else:
+            rules = body.get("rules") or []
+            if len(rules) == 1 and rules[0].get("field") == "director":
+                name = rules[0].get("value")
+                name = name[0] if isinstance(name, list) and name else name
+                if isinstance(name, str) and name.strip():
+                    url = engine.person_photo(name)
+                    overlay = True
+    except Exception:   # noqa: BLE001
+        logger.debug("context art lookup failed", exc_info=True)
+        return None
+    if not url:
+        return None
+    try:
+        if http_get is None:
+            import requests
+            http_get = lambda u: requests.get(u, timeout=20)   # noqa: E731
+        r = http_get(url)
+        data = getattr(r, "content", None) if getattr(r, "status_code", 200) == 200 else None
+        return (data, overlay) if data else None
+    except Exception:   # noqa: BLE001
+        logger.debug("context art fetch failed: %s", url, exc_info=True)
+        return None
+
+
 def generate_for_definition(db, definition: Dict[str, Any], *,
                             fetch: Optional[Callable] = None,
                             owned: Optional[List[Dict[str, Any]]] = None,
                             list_fetcher: Optional[Callable] = None,
+                            mode: str = "auto",
+                            context_engine=None,
                             root: Optional[Path] = None) -> Optional[str]:
     """Render + store the poster for one definition and point its poster_url at
-    the serve route. Resolves with the REAL list fetcher by default — a chart/
-    franchise collection must collage from its owned members, not fall back to
-    the gradient because membership couldn't resolve. Pass ``owned`` to skip the
-    resolve (sync already has it). Returns the new poster_url, or None. Never
-    raises."""
+    the serve route. ``mode='auto'`` prefers the subject's REAL artwork when it
+    has one (franchise/universe title art verbatim; a director's portrait with
+    the name burned in) and collages otherwise; ``mode='collage'`` forces the
+    member collage. Resolves with the real list fetcher by default; pass
+    ``owned`` to skip the resolve (sync already has it). Returns the new
+    poster_url, or None. Never raises."""
     did = (definition or {}).get("id")
     if did is None:
         return None
     try:
-        if owned is None:
-            from core.video.collections.resolver import resolve_collection
-            res = resolve_collection(db, definition,
-                                     list_fetcher=list_fetcher or _default_list_fetcher(db))
-            owned = res.owned if res.ok else []
-        fetch = fetch or _default_fetch(db)
-        media_type = definition.get("media_type") or "movie"
-        blobs = []
-        for m in _collage_members(owned):
-            if len(blobs) >= 4:
-                break
-            try:
-                b = fetch(media_type, m.get("id"))
-            except Exception:   # noqa: BLE001 - one bad fetch shouldn't kill the poster
-                b = None
-            if b:
-                blobs.append(b)
-        data = render_collage(blobs, definition.get("name") or "Collection")
+        data = None
+        if mode != "collage":
+            ctx = _context_art(definition, engine=context_engine)
+            if ctx:
+                art, overlay = ctx
+                data = render_collage([art], definition.get("name") or "Collection") \
+                    if overlay else art
+        if data is None:
+            if owned is None:
+                from core.video.collections.resolver import resolve_collection
+                res = resolve_collection(db, definition,
+                                         list_fetcher=list_fetcher or _default_list_fetcher(db))
+                owned = res.owned if res.ok else []
+            fetch = fetch or _default_fetch(db)
+            media_type = definition.get("media_type") or "movie"
+            blobs = []
+            for m in _collage_members(owned):
+                if len(blobs) >= 4:
+                    break
+                try:
+                    b = fetch(media_type, m.get("id"))
+                except Exception:   # noqa: BLE001 - one bad fetch shouldn't kill the poster
+                    b = None
+                if b:
+                    blobs.append(b)
+            data = render_collage(blobs, definition.get("name") or "Collection")
 
         path = poster_path(did, root)
         path.parent.mkdir(parents=True, exist_ok=True)

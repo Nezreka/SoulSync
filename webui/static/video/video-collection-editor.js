@@ -20,8 +20,16 @@
     var fieldCache = {};          // media_type -> {fields, suggestions}
     var presetCache = {};         // media_type -> packs[]
     var ed = null;                // editor state
-    var gal = { tab: 'all', q: '', collections: null };
-    var view = 'gallery';         // gallery | presets | picker | editor
+    var gal = { tab: 'all', q: '', collections: null,
+                sort: _pref('vce:sort', 'smart'), density: _pref('vce:density', 'cozy') };
+    var view = 'gallery';         // gallery | presets | picker | editor | server
+
+    function _pref(key, fallback) {
+        try { return localStorage.getItem(key) || fallback; } catch (e) { return fallback; }
+    }
+    function _setPref(key, val) {
+        try { localStorage.setItem(key, val); } catch (e) { /* private mode */ }
+    }
 
     // ── tiny helpers ─────────────────────────────────────────────────────────
     function esc(s) {
@@ -200,11 +208,14 @@
             '<div class="vce-stat"><span class="vce-stat-n">' + items + '</span><span class="vce-stat-l">Items grouped</span></div>' +
             '<div class="vce-stat"><span class="vce-stat-n">' + esc(relTime(last) || '—') + '</span><span class="vce-stat-l">Last sync</span></div>'));
 
-        // filters
+        // filters: tabs (with counts) · search · sort · density
+        var counts = { all: cols.length, movie: 0, show: 0 };
+        cols.forEach(function (c) { counts[(c.media_type || 'movie')]++; });
         var filters = h('div', 'vce-filters');
         var tabs = h('div', 'vce-tabs');
         [['all', 'All'], ['movie', 'Movies'], ['show', 'Shows']].forEach(function (t) {
-            var b = h('button', 'vce-tab' + (gal.tab === t[0] ? ' vce-tab--on' : ''), esc(t[1]));
+            var b = h('button', 'vce-tab' + (gal.tab === t[0] ? ' vce-tab--on' : ''),
+                esc(t[1]) + '<span class="vce-tab-n">' + counts[t[0]] + '</span>');
             b.type = 'button';
             b.addEventListener('click', function () { gal.tab = t[0]; renderGallery(page); });
             tabs.appendChild(b);
@@ -220,21 +231,64 @@
         });
         search.appendChild(si);
         filters.appendChild(search);
+        var sortSel = h('select', 'vce-input vce-sort',
+            [['smart', 'Pinned & wishlists first'], ['name', 'Name A → Z'],
+             ['synced', 'Recently synced'], ['items', 'Most items']].map(function (o) {
+                return '<option value="' + o[0] + '"' + (o[0] === gal.sort ? ' selected' : '') + '>' + esc(o[1]) + '</option>';
+            }).join(''));
+        sortSel.setAttribute('aria-label', 'Sort collections');
+        sortSel.addEventListener('change', function () {
+            gal.sort = sortSel.value;
+            _setPref('vce:sort', gal.sort);
+            paintCards(grid);
+        });
+        filters.appendChild(sortSel);
+        var density = h('button', 'vce-density' + (gal.density === 'compact' ? ' vce-density--on' : ''), I.brand);
+        density.type = 'button';
+        density.title = 'Toggle compact grid';
+        density.setAttribute('aria-label', 'Toggle compact grid');
+        density.addEventListener('click', function () {
+            gal.density = gal.density === 'compact' ? 'cozy' : 'compact';
+            _setPref('vce:density', gal.density);
+            density.classList.toggle('vce-density--on', gal.density === 'compact');
+            grid.classList.toggle('vce-gallery--compact', gal.density === 'compact');
+        });
+        filters.appendChild(density);
         page.appendChild(filters);
 
-        var grid = h('div', 'vce-gallery');
+        var grid = h('div', 'vce-gallery' + (gal.density === 'compact' ? ' vce-gallery--compact' : ''));
         page.appendChild(grid);
         paintCards(grid);
         if (gal.q) { si.focus(); si.setSelectionRange(si.value.length, si.value.length); }
     }
 
+    // Sort for the gallery. 'smart' = pinned first, then wishlist-feeding, then
+    // the API's recently-edited order (JS sort is stable, so ties keep recency).
+    function sortCols(list) {
+        var arr = list.slice();
+        if (gal.sort === 'name') {
+            arr.sort(function (a, b) { return (a.name || '').localeCompare(b.name || ''); });
+        } else if (gal.sort === 'synced') {
+            arr.sort(function (a, b) { return (b.synced_at || '').localeCompare(a.synced_at || ''); });
+        } else if (gal.sort === 'items') {
+            arr.sort(function (a, b) { return (b.member_count || 0) - (a.member_count || 0); });
+        } else {
+            arr.sort(function (a, b) {
+                var wa = (a.pinned ? 2 : 0) + (a.wishlist_missing ? 1 : 0);
+                var wb = (b.pinned ? 2 : 0) + (b.wishlist_missing ? 1 : 0);
+                return wb - wa;
+            });
+        }
+        return arr;
+    }
+
     function paintCards(grid) {
         var q = (gal.q || '').trim().toLowerCase();
-        var cols = (gal.collections || []).filter(function (c) {
+        var cols = sortCols((gal.collections || []).filter(function (c) {
             if (gal.tab !== 'all' && (c.media_type || 'movie') !== gal.tab) return false;
             if (q && (c.name || '').toLowerCase().indexOf(q) < 0) return false;
             return true;
-        });
+        }));
         grid.innerHTML = '';
 
         var add = h('button', 'vce-card vce-card--new', I.plus + '<span>New collection</span>');
@@ -463,8 +517,11 @@
         var foot = h('div', 'vce-picker-foot');
         var wl = null;
         if (pack.entries.some(function (e) { return e.wishlist_capable; })) {
-            foot.innerHTML = '<label class="vce-wl"><input type="checkbox" checked data-wl> ' +
-                'Wishlist the ' + esc(mediaWord(pack.media_type)) + ' I\'m missing from each series</label>';
+            // Default ON only where the missing set is bounded (complete-the-series
+            // packs). A chart/theme can be 200+ missing titles — that's opt-in.
+            var wlDefault = (pack.id === 'franchises' || pack.id === 'universes');
+            foot.innerHTML = '<label class="vce-wl"><input type="checkbox"' + (wlDefault ? ' checked' : '') + ' data-wl> ' +
+                'Wishlist the ' + esc(mediaWord(pack.media_type)) + ' I\'m missing</label>';
             wl = foot.querySelector('[data-wl]');
         }
         foot.appendChild(h('div', 'vce-foot-spacer'));
@@ -773,8 +830,12 @@
                     (poster ? '' : '<div class="vce-card-mono">' + esc((ed.name || '?').slice(0, 2)) + '</div>') +
                 '</div>' +
                 '<div class="vce-poster-side">' +
-                    '<button type="button" class="vce-btn" data-act="genposter"' + (ed.id ? '' : ' disabled title="Save first"') + '>' +
-                        I.image + 'Generate collage</button>' +
+                    '<div class="vce-poster-btns">' +
+                        '<button type="button" class="vce-btn" data-act="genposter"' + (ed.id ? '' : ' disabled title="Save first"') + '>' +
+                            I.image + 'Auto artwork</button>' +
+                        '<button type="button" class="vce-btn vce-btn--ghost" data-act="genposter-collage"' + (ed.id ? '' : ' disabled title="Save first"') + '>Collage</button>' +
+                    '</div>' +
+                    '<p class="vce-note" style="margin-top:8px">Auto uses the real TMDB art when this collection has some (franchise title art, a director\'s portrait) and collages your members otherwise.</p>' +
                     '<label class="vce-flabel">or poster URL</label>' +
                     '<input class="vce-input" data-f="poster_url" value="' + esc(ed.poster_url) + '" placeholder="https://…">' +
                 '</div>' +
@@ -832,22 +893,26 @@
         });
         var delBtn = page.querySelector('[data-act="del"]');
         if (delBtn) delBtn.addEventListener('click', function () { delCollection(ed.id, ed.name, true); });
-        var genBtn = page.querySelector('[data-act="genposter"]');
-        if (genBtn) genBtn.addEventListener('click', function () {
-            if (!ed.id) return;
-            genBtn.disabled = true;
-            genBtn.innerHTML = I.image + 'Rendering…';
-            api('/' + ed.id + '/poster/generate', { method: 'POST' }).then(function (d) {
-                if (d && d.ok) {
-                    ed.poster_url = d.poster_url;
-                    var thumb = overlay.querySelector('[data-poster]');
-                    if (thumb) { thumb.style.backgroundImage = 'url("' + d.poster_url + '")'; thumb.innerHTML = ''; }
-                    var urlInp = overlay.querySelector('[data-f="poster_url"]');
-                    if (urlInp) urlInp.value = d.poster_url;
-                    toast('Poster generated');
-                } else { toast((d && d.error) || 'Poster generation failed', true); }
-            }).finally(function () { genBtn.disabled = false; genBtn.innerHTML = I.image + 'Generate collage'; });
-        });
+        function wireGen(btn, mode, idleHTML) {
+            if (!btn) return;
+            btn.addEventListener('click', function () {
+                if (!ed.id) return;
+                btn.disabled = true;
+                btn.innerHTML = 'Rendering…';
+                api('/' + ed.id + '/poster/generate', { method: 'POST', body: JSON.stringify({ mode: mode }) }).then(function (d) {
+                    if (d && d.ok) {
+                        ed.poster_url = d.poster_url;
+                        var thumb = overlay.querySelector('[data-poster]');
+                        if (thumb) { thumb.style.backgroundImage = 'url("' + d.poster_url + '")'; thumb.innerHTML = ''; }
+                        var urlInp = overlay.querySelector('[data-f="poster_url"]');
+                        if (urlInp) urlInp.value = d.poster_url;
+                        toast('Poster updated');
+                    } else { toast((d && d.error) || 'Poster generation failed', true); }
+                }).finally(function () { btn.disabled = false; btn.innerHTML = idleHTML; });
+            });
+        }
+        wireGen(page.querySelector('[data-act="genposter"]'), 'auto', I.image + 'Auto artwork');
+        wireGen(page.querySelector('[data-act="genposter-collage"]'), 'collage', 'Collage');
 
         toggleWishlistRow();
         renderBuilder();
