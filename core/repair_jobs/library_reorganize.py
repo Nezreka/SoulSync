@@ -277,6 +277,11 @@ class LibraryReorganizeJob(RepairJob):
                                 details={
                                     'from': t.get('current_path') or '',
                                     'to': t.get('new_path') or '',
+                                    # Authoritative absolute paths (the from/to above are
+                                    # display-trimmed) — the fix handler moves THESE, so it
+                                    # works for libraries not rooted under transfer_path (#978).
+                                    'from_abs': t.get('current_path_abs') or '',
+                                    'to_abs': t.get('new_path_abs') or '',
                                     'album_id': str(album_id),
                                     'album_title': album_title,
                                     'source': preview.get('source'),

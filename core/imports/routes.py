@@ -16,6 +16,7 @@ from core.imports.filename import parse_filename_metadata
 from core.imports.pipeline import import_rejection_reason
 from core.imports.staging import (
     AUDIO_EXTENSIONS,
+    available_import_sources as _available_import_sources,
     get_import_suggestions_cache,
     get_primary_source as _get_primary_source,
     get_primary_source_label as _get_primary_source_label,
@@ -43,6 +44,12 @@ def _get_single_track_import_context(*args, **kwargs):
     return get_single_track_import_context(*args, **kwargs)
 
 
+def _is_active_media_server_ready() -> tuple[bool, str]:
+    from core.imports.side_effects import is_active_media_server_ready
+
+    return is_active_media_server_ready()
+
+
 @dataclass
 class ImportRouteRuntime:
     """Dependencies needed to service import/staging HTTP endpoints."""
@@ -64,6 +71,7 @@ class ImportRouteRuntime:
     get_import_track_info: Callable[[Dict[str, Any]], Dict[str, Any]] = get_import_track_info
     process_single_import_file: Callable[["ImportRouteRuntime", Dict[str, Any]], tuple[str, str]] | None = None
     post_process_matched_download: Callable[[str, Dict[str, Any], str], Any] | None = None
+    is_active_media_server_ready: Callable[[], tuple[bool, str]] = _is_active_media_server_ready
     add_activity_item: Callable[[Any, Any, Any, Any], Any] | None = None
     refresh_import_suggestions_cache: Callable[[], Any] = _refresh_import_suggestions_cache
     automation_engine: Any = None
@@ -400,26 +408,43 @@ def staging_suggestions() -> tuple[Dict[str, Any], int]:
     }, 200
 
 
-def search_albums(runtime: ImportRouteRuntime, query: str, limit: int = 12) -> tuple[Dict[str, Any], int]:
-    """Search albums for manual import using the active metadata provider."""
+def search_albums(runtime: ImportRouteRuntime, query: str, limit: int = 12,
+                   source: str = "") -> tuple[Dict[str, Any], int]:
+    """Search albums for manual import using the active metadata provider,
+    or an explicitly-chosen source when ``source`` is given (the Import
+    Search source picker) — see search_import_albums()'s docstring for why
+    that bypass exists."""
     try:
         query = (query or "").strip()
         if not query:
             return {"success": False, "error": "Missing query parameter"}, 400
 
         limit = min(int(limit), 50)
+        source_override = (source or "").strip().lower() or None
         primary_source = runtime.get_primary_source()
-        if primary_source == "hydrabase" and runtime.hydrabase_worker and runtime.dev_mode_enabled:
+        if not source_override and primary_source == "hydrabase" and runtime.hydrabase_worker and runtime.dev_mode_enabled:
             runtime.hydrabase_worker.enqueue(query, "albums")
 
-        albums = runtime.search_import_albums(query, limit=limit)
+        albums = runtime.search_import_albums(query, limit=limit, source_override=source_override)
         # The label names the user's CONFIGURED source (Spotify Free reads as
         # 'spotify', not the deezer fallback the functional source downgrades to).
         return {"success": True, "albums": albums,
-                "primary_source": runtime.get_primary_source_label()}, 200
+                "primary_source": runtime.get_primary_source_label(),
+                "source_override": source_override}, 200
     except Exception as exc:
         runtime.logger.error("Error searching albums for import: %s", exc)
         return {"success": False, "error": str(exc)}, 500
+
+
+def search_sources() -> tuple[Dict[str, Any], int]:
+    """Source picker options for Import Search — every metadata source with
+    a live client, the primary one flagged 'active'. Same shape as
+    /api/reidentify/sources (core.imports.rematch_search.available_sources)."""
+    try:
+        return {"success": True, "sources": _available_import_sources()}, 200
+    except Exception as exc:
+        module_logger.error("Error listing import search sources: %s", exc)
+        return {"success": False, "error": str(exc), "sources": []}, 500
 
 
 def album_match(runtime: ImportRouteRuntime, data: Dict[str, Any]) -> tuple[Dict[str, Any], int]:
@@ -467,6 +492,10 @@ def album_process(runtime: ImportRouteRuntime, data: Dict[str, Any]) -> tuple[Di
             return {"success": False, "error": "Missing album or matches data"}, 400
         if runtime.post_process_matched_download is None:
             return {"success": False, "error": "Import post-processing not available"}, 500
+
+        ready, reason = runtime.is_active_media_server_ready()
+        if not ready:
+            return {"success": False, "error": reason, "error_code": "media_server_not_connected"}, 503
 
         processed = 0
         errors = []
@@ -646,6 +675,10 @@ def singles_process(runtime: ImportRouteRuntime, files: list[Dict[str, Any]]) ->
             return {"success": False, "error": "No files provided"}, 400
         if runtime.import_singles_executor is None:
             return {"success": False, "error": "Import executor not available"}, 500
+
+        ready, reason = runtime.is_active_media_server_ready()
+        if not ready:
+            return {"success": False, "error": reason, "error_code": "media_server_not_connected"}, 503
 
         processed = 0
         errors = []

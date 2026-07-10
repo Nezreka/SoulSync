@@ -128,6 +128,12 @@ class LossyConverterJob(RepairJob):
         if context.config_manager:
             download_folder = context.config_manager.get('soulseek.download_path', '')
 
+        # Files silently dropped from the scan. Surfaced at the end so a library
+        # whose DB paths don't resolve on disk reads as "N skipped" instead of
+        # looking like the job just missed lossless files (#995).
+        skipped_missing = 0        # DB path could not be located on disk
+        skipped_not_lossless = 0   # extension matched but the codec probe says lossy
+
         for i, row in enumerate(tracks):
             if context.check_stop():
                 return result
@@ -149,11 +155,13 @@ class LossyConverterJob(RepairJob):
             resolved = _resolve_file_path(file_path, context.transfer_folder, download_folder,
                                            config_manager=context.config_manager)
             if not resolved or not os.path.exists(resolved):
+                skipped_missing += 1
                 continue
 
             # Confirm it's actually lossless — the SQL pre-filter lets .m4a through,
             # which is ALAC (lossless) OR AAC (lossy); only a codec probe decides.
             if not is_lossless_audio_path(resolved, probe_codec=m4a_codec):
+                skipped_not_lossless += 1
                 continue
 
             # Check if lossy copy already exists
@@ -217,15 +225,19 @@ class LossyConverterJob(RepairJob):
             context.update_progress(total, total)
 
         if context.report_progress:
+            summary = f'Found {result.findings_created} lossless files without {quality_label} copies'
+            if skipped_missing:
+                summary += f'; {skipped_missing} tracks could not be located on disk (skipped)'
             context.report_progress(
                 scanned=total, total=total,
                 phase='Complete',
-                log_line=f'Found {result.findings_created} lossless files without {quality_label} copies',
+                log_line=summary,
                 log_type='success' if result.findings_created == 0 else 'info'
             )
 
-        logger.info("Lossy converter scan: %d scanned, %d missing lossy copies",
-                     result.scanned, result.findings_created)
+        logger.info("Lossy converter scan: %d scanned, %d missing lossy copies, "
+                     "%d unresolved/missing on disk, %d probed-not-lossless",
+                     result.scanned, result.findings_created, skipped_missing, skipped_not_lossless)
         return result
 
     def estimate_scope(self, context: JobContext) -> int:

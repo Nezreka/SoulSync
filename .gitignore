@@ -33,5 +33,10 @@ bin/
 
 # Development compose/config files
 *.dev.yml
+
+# Local-only testing directories and tooling
+.tool-versions
+Staging/
+Transfer/
 # Any hidden folders
 **/.*/

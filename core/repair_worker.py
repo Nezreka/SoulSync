@@ -1028,6 +1028,7 @@ class RepairWorker:
             'missing_discography_track': self._fix_discography_backfill,
             'library_retag': self._fix_library_retag,
             'short_preview_track': self._fix_short_preview_track,
+            'corrupt_audio': self._fix_corrupt_audio,
         }
         handler = handlers.get(finding_type)
         if not handler:
@@ -1425,6 +1426,117 @@ class RepairWorker:
                                 f'Re-wishlisted "{track_name}" (preview file already gone)')}
         except Exception as e:
             logger.error("Preview-clip fix failed for track %s: %s", entity_id, e)
+            return {'success': False, 'error': str(e)}
+        finally:
+            if conn:
+                conn.close()
+
+    def _fix_corrupt_audio(self, entity_type, entity_id, file_path, details):
+        """Approve a corrupt-file finding: delete the damaged file, drop its DB row, and
+        re-add the track to the wishlist (full payload) so the real version downloads.
+        Frame-corrupt audio can't be repaired by re-tagging — the data is gone — so a
+        fresh download is the only cure. Mirrors the preview-clip redownload path (#1000).
+        """
+        if not entity_id:
+            return {'success': False, 'error': 'No track ID associated with this finding'}
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT t.id, t.title, t.track_number, t.duration,
+                       t.spotify_track_id, t.itunes_track_id, t.deezer_id, t.isrc,
+                       ar.name AS artist_name, ar.spotify_artist_id,
+                       al.title AS album_title, al.spotify_album_id,
+                       al.record_type, al.track_count, al.year, al.thumb_url AS album_thumb
+                FROM tracks t
+                LEFT JOIN artists ar ON ar.id = t.artist_id
+                LEFT JOIN albums al ON al.id = t.album_id
+                WHERE t.id = ?
+            """, (entity_id,))
+            row = cursor.fetchone()
+            if not row:
+                return {'success': False, 'error': 'Track not found in database'}
+
+            track_name = row['title'] or details.get('title', 'Unknown')
+            artist_name = row['artist_name'] or details.get('artist', 'Unknown Artist')
+            album_title = row['album_title'] or details.get('album', '')
+
+            wishlist_id = (row['spotify_track_id']
+                           or row['itunes_track_id']
+                           or row['deezer_id']
+                           or f"corrupt_redl_{entity_id}")
+
+            album_images = []
+            album_thumb = details.get('album_thumb_url') or row['album_thumb']
+            if album_thumb:
+                album_images = [{'url': album_thumb}]
+
+            spotify_track_data = {
+                'id': wishlist_id,
+                'name': track_name,
+                'artists': [{'name': artist_name}],
+                'album': {
+                    'name': album_title or track_name,
+                    'id': row['spotify_album_id'] or '',
+                    'release_date': str(row['year']) if row['year'] else '',
+                    'images': album_images,
+                    'album_type': row['record_type'] or 'album',
+                    'total_tracks': row['track_count'] or 0,
+                    'artists': [{'name': artist_name}],
+                },
+                'duration_ms': row['duration'] or 0,
+                'track_number': row['track_number'] or 1,
+                'disc_number': 1,
+                'explicit': False,
+                'external_urls': {},
+                'popularity': 0,
+                'preview_url': None,
+                'uri': f"spotify:track:{row['spotify_track_id']}" if row['spotify_track_id'] else '',
+                'is_local': False,
+            }
+
+            source_info = {
+                'original_path': file_path or details.get('original_path', ''),
+                'album_title': album_title,
+                'artist': artist_name,
+                'reason': 'corrupt_file_redownload',
+            }
+
+            added = self.db.add_to_wishlist(
+                spotify_track_data,
+                failure_reason='Corrupt file — re-downloading',
+                source_type='redownload',
+                source_info=source_info,
+            )
+            if not added:
+                return {'success': False, 'error': 'Failed to add to wishlist (may already exist or be blocklisted)'}
+
+            # Delete the corrupt file (path resolved like the other delete tools).
+            deleted_file = False
+            target_path = file_path or details.get('original_path')
+            if target_path:
+                download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else None
+                resolved = _resolve_file_path(target_path, self.transfer_folder,
+                                              download_folder=download_folder,
+                                              config_manager=self._config_manager)
+                if resolved and os.path.exists(resolved):
+                    try:
+                        os.remove(resolved)
+                        deleted_file = True
+                    except Exception as e:
+                        logger.warning("Could not delete corrupt file %s: %s", resolved, e)
+
+            # Drop the DB row so the track shows as missing.
+            cursor.execute("DELETE FROM tracks WHERE id = ?", (entity_id,))
+            conn.commit()
+
+            return {'success': True, 'action': 'added_to_wishlist',
+                    'message': (f'Deleted corrupt file and re-wishlisted "{track_name}" for download'
+                                if deleted_file else
+                                f'Re-wishlisted "{track_name}" (corrupt file already gone)')}
+        except Exception as e:
+            logger.error("Corrupt-file fix failed for track %s: %s", entity_id, e)
             return {'success': False, 'error': str(e)}
         finally:
             if conn:
@@ -2243,9 +2355,17 @@ class RepairWorker:
         except Exception as e:
             logger.warning(f"Tag write failed during unknown artist fix: {e}")
 
-        # Step 2: Move file if expected path differs
-        final_path = resolved
-        if expected_path:
+        # Step 2: Move file if expected path differs — but ONLY when the file lives
+        # under the SoulSync transfer folder. For a media-server / non-transfer
+        # library the resolved file is elsewhere, and building the destination from
+        # transfer_folder would YANK it into the transfer folder, away from its real
+        # library (same class as #978). There we just re-tag + fix the DB metadata and
+        # leave the file where it is (physical reorg is Library Reorganize's job).
+        transfer_norm = os.path.normpath(self.transfer_folder) if self.transfer_folder else ''
+        under_transfer = bool(transfer_norm) and os.path.normpath(resolved).lower().startswith(
+            transfer_norm.lower() + os.sep)
+        final_path = resolved if under_transfer else file_path
+        if expected_path and under_transfer:
             expected_abs = os.path.normpath(os.path.join(self.transfer_folder, expected_path))
             if os.path.normpath(resolved).lower() != expected_abs.lower():
                 try:
@@ -2625,7 +2745,11 @@ class RepairWorker:
                             changes.append(f'{field}: "{current}" → "{canonical}" in {os.path.basename(resolved)}')
 
                 if file_changed:
-                    audio.save()
+                    # Atomic + audio-integrity-verified save (#819/#1000): never
+                    # rewrite the library file in place; abort if the write would
+                    # damage the audio rather than corrupt it.
+                    from core.metadata.common import save_audio_file, get_mutagen_symbols
+                    save_audio_file(audio, get_mutagen_symbols())
                     fixed_files += 1
             except Exception as e:
                 logger.error(f"Error fixing tag consistency for {resolved}: {e}")
@@ -3391,17 +3515,31 @@ class RepairWorker:
             logger.warning("Path mismatch fix: missing from/to in details")
             return {'success': False, 'error': 'Missing from/to paths in finding details'}
 
+        # Prefer the authoritative ABSOLUTE paths the preview computed (#978). The
+        # from/to above are display-TRIMMED for the UI; rebuilding them from the
+        # transfer folder broke every library not rooted under transfer_path
+        # (Plex/media-server, Docker host<->container splits) — the trimmed `from`
+        # was already absolute, os.path.join returned it unchanged, and the guard
+        # then rejected it as "escapes transfer folder" ("Fix All fixes nothing").
+        # The live reorganize executor moves these _abs paths directly; do the same.
         transfer = self.transfer_folder
-        src = os.path.normpath(os.path.join(transfer, rel_from))
-        dst = os.path.normpath(os.path.join(transfer, rel_to))
+        transfer_norm = os.path.normpath(transfer) if transfer else ''
+        abs_from = details.get('from_abs') or ''
+        abs_to = details.get('to_abs') or ''
+        if abs_from and abs_to:
+            src = os.path.normpath(abs_from)
+            dst = os.path.normpath(abs_to)
+        else:
+            # Legacy finding written before _abs was persisted — reconstruct from the
+            # transfer folder and keep the safety guard (re-scan to refresh a finding
+            # whose library lives outside transfer_path).
+            src = os.path.normpath(os.path.join(transfer, rel_from))
+            dst = os.path.normpath(os.path.join(transfer, rel_to))
+            if not src.startswith(transfer_norm + os.sep) or not dst.startswith(transfer_norm + os.sep):
+                logger.warning("Path mismatch fix: legacy finding escapes transfer folder — re-scan to refresh. src=%s, dst=%s, transfer=%s", src, dst, transfer_norm)
+                return {'success': False, 'error': 'Path escapes transfer folder (legacy finding — re-scan the library to refresh)'}
 
-        logger.info("Path mismatch fix: src=%s dst=%s transfer=%s", src, dst, transfer)
-
-        # Safety: both paths must be inside transfer folder
-        transfer_norm = os.path.normpath(transfer)
-        if not src.startswith(transfer_norm + os.sep) or not dst.startswith(transfer_norm + os.sep):
-            logger.warning("Path mismatch fix: path escapes transfer folder. src=%s, dst=%s, transfer=%s", src, dst, transfer_norm)
-            return {'success': False, 'error': 'Path escapes transfer folder'}
+        logger.info("Path mismatch fix: src=%s dst=%s", src, dst)
 
         if not os.path.isfile(src):
             # Source may have been moved already — check if destination already exists
@@ -3446,8 +3584,19 @@ class RepairWorker:
             try:
                 conn = self.db._get_connection()
                 cursor = conn.cursor()
-                # Try exact match
-                cursor.execute("UPDATE tracks SET file_path = ? WHERE file_path = ?", (dst, src))
+                # Prefer updating the exact track by id — authoritative, the way the
+                # live reorganize executor does it. Path-matching below is a fallback:
+                # it can MISS for media-server libraries whose stored file_path differs
+                # from the resolved path we just moved, which is exactly the #978
+                # population (so without this the file moves but the DB stays stale).
+                try:
+                    tid = int(entity_id) if entity_id not in (None, '') else None
+                except (TypeError, ValueError):
+                    tid = None
+                if tid is not None:
+                    cursor.execute("UPDATE tracks SET file_path = ? WHERE id = ?", (dst, tid))
+                if tid is None or cursor.rowcount == 0:
+                    cursor.execute("UPDATE tracks SET file_path = ? WHERE file_path = ?", (dst, src))
                 if cursor.rowcount == 0:
                     cursor.execute("UPDATE tracks SET file_path = ? WHERE file_path = ?",
                                    (dst, os.path.normpath(src)))
@@ -3565,7 +3714,15 @@ class RepairWorker:
                         os.remove(out_path)
                     except Exception as e:
                         logger.debug("Failed to remove out_path after ffmpeg failure: %s", e)
-                return {'success': False, 'error': f'ffmpeg conversion failed: {proc.stderr[:200] if proc.stderr else "unknown error"}'}
+                # Surface the REAL ffmpeg error, not the leading version banner —
+                # ffmpeg writes the banner first and the actual reason last, so the
+                # old proc.stderr[:200] only ever showed the banner (#995).
+                from core.imports.ffmpeg_errors import summarize_ffmpeg_error
+                reason = summarize_ffmpeg_error(proc.stderr)
+                logger.error("Lossy conversion failed for %s -> %s (rc=%s): %s",
+                             resolved, out_path, proc.returncode, reason)
+                logger.debug("Full ffmpeg stderr for %s:\n%s", resolved, proc.stderr)
+                return {'success': False, 'error': f'ffmpeg conversion failed: {reason}'}
 
             # Update QUALITY tag
             try:

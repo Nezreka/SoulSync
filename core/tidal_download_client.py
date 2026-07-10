@@ -265,23 +265,52 @@ class TidalDownloadClient(DownloadSourcePlugin):
                 )
                 return
 
-            try:
-                expiry_dt = datetime.fromtimestamp(expiry_time, tz=timezone.utc) if expiry_time else None
+            self._restore_and_verify(token_type, access_token, refresh_token, expiry_time)
 
-                restored = self.session.load_oauth_session(
-                    token_type=token_type,
-                    access_token=access_token,
-                    refresh_token=refresh_token,
-                    expiry_time=expiry_dt,
-                )
-                if restored and self.session.check_login():
-                    logger.info("Restored Tidal download session from saved tokens")
-                    self._save_session()
-                    return
-                else:
-                    logger.warning("Saved Tidal session tokens are invalid/expired")
-            except Exception as e:
-                logger.warning(f"Could not restore Tidal session: {e}")
+    def _restore_and_verify(self, token_type, access_token, refresh_token, expiry_time) -> bool:
+        """Load saved OAuth tokens into the session and confirm they work.
+
+        After a restart the saved access token is almost always EXPIRED, and
+        ``check_login()`` verifies the current token but does NOT refresh it — so
+        an expired-but-refreshable session was being dropped on every restart,
+        which the UI then read as "disconnected" (#1002). When the loaded token
+        is stale, explicitly refresh it with the stored refresh token before
+        giving up.
+
+        Safe by construction: it only ADDS a recovery attempt to a path that
+        would otherwise fail. It saves the (refreshed) session ONLY on confirmed
+        success; on any failure the saved config tokens are left untouched so the
+        next restart can retry. Never raises."""
+        try:
+            expiry_dt = datetime.fromtimestamp(expiry_time, tz=timezone.utc) if expiry_time else None
+            restored = self.session.load_oauth_session(
+                token_type=token_type,
+                access_token=access_token,
+                refresh_token=refresh_token,
+                expiry_time=expiry_dt,
+            )
+            if not restored:
+                logger.warning("Saved Tidal session tokens are invalid/expired")
+                return False
+            if self.session.check_login():
+                logger.info("Restored Tidal download session from saved tokens")
+                self._save_session()
+                return True
+            # Access token is stale — check_login won't refresh it, so refresh it
+            # explicitly with the stored refresh token before declaring it dead.
+            if refresh_token:
+                try:
+                    if self.session.token_refresh(refresh_token) and self.session.check_login():
+                        logger.info("Refreshed expired Tidal download token on restore")
+                        self._save_session()
+                        return True
+                except Exception as e:
+                    logger.warning(f"Tidal download token refresh failed: {e}")
+            logger.warning("Saved Tidal session tokens are invalid/expired")
+            return False
+        except Exception as e:
+            logger.warning(f"Could not restore Tidal session: {e}")
+            return False
 
     def _complete_deferred_session(self) -> bool:
         """Finish restoring a session that was deferred during boot."""
@@ -299,22 +328,7 @@ class TidalDownloadClient(DownloadSourcePlugin):
         expiry_time = pending.get('expiry_time', 0)
         self._boot_session_tokens = None
 
-        try:
-            expiry_dt = datetime.fromtimestamp(expiry_time, tz=timezone.utc) if expiry_time else None
-            restored = self.session.load_oauth_session(
-                token_type=token_type,
-                access_token=access_token,
-                refresh_token=refresh_token,
-                expiry_time=expiry_dt,
-            )
-            if restored and self.session.check_login():
-                logger.info("Restored Tidal download session from saved tokens")
-                self._save_session()
-                return True
-            logger.warning("Saved Tidal session tokens are invalid/expired")
-        except Exception as e:
-            logger.warning(f"Could not restore Tidal session: {e}")
-        return False
+        return self._restore_and_verify(token_type, access_token, refresh_token, expiry_time)
 
     def _save_session(self):
         if not self.session:

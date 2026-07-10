@@ -243,6 +243,63 @@ def _find_best_release(album_name, artist_name, track_count, mb_service):
         return None
 
 
+def _resolve_album_release(album_name, artist_name, track_count, mb_service):
+    """Resolve ONE MusicBrainz release for the album, PINNED across runs.
+
+    The bug this fixes (#999-adjacent, Meshuggah "Catch Thirtythree" split): an
+    album with several close-scoring MB releases gets a DIFFERENT release picked
+    by ``_find_best_release`` on different runs (candidate sets vary with MB API
+    timeouts). Album consistency re-runs on every album-completeness / wishlist
+    cycle and RE-TAGS, so tracks tagged on different runs ended up with different
+    ``MUSICBRAINZ_ALBUMID`` values -> Navidrome split the album.
+
+    So consult the persistent album->release-MBID cache FIRST — the same store
+    per-track enrichment (``core/metadata/source.py``) already uses, whose whole
+    purpose is "every track of the same album gets the same album MBID". On a hit
+    we reuse that exact release forever; on a miss we score a fresh search and
+    record the winner so the next run reuses it. Every cache/DB touch is
+    defensive: any failure falls straight through to today's search behavior.
+    """
+    norm_key = artist_key = None
+    try:
+        from core.metadata.source import normalize_album_cache_key
+        norm_key = normalize_album_cache_key(album_name)
+        artist_key = (artist_name or "").lower().strip()
+    except Exception:   # noqa: BLE001 - key derivation must never break tagging
+        norm_key = artist_key = None
+
+    # 1. Reuse a pinned release if this album has been resolved before.
+    if norm_key and artist_key:
+        try:
+            from core.metadata import album_mbid_cache
+            pinned = album_mbid_cache.lookup(norm_key, artist_key)
+        except Exception:   # noqa: BLE001
+            pinned = None
+        if pinned:
+            try:
+                release = mb_service.mb_client.get_release(
+                    pinned, includes=['recordings', 'release-groups', 'labels',
+                                      'media', 'artist-credits'])
+                if release and release.get('id'):
+                    logger.info("Album consistency reusing pinned release %s... for '%s'",
+                                pinned[:8], album_name)
+                    return release
+            except Exception as e:   # noqa: BLE001 - fall through to a fresh search
+                logger.debug("Pinned release %s fetch failed (%s); re-searching", pinned[:8], e)
+
+    # 2. No usable pin — score a fresh search (today's behavior).
+    release = _find_best_release(album_name, artist_name, track_count, mb_service)
+
+    # 3. Pin the winner so every future run of this album reuses it.
+    if release and release.get('id') and norm_key and artist_key:
+        try:
+            from core.metadata import album_mbid_cache
+            album_mbid_cache.record(norm_key, artist_key, release['id'])
+        except Exception as e:   # noqa: BLE001 - pinning is best-effort
+            logger.debug("Album MBID pin record failed (%s)", e)
+    return release
+
+
 def _match_files_to_tracklist(file_infos, release):
     """Match downloaded files to MB release tracklist entries.
     Returns {file_path: mb_track_entry} for matched files."""
@@ -338,6 +395,135 @@ def _write_standard_tag(audio, tag_name, value):
         logger.debug(f"Failed to write standard tag {tag_name}: {e}")
 
 
+def _atomic_save(audio):
+    """Persist tag changes through the atomic + audio-integrity-verified saver
+    (#819/#1000): write into a temp copy, verify the audio is byte-for-byte
+    intact, then swap — so a consistency tag write can never truncate or corrupt
+    a library file. Aborts (leaves the original untouched) if the write would
+    damage the audio."""
+    from core.metadata.common import save_audio_file, get_mutagen_symbols
+    return save_audio_file(audio, get_mutagen_symbols())
+
+
+# Audio extensions we consider when looking for an album's existing tracks.
+_AUDIO_EXTS = {'.flac', '.mp3', '.m4a', '.mp4', '.ogg', '.oga', '.opus', '.wav', '.aiff', '.aif'}
+
+
+def _read_tag_from_file(audio, tag_key):
+    """Read a single custom album-level tag (mirror of _write_tag_to_file)."""
+    try:
+        if isinstance(audio.tags, ID3):
+            desc = _ID3_TXXX_MAP.get(tag_key, tag_key)
+            for k in list(audio.tags.keys()):
+                if k.startswith('TXXX:') and desc in k:
+                    txt = getattr(audio.tags[k], 'text', None)
+                    return str(txt[0]) if txt else None
+            return None
+        elif isinstance(audio, (FLAC, OggVorbis)):
+            vals = audio.get(tag_key) or audio.get(tag_key.lower())
+            return str(vals[0]) if vals else None
+        elif isinstance(audio, MP4):
+            key = _MP4_KEY_PREFIX + _ID3_TXXX_MAP.get(tag_key, tag_key)
+            vals = audio.get(key)
+            if not vals:
+                return None
+            v = vals[0]
+            return bytes(v).decode('utf-8', 'ignore') if isinstance(v, (bytes, bytearray)) else str(v)
+    except Exception:
+        return None
+    return None
+
+
+def _read_standard_tag(audio, tag_name):
+    """Read album/albumartist (mirror of _write_standard_tag)."""
+    try:
+        if isinstance(audio.tags, ID3):
+            frame = 'TALB' if tag_name == 'album' else 'TPE2'
+            vals = audio.tags.getall(frame)
+            return str(vals[0].text[0]) if vals and vals[0].text else None
+        elif isinstance(audio, (FLAC, OggVorbis)):
+            vals = audio.get(tag_name.upper()) or audio.get(tag_name)
+            return str(vals[0]) if vals else None
+        elif isinstance(audio, MP4):
+            key = {'album': '\xa9alb', 'albumartist': 'aART'}.get(tag_name)
+            vals = audio.get(key) if key else None
+            return str(vals[0]) if vals else None
+    except Exception:
+        return None
+    return None
+
+
+def _sibling_files(file_infos) -> List[str]:
+    """The album's pre-existing tracks: audio files sharing a folder with the
+    new files but NOT themselves in file_infos."""
+    new_paths = {os.path.normpath(fi['path']) for fi in file_infos if fi.get('path')}
+    folders = {os.path.dirname(p) for p in new_paths}
+    siblings = []
+    for folder in folders:
+        if not folder:
+            continue
+        try:
+            entries = os.listdir(folder)
+        except OSError:
+            continue
+        for name in entries:
+            full = os.path.normpath(os.path.join(folder, name))
+            if full in new_paths:
+                continue
+            if os.path.splitext(name)[1].lower() in _AUDIO_EXTS and os.path.isfile(full):
+                siblings.append(full)
+    return siblings
+
+
+def _adopt_album_tags_from_siblings(file_infos):
+    """When this album already has tracks on disk, derive the album-level tags to
+    write onto the NEW files from those existing siblings (majority value per
+    field). Returns (album_tags, album_name, album_artist) or None when there are
+    no siblings / nothing worth adopting — the caller then falls back to the
+    MusicBrainz release path. Existing files are only READ here, never written."""
+    from collections import Counter
+
+    siblings = _sibling_files(file_infos)
+    if not siblings:
+        return None
+
+    tag_votes = {k: Counter() for k in _ALBUM_LEVEL_TAGS}
+    album_votes: Counter = Counter()
+    artist_votes: Counter = Counter()
+    read_any = False
+
+    for path in siblings:
+        try:
+            audio = MutagenFile(path, easy=False)
+        except Exception:
+            audio = None
+        if audio is None:
+            continue
+        read_any = True
+        for k in _ALBUM_LEVEL_TAGS:
+            v = _read_tag_from_file(audio, k)
+            if v:
+                tag_votes[k][v] += 1
+        alb = _read_standard_tag(audio, 'album')
+        if alb:
+            album_votes[alb] += 1
+        aa = _read_standard_tag(audio, 'albumartist')
+        if aa:
+            artist_votes[aa] += 1
+
+    if not read_any:
+        return None
+
+    adopted = {k: c.most_common(1)[0][0] for k, c in tag_votes.items() if c}
+    album = album_votes.most_common(1)[0][0] if album_votes else None
+    artist = artist_votes.most_common(1)[0][0] if artist_votes else None
+
+    # Nothing to join to (untagged siblings) → let the MB path handle it.
+    if not adopted and not album:
+        return None
+    return adopted, album, artist
+
+
 def run_album_consistency(
     file_infos: List[Dict[str, Any]],
     album_name: str,
@@ -374,12 +560,52 @@ def run_album_consistency(
         result['error'] = 'No files provided'
         return result
 
+    # Step 0 (#1000): ADOPT the existing album's tags when this album already has
+    # tracks on disk. A completing / late-arriving track must JOIN its siblings —
+    # copy the album-level tags the existing files already carry onto the NEW
+    # files, instead of imposing a freshly-picked MusicBrainz release that can
+    # differ from what the siblings hold and actually SPLIT the album. Existing
+    # files are never opened for writing here; only the new file_infos are tagged.
+    adopted = _adopt_album_tags_from_siblings(file_infos)
+    if adopted:
+        adopt_tags, adopt_album, adopt_artist = adopted
+        written = 0
+        for fi in file_infos:
+            path = fi.get('path')
+            if not path or not os.path.exists(path):
+                continue
+            try:
+                lock = file_lock_fn(path) if file_lock_fn else _DummyLock()
+                with lock:
+                    audio = MutagenFile(path, easy=False)
+                    if audio is None:
+                        continue
+                    for tag_key, value in adopt_tags.items():
+                        _write_tag_to_file(audio, tag_key, value)
+                    if adopt_album:
+                        _write_standard_tag(audio, 'album', adopt_album)
+                    if adopt_artist:
+                        _write_standard_tag(audio, 'albumartist', adopt_artist)
+                    _atomic_save(audio)
+                    written += 1
+            except Exception as e:
+                logger.error(f"Error adopting album tags for {path}: {e}")
+        result['success'] = written > 0
+        result['tags_written'] = written
+        result['adopted'] = True
+        result['release_mbid'] = adopt_tags.get('MUSICBRAINZ_RELEASE_ID')
+        logger.info(f"[Album Consistency] Adopted existing album tags for "
+                    f"{written}/{len(file_infos)} new file(s); existing tracks untouched")
+        return result
+
     if not mb_service:
         result['error'] = 'MusicBrainz service not available'
         return result
 
-    # Step 1: Find the best release
-    release = _find_best_release(album_name, artist_name, len(file_infos), mb_service)
+    # Step 1: Resolve the album's release — PINNED across runs (via the persistent
+    # album MBID cache) so re-runs can't pick a different release and fracture the
+    # album into multiple MUSICBRAINZ_ALBUMIDs.
+    release = _resolve_album_release(album_name, artist_name, len(file_infos), mb_service)
     if not release:
         result['error'] = f'No MusicBrainz release found for "{album_name}"'
         return result
@@ -494,7 +720,7 @@ def run_album_consistency(
                 if mb_track and mb_track.get('id'):
                     _write_tag_to_file(audio, 'MUSICBRAINZ_RELEASETRACKID', mb_track['id'])
 
-                audio.save()
+                _atomic_save(audio)
                 tags_written += 1
 
         except Exception as e:

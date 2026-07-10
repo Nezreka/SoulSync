@@ -36,6 +36,10 @@ function createInitialWorkflowState() {
     albumSearchLoading: false,
     // Lookup source used to seed the album search. Result rows still carry their own `source`.
     albumSearchLookupSource: null as string | null,
+    // Explicit source picker choice (empty = default priority-chain walk). Bypasses the
+    // "stops at the first source with any result" fallback that otherwise shadows sources
+    // late in the chain (Bandcamp, JioSaavn) behind a broad-catalog one like Discogs.
+    albumSearchSourceOverride: '' as string,
     autoGroupFilePaths: null as string[] | null,
     selectedAlbum: null as ImportAlbumResult | null,
     albumMatch: null as ImportAlbumMatchPayload | null,
@@ -100,6 +104,8 @@ export const useImportWorkflowStore = create(
     setAlbumSearchLoading: (albumSearchLoading: boolean) => set({ albumSearchLoading }),
     setAlbumSearchLookupSource: (albumSearchLookupSource: string | null) =>
       set({ albumSearchLookupSource }),
+    setAlbumSearchSourceOverride: (albumSearchSourceOverride: string) =>
+      set({ albumSearchSourceOverride }),
     setAlbumSearchContext: (albumQuery: string, autoGroupFilePaths: string[] | null) => {
       set({
         albumQuery,
@@ -227,6 +233,7 @@ export function useAlbumImportWorkflow() {
       albumSearchError: state.albumSearchError,
       albumSearchLoading: state.albumSearchLoading,
       albumSearchLookupSource: state.albumSearchLookupSource,
+      albumSearchSourceOverride: state.albumSearchSourceOverride,
       autoGroupFilePaths: state.autoGroupFilePaths,
       clearAutoGroupFilePaths: state.clearAutoGroupFilePaths,
       matchOverrides: state.matchOverrides,
@@ -241,6 +248,7 @@ export function useAlbumImportWorkflow() {
       setAlbumSearchError: state.setAlbumSearchError,
       setAlbumSearchLoading: state.setAlbumSearchLoading,
       setAlbumSearchLookupSource: state.setAlbumSearchLookupSource,
+      setAlbumSearchSourceOverride: state.setAlbumSearchSourceOverride,
       setMatchOverrides: state.setMatchOverrides,
       setSelectedAlbum: state.setSelectedAlbum,
     })),

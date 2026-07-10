@@ -32,6 +32,7 @@ declare global {
           replace?: boolean;
           artistId?: string | number;
           artistSource?: string | null;
+          artistName?: string;
         },
       ) => Promise<boolean>;
     };

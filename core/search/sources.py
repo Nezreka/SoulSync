@@ -23,14 +23,21 @@ from typing import Any, Optional
 logger = logging.getLogger(__name__)
 
 
-def search_kind(client, query: str, kind: str, source_name: Optional[str] = None) -> list:
+def search_kind(client, query: str, kind: str, source_name: Optional[str] = None,
+                prefer_free: bool = False) -> list:
     """Search one result type from a metadata source and normalize it."""
     source_label = source_name or type(client).__name__
+
+    # prefer_free is only ever set for an explicit Spotify pick (see the
+    # orchestrator), so only the SpotifyClient — which accepts the kwarg — ever
+    # receives it. Passing it only when True keeps every other client's signature
+    # untouched.
+    extra = {"prefer_free": True} if prefer_free else {}
 
     if kind == "artists":
         artists = []
         try:
-            artist_objs = client.search_artists(query, limit=10)
+            artist_objs = client.search_artists(query, limit=10, **extra)
             for artist in artist_objs:
                 artists.append({
                     "id": artist.id,
@@ -46,7 +53,7 @@ def search_kind(client, query: str, kind: str, source_name: Optional[str] = None
     if kind == "albums":
         albums = []
         try:
-            album_objs = client.search_albums(query, limit=10)
+            album_objs = client.search_albums(query, limit=10, **extra)
             for album in album_objs:
                 artist_name = ', '.join(album.artists) if album.artists else 'Unknown Artist'
                 albums.append({
@@ -73,7 +80,7 @@ def search_kind(client, query: str, kind: str, source_name: Optional[str] = None
     if kind == "tracks":
         tracks = []
         try:
-            track_objs = client.search_tracks(query, limit=10)
+            track_objs = client.search_tracks(query, limit=10, **extra)
             for track in track_objs:
                 artist_name = ', '.join(track.artists) if track.artists else 'Unknown Artist'
                 tracks.append({
@@ -108,14 +115,15 @@ def search_kind(client, query: str, kind: str, source_name: Optional[str] = None
     raise ValueError(f"Unknown metadata search kind: {kind}")
 
 
-def search_source(query: str, client, source_name: Optional[str] = None) -> dict:
+def search_source(query: str, client, source_name: Optional[str] = None,
+                  prefer_free: bool = False) -> dict:
     """Run all three search-kinds against a single client in parallel."""
     results: dict[str, Any] = {"artists": [], "albums": [], "tracks": []}
     with ThreadPoolExecutor(max_workers=3) as executor:
         futures = {
-            executor.submit(search_kind, client, query, "artists", source_name): "artists",
-            executor.submit(search_kind, client, query, "albums", source_name): "albums",
-            executor.submit(search_kind, client, query, "tracks", source_name): "tracks",
+            executor.submit(search_kind, client, query, "artists", source_name, prefer_free): "artists",
+            executor.submit(search_kind, client, query, "albums", source_name, prefer_free): "albums",
+            executor.submit(search_kind, client, query, "tracks", source_name, prefer_free): "tracks",
         }
         for future in as_completed(futures):
             kind = futures[future]

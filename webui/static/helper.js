@@ -3404,19 +3404,19 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Convention: keep only the CURRENT release here, plus a single brief
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '2.8.4': [
-        { date: 'July 2026 — 2.8.4 release' },
-        { title: 'Artist Web — your library as a map', desc: 'an interactive WebGL graph of every artist you own, laid out by how they relate. it settles live (physics in a background worker, so the UI never freezes) and pans/zooms smoothly across thousands of nodes. three lenses: Taste Map (by genre), Communities, and the Discovery Web.', page: 'discover' },
-        { title: 'Discovery Web', desc: 'the map\'s discovery mode — your owned artists anchor a graph that grows out to similar artists you don\'t own yet. click any node to expand the map from there, follow the thread, and add anything to your watchlist on the spot.', page: 'discover' },
-        { title: 'Play from the map', desc: 'start artist radio off an owned node, or hear a 30s preview on a candidate you don\'t own — without leaving the graph. plus a first-run hint, a guide modal, and hover tooltips with the artist\'s photo.', page: 'discover' },
-        { title: 'Quality Profiles (#974)', desc: 'the single global quality setting becomes named, editable profiles — targets, upgrade behavior, AcoustID strictness, downsampling + lossy-copy all resolve per profile. Auto-Import can run its own, and there\'s an "upgrade until target" cutoff. (thanks @nick2000713.)', page: 'settings' },
-        { title: 'The Adventurousness dial, for real', desc: 'it was mostly cosmetic before (a browser-cache bug served the same recs). now it actually drives which artists surface — deeper the further you push it, genre-diverse so one genre can\'t hog the row, freshly rotated each visit, with "off your usual path" chips at the exploratory end.', page: 'discover' },
-        { title: 'Repair stop button actually cancels (#970)', desc: 'hitting stop now interrupts the running scan and flips responsively to "Stopping…", instead of the job grinding on to completion.', page: 'tools' },
-        { title: 'Playlist stuck "syncing" fixed (#972)', desc: 'a socket-driven sync could leave a playlist wedged in the syncing state server-side. fixed.', page: 'sync' },
-        { title: 'JioSaavn full enrichment worker (#964)', desc: 'JioSaavn graduates from experimental metadata to a full enrichment worker — and no longer wedges the whole worker on a single unresolvable row. (thanks HellRa1SeR.)', page: 'settings' },
-        { title: 'Unicode / Japanese dedup matching (#965)', desc: 'self-titled tracks match correctly and normalization preserves all scripts instead of only CJK, so the duplicate detector stops mis-grouping Japanese titles. (#967 — thanks bluejorts.)', page: 'tools' },
-        { title: 'Safer duplicate cleanup', desc: 'the duplicate cleaner quarantines instead of hard-deleting, and surfaces Docker permission failures instead of silently swallowing them.', page: 'tools' },
-        { title: 'Earlier versions', desc: '2.8.3 rebuilt Discover — a Spotify-level redesign plus a real recommendation engine (genre/novelty scoring, "why this rec" chips, self-filling popularity data). 2.8.2 fixed the Spotify Docker boot hang (#949) + added Max Performance mode; 2.8.1 added playlist export to Spotify & Deezer (#945); 2.8.0 brought the Unverified-queue cleanup (#934); 2.7.0 made multi-user real.' },
+    '2.8.8': [
+        { date: 'July 2026 — 2.8.8' },
+        { title: 'Fixed a bug that could corrupt FLAC files on a tag write (#1000)', desc: 'writing tags to a FLAC (album consistency, the repair passes, ReplayGain) could damage the audio on some setups — the kind of skips/mutes flac -t catches. every tag write now goes to a temp copy, verifies the audio is byte-for-byte intact, and only then swaps the file in, so a bad write can never replace a good one. completing an album also adopts the album\'s existing tags instead of re-stamping every track, and the consistency pass pins one MusicBrainz release so albums stop splitting into 2-3 copies.', page: 'library' },
+        { title: 'New: Corrupt File Detector repair job', desc: 'decode-tests your FLAC library, flags any that are physically damaged, and lets you delete + re-download them in one click. opt-in, under the repair jobs.', page: 'tools' },
+        { title: 'New: Bandcamp enrichment source', desc: 'an experimental metadata/enrichment source for Bandcamp — big thanks to @shkarlsson for the contribution. off by default; turn it on in the enrichment sources.', page: 'settings' },
+        { title: 'Atomic album publishing (opt-in)', desc: 'a new toggle in Settings → Downloads: stage an album\'s tracks privately and only move the whole album into your library once it finishes downloading, so Plex/Jellyfin never shows a half-loaded album mid-download. off by default — nothing changes unless you enable it.', page: 'settings' },
+        { title: 'Downloads unjammed', desc: 'fixed a batch-slot leak and a few deadlocks that could wedge the download queue with orphaned tasks that never cleared — the "found N orphaned tasks" loop.', page: 'active-downloads' },
+        { title: 'Tidal downloads survive restarts (#1002)', desc: 'the Tidal download session now refreshes its token on restart instead of silently dropping it, so the source stays connected instead of forcing a manual re-link.', page: 'settings' },
+        { title: 'Compilations stay together (#1003)', desc: 'various-artists compilations now land under Compilations/ instead of scattering their tracks across individual artist folders.', page: 'settings' },
+        { title: 'Lossy converter + auto-scan fixes (#995)', desc: 'the lossy converter surfaces the real ffmpeg error instead of the version banner, and simple downloads now honor the "Auto-Scan After Downloads" toggle instead of always scanning.', page: 'tools' },
+        { title: 'UI + mobile polish', desc: 'a big cleanup pass across headers, buttons, filters, mobile touch targets, and general layout. thanks to @bluejorts.', page: 'dashboard' },
+        { title: 'Imports refused when your media server isn\'t connected', desc: 'a download/import can\'t land orphaned when SoulSync can\'t reach Plex/Jellyfin/Navidrome.', page: 'import' },
+        { title: 'Earlier versions', desc: '2.8.7 made the SoulSync discovery playlists first-class Auto-Sync items, fixed a settings-save that could wipe a stored API secret (#992), and added Navidrome playlist cover art (#993). 2.8.6 was a fix batch (Spotify search without an account, the Docker Import/Stats black screen #986, mirrored-playlist wipes #990, artist browse #988, iTunes singles #989, Reorganize folder pruning #985). 2.8.4 added Artist Web + named Quality Profiles (#974); 2.8.3 rebuilt Discover; 2.7.0 made multi-user real.' },
     ],
 };
 
@@ -3447,51 +3447,65 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "Artist Web — your library as a map",
-        description: "an interactive WebGL graph of your whole library that doubles as a discovery tool.",
+        title: "2.8.8 — no more corrupted FLACs, Bandcamp, and atomic album publishing",
+        description: "the headline is a fix for a tag write that could corrupt a FLAC's audio on some setups — every tag write is atomic and audio-verified now. plus a Corrupt File Detector, a new Bandcamp source, and opt-in atomic album publishing.",
         features: [
-            "every artist you own, laid out by how they relate — it settles live (physics in a background worker, so the UI never freezes) and pans/zooms smoothly across thousands of nodes",
-            "three lenses / front doors: Taste Map (clustered by genre), Communities (who groups with who), and the Discovery Web",
-            "the Discovery Web — your owned artists anchor a map that grows out to similar artists you don't own yet; click any node to expand from there, follow the thread, and add anything to your watchlist on the spot",
-            "play from the map — artist radio off an owned node, or a 30s preview on a candidate you don't own, without leaving the graph; plus a first-run hint, a guide modal, and hover tooltips with the artist's photo",
-        ],
-        usage_note: "open Artist Web from Discover — drag to pan, scroll to zoom, click a node to expand or play.",
-    },
-    {
-        title: "Quality Profiles",
-        description: "the single global quality setting becomes named, editable profiles (#974, thanks @nick2000713).",
-        features: [
-            "targets, upgrade behavior, AcoustID strictness, downsampling, and lossy-copy rules all resolve per profile — not one global setting",
-            "Auto-Import can run its own profile independent of your default; wishlist/library rows can carry their own; and there's an \"upgrade until target\" cutoff that lives on the profile",
-            "a Manage view shows what's active for what (default vs. Auto-Import vs. per-item), separate from previewing/editing a profile",
+            "#1000 — a tag write (album consistency, the repair passes, ReplayGain) could damage a FLAC's audio on some setups. every tag write now writes to a temp copy, verifies the audio is byte-for-byte intact, and only then swaps the file in — so a bad write can never replace a good file. completing an album adopts the album's existing tags instead of re-stamping every track, and the consistency pass pins one MusicBrainz release so albums stop splitting into 2-3 copies",
+            "new Corrupt File Detector repair job — decode-tests your FLACs and lets you delete + re-download any that are already damaged",
+            "Bandcamp — a new experimental enrichment source (big thanks to @shkarlsson); off by default, enable it in the enrichment sources",
+            "atomic album publishing — an opt-in toggle in Settings → Downloads that stages an album privately and only moves it into your library once the whole thing finishes, so Plex/Jellyfin never shows a half-loaded album mid-download",
+            "downloads unjammed — fixed a batch-slot leak and a few deadlocks that could wedge the queue with orphaned tasks that never cleared",
+            "#1002 — Tidal downloads survive a restart: the session refreshes its token instead of silently dropping it and forcing a re-link",
+            "#1003 — various-artists compilations stay together under Compilations/ instead of scattering by artist; #995 — the lossy converter shows the real ffmpeg error and simple downloads honor the auto-scan toggle; plus a big UI + mobile polish pass (thanks @bluejorts)",
         ],
     },
     {
-        title: "The Adventurousness dial, for real this time",
-        description: "the Discover dial goes from cosmetic to actually reshaping your recs.",
+        title: "Earlier in 2.8.7",
+        description: "the SoulSync discovery playlists become first-class Auto-Sync items, plus a credential-wipe fix.",
         features: [
-            "it was mostly cosmetic before — a browser-cache bug was serving the same recs no matter where you set it. now it genuinely drives which artists surface, not just how they're sorted",
-            "deeper the further you push it — the far right reaches real deep cuts, with a distinct middle instead of two ends that felt the same",
-            "genre diversity so one genre can't hog the row, freshness rotation so you get different deep cuts each visit, and \"🧭 off your usual path\" chips at the exploratory end",
+            "the SoulSync discovery playlists (Time Machine, Genre, Seasonal, Daily Mix, Popular Picks / Hidden Gems / The Archives / Fresh Tape / Discovery Shuffle) now schedule straight from Auto-Sync — turn one on and it generates itself on the first run and keeps syncing on your interval",
+            "#992 — a settings-save could wipe a stored API secret (surfaced as Spotify \"invalid_client\", and could clear Last.fm / Genius / Discogs keys too); a save can no longer blank a saved secret",
+            "#993 — mirrored playlists push their cover art to Navidrome on sync; and artist discography hides non-studio releases (live, compilations, singles) by default",
         ],
     },
     {
-        title: "Fixes this release",
-        description: "repair jobs, sync, dedup, and matching.",
+        title: "Earlier in 2.8.6",
+        description: "a focused fix release across search, import, library, and playlists.",
         features: [
-            "#970 — the repair-job stop button actually cancels the running scan (instant \"Stopping…\"), instead of grinding on",
-            "#972 — a playlist could get stuck \"syncing\" server-side after a socket-driven sync; fixed",
-            "#964 — the JioSaavn worker no longer wedges the whole enrichment worker on a single unresolvable row",
-            "duplicate cleanup quarantines instead of hard-deleting (and surfaces Docker permission failures); Jellyfin playlist align + a couple of match/sync fixes",
+            "Spotify search without a connected account — picking \"Spotify\" as your search source now works even if you haven't authenticated, using the no-auth Spotify Free source; and a connected account whose official search returns empty falls back to Free instead of a blank page",
+            "#986 — a follow-up to the 2.8.5 black-screen fix: some Docker setups still loaded Import & Stats blank because the JS module bundle was served with a non-JS content type. we force the correct type at the HTTP layer now, so the module scripts always run",
+            "#990 — a wrong-shaped playlist refresh could overwrite a mirror with thousands of empty rows and still report success; it accepts the Spotify track shape directly now and validates before deleting, so a malformed payload is rejected and your existing mirror is left intact",
+            "#988 — browsing an artist could surface a completely different artist's tracks (e.g. The Outfield showing Beatles) because a Deezer name-search accepted the first result on a poor match; it requires a real name match now",
+            "#989 — iTunes singles could file and tag under \"Unknown Artist\" when the album-artist came back empty; they fall back to the real track artist now",
+            "#985 — Library Reorganize left the old, now-empty disc/album folders behind after moving files; it prunes them now, safely (never climbing to the artist or library root)",
         ],
     },
     {
-        title: "Community contributions",
-        description: "great PRs from contributors this release.",
+        title: "Earlier in 2.8.51",
+        description: "a one-fix follow-up to 2.8.5.",
         features: [
-            "#974 — named Quality Profiles (the feature above). thanks @nick2000713",
-            "#964 — JioSaavn graduates from experimental metadata to a full enrichment worker. thanks HellRa1SeR",
-            "#965/#967 — unicode / Japanese dedup matching: self-titled tracks match, and normalization preserves all scripts, not just CJK. thanks bluejorts",
+            "#983 — on a fresh install, opening a watchlist artist's settings could fail with \"no such column: preferred_metadata_source\" (a restart worked around it). first-run setup was rebuilding the watchlist table from a column list that dropped two newer columns; they survive now, so it works from the first boot",
+        ],
+    },
+    {
+        title: "Earlier in 2.8.5",
+        description: "2.8.5 was a focused fix release across import, library, repair, and the webui.",
+        features: [
+            "#979 — Import & Stats loaded as a black screen on some setups (mostly Windows, where the OS served the app's JS bundle with the wrong MIME type and the browser refused it). we force the correct type now, so they load for everyone",
+            "#980 — iTunes singles were landing in \"Unknown Artist\" with no album tag; a single's album is its own title now, so they file and tag correctly",
+            "#981 — $disc/$discnum stamped a \"01-\" prefix on single-disc albums; they're smart now like $cdnum (empty on single-disc, shown only for real multi-disc), for both import and rename/reorganize",
+            "#976 — cleanup never deletes a folder you've set as a root, and self-heals a missing staging/import folder if a sweep removed it",
+            "#978 — repair \"Fix All\" now works for libraries outside the transfer path and stops pulling media-server files into transfer; #977 — discography backfill only touches artists you own",
+        ],
+    },
+    {
+        title: "Earlier in 2.8.4",
+        description: "2.8.4 was the Artist Web + Quality Profiles release.",
+        features: [
+            "Artist Web — an interactive WebGL map of your whole library, laid out by how artists relate, in three lenses (Taste Map, Communities, Discovery Web); the Discovery Web grows out to similar artists you don't own, and you can play artist radio / 30s previews right from the graph",
+            "Quality Profiles (#974, thanks @nick2000713) — the single global quality setting becomes named, editable profiles (targets, upgrade behavior, AcoustID strictness, downsampling, lossy-copy), with an \"upgrade until target\" cutoff and a per-profile Auto-Import option",
+            "the Adventurousness dial went from cosmetic to actually reshaping your recs — deeper the further you push it, genre-diverse, freshly rotated, with \"off your usual path\" chips",
+            "fixes: repair stop button actually cancels (#970), playlists no longer stuck \"syncing\" (#972), JioSaavn worker no longer wedges (#964), safer duplicate cleanup; contributor PRs for JioSaavn enrichment (#964, HellRa1SeR) and unicode/Japanese dedup matching (#965/#967, bluejorts)",
         ],
     },
     {

@@ -31,7 +31,7 @@ from . import sources
 logger = logging.getLogger(__name__)
 
 VALID_SOURCES = (
-    'spotify', 'itunes', 'deezer', 'discogs', 'hydrabase', 'musicbrainz', 'amazon', 'jiosaavn',
+    'spotify', 'itunes', 'deezer', 'discogs', 'hydrabase', 'musicbrainz', 'amazon', 'jiosaavn', 'bandcamp',
 )
 
 VALID_STREAM_SOURCES = VALID_SOURCES + ('youtube_videos',)
@@ -108,6 +108,13 @@ def resolve_client(source_name: str, deps: SearchDeps) -> tuple[Any, bool]:
         except Exception as e:
             logger.warning(f"JioSaavn client init failed: {e}")
             return None, False
+    if source_name == 'bandcamp':
+        try:
+            from core.metadata.registry import get_bandcamp_client
+            return get_bandcamp_client(), True
+        except Exception as e:
+            logger.warning(f"Bandcamp client init failed: {e}")
+            return None, False
     return None, False
 
 
@@ -150,6 +157,21 @@ def _single_source_response(
 ) -> dict:
     """Run a single-source search — bypasses the fan-out."""
     client, available = resolve_client(requested_source, deps)
+
+    # Explicit Spotify pick that the normal gate rejected (no auth, and 'Spotify
+    # Free' isn't the chosen metadata source). If the no-creds SpotipyFree package
+    # is installed, honor the deliberate selection via the free source instead of
+    # returning nothing — the explicit per-search pick is the user's consent, and
+    # this stays out of every background/fan-out path (which never reaches here).
+    prefer_free = False
+    if not client and requested_source == 'spotify' and deps.spotify_client:
+        try:
+            if deps.spotify_client._free_installed():
+                client = deps.spotify_client
+                prefer_free = True
+        except Exception as e:
+            logger.debug(f"Spotify free-fallback availability check failed: {e}")
+
     if not client:
         return {
             'db_artists': db_artists,
@@ -163,7 +185,7 @@ def _single_source_response(
         }
 
     try:
-        source_results = sources.search_source(query, client, requested_source)
+        source_results = sources.search_source(query, client, requested_source, prefer_free=prefer_free)
     except Exception as e:
         logger.warning(f"Single-source search ({requested_source}) failed: {e}")
         source_results = {'artists': [], 'albums': [], 'tracks': [], 'available': False}

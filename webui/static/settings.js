@@ -240,6 +240,27 @@ async function onExperimentalJiosaavnToggle(checkbox) {
     debouncedAutoSaveSettings();
 }
 
+async function onExperimentalBandcampToggle(checkbox) {
+    if (!checkbox) return;
+
+    if (!checkbox.checked) {
+        debouncedAutoSaveSettings();
+        return;
+    }
+
+    checkbox.checked = false;
+
+    const acknowledged = await showExperimentalEnableDialog({
+        title: 'Enable Bandcamp',
+        message: 'Bandcamp has no official public search/metadata API — this uses Bandcamp\'s own public search and release-page endpoints. Coverage and availability may change without notice. Once enabled, Bandcamp will appear as a search source in Discover and as a metadata enrichment source for downloaded tracks.',
+    });
+
+    if (!acknowledged) return;
+
+    checkbox.checked = true;
+    debouncedAutoSaveSettings();
+}
+
 function _metadataSourceFallback(source) {
     if (source === 'spotify') return 'deezer';
     return 'deezer';
@@ -1424,6 +1445,9 @@ async function loadSettingsData() {
             document.getElementById('metadata-fallback-source').value = 'jiosaavn';
         }
 
+        const _bandcampExp = document.getElementById('experimental-bandcamp-enabled');
+        if (_bandcampExp) _bandcampExp.checked = settings.experimental?.bandcamp_enabled === true;
+
         // Populate Hydrabase settings
         const hbConfig = settings.hydrabase || {};
         document.getElementById('hydrabase-url').value = hbConfig.url || '';
@@ -1620,6 +1644,10 @@ async function loadSettingsData() {
         document.getElementById('lossy-copy-bitrate').value = settings.lossy_copy?.bitrate || '320';
         updateLossyBitrateOptions();
         document.getElementById('lossy-copy-delete-original').checked = settings.lossy_copy?.delete_original === true;
+
+        // Album Publishing (#999) — atomic album publish, opt-in, default off.
+        const _atomicPub = document.getElementById('album-atomic-publish');
+        if (_atomicPub) _atomicPub.checked = settings.album_downloads?.atomic_publish === true;
 
         // Populate Listening Stats settings
         document.getElementById('listening-stats-enabled').checked = settings.listening_stats?.enabled === true;
@@ -4343,6 +4371,7 @@ async function saveSettings(quiet = false) {
         },
         experimental: {
             jiosaavn_enabled: document.getElementById('experimental-jiosaavn-enabled')?.checked === true,
+            bandcamp_enabled: document.getElementById('experimental-bandcamp-enabled')?.checked === true,
         },
         hydrabase: {
             url: document.getElementById('hydrabase-url').value,
@@ -4509,6 +4538,10 @@ async function saveSettings(quiet = false) {
             bitrate: document.getElementById('lossy-copy-bitrate').value,
             delete_original: document.getElementById('lossy-copy-delete-original').checked,
             downsample_hires: document.getElementById('downsample-hires').checked
+        },
+        album_downloads: {
+            // Atomic album publishing (#999) — opt-in, default off.
+            atomic_publish: document.getElementById('album-atomic-publish')?.checked === true
         },
         listening_stats: {
             enabled: document.getElementById('listening-stats-enabled').checked,

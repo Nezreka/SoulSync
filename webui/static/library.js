@@ -509,7 +509,7 @@ function _renderWatchAllModalContent(overlay, eligible, ineligible, sourceName) 
 
     // Search filter
     if (eligible.length > 10) {
-        html += '<div class="watch-all-search-wrap"><input type="text" class="watch-all-search" id="watch-all-search" placeholder="Search artists..." oninput="_filterWatchAllList(this.value)"></div>';
+        html += '<div class="watch-all-search-wrap"><input type="text" class="watch-all-search" id="watch-all-search" placeholder="Filter artists…" oninput="_filterWatchAllList(this.value)"></div>';
     }
 
     // Eligible grid
@@ -736,9 +736,19 @@ if (typeof window !== 'undefined') {
 // Discography filter state
 let discographyFilterState = {
     categories: { albums: true, eps: true, singles: true },
+    // Content defaults to show-all. The declutter (hide non-studio by default)
+    // is applied ONLY for MusicBrainz discographies, in populateDiscographySections
+    // once the discography's true source is known. Other sources are already clean
+    // commercial catalogues, so their default is unchanged.
     content: { live: true, compilations: true, featured: true },
     ownership: 'all'  // 'all', 'owned', 'missing'
 };
+
+// Non-studio MusicBrainz release-group secondary types (EXCLUDING Compilation,
+// which has its own toggle). Mirrors core/musicbrainz_search _NON_STUDIO_SECONDARY_TYPES
+// so backend + UI agree. Only used to declutter MusicBrainz artist pages by default.
+const _NON_STUDIO_SECONDARY = new Set(['live', 'soundtrack', 'remix', 'demo',
+    'mixtape/street', 'interview', 'audiobook', 'audio drama']);
 
 // Maximum visible characters of an artist name in the sidebar Library
 // breadcrumb. Names longer than this get truncated with an ellipsis so the
@@ -1153,6 +1163,7 @@ function updateArtistDetailPageHeaderWithData(artist) {
         if (artist.qobuz_id) badges.push(_hb(QOBUZ_LOGO_URL, 'Qz', 'Qobuz', `https://www.qobuz.com/artist/${artist.qobuz_id}`));
         if (artist.discogs_id) badges.push(_hb(DISCOGS_LOGO_URL, 'DC', 'Discogs', `https://www.discogs.com/artist/${artist.discogs_id}`));
         if (artist.amazon_id) badges.push(_hb(AMAZON_LOGO_URL, 'AMZ', 'Amazon Music', null));
+        if (artist.bandcamp_url) badges.push(_hb(BANDCAMP_LOGO_URL, 'BC', 'Bandcamp', artist.bandcamp_url));
         if (artist.soul_id && !String(artist.soul_id).startsWith('soul_unnamed_')) badges.push(_hb('/static/trans2.png', 'SS', `SoulID: ${artist.soul_id}`, null));
 
         badgesContainer.innerHTML = badges.join('');
@@ -1180,6 +1191,7 @@ function renderArtistEnrichmentCoverage(enrichment) {
         { name: 'Genius', key: 'genius', color: '#ffff64' },
         { name: 'Tidal', key: 'tidal', color: '#00ffff' },
         { name: 'Qobuz', key: 'qobuz', color: '#4285f4' },
+        { name: 'Bandcamp', key: 'bandcamp', color: '#1da0c3' },
     ], 'key');
 
     const r = 20, circ = 2 * Math.PI * r;
@@ -1828,6 +1840,42 @@ function populateDiscographySections(discography) {
     // Populate singles
     populateReleaseSection('singles', discography.singles);
 
+    // MusicBrainz lists an artist's WHOLE catalogue (live, soundtracks, remixes,
+    // etc.), which buries the studio albums. ONLY for a MusicBrainz discography,
+    // hide non-studio content by default (compilations stay shown; owned releases
+    // are never hidden; the user can toggle it back on). Other sources are already
+    // clean commercial catalogues, so this leaves their default untouched. Gated
+    // on the discography's real source, which is known now that data has loaded.
+    if ((discography && String(discography.source || '').toLowerCase()) === 'musicbrainz') {
+        discographyFilterState.content.live = false;
+        discographyFilterState._mbDeclutter = true;
+
+        // MusicBrainz tags live/non-studio authoritatively, so recompute each
+        // card's data-is-live from its secondary_types instead of the title guess.
+        // This fixes the false positive where a studio album titled "Live Through
+        // This" would be hidden, and covers soundtrack/remix/demo too. MB cards only.
+        ['albums', 'eps', 'singles'].forEach(cat => {
+            const grid = document.getElementById(`${cat}-grid`);
+            if (!grid) return;
+            grid.querySelectorAll('.release-card').forEach(card => {
+                const rd = card._releaseData;
+                const secs = (rd && Array.isArray(rd.secondary_types))
+                    ? rd.secondary_types.map(s => String(s).trim().toLowerCase()) : [];
+                const nonStudio = secs.some(s => _NON_STUDIO_SECONDARY.has(s));
+                card.setAttribute('data-is-live', nonStudio ? 'true' : 'false');
+            });
+        });
+
+        // The toggle governs the broader non-studio set on MB, so label it honestly.
+        const container = document.getElementById('discography-filters');
+        const liveBtn = container && container.querySelector(
+            '.discography-filter-btn[data-filter="content"][data-value="live"]');
+        if (liveBtn) {
+            liveBtn.classList.remove('active');
+            liveBtn.textContent = 'Non-Studio';
+        }
+    }
+
     // Apply any active filters after populating
     applyDiscographyFilters();
 }
@@ -2391,8 +2439,11 @@ function initializeDiscographyFilters() {
 
 function resetDiscographyFilters() {
     discographyFilterState.categories = { albums: true, eps: true, singles: true };
+    // Neutral show-all. The MusicBrainz-only declutter is applied later, in
+    // populateDiscographySections, once the discography's real source is known.
     discographyFilterState.content = { live: true, compilations: true, featured: true };
     discographyFilterState.ownership = 'all';
+    discographyFilterState._mbDeclutter = false;
 
     // Reset button visual states
     const container = document.getElementById('discography-filters');
@@ -2406,6 +2457,9 @@ function resetDiscographyFilters() {
             btn.classList.add('active');
         }
     });
+    // Restore the default "Live" label; the MB path relabels it to "Non-Studio".
+    const liveBtn = container.querySelector('.discography-filter-btn[data-filter="content"][data-value="live"]');
+    if (liveBtn) liveBtn.textContent = 'Live';
 }
 
 function applyDiscographyFilters() {
@@ -2433,15 +2487,24 @@ function applyDiscographyFilters() {
         grid.querySelectorAll('.release-card').forEach(card => {
             let hidden = false;
 
-            // Content filters
-            if (!discographyFilterState.content.live && card.getAttribute('data-is-live') === 'true') {
-                hidden = true;
-            }
-            if (!discographyFilterState.content.compilations && card.getAttribute('data-is-compilation') === 'true') {
-                hidden = true;
-            }
-            if (!discographyFilterState.content.featured && card.getAttribute('data-is-featured') === 'true') {
-                hidden = true;
+            // Content filters. On MusicBrainz pages (where non-studio is hidden by
+            // an automatic default the user didn't set) never hide something the
+            // user OWNS. Elsewhere the toggles are entirely user-driven, so they are
+            // respected as-is (no owned exemption) — keeps non-MB behaviour identical
+            // to before. (owned is null while its completion check is pending; the
+            // filter re-runs once checks resolve, so an owned card reappears then.)
+            const _ownedExempt = discographyFilterState._mbDeclutter
+                && card._releaseData && card._releaseData.owned === true;
+            if (!_ownedExempt) {
+                if (!discographyFilterState.content.live && card.getAttribute('data-is-live') === 'true') {
+                    hidden = true;
+                }
+                if (!discographyFilterState.content.compilations && card.getAttribute('data-is-compilation') === 'true') {
+                    hidden = true;
+                }
+                if (!discographyFilterState.content.featured && card.getAttribute('data-is-featured') === 'true') {
+                    hidden = true;
+                }
             }
 
             // Ownership filter (only apply if card is not still checking)
@@ -2609,6 +2672,10 @@ function _esc(s) { const d = document.createElement('div'); d.textContent = s; r
 // Artist Detail cards and the Download Discography modal so they can't drift.
 function _classifyReleaseContent(release) {
     const t = (release && (release.title || release.name)) || '';
+    // Title-based classification, shared by all sources and the download modal.
+    // On MusicBrainz artist pages the data-is-live attribute is recomputed
+    // authoritatively from secondary_types in populateDiscographySections (MB tags
+    // live/non-studio reliably), so this title heuristic only governs non-MB here.
     const livePattern = /\b(live)\b|\(live[^)]*\)|\[live[^\]]*\]/i;
     const compilationPattern = /\b(greatest hits|best of|collection|anthology|essential)\b/i;
     const featuredPattern = /\(?\bfeat\.?\s|\bft\.?\s|\bfeaturing\b/i;
@@ -3203,6 +3270,9 @@ function renderArtistMetaPanel(artist) {
             { id: 'genius', label: 'Genius', icon: '🟡' },
             { id: 'tidal', label: 'Tidal', icon: '⬛' },
             { id: 'qobuz', label: 'Qobuz', icon: '🔷' },
+            // Bandcamp intentionally omitted: this is the artist-level enrich
+            // menu and Bandcamp has no artist pass (album/track only). The
+            // album-level menu below still offers it.
         ], 'id');
         services.forEach(svc => {
             const item = document.createElement('div');
@@ -3783,6 +3853,7 @@ function renderExpandedAlbumHeader(album) {
         { key: 'discogs_id', label: 'Discogs', svc: 'discogs' },
         { key: 'itunes_album_id', label: 'iTunes', svc: 'itunes' },
         { key: 'lastfm_url', label: 'Last.fm', svc: 'lastfm' },
+        { key: 'bandcamp_url', label: 'Bandcamp', svc: 'bandcamp' },
     ], 'svc');
     idFields.forEach(f => {
         if (album[f.key]) {
@@ -3807,6 +3878,7 @@ function renderExpandedAlbumHeader(album) {
         { key: 'itunes_match_status', label: 'iTunes', attempted: 'itunes_last_attempted', svc: 'itunes' },
         { key: 'lastfm_match_status', label: 'Last.fm', attempted: 'lastfm_last_attempted', svc: 'lastfm' },
         { key: 'amazon_match_status', label: 'Amazon', attempted: 'amazon_last_attempted', svc: 'amazon' },
+        { key: 'bandcamp_match_status', label: 'Bandcamp', attempted: 'bandcamp_last_attempted', svc: 'bandcamp' },
     ], 'svc');
     statusSvcs.forEach(s => {
         const status = album[s.key];
@@ -3851,6 +3923,7 @@ function renderExpandedAlbumHeader(album) {
             { id: 'itunes', label: 'iTunes', icon: '🔴' },
             { id: 'lastfm', label: 'Last.fm', icon: '⚪' },
             { id: 'genius', label: 'Genius', icon: '🟡' },
+            { id: 'bandcamp', label: 'Bandcamp', icon: '🔹' },
         ], 'id').forEach(svc => {
             const item = document.createElement('div');
             item.className = 'enhanced-enrich-menu-item';
@@ -4286,6 +4359,7 @@ function _buildTrackRow(track, album, admin) {
         { svc: 'itunes', col: 'itunes_track_id', label: 'iT' },
         { svc: 'lastfm', col: 'lastfm_url', label: 'LFM' },
         { svc: 'genius', col: 'genius_id', label: 'Gen' },
+        { svc: 'bandcamp', col: 'bandcamp_url', label: 'BC' },
     ], 'svc');
     trackServices.forEach(s => {
         const hasId = !!track[s.col];
@@ -4491,7 +4565,15 @@ function _attachTableDelegation(table, album) {
                 e.stopPropagation();
                 const svc = chip.dataset.service;
                 const aId = artistDetailPageState.enhancedData ? artistDetailPageState.enhancedData.artist.id : null;
-                openManualMatchModal('track', track.id, svc, track.title || '', aId);
+                // Bandcamp only: include the album name alongside the track title
+                // so its release-page search has more to narrow down on (a bare
+                // track title is ambiguous — compilations, remixes, covers share
+                // titles across releases). Other services take a track ID directly
+                // and searched better with just the bare title, so leave them be.
+                const trackDefaultQuery = svc === 'bandcamp'
+                    ? [album.title, track.title].filter(Boolean).join(' ')
+                    : (track.title || '');
+                openManualMatchModal('track', track.id, svc, trackDefaultQuery, aId);
                 return;
             }
         }
@@ -5861,6 +5943,11 @@ function getServiceUrl(service, entityType, id) {
             album: `https://music.amazon.com/albums/${id}`,
             track: `https://music.amazon.com/tracks/${id}`,
         },
+        bandcamp: {
+            artist: id,  // derived artist page origin, already a full URL
+            album: id,   // bandcamp_url is already a full URL
+            track: id,
+        },
     };
     return urls[service] && urls[service][entityType] || null;
 }
@@ -6311,7 +6398,7 @@ function openManualMatchModal(entityType, entityId, service, defaultQuery, artis
     const serviceLabels = {
         spotify: 'Spotify', musicbrainz: 'MusicBrainz', deezer: 'Deezer',
         audiodb: 'AudioDB', itunes: 'iTunes', lastfm: 'Last.fm', genius: 'Genius',
-        tidal: 'Tidal', qobuz: 'Qobuz', amazon: 'Amazon Music'
+        tidal: 'Tidal', qobuz: 'Qobuz', amazon: 'Amazon Music', bandcamp: 'Bandcamp'
     };
 
     const overlay = document.createElement('div');
@@ -6932,6 +7019,7 @@ async function runEnrichment(entityType, entityId, service, name, artistName, ar
         'itunes': ['itunes', 'it'],
         'lastfm': ['last.fm', 'lfm'],
         'genius': ['genius', 'gen'],
+        'bandcamp': ['bandcamp', 'bc'],
     };
     const prefixes = chipPrefixes[service] || [service];
     document.querySelectorAll('.enhanced-match-chip').forEach(chip => {

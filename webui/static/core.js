@@ -464,6 +464,7 @@ function initializeWebSocket() {
     socket.on('enrichment:tidal-enrichment', (data) => updateTidalEnrichmentStatusFromData(data));
     socket.on('enrichment:qobuz-enrichment', (data) => updateQobuzEnrichmentStatusFromData(data));
     socket.on('enrichment:amazon-enrichment', (data) => updateAmazonEnrichmentStatusFromData(data));
+    socket.on('enrichment:bandcamp-enrichment', (data) => updateBandcampEnrichmentStatusFromData(data));
     socket.on('enrichment:similar_artists', (data) => updateSimilarArtistsEnrichmentStatusFromData(data));
     socket.on('enrichment:hydrabase', (data) => updateHydrabaseStatusFromData(data));
     socket.on('enrichment:repair', (data) => updateRepairStatusFromData(data));
@@ -476,7 +477,7 @@ function initializeWebSocket() {
     // disturb the UI handlers above).
     ['musicbrainz', 'audiodb', 'discogs', 'deezer', 'jiosaavn', 'spotify-enrichment',
      'itunes-enrichment', 'lastfm-enrichment', 'genius-enrichment', 'tidal-enrichment',
-     'qobuz-enrichment', 'amazon-enrichment', 'similar_artists', 'hydrabase',
+     'qobuz-enrichment', 'amazon-enrichment', 'bandcamp-enrichment', 'similar_artists', 'hydrabase',
      'soulid', 'repair'].forEach((ch) => {
         socket.on('enrichment:' + ch, (data) => {
             if (window.workerOrbs && window.workerOrbs.onStatus) window.workerOrbs.onStatus(ch, data);
@@ -756,6 +757,7 @@ const TIDAL_LOGO_URL = 'https://www.svgrepo.com/show/519734/tidal.svg';
 const QOBUZ_LOGO_URL = 'https://www.svgrepo.com/show/504778/qobuz.svg';
 const DISCOGS_LOGO_URL = 'https://www.svgrepo.com/show/305957/discogs.svg';
 const AMAZON_LOGO_URL = '/static/amazon.svg';
+const BANDCAMP_LOGO_URL = 'https://upload.wikimedia.org/wikipedia/commons/9/90/Bandcamp-polygon-aqua.svg';
 function getAudioDBLogoURL() { const el = document.querySelector('img.audiodb-logo'); return el ? el.src : null; }
 
 // --- Wishlist Modal Persistence State Management ---
