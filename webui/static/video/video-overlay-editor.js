@@ -700,30 +700,49 @@
         }).catch(function () { renderGallery([]); });
     }
 
+    function templateCardHTML(t) {
+        var when = t.updated_at ? String(t.updated_at).slice(0, 10) : '';
+        var n = t.layer_count || 0;
+        var wide = (t.kind || 'poster') === 'episode';
+        return '<div class="voe-card' + (wide ? ' voe-card--wide' : '') + '" data-voe-open="' + t.id + '">' +
+            '<div class="voe-card-canvas">' +
+                '<span class="voe-card-empty-ic">🎬</span>' +
+                '<img class="voe-card-thumb" src="/api/video/overlays/templates/' + t.id + '/thumb?v=' + encodeURIComponent(t.updated_at || '') + '"' +
+                ' alt="" loading="lazy" onload="this.classList.add(\'voe-card-thumb--on\')" onerror="this.remove()">' +
+                '<div class="voe-card-actions">' +
+                    '<div class="voe-card-act" data-voe-dupe="' + t.id + '" title="Duplicate">' + I.copy + '</div>' +
+                    '<div class="voe-card-act voe-card-act--danger" data-voe-del="' + t.id + '" data-voe-delname="' + esc(t.name) + '" title="Delete">' + I.trash + '</div>' +
+                '</div>' +
+            '</div>' +
+            '<div class="voe-card-meta"><div class="voe-card-name">' + esc(t.name) + '</div>' +
+                '<div class="voe-card-info">' + n + ' layer' + (n === 1 ? '' : 's') + (when ? ' · ' + when : '') + '</div></div>' +
+            '</div>';
+    }
+
     function renderGallery(templates) {
         var grid = overlay && overlay.querySelector('[data-voe-grid]');
         if (!grid) return;
-        var cards = ['<div class="voe-card voe-card--new" data-voe-new>' +
-            '<div class="voe-card-canvas"><span class="voe-plus">+</span><span class="voe-new-label">New template</span></div></div>'];
-        templates.forEach(function (t) {
-            var when = t.updated_at ? String(t.updated_at).slice(0, 10) : '';
-            var n = t.layer_count || 0;
-            cards.push(
-                '<div class="voe-card" data-voe-open="' + t.id + '">' +
-                    '<div class="voe-card-canvas">' +
-                        '<span class="voe-card-empty-ic">🎬</span>' +
-                        '<img class="voe-card-thumb" src="/api/video/overlays/templates/' + t.id + '/thumb?v=' + encodeURIComponent(t.updated_at || '') + '"' +
-                        ' alt="" loading="lazy" onload="this.classList.add(\'voe-card-thumb--on\')" onerror="this.remove()">' +
-                        '<div class="voe-card-actions">' +
-                            '<div class="voe-card-act" data-voe-dupe="' + t.id + '" title="Duplicate">' + I.copy + '</div>' +
-                            '<div class="voe-card-act voe-card-act--danger" data-voe-del="' + t.id + '" data-voe-delname="' + esc(t.name) + '" title="Delete">' + I.trash + '</div>' +
-                        '</div>' +
-                    '</div>' +
-                    '<div class="voe-card-meta"><div class="voe-card-name">' + esc(t.name) + '</div>' +
-                        '<div class="voe-card-info">' + n + ' layer' + (n === 1 ? '' : 's') + (when ? ' · ' + when : '') + '</div></div>' +
-                '</div>');
+        // Grouped by template type — each shape lives with its own kind, and
+        // episode templates render in their true 16:9.
+        var GROUPS = [['poster', 'Posters', 'Movies & shows · 2:3'],
+                      ['season', 'Seasons', 'Season posters · 2:3'],
+                      ['episode', 'Episodes', 'Episode stills · 16:9']];
+        var byKind = { poster: [], season: [], episode: [] };
+        (templates || []).forEach(function (t) {
+            (byKind[(t.kind || 'poster')] || byKind.poster).push(t);
         });
-        grid.innerHTML = cards.join('');
+        var html = '<div class="voe-grid-row">' +
+            '<div class="voe-card voe-card--new" data-voe-new>' +
+            '<div class="voe-card-canvas"><span class="voe-plus">+</span><span class="voe-new-label">New template</span></div></div></div>';
+        GROUPS.forEach(function (g) {
+            var list = byKind[g[0]];
+            if (!list.length) return;
+            html += '<div class="voe-grid-grouphead"><span>' + g[1] + '</span>' +
+                '<i>' + list.length + ' · ' + g[2] + '</i></div>' +
+                '<div class="voe-grid-row' + (g[0] === 'episode' ? ' voe-grid-row--wide' : '') + '">' +
+                list.map(templateCardHTML).join('') + '</div>';
+        });
+        grid.innerHTML = html;
         grid.querySelector('[data-voe-new]').addEventListener('click', openStarterPicker);
         grid.querySelectorAll('[data-voe-open]').forEach(function (c) {
             c.addEventListener('click', function (e) {

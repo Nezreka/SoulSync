@@ -680,3 +680,20 @@ select.voe-input option { background: #17171d; }
 .voe-filter-foot { display: flex; align-items: center; gap: 10px; }
 .voe-filter-add { font-size: 11.5px; padding: 5px 11px; }
 .voe-filter-count { font-size: 11px; color: rgba(255,255,255,.45); font-variant-numeric: tabular-nums; }
+
+/* ── gallery grouped by template type; episode cards in true 16:9 ────────── */
+.voe-grid { display: block; }
+.voe-grid-row {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 16px; margin-bottom: 8px;
+}
+.voe-grid-row--wide { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+.voe-grid-grouphead {
+    display: flex; align-items: baseline; gap: 10px; margin: 22px 2px 12px;
+    font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em;
+    color: rgba(255,255,255,.5);
+}
+.voe-grid-grouphead::after { content: ""; flex: 1; height: 1px; background: rgba(255,255,255,.08); }
+.voe-grid-grouphead i { font-style: normal; font-weight: 600; text-transform: none;
+    letter-spacing: 0; color: rgba(255,255,255,.35); font-size: 11.5px; }
+.voe-card--wide .voe-card-canvas { aspect-ratio: 16 / 9; }
