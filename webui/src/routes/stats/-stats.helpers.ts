@@ -67,12 +67,18 @@ export const STATS_ENRICHMENT_SERVICES = [
   { key: 'genius', label: 'Genius', color: '#ffff64' },
   { key: 'tidal', label: 'Tidal', color: '#00ffff' },
   { key: 'qobuz', label: 'Qobuz', color: '#4285f4' },
+  { key: 'bandcamp', label: 'Bandcamp', color: '#1da0c3' },
 ] as const;
 
-export function visibleStatsEnrichmentServices(jiosaavnEnabled: boolean) {
-  return STATS_ENRICHMENT_SERVICES.filter(
-    (service) => service.key !== 'jiosaavn' || jiosaavnEnabled,
-  );
+export function visibleStatsEnrichmentServices(
+  jiosaavnEnabled: boolean,
+  bandcampEnabled: boolean,
+) {
+  return STATS_ENRICHMENT_SERVICES.filter((service) => {
+    if (service.key === 'jiosaavn') return jiosaavnEnabled;
+    if (service.key === 'bandcamp') return bandcampEnabled;
+    return true;
+  });
 }
 
 export function getStatsRangeLabel(range: StatsRange): string {

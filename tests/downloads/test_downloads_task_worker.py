@@ -123,9 +123,21 @@ def _seed_task(task_id='t1', status='pending', track_info=None, **extra):
 # Early-return guards
 # ---------------------------------------------------------------------------
 
-def test_missing_task_returns_silently():
+def test_missing_task_frees_batch_slot():
+    # A worker dispatched for a task that was deleted before it ran (cleanup /
+    # dedup / atomic cancel) must FREE the reserved batch slot via
+    # on_download_completed, not just return. Otherwise active_count leaks: the
+    # slot was reserved at dispatch and never released, the next queued task never
+    # starts, and the batch wedges in 'downloading' forever (the reported jam).
     deps, rec = _build_deps()
     tw.download_track_worker('absent', 'b1', deps)
+    assert ('on_download_completed', ('b1', 'absent', False), {}) in rec.calls
+
+
+def test_missing_task_without_batch_returns_silently():
+    # No batch → no reserved slot to free → nothing to call.
+    deps, rec = _build_deps()
+    tw.download_track_worker('absent', None, deps)
     assert rec.calls == []
 
 
@@ -152,6 +164,31 @@ def test_cancelled_no_batch_id_just_returns():
     tw.download_track_worker('t1', None, deps)
     # Nothing called — no batch to notify
     assert rec.calls == []
+
+
+def test_legacy_cancel_completion_runs_outside_tasks_lock():
+    """Regression: the legacy-cancel completion callback MUST run outside
+    tasks_lock. tasks_lock is non-reentrant, and on_download_completed re-acquires
+    it — calling it in-lock deadlocked the worker WHILE HOLDING the global lock,
+    freezing all downloads. We prove the lock is free when the callback fires by
+    having the callback try to acquire it: on the buggy (in-lock) version the
+    worker still holds it, so this times out to False; with the fix it's free."""
+    from core.runtime_state import tasks_lock
+
+    _seed_task(status='cancelled')  # no playlist_id → legacy path
+
+    acquired = []
+
+    def _cb(batch_id, task_id, success):
+        got = tasks_lock.acquire(timeout=2)
+        acquired.append(got)
+        if got:
+            tasks_lock.release()
+
+    deps, _ = _build_deps(on_download_completed=_cb)
+    tw.download_track_worker('t1', 'b1', deps)
+
+    assert acquired == [True]   # callback ran AND the lock was not held by the worker
 
 
 # ---------------------------------------------------------------------------

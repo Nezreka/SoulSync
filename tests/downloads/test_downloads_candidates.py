@@ -275,6 +275,34 @@ def test_cancellation_after_download_starts_calls_cancel_and_lifecycle():
     assert completion_calls == [("b7", "t7", False)]
 
 
+def test_cancel_after_download_frees_slot_outside_tasks_lock():
+    """Regression: the mid-download-cancel completion callback MUST run outside
+    tasks_lock. on_download_completed re-acquires it and tasks_lock is
+    non-reentrant, so an in-lock call deadlocked the worker WHILE HOLDING the
+    global lock, freezing all downloads. Prove the lock is free when the callback
+    fires by having it acquire the lock (times out on the buggy in-lock version)."""
+    acquired = []
+
+    def _cb(batch_id, task_id, success=None):
+        got = tasks_lock.acquire(timeout=2)
+        acquired.append(got)
+        if got:
+            tasks_lock.release()
+
+    deps = _build_deps(on_complete=_cb)
+    _seed_task("t8")
+
+    def cancel_mid_flight(task_id, status):
+        if status == "downloading":
+            download_tasks[task_id]["status"] = "cancelled"
+
+    deps.update_task_status = cancel_mid_flight
+
+    result = dc.attempt_download_with_candidates("t8", [_Candidate()], _Track(), batch_id="b8", deps=deps)
+    assert result is False
+    assert acquired == [True]   # lock was free when the callback ran
+
+
 # ---------------------------------------------------------------------------
 # Failure path — all candidates exhausted
 # ---------------------------------------------------------------------------

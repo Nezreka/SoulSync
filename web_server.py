@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "2.8.7"
+_SOULSYNC_BASE_VERSION = "2.8.8"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -177,6 +177,7 @@ from core.imports.routes import album_match as _import_album_match
 from core.imports.routes import album_process as _import_album_process
 from core.imports.routes import process_single_import_file as _import_process_single_import_file
 from core.imports.routes import search_albums as _import_search_albums
+from core.imports.routes import search_sources as _import_search_sources
 from core.imports.routes import search_tracks as _import_search_tracks
 from core.imports.routes import singles_process as _import_singles_process
 from core.imports.routes import staging_files as _import_staging_files
@@ -237,6 +238,7 @@ from core.spotify_worker import SpotifyWorker
 from core.itunes_worker import iTunesWorker
 from core.lastfm_worker import LastFMWorker
 from core.genius_worker import GeniusWorker
+from core.bandcamp_worker import BandcampWorker
 from core.tidal_worker import TidalWorker
 from core.qobuz_worker import QobuzWorker
 from core.hydrabase_worker import HydrabaseWorker
@@ -1774,6 +1776,17 @@ def validate_and_heal_batch_states():
 
             # Cleanup stale batches inside the lock (safe - just dict mutations)
             for batch_id in batches_to_cleanup:
+                # #999: discard unpublished atomic staging for an abandoned batch
+                # (no-op for normal batches and for atomic batches that already
+                # published — their staging was pruned at publish).
+                _cleanup_batch = download_batches[batch_id]
+                if _cleanup_batch.get('_atomic_active') and _cleanup_batch.get('_atomic_staging_root'):
+                    try:
+                        from core.downloads.atomic_album_publish import discard_staging_root
+                        if discard_staging_root(_cleanup_batch.get('_atomic_staging_root')):
+                            logger.info(f"[Atomic Publish] Discarded staging for abandoned batch {batch_id}")
+                    except Exception as _atomic_e:
+                        logger.debug(f"[Atomic Publish] staging discard failed: {_atomic_e}")
                 task_ids_to_remove = download_batches[batch_id].get('queue', [])
                 del download_batches[batch_id]
                 # Clean up associated tasks
@@ -1957,6 +1970,7 @@ def _shutdown_runtime_components():
         (discogs_worker, "discogs worker"),
         (deezer_worker, "deezer worker"),
         (jiosaavn_worker, "jiosaavn worker"),
+        (bandcamp_worker, "bandcamp worker"),
         (spotify_enrichment_worker, "spotify enrichment worker"),
         (itunes_enrichment_worker, "itunes enrichment worker"),
         (lastfm_worker, "lastfm worker"),
@@ -2273,6 +2287,7 @@ SERVICE_CONFIG_REGISTRY = {
     'musicbrainz':  {'always': True},   # public API, no credentials required
     'amazon':       {'always': True},   # T2Tunes proxy, no credentials required
     'jiosaavn':     {'always': True},   # public proxy API, no credentials required
+    'bandcamp':     {'always': True},   # public search + release-page scrape, no credentials
     'discogs':      {'required': ['token']},
     'tidal':        {'custom': lambda _svc: _tidal_has_auth_token()},
     'qobuz':        {'any_of': [['email', 'password'], ['token'], ['user_auth_token']]},
@@ -2404,7 +2419,7 @@ def _get_windowed_calls(key, current_total):
 def _get_enrichment_status():
     """Get lightweight status for all enrichment services (no DB queries).
     Reads worker properties directly to avoid expensive get_stats() calls."""
-    from core.metadata.registry import is_jiosaavn_enabled
+    from core.metadata.registry import is_jiosaavn_enabled, is_source_enabled
 
     services = {}
 
@@ -2422,6 +2437,7 @@ def _get_enrichment_status():
         ('discogs', 'Discogs', lambda: discogs_worker),
         ('amazon_enrichment', 'Amazon Music', lambda: amazon_worker),
         ('jiosaavn_enrichment', 'JioSaavn', lambda: jiosaavn_worker),
+        ('bandcamp_enrichment', 'Bandcamp', lambda: bandcamp_worker),
     ]
 
     # Config-based "configured" checks for services that need API keys/credentials
@@ -2432,10 +2448,13 @@ def _get_enrichment_status():
         'lastfm': lambda: bool(config_manager.get('lastfm.api_key', '')),
         'genius': lambda: bool(config_manager.get('genius.access_token', '')),
         'jiosaavn_enrichment': is_jiosaavn_enabled,
+        'bandcamp_enrichment': lambda: is_source_enabled('bandcamp'),
     }
 
     for key, name, get_worker in workers_info:
         if key == 'jiosaavn_enrichment' and not is_jiosaavn_enabled():
+            continue
+        if key == 'bandcamp_enrichment' and not is_source_enabled('bandcamp'):
             continue
         worker = get_worker()
         if worker is not None:
@@ -3363,7 +3382,7 @@ def handle_settings():
                 for key, value in _experimental_in.items():
                     config_manager.set(f'experimental.{key}', value)
 
-            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'experimental']:
+            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'album_downloads', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'experimental']:
                 if service in new_settings:
                     if service == 'experimental' and isinstance(_experimental_in, dict):
                         continue
@@ -9161,6 +9180,14 @@ def _build_source_only_artist_detail(artist_id, artist_name, source):
     except Exception as e:
         logger.debug(f"JioSaavn client resolution failed: {e}")
 
+    bc = None
+    try:
+        from core.metadata.registry import get_bandcamp_client, is_source_enabled
+        if is_source_enabled('bandcamp'):
+            bc = get_bandcamp_client()
+    except Exception as e:
+        logger.debug(f"Bandcamp client resolution failed: {e}")
+
     try:
         lastfm_api_key = config_manager.get('lastfm.api_key', '') or None
     except Exception:
@@ -9176,6 +9203,7 @@ def _build_source_only_artist_detail(artist_id, artist_name, source):
         discogs_client=dc,
         amazon_client=az,
         jiosaavn_client=js,
+        bandcamp_client=bc,
         lastfm_api_key=lastfm_api_key,
     )
     return jsonify(payload), status
@@ -9364,7 +9392,12 @@ def get_artist_detail(artist_id):
                                      ('deezer', 'deezer_id'), ('lastfm', 'lastfm_url'),
                                      ('itunes', 'itunes_track_id'), ('audiodb', 'audiodb_id'),
                                      ('genius', 'genius_id'), ('tidal', 'tidal_id'),
-                                     ('qobuz', 'qobuz_id')]:
+                                     ('qobuz', 'qobuz_id'),
+                                     # bandcamp_url, not bandcamp_id: the URL is Bandcamp's
+                                     # canonical match signal and is always written on a match,
+                                     # whereas bandcamp_id stays null on url-only/manual matches
+                                     # (which showed a match badge but 0% coverage). PR #968 review.
+                                     ('bandcamp', 'bandcamp_url')]:
                         try:
                             cursor.execute(f"""
                                 SELECT COUNT(*) FROM tracks t
@@ -9378,6 +9411,30 @@ def get_artist_detail(artist_id):
                         except Exception:
                             enrichment_coverage[svc] = 0
                     enrichment_coverage['total_tracks'] = total
+
+                # Bandcamp has no artist-level enrichment (no artists.bandcamp_id
+                # column), so derive an artist badge link from any owned album/track's
+                # release URL instead — Bandcamp release URLs are always
+                # https://<artist>.bandcamp.com/album|track/<slug>, so the origin
+                # doubles as the artist's Bandcamp page.
+                cursor.execute("""
+                    SELECT al.bandcamp_url FROM albums al
+                    JOIN artists ar ON ar.id = al.artist_id
+                    WHERE ar.name = ? AND ar.server_source = ?
+                      AND al.bandcamp_url IS NOT NULL AND al.bandcamp_url != ''
+                    UNION ALL
+                    SELECT t.bandcamp_url FROM tracks t
+                    JOIN albums al ON al.id = t.album_id
+                    JOIN artists ar ON ar.id = al.artist_id
+                    WHERE ar.name = ? AND ar.server_source = ?
+                      AND t.bandcamp_url IS NOT NULL AND t.bandcamp_url != ''
+                    LIMIT 1
+                """, (artist_name, server_source, artist_name, server_source))
+                bandcamp_row = cursor.fetchone()
+                if bandcamp_row and bandcamp_row[0]:
+                    parsed_bandcamp_url = urlparse(bandcamp_row[0])
+                    if parsed_bandcamp_url.scheme and parsed_bandcamp_url.netloc:
+                        artist_info['bandcamp_url'] = f"{parsed_bandcamp_url.scheme}://{parsed_bandcamp_url.netloc}/"
         except Exception as e:
             logger.debug("enrichment coverage build failed: %s", e)
 
@@ -13136,7 +13193,7 @@ def library_log_play():
         logger.debug(f"log-play failed (non-fatal): {e}")
         return jsonify({"success": False, "error": str(e)}), 200
 
-_enrichment_locks = {svc: threading.Lock() for svc in ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz', 'discogs', 'jiosaavn')}
+_enrichment_locks = {svc: threading.Lock() for svc in ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz', 'discogs', 'bandcamp', 'jiosaavn')}
 
 @app.route('/api/library/enrich', methods=['POST'])
 def library_enrich_entity():
@@ -13162,7 +13219,7 @@ def library_enrich_entity():
         if entity_type not in ('artist', 'album', 'track'):
             return jsonify({"success": False, "error": "entity_type must be artist, album, or track"}), 400
 
-        valid_services = ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz', 'discogs', 'jiosaavn')
+        valid_services = ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz', 'discogs', 'bandcamp', 'jiosaavn')
         if service not in valid_services:
             return jsonify({"success": False, "error": f"service must be one of: {', '.join(valid_services)}"}), 400
 
@@ -13353,6 +13410,20 @@ def _run_single_enrichment(service, entity_type, entity_id, name, artist_name):
         discogs_worker._process_item(item)
         return {"success": True, "message": f"Discogs lookup complete for {entity_type}"}
 
+    elif service == 'bandcamp':
+        if not bandcamp_worker:
+            return {"success": False, "error": "Bandcamp worker not initialized"}
+        from core.metadata.registry import is_source_enabled
+        if not is_source_enabled('bandcamp'):
+            return {"success": False, "error": "Bandcamp is disabled (experimental feature off)"}
+        if entity_type == 'artist':
+            return {"success": False, "error": "Bandcamp does not support artist-level enrichment"}
+        if entity_type == 'album':
+            bandcamp_worker._process_album(entity_id, name, artist_name)
+        elif entity_type == 'track':
+            bandcamp_worker._process_track(entity_id, name, artist_name)
+        return {"success": True, "message": f"Bandcamp lookup complete for {entity_type}"}
+
     else:
         return {"success": False, "error": f"Unknown service: {service}"}
 
@@ -13404,6 +13475,7 @@ _SERVICE_ID_COLUMNS = {
     'tidal': {'artist': 'tidal_id', 'album': 'tidal_id', 'track': 'tidal_id'},
     'qobuz': {'artist': 'qobuz_id', 'album': 'qobuz_id', 'track': 'qobuz_id'},
     'amazon': {'artist': 'amazon_id', 'album': 'amazon_id', 'track': 'amazon_id'},
+    'bandcamp': {'album': 'bandcamp_url', 'track': 'bandcamp_url'},  # no artist-level id column
     'jiosaavn': {'artist': 'jiosaavn_id', 'album': 'jiosaavn_id', 'track': 'jiosaavn_id'},
 }
 
@@ -16569,6 +16641,7 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
             qobuz_enrichment_worker=qobuz_enrichment_worker,
             lastfm_worker=lastfm_worker,
             genius_worker=genius_worker,
+            bandcamp_worker=bandcamp_worker,
             spotify_enrichment_worker=spotify_enrichment_worker,
             itunes_enrichment_worker=itunes_enrichment_worker,
             hifi_client=download_orchestrator.client("hifi") if download_orchestrator else None,
@@ -16675,6 +16748,7 @@ def _post_process_matched_download_with_verification(context_key, context, file_
             qobuz_enrichment_worker=qobuz_enrichment_worker,
             lastfm_worker=lastfm_worker,
             genius_worker=genius_worker,
+            bandcamp_worker=bandcamp_worker,
             spotify_enrichment_worker=spotify_enrichment_worker,
             itunes_enrichment_worker=itunes_enrichment_worker,
             hifi_client=download_orchestrator.client("hifi") if download_orchestrator else None,
@@ -16800,6 +16874,7 @@ def _post_process_matched_download(context_key, context, file_path):
             qobuz_enrichment_worker=qobuz_enrichment_worker,
             lastfm_worker=lastfm_worker,
             genius_worker=genius_worker,
+            bandcamp_worker=bandcamp_worker,
             spotify_enrichment_worker=spotify_enrichment_worker,
             itunes_enrichment_worker=itunes_enrichment_worker,
             hifi_client=download_orchestrator.client("hifi") if download_orchestrator else None,
@@ -17260,6 +17335,7 @@ def _pause_workers_for_scan():
         'deezer': deezer_worker, 'audiodb': audiodb_worker, 'discogs': discogs_worker, 'lastfm': lastfm_worker,
         'genius': genius_worker, 'tidal': tidal_enrichment_worker, 'qobuz': qobuz_enrichment_worker,
         'amazon': amazon_worker, 'repair': repair_worker, 'soulid': soulid_worker, 'jiosaavn': jiosaavn_worker,
+        'bandcamp': bandcamp_worker,
     }
     for name, w in workers.items():
         if w and hasattr(w, 'pause') and not getattr(w, 'paused', True):
@@ -17276,6 +17352,7 @@ def _resume_workers_after_scan():
         'deezer': deezer_worker, 'audiodb': audiodb_worker, 'discogs': discogs_worker, 'lastfm': lastfm_worker,
         'genius': genius_worker, 'tidal': tidal_enrichment_worker, 'qobuz': qobuz_enrichment_worker,
         'amazon': amazon_worker, 'repair': repair_worker, 'soulid': soulid_worker, 'jiosaavn': jiosaavn_worker,
+        'bandcamp': bandcamp_worker,
     }
     resumed = 0
     for name, w in workers.items():
@@ -19951,33 +20028,39 @@ def cancel_download_task():
         
         if batch_id:
             try:
-                # Check if we need to free a worker slot by examining batch state
+                # Decide whether to free a worker slot by examining batch state.
+                # The actual free happens OUTSIDE the lock: _on_download_completed
+                # re-acquires tasks_lock, which is non-reentrant — calling it in-lock
+                # deadlocked this request WHILE HOLDING the global lock, freezing the
+                # whole download subsystem.
+                _should_free_slot = False
                 with tasks_lock:
                     if batch_id in download_batches:
                         batch = download_batches[batch_id]
                         active_count = batch['active_count']
-                        
+
                         # Free worker slot if there are active workers and task was actively running
                         # This is more reliable than checking task status which can be inconsistent
                         if active_count > 0 and current_status in ['pending', 'searching', 'downloading', 'queued']:
                             logger.info(f"[Cancel] Task {task_id} (status: {current_status}) - freeing worker slot for batch {batch_id}")
                             logger.info(f"[Cancel] Active count before: {active_count}")
-                            
-                            # Use the completion callback with error handling
-                            _on_download_completed(batch_id, task_id, success=False)
-                            worker_slot_freed = True
-                            
-                            # Verify slot was actually freed
-                            new_active = download_batches[batch_id]['active_count']
-                            logger.info(f"[Cancel] Active count after: {new_active}")
-                            
+                            _should_free_slot = True
                         elif active_count == 0:
                             logger.warning(f"[Cancel] Task {task_id} - no active workers to free")
                         else:
                             logger.warning(f"[Cancel] Task {task_id} (status: {current_status}) - not actively running, no slot to free")
                     else:
                         logger.warning(f"[Cancel] Task {task_id} - batch {batch_id} not found")
-                        
+
+                if _should_free_slot:
+                    # Use the completion callback (outside the lock) — idempotent, so
+                    # a no-op if the slot was already freed.
+                    _on_download_completed(batch_id, task_id, success=False)
+                    worker_slot_freed = True
+                    with tasks_lock:
+                        new_active = download_batches.get(batch_id, {}).get('active_count')
+                    logger.info(f"[Cancel] Active count after: {new_active}")
+
             except Exception as slot_error:
                 logger.error(f"[Cancel] Error managing worker slot for {task_id}: {slot_error}")
                 # Attempt emergency recovery if normal completion failed
@@ -20425,6 +20508,16 @@ def cleanup_batch():
 
                 # Get the list of task IDs before deleting the batch
                 task_ids_to_remove = batch.get('queue', [])
+
+                # #999: discard unpublished atomic staging on cleanup/cancel of a
+                # staged album (no-op for normal batches and already-published ones).
+                if batch.get('_atomic_active') and batch.get('_atomic_staging_root'):
+                    try:
+                        from core.downloads.atomic_album_publish import discard_staging_root
+                        if discard_staging_root(batch.get('_atomic_staging_root')):
+                            logger.info(f"[Atomic Publish] Discarded staging for cleaned-up batch {batch_id}")
+                    except Exception as _atomic_e:
+                        logger.debug(f"[Atomic Publish] staging discard failed: {_atomic_e}")
 
                 # Delete the batch record
                 del download_batches[batch_id]
@@ -22157,6 +22250,37 @@ def get_spotify_album_tracks(album_id):
             logger.error(f"JioSaavn album detail failed: {e}")
             return jsonify({"error": str(e)}), 500
 
+    if source_override == 'bandcamp':
+        try:
+            from core.metadata.registry import (
+                get_bandcamp_client,
+                experimental_source_rejected,
+            )
+            if experimental_source_rejected(source_override):
+                return jsonify({"error": "Bandcamp is not enabled"}), 503
+            client = get_bandcamp_client()
+
+            # Fast path: the click carried the exact release URL (Search
+            # results and Discover cards do). Falls back to a name search
+            # when it didn't (e.g. a release clicked from within an artist's
+            # discography grid, which only has a title/id) — Bandcamp has no
+            # numeric-ID lookup API, so a URL or a name is all it can work from.
+            bandcamp_url = request.args.get('bandcamp_url', '').strip()
+            album_name = request.args.get('name', '')
+            album_artist = request.args.get('artist', '')
+
+            release = client.get_release_metadata(bandcamp_url) if bandcamp_url else None
+            if not release and album_artist and album_name:
+                release = client.search_album(album_artist, album_name)
+            if not release:
+                return jsonify({"error": "Album not found"}), 404
+
+            from core.bandcamp_client import release_to_spotify_shape
+            return jsonify(release_to_spotify_shape(release, album_id, album_name, album_artist))
+        except Exception as e:
+            logger.error(f"Bandcamp album detail failed: {e}")
+            return jsonify({"error": str(e)}), 500
+
     if not spotify_client or not spotify_client.is_authenticated():
         return jsonify({"error": "Spotify not authenticated."}), 401
     try:
@@ -22248,6 +22372,48 @@ def get_spotify_track(track_id):
             return jsonify(track_data)
         except Exception as e:
             logger.error(f"JioSaavn track detail failed: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    if source_override == 'bandcamp':
+        try:
+            from core.metadata.registry import (
+                get_bandcamp_client,
+                experimental_source_rejected,
+            )
+            if experimental_source_rejected(source_override):
+                return jsonify({"error": "Bandcamp is not enabled"}), 503
+            client = get_bandcamp_client()
+
+            bandcamp_url = request.args.get('bandcamp_url', '').strip()
+            track_name = request.args.get('name', '')
+            track_artist = request.args.get('artist', '')
+
+            release = client.get_release_metadata(bandcamp_url) if bandcamp_url else None
+            result = None
+            if release:
+                result = {
+                    'title': release.get('title', track_name),
+                    'url': bandcamp_url,
+                    'artist': release.get('artist') or track_artist,
+                    'image_url': release.get('image_url'),
+                }
+            elif track_artist and track_name:
+                result = client.search_track(track_artist, track_name)
+            if not result:
+                return jsonify({"error": "Track not found"}), 404
+
+            return jsonify({
+                'id': result.get('url', ''),
+                'name': result.get('title', track_name),
+                'artists': [{'name': result.get('artist') or track_artist}],
+                'album': {'name': '', 'images': [{'url': result['image_url']}] if result.get('image_url') else []},
+                'duration_ms': 0,
+                'preview_url': None,
+                'external_urls': {'bandcamp': result.get('url', '')},
+                'popularity': 0,
+            })
+        except Exception as e:
+            logger.error(f"Bandcamp track detail failed: {e}")
             return jsonify({"error": str(e)}), 500
 
     # Try Hydrabase first when active and track name provided
@@ -37741,6 +37907,39 @@ except Exception as e:
 # END GENIUS ENRICHMENT INTEGRATION
 # ================================================================================================
 
+
+# ================================================================================================
+# BANDCAMP ENRICHMENT WORKER
+# ================================================================================================
+# Opt-in experimental source (core.metadata.registry.EXPERIMENTAL_SOURCES) —
+# started unconditionally like the other enrichment workers, but the worker
+# loop itself stays idle unless 'experimental.bandcamp_enabled' is on
+# (checked live, so toggling the setting takes effect without a restart).
+
+bandcamp_worker = None
+try:
+    from database.music_database import MusicDatabase
+    bandcamp_db = MusicDatabase()
+    bandcamp_worker = BandcampWorker(database=bandcamp_db)
+    if config_manager.get('bandcamp_enrichment_paused', False):
+        bandcamp_worker.paused = True
+    bandcamp_worker.start()
+    if bandcamp_worker.paused:
+        logger.info("Bandcamp enrichment worker initialized (paused — restored from config)")
+    else:
+        logger.info("Bandcamp enrichment worker initialized and started")
+except Exception as e:
+    logger.error(f"Bandcamp worker initialization failed: {e}")
+    bandcamp_worker = None
+
+# Bandcamp status / pause / resume routes are served by the generic
+# enrichment blueprint at /api/enrichment/bandcamp/{status,pause,resume},
+# same as Genius above.
+
+# ================================================================================================
+# END BANDCAMP ENRICHMENT INTEGRATION
+# ================================================================================================
+
 # ================================================================================================
 # TIDAL ENRICHMENT WORKER
 # ================================================================================================
@@ -37797,6 +37996,7 @@ _init_service_search(
     discogs_worker_obj=discogs_worker,
     audiodb_worker_obj=audiodb_worker,
     amazon_worker_obj=amazon_worker,
+    bandcamp_worker_obj=bandcamp_worker,
     jiosaavn_worker_obj=jiosaavn_worker,
 )
 
@@ -38743,7 +38943,14 @@ def import_search_albums():
         _build_import_route_runtime(),
         request.args.get('q', ''),
         request.args.get('limit', 12),
+        request.args.get('source', ''),
     )
+    return jsonify(payload), status
+
+
+@app.route('/api/import/search/sources', methods=['GET'])
+def import_search_sources_route():
+    payload, status = _import_search_sources()
     return jsonify(payload), status
 
 
@@ -39436,6 +39643,11 @@ _register_enrichment_services([
         worker_getter=lambda: similar_artists_worker,
         config_paused_key='similar_artists_enrichment_paused',
     ),
+    _EnrichmentService(
+        id='bandcamp', display_name='Bandcamp',
+        worker_getter=lambda: bandcamp_worker,
+        config_paused_key='bandcamp_enrichment_paused',
+    ),
 ])
 
 _configure_enrichment_api(
@@ -39523,6 +39735,7 @@ def _emit_enrichment_status_loop():
         'tidal-enrichment': lambda: tidal_enrichment_worker,
         'qobuz-enrichment': lambda: qobuz_enrichment_worker,
         'amazon-enrichment': lambda: amazon_worker,
+        'bandcamp-enrichment': lambda: bandcamp_worker,
         'similar_artists': lambda: similar_artists_worker,
         'hydrabase': lambda: hydrabase_worker,
         'soulid': lambda: soulid_worker,

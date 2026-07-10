@@ -23,6 +23,7 @@ Safety rails:
 from __future__ import annotations
 
 import os
+import unicodedata
 from typing import Any, Optional
 
 from core.library.path_resolver import resolve_library_file_path
@@ -32,6 +33,25 @@ logger = get_logger("library.existing_album_folder")
 
 # Strict — a wrong album match drops the file in the wrong folder.
 _STRICT_ALBUM_CONFIDENCE = 0.85
+
+
+def _normalize_album_name(name: Optional[str]) -> str:
+    """Casefold + strip diacritics + collapse whitespace. Deliberately does NOT
+    strip edition qualifiers (Deluxe/Remastered/"Plus"/…) — folder identity must
+    treat those as *different* albums (#1001)."""
+    if not name:
+        return ""
+    decomposed = unicodedata.normalize("NFKD", str(name))
+    stripped = "".join(c for c in decomposed if not unicodedata.combining(c))
+    return " ".join(stripped.casefold().split())
+
+
+def _same_album_name(a: Optional[str], b: Optional[str]) -> bool:
+    """True only when two album names are the SAME album, not merely an
+    edition-collapsed neighbour. Exact after normalization — a wrong merge here
+    loses files/art, so we bias toward 'different' when unsure."""
+    na, nb = _normalize_album_name(a), _normalize_album_name(b)
+    return bool(na) and na == nb
 
 
 def _is_under(child: str, parent: str) -> bool:
@@ -64,7 +84,21 @@ def _find_album(db: Any, spotify_album_id: Optional[str], album_name: Optional[s
                 server_source=active_server,
             )
             if match and confidence >= _STRICT_ALBUM_CONFIDENCE:
-                return match
+                # #1001: check_album_exists_with_editions is edition-AWARE — it
+                # deliberately treats "Grassy Fields" and "Grassy Fields Plus"
+                # (or Original vs Remastered) as the same album. That is right
+                # for "does this album exist" questions, but WRONG for folder
+                # identity: different editions are different releases and must
+                # keep their own folders (that's what the user's $albumtype/$year
+                # template encodes). So accept the name match only when it is the
+                # SAME album name; otherwise fall through to the template.
+                if _same_album_name(album_name, getattr(match, "title", None)):
+                    return match
+                logger.debug(
+                    "[Existing Album Folder] rejecting edition-variant match "
+                    "%r != %r — folder identity requires the same album name",
+                    album_name, getattr(match, "title", None),
+                )
         except Exception as e:
             logger.debug("strict album name+artist match failed: %s", e)
     return None

@@ -87,9 +87,9 @@ def test_itunes_single_albumartist_falls_back_to_track_artist(monkeypatch, tmp_p
     assert "Unknown Artist" not in final_path
 
 
-def test_real_album_artist_still_wins_over_track_artist(monkeypatch, tmp_path):
-    """The #989 guard must not clobber a genuine, different album artist (compilations,
-    'various artists' style releases keep their real collection artist)."""
+def test_compilation_uses_compilation_path_template(monkeypatch, tmp_path):
+    """Compilation albums route through the compilation_path template so all tracks
+    land in a single Compilations/<album>/ folder instead of being split by artist."""
     monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _album_path_config(tmp_path))
     monkeypatch.setattr(import_paths, "_get_album_tracks_for_source", lambda *a: None)
     ctx = {
@@ -105,7 +105,11 @@ def test_real_album_artist_still_wins_over_track_artist(monkeypatch, tmp_path):
     info = {"is_album": True, "album_name": "Big Comp", "track_number": 3, "disc_number": 1}
     final_path, _ = import_paths.build_final_path_for_track(
         ctx, {"name": "Guest Singer"}, info, ".flac", create_dirs=False)
-    assert "Various Artists" in final_path        # real album artist preserved
+    # compilation_path default: Compilations/$album/$track - $artist - $title
+    assert "Compilations" in final_path
+    assert "Big Comp" in final_path
+    assert "Guest Singer" in final_path
+    assert "Various Artists" not in final_path
 
 
 def test_create_dirs_true_still_creates_folders(monkeypatch, tmp_path):

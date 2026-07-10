@@ -13,10 +13,12 @@ export const IMPORT_PLACEHOLDER_IMAGE = '/static/placeholder.png';
 
 const IMPORT_SOURCE_LABELS: Record<string, string> = {
   amazon: 'Amazon Music',
+  bandcamp: 'Bandcamp',
   deezer: 'Deezer',
   discogs: 'Discogs',
   hydrabase: 'Hydrabase',
   itunes: 'Apple Music',
+  jiosaavn: 'JioSaavn',
   musicbrainz: 'MusicBrainz',
   playlist: 'Playlist',
   soulseek: 'Basic Search',

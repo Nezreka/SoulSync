@@ -83,7 +83,7 @@ def test_search_albums_payload_uses_label_not_functional_source():
     runtime = ImportRouteRuntime(
         get_primary_source=lambda: "deezer",          # functional (downgraded)
         get_primary_source_label=lambda: "spotify",   # configured intent
-        search_import_albums=lambda q, limit=12: [{"name": "X", "source": "discogs"}],
+        search_import_albums=lambda q, limit=12, source_override=None: [{"name": "X", "source": "discogs"}],
         hydrabase_worker=None,
         dev_mode_enabled=False,
     )

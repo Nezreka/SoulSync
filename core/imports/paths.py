@@ -584,7 +584,9 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         # so $cdnum can decide between "CDxx" and an empty string.
         template_context["total_discs"] = total_discs
 
-        album_template = _get_config_manager().get("file_organization.templates", {}).get("album_path", "") or ""
+        _template_key = "compilation_path" if raw_album_type in ("compilation", "compile") else "album_path"
+
+        album_template = _get_config_manager().get("file_organization.templates", {}).get(_template_key, "") or ""
         # Suppress the auto-injected disc folder when the user already
         # encodes the disc in the filename via $disc, $discnum, or $cdnum.
         user_controls_disc = (
@@ -596,7 +598,7 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         )
         disc_label = _get_config_manager().get("file_organization.disc_label", "Disc")
 
-        folder_path, filename_base = get_file_path_from_template(template_context, "album_path")
+        folder_path, filename_base = get_file_path_from_template(template_context, _template_key)
 
         # #829: if this album already lives in a single folder on disk, drop the
         # new track there instead of a freshly-templated folder — this is what
@@ -604,8 +606,10 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         # batches (wishlist, Album Completeness, a missed track later). Strict
         # match + transfer-dir-only + single-folder-only inside the resolver;
         # any miss falls through to the template path below. Best-effort.
+        # Compilations skip reuse — their namespace moved from artist-based to
+        # Compilations/, so matching an old artist folder would scatter tracks.
         reuse_folder = None
-        if filename_base:
+        if filename_base and raw_album_type not in ("compilation", "compile"):
             try:
                 from core.library.existing_album_folder import resolve_existing_album_folder
                 from database.music_database import get_database
@@ -646,11 +650,14 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
                 _ensure_dir(os.path.join(transfer_dir, folder_path), exist_ok=True)
             return final_path, True
 
-        artist_name_sanitized = sanitize_filename(template_context["albumartist"])
         album_name_sanitized = sanitize_filename(album_info["album_name"])
-        artist_dir = os.path.join(transfer_dir, artist_name_sanitized)
-        album_folder_name = f"{artist_name_sanitized} - {album_name_sanitized}"
-        album_dir = os.path.join(artist_dir, album_folder_name)
+        if raw_album_type in ("compilation", "compile"):
+            album_dir = os.path.join(transfer_dir, "Compilations", album_name_sanitized)
+        else:
+            artist_name_sanitized = sanitize_filename(template_context["albumartist"])
+            artist_dir = os.path.join(transfer_dir, artist_name_sanitized)
+            album_folder_name = f"{artist_name_sanitized} - {album_name_sanitized}"
+            album_dir = os.path.join(artist_dir, album_folder_name)
         if total_discs > 1:
             album_dir = os.path.join(album_dir, f"{disc_label} {disc_number}")
         _ensure_dir(album_dir, exist_ok=True)

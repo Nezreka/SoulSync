@@ -213,6 +213,73 @@ def build_import_pipeline_runtime(
 
 
 
+def _maybe_stage_album_track(context, final_path):
+    """#999 atomic album publishing (opt-in, default off). When this track belongs
+    to a FRESH whole-album batch and ``album_downloads.atomic_publish`` is on,
+    return the private staging-mirror path to post-process into instead of the
+    live library path, and mark the batch so batch-completion publishes it as one
+    unit — so Plex never sees a partial album mid-download.
+
+    Returns ``final_path`` UNCHANGED for every normal case (flag off, no batch,
+    not an album batch, not a fresh album, or any error), so default behavior is
+    byte-for-byte today's. The decision is made once per batch and cached."""
+    try:
+        if not config_manager.get('album_downloads.atomic_publish', False):
+            return final_path
+        # Real batched downloads run through the verification wrapper, which pops
+        # batch_id out of the context (batch accounting is the wrapper's job) and
+        # stashes it under _atomic_publish_batch_id for us. Manual/base-direct
+        # calls still carry batch_id normally.
+        batch_id = context.get('batch_id') or context.get('_atomic_publish_batch_id')
+        if not batch_id:
+            logger.debug("[Atomic Publish] track has no batch_id — publishing directly")
+            return final_path
+        from core.downloads.atomic_album_publish import (
+            staging_root_for_batch, to_staging_path, album_folder_is_fresh)
+        with tasks_lock:
+            batch = download_batches.get(batch_id)
+            if not batch:
+                logger.debug("[Atomic Publish] batch %s not found — publishing directly", batch_id)
+                return final_path
+            # Decide once per batch, and LOG the decision + reason so an opted-in
+            # user can confirm it in app.log. Cached via _atomic_decided.
+            if not batch.get('_atomic_decided'):
+                batch['_atomic_decided'] = True
+                batch['_atomic_active'] = False
+                if not batch.get('is_album_download'):
+                    logger.info("[Atomic Publish] Batch %s: NOT flagged as an album download "
+                                "— publishing directly (atomic only applies to album batches)", batch_id)
+                else:
+                    transfer_dir = docker_resolve_path(
+                        config_manager.get('soulseek.transfer_path', './Transfer'))
+                    album_folder = os.path.dirname(final_path)
+                    if album_folder_is_fresh(album_folder):
+                        batch['_atomic_active'] = True
+                        batch['_atomic_transfer_dir'] = transfer_dir
+                        batch['_atomic_staging_root'] = staging_root_for_batch(transfer_dir, batch_id)
+                        logger.info("[Atomic Publish] Batch %s: STAGING album until complete "
+                                    "(album=%r, transfer=%s)", batch_id,
+                                    os.path.basename(album_folder), transfer_dir)
+                    else:
+                        logger.info("[Atomic Publish] Batch %s: album folder already has tracks "
+                                    "(completeness fill) — publishing directly: %s",
+                                    batch_id, album_folder)
+            if not batch.get('_atomic_active'):
+                return final_path
+            staging_root = batch.get('_atomic_staging_root')
+            transfer_dir = batch.get('_atomic_transfer_dir')
+        staged = to_staging_path(final_path, transfer_dir, staging_root)
+        if not staged:
+            logger.warning("[Atomic Publish] Batch %s: %r is not under the transfer dir %r "
+                           "— publishing directly (check soulseek.transfer_path)",
+                           batch_id, final_path, transfer_dir)
+            return final_path
+        return staged
+    except Exception as e:
+        logger.error("[Atomic Publish] stage redirect failed (using direct publish): %s", e)
+        return final_path
+
+
 def _persist_verification_status(context, final_path):
     """Compute + persist the verification status (verified / unverified /
     force_imported) for a finished import: embedded tag on the file, plus
@@ -629,7 +696,15 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                 if context_key in matched_downloads_context:
                     del matched_downloads_context[context_key]
 
-            if web_scan_manager:
+            # Honor the "Auto-Scan After Downloads" toggle. Batch downloads emit
+            # batch_complete and the automation engine only scans when that
+            # automation is enabled — but a simple download never forms a batch,
+            # so this direct scan used to fire unconditionally and kept scanning
+            # even with auto-scan turned off (#995 follow-up). Gate it on the same
+            # automation; fail open when the engine isn't available.
+            _auto_scan_on = (automation_engine is None
+                             or automation_engine.is_event_action_enabled('batch_complete', 'scan_library'))
+            if web_scan_manager and _auto_scan_on:
                 threading.Thread(
                     target=lambda: web_scan_manager.request_scan("Simple download completed"),
                     daemon=True,
@@ -794,6 +869,9 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
         album_info['disc_number'] = _resolved_disc
 
         final_path, _ = build_final_path_for_track(context, artist_context, album_info, file_ext)
+        # #999 atomic album publish (opt-in): redirect to a private staging mirror
+        # for fresh whole-album batches; returns final_path unchanged otherwise.
+        final_path = _maybe_stage_album_track(context, final_path)
         logger.info(f"Resolved path: '{final_path}'")
         context['_final_processed_path'] = final_path
 
@@ -1122,7 +1200,15 @@ def post_process_matched_download_with_verification(context_key, context, file_p
     try:
         original_task_id = context.pop('task_id', None)
         original_batch_id = context.pop('batch_id', None)
+        # #999: the atomic-publish stage redirect runs inside the inner pipeline
+        # and needs the batch id — which we just popped so the inner batch
+        # accounting stays owned by this wrapper. Stash it under a dedicated key
+        # the redirect reads. Flag-gated so flag-off downloads are byte-identical
+        # (no extra context key), and popped again before the wrapper continues.
+        if original_batch_id and config_manager.get('album_downloads.atomic_publish', False):
+            context['_atomic_publish_batch_id'] = original_batch_id
         post_process_matched_download(context_key, context, file_path, runtime, metadata_runtime=metadata_runtime)
+        context.pop('_atomic_publish_batch_id', None)
         if original_task_id:
             context['task_id'] = original_task_id
         if original_batch_id:

@@ -2,12 +2,13 @@ import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { type DragEvent, type KeyboardEvent, useState } from 'react';
 
-import { Button, TextInput } from '@/components/form/form';
+import { Button, Select, TextInput } from '@/components/form/form';
 import { Notice } from '@/components/primitives';
 
 import type { ImportAlbumResult } from '../-import.types';
 
 import {
+  importSearchSourcesQueryOptions,
   importStagingGroupsQueryOptions,
   importStagingSuggestionsQueryOptions,
   matchImportAlbum,
@@ -41,6 +42,9 @@ function useAlbumImportViewModel() {
   const suggestionsQuery = useQuery({
     ...importStagingSuggestionsQueryOptions(),
   });
+  const sourcesQuery = useQuery({
+    ...importSearchSourcesQueryOptions(),
+  });
   const { addQueueJob } = useImportQueueActions();
   const {
     albumMatch,
@@ -51,6 +55,7 @@ function useAlbumImportViewModel() {
     albumSearchError,
     albumSearchLoading,
     albumSearchLookupSource,
+    albumSearchSourceOverride,
     autoGroupFilePaths,
     clearAutoGroupFilePaths,
     matchOverrides,
@@ -65,6 +70,7 @@ function useAlbumImportViewModel() {
     setAlbumSearchError,
     setAlbumSearchLoading,
     setAlbumSearchLookupSource,
+    setAlbumSearchSourceOverride,
     setMatchOverrides,
     setSelectedAlbum,
   } = useAlbumImportWorkflow();
@@ -83,7 +89,7 @@ function useAlbumImportViewModel() {
     setAlbumSearchContext(trimmed, filePaths);
 
     try {
-      const payload = await searchImportAlbums(trimmed);
+      const payload = await searchImportAlbums(trimmed, albumSearchSourceOverride || undefined);
       setAlbumResults(payload.albums ?? []);
       setAlbumSearchLookupSource(payload.primary_source ?? null);
     } catch (error) {
@@ -174,10 +180,13 @@ function useAlbumImportViewModel() {
     albumSearchError,
     albumSearchLoading,
     albumSearchLookupSource,
+    albumSearchSourceOverride,
+    availableSources: sourcesQuery.data?.sources ?? [],
     dragOverTrack,
     groups: groupsQuery.data?.groups ?? [],
     matchOverrides,
     onAlbumQueryChange: setAlbumQuery,
+    onAlbumSearchSourceChange: setAlbumSearchSourceOverride,
     onAutoRematch: () => {
       setMatchOverrides({});
       setTapSelectedChip(null);
@@ -242,8 +251,11 @@ function AlbumImportPanelContent({ viewModel }: { viewModel: AlbumImportViewMode
     albumSearchError,
     albumSearchLoading,
     albumSearchLookupSource,
+    albumSearchSourceOverride,
+    availableSources,
     groups,
     onAlbumQueryChange,
+    onAlbumSearchSourceChange,
     onBackToSearch,
     onRunGroupSearch,
     onRunSearch,
@@ -321,6 +333,22 @@ function AlbumImportPanelContent({ viewModel }: { viewModel: AlbumImportViewMode
         )}
 
         <div className={styles.importPageSearchBar}>
+          {availableSources.length > 1 && (
+            <Select
+              id="import-page-album-search-source"
+              aria-label="Search source"
+              title="Only your primary source is tried by default — the first source with any result wins, which can shadow a niche source (e.g. Bandcamp) behind a broad-catalog one. Pick a source to search it directly."
+              value={albumSearchSourceOverride}
+              onChange={(event) => onAlbumSearchSourceChange(event.target.value)}
+            >
+              <option value="">Auto (your primary source)</option>
+              {availableSources.map((source) => (
+                <option key={source.source} value={source.source}>
+                  {source.label}
+                </option>
+              ))}
+            </Select>
+          )}
           <TextInput
             type="text"
             id="import-page-album-search-input"

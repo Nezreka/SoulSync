@@ -228,12 +228,12 @@ function _handleShellLinkClick(event) {
     }
 
     if (pathname.startsWith('/artist-detail/')) {
-        _handleArtistDetailLinkClick(event, pathname);
+        _handleArtistDetailLinkClick(event, pathname, anchor);
         return;
     }
 }
 
-function _handleArtistDetailLinkClick(event, pathname) {
+function _handleArtistDetailLinkClick(event, pathname, anchor) {
     const parts = pathname.split('/').filter(Boolean);
     if (parts.length < 3) return;
 
@@ -243,10 +243,20 @@ function _handleArtistDetailLinkClick(event, pathname) {
     const artistId = decodeURIComponent(parts.slice(2).join('/'));
     if (!source || !artistId) return;
 
+    // Some sources (Bandcamp) have no numeric-ID lookup API — the artist's
+    // display name has to travel with the click, or the destination page
+    // has nothing to resolve against. The card already stashes it as a data
+    // attribute (renderCompactSection); the href's own ?name= query (set by
+    // buildArtistDetailPath) is the fallback for anchors that don't.
+    const artistName = anchor?.dataset?.artistName
+        || new URLSearchParams(anchor?.search || '').get('name')
+        || '';
+
     event.preventDefault();
     void navigateToPage('artist-detail', {
         artistId,
         artistSource: source,
+        artistName,
         forceReload: true,
     });
 }

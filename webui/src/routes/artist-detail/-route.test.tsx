@@ -42,6 +42,24 @@ describe('artist-detail route', () => {
     });
   });
 
+  it('passes the ?name= search param through to the legacy shell', async () => {
+    // Bandcamp (and any other source with no numeric-ID lookup API) can only
+    // resolve an artist by name — the URL is the only channel that survives
+    // a page load / browser-back, so this must round-trip correctly.
+    renderArtistDetailRoute(['/artist-detail/bandcamp/3957198221?name=Radiohead']);
+
+    await waitFor(() => {
+      expect(window.SoulSyncWebShellBridge?.navigateToArtistDetail).toHaveBeenCalledWith(
+        '3957198221',
+        'Radiohead',
+        'bandcamp',
+        {
+          skipRouteChange: true,
+        },
+      );
+    });
+  });
+
   it('normalizes library sources before handing off', async () => {
     renderArtistDetailRoute(['/artist-detail/library/42']);
 
