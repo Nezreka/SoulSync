@@ -28,6 +28,64 @@ def register_routes(bp):
             return jsonify({"error": "not found"}), 404
         return jsonify({"success": True, "monitored": bool(body.get("monitored"))})
 
+    # ── Manage sidebar: metadata edits + field locks + watched ────────────────
+    @bp.route("/detail/<kind>/<int:item_id>/metadata", methods=["PUT"])
+    def video_edit_metadata(kind, item_id):
+        """Apply user edits (title/sort/year/rating/genres/summary/tagline…).
+        Writes locally + auto-locks the fields, then pushes to Plex/Jellyfin
+        with the server's own field locks set."""
+        from core.video import metadata as med
+
+        from . import get_video_db
+        if kind not in ("movie", "show"):
+            return jsonify({"error": "bad kind"}), 400
+        changes = (request.get_json(silent=True) or {}).get("changes")
+        if not isinstance(changes, dict) or not changes:
+            return jsonify({"error": "no changes"}), 400
+        try:
+            res = med.edit_item(get_video_db(), kind, item_id, changes)
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+        if not res.get("ok"):
+            return jsonify({"error": res.get("error", "not found")}), 404
+        return jsonify(res)
+
+    @bp.route("/detail/<kind>/<int:item_id>/lock", methods=["POST"])
+    def video_field_lock(kind, item_id):
+        """Lock or release one field. Releasing hands it back to the server:
+        the next scan re-adopts the server's value."""
+        from core.video import metadata as med
+
+        from . import get_video_db
+        body = request.get_json(silent=True) or {}
+        field = body.get("field")
+        if kind not in ("movie", "show") or not field:
+            return jsonify({"error": "bad request"}), 400
+        db = get_video_db()
+        if body.get("locked"):
+            locks = db.set_field_lock(kind, item_id, field, True)
+            if locks is None:
+                return jsonify({"error": "unknown item or field"}), 404
+            return jsonify({"ok": True, "locked": locks})
+        res = med.release_lock(db, kind, item_id, field)
+        if not res.get("ok"):
+            return jsonify({"error": res.get("error", "not found")}), 404
+        return jsonify(res)
+
+    @bp.route("/detail/<kind>/<int:item_id>/watched", methods=["POST"])
+    def video_set_watched(kind, item_id):
+        """Played/unplayed toggle — local watch state + server markPlayed."""
+        from core.video import metadata as med
+
+        from . import get_video_db
+        if kind not in ("movie", "show"):
+            return jsonify({"error": "bad kind"}), 400
+        watched = bool((request.get_json(silent=True) or {}).get("watched"))
+        res = med.set_watched(get_video_db(), kind, item_id, watched)
+        if not res.get("ok"):
+            return jsonify({"error": res.get("error", "not found")}), 404
+        return jsonify(res)
+
     @bp.route("/detail/show/<int:show_id>", methods=["GET"])
     def video_show_detail(show_id):
         from . import get_video_db

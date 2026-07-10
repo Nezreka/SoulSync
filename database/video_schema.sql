@@ -96,7 +96,8 @@ CREATE TABLE IF NOT EXISTS movies (
     path                 TEXT,            -- folder on disk once owned
     added_at             TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at           TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    play_count       INTEGER                          -- server watch state (viewCount)
+    play_count       INTEGER,                         -- server watch state (viewCount)
+    locked_fields    TEXT                             -- JSON list of user-edited (scan/enrichment-immune) fields
 );
 CREATE INDEX IF NOT EXISTS idx_movies_tmdb       ON movies(tmdb_id);
 CREATE INDEX IF NOT EXISTS idx_movies_monitored  ON movies(monitored, has_file);
@@ -146,7 +147,8 @@ CREATE TABLE IF NOT EXISTS shows (
     path               TEXT,
     added_at           TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at         TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    watched_episodes INTEGER                          -- server watch state (viewed leaf count)
+    watched_episodes INTEGER,                         -- server watch state (viewed leaf count)
+    locked_fields    TEXT                             -- JSON list of user-edited (scan/enrichment-immune) fields
 );
 CREATE INDEX IF NOT EXISTS idx_shows_tvdb      ON shows(tvdb_id);
 CREATE INDEX IF NOT EXISTS idx_shows_monitored ON shows(monitored);

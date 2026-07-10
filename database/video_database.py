@@ -31,7 +31,7 @@ logger = get_logger("video_database")
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 28
+SCHEMA_VERSION = 29
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -71,6 +71,17 @@ _ENRICH_META_COLS = {
     "shows": {"overview", "backdrop_url", "logo_url", "status", "network", "content_rating",
               "tagline", "rating", "first_air_date", "last_air_date", "airs_time",
               "imdb_id", "tmdb_id", "tvdb_id"},
+}
+
+# Fields a USER may edit (Manage sidebar) per table. 'genres' is a pseudo-field
+# routed to the link tables. An edited field is recorded in the row's
+# ``locked_fields`` JSON list and from then on belongs to the user: scans
+# (every mode, including FULL) and enrichment leave it alone until released.
+_USER_EDITABLE = {
+    "movies": {"title", "sort_title", "year", "overview", "tagline", "content_rating",
+               "studio", "genres"},
+    "shows": {"title", "sort_title", "year", "overview", "tagline", "content_rating",
+              "network", "genres"},
 }
 
 # Backfill-worker plumbing (parallels _ENRICH, but for services that enrich an
@@ -266,6 +277,10 @@ _COLUMN_MIGRATIONS = [
     # one-time per-item detail re-fetch that fills those gaps. Starts 0 = needs it.
     ("shows", "details_synced", "INTEGER NOT NULL DEFAULT 0"),
     ("movies", "details_synced", "INTEGER NOT NULL DEFAULT 0"),
+    # User-edited metadata locks (JSON list of field names, e.g. '["title","genres"]').
+    # A locked field is owned by the user: scan upserts and enrichment skip it.
+    ("movies", "locked_fields", "TEXT"),
+    ("shows", "locked_fields", "TEXT"),
 ]
 
 
@@ -439,14 +454,14 @@ class VideoDatabase:
         # existing (authoritative) id, still recording status + metadata.
         id_cols = {"tmdb_id", "tvdb_id", "imdb_id"}
 
-        def build(include_ids):
+        def build(include_ids, locked):
             sets = [f"{sc}=?", f"{ac}=CURRENT_TIMESTAMP"]
             params = [status]
             if matched and external_id is not None and include_ids:
                 sets.append(f"{idc}=?")
                 params.append(external_id)
             for col, val in (metadata or {}).items():
-                if val is None or col not in allowed:
+                if val is None or col not in allowed or col in locked:
                     continue
                 if not include_ids and col in id_cols:
                     continue
@@ -459,19 +474,22 @@ class VideoDatabase:
 
         conn = self._get_connection()
         try:
-            sql, params = build(True)
+            # User-locked fields belong to the user — enrichment never touches
+            # them, not even to fill a deliberately-blanked value.
+            locked = self._locked_fields_set(conn, tbl, item_id)
+            sql, params = build(True, locked)
             try:
                 conn.execute(sql, params)
             except sqlite3.IntegrityError:
                 conn.rollback()
-                sql, params = build(False)   # keep existing id, just record status/metadata
+                sql, params = build(False, locked)   # keep existing id, just record status/metadata
                 conn.execute(sql, params)
             # Genres backfill — only when the item has none yet (enrichment fills
             # the gap the server didn't). Written to the normalised link tables.
             genres = (metadata or {}).get("genres")
             link = {"movies": ("movie_genres", "movie_id"),
                     "shows": ("show_genres", "show_id")}.get(tbl)
-            if matched and genres and link:
+            if matched and genres and link and "genres" not in locked:
                 lt, oc = link
                 has = conn.execute(f"SELECT 1 FROM {lt} WHERE {oc}=? LIMIT 1", (item_id,)).fetchone()
                 if not has:
@@ -1952,6 +1970,23 @@ class VideoDatabase:
         )
 
     @staticmethod
+    def _parse_locked(raw) -> set:
+        """Parse a stored ``locked_fields`` JSON list (None/garbage → empty)."""
+        if not raw:
+            return set()
+        try:
+            v = json.loads(raw)
+            return {str(f) for f in v} if isinstance(v, list) else set()
+        except (ValueError, TypeError):
+            return set()
+
+    @classmethod
+    def _locked_fields_set(cls, conn, table: str, item_id: int) -> set:
+        """The user-locked field names for one movies/shows row (empty when none)."""
+        row = conn.execute(f"SELECT locked_fields FROM {table} WHERE id=?", (item_id,)).fetchone()
+        return cls._parse_locked(row["locked_fields"]) if row else set()
+
+    @staticmethod
     def _set_genres(conn, link_table: str, owner_col: str, owner_id: int, names) -> None:
         """Replace the genre links for one owner (normalised; dedup names in the
         shared genres table). owner_col/link_table are internal, never user input."""
@@ -1979,15 +2014,21 @@ class VideoDatabase:
         ``preserve_enrichment`` (default) keeps enrichment-owned fields (``status``,
         network, ratings, air dates…) that the SERVER left blank — so an incremental
         or deep re-scan never wipes the TMDB-backfilled ``status`` (which the airing
-        watchlist depends on). A FULL scan passes False = a clean overwrite / reset."""
+        watchlist depends on). A FULL scan passes False = a clean overwrite / reset.
+
+        User-locked fields (``locked_fields`` JSON on the row) are kept in EVERY
+        mode — a full scan resets enrichment, never a user edit."""
         protect = (_ENRICH_META_COLS.get(table, set()) if preserve_enrichment else set())
 
         def _set(c):
             # On a conflict UPDATE, an enrichment-owned column only takes the server
             # value when it's non-blank; otherwise it keeps what's already stored.
+            take = f"excluded.{c}"
             if c in protect:
-                return f"{c}=COALESCE(NULLIF(excluded.{c}, ''), {table}.{c})"
-            return f"{c}=excluded.{c}"
+                take = f"COALESCE(NULLIF(excluded.{c}, ''), {table}.{c})"
+            # instr on the quoted name — '"title"' never matches '"sort_title"'.
+            return (f"{c}=CASE WHEN instr(COALESCE({table}.locked_fields, ''), '\"{c}\"') > 0 "
+                    f"THEN {table}.{c} ELSE {take} END")
 
         def run(include_ids):
             cols = list(base.keys()) + (list(id_cols.keys()) if include_ids else [])
@@ -2075,7 +2116,8 @@ class VideoDatabase:
                 (server_source, item["server_id"]),
             ).fetchone()["id"]
             self._set_media_file(conn, "movie_id", movie_id, item.get("file"))
-            self._set_genres(conn, "movie_genres", "movie_id", movie_id, item.get("genres"))
+            if "genres" not in self._locked_fields_set(conn, "movies", movie_id):
+                self._set_genres(conn, "movie_genres", "movie_id", movie_id, item.get("genres"))
             conn.commit()
             return movie_id
         finally:
@@ -2105,7 +2147,8 @@ class VideoDatabase:
                 "SELECT id FROM shows WHERE server_source=? AND server_id=?",
                 (server_source, item["server_id"]),
             ).fetchone()["id"]
-            self._set_genres(conn, "show_genres", "show_id", show_id, item.get("genres"))
+            if "genres" not in self._locked_fields_set(conn, "shows", show_id):
+                self._set_genres(conn, "show_genres", "show_id", show_id, item.get("genres"))
 
             seen_seasons: set[int] = set()
             seen_eps: set[tuple[int, int]] = set()
@@ -3482,6 +3525,9 @@ class VideoDatabase:
         owned_total = sum(1 for e in eps if e["has_file"])
         return {
             "kind": "show", "id": show["id"], "title": show["title"], "year": show["year"],
+            "sort_title": show["sort_title"],
+            "locked_fields": sorted(self._parse_locked(show["locked_fields"])),
+            "watched": (show["watched_episodes"] or 0) >= total > 0,
             "overview": show["overview"], "status": show["status"], "network": show["network"],
             "content_rating": show["content_rating"], "runtime_minutes": show["runtime_minutes"],
             "tagline": show["tagline"], "rating": show["rating"],
@@ -3516,6 +3562,120 @@ class VideoDatabase:
                                (1 if monitored else 0, item_id))
             conn.commit()
             return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def set_watch_state(self, kind: str, item_id: int, watched: bool) -> bool:
+        """Reflect a played/unplayed toggle locally (the server push happens in
+        core.video.metadata) so 'watched' smart rules react without waiting for
+        the next scan. Movies flip play_count; shows set watched_episodes to the
+        full episode count (matching what the server does on markPlayed)."""
+        conn = self._get_connection()
+        try:
+            if kind == "movie":
+                cur = conn.execute(
+                    "UPDATE movies SET play_count=CASE WHEN ? THEN MAX(COALESCE(play_count,0),1) "
+                    "ELSE 0 END WHERE id=?", (1 if watched else 0, item_id))
+            elif kind == "show":
+                cur = conn.execute(
+                    "UPDATE shows SET watched_episodes=CASE WHEN ? THEN "
+                    "(SELECT COUNT(*) FROM episodes WHERE show_id=shows.id) ELSE 0 END "
+                    "WHERE id=?", (1 if watched else 0, item_id))
+            else:
+                return False
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    # ── User metadata edits + field locks (Manage sidebar) ────────────────────
+    # An edit writes the row AND records the field in ``locked_fields`` — from
+    # then on scans (every mode) and enrichment leave it alone. Releasing the
+    # lock hands the field back: the next scan re-adopts the server's value.
+
+    def get_locked_fields(self, kind: str, item_id: int) -> list:
+        table = {"movie": "movies", "show": "shows"}.get(kind)
+        if not table:
+            return []
+        conn = self._get_connection()
+        try:
+            return sorted(self._locked_fields_set(conn, table, item_id))
+        finally:
+            conn.close()
+
+    def set_field_lock(self, kind: str, item_id: int, field: str, locked: bool):
+        """Lock/release one field. Returns the new lock list, or None for an
+        unknown kind/field/item."""
+        table = {"movie": "movies", "show": "shows"}.get(kind)
+        if not table or field not in _USER_EDITABLE[table]:
+            return None
+        conn = self._get_connection()
+        try:
+            if not conn.execute(f"SELECT 1 FROM {table} WHERE id=?", (item_id,)).fetchone():
+                return None
+            locks = self._locked_fields_set(conn, table, item_id)
+            locks = (locks | {field}) if locked else (locks - {field})
+            conn.execute(f"UPDATE {table} SET locked_fields=? WHERE id=?",
+                         (json.dumps(sorted(locks)) if locks else None, item_id))
+            conn.commit()
+            return sorted(locks)
+        finally:
+            conn.close()
+
+    def update_item_fields(self, kind: str, item_id: int, changes: dict):
+        """Apply user edits to a movie/show and auto-lock the edited fields.
+
+        ``changes`` maps field name -> new value; fields outside _USER_EDITABLE
+        raise ValueError (nothing partially applied). Editing ``title`` also
+        derives ``sort_title`` unless it was provided or is already locked.
+        Returns {"applied": [...], "locked": [...]} or None when the row is gone."""
+        table = {"movie": "movies", "show": "shows"}.get(kind)
+        if not table:
+            return None
+        editable = _USER_EDITABLE[table]
+        bad = [f for f in changes if f not in editable]
+        if bad:
+            raise ValueError(f"not editable: {', '.join(sorted(bad))}")
+        clean: dict = {}
+        for field, value in changes.items():
+            if field == "genres":
+                if not isinstance(value, (list, tuple)):
+                    raise ValueError("genres must be a list")
+                clean[field] = [str(g).strip() for g in value if str(g or "").strip()]
+            elif field == "year":
+                try:
+                    clean[field] = int(value) if value not in (None, "") else None
+                except (TypeError, ValueError):
+                    raise ValueError("year must be a number") from None
+            else:
+                v = "" if value is None else str(value).strip()
+                if field == "title" and not v:
+                    raise ValueError("title cannot be empty")
+                clean[field] = v
+        conn = self._get_connection()
+        try:
+            row = conn.execute(f"SELECT 1 FROM {table} WHERE id=?", (item_id,)).fetchone()
+            if not row:
+                return None
+            locks = self._locked_fields_set(conn, table, item_id)
+            if "title" in clean and "sort_title" not in clean and "sort_title" not in locks:
+                clean["sort_title"] = _sort_title(clean["title"])
+            genres = clean.pop("genres", None)
+            if genres is not None:
+                lt, oc = (("movie_genres", "movie_id") if table == "movies"
+                          else ("show_genres", "show_id"))
+                self._set_genres(conn, lt, oc, item_id, genres)
+                locks.add("genres")
+            if clean:
+                sets = ", ".join(f"{c}=?" for c in clean)
+                conn.execute(f"UPDATE {table} SET {sets}, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                             (*clean.values(), item_id))
+                locks.update(clean)
+            conn.execute(f"UPDATE {table} SET locked_fields=? WHERE id=?",
+                         (json.dumps(sorted(locks)) if locks else None, item_id))
+            conn.commit()
+            applied = sorted(set(clean) | ({"genres"} if genres is not None else set()))
+            return {"applied": applied, "locked": sorted(locks)}
         finally:
             conn.close()
 
@@ -4721,6 +4881,9 @@ class VideoDatabase:
             conn.close()
         return {
             "kind": "movie", "id": m["id"], "title": m["title"], "year": m["year"],
+            "sort_title": m["sort_title"],
+            "locked_fields": sorted(self._parse_locked(m["locked_fields"])),
+            "watched": (m["play_count"] or 0) > 0,
             "overview": m["overview"], "status": m["status"], "studio": m["studio"],
             "release_date": m["release_date"], "runtime_minutes": m["runtime_minutes"],
             "content_rating": m["content_rating"], "tagline": m["tagline"],

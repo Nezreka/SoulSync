@@ -473,6 +473,70 @@ class PlexVideoSource:
             logger.exception("Plex: set_poster failed for %s", server_id)
             return {"ok": False, "error": str(e)}
 
+    # ── User metadata edits (Manage sidebar) ──────────────────────────────────
+    # SoulSync editable field -> Plex edit field. Every pushed field is also
+    # LOCKED on Plex ('field.locked': 1) so Plex's own agents don't undo the
+    # user's edit on their next refresh — the lock travels with the value.
+    _EDIT_FIELDS = {
+        "title": "title", "sort_title": "titleSort", "year": "year",
+        "content_rating": "contentRating", "overview": "summary",
+        "tagline": "tagline", "studio": "studio",
+    }
+
+    def edit_item_metadata(self, server_id, changes: dict, kind: str = "movie",
+                           unlock_fields=None) -> dict:
+        """Push user metadata edits to a Plex item (by ratingKey), locking each
+        pushed field server-side. ``unlock_fields`` releases Plex's field lock
+        (used when the user releases a SoulSync lock). Fields Plex can't edit
+        (e.g. a show's network) are reported back in ``skipped``."""
+        try:
+            item = self._server.fetchItem(int(server_id))
+            edits, skipped = {}, []
+            for field, value in (changes or {}).items():
+                if field == "genres":
+                    continue   # tags handled below
+                plex_field = self._EDIT_FIELDS.get(field)
+                if not plex_field:
+                    skipped.append(field)
+                    continue
+                edits[f"{plex_field}.value"] = "" if value is None else value
+                edits[f"{plex_field}.locked"] = 1
+            for field in (unlock_fields or []):
+                if field == "genres":
+                    edits["genre.locked"] = 0
+                elif field in self._EDIT_FIELDS:
+                    edits[f"{self._EDIT_FIELDS[field]}.locked"] = 0
+            if edits:
+                item.edit(**edits)
+            if "genres" in (changes or {}):
+                want = [str(g) for g in (changes.get("genres") or [])]
+                current = [t.tag for t in (getattr(item, "genres", None) or [])]
+                stale = [g for g in current if g not in want]
+                fresh = [g for g in want if g not in current]
+                if stale:
+                    item.removeGenre(stale, locked=True)
+                if fresh:
+                    item.addGenre(fresh, locked=True)
+                if not stale and not fresh:
+                    item.edit(**{"genre.locked": 1})   # value unchanged — still lock it
+            return {"ok": True, "skipped": skipped}
+        except Exception as e:   # noqa: BLE001 - surface any Plex/network error
+            logger.exception("Plex: edit_item_metadata failed for %s", server_id)
+            return {"ok": False, "error": str(e)}
+
+    def set_watched(self, server_id, watched: bool, kind: str = "movie") -> dict:
+        """Mark a Plex item played/unplayed (a show marks all its episodes)."""
+        try:
+            item = self._server.fetchItem(int(server_id))
+            if watched:
+                (getattr(item, "markPlayed", None) or item.markWatched)()
+            else:
+                (getattr(item, "markUnplayed", None) or item.markUnwatched)()
+            return {"ok": True}
+        except Exception as e:   # noqa: BLE001
+            logger.exception("Plex: set_watched failed for %s", server_id)
+            return {"ok": False, "error": str(e)}
+
     # ── Collections (SoulSync-managed) ────────────────────────────────────────
     def _collection_section(self, kind: str):
         """The library section collections of a kind live in — the mapped one,
@@ -934,6 +998,74 @@ class JellyfinVideoSource:
             return {"ok": True}
         except Exception as e:   # noqa: BLE001 - surface any Jellyfin/network error
             logger.exception("Jellyfin: set_poster failed for %s", server_id)
+            return {"ok": False, "error": str(e)}
+
+    # ── User metadata edits (Manage sidebar) ──────────────────────────────────
+    # Jellyfin's edit contract is the full item-DTO round-trip (GET → mutate →
+    # POST whole, same as set_collection_meta). Jellyfin natively supports
+    # LockedFields — each pushed field that has a lock name is added there so
+    # Jellyfin's own metadata refreshes don't undo the user's edit.
+    _JF_LOCK_NAMES = {"title": "Name", "overview": "Overview", "genres": "Genres",
+                      "content_rating": "OfficialRating", "studio": "Studios",
+                      "network": "Studios"}
+
+    def edit_item_metadata(self, server_id, changes: dict, kind: str = "movie",
+                           unlock_fields=None) -> dict:
+        import requests
+        base, headers = self._jf()
+        if not base:
+            return {"ok": False, "error": "Jellyfin not configured"}
+        try:
+            item = self._req(f"/Users/{self.uid}/Items/{server_id}")
+            if not item or not item.get("Id"):
+                return {"ok": False, "error": "Item not found"}
+            skipped = []
+            for field, value in (changes or {}).items():
+                if field == "title":
+                    item["Name"] = value
+                elif field == "sort_title":
+                    item["SortName"] = value
+                    item["ForcedSortName"] = value
+                elif field == "year":
+                    item["ProductionYear"] = value
+                elif field == "content_rating":
+                    item["OfficialRating"] = value
+                elif field == "overview":
+                    item["Overview"] = value
+                elif field == "tagline":
+                    item["Taglines"] = [value] if value else []
+                elif field in ("studio", "network"):
+                    item["Studios"] = [{"Name": value}] if value else []
+                elif field == "genres":
+                    item["Genres"] = [str(g) for g in (value or [])]
+                else:
+                    skipped.append(field)
+            locks = set(item.get("LockedFields") or [])
+            locks |= {self._JF_LOCK_NAMES[f] for f in (changes or {}) if f in self._JF_LOCK_NAMES}
+            locks -= {self._JF_LOCK_NAMES[f] for f in (unlock_fields or []) if f in self._JF_LOCK_NAMES}
+            item["LockedFields"] = sorted(locks)
+            headers = dict(headers, **{"Content-Type": "application/json"})
+            requests.post(base + f"/Items/{server_id}", json=item,
+                          headers=headers, timeout=20).raise_for_status()
+            return {"ok": True, "skipped": skipped}
+        except Exception as e:   # noqa: BLE001 - surface any Jellyfin/network error
+            logger.exception("Jellyfin: edit_item_metadata failed for %s", server_id)
+            return {"ok": False, "error": str(e)}
+
+    def set_watched(self, server_id, watched: bool, kind: str = "movie") -> dict:
+        """Mark a Jellyfin item played/unplayed via the PlayedItems endpoint
+        (a series marks all its episodes)."""
+        import requests
+        base, headers = self._jf()
+        if not base:
+            return {"ok": False, "error": "Jellyfin not configured"}
+        try:
+            url = base + f"/Users/{self.uid}/PlayedItems/{server_id}"
+            r = (requests.post if watched else requests.delete)(url, headers=headers, timeout=20)
+            r.raise_for_status()
+            return {"ok": True}
+        except Exception as e:   # noqa: BLE001
+            logger.exception("Jellyfin: set_watched failed for %s", server_id)
             return {"ok": False, "error": str(e)}
 
     # ── Collections (BoxSets; SoulSync-managed) ───────────────────────────────
