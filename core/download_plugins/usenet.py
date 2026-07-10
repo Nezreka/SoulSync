@@ -30,6 +30,7 @@ from core.download_plugins.album_bundle import (
     resolve_reported_save_path,
 )
 from core.download_plugins.base import DownloadSourcePlugin
+from core.download_plugins.candidate_store import get_candidate_store
 from core.download_plugins.torrent import (
     _adapter_state_to_display,
     _decode_filename,
@@ -121,7 +122,11 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
                 continue
             if not result.download_url:
                 continue
-            filename = f"{result.download_url}{_FILENAME_SEP}{result.title}"
+            # The filename crosses to the browser in search responses and
+            # comes back on grab. Prowlarr NZB URLs can carry API keys /
+            # signed params, so only an opaque server token travels (P0-03).
+            token = get_candidate_store().put(result.download_url)
+            filename = f"{token}{_FILENAME_SEP}{result.title}"
             quality = _guess_quality_from_title(result.title)
             parsed_artist, parsed_title = _parse_release_title(result.title)
             tr = TrackResult(
@@ -176,9 +181,16 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
     ) -> Optional[str]:
         if not self.is_configured():
             return None
-        nzb_url, display_name = _decode_filename(filename)
+        token, display_name = _decode_filename(filename)
+        if not token:
+            logger.error("Usenet download missing candidate token in filename: %r", filename)
+            return None
+        # Only a token from OUR candidate store is accepted — a raw URL from
+        # the client is a trust-boundary violation, not a fallback (P0-03).
+        nzb_url = get_candidate_store().resolve(token)
         if not nzb_url:
-            logger.error("Usenet download missing URL in filename: %r", filename)
+            logger.error("Usenet download: unknown or expired candidate for %r "
+                         "— re-run the search", display_name)
             return None
 
         download_id = str(uuid.uuid4())
