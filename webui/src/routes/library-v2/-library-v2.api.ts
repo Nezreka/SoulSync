@@ -92,10 +92,18 @@ export async function setLibraryV2QualityProfile(
   id: number,
   qualityProfileId: number,
   cascade = true,
+  monitorExisting = false,
 ): Promise<void> {
   const payload = await readJson<{ success: boolean; error?: string }>(
     apiClient.post(`library/v2/${entity}/${id}/quality-profile`, {
-      json: { quality_profile_id: qualityProfileId, cascade },
+      json: {
+        quality_profile_id: qualityProfileId,
+        cascade,
+        // Assigning a profile is a quality decision; monitoring the entity's
+        // tracks for upgrades (a wanted-action) is a separate, explicit
+        // opt-in (audit P1-15).
+        monitor_existing: monitorExisting,
+      },
     }),
   );
   if (!payload.success) throw new Error(payload.error || 'Failed to update quality profile');

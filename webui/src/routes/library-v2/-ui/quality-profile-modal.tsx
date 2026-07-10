@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
 
 import {
   LIBRARY_V2_QUERY_KEY,
@@ -37,8 +38,13 @@ export function QualityProfileModal({
 }) {
   const profilesQuery = useQuery(libraryV2QualityProfilesQueryOptions());
   const queryClient = useQueryClient();
+  // Assigning a profile is a quality decision. Monitoring the tracks for
+  // upgrades (queueing downloads) is a separate wanted-action — explicit
+  // opt-in, default off (audit P1-15).
+  const [monitorExisting, setMonitorExisting] = useState(false);
   const mutation = useMutation({
-    mutationFn: (profileId: number) => setLibraryV2QualityProfile(entity, id, profileId),
+    mutationFn: (profileId: number) =>
+      setLibraryV2QualityProfile(entity, id, profileId, true, monitorExisting),
     onSettled: () => queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY }),
     onSuccess: () => onClose(),
   });
@@ -60,6 +66,14 @@ export function QualityProfileModal({
           </p>
           <span className={styles.qpManagedHint}>Profiles are managed in Settings → Quality</span>
         </div>
+        <label className={styles.checkOption}>
+          <input
+            type="checkbox"
+            checked={monitorExisting}
+            onChange={(e) => setMonitorExisting(e.target.checked)}
+          />
+          Also monitor existing tracks for upgrades (adds them to Wanted and may queue downloads)
+        </label>
         <div className={styles.qpList}>
           {profilesQuery.isLoading ? (
             <div className={styles.inlineLoading}>Loading profiles…</div>

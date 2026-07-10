@@ -169,19 +169,38 @@ def test_track_toggle_is_user_initiated_album_toggle_is_not(api):
     db.wishlist_adds.clear()
     resp = client.post(
         f"/api/library/v2/artists/{ids['artist']}/quality-profile",
-        json={"quality_profile_id": 2},
+        json={"quality_profile_id": 2, "monitor_existing": True},
     ).get_json()
     assert resp["success"] is True
     assert db.wishlist_adds and not any(a["user_initiated"] for a in db.wishlist_adds)
 
 
-def test_profile_assign_skips_consolidated_duplicates(api):
-    """An upgrade-policy profile auto-monitors an artist's tracks — but not a
-    consolidated-away duplicate (no file, canonical partner owns the file)."""
+def test_profile_assign_does_not_touch_monitoring_by_default(api):
+    """Audit P1-15: assigning a quality profile is a quality decision, not a
+    wanted-action. Without the explicit opt-in it must neither flip monitored
+    flags nor queue wishlist adds — a deliberately unmonitored track must not
+    get re-downloaded because the user changed a profile."""
     client, db, ids = api
     resp = client.post(
         f"/api/library/v2/artists/{ids['artist']}/quality-profile",
-        json={"quality_profile_id": 2},  # seeded 'until_cutoff' profile
+        json={"quality_profile_id": 2},  # upgrade policy, but no opt-in
+    ).get_json()
+    assert resp["success"] is True
+    assert resp["auto_monitored"] == 0 and resp["mirrored"] == 0
+    with _conn(db) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM lib2_tracks WHERE monitored=1").fetchone()[0] == 0
+    assert db.wishlist_adds == []
+
+
+def test_profile_assign_skips_consolidated_duplicates(api):
+    """With the explicit monitor-existing opt-in, an upgrade-policy profile
+    monitors the artist's tracks — but not a consolidated-away duplicate (no
+    file, canonical partner owns the file)."""
+    client, db, ids = api
+    resp = client.post(
+        f"/api/library/v2/artists/{ids['artist']}/quality-profile",
+        json={"quality_profile_id": 2, "monitor_existing": True},  # seeded 'until_cutoff' profile
     ).get_json()
     assert resp["success"] is True
     with _conn(db) as conn:

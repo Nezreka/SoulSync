@@ -411,6 +411,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             return jsonify({"success": False, "error": "Unknown entity"}), 400
         profile_id = int((request.json or {}).get("quality_profile_id") or 0)
         cascade = bool((request.json or {}).get("cascade", True))
+        # P1-15: assigning a profile is a QUALITY decision, not a wanted-
+        # action. Monitoring existing tracks (and thereby queueing upgrade
+        # downloads) only happens on explicit opt-in from the UI.
+        monitor_existing = bool((request.json or {}).get("monitor_existing", False))
         db = get_database()
         conn = db._get_connection()
         try:
@@ -451,7 +455,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # user deliberately left fileless while its canonical partner owns
             # the file) — re-wanting those would re-download what Manage Tracks
             # just cleaned up. An explicit single-track assignment still wins.
-            if is_upgrade_policy(profile["upgrade_policy"]):
+            if monitor_existing and is_upgrade_policy(profile["upgrade_policy"]):
                 if entity == "artists":
                     auto_monitor_track_ids = [r["id"] for r in conn.execute(
                         f"SELECT id FROM lib2_tracks "
