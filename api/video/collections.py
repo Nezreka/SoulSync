@@ -144,8 +144,35 @@ def register_routes(bp):
         return jsonify({"media_type": mt, "fields": field_schema(mt),
                         "suggestions": {"genre": [g for g in genres if g]}})
 
+    @bp.route("/collections/presets/catalog", methods=["GET"])
+    def collections_presets_catalog():
+        """Pack identities only (no DB, no network) — the browser paints these
+        instantly as skeletons while the full expansion loads."""
+        from core.video.collections.presets import pack_catalog
+        mt = request.args.get("media_type", "movie")
+        mt = "show" if mt in ("show", "shows", "tv", "series") else "movie"
+        return jsonify({"media_type": mt, "packs": pack_catalog(mt)})
+
+    # Full-expansion cache: on a big library the aggregate queries take seconds,
+    # and the counts barely move between clicks — serve the cached payload for
+    # 10 min with FRESH exists-marking (that's the part that changes on apply).
+    _preset_cache: dict = {}
+    _PRESET_TTL = 600
+
+    def _remark_exists(db, mt, packs):
+        try:
+            existing = {" ".join((c.get("name") or "").split()).casefold()
+                        for c in db.list_collection_definitions() or []
+                        if (c.get("media_type") or "movie") == mt}
+        except Exception:
+            existing = set()
+        for p in packs:
+            for e in p.get("entries") or []:
+                e["exists"] = " ".join((e.get("name") or "").split()).casefold() in existing
+
     @bp.route("/collections/presets", methods=["GET"])
     def collections_presets():
+        import time as _time
         from . import get_video_db
         from core.video.collections.list_sources import build_list_fetcher
         from core.video.collections.presets import list_packs
@@ -153,6 +180,10 @@ def register_routes(bp):
         mt = "show" if mt in ("show", "shows", "tv", "series") else "movie"
         try:
             db = get_video_db()
+            hit = _preset_cache.get(mt)
+            if hit and (_time.monotonic() - hit["ts"]) < _PRESET_TTL:
+                _remark_exists(db, mt, hit["packs"])
+                return jsonify({"media_type": mt, "packs": hit["packs"]})
             if mt == "movie":
                 # Drain the franchise-id backlog off-request so the Franchises
                 # pack stops under-reporting (the lazy 20-per-Discover-visit
@@ -161,8 +192,9 @@ def register_routes(bp):
                 kick_franchise_backfill(db)
             # The fetcher powers the remote packs' live "owned / chart size"
             # counts (engine-cached; a failed fetch degrades to count=None).
-            return jsonify({"media_type": mt,
-                            "packs": list_packs(db, mt, fetcher=build_list_fetcher(db))})
+            packs = list_packs(db, mt, fetcher=build_list_fetcher(db))
+            _preset_cache[mt] = {"ts": _time.monotonic(), "packs": packs}
+            return jsonify({"media_type": mt, "packs": packs})
         except Exception:
             logger.exception("preset browse failed")
             return jsonify({"media_type": mt, "packs": [], "error": "Failed to load presets"}), 500
