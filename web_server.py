@@ -481,6 +481,9 @@ _set_overlay_emit(socketio.emit)
 # Live collection-cleanup progress → 'collections:cleanup' socket events (studio).
 from core.video.collections.server_cleanup import set_cleanup_progress_emitter as _set_cleanup_emit
 _set_cleanup_emit(socketio.emit)
+# Live collection-sync progress → 'collections:sync' socket events (bell + studio).
+from core.video.collections.sync_job import set_sync_progress_emitter as _set_colsync_emit
+_set_colsync_emit(socketio.emit)
 
 # Plex PIN auth requests stored in memory for polling
 _plex_pin_requests = {}

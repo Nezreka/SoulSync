@@ -513,6 +513,7 @@ function initializeWebSocket() {
     // Phase 6: Automation progress
     socket.on('automation:progress', (data) => { qaSignal('auto'); updateAutomationProgressFromData(data); });
     socket.on('overlay:progress', (data) => { if (typeof updateOverlayTask === 'function') updateOverlayTask(data); });
+    socket.on('collections:sync', (data) => { if (typeof updateCollectionSyncTask === 'function') updateCollectionSyncTask(data); });
 }
 
 // ── Quick Actions tiles: animation == gauge ──

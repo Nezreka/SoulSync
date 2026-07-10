@@ -304,20 +304,67 @@
         });
     }
 
+    // Sync-all runs as a background job on the server; follow it live over the
+    // 'collections:sync' socket event (the bell shows it too), poll as fallback.
     function syncAll(btn) {
-        if (btn) { btn.disabled = true; btn.textContent = 'Syncing…'; }
+        if (btn) btn.disabled = true;
         api('/sync', { method: 'POST' }).then(function (d) {
-            if (d && d.ok) {
-                var bits = [d.synced + '/' + d.total + ' synced'];
-                if (d.added) bits.push('+' + d.added);
-                if (d.removed) bits.push('-' + d.removed);
-                if (d.wishlisted) bits.push(d.wishlisted + ' wishlisted');
-                if (d.failed) bits.push(d.failed + ' failed');
-                toast('Sync complete — ' + bits.join(' · '), !!d.failed);
-            } else { toast((d && d.error) || 'Sync failed', true); }
-            refreshGallery();
-        }).catch(function () { toast('Sync failed', true); })
-          .finally(function () { if (btn) { btn.disabled = false; btn.innerHTML = I.sync + 'Sync all'; } });
+            if ((d && d.ok) || /already running/i.test((d && d.error) || '')) {
+                if (d && !d.ok) toast('A sync is already running — following it');
+                watchSyncAll(btn);
+            } else {
+                toast((d && d.error) || 'Sync failed', true);
+                if (btn) { btn.disabled = false; btn.innerHTML = I.sync + 'Sync all'; }
+            }
+        }).catch(function () {
+            toast('Sync failed', true);
+            if (btn) { btn.disabled = false; btn.innerHTML = I.sync + 'Sync all'; }
+        });
+    }
+
+    function watchSyncAll(btn) {
+        var stopped = false;
+        var sockFn = null;
+        var hasSocket = (typeof socket !== 'undefined' && socket && socket.on);
+
+        function restore() {
+            if (btn && btn.isConnected) { btn.disabled = false; btn.innerHTML = I.sync + 'Sync all'; }
+        }
+        function stop() {
+            if (stopped) return;
+            stopped = true;
+            if (sockFn && socket.off) socket.off('collections:sync', sockFn);
+            clearInterval(timer);
+        }
+        function paint(s) {
+            if (stopped || !s) return;
+            if (btn && !btn.isConnected) { stop(); return; }   // left the gallery
+            if (btn && (s.running || s.phase === 'starting')) {
+                btn.textContent = 'Syncing… ' + (s.done || 0) + '/' + (s.total || '…');
+            }
+            if (!s.running && s.phase !== 'starting' && s.phase !== 'idle') {
+                stop();
+                if (s.phase === 'error') toast(s.error || 'Sync failed', true);
+                else {
+                    var bits = [(s.synced || 0) + '/' + (s.total || 0) + ' synced'];
+                    if (s.added) bits.push('+' + s.added);
+                    if (s.removed) bits.push('−' + s.removed);
+                    if (s.wishlisted) bits.push(s.wishlisted + ' wishlisted');
+                    if (s.failed) bits.push(s.failed + ' failed');
+                    toast('Sync complete — ' + bits.join(' · '), !!s.failed);
+                }
+                restore();
+                refreshGallery();
+            }
+        }
+        if (hasSocket) {
+            sockFn = function (d) { paint(d); };
+            socket.on('collections:sync', sockFn);
+        }
+        var timer = setInterval(function () {
+            api('/sync/status', {}).then(paint);
+        }, hasSocket ? 5000 : 1500);
+        api('/sync/status', {}).then(paint);
     }
 
     // ── preset browser (Easy setup) ──────────────────────────────────────────

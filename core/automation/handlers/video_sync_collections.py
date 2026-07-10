@@ -29,8 +29,11 @@ def _default_db():
 
 
 def _default_run(db, on_progress):
-    from core.video.collections.sync import run_sync
-    return run_sync(db, on_progress=on_progress)
+    # Through the shared sync JOB (not run_sync directly): the nightly run then
+    # feeds the same 'collections:sync' socket state as a manual "Sync all", so
+    # the bell shows it live — and the job lock means they can never overlap.
+    from core.video.collections.sync_job import sync_all_with_progress
+    return sync_all_with_progress(db, on_progress=on_progress)
 
 
 def auto_video_sync_collections(

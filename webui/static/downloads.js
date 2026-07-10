@@ -5653,7 +5653,63 @@ function _overlayTaskActive() {
 
 function _updateOverlayBell() {
     const btn = document.getElementById('notif-bell-btn');
-    if (btn) btn.classList.toggle('notif-bell-working', _overlayTaskActive());
+    if (btn) btn.classList.toggle('notif-bell-working',
+        _overlayTaskActive() || _colSyncTaskActive());
+}
+
+// ── Active collection-sync task ('collections:sync' socket event) ──────────────
+// Same treatment as the overlay job: bell working indicator + a pinned Active
+// card. Covers the studio's "Sync all" AND the nightly automation (one _JOB).
+let _colSyncTask = null;
+let _colSyncClearTimer = null;
+
+function updateCollectionSyncTask(data) {
+    if (!data) return;
+    if (_colSyncClearTimer) { clearTimeout(_colSyncClearTimer); _colSyncClearTimer = null; }
+    const active = data.running || data.phase === 'starting' || data.phase === 'running';
+    if (active) {
+        _colSyncTask = data;
+    } else if (data.phase === 'done' || data.phase === 'error') {
+        _colSyncTask = data;    // keep the final result on screen briefly, then clear
+        _colSyncClearTimer = setTimeout(() => { _colSyncTask = null; _updateOverlayBell(); _patchOverlayActive(); }, 6000);
+    } else {
+        _colSyncTask = null;    // idle
+    }
+    _updateOverlayBell();
+    _patchOverlayActive();
+}
+
+function _seedCollectionSyncTask() {
+    fetch('/api/video/collections/sync/status')
+        .then(r => r.ok ? r.json() : null)
+        .then(s => { if (s) updateCollectionSyncTask(s); })
+        .catch(() => {});
+}
+
+function _colSyncTaskActive() {
+    return !!(_colSyncTask && (_colSyncTask.running || _colSyncTask.phase === 'starting' || _colSyncTask.phase === 'running'));
+}
+
+function _colSyncActiveHTML() {
+    const t = _colSyncTask;
+    if (!t) return '';
+    const total = t.total || 0, done = t.done || 0;
+    const pct = total ? Math.min(100, Math.round(done / total * 100)) : (t.phase === 'done' ? 100 : 4);
+    let line, cls = '';
+    if (t.phase === 'done') {
+        line = `Done · ${t.synced || 0} synced` +
+            ((t.added || t.removed) ? ` (+${t.added || 0} / −${t.removed || 0})` : '') +
+            (t.wishlisted ? `, ${t.wishlisted} wishlisted` : '') +
+            (t.failed ? `, ${t.failed} failed` : '');
+        cls = 'done';
+    } else if (t.phase === 'error') { line = 'Failed: ' + _escToast(t.error || 'error'); cls = 'error'; }
+    else line = `${done} / ${total || '…'}` + (t.name ? ' · ' + _escToast(t.name) : '');
+    return `
+        <div class="notif-active notif-active-${cls}">
+            <div class="notif-active-head"><span class="notif-active-title">Syncing collections</span><span class="notif-active-pct">${pct}%</span></div>
+            <div class="notif-active-bar"><div class="notif-active-fill" style="width:${pct}%"></div></div>
+            <div class="notif-active-sub">${line}</div>
+        </div>`;
 }
 
 function _overlayActiveHTML() {
@@ -5676,7 +5732,7 @@ function _overlayActiveHTML() {
 
 function _patchOverlayActive() {
     const host = document.querySelector('#notif-panel [data-notif-active-host]');
-    if (host) host.innerHTML = _overlayActiveHTML();
+    if (host) host.innerHTML = _overlayActiveHTML() + _colSyncActiveHTML();
 }
 
 function showToast(message, type = 'success', helpSection = null) {
@@ -5793,7 +5849,8 @@ function _openNotifPanel() {
     `;
 
     document.body.appendChild(panel);
-    _seedOverlayTask();   // refresh the Active card from the server on open (socket keeps it live after)
+    _seedOverlayTask();   // refresh the Active cards from the server on open (socket keeps them live after)
+    _seedCollectionSyncTask();
 
     // Position above the bell button
     if (btn) {
@@ -6061,10 +6118,14 @@ let _gsController = null;
     else run();
 })();
 
-// On load, seed the overlay-apply task so the bell reflects a job that was already
-// running before this page connected (the socket keeps it live thereafter).
+// On load, seed the overlay-apply + collection-sync tasks so the bell reflects a
+// job that was already running before this page connected (the socket keeps them
+// live thereafter).
 (function _overlayTaskInit() {
-    const run = () => setTimeout(() => { if (typeof _seedOverlayTask === 'function') _seedOverlayTask(); }, 1200);
+    const run = () => setTimeout(() => {
+        if (typeof _seedOverlayTask === 'function') _seedOverlayTask();
+        if (typeof _seedCollectionSyncTask === 'function') _seedCollectionSyncTask();
+    }, 1200);
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run);
     else run();
 })();
