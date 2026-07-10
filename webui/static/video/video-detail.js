@@ -492,6 +492,14 @@
             html += '<button class="vd-trailer-btn" type="button" data-vd-act="poster" title="Change poster">' +
                 '<span class="vd-trailer-ic">🖼</span> Manage Poster</button>';
         }
+        // Manage — the per-item metadata editor (library items only: edits write
+        // to the local row + push to the item's own server). Library-sourced pages
+        // always have a row; TMDB pages only when owned (library_id resolves it).
+        if (ownLibItem && window.VideoManage &&
+                (d.source !== 'tmdb' || d.library_id != null)) {
+            html += '<button class="vd-trailer-btn" type="button" data-vd-act="manage" title="Edit metadata">' +
+                '<span class="vd-trailer-ic">✎</span> Manage</button>';
+        }
         a.innerHTML = html;
     }
 
@@ -508,6 +516,14 @@
             // "Get Missing" jumps straight to the season/episode grab view.
             startDownload: !!startDownload,
         });
+    }
+
+    // Manage — the per-item metadata editor (slide-over panel, own module).
+    function openManagePanel() {
+        if (!window.VideoManage || !data) return;
+        var libId = (data.source !== 'tmdb') ? ((data.id != null) ? data.id : currentId) : (data.library_id || null);
+        if (libId == null) return;
+        VideoManage.open({ kind: data.kind, id: libId });
     }
 
     // Manage Poster — open the poster manager for this item (library id + tmdb id).
@@ -2085,6 +2101,7 @@
             else if (which === 'get') openGetModal();
             else if (which === 'missing') openGetModal(true);
             else if (which === 'poster') openPosterModal();
+            else if (which === 'manage') openManagePanel();
             else if (which === 'yt-follow') toggleYtFollow();
             else if (which === 'yt-pl-follow') toggleYtPlaylistFollowHero();
             else if (which === 'trailer' && data && data.trailer) openTrailer(data.trailer.key);
@@ -2300,6 +2317,16 @@
         // the wishlist changes (e.g. after the Get modal adds/removes this movie).
         document.addEventListener('soulsync:video-wishlist-changed', function () {
             if (currentKind === 'movie' && data) { data._wl_checked = false; renderActions(data); }
+        });
+        // Metadata edited via the Manage panel → re-render the page from the DB
+        // (title/genres/summary changed under us). Quiet events (toggles) skip it.
+        document.addEventListener('soulsync:video-meta-changed', function (e) {
+            var det = e && e.detail;
+            if (!data || !det || det.quiet) return;
+            var libId = (data.source !== 'tmdb') ? data.id : (data.library_id || null);
+            if (det.kind !== data.kind || String(det.id) !== String(libId)) return;
+            if (data.kind === 'movie') loadMovie(currentId, currentSource);
+            else if (data.kind === 'show') loadShow(currentId, currentSource);
         });
         // Poster changed via the Poster Manager → bust the on-page poster/backdrop
         // (the proxy now serves the new art, but the browser cached the old one).
