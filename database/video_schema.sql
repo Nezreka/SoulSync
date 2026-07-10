@@ -666,6 +666,7 @@ CREATE TABLE IF NOT EXISTS collection_definitions (
     enabled          INTEGER NOT NULL DEFAULT 1,      -- included in the daily sync
     window_start     TEXT,                            -- seasonal window 'MM-DD' (with window_end):
     window_end       TEXT,                            --   in-window syncs; out-of-window removes ours
+    collection_mode  TEXT,                            -- Plex library behavior: default|hide|hideItems|showItems (NULL = leave alone)
     created_at       TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
 );

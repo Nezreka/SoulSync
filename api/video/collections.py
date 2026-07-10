@@ -33,7 +33,9 @@ logger = get_logger("video_api.collections")
 
 _UPDATABLE = ("name", "kind", "media_type", "definition", "poster_url", "summary",
               "sort_order", "sync_mode", "pinned", "wishlist_missing", "enabled",
-              "window_start", "window_end")
+              "window_start", "window_end", "collection_mode")
+
+_MODES = ("", "default", "hide", "hideItems", "showItems")
 
 
 def _clean_md(v):
@@ -78,7 +80,8 @@ def register_routes(bp):
                 wishlist_missing=bool(d.get("wishlist_missing")),
                 enabled=False if d.get("enabled") is False else True,
                 window_start=_clean_md(d.get("window_start")),
-                window_end=_clean_md(d.get("window_end")))
+                window_end=_clean_md(d.get("window_end")),
+                collection_mode=(d.get("collection_mode") if d.get("collection_mode") in _MODES else None))
             if cid is None:
                 return jsonify({"ok": False, "error": "Could not create collection"}), 500
             # Art is default-on: a poster-less collection gets its collage
@@ -106,6 +109,8 @@ def register_routes(bp):
         for w in ("window_start", "window_end"):
             if w in fields:
                 fields[w] = _clean_md(fields[w])
+        if "collection_mode" in fields and fields["collection_mode"] not in _MODES:
+            fields.pop("collection_mode")
         try:
             return jsonify({"ok": get_video_db().update_collection_definition(cid, **fields)})
         except Exception:

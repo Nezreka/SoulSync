@@ -551,7 +551,7 @@ class PlexVideoSource:
             return {"ok": False, "error": str(e)}
 
     def set_collection_meta(self, collection_id, *, poster_url=None, poster_bytes=None,
-                            summary=None, sort=None, pinned=None) -> dict:
+                            summary=None, sort=None, pinned=None, mode=None) -> dict:
         try:
             col = self._server.fetchItem(int(collection_id))
         except Exception as e:   # noqa: BLE001
@@ -566,6 +566,13 @@ class PlexVideoSource:
                         col.sortUpdate(sort=plex_sort)
                     except Exception:   # noqa: BLE001 - older plexapi may lack it
                         logger.debug("Plex: sortUpdate unsupported", exc_info=True)
+            if mode in ("default", "hide", "hideItems", "showItems"):
+                # Library behavior — 'hideItems' is the Kometa classic: the
+                # library shows one collection tile instead of every member.
+                try:
+                    col.modeUpdate(mode=mode)
+                except Exception:   # noqa: BLE001 - older plexapi may lack it
+                    logger.debug("Plex: modeUpdate unsupported", exc_info=True)
             if poster_url:
                 col.uploadPoster(url=poster_url)
             elif poster_bytes:
@@ -974,9 +981,10 @@ class JellyfinVideoSource:
             return {"ok": False, "error": str(e)}
 
     def set_collection_meta(self, collection_id, *, poster_url=None, poster_bytes=None,
-                            summary=None, sort=None, pinned=None) -> dict:
+                            summary=None, sort=None, pinned=None, mode=None) -> dict:
         # Poster reuses the Primary-image endpoint. Summary/sort/pin need a full
         # item-DTO update on Jellyfin and are deferred (a member sync is the point).
+        # 'mode' is a Plex library concept — no Jellyfin equivalent.
         if poster_url or poster_bytes:
             return self.set_poster(collection_id, image_url=poster_url,
                                    image_bytes=poster_bytes, kind="collection")
