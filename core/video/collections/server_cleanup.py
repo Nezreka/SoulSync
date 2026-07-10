@@ -3,9 +3,8 @@
 Deleting N collections is N×2 server round-trips — a Kometa cleanup can be
 thousands (Boulder's first run: 1,500), which is far too long for one HTTP
 request. So the delete endpoint starts THIS job and returns immediately; the
-studio follows along over socketio ('collections:cleanup', throttled to ~1/s —
-same singleton-job pattern as the overlay apply service) with a status endpoint
-as the polling fallback.
+studio follows along over socketio ('collections:cleanup', throttled to ~1/s
+via the shared JobChannel) with a status endpoint as the polling fallback.
 
 Managed collections get their sync-ledger row cleared on successful delete (no
 ghost tracking; the next sync recreates them while their definition stays
@@ -15,45 +14,25 @@ enabled). Definitions and titles are never touched.
 from __future__ import annotations
 
 import threading
-import time
-from typing import Callable, Optional
 
+from core.video.collections.job_channel import JobChannel
 from utils.logging_config import get_logger
 
 logger = get_logger("video.collections.cleanup")
 
-_JOB = {"running": False, "phase": "idle", "done": 0, "total": 0,
-        "deleted": 0, "failed": 0, "name": None, "error": None}
-_lock = threading.Lock()
-
-# Live progress over socketio (wired at startup via set_cleanup_progress_emitter).
-# Throttled to ~1/s so a huge purge doesn't flood the socket; phase changes
-# (start / done / error) always emit so the UI flips state instantly.
-_emit: Optional[Callable] = None
-_last_emit = [0.0]
+_channel = JobChannel("collections:cleanup",
+                      {"done": 0, "total": 0, "deleted": 0, "failed": 0,
+                       "name": None, "error": None})
+_JOB = _channel.job          # same dict — tests and callers poke it directly
 
 
 def set_cleanup_progress_emitter(fn) -> None:
-    global _emit
-    _emit = fn
-
-
-def _emit_progress(force: bool = False) -> None:
-    if _emit is None:
-        return
-    now = time.monotonic()
-    if not force and (now - _last_emit[0]) < 1.0:
-        return
-    _last_emit[0] = now
-    try:
-        _emit("collections:cleanup", dict(_JOB))
-    except Exception:   # noqa: BLE001 - progress is a nicety, never fail the job
-        logger.debug("cleanup progress emit failed", exc_info=True)
+    _channel.set_emitter(fn)
 
 
 def status() -> dict:
     """The job's current state (polling fallback for socket-less clients)."""
-    return dict(_JOB)
+    return _channel.status()
 
 
 def start_delete(db, ids, *, source=None) -> dict:
@@ -67,12 +46,8 @@ def start_delete(db, ids, *, source=None) -> dict:
         source = get_collection_source()
     if source is None or not hasattr(source, "delete_collection"):
         return {"ok": False, "error": "No video server configured (or it can't do collections)"}
-    with _lock:
-        if _JOB["running"]:
-            return {"ok": False, "error": "a collection cleanup is already running"}
-        _JOB.update(running=True, phase="starting", done=0, total=len(ids),
-                    deleted=0, failed=0, name=None, error=None)
-    _emit_progress(force=True)
+    if not _channel.acquire(total=len(ids)):
+        return {"ok": False, "error": "a collection cleanup is already running"}
     threading.Thread(target=_run, args=(db, ids, source),
                      name="collection-cleanup", daemon=True).start()
     return {"ok": True, "total": len(ids)}
@@ -85,8 +60,7 @@ def _run(db, ids, source) -> None:
         logger.exception("collection cleanup crashed")
         _JOB.update(phase="error", error=str(e))
     finally:
-        _JOB["running"] = False
-        _emit_progress(force=True)
+        _channel.release()
 
 
 def run_delete(db, ids, source) -> dict:
@@ -117,7 +91,7 @@ def run_delete(db, ids, source) -> dict:
             logger.warning("cleanup: delete failed for %s: %s", sid, r.get("error"))
         _JOB.update(done=i + 1, deleted=deleted, failed=failed,
                     name=(entry or {}).get("definition_name"))
-        _emit_progress()
+        _channel.emit()
     _JOB["phase"] = "done"
     return {"ok": True, "deleted": deleted, "failed": failed}
 

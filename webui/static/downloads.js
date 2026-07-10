@@ -5654,7 +5654,55 @@ function _overlayTaskActive() {
 function _updateOverlayBell() {
     const btn = document.getElementById('notif-bell-btn');
     if (btn) btn.classList.toggle('notif-bell-working',
-        _overlayTaskActive() || _colSyncTaskActive());
+        _overlayTaskActive() || _colSyncTaskActive() || _colArtTaskActive());
+}
+
+// ── Active artwork-refresh task ('collections:artwork' socket event) ───────────
+let _colArtTask = null;
+let _colArtClearTimer = null;
+
+function updateCollectionArtTask(data) {
+    if (!data) return;
+    if (_colArtClearTimer) { clearTimeout(_colArtClearTimer); _colArtClearTimer = null; }
+    const active = data.running || data.phase === 'starting' || data.phase === 'running';
+    if (active) {
+        _colArtTask = data;
+    } else if (data.phase === 'done' || data.phase === 'error') {
+        _colArtTask = data;    // keep the final result on screen briefly, then clear
+        _colArtClearTimer = setTimeout(() => { _colArtTask = null; _updateOverlayBell(); _patchOverlayActive(); }, 6000);
+    } else {
+        _colArtTask = null;    // idle
+    }
+    _updateOverlayBell();
+    _patchOverlayActive();
+}
+
+function _seedCollectionArtTask() {
+    fetch('/api/video/collections/posters/regenerate/status')
+        .then(r => r.ok ? r.json() : null)
+        .then(s => { if (s) updateCollectionArtTask(s); })
+        .catch(() => {});
+}
+
+function _colArtTaskActive() {
+    return !!(_colArtTask && (_colArtTask.running || _colArtTask.phase === 'starting' || _colArtTask.phase === 'running'));
+}
+
+function _colArtActiveHTML() {
+    const t = _colArtTask;
+    if (!t) return '';
+    const total = t.total || 0, done = t.done || 0;
+    const pct = total ? Math.min(100, Math.round(done / total * 100)) : (t.phase === 'done' ? 100 : 4);
+    let line, cls = '';
+    if (t.phase === 'done') { line = `Done · ${t.rendered || 0} rendered` + (t.failed ? `, ${t.failed} failed` : ''); cls = 'done'; }
+    else if (t.phase === 'error') { line = 'Failed: ' + _escToast(t.error || 'error'); cls = 'error'; }
+    else line = `${done} / ${total || '…'}` + (t.name ? ' · ' + _escToast(t.name) : '');
+    return `
+        <div class="notif-active notif-active-${cls}">
+            <div class="notif-active-head"><span class="notif-active-title">Refreshing collection artwork</span><span class="notif-active-pct">${pct}%</span></div>
+            <div class="notif-active-bar"><div class="notif-active-fill" style="width:${pct}%"></div></div>
+            <div class="notif-active-sub">${line}</div>
+        </div>`;
 }
 
 // ── Active collection-sync task ('collections:sync' socket event) ──────────────
@@ -5732,7 +5780,7 @@ function _overlayActiveHTML() {
 
 function _patchOverlayActive() {
     const host = document.querySelector('#notif-panel [data-notif-active-host]');
-    if (host) host.innerHTML = _overlayActiveHTML() + _colSyncActiveHTML();
+    if (host) host.innerHTML = _overlayActiveHTML() + _colSyncActiveHTML() + _colArtActiveHTML();
 }
 
 function showToast(message, type = 'success', helpSection = null) {
@@ -5851,6 +5899,7 @@ function _openNotifPanel() {
     document.body.appendChild(panel);
     _seedOverlayTask();   // refresh the Active cards from the server on open (socket keeps them live after)
     _seedCollectionSyncTask();
+    _seedCollectionArtTask();
 
     // Position above the bell button
     if (btn) {
@@ -6125,6 +6174,7 @@ let _gsController = null;
     const run = () => setTimeout(() => {
         if (typeof _seedOverlayTask === 'function') _seedOverlayTask();
         if (typeof _seedCollectionSyncTask === 'function') _seedCollectionSyncTask();
+        if (typeof _seedCollectionArtTask === 'function') _seedCollectionArtTask();
     }, 1200);
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run);
     else run();

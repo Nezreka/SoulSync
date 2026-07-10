@@ -267,9 +267,38 @@ def test_regenerate_all_respects_user_posters(db, tmp_path, monkeypatch):
     assert n == 2 and sorted(regenerated) == sorted([gen_id, bare_id])
 
     # Busy-guard: second kick while running is refused.
-    poster_gen._regen_running[0] = True
+    poster_gen._JOB["running"] = True
     assert poster_gen.kick_regenerate_all(db)["ok"] is False
-    poster_gen._regen_running[0] = False
+    poster_gen._JOB["running"] = False
+
+
+def test_kick_regenerate_is_a_live_job(db, monkeypatch):
+    import time
+    _seed(db)
+    db.create_collection_definition(
+        "Action", media_type="movie",
+        definition={"rules": [{"field": "genre", "op": "in", "value": ["Action"]}]})
+    db.create_collection_definition(
+        "Drama", media_type="movie", poster_url="/api/video/collections/9/poster?v=aa1122bb",
+        definition={"rules": [{"field": "genre", "op": "in", "value": ["Action"]}]})
+    monkeypatch.setattr(poster_gen, "generate_for_definition",
+                        lambda dbb, d, **kw: "/api/x")
+    events = []
+    poster_gen.set_artwork_progress_emitter(lambda name, payload: events.append((name, payload)))
+    try:
+        r = poster_gen.kick_regenerate_all(db)
+        assert r == {"ok": True, "total": 2}
+        for _ in range(100):
+            s = poster_gen.artwork_status()
+            if not s["running"] and s["phase"] in ("done", "error"):
+                break
+            time.sleep(0.05)
+        assert s["phase"] == "done" and s["rendered"] == 2 and s["failed"] == 0
+        assert events[0][0] == "collections:artwork"
+        assert events[0][1]["phase"] == "starting" and events[-1][1]["phase"] == "done"
+    finally:
+        poster_gen.set_artwork_progress_emitter(None)
+        poster_gen._JOB["running"] = False
 
 
 def test_generate_auto_prefers_context_and_collage_mode_forces(db, tmp_path, monkeypatch):
