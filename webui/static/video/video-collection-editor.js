@@ -437,14 +437,53 @@
             if (btn) btn.disabled = true;
             api('/posters/regenerate', { method: 'POST' }).then(function (d) {
                 if (d && d.ok) {
-                    toast('Refreshing artwork for ' + d.total + ' collection' + (d.total === 1 ? '' : 's') + '…');
-                    // Art lands progressively; pick it up in a couple of passes.
-                    setTimeout(refreshGallery, 6000);
-                    setTimeout(refreshGallery, 20000);
+                    toast('Refreshing artwork for ' + d.total + ' collection' + (d.total === 1 ? '' : 's') + ' — progress in the bell');
+                    watchArtwork();
+                } else if (d && /already running/i.test(d.error || '')) {
+                    toast('An artwork refresh is already running — following it');
+                    watchArtwork();
                 } else { toast((d && d.error) || 'Refresh failed', true); }
             }).catch(function () { toast('Refresh failed', true); })
               .finally(function () { if (btn) btn.disabled = false; });
         });
+    }
+
+    // Follow a running artwork refresh (socket-first, polling fallback); repaint
+    // the gallery midway and at the end so new art appears as it lands.
+    function watchArtwork() {
+        var stopped = false;
+        var sockFn = null;
+        var hasSocket = (typeof socket !== 'undefined' && socket && socket.on);
+        var lastPaint = 0;
+
+        function stop() {
+            if (stopped) return;
+            stopped = true;
+            if (sockFn && socket.off) socket.off('collections:artwork', sockFn);
+            clearInterval(timer);
+        }
+        function paint(s) {
+            if (stopped || !s) return;
+            var now = Date.now();
+            if (s.running && now - lastPaint > 8000) {   // progressive art pickup
+                lastPaint = now;
+                refreshGallery();
+            }
+            if (!s.running && s.phase !== 'starting' && s.phase !== 'idle') {
+                stop();
+                if (s.phase === 'error') toast(s.error || 'Artwork refresh failed', true);
+                else toast('Artwork refreshed — ' + (s.rendered || 0) + ' rendered' +
+                           (s.failed ? ' · ' + s.failed + ' failed' : ''), !!s.failed);
+                refreshGallery();
+            }
+        }
+        if (hasSocket) {
+            sockFn = function (d) { paint(d); };
+            socket.on('collections:artwork', sockFn);
+        }
+        var timer = setInterval(function () {
+            api('/posters/regenerate/status', {}).then(paint);
+        }, hasSocket ? 6000 : 2000);
     }
 
     // Sync-all runs as a background job on the server; follow it live over the

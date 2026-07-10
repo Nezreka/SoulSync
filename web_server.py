@@ -484,6 +484,9 @@ _set_cleanup_emit(socketio.emit)
 # Live collection-sync progress → 'collections:sync' socket events (bell + studio).
 from core.video.collections.sync_job import set_sync_progress_emitter as _set_colsync_emit
 _set_colsync_emit(socketio.emit)
+# Live artwork-refresh progress → 'collections:artwork' socket events (bell + studio).
+from core.video.collections.poster_gen import set_artwork_progress_emitter as _set_colart_emit
+_set_colart_emit(socketio.emit)
 
 # Plex PIN auth requests stored in memory for polling
 _plex_pin_requests = {}

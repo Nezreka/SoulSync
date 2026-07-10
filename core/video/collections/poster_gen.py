@@ -414,50 +414,82 @@ def generate_for_definitions(db, definition_ids, *, fetch: Optional[Callable] = 
 
 
 # ── bulk artwork refresh ("get the new posters everywhere") ─────────────────
-_regen_lock = threading.Lock()
-_regen_running = [False]
+# A JobChannel like cleanup/sync-all: live 'collections:artwork' progress for
+# the bell + studio, status endpoint as the polling fallback.
+from core.video.collections.job_channel import JobChannel  # noqa: E402 - feature-local
+
+_channel = JobChannel("collections:artwork",
+                      {"done": 0, "total": 0, "rendered": 0, "failed": 0,
+                       "name": None, "error": None})
+_JOB = _channel.job
+
+
+def set_artwork_progress_emitter(fn) -> None:
+    _channel.set_emitter(fn)
+
+
+def artwork_status() -> dict:
+    """The refresh job's current state (polling fallback / bell seed)."""
+    return _channel.status()
 
 
 def regenerate_candidates(db) -> list:
-    """Definition ids whose art WE own: a generated poster ref or no poster at
-    all. A hand-set external URL is the user's choice — never clobbered."""
+    """Definitions whose art WE own: a generated poster ref or no poster at
+    all. A hand-set external URL is the user's choice — never clobbered.
+    Returns light rows (id + name for progress display)."""
     out = []
     for c in db.list_collection_definitions() or []:
         pu = c.get("poster_url")
         if not pu or is_generated_ref(pu):
-            out.append(c["id"])
+            out.append({"id": c["id"], "name": c.get("name")})
     return out
 
 
 def regenerate_all(db, *, mode: str = "auto", fetch: Optional[Callable] = None,
-                   root: Optional[Path] = None) -> int:
+                   root: Optional[Path] = None,
+                   on_progress: Optional[Callable] = None) -> int:
     """Re-render every owned poster with the current art pipeline (context art
-    first). Returns how many were regenerated. Synchronous — callers thread it."""
+    first). ``on_progress(done, total, name, ok)`` after each. Returns how many
+    were regenerated. Synchronous — callers thread it."""
+    cands = regenerate_candidates(db)
     n = 0
-    for did in regenerate_candidates(db):
-        d = db.get_collection_definition(did)
-        if d and generate_for_definition(db, d, mode=mode, fetch=fetch, root=root):
-            n += 1
+    for i, cand in enumerate(cands):
+        d = db.get_collection_definition(cand["id"])
+        ok = bool(d and generate_for_definition(db, d, mode=mode, fetch=fetch, root=root))
+        n += 1 if ok else 0
+        if on_progress:
+            try:
+                on_progress(i + 1, len(cands), cand.get("name"), ok)
+            except Exception:   # noqa: BLE001 - a progress hook can't kill the run
+                pass
     return n
 
 
 def kick_regenerate_all(db) -> dict:
-    """Run regenerate_all in a background thread (at most one at a time).
-    Returns {ok, total} with the candidate count, or {ok: False} when busy."""
-    with _regen_lock:
-        if _regen_running[0]:
-            return {"ok": False, "error": "an artwork refresh is already running"}
-        _regen_running[0] = True
+    """Run regenerate_all as the artwork-refresh job (at most one at a time),
+    with live channel progress. Returns {ok, total}, or {ok: False} when busy."""
     total = len(regenerate_candidates(db))
+    if not _channel.acquire(total=total):
+        return {"ok": False, "error": "an artwork refresh is already running"}
 
     def run():
         try:
-            n = regenerate_all(db)
+            _JOB.update(phase="running")
+
+            def prog(done, tot, name, ok):
+                _JOB.update(done=done, total=tot, name=name,
+                            rendered=_JOB["rendered"] + (1 if ok else 0),
+                            failed=_JOB["failed"] + (0 if ok else 1))
+                _channel.emit()
+
+            n = regenerate_all(db, on_progress=prog)
+            _JOB.update(phase="done")
             logger.info("artwork refresh regenerated %d poster(s)", n)
-        except Exception:   # noqa: BLE001 - background nicety
+        except Exception as e:   # noqa: BLE001 - background nicety
             logger.exception("artwork refresh failed")
+            _JOB.update(phase="error", error=str(e))
         finally:
-            _regen_running[0] = False
+            _channel.release()
 
     threading.Thread(target=run, name="collection-art-refresh", daemon=True).start()
     return {"ok": True, "total": total}
@@ -465,5 +497,5 @@ def kick_regenerate_all(db) -> dict:
 
 __all__ = ["render_collage", "render_logo_poster", "generate_for_definition",
            "generate_for_definitions", "regenerate_all", "kick_regenerate_all",
-           "regenerate_candidates", "poster_path", "read_poster", "posters_root",
-           "is_generated_ref", "poster_route"]
+           "regenerate_candidates", "artwork_status", "set_artwork_progress_emitter",
+           "poster_path", "read_poster", "posters_root", "is_generated_ref", "poster_route"]

@@ -203,6 +203,11 @@ def register_routes(bp):
             return jsonify(r), 409
         return jsonify(r)
 
+    @bp.route("/collections/posters/regenerate/status", methods=["GET"])
+    def collections_posters_regenerate_status():
+        from core.video.collections.poster_gen import artwork_status
+        return jsonify(artwork_status())
+
     @bp.route("/collections/<int:cid>/poster", methods=["GET"])
     def collections_poster(cid):
         from flask import Response
