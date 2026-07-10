@@ -190,6 +190,51 @@ def test_seasonal_and_stories_packs(db):
     assert "Based on a Book" in stories and "Based on a Video Game" in stories
 
 
+def test_universes_pack_unions_franchises_and_keywords(db):
+    _seed_movies(db)
+    seen = []
+
+    def fetcher(source, ref):
+        seen.append((source, ref))
+        return [{"tmdb_id": 1004}, {"tmdb_id": 1005}, {"tmdb_id": 555}]
+
+    entries = {e["name"]: e for e in expand_pack(db, "universes", "movie", fetcher)}
+    assert {"Marvel Cinematic Universe", "Middle-earth", "Wizarding World",
+            "Star Wars Saga"} <= set(entries)
+    mcu = entries["Marvel Cinematic Universe"]
+    assert mcu["kind"] == "list" and mcu["wishlist_capable"] is True
+    assert mcu["count"] == 2 and mcu["of_total"] == 3      # owns Iron Man 1+2 of 3
+    assert mcu["definition"]["source"] == "tmdb_union"
+    assert mcu["definition"]["keywords"] == ["marvel cinematic universe"]
+    me = entries["Middle-earth"]
+    assert me["definition"]["collections"] == [119, 121938]
+    assert all(s == "tmdb_union" for s, _ in seen)
+    assert expand_pack(db, "universes", "show", fetcher) == []   # movies only
+
+
+def test_franchise_backfill_drains_the_backlog(db):
+    # Movies matched before the collection column have tmdb_collection_id NULL —
+    # the pack under-reports until they're backfilled (the LOTR-is-missing bug).
+    from core.video.collections.presets import backfill_missing_franchises
+    _add_movie(db, 10, "Fellowship", year=2001)                  # tmdb 1010, no franchise
+    _add_movie(db, 11, "Two Towers", year=2002)                  # tmdb 1011, no franchise
+
+    class _Eng:
+        def movie_collection(self, tmdb_id):
+            if tmdb_id == 1010:
+                return {"id": 119, "name": "The Lord of the Rings Collection"}
+            if tmdb_id == 1011:
+                return None                                       # lookup failed → retry later
+            return {"id": None, "name": None}                     # genuinely standalone
+
+    n = backfill_missing_franchises(db, engine=_Eng(), batch=2, cap=100)
+    assert n >= 2
+    franchises = {e["name"]: e for e in expand_pack(db, "franchises", "movie")}
+    assert franchises["The Lord of the Rings"]["count"] == 1      # now discoverable
+    # The failed lookup stays in the backlog for a later pass.
+    assert any(m["tmdb_id"] == 1011 for m in db.movies_missing_collection(limit=50))
+
+
 def test_apply_chart_creates_living_list_definition(db):
     _seed_movies(db)
     r = apply_pack(db, "charts", "movie", ["chart:top"], wishlist_missing=True,
@@ -266,8 +311,8 @@ def test_presets_api_browse_and_apply(tmp_path):
 
     r = client.get("/api/video/collections/presets?media_type=movie").get_json()
     packs = {p["id"]: p for p in r["packs"]}
-    assert set(packs) == {"charts", "genres", "decades", "franchises", "studios",
-                          "directors", "essentials", "seasonal", "stories"}
+    assert set(packs) == {"charts", "genres", "decades", "franchises", "universes",
+                          "studios", "directors", "essentials", "seasonal", "stories"}
     assert packs["genres"]["available"] >= 3
     # Remote packs list fine with no engine — counts just resolve on sync.
     assert packs["charts"]["available"] == 4

@@ -133,6 +133,12 @@ def register_routes(bp):
         mt = "show" if mt in ("show", "shows", "tv", "series") else "movie"
         try:
             db = get_video_db()
+            if mt == "movie":
+                # Drain the franchise-id backlog off-request so the Franchises
+                # pack stops under-reporting (the lazy 20-per-Discover-visit
+                # backfill starves it on older libraries).
+                from core.video.collections.presets import kick_franchise_backfill
+                kick_franchise_backfill(db)
             # The fetcher powers the remote packs' live "owned / chart size"
             # counts (engine-cached; a failed fetch degrades to count=None).
             return jsonify({"media_type": mt,

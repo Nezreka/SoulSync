@@ -81,6 +81,39 @@ def test_keyword_resolves_name_then_discovers():
     assert fetch("tmdb_keyword", "not-a-dict") == []
 
 
+def test_union_combines_franchises_and_keywords():
+    fetch, eng = _fetcher()
+    out = fetch("tmdb_union", {"kind": "movie", "limit": 200,
+                               "collections": [10, 119], "keywords": ["christmas"]})
+    ids = [o["tmdb_id"] for o in out]
+    assert 71 in ids and 72 in ids                          # franchise members (both ids)
+    assert 100 in ids                                       # keyword discover members
+    assert len(ids) == len(set(ids))                        # unioned, deduped
+    assert ("collection", 10) in eng.calls and ("collection", 119) in eng.calls
+    assert ("kwid", "christmas") in eng.calls
+    assert fetch("tmdb_union", "not-a-dict") == []
+
+
+def test_resolver_union_ref_and_validation():
+    seen = []
+
+    def fetch(source, ref):
+        seen.append((source, ref))
+        return _items([5])
+
+    class _Db:
+        def owned_by_tmdb_ids(self, mt, ids):
+            return []
+
+    d = {"media_type": "movie", "kind": "list",
+         "definition": {"source": "tmdb_union", "collections": [119], "limit": 200}}
+    res = resolve_collection(_Db(), d, list_fetcher=fetch)
+    assert res.ok and seen[0][0] == "tmdb_union" and seen[0][1]["kind"] == "movie"
+    bad = resolve_collection(_Db(), {"media_type": "movie", "kind": "list",
+                                     "definition": {"source": "tmdb_union"}}, list_fetcher=fetch)
+    assert not bad.ok and "no franchises or keywords" in bad.error
+
+
 def test_tmdb_list_pages_and_dedups():
     fetch, _ = _fetcher()
     out = fetch("tmdb_list", "8241") or []
