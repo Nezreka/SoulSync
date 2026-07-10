@@ -467,7 +467,7 @@
                 '<div class="vce-card-badges">' +
                     '<span class="vce-chip">' + (c.kind === 'list' ? 'List' : 'Smart') + '</span>' +
                     (c.pinned ? '<span class="vce-chip">Pinned</span>' : '') +
-                    (c.wishlist_missing ? '<span class="vce-chip vce-chip--warn">Wishlists</span>' : '') +
+                    (c.wishlist_missing ? '<span class="vce-chip vce-chip--warn">' + (c.media_type === 'show' ? 'Watchlists' : 'Wishlists') + '</span>' : '') +
                     (c.in_season === true ? '<span class="vce-chip vce-chip--ok">In season</span>' : '') +
                     (c.in_season === false ? '<span class="vce-chip vce-chip--warn">Off season</span>' : '') +
                 '</div>' +
