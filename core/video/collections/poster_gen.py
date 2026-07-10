@@ -335,16 +335,18 @@ def _context_art(definition: Dict[str, Any], *, engine=None,
                     treatment = "logo"
         else:
             director = _single_rule(body, "director")
-            studio = _single_rule(body, "studio")
+            # Studio/network rules may be brand-grouped variant lists ("Hallmark
+            # Channel" + "Hallmark Media") — the first variant finds the logo.
+            # Networks ride the company search too: TMDB has no network-search
+            # API, but HBO/Netflix/AMC-class networks all have company twins.
+            brand = _single_rule(body, "studio") or _single_rule(body, "network")
             if director:
                 url = engine.person_photo(director)
                 treatment = "title"
-            elif studio:
-                # Studio rules may be brand-grouped variant lists ("Hallmark
-                # Channel" + "Hallmark Media") — the first variant finds the logo.
+            elif brand:
                 rules = body.get("rules") or []
                 if rules[0].get("op") in ("is", "in", "contains"):
-                    url = engine.company_logo(studio)
+                    url = engine.company_logo(brand)
                     treatment = "logo"
     except Exception:   # noqa: BLE001
         logger.debug("context art lookup failed", exc_info=True)

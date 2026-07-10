@@ -190,6 +190,8 @@ class _CtxEngine:
             return "https://img.tmdb/hallmark-logo.png"
         if name == "Marvel Studios":
             return "https://img.tmdb/marvel-logo.png"
+        if name == "HBO":
+            return "https://img.tmdb/hbo-logo.png"
         return None
 
 
@@ -240,6 +242,15 @@ def test_context_art_keyword_universe_uses_logo_hint():
             "collections": [119], "logo": "Marvel Studios"}}
     art = poster_gen._context_art(both, engine=_CtxEngine(), http_get=_http)
     assert art[1] == "verbatim"
+
+
+def test_context_art_network_logo_for_show_collections():
+    # Show-side brand parity: a single-network collection gets the network's
+    # logo via its company twin (TMDB has no network-search API).
+    net = {"kind": "smart", "media_type": "show", "definition": {"rules": [
+        {"field": "network", "op": "in", "value": ["HBO", "HBO Max"]}]}}
+    art = poster_gen._context_art(net, engine=_CtxEngine(), http_get=_http)
+    assert art == (b"ART:https://img.tmdb/hbo-logo.png", "logo")
 
 
 def test_context_art_none_for_charts_and_multi_rule():
