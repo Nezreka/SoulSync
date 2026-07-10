@@ -143,13 +143,52 @@ def register_routes(bp):
         return jsonify({"assignments": db.get_overlay_assignments(), "templates": templates,
                         "applied": db.overlay_applied_count()})
 
+    def _validate_overlay_filter(scope, filt):
+        """(filter_dict|None, error|None) — a filter must compile against the
+        scope's rule kind (seasons/episodes filter the parent SHOW) before it's
+        stored; a stored-broken filter would silently skip the whole scope."""
+        if not isinstance(filt, dict) or not (filt.get("rules") or []):
+            return None, None
+        from core.video.collections.smart_filter import SmartFilterError, compile_rules
+        kind = "movie" if scope == "movie" else "show"
+        try:
+            compile_rules(filt, kind)
+        except SmartFilterError as e:
+            return None, str(e)
+        return filt, None
+
     @bp.route("/overlays/assignments", methods=["PUT"])
     def overlay_assignments_set():
         from . import get_video_db
         data = request.get_json(silent=True) or {}
         scope = data.get("scope")
-        ok = get_video_db().set_overlay_assignment(scope, data.get("template_id"), bool(data.get("enabled")))
+        filt, err = _validate_overlay_filter(scope, data.get("filter"))
+        if err:
+            return jsonify({"ok": False, "error": f"Filter doesn't compile: {err}"}), 400
+        ok = get_video_db().set_overlay_assignment(
+            scope, data.get("template_id"), bool(data.get("enabled")),
+            filter_definition=filt)
         return jsonify({"ok": bool(ok)}), (200 if ok else 400)
+
+    @bp.route("/overlays/filter/preview", methods=["POST"])
+    def overlay_filter_preview():
+        """Live 'N of M match' for the scope-card filter builder."""
+        from . import get_video_db
+        from core.video.collections.smart_filter import SmartFilterError
+        data = request.get_json(silent=True) or {}
+        scope = data.get("scope")
+        if scope not in ("movie", "show", "season", "episode"):
+            return jsonify({"ok": False, "error": "bad scope"}), 400
+        db = get_video_db()
+        try:
+            total = len(db.overlay_scope_items(scope))
+            filt, err = _validate_overlay_filter(scope, data.get("filter"))
+            if err:
+                return jsonify({"ok": False, "error": err})
+            count = len(db.overlay_scope_items(scope, filter_definition=filt)) if filt else total
+            return jsonify({"ok": True, "count": count, "total": total})
+        except SmartFilterError as e:
+            return jsonify({"ok": False, "error": str(e)})
 
     @bp.route("/overlays/apply", methods=["POST"])
     def overlay_apply_run():

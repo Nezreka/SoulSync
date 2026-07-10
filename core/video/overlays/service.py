@@ -235,10 +235,37 @@ class OverlayApplyService:
             tpl = self.db.get_overlay_template(a["template_id"])
             if not tpl:
                 continue
-            for it in self.db.overlay_scope_items(scope):
+            try:
+                items = self.db.overlay_scope_items(scope, filter_definition=a.get("filter"))
+            except Exception:   # noqa: BLE001 - a bad filter must never mis-apply; skip the scope
+                logger.warning("overlay filter for scope %r failed to compile — scope skipped",
+                               scope, exc_info=True)
+                continue
+            for it in items:
                 jobs.append({"kind": scope, "item_id": it["id"], "template": tpl,
                              "values": self.db.overlay_sample_data(scope, it["id"]) or {},
                              "title": it.get("title"), "force": force})
+        return jobs
+
+    def build_restore_jobs(self, scopes) -> list:
+        """Items whose overlay should come OFF because the scope's filter no
+        longer matches them (their clean art gets restored) — the counterpart
+        that keeps a tightened filter honest instead of leaving stale overlays.
+        Only computed for filtered scopes; without a filter, every scope item is
+        a target so nothing can go stale this way."""
+        assigns = self.db.get_overlay_assignments()
+        jobs = []
+        for scope in scopes:
+            a = assigns.get(scope) or {}
+            if not a.get("enabled") or not a.get("template_id") or not a.get("filter"):
+                continue
+            try:
+                targets = {it["id"] for it in
+                           self.db.overlay_scope_items(scope, filter_definition=a.get("filter"))}
+            except Exception:   # noqa: BLE001 - bad filter → scope skipped in build_jobs too
+                continue
+            for item_id in sorted(self.db.overlay_applied_ids(scope) - targets):
+                jobs.append({"kind": scope, "item_id": item_id})
         return jobs
 
     def build_remove_jobs(self, scopes) -> list:
@@ -328,6 +355,10 @@ def apply_scopes_sync(db, scopes, *, force=False, on_progress=None) -> dict:
                 on_progress(p)
 
         res = run_apply(svc.applier(), jobs, on_progress=_prog)
+        restores = svc.build_restore_jobs(scopes)
+        if restores:
+            _JOB["total"] = len(jobs) + len(restores)
+            res["restored"] = _apply_restores(db, svc, restores, offset=len(jobs))
         _JOB["phase"] = "done"
         return {"ok": True, **res}
     except Exception as e:
@@ -359,13 +390,15 @@ def _run(db, scopes, force, remove, reset=False):
             _JOB["phase"] = "done"
             return
         jobs = svc.build_remove_jobs(scopes) if remove else svc.build_jobs(scopes, force=force)
-        _JOB.update(total=len(jobs), phase="running")
+        restores = [] if remove else svc.build_restore_jobs(scopes)
+        _JOB.update(total=len(jobs) + len(restores), phase="running")
 
         def _prog(p):
             _JOB.update(p)
             _emit_progress()
 
         run_apply(svc.applier(), jobs, on_progress=_prog, remove=remove)
+        _apply_restores(db, svc, restores, offset=len(jobs))
         _JOB["phase"] = "done"
     except Exception as e:
         logger.exception("overlay apply run failed")
@@ -373,6 +406,24 @@ def _run(db, scopes, force, remove, reset=False):
     finally:
         _JOB["running"] = False
         _emit_progress(force=True)
+
+
+def _apply_restores(db, svc, restores, offset=0) -> int:
+    """Restore clean art for items a tightened filter released. Counts into the
+    running job's progress; failures never abort the run."""
+    restored = 0
+    for i, j in enumerate(restores or []):
+        try:
+            ok = reset_item_poster(db, j["kind"], j["item_id"], svc.store).get("ok")
+        except Exception:   # noqa: BLE001
+            logger.exception("overlay restore failed for %s %s", j.get("kind"), j.get("item_id"))
+            ok = False
+        restored += 1 if ok else 0
+        _JOB.update(done=offset + i + 1,
+                    applied=_JOB.get("applied", 0) + (1 if ok else 0),
+                    failed=_JOB.get("failed", 0) + (0 if ok else 1))
+        _emit_progress()
+    return restored
 
 
 def status() -> dict:

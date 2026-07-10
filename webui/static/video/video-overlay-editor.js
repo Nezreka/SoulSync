@@ -396,12 +396,21 @@
             '</div>' +
             '<select class="voe-input" data-apply-tpl="' + scope + '"' + (pool.length ? '' : ' disabled') + '>' + opts + '</select>' +
             (pool.length ? '' : '<div class="voe-apply-card-empty">No ' + esc(want) + ' templates yet — design one first.</div>') +
+            '<div class="voe-filter" data-filter-host="' + scope + '">' +
+                '<button type="button" class="voe-filter-line" data-filter-toggle="' + scope + '">' +
+                    '<span class="voe-filter-ic">◇</span><span data-filter-sum>' + filterSummary(assign && assign.filter) + '</span>' +
+                '</button>' +
+                '<div class="voe-filter-body" data-filter-body hidden></div>' +
+            '</div>' +
             (note ? '<div class="voe-apply-card-note">' + esc(note) + '</div>' : '') +
             '</div>';
     }
     // The 4 scope cards, shared by the Apply modal AND the studio settings panel.
     function assignCardsHTML(a, templates) {
         a = a || {};
+        ['movie', 'show', 'season', 'episode'].forEach(function (s) {
+            _scopeFilters[s] = (a[s] && a[s].filter) || null;
+        });
         return scopeCard('Movies', 'movie', a.movie, templates, '') +
             scopeCard('TV Shows', 'show', a.show, templates, '') +
             scopeCard('Seasons', 'season', a.season, templates, 'Season posters') +
@@ -420,6 +429,160 @@
                 saveAssign(root, btn.getAttribute('data-apply-en'));
             });
         });
+        root.querySelectorAll('[data-filter-toggle]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                toggleFilterEditor(root, btn.getAttribute('data-filter-toggle'));
+            });
+        });
+    }
+
+    // ── filtered targeting: "apply this overlay only to items matching…" ─────
+    // Same rule language as the Collection Studio (one brain: the smart-filter
+    // compiler); seasons/episodes filter their PARENT SHOW.
+    var _scopeFilters = {};      // scope -> definition ({match, rules}) or null
+    var _filterFields = {};      // 'movie'|'show' -> field schema (lazy, shared API)
+
+    function filterSummary(filt) {
+        var n = filt && filt.rules ? filt.rules.length : 0;
+        return n ? ('Applies to items matching ' + n + ' rule' + (n === 1 ? '' : 's'))
+                 : 'Applies to everything';
+    }
+
+    function filterFieldKind(scope) { return scope === 'movie' ? 'movie' : 'show'; }
+
+    function loadFilterFields(kind) {
+        if (_filterFields[kind]) return Promise.resolve(_filterFields[kind]);
+        return fetch('/api/video/collections/fields?media_type=' + kind, { headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.json(); })
+            .then(function (d) { _filterFields[kind] = d || { fields: [], suggestions: {} }; return _filterFields[kind]; });
+    }
+
+    function toggleFilterEditor(root, scope) {
+        var host = root.querySelector('[data-filter-host="' + scope + '"]');
+        if (!host) return;
+        var body = host.querySelector('[data-filter-body]');
+        if (!body.hidden) { body.hidden = true; return; }
+        body.hidden = false;
+        body.innerHTML = '<div class="voe-filter-loading">Loading…</div>';
+        loadFilterFields(filterFieldKind(scope)).then(function () { paintFilterEditor(root, scope); });
+    }
+
+    function paintFilterEditor(root, scope) {
+        var host = root.querySelector('[data-filter-host="' + scope + '"]');
+        var body = host && host.querySelector('[data-filter-body]');
+        if (!body) return;
+        var meta = _filterFields[filterFieldKind(scope)] || { fields: [], suggestions: {} };
+        var filt = _scopeFilters[scope] || { match: 'all', rules: [] };
+        _scopeFilters[scope] = filt;
+        body.innerHTML = '';
+
+        if ((filt.rules || []).length > 1) {
+            var m = document.createElement('div');
+            m.className = 'voe-filter-match';
+            m.innerHTML = 'Match <select class="voe-input voe-filter-match-sel">' +
+                '<option value="all"' + (filt.match !== 'any' ? ' selected' : '') + '>all</option>' +
+                '<option value="any"' + (filt.match === 'any' ? ' selected' : '') + '>any</option>' +
+                '</select> of these rules' + (scope === 'season' || scope === 'episode' ? ' <i>(rules describe the SHOW)</i>' : '');
+            m.querySelector('select').addEventListener('change', function (e) {
+                filt.match = e.target.value;
+                filterChanged(root, scope);
+            });
+            body.appendChild(m);
+        }
+
+        (filt.rules || []).forEach(function (rule, i) {
+            var spec = meta.fields.filter(function (f) { return f.field === rule.field; })[0] || meta.fields[0];
+            if (!spec) return;
+            if (!rule.op || spec.ops.indexOf(rule.op) < 0) rule.op = spec.ops[0];
+            var row = document.createElement('div');
+            row.className = 'voe-filter-rule';
+            var fsel = document.createElement('select');
+            fsel.className = 'voe-input';
+            fsel.innerHTML = meta.fields.map(function (f) {
+                return '<option value="' + f.field + '"' + (f.field === rule.field ? ' selected' : '') + '>' + esc(f.label) + '</option>';
+            }).join('');
+            fsel.addEventListener('change', function () {
+                rule.field = fsel.value; rule.op = ''; rule.value = '';
+                paintFilterEditor(root, scope); filterChanged(root, scope);
+            });
+            var osel = document.createElement('select');
+            osel.className = 'voe-input voe-filter-op';
+            osel.innerHTML = spec.ops.map(function (o) {
+                return '<option value="' + o + '"' + (o === rule.op ? ' selected' : '') + '>' + esc(o.replace(/_/g, ' ')) + '</option>';
+            }).join('');
+            osel.addEventListener('change', function () { rule.op = osel.value; filterChanged(root, scope); });
+            var val = document.createElement('input');
+            val.className = 'voe-input';
+            val.placeholder = spec.type === 'number' ? 'number' : 'value';
+            val.value = Array.isArray(rule.value) ? rule.value.join(', ') : (rule.value == null ? '' : rule.value);
+            var opts = spec.options || (meta.suggestions && meta.suggestions[rule.field]);
+            if (opts && opts.length) {
+                var dlid = 'voe-fdl-' + scope + '-' + i;
+                val.setAttribute('list', dlid);
+                var dl = document.createElement('datalist');
+                dl.id = dlid;
+                dl.innerHTML = opts.map(function (o) { return '<option value="' + esc(String(o)) + '">'; }).join('');
+                row.appendChild(dl);
+            }
+            val.addEventListener('input', function () {
+                rule.value = (rule.op === 'in' || rule.op === 'not_in')
+                    ? val.value.split(',').map(function (s) { return s.trim(); }).filter(Boolean)
+                    : val.value;
+                filterChanged(root, scope);
+            });
+            var x = document.createElement('button');
+            x.type = 'button';
+            x.className = 'voe-filter-x';
+            x.innerHTML = '&times;';
+            x.addEventListener('click', function () {
+                filt.rules.splice(i, 1);
+                paintFilterEditor(root, scope); filterChanged(root, scope);
+            });
+            row.appendChild(fsel); row.appendChild(osel); row.appendChild(val); row.appendChild(x);
+            body.appendChild(row);
+        });
+
+        var foot = document.createElement('div');
+        foot.className = 'voe-filter-foot';
+        var add = document.createElement('button');
+        add.type = 'button';
+        add.className = 'voe-btn voe-btn--ghost voe-filter-add';
+        add.textContent = '+ Rule';
+        add.addEventListener('click', function () {
+            filt.rules.push({ field: (meta.fields[0] || {}).field || 'year', op: '', value: '' });
+            paintFilterEditor(root, scope);
+        });
+        foot.appendChild(add);
+        var count = document.createElement('span');
+        count.className = 'voe-filter-count';
+        count.setAttribute('data-filter-count', scope);
+        foot.appendChild(count);
+        body.appendChild(foot);
+        refreshFilterCount(root, scope);
+    }
+
+    var _filterTimers = {};
+    function filterChanged(root, scope) {
+        var sum = root.querySelector('[data-filter-host="' + scope + '"] [data-filter-sum]');
+        if (sum) sum.textContent = filterSummary(_scopeFilters[scope]);
+        clearTimeout(_filterTimers[scope]);
+        _filterTimers[scope] = setTimeout(function () {
+            saveAssign(root, scope);
+            refreshFilterCount(root, scope);
+        }, 450);
+    }
+
+    function refreshFilterCount(root, scope) {
+        var el = root.querySelector('[data-filter-count="' + scope + '"]');
+        if (!el) return;
+        var filt = _scopeFilters[scope];
+        if (!filt || !(filt.rules || []).length) { el.textContent = 'No filter — every item gets the overlay'; return; }
+        el.textContent = 'Counting…';
+        api('POST', '/api/video/overlays/filter/preview', { scope: scope, filter: filt })
+            .then(function (d) {
+                if (d && d.ok) el.textContent = d.count + ' of ' + d.total + ' match — the rest get their clean art back';
+                else el.textContent = (d && d.error) || 'Filter incomplete';
+            }).catch(function () { el.textContent = ''; });
     }
     function renderApplyDialog(d) {
         var templates = d.templates || [], a = d.assignments || {};
@@ -472,7 +635,10 @@
         var en = back.querySelector('[data-apply-en="' + scope + '"]');
         var tid = sel.value ? parseInt(sel.value, 10) : null;
         var enabled = en.classList.contains('voe-toggle--on') && !!tid;
-        api('PUT', '/api/video/overlays/assignments', { scope: scope, template_id: tid, enabled: enabled })
+        var filt = _scopeFilters[scope];
+        api('PUT', '/api/video/overlays/assignments',
+            { scope: scope, template_id: tid, enabled: enabled,
+              filter: (filt && (filt.rules || []).length ? filt : null) })
             .catch(function () { toast('Could not save assignment', 'error'); });
     }
     function _applyBtns(back) { return back.querySelectorAll('[data-apply-run],[data-apply-remove],[data-apply-reset]'); }
