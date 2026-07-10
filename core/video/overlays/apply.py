@@ -49,9 +49,12 @@ _RENDER_VERSION = 2
 def values_signature(definition: dict, values: dict) -> str:
     """A stable signature of only the values a template consumes, so a quality/
     rating change re-renders while unrelated edits don't. Includes a render
-    version so a compositor change invalidates every cached render exactly once."""
+    version (a compositor change invalidates every cached render exactly once)
+    AND the definition's own hash — a template RESTYLE (same fields, new look)
+    must re-render too, which the fields-only signature silently skipped."""
     fields, needs_logo = used_fields(definition)
-    sub = {"_rv": _RENDER_VERSION}
+    sub = {"_rv": _RENDER_VERSION,
+           "_tdef": sha1(json.dumps(definition or {}, sort_keys=True, default=str).encode("utf-8"))}
     sub.update({k: (values or {}).get(k) for k in sorted(fields)})
     if needs_logo:
         sub["logo_url"] = (values or {}).get("logo_url")

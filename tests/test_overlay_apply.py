@@ -139,3 +139,14 @@ def test_render_version_invalidates_every_cached_render(monkeypatch):
     monkeypatch.setattr(ap, "_RENDER_VERSION", ap._RENDER_VERSION + 1)  # a compositor change
     after = values_signature(tpl, vals)
     assert before != after   # same inputs, new signature → item re-renders once
+
+
+def test_template_restyle_changes_signature_but_value_noise_does_not():
+    # A restyle (same consumed fields, different look) must re-render; an edit
+    # to a value the template doesn't consume must still skip.
+    from core.video.overlays.apply import values_signature
+    d1 = {"layers": [{"type": "text", "field": "resolution", "color": "#fff"}]}
+    d2 = {"layers": [{"type": "text", "field": "resolution", "color": "#f00"}]}   # restyle
+    v = {"resolution": "2160p", "title": "A"}
+    assert values_signature(d1, v) != values_signature(d2, v)
+    assert values_signature(d1, v) == values_signature(d1, dict(v, title="B"))
