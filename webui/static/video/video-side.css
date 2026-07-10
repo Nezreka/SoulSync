@@ -4461,3 +4461,25 @@ body[data-side="video"] #gsearch-aura {
     background: rgb(var(--accent-rgb, 88 101 242)); transition: width .4s ease;
 }
 @media (prefers-reduced-motion: reduce) { .vbb-fill { transition: none; } }
+
+/* ── Detail hero: the Manage (metadata editor) button ──────────────────────
+   Deliberately unlike the accent-filled content actions (Trailer / Get /
+   Manage Poster): a dark glass pill with a luminous gradient ring — reads as
+   a TOOL, so it stands out in the row without stealing the Play CTA's job. */
+.vd-manage-btn {
+    display: inline-flex; align-items: center; gap: 8px; padding: 7px 18px;
+    border-radius: 999px; font-size: 12.5px; font-weight: 800; letter-spacing: 0.02em;
+    cursor: pointer; color: #fff; position: relative;
+    border: 1px solid transparent;
+    background:
+        linear-gradient(rgba(12, 12, 17, 0.92), rgba(12, 12, 17, 0.92)) padding-box,
+        linear-gradient(120deg, rgba(var(--vd-accent-rgb), 0.95), rgba(255, 255, 255, 0.75),
+            rgba(var(--vd-accent-rgb), 0.95)) border-box;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45), 0 0 14px rgba(var(--vd-accent-rgb), 0.25);
+    transition: all 0.2s ease;
+}
+.vd-manage-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.5), 0 0 22px rgba(var(--vd-accent-rgb), 0.5);
+}
+.vd-manage-ic { font-size: 12px; color: rgb(var(--vd-accent-rgb)); filter: brightness(1.35); }
