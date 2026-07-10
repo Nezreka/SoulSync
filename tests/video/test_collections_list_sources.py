@@ -58,8 +58,8 @@ def test_chart_pages_until_limit_and_dedups():
     assert len(out) == 50
     assert [o["tmdb_id"] for o in out[:3]] == [1, 2, 3]
     assert out[0]["poster_url"] == "p1"                     # engine 'poster' normalized
-    pages = [c[2] for c in eng.calls if c[0] == "curated"]
-    assert pages == [1, 2, 3]                               # stopped at the limit
+    pages = sorted(c[2] for c in eng.calls if c[0] == "curated")
+    assert pages == [1, 2, 3]      # only the pages the limit needs (fetched concurrently)
 
 
 def test_chart_trending_and_unknown():

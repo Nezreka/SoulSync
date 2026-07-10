@@ -90,6 +90,17 @@ def _limit_of(ref: Any) -> int:
     return max(1, min(n, _MAX_PAGES * 20))
 
 
+def _fetch_pages(fetch_page: Callable, limit: int) -> list:
+    """Fetch the pages a limit needs CONCURRENTLY (a 250-item chart is 13 TMDB
+    round-trips — sequential paging is why 'Easy setup' crawled on first open).
+    ``ex.map`` preserves page order, so chart RANK ordering survives."""
+    pages = range(1, min(_MAX_PAGES, (limit + 19) // 20) + 1)
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        batches = list(ex.map(lambda p: fetch_page(p) or [], pages))
+    return [it for batch in batches for it in batch]
+
+
 def _fetch_chart(eng, ref: Any) -> List[Dict[str, Any]]:
     chart = str((ref or {}).get("chart") or "") if isinstance(ref, dict) else str(ref or "")
     spec = _CHARTS.get(chart)
@@ -100,14 +111,7 @@ def _fetch_chart(eng, ref: Any) -> List[Dict[str, Any]]:
     surface, key = spec
     if surface == "trending":
         return _dedup_normed(eng.trending(window="week", kind=key) or [])[:limit]
-    raw: list = []
-    for page in range(1, min(_MAX_PAGES, (limit + 19) // 20) + 1):
-        batch = eng.discover_curated(key, page=page) or []
-        if not batch:
-            break
-        raw.extend(batch)
-        if len(raw) >= limit:
-            break
+    raw = _fetch_pages(lambda p: eng.discover_curated(key, page=p), limit)
     return _dedup_normed(raw)[:limit]
 
 
@@ -123,15 +127,9 @@ def _fetch_keyword(eng, ref: Any) -> List[Dict[str, Any]]:
         logger.debug("no TMDB keyword for %r", query)
         return []
     limit = _limit_of(ref)
-    raw: list = []
-    for page in range(1, min(_MAX_PAGES, (limit + 19) // 20) + 1):
-        batch = eng.discover_filter(kind, keywords=str(kid), page=page,
-                                    vote_count_min=20) or []
-        if not batch:
-            break
-        raw.extend(batch)
-        if len(raw) >= limit:
-            break
+    raw = _fetch_pages(
+        lambda p: eng.discover_filter(kind, keywords=str(kid), page=p, vote_count_min=20),
+        limit)
     return _dedup_normed(raw)[:limit]
 
 
