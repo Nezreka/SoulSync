@@ -154,6 +154,109 @@ def _fetch_union(eng, ref: Any) -> List[Dict[str, Any]]:
     return _dedup_normed(raw)[: _MAX_PAGES * 20]
 
 
+# ── community list sources (Trakt / MDBList) ────────────────────────────────
+# Both need a free user key (video Settings → Metadata): Trakt reads public
+# lists with just an app Client ID; MDBList aggregates IMDb/Trakt lists (the
+# route to a REAL IMDb Top 250 and award lists). Fetched directly (no engine
+# worker — they're list readers, not matchers) with a module TTL cache.
+_COMMUNITY_CACHE: Dict[tuple, tuple] = {}
+_COMMUNITY_TTL = 1800
+
+
+def _http_json(url, headers=None, params=None):
+    import requests
+    r = requests.get(url, headers=headers or {}, params=params or {}, timeout=20)
+    r.raise_for_status()
+    return r
+
+
+def _user_slug(ref, *path_markers) -> tuple | None:
+    """'user/slug' from a bare pair or a full list URL.
+    trakt.tv/users/{user}/lists/{slug} · mdblist.com/lists/{user}/{slug}"""
+    s = str(ref or "").strip().strip("/")
+    if not s:
+        return None
+    parts = [p for p in s.replace("?", "/").split("/") if p]
+    for marker in path_markers:
+        if marker in parts:
+            i = parts.index(marker)
+            if len(parts) > i + 1:
+                # users/{user}/lists/{slug} or lists/{user}/{slug}
+                tail = [p for p in parts[i + 1:] if p != "lists"]
+                if len(tail) >= 2:
+                    return tail[0], tail[1]
+    return (parts[0], parts[1]) if len(parts) == 2 and "." not in parts[0] else None
+
+
+def _community_cached(key, build):
+    import time
+    hit = _COMMUNITY_CACHE.get(key)
+    if hit and time.monotonic() - hit[0] < _COMMUNITY_TTL:
+        return hit[1]
+    items = build()
+    _COMMUNITY_CACHE[key] = (time.monotonic(), items)
+    return items
+
+
+def _fetch_trakt(db, ref: Any) -> List[Dict[str, Any]]:
+    key = db.get_setting("trakt_api_key") if db is not None else None
+    if not key:
+        logger.info("trakt list skipped — no Trakt Client ID configured")
+        return []
+    us = _user_slug(ref, "users")
+    if not us:
+        return []
+
+    def build():
+        headers = {"trakt-api-version": "2", "trakt-api-key": key,
+                   "Content-Type": "application/json"}
+        raw: list = []
+        page, page_count = 1, 1
+        while page <= min(page_count, 10):        # 10×200 = 2000 items, plenty
+            r = _http_json(f"https://api.trakt.tv/users/{us[0]}/lists/{us[1]}/items",
+                           headers=headers, params={"page": page, "limit": 200})
+            try:
+                page_count = int(r.headers.get("x-pagination-page-count") or 1)
+            except (TypeError, ValueError):
+                page_count = 1
+            for it in r.json() or []:
+                media = it.get("movie") or it.get("show") or {}
+                tid = (media.get("ids") or {}).get("tmdb")
+                if tid:
+                    raw.append({"tmdb_id": tid, "title": media.get("title"),
+                                "year": media.get("year")})
+            page += 1
+        return _dedup_normed(raw)
+
+    return _community_cached(("trakt", us), build)
+
+
+def _fetch_mdblist(db, ref: Any) -> List[Dict[str, Any]]:
+    key = db.get_setting("mdblist_api_key") if db is not None else None
+    if not key:
+        logger.info("mdblist skipped — no MDBList API key configured")
+        return []
+    us = _user_slug(ref, "lists")
+    if not us:
+        return []
+
+    def build():
+        r = _http_json(f"https://api.mdblist.com/lists/{us[0]}/{us[1]}/items",
+                       params={"apikey": key})
+        data = r.json() or []
+        if isinstance(data, dict):                # some responses wrap in {movies, shows}
+            data = (data.get("movies") or []) + (data.get("shows") or [])
+        raw = []
+        for it in data:
+            tid = it.get("id") or it.get("tmdbid") or it.get("tmdb_id")
+            if tid:
+                raw.append({"tmdb_id": tid, "title": it.get("title"),
+                            "year": it.get("release_year") or it.get("year")})
+        return _dedup_normed(raw)
+
+    return _community_cached(("mdblist", us), build)
+
+
 def _fetch_list(eng, ref: Any) -> List[Dict[str, Any]]:
     # Lists get a higher page cap (500 items) than charts — a public TMDB list
     # is a complete membership, not a ranking to sample.
@@ -182,6 +285,15 @@ def build_list_fetcher(db=None, *, engine_factory: Optional[Callable] = None) ->
 
     def fetch(source: str, ref: Any) -> List[Dict[str, Any]]:
         source = str(source or "").lower()
+        # Community sources first — they read their own keys, no engine needed.
+        try:
+            if source == "trakt_list":
+                return _fetch_trakt(db, ref)
+            if source == "mdblist_list":
+                return _fetch_mdblist(db, ref)
+        except Exception:   # noqa: BLE001 - membership is best-effort; owned still syncs
+            logger.debug("list fetch failed for %s %r", source, ref, exc_info=True)
+            return []
         try:
             eng = _engine()
         except Exception:   # noqa: BLE001 - no engine → no membership, owned still syncs
@@ -204,8 +316,7 @@ def build_list_fetcher(db=None, *, engine_factory: Optional[Callable] = None) ->
         except Exception:   # noqa: BLE001 - membership is best-effort; owned still syncs
             logger.debug("list fetch failed for %s %r", source, ref, exc_info=True)
             return []
-        # trakt_list — deferred (needs a Trakt client).
-        logger.debug("list source %r not yet fetchable; owned-only", source)
+        logger.debug("list source %r not fetchable; owned-only", source)
         return []
 
     return fetch

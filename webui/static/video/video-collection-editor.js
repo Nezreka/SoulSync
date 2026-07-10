@@ -1512,7 +1512,8 @@
             ['tmdb_chart', 'Chart (Top Rated / Popular / Trending)'],
             ['tmdb_keyword', 'Theme / keyword (Christmas, heist…)'],
             ['tmdb_list', 'TMDB list'],
-            ['trakt_list', 'Trakt list URL (coming soon)']
+            ['trakt_list', 'Trakt list'],
+            ['mdblist_list', 'MDBList (IMDb charts, awards…)']
         ];
         var refHTML;
         if (def.source === 'tmdb_union') {
@@ -1540,10 +1541,20 @@
                 '<input class="vce-input" data-listref placeholder="e.g. christmas, halloween, heist, time travel" value="' + esc(def.query || '') + '">' +
                 '<p class="vce-note">Matches TMDB\'s keyword tags — great for seasonal and mood collections. Refreshes on every sync.</p>';
         } else {
+            var refLabel = def.source === 'tmdb_collection' ? 'TMDB collection id'
+                : def.source === 'trakt_list' ? 'Trakt list URL (or user/slug)'
+                : def.source === 'mdblist_list' ? 'MDBList URL (or user/slug)'
+                : 'TMDB list id';
+            var refPh = def.source === 'tmdb_collection' ? 'e.g. 10 (Star Wars Collection)'
+                : def.source === 'trakt_list' ? 'https://trakt.tv/users/…/lists/…'
+                : def.source === 'mdblist_list' ? 'https://mdblist.com/lists/…/…'
+                : 'reference';
+            var keyNote = def.source === 'trakt_list' ? ' Needs your Trakt Client ID (Settings → Metadata).'
+                : def.source === 'mdblist_list' ? ' Needs your MDBList API key (Settings → Metadata).' : '';
             refHTML =
-                '<label class="vce-flabel">' + (def.source === 'tmdb_collection' ? 'TMDB collection id' : (def.source === 'trakt_list' ? 'Trakt list URL' : 'TMDB list id')) + '</label>' +
-                '<input class="vce-input" data-listref placeholder="' + (def.source === 'tmdb_collection' ? 'e.g. 10 (Star Wars Collection)' : 'reference') + '" value="' + esc(def.collection_id || def.list_id || def.url || '') + '">' +
-                '<p class="vce-note">Members you own appear in the preview. Wishlisting the ones you don\'t own happens on Sync.</p>';
+                '<label class="vce-flabel">' + refLabel + '</label>' +
+                '<input class="vce-input" data-listref placeholder="' + refPh + '" value="' + esc(def.collection_id || def.list_id || def.url || '') + '">' +
+                '<p class="vce-note">Members you own appear in the preview. Wishlisting the ones you don\'t own happens on Sync.' + keyNote + '</p>';
         }
         host.innerHTML =
             '<label class="vce-flabel">List source</label>' +
@@ -1584,7 +1595,7 @@
             var v = e.target.value.trim();
             delete def.collection_id; delete def.list_id; delete def.url; delete def.query;
             if (def.source === 'tmdb_collection') def.collection_id = v ? parseInt(v, 10) : null;
-            else if (def.source === 'trakt_list') def.url = v;
+            else if (def.source === 'trakt_list' || def.source === 'mdblist_list') def.url = v;
             else if (def.source === 'tmdb_keyword') { def.query = v; def.limit = 100; }
             else def.list_id = v;
             ed.dirty = true;

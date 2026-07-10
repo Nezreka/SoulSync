@@ -236,6 +236,8 @@
                 if (sub && d.opensubtitles_api_key != null) sub.value = d.opensubtitles_api_key;
                 var trakt = document.getElementById('trakt-api-key');
                 if (trakt && d.trakt_api_key != null) trakt.value = d.trakt_api_key;
+                var mdbl = document.getElementById('mdblist-api-key');
+                if (mdbl && d.mdblist_api_key != null) mdbl.value = d.mdblist_api_key;
                 var ryd = document.getElementById('video-ryd-enabled');
                 if (ryd && d.ryd_enabled != null) ryd.checked = !!d.ryd_enabled;
                 var sb = document.getElementById('video-sponsorblock-enabled');
@@ -656,6 +658,7 @@
                 fanart_api_key: fa ? fa.value : '',
                 opensubtitles_api_key: sub ? sub.value : '',
                 trakt_api_key: trakt ? trakt.value : '',
+                mdblist_api_key: (document.getElementById('mdblist-api-key') || {}).value || '',
                 ryd_enabled: ryd ? ryd.checked : true,
                 sponsorblock_enabled: sb ? sb.checked : true,
                 dearrow_enabled: dea ? dea.checked : true,

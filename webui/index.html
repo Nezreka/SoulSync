@@ -6148,9 +6148,26 @@
                                         </div>
                                         <div class="callback-info">
                                             <div class="callback-help">Create a free API app at <a href="https://trakt.tv/oauth/applications" target="_blank" style="color: #ed1c24;">trakt.tv</a> and paste its <strong>Client ID</strong>.</div>
-                                            <div class="callback-help">Adds Trakt's community audience score (and vote count) to movies &amp; shows.</div>
+                                            <div class="callback-help">Adds Trakt's community audience score (and vote count) to movies &amp; shows — and lets the Collection Studio build collections from public Trakt lists.</div>
                                         </div>
                                         <button class="test-button" type="button" data-video-test-service="trakt">Test Trakt</button>
+                                    </div>
+                                </div>
+                                <div class="api-service-frame stg-service" data-video-service="mdblist">
+                                    <div class="stg-service-header" onclick="toggleStgService(this)">
+                                        <span class="stg-service-dot" style="color: #f5c518;"></span>
+                                        <h4 class="service-title">MDBList (List Collections)</h4>
+                                        <span class="stg-service-chevron">›</span>
+                                    </div>
+                                    <div class="stg-service-body">
+                                        <div class="form-group">
+                                            <label>API Key:</label>
+                                            <input type="password" id="mdblist-api-key" placeholder="MDBList API key">
+                                        </div>
+                                        <div class="callback-info">
+                                            <div class="callback-help">Free key from <a href="https://mdblist.com/preferences/" target="_blank" style="color: #f5c518;">mdblist.com</a> (Preferences &rarr; API Access).</div>
+                                            <div class="callback-help">Lets the Collection Studio build collections from MDBList lists — the real IMDb Top 250, award lists (Oscar winners), and thousands of community lists.</div>
+                                        </div>
                                     </div>
                                 </div>
                                 <div class="api-service-frame stg-service" data-video-service="nokey">
