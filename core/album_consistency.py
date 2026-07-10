@@ -295,8 +295,8 @@ def _resolve_album_release(album_name, artist_name, track_count, mb_service):
         try:
             from core.metadata import album_mbid_cache
             album_mbid_cache.record(norm_key, artist_key, release['id'])
-        except Exception:   # noqa: BLE001
-            pass
+        except Exception as e:   # noqa: BLE001 - pinning is best-effort
+            logger.debug("Album MBID pin record failed (%s)", e)
     return release
 
 
