@@ -10,6 +10,8 @@ SoulSync-managed movie/show collections. Admin-only (gated in __init__.py).
     GET    /api/video/collections/fields          -> {fields,suggestions}   (rule builder)
     GET    /api/video/collections/presets         -> {packs:[...]}          (easy setup)
     POST   /api/video/collections/presets/apply   -> {ok,created,skipped}   (batch create)
+    GET    /api/video/collections/<id>/poster     -> image/jpeg             (generated art)
+    POST   /api/video/collections/<id>/poster/generate -> {ok,poster_url}   (render collage)
     POST   /api/video/collections/preview         -> {ok,count,sample,...}  (live preview)
     POST   /api/video/collections/<id>/sync       -> {ok,...}               (Sync now, one)
     POST   /api/video/collections/sync            -> {ok,...}               (Sync now, all)
@@ -139,10 +141,57 @@ def register_routes(bp):
         try:
             r = apply_pack(get_video_db(), pack, mt, keys,
                            wishlist_missing=bool(d.get("wishlist_missing", True)))
+            _generate_posters_async([c["id"] for c in r["created"]])
             return jsonify({"ok": True, "created": r["created"], "skipped": r["skipped"]})
         except Exception:
             logger.exception("preset apply failed (%s)", pack)
             return jsonify({"ok": False, "error": "Could not create collections"}), 500
+
+    def _generate_posters_async(ids):
+        """Collage posters for freshly-applied preset collections, off-request —
+        each needs member resolution + up to 4 poster fetches, so a big pack
+        would otherwise hang the apply call. Best-effort: cards show art as the
+        renders land (the gallery serves whatever exists at read time)."""
+        if not ids:
+            return
+        from . import get_video_db
+        db, todo = get_video_db(), list(ids)
+
+        def run():
+            try:
+                from core.video.collections.poster_gen import generate_for_definitions
+                generate_for_definitions(db, todo)
+            except Exception:
+                logger.exception("preset poster generation failed")
+
+        import threading
+        threading.Thread(target=run, name="collection-poster-gen", daemon=True).start()
+
+    @bp.route("/collections/<int:cid>/poster", methods=["GET"])
+    def collections_poster(cid):
+        from flask import Response
+        from core.video.collections.poster_gen import read_poster
+        data = read_poster(cid)
+        if not data:
+            return jsonify({"error": "no generated poster"}), 404
+        resp = Response(data, content_type="image/jpeg")
+        # Immutable-friendly: the URL carries a content hash (?v=), so a
+        # regenerate lands on a fresh URL and this can cache hard.
+        resp.headers["Cache-Control"] = "public, max-age=604800"
+        return resp
+
+    @bp.route("/collections/<int:cid>/poster/generate", methods=["POST"])
+    def collections_poster_generate(cid):
+        from . import get_video_db
+        from core.video.collections.poster_gen import generate_for_definition
+        db = get_video_db()
+        c = db.get_collection_definition(cid)
+        if not c:
+            return jsonify({"ok": False, "error": "not found"}), 404
+        url = generate_for_definition(db, c)
+        if not url:
+            return jsonify({"ok": False, "error": "Could not generate a poster"}), 500
+        return jsonify({"ok": True, "poster_url": url})
 
     @bp.route("/collections/preview", methods=["POST"])
     def collections_preview():
