@@ -31,7 +31,7 @@ logger = get_logger("video_database")
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 29
+SCHEMA_VERSION = 30
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -3705,6 +3705,259 @@ class VideoDatabase:
                 f"SELECT DISTINCT tmdb_id FROM {table} WHERE id IN ({marks}) "
                 "AND tmdb_id IS NOT NULL", clean).fetchall()
             return [r["tmdb_id"] for r in rows]
+        finally:
+            conn.close()
+
+    # ── Library Maintenance: jobs & findings (mirrors music's repair standard) ─
+    # Findings: pending → resolved (approve == fix) | dismissed. Dedup treats
+    # EVERY status as already-seen, so a re-scan never resurrects a dismissed or
+    # fixed finding. Runs record per-job tallies for the History tab.
+
+    def repair_create_finding(self, job_id: str, finding_type: str, *, title: str,
+                              severity: str = "info", entity_type=None, entity_id=None,
+                              file_path=None, description=None, details=None) -> bool:
+        """Insert a finding unless an equivalent one exists in ANY status —
+        same job+type and (same entity OR same non-null file_path). Returns
+        True only when a genuinely new row landed (music dedup semantics)."""
+        conn = self._get_connection()
+        try:
+            # Dedup basis: entity match (when the finding names one) OR same
+            # non-null file_path. NULL entities never match each other — two
+            # entity-less findings are only dupes via an identical path.
+            conds, dparams = [], [job_id, finding_type]
+            if entity_id is not None:
+                conds.append("(entity_type IS ? AND entity_id=?)")
+                dparams += [entity_type, str(entity_id)]
+            if file_path:
+                conds.append("(file_path IS NOT NULL AND file_path=?)")
+                dparams.append(file_path)
+            if conds:
+                dup_sql = ("SELECT 1 FROM video_repair_findings WHERE job_id=? AND finding_type=? "
+                           "AND (" + " OR ".join(conds) + ") LIMIT 1")
+                if conn.execute(dup_sql, dparams).fetchone():
+                    return False
+            conn.execute(
+                "INSERT INTO video_repair_findings (job_id, finding_type, severity, entity_type, "
+                "entity_id, file_path, title, description, details_json) VALUES (?,?,?,?,?,?,?,?,?)",
+                (job_id, finding_type, severity, entity_type,
+                 None if entity_id is None else str(entity_id), file_path, title, description,
+                 json.dumps(details or {})))
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _finding_row(r) -> dict:
+        d = dict(r)
+        try:
+            d["details"] = json.loads(d.pop("details_json") or "{}")
+        except (ValueError, TypeError):
+            d["details"] = {}
+        return d
+
+    def repair_get_findings(self, job_id=None, status=None, severity=None,
+                            page: int = 1, limit: int = 50) -> dict:
+        where, params = [], []
+        for col, val in (("job_id", job_id), ("status", status), ("severity", severity)):
+            if val:
+                where.append(f"{col}=?")
+                params.append(val)
+        w = (" WHERE " + " AND ".join(where)) if where else ""
+        page, limit = max(1, int(page or 1)), max(1, min(200, int(limit or 50)))
+        conn = self._get_connection()
+        try:
+            total = conn.execute(f"SELECT COUNT(*) FROM video_repair_findings{w}", params).fetchone()[0]
+            rows = conn.execute(
+                f"SELECT * FROM video_repair_findings{w} ORDER BY created_at DESC, id DESC "
+                "LIMIT ? OFFSET ?", (*params, limit, (page - 1) * limit)).fetchall()
+            return {"items": [self._finding_row(r) for r in rows],
+                    "total": total, "page": page, "limit": limit}
+        finally:
+            conn.close()
+
+    def repair_get_finding(self, finding_id: int):
+        conn = self._get_connection()
+        try:
+            r = conn.execute("SELECT * FROM video_repair_findings WHERE id=?",
+                             (int(finding_id),)).fetchone()
+            return self._finding_row(r) if r else None
+        finally:
+            conn.close()
+
+    def repair_set_finding_details(self, finding_id: int, details: dict) -> bool:
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE video_repair_findings SET details_json=?, updated_at=CURRENT_TIMESTAMP "
+                "WHERE id=?", (json.dumps(details or {}), int(finding_id)))
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def repair_set_finding_status(self, finding_id: int, status: str, action=None) -> bool:
+        """resolved/dismissed stamp resolved_at (+user_action on resolve)."""
+        if status not in ("pending", "resolved", "dismissed"):
+            return False
+        conn = self._get_connection()
+        try:
+            stamp = ", resolved_at=CURRENT_TIMESTAMP" if status != "pending" else ", resolved_at=NULL"
+            cur = conn.execute(
+                f"UPDATE video_repair_findings SET status=?, user_action=?{stamp}, "
+                "updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (status, action, int(finding_id)))
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def repair_bulk_update_findings(self, ids, status: str) -> int:
+        if status not in ("resolved", "dismissed") or not ids:
+            return 0
+        clean = [int(i) for i in ids]
+        conn = self._get_connection()
+        try:
+            marks = ",".join("?" * len(clean))
+            cur = conn.execute(
+                f"UPDATE video_repair_findings SET status=?, resolved_at=CURRENT_TIMESTAMP, "
+                f"updated_at=CURRENT_TIMESTAMP WHERE id IN ({marks}) AND status='pending'",
+                (status, *clean))
+            conn.commit()
+            return cur.rowcount
+        finally:
+            conn.close()
+
+    def repair_clear_findings(self, job_id=None, status=None) -> int:
+        where, params = [], []
+        if job_id:
+            where.append("job_id=?")
+            params.append(job_id)
+        if status:
+            where.append("status=?")
+            params.append(status)
+        w = (" WHERE " + " AND ".join(where)) if where else ""
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(f"DELETE FROM video_repair_findings{w}", params)
+            conn.commit()
+            return cur.rowcount
+        finally:
+            conn.close()
+
+    def repair_counts(self) -> dict:
+        conn = self._get_connection()
+        try:
+            out = {"pending": 0, "resolved": 0, "dismissed": 0, "total": 0, "by_job": {}}
+            for r in conn.execute("SELECT status, COUNT(*) n FROM video_repair_findings "
+                                  "GROUP BY status").fetchall():
+                out[r["status"]] = r["n"]
+                out["total"] += r["n"]
+            for r in conn.execute("SELECT job_id, COUNT(*) n FROM video_repair_findings "
+                                  "WHERE status='pending' GROUP BY job_id").fetchall():
+                out["by_job"][r["job_id"]] = r["n"]
+            return out
+        finally:
+            conn.close()
+
+    def repair_dismiss_stale(self, job_id: str, finding_type: str,
+                             entity_prefix: str, keep_entity_id: str) -> int:
+        """Dismiss PENDING findings whose entity shares a prefix (same show) but
+        isn't the current one — the situation changed, the old finding is stale.
+        Handled findings are never touched."""
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE video_repair_findings SET status='dismissed', "
+                "user_action='superseded by a newer scan', resolved_at=CURRENT_TIMESTAMP, "
+                "updated_at=CURRENT_TIMESTAMP WHERE job_id=? AND finding_type=? "
+                "AND status='pending' AND entity_id LIKE ? AND entity_id<>?",
+                (job_id, finding_type, entity_prefix + "%", keep_entity_id))
+            conn.commit()
+            return cur.rowcount
+        finally:
+            conn.close()
+
+    def repair_sweep_stale_runs(self) -> int:
+        """Close 'running' run rows left behind by a process death so the
+        scheduler doesn't treat the job as forever-running."""
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE video_repair_job_runs SET status='completed', "
+                "finished_at=COALESCE(finished_at, datetime('now')) WHERE status='running'")
+            conn.commit()
+            return cur.rowcount
+        finally:
+            conn.close()
+
+    def missing_episode_rows(self, include_specials: bool = False) -> list:
+        """Every aired, monitored, un-owned episode of a LIBRARY show (the
+        missing-episodes job's source). Terminal-status shows are included on
+        purpose — 'ended' matters for watching-for-new, not for filling gaps."""
+        w = "" if include_specials else "AND e.season_number > 0 "
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT e.show_id, e.season_number, e.episode_number, e.title, e.air_date, "
+                "e.still_url, e.overview, s.title AS show_title, s.tmdb_id AS show_tmdb_id, "
+                "s.server_source FROM episodes e JOIN shows s ON s.id = e.show_id "
+                "WHERE e.has_file=0 AND e.monitored=1 AND s.server_source IS NOT NULL "
+                "AND e.air_date IS NOT NULL AND e.air_date <= date('now') "
+                + w +
+                "ORDER BY s.title COLLATE NOCASE, e.season_number, e.episode_number").fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def repair_record_job_start(self, job_id: str) -> int:
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                "INSERT INTO video_repair_job_runs (job_id, started_at) "
+                "VALUES (?, datetime('now'))", (job_id,))
+            conn.commit()
+            return cur.lastrowid
+        finally:
+            conn.close()
+
+    def repair_record_job_finish(self, run_id: int, *, items_scanned=0, findings_created=0,
+                                 auto_fixed=0, errors=0) -> None:
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                "UPDATE video_repair_job_runs SET finished_at=datetime('now'), "
+                "duration_seconds=(julianday(datetime('now'))-julianday(started_at))*86400, "
+                "items_scanned=?, findings_created=?, auto_fixed=?, errors=?, "
+                "status='completed' WHERE id=?",
+                (int(items_scanned), int(findings_created), int(auto_fixed),
+                 int(errors), int(run_id)))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def repair_last_run(self, job_id: str):
+        conn = self._get_connection()
+        try:
+            r = conn.execute(
+                "SELECT * FROM video_repair_job_runs WHERE job_id=? "
+                "ORDER BY started_at DESC, id DESC LIMIT 1", (job_id,)).fetchone()
+            return dict(r) if r else None
+        finally:
+            conn.close()
+
+    def repair_history(self, job_id=None, limit: int = 50) -> list:
+        conn = self._get_connection()
+        try:
+            if job_id:
+                rows = conn.execute(
+                    "SELECT * FROM video_repair_job_runs WHERE job_id=? "
+                    "ORDER BY started_at DESC, id DESC LIMIT ?", (job_id, int(limit))).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM video_repair_job_runs ORDER BY started_at DESC, id DESC "
+                    "LIMIT ?", (int(limit),)).fetchall()
+            return [dict(r) for r in rows]
         finally:
             conn.close()
 
