@@ -263,6 +263,23 @@ def _default_list_fetcher(db):
 
 
 # ── context art (real artwork beats a collage where the subject HAS one) ────
+def _preset_logo_hint(body: Dict[str, Any]) -> Optional[str]:
+    """The preset catalog's logo hint for a union definition created BEFORE the
+    hint existed — matched by keyword set, so old MCU/DCEU rows heal on a plain
+    artwork refresh."""
+    kws = {str(k).casefold() for k in (body.get("keywords") or [])}
+    if not kws:
+        return None
+    try:
+        from core.video.collections.presets import _UNIVERSES
+        for _, _, spec, _ in _UNIVERSES:
+            if spec.get("logo") and {str(k).casefold() for k in (spec.get("keywords") or [])} == kws:
+                return spec["logo"]
+    except Exception:   # noqa: BLE001 - a healing nicety
+        pass
+    return None
+
+
 def _single_rule(body: Dict[str, Any], field: str):
     """The rule's scalar value when the definition is exactly one `field is X`
     rule, else None."""
@@ -307,6 +324,15 @@ def _context_art(definition: Dict[str, Any], *, engine=None,
                     url = engine.collection_poster(cid)
                     if url:
                         break
+                # Keyword-only universes (MCU/DCEU) have no collection art —
+                # their 'logo' hint gives them the studio's mark instead.
+                # (Older definitions predate the hint: fall back to the preset
+                # catalog's hint for the same keyword set, so a plain artwork
+                # refresh heals them without a delete + re-apply.)
+                logo = body.get("logo") or _preset_logo_hint(body)
+                if not url and logo:
+                    url = engine.company_logo(logo)
+                    treatment = "logo"
         else:
             director = _single_rule(body, "director")
             studio = _single_rule(body, "studio")

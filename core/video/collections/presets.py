@@ -399,11 +399,13 @@ def _expand_keyword_pack(db, mt: str, fetcher, rows, pack: str, blurb_fmt) -> Li
 # themes where it doesn't (the MCU/DCEU/MonsterVerse carry maintained TMDB
 # keywords; ids resolve at runtime, nothing hardcoded to rot).
 _UNIVERSES = [
+    # Keyword-only universes have no TMDB collection (no title art) — the
+    # "logo" hint gives them their studio's mark as context art instead.
     ("mcu", "Marvel Cinematic Universe",
-     {"keywords": ["marvel cinematic universe"]},
+     {"keywords": ["marvel cinematic universe"], "logo": "Marvel Studios"},
      "Every MCU film, phase by phase."),
     ("dc", "DC Extended Universe",
-     {"keywords": ["dc extended universe"]},
+     {"keywords": ["dc extended universe"], "logo": "DC Films"},
      "The DCEU, from Man of Steel on."),
     ("middle-earth", "Middle-earth",
      {"collections": [119, 121938]},
