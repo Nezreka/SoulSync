@@ -127,6 +127,76 @@ def test_franchise_and_engineless():
     assert dead("tmdb_chart", {"chart": "top_movies"}) == []
 
 
+# ── community sources (Trakt / MDBList) ──────────────────────────────────────
+class _SettingsDb:
+    def __init__(self, **settings):
+        self._s = settings
+
+    def get_setting(self, key, default=None):
+        return self._s.get(key, default)
+
+
+def _fake_http(responses):
+    """responses: url-substring -> (json, headers). Records calls."""
+    calls = []
+
+    def http(url, headers=None, params=None):
+        calls.append({"url": url, "headers": headers or {}, "params": params or {}})
+        for frag, (body, hdrs) in responses.items():
+            if frag in url:
+                class R:
+                    def json(self):
+                        return body
+                r = R()
+                r.headers = hdrs or {}
+                return r
+        raise AssertionError("unexpected url " + url)
+    http.calls = calls
+    return http
+
+
+def test_trakt_list_fetch_paginates_and_maps_tmdb_ids(monkeypatch):
+    import core.video.collections.list_sources as ls
+    monkeypatch.setattr(ls, "_COMMUNITY_CACHE", {})
+    body = [
+        {"type": "movie", "movie": {"title": "M1", "year": 2000, "ids": {"tmdb": 11}}},
+        {"type": "show", "show": {"title": "S1", "year": 2010, "ids": {"tmdb": 22}}},
+        {"type": "movie", "movie": {"title": "NoId", "ids": {}}},
+    ]
+    http = _fake_http({"api.trakt.tv/users/boulder/lists/faves/items":
+                       (body, {"x-pagination-page-count": "1"})})
+    monkeypatch.setattr(ls, "_http_json", http)
+
+    fetch = ls.build_list_fetcher(_SettingsDb(trakt_api_key="cid123"),
+                                  engine_factory=lambda: None)
+    out = fetch("trakt_list", "https://trakt.tv/users/boulder/lists/faves")
+    assert [(o["tmdb_id"], o["title"]) for o in out] == [(11, "M1"), (22, "S1")]
+    assert http.calls[0]["headers"]["trakt-api-key"] == "cid123"
+    # No key → clean empty (owned-only), not an error.
+    monkeypatch.setattr(ls, "_COMMUNITY_CACHE", {})
+    fetch2 = ls.build_list_fetcher(_SettingsDb(), engine_factory=lambda: None)
+    assert fetch2("trakt_list", "boulder/faves") == []
+
+
+def test_mdblist_fetch_and_user_slug_forms(monkeypatch):
+    import core.video.collections.list_sources as ls
+    monkeypatch.setattr(ls, "_COMMUNITY_CACHE", {})
+    body = [{"id": 278, "title": "Shawshank", "release_year": 1994, "mediatype": "movie"},
+            {"id": None, "title": "junk"},
+            {"tmdbid": 500, "title": "AltKey", "year": 2001}]
+    http = _fake_http({"api.mdblist.com/lists/linas/imdb-top-250/items": (body, {})})
+    monkeypatch.setattr(ls, "_http_json", http)
+
+    fetch = ls.build_list_fetcher(_SettingsDb(mdblist_api_key="k1"),
+                                  engine_factory=lambda: None)
+    out = fetch("mdblist_list", "https://mdblist.com/lists/linas/imdb-top-250/")
+    assert [(o["tmdb_id"], o["year"]) for o in out] == [(278, 1994), (500, 2001)]
+    assert http.calls[0]["params"]["apikey"] == "k1"
+    # bare user/slug form works too (cache returns without a second fetch)
+    out2 = fetch("mdblist_list", "linas/imdb-top-250")
+    assert len(out2) == 2 and len(http.calls) == 1
+
+
 def test_chart_keys_per_media():
     assert "top_movies" in chart_keys("movie") and "top_shows" not in chart_keys("movie")
     assert "on_the_air" in chart_keys("show")
