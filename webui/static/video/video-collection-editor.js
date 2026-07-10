@@ -1089,8 +1089,9 @@
             '<p class="vce-panel-t">Live preview</p>' +
             '<div class="vce-preview-count"><span class="vce-preview-n" data-pv-n>—</span>' +
             '<span class="vce-preview-l" data-pv-l>owned items</span>' +
-            '<span class="vce-preview-miss" data-pv-miss></span></div>' +
+            '<button type="button" class="vce-preview-miss" data-pv-miss hidden></button></div>' +
             '<div class="vce-preview-grid" data-preview-grid></div>' +
+            '<div class="vce-missing" data-missing hidden></div>' +
             '<p class="vce-note">Hover a poster and hit × to exclude that title from this collection.</p>'));
 
         right.appendChild(h('div', 'vce-panel',
@@ -1603,7 +1604,13 @@
                 }
                 nEl.textContent = d.count;
                 lEl.textContent = 'owned ' + mediaWord(ed.media_type) + ' match';
-                missEl.textContent = d.missing_count ? ('+' + d.missing_count + ' missing') : '';
+                missEl.hidden = !d.missing_count;
+                if (d.missing_count) {
+                    missEl.textContent = '+' + d.missing_count + ' missing';
+                    missEl.disabled = !ed.id;
+                    missEl.title = ed.id ? 'See what you\'re missing' : 'Save first to browse the missing titles';
+                    missEl.onclick = function () { toggleMissingPanel(); };
+                }
                 grid.innerHTML = (d.sample || []).map(function (m) {
                     var img = m.has_poster ? '<img src="' + memberPosterURL(ed.media_type, m.id) + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">' : '';
                     var x = m.tmdb_id ? '<button type="button" class="vce-pv-x" data-x="' + m.tmdb_id + '" data-t="' + esc(m.title || '') + '" title="Exclude from this collection">&times;</button>' : '';
@@ -1619,6 +1626,67 @@
                 });
             })
             .catch(function () { lEl.textContent = 'preview failed'; });
+    }
+
+    // ── missing-members browser (the acquisition view) ───────────────────────
+    function toggleMissingPanel() {
+        var panel = overlay.querySelector('[data-missing]');
+        if (!panel || !ed.id) return;
+        if (!panel.hidden) { panel.hidden = true; return; }
+        panel.hidden = false;
+        panel.innerHTML = '<div class="vce-loading" style="padding:20px">Checking the full list…</div>';
+        api('/' + ed.id + '/missing', {}).then(function (d) {
+            if (!d || d.ok === false) {
+                panel.innerHTML = '<p class="vce-note">' + esc((d && d.error) || 'Could not resolve the list') + '</p>';
+                return;
+            }
+            if (!d.count) {
+                panel.innerHTML = '<p class="vce-note">Nothing missing — you own the whole list. 🎉</p>';
+                return;
+            }
+            panel.innerHTML = '';
+            var head = h('div', 'vce-missing-head',
+                '<span class="vce-missing-t">You\'re missing ' + d.count + ' ' + mediaWord(ed.media_type) + '</span>');
+            var all = h('button', 'vce-btn vce-btn--primary vce-missing-all', 'Wishlist all');
+            all.type = 'button';
+            all.addEventListener('click', function () { wishlistMissing(null, all); });
+            head.appendChild(all);
+            panel.appendChild(head);
+            var grid = h('div', 'vce-preview-grid vce-missing-grid');
+            (d.missing || []).forEach(function (m) {
+                var img = m.poster_url ? '<img src="' + esc(m.poster_url) + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">' : '';
+                var tile = h('div', 'vce-pv vce-pv--miss');
+                tile.title = (m.title || '') + (m.year ? ' (' + m.year + ')' : '');
+                tile.innerHTML = img + '<span class="vce-pv-fallback">' + esc((m.title || '?').slice(0, 2)) + '</span>' +
+                    '<button type="button" class="vce-pv-add" title="Wishlist this title">+</button>';
+                tile.querySelector('.vce-pv-add').addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    wishlistMissing([m.tmdb_id], e.currentTarget);
+                });
+                grid.appendChild(tile);
+            });
+            panel.appendChild(grid);
+            if (ed.media_type === 'show') {
+                panel.appendChild(h('p', 'vce-note',
+                    'Shows expand into their aired episodes; big batches drain across nightly syncs (a few new shows per pass).'));
+            }
+        });
+    }
+
+    function wishlistMissing(tmdbIds, btn) {
+        if (btn) btn.disabled = true;
+        api('/' + ed.id + '/wishlist_missing', { method: 'POST',
+            body: JSON.stringify(tmdbIds ? { tmdb_ids: tmdbIds } : {}) }).then(function (d) {
+            if (d && d.ok) {
+                toast('Wishlisted ' + d.added + ' ' + (d.unit || 'titles'));
+                if (tmdbIds && btn) { btn.textContent = '✓'; return; }   // leave disabled: it's queued
+                var panel = overlay.querySelector('[data-missing]');
+                if (panel) panel.hidden = true;
+            } else {
+                toast((d && d.error) || 'Wishlist failed', true);
+                if (btn) btn.disabled = false;
+            }
+        }).catch(function () { toast('Wishlist failed', true); if (btn) btn.disabled = false; });
     }
 
     // ── save / sync / delete ─────────────────────────────────────────────────
