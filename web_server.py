@@ -478,6 +478,9 @@ set_activity_toast_emitter(socketio.emit)
 # Live overlay-apply progress → 'overlay:progress' socket events (bell + panel).
 from core.video.overlays.service import set_overlay_progress_emitter as _set_overlay_emit
 _set_overlay_emit(socketio.emit)
+# Live collection-cleanup progress → 'collections:cleanup' socket events (studio).
+from core.video.collections.server_cleanup import set_cleanup_progress_emitter as _set_cleanup_emit
+_set_cleanup_emit(socketio.emit)
 
 # Plex PIN auth requests stored in memory for polling
 _plex_pin_requests = {}

@@ -113,33 +113,88 @@ def test_server_list_no_source_is_400(tmp_path, monkeypatch):
     assert r.status_code == 400 and r.get_json()["ok"] is False
 
 
-# ── POST /collections/server/delete ──────────────────────────────────────────
-def test_bulk_delete_clears_ledger_for_managed(tmp_path, monkeypatch):
+# ── cleanup job (background bulk delete + live progress) ─────────────────────
+@pytest.fixture(autouse=True)
+def _reset_job():
+    from core.video.collections import server_cleanup as sc
+    sc._JOB.update(running=False, phase="idle", done=0, total=0,
+                   deleted=0, failed=0, name=None, error=None)
+    sc.set_cleanup_progress_emitter(None)
+    yield
+    sc._JOB["running"] = False
+    sc.set_cleanup_progress_emitter(None)
+
+
+def test_run_delete_clears_ledger_and_keeps_going_on_failures(db):
+    from core.video.collections.server_cleanup import run_delete, status
+    cid = _ledgered_definition(db, "Action", "col1")
+    fake = _FakeSource([])
+    fake.fail_ids = {"bad"}
+
+    r = run_delete(db, ["col1", "bad", "k9"], fake)
+    assert r == {"ok": True, "deleted": 2, "failed": 1}
+    assert sorted(fake.deleted) == ["col1", "k9"]
+    # Managed one: ledger row gone (no ghost); definition itself untouched.
+    assert db.get_collection_sync(cid) is None
+    assert db.get_collection_definition(cid) is not None
+    s = status()
+    assert s["done"] == 3 and s["deleted"] == 2 and s["failed"] == 1 and s["phase"] == "done"
+
+
+def test_start_delete_runs_in_background_and_emits_progress(db):
+    import time
+    from core.video.collections import server_cleanup as sc
+    _ledgered_definition(db, "Action", "col1")
+    fake = _FakeSource([])
+    events = []
+    sc.set_cleanup_progress_emitter(lambda name, payload: events.append((name, payload)))
+
+    r = sc.start_delete(db, ["col1", "k9"], source=fake)
+    assert r == {"ok": True, "total": 2}
+    for _ in range(100):                       # the fake makes this near-instant
+        if not sc.status()["running"] and sc.status()["phase"] in ("done", "error"):
+            break
+        time.sleep(0.05)
+    s = sc.status()
+    assert s["phase"] == "done" and s["deleted"] == 2
+    # Start + finish always emit (throttling only limits the middle).
+    assert events and events[0][0] == "collections:cleanup"
+    assert events[0][1]["phase"] == "starting" and events[-1][1]["phase"] == "done"
+
+
+def test_start_delete_refuses_overlap_and_validates(db):
+    from core.video.collections import server_cleanup as sc
+    fake = _FakeSource([])
+    assert sc.start_delete(db, [], source=fake)["ok"] is False
+    sc._JOB["running"] = True                  # simulate a purge mid-flight
+    r = sc.start_delete(db, ["x"], source=fake)
+    assert r["ok"] is False and "already running" in r["error"]
+
+
+# ── API seam: start + status ─────────────────────────────────────────────────
+def test_delete_api_starts_job_and_reports_status(tmp_path, monkeypatch):
+    import time
+    from core.video.collections import server_cleanup as sc
     client, vdb = _make_client(tmp_path)
     cid = _ledgered_definition(vdb, "Action", "col1")
     fake = _FakeSource([])
     monkeypatch.setattr("core.video.collections.sync.get_collection_source", lambda: fake)
 
-    d = client.post("/api/video/collections/server/delete",
-                    json={"ids": ["col1", "k9"]}).get_json()
-    assert d["ok"] and d["deleted"] == 2 and d["failed"] == []
+    r = client.post("/api/video/collections/server/delete", json={"ids": ["col1", "k9"]})
+    assert r.status_code == 200 and r.get_json() == {"ok": True, "total": 2}
+    for _ in range(100):
+        s = client.get("/api/video/collections/server/delete/status").get_json()
+        if not s["running"] and s["phase"] in ("done", "error"):
+            break
+        time.sleep(0.05)
+    assert s["phase"] == "done" and s["deleted"] == 2 and s["done"] == 2
     assert sorted(fake.deleted) == ["col1", "k9"]
-    # Managed one: ledger row gone (no ghost); definition itself untouched.
     assert vdb.get_collection_sync(cid) is None
-    assert vdb.get_collection_definition(cid) is not None
 
-
-def test_bulk_delete_reports_failures_and_keeps_going(tmp_path, monkeypatch):
-    client, _ = _make_client(tmp_path)
-    fake = _FakeSource([])
-    fake.fail_ids = {"bad"}
-    monkeypatch.setattr("core.video.collections.sync.get_collection_source", lambda: fake)
-
-    d = client.post("/api/video/collections/server/delete",
-                    json={"ids": ["bad", "ok1"]}).get_json()
-    assert d["ok"] and d["deleted"] == 1
-    assert d["failed"] == [{"server_id": "bad", "error": "boom"}]
-    assert fake.deleted == ["ok1"]
+    # Overlap → 409 (the UI attaches to the running job's progress instead).
+    sc._JOB["running"] = True
+    r = client.post("/api/video/collections/server/delete", json={"ids": ["x"]})
+    assert r.status_code == 409
 
 
 def test_bulk_delete_validates_input(tmp_path, monkeypatch):

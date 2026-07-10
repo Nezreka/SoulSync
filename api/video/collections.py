@@ -13,7 +13,8 @@ SoulSync-managed movie/show collections. Admin-only (gated in __init__.py).
     GET    /api/video/collections/<id>/poster     -> image/jpeg             (generated art)
     POST   /api/video/collections/<id>/poster/generate -> {ok,poster_url}   (render collage)
     GET    /api/video/collections/server          -> {collections:[...]}    (all ON the server)
-    POST   /api/video/collections/server/delete   -> {ok,deleted,failed}    (bulk cleanup)
+    POST   /api/video/collections/server/delete   -> {ok,total}             (start bulk cleanup job)
+    GET    /api/video/collections/server/delete/status -> job state         (polling fallback)
     POST   /api/video/collections/preview         -> {ok,count,sample,...}  (live preview)
     POST   /api/video/collections/<id>/sync       -> {ok,...}               (Sync now, one)
     POST   /api/video/collections/sync            -> {ok,...}               (Sync now, all)
@@ -266,33 +267,24 @@ def register_routes(bp):
 
     @bp.route("/collections/server/delete", methods=["POST"])
     def collections_server_delete():
-        """Bulk-delete collections ON the server by server id. For a SoulSync-
-        managed one the ledger row is cleared too (so we don't track a ghost —
-        the next sync recreates it while its definition stays enabled; the UI
-        says so). Definitions are never touched here."""
+        """START a background bulk-delete of server collections (a Kometa purge
+        can be thousands — far too long for one request). Returns {ok, total}
+        immediately; progress streams over the 'collections:cleanup' socket
+        event (~1/s) with GET .../delete/status as the polling fallback.
+        Managed deletes clear their ledger row; definitions are never touched."""
         from . import get_video_db
-        from core.video.collections.sync import get_collection_source
+        from core.video.collections.server_cleanup import start_delete
         d = request.get_json(silent=True) or {}
-        ids = [str(i) for i in (d.get("ids") or []) if str(i).strip()]
-        if not ids:
+        ids = d.get("ids") or []
+        if not isinstance(ids, list) or not ids:
             return jsonify({"ok": False, "error": "ids are required"}), 400
-        src = get_collection_source()
-        if src is None or not hasattr(src, "delete_collection"):
-            return jsonify({"ok": False, "error": "No video server configured (or it can't do collections)"}), 400
-        db = get_video_db()
-        ledger = {str(s.get("server_id")): s.get("definition_id")
-                  for s in db.list_collection_syncs()
-                  if s.get("server_source") == src.server_name and s.get("server_id")}
-        deleted, failed = 0, []
-        for sid in ids:
-            try:
-                r = src.delete_collection(sid)
-            except Exception as e:   # noqa: BLE001 - keep going; report per-id
-                r = {"ok": False, "error": str(e)}
-            if r.get("ok"):
-                deleted += 1
-                if sid in ledger and ledger[sid] is not None:
-                    db.delete_collection_sync(ledger[sid])
-            else:
-                failed.append({"server_id": sid, "error": r.get("error") or "delete failed"})
-        return jsonify({"ok": True, "deleted": deleted, "failed": failed})
+        r = start_delete(get_video_db(), ids)
+        if not r.get("ok"):
+            already = "already running" in (r.get("error") or "")
+            return jsonify(r), (409 if already else 400)
+        return jsonify(r)
+
+    @bp.route("/collections/server/delete/status", methods=["GET"])
+    def collections_server_delete_status():
+        from core.video.collections.server_cleanup import status
+        return jsonify(status())
