@@ -81,6 +81,31 @@ def test_server_list_marks_managed_and_sorts_foreign_first(tmp_path, monkeypatch
     assert by_name["IMDb Top 250"]["definition_id"] is None
 
 
+def test_server_list_detects_kometa_labels(tmp_path, monkeypatch):
+    client, vdb = _make_client(tmp_path)
+    _ledgered_definition(vdb, "Action", "col1")
+    fake = _FakeSource([
+        {"server_id": "col1", "name": "Action", "count": 3, "media_type": "movie",
+         "section": "Movies", "labels": ["Kometa"], "smart": False},   # ours wins over the label
+        {"server_id": "k1", "name": "IMDb Top 250", "count": 250, "media_type": "movie",
+         "section": "Movies", "labels": ["Kometa"], "smart": False},
+        {"server_id": "k2", "name": "Oscars", "count": 30, "media_type": "movie",
+         "section": "Movies", "labels": ["PMM"], "smart": True},       # legacy label
+        {"server_id": "h1", "name": "Hand-made", "count": 4, "media_type": "movie",
+         "section": "Movies", "labels": [], "smart": False},
+    ])
+    monkeypatch.setattr("core.video.collections.sync.get_collection_source", lambda: fake)
+
+    d = client.get("/api/video/collections/server").get_json()
+    by_name = {c["name"]: c for c in d["collections"]}
+    assert by_name["IMDb Top 250"]["kometa"] is True
+    assert by_name["Oscars"]["kometa"] is True and by_name["Oscars"]["smart"] is True
+    assert by_name["Hand-made"]["kometa"] is False
+    assert by_name["Action"]["kometa"] is False        # managed by us — never flagged Kometa
+    # Sort: Kometa targets first, then other foreign, managed last.
+    assert [c["name"] for c in d["collections"]] == ["IMDb Top 250", "Oscars", "Hand-made", "Action"]
+
+
 def test_server_list_no_source_is_400(tmp_path, monkeypatch):
     client, _ = _make_client(tmp_path)
     monkeypatch.setattr("core.video.collections.sync.get_collection_source", lambda: None)

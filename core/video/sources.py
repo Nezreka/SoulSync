@@ -613,12 +613,21 @@ class PlexVideoSource:
                                      getattr(sec, "title", "?"))
                     continue
                 for c in cols:
+                    try:
+                        labels = [str(l.tag) for l in (getattr(c, "labels", None) or []) if getattr(l, "tag", None)]
+                    except Exception:   # noqa: BLE001 - labels are a detection nicety
+                        labels = []
                     out.append({
                         "server_id": str(c.ratingKey),
                         "name": getattr(c, "title", "") or "",
                         "count": int(getattr(c, "childCount", 0) or 0),
                         "media_type": kind,
                         "section": getattr(sec, "title", None),
+                        # Provenance fingerprints: Kometa labels everything it
+                        # manages ('Kometa'/'PMM'); smart = filter-based, which
+                        # SoulSync never creates.
+                        "labels": labels,
+                        "smart": bool(getattr(c, "smart", False)),
                     })
         return out
 

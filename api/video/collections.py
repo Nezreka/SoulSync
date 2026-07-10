@@ -251,12 +251,17 @@ def register_routes(bp):
         for s in get_video_db().list_collection_syncs():
             if s.get("server_source") == src.server_name and s.get("server_id"):
                 managed[str(s["server_id"])] = s
+        kometa_labels = {"kometa", "pmm", "plex meta manager"}
         for c in cols:
             m = managed.get(str(c.get("server_id")))
             c["managed"] = bool(m)
             c["definition_id"] = m.get("definition_id") if m else None
             c["definition_name"] = m.get("definition_name") if m else None
-        cols.sort(key=lambda c: (c["managed"], (c.get("name") or "").casefold()))
+            # Provenance: Kometa labels its collections ('Kometa'/'PMM'); smart
+            # (filter-based) collections are never SoulSync's either.
+            labels = {str(x).strip().lower() for x in (c.get("labels") or [])}
+            c["kometa"] = bool(labels & kometa_labels) and not c["managed"]
+        cols.sort(key=lambda c: (c["managed"], not c.get("kometa"), (c.get("name") or "").casefold()))
         return jsonify({"ok": True, "server": src.server_name, "collections": cols})
 
     @bp.route("/collections/server/delete", methods=["POST"])

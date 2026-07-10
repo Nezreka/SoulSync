@@ -239,6 +239,7 @@ textarea.vce-input { resize: vertical; min-height: 58px; }
     padding: 3px 8px; border-radius: 6px; background: rgba(255,255,255,.07); color: rgba(255,255,255,.55);
 }
 .vce-tag--ok { background: rgba(74,222,128,.14); color: #4ade80; }
+.vce-tag--warn { background: rgba(255,170,40,.16); color: #ffbe55; }
 .vce-servnote { font-size: 12px; line-height: 1.55; color: rgba(255,255,255,.45); margin: 0 0 16px; max-width: 700px; }
 .vce-picker-foot {
     position: sticky; bottom: 0; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
