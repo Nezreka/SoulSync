@@ -49,7 +49,7 @@
                 'letter-spacing:.09em;color:rgb(' + A + ');}' +
             '.vmg-kick-dot{width:7px;height:7px;border-radius:50%;background:rgb(' + A + ');box-shadow:0 0 10px rgb(' + A + ');}' +
             '.vmg-title{font-size:20px;font-weight:900;letter-spacing:-.02em;color:#fff;margin:8px 0 2px;' +
-                'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:40px;}' +
+                'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:150px;}' +
             '.vmg-sub{font-size:12.5px;color:rgba(255,255,255,.5);line-height:1.5;}' +
             '.vmg-close{position:absolute;top:18px;right:18px;width:34px;height:34px;border-radius:50%;' +
                 'border:1px solid rgba(255,255,255,.16);background:rgba(0,0,0,.4);color:#fff;font-size:20px;line-height:1;' +
@@ -103,11 +103,11 @@
                 'background:#fff;transition:transform .16s;}' +
             '.vmg-toggle--on .vmg-sw{background:rgb(' + A + ');}' +
             '.vmg-toggle--on .vmg-sw::after{transform:translateX(15px);}' +
-            // footer
-            '.vmg-foot{padding:14px 24px 18px;border-top:1px solid rgba(255,255,255,.07);display:flex;' +
-                'align-items:center;gap:12px;}' +
-            '.vmg-hint{flex:1;font-size:11.5px;color:rgba(255,255,255,.4);line-height:1.5;}' +
-            '.vmg-save{padding:11px 22px;border-radius:12px;font-size:13.5px;font-weight:800;cursor:pointer;border:none;' +
+            // save (in the header, clear of the app's floating bell/help orbs)
+            '.vmg-hint{font-size:11.5px;color:rgba(255,255,255,.4);line-height:1.5;' +
+                'padding:2px 0 30px;}' +
+            '.vmg-save{position:absolute;top:18px;right:60px;padding:8px 18px;border-radius:999px;' +
+                'font-size:12.5px;font-weight:800;cursor:pointer;border:none;' +
                 'background:rgb(' + A + ');color:#fff;box-shadow:0 6px 18px rgba(' + A + ',.35);transition:all .15s;}' +
             '.vmg-save:hover:not(:disabled){filter:brightness(1.12);}' +
             '.vmg-save:disabled{opacity:.38;cursor:default;box-shadow:none;}' +
@@ -193,12 +193,14 @@
                     '<div class="vmg-kick"><span class="vmg-kick-dot"></span>Manage</div>' +
                     '<div class="vmg-title">' + esc(d.title) + '</div>' +
                     '<div class="vmg-sub">Edits are saved here, pushed to your server, and locked against scans.</div>' +
+                    // Save lives in the header — the app's notification/help orbs
+                    // float over the bottom-right corner (z 999999, by design),
+                    // so a footer button there would sit underneath them.
+                    '<button class="vmg-save" type="button" data-vmg-save disabled>Save</button>' +
                     '<button class="vmg-close" type="button" data-vmg-close aria-label="Close">×</button>' +
                 '</div>' +
-                '<div class="vmg-body">' + bodyHtml(d) + '</div>' +
-                '<div class="vmg-foot">' +
+                '<div class="vmg-body">' + bodyHtml(d) +
                     '<div class="vmg-hint">Locked fields wear a badge — click it to hand one back to the server.</div>' +
-                    '<button class="vmg-save" type="button" data-vmg-save disabled>Save changes</button>' +
                 '</div>' +
             '</div>'
         );
@@ -290,7 +292,7 @@
         }).catch(function (e) {
             if (state) {
                 state.saving = false;
-                if (btn) { btn.textContent = 'Save changes'; }
+                if (btn) { btn.textContent = 'Save'; }
                 markDirty();
             }
             toast(e && e.message ? e.message : 'Save failed', 'error');
