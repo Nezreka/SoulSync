@@ -160,11 +160,13 @@
         var page = shell(
             topBtn('Easy setup', I.spark) +
             topBtn('On server', I.server) +
+            topBtn('Refresh artwork', I.image, 'vce-btn--ghost') +
             topBtn('Sync all', I.sync) +
             topBtn('New collection', I.plus, 'vce-btn--primary'));
         wireTop(page, {
             'Easy setup': function () { showPresets(); },
             'On server': function () { showServer(); },
+            'Refresh artwork': refreshArtwork,
             'Sync all': syncAll,
             'New collection': function () { newCollection(); }
         });
@@ -362,6 +364,24 @@
             var page = overlay.querySelector('.vce-page');
             if (page) renderGallery(page);
         });
+    }
+
+    // Re-render every generated poster with the current art pipeline (real
+    // franchise/studio/director art where it exists). Hand-set URLs untouched.
+    function refreshArtwork(btn) {
+        if (!window.confirm('Refresh artwork for all collections?\n\nRe-renders every generated poster with the ' +
+            'latest treatment (real franchise art, studio logos, director portraits). ' +
+            'Poster URLs you set yourself are left alone.')) return;
+        if (btn) btn.disabled = true;
+        api('/posters/regenerate', { method: 'POST' }).then(function (d) {
+            if (d && d.ok) {
+                toast('Refreshing artwork for ' + d.total + ' collection' + (d.total === 1 ? '' : 's') + '…');
+                // Art lands progressively; pick it up in a couple of passes.
+                setTimeout(refreshGallery, 6000);
+                setTimeout(refreshGallery, 20000);
+            } else { toast((d && d.error) || 'Refresh failed', true); }
+        }).catch(function () { toast('Refresh failed', true); })
+          .finally(function () { if (btn) btn.disabled = false; });
     }
 
     // Sync-all runs as a background job on the server; follow it live over the

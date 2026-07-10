@@ -11,7 +11,8 @@ SoulSync-managed movie/show collections. Admin-only (gated in __init__.py).
     GET    /api/video/collections/presets         -> {packs:[...]}          (easy setup)
     POST   /api/video/collections/presets/apply   -> {ok,created,skipped}   (batch create)
     GET    /api/video/collections/<id>/poster     -> image/jpeg             (generated art)
-    POST   /api/video/collections/<id>/poster/generate -> {ok,poster_url}   (render collage)
+    POST   /api/video/collections/<id>/poster/generate -> {ok,poster_url}   (render one, mode auto|collage)
+    POST   /api/video/collections/posters/regenerate -> {ok,total}          (refresh ALL owned art)
     GET    /api/video/collections/server          -> {collections:[...]}    (all ON the server)
     POST   /api/video/collections/server/delete   -> {ok,total}             (start bulk cleanup job)
     GET    /api/video/collections/server/delete/status -> job state         (polling fallback)
@@ -188,6 +189,19 @@ def register_routes(bp):
 
         import threading
         threading.Thread(target=run, name="collection-poster-gen", daemon=True).start()
+
+    @bp.route("/collections/posters/regenerate", methods=["POST"])
+    def collections_posters_regenerate():
+        """Re-render EVERY collection's artwork with the current pipeline
+        (context art first) in the background — only touches generated posters
+        and poster-less collections; hand-set poster URLs are never clobbered.
+        The next sync pushes the refreshed art (the ?v hash changes)."""
+        from . import get_video_db
+        from core.video.collections.poster_gen import kick_regenerate_all
+        r = kick_regenerate_all(get_video_db())
+        if not r.get("ok"):
+            return jsonify(r), 409
+        return jsonify(r)
 
     @bp.route("/collections/<int:cid>/poster", methods=["GET"])
     def collections_poster(cid):

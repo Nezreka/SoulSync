@@ -580,6 +580,20 @@ class TMDBClient:
                 return "https://image.tmdb.org/t/p/h632" + it["profile_path"]
         return None
 
+    def company_logo(self, name):
+        """A studio's TMDB logo URL (transparent PNG) by name — first search hit
+        with a logo, or None. Powers context posters for studio collections."""
+        if not self.api_key or not (name or "").strip():
+            return None
+        import requests
+        r = requests.get(self.BASE + "/search/company",
+                         params={"api_key": self.api_key, "query": name}, timeout=15)
+        r.raise_for_status()
+        for it in (r.json() or {}).get("results") or []:
+            if it.get("logo_path"):
+                return "https://image.tmdb.org/t/p/w500" + it["logo_path"]
+        return None
+
     def keyword_search(self, query):
         """TMDB keyword id for a query ('christmas' → 207317) — first exact-ish
         match wins. Resolved at runtime instead of hardcoding ids so a TMDB-side

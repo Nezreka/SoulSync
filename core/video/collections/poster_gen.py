@@ -26,6 +26,7 @@ from __future__ import annotations
 import hashlib
 import io
 import os
+import threading
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -201,6 +202,44 @@ def render_collage(member_posters: List[bytes], title: str) -> bytes:
     return out.getvalue()
 
 
+def render_logo_poster(logo_bytes: bytes, title: str) -> Optional[bytes]:
+    """A studio-card poster: the studio's (transparent) logo centered on a
+    name-seeded gradient. Dark logos get a light card so they never vanish.
+    Pure — bytes in, JPEG out; None when the logo can't be decoded."""
+    from PIL import Image
+    try:
+        logo = Image.open(io.BytesIO(logo_bytes)).convert("RGBA")
+    except Exception:   # noqa: BLE001 - bad logo → caller falls back to collage
+        return None
+
+    # Mean luminance of the visible pixels decides the card tone.
+    small = logo.resize((min(64, logo.width), min(64, logo.height)))
+    px = list(small.getdata())
+    vis = [(r, g, b) for r, g, b, a in px if a > 40]
+    lum = (sum(0.299 * r + 0.587 * g + 0.114 * b for r, g, b in vis) / len(vis)) if vis else 255
+    if lum < 96:   # dark logo → light card
+        card = Image.new("RGB", (_W, _H), (231, 233, 238))
+        strip = Image.new("RGB", (1, _H))
+        sp = strip.load()
+        for y in range(_H):
+            t = y / (_H - 1)
+            sp[0, y] = (int(231 - 14 * t), int(233 - 14 * t), int(238 - 12 * t))
+        card = strip.resize((_W, _H))
+    else:
+        card = _gradient(title)
+
+    # Fit the logo into a centered box (~66% wide, capped height), keep aspect.
+    box_w, box_h = int(_W * 0.66), int(_H * 0.30)
+    scale = min(box_w / logo.width, box_h / logo.height)
+    logo = logo.resize((max(1, int(logo.width * scale)), max(1, int(logo.height * scale))))
+    card = card.convert("RGBA")
+    card.alpha_composite(logo, ((_W - logo.width) // 2, (_H - logo.height) // 2))
+
+    out = io.BytesIO()
+    card.convert("RGB").save(out, format="JPEG", quality=88)
+    return out.getvalue()
+
+
 # ── generation (resolve members → fetch art → render → store) ──────────────
 def _default_fetch(db) -> Callable:
     from core.video.overlays.service import fetch_poster_bytes
@@ -224,14 +263,27 @@ def _default_list_fetcher(db):
 
 
 # ── context art (real artwork beats a collage where the subject HAS one) ────
+def _single_rule(body: Dict[str, Any], field: str):
+    """The rule's scalar value when the definition is exactly one `field is X`
+    rule, else None."""
+    rules = body.get("rules") or []
+    if len(rules) != 1 or rules[0].get("field") != field:
+        return None
+    val = rules[0].get("value")
+    val = val[0] if isinstance(val, list) and val else val
+    return val if isinstance(val, str) and val.strip() else None
+
+
 def _context_art(definition: Dict[str, Any], *, engine=None,
                  http_get: Optional[Callable] = None):
-    """(image_bytes, needs_title_overlay) when the definition's subject carries
-    its own artwork on TMDB, else None:
-      · franchise / universe (with franchise ids) → the collection's title art
-        (used VERBATIM — it already carries the branding),
-      · a single-director smart collection → the director's portrait (gets the
-        name burned in via the standard title treatment).
+    """(image_bytes, treatment) when the definition's subject carries its own
+    artwork on TMDB, else None:
+      · franchise / universe (with franchise ids) → the collection's title art,
+        'verbatim' (it already carries the branding),
+      · a single-director smart collection → the director's portrait, 'title'
+        (name burned in via the standard treatment),
+      · a single-studio smart collection → the studio's logo, 'logo'
+        (composited onto a gradient card).
     Best-effort at every step — any miss falls back to the collage."""
     try:
         if engine is None:
@@ -244,7 +296,7 @@ def _context_art(definition: Dict[str, Any], *, engine=None,
 
     body = definition.get("definition") or {}
     url = None
-    overlay = False
+    treatment = "verbatim"
     try:
         if definition.get("kind") == "list":
             source = str(body.get("source") or "").lower()
@@ -256,13 +308,18 @@ def _context_art(definition: Dict[str, Any], *, engine=None,
                     if url:
                         break
         else:
-            rules = body.get("rules") or []
-            if len(rules) == 1 and rules[0].get("field") == "director":
-                name = rules[0].get("value")
-                name = name[0] if isinstance(name, list) and name else name
-                if isinstance(name, str) and name.strip():
-                    url = engine.person_photo(name)
-                    overlay = True
+            director = _single_rule(body, "director")
+            studio = _single_rule(body, "studio")
+            if director:
+                url = engine.person_photo(director)
+                treatment = "title"
+            elif studio:
+                # Studio rules may be brand-grouped variant lists ("Hallmark
+                # Channel" + "Hallmark Media") — the first variant finds the logo.
+                rules = body.get("rules") or []
+                if rules[0].get("op") in ("is", "in", "contains"):
+                    url = engine.company_logo(studio)
+                    treatment = "logo"
     except Exception:   # noqa: BLE001
         logger.debug("context art lookup failed", exc_info=True)
         return None
@@ -274,7 +331,7 @@ def _context_art(definition: Dict[str, Any], *, engine=None,
             http_get = lambda u: requests.get(u, timeout=20)   # noqa: E731
         r = http_get(url)
         data = getattr(r, "content", None) if getattr(r, "status_code", 200) == 200 else None
-        return (data, overlay) if data else None
+        return (data, treatment) if data else None
     except Exception:   # noqa: BLE001
         logger.debug("context art fetch failed: %s", url, exc_info=True)
         return None
@@ -302,9 +359,14 @@ def generate_for_definition(db, definition: Dict[str, Any], *,
         if mode != "collage":
             ctx = _context_art(definition, engine=context_engine)
             if ctx:
-                art, overlay = ctx
-                data = render_collage([art], definition.get("name") or "Collection") \
-                    if overlay else art
+                art, treatment = ctx
+                name = definition.get("name") or "Collection"
+                if treatment == "title":
+                    data = render_collage([art], name)
+                elif treatment == "logo":
+                    data = render_logo_poster(art, name)   # None → collage below
+                else:
+                    data = art
         if data is None:
             if owned is None:
                 from core.video.collections.resolver import resolve_collection
@@ -351,5 +413,57 @@ def generate_for_definitions(db, definition_ids, *, fetch: Optional[Callable] = 
     return n
 
 
-__all__ = ["render_collage", "generate_for_definition", "generate_for_definitions",
-           "poster_path", "read_poster", "posters_root", "is_generated_ref", "poster_route"]
+# ── bulk artwork refresh ("get the new posters everywhere") ─────────────────
+_regen_lock = threading.Lock()
+_regen_running = [False]
+
+
+def regenerate_candidates(db) -> list:
+    """Definition ids whose art WE own: a generated poster ref or no poster at
+    all. A hand-set external URL is the user's choice — never clobbered."""
+    out = []
+    for c in db.list_collection_definitions() or []:
+        pu = c.get("poster_url")
+        if not pu or is_generated_ref(pu):
+            out.append(c["id"])
+    return out
+
+
+def regenerate_all(db, *, mode: str = "auto", fetch: Optional[Callable] = None,
+                   root: Optional[Path] = None) -> int:
+    """Re-render every owned poster with the current art pipeline (context art
+    first). Returns how many were regenerated. Synchronous — callers thread it."""
+    n = 0
+    for did in regenerate_candidates(db):
+        d = db.get_collection_definition(did)
+        if d and generate_for_definition(db, d, mode=mode, fetch=fetch, root=root):
+            n += 1
+    return n
+
+
+def kick_regenerate_all(db) -> dict:
+    """Run regenerate_all in a background thread (at most one at a time).
+    Returns {ok, total} with the candidate count, or {ok: False} when busy."""
+    with _regen_lock:
+        if _regen_running[0]:
+            return {"ok": False, "error": "an artwork refresh is already running"}
+        _regen_running[0] = True
+    total = len(regenerate_candidates(db))
+
+    def run():
+        try:
+            n = regenerate_all(db)
+            logger.info("artwork refresh regenerated %d poster(s)", n)
+        except Exception:   # noqa: BLE001 - background nicety
+            logger.exception("artwork refresh failed")
+        finally:
+            _regen_running[0] = False
+
+    threading.Thread(target=run, name="collection-art-refresh", daemon=True).start()
+    return {"ok": True, "total": total}
+
+
+__all__ = ["render_collage", "render_logo_poster", "generate_for_definition",
+           "generate_for_definitions", "regenerate_all", "kick_regenerate_all",
+           "regenerate_candidates", "poster_path", "read_poster", "posters_root",
+           "is_generated_ref", "poster_route"]

@@ -185,6 +185,9 @@ class _CtxEngine:
     def person_photo(self, name):
         return "https://img.tmdb/nolan.jpg" if name == "Christopher Nolan" else None
 
+    def company_logo(self, name):
+        return "https://img.tmdb/hallmark-logo.png" if name.startswith("Hallmark") else None
+
 
 def _http(url):
     class R:
@@ -196,7 +199,7 @@ def _http(url):
 def test_context_art_franchise_verbatim_and_director_overlay():
     fr = {"kind": "list", "definition": {"source": "tmdb_collection", "collection_id": 119}}
     art = poster_gen._context_art(fr, engine=_CtxEngine(), http_get=_http)
-    assert art == (b"ART:https://img.tmdb/collection-119.jpg", False)   # verbatim
+    assert art == (b"ART:https://img.tmdb/collection-119.jpg", "verbatim")
 
     uni = {"kind": "list", "definition": {"source": "tmdb_union", "collections": [999, 131292]}}
     art = poster_gen._context_art(uni, engine=_CtxEngine(), http_get=_http)
@@ -205,7 +208,15 @@ def test_context_art_franchise_verbatim_and_director_overlay():
     di = {"kind": "smart", "definition": {"rules": [
         {"field": "director", "op": "is", "value": "Christopher Nolan"}]}}
     art = poster_gen._context_art(di, engine=_CtxEngine(), http_get=_http)
-    assert art == (b"ART:https://img.tmdb/nolan.jpg", True)             # name gets burned in
+    assert art == (b"ART:https://img.tmdb/nolan.jpg", "title")          # name gets burned in
+
+
+def test_context_art_studio_logo_from_variant_list():
+    # Brand-grouped studio rule (in-list of variants) → the studio's logo card.
+    st = {"kind": "smart", "definition": {"rules": [
+        {"field": "studio", "op": "in", "value": ["Hallmark Channel", "Hallmark Media"]}]}}
+    art = poster_gen._context_art(st, engine=_CtxEngine(), http_get=_http)
+    assert art == (b"ART:https://img.tmdb/hallmark-logo.png", "logo")
 
 
 def test_context_art_none_for_charts_and_multi_rule():
@@ -220,11 +231,52 @@ def test_context_art_none_for_charts_and_multi_rule():
         engine=eng, http_get=_http) is None
 
 
+def test_logo_poster_light_card_for_dark_logo_and_reverse():
+    # Dark logo → light card so it stays visible; light logo → the gradient.
+    dark = io.BytesIO()
+    Image.new("RGBA", (400, 160), (20, 20, 24, 255)).save(dark, format="PNG")
+    data = poster_gen.render_logo_poster(dark.getvalue(), "A24")
+    img = Image.open(io.BytesIO(data)).convert("RGB")
+    assert img.size == (1000, 1500)
+    assert sum(img.getpixel((30, 30))) > 550                 # corner is light
+
+    light = io.BytesIO()
+    Image.new("RGBA", (400, 160), (240, 240, 245, 255)).save(light, format="PNG")
+    data = poster_gen.render_logo_poster(light.getvalue(), "A24")
+    img = Image.open(io.BytesIO(data)).convert("RGB")
+    assert sum(img.getpixel((30, 30))) < 300                 # corner is dark gradient
+    assert poster_gen.render_logo_poster(b"not a png", "X") is None
+
+
+def test_regenerate_all_respects_user_posters(db, tmp_path, monkeypatch):
+    _seed(db)
+    gen_id = db.create_collection_definition(
+        "Action", media_type="movie", poster_url="/api/video/collections/1/poster?v=old11111",
+        definition={"rules": [{"field": "genre", "op": "in", "value": ["Action"]}]})
+    db.create_collection_definition(                          # hand-set URL — untouched
+        "Custom", media_type="movie", poster_url="https://img.example/mine.jpg",
+        definition={"rules": [{"field": "genre", "op": "in", "value": ["Action"]}]})
+    bare_id = db.create_collection_definition(                # no poster — included
+        "Bare", media_type="movie",
+        definition={"rules": [{"field": "genre", "op": "in", "value": ["Action"]}]})
+
+    regenerated = []
+    monkeypatch.setattr(poster_gen, "generate_for_definition",
+                        lambda dbb, d, **kw: regenerated.append(d["id"]) or "/api/x")
+    n = poster_gen.regenerate_all(db)
+    assert n == 2 and sorted(regenerated) == sorted([gen_id, bare_id])
+
+    # Busy-guard: second kick while running is refused.
+    poster_gen._regen_running[0] = True
+    assert poster_gen.kick_regenerate_all(db)["ok"] is False
+    poster_gen._regen_running[0] = False
+
+
 def test_generate_auto_prefers_context_and_collage_mode_forces(db, tmp_path, monkeypatch):
     _seed(db, n=2)
     d = _definition(db)
     real_jpeg = _jpeg((25, 90, 25), size=(780, 1170))
-    monkeypatch.setattr(poster_gen, "_context_art", lambda definition, **kw: (real_jpeg, False))
+    monkeypatch.setattr(poster_gen, "_context_art", lambda definition, **kw: (real_jpeg, "verbatim"))
 
     url = poster_gen.generate_for_definition(db, d, root=tmp_path / "gen")
     assert url is not None

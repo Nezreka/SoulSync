@@ -123,6 +123,25 @@ def test_studio_director_and_essentials_packs(db):
     assert "Recently Added" in ess and "New Releases" in ess
 
 
+def test_studio_pack_groups_brand_variants(db):
+    # One brand, many label strings (the 23-item Hallmark problem): the pack
+    # entry must cover ALL variants and count them together.
+    _add_movie(db, 21, "Xmas 1", studio="Hallmark Channel")
+    _add_movie(db, 22, "Xmas 2", studio="Hallmark Channel")
+    _add_movie(db, 23, "Xmas 3", studio="Hallmark Media")
+    _add_movie(db, 24, "Xmas 4", studio="Hallmark Entertainment")
+    _add_movie(db, 25, "Indie", studio="A24")
+    entries = {e["name"]: e for e in expand_pack(db, "studios", "movie")}
+    hm = entries["Hallmark"]                                # common word prefix
+    assert hm["count"] == 4
+    assert hm["definition"]["rules"] == [{
+        "field": "studio", "op": "in",
+        "value": ["Hallmark Channel", "Hallmark Entertainment", "Hallmark Media"]}]
+    # The rule really resolves all variants.
+    assert len(db.resolve_smart_members("movie", hm["definition"])) == 4
+    assert entries["A24"]["count"] == 1                     # single variant keeps its name
+
+
 def test_show_packs_use_network_not_studio(db):
     _add_show(db, 1, "The Wire", network="HBO", genres=("Crime",))
     _add_show(db, 2, "Oz", network="HBO", genres=("Crime",))
