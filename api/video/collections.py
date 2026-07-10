@@ -16,6 +16,7 @@ SoulSync-managed movie/show collections. Admin-only (gated in __init__.py).
     GET    /api/video/collections/server          -> {collections:[...]}    (all ON the server)
     POST   /api/video/collections/server/delete   -> {ok,total}             (start bulk cleanup job)
     GET    /api/video/collections/server/delete/status -> job state         (polling fallback)
+    POST   /api/video/collections/server/adopt    -> {ok,adopted,skipped}   (manage existing collections)
     POST   /api/video/collections/preview         -> {ok,count,sample,...}  (live preview)
     POST   /api/video/collections/<id>/sync       -> {ok,...}               (Sync now, one)
     POST   /api/video/collections/sync            -> {ok,started}           (start sync-all job)
@@ -364,3 +365,20 @@ def register_routes(bp):
     def collections_server_delete_status():
         from core.video.collections.server_cleanup import status
         return jsonify(status())
+
+    @bp.route("/collections/server/adopt", methods=["POST"])
+    def collections_server_adopt():
+        """Bring existing server collections under SoulSync management (the
+        Kometa migration path): membership snapshot + ledger binding. Append
+        sync mode + the server's own poster are kept — adoption changes who
+        manages the collection, not what it looks like."""
+        from . import get_video_db
+        from core.video.collections.server_cleanup import adopt_collections
+        d = request.get_json(silent=True) or {}
+        items = d.get("items") or []
+        if not isinstance(items, list) or not items:
+            return jsonify({"ok": False, "error": "items are required"}), 400
+        r = adopt_collections(get_video_db(), items)
+        if not r.get("ok"):
+            return jsonify(r), 400
+        return jsonify(r)

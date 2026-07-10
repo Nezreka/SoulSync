@@ -136,8 +136,10 @@ def sync_collection(db, definition: Dict[str, Any], *, source,
 
     # Default-on artwork — BEFORE the signature, so the very first sync pushes
     # the art with no signature churn. Best-effort: a failed render just leaves
-    # the poster empty and tries again next sync.
-    if poster_generator and did is not None and not definition.get("poster_url"):
+    # the poster empty and tries again next sync. Adopted collections opt out
+    # (keep_server_art): their existing server poster is the user's choice.
+    if (poster_generator and did is not None and not definition.get("poster_url")
+            and not (definition.get("definition") or {}).get("keep_server_art")):
         try:
             url = poster_generator(definition, res.owned)
         except Exception:   # noqa: BLE001 - art is a nicety, never fail the sync

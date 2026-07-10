@@ -2885,6 +2885,36 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def items_by_server_ids(self, server_ids, server_source=None) -> list:
+        """Library items (movies + shows) matching the given native server ids —
+        maps a server collection's membership back to our rows for adoption.
+        Returns [{kind, id, tmdb_id, server_id, title}]."""
+        ids = [str(s) for s in (server_ids or []) if str(s).strip()]
+        if not ids:
+            return []
+        out = []
+        conn = self._get_connection()
+        try:
+            for kind, table in (("movie", "movies"), ("show", "shows")):
+                for i in range(0, len(ids), 400):        # chunk under SQLite's var cap
+                    chunk = ids[i:i + 400]
+                    ph = ", ".join("?" for _ in chunk)
+                    sql = (f"SELECT id, tmdb_id, server_id, title FROM {table} "
+                           f"WHERE server_id IN ({ph})")
+                    args: list = list(chunk)
+                    if server_source:
+                        sql += " AND server_source=?"
+                        args.append(server_source)
+                    for r in conn.execute(sql, args):
+                        out.append({"kind": kind, "id": r["id"], "tmdb_id": r["tmdb_id"],
+                                    "server_id": str(r["server_id"]), "title": r["title"]})
+            return out
+        except sqlite3.Error:
+            logger.exception("items_by_server_ids failed")
+            return []
+        finally:
+            conn.close()
+
     # ── Collection sync ledger (managed-collection map + skip signature) ──────
     def get_collection_sync(self, definition_id: int) -> dict | None:
         conn = self._get_connection()

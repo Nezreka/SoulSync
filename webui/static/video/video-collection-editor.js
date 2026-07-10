@@ -719,9 +719,10 @@
         page.appendChild(h('div', 'vce-preshead', '<h2>Collections on your server</h2>'));
         page.appendChild(h('p', 'vce-servnote',
             'Everything that currently exists on the media server — including collections made by other tools ' +
-            '(old Kometa runs, hand-made ones). Deleting here removes the collection from the server only; ' +
-            'titles are never touched. Deleting a SoulSync-managed collection just recreates it on the next ' +
-            'sync unless you also pause or delete its definition in the gallery.'));
+            '(old Kometa runs, hand-made ones). ADOPT the ones you want to keep: SoulSync takes over managing ' +
+            'them with their members and artwork intact. Deleting removes the collection from the server only; ' +
+            'titles are never touched (a SoulSync-managed one just recreates on the next sync unless you also ' +
+            'pause or delete its definition).'));
 
         var hostEl = h('div');
         hostEl.innerHTML = '<div class="vce-loading">Reading the server…</div>';
@@ -766,6 +767,37 @@
             var foot = h('div', 'vce-picker-foot');
             foot.appendChild(h('span', 'vce-selsum', ''));
             foot.appendChild(h('div', 'vce-foot-spacer'));
+            var adoptBtn = h('button', 'vce-btn', I.brand + 'Adopt selected');
+            adoptBtn.type = 'button';
+            adoptBtn.title = 'Bring these collections under SoulSync management (keeps their members and artwork)';
+            adoptBtn.addEventListener('click', function () {
+                var ids = Object.keys(picked);
+                if (!ids.length) return;
+                var items = cols.filter(function (c) { return picked[c.server_id] && !c.managed; })
+                                .map(function (c) { return { server_id: c.server_id, name: c.name }; });
+                if (!items.length) { toast('Those are already managed by SoulSync'); return; }
+                ask({ title: 'Adopt ' + items.length + ' collection' + (items.length === 1 ? '' : 's') + '?',
+                      message: 'SoulSync takes over managing them — members and artwork are kept exactly ' +
+                               'as they are, and they join the daily sync. You can edit or delete them from ' +
+                               'the gallery afterwards.',
+                      confirmText: 'Adopt', cancelText: 'Cancel' }).then(function (ok) {
+                    if (!ok) return;
+                    adoptBtn.disabled = true;
+                    api('/server/adopt', { method: 'POST', body: JSON.stringify({ items: items }) }).then(function (r) {
+                        if (r && r.ok) {
+                            var n = (r.adopted || []).length;
+                            var bits = [n + ' adopted'];
+                            if (r.skipped && r.skipped.length) bits.push(r.skipped.length + ' skipped');
+                            toast(bits.join(' · '));
+                            showServer();                 // fresh read — they now show as SoulSync's
+                        } else {
+                            toast((r && r.error) || 'Adopt failed', true);
+                            adoptBtn.disabled = false;
+                        }
+                    }).catch(function () { toast('Adopt failed', true); adoptBtn.disabled = false; });
+                });
+            });
+            foot.appendChild(adoptBtn);
             var delBtn = h('button', 'vce-btn vce-btn--danger', I.trash + 'Delete selected');
             delBtn.type = 'button';
             delBtn.addEventListener('click', function () {
@@ -825,6 +857,7 @@
                 var sum = foot.querySelector('.vce-selsum');
                 if (sum) sum.textContent = n ? (n + ' selected') : 'Nothing selected';
                 delBtn.disabled = !n;
+                adoptBtn.disabled = !n;
             }
             paintRows();
         });
