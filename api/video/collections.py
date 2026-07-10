@@ -122,11 +122,16 @@ def register_routes(bp):
     @bp.route("/collections/presets", methods=["GET"])
     def collections_presets():
         from . import get_video_db
+        from core.video.collections.list_sources import build_list_fetcher
         from core.video.collections.presets import list_packs
         mt = request.args.get("media_type", "movie")
         mt = "show" if mt in ("show", "shows", "tv", "series") else "movie"
         try:
-            return jsonify({"media_type": mt, "packs": list_packs(get_video_db(), mt)})
+            db = get_video_db()
+            # The fetcher powers the remote packs' live "owned / chart size"
+            # counts (engine-cached; a failed fetch degrades to count=None).
+            return jsonify({"media_type": mt,
+                            "packs": list_packs(db, mt, fetcher=build_list_fetcher(db))})
         except Exception:
             logger.exception("preset browse failed")
             return jsonify({"media_type": mt, "packs": [], "error": "Failed to load presets"}), 500
@@ -142,8 +147,11 @@ def register_routes(bp):
         if not pack or not isinstance(keys, list) or not keys:
             return jsonify({"ok": False, "error": "pack and keys are required"}), 400
         try:
-            r = apply_pack(get_video_db(), pack, mt, keys,
-                           wishlist_missing=bool(d.get("wishlist_missing", True)))
+            from core.video.collections.list_sources import build_list_fetcher
+            db = get_video_db()
+            r = apply_pack(db, pack, mt, keys,
+                           wishlist_missing=bool(d.get("wishlist_missing", True)),
+                           fetcher=build_list_fetcher(db))
             _generate_posters_async([c["id"] for c in r["created"]])
             return jsonify({"ok": True, "created": r["created"], "skipped": r["skipped"]})
         except Exception:
@@ -204,9 +212,12 @@ def register_routes(bp):
         defn = {"media_type": d.get("media_type", "movie"),
                 "kind": d.get("kind", "smart"),
                 "definition": d.get("definition") or {}}
-        # No list fetcher here: smart + franchise (owned) preview instantly from the
-        # DB; a remote list source reports what's owned and notes it needs a sync.
-        res = resolve_collection(get_video_db(), defn)
+        # Smart + franchise preview straight from the DB; remote sources (charts/
+        # keywords/lists) go through the real fetcher — engine-cached, so the
+        # debounced editor preview stays snappy after the first resolve.
+        from core.video.collections.list_sources import build_list_fetcher
+        db = get_video_db()
+        res = resolve_collection(db, defn, list_fetcher=build_list_fetcher(db))
         if not res.ok:
             return jsonify({"ok": False, "error": res.error})
         return jsonify({"ok": True, "media_type": res.media_type,

@@ -23,7 +23,8 @@ logger = get_logger("video.collections.presets")
 
 # Entries at/above this owned count are pre-checked in the picker UI.
 _SUGGEST_MIN = {"genres": 5, "decades": 5, "franchises": 2, "studios": 4,
-                "networks": 3, "directors": 3, "essentials": 3}
+                "networks": 3, "directors": 3, "essentials": 3,
+                "seasonal": 3, "stories": 3}
 
 # ── pack catalog ────────────────────────────────────────────────────────────
 # id -> {title, blurb, icon, media: tuple of media types the pack supports}
@@ -63,10 +64,25 @@ _PACKS: Dict[str, Dict[str, Any]] = {
         "blurb": "4K, Critically Acclaimed, Recently Added — living shelves that update on every sync.",
         "icon": "essentials", "media": ("movie", "show"),
     },
+    "charts": {
+        "title": "Charts",
+        "blurb": "Top Rated 250, Most Popular, Trending — living charts that re-resolve on every sync, and can wishlist what you're missing.",
+        "icon": "charts", "media": ("movie", "show"),
+    },
+    "seasonal": {
+        "title": "Seasonal",
+        "blurb": "Christmas, Halloween, Valentine's… your holiday shelves, ready before the holiday is.",
+        "icon": "seasonal", "media": ("movie", "show"),
+    },
+    "stories": {
+        "title": "Based On…",
+        "blurb": "Books, comics, true stories, video games — what your titles were made from.",
+        "icon": "stories", "media": ("movie", "show"),
+    },
 }
 
-_PACK_ORDER = ["genres", "decades", "franchises", "studios", "networks",
-               "directors", "essentials"]
+_PACK_ORDER = ["charts", "genres", "franchises", "decades", "seasonal",
+               "stories", "studios", "networks", "directors", "essentials"]
 
 
 def _norm(name: str) -> str:
@@ -230,25 +246,150 @@ def _expand_essentials(db, mt: str) -> List[Dict[str, Any]]:
     return out
 
 
+# ── remote packs (charts / seasonal / stories) ──────────────────────────────
+# These need the list fetcher: entries are TMDB-backed list definitions, and the
+# browse counts are "owned ∩ fetched" — the same intersection sync will push.
+# Fetches run concurrently (each is 1-13 cached TMDB calls); a failed fetch
+# yields count=None ("resolves on sync") rather than hiding the entry.
+
+_CHART_ENTRIES = {
+    "movie": [
+        ("top",      "Top Rated 250",      "top_movies",      250,
+         "TMDB's top-rated chart — the IMDb Top 250 equivalent. Re-resolves on every sync."),
+        ("popular",  "Most Popular",       "popular_movies",  100,
+         "The most popular movies right now. Re-resolves on every sync."),
+        ("trending", "Trending This Week", "trending_movies", 20,
+         "This week's trending movies. Re-resolves on every sync."),
+        ("theaters", "In Theaters",        "now_playing",     40,
+         "Playing in theaters right now. Re-resolves on every sync."),
+    ],
+    "show": [
+        ("top",      "Top Rated 250",      "top_shows",       250,
+         "TMDB's top-rated chart — the IMDb Top 250 equivalent. Re-resolves on every sync."),
+        ("popular",  "Most Popular",       "popular_shows",   100,
+         "The most popular shows right now. Re-resolves on every sync."),
+        ("trending", "Trending This Week", "trending_shows",  20,
+         "This week's trending shows. Re-resolves on every sync."),
+        ("air",      "On The Air",         "on_the_air",      40,
+         "Currently airing shows. Re-resolves on every sync."),
+    ],
+}
+
+_SEASONAL = [
+    ("christmas",    "Christmas",       "christmas"),
+    ("halloween",    "Halloween",       "halloween"),
+    ("valentine",    "Valentine's Day", "valentine's day"),
+    ("easter",       "Easter",          "easter"),
+    ("thanksgiving", "Thanksgiving",    "thanksgiving"),
+    ("newyear",      "New Year's Eve",  "new year's eve"),
+]
+
+_STORIES = [
+    ("book",  "Based on a Book",       "based on novel or book"),
+    ("comic", "Based on a Comic",      "based on comic"),
+    ("true",  "Based on a True Story", "based on true story"),
+    ("game",  "Based on a Video Game", "based on video game"),
+]
+
+
+def _owned_counts(db, mt: str, specs, fetcher) -> List[Optional[tuple]]:
+    """(owned, total) per (source, ref) spec — concurrent, None on fetch failure."""
+    if fetcher is None:
+        return [None] * len(specs)
+
+    def one(spec):
+        try:
+            full = fetcher(spec[0], spec[1]) or []
+        except Exception:   # noqa: BLE001 - count is a nicety; sync still resolves
+            return None
+        if not full:
+            return None
+        ids = [i.get("tmdb_id") for i in full if i.get("tmdb_id") is not None]
+        try:
+            owned = db.owned_by_tmdb_ids(mt, ids)
+        except Exception:   # noqa: BLE001
+            return None
+        return (len(owned), len(ids))
+
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        return list(ex.map(one, specs))
+
+
+def _remote_entry(key, name, count, summary, definition, pack, mt) -> Dict[str, Any]:
+    # wishlist tie-in is movies-only today (wishlist_missing_movies in sync).
+    e = _entry(key, name, (count or (0, 0))[0], summary, kind="list",
+               definition=definition, pack=pack, wishlist_capable=(mt == "movie"))
+    if count is None:
+        e["count"] = None            # fetch failed/offline — resolves on sync
+        e["suggested"] = pack == "charts"
+    else:
+        e["of_total"] = count[1]
+        if pack == "charts":
+            e["suggested"] = True    # charts are the marquee — always pre-checked
+    return e
+
+
+def _expand_charts(db, mt: str, fetcher=None) -> List[Dict[str, Any]]:
+    rows = _CHART_ENTRIES.get(mt) or []
+    specs = [("tmdb_chart", {"chart": chart, "limit": limit})
+             for _, _, chart, limit, _ in rows]
+    counts = _owned_counts(db, mt, specs, fetcher)
+    return [
+        _remote_entry("chart:" + key, name, counts[i], blurb,
+                      {"source": "tmdb_chart", "chart": chart, "limit": limit}, "charts", mt)
+        for i, (key, name, chart, limit, blurb) in enumerate(rows)
+    ]
+
+
+def _expand_keyword_pack(db, mt: str, fetcher, rows, pack: str, blurb_fmt) -> List[Dict[str, Any]]:
+    specs = [("tmdb_keyword", {"kind": mt, "query": q, "limit": 100}) for _, _, q in rows]
+    counts = _owned_counts(db, mt, specs, fetcher)
+    return [
+        _remote_entry(pack + ":" + key, name, counts[i], blurb_fmt(name, mt),
+                      {"source": "tmdb_keyword", "query": q, "limit": 100}, pack, mt)
+        for i, (key, name, q) in enumerate(rows)
+    ]
+
+
+def _expand_seasonal(db, mt: str, fetcher=None) -> List[Dict[str, Any]]:
+    return _expand_keyword_pack(
+        db, mt, fetcher, _SEASONAL, "seasonal",
+        lambda name, m: f"{name} {_media_word(m)} — refreshes on every sync.")
+
+
+def _expand_stories(db, mt: str, fetcher=None) -> List[Dict[str, Any]]:
+    return _expand_keyword_pack(
+        db, mt, fetcher, _STORIES, "stories",
+        lambda name, m: f"{name.replace('Based on', 'Adapted from')} — refreshes on every sync.")
+
+
 _EXPANDERS = {
     "genres": _expand_genres, "decades": _expand_decades,
     "franchises": _expand_franchises, "studios": _expand_studios,
     "networks": _expand_networks, "directors": _expand_directors,
     "essentials": _expand_essentials,
+    "charts": _expand_charts, "seasonal": _expand_seasonal, "stories": _expand_stories,
 }
+_REMOTE_PACKS = {"charts", "seasonal", "stories"}
 
 
 # ── public surface ──────────────────────────────────────────────────────────
-def expand_pack(db, pack_id: str, media_type: str) -> List[Dict[str, Any]]:
+def expand_pack(db, pack_id: str, media_type: str, fetcher=None) -> List[Dict[str, Any]]:
     """Expand one pack against the library. Each entry carries a stable ``key``
-    (what apply selects by), the owned ``count``, and the full definition it
-    would create. Entries whose name matches an existing definition (same media
-    type, case-insensitive) get ``exists: true`` so apply is idempotent."""
+    (what apply selects by), the owned ``count`` (None when a remote pack can't
+    fetch — it still resolves on sync), and the full definition it would create.
+    Entries whose name matches an existing definition (same media type,
+    case-insensitive) get ``exists: true`` so apply is idempotent. ``fetcher``
+    (the list fetcher) powers the remote packs' owned-∩-chart counts."""
     meta = _PACKS.get(pack_id)
     expander = _EXPANDERS.get(pack_id)
     if meta is None or expander is None or media_type not in meta["media"]:
         return []
-    entries = expander(db, media_type)
+    if pack_id in _REMOTE_PACKS:
+        entries = expander(db, media_type, fetcher)
+    else:
+        entries = expander(db, media_type)
 
     existing = set()
     try:
@@ -262,7 +403,7 @@ def expand_pack(db, pack_id: str, media_type: str) -> List[Dict[str, Any]]:
     return entries
 
 
-def list_packs(db, media_type: str) -> List[Dict[str, Any]]:
+def list_packs(db, media_type: str, fetcher=None) -> List[Dict[str, Any]]:
     """The full preset browser payload for one media type: every applicable pack
     with its expanded entries, available/item totals, and exists-marking."""
     out = []
@@ -270,26 +411,27 @@ def list_packs(db, media_type: str) -> List[Dict[str, Any]]:
         meta = _PACKS[pid]
         if media_type not in meta["media"]:
             continue
-        entries = expand_pack(db, pid, media_type)
+        entries = expand_pack(db, pid, media_type, fetcher)
         out.append({
             "id": pid, "title": meta["title"], "blurb": meta["blurb"],
             "icon": meta["icon"], "media_type": media_type,
             "available": len(entries),
-            "item_total": sum(e["count"] for e in entries),
+            "item_total": sum(e["count"] or 0 for e in entries),
             "entries": entries,
         })
     return out
 
 
 def apply_pack(db, pack_id: str, media_type: str, keys, *,
-               wishlist_missing: bool = True) -> Dict[str, Any]:
+               wishlist_missing: bool = True, fetcher=None) -> Dict[str, Any]:
     """Create collection definitions for the selected entry keys. Existing names
-    are skipped (idempotent — re-applying a pack never duplicates). Franchise
-    entries get ``wishlist_missing`` per the caller's choice; smart entries never
-    do (they have no missing set). Returns {created: [{id, name}], skipped: [name]}."""
+    are skipped (idempotent — re-applying a pack never duplicates). List-kind
+    entries (franchises/charts/seasonal/stories) get ``wishlist_missing`` per the
+    caller's choice; smart entries never do (they have no missing set).
+    Returns {created: [{id, name}], skipped: [name]}."""
     wanted = {str(k) for k in (keys or [])}
     created, skipped = [], []
-    for e in expand_pack(db, pack_id, media_type):
+    for e in expand_pack(db, pack_id, media_type, fetcher):
         if e["key"] not in wanted:
             continue
         if e.get("exists"):

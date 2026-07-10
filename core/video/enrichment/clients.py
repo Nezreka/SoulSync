@@ -551,6 +551,35 @@ class TMDBClient:
         r.raise_for_status()
         return self._disc_map((r.json() or {}).get("results"), kind)
 
+    def keyword_search(self, query):
+        """TMDB keyword id for a query ('christmas' → 207317) — first exact-ish
+        match wins. Resolved at runtime instead of hardcoding ids so a TMDB-side
+        change can't silently break the seasonal collections. None if no hit."""
+        if not self.api_key or not (query or "").strip():
+            return None
+        import requests
+        r = requests.get(self.BASE + "/search/keyword",
+                         params={"api_key": self.api_key, "query": query}, timeout=15)
+        r.raise_for_status()
+        results = (r.json() or {}).get("results") or []
+        q = query.strip().lower()
+        for it in results:                                   # prefer the exact name
+            if (it.get("name") or "").lower() == q and it.get("id"):
+                return int(it["id"])
+        return int(results[0]["id"]) if results and results[0].get("id") else None
+
+    def list_items(self, list_id, page=1):
+        """One page of a public TMDB list (/list/{id}) — mixed movie/tv rows.
+        Returns (items, total_pages)."""
+        if not self.api_key or not list_id:
+            return [], 0
+        import requests
+        r = requests.get(self.BASE + f"/list/{list_id}",
+                         params={"api_key": self.api_key, "page": page}, timeout=15)
+        r.raise_for_status()
+        d = r.json() or {}
+        return self._disc_map(d.get("items"), None), int(d.get("total_pages") or 1)
+
     def discover(self, kind, *, genre=None, year=None, decade=None, providers=None,
                  sort_by="popularity.desc", page=1, region="US", language=None,
                  keywords=None, companies=None, networks=None, cast=None, crew=None,

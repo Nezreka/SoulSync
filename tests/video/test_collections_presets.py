@@ -140,6 +140,70 @@ def test_unknown_pack_or_wrong_media_returns_empty(db):
     assert expand_pack(db, "franchises", "show") == []
 
 
+# ── remote packs: charts / seasonal (fetcher-backed, counts = owned ∩ list) ──
+def test_charts_pack_counts_owned_against_chart(db):
+    _seed_movies(db)                                    # owned tmdb ids 1001..1005
+
+    def fetcher(source, ref):
+        assert source == "tmdb_chart"
+        return [{"tmdb_id": i} for i in (1001, 1004, 9999)]
+
+    entries = expand_pack(db, "charts", "movie", fetcher)
+    by_name = {e["name"]: e for e in entries}
+    top = by_name["Top Rated 250"]
+    assert top["count"] == 2 and top["of_total"] == 3   # owns 2 of the chart's 3
+    assert top["kind"] == "list" and top["suggested"] is True
+    assert top["definition"] == {"source": "tmdb_chart", "chart": "top_movies", "limit": 250}
+    assert by_name["Most Popular"]["definition"]["chart"] == "popular_movies"
+    # Show charts use the show-side chart keys and are NOT wishlist-capable.
+    shows = expand_pack(db, "charts", "show", fetcher=None)
+    assert {e["definition"]["chart"] for e in shows} == \
+        {"top_shows", "popular_shows", "trending_shows", "on_the_air"}
+    assert all(e["wishlist_capable"] is False for e in shows)
+
+
+def test_charts_pack_survives_fetch_failure(db):
+    _seed_movies(db)
+    entries = expand_pack(db, "charts", "movie", fetcher=lambda s, r: (_ for _ in ()).throw(RuntimeError()))
+    assert len(entries) == 4
+    assert all(e["count"] is None for e in entries)     # '—' in the picker
+    assert all(e["suggested"] for e in entries)         # charts stay pre-checked
+    # No fetcher at all behaves the same.
+    assert all(e["count"] is None for e in expand_pack(db, "charts", "movie"))
+
+
+def test_seasonal_and_stories_packs(db):
+    _seed_movies(db)
+    seen = []
+
+    def fetcher(source, ref):
+        seen.append((source, ref))
+        return [{"tmdb_id": 1001}]
+
+    seasonal = {e["name"]: e for e in expand_pack(db, "seasonal", "movie", fetcher)}
+    assert "Christmas" in seasonal and "Halloween" in seasonal
+    assert seasonal["Christmas"]["definition"] == \
+        {"source": "tmdb_keyword", "query": "christmas", "limit": 100}
+    assert seasonal["Christmas"]["count"] == 1
+    assert all(s == "tmdb_keyword" and r["kind"] == "movie" for s, r in seen)
+    stories = {e["name"] for e in expand_pack(db, "stories", "movie", fetcher)}
+    assert "Based on a Book" in stories and "Based on a Video Game" in stories
+
+
+def test_apply_chart_creates_living_list_definition(db):
+    _seed_movies(db)
+    r = apply_pack(db, "charts", "movie", ["chart:top"], wishlist_missing=True,
+                   fetcher=lambda s, ref: [{"tmdb_id": 1001}])
+    full = db.get_collection_definition(r["created"][0]["id"])
+    assert full["kind"] == "list" and full["wishlist_missing"]
+    assert full["definition"] == {"source": "tmdb_chart", "chart": "top_movies", "limit": 250}
+    # The resolver turns it into owned members + the missing set via the fetcher.
+    from core.video.collections.resolver import resolve_collection
+    res = resolve_collection(
+        db, full, list_fetcher=lambda s, ref: [{"tmdb_id": 1001}, {"tmdb_id": 777}])
+    assert res.ok and len(res.owned) == 1 and len(res.missing) == 1
+
+
 # ── apply: creates normal definitions, idempotent, wishlist honored ─────────
 def test_apply_creates_normal_definitions(db):
     _seed_movies(db)
@@ -202,8 +266,11 @@ def test_presets_api_browse_and_apply(tmp_path):
 
     r = client.get("/api/video/collections/presets?media_type=movie").get_json()
     packs = {p["id"]: p for p in r["packs"]}
-    assert set(packs) == {"genres", "decades", "franchises", "studios", "directors", "essentials"}
+    assert set(packs) == {"charts", "genres", "decades", "franchises", "studios",
+                          "directors", "essentials", "seasonal", "stories"}
     assert packs["genres"]["available"] >= 3
+    # Remote packs list fine with no engine — counts just resolve on sync.
+    assert packs["charts"]["available"] == 4
     action = [e for e in packs["genres"]["entries"] if e["name"] == "Action"][0]
     assert action["count"] == 4 and action["exists"] is False
 

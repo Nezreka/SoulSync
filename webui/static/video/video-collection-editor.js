@@ -86,7 +86,10 @@
         studios: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21V8l6-5 6 5v13"/><path d="M20 21V11l-4-3"/><path d="M2 21h20"/></svg>',
         networks: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="13" rx="2"/><path d="M8 2l4 5 4-5"/></svg>',
         directors: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="16" r="4"/><circle cx="17" cy="16" r="4"/><path d="M11 16h2M3.5 13L9 4l3 2 3-2 5.5 9"/></svg>',
-        essentials: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2.5 6.5L21 9l-5 4.5L17.5 21 12 17l-5.5 4L8 13.5 3 9l6.5-.5z"/></svg>'
+        essentials: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2.5 6.5L21 9l-5 4.5L17.5 21 12 17l-5.5 4L8 13.5 3 9l6.5-.5z"/></svg>',
+        charts: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8M12 17v4M17 4H7v6a5 5 0 0 0 10 0z"/><path d="M17 5h3a1 1 0 0 1 1 1c0 2.5-2 4.5-4 4.5M7 5H4a1 1 0 0 0-1 1c0 2.5 2 4.5 4 4.5"/></svg>',
+        seasonal: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M5 12v8a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-8M12 8v13"/><path d="M12 8s-2.5-5-5-3.5S9 8 12 8zM12 8s2.5-5 5-3.5S15 8 12 8z"/></svg>',
+        stories: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>'
     };
 
     // ── open / close / shell ─────────────────────────────────────────────────
@@ -448,11 +451,15 @@
             list.innerHTML = '';
             pack.entries.forEach(function (e) {
                 var on = !!picked[e.key];
+                // count: owned items; "41 / 250" for chart-backed entries; '—'
+                // when the chart couldn't be fetched (still resolves on sync).
+                var countTxt = e.count == null ? '—'
+                    : (e.of_total ? e.count + ' / ' + e.of_total : String(e.count));
                 var row = h('label', 'vce-entry' + (on ? ' vce-entry--on' : '') + (e.exists ? ' vce-entry--exists' : ''),
                     '<span class="vce-cb">' + I.check + '</span>' +
                     '<span class="vce-entry-name">' + esc(e.name) + '</span>' +
                     (e.exists ? '<span class="vce-entry-added">Added</span>'
-                              : '<span class="vce-entry-count">' + e.count + '</span>'));
+                              : '<span class="vce-entry-count">' + countTxt + '</span>'));
                 if (!e.exists) {
                     row.addEventListener('click', function () {
                         if (picked[e.key]) delete picked[e.key]; else picked[e.key] = true;
@@ -462,9 +469,9 @@
                 list.appendChild(row);
             });
             var n = Object.keys(picked).length;
-            var total = pack.entries.reduce(function (s, e) { return s + (picked[e.key] ? e.count : 0); }, 0);
+            var total = pack.entries.reduce(function (s, e) { return s + (picked[e.key] ? (e.count || 0) : 0); }, 0);
             var sum = overlay.querySelector('[data-selsum]');
-            if (sum) sum.textContent = n ? (n + ' selected · ' + total + ' items') : 'Nothing selected';
+            if (sum) sum.textContent = n ? (n + ' selected · ' + total + ' owned items') : 'Nothing selected';
             createBtn.disabled = !n;
             createBtn.textContent = n ? ('Create ' + n + ' collection' + (n === 1 ? '' : 's')) : 'Create';
         }
@@ -965,29 +972,76 @@
         return wrap;
     }
 
+    // Charts per media type: [key, label, default size].
+    var CHARTS = {
+        movie: [['top_movies', 'Top Rated 250', 250], ['popular_movies', 'Most Popular', 100],
+                ['trending_movies', 'Trending This Week', 20], ['now_playing', 'In Theaters', 40]],
+        show: [['top_shows', 'Top Rated 250', 250], ['popular_shows', 'Most Popular', 100],
+               ['trending_shows', 'Trending This Week', 20], ['on_the_air', 'On The Air', 40]]
+    };
+
     function renderListBuilder(host) {
         var def = ed.definition;
         if (!def.source) def.source = 'tmdb_collection';
-        var sources = [['tmdb_collection', 'TMDB franchise (collection id)'], ['tmdb_list', 'TMDB list'], ['trakt_list', 'Trakt list URL']];
+        var sources = [
+            ['tmdb_collection', 'TMDB franchise (collection id)'],
+            ['tmdb_chart', 'Chart (Top Rated / Popular / Trending)'],
+            ['tmdb_keyword', 'Theme / keyword (Christmas, heist…)'],
+            ['tmdb_list', 'TMDB list'],
+            ['trakt_list', 'Trakt list URL (coming soon)']
+        ];
+        var refHTML;
+        if (def.source === 'tmdb_chart') {
+            var charts = CHARTS[ed.media_type === 'show' ? 'show' : 'movie'];
+            // Also covers a library switch: a movie chart is invalid for shows.
+            if (!charts.some(function (c) { return c[0] === def.chart; })) {
+                def.chart = charts[0][0]; def.limit = charts[0][2];
+            }
+            refHTML =
+                '<label class="vce-flabel">Chart</label>' +
+                '<select class="vce-input" data-chart-sel>' +
+                    charts.map(function (c) { return '<option value="' + c[0] + '"' + (c[0] === def.chart ? ' selected' : '') + '>' + esc(c[1]) + '</option>'; }).join('') +
+                '</select>' +
+                '<p class="vce-note">A living chart — membership re-resolves from TMDB on every sync, so it always matches the current chart.</p>';
+        } else if (def.source === 'tmdb_keyword') {
+            refHTML =
+                '<label class="vce-flabel">Keyword / theme</label>' +
+                '<input class="vce-input" data-listref placeholder="e.g. christmas, halloween, heist, time travel" value="' + esc(def.query || '') + '">' +
+                '<p class="vce-note">Matches TMDB\'s keyword tags — great for seasonal and mood collections. Refreshes on every sync.</p>';
+        } else {
+            refHTML =
+                '<label class="vce-flabel">' + (def.source === 'tmdb_collection' ? 'TMDB collection id' : (def.source === 'trakt_list' ? 'Trakt list URL' : 'TMDB list id')) + '</label>' +
+                '<input class="vce-input" data-listref placeholder="' + (def.source === 'tmdb_collection' ? 'e.g. 10 (Star Wars Collection)' : 'reference') + '" value="' + esc(def.collection_id || def.list_id || def.url || '') + '">' +
+                '<p class="vce-note">Members you own appear in the preview. Wishlisting the ones you don\'t own happens on Sync.</p>';
+        }
         host.innerHTML =
             '<label class="vce-flabel">List source</label>' +
             '<select class="vce-input" data-source-sel>' +
                 sources.map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === def.source ? ' selected' : '') + '>' + esc(o[1]) + '</option>'; }).join('') +
-            '</select>' +
-            '<label class="vce-flabel">' + (def.source === 'tmdb_collection' ? 'TMDB collection id' : (def.source === 'trakt_list' ? 'Trakt list URL' : 'TMDB list id')) + '</label>' +
-            '<input class="vce-input" data-listref placeholder="' + (def.source === 'tmdb_collection' ? 'e.g. 10 (Star Wars Collection)' : 'reference') + '" value="' + esc(def.collection_id || def.list_id || def.url || '') + '">' +
-            '<p class="vce-note">Franchise members you own preview instantly. Full list membership (and wishlisting the ones you don\'t own) resolves on Sync.</p>';
+            '</select>' + refHTML;
         host.querySelector('[data-source-sel]').addEventListener('change', function (e) {
-            def.source = e.target.value;
+            var keep = e.target.value;
+            ed.definition = def = { source: keep };   // sources carry different fields — start clean
             ed.dirty = true;
-            renderListBuilder(host);   // relabel the reference input
+            renderListBuilder(host);
             schedulePreview();
         });
-        host.querySelector('[data-listref]').addEventListener('input', function (e) {
+        var chartSel = host.querySelector('[data-chart-sel]');
+        if (chartSel) chartSel.addEventListener('change', function (e) {
+            var charts = CHARTS[ed.media_type === 'show' ? 'show' : 'movie'];
+            var pickd = charts.filter(function (c) { return c[0] === e.target.value; })[0];
+            def.chart = e.target.value;
+            def.limit = pickd ? pickd[2] : 100;
+            ed.dirty = true;
+            schedulePreview();
+        });
+        var refInp = host.querySelector('[data-listref]');
+        if (refInp) refInp.addEventListener('input', function (e) {
             var v = e.target.value.trim();
-            delete def.collection_id; delete def.list_id; delete def.url;
+            delete def.collection_id; delete def.list_id; delete def.url; delete def.query;
             if (def.source === 'tmdb_collection') def.collection_id = v ? parseInt(v, 10) : null;
             else if (def.source === 'trakt_list') def.url = v;
+            else if (def.source === 'tmdb_keyword') { def.query = v; def.limit = 100; }
             else def.list_id = v;
             ed.dirty = true;
             schedulePreview();

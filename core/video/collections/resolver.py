@@ -108,13 +108,23 @@ def _resolve_list(db, media_type: str, body: Dict[str, Any],
                 missing = []
         return ResolvedCollection(media_type=media_type, owned=owned, missing=missing)
 
-    # tmdb_list / trakt_list / imdb_list — need the fetcher to learn membership.
+    # tmdb_chart / tmdb_keyword / tmdb_list / trakt_list — need the fetcher.
     if list_fetcher is None:
         return ResolvedCollection(media_type=media_type,
                                   error=f"list source {source!r} needs a list fetcher")
-    ref = body.get("list_id") or body.get("url") or body.get("ref")
-    if not ref:
-        return ResolvedCollection(media_type=media_type, error=f"list source {source!r}: no reference")
+    if source == "tmdb_chart":
+        if not body.get("chart"):
+            return ResolvedCollection(media_type=media_type, error="chart source: no chart chosen")
+        ref: Any = dict(body)
+    elif source == "tmdb_keyword":
+        if not (body.get("query") or "").strip():
+            return ResolvedCollection(media_type=media_type, error="keyword source: no keyword")
+        ref = dict(body, kind=media_type)
+    else:
+        ref = body.get("list_id") or body.get("url") or body.get("ref")
+        if not ref:
+            return ResolvedCollection(media_type=media_type,
+                                      error=f"list source {source!r}: no reference")
     try:
         full = list_fetcher(source, ref)
     except Exception as e:   # noqa: BLE001

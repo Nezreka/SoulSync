@@ -442,6 +442,39 @@ class VideoEnrichmentEngine:
                 return []
         return items
 
+    def keyword_id(self, query) -> int | None:
+        """TMDB keyword id for a name (day-cached — keyword ids never move).
+        Powers the seasonal/themed collection sources."""
+        w = self.workers.get("tmdb")
+        if not w or not w.enabled or not (query or "").strip():
+            return None
+        ck = ("kwid", query.strip().lower())
+        hit = self._cache_get(ck)
+        if hit is None:
+            try:
+                hit = w.client.keyword_search(query) or 0   # 0 = cached miss
+                self._cache_put(ck, hit, ttl=86400)
+            except Exception:
+                logger.exception("keyword search failed (%s)", query)
+                return None
+        return hit or None
+
+    def list_page(self, list_id, page=1) -> tuple:
+        """One page of a public TMDB list — (items, total_pages), cached."""
+        w = self.workers.get("tmdb")
+        if not w or not w.enabled or not list_id:
+            return [], 0
+        ck = ("list", str(list_id), page)
+        hit = self._cache_get(ck)
+        if hit is None:
+            try:
+                hit = w.client.list_items(list_id, page=page)
+                self._cache_put(ck, hit, ttl=3600)
+            except Exception:
+                logger.exception("tmdb list fetch failed (%s p%s)", list_id, page)
+                return [], 0
+        return hit
+
     def recommendations(self, kind, tmdb_id, page=1) -> list:
         """'More like this' titles for a tmdb id — cached + owned-annotated."""
         w = self.workers.get("tmdb")
