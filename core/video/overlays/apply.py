@@ -43,7 +43,7 @@ def used_fields(definition: dict):
 # Bump when the COMPOSITOR's output changes for the same inputs (e.g. bundling
 # Inter fixed invisible text). It's folded into the signature so every already-
 # overlaid item re-renders once on the next apply, then goes back to skipping.
-_RENDER_VERSION = 2
+_RENDER_VERSION = 3
 
 
 def values_signature(definition: dict, values: dict) -> str:
