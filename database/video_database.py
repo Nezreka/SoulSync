@@ -31,7 +31,7 @@ logger = get_logger("video_database")
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 26
+SCHEMA_VERSION = 27
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -252,6 +252,10 @@ _COLUMN_MIGRATIONS = [
     # Watch state from the server (drives 'watched' smart-collection rules)
     ("movies", "play_count", "INTEGER"),
     ("shows", "watched_episodes", "INTEGER"),
+    # imdb_tmdb_map poster art — the table briefly shipped without these, and
+    # CREATE TABLE IF NOT EXISTS never upgrades an existing table's shape.
+    ("imdb_tmdb_map", "movie_poster", "TEXT"),
+    ("imdb_tmdb_map", "show_poster", "TEXT"),
     ("youtube_video_stats", "dearrow_attempted", "TEXT"),
     # TMDB details backfill: the server pre-matches shows/movies (so the matcher
     # skips them) but never supplies details-only fields like `status` (airing vs
