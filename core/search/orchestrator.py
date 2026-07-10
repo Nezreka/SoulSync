@@ -31,7 +31,7 @@ from . import sources
 logger = logging.getLogger(__name__)
 
 VALID_SOURCES = (
-    'spotify', 'itunes', 'deezer', 'discogs', 'hydrabase', 'musicbrainz', 'amazon', 'jiosaavn',
+    'spotify', 'itunes', 'deezer', 'discogs', 'hydrabase', 'musicbrainz', 'amazon', 'jiosaavn', 'bandcamp',
 )
 
 VALID_STREAM_SOURCES = VALID_SOURCES + ('youtube_videos',)
@@ -107,6 +107,13 @@ def resolve_client(source_name: str, deps: SearchDeps) -> tuple[Any, bool]:
             return get_jiosaavn_client(), True
         except Exception as e:
             logger.warning(f"JioSaavn client init failed: {e}")
+            return None, False
+    if source_name == 'bandcamp':
+        try:
+            from core.metadata.registry import get_bandcamp_client
+            return get_bandcamp_client(), True
+        except Exception as e:
+            logger.warning(f"Bandcamp client init failed: {e}")
             return None, False
     return None, False
 

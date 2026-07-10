@@ -414,7 +414,7 @@ function initializeSearchModeToggle() {
                 name: artist.name,
                 meta: 'Artist',
                 badge: sourceBadge,
-                href: buildArtistDetailPath(artist.id, searchController.state.activeSource || null),
+                href: buildArtistDetailPath(artist.id, searchController.state.activeSource || null, artist.name),
             })
         );
 
@@ -710,6 +710,12 @@ function initializeSearchModeToggle() {
             // Pass Hydrabase plugin origin so server routes to correct client
             if (album.external_urls?.hydrabase_plugin) {
                 albumParams.set('plugin', album.external_urls.hydrabase_plugin);
+            }
+            // Bandcamp has no numeric-ID lookup API — pass the exact release
+            // URL so the server can fetch it directly instead of re-searching
+            // by name (still falls back to that if this is missing).
+            if (activeSource === 'bandcamp' && album.external_urls?.bandcamp) {
+                albumParams.set('bandcamp_url', album.external_urls.bandcamp);
             }
             const response = await fetch(`/api/spotify/album/${album.id}?${albumParams}`);
 
@@ -1291,7 +1297,7 @@ async function loadInitialData() {
         if (targetPage === 'artist-detail') {
             const artistRoute = typeof parseArtistDetailPath === 'function' ? parseArtistDetailPath() : null;
             if (artistRoute && typeof navigateToArtistDetail === 'function') {
-                navigateToArtistDetail(artistRoute.artistId, '', artistRoute.source);
+                navigateToArtistDetail(artistRoute.artistId, artistRoute.name || '', artistRoute.source);
             }
             return;
         }

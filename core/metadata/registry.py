@@ -18,7 +18,7 @@ logger = get_logger("metadata.registry")
 
 MetadataClientFactory = Callable[[], Any]
 
-METADATA_SOURCE_PRIORITY = ("deezer", "itunes", "spotify", "discogs", "hydrabase", "musicbrainz", "jiosaavn")
+METADATA_SOURCE_PRIORITY = ("deezer", "itunes", "spotify", "discogs", "hydrabase", "musicbrainz", "jiosaavn", "bandcamp")
 METADATA_SOURCE_LABELS = {
     "spotify": "Spotify",
     "itunes": "iTunes",
@@ -49,6 +49,7 @@ _profile_spotify_credentials_provider: Callable[[int], Any] = lambda profile_id:
 # watchlist, config-status, and the UI `_experimental` payload) automatically.
 EXPERIMENTAL_SOURCES: Dict[str, str] = {
     "jiosaavn": "experimental.jiosaavn_enabled",
+    "bandcamp": "experimental.bandcamp_enabled",
 }
 
 
@@ -280,6 +281,14 @@ def _get_jiosaavn_factory(client_factory: Optional[MetadataClientFactory]) -> Me
     return JioSaavnClient
 
 
+def _get_bandcamp_factory(client_factory: Optional[MetadataClientFactory]) -> MetadataClientFactory:
+    if client_factory is not None:
+        return client_factory
+    from core.bandcamp_client import BandcampClient
+
+    return BandcampClient
+
+
 def get_spotify_client(client_factory: Optional[MetadataClientFactory] = None):
     """Get shared Spotify client.
 
@@ -459,6 +468,18 @@ def get_jiosaavn_client(client_factory: Optional[MetadataClientFactory] = None):
     base_url = _get_config_value("jiosaavn.base_url", "https://saavn.sumit.co") or "https://saavn.sumit.co"
     cache_key = f"jiosaavn::{base_url.rstrip('/')}"
     factory = _get_jiosaavn_factory(client_factory)
+    with _client_cache_lock:
+        client = _client_cache.get(cache_key)
+        if client is None:
+            client = factory()
+            _client_cache[cache_key] = client
+        return client
+
+
+def get_bandcamp_client(client_factory: Optional[MetadataClientFactory] = None):
+    """Get cached Bandcamp client. Keyless — no config-dependent cache key."""
+    cache_key = "bandcamp"
+    factory = _get_bandcamp_factory(client_factory)
     with _client_cache_lock:
         client = _client_cache.get(cache_key)
         if client is None:
@@ -740,5 +761,8 @@ def get_client_for_source(
 
     if source == "jiosaavn":
         return get_jiosaavn_client(client_factory=jiosaavn_client_factory)
+
+    if source == "bandcamp":
+        return get_bandcamp_client()
 
     return None
