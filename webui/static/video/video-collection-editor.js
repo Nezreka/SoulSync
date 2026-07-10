@@ -85,6 +85,7 @@
         search: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>',
         image: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>',
         back: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>',
+        dots: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round"><circle cx="12" cy="5" r="0.6"/><circle cx="12" cy="12" r="0.6"/><circle cx="12" cy="19" r="0.6"/></svg>',
         copy: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
         server: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="7" rx="2"/><rect x="2" y="14" width="20" height="7" rx="2"/><path d="M6 6.5h.01M6 17.5h.01"/></svg>',
         // preset pack icons
@@ -106,6 +107,12 @@
         if (overlay) return overlay;
         overlay = h('div', 'vce-overlay');
         document.body.appendChild(overlay);
+        // Delegated once: any click outside the ⋯ cluster closes its menu.
+        overlay.addEventListener('click', function (e) {
+            if (e.target.closest && e.target.closest('.vce-more')) return;
+            var m = overlay.querySelector('[data-menu]');
+            if (m && !m.hidden) m.hidden = true;
+        });
         return overlay;
     }
     function open(collectionId) {
@@ -124,52 +131,89 @@
         view = 'gallery';
     }
 
-    function shell(actionsHTML) {
+    // The studio shell: ONE persistent topbar in every view — brand, a section
+    // nav (Collections · Easy setup · On server) with an accent underline on
+    // the active section, and a right action cluster with real hierarchy
+    // (quiet Sync all · overflow menu · primary New collection · close).
+    // Drill-in views (editor, pack picker) keep the nav; their back affordance
+    // lives in the page as a ← chip.
+    function navGuard(fn) {
+        return function () {
+            if (view === 'editor' && ed && ed.dirty &&
+                !window.confirm('Discard unsaved changes?')) return;
+            if (ed) ed.dirty = false;
+            fn();
+        };
+    }
+
+    function shell(navKey) {
         overlay.innerHTML = '';
         var bar = h('div', 'vce-topbar',
             '<div class="vce-brand"><div class="vce-brand-mark">' + I.brand + '</div>' +
             '<div class="vce-brand-name">Collection <span>Studio</span></div></div>' +
+            '<nav class="vce-nav" aria-label="Studio sections">' +
+                [['gallery', 'Collections', I.brand], ['presets', 'Easy setup', I.spark],
+                 ['server', 'On server', I.server]].map(function (n) {
+                    return '<button type="button" class="vce-nav-item' + (n[0] === navKey ? ' vce-nav-item--on' : '') +
+                        '" data-nav="' + n[0] + '">' + n[2] + esc(n[1]) + '</button>';
+                }).join('') +
+            '</nav>' +
             '<div class="vce-top-spacer"></div>' +
-            '<div class="vce-top-actions" data-top-actions style="display:flex;gap:9px;align-items:center;">' + (actionsHTML || '') + '</div>');
+            '<div class="vce-top-actions">' +
+                '<button type="button" class="vce-btn vce-btn--ghost" data-top="sync">' + I.sync + '<span>Sync all</span></button>' +
+                '<div class="vce-more">' +
+                    '<button type="button" class="vce-kebab" data-top="more" aria-label="More actions" aria-haspopup="true">' + I.dots + '</button>' +
+                    '<div class="vce-menu" data-menu hidden>' +
+                        '<button type="button" data-top="artwork">' + I.image + 'Refresh artwork</button>' +
+                    '</div>' +
+                '</div>' +
+                '<button type="button" class="vce-btn vce-btn--primary" data-top="new">' + I.plus + '<span>New collection</span></button>' +
+            '</div>');
         var x = h('button', 'vce-x', '&times;');
         x.type = 'button';
         x.setAttribute('aria-label', 'Close');
         x.addEventListener('click', close);
         bar.appendChild(x);
         overlay.appendChild(bar);
+
+        var routes = { gallery: showGallery, presets: function () { showPresets(); }, server: showServer };
+        bar.querySelectorAll('[data-nav]').forEach(function (b) {
+            var key = b.getAttribute('data-nav');
+            b.addEventListener('click', navGuard(function () {
+                if (key !== navKey || view !== navKey) routes[key]();
+            }));
+        });
+        bar.querySelector('[data-top="sync"]').addEventListener('click', function (e) { syncAll(e.currentTarget); });
+        bar.querySelector('[data-top="new"]').addEventListener('click', navGuard(function () { newCollection(); }));
+        var menu = bar.querySelector('[data-menu]');
+        bar.querySelector('[data-top="more"]').addEventListener('click', function (e) {
+            e.stopPropagation();
+            menu.hidden = !menu.hidden;
+        });
+        bar.querySelector('[data-top="artwork"]').addEventListener('click', function (e) {
+            menu.hidden = true;
+            refreshArtwork(e.currentTarget);
+        });
+
         var scroll = h('div', 'vce-scroll');
         var page = h('div', 'vce-page');
         scroll.appendChild(page);
         overlay.appendChild(scroll);
         return page;
     }
-    function topBtn(label, icon, cls) {
-        return '<button type="button" class="vce-btn ' + (cls || '') + '" data-top="' + label + '">' +
-            (icon || '') + esc(label) + '</button>';
-    }
-    function wireTop(page, handlers) {
-        overlay.querySelectorAll('[data-top]').forEach(function (b) {
-            var fn = handlers[b.getAttribute('data-top')];
-            if (fn) b.addEventListener('click', function (e) { fn(e.currentTarget); });
-        });
+
+    // In-page back affordance for drill-in views.
+    function backChip(label, fn) {
+        var b = h('button', 'vce-back', I.back + esc(label));
+        b.type = 'button';
+        b.addEventListener('click', fn);
+        return b;
     }
 
     // ── gallery ──────────────────────────────────────────────────────────────
     function showGallery() {
         view = 'gallery';
-        var page = shell(
-            topBtn('Easy setup', I.spark) +
-            topBtn('On server', I.server) +
-            topBtn('Refresh artwork', I.image, 'vce-btn--ghost') +
-            topBtn('Sync all', I.sync) +
-            topBtn('New collection', I.plus, 'vce-btn--primary'));
-        wireTop(page, {
-            'Easy setup': function () { showPresets(); },
-            'On server': function () { showServer(); },
-            'Refresh artwork': refreshArtwork,
-            'Sync all': syncAll,
-            'New collection': function () { newCollection(); }
-        });
+        var page = shell('gallery');
         page.innerHTML = '<div class="vce-loading">Loading…</div>';
         api('', {}).then(function (d) {
             gal.collections = (d && d.collections) || [];
@@ -394,11 +438,11 @@
                 watchSyncAll(btn);
             } else {
                 toast((d && d.error) || 'Sync failed', true);
-                if (btn) { btn.disabled = false; btn.innerHTML = I.sync + 'Sync all'; }
+                if (btn) { btn.disabled = false; btn.innerHTML = I.sync + '<span>Sync all</span>'; }
             }
         }).catch(function () {
             toast('Sync failed', true);
-            if (btn) { btn.disabled = false; btn.innerHTML = I.sync + 'Sync all'; }
+            if (btn) { btn.disabled = false; btn.innerHTML = I.sync + '<span>Sync all</span>'; }
         });
     }
 
@@ -408,7 +452,7 @@
         var hasSocket = (typeof socket !== 'undefined' && socket && socket.on);
 
         function restore() {
-            if (btn && btn.isConnected) { btn.disabled = false; btn.innerHTML = I.sync + 'Sync all'; }
+            if (btn && btn.isConnected) { btn.disabled = false; btn.innerHTML = I.sync + '<span>Sync all</span>'; }
         }
         function stop() {
             if (stopped) return;
@@ -453,8 +497,7 @@
     function showPresets(mediaType) {
         view = 'presets';
         if (mediaType) presetMedia = mediaType;
-        var page = shell(topBtn('Back to gallery', I.back, 'vce-btn--ghost'));
-        wireTop(page, { 'Back to gallery': function () { showGallery(); } });
+        var page = shell('presets');
 
         var head = h('div', 'vce-preshead', '<h2>Easy setup</h2>');
         var tabs = h('div', 'vce-tabs');
@@ -505,8 +548,8 @@
 
     function showPicker(pack) {
         view = 'picker';
-        var page = shell(topBtn('Back to packs', I.back, 'vce-btn--ghost'));
-        wireTop(page, { 'Back to packs': function () { showPresets(); } });
+        var page = shell('presets');
+        page.appendChild(backChip('All packs', function () { showPresets(); }));
 
         var picked = {};
         pack.entries.forEach(function (e) { if (e.suggested && !e.exists) picked[e.key] = true; });
@@ -611,8 +654,7 @@
     // ── server-side collections (cleanup view) ──────────────────────────────
     function showServer() {
         view = 'server';
-        var page = shell(topBtn('Back to gallery', I.back, 'vce-btn--ghost'));
-        wireTop(page, { 'Back to gallery': function () { showGallery(); } });
+        var page = shell('server');
 
         page.appendChild(h('div', 'vce-preshead', '<h2>Collections on your server</h2>'));
         page.appendChild(h('p', 'vce-servnote',
@@ -784,7 +826,7 @@
         ensureOverlay();
         overlay.classList.add('vce-overlay--on');
         view = 'editor';
-        var page = shell('');
+        var page = shell('gallery');   // the editor is a drill-in of Collections
         page.innerHTML = '<div class="vce-loading">Loading…</div>';
         api('/' + id, {}).then(function (d) {
             var c = d && d.collection;
@@ -809,9 +851,8 @@
 
     function renderEditor() {
         view = 'editor';
-        var page = shell(topBtn('Back to gallery', I.back, 'vce-btn--ghost'));
-        wireTop(page, { 'Back to gallery': leaveEditor });
-        page.innerHTML = '';
+        var page = shell('gallery');   // the editor is a drill-in of Collections
+        page.appendChild(backChip('All collections', leaveEditor));
         var cols = h('div', 'vce-editor');
 
         // ── left: definition + builder
