@@ -173,19 +173,53 @@ def _expand_franchises(db, mt: str) -> List[Dict[str, Any]]:
     return out
 
 
+# Studio strings vary per movie ("Hallmark Channel" / "Hallmark Media" /
+# "Hallmark Entertainment" are one brand) — exact-match entries fragmented a
+# studio across variants (Boulder's 23-item Hallmark collection vs ~100 owned).
+# Group by brand and match the variant SET.
+_GENERIC_LEADS = {"the", "new", "a", "an"}      # one word isn't a brand here
+
+
+def _brand_key(studio: str) -> str:
+    words = studio.split()
+    if not words:
+        return studio.casefold()
+    take = 2 if words[0].casefold() in _GENERIC_LEADS and len(words) > 1 else 1
+    return " ".join(w.casefold() for w in words[:take])
+
+
+def _common_word_prefix(names: List[str]) -> str:
+    split = [n.split() for n in names]
+    out = []
+    for parts in zip(*split, strict=False):
+        if len({p.casefold() for p in parts}) == 1:
+            out.append(parts[0])
+        else:
+            break
+    return " ".join(out)
+
+
 def _expand_studios(db, mt: str) -> List[Dict[str, Any]]:
     if mt != "movie":
         return []
-    out = []
-    for s in db.owned_studio_counts(limit=40) or []:
+    groups: Dict[str, list] = {}
+    for s in db.owned_studio_counts(limit=100) or []:
         name = str(s.get("value") or "").strip()
         if not name:
             continue
+        groups.setdefault(_brand_key(name), []).append((name, int(s.get("count") or 0)))
+    out = []
+    for key, variants in groups.items():
+        names = sorted(n for n, _ in variants)
+        label = _common_word_prefix(names) if len(names) > 1 else names[0]
+        label = label or names[0]
+        total = sum(c for _, c in variants)
         out.append(_entry(
-            "studio:" + name, name, s.get("count"),
-            f"Movies from {name}.",
-            definition=_smart([{"field": "studio", "op": "is", "value": name}]),
+            "studio:" + key, label, total,
+            f"Movies from {label}." + (f" Covers {len(names)} label variants." if len(names) > 1 else ""),
+            definition=_smart([{"field": "studio", "op": "in", "value": names}]),
             pack="studios"))
+    out.sort(key=lambda e: -e["count"])
     return out
 
 

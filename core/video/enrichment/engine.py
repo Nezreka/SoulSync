@@ -475,6 +475,22 @@ class VideoEnrichmentEngine:
                 return None
         return hit or None
 
+    def company_logo(self, name) -> str | None:
+        """A studio's TMDB logo URL by name, day-cached."""
+        w = self.workers.get("tmdb")
+        if not w or not w.enabled or not (name or "").strip():
+            return None
+        ck = ("companylogo", name.strip().lower())
+        hit = self._cache_get(ck)
+        if hit is None:
+            try:
+                hit = w.client.company_logo(name) or ""   # "" = cached miss
+                self._cache_put(ck, hit, ttl=86400)
+            except Exception:
+                logger.exception("company logo lookup failed (%s)", name)
+                return None
+        return hit or None
+
     def keyword_id(self, query) -> int | None:
         """TMDB keyword id for a name (day-cached — keyword ids never move).
         Powers the seasonal/themed collection sources."""
