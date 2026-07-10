@@ -538,22 +538,28 @@
                     '\n\nTitles themselves are never touched.';
                 if (!window.confirm(msg)) return;
                 delBtn.disabled = true;
-                delBtn.textContent = 'Deleting…';
                 api('/server/delete', { method: 'POST', body: JSON.stringify({ ids: ids }) }).then(function (r) {
                     if (r && r.ok) {
-                        var bits = [r.deleted + ' deleted'];
-                        if (r.failed && r.failed.length) bits.push(r.failed.length + ' failed');
-                        toast(bits.join(' · '), !!(r.failed && r.failed.length));
-                    } else { toast((r && r.error) || 'Delete failed', true); }
-                    showServer();   // re-read the server
+                        watchCleanup(foot);          // job started — follow it live
+                    } else if (r && /already running/i.test(r.error || '')) {
+                        toast('A cleanup is already running — showing its progress');
+                        watchCleanup(foot);
+                    } else {
+                        toast((r && r.error) || 'Delete failed', true);
+                        delBtn.disabled = false;
+                    }
                 }).catch(function () {
                     toast('Delete failed', true);
                     delBtn.disabled = false;
-                    delBtn.innerHTML = I.trash + 'Delete selected';
                 });
             });
             foot.appendChild(delBtn);
             hostEl.appendChild(foot);
+
+            // A purge may already be running (view re-opened mid-cleanup).
+            api('/server/delete/status', {}).then(function (s) {
+                if (s && s.running && foot.isConnected) watchCleanup(foot);
+            });
 
             function paintRows() {
                 list.innerHTML = '';
@@ -580,6 +586,51 @@
             }
             paintRows();
         });
+    }
+
+    // Follow a running cleanup job: live over the 'collections:cleanup' socket
+    // event (server emits ~1/s), with status polling as the no-socket fallback.
+    // When it finishes, re-read the server list.
+    function watchCleanup(foot) {
+        foot.innerHTML =
+            '<div class="vce-prog"><div class="vce-prog-fill" data-prog-fill></div></div>' +
+            '<span class="vce-selsum" data-prog-label>Deleting…</span>';
+        var fill = foot.querySelector('[data-prog-fill]');
+        var label = foot.querySelector('[data-prog-label]');
+        var stopped = false;
+        var sockFn = null;
+        var hasSocket = (typeof socket !== 'undefined' && socket && socket.on);
+
+        function stop() {
+            if (stopped) return;
+            stopped = true;
+            if (sockFn && socket.off) socket.off('collections:cleanup', sockFn);
+            clearInterval(timer);
+        }
+        function paint(s) {
+            if (stopped || !s) return;
+            if (!foot.isConnected) { stop(); return; }   // view was left
+            var pct = s.total ? Math.round(100 * (s.done || 0) / s.total) : 0;
+            fill.style.width = pct + '%';
+            label.textContent = 'Deleting… ' + (s.done || 0) + ' / ' + (s.total || 0) +
+                (s.failed ? ' · ' + s.failed + ' failed' : '');
+            if (!s.running && s.phase !== 'starting') {
+                stop();
+                if (s.phase === 'error') toast(s.error || 'Cleanup failed', true);
+                else toast('Cleanup done — ' + (s.deleted || 0) + ' deleted' +
+                           (s.failed ? ' · ' + s.failed + ' failed' : ''), !!s.failed);
+                if (view === 'server') showServer();     // fresh read of the server
+            }
+        }
+        if (hasSocket) {
+            sockFn = function (d) { paint(d); };
+            socket.on('collections:cleanup', sockFn);
+        }
+        // Poll as fallback (and as insurance even with a socket — cheap).
+        var timer = setInterval(function () {
+            api('/server/delete/status', {}).then(paint);
+        }, hasSocket ? 5000 : 1500);
+        api('/server/delete/status', {}).then(paint);    // paint immediately
     }
 
     // ── editor ───────────────────────────────────────────────────────────────

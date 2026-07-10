@@ -241,6 +241,8 @@ textarea.vce-input { resize: vertical; min-height: 58px; }
 .vce-tag--ok { background: rgba(74,222,128,.14); color: #4ade80; }
 .vce-tag--warn { background: rgba(255,170,40,.16); color: #ffbe55; }
 .vce-servnote { font-size: 12px; line-height: 1.55; color: rgba(255,255,255,.45); margin: 0 0 16px; max-width: 700px; }
+.vce-prog { flex: 1; min-width: 160px; height: 8px; border-radius: 99px; background: rgba(255,255,255,.08); overflow: hidden; }
+.vce-prog-fill { height: 100%; width: 0%; background: rgb(var(--a)); border-radius: 99px; transition: width .4s ease; }
 .vce-picker-foot {
     position: sticky; bottom: 0; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
     margin-top: 18px; padding: 14px 16px; border-radius: 14px;
