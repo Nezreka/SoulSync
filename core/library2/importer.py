@@ -228,8 +228,8 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
     ``database`` is a ``MusicDatabase`` instance (we use its ``_get_connection``).
     ``reset`` wipes the v2 tables first. ``progress(stage, current, total)`` is an
     optional callback for UI progress. ``profile_id`` scopes the watchlist/
-    wishlist-derived monitoring to one user profile (None = legacy behavior,
-    read everything).
+    wishlist-derived monitoring to the admin profile. Omitting it is an alias
+    for admin profile 1, never for an all-profile import.
 
     ADR-01 (admin-only): only the admin profile may drive this import. The
     lib2 monitored flags are GLOBAL columns derived from exactly one
@@ -237,10 +237,13 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
     overwrite the admin's monitoring intent for everyone (audit P0-02).
     """
     from core.library2 import ADMIN_PROFILE_ID
-    if profile_id is not None and int(profile_id) != ADMIN_PROFILE_ID:
+    effective_profile_id = (ADMIN_PROFILE_ID if profile_id is None
+                            else int(profile_id))
+    if effective_profile_id != ADMIN_PROFILE_ID:
         raise ValueError(
             f"Library v2 import is admin-only (ADR-01): got profile_id={profile_id}, "
             f"expected {ADMIN_PROFILE_ID}")
+    profile_id = effective_profile_id
     stats = {
         "artists": 0,
         "albums": 0,
@@ -542,7 +545,7 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
     so the Lidarr-style UI can show the concrete songs as monitored + missing.
     Importantly, a wishlisted song must not make the whole artist monitored:
     artist-level monitoring is the watchlist's job.
-    ``profile_id`` scopes to one user profile's wishlist (None = all).
+    ``profile_id`` is restricted to the admin wishlist (None = admin profile).
     """
     if not _table_exists(cursor, "wishlist_tracks"):
         return 0
@@ -747,14 +750,22 @@ def _table_exists(cursor, name: str) -> bool:
 
 
 def _profile_filter(cursor, table: str, profile_id: Optional[int]) -> Tuple[str, tuple]:
-    """WHERE fragment scoping a legacy table to one user profile.
+    """WHERE fragment that enforces Library-v2's admin-only legacy scope.
 
-    Empty when no ``profile_id`` is given (single-profile installs / legacy
-    behavior) or the table predates the ``profile_id`` column.
+    Tables predating the ``profile_id`` column are necessarily treated as the
+    single admin library. On profile-aware tables, ``None`` means admin profile
+    1, never all profiles.
     """
-    if profile_id is None or "profile_id" not in _existing_columns(cursor, table):
+    if "profile_id" not in _existing_columns(cursor, table):
         return "", ()
-    return "profile_id = ?", (int(profile_id),)
+    from core.library2 import ADMIN_PROFILE_ID
+    effective_profile_id = (ADMIN_PROFILE_ID if profile_id is None
+                            else int(profile_id))
+    if effective_profile_id != ADMIN_PROFILE_ID:
+        raise ValueError(
+            f"Library v2 legacy scope is admin-only: got profile_id={profile_id}, "
+            f"expected {ADMIN_PROFILE_ID}")
+    return "profile_id = ?", (effective_profile_id,)
 
 
 def apply_monitoring_from_watchlist_wishlist(cursor, profile_id: Optional[int] = None) -> None:
@@ -774,9 +785,9 @@ def apply_monitoring_from_watchlist_wishlist(cursor, profile_id: Optional[int] =
     choices must not be turned off just because the wishlist row disappeared.
     No-op when those tables are absent (unit-test DBs).
 
-    ``profile_id`` scopes the derivation to one user profile's watchlist/
-    wishlist rows so Library v2 doesn't leak another profile's wanted state
-    into this view. ``None`` keeps the legacy read-everything behavior.
+    ``profile_id`` is restricted to the admin watchlist/wishlist so Library v2
+    cannot leak another profile's wanted state into its global flags. ``None``
+    means admin profile 1.
     """
     # Artists ← watchlist
     if _table_exists(cursor, "watchlist_artists"):

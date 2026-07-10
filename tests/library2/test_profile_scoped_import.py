@@ -5,7 +5,12 @@ from __future__ import annotations
 
 import json
 
-from core.library2.importer import apply_monitoring_from_watchlist_wishlist
+import pytest
+
+from core.library2.importer import (
+    apply_monitoring_from_watchlist_wishlist,
+    import_legacy_library,
+)
 
 
 def _seed_legacy_monitor_tables(conn):
@@ -65,7 +70,7 @@ def test_profile_scope_filters_monitoring(imported_conn):
     assert tracks["sp-t2"] == 0  # profile 2's wishlist must not leak
 
 
-def test_no_profile_reads_everything(imported_conn):
+def test_no_profile_defaults_to_admin(imported_conn):
     conn = imported_conn
     _seed_legacy_monitor_tables(conn)
     drake, adele = _seed_lib2(conn)
@@ -77,4 +82,41 @@ def test_no_profile_reads_everything(imported_conn):
     monitored = {r["name"]: r["monitored"] for r in conn.execute(
         "SELECT name, monitored FROM lib2_artists WHERE id IN (?,?)", (drake, adele))}
     assert monitored["Drake"] == 1
-    assert monitored["Adele"] == 1  # legacy behavior: all profiles
+    assert monitored["Adele"] == 0
+
+
+def test_monitoring_helper_rejects_nonadmin_profile(imported_conn):
+    conn = imported_conn
+    _seed_legacy_monitor_tables(conn)
+
+    with pytest.raises(ValueError, match="admin-only"):
+        apply_monitoring_from_watchlist_wishlist(conn.cursor(), profile_id=2)
+
+
+def test_import_without_profile_uses_admin_only(legacy_db):
+    conn = legacy_db._get_connection()
+    conn.execute(
+        "INSERT INTO artists(id, name, spotify_artist_id) "
+        "VALUES(2, 'Adele', 'sp-adele')")
+    conn.execute("""CREATE TABLE watchlist_artists(
+        id INTEGER PRIMARY KEY, artist_name TEXT, spotify_artist_id TEXT,
+        musicbrainz_artist_id TEXT, profile_id INTEGER DEFAULT 1)""")
+    conn.execute(
+        "INSERT INTO watchlist_artists(artist_name, spotify_artist_id, profile_id) "
+        "VALUES('Drake', 'sp1', 1)")
+    conn.execute(
+        "INSERT INTO watchlist_artists(artist_name, spotify_artist_id, profile_id) "
+        "VALUES('Adele', 'sp-adele', 2)")
+    conn.commit()
+    conn.close()
+
+    import_legacy_library(legacy_db)
+
+    conn = legacy_db._get_connection()
+    monitored = {
+        row["name"]: row["monitored"]
+        for row in conn.execute(
+            "SELECT name, monitored FROM lib2_artists WHERE name IN ('Drake', 'Adele')")
+    }
+    conn.close()
+    assert monitored == {"Drake": 1, "Adele": 0}
