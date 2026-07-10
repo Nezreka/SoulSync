@@ -5655,6 +5655,25 @@ function _updateOverlayBell() {
     const btn = document.getElementById('notif-bell-btn');
     if (btn) btn.classList.toggle('notif-bell-working',
         _overlayTaskActive() || _colSyncTaskActive() || _colArtTaskActive());
+    _ensureTaskPolling();
+}
+
+// Insurance while any task is active: re-seed from the status endpoints every
+// 12s so a missed final socket event (tab throttled, socket hiccup) can never
+// strand an Active card in its last "running" state. Stops itself when idle.
+let _taskPollTimer = null;
+function _ensureTaskPolling() {
+    const active = _overlayTaskActive() || _colSyncTaskActive() || _colArtTaskActive();
+    if (active && !_taskPollTimer) {
+        _taskPollTimer = setInterval(() => {
+            _seedOverlayTask();
+            _seedCollectionSyncTask();
+            _seedCollectionArtTask();
+        }, 12000);
+    } else if (!active && _taskPollTimer) {
+        clearInterval(_taskPollTimer);
+        _taskPollTimer = null;
+    }
 }
 
 // ── Active artwork-refresh task ('collections:artwork' socket event) ───────────
