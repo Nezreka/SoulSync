@@ -664,6 +664,8 @@ CREATE TABLE IF NOT EXISTS collection_definitions (
     pinned           INTEGER NOT NULL DEFAULT 0,      -- promote to home/library
     wishlist_missing INTEGER NOT NULL DEFAULT 0,      -- 'list' kind: wishlist unowned members
     enabled          INTEGER NOT NULL DEFAULT 1,      -- included in the daily sync
+    window_start     TEXT,                            -- seasonal window 'MM-DD' (with window_end):
+    window_end       TEXT,                            --   in-window syncs; out-of-window removes ours
     created_at       TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
 );

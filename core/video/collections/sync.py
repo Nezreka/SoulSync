@@ -62,20 +62,72 @@ def _dedup(seq) -> List[str]:
     return out
 
 
+# ── seasonal windows ─────────────────────────────────────────────────────────
+_MD_RE = None   # compiled lazily (module import stays cheap)
+
+
+def _parse_md(s) -> tuple | None:
+    """'MM-DD' → (month, day), or None when absent/invalid."""
+    global _MD_RE
+    if not s or not isinstance(s, str):
+        return None
+    if _MD_RE is None:
+        import re
+        _MD_RE = re.compile(r"^(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$")
+    m = _MD_RE.match(s.strip())
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def in_season(definition, today=None) -> bool:
+    """Whether a definition's seasonal window covers today (inclusive). No/
+    invalid window → always in season. Windows may wrap the year end
+    ('12-26' → '01-08'). ``today`` injectable for tests."""
+    start = _parse_md((definition or {}).get("window_start"))
+    end = _parse_md((definition or {}).get("window_end"))
+    if not start or not end:
+        return True
+    if today is None:
+        import datetime
+        today = datetime.date.today()
+    md = (today.month, today.day)
+    if start <= end:
+        return start <= md <= end
+    return md >= start or md <= end   # wraps the year end
+
+
 def sync_collection(db, definition: Dict[str, Any], *, source,
                     list_fetcher: Optional[Callable] = None, force: bool = False,
-                    poster_generator: Optional[Callable] = None) -> Dict[str, Any]:
+                    poster_generator: Optional[Callable] = None,
+                    today=None) -> Dict[str, Any]:
     """Sync one collection definition (a full row from ``get_collection_definition``)
     to ``source``. Returns a result dict with ``ok`` and, on success,
     ``server_id``/``added``/``removed``/``total``/``missing`` (or ``skipped``).
     ``poster_generator(definition, owned) -> poster_url|None`` (injected by the
     live entry points) gives a poster-less collection generated collage art
-    before its first push — art is default-on, never a manual chore."""
+    before its first push — art is default-on, never a manual chore.
+    Seasonal windows: out-of-window, the sync REMOVES our server collection
+    (ledger-verified — never a name-matched or foreign object) so seasonal
+    shelves appear for the holiday and disappear after it."""
     did = definition.get("id")
     name = (definition.get("name") or "").strip() or "Untitled collection"
     media_type = definition.get("media_type") or "movie"
     kind = media_type   # 'movie' | 'show'
     sync_mode = (definition.get("sync_mode") or "sync").lower()
+
+    if not in_season(definition, today=today):
+        removed_server = False
+        prev = db.get_collection_sync(did) if did is not None else None
+        if (prev and prev.get("server_source") == source.server_name
+                and prev.get("server_id")):
+            try:
+                r = source.delete_collection(str(prev["server_id"]))
+                removed_server = bool(r.get("ok"))
+            except Exception:   # noqa: BLE001 - off-season removal is best-effort
+                logger.debug("out-of-season removal failed for %s", did, exc_info=True)
+            if removed_server:
+                db.delete_collection_sync(did)
+        return {"ok": True, "skipped": "out_of_season", "definition_id": did,
+                "name": name, "removed_server": removed_server}
 
     res: ResolvedCollection = resolve_collection(db, definition, list_fetcher=list_fetcher)
     if not res.ok:
@@ -323,4 +375,5 @@ def sync_one_now(db, definition_id, *, force: bool = False) -> Dict[str, Any]:
 
 
 __all__ = ["sync_collection", "sync_all_collections", "members_signature",
-           "wishlist_missing_movies", "run_sync", "sync_one_now", "get_collection_source"]
+           "wishlist_missing_movies", "run_sync", "sync_one_now", "get_collection_source",
+           "in_season"]

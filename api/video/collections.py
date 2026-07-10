@@ -31,7 +31,15 @@ from utils.logging_config import get_logger
 logger = get_logger("video_api.collections")
 
 _UPDATABLE = ("name", "kind", "media_type", "definition", "poster_url", "summary",
-              "sort_order", "sync_mode", "pinned", "wishlist_missing", "enabled")
+              "sort_order", "sync_mode", "pinned", "wishlist_missing", "enabled",
+              "window_start", "window_end")
+
+
+def _clean_md(v):
+    """A seasonal-window value: valid 'MM-DD' passes, '' clears, junk → ''."""
+    import re
+    v = (str(v).strip() if v is not None else "")
+    return v if re.match(r"^(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$", v) else ""
 
 
 def _sample_members(rows, limit=24):
@@ -44,8 +52,13 @@ def register_routes(bp):
     @bp.route("/collections", methods=["GET"])
     def collections_list():
         from . import get_video_db
+        from core.video.collections.sync import in_season
         try:
-            return jsonify({"collections": get_video_db().list_collection_definitions()})
+            rows = get_video_db().list_collection_definitions()
+            for r in rows:
+                # Only meaningful when a window is set; None = not seasonal.
+                r["in_season"] = in_season(r) if (r.get("window_start") and r.get("window_end")) else None
+            return jsonify({"collections": rows})
         except Exception:
             logger.exception("list collections failed")
             return jsonify({"collections": [], "error": "Failed to load collections"}), 500
@@ -62,7 +75,9 @@ def register_routes(bp):
                 summary=d.get("summary"), sort_order=d.get("sort_order", "release"),
                 sync_mode=d.get("sync_mode", "sync"), pinned=bool(d.get("pinned")),
                 wishlist_missing=bool(d.get("wishlist_missing")),
-                enabled=False if d.get("enabled") is False else True)
+                enabled=False if d.get("enabled") is False else True,
+                window_start=_clean_md(d.get("window_start")),
+                window_end=_clean_md(d.get("window_end")))
             if cid is None:
                 return jsonify({"ok": False, "error": "Could not create collection"}), 500
             # Art is default-on: a poster-less collection gets its collage
@@ -87,6 +102,9 @@ def register_routes(bp):
         from . import get_video_db
         d = request.get_json(silent=True) or {}
         fields = {k: d[k] for k in _UPDATABLE if k in d}
+        for w in ("window_start", "window_end"):
+            if w in fields:
+                fields[w] = _clean_md(fields[w])
         try:
             return jsonify({"ok": get_video_db().update_collection_definition(cid, **fields)})
         except Exception:
