@@ -329,6 +329,49 @@ def register_routes(bp):
                         "count": len(res.owned), "missing_count": len(res.missing),
                         "sample": _sample_members(res.owned)})
 
+    @bp.route("/collections/<int:cid>/missing", methods=["GET"])
+    def collections_missing(cid):
+        """The titles a list collection's source has that the library doesn't —
+        the acquisition view behind the preview's '+N missing' badge."""
+        from . import get_video_db
+        from core.video.collections.list_sources import build_list_fetcher
+        from core.video.collections.resolver import resolve_collection
+        db = get_video_db()
+        c = db.get_collection_definition(cid)
+        if not c:
+            return jsonify({"ok": False, "error": "not found"}), 404
+        res = resolve_collection(db, c, list_fetcher=build_list_fetcher(db))
+        if not res.ok:
+            return jsonify({"ok": False, "error": res.error})
+        return jsonify({"ok": True, "count": len(res.missing), "missing": res.missing})
+
+    @bp.route("/collections/<int:cid>/wishlist_missing", methods=["POST"])
+    def collections_wishlist_missing(cid):
+        """Wishlist a collection's missing members ON DEMAND (the browser's
+        'wishlist all' / per-title buttons) — an explicit user action, so it
+        works regardless of the collection's nightly wishlist toggle. Optional
+        {tmdb_ids: [...]} restricts to a subset."""
+        from . import get_video_db
+        from core.video.collections.list_sources import build_list_fetcher
+        from core.video.collections.resolver import resolve_collection
+        from core.video.collections.sync import wishlist_missing_members
+        db = get_video_db()
+        c = db.get_collection_definition(cid)
+        if not c:
+            return jsonify({"ok": False, "error": "not found"}), 404
+        res = resolve_collection(db, c, list_fetcher=build_list_fetcher(db))
+        if not res.ok:
+            return jsonify({"ok": False, "error": res.error})
+        missing = res.missing
+        d = request.get_json(silent=True) or {}
+        if d.get("tmdb_ids"):
+            want = {int(x) for x in d["tmdb_ids"] if str(x).strip().isdigit()}
+            missing = [m for m in missing if int(m["tmdb_id"]) in want]
+        # Explicit action: force the wishlist gate open for this run only.
+        added = wishlist_missing_members(db, dict(c, wishlist_missing=True), missing)
+        return jsonify({"ok": True, "added": added,
+                        "unit": "episodes" if (c.get("media_type") == "show") else "movies"})
+
     @bp.route("/collections/<int:cid>/sync", methods=["POST"])
     def collections_sync_one(cid):
         from . import get_video_db
