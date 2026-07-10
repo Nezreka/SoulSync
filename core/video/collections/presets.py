@@ -360,9 +360,9 @@ def _owned_counts(db, mt: str, specs, fetcher) -> List[Optional[tuple]]:
 
 
 def _remote_entry(key, name, count, summary, definition, pack, mt) -> Dict[str, Any]:
-    # wishlist tie-in is movies-only today (wishlist_missing_movies in sync).
+    # Movies wishlist as movie rows; shows expand into aired-episode rows.
     e = _entry(key, name, (count or (0, 0))[0], summary, kind="list",
-               definition=definition, pack=pack, wishlist_capable=(mt == "movie"))
+               definition=definition, pack=pack, wishlist_capable=True)
     if count is None:
         e["count"] = None            # fetch failed/offline — resolves on sync
         e["suggested"] = pack in ("charts", "universes")
