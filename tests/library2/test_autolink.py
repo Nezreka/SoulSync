@@ -127,3 +127,70 @@ def test_idempotent_relink_updates_not_duplicates(lib2_enabled, imported_conn):
     assert imported_conn.execute(
         "SELECT COUNT(*) c FROM lib2_track_files WHERE path LIKE '%Nonstop%'"
     ).fetchone()["c"] == 1
+
+
+def test_direct_entity_link_beats_name_heuristics(lib2_enabled, imported_conn):
+    """A grab that started from Library v2 carries the server-resolved entity
+    (audit P1-16). The file must land on THAT track even when the download's
+    metadata names something the heuristics would match elsewhere."""
+    conn = lib2_enabled._get_connection()
+    artist_id = conn.execute("SELECT id FROM lib2_artists WHERE name='Drake'").fetchone()["id"]
+    conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title, album_type) "
+        "VALUES(?, 'Care Package', 'album')", (artist_id,))
+    album_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    conn.execute(
+        "INSERT INTO lib2_album_artists(album_id, artist_id) VALUES(?,?)", (album_id, artist_id))
+    conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title, track_number, monitored) "
+        "VALUES(?, 'Nonstop', 1, 1)", (album_id,))
+    target_track = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    conn.commit()
+    conn.close()
+
+    file_id = A.link_download_into_library_v2(_context(
+        lib2_entity={"track_id": target_track, "album_id": album_id,
+                     "quality_profile_id": 1}))
+    assert file_id is not None
+    row = imported_conn.execute(
+        "SELECT track_id FROM lib2_track_files WHERE id=?", (file_id,)).fetchone()
+    assert row["track_id"] == target_track
+    # No new Scorpion album was created from the metadata (heuristics skipped).
+    assert imported_conn.execute(
+        "SELECT COUNT(*) c FROM lib2_albums WHERE title='Scorpion'").fetchone()["c"] == 0
+
+
+def test_direct_album_link_creates_track_inside_that_album(lib2_enabled, imported_conn):
+    conn = lib2_enabled._get_connection()
+    artist_id = conn.execute("SELECT id FROM lib2_artists WHERE name='Drake'").fetchone()["id"]
+    conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title, album_type) "
+        "VALUES(?, 'Care Package', 'album')", (artist_id,))
+    album_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    conn.execute(
+        "INSERT INTO lib2_album_artists(album_id, artist_id) VALUES(?,?)", (album_id, artist_id))
+    conn.commit()
+    conn.close()
+
+    file_id = A.link_download_into_library_v2(_context(
+        lib2_entity={"album_id": album_id, "quality_profile_id": 1}))
+    assert file_id is not None
+    row = imported_conn.execute(
+        """SELECT t.album_id FROM lib2_track_files tf
+           JOIN lib2_tracks t ON t.id = tf.track_id WHERE tf.id=?""",
+        (file_id,)).fetchone()
+    assert row["album_id"] == album_id
+
+
+def test_stale_entity_falls_back_to_heuristics(lib2_enabled, imported_conn):
+    """The named track was deleted between grab and import — fall back to the
+    heuristic path rather than dropping the link entirely."""
+    file_id = A.link_download_into_library_v2(_context(
+        lib2_entity={"track_id": 999999, "album_id": 999999,
+                     "quality_profile_id": 1}))
+    assert file_id is not None
+    row = imported_conn.execute(
+        """SELECT t.title FROM lib2_track_files tf
+           JOIN lib2_tracks t ON t.id = tf.track_id WHERE tf.id=?""",
+        (file_id,)).fetchone()
+    assert row["title"] == "Nonstop"

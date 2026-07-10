@@ -151,10 +151,17 @@ def link_download_into_library_v2(context: Dict[str, Any]) -> Optional[int]:
         if not file_path:
             return None
 
+        # A grab that started from Library v2 carries the server-resolved
+        # entity (audit P1-16) — the file links to that exact row, no
+        # heuristic re-matching. Without it, fall back to name matching.
+        lib2_ctx = context.get("lib2_entity") or {}
+        direct_track_id = lib2_ctx.get("track_id")
+        direct_album_id = lib2_ctx.get("album_id")
+
         ti = context.get("track_info") or context.get("search_result") or {}
         title = _get(ti, "name", "title")
         artist_name = _primary_artist_name(ti)
-        if not title or not artist_name:
+        if not direct_track_id and not direct_album_id and (not title or not artist_name):
             return None
         album_name = _get(ti, "album") or title
 
@@ -177,15 +184,35 @@ def link_download_into_library_v2(context: Dict[str, Any]) -> Optional[int]:
         db = get_database()
         conn = db._get_connection()
         try:
-            artist_id = _find_or_create_artist(conn, artist_name)
-            if artist_id is None:
-                return None
-            album_id = _find_or_create_album(
-                conn, artist_id, album_name,
-                album_type=album_type, spotify_album_id=spotify_album_id)
-            track_id = _find_or_create_track(
-                conn, album_id, artist_id, title,
-                track_number=track_number, spotify_track_id=spotify_track_id)
+            track_id = album_id = None
+            if direct_track_id:
+                row = conn.execute(
+                    "SELECT id, album_id FROM lib2_tracks WHERE id=?",
+                    (direct_track_id,)).fetchone()
+                if row:
+                    track_id, album_id = row["id"], row["album_id"]
+            elif direct_album_id:
+                row = conn.execute(
+                    "SELECT id, primary_artist_id FROM lib2_albums WHERE id=?",
+                    (direct_album_id,)).fetchone()
+                if row and title:
+                    album_id = row["id"]
+                    track_id = _find_or_create_track(
+                        conn, album_id, row["primary_artist_id"], title,
+                        track_number=track_number, spotify_track_id=spotify_track_id)
+            if track_id is None:
+                # Entity gone or absent — heuristic name matching as before.
+                if not title or not artist_name:
+                    return None
+                artist_id = _find_or_create_artist(conn, artist_name)
+                if artist_id is None:
+                    return None
+                album_id = _find_or_create_album(
+                    conn, artist_id, album_name,
+                    album_type=album_type, spotify_album_id=spotify_album_id)
+                track_id = _find_or_create_track(
+                    conn, album_id, artist_id, title,
+                    track_number=track_number, spotify_track_id=spotify_track_id)
 
             fmt = file_path.rsplit(".", 1)[-1].lower() if "." in file_path else None
             bitrate = sample_rate = bit_depth = None

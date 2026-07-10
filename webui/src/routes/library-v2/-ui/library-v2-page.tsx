@@ -30,6 +30,7 @@ import {
   startLibraryV2Import,
   startLibraryV2UpgradeScan,
   unlinkLibraryV2Duplicate,
+  type Lib2EntityRef,
   type LibraryV2AlbumType,
 } from '../-library-v2.api';
 import type {
@@ -49,6 +50,11 @@ interface QpTarget {
   currentProfileId: number;
   title: string;
 }
+
+/** Row/toolbar action dispatch: the label drives the behaviour, the optional
+ *  entity ref carries WHICH lib2 track/album the action is for so grabs keep
+ *  their entity + quality-profile context (audit P1-16/P1-17). */
+type ActionHandler = (action: string, entity?: Lib2EntityRef) => void;
 
 function trackProgress(present: number, total: number): string {
   return `${present}/${total}`;
@@ -1058,7 +1064,10 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   const [refreshing, setRefreshing] = useState(false);
   const [discographyBusy, setDiscographyBusy] = useState(false);
   const [upgradeScanBusy, setUpgradeScanBusy] = useState(false);
-  const [modalAction, setModalAction] = useState<string | null>(null);
+  const [modalAction, setModalAction] = useState<{
+    action: string;
+    entity?: Lib2EntityRef;
+  } | null>(null);
   const [showMonitoring, setShowMonitoring] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showMaintenance, setShowMaintenance] = useState(false);
@@ -1161,7 +1170,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   /** Route a toolbar/row action: Interactive Search opens the window;
    *  Search Monitored runs the wishlist processor; per-track Search / Grab
    *  auto-searches and downloads the best result for that specific track. */
-  function handleAction(action: string) {
+  function handleAction(action: string, entity?: Lib2EntityRef) {
     if (action === 'Quality Profile' && artist) {
       setQpTarget({
         entity: 'artists',
@@ -1172,7 +1181,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
       return;
     }
     if (INTERACTIVE_RE.test(action)) {
-      setModalAction(action);
+      setModalAction({ action, entity });
       return;
     }
     if (SEARCH_MONITORED_RE.test(action)) {
@@ -1182,7 +1191,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
     if (AUTO_GRAB_RE.test(action)) {
       const query = buildSearchQuery(artistName, action);
       setGrabBanner({ tone: 'busy', text: `Searching "${query}"…` });
-      void autoGrabBest(query)
+      void autoGrabBest(query, {}, entity)
         .then((best) => {
           if (!best) {
             setGrabBanner({ tone: 'err', text: `No results for "${query}".` });
@@ -1406,10 +1415,11 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             }
             onEdit={setEditAlbumTarget}
           />
-          {modalAction && INTERACTIVE_RE.test(modalAction) ? (
+          {modalAction && INTERACTIVE_RE.test(modalAction.action) ? (
             <InteractiveSearchModal
-              initialQuery={buildSearchQuery(artist.name, modalAction)}
+              initialQuery={buildSearchQuery(artist.name, modalAction.action)}
               qualityProfile={artist.quality_profile}
+              entity={modalAction.entity}
               onClose={() => setModalAction(null)}
             />
           ) : null}
@@ -1497,7 +1507,7 @@ function AlbumGroup({
   albums: LibraryV2AlbumSummary[];
   artistId: number;
   scope: 'albums' | 'eps' | 'singles';
-  onAction: (action: string) => void;
+  onAction: ActionHandler;
   onQualityProfile: (target: QpTarget) => void;
   onDelete: (album: LibraryV2AlbumSummary) => void;
   onRetag: (album: LibraryV2AlbumSummary) => void;
@@ -1566,7 +1576,7 @@ function AlbumBlock({
   onEdit,
 }: {
   album: LibraryV2AlbumSummary;
-  onAction: (action: string) => void;
+  onAction: ActionHandler;
   onQualityProfile: (target: QpTarget) => void;
   onDelete: (album: LibraryV2AlbumSummary) => void;
   onRetag: (album: LibraryV2AlbumSummary) => void;
@@ -1611,7 +1621,16 @@ function AlbumBlock({
         )}
         <span className={styles.albumActions}>
           <IconActionButton icon="search" title="Search Monitored" onClick={() => onAction(`Search Monitored: ${album.title}`)} />
-          <IconActionButton icon="interactive" title="Interactive Search" onClick={() => onAction(`Interactive Search: ${album.title}`)} />
+          <IconActionButton
+            icon="interactive"
+            title="Interactive Search"
+            onClick={() =>
+              onAction(`Interactive Search: ${album.title}`, {
+                albumId: album.id,
+                qualityProfileId: album.quality_profile_id,
+              })
+            }
+          />
           <IconActionButton
             icon="profile"
             title="Quality Profile"
@@ -1657,7 +1676,7 @@ function AlbumTrackTable({
   albumId: number;
   /** Discography-only releases materialize their provider tracklist on expand. */
   resolve?: boolean;
-  onAction: (action: string) => void;
+  onAction: ActionHandler;
 }) {
   const albumQuery = useQuery(libraryV2AlbumQueryOptions(albumId, { resolve }));
   const album = albumQuery.data;
@@ -1681,7 +1700,13 @@ function AlbumTrackTable({
         </thead>
         <tbody>
           {album.tracks.map((track, i) => (
-            <TrackRow key={track.id ?? `missing-${i}`} track={track} albumTitle={album.title} onAction={onAction} />
+            <TrackRow
+              key={track.id ?? `missing-${i}`}
+              track={track}
+              albumTitle={album.title}
+              entityBase={{ albumId: album.id, qualityProfileId: album.quality_profile?.id }}
+              onAction={onAction}
+            />
           ))}
         </tbody>
       </table>
@@ -1692,14 +1717,17 @@ function AlbumTrackTable({
 function TrackRow({
   track,
   albumTitle,
+  entityBase,
   onAction,
 }: {
   track: LibraryV2Track;
   albumTitle: string;
-  onAction: (action: string) => void;
+  entityBase: Lib2EntityRef;
+  onAction: ActionHandler;
 }) {
   const missing = track.file_status === 'missing';
   const label = track.title ?? `Track ${track.track_number ?? '?'} - missing`;
+  const entity: Lib2EntityRef = { ...entityBase, ...(track.id ? { trackId: track.id } : {}) };
   return (
     <tr className={missing ? styles.missingRow : styles.staticRow}>
       <td>
@@ -1743,19 +1771,19 @@ function TrackRow({
           icon="search"
           title="Search"
           disabled={!track.id}
-          onClick={() => onAction(`Search: ${label} (${albumTitle})`)}
+          onClick={() => onAction(`Search: ${label} (${albumTitle})`, entity)}
         />
         <IconActionButton
           icon="interactive"
           title="Interactive Search"
           disabled={!track.id}
-          onClick={() => onAction(`Interactive Search: ${label} (${albumTitle})`)}
+          onClick={() => onAction(`Interactive Search: ${label} (${albumTitle})`, entity)}
         />
         <IconActionButton
           icon="download"
           title="Grab / Download"
           disabled={!track.id}
-          onClick={() => onAction(`Grab Release: ${label} (${albumTitle})`)}
+          onClick={() => onAction(`Grab Release: ${label} (${albumTitle})`, entity)}
         />
       </td>
     </tr>

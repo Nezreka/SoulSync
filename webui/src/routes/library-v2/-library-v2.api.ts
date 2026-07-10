@@ -490,6 +490,23 @@ export interface DownloadOptions {
   qualityCheck?: boolean;
 }
 
+/** The Library-v2 entity a manual grab acts for. Only the ids travel — the
+ *  server re-validates them and resolves the entity's EFFECTIVE quality
+ *  profile itself, so the client can't dictate the profile (audit P1-16).
+ *  `qualityProfileId` is display-only (search-modal preview badge). */
+export interface Lib2EntityRef {
+  trackId?: number;
+  albumId?: number;
+  qualityProfileId?: number;
+}
+
+function lib2EntityFields(entity?: Lib2EntityRef): Record<string, number> {
+  return {
+    ...(entity?.trackId ? { lib2_track_id: entity.trackId } : {}),
+    ...(entity?.albumId ? { lib2_album_id: entity.albumId } : {}),
+  };
+}
+
 export async function searchSources(query: string, source?: string): Promise<SourceSearchResult[]> {
   const payload = await readJson<{ results?: SourceSearchResult[]; error?: string }>(
     apiClient.post('search', {
@@ -516,10 +533,12 @@ export async function listSearchSources(): Promise<string[]> {
 export async function startSourceDownload(
   result: SourceSearchResult,
   options: DownloadOptions = {},
+  entity?: Lib2EntityRef,
 ): Promise<void> {
   const checks = {
     skip_acoustid: options.skipAcoustid === true,
     quality_check: options.qualityCheck !== false,
+    ...lib2EntityFields(entity),
   };
   const json =
     result.result_type === 'album'
@@ -550,16 +569,21 @@ export async function startSourceDownload(
 export async function autoGrabBest(
   query: string,
   options: DownloadOptions = {},
+  entity?: Lib2EntityRef,
 ): Promise<SourceSearchResult | null> {
   const all = await searchSources(query);
   if (all.length === 0) return null;
+  // A track action must not grab a release-bundle result (audit P1-18):
+  // the pipeline would import one arbitrary file of a whole album.
+  const pool = entity?.trackId ? all.filter((r) => r.result_type === 'track') : all;
+  if (pool.length === 0) return null;
   // Prefer lossless, then highest quality_score, then most upload slots.
   const score = (r: SourceSearchResult) => {
     const q = (r.quality ?? r.dominant_quality ?? '').toLowerCase();
     const lossless = q.includes('flac') || q.includes('alac') || q.includes('wav') ? 1 : 0;
     return lossless * 1e6 + (r.quality_score ?? 0) * 100 + (r.free_upload_slots ?? 0);
   };
-  const best = [...all].sort((a, b) => score(b) - score(a))[0];
-  await startSourceDownload(best, options);
+  const best = [...pool].sort((a, b) => score(b) - score(a))[0];
+  await startSourceDownload(best, options, entity);
   return best;
 }

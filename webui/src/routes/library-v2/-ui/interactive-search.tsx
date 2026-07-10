@@ -1,6 +1,13 @@
+import { useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 
-import { searchSources, startSourceDownload, type SourceSearchResult } from '../-library-v2.api';
+import {
+  libraryV2QualityProfilesQueryOptions,
+  searchSources,
+  startSourceDownload,
+  type Lib2EntityRef,
+  type SourceSearchResult,
+} from '../-library-v2.api';
 import type { LibraryV2QualityProfile, LibraryV2RankedTarget } from '../-library-v2.types';
 import styles from './library-v2-page.module.css';
 
@@ -258,13 +265,29 @@ function ProfileBadge({
 export function InteractiveSearchModal({
   initialQuery,
   qualityProfile,
+  entity,
   onClose,
 }: {
   initialQuery: string;
+  /** The artist's profile — fallback when the action has no album context. */
   qualityProfile?: LibraryV2QualityProfile | null;
+  /** Which lib2 entity grabs from this window act for. Sent with every grab
+   *  so the pipeline keeps entity + profile context (audit P1-16). */
+  entity?: Lib2EntityRef;
   onClose: () => void;
 }) {
   const [query, setQuery] = useState(initialQuery);
+  // Album/track actions use the ALBUM's own profile for the preview badge,
+  // not the artist's (audit P1-17). The authoritative profile is resolved
+  // server-side from the entity ids on grab either way.
+  const profilesQuery = useQuery({
+    ...libraryV2QualityProfilesQueryOptions(),
+    enabled: entity?.qualityProfileId != null,
+  });
+  const effectiveProfile =
+    entity?.qualityProfileId != null
+      ? (profilesQuery.data?.find((p) => p.id === entity.qualityProfileId) ?? qualityProfile)
+      : qualityProfile;
   const [results, setResults] = useState<SourceSearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -342,7 +365,7 @@ export function InteractiveSearchModal({
     const key = resultKey(r);
     setGrabbed((g) => ({ ...g, [key]: 'pending' }));
     try {
-      await startSourceDownload(r, { qualityCheck, skipAcoustid: !acoustidCheck });
+      await startSourceDownload(r, { qualityCheck, skipAcoustid: !acoustidCheck }, entity);
       setGrabbed((g) => ({ ...g, [key]: 'done' }));
     } catch {
       setGrabbed((g) => ({ ...g, [key]: 'error' }));
@@ -453,7 +476,7 @@ export function InteractiveSearchModal({
                       <td>{r.artist ?? '—'}</td>
                       <td className={styles.qualityText}>
                         {resultQuality(r)}
-                        <ProfileBadge result={r} profile={qualityProfile} />
+                        <ProfileBadge result={r} profile={effectiveProfile} />
                       </td>
                       <td className={styles.colNum}>{fmtBytes(resultSize(r))}</td>
                       <td className={styles.colNum} title={effMeta(r).publish_date ?? undefined}>

@@ -7054,7 +7054,16 @@ def start_download():
     
     try:
         result_type = data.get('result_type', 'track')
-        
+
+        # Library-v2 entity context (audit P1-16): the browser may NAME the
+        # lib2 track/album this grab acts for; existence and the effective
+        # quality profile are resolved server-side. A named-but-invalid
+        # entity fails the grab instead of degrading to a context-free one.
+        from core.library2.grab_context import resolve_lib2_grab_context
+        _lib2_state, _lib2_ctx = resolve_lib2_grab_context(get_database(), data)
+        if _lib2_state == 'invalid':
+            return jsonify({"error": "Unknown Library v2 entity for this grab."}), 400
+
         if result_type == 'album':
             tracks = data.get('tracks', [])
             if not tracks:
@@ -7098,6 +7107,7 @@ def start_download():
                                 'spotify_album': None,
                                 'track_info': None,
                                 '_skip_quarantine_check': _album_skip_checks or None,
+                                'lib2_entity': _lib2_ctx,
                             }
                         if _album_skip_checks:
                             _audit_manual_skip(context_key, track_data.get('title'),
@@ -7176,6 +7186,7 @@ def start_download():
                         'spotify_album': None,
                         'track_info': None,
                         '_skip_quarantine_check': _skip_checks or None,
+                        'lib2_entity': _lib2_ctx,
                     }
                     source_label = username.title() if is_streaming_source else 'Soulseek'
                     logger.info(f"[{source_label}] Registered simple download for post-processing: {context_key}")
