@@ -186,7 +186,11 @@ class _CtxEngine:
         return "https://img.tmdb/nolan.jpg" if name == "Christopher Nolan" else None
 
     def company_logo(self, name):
-        return "https://img.tmdb/hallmark-logo.png" if name.startswith("Hallmark") else None
+        if name.startswith("Hallmark"):
+            return "https://img.tmdb/hallmark-logo.png"
+        if name == "Marvel Studios":
+            return "https://img.tmdb/marvel-logo.png"
+        return None
 
 
 def _http(url):
@@ -217,6 +221,25 @@ def test_context_art_studio_logo_from_variant_list():
         {"field": "studio", "op": "in", "value": ["Hallmark Channel", "Hallmark Media"]}]}}
     art = poster_gen._context_art(st, engine=_CtxEngine(), http_get=_http)
     assert art == (b"ART:https://img.tmdb/hallmark-logo.png", "logo")
+
+
+def test_context_art_keyword_universe_uses_logo_hint():
+    # A keyword-only universe has no TMDB collection art — the logo hint gives
+    # it the studio's mark.
+    mcu = {"kind": "list", "definition": {"source": "tmdb_union",
+           "keywords": ["marvel cinematic universe"], "logo": "Marvel Studios"}}
+    art = poster_gen._context_art(mcu, engine=_CtxEngine(), http_get=_http)
+    assert art == (b"ART:https://img.tmdb/marvel-logo.png", "logo")
+    # An OLD definition without the hint heals via the preset catalog match.
+    old = {"kind": "list", "definition": {"source": "tmdb_union",
+           "keywords": ["marvel cinematic universe"], "limit": 200}}
+    art = poster_gen._context_art(old, engine=_CtxEngine(), http_get=_http)
+    assert art == (b"ART:https://img.tmdb/marvel-logo.png", "logo")
+    # Collection art still wins over the logo when a union has both.
+    both = {"kind": "list", "definition": {"source": "tmdb_union",
+            "collections": [119], "logo": "Marvel Studios"}}
+    art = poster_gen._context_art(both, engine=_CtxEngine(), http_get=_http)
+    assert art[1] == "verbatim"
 
 
 def test_context_art_none_for_charts_and_multi_rule():
