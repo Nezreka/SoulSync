@@ -503,9 +503,13 @@
             var picked = {};
 
             var quick = h('div', 'vce-quick');
-            [['Not SoulSync’s', function (c) { return !c.managed; }],
+            var selects = [['Not SoulSync’s', function (c) { return !c.managed; }]];
+            if (cols.some(function (c) { return c.kometa; })) {
+                selects.push(['Kometa’s', function (c) { return c.kometa; }]);
+            }
+            selects.concat([
              ['All', function () { return true; }],
-             ['None', function () { return false; }]].forEach(function (q) {
+             ['None', function () { return false; }]]).forEach(function (q) {
                 var b = h('button', 'vce-link', esc(q[0]));
                 b.type = 'button';
                 b.addEventListener('click', function () {
@@ -559,6 +563,8 @@
                         '<span class="vce-cb">' + I.check + '</span>' +
                         '<span class="vce-entry-name">' + esc(c.name || '(unnamed)') + '</span>' +
                         (c.media_type ? '<span class="vce-tag">' + esc(mediaWord(c.media_type, true)) + '</span>' : '') +
+                        (c.smart ? '<span class="vce-tag" title="Filter-based smart collection — not created by SoulSync">Smart</span>' : '') +
+                        (c.kometa ? '<span class="vce-tag vce-tag--warn" title="Carries a Kometa/PMM label">Kometa</span>' : '') +
                         (c.managed ? '<span class="vce-tag vce-tag--ok" title="Managed by the definition “' + esc(c.definition_name || '') + '”">SoulSync</span>' : '') +
                         '<span class="vce-entry-count">' + (c.count || 0) + '</span>');
                     row.addEventListener('click', function () {
