@@ -49,6 +49,8 @@ def members_signature(definition: Dict[str, Any], server_ids) -> str:
         "pinned": bool((definition or {}).get("pinned")),
         "poster": (definition or {}).get("poster_url"),
         "mode": (definition or {}).get("collection_mode"),
+        "order": (((definition or {}).get("definition") or {}).get("order")
+                  if (definition or {}).get("sort_order") == "custom" else None),
     }
     return hashlib.sha1(json.dumps(sub, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
@@ -240,12 +242,49 @@ def sync_collection(db, definition: Dict[str, Any], *, source,
     except Exception:   # noqa: BLE001
         logger.debug("set_collection_meta failed for %s", collection_id, exc_info=True)
 
+    # Custom member ORDER (e.g. the MCU in timeline order) — best-effort, Plex
+    # only (Jellyfin BoxSets have no reorder API). Runs after the member diff so
+    # every ordered member exists on the server.
+    if (definition.get("sort_order") == "custom"
+            and hasattr(source, "collection_reorder")):
+        order = (definition.get("definition") or {}).get("order") or []
+        ordered = _ordered_server_ids(order, res.owned)
+        if ordered:
+            try:
+                source.collection_reorder(collection_id, ordered)
+            except Exception:   # noqa: BLE001 - ordering is presentation, never fail the sync
+                logger.debug("collection_reorder failed for %s", collection_id, exc_info=True)
+
     if did is not None:
         db.record_collection_sync(did, server_source=source.server_name, server_id=collection_id,
                                   members_sig=sig, member_count=len(desired_set))
 
     return {"ok": True, "definition_id": did, "name": name, "server_id": collection_id,
             "total": len(desired_set), "added": added, "removed": removed, "missing": res.missing}
+
+
+def _ordered_server_ids(order_tmdb_ids, owned) -> List[str]:
+    """Map a custom tmdb-id order onto the owned members' server ids; members
+    not in the order list follow after, in resolve order."""
+    by_tmdb = {}
+    rest = []
+    for m in owned or []:
+        sid = m.get("server_id")
+        if not sid:
+            continue
+        tid = m.get("tmdb_id")
+        if tid is not None:
+            by_tmdb[int(tid)] = str(sid)
+        rest.append(str(sid))
+    head = []
+    for tid in order_tmdb_ids or []:
+        try:
+            sid = by_tmdb.get(int(tid))
+        except (TypeError, ValueError):
+            continue
+        if sid and sid not in head:
+            head.append(sid)
+    return head + [s for s in rest if s not in set(head)]
 
 
 def wishlist_missing_movies(db, definition: Dict[str, Any], missing) -> int:

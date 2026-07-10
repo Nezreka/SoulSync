@@ -334,6 +334,28 @@ def register_routes(bp):
                         "count": len(res.owned), "missing_count": len(res.missing),
                         "sample": _sample_members(res.owned)})
 
+    @bp.route("/collections/<int:cid>/members", methods=["GET"])
+    def collections_members(cid):
+        """The resolved OWNED members (for the custom-order editor), pre-sorted
+        by the definition's saved order with unlisted members after."""
+        from . import get_video_db
+        from core.video.collections.list_sources import build_list_fetcher
+        from core.video.collections.resolver import resolve_collection
+        db = get_video_db()
+        c = db.get_collection_definition(cid)
+        if not c:
+            return jsonify({"ok": False, "error": "not found"}), 404
+        res = resolve_collection(db, c, list_fetcher=build_list_fetcher(db))
+        if not res.ok:
+            return jsonify({"ok": False, "error": res.error})
+        order = {int(t): i for i, t in enumerate((c.get("definition") or {}).get("order") or [])
+                 if str(t).lstrip("-").isdigit()}
+        members = [{"id": m.get("id"), "tmdb_id": m.get("tmdb_id"),
+                    "title": m.get("title"), "year": m.get("year")} for m in res.owned]
+        members.sort(key=lambda m: (order.get(int(m["tmdb_id"]), 10 ** 9)
+                                    if m.get("tmdb_id") is not None else 10 ** 9))
+        return jsonify({"ok": True, "members": members})
+
     @bp.route("/collections/<int:cid>/missing", methods=["GET"])
     def collections_missing(cid):
         """The titles a list collection's source has that the library doesn't —
@@ -407,6 +429,66 @@ def register_routes(bp):
     def collections_sync_status():
         from core.video.collections.sync_job import status
         return jsonify(status())
+
+    # ── portability: export / import definitions (community sharing) ──────────
+    _PORTABLE = ("name", "kind", "media_type", "definition", "summary", "sort_order",
+                 "sync_mode", "pinned", "wishlist_missing", "window_start", "window_end",
+                 "collection_mode")
+
+    @bp.route("/collections/export", methods=["GET"])
+    def collections_export():
+        """Every definition as portable JSON — no ids, no poster refs, nothing
+        machine-local — so a config can be shared and imported anywhere."""
+        from . import get_video_db
+        db = get_video_db()
+        out = []
+        for light in db.list_collection_definitions() or []:
+            full = db.get_collection_definition(light["id"])
+            if full:
+                out.append({k: full.get(k) for k in _PORTABLE})
+        return jsonify({"soulsync_collections": 1, "collections": out})
+
+    @bp.route("/collections/import", methods=["POST"])
+    def collections_import():
+        """Import a shared export. Existing names (per media type) are skipped —
+        idempotent like preset apply; nothing is overwritten."""
+        from . import get_video_db
+        db = get_video_db()
+        d = request.get_json(silent=True) or {}
+        rows = d.get("collections")
+        if not isinstance(rows, list) or not rows:
+            return jsonify({"ok": False, "error": "collections are required"}), 400
+        existing = {((c.get("media_type") or "movie"),
+                     " ".join((c.get("name") or "").split()).casefold())
+                    for c in db.list_collection_definitions() or []}
+        imported, skipped = [], []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            name = " ".join(str(row.get("name") or "").split())
+            mt = row.get("media_type") if row.get("media_type") in ("movie", "show") else "movie"
+            kind = row.get("kind") if row.get("kind") in ("smart", "list") else "smart"
+            if not name:
+                continue
+            if (mt, name.casefold()) in existing:
+                skipped.append(name)
+                continue
+            cid = db.create_collection_definition(
+                name, kind=kind, media_type=mt,
+                definition=row.get("definition") if isinstance(row.get("definition"), dict) else {},
+                summary=row.get("summary"), sort_order=row.get("sort_order") or "release",
+                sync_mode="append" if row.get("sync_mode") == "append" else "sync",
+                pinned=bool(row.get("pinned")), wishlist_missing=bool(row.get("wishlist_missing")),
+                enabled=True,
+                window_start=_clean_md(row.get("window_start")),
+                window_end=_clean_md(row.get("window_end")),
+                collection_mode=(row.get("collection_mode")
+                                 if row.get("collection_mode") in _MODES else None))
+            if cid is not None:
+                existing.add((mt, name.casefold()))
+                imported.append({"id": cid, "name": name})
+        _generate_posters_async([c["id"] for c in imported])
+        return jsonify({"ok": True, "imported": imported, "skipped": skipped})
 
     # ── server-side collections (cleanup view) ────────────────────────────────
     @bp.route("/collections/server", methods=["GET"])
