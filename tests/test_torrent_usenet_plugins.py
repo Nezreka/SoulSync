@@ -161,19 +161,25 @@ def test_torrent_project_results_drops_releases_without_download_url() -> None:
 
 
 def test_torrent_project_results_prefers_magnet_when_available() -> None:
+    from core.download_plugins.candidate_store import get_candidate_store
     plugin = TorrentDownloadPlugin()
     magnet = 'magnet:?xt=urn:btih:abc'
     results = [_make_torrent_result(magnet_uri=magnet, download_url='https://x/y.torrent')]
     tracks, _ = plugin._project_results(results)
-    url, _ = _decode_filename(tracks[0].filename)
-    assert url == magnet
+    token, _ = _decode_filename(tracks[0].filename)
+    assert get_candidate_store().resolve(token) == magnet
 
 
-def test_torrent_project_results_encodes_url_and_title_in_filename() -> None:
+def test_torrent_project_results_encodes_token_and_title_in_filename() -> None:
+    """P0-03: the filename that reaches the browser carries an opaque
+    candidate token — never the indexer download URL (may embed API keys)."""
+    from core.download_plugins.candidate_store import get_candidate_store
     plugin = TorrentDownloadPlugin()
     tracks, _ = plugin._project_results([_make_torrent_result()])
-    url, display = _decode_filename(tracks[0].filename)
-    assert url == 'https://x/y.torrent'
+    token, display = _decode_filename(tracks[0].filename)
+    assert 'https://x/y.torrent' not in tracks[0].filename
+    assert get_candidate_store().is_token(token)
+    assert get_candidate_store().resolve(token) == 'https://x/y.torrent'
     assert display == 'Danny Brown - Atrocity Exhibition [FLAC]'
 
 
@@ -395,11 +401,14 @@ def test_usenet_project_drops_results_without_download_url() -> None:
     assert tracks == []
 
 
-def test_usenet_project_encodes_url_in_filename() -> None:
+def test_usenet_project_encodes_token_in_filename() -> None:
+    """P0-03: the browser sees an opaque candidate token, never the NZB URL."""
+    from core.download_plugins.candidate_store import get_candidate_store
     plugin = UsenetDownloadPlugin()
     tracks, _ = plugin._project_results([_make_usenet_result()])
-    url, display = _decode_filename(tracks[0].filename)
-    assert url == 'https://x/y.nzb'
+    token, display = _decode_filename(tracks[0].filename)
+    assert 'https://x/y.nzb' not in tracks[0].filename
+    assert get_candidate_store().resolve(token) == 'https://x/y.nzb'
     assert display == 'Some Artist - Some Album'
     # Artist + title should be parsed out, not auto-extracted from filename.
     assert tracks[0].artist == 'Some Artist'
