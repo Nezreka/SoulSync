@@ -8,6 +8,8 @@ SoulSync-managed movie/show collections. Admin-only (gated in __init__.py).
     DELETE /api/video/collections/<id>            -> {ok}
     POST   /api/video/collections/<id>/duplicate  -> {ok,id}
     GET    /api/video/collections/fields          -> {fields,suggestions}   (rule builder)
+    GET    /api/video/collections/presets         -> {packs:[...]}          (easy setup)
+    POST   /api/video/collections/presets/apply   -> {ok,created,skipped}   (batch create)
     POST   /api/video/collections/preview         -> {ok,count,sample,...}  (live preview)
     POST   /api/video/collections/<id>/sync       -> {ok,...}               (Sync now, one)
     POST   /api/video/collections/sync            -> {ok,...}               (Sync now, all)
@@ -111,6 +113,36 @@ def register_routes(bp):
             logger.debug("genre suggestions failed", exc_info=True)
         return jsonify({"media_type": mt, "fields": field_schema(mt),
                         "suggestions": {"genre": [g for g in genres if g]}})
+
+    @bp.route("/collections/presets", methods=["GET"])
+    def collections_presets():
+        from . import get_video_db
+        from core.video.collections.presets import list_packs
+        mt = request.args.get("media_type", "movie")
+        mt = "show" if mt in ("show", "shows", "tv", "series") else "movie"
+        try:
+            return jsonify({"media_type": mt, "packs": list_packs(get_video_db(), mt)})
+        except Exception:
+            logger.exception("preset browse failed")
+            return jsonify({"media_type": mt, "packs": [], "error": "Failed to load presets"}), 500
+
+    @bp.route("/collections/presets/apply", methods=["POST"])
+    def collections_presets_apply():
+        from . import get_video_db
+        from core.video.collections.presets import apply_pack
+        d = request.get_json(silent=True) or {}
+        mt = "show" if d.get("media_type") in ("show", "shows", "tv", "series") else "movie"
+        pack = str(d.get("pack") or "")
+        keys = d.get("keys") or []
+        if not pack or not isinstance(keys, list) or not keys:
+            return jsonify({"ok": False, "error": "pack and keys are required"}), 400
+        try:
+            r = apply_pack(get_video_db(), pack, mt, keys,
+                           wishlist_missing=bool(d.get("wishlist_missing", True)))
+            return jsonify({"ok": True, "created": r["created"], "skipped": r["skipped"]})
+        except Exception:
+            logger.exception("preset apply failed (%s)", pack)
+            return jsonify({"ok": False, "error": "Could not create collections"}), 500
 
     @bp.route("/collections/preview", methods=["POST"])
     def collections_preview():
