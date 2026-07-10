@@ -132,7 +132,7 @@ def test_studio_pack_groups_brand_variants(db):
     _add_movie(db, 24, "Xmas 4", studio="Hallmark Entertainment")
     _add_movie(db, 25, "Indie", studio="A24")
     entries = {e["name"]: e for e in expand_pack(db, "studios", "movie")}
-    hm = entries["Hallmark"]                                # common word prefix
+    hm = entries["Hallmark"]                                # shared brand token
     assert hm["count"] == 4
     assert hm["definition"]["rules"] == [{
         "field": "studio", "op": "in",
@@ -140,6 +140,25 @@ def test_studio_pack_groups_brand_variants(db):
     # The rule really resolves all variants.
     assert len(db.resolve_smart_members("movie", hm["definition"])) == 4
     assert entries["A24"]["count"] == 1                     # single variant keeps its name
+
+
+def test_studio_pack_unifies_disney_across_eras(db):
+    # The 22-movie Disney bug: 'Disney' and 'Walt Disney *' didn't share a first
+    # word, so classics and modern films split into separate entries. Token
+    # grouping unifies every era under one brand.
+    _add_movie(db, 31, "Snow White", year=1937, studio="Walt Disney Productions")
+    _add_movie(db, 32, "Frozen", year=2013, studio="Walt Disney Animation Studios")
+    _add_movie(db, 33, "Jungle Cruise", year=2021, studio="Walt Disney Pictures")
+    _add_movie(db, 34, "Streamer", year=2023, studio="Disney")
+    _add_movie(db, 35, "Indie", studio="A24")
+    entries = {e["name"]: e for e in expand_pack(db, "studios", "movie")}
+    dis = entries["Disney"]                                 # shared token labels the brand
+    assert dis["count"] == 4
+    assert sorted(dis["definition"]["rules"][0]["value"]) == [
+        "Disney", "Walt Disney Animation Studios", "Walt Disney Pictures",
+        "Walt Disney Productions"]
+    assert len(db.resolve_smart_members("movie", dis["definition"])) == 4
+    assert "Walt Disney Pictures" not in entries            # no fragment entries survive
 
 
 def test_show_packs_use_network_not_studio(db):
