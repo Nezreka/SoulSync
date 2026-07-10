@@ -394,10 +394,11 @@ def register_routes(bp):
         if d.get("tmdb_ids"):
             want = {int(x) for x in d["tmdb_ids"] if str(x).strip().isdigit()}
             missing = [m for m in missing if int(m["tmdb_id"]) in want]
-        # Explicit action: force the wishlist gate open for this run only.
+        # Explicit action: force the acquire gate open for this run only.
+        # Movies → wishlist rows; shows → watchlist FOLLOWS (ended shows skip).
         added = wishlist_missing_members(db, dict(c, wishlist_missing=True), missing)
         return jsonify({"ok": True, "added": added,
-                        "unit": "episodes" if (c.get("media_type") == "show") else "movies"})
+                        "unit": "shows followed" if (c.get("media_type") == "show") else "movies"})
 
     @bp.route("/collections/<int:cid>/sync", methods=["POST"])
     def collections_sync_one(cid):
