@@ -292,8 +292,10 @@ def write_replaygain_tags(
         else:
             return False
 
-        audio.save()
-        return True
+        # Atomic + audio-integrity-verified save (#819/#1000): never rewrite the
+        # library file in place; abort rather than risk damaging the audio.
+        from core.metadata.common import save_audio_file, get_mutagen_symbols
+        return bool(save_audio_file(audio, get_mutagen_symbols()))
     except Exception:
         return False
 

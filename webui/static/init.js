@@ -2852,12 +2852,19 @@ function _normalizeArtistDetailSource(source) {
     return value || 'library';
 }
 
-function buildArtistDetailPath(artistId, source = null) {
+function buildArtistDetailPath(artistId, source = null, name = null) {
     if (!artistId) {
         throw new Error('artistId is required for artist-detail navigation');
     }
     const normalizedSource = _normalizeArtistDetailSource(source);
-    return '/artist-detail/' + encodeURIComponent(normalizedSource) + '/' + encodeURIComponent(String(artistId));
+    let path = '/artist-detail/' + encodeURIComponent(normalizedSource) + '/' + encodeURIComponent(String(artistId));
+    // Some sources (Bandcamp) have no numeric-ID lookup API at all — the
+    // artist's display name has to travel with the URL, or a page load /
+    // browser-back landing on this route has nothing to resolve against.
+    if (name) {
+        path += '?name=' + encodeURIComponent(name);
+    }
+    return path;
 }
 
 function parseArtistDetailPath(pathname = window.location.pathname) {
@@ -2868,9 +2875,12 @@ function parseArtistDetailPath(pathname = window.location.pathname) {
     const artistId = decodeURIComponent(segs.slice(2).join('/'));
     if (!source || !artistId) return null;
 
+    const name = new URLSearchParams(window.location.search).get('name') || '';
+
     return {
         artistId,
         source: source.toLowerCase() === 'library' ? null : source,
+        name,
     };
 }
 
@@ -3050,6 +3060,7 @@ function navigateToPage(pageId, options = {}) {
             replace: options.replace === true,
             artistId: options.artistId,
             artistSource: options.artistSource,
+            artistName: options.artistName,
         });
     }
 
@@ -3066,7 +3077,7 @@ function navigateToPage(pageId, options = {}) {
 
     if (!options.skipPushState) {
         const urlPath = pageId === 'dashboard' ? '/'
-            : (pageId === 'artist-detail' && options.artistId) ? buildArtistDetailPath(options.artistId, options.artistSource)
+            : (pageId === 'artist-detail' && options.artistId) ? buildArtistDetailPath(options.artistId, options.artistSource, options.artistName)
             : '/' + pageId;
         if (window.location.pathname !== urlPath) {
             if (options.replace === true) {

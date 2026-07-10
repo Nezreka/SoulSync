@@ -51,6 +51,11 @@ class SoulSyncDiscoveryPlaylistSource(PlaylistSource):
             records = manager.list_playlists(profile_id=self._profile_id_getter()) or []
         except Exception:
             return []
+        # Only surface syncable playlists: skip ones that generated empty
+        # (e.g. a no-op generator) — a 0-track playlist can't be mirrored and
+        # is just clutter on the sync board. (Unregistered kinds are already
+        # dropped by the manager.)
+        records = [r for r in records if (getattr(r, 'track_count', 0) or 0) > 0]
         return [self._meta_from_record(r) for r in records]
 
     def get_playlist(self, playlist_id: str) -> Optional[PlaylistDetail]:

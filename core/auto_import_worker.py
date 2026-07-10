@@ -511,8 +511,23 @@ class AutoImportWorker:
         runs `_process_one_candidate` in parallel up to `max_workers`.
         """
         staging = self._resolve_staging_path()
-        if not staging or not os.path.isdir(staging):
-            logger.warning(f"[Auto-Import] Staging path not found or invalid: {self.staging_path}")
+        if not staging:
+            logger.warning(f"[Auto-Import] Staging path not configured: {self.staging_path}")
+            return
+        if not os.path.isdir(staging):
+            # #976: self-heal a missing staging folder instead of erroring the
+            # whole import feature (an earlier empty-folder cleanup could delete it).
+            try:
+                os.makedirs(staging, exist_ok=True)
+                logger.warning(f"[Auto-Import] Staging folder was missing — recreated: {staging}")
+            except Exception as e:
+                logger.warning(f"[Auto-Import] Staging path not found and could not be recreated ({staging}): {e}")
+                return
+
+        from core.imports.side_effects import is_active_media_server_ready
+        ready, reason = is_active_media_server_ready()
+        if not ready:
+            logger.warning(f"[Auto-Import] Skipping scan cycle — {reason}")
             return
 
         candidates = self._enumerate_folders(staging)

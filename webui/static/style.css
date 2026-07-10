@@ -6415,6 +6415,16 @@ body.helper-mode-active #dashboard-activity-feed:hover {
             transparent 85%);
 }
 
+/* While the immersive Now Playing modal is open, suppress the floating
+   bottom chrome — its very high z-index would otherwise render the global
+   search bar and FAB buttons on top of the player's transport controls. */
+body.np-modal-open #gsearch-bar,
+body.np-modal-open #gsearch-aura,
+body.np-modal-open #notif-bell-btn,
+body.np-modal-open #helper-float-btn {
+    display: none !important;
+}
+
 .gsearch-bar {
     position: fixed;
     bottom: 24px;
@@ -6571,7 +6581,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     cursor: pointer;
     transition: all 0.15s;
 }
-.gsearch-tab.active { background: rgba(var(--accent-rgb), 0.12); color: var(--accent); border-color: rgba(var(--accent-rgb), 0.2); }
+.gsearch-tab.active { background: rgba(var(--accent-rgb), 0.12); color: rgb(var(--accent-light-rgb)); border-color: rgba(var(--accent-rgb), 0.2); }
 .gsearch-tab:hover:not(.active) { background: rgba(255,255,255,0.06); }
 
 /* Source icon row in the global widget. The popover itself is already a
@@ -9159,14 +9169,21 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     gap: 5px;
 }
 
-/* Page header icon — shown beside all page titles */
+/* Page header icon — compact by default (unified header bar); the Dashboard
+   keeps the full-size hero illustration (see #dashboard-page override below). */
 .page-header-icon {
-    width: 176px;
-    height: 176px;
+    width: 48px;
+    height: 48px;
     object-fit: contain;
     flex-shrink: 0;
     filter: drop-shadow(0 2px 8px rgba(var(--accent-rgb), 0.3));
     transition: transform 0.3s ease, filter 0.3s ease;
+}
+
+/* Dashboard is the one page that keeps the large hero illustration. */
+#dashboard-page .page-header-icon {
+    width: 176px;
+    height: 176px;
 }
 
 .page-header-icon:hover {
@@ -12694,6 +12711,85 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     color: rgb(var(--accent-light-rgb));
 }
 
+/* Collapsible variant-kind group (Time Machine decades, Genres, ...) in the
+   sidebar — one expandable header instead of every variant listed inline. */
+.auto-sync-kind-group {
+    margin-bottom: 8px;
+}
+
+.auto-sync-kind-group-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 11px 14px;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 10px;
+    background: rgba(22, 22, 22, 0.95);
+    cursor: pointer;
+    transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.auto-sync-kind-group-head:hover {
+    border-color: rgba(var(--accent-rgb), 0.25);
+    background: rgba(28, 28, 28, 0.98);
+}
+
+.auto-sync-kind-group.has-active .auto-sync-kind-group-head {
+    border-color: rgba(var(--accent-rgb), 0.22);
+}
+
+.auto-sync-kind-group-chevron {
+    flex-shrink: 0;
+    font-size: 9px;
+    color: rgba(255, 255, 255, 0.4);
+    transition: transform 0.2s ease;
+}
+
+.auto-sync-kind-group.expanded .auto-sync-kind-group-chevron {
+    transform: rotate(90deg);
+}
+
+.auto-sync-kind-group-label {
+    flex: 1;
+    min-width: 0;
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 13px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.auto-sync-kind-group-active {
+    flex-shrink: 0;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: rgba(var(--accent-rgb), 0.16);
+    color: rgb(var(--accent-light-rgb));
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.auto-sync-kind-group-count {
+    flex-shrink: 0;
+    min-width: 18px;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.auto-sync-kind-group-body {
+    display: none;
+    padding: 8px 0 2px 12px;
+}
+
+.auto-sync-kind-group.expanded .auto-sync-kind-group-body {
+    display: block;
+}
+
 /* Bulk-schedule popover for a source group */
 .auto-sync-bulk-menu {
     position: fixed;
@@ -15132,9 +15228,14 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 
 .sync-tab-button[data-tab="mirrored"].active {
-    background: #a78bfa;
-    color: #fff;
-    box-shadow: 0 4px 15px rgba(167, 139, 250, 0.3);
+    /* Mirrored is not a real brand — use the app green like the other
+       brandless source (Server Playlists) instead of an arbitrary
+       lavender (SR2). */
+    background: linear-gradient(135deg,
+        rgba(var(--accent-rgb), 0.95),
+        rgba(var(--accent-rgb), 0.75));
+    color: #000;
+    box-shadow: 0 4px 15px rgba(var(--accent-rgb), 0.3);
 }
 
 .sync-tab-button.active .mirrored-icon {
@@ -27690,13 +27791,13 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .watchlist-filter {
     display: flex;
     gap: 8px;
-    justify-content: center;
+    justify-content: flex-start;
     padding: 8px 0;
 }
 
 .library-source-filter {
     display: flex;
-    justify-content: center;
+    justify-content: flex-start;
     padding: 0 0 4px;
 }
 .library-source-filter-select {
@@ -28005,7 +28106,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     gap: 12px;
     padding: 16px;
     min-width: max-content;
-    justify-content: center;
+    justify-content: flex-start;
     align-items: center;
 }
 
@@ -36559,7 +36660,7 @@ div.artist-hero-badge {
     color: rgba(255,255,255,0.4); cursor: pointer; transition: all 0.2s;
 }
 .ya-filter-btn:hover { background: rgba(255,255,255,0.07); color: rgba(255,255,255,0.7); }
-.ya-filter-btn.active { background: rgba(var(--accent-rgb),0.15); border-color: rgba(var(--accent-rgb),0.3); color: var(--accent); }
+.ya-filter-btn.active { background: rgba(var(--accent-rgb),0.15); border-color: rgba(var(--accent-rgb),0.3); color: rgb(var(--accent-light-rgb)); }
 .ya-modal-sort {
     padding: 6px 10px; border-radius: 8px; font-size: 11px;
     background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.07);
@@ -38510,7 +38611,7 @@ div.artist-hero-badge {
 .decade-tab.active,
 .genre-tab.active {
     color: #fff;
-    border-bottom-color: #667eea;
+    border-bottom-color: rgb(var(--accent-light-rgb));
 }
 
 .decade-tab-content,
@@ -38694,11 +38795,11 @@ div.artist-hero-badge {
     left: 4px;
     width: calc(50% - 4px);
     height: calc(100% - 8px);
-    background: linear-gradient(135deg, rgba(138, 43, 226, 0.9), rgba(123, 31, 162, 0.9));
+    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.9), rgba(24, 156, 71, 0.9));
     border-radius: 8px;
     transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     z-index: 1;
-    box-shadow: 0 2px 8px rgba(138, 43, 226, 0.4);
+    box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.4);
 }
 
 .search-mode-toggle[data-active="basic"] .toggle-slider {
@@ -39254,6 +39355,7 @@ div.artist-hero-badge {
 .enh-source-tab.enh-tab-youtube.active { background: rgba(255, 0, 0, 0.2); color: #ff4444; }
 .enh-source-tab.enh-tab-musicbrainz.active { background: rgba(186, 51, 88, 0.2); color: #BA3358; }
 .enh-source-tab.enh-tab-jiosaavn.active { background: rgba(43, 197, 180, 0.2); color: #2bc5b4; }
+.enh-source-tab.enh-tab-bandcamp.active { background: rgba(29, 160, 195, 0.2); color: #1da0c3; }
 
 /* ── Source picker icon row (replaces dropdown + post-search tabs) ── */
 .enh-source-row {
@@ -43067,6 +43169,232 @@ div.artist-hero-badge {
 }
 
 /* ========================================
+   BANDCAMP ENRICHMENT STATUS BUTTON
+   ======================================== */
+
+.bandcamp-enrich-button-container {
+    position: relative;
+    display: inline-block;
+    margin-right: 12px;
+}
+
+.bandcamp-enrich-button {
+    position: relative;
+    width: 44px;
+    height: 44px;
+    background: linear-gradient(135deg, rgba(29, 160, 195, 0.10) 0%, rgba(20, 130, 165, 0.16) 100%);
+    backdrop-filter: blur(20px) saturate(1.4);
+    -webkit-backdrop-filter: blur(20px) saturate(1.4);
+    border: 1.5px solid rgba(29, 160, 195, 0.25);
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 4px 16px rgba(29, 160, 195, 0.15), 0 2px 8px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.bandcamp-enrich-button:hover {
+    background: linear-gradient(135deg, rgba(29, 160, 195, 0.16) 0%, rgba(20, 130, 165, 0.22) 100%);
+    border-color: rgba(29, 160, 195, 0.4);
+    transform: scale(1.05);
+    box-shadow: 0 6px 20px rgba(29, 160, 195, 0.25), 0 3px 12px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.bandcamp-enrich-button:active {
+    transform: scale(0.95);
+}
+
+.bandcamp-enrich-logo {
+    width: 24px;
+    height: 24px;
+    object-fit: contain;
+    opacity: 0.85;
+    transition: opacity 0.3s ease;
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+    border-radius: 50%;
+}
+
+.bandcamp-enrich-button:hover .bandcamp-enrich-logo {
+    opacity: 1;
+}
+
+.bandcamp-enrich-spinner {
+    position: absolute;
+    width: 44px;
+    height: 44px;
+    border: 3px solid transparent;
+    border-top-color: rgba(29, 160, 195, 0.8);
+    border-right-color: rgba(29, 160, 195, 0.5);
+    border-radius: 50%;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+}
+
+.bandcamp-enrich-button.active .bandcamp-enrich-spinner {
+    opacity: 1;
+    animation: bandcamp-spin 1.2s linear infinite;
+}
+
+.bandcamp-enrich-button.active {
+    background: linear-gradient(135deg, rgba(29, 160, 195, 0.20) 0%, rgba(20, 130, 165, 0.26) 100%);
+    border-color: rgba(29, 160, 195, 0.5);
+    box-shadow: 0 6px 24px rgba(29, 160, 195, 0.3), 0 3px 12px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+.bandcamp-enrich-button.active .bandcamp-enrich-logo {
+    opacity: 1;
+    filter: drop-shadow(0 0 8px rgba(29, 160, 195, 0.6));
+}
+
+.bandcamp-enrich-button.complete {
+    background: linear-gradient(135deg, rgba(76, 175, 80, 0.15) 0%, rgba(56, 142, 60, 0.20) 100%);
+    border-color: rgba(76, 175, 80, 0.35);
+    box-shadow: 0 4px 16px rgba(76, 175, 80, 0.2), 0 2px 8px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.bandcamp-enrich-button.complete .bandcamp-enrich-logo {
+    opacity: 0.85;
+    filter: drop-shadow(0 0 6px rgba(76, 175, 80, 0.5));
+}
+
+.bandcamp-enrich-button.complete .bandcamp-enrich-spinner {
+    opacity: 0;
+}
+
+.bandcamp-enrich-button.paused {
+    background: linear-gradient(135deg, rgba(255, 193, 7, 0.12) 0%, rgba(255, 152, 0, 0.18) 100%);
+    border-color: rgba(255, 193, 7, 0.35);
+    box-shadow: 0 4px 16px rgba(255, 193, 7, 0.2), 0 2px 8px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.bandcamp-enrich-button.paused:hover {
+    border-color: rgba(255, 193, 7, 0.5);
+    box-shadow: 0 6px 20px rgba(255, 193, 7, 0.3), 0 3px 12px rgba(0, 0, 0, 0.2);
+}
+
+@keyframes bandcamp-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+.bandcamp-enrich-tooltip {
+    position: absolute;
+    left: 50%;
+    top: calc(100% + 12px);
+    transform: translateX(-50%) translateY(-5px);
+    z-index: 5000;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: none;
+}
+
+.bandcamp-enrich-button:hover+.bandcamp-enrich-tooltip {
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(-50%) translateY(0);
+}
+
+.bandcamp-enrich-tooltip-content {
+    min-width: 260px;
+    background: linear-gradient(135deg, rgba(30, 30, 30, 0.98) 0%, rgba(20, 20, 20, 0.99) 100%);
+    backdrop-filter: blur(40px) saturate(1.6);
+    -webkit-backdrop-filter: blur(40px) saturate(1.6);
+    border: 1px solid rgba(29, 160, 195, 0.3);
+    border-radius: 16px;
+    padding: 16px 18px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 6px 20px rgba(29, 160, 195, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.bandcamp-enrich-tooltip-header {
+    font-family: 'SF Pro Display', -apple-system, sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(29, 160, 195, 0.95);
+    letter-spacing: -0.2px;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.bandcamp-enrich-tooltip-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+#bandcamp-enrich-tooltip-status {
+    color: rgb(var(--accent-light-rgb));
+    font-weight: 600;
+}
+
+.bandcamp-enrich-button.paused+.bandcamp-enrich-tooltip #bandcamp-enrich-tooltip-status {
+    color: #ffc107;
+}
+
+.bandcamp-enrich-button.no-auth {
+    background: linear-gradient(135deg,
+            rgba(120, 120, 120, 0.08) 0%,
+            rgba(80, 80, 80, 0.12) 100%);
+    border-color: rgba(120, 120, 120, 0.25);
+    box-shadow:
+        0 4px 16px rgba(0, 0, 0, 0.15),
+        0 2px 8px rgba(0, 0, 0, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.bandcamp-enrich-button.no-auth .bandcamp-enrich-logo {
+    filter: grayscale(1) opacity(0.4);
+}
+
+.bandcamp-enrich-button.no-auth .bandcamp-enrich-spinner {
+    display: none;
+}
+
+.bandcamp-enrich-button.no-auth:hover {
+    border-color: rgba(120, 120, 120, 0.35);
+    box-shadow:
+        0 6px 20px rgba(0, 0, 0, 0.2),
+        0 3px 12px rgba(0, 0, 0, 0.15);
+    opacity: 0.55;
+}
+
+.bandcamp-enrich-button.no-auth+.bandcamp-enrich-tooltip #bandcamp-enrich-tooltip-status {
+    color: rgba(120, 120, 120, 0.8);
+}
+
+.bandcamp-enrich-tooltip-content::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: -8px;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-bottom: 8px solid rgba(29, 160, 195, 0.3);
+}
+
+.bandcamp-enrich-tooltip-content::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: -7px;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-bottom: 8px solid rgba(30, 30, 30, 0.98);
+}
+
+/* ========================================
    TIDAL ENRICHMENT STATUS BUTTON
    ======================================== */
 
@@ -46776,9 +47104,9 @@ body.downloads-disabled [onclick*="DownloadMissing"]:not([onclick*="close"]) {
 }
 .auto-new-btn {
     position: relative;
-    background: linear-gradient(135deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.04) 100%);
+    background: linear-gradient(135deg, rgb(var(--accent-rgb)), rgb(var(--accent-light-rgb)));
     color: #fff;
-    border: 1.5px solid rgba(255,255,255,0.15);
+    border: 1.5px solid rgba(var(--accent-light-rgb), 0.6);
     padding: 10px 22px;
     border-radius: 12px;
     font-size: 14px;
@@ -46786,13 +47114,13 @@ body.downloads-disabled [onclick*="DownloadMissing"]:not([onclick*="close"]) {
     cursor: pointer;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     letter-spacing: 0.3px;
-    animation: btn-rainbow-glow 6s linear infinite;
+    box-shadow: 0 4px 18px rgba(var(--accent-rgb), 0.35);
     backdrop-filter: blur(12px);
 }
 .auto-new-btn:hover {
     transform: translateY(-2px);
-    background: linear-gradient(135deg, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0.08) 100%);
-    animation: btn-rainbow-glow-hover 4s linear infinite;
+    background: linear-gradient(135deg, rgb(var(--accent-rgb)), rgb(var(--accent-light-rgb)));
+    box-shadow: 0 6px 24px rgba(var(--accent-rgb), 0.5);
 }
 .auto-new-btn:active {
     transform: translateY(0) scale(0.97);
@@ -47022,6 +47350,16 @@ body.downloads-disabled [onclick*="DownloadMissing"]:not([onclick*="close"]) {
     padding: 0 4px 0 0;
     margin-bottom: 16px;
     overflow-x: auto;
+}
+@media (max-width: 768px) {
+    /* Fade the right edge to signal the tab row scrolls */
+    .auto-hub-tabs {
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+        -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent);
+        mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent);
+    }
+    .auto-hub-tabs::-webkit-scrollbar { display: none; }
 }
 .auto-hub-tab {
     padding: 8px 16px;
@@ -52532,6 +52870,9 @@ tr.tag-diff-same {
     font-size: 14px;
     line-height: 1.6;
     color: rgba(255, 255, 255, 0.72);
+    /* Long paths/URLs must break so the flex item can shrink instead of clipping */
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 .docs-steps li::before {
@@ -52560,6 +52901,13 @@ tr.tag-diff-same {
     display: flex;
     gap: 12px;
     align-items: flex-start;
+    min-width: 0;
+}
+
+/* Callout body must be able to shrink and wrap long paths/URLs */
+.docs-callout > * {
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 .docs-callout-icon {
@@ -52616,6 +52964,23 @@ tr.tag-diff-same {
 
 .docs-table tr:hover td {
     background: rgba(255, 255, 255, 0.02);
+}
+
+/* Long inline tokens (URLs, docker paths) in prose must wrap, not clip */
+.docs-content p,
+.docs-content li,
+.docs-content strong,
+.docs-content a,
+.docs-table th,
+.docs-table td {
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 768px) {
+    /* Keep data tables inside the viewport by wrapping cell text */
+    .docs-table {
+        table-layout: fixed;
+    }
 }
 
 /* Keyboard shortcut badges */
@@ -53427,6 +53792,44 @@ tr.tag-diff-same {
     .docs-section-title {
         font-size: 22px;
     }
+
+    /* Step rows carry rich inline content (code, badges); let it wrap
+       instead of forcing the flex row wider than the viewport */
+    .docs-steps li {
+        flex-wrap: wrap;
+    }
+
+    /* API param tables pin their first two columns nowrap — release that
+       on small screens and let the fixed layout keep them in-bounds */
+    .api-params-table {
+        table-layout: fixed;
+    }
+    .api-params-table td:first-child,
+    .api-params-table td:nth-child(2),
+    .api-params-table th,
+    .api-params-table td {
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+
+    /* API tester: key bar + endpoint headers are nowrap flex rows with a
+       non-shrinking path — let them wrap and shrink on small screens */
+    .api-key-bar {
+        flex-wrap: wrap;
+    }
+    .api-endpoint-header {
+        flex-wrap: wrap;
+    }
+    .api-endpoint-path {
+        flex-shrink: 1;
+        min-width: 0;
+        overflow-wrap: anywhere;
+    }
+    .api-endpoint-desc {
+        max-width: 100%;
+        text-align: left;
+        white-space: normal;
+    }
 }
 
 @media (max-width: 600px) {
@@ -53702,8 +54105,8 @@ tr.tag-diff-same {
 }
 
 .mcache-tab.active {
-    color: var(--accent, #6d5dfc);
-    border-bottom-color: var(--accent, #6d5dfc);
+    color: rgb(var(--accent-light-rgb));
+    border-bottom-color: rgb(var(--accent-light-rgb));
 }
 
 /* Filters */
@@ -54429,8 +54832,8 @@ tr.tag-diff-same {
 }
 
 .repair-tab.active {
-    color: var(--accent-color, #6366f1);
-    border-bottom-color: var(--accent-color, #6366f1);
+    color: rgb(var(--accent-light-rgb));
+    border-bottom-color: rgb(var(--accent-light-rgb));
 }
 
 .repair-tab-badge {
@@ -56690,17 +57093,28 @@ tr.tag-diff-same {
 /* The growing label pushes the control to a consistent right edge; the ⓘ rides
    immediately after the control as a pair so it can never shove it around. The
    help callout (flex-basis:100%) wraps to its own line below. */
+/* Shared control column — every control type sizes to one width so labels
+   sit left and controls line up in a tidy right-hand column (S1). */
 #settings-page .form-group > select,
-#settings-page .form-group > .form-select {
-    flex: 0 0 auto;
+#settings-page .form-group > .form-select,
+#settings-page .form-group > input[type="text"],
+#settings-page .form-group > input[type="password"],
+#settings-page .form-group > input[type="number"],
+#settings-page .form-group > input[type="url"] {
+    /* flex:none (not a fixed flex-basis) so the 260px comes from `width` on
+       the desktop row layout, while the mobile column layout — which flips
+       flex-direction and would otherwise read 260px as a *height* — falls
+       back to content height. */
+    flex: none;
+    width: 260px;
+    max-width: 260px;
+    box-sizing: border-box;
 }
 
 #settings-page .form-group > input[type="text"],
 #settings-page .form-group > input[type="password"],
 #settings-page .form-group > input[type="number"],
 #settings-page .form-group > input[type="url"] {
-    flex: 1;
-    max-width: 340px;
     padding: 9px 14px;
     background: rgba(255, 255, 255, 0.04);
     border: 1px solid rgba(255, 255, 255, 0.06);
@@ -56754,7 +57168,7 @@ tr.tag-diff-same {
     font-size: 0.88em;
     font-family: inherit;
     cursor: pointer;
-    min-width: 180px;
+    min-width: 0;
     margin: 0;
     transition: border-color 0.25s, background-color 0.25s, box-shadow 0.25s;
 }
@@ -57026,6 +57440,15 @@ tr.tag-diff-same {
 #settings-page .form-group > input[type="text"][id^="template-"] {
     flex: 1;
     max-width: 420px;
+}
+
+/* Inline hints (<small>/.settings-hint) wrap below the control instead of
+   stealing horizontal space and squeezing the input narrower (S1). */
+#settings-page .form-group > small,
+#settings-page .form-group > .settings-hint {
+    flex-basis: 100%;
+    width: 100%;
+    margin: 4px 0 0;
 }
 
 /* ── Setting help text — always wraps to its own line ── */
@@ -57691,13 +58114,19 @@ tr.tag-diff-same {
     #settings-page .settings-nav-row .header-actions {
         margin-left: auto;
     }
-    /* Tab bar scrolls horizontally */
+    /* Tab bar scrolls horizontally; fade the right edge to signal more tabs */
     #settings-page .stg-tabbar {
         width: 100%;
         flex: 1 1 100%;
         border-radius: 0;
         justify-content: flex-start;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent);
+        mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent);
     }
+    #settings-page .stg-tabbar::-webkit-scrollbar { display: none; }
     .stg-tab { padding: 8px 14px; font-size: 0.8em; }
     /* Content fills screen */
     #settings-page .settings-columns { max-width: 100% !important; padding: 0 8px; }
@@ -60838,7 +61267,7 @@ tr.tag-diff-same {
     .server-search-result-art { width: 36px; height: 36px; }
     .server-search-result-details { gap: 3px; }
 
-    .sync-tab-server { flex: 1 !important; }
+    .sync-tab-server { flex: 0 0 auto !important; }
     .sync-tab-divider { display: none; }
 }
 
@@ -62804,6 +63233,9 @@ body.max-performance #page-particles-canvas {
     letter-spacing: -0.5px;
     line-height: 1.1;
     font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
+    /* Keep values like "1.8 MB" on one line so this tile's baseline matches
+       the single-line sibling tiles (2 / 12 / ...) (D5). */
+    white-space: nowrap;
 }
 
 .library-status-stat-label {
@@ -63520,10 +63952,16 @@ body.max-performance #page-particles-canvas {
     gap: 6px;
 }
 
-.wishlist-page-header-right {
+/* Wishlist actions live in a left-aligned row below the header, matching
+   its sibling Watchlist page (.watchlist-page-actions) instead of sitting
+   inside the header top-right (WL1). */
+.wishlist-page-actions {
     display: flex;
     gap: 8px;
     align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+    padding: 0 4px;
 }
 
 .wishlist-page-title {
@@ -64213,9 +64651,9 @@ body.max-performance #page-particles-canvas {
         width: 100%;
     }
 
-    .wishlist-page-header-right {
-        width: 100%;
-        justify-content: flex-end;
+    .wishlist-page-actions {
+        flex-direction: column;
+        align-items: stretch;
     }
 
     .wishlist-stat-item {
@@ -64742,7 +65180,11 @@ body.max-performance .dash-card::after {
     grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
     gap: clamp(8px, 0.8cqw + 4px, 14px);
-    height: clamp(280px, 18cqw + 200px, 340px);
+    /* Size to content (rows are minmax(0,1fr) so the row-spanning hero
+       auto-equalizes to the two stacked minor tiles); keep a floor for
+       visual mass. Forcing a fixed height taller than content is what
+       left the dead gap above the Auto-Sync title (D1). */
+    min-height: clamp(220px, 14cqw + 160px, 280px);
 }
 
 .qa-tile {
@@ -64808,7 +65250,7 @@ body.max-performance .dash-card::after {
 .qa-tile--hero {
     grid-row: span 2;
     padding: clamp(20px, 1.6cqw + 14px, 32px);
-    grid-template-rows: auto auto 1fr auto;
+    grid-template-rows: auto auto auto 1fr;
     gap: clamp(10px, 1cqw + 4px, 18px);
 }
 
@@ -65172,7 +65614,7 @@ body.max-performance .dash-card::after {
 
 .qa-tile--hero .qa-tile__heading {
     grid-row: 3;
-    align-self: end;
+    align-self: start;
 }
 
 .qa-tile__title {
@@ -65228,8 +65670,11 @@ body.max-performance .dash-card::after {
 
 .qa-tile--hero .qa-tile__cta {
     grid-row: 4;
-    padding-top: clamp(10px, 1cqw + 4px, 16px);
-    border-top: 1px solid rgba(255, 255, 255, 0.07);
+    /* Same clean inline CTA rhythm as the minor tiles — drop the divider
+       "footer" treatment so all three read as one family (D2). The hero
+       keeps its signature (status dot, big title, own icon row). */
+    align-self: start;
+    margin-top: clamp(4px, 0.4cqw, 6px);
 }
 
 .qa-tile__cta-label {
@@ -65267,7 +65712,9 @@ body.max-performance .dash-card::after {
         grid-template-rows: auto auto auto;
         height: auto;
     }
-    .qa-tile--hero { grid-row: auto; aspect-ratio: 4 / 3; }
+    /* Size to content in the single-column layout — a fixed 4:3 box left a
+       big dead gap below the CTA on the narrow dashboard column (D1). */
+    .qa-tile--hero { grid-row: auto; aspect-ratio: auto; }
     .qa-tile--minor { min-height: 90px; }
 }
 
@@ -66889,11 +67336,11 @@ body.max-performance .dash-card::after {
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
 }
 
-/* Active state — swell into a pill that shows the label inline. */
+/* Active state — stay the same 40px circle as the inactive chips (no
+   swell) so the row never reflows when you switch source (SY1). The active
+   chip reads by its brand-color fill; the source name shows in the panel
+   header below the strip. */
 .sync-tab-button.active {
-    width: auto;
-    padding: 0 14px 0 10px;
-    gap: 8px;
     background: linear-gradient(135deg,
         color-mix(in srgb, var(--sync-tab-accent, rgb(var(--accent-rgb))) 92%, white 8%),
         color-mix(in srgb, var(--sync-tab-accent, rgb(var(--accent-rgb))) 78%, black 22%));
@@ -66953,10 +67400,8 @@ body.max-performance .dash-card::after {
                 opacity 0.22s ease;
 }
 
-.sync-tab-button.active .sync-tab-label {
-    max-width: 200px;
-    opacity: 1;
-}
+/* Labels stay collapsed for every chip (icon-only strip); the active
+   source is named by the panel header, so the chip needn't swell (SY1). */
 
 /* Chain-link badge for the ``Link`` variants (Spotify Link, Deezer
  * Link, iTunes Link). Bottom-right corner of the chip, accent-tinted
@@ -69911,7 +70356,7 @@ body.em-scroll-lock { overflow: hidden; }
     font: 600 11.5px/1 'JetBrains Mono', ui-monospace, monospace;
     color: #8b93b0; transition: all .15s ease;
 }
-.arec-tab.active { background: rgba(122,162,247,0.22); color: #cdd6f4; }
+.arec-tab.active { background: rgba(var(--accent-rgb),0.22); color: rgb(var(--accent-light-rgb)); }
 .arec-tab:not(.active):hover { color: #cdd6f4; }
 .arec-filter {
     flex: 1; min-width: 120px;

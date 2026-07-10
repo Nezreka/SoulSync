@@ -478,6 +478,9 @@ class MusicDatabase:
             # Add Similar-Artists worker tracking columns (migration)
             self._add_similar_artists_worker_columns(cursor)
 
+            # Add Bandcamp enrichment tracking columns (migration)
+            self._add_bandcamp_columns(cursor)
+
             # Backfill match_status for rows that already have an external ID but
             # NULL status. Prevents enrichment workers from re-processing these
             # rows forever. Must run AFTER all *_match_status columns have been
@@ -949,7 +952,12 @@ class MusicDatabase:
             # legitimately sharing an id) are left alone via the DISTINCT-name
             # check, so this only touches genuine corruption.
             try:
-                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='_source_id_dedupe_v1'")
+                # v2 re-runs the sweep: #988 found the Deezer album/track "id
+                # correction" path could still smear an id (e.g. The Beatles' id 1
+                # onto The Outfield) after v1 ran, via a blank result-artist-name
+                # bypass. That path is now fully gated (name match + conflict check),
+                # so one more clear heals any smears that slipped through before the fix.
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='_source_id_dedupe_v2'")
                 if not cursor.fetchone():
                     _dedupe_id_cols = [
                         ('deezer_id', 'deezer_match_status'),
@@ -977,7 +985,7 @@ class MusicDatabase:
                             total_cleared += cursor.rowcount
                         except Exception as col_err:
                             logger.debug("Source-id dedupe skipped %s: %s", id_col, col_err)
-                    cursor.execute("CREATE TABLE _source_id_dedupe_v1 (applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+                    cursor.execute("CREATE TABLE _source_id_dedupe_v2 (applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
                     if total_cleared > 0:
                         logger.info(
                             f"Cleared {total_cleared} duplicated source ids shared across "
@@ -2601,6 +2609,8 @@ class MusicDatabase:
                             discogs_artist_id TEXT,
                             musicbrainz_artist_id TEXT,
                             amazon_artist_id TEXT,
+                            preferred_metadata_source TEXT DEFAULT NULL,
+                            auto_download INTEGER NOT NULL DEFAULT 1,
                             profile_id INTEGER DEFAULT 1,
                             UNIQUE(profile_id, spotify_artist_id),
                             UNIQUE(profile_id, itunes_artist_id)
@@ -2630,7 +2640,9 @@ class MusicDatabase:
                             deezer_artist_id TEXT,
                             discogs_artist_id TEXT,
                             musicbrainz_artist_id TEXT,
-                            amazon_artist_id TEXT
+                            amazon_artist_id TEXT,
+                            preferred_metadata_source TEXT DEFAULT NULL,
+                            auto_download INTEGER NOT NULL DEFAULT 1
                         )
                     """)
 
@@ -2643,7 +2655,8 @@ class MusicDatabase:
                             'include_remixes', 'include_acoustic', 'include_compilations',
                             'include_instrumentals', 'lookback_days',
                             'itunes_artist_id', 'deezer_artist_id', 'discogs_artist_id',
-                            'musicbrainz_artist_id', 'amazon_artist_id', 'profile_id']
+                            'musicbrainz_artist_id', 'amazon_artist_id',
+                            'preferred_metadata_source', 'auto_download', 'profile_id']
                 shared_cols = [c for c in new_cols if c in old_cols]
                 cols_str = ', '.join(shared_cols)
                 cursor.execute(f"INSERT INTO watchlist_artists_new ({cols_str}) SELECT {cols_str} FROM watchlist_artists")
@@ -2995,6 +3008,41 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error adding Amazon columns: {e}")
 
+    def _add_bandcamp_columns(self, cursor):
+        """Add Bandcamp enrichment tracking columns to albums and tracks.
+
+        Album+track (unlike Last.fm/Genius, which also enrich artists) —
+        Bandcamp's band/label pages don't carry enough structured data to be
+        worth a separate artist enrichment pass, but releases (albums) are
+        Bandcamp's primary unit — a release's JSON-LD is the richer object
+        (full tracklist, tags, label, credits in one place), so albums get
+        the same enrichment columns tracks do, mirroring the existing
+        Last.fm/Tidal/Qobuz album-level columns."""
+        try:
+            for table in ("albums", "tracks"):
+                cursor.execute(f"PRAGMA table_info({table})")
+                table_columns = [column[1] for column in cursor.fetchall()]
+
+                if 'bandcamp_id' not in table_columns:
+                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN bandcamp_id TEXT")
+                if 'bandcamp_match_status' not in table_columns:
+                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN bandcamp_match_status TEXT")
+                if 'bandcamp_last_attempted' not in table_columns:
+                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN bandcamp_last_attempted TIMESTAMP")
+                if 'bandcamp_url' not in table_columns:
+                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN bandcamp_url TEXT")
+                if 'bandcamp_tags' not in table_columns:
+                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN bandcamp_tags TEXT")
+                if 'bandcamp_label' not in table_columns:
+                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN bandcamp_label TEXT")
+
+                cursor.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_bandcamp_id ON {table} (bandcamp_id)")
+                cursor.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_bandcamp_status ON {table} (bandcamp_match_status)")
+
+            logger.info("Bandcamp columns added/verified successfully")
+        except Exception as e:
+            logger.error(f"Error adding Bandcamp columns: {e}")
+
     def _backfill_match_status_for_existing_ids(self, cursor):
         """Set `<provider>_match_status = 'matched'` for rows that already have a
         populated external ID but NULL match_status.
@@ -3020,6 +3068,8 @@ class MusicDatabase:
             ('artists', 'qobuz_id', 'qobuz_match_status'),
             ('albums', 'qobuz_id', 'qobuz_match_status'),
             ('tracks', 'qobuz_id', 'qobuz_match_status'),
+            ('albums', 'bandcamp_url', 'bandcamp_match_status'),
+            ('tracks', 'bandcamp_url', 'bandcamp_match_status'),
             ('artists', 'jiosaavn_id', 'jiosaavn_match_status'),
             ('albums', 'jiosaavn_id', 'jiosaavn_match_status'),
             ('tracks', 'jiosaavn_id', 'jiosaavn_match_status'),
@@ -3573,6 +3623,8 @@ class MusicDatabase:
                             discogs_artist_id TEXT,
                             musicbrainz_artist_id TEXT,
                             amazon_artist_id TEXT,
+                            preferred_metadata_source TEXT DEFAULT NULL,
+                            auto_download INTEGER NOT NULL DEFAULT 1,
                             profile_id INTEGER DEFAULT 1,
                             UNIQUE(profile_id, spotify_artist_id),
                             UNIQUE(profile_id, itunes_artist_id)
@@ -3586,7 +3638,8 @@ class MusicDatabase:
                                 'include_remixes', 'include_acoustic', 'include_compilations',
                                 'include_instrumentals', 'lookback_days',
                                 'itunes_artist_id', 'deezer_artist_id', 'discogs_artist_id',
-                                'musicbrainz_artist_id', 'amazon_artist_id', 'profile_id']
+                                'musicbrainz_artist_id', 'amazon_artist_id',
+                            'preferred_metadata_source', 'auto_download', 'profile_id']
                     shared_cols = [c for c in new_cols if c in col_names]
                     cols_str = ', '.join(shared_cols)
 
@@ -6646,6 +6699,8 @@ class MusicDatabase:
                         'style', 'mood', 'label', 'explicit', 'record_type',
                         'deezer_id', 'deezer_match_status', 'deezer_last_attempted',
                         'jiosaavn_id', 'jiosaavn_match_status', 'jiosaavn_last_attempted',
+                        'bandcamp_id', 'bandcamp_match_status', 'bandcamp_last_attempted',
+                        'bandcamp_url', 'bandcamp_tags', 'bandcamp_label',
                         # api_track_count is metadata-source-derived enrichment cache;
                         # losing it on a ratingKey rekey would force the next
                         # completeness scan back to live API lookups (kettui PR #374).
@@ -15183,6 +15238,32 @@ class MusicDatabase:
     def mirror_playlist(self, source: str, source_playlist_id: str, name: str,
                         tracks: List[Dict], profile_id: int = 1, **kwargs) -> Optional[int]:
         """Upsert a mirrored playlist and replace all its tracks."""
+        from core.playlists.source_refs import coalesce_mirror_track, stable_source_track_id
+
+        # #990: accept mirror-shaped AND Spotify-shaped tracks (the GET playlist
+        # endpoints return the Spotify shape, which users feed straight back in).
+        tracks = [coalesce_mirror_track(t) for t in (tracks or [])]
+
+        # #990: refuse to REPLACE an existing mirror with an all-empty payload — a
+        # wrong-shaped POST once silently rewrote 21k rows to empty strings and
+        # returned success, breaking sync and hammering Deezer for days. A payload
+        # where every track has neither a name nor an id is unambiguously malformed
+        # (a real playlist always has named tracks); reject it BEFORE any DB write so
+        # the existing mirror is preserved.
+        empty = sum(1 for t in tracks
+                    if not str(t.get("track_name", "")).strip() and not stable_source_track_id(t))
+        if tracks and empty == len(tracks):
+            raise ValueError(
+                f"Refusing to mirror '{name}': all {len(tracks)} tracks are empty after "
+                "mapping (no track_name and no id) — the payload looks malformed. Expected "
+                "mirror-shaped tracks (track_name, artist_name, album_name, source_track_id); "
+                "Spotify-shaped (name, artists, album, id) is also accepted."
+            )
+        if empty:
+            logger.warning(
+                "[Mirror] %s/%d of tracks for playlist '%s' have no name/id — stored anyway",
+                empty, len(tracks), name)
+
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()

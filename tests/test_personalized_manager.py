@@ -393,6 +393,47 @@ class TestListPlaylists:
         assert len(mgr.list_playlists(1)) == 1
         assert len(mgr.list_playlists(2)) == 1
 
+    @staticmethod
+    def _insert_raw(db, kind, variant='', name='X', profile_id=1, track_count=0):
+        # Insert a row directly (ensure_playlist would reject an unregistered
+        # kind) so we can simulate leftover rows from a removed generator.
+        with db._get_connection() as conn:
+            conn.execute(
+                """INSERT INTO personalized_playlists
+                       (profile_id, kind, variant, name, config_json, track_count,
+                        created_at, updated_at)
+                   VALUES (?, ?, ?, ?, '{}', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)""",
+                (profile_id, kind, variant, name, track_count),
+            )
+            conn.commit()
+
+    def test_drops_rows_whose_kind_is_no_longer_registered(self, db, registry):
+        # A reverted/removed generator (e.g. year_mix) leaves orphan rows.
+        _register_simple_kind(registry, lambda *a, **k: [], kind='hidden_gems')
+        mgr = PersonalizedPlaylistManager(db, deps=None, registry=registry)
+        mgr.ensure_playlist('hidden_gems', '', 1)
+        self._insert_raw(db, 'year_mix', '1970', 'Year Mix — 1970', track_count=32)
+        kinds = {r.kind for r in mgr.list_playlists(1)}
+        assert kinds == {'hidden_gems'}  # year_mix hidden
+
+    def test_fails_open_when_registry_is_empty(self, db, registry):
+        # If generators were never imported the registry is empty; hide nothing
+        # rather than blanking every playlist.
+        self._insert_raw(db, 'hidden_gems', '', 'Hidden Gems', track_count=50)
+        self._insert_raw(db, 'year_mix', '1970', 'Year Mix — 1970', track_count=32)
+        mgr = PersonalizedPlaylistManager(db, deps=None, registry=registry)  # empty
+        kinds = {r.kind for r in mgr.list_playlists(1)}
+        assert kinds == {'hidden_gems', 'year_mix'}  # nothing dropped
+
+    def test_registered_but_empty_kind_still_listed_by_manager(self, db, registry):
+        # The manager only drops UNREGISTERED kinds; empty (0-track) playlists
+        # of a registered kind are the sync SOURCE's concern, not the manager's.
+        _register_simple_kind(registry, lambda *a, **k: [], kind='hidden_gems')
+        mgr = PersonalizedPlaylistManager(db, deps=None, registry=registry)
+        rec = mgr.ensure_playlist('hidden_gems', '', 1)  # created with 0 tracks
+        assert rec.track_count == 0
+        assert {r.kind for r in mgr.list_playlists(1)} == {'hidden_gems'}
+
 
 class TestStalenessFilter:
     """`config.exclude_recent_days > 0` drops tracks served by this

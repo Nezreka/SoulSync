@@ -811,6 +811,19 @@
   text-overflow: ellipsis;
 }
 
+.importPageQueueErrors li:has(a) {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.importPageQueueErrors a {
+  color: #ff9b9b;
+  font-weight: 600;
+  text-decoration: underline;
+  white-space: nowrap;
+}
+
 .importPageQueueProgress {
   width: 120px;
   flex-shrink: 0;

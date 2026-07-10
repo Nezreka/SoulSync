@@ -118,3 +118,64 @@ def test_fresh_db_has_amazon_artist_id_column(tmp_path: Path) -> None:
     db_path = tmp_path / "fresh_library.db"
     MusicDatabase(str(db_path))
     assert "amazon_artist_id" in _watchlist_columns(db_path)
+
+
+# ── #983: preferred_metadata_source + auto_download were added AFTER the amazon
+#    fix but never added to the rebuild column lists, so the profile-UNIQUE rebuild
+#    dropped them again. On a FRESH install the rebuild fires right after the
+#    columns are added, so the (non-defensive) artist-config endpoint 500'd with
+#    "no such column: preferred_metadata_source" until a restart re-added it. ──
+_OLD_WATCHLIST_WITH_PREFERRED = """
+    CREATE TABLE watchlist_artists (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        spotify_artist_id TEXT UNIQUE,
+        itunes_artist_id TEXT,
+        deezer_artist_id TEXT,
+        discogs_artist_id TEXT,
+        musicbrainz_artist_id TEXT,
+        amazon_artist_id TEXT,
+        artist_name TEXT NOT NULL,
+        date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        last_scan_timestamp TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        preferred_metadata_source TEXT DEFAULT NULL,
+        auto_download INTEGER NOT NULL DEFAULT 1
+    )
+"""
+
+
+def test_fresh_db_has_preferred_metadata_source_column(tmp_path: Path) -> None:
+    """#983 repro: a brand-new database must end up with preferred_metadata_source
+    (and auto_download) — the profile rebuild must not drop them."""
+    db_path = tmp_path / "fresh_library.db"
+    MusicDatabase(str(db_path))
+    cols = _watchlist_columns(db_path)
+    assert "preferred_metadata_source" in cols, f"dropped by the rebuild; columns: {cols}"
+    assert "auto_download" in cols
+
+
+def test_preferred_metadata_source_data_survives_rebuild(tmp_path: Path) -> None:
+    """A stored per-artist source override must carry across the profile rebuild.
+    FAILS on pre-fix code (column + data dropped)."""
+    db_path = tmp_path / "old_library.db"
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute(_OLD_WATCHLIST_WITH_PREFERRED)   # nullable spotify + no profile UNIQUE → profile rebuild fires
+        conn.execute(
+            "INSERT INTO watchlist_artists (spotify_artist_id, artist_name, preferred_metadata_source) "
+            "VALUES (?, ?, ?)", ("spfy_x", "Prefers iTunes", "itunes"))
+        conn.commit()
+    finally:
+        conn.close()
+
+    MusicDatabase(str(db_path))
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        row = conn.execute(
+            "SELECT preferred_metadata_source FROM watchlist_artists WHERE artist_name = ?",
+            ("Prefers iTunes",)).fetchone()
+    finally:
+        conn.close()
+    assert row is not None and row[0] == "itunes", f"preferred_metadata_source not preserved (got {row!r})"

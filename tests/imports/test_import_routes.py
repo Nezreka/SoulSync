@@ -317,7 +317,7 @@ def test_search_albums_enqueues_hydrabase_and_caps_limit():
         get_primary_source_label=lambda: "hydrabase",
         hydrabase_worker=worker,
         dev_mode_enabled=True,
-        search_import_albums=lambda query, limit: calls.append((query, limit)) or [{"id": "album-1"}],
+        search_import_albums=lambda query, limit, source_override=None: calls.append((query, limit)) or [{"id": "album-1"}],
         logger=_FakeLogger(),
     )
 
@@ -328,6 +328,7 @@ def test_search_albums_enqueues_hydrabase_and_caps_limit():
         "success": True,
         "albums": [{"id": "album-1"}],
         "primary_source": "hydrabase",
+        "source_override": None,
     }
     assert worker.enqueued == [("Album", "albums")]
     assert calls == [("Album", 50)]
@@ -353,7 +354,7 @@ def test_search_albums_exposes_primary_source_when_chain_falls_back():
     runtime = ImportRouteRuntime(
         get_primary_source=lambda: "deezer",          # functional (downgraded fallback)
         get_primary_source_label=lambda: "spotify",   # configured intent (Spotify Free)
-        search_import_albums=lambda query, limit: [
+        search_import_albums=lambda query, limit, source_override=None: [
             {"id": "discogs-1", "name": "Album", "source": "discogs"},
         ],
         logger=_FakeLogger(),
@@ -447,6 +448,7 @@ def test_album_process_posts_valid_files_and_records_side_effects(tmp_path):
         add_activity_item=lambda *args: activity.append(args),
         refresh_import_suggestions_cache=lambda: refresh_calls.append("refresh"),
         automation_engine=automation,
+        is_active_media_server_ready=lambda: (True, ""),
         logger=_FakeLogger(),
     )
 
@@ -507,6 +509,55 @@ def test_album_process_requires_album_and_matches():
     assert payload == {"success": False, "error": "Missing album or matches data"}
 
 
+def test_album_process_rejects_when_media_server_not_ready(tmp_path):
+    good_file = tmp_path / "good.flac"
+    _touch(good_file)
+    runtime = ImportRouteRuntime(
+        post_process_matched_download=lambda *_args: None,
+        is_active_media_server_ready=lambda: (False, "Plex isn't connected."),
+        logger=_FakeLogger(),
+    )
+
+    payload, status = album_process(
+        runtime,
+        {
+            "album": {"id": "album-1", "name": "Album", "artist": "Artist"},
+            "matches": [
+                {
+                    "staging_file": {"full_path": str(good_file), "filename": "good.flac"},
+                    "track": {"name": "Good Track", "track_number": 1},
+                },
+            ],
+        },
+    )
+
+    assert status == 503
+    assert payload == {
+        "success": False,
+        "error": "Plex isn't connected.",
+        "error_code": "media_server_not_connected",
+    }
+
+
+def test_singles_process_rejects_when_media_server_not_ready():
+    executor = _FakeExecutor()
+    runtime = ImportRouteRuntime(
+        import_singles_executor=executor,
+        is_active_media_server_ready=lambda: (False, "Jellyfin isn't connected."),
+        logger=_FakeLogger(),
+    )
+
+    payload, status = singles_process(runtime, [{"filename": "a.flac"}])
+
+    assert status == 503
+    assert payload == {
+        "success": False,
+        "error": "Jellyfin isn't connected.",
+        "error_code": "media_server_not_connected",
+    }
+    assert executor.calls == []
+
+
 def test_process_single_import_file_resolves_and_posts_context(tmp_path):
     audio_file = tmp_path / "Artist - Song.flac"
     _touch(audio_file)
@@ -557,6 +608,7 @@ def test_singles_process_aggregates_worker_results_and_side_effects():
         add_activity_item=lambda *args: activity.append(args),
         refresh_import_suggestions_cache=lambda: refresh_calls.append("refresh"),
         automation_engine=automation,
+        is_active_media_server_ready=lambda: (True, ""),
         logger=_FakeLogger(),
     )
 
@@ -603,6 +655,7 @@ def test_singles_process_uses_injected_single_file_worker():
     runtime = ImportRouteRuntime(
         import_singles_executor=executor,
         process_single_import_file=fake_process_file,
+        is_active_media_server_ready=lambda: (True, ""),
         logger=_FakeLogger(),
     )
 

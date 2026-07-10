@@ -92,8 +92,14 @@ class _FakeConfig:
 
 
 class _FakePlex:
-    def __init__(self):
+    def __init__(self, existing=()):
         self.image_calls = []
+        # Names the test declares already present on the server (#993 existence
+        # probe). Anything not listed reads as a brand-new playlist.
+        self._existing = {n.lower() for n in existing}
+
+    def get_playlist_by_name(self, name):
+        return object() if name.lower() in self._existing else None
 
     def set_playlist_image(self, name, url):
         self.image_calls.append((name, url))
@@ -101,8 +107,25 @@ class _FakePlex:
 
 
 class _FakeJellyfin:
-    def __init__(self):
+    def __init__(self, existing=()):
         self.image_calls = []
+        self._existing = {n.lower() for n in existing}
+
+    def get_playlist_by_name(self, name):
+        return object() if name.lower() in self._existing else None
+
+    def set_playlist_image(self, name, url):
+        self.image_calls.append((name, url))
+        return True
+
+
+class _FakeNavidrome:
+    def __init__(self, existing=()):
+        self.image_calls = []
+        self._existing = {n.lower() for n in existing}
+
+    def get_playlist_by_name(self, name):
+        return object() if name.lower() in self._existing else None
 
     def set_playlist_image(self, name, url):
         self.image_calls.append((name, url))
@@ -133,6 +156,7 @@ def _build_deps(
     config=None,
     plex=None,
     jellyfin=None,
+    navidrome=None,
     automation=None,
     sync_states=None,
     sync_lock=None,
@@ -150,6 +174,7 @@ def _build_deps(
         media_server_engine=_FakeMediaServerEngine(
             plex=plex or _FakePlex(),
             jellyfin=jellyfin or _FakeJellyfin(),
+            navidrome=navidrome or _FakeNavidrome(),
         ),
         automation_engine=automation or _FakeAutomationEngine(),
         run_async=run_async or _run_async_sync,
@@ -362,6 +387,81 @@ def test_playlist_image_uploaded_to_jellyfin(patched_db):
                      playlist_image_url='https://img/y.png', deps=deps)
 
     assert jf.image_calls == [('PJF', 'https://img/y.png')]
+
+
+def test_playlist_image_uploaded_to_navidrome(patched_db):
+    """Navidrome active → navidrome_client.set_playlist_image (#993). Subsonic has
+    no cover field, so this rides the native-API upload path."""
+    nd = _FakeNavidrome()
+    cfg = _FakeConfig(server='navidrome')
+    result = _FakeSyncResult(synced_tracks=4)
+    svc = _FakeSyncService(media_client=_FakeMediaClient(), sync_result=result)
+    deps = _build_deps(sync_service=svc, navidrome=nd, config=cfg)
+
+    ds.run_sync_task('pND', 'PND', [_track()],
+                     playlist_image_url='https://img/z.png', deps=deps)
+
+    assert nd.image_calls == [('PND', 'https://img/z.png')]
+
+
+def test_navidrome_append_mode_preserves_playlist_image(patched_db):
+    """Append edits in place — Navidrome must NOT re-push the source cover over a
+    user's custom one either (same guard as Plex/Jellyfin)."""
+    nd = _FakeNavidrome()
+    cfg = _FakeConfig(server='navidrome')
+    result = _FakeSyncResult(synced_tracks=4)
+    svc = _FakeSyncService(media_client=_FakeMediaClient(), sync_result=result)
+    deps = _build_deps(sync_service=svc, navidrome=nd, config=cfg)
+
+    ds.run_sync_task('pNDa', 'PNDa', [_track()],
+                     playlist_image_url='https://img/z.png', deps=deps, sync_mode='append')
+
+    assert nd.image_calls == []   # preserved, not clobbered
+
+
+def test_playlist_image_skipped_when_playlist_already_exists(patched_db):
+    """#993: a playlist that already exists on the server keeps its current cover.
+    The source cover is pushed only to a brand-new playlist (first mirror), so a
+    recurring replace-mode sync no longer stomps a hand-set (or prior) cover."""
+    nd = _FakeNavidrome(existing=('PND',))
+    cfg = _FakeConfig(server='navidrome')
+    result = _FakeSyncResult(synced_tracks=4)
+    svc = _FakeSyncService(media_client=_FakeMediaClient(), sync_result=result)
+    deps = _build_deps(sync_service=svc, navidrome=nd, config=cfg)
+
+    ds.run_sync_task('pND', 'PND', [_track()],
+                     playlist_image_url='https://img/z.png', deps=deps)
+
+    assert nd.image_calls == []   # already existed → cover left untouched
+
+
+def test_playlist_image_new_playlist_still_pushes(patched_db):
+    """The complement: a genuinely new playlist (not present pre-sync) still gets
+    the source cover — the guard only suppresses re-pushes, never first fills."""
+    nd = _FakeNavidrome()   # no existing playlists → 'PNew' is brand new
+    cfg = _FakeConfig(server='navidrome')
+    result = _FakeSyncResult(synced_tracks=4)
+    svc = _FakeSyncService(media_client=_FakeMediaClient(), sync_result=result)
+    deps = _build_deps(sync_service=svc, navidrome=nd, config=cfg)
+
+    ds.run_sync_task('pNew', 'PNew', [_track()],
+                     playlist_image_url='https://img/n.png', deps=deps)
+
+    assert nd.image_calls == [('PNew', 'https://img/n.png')]
+
+
+def test_playlist_image_skip_on_existing_applies_to_plex_too(patched_db):
+    """The new-playlist-only rule is uniform across servers, not Navidrome-only."""
+    plex = _FakePlex(existing=('PImg',))
+    cfg = _FakeConfig(server='plex')
+    result = _FakeSyncResult(synced_tracks=5)
+    svc = _FakeSyncService(media_client=_FakeMediaClient(), sync_result=result)
+    deps = _build_deps(sync_service=svc, plex=plex, config=cfg)
+
+    ds.run_sync_task('pImg', 'PImg', [_track()],
+                     playlist_image_url='https://img/x.png', deps=deps)
+
+    assert plex.image_calls == []   # already existed → not re-pushed
 
 
 def test_append_mode_preserves_playlist_image(patched_db):

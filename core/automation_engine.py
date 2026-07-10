@@ -705,6 +705,28 @@ class AutomationEngine:
         )
         thread.start()
 
+    def is_event_action_enabled(self, event_type: str, action_type: str) -> bool:
+        """True if an ENABLED automation exists for (event_type → action_type).
+
+        Lets code paths that fire an effect DIRECTLY — e.g. the simple-download
+        library scan, which never forms a batch and so never emits
+        ``batch_complete`` — honor the user's automation toggle instead of always
+        running (#995 follow-up: 'Media scan completed' kept popping up with
+        Auto-Scan After Downloads turned off). Best-effort: any error returns
+        False so the caller can decide its own fallback.
+        """
+        try:
+            if self._event_cache_dirty:
+                self._rebuild_event_cache()
+            for aid in self._event_automations.get(event_type, []):
+                auto = self.db.get_automation(aid)
+                if auto and auto.get('enabled') and auto.get('action_type') == action_type:
+                    return True
+            return False
+        except Exception as e:
+            logger.debug(f"is_event_action_enabled({event_type}, {action_type}) failed: {e}")
+            return False
+
     def _process_event(self, event_type, data):
         """Find matching automations and run them."""
         try:
