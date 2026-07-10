@@ -60,7 +60,9 @@ def resolve_collection(db, definition: Dict[str, Any], *,
     """Resolve ``definition`` (a row from ``get_collection_definition``) to its
     members. Never raises for a bad definition — returns a ResolvedCollection
     with ``error`` set so a nightly batch can skip one bad collection and carry
-    on."""
+    on. Manual overrides (``include``/``exclude`` tmdb-id lists in the body)
+    apply LAST, on top of whatever the builder resolved — every kind supports
+    "perfect, except that one movie"."""
     media_type = (definition or {}).get("media_type") or "movie"
     if media_type not in ("movie", "show"):
         return ResolvedCollection(media_type="movie", error=f"bad media_type {media_type!r}")
@@ -75,12 +77,49 @@ def resolve_collection(db, definition: Dict[str, Any], *,
             return ResolvedCollection(media_type=media_type, error=str(e))
         except Exception as e:   # noqa: BLE001 - a DB hiccup shouldn't crash the batch
             return ResolvedCollection(media_type=media_type, error=f"resolve failed: {e}")
-        return ResolvedCollection(media_type=media_type, owned=owned)
+        res = ResolvedCollection(media_type=media_type, owned=owned)
+    elif kind == "list":
+        res = _resolve_list(db, media_type, body, list_fetcher)
+    else:
+        return ResolvedCollection(media_type=media_type, error=f"unknown collection kind {kind!r}")
 
-    if kind == "list":
-        return _resolve_list(db, media_type, body, list_fetcher)
+    return _apply_overrides(db, media_type, body, res) if res.ok else res
 
-    return ResolvedCollection(media_type=media_type, error=f"unknown collection kind {kind!r}")
+
+def _override_ids(body: Dict[str, Any], key: str) -> set:
+    out = set()
+    for v in body.get(key) or []:
+        try:
+            out.add(int(v))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _apply_overrides(db, media_type: str, body: Dict[str, Any],
+                     res: ResolvedCollection) -> ResolvedCollection:
+    """Pin/exclude specific titles on top of the resolved set. Exclude wins over
+    include; both act on the missing set too (an excluded title must never be
+    wishlisted)."""
+    include = _override_ids(body, "include")
+    exclude = _override_ids(body, "exclude")
+    if not include and not exclude:
+        return res
+    owned = list(res.owned)
+    if include:
+        have = {int(m["tmdb_id"]) for m in owned if m.get("tmdb_id") is not None}
+        want = [i for i in include if i not in have]
+        if want:
+            try:
+                owned.extend(db.owned_by_tmdb_ids(media_type, want))
+            except Exception:   # noqa: BLE001 - includes are additive; never kill the resolve
+                pass
+    if exclude:
+        owned = [m for m in owned
+                 if m.get("tmdb_id") is None or int(m["tmdb_id"]) not in exclude]
+    missing = [m for m in res.missing
+               if int(m["tmdb_id"]) not in exclude and int(m["tmdb_id"]) not in include]
+    return ResolvedCollection(media_type=res.media_type, owned=owned, missing=missing)
 
 
 def _resolve_list(db, media_type: str, body: Dict[str, Any],

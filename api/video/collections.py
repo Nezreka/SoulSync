@@ -258,6 +258,25 @@ def register_routes(bp):
             return jsonify({"ok": False, "error": "Could not generate a poster"}), 500
         return jsonify({"ok": True, "poster_url": url})
 
+    @bp.route("/collections/search_owned", methods=["GET"])
+    def collections_search_owned():
+        """Owned-title search for the include-override picker."""
+        from . import get_video_db
+        mt = "show" if request.args.get("media_type") in ("show", "shows", "tv") else "movie"
+        q = request.args.get("q", "")
+        return jsonify({"results": get_video_db().search_owned_titles(mt, q, limit=10)})
+
+    @bp.route("/collections/titles", methods=["GET"])
+    def collections_titles():
+        """Titles for override chips: ?media_type=&tmdb_ids=1,2,3."""
+        from . import get_video_db
+        mt = "show" if request.args.get("media_type") in ("show", "shows", "tv") else "movie"
+        try:
+            ids = [int(x) for x in (request.args.get("tmdb_ids") or "").split(",") if x.strip()]
+        except ValueError:
+            ids = []
+        return jsonify({"titles": get_video_db().owned_titles_by_tmdb_ids(mt, ids)})
+
     @bp.route("/collections/preview", methods=["POST"])
     def collections_preview():
         from . import get_video_db

@@ -2885,6 +2885,32 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def search_owned_titles(self, media_type: str, query: str, limit: int = 10) -> list:
+        """Owned, TMDB-matched items whose title matches — feeds the editor's
+        include-override picker. Returns [{tmdb_id, title, year}]."""
+        if media_type not in ("movie", "show") or not (query or "").strip():
+            return []
+        table = "movies" if media_type == "movie" else "shows"
+        like = "%" + query.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                f"SELECT tmdb_id, title, year FROM {table} "
+                f"WHERE {self._ON_SERVER} AND tmdb_id IS NOT NULL "
+                f"AND title LIKE ? ESCAPE '\\' ORDER BY title LIMIT ?",
+                (like, int(limit))).fetchall()
+            return [dict(r) for r in rows]
+        except sqlite3.Error:
+            return []
+        finally:
+            conn.close()
+
+    def owned_titles_by_tmdb_ids(self, media_type: str, tmdb_ids) -> list:
+        """Titles for override chips — [{tmdb_id, title, year}] for owned items."""
+        rows = self.owned_by_tmdb_ids(media_type, tmdb_ids) if tmdb_ids else []
+        return [{"tmdb_id": r.get("tmdb_id"), "title": r.get("title"), "year": r.get("year")}
+                for r in rows]
+
     def items_by_server_ids(self, server_ids, server_source=None) -> list:
         """Library items (movies + shows) matching the given native server ids —
         maps a server collection's membership back to our rows for adoption.
