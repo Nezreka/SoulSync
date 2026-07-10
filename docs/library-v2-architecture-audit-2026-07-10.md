@@ -836,6 +836,13 @@ Monitoraktion kann den ursprünglichen Pipelinekontext mit dem falschen Profil
 Album-/Artist-Profil darf nur nach einer klaren Aggregationsregel gesetzt werden,
 nicht automatisch aus einem einzelnen Track. Konflikte sichtbar machen.
 
+**Status 2026-07-10: behoben.** Der Import liest die optionale Spalte
+`quality_profile_id`, validiert sie gegen die app-weiten Profile und verwendet bei
+fehlenden/dangling Werten das aktuelle Default-Profil. Nur der Track übernimmt den
+Intent; Album und Artist bleiben unverändert. Konflikte werden in stabiler Row-ID-
+Reihenfolge verarbeitet und geloggt. Abgedeckt durch Import- und Regressionstests
+(`33aeaf0`).
+
 ### P1-31: Auto-monitoriertes Release bleibt nach transientem Tracklistfehler leer
 
 **Beleg:** `core/library2/discography.py`, Zeilen 251-285. `auto_monitor_releases`
@@ -1874,18 +1881,23 @@ nicht mehr still Daten oder Secrets gefährden.
 
 #### Aufgaben
 
-- [ ] Produktentscheidung Multi-Profil versus Admin-only treffen.
+- [x] Produktentscheidung Multi-Profil versus Admin-only treffen. *(ADR-01,
+  technisch erzwungen durch `10bfdd6`, nachgehärtet durch `6ab520f`)*
 - [ ] Numerische Default-1-Werte aus Lib2-Inserts entfernen.
 - [ ] FK-/Replacement-Strategie für Quality Profiles migrieren.
 - [ ] `monitor_rules` und Wanted-Projektion minimal einführen.
 - [ ] bestehende Flags als Legacy-Projektion behandeln.
 - [ ] Monitor-Provenance für Track/Album/Artist/New Release definieren.
-- [ ] Profilzuweisung von Monitoring entkoppeln.
-- [ ] `user_initiated` nur bei echter UI-Aktion setzen.
-- [ ] Wishlist-Upsert strukturell idempotent machen.
-- [ ] bestehende Wishlist-Row bei Profil-/Sourceänderung aktualisieren.
+- [x] Profilzuweisung von Monitoring entkoppeln. *(LIB2-008, `bb7c815`)*
+- [x] `user_initiated` nur bei echter UI-Aktion setzen. *(LIB2-005, `a531111`)*
+- [x] Wishlist-Upsert strukturell idempotent machen. *(LIB2-004, `ebdd8a0`)*
+- [x] bestehende Wishlist-Row bei Profil-/Sourceänderung aktualisieren.
+  *(LIB2-004, `ebdd8a0`)*
+- [x] Wishlist-only-Import übernimmt das validierte Track-Quality-Profil, ohne
+  Album/Artist implizit zu ändern. *(P1-30, `33aeaf0`)*
 - [ ] stabile providerlose IDs ergänzen.
-- [ ] Transactional Outbox für Watchlist/Wishlist einführen.
+- [x] Transactional Outbox für Watchlist/Wishlist einführen. *(LIB2-009,
+  `bdc95b2`; strikte Fehlerweitergabe `895d27e`)*
 - [ ] Reconciliation-Job und UI-Status für Mirrorfehler ergänzen.
 - [ ] periodische Jobs profilbewusst machen oder Admin-only erzwingen.
 
@@ -2140,7 +2152,10 @@ werden, aber die gefährlichsten Grundlagen schließen:
     ✅ *(2026-07-10, ADRs in §25a; Admin-only technisch erzwungen: API-Write-Guard + Import-Guard)*
 
 Damit sind P0-01, P0-02, P0-03, P0-04, P1-08, P1-09, P1-10, P1-11, P1-15,
-P1-16, P1-17, P1-29 sowie Teile von P1-18 geschlossen. Erst danach sollten
+P1-16, P1-17, P1-29, P1-30 sowie Teile von P1-18 geschlossen. P0-04 wurde mit
+strikter Fehlerweitergabe im Outbox-Worker nachgehärtet (`895d27e`); der manuelle
+Grab-Pfad übergibt das serverseitige Profil nun nachweislich an die Pipeline und ist
+für Nicht-Admins gesperrt (`a7b08a8`). Erst danach sollten
 ReleaseEdition/Recording und der größere Acquisition-Layer beginnen.
 
 ## 17. Teststrategie
@@ -2505,10 +2520,10 @@ Pipeline einfließt, nicht durch ein zweites Profil unterlaufen werden können.
 - API-Endpunkte für Quality-Profile-Zuweisung (`quality_profile_id`-Writes)
   brauchen eine Autorisierungsprüfung auf `is_admin=1` des aufrufenden Profils,
   nicht nur eine UI-seitige Ausblendung.
-- P1-01 (Default-1-Fallback) und P1-30 (Wishlist-Import übernimmt Quality-Profile
-  nicht) bleiben unverändert relevant und müssen weiterhin gefixt werden — diese
-  Entscheidung ändert nur *wer* zuweisen darf, nicht *wie* robust die Zuweisung
-  gespeichert wird.
+- P1-01 (Default-1-Fallback/FK-Strategie) bleibt unverändert relevant. P1-30
+  (Wishlist-Import übernimmt Quality-Profile) ist mit `33aeaf0` behoben. Die
+  Admin-only-Entscheidung ändert nur *wer* zuweisen darf, nicht *wie* robust die
+  Zuweisung gespeichert wird.
 
 ### ADR-02: Source of Truth für "Wanted"/Monitoring — **Entschieden: gestuft, Option 3 jetzt → Option 1 langfristiges Ziel**
 
