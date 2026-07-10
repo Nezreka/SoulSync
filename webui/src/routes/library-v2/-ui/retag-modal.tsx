@@ -13,7 +13,10 @@ import styles from './library-v2-page.module.css';
 function fieldValue(v: unknown): string {
   if (v === null || v === undefined || v === '') return '—';
   if (Array.isArray(v)) return v.join(', ');
-  return String(v);
+  if (typeof v === 'string') return v;
+  if (typeof v === 'number' || typeof v === 'boolean' || typeof v === 'bigint') return String(v);
+  if (typeof v === 'object') return JSON.stringify(v);
+  return '—';
 }
 
 function diffSummary(t: LibraryV2TagPreviewTrack): string {

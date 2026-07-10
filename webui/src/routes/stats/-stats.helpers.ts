@@ -99,7 +99,7 @@ export function formatCompactNumber(value: number | null | undefined): string {
   if (!value) return '0';
   if (value >= 1_000_000) return `${stripTrailingZero((value / 1_000_000).toFixed(1))}M`;
   if (value >= 1_000) return `${stripTrailingZero((value / 1_000).toFixed(1))}K`;
-  return value.toLocaleString();
+  return value.toLocaleString('en-US');
 }
 
 export function formatListeningTime(totalMs: number | null | undefined): string {
@@ -153,7 +153,7 @@ export function formatDbStorageValue(size: number, method: string | null | undef
     if (size > 1_048_576) return `${(size / 1_048_576).toFixed(1)} MB`;
     return `${Math.round(size / 1024)} KB`;
   }
-  return `${size.toLocaleString()} rows`;
+  return `${size.toLocaleString('en-US')} rows`;
 }
 
 export function getTopArtistBubbles(artists: StatsArtistRow[]) {

@@ -24,6 +24,13 @@ export const libraryV2SearchSchema = z.object({
 
 export type LibraryV2Search = z.infer<typeof libraryV2SearchSchema>;
 
+/** 'library' = imported from files; 'discography' = provider-only release.
+ *  `(string & {})` keeps unknown future server values assignable without
+ *  collapsing the union (would trip no-redundant-type-constituents). */
+export type LibraryV2AlbumOrigin = 'library' | 'discography' | (string & {});
+
+export type LibraryV2UpgradePolicy = 'acceptable' | 'until_cutoff' | 'until_top' | (string & {});
+
 export interface LibraryV2Pagination {
   page: number;
   limit: number;
@@ -58,8 +65,7 @@ export interface LibraryV2AlbumSummary {
   image_url: string | null;
   monitored: boolean;
   quality_profile_id: number;
-  /** 'library' = imported from files; 'discography' = provider-only release. */
-  origin: 'library' | 'discography' | string;
+  origin: LibraryV2AlbumOrigin;
   spotify_id: string | null;
   track_count: number;
   tracks_present: number;
@@ -133,7 +139,7 @@ export interface LibraryV2AlbumDetail {
   image_url: string | null;
   genres: string[];
   monitored: boolean;
-  origin: 'library' | 'discography' | string;
+  origin: LibraryV2AlbumOrigin;
   quality_profile: LibraryV2QualityProfile | null;
   primary_artist: { id: number; name: string } | null;
   tracks: LibraryV2Track[];
@@ -155,7 +161,7 @@ export interface LibraryV2QualityProfile {
   id: number;
   name: string;
   description: string | null;
-  upgrade_policy: 'acceptable' | 'until_cutoff' | 'until_top' | string;
+  upgrade_policy: LibraryV2UpgradePolicy;
   /** For 'until_cutoff': index into ranked_targets that counts as "done" (0 = top). */
   upgrade_cutoff_index: number;
   ranked_targets: LibraryV2RankedTarget[];
