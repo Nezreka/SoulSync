@@ -175,6 +175,10 @@ def test_candidates_dispatched_to_executor(monkeypatch):
         monkeypatch.setattr('core.auto_import_worker.os.path.isdir', lambda p: True)
         monkeypatch.setattr(w, '_is_already_processed', lambda h: False)
         monkeypatch.setattr(w, '_is_folder_stable', lambda c: True)
+        monkeypatch.setattr(
+            'core.imports.side_effects.is_active_media_server_ready',
+            lambda: (True, ''),
+        )
 
         processed = []
         processed_lock = threading.Lock()
@@ -284,6 +288,10 @@ def test_candidate_only_submitted_once_across_concurrent_scans(monkeypatch):
         monkeypatch.setattr('core.auto_import_worker.os.path.isdir', lambda p: True)
         monkeypatch.setattr(w, '_is_already_processed', lambda h: False)
         monkeypatch.setattr(w, '_is_folder_stable', lambda c: True)
+        monkeypatch.setattr(
+            'core.imports.side_effects.is_active_media_server_ready',
+            lambda: (True, ''),
+        )
 
         process_count = 0
         process_lock = threading.Lock()

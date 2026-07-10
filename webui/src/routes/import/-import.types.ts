@@ -83,7 +83,21 @@ export interface ImportAlbumSearchPayload {
   suggestions?: ImportAlbumResult[];
   /** Provider used to seed the lookup chain for this response. */
   primary_source?: string | null;
+  /** Explicit source the caller picked, if any (echoed back). */
+  source_override?: string | null;
   ready?: boolean;
+  error?: string;
+}
+
+export interface ImportSearchSource {
+  source: string;
+  label: string;
+  active: boolean;
+}
+
+export interface ImportSearchSourcesPayload {
+  success: boolean;
+  sources?: ImportSearchSource[];
   error?: string;
 }
 
@@ -250,6 +264,10 @@ export interface ImportQueueEntry {
   processed: number;
   total: number;
   errors: string[];
+  /** Set when the backend refused to process because the active media server
+   * isn't connected (see `is_active_media_server_ready` in core/imports/side_effects.py).
+   * The queue item renders a Settings link instead of the plain error list. */
+  blockedByMediaServer?: boolean;
 }
 
 export interface ImportAlbumQueueJob {

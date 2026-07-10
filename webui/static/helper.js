@@ -3404,13 +3404,19 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Convention: keep only the CURRENT release here, plus a single brief
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '2.8.7': [
-        { date: 'July 2026 — 2.8.7' },
-        { title: 'Schedule SoulSync Discovery playlists straight from Auto-Sync', desc: 'every soulsync-made discovery playlist (Time Machine decades, Genre, Seasonal, Daily Mix, plus Popular Picks / Hidden Gems / The Archives / Fresh Tape / Discovery Shuffle) now shows up in the auto-sync schedule modal. flip one on and it generates itself on the first run and keeps syncing on your interval, no manual "generate" step. the many-variant kinds collapse into one expandable row so the list stays tidy, and track counts show even before a playlist has synced.', page: 'playlists' },
-        { title: 'Artist discography hides non-studio releases by default', desc: 'a browsed artist now shows just the studio catalog by default, hiding live albums, compilations, and singles. it reads strictly from MusicBrainz, so the main view stays clean.', page: 'artists' },
-        { title: 'Navidrome playlist cover art (#993)', desc: 'mirrored playlists now push their cover art to Navidrome when they sync, so synced playlists show the right artwork instead of a blank tile. the art goes up on the first mirror, not re-pushed on every sync.', page: 'playlists' },
-        { title: 'Saving settings can\'t wipe a stored API secret anymore (#992)', desc: 'a saved secret could get blanked by the settings page auto-save if it fired while a masked field was mid-edit. that showed up as Spotify failing to authenticate with "invalid_client" even after re-entering the secret, and it could quietly clear other API keys (Last.fm, Genius, Discogs, and so on) too. a settings save can no longer empty a saved secret.', page: 'settings' },
-        { title: 'Earlier versions', desc: '2.8.6 was a fix batch: Spotify search without a connected account, the Import/Stats black screen on Docker (#986), mirrored playlists no longer wiped by a bad refresh (#990), artist browse showing another artist\'s tracks (#988), iTunes singles landing in Unknown Artist (#989), and Reorganize pruning the folders it empties (#985). 2.8.51 fixed fresh-install watchlist settings (#983). 2.8.4 added Artist Web + named Quality Profiles (#974); 2.8.3 rebuilt Discover with a real recommendation engine; 2.7.0 made multi-user real.' },
+    '2.8.8': [
+        { date: 'July 2026 — 2.8.8' },
+        { title: 'Fixed a bug that could corrupt FLAC files on a tag write (#1000)', desc: 'writing tags to a FLAC (album consistency, the repair passes, ReplayGain) could damage the audio on some setups — the kind of skips/mutes flac -t catches. every tag write now goes to a temp copy, verifies the audio is byte-for-byte intact, and only then swaps the file in, so a bad write can never replace a good one. completing an album also adopts the album\'s existing tags instead of re-stamping every track, and the consistency pass pins one MusicBrainz release so albums stop splitting into 2-3 copies.', page: 'library' },
+        { title: 'New: Corrupt File Detector repair job', desc: 'decode-tests your FLAC library, flags any that are physically damaged, and lets you delete + re-download them in one click. opt-in, under the repair jobs.', page: 'tools' },
+        { title: 'New: Bandcamp enrichment source', desc: 'an experimental metadata/enrichment source for Bandcamp — big thanks to @shkarlsson for the contribution. off by default; turn it on in the enrichment sources.', page: 'settings' },
+        { title: 'Atomic album publishing (opt-in)', desc: 'a new toggle in Settings → Downloads: stage an album\'s tracks privately and only move the whole album into your library once it finishes downloading, so Plex/Jellyfin never shows a half-loaded album mid-download. off by default — nothing changes unless you enable it.', page: 'settings' },
+        { title: 'Downloads unjammed', desc: 'fixed a batch-slot leak and a few deadlocks that could wedge the download queue with orphaned tasks that never cleared — the "found N orphaned tasks" loop.', page: 'active-downloads' },
+        { title: 'Tidal downloads survive restarts (#1002)', desc: 'the Tidal download session now refreshes its token on restart instead of silently dropping it, so the source stays connected instead of forcing a manual re-link.', page: 'settings' },
+        { title: 'Compilations stay together (#1003)', desc: 'various-artists compilations now land under Compilations/ instead of scattering their tracks across individual artist folders.', page: 'settings' },
+        { title: 'Lossy converter + auto-scan fixes (#995)', desc: 'the lossy converter surfaces the real ffmpeg error instead of the version banner, and simple downloads now honor the "Auto-Scan After Downloads" toggle instead of always scanning.', page: 'tools' },
+        { title: 'UI + mobile polish', desc: 'a big cleanup pass across headers, buttons, filters, mobile touch targets, and general layout. thanks to @bluejorts.', page: 'dashboard' },
+        { title: 'Imports refused when your media server isn\'t connected', desc: 'a download/import can\'t land orphaned when SoulSync can\'t reach Plex/Jellyfin/Navidrome.', page: 'import' },
+        { title: 'Earlier versions', desc: '2.8.7 made the SoulSync discovery playlists first-class Auto-Sync items, fixed a settings-save that could wipe a stored API secret (#992), and added Navidrome playlist cover art (#993). 2.8.6 was a fix batch (Spotify search without an account, the Docker Import/Stats black screen #986, mirrored-playlist wipes #990, artist browse #988, iTunes singles #989, Reorganize folder pruning #985). 2.8.4 added Artist Web + named Quality Profiles (#974); 2.8.3 rebuilt Discover; 2.7.0 made multi-user real.' },
     ],
 };
 
@@ -3441,14 +3447,25 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "2.8.7 — schedule your discovery playlists + a credential-wipe fix",
-        description: "the soulsync-made discovery playlists become first-class Auto-Sync items, plus a fix for the settings page quietly wiping saved API secrets.",
+        title: "2.8.8 — no more corrupted FLACs, Bandcamp, and atomic album publishing",
+        description: "the headline is a fix for a tag write that could corrupt a FLAC's audio on some setups — every tag write is atomic and audio-verified now. plus a Corrupt File Detector, a new Bandcamp source, and opt-in atomic album publishing.",
         features: [
-            "Schedule SoulSync Discovery playlists from Auto-Sync — every discovery playlist (Time Machine decades, Genre, Seasonal, Daily Mix, plus Popular Picks / Hidden Gems / The Archives / Fresh Tape / Discovery Shuffle) now shows in the schedule modal; turn one on and it generates itself on the first run and keeps syncing on your interval, no manual \"generate\" step",
-            "the many-variant kinds (Time Machine, Genre, Seasonal) collapse into one expandable row per kind so the list stays tidy, and track counts show even for a playlist you've generated but not yet synced to the server",
-            "#992 — a saved API secret could be wiped by the settings auto-save firing while a masked field was mid-edit; it surfaced as Spotify failing with \"invalid_client\" even after re-entering the secret, and could silently clear other keys (Last.fm, Genius, Discogs, and the rest). a settings save can no longer blank a saved secret",
-            "#993 — mirrored playlists now push their cover art to Navidrome on sync (on the first mirror, not every sync), so synced playlists show the right artwork",
-            "artist discography hides non-studio releases (live, compilations, singles) by default, strictly from MusicBrainz, so you see the studio catalog cleanly",
+            "#1000 — a tag write (album consistency, the repair passes, ReplayGain) could damage a FLAC's audio on some setups. every tag write now writes to a temp copy, verifies the audio is byte-for-byte intact, and only then swaps the file in — so a bad write can never replace a good file. completing an album adopts the album's existing tags instead of re-stamping every track, and the consistency pass pins one MusicBrainz release so albums stop splitting into 2-3 copies",
+            "new Corrupt File Detector repair job — decode-tests your FLACs and lets you delete + re-download any that are already damaged",
+            "Bandcamp — a new experimental enrichment source (big thanks to @shkarlsson); off by default, enable it in the enrichment sources",
+            "atomic album publishing — an opt-in toggle in Settings → Downloads that stages an album privately and only moves it into your library once the whole thing finishes, so Plex/Jellyfin never shows a half-loaded album mid-download",
+            "downloads unjammed — fixed a batch-slot leak and a few deadlocks that could wedge the queue with orphaned tasks that never cleared",
+            "#1002 — Tidal downloads survive a restart: the session refreshes its token instead of silently dropping it and forcing a re-link",
+            "#1003 — various-artists compilations stay together under Compilations/ instead of scattering by artist; #995 — the lossy converter shows the real ffmpeg error and simple downloads honor the auto-scan toggle; plus a big UI + mobile polish pass (thanks @bluejorts)",
+        ],
+    },
+    {
+        title: "Earlier in 2.8.7",
+        description: "the SoulSync discovery playlists become first-class Auto-Sync items, plus a credential-wipe fix.",
+        features: [
+            "the SoulSync discovery playlists (Time Machine, Genre, Seasonal, Daily Mix, Popular Picks / Hidden Gems / The Archives / Fresh Tape / Discovery Shuffle) now schedule straight from Auto-Sync — turn one on and it generates itself on the first run and keeps syncing on your interval",
+            "#992 — a settings-save could wipe a stored API secret (surfaced as Spotify \"invalid_client\", and could clear Last.fm / Genius / Discogs keys too); a save can no longer blank a saved secret",
+            "#993 — mirrored playlists push their cover art to Navidrome on sync; and artist discography hides non-studio releases (live, compilations, singles) by default",
         ],
     },
     {

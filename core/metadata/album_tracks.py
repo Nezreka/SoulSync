@@ -464,10 +464,29 @@ def get_album_tracks_for_source(source: str, album_id: str):
         return None
 
 
-def get_album_for_source(source: str, album_id: str):
+def get_album_for_source(source: str, album_id: str, artist_name: str = '', album_name: str = ''):
     """Get album metadata for an exact source."""
     client = metadata_registry.get_client_for_source(source)
-    if not client or not hasattr(client, 'get_album'):
+    if not client:
+        return None
+
+    if source == 'bandcamp':
+        # Bandcamp has no numeric-ID lookup API — everything is URL-based —
+        # so this resolves by name regardless of album_id, then reshapes
+        # into the 'Spotify-shaped' dict this module's extraction helpers
+        # expect (Bandcamp's own field names don't match their alias chains).
+        if not (artist_name and album_name):
+            return None
+        try:
+            from core.bandcamp_client import release_to_spotify_shape
+            release = client.search_album(artist_name, album_name)
+            if not release:
+                return None
+            return release_to_spotify_shape(release, album_id, album_name, artist_name)
+        except Exception:
+            return None
+
+    if not hasattr(client, 'get_album'):
         return None
 
     try:
@@ -498,6 +517,11 @@ def get_artist_albums_for_source(
             'limit': limit,
         }
         if source == 'jiosaavn':
+            kwargs['artist_name'] = artist_name
+        if source == 'bandcamp':
+            # Bandcamp has no numeric-ID lookup API — everything is
+            # URL-based — so it always resolves by name regardless of
+            # target_artist_id (same fallback shape as JioSaavn above).
             kwargs['artist_name'] = artist_name
         if source == 'spotify':
             kwargs['allow_fallback'] = False
@@ -653,7 +677,7 @@ def get_artist_album_tracks(
         if not client:
             continue
 
-        album_data = get_album_for_source(source, album_id)
+        album_data = get_album_for_source(source, album_id, artist_name=artist_name, album_name=album_name)
         if not album_data:
             continue
 
@@ -692,7 +716,7 @@ def get_artist_album_tracks(
             if not client:
                 continue
 
-            album_data = get_album_for_source(source, resolved_album_id)
+            album_data = get_album_for_source(source, resolved_album_id, artist_name=artist_name, album_name=album_name)
             if not album_data:
                 continue
 

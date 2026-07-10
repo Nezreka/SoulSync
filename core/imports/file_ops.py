@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Iterable, List
 
 from config.settings import config_manager
+from core.imports.ffmpeg_errors import summarize_ffmpeg_error
 
 logger = logging.getLogger("imports.file_ops")
 
@@ -726,7 +727,14 @@ def create_lossy_copy(final_path, settings=None):
                         )
             return out_path
 
-        logger.error(f"[Lossy Copy] ffmpeg failed: {result.stderr[:200]}")
+        # The real reason lives at the END of ffmpeg's stderr (the banner is
+        # printed first every run), so summarize the tail instead of stderr[:200]
+        # which only ever logged the version banner (#995).
+        logger.error(
+            f"[Lossy Copy] ffmpeg failed for {os.path.basename(final_path)} "
+            f"(rc={result.returncode}): {summarize_ffmpeg_error(result.stderr)}"
+        )
+        logger.debug(f"[Lossy Copy] full ffmpeg stderr:\n{result.stderr}")
         if os.path.exists(out_path):
             try:
                 os.remove(out_path)

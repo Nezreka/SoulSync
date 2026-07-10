@@ -583,6 +583,28 @@
                                     </div>
                                 </div>
                             </div>
+                            <!-- Bandcamp Enrichment Status Icon (experimental — off by default) -->
+                            <div class="bandcamp-enrich-button-container">
+                                <button class="bandcamp-enrich-button" id="bandcamp-enrich-button" title="Bandcamp Library Enrichment">
+                                    <img src="https://upload.wikimedia.org/wikipedia/commons/9/90/Bandcamp-polygon-aqua.svg"
+                                        alt="Bandcamp" class="bandcamp-enrich-logo">
+                                    <div class="bandcamp-enrich-spinner"></div>
+                                </button>
+                                <div class="bandcamp-enrich-tooltip" id="bandcamp-enrich-tooltip">
+                                    <div class="bandcamp-enrich-tooltip-content">
+                                        <div class="bandcamp-enrich-tooltip-header">Bandcamp Enrichment</div>
+                                        <div class="bandcamp-enrich-tooltip-body" id="bandcamp-enrich-tooltip-body">
+                                            <div class="tooltip-status">Status: <span
+                                                    id="bandcamp-enrich-tooltip-status">Idle</span>
+                                            </div>
+                                            <div class="tooltip-current" id="bandcamp-enrich-tooltip-current">No active matches
+                                            </div>
+                                            <div class="tooltip-progress" id="bandcamp-enrich-tooltip-progress">Progress: 0 / 0
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                             <!-- Tidal Enrichment Status Icon -->
                             <div class="tidal-enrich-button-container">
                                 <button class="tidal-enrich-button" id="tidal-enrich-button" title="Tidal Library Enrichment">
@@ -2452,7 +2474,7 @@
                         </div>
                         <div class="automations-stats" id="automations-stats"></div>
                         <div class="auto-filter-bar" id="auto-filter-bar" style="display:none;">
-                            <input type="text" class="auto-filter-search" id="auto-filter-search" placeholder="Search automations...">
+                            <input type="text" class="auto-filter-search" id="auto-filter-search" placeholder="Filter automations…">
                             <select class="auto-filter-select" id="auto-filter-trigger"><option value="">All Triggers</option></select>
                             <select class="auto-filter-select" id="auto-filter-action"><option value="">All Actions</option></select>
                             <span class="auto-filter-count" id="auto-filter-count"></span>
@@ -2571,7 +2593,7 @@
                     <div class="library-controls">
                         <div class="library-search-container">
                             <input type="text" id="library-search-input" class="library-search-input"
-                                placeholder="Search artists...">
+                                placeholder="Filter your library…">
                             <div class="library-search-icon">🔍</div>
                         </div>
 
@@ -3450,7 +3472,7 @@
                         </div>
                         <div class="spotify-library-filters" id="your-albums-filters" style="display: none;">
                             <input type="text" class="spotify-library-search" id="your-albums-search"
-                                placeholder="Search by artist or album..." oninput="debouncedYourAlbumsSearch()">
+                                placeholder="Filter your albums…" oninput="debouncedYourAlbumsSearch()">
                             <select id="your-albums-status-filter" class="spotify-library-select" onchange="loadYourAlbumsGrid()">
                                 <option value="all">All Albums</option>
                                 <option value="missing">Missing</option>
@@ -5875,6 +5897,28 @@
                             </div>
                             </div><!-- end Retry Logic body -->
 
+                            <!-- ═══ ALBUM PUBLISHING (#999 — atomic album publish, opt-in) ═══ -->
+                            <div class="settings-section-header collapsed" data-stg="downloads" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
+                                <h3>Album Publishing</h3>
+                                <span class="settings-section-hint">When album downloads appear in your library</span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="downloads">
+                            <div class="settings-group" data-stg="downloads">
+                                <div class="form-group">
+                                    <div class="setting-row">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="album-atomic-publish">
+                                            Publish albums only when complete
+                                        </label>
+                                        <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    </div>
+                                    <div class="setting-help-body" hidden><strong>Off by default</strong> — with this off, tracks appear in your library as they finish downloading (unchanged behavior). When <strong>on</strong>, the tracks of an album download are staged privately and only moved into your media library once the <strong>whole album</strong> completes, so Plex/Jellyfin/Navidrome never shows a half-loaded album while it's still downloading. If a batch stalls or fails, its tracks stay in staging (never your library) and the failed tracks remain retryable in your wishlist. Only affects full-album and wishlist-album downloads — single tracks and album top-ups (completeness fills) are unaffected.</div>
+                                </div>
+                            </div>
+                            </div><!-- end Album Publishing body -->
+
                             <!-- ═══ PATHS & ORGANIZATION ═══ -->
                             <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
                                 <span class="settings-section-arrow">&#9660;</span>
@@ -7056,6 +7100,17 @@
                                     </div>
                                     <div class="setting-help-text setting-help-body" hidden>Exposes JioSaavn as a primary metadata source on the Connections tab and in search. Free, no account — strong for Indian and Bollywood catalogs; limited to 1 request/sec via the public proxy API. Off by default.</div>
                                 </div>
+                                <div class="form-group">
+                                    <div class="setting-row" style="flex:1;min-width:0;">
+                                        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:normal;margin:0;">
+                                            <input type="checkbox" id="experimental-bandcamp-enabled" style="width:auto;margin:0;" onchange="onExperimentalBandcampToggle(this)">
+                                            <span>Enable Bandcamp search &amp; enrichment</span>
+                                        </label>
+                                        <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    </div>
+                                    <div class="setting-help-text setting-help-body" hidden>Adds Bandcamp as a Discover search source and a track/album metadata enrichment source (tags, label, credits). Free, no account — uses Bandcamp's own public search and release-page endpoints (unofficial, no guaranteed uptime or rate limits). Off by default.</div>
+                                </div>
                             </div>
                             </div><!-- end Experimental body -->
                         </div>
@@ -7080,7 +7135,7 @@
                                 </div>
                             </div>
                             <div class="log-viewer-actions">
-                                <input type="text" id="log-viewer-search" class="log-viewer-search" placeholder="Search logs..." oninput="_logViewerOnSearch(this)">
+                                <input type="text" id="log-viewer-search" class="log-viewer-search" placeholder="Filter logs…" oninput="_logViewerOnSearch(this)">
                                 <button class="log-action-btn" onclick="_logViewerCopy()" title="Copy visible logs">Copy</button>
                                 <button class="log-action-btn" onclick="_logViewerClear()" title="Clear display">Clear</button>
                                 <label class="log-autoscroll-label">
@@ -7208,7 +7263,7 @@
                     <nav class="docs-sidebar" id="docs-sidebar">
                         <div class="docs-sidebar-header">
                             <h3>Documentation</h3>
-                            <input type="text" class="docs-search" id="docs-search-input" placeholder="Search docs..." autocomplete="off">
+                            <input type="text" class="docs-search" id="docs-search-input" placeholder="Filter docs…" autocomplete="off">
                         </div>
                         <div class="docs-nav" id="docs-nav">
                             <!-- Populated by JS -->
@@ -7709,7 +7764,7 @@
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
                             Cancel Scan
                         </button>
-                        <button class="wl-chip wl-chip--blue" id="update-similar-artists-btn" onclick="updateSimilarArtists()">
+                        <button class="wl-chip wl-chip--slate" id="update-similar-artists-btn" onclick="updateSimilarArtists()">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
                             Update Similar Artists
                         </button>
@@ -7717,11 +7772,11 @@
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                             Global Settings
                         </button>
-                        <button class="wl-chip wl-chip--green" id="watchlist-page-origins-btn" onclick="openDownloadOriginsModal('watchlist')" title="See every track your watchlist downloaded">
+                        <button class="wl-chip wl-chip--slate" id="watchlist-page-origins-btn" onclick="openDownloadOriginsModal('watchlist')" title="See every track your watchlist downloaded">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                             Download Origins
                         </button>
-                        <button class="wl-chip wl-chip--amber" id="watchlist-page-history-btn" onclick="openWatchlistHistoryModal()" title="Every past scan and the tracks it added to the wishlist">
+                        <button class="wl-chip wl-chip--slate" id="watchlist-page-history-btn" onclick="openWatchlistHistoryModal()" title="Every past scan and the tracks it added to the wishlist">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><polyline points="12 7 12 12 15 15"/></svg>
                             History
                         </button>
@@ -7747,7 +7802,7 @@
                     <div class="watchlist-toolbar">
                         <div class="watchlist-search-container">
                             <svg class="watchlist-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="rgba(255,255,255,0.35)"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
-                            <input type="text" id="watchlist-search-input" class="watchlist-search-input" placeholder="Search watchlist..." oninput="filterWatchlistArtists()">
+                            <input type="text" id="watchlist-search-input" class="watchlist-search-input" placeholder="Filter watchlist…" oninput="filterWatchlistArtists()">
                         </div>
                         <select class="watchlist-sort-select" id="watchlist-sort-select" onchange="sortWatchlistArtists(this.value)">
                             <option value="name-asc">Name A-Z</option>
@@ -7804,20 +7859,21 @@
                                 <span class="wishlist-page-timer" id="wishlist-next-auto-timer">Next Auto: --</span>
                             </div>
                         </div>
-                        <div class="wishlist-page-header-right">
-                            <button class="btn btn--secondary" onclick="openWishlistIgnoreModal()" title="Tracks you removed or cancelled — auto-skipped until they expire. Un-ignore to allow auto-download again.">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
-                                Ignored
-                            </button>
-                            <button class="btn btn--secondary" onclick="cleanupWishlistOverview()">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/></svg>
-                                Cleanup
-                            </button>
-                            <button class="btn btn--danger" onclick="clearEntireWishlist()">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
-                                Clear All
-                            </button>
-                        </div>
+                    </div>
+
+                    <div class="wishlist-page-actions">
+                        <button class="btn btn--secondary" onclick="openWishlistIgnoreModal()" title="Tracks you removed or cancelled — auto-skipped until they expire. Un-ignore to allow auto-download again.">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+                            Ignored
+                        </button>
+                        <button class="btn btn--secondary" onclick="cleanupWishlistOverview()">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/></svg>
+                            Cleanup
+                        </button>
+                        <button class="btn btn--danger" onclick="clearEntireWishlist()">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+                            Clear All
+                        </button>
                     </div>
 
                     <!-- Stats strip -->
@@ -7842,7 +7898,7 @@
                     <div class="wl-nebula" id="wishlist-nebula">
                         <!-- Action bar -->
                         <div class="wl-nebula-bar">
-                            <input type="text" class="wl-nebula-search" id="wl-nebula-search" placeholder="Search artists, albums..." oninput="_filterNebula()">
+                            <input type="text" class="wl-nebula-search" id="wl-nebula-search" placeholder="Filter wishlist…" oninput="_filterNebula()">
                             <button class="btn btn--primary" onclick="_nebulaDownload()">
                                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                                 Download Wishlist
@@ -8805,7 +8861,7 @@
                 <button class="mcache-tab" data-tab="track" onclick="switchMetadataCacheTab('track')">Tracks</button>
             </div>
             <div class="mcache-filters">
-                <input type="text" class="mcache-search-input" id="mcache-search" placeholder="Search cached metadata..." oninput="debouncedMetadataCacheSearch()">
+                <input type="text" class="mcache-search-input" id="mcache-search" placeholder="Filter cached metadata…" oninput="debouncedMetadataCacheSearch()">
                 <select class="mcache-source-filter" id="mcache-source-filter" onchange="loadMetadataCacheBrowse()">
                     <option value="">All Sources</option>
                     <option value="spotify">Spotify</option>
@@ -8989,7 +9045,7 @@
         <div class="gsearch-icon">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
         </div>
-        <input type="text" class="gsearch-input" id="gsearch-input" placeholder="Search artists, albums, tracks..." autocomplete="off" spellcheck="false">
+        <input type="text" class="gsearch-input" id="gsearch-input" placeholder="Search everything…" autocomplete="off" spellcheck="false">
         <button class="gsearch-clear" id="gsearch-clear" style="display:none" title="Clear">&times;</button>
         <span class="gsearch-shortcut" id="gsearch-shortcut">/</span>
     </div>

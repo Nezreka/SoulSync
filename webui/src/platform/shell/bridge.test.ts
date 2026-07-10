@@ -65,6 +65,23 @@ describe('bindWindowWebRouter', () => {
     });
   });
 
+  it('appends ?name= for sources with no numeric-ID lookup API', async () => {
+    const navigate = vi.fn().mockResolvedValue(undefined);
+
+    bindWindowWebRouter({ navigate } as never);
+
+    await window.SoulSyncWebRouter?.navigateToPage('artist-detail', {
+      artistId: '3957198221',
+      artistSource: 'bandcamp',
+      artistName: 'Radiohead',
+    });
+
+    expect(navigate).toHaveBeenCalledWith({
+      href: '/artist-detail/bandcamp/3957198221?name=Radiohead',
+      replace: false,
+    });
+  });
+
   it('falls back artist detail URLs to library source when none is supplied', async () => {
     const navigate = vi.fn().mockResolvedValue(undefined);
 

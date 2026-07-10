@@ -8,6 +8,7 @@ import {
   getTopArtistBubbles,
   groupDbStorageTables,
   hasStatsData,
+  visibleStatsEnrichmentServices,
 } from './-stats.helpers';
 import { statsSearchSchema } from './-stats.types';
 
@@ -63,5 +64,19 @@ describe('stats helpers', () => {
 
     expect(bubbles[0]?.percent).toBe(100);
     expect(bubbles[1]?.percent).toBe(50);
+  });
+
+  it('hides experimental enrichment sources unless enabled', () => {
+    const keysWhenOff = visibleStatsEnrichmentServices(false, false).map((s) => s.key);
+    expect(keysWhenOff).not.toContain('jiosaavn');
+    expect(keysWhenOff).not.toContain('bandcamp');
+
+    const keysWhenOn = visibleStatsEnrichmentServices(true, true).map((s) => s.key);
+    expect(keysWhenOn).toContain('jiosaavn');
+    expect(keysWhenOn).toContain('bandcamp');
+
+    // Each toggles independently.
+    expect(visibleStatsEnrichmentServices(false, true).map((s) => s.key)).toContain('bandcamp');
+    expect(visibleStatsEnrichmentServices(false, true).map((s) => s.key)).not.toContain('jiosaavn');
   });
 });
