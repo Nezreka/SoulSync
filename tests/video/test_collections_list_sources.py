@@ -127,15 +127,9 @@ def test_franchise_and_engineless():
     assert dead("tmdb_chart", {"chart": "top_movies"}) == []
 
 
-# ── IMDb (keyless scrape, the Kometa trick) ──────────────────────────────────
-_IMDB_HTML = """<html><head>
-<script type="application/ld+json">
-{"@type":"ItemList","itemListElement":[
- {"item":{"url":"https://www.imdb.com/title/tt0111161/","name":"The Shawshank Redemption"}},
- {"item":{"url":"https://www.imdb.com/title/tt0068646/","name":"The Godfather"}},
- {"item":{"url":"https://www.imdb.com/title/tt0111161/","name":"Dup"}},
- {"item":{"url":"https://www.imdb.com/title/tt9999999/","name":"Unmappable"}}]}
-</script></head><body></body></html>"""
+# ── IMDb (keyless — its public GraphQL endpoint, like current Kometa) ────────
+def _gql_title(tt, name, year):
+    return {"id": tt, "titleText": {"text": name}, "releaseYear": {"year": year}}
 
 
 class _ImdbEngine:
@@ -143,29 +137,49 @@ class _ImdbEngine:
         return {"tt0111161": 278, "tt0068646": 238}.get(tt)
 
 
-def test_imdb_chart_scrapes_and_maps(monkeypatch):
+def test_imdb_chart_via_graphql(monkeypatch):
     import core.video.collections.list_sources as ls
     monkeypatch.setattr(ls, "_COMMUNITY_CACHE", {})
-    fetched = []
-    monkeypatch.setattr(ls, "_http_text", lambda url: fetched.append(url) or _IMDB_HTML)
+    queries = []
+
+    def gql(query):
+        queries.append(query)
+        return {"data": {"chartTitles": {"edges": [
+            {"node": _gql_title("tt0111161", "The Shawshank Redemption", 1994)},
+            {"node": _gql_title("tt0068646", "The Godfather", 1972)},
+            {"node": _gql_title("tt0111161", "Dup", 1994)},
+            {"node": _gql_title("tt9999999", "Unmappable", 2000)},
+        ]}}}
+    monkeypatch.setattr(ls, "_imdb_graphql", gql)
 
     fetch = ls.build_list_fetcher(engine_factory=lambda: _ImdbEngine())
     out = fetch("imdb_chart", {"chart": "top", "kind": "movie"})
-    assert [(o["tmdb_id"], o["title"]) for o in out] == \
-        [(278, "The Shawshank Redemption"), (238, "The Godfather")]   # deduped, unmappable dropped
-    assert fetched == ["https://www.imdb.com/chart/top/"]
+    assert [(o["tmdb_id"], o["title"], o["year"]) for o in out] == \
+        [(278, "The Shawshank Redemption", 1994), (238, "The Godfather", 1972)]
+    assert "TOP_RATED_MOVIES" in queries[0]
     assert fetch("imdb_chart", {"chart": "nope"}) == []
 
 
-def test_imdb_list_url_and_fallback_regex(monkeypatch):
+def test_imdb_list_paginates_cursors(monkeypatch):
     import core.video.collections.list_sources as ls
     monkeypatch.setattr(ls, "_COMMUNITY_CACHE", {})
-    # No JSON-LD (markup change) → regex sweep of /title/tt links still works.
-    monkeypatch.setattr(ls, "_http_text",
-                        lambda url: '<a href="/title/tt0111161/">x</a><a href="/title/tt0068646/">y</a>')
+    pages = []
+
+    def gql(query):
+        pages.append(query)
+        if 'after: "c1"' in query:
+            return {"data": {"list": {"titleListItemSearch": {
+                "edges": [{"title": _gql_title("tt0068646", "The Godfather", 1972)}],
+                "pageInfo": {"hasNextPage": False, "endCursor": None}}}}}
+        return {"data": {"list": {"titleListItemSearch": {
+            "edges": [{"title": _gql_title("tt0111161", "Shawshank", 1994)}],
+            "pageInfo": {"hasNextPage": True, "endCursor": "c1"}}}}}
+    monkeypatch.setattr(ls, "_imdb_graphql", gql)
+
     fetch = ls.build_list_fetcher(engine_factory=lambda: _ImdbEngine())
     out = fetch("imdb_list", {"url": "https://www.imdb.com/list/ls055592025/?ref=x", "kind": "movie"})
     assert [o["tmdb_id"] for o in out] == [278, 238]
+    assert len(pages) == 2 and 'ls055592025' in pages[0]
     assert fetch("imdb_list", {"url": "not-a-list"}) == []
 
 
