@@ -108,6 +108,16 @@ def _resolve_list(db, media_type: str, body: Dict[str, Any],
                 missing = []
         return ResolvedCollection(media_type=media_type, owned=owned, missing=missing)
 
+    if source == "static":
+        # A pinned membership snapshot (adopted server collections): portable
+        # tmdb ids resolved against the library; no remote list, no missing set.
+        ids = body.get("tmdb_ids") or []
+        try:
+            owned = db.owned_by_tmdb_ids(media_type, ids)
+        except Exception as e:   # noqa: BLE001
+            return ResolvedCollection(media_type=media_type, error=f"resolve failed: {e}")
+        return ResolvedCollection(media_type=media_type, owned=owned)
+
     # tmdb_chart / tmdb_keyword / tmdb_list / trakt_list — need the fetcher.
     if list_fetcher is None:
         return ResolvedCollection(media_type=media_type,

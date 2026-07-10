@@ -96,4 +96,79 @@ def run_delete(db, ids, source) -> dict:
     return {"ok": True, "deleted": deleted, "failed": failed}
 
 
-__all__ = ["start_delete", "run_delete", "status", "set_cleanup_progress_emitter"]
+# ── adopt: bring a foreign server collection under SoulSync management ───────
+def adopt_collections(db, items, *, source=None) -> dict:
+    """Convert existing server collections (Kometa's, hand-made) into SoulSync-
+    managed definitions — the migration path that beats delete-and-rebuild.
+
+    Per collection: read its CURRENT members, map them to library items, store a
+    portable membership snapshot ({source: 'static', tmdb_ids}) and bind the
+    ledger so the next sync updates THIS server object instead of creating one.
+
+    Deliberate safety choices:
+      * sync_mode 'append' — members we couldn't map (no tmdb id) must never be
+        stripped by a 'sync'-mode diff; the user can flip to sync later.
+      * keep_server_art — the collection's existing poster is the user's choice;
+        default-on art generation skips it (Auto artwork still works on demand).
+
+    ``items`` = [{server_id, name?}]. Returns {adopted: [...], skipped: [...]}.
+    """
+    if source is None:
+        from core.video.collections.sync import get_collection_source
+        source = get_collection_source()
+    if source is None or not hasattr(source, "collection_member_ids"):
+        return {"ok": False, "error": "No video server configured (or it can't do collections)"}
+
+    managed = set()
+    try:
+        for s in db.list_collection_syncs():
+            if s.get("server_source") == source.server_name and s.get("server_id"):
+                managed.add(str(s["server_id"]))
+    except Exception:   # noqa: BLE001 - worst case we re-check per item below
+        logger.debug("ledger read failed for adopt", exc_info=True)
+
+    adopted, skipped = [], []
+    for item in items or []:
+        sid = str((item or {}).get("server_id") or "").strip()
+        if not sid:
+            continue
+        if sid in managed:
+            skipped.append({"server_id": sid, "reason": "already managed by SoulSync"})
+            continue
+        try:
+            member_ids = source.collection_member_ids(sid)
+        except Exception as e:   # noqa: BLE001 - keep going; report per collection
+            skipped.append({"server_id": sid, "reason": f"member read failed: {e}"})
+            continue
+        if member_ids is None:
+            skipped.append({"server_id": sid, "reason": "collection no longer exists"})
+            continue
+        rows = db.items_by_server_ids(member_ids, server_source=source.server_name)
+        mapped = [r for r in rows if r.get("tmdb_id") is not None]
+        if not mapped:
+            skipped.append({"server_id": sid, "reason": "no members matched to the library"})
+            continue
+        # Majority kind decides the media type (a BoxSet can't tell us itself).
+        movies = sum(1 for r in mapped if r["kind"] == "movie")
+        media_type = "movie" if movies * 2 >= len(mapped) else "show"
+        tmdb_ids = sorted({int(r["tmdb_id"]) for r in mapped if r["kind"] == media_type})
+        name = (str((item or {}).get("name") or "").strip()
+                or f"Adopted collection {sid}")
+        did = db.create_collection_definition(
+            name, kind="list", media_type=media_type,
+            definition={"source": "static", "tmdb_ids": tmdb_ids, "keep_server_art": True},
+            summary=None, sort_order="release", sync_mode="append",
+            wishlist_missing=False, enabled=True)
+        if did is None:
+            skipped.append({"server_id": sid, "reason": "could not create the definition"})
+            continue
+        db.record_collection_sync(did, server_source=source.server_name, server_id=sid,
+                                  members_sig="adopted", member_count=len(member_ids))
+        adopted.append({"definition_id": did, "server_id": sid, "name": name,
+                        "media_type": media_type, "members": len(member_ids),
+                        "mapped": len(tmdb_ids)})
+    return {"ok": True, "adopted": adopted, "skipped": skipped}
+
+
+__all__ = ["start_delete", "run_delete", "status", "set_cleanup_progress_emitter",
+           "adopt_collections"]
