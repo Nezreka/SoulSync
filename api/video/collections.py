@@ -63,6 +63,10 @@ def register_routes(bp):
                 enabled=False if d.get("enabled") is False else True)
             if cid is None:
                 return jsonify({"ok": False, "error": "Could not create collection"}), 500
+            # Art is default-on: a poster-less collection gets its collage
+            # rendered off-request (regenerate any time from the editor).
+            if not d.get("poster_url"):
+                _generate_posters_async([cid])
             return jsonify({"ok": True, "id": cid})
         except Exception:
             logger.exception("create collection failed")
