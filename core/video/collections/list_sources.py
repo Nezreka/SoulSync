@@ -243,10 +243,18 @@ def _fetch_imdb(eng, ref: Any) -> List[Dict[str, Any]]:
             logger.info("imdb source yielded no titles (schema change?): %s", key)
             return []
         from concurrent.futures import ThreadPoolExecutor
+
+        def resolve(p):
+            tid = eng.tmdb_from_imdb(p[0], kind)
+            # Poster rides the same cached record — IMDb carries no art, and an
+            # art-less missing browser isn't to standard.
+            poster = eng.imdb_poster(p[0], kind) if tid else None
+            return tid, poster
+
         with ThreadPoolExecutor(max_workers=8) as ex:
-            tmdb_ids = list(ex.map(lambda p: eng.tmdb_from_imdb(p[0], kind), pairs))
-        raw = [{"tmdb_id": tid, "title": name, "year": year}
-               for (tt, name, year), tid in zip(pairs, tmdb_ids, strict=False) if tid]
+            resolved = list(ex.map(resolve, pairs))
+        raw = [{"tmdb_id": tid, "title": name, "year": year, "poster_url": poster}
+               for (tt, name, year), (tid, poster) in zip(pairs, resolved, strict=False) if tid]
         return _dedup_normed(raw)
 
     return _community_cached(key, build)

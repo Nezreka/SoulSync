@@ -136,6 +136,9 @@ class _ImdbEngine:
     def tmdb_from_imdb(self, tt, kind):
         return {"tt0111161": 278, "tt0068646": 238}.get(tt)
 
+    def imdb_poster(self, tt, kind):
+        return f"https://img.tmdb/{tt}.jpg" if self.tmdb_from_imdb(tt, kind) else None
+
 
 def test_imdb_chart_via_graphql(monkeypatch):
     import core.video.collections.list_sources as ls
@@ -156,6 +159,8 @@ def test_imdb_chart_via_graphql(monkeypatch):
     out = fetch("imdb_chart", {"chart": "top", "kind": "movie"})
     assert [(o["tmdb_id"], o["title"], o["year"]) for o in out] == \
         [(278, "The Shawshank Redemption", 1994), (238, "The Godfather", 1972)]
+    # Art rides along — IMDb carries none, TMDB's /find record fills it.
+    assert out[0]["poster_url"] == "https://img.tmdb/tt0111161.jpg"
     assert "TOP_RATED_MOVIES" in queries[0]
     assert fetch("imdb_chart", {"chart": "nope"}) == []
 
@@ -310,3 +315,45 @@ def test_resolver_builds_chart_and_keyword_refs():
     bad = resolve_collection(_Db(), {"media_type": "movie", "kind": "list",
                                      "definition": {"source": "tmdb_keyword"}}, list_fetcher=fetch)
     assert not bad.ok and "no keyword" in bad.error
+
+
+# ── tt→TMDB mapping persists (an IMDb chart costs its lookups once EVER) ─────
+def test_imdb_map_persists_across_engine_restarts(tmp_path):
+    from types import SimpleNamespace
+    from core.video.enrichment.engine import VideoEnrichmentEngine
+    from database.video_database import VideoDatabase
+    db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
+    calls = []
+
+    class _Client:
+        def find_by_imdb(self, tt):
+            calls.append(tt)
+            return {"movie": 278, "show": None,
+                    "movie_poster": "https://img.tmdb/278.jpg", "show_poster": None}
+
+    def eng():
+        e = VideoEnrichmentEngine.__new__(VideoEnrichmentEngine)
+        e.db = db
+        from core.video.enrichment.engine import TTLCache
+        e._cache = TTLCache(maxsize=64, ttl=1800)
+        e.workers = {"tmdb": SimpleNamespace(enabled=True, client=_Client())}
+        return e
+
+    e1 = eng()
+    assert e1.tmdb_from_imdb("tt0111161", "movie") == 278
+    assert e1.imdb_poster("tt0111161", "movie") == "https://img.tmdb/278.jpg"
+    assert calls == ["tt0111161"]
+
+    # Fresh engine (restart): the persisted map answers — no network at all.
+    e2 = eng()
+    assert e2.tmdb_from_imdb("tt0111161", "movie") == 278
+    assert e2.imdb_poster("tt0111161", "movie") == "https://img.tmdb/278.jpg"
+    assert calls == ["tt0111161"]
+
+    # A tt the LIBRARY already knows maps with zero network too.
+    conn = db._get_connection()
+    conn.execute("INSERT INTO movies (id, server_source, server_id, tmdb_id, imdb_id, title, has_file) "
+                 "VALUES (9, 'plex', 'm9', 999, 'tt7777777', 'Owned', 1)")
+    conn.commit(); conn.close()
+    assert eng().tmdb_from_imdb("tt7777777", "movie") == 999
+    assert calls == ["tt0111161"]
