@@ -3681,17 +3681,18 @@ class VideoDatabase:
         finally:
             conn.close()
 
-    def wishlisted_show_tmdb_ids(self) -> list:
-        """Distinct show tmdb ids with episode rows on the wishlist — lets the
-        collections tie-in skip shows it (or anything else) already expanded."""
+    def watchlist_states(self, kind: str) -> dict:
+        """{tmdb_id: state} for every watchlist row of a kind — lets the
+        collections tie-in skip shows already followed AND respect 'mute'
+        tombstones (a muted show must never be re-followed by automation)."""
         conn = self._get_connection()
         try:
-            return [int(r["tmdb_id"]) for r in conn.execute(
-                "SELECT DISTINCT tmdb_id FROM video_wishlist "
-                "WHERE kind='episode' AND tmdb_id IS NOT NULL")]
+            return {int(r["tmdb_id"]): r["state"] for r in conn.execute(
+                "SELECT tmdb_id, state FROM video_watchlist "
+                "WHERE kind=? AND tmdb_id IS NOT NULL", (kind,))}
         except Exception:
-            logger.exception("wishlisted_show_tmdb_ids failed")
-            return []
+            logger.exception("watchlist_states failed")
+            return {}
         finally:
             conn.close()
 

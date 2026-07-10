@@ -798,8 +798,11 @@
             // Default ON only where the missing set is bounded (complete-the-series
             // packs). A chart/theme can be 200+ missing titles — that's opt-in.
             var wlDefault = (pack.id === 'franchises' || pack.id === 'universes');
+            var wlText = pack.media_type === 'show'
+                ? 'Watchlist the shows I\'m missing (follow them)'
+                : 'Wishlist the movies I\'m missing';
             foot.innerHTML = '<label class="vce-wl"><input type="checkbox"' + (wlDefault ? ' checked' : '') + ' data-wl> ' +
-                'Wishlist the ' + esc(mediaWord(pack.media_type)) + ' I\'m missing</label>';
+                wlText + '</label>';
             wl = foot.querySelector('[data-wl]');
         }
         foot.appendChild(h('div', 'vce-foot-spacer'));
@@ -1190,7 +1193,7 @@
                 ['hide', 'Hide the collection itself'],
                 ['default', 'Library default']]) +
             '<label class="vce-check"><input type="checkbox" data-f="pinned"' + (ed.pinned ? ' checked' : '') + '> Pin to server home</label>' +
-            '<label class="vce-check" data-wishlist-row><input type="checkbox" data-f="wishlist_missing"' + (ed.wishlist_missing ? ' checked' : '') + '> Wishlist members I don\'t own</label>' +
+            '<label class="vce-check" data-wishlist-row><input type="checkbox" data-f="wishlist_missing"' + (ed.wishlist_missing ? ' checked' : '') + '> <span data-wl-label>Wishlist members I don\'t own</span></label>' +
             '<label class="vce-check"><input type="checkbox" data-f="enabled"' + (ed.enabled ? ' checked' : '') + '> Include in daily sync</label>' +
             '<div class="vce-order" data-order hidden></div>' +
             '<label class="vce-flabel">In season only (optional)</label>' +
@@ -1387,7 +1390,12 @@
 
     function toggleWishlistRow() {
         var row = overlay.querySelector('[data-wishlist-row]');
-        if (row) row.style.display = ed.kind === 'list' ? '' : 'none';
+        if (!row) return;
+        row.style.display = ed.kind === 'list' ? '' : 'none';
+        var lbl = row.querySelector('[data-wl-label]');
+        if (lbl) lbl.textContent = ed.media_type === 'show'
+            ? 'Watchlist shows I don\'t own (follow them)'
+            : 'Wishlist movies I don\'t own';
     }
 
     // ── builder (smart rules OR list source) ─────────────────────────────────
@@ -1808,7 +1816,8 @@
             panel.innerHTML = '';
             var head = h('div', 'vce-missing-head',
                 '<span class="vce-missing-t">You\'re missing ' + d.count + ' ' + mediaWord(ed.media_type) + '</span>');
-            var all = h('button', 'vce-btn vce-btn--primary vce-missing-all', 'Wishlist all');
+            var all = h('button', 'vce-btn vce-btn--primary vce-missing-all',
+                ed.media_type === 'show' ? 'Watchlist all' : 'Wishlist all');
             all.type = 'button';
             all.addEventListener('click', function () { wishlistMissing(null, all); });
             head.appendChild(all);
@@ -1829,7 +1838,8 @@
             panel.appendChild(grid);
             if (ed.media_type === 'show') {
                 panel.appendChild(h('p', 'vce-note',
-                    'Shows expand into their aired episodes; big batches drain across nightly syncs (a few new shows per pass).'));
+                    'Shows get FOLLOWED on your watchlist (new episodes auto-wishlist as they air). ' +
+                    'Ended shows are skipped — grab those manually from here.'));
             }
         });
     }
