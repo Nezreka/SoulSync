@@ -1,8 +1,7 @@
 import { z } from 'zod';
 
 // Single route `/library-v2` with the current view driven by search params:
-//   - album set  -> album/single detail
-//   - artist set -> artist detail
+//   - artist set -> artist detail (albums expand inline)
 //   - neither    -> artist overview
 // Keeping it to one route (vs nested file routes) keeps the TanStack route tree
 // small and avoids codegen surprises while still giving the full drill-down UX.
@@ -19,7 +18,6 @@ export const libraryV2SearchSchema = z.object({
   monitored: z.enum(LIBRARY_V2_MONITOR_FILTERS).default('all').catch('all'),
   page: z.coerce.number().int().positive().default(1).catch(1),
   artist: z.coerce.number().int().positive().optional().catch(undefined),
-  album: z.coerce.number().int().positive().optional().catch(undefined),
   /** Artist detail: show only owned releases or the full provider discography. */
   releases: z.enum(['library', 'all']).default('library').catch('library'),
 });

@@ -7018,6 +7018,30 @@ def get_music_video_status(video_id):
     return jsonify(status)
 
 
+def _audit_manual_skip(context_key, title, artist, skip_checks):
+    """Record a user-initiated check override in the Library v2 skip audit.
+
+    Only when the Library v2 feature is enabled — the audit exists for lib2's
+    cleanup/repair jobs, and a disabled feature shouldn't accumulate rows.
+    Best-effort: failures never block the download.
+    """
+    try:
+        if config_manager.get('features.library_v2', False) is not True:
+            return
+        import json as _json
+        _db = get_database()
+        with _db._get_connection() as _c:
+            _c.execute(
+                "INSERT INTO lib2_manual_skips "
+                "(content_key, title, artist, skipped_checks, reason) "
+                "VALUES (?,?,?,?, 'manual_download')",
+                (context_key, title, artist, _json.dumps(skip_checks)),
+            )
+            _c.commit()
+    except Exception as _se:
+        logger.debug("manual-skip audit write failed: %s", _se)
+
+
 @app.route('/api/download', methods=['POST'])
 def start_download():
     """Simple download route"""
@@ -7035,6 +7059,14 @@ def start_download():
             tracks = data.get('tracks', [])
             if not tracks:
                 return jsonify({"error": "No tracks found in album."}), 400
+
+            # Per-download check overrides apply to every track of the album —
+            # the Library v2 interactive search sends them on album grabs too.
+            _album_skip_checks = []
+            if data.get('skip_acoustid'):
+                _album_skip_checks.append('acoustid')
+            if data.get('quality_check') is False:
+                _album_skip_checks.extend(['bit_depth', 'quality'])
 
             started_downloads = 0
             for track_data in tracks:
@@ -7064,8 +7096,12 @@ def start_download():
                                 },
                                 'spotify_artist': None,  # No Spotify metadata
                                 'spotify_album': None,
-                                'track_info': None
+                                'track_info': None,
+                                '_skip_quarantine_check': _album_skip_checks or None,
                             }
+                        if _album_skip_checks:
+                            _audit_manual_skip(context_key, track_data.get('title'),
+                                               track_data.get('artist'), _album_skip_checks)
                         started_downloads += 1
                 except Exception as e:
                     logger.error(f"Failed to start track download: {e}")
@@ -7148,20 +7184,8 @@ def start_download():
                 # checks were skipped so cleanup/repair jobs (and the user) know it
                 # was a deliberate manual choice (#library-v2).
                 if _skip_checks:
-                    try:
-                        import json as _json
-                        _db = get_database()
-                        with _db._get_connection() as _c:
-                            _c.execute(
-                                "INSERT INTO lib2_manual_skips "
-                                "(content_key, title, artist, skipped_checks, reason) "
-                                "VALUES (?,?,?,?, 'manual_download')",
-                                (context_key, data.get('title'), data.get('artist'),
-                                 _json.dumps(_skip_checks)),
-                            )
-                            _c.commit()
-                    except Exception as _se:
-                        logger.debug("manual-skip audit write failed: %s", _se)
+                    _audit_manual_skip(context_key, data.get('title'),
+                                       data.get('artist'), _skip_checks)
 
                 # Extract track name from filename for activity
                 track_name = filename.split('/')[-1] if '/' in filename else filename.split('\\')[-1] if '\\' in filename else filename

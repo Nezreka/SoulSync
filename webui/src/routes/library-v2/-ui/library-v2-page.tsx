@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate as useRouterNavigate } from '@tanstack/react-router';
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, useRef, useState } from 'react';
 
 import { useReactPageShell } from '@/platform/shell/route-controllers';
 
@@ -8,17 +8,20 @@ import {
   autoGrabBest,
   bulkMonitorLibraryV2Releases,
   deleteLibraryV2Entity,
+  editLibraryV2AlbumType,
   editLibraryV2Artist,
   fetchLibraryV2ArtistHistory,
   fetchLibraryV2Duplicates,
   fetchLibraryV2ImportStatus,
   fetchLibraryV2JobStatus,
+  LIBRARY_V2_ALBUM_TYPES,
   LIBRARY_V2_QUERY_KEY,
   libraryV2AlbumQueryOptions,
   libraryV2ArtistQueryOptions,
   libraryV2ArtistsQueryOptions,
   libraryV2EnabledQueryOptions,
   moveLibraryV2TrackFile,
+  processWishlist,
   refreshLibraryV2,
   refreshLibraryV2Discography,
   runRepairJob,
@@ -26,6 +29,7 @@ import {
   startLibraryV2Import,
   startLibraryV2UpgradeScan,
   unlinkLibraryV2Duplicate,
+  type LibraryV2AlbumType,
 } from '../-library-v2.api';
 import type {
   LibraryV2AlbumSummary,
@@ -51,8 +55,11 @@ function trackProgress(present: number, total: number): string {
 
 /** Only "Interactive Search" opens the manual results window. */
 const INTERACTIVE_RE = /^Interactive Search\b/;
-/** "Search" / "Search Monitored" / "Grab Release" auto-search + grab the best. */
-const AUTO_GRAB_RE = /^(Search Monitored|Search|Grab Release)\b/;
+/** "Search Monitored" triggers wishlist processing (checked BEFORE the
+ *  auto-grab route — its label also starts with "Search"). */
+const SEARCH_MONITORED_RE = /^Search Monitored\b/;
+/** Per-track "Search" / "Grab Release" auto-search + grab the best result. */
+const AUTO_GRAB_RE = /^(Search|Grab Release)\b/;
 
 /** Build a source-search query from an artist name + an action label like
  *  "Interactive Search: Title (Album)". */
@@ -477,6 +484,71 @@ function DeleteConfirmModal({
   );
 }
 
+/** Edit a release: re-file it under the correct type. The legacy import
+ *  classifies by track count, so 1-track EPs land under Singles etc. —
+ *  correcting the type moves the release between the page's sections. */
+function EditAlbumModal({
+  album,
+  onClose,
+}: {
+  album: LibraryV2AlbumSummary;
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [albumType, setAlbumType] = useState<LibraryV2AlbumType>(
+    (LIBRARY_V2_ALBUM_TYPES as readonly string[]).includes(album.album_type)
+      ? (album.album_type as LibraryV2AlbumType)
+      : 'album',
+  );
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <ModalShell title={`Edit — ${album.title}`} onClose={onClose}>
+      <div className={styles.editRow}>
+        <label htmlFor="lib2-album-type">Release type</label>
+        <select
+          id="lib2-album-type"
+          className={styles.select}
+          value={albumType}
+          disabled={busy}
+          onChange={(e) => setAlbumType(e.target.value as LibraryV2AlbumType)}
+        >
+          {LIBRARY_V2_ALBUM_TYPES.map((t) => (
+            <option key={t} value={t}>
+              {t.charAt(0).toUpperCase() + t.slice(1)}
+            </option>
+          ))}
+        </select>
+      </div>
+      {error ? <div className={styles.searchError}>{error}</div> : null}
+      <div className={styles.modalActions}>
+        <button type="button" className={styles.btnGhost} disabled={busy} onClick={onClose}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          className={styles.btnPrimary}
+          disabled={busy || albumType === album.album_type}
+          onClick={() => {
+            setBusy(true);
+            void editLibraryV2AlbumType(album.id, albumType)
+              .then(async () => {
+                await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+                onClose();
+              })
+              .catch((e) => {
+                setError(e instanceof Error ? e.message : 'Edit failed');
+                setBusy(false);
+              });
+          }}
+        >
+          {busy ? 'Saving…' : 'Save'}
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
 /** Maintenance jobs (the existing repair workers), runnable from the artist
  *  page like Lidarr's Tasks. Jobs with `scoped: true` honor an artist scope
  *  when triggered from here; the rest scan the whole library. */
@@ -740,6 +812,8 @@ export function LibraryV2Page() {
 function ArtistIndexView() {
   const search = Route.useSearch();
   const navigate = useNavigate();
+  // Debounce the filter box: navigating per keystroke fires a request each key.
+  const searchDebounce = useRef<number | undefined>(undefined);
   const artistsQuery = useQuery(
     libraryV2ArtistsQueryOptions({
       q: search.q,
@@ -775,7 +849,10 @@ function ArtistIndexView() {
           defaultValue={search.q}
           onChange={(e) => {
             const value = e.target.value;
-            void navigate({ search: (prev) => ({ ...prev, q: value, page: 1 }) });
+            window.clearTimeout(searchDebounce.current);
+            searchDebounce.current = window.setTimeout(() => {
+              void navigate({ search: (prev) => ({ ...prev, q: value, page: 1 }) });
+            }, 300);
           }}
         />
         <select
@@ -971,6 +1048,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
     id: number;
     title: string;
   } | null>(null);
+  const [editAlbumTarget, setEditAlbumTarget] = useState<LibraryV2AlbumSummary | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{
     entity: 'artists' | 'albums';
     id: number;
@@ -1039,8 +1117,30 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
     }
   }
 
-  /** Route a toolbar/row action: Interactive Search opens the window; plain
-   *  Search / Grab auto-searches and downloads the best result. */
+  /** "Search Monitored" = run the wishlist processor. Every monitored missing
+   *  or upgradable track is already mirrored into the wishlist, so processing
+   *  it searches and downloads exactly those — it must NOT blind-grab the best
+   *  result for a bare artist-name query (an arbitrary release). */
+  function searchMonitored() {
+    setGrabBanner({ tone: 'busy', text: 'Starting wishlist processing…' });
+    void processWishlist()
+      .then((message) =>
+        setGrabBanner({
+          tone: 'ok',
+          text: `${message} — monitored missing tracks are searched through the normal pipeline (progress on the Wishlist page).`,
+        }),
+      )
+      .catch((e) =>
+        setGrabBanner({
+          tone: 'err',
+          text: e instanceof Error ? e.message : 'Wishlist processing failed to start',
+        }),
+      );
+  }
+
+  /** Route a toolbar/row action: Interactive Search opens the window;
+   *  Search Monitored runs the wishlist processor; per-track Search / Grab
+   *  auto-searches and downloads the best result for that specific track. */
   function handleAction(action: string) {
     if (action === 'Quality Profile' && artist) {
       setQpTarget({
@@ -1053,6 +1153,10 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
     }
     if (INTERACTIVE_RE.test(action)) {
       setModalAction(action);
+      return;
+    }
+    if (SEARCH_MONITORED_RE.test(action)) {
+      searchMonitored();
       return;
     }
     if (AUTO_GRAB_RE.test(action)) {
@@ -1092,21 +1196,13 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               <ActionButton
                 icon="search"
                 label="Search Monitored"
-                title="Search monitored missing tracks"
-                disabled={
-                  !artist.monitored ||
-                  artist.albums.length + (artist.eps?.length ?? 0) + artist.singles.length === 0
-                }
+                title="Process the wishlist: search + download all monitored missing tracks"
                 onClick={() => handleAction('Search Monitored')}
               />
               <ActionButton
                 icon="interactive"
                 label="Interactive Search"
                 title="Search all SoulSync sources manually"
-                disabled={
-                  !artist.monitored ||
-                  artist.albums.length + (artist.eps?.length ?? 0) + artist.singles.length === 0
-                }
                 onClick={() => handleAction('Interactive Search')}
               />
               <ActionButton
@@ -1258,6 +1354,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             onRetag={(album) =>
               setRetagTarget({ entity: 'albums', id: album.id, title: album.title })
             }
+            onEdit={setEditAlbumTarget}
           />
           <AlbumGroup
             title="EPs"
@@ -1272,6 +1369,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             onRetag={(album) =>
               setRetagTarget({ entity: 'albums', id: album.id, title: album.title })
             }
+            onEdit={setEditAlbumTarget}
           />
           <AlbumGroup
             title="Singles"
@@ -1286,6 +1384,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             onRetag={(album) =>
               setRetagTarget({ entity: 'albums', id: album.id, title: album.title })
             }
+            onEdit={setEditAlbumTarget}
           />
           {modalAction && INTERACTIVE_RE.test(modalAction) ? (
             <InteractiveSearchModal
@@ -1315,6 +1414,9 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               title={retagTarget.title}
               onClose={() => setRetagTarget(null)}
             />
+          ) : null}
+          {editAlbumTarget ? (
+            <EditAlbumModal album={editAlbumTarget} onClose={() => setEditAlbumTarget(null)} />
           ) : null}
           {deleteTarget ? (
             <DeleteConfirmModal
@@ -1369,6 +1471,7 @@ function AlbumGroup({
   onQualityProfile,
   onDelete,
   onRetag,
+  onEdit,
 }: {
   title: string;
   albums: LibraryV2AlbumSummary[];
@@ -1378,6 +1481,7 @@ function AlbumGroup({
   onQualityProfile: (target: QpTarget) => void;
   onDelete: (album: LibraryV2AlbumSummary) => void;
   onRetag: (album: LibraryV2AlbumSummary) => void;
+  onEdit: (album: LibraryV2AlbumSummary) => void;
 }) {
   const queryClient = useQueryClient();
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -1425,6 +1529,7 @@ function AlbumGroup({
             onQualityProfile={onQualityProfile}
             onDelete={onDelete}
             onRetag={onRetag}
+            onEdit={onEdit}
           />
         ))}
       </div>
@@ -1438,12 +1543,14 @@ function AlbumBlock({
   onQualityProfile,
   onDelete,
   onRetag,
+  onEdit,
 }: {
   album: LibraryV2AlbumSummary;
   onAction: (action: string) => void;
   onQualityProfile: (target: QpTarget) => void;
   onDelete: (album: LibraryV2AlbumSummary) => void;
   onRetag: (album: LibraryV2AlbumSummary) => void;
+  onEdit: (album: LibraryV2AlbumSummary) => void;
 }) {
   const [open, setOpen] = useState(false);
   const complete = album.tracks_missing === 0 && album.track_count > 0;
@@ -1501,6 +1608,11 @@ function AlbumBlock({
             icon="retag"
             title="Preview Retag"
             onClick={() => onRetag(album)}
+          />
+          <IconActionButton
+            icon="edit"
+            title="Edit release (correct the album/EP/single type)"
+            onClick={() => onEdit(album)}
           />
           <IconActionButton
             icon="delete"

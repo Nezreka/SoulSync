@@ -189,6 +189,90 @@ def test_wishlist_only_track_seeds_missing_monitored_library_rows(legacy_db):
     assert detail["tracks"][0]["monitored"] is True
 
 
+def test_wishlist_seed_does_not_clamp_discography_expected_count(legacy_db):
+    """A wishlist track that lands on a provider-only (discography) release must
+    not shrink the release's expected_track_count to the wishlisted rows — the
+    later tracklist materialization trims to expected, so a clamp would
+    truncate the whole release to one track."""
+    import_legacy_library(legacy_db)
+
+    conn = sqlite3.connect(legacy_db.path)
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        "INSERT INTO lib2_artists(name, sort_name, spotify_id) "
+        "VALUES('Wishlist Artist','Wishlist Artist','sp_artist_1')")
+    artist_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title, album_type, spotify_id, "
+        "origin, monitored, track_count, expected_track_count) "
+        "VALUES(?, 'Big Release', 'album', 'sp_album_1', 'discography', 0, 12, 12)",
+        (artist_id,))
+    album_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    conn.execute("INSERT INTO lib2_album_artists(album_id, artist_id) VALUES(?,?)",
+                 (album_id, artist_id))
+    conn.execute("""
+        CREATE TABLE wishlist_tracks(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            spotify_track_id TEXT NOT NULL,
+            spotify_data TEXT NOT NULL,
+            source_type TEXT DEFAULT 'manual',
+            date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    payload = {
+        "id": "sp_track_9",
+        "name": "Wanted Album Cut",
+        "artists": [{"id": "sp_artist_1", "name": "Wishlist Artist"}],
+        "album": {
+            "id": "sp_album_1",
+            "name": "Big Release",
+            "album_type": "album",
+            "total_tracks": 12,
+            "artists": [{"id": "sp_artist_1", "name": "Wishlist Artist"}],
+        },
+        "track_number": 3,
+    }
+    conn.execute(
+        "INSERT INTO wishlist_tracks(spotify_track_id, spotify_data, source_type) VALUES(?,?,?)",
+        ("sp_track_9", json.dumps(payload), "manual"))
+    conn.commit()
+    conn.close()
+
+    import_legacy_library(legacy_db)
+
+    conn = sqlite3.connect(legacy_db.path)
+    conn.row_factory = sqlite3.Row
+    album = conn.execute("SELECT * FROM lib2_albums WHERE spotify_id='sp_album_1'").fetchone()
+    conn.close()
+    assert album["expected_track_count"] == 12
+    assert album["origin"] == "discography"
+
+
+def test_full_band_name_credit_is_not_split_into_ghost_artists(legacy_db):
+    """'Simon & Garfunkel' as a track credit must reuse the existing artist row,
+    not be split at '&' into two invented artists."""
+    conn = sqlite3.connect(legacy_db.path)
+    conn.execute(
+        "INSERT INTO artists VALUES(2,'Simon & Garfunkel',NULL,NULL,NULL,NULL,NULL)")
+    conn.execute(
+        "INSERT INTO albums VALUES(20,2,'Bookends',1968,NULL,NULL,1,NULL)")
+    conn.execute(
+        "INSERT INTO tracks VALUES(200,20,2,'Mrs. Robinson',1,240000,'/m/mrs.flac',900,4000,"
+        "'Simon & Garfunkel')")
+    conn.commit()
+    conn.close()
+
+    import_legacy_library(legacy_db, reset=True)
+
+    conn = sqlite3.connect(legacy_db.path)
+    conn.row_factory = sqlite3.Row
+    names = {r["name"] for r in conn.execute("SELECT name FROM lib2_artists")}
+    conn.close()
+    assert "Simon & Garfunkel" in names
+    assert "Simon" not in names
+    assert "Garfunkel" not in names
+
+
 def test_watchlist_artist_monitoring_is_independent_from_wishlist_tracks(legacy_db):
     conn = sqlite3.connect(legacy_db.path)
     conn.execute("""

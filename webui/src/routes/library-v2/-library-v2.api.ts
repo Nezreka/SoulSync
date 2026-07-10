@@ -170,6 +170,34 @@ export async function editLibraryV2Artist(
   if (!payload.success) throw new Error(payload.error || 'Edit failed');
 }
 
+export const LIBRARY_V2_ALBUM_TYPES = ['album', 'ep', 'single', 'compilation', 'live'] as const;
+export type LibraryV2AlbumType = (typeof LIBRARY_V2_ALBUM_TYPES)[number];
+
+/** Re-file a release under the correct type (the legacy import classifies by
+ *  track count, so EPs/singles are frequently misfiled). */
+export async function editLibraryV2AlbumType(
+  albumId: number,
+  albumType: LibraryV2AlbumType,
+): Promise<void> {
+  const payload = await readJson<{ success: boolean; error?: string }>(
+    apiClient.post(`library/v2/albums/${albumId}/edit`, {
+      json: { album_type: albumType },
+    }),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Edit failed');
+}
+
+/** Trigger the wishlist processor — the real "Search Monitored": every
+ *  monitored missing/upgradable track is mirrored to the wishlist, so
+ *  processing it searches and downloads them through the normal pipeline. */
+export async function processWishlist(): Promise<string> {
+  const payload = await readJson<{ success: boolean; message?: string; error?: string }>(
+    apiClient.post('wishlist/process', { json: {} }),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Wishlist processing failed to start');
+  return payload.message ?? 'Wishlist processing started';
+}
+
 export async function deleteLibraryV2Entity(
   entity: 'artists' | 'albums',
   id: number,

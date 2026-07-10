@@ -16,8 +16,6 @@ files, never findings.
 
 from __future__ import annotations
 
-import os
-
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
@@ -88,13 +86,19 @@ class Lib2SkipsCleanupJob(RepairJob):
             ).fetchall()
             expired_ids = {r["id"] for r in expired}
 
+            # Stored paths may be the media server's filesystem view — resolve
+            # through the shared lib2 resolver, otherwise a path-mapped setup
+            # would look 100% missing and this job would wipe the whole audit.
+            from core.library2.paths import resolve_lib2_path
+
             to_delete = set(expired_ids)
             for row in rows:
                 if context.check_stop():
                     break
                 result.scanned += 1
                 path = row["file_path"]
-                if path and not os.path.exists(path):
+                if path and resolve_lib2_path(
+                        path, config_manager=context.config_manager) is None:
                     to_delete.add(row["id"])
 
             for skip_id in to_delete:

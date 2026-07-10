@@ -337,7 +337,9 @@ export function InteractiveSearchModal({
   }, []);
 
   async function grab(r: SourceSearchResult) {
-    const key = `${r.username}::${r.filename}`;
+    // Must match the key the row renders with (resultKey) — album results
+    // have no filename, so a filename-based key would never update the button.
+    const key = resultKey(r);
     setGrabbed((g) => ({ ...g, [key]: 'pending' }));
     try {
       await startSourceDownload(r, { qualityCheck, skipAcoustid: !acoustidCheck });

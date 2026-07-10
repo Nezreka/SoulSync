@@ -164,6 +164,45 @@ def test_reexpansion_auto_monitors_new_release(legacy_db, imported_conn, fake_di
         "SELECT monitored FROM lib2_albums WHERE title='Scorpion'").fetchone()["monitored"] == 0
 
 
+def test_reexpansion_auto_monitors_even_after_all_rows_claimed(
+        legacy_db, imported_conn, fake_discography, monkeypatch):
+    """The first-vs-re-expansion distinction must survive every discography row
+    being claimed/monitored since — the explicit discography_synced_at marker
+    carries it, not the presence of pristine provider rows."""
+    aid = _artist_id(imported_conn)
+    conn = legacy_db._get_connection()
+    conn.execute("UPDATE lib2_artists SET monitored=1, monitor_new_items='all' WHERE id=?", (aid,))
+    conn.commit()
+    conn.close()
+
+    D.expand_artist_discography(legacy_db, aid)  # first expansion sets the marker
+
+    # The user monitors the whole catalog — no origin='discography' row stays
+    # pristine (the old heuristic would misread the next run as a first expansion).
+    conn = legacy_db._get_connection()
+    conn.execute("UPDATE lib2_albums SET monitored=1")
+    conn.commit()
+    conn.close()
+
+    grown = _cards(
+        ("albums", {"id": "sp-views", "title": "Views", "album_type": "album", "track_count": 20}),
+        ("albums", {"id": "sp-scorpion", "title": "Scorpion", "album_type": "album", "track_count": 25}),
+        ("albums", {"id": "sp-new", "title": "For All The Dogs", "album_type": "album",
+                    "track_count": 23}),
+        ("singles", {"id": "sp-onedance", "title": "One Dance", "album_type": "single",
+                     "track_count": 1}),
+    )
+    monkeypatch.setattr(
+        "core.metadata.discography.get_artist_detail_discography",
+        lambda artist_id, artist_name="", options=None: grown,
+    )
+    stats = D.expand_artist_discography(legacy_db, aid)
+    assert len(stats["auto_monitor_album_ids"]) == 1
+    assert imported_conn.execute(
+        "SELECT monitored FROM lib2_albums WHERE title='For All The Dogs'"
+    ).fetchone()["monitored"] == 1
+
+
 def test_reexpansion_respects_monitor_new_items_none(legacy_db, imported_conn, fake_discography, monkeypatch):
     aid = _artist_id(imported_conn)
     conn = legacy_db._get_connection()

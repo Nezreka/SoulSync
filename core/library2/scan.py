@@ -42,8 +42,14 @@ def rescan_files(database, *, album_ids: Optional[List[int]] = None,
 
     Returns ``{"scanned": n, "updated": n, "missing": n}``. Never raises for
     individual files — a broken file just stays on its imported values.
+
+    Stored paths are the legacy DB's (often the media server's) view of the
+    filesystem, so each one goes through the shared resolver — on path-mapped
+    setups the raw path never exists here and a raw ``os.path.exists`` check
+    would report the whole library "missing".
     """
     from core.imports.file_ops import probe_audio_quality
+    from core.library2.paths import resolve_lib2_path
     from core.library2.status import quality_tier
 
     stats = {"scanned": 0, "updated": 0, "missing": 0}
@@ -52,10 +58,10 @@ def rescan_files(database, *, album_ids: Optional[List[int]] = None,
         rows = _file_rows_in_scope(conn, album_ids=album_ids)
         total = len(rows)
         for i, row in enumerate(rows):
-            path = row["path"]
+            path = resolve_lib2_path(row["path"])
             if progress and i % 25 == 0:
                 progress("scan", i, total)
-            if not path or not os.path.exists(path):
+            if not path:
                 stats["missing"] += 1
                 continue
             stats["scanned"] += 1

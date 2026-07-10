@@ -166,12 +166,14 @@ def _persist_tracklist_tracks(conn, album_id: int, tracks: List[dict]) -> int:
             track_id = existing["id"]
             touched_ids.add(track_id)
         else:
+            from core.library2.profile_lookup import default_quality_profile_id
             conn.execute(
                 """INSERT INTO lib2_tracks(album_id, title, track_number, disc_number,
                           duration, spotify_id, monitored, quality_profile_id)
                    VALUES(?,?,?,?,?,?,?,?)""",
                 (album_id, title, number, disc, duration, spotify_id,
-                 1 if al["monitored"] else 0, al["quality_profile_id"] or 1),
+                 1 if al["monitored"] else 0,
+                 al["quality_profile_id"] or default_quality_profile_id(conn)),
             )
             track_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
             created += 1

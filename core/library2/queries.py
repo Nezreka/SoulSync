@@ -34,11 +34,19 @@ _ARTIST_STATS = """
        WHERE aa.artist_id = a.id AND al.album_type = 'single'
          AND (al.origin = 'library' OR al.monitored = 1)) AS single_count,
     (SELECT COUNT(DISTINCT ta.track_id) FROM lib2_track_artists ta
-       WHERE ta.artist_id = a.id) AS track_count,
+       JOIN lib2_tracks t ON t.id = ta.track_id
+       WHERE ta.artist_id = a.id
+         AND (t.monitored = 1
+              OR EXISTS(SELECT 1 FROM lib2_track_files tf
+                        WHERE tf.track_id = t.id))) AS track_count,
     (SELECT COUNT(DISTINCT ta.track_id) FROM lib2_track_artists ta
        JOIN lib2_track_files tf ON tf.track_id = ta.track_id
        WHERE ta.artist_id = a.id) AS track_files_present
 """
+# track_count deliberately counts only tracks that are wanted (monitored) or
+# owned (have a file): merely BROWSING an unowned discography release
+# materializes fileless provider rows, and those must not inflate the
+# overview's "missing" badge.
 
 
 def _json_dict(raw: Any) -> Dict[str, Any]:
@@ -478,23 +486,35 @@ def get_album(conn, album_id: int) -> Optional[Dict[str, Any]]:
         for t in tracks
         if t.get("track_number") is not None
     }
-    # Titles for the missing slots, when we've cached the album's canonical
-    # tracklist from a metadata provider (see core/library2/completeness.py).
-    missing_titles: Dict[int, str] = {}
+    # Slots for the missing tracks. When the album's canonical tracklist is
+    # cached (core/library2/completeness.py) the slots come from it — with the
+    # real title AND disc number, so multi-disc albums don't get colliding
+    # disc-1 placeholders. Without a tracklist, fall back to a numeric loop.
+    tl_entries: List[Dict[str, Any]] = []
     try:
         tl_raw = al["tracklist_json"] if "tracklist_json" in al.keys() else None
         for entry in (json.loads(tl_raw) if tl_raw else []):
             num = entry.get("track_number")
-            if num and entry.get("title"):
-                missing_titles[int(num)] = entry["title"]
+            if num:
+                tl_entries.append({
+                    "track_number": int(num),
+                    "disc_number": int(entry.get("disc_number") or 1),
+                    "title": entry.get("title"),
+                })
     except (ValueError, TypeError):
-        pass
+        tl_entries = []
     if total > known_count:
-        for number in range(1, total + 1):
-            key = (1, number)
-            if key not in known_numbers:
-                tracks.append(_missing_track_placeholder(
-                    number, album=album_for_tracks, title=missing_titles.get(number)))
+        if tl_entries:
+            for entry in tl_entries:
+                key = (entry["disc_number"], entry["track_number"])
+                if key not in known_numbers:
+                    tracks.append(_missing_track_placeholder(
+                        entry["track_number"], disc_number=entry["disc_number"],
+                        album=album_for_tracks, title=entry.get("title")))
+        else:
+            for number in range(1, total + 1):
+                if (1, number) not in known_numbers:
+                    tracks.append(_missing_track_placeholder(number, album=album_for_tracks))
     tracks.sort(key=lambda t: (t.get("disc_number") or 1, t.get("track_number") or 0,
                               t.get("id") or 0))
 

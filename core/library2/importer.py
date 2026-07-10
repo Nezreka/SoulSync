@@ -137,6 +137,10 @@ class _ArtistResolver:
     def get_legacy(self, legacy_id: int) -> Optional[int]:
         return self._by_legacy.get(legacy_id)
 
+    def known_name(self, name: str) -> bool:
+        """Whether an artist with exactly this (normalized) name already exists."""
+        return normalize_name(name) in self._by_name
+
     def get_or_create_by_name(self, name: str) -> int:
         key = normalize_name(name)
         existing = self._by_name.get(key)
@@ -241,6 +245,8 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
         cursor = conn.cursor()
 
         if reset:
+            # lib2_manual_skips deliberately survives a reset: it's an audit of
+            # user decisions about FILES, not derived library state.
             for table in ("lib2_track_files", "lib2_track_artists", "lib2_tracks",
                           "lib2_album_artists", "lib2_albums", "lib2_artists"):
                 cursor.execute(f"DELETE FROM {table}")
@@ -387,7 +393,15 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
             credits: List[Tuple[int, str, int]] = []  # (artist_id, role, position)
             if primary_lib2 is not None:
                 credits.append((primary_lib2, "primary", 0))
-            extra_names = split_artist_credits(_pick(row, "track_artist") or "")
+            # Band names legitimately contain the list separators ("Simon &
+            # Garfunkel", "Florence and the Machine") — when the FULL credit
+            # string is already a known artist, trust it over the split
+            # heuristic so we don't invent ghost artists.
+            raw_credit = _pick(row, "track_artist") or ""
+            if raw_credit and resolver.known_name(raw_credit):
+                extra_names = [raw_credit.strip()]
+            else:
+                extra_names = split_artist_credits(raw_credit)
             extra_names += featured_from_title(title)
             pos = 1
             for nm in extra_names:
@@ -563,12 +577,14 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
         primary_name = _artist_name_from_payload(primary_payload) or "Unknown Artist"
         primary_spotify = _artist_spotify_from_payload(primary_payload)
 
+        # monitored=0 here is safe only because apply_monitoring_from_watchlist_
+        # wishlist() runs AFTER seeding and re-derives artist flags from the
+        # watchlist — a wishlisted song must never monitor the whole artist.
         artist_id = resolver.get_or_create_by_name(primary_name)
         cursor.execute(
             """
             UPDATE lib2_artists
                SET spotify_id = COALESCE(NULLIF(spotify_id, ''), ?),
-                   image_url = COALESCE(NULLIF(image_url, ''), image_url),
                    monitored = 0,
                    updated_at = CURRENT_TIMESTAMP
              WHERE id = ?
@@ -661,6 +677,9 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
         # not the titles for the other release tracks. For albums that only exist
         # because of wishlist rows, keep the expected size to the known wishlist
         # rows so the UI does not invent unnamed "Track N - missing" placeholders.
+        # Discography rows are excluded: their expected_track_count came from the
+        # provider catalog, and clamping it here would make the later tracklist
+        # materialization truncate the release to the wishlisted tracks.
         cursor.execute(
             """
             UPDATE lib2_albums
@@ -673,6 +692,7 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
                    updated_at = CURRENT_TIMESTAMP
              WHERE id = ?
                AND legacy_album_id IS NULL
+               AND COALESCE(origin, 'library') <> 'discography'
                AND NOT EXISTS (
                    SELECT 1
                      FROM lib2_tracks t

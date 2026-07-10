@@ -51,6 +51,14 @@ def _find_or_create_artist(conn, name: str) -> Optional[int]:
     key = normalize_name(name)
     if not key:
         return None
+    # Fast path: SQL case-insensitive match covers almost every real name and
+    # avoids scanning the whole artist table per finished download.
+    row = conn.execute(
+        "SELECT id FROM lib2_artists WHERE lower(name) = ? LIMIT 1", (key,)
+    ).fetchone()
+    if row:
+        return row["id"]
+    # Slow path: python normalization also collapses whitespace/casefolds.
     for row in conn.execute("SELECT id, name FROM lib2_artists"):
         if normalize_name(row["name"]) == key:
             return row["id"]
@@ -75,10 +83,12 @@ def _find_or_create_album(conn, artist_id: int, title: str, *,
             return row["id"]
     # New albums inherit the artist's quality-profile assignment (cascade),
     # mirroring what the explicit assign endpoint does.
+    from core.library2.profile_lookup import default_quality_profile_id
     artist_profile = conn.execute(
         "SELECT quality_profile_id FROM lib2_artists WHERE id=?", (artist_id,)
     ).fetchone()
-    profile_id = (artist_profile["quality_profile_id"] if artist_profile else None) or 1
+    profile_id = ((artist_profile["quality_profile_id"] if artist_profile else None)
+                  or default_quality_profile_id(conn))
     cur = conn.execute(
         """INSERT INTO lib2_albums(primary_artist_id, title, album_type, spotify_id,
                quality_profile_id)
@@ -106,10 +116,12 @@ def _find_or_create_track(conn, album_id: int, artist_id: int, title: str, *,
     for row in rows:
         if normalize_name(row["title"]) == key:
             return row["id"]
+    from core.library2.profile_lookup import default_quality_profile_id
     album_profile = conn.execute(
         "SELECT quality_profile_id FROM lib2_albums WHERE id=?", (album_id,)
     ).fetchone()
-    profile_id = (album_profile["quality_profile_id"] if album_profile else None) or 1
+    profile_id = ((album_profile["quality_profile_id"] if album_profile else None)
+                  or default_quality_profile_id(conn))
     cur = conn.execute(
         """INSERT INTO lib2_tracks(album_id, title, track_number, spotify_id,
                quality_profile_id)
@@ -220,6 +232,12 @@ def link_download_into_library_v2(context: Dict[str, Any]) -> Optional[int]:
                      fmt, tier, source),
                 )
                 file_id = cur.lastrowid
+            # The album now owns a real file — a provider-only discography row
+            # must graduate to the library, or "My Library" (which filters on
+            # origin/monitored) would hide an album whose file exists.
+            conn.execute(
+                "UPDATE lib2_albums SET origin='library', updated_at=CURRENT_TIMESTAMP "
+                "WHERE id=? AND origin='discography'", (album_id,))
             conn.commit()
             logger.info("Library v2 auto-linked download: %s → track %s (file %s)",
                         os.path.basename(str(file_path)), track_id, file_id)

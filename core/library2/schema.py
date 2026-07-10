@@ -252,6 +252,10 @@ _ADDED_COLUMNS = (
      "ALTER TABLE lib2_tracks ADD COLUMN quality_profile_id INTEGER NOT NULL DEFAULT 1"),
     ("lib2_albums", "origin",
      "ALTER TABLE lib2_albums ADD COLUMN origin TEXT NOT NULL DEFAULT 'library'"),
+    # NULL = the artist's provider catalog was never expanded; used by the
+    # monitor_new_items enforcement to tell first expansion from re-expansion.
+    ("lib2_artists", "discography_synced_at",
+     "ALTER TABLE lib2_artists ADD COLUMN discography_synced_at TIMESTAMP"),
 )
 
 
@@ -333,6 +337,19 @@ def ensure_library_v2_schema(connection: Any) -> None:
             except Exception as e:  # noqa: BLE001
                 logger.debug("column migration %s.%s: %s", table, column, e)
     _migrate_lib2_profiles_to_app_wide(cursor)
+    # The read API falls back to download provenance (track_downloads) for
+    # files the importer knew no quality data for — index the lookup column so
+    # album views don't table-scan a large history per track. Guarded: the
+    # table belongs to the legacy schema and may not exist in test harnesses.
+    try:
+        cursor.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='track_downloads'")
+        if cursor.fetchone():
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_track_downloads_file_path "
+                "ON track_downloads(file_path)")
+    except Exception as e:  # noqa: BLE001
+        logger.debug("track_downloads index skipped: %s", e)
     logger.debug("Library v2 schema ensured")
 
 

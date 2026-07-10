@@ -98,6 +98,28 @@ def test_attaches_file_to_materialized_missing_track(lib2_enabled, imported_conn
         "SELECT COUNT(*) c FROM lib2_tracks WHERE title='Nonstop'").fetchone()["c"] == 1
 
 
+def test_linking_file_graduates_discography_album_to_library(lib2_enabled, imported_conn):
+    """Attaching a real file to a provider-only release must flip its origin —
+    'My Library' filters on origin/monitored, so an unmonitored discography row
+    with a file would otherwise be invisible despite the file existing."""
+    conn = lib2_enabled._get_connection()
+    artist_id = conn.execute("SELECT id FROM lib2_artists WHERE name='Drake'").fetchone()["id"]
+    conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title, album_type, spotify_id, "
+        "origin, monitored) VALUES(?, 'Scorpion', 'album', 'sp-scorpion', 'discography', 0)",
+        (artist_id,))
+    album_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    conn.execute(
+        "INSERT INTO lib2_album_artists(album_id, artist_id) VALUES(?,?)", (album_id, artist_id))
+    conn.commit()
+    conn.close()
+
+    assert A.link_download_into_library_v2(_context()) is not None
+    row = imported_conn.execute(
+        "SELECT origin FROM lib2_albums WHERE id=?", (album_id,)).fetchone()
+    assert row["origin"] == "library"
+
+
 def test_idempotent_relink_updates_not_duplicates(lib2_enabled, imported_conn):
     first = A.link_download_into_library_v2(_context())
     second = A.link_download_into_library_v2(_context())

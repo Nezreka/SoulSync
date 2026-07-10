@@ -121,8 +121,8 @@ def expand_artist_discography(database, artist_id: int) -> Dict[str, Any]:
     conn = database._get_connection()
     try:
         artist = conn.execute(
-            "SELECT id, name, spotify_id, quality_profile_id, monitored, monitor_new_items "
-            "FROM lib2_artists WHERE id=?",
+            "SELECT id, name, spotify_id, quality_profile_id, monitored, monitor_new_items, "
+            "discography_synced_at FROM lib2_artists WHERE id=?",
             (artist_id,),
         ).fetchone()
         if not artist:
@@ -137,8 +137,11 @@ def expand_artist_discography(database, artist_id: int) -> Dict[str, Any]:
         index = _existing_release_index(conn, artist_id)
         # "Monitor new items" applies to releases DISCOVERED after the catalog
         # was first expanded — never to the first expansion itself (that would
-        # queue an artist's whole back catalog in one click).
-        had_discography = any(
+        # queue an artist's whole back catalog in one click). The explicit
+        # ``discography_synced_at`` marker survives even when every provider
+        # row has since been claimed or monitored (the old "any pristine
+        # discography row left?" heuristic did not).
+        had_discography = artist["discography_synced_at"] is not None or any(
             row["origin"] == "discography"
             for rows in index.values() for row in rows
         )
@@ -147,6 +150,8 @@ def expand_artist_discography(database, artist_id: int) -> Dict[str, Any]:
             and artist["monitored"]
             and (artist["monitor_new_items"] or "all") in ("all", "new")
         )
+        from core.library2.profile_lookup import default_quality_profile_id
+        fallback_profile = default_quality_profile_id(conn)
         seen_ids: set = set()
         cursor = conn.cursor()
 
@@ -198,7 +203,7 @@ def expand_artist_discography(database, artist_id: int) -> Dict[str, Any]:
                 (artist_id, title, album_type, release_date, year, spotify_id,
                  external_ids, image_url, track_count, track_count,
                  1 if auto_monitor_new else 0,
-                 artist["quality_profile_id"] or 1),
+                 artist["quality_profile_id"] or fallback_profile),
             )
             new_id = cursor.lastrowid
             seen_ids.add(new_id)
@@ -232,6 +237,9 @@ def expand_artist_discography(database, artist_id: int) -> Dict[str, Any]:
             cursor.execute("DELETE FROM lib2_albums WHERE id=?", (row["id"],))
             stats["removed"] += 1
 
+        cursor.execute(
+            "UPDATE lib2_artists SET discography_synced_at=CURRENT_TIMESTAMP WHERE id=?",
+            (artist_id,))
         conn.commit()
     finally:
         conn.close()
@@ -240,4 +248,42 @@ def expand_artist_discography(database, artist_id: int) -> Dict[str, Any]:
     return stats
 
 
-__all__ = ["expand_artist_discography"]
+def auto_monitor_releases(db, config_manager, album_ids: List[int],
+                          *, wishlist_profile_id: int = 1) -> int:
+    """Make freshly discovered releases genuinely wanted.
+
+    For each album: materialize its provider tracklist into real track rows,
+    flip them monitored, and mirror them into the Wishlist (carrying the
+    per-item quality profile). Shared by the discography-refresh endpoint and
+    the periodic ``lib2_discography_refresh`` repair job so the
+    monitor_new_items enforcement can't drift between the two.
+
+    ``wishlist_profile_id`` is the legacy per-user wishlist scope (resolve it
+    in request context — background threads have none). Returns the number of
+    tracks mirrored. Never raises for individual albums.
+    """
+    from core.library2.completeness import resolve_tracklist
+    from core.library2.wishlist_mirror import mirror_tracks_wishlist
+
+    mirrored = 0
+    conn = db._get_connection()
+    try:
+        for album_id in album_ids:
+            try:
+                resolve_tracklist(config_manager, conn, album_id)
+            except Exception as e:  # noqa: BLE001
+                logger.debug("auto-monitor tracklist resolve failed (%s): %s", album_id, e)
+            conn.execute("UPDATE lib2_tracks SET monitored=1 WHERE album_id=?", (album_id,))
+            # Commit before mirroring: add_to_wishlist opens its own connection.
+            conn.commit()
+            track_ids = [r[0] for r in conn.execute(
+                "SELECT id FROM lib2_tracks WHERE album_id=?", (album_id,))]
+            if track_ids:
+                mirrored += mirror_tracks_wishlist(
+                    db, conn, track_ids, True, profile_id=wishlist_profile_id)
+    finally:
+        conn.close()
+    return mirrored
+
+
+__all__ = ["expand_artist_discography", "auto_monitor_releases"]

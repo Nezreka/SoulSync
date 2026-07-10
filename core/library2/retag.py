@@ -19,29 +19,37 @@ from utils.logging_config import get_logger
 
 logger = get_logger("library2.retag")
 
-# Caps a single preview/write request; an artist page fits comfortably.
+# Caps a single PREVIEW request (an artist page fits comfortably); the write
+# path processes any number of tracks in MAX_TRACKS-sized query batches.
 MAX_TRACKS = 500
 
 
 def _track_rows(conn, track_ids: List[int]) -> List[Any]:
+    """Track+album metadata rows for the given ids (single query batch).
+
+    The file path comes from a correlated subquery picking the FIRST file row
+    (lowest id) — a bare-column GROUP BY would let SQLite pick an arbitrary
+    file when a track has several.
+    """
     if not track_ids:
         return []
-    marks = ",".join("?" for _ in track_ids[:MAX_TRACKS])
+    batch = track_ids[:MAX_TRACKS]
+    marks = ",".join("?" for _ in batch)
     return conn.execute(
         f"""SELECT t.id, t.title, t.track_number, t.disc_number,
                    t.spotify_id, t.musicbrainz_id, t.album_id,
                    al.title AS album_title, al.year, al.release_date, al.genres,
                    al.expected_track_count, al.track_count,
                    ar.name AS album_artist_name,
-                   tf.path AS file_path
+                   (SELECT tf.path FROM lib2_track_files tf
+                     WHERE tf.track_id = t.id AND tf.path IS NOT NULL AND tf.path <> ''
+                     ORDER BY tf.id LIMIT 1) AS file_path
             FROM lib2_tracks t
             JOIN lib2_albums al ON al.id = t.album_id
             LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id
-            LEFT JOIN lib2_track_files tf ON tf.track_id = t.id
            WHERE t.id IN ({marks})
-           GROUP BY t.id
            ORDER BY al.id, COALESCE(t.disc_number,1), t.track_number, t.id""",
-        track_ids[:MAX_TRACKS],
+        batch,
     ).fetchall()
 
 
@@ -102,6 +110,7 @@ def _db_data_for_row(conn, row: Any) -> Dict[str, Any]:
 
 def tag_preview(database, conn, track_ids: List[int]) -> List[Dict[str, Any]]:
     """Per-track diff of file tags vs the lib2 DB metadata. Never raises."""
+    from core.library2.paths import resolve_lib2_path
     from core.tag_writer import build_tag_diff, read_file_tags
 
     out: List[Dict[str, Any]] = []
@@ -118,8 +127,15 @@ def tag_preview(database, conn, track_ids: List[int]) -> List[Dict[str, Any]]:
             entry.update(error="No file", has_changes=False, diff=[])
             out.append(entry)
             continue
+        # Stored paths are the legacy/media-server view; resolve to this
+        # process's filesystem before touching the file.
+        abs_path = resolve_lib2_path(row["file_path"])
+        if not abs_path:
+            entry.update(error="File not found on disk", has_changes=False, diff=[])
+            out.append(entry)
+            continue
         try:
-            file_tags = read_file_tags(row["file_path"])
+            file_tags = read_file_tags(abs_path)
             if file_tags.get("error"):
                 entry.update(error=file_tags["error"], has_changes=False, diff=[])
                 out.append(entry)
@@ -154,21 +170,32 @@ def write_tags(database, conn, track_ids: List[int], *, embed_cover: bool = True
     Returns ``{written, skipped, failed, errors: [...]}``. Cover art comes from
     the lib2 artwork cache (fetched once per album). Files that already match
     are counted as skipped (the writer only writes fields with DB values, and
-    ``build_tag_diff`` decides nothing changed).
+    ``build_tag_diff`` decides nothing changed). Any number of tracks is
+    processed — ``MAX_TRACKS`` is only the per-query batch size, never a
+    silent cap on a write the user asked for.
     """
+    from core.library2.paths import resolve_lib2_path
     from core.tag_writer import build_tag_diff, read_file_tags, write_tags_to_file
 
     stats: Dict[str, Any] = {"written": 0, "skipped": 0, "failed": 0, "errors": []}
     covers: Dict[int, Optional[Tuple[bytes, str]]] = {}
-    rows = _track_rows(conn, track_ids)
+    rows: List[Any] = []
+    for start in range(0, len(track_ids), MAX_TRACKS):
+        rows.extend(_track_rows(conn, track_ids[start:start + MAX_TRACKS]))
     for i, row in enumerate(rows):
         if progress:
             progress("retag", i, len(rows))
         if not row["file_path"]:
             stats["skipped"] += 1
             continue
+        abs_path = resolve_lib2_path(row["file_path"])
+        if not abs_path:
+            stats["failed"] += 1
+            stats["errors"].append({"track_id": row["id"],
+                                    "error": "File not found on disk"})
+            continue
         try:
-            file_tags = read_file_tags(row["file_path"])
+            file_tags = read_file_tags(abs_path)
             db_data = _db_data_for_row(conn, row)
             if not file_tags.get("error"):
                 diff = build_tag_diff(file_tags, db_data)
@@ -181,7 +208,7 @@ def write_tags(database, conn, track_ids: List[int], *, embed_cover: bool = True
                     covers[row["album_id"]] = _album_cover_data(database, row["album_id"])
                 cover = covers[row["album_id"]]
             result = write_tags_to_file(
-                row["file_path"], db_data,
+                abs_path, db_data,
                 embed_cover=bool(cover), cover_data=cover,
             )
             if result.get("success"):

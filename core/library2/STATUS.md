@@ -185,14 +185,60 @@ tests `tests/library2/`.
 - Buttons without a real backend (Preview Rename/Retag, Manage Tracks, Manual Import)
   were REMOVED rather than left as dead placeholders — they return with Phase C.
 
+### 2026-07-07 review-fix pass (docs/library-v2-branch-review-2026-07-06.md)
+All findings of the deep branch review were fixed in one pass:
+- **Path resolution unified** (`paths.py::resolve_lib2_path`): scan, retag and the
+  skip-audit cleanup now resolve stored (media-server-view) paths like artwork
+  always did — path-mapped setups no longer see "all missing" / audit wipes.
+- **Profile scope in background threads**: bulk monitor + upgrade scan resolve the
+  active user profile in request context and pass it into the thread (was: silent
+  fallback to profile 1 on multi-profile installs).
+- **Search Monitored is real now**: triggers `POST /api/wishlist/process` (all
+  monitored missing tracks are wishlist-mirrored already) instead of blind
+  auto-grabbing the best result for a bare artist-name query.
+- **Consolidated-duplicate guard**: bulk re-monitor and upgrade-profile assignment
+  skip tracks whose file was deliberately moved to their canonical partner
+  (`_NOT_CONSOLIDATED_SQL`) — Manage-Tracks cleanups don't get re-queued.
+- Artwork: EPs get the local artwork URL too; refresh/force bust the THUMBNAIL as
+  well as the full image; delete removes cached art; slow-path resolution is
+  serialized per entity (no provider stampede).
+- Importer: wishlist seeding no longer clamps a discography release's
+  expected_track_count (would truncate later tracklist materialization); full band
+  names ("Simon & Garfunkel") are no longer split into ghost artists when the
+  artist exists.
+- Autolink: attaching a file to a provider-only release flips `origin` to
+  'library' (visibility rule counts it again); artist lookup got an SQL fast path.
+- **`lib2_discography_refresh` repair job** (default-off, weekly): periodic
+  re-expansion for already-expanded monitored artists — `monitor_new_items` now
+  works without pressing "Update Discography" (shared
+  `discography.auto_monitor_releases` helper; first expansion stays manual;
+  `lib2_artists.discography_synced_at` marks expansion explicitly).
+- **Album Edit** (Phase D slice): `POST /albums/<id>/edit` + UI modal re-files a
+  release's type (album/ep/single/compilation/live) — fixes the track-count
+  heuristic's misclassifications.
+- Interactive search: skip-check toggles now apply to ALBUM grabs too (web_server
+  album branch + audit); grab-button state works for album results; manual-skip
+  audit only writes when the feature flag is on.
+- Index stats count only wanted-or-owned tracks (browsing a discography no longer
+  inflates "missing"); multi-disc missing slots come from the cached tracklist;
+  history matches multi-artist credit strings; retag processes >500 tracks in
+  batches and picks files deterministically; artists list rejects bad paging with
+  400; debounced filter box.
+- **API layer is now tested**: `tests/library2/test_api_routes.py` (Flask test
+  client — artwork rewrite incl. EPs, monitor mirror with active profile,
+  consolidated-guard on profile assign, delete cleanup incl. artwork, album edit,
+  refresh thumb busting).
+
 ## TODO (next)
 1. **Explicit monitor provenance**: if album-level monitoring must survive re-imports
    independently from track-level wishlist monitoring, add provenance/mode columns
    instead of deriving parent release flags from child tracks.
-2. **Optional**: periodic discography re-expansion (today it refreshes on demand —
-   the watchlist scanner already covers new-release queueing on its own cadence);
-   artist scope for more repair jobs (reorganize/dedup walk the transfer folder, so
+2. Artist scope for more repair jobs (reorganize/dedup walk the transfer folder, so
    they need path-level scoping, not a SQL filter).
+3. Broader metadata editing (titles/years/artists) beyond the release-type edit;
+   deep-linkable album detail view; Playlists (Phase E, last).
+4. Job registry (parallel background jobs + per-job polling) before multi-user use —
+   today one global bulk-job slot is shared by monitor/retag/upgrade scans.
 
 ## Run / verify (no Node/Flask locally — use Docker)
 ```

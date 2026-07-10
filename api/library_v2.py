@@ -43,6 +43,39 @@ _job_state: Dict[str, Any] = {"running": False, "kind": None, "current": 0,
 _MONITOR_TABLES = {"artists": "lib2_artists", "albums": "lib2_albums", "tracks": "lib2_tracks"}
 _PROFILE_TABLES = {"artists": "lib2_artists", "albums": "lib2_albums", "tracks": "lib2_tracks"}
 
+# Serializes slow-path artwork resolution per entity so a page of 75 uncached
+# covers doesn't fire 75 concurrent provider lookups for the same image.
+_artwork_locks: Dict[str, threading.Lock] = {}
+_artwork_locks_guard = threading.Lock()
+
+# A track is "consolidated away" when it deliberately has no file while its
+# canonical duplicate partner (either link direction) owns one — the user just
+# moved/deduped it. Bulk re-monitor paths must not re-want those, or the
+# pipeline would immediately re-download the variant the user removed.
+_NOT_CONSOLIDATED_SQL = """
+    NOT (
+        NOT EXISTS(SELECT 1 FROM lib2_track_files tf
+                   WHERE tf.track_id = lib2_tracks.id
+                     AND tf.path IS NOT NULL AND tf.path <> '')
+        AND EXISTS(
+            SELECT 1 FROM lib2_tracks o
+            JOIN lib2_track_files otf ON otf.track_id = o.id
+                 AND otf.path IS NOT NULL AND otf.path <> ''
+            WHERE o.id = lib2_tracks.canonical_track_id
+               OR o.canonical_track_id = lib2_tracks.id
+        )
+    )
+"""
+
+
+def _artwork_lock(kind: str, eid: int) -> threading.Lock:
+    key = f"{kind}:{eid}"
+    with _artwork_locks_guard:
+        lock = _artwork_locks.get(key)
+        if lock is None:
+            lock = _artwork_locks.setdefault(key, threading.Lock())
+        return lock
+
 
 def _artwork_url(kind: str, entity_id: int) -> str:
     return f"/api/library/v2/artwork/{kind}/{int(entity_id)}"
@@ -98,8 +131,11 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         search = request.args.get("search", "")
         sort = request.args.get("sort", "name")
         monitored = request.args.get("monitored", "all")
-        page = int(request.args.get("page", 1))
-        limit = int(request.args.get("limit", 75))
+        try:
+            page = int(request.args.get("page", 1))
+            limit = int(request.args.get("limit", 75))
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "error": "page/limit must be integers"}), 400
         conn = _conn()
         try:
             artists, total = Q.list_artists(conn, search=search, sort=sort,
@@ -133,7 +169,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         if data is None:
             return jsonify({"success": False, "error": "Artist not found"}), 404
         _apply_artwork_urls(data, "artist")
-        for entry in data.get("albums", []) + data.get("singles", []):
+        for entry in data.get("albums", []) + data.get("eps", []) + data.get("singles", []):
             _apply_artwork_urls(entry, "album")
         return jsonify({"success": True, "artist": data})
 
@@ -229,6 +265,16 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         db = get_database()
         want_thumb = request.args.get("size") == "thumb"
         force = request.args.get("force") == "1"
+        if force:
+            # A forced rebuild must bust BOTH cached variants — build_artwork
+            # only replaces the full image; a surviving stale thumb would keep
+            # winning the fast path forever.
+            t = thumb_file(db, kind, eid)
+            if t.exists():
+                try:
+                    t.unlink()
+                except OSError:
+                    pass
         # Fast path: serve the cached file directly with NO database/resolve work.
         if not force:
             target = thumb_file(db, kind, eid) if want_thumb else artwork_file(db, kind, eid)
@@ -239,15 +285,23 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 _write_thumbnail(full, target)
                 if target.exists():
                     return _send_art(target)
-        # Slow path: resolve + cache (opens a DB connection).
-        conn = db._get_connection()
-        try:
-            path = build_artwork(db, conn, config_manager, kind, eid, force=force)
-        finally:
-            conn.close()
+        # Slow path: resolve + cache (opens a DB connection). Serialized per
+        # entity so concurrent first-views don't stampede the providers; the
+        # second waiter finds the file cached and returns without resolving.
+        with _artwork_lock(kind, eid):
+            if not force and artwork_file(db, kind, eid).exists():
+                path = str(artwork_file(db, kind, eid))
+            else:
+                conn = db._get_connection()
+                try:
+                    path = build_artwork(db, conn, config_manager, kind, eid, force=force)
+                finally:
+                    conn.close()
         if not path:
             return "", 404
         target = thumb_file(db, kind, eid) if want_thumb else artwork_file(db, kind, eid)
+        if want_thumb and not target.exists():
+            _write_thumbnail(artwork_file(db, kind, eid), target)
         return _send_art(target if target.exists() else artwork_file(db, kind, eid))
 
     # -- monitoring (mirrors watchlist / wishlist) ----------------------------
@@ -270,12 +324,19 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         except Exception as e:  # noqa: BLE001
             logger.debug("watchlist mirror failed (artist %s): %s", artist_id, e)
 
-    def _mirror_tracks_wishlist(db, conn, track_ids: List[int], monitored: bool) -> int:
+    def _mirror_tracks_wishlist(db, conn, track_ids: List[int], monitored: bool,
+                                profile_id: Optional[int] = None) -> int:
         """Delegates to the shared mirror (core/library2/wishlist_mirror.py) with
-        the active user profile as the wishlist scope."""
+        the active user profile as the wishlist scope.
+
+        Callers running in a BACKGROUND THREAD must resolve the profile in the
+        request context and pass it explicitly — ``_profile()`` reads Flask's
+        ``g`` and silently degrades to profile 1 outside a request.
+        """
         from core.library2.wishlist_mirror import mirror_tracks_wishlist
         return mirror_tracks_wishlist(db, conn, track_ids, monitored,
-                                      profile_id=_profile())
+                                      profile_id=profile_id if profile_id is not None
+                                      else _profile())
 
     @app.route("/api/library/v2/<entity>/<int:eid>/monitor", methods=["POST"])
     def lib2_set_monitored(entity, eid):
@@ -376,29 +437,32 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             auto_monitored = 0
             auto_monitor_track_ids: List[int] = []
             from core.library2.quality_eval import is_upgrade_policy
+            # Bulk auto-monitor skips consolidated-away duplicates (a track the
+            # user deliberately left fileless while its canonical partner owns
+            # the file) — re-wanting those would re-download what Manage Tracks
+            # just cleaned up. An explicit single-track assignment still wins.
             if is_upgrade_policy(profile["upgrade_policy"]):
                 if entity == "artists":
                     auto_monitor_track_ids = [r["id"] for r in conn.execute(
-                        "SELECT id FROM lib2_tracks "
-                        "WHERE album_id IN (SELECT id FROM lib2_albums WHERE primary_artist_id=?)",
+                        f"SELECT id FROM lib2_tracks "
+                        f"WHERE album_id IN (SELECT id FROM lib2_albums WHERE primary_artist_id=?) "
+                        f"AND {_NOT_CONSOLIDATED_SQL}",
                         (eid,),
                     )]
-                    cur.execute(
-                        "UPDATE lib2_tracks SET monitored=1 "
-                        "WHERE album_id IN (SELECT id FROM lib2_albums WHERE primary_artist_id=?)",
-                        (eid,),
-                    )
-                    auto_monitored = cur.rowcount
                 elif entity == "albums":
                     auto_monitor_track_ids = [r["id"] for r in conn.execute(
-                        "SELECT id FROM lib2_tracks WHERE album_id=?",
+                        f"SELECT id FROM lib2_tracks WHERE album_id=? "
+                        f"AND {_NOT_CONSOLIDATED_SQL}",
                         (eid,),
                     )]
-                    cur.execute("UPDATE lib2_tracks SET monitored=1 WHERE album_id=?", (eid,))
-                    auto_monitored = cur.rowcount
                 elif entity == "tracks":
                     auto_monitor_track_ids = [eid]
-                    cur.execute("UPDATE lib2_tracks SET monitored=1 WHERE id=?", (eid,))
+                if auto_monitor_track_ids:
+                    marks = ",".join("?" for _ in auto_monitor_track_ids)
+                    cur.execute(
+                        f"UPDATE lib2_tracks SET monitored=1 WHERE id IN ({marks})",
+                        auto_monitor_track_ids,
+                    )
                     auto_monitored = cur.rowcount
             conn.commit()
             mirrored = 0
@@ -441,26 +505,14 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             return jsonify({"success": False, "error": str(e)}), 500
         # monitor_new_items enforcement: releases discovered on a re-expansion
         # of a monitored 'all'/'new' artist come back pre-monitored — give them
-        # real track rows and mirror those into the wishlist.
+        # real track rows and mirror those into the wishlist (shared helper,
+        # also used by the periodic lib2_discography_refresh repair job).
         auto_ids = stats.pop("auto_monitor_album_ids", []) or []
         mirrored = 0
         if auto_ids:
-            conn = db._get_connection()
-            try:
-                for album_id in auto_ids:
-                    try:
-                        from core.library2.completeness import resolve_tracklist
-                        resolve_tracklist(config_manager, conn, album_id)
-                    except Exception as e:  # noqa: BLE001
-                        logger.debug("auto-monitor tracklist resolve failed (%s): %s",
-                                     album_id, e)
-                    conn.execute("UPDATE lib2_tracks SET monitored=1 WHERE album_id=?",
-                                 (album_id,))
-                    conn.commit()
-                    mirrored += _mirror_tracks_wishlist(
-                        db, conn, _bulk_track_ids_for_albums(conn, [album_id]), True)
-            finally:
-                conn.close()
+            from core.library2.discography import auto_monitor_releases
+            mirrored = auto_monitor_releases(db, config_manager, auto_ids,
+                                             wishlist_profile_id=_profile())
         return jsonify({"success": True, **stats,
                         "auto_monitored_releases": len(auto_ids),
                         "auto_monitor_mirrored": mirrored})
@@ -508,6 +560,11 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             _job_state.update(running=True, kind=f"monitor:{scope}", current=0,
                               total=0, result=None, error=None, finished_at=None)
 
+        # Resolve the active profile OUTSIDE the thread (request context) —
+        # _profile() degrades to 1 without one, which would mirror into the
+        # wrong user's wishlist on multi-profile installs.
+        active_profile = _profile()
+
         def _run():
             import time as _t
             db = get_database()
@@ -535,7 +592,16 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                                                  album_id, e)
                         conn.execute("UPDATE lib2_albums SET monitored=? WHERE id=?",
                                      (1 if monitored else 0, album_id))
-                        track_ids = _bulk_track_ids_for_albums(conn, [album_id])
+                        # Re-monitoring skips consolidated-away duplicates (the
+                        # user just moved their file to the other variant) —
+                        # both for the flag AND the wishlist mirror; unmonitoring
+                        # always applies to every track.
+                        if monitored:
+                            track_ids = [r["id"] for r in conn.execute(
+                                f"SELECT id FROM lib2_tracks WHERE album_id=? "
+                                f"AND {_NOT_CONSOLIDATED_SQL}", (album_id,))]
+                        else:
+                            track_ids = _bulk_track_ids_for_albums(conn, [album_id])
                         if track_ids:
                             marks = ",".join("?" for _ in track_ids)
                             conn.execute(
@@ -543,7 +609,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                                 [1 if monitored else 0, *track_ids])
                         conn.commit()
                         if track_ids:
-                            mirrored += _mirror_tracks_wishlist(db, conn, track_ids, monitored)
+                            mirrored += _mirror_tracks_wishlist(
+                                db, conn, track_ids, monitored,
+                                profile_id=active_profile)
                     _job_state.update(result={"albums": len(albums), "mirrored": mirrored})
                 finally:
                     conn.close()
@@ -589,6 +657,34 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             conn.close()
         return jsonify({"success": True, "monitor_new_items": monitor_new})
 
+    _ALBUM_TYPES = ("album", "single", "ep", "compilation", "live")
+
+    @app.route("/api/library/v2/albums/<int:album_id>/edit", methods=["POST"])
+    def lib2_edit_album(album_id):
+        """Correct album-level metadata. Currently: ``album_type`` — the legacy
+        import classifies by track count, so a 1-track EP lands under Singles
+        and a 5-track album under EPs; this lets the user re-file the release
+        (it moves between the Albums/EPs/Singles sections)."""
+        guard = _guard()
+        if guard:
+            return guard
+        body = request.json or {}
+        album_type = str(body.get("album_type") or "").strip().lower()
+        if album_type not in _ALBUM_TYPES:
+            return jsonify({"success": False,
+                            "error": f"album_type must be one of {'|'.join(_ALBUM_TYPES)}"}), 400
+        conn = _conn()
+        try:
+            cur = conn.execute(
+                "UPDATE lib2_albums SET album_type=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (album_type, album_id))
+            if not cur.rowcount:
+                return jsonify({"success": False, "error": "Album not found"}), 404
+            conn.commit()
+        finally:
+            conn.close()
+        return jsonify({"success": True, "album_type": album_type})
+
     def _unmonitor_tracks_and_delete(db, conn, *, artist_id: Optional[int] = None,
                                      album_ids: Optional[List[int]] = None) -> Dict[str, int]:
         """Shared delete path: unmirror wishlist entries, then delete lib2 rows.
@@ -617,7 +713,21 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             conn.execute("DELETE FROM lib2_tracks WHERE album_id=?", (aid_,))
             conn.execute("DELETE FROM lib2_albums WHERE id=?", (aid_,))
             removed_albums += 1
+            _delete_artwork_files(db, "album", aid_)
         return {"albums": removed_albums, "tracks": len(track_ids), "unmirrored": unmirrored}
+
+    def _delete_artwork_files(db, kind: str, eid: int) -> None:
+        """Remove the cached artwork (full + thumb) of a deleted entity."""
+        try:
+            from core.library2.artwork import artwork_file, thumb_file
+            for f in (artwork_file(db, kind, eid), thumb_file(db, kind, eid)):
+                if f.exists():
+                    try:
+                        f.unlink()
+                    except OSError:
+                        pass
+        except Exception as e:  # noqa: BLE001
+            logger.debug("artwork cleanup failed (%s %s): %s", kind, eid, e)
 
     @app.route("/api/library/v2/artists/<int:artist_id>", methods=["DELETE"])
     def lib2_delete_artist(artist_id):
@@ -637,6 +747,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             stats = _unmonitor_tracks_and_delete(db, conn, artist_id=artist_id)
             conn.execute("DELETE FROM lib2_artists WHERE id=?", (artist_id,))
             conn.commit()
+            _delete_artwork_files(db, "artist", artist_id)
         finally:
             conn.close()
         return jsonify({"success": True, **stats})
@@ -796,7 +907,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         guard = _guard()
         if guard:
             return guard
-        limit = min(int(request.args.get("limit", 50)), 200)
+        try:
+            limit = min(int(request.args.get("limit", 50)), 200)
+        except (TypeError, ValueError):
+            limit = 50
         conn = _conn()
         try:
             artist = conn.execute(
@@ -804,14 +918,18 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             if not artist:
                 return jsonify({"success": False, "error": "Artist not found"}), 404
             try:
+                # Provenance rows store the full credit string ("Drake feat.
+                # Wizkid"), so match exact OR name-as-prefix — an exact-only
+                # match made History look empty for multi-artist downloads.
                 rows = conn.execute(
                     """SELECT track_title, track_album, source_service, source_username,
                               audio_quality, bit_depth, sample_rate, bitrate,
                               file_path, status, created_at
                        FROM track_downloads
                        WHERE lower(track_artist) = lower(?)
+                          OR lower(track_artist) LIKE lower(?) || ' %'
                        ORDER BY id DESC LIMIT ?""",
-                    (artist["name"], limit),
+                    (artist["name"], artist["name"], limit),
                 ).fetchall()
             except Exception:  # table/columns may not exist on a fresh DB
                 rows = []
@@ -848,6 +966,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             _job_state.update(running=True, kind="upgrade-scan", current=0,
                               total=0, result=None, error=None, finished_at=None)
 
+        # Resolve the active profile OUTSIDE the thread (request context).
+        active_profile = _profile()
+
         def _run():
             import time as _t
             db = get_database()
@@ -859,7 +980,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     _job_state.update(total=len(track_ids))
                     # _mirror_tracks_wishlist re-checks upgrade_candidate per
                     # track and only queues genuine upgrade candidates.
-                    queued = _mirror_tracks_wishlist(db, conn, track_ids, True)
+                    queued = _mirror_tracks_wishlist(db, conn, track_ids, True,
+                                                     profile_id=active_profile)
                     _job_state.update(result={"checked": len(track_ids), "queued": queued})
                 finally:
                     conn.close()
@@ -969,21 +1091,12 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 album_ids = [r["id"] for r in conn.execute(
                     """SELECT al.id FROM lib2_album_artists aa JOIN lib2_albums al ON al.id=aa.album_id
                        WHERE aa.artist_id=?""", (eid,))]
-            from core.library2.artwork import artwork_file
+            # Bust full image AND thumbnail — the thumb wins the serve fast
+            # path, so leaving it behind would pin the stale cover in lists.
             for aid in album_ids:
-                f = artwork_file(db, "album", aid)
-                if f.exists():
-                    try:
-                        f.unlink()
-                    except OSError:
-                        pass
+                _delete_artwork_files(db, "album", aid)
             if entity == "artists":
-                af = artwork_file(db, "artist", eid)
-                if af.exists():
-                    try:
-                        af.unlink()
-                    except OSError:
-                        pass
+                _delete_artwork_files(db, "artist", eid)
         finally:
             conn.close()
         # Probe the files in scope so quality evaluation runs against measured
