@@ -101,6 +101,9 @@ def api(tmp_path):
     conn.close()
 
     db = FakeDB(db_path)
+    # ADR-01: lib2 writes are admin-only (profile 1). Tests flip this to a
+    # non-admin id to probe the rejection path.
+    db.active_profile = 1
     app = flask.Flask(__name__)
     from api.library_v2 import register_library_v2_routes
     register_library_v2_routes(
@@ -109,7 +112,7 @@ def api(tmp_path):
         config_get=lambda key, default=None: (
             True if key == "features.library_v2" else default),
         config_manager=None,
-        profile_id_getter=lambda: 7,
+        profile_id_getter=lambda: db.active_profile,
     )
     ids = {"artist": artist_id, "views": views_id, "single": single_id,
            "ep": ep_id, "album_track": album_track,
@@ -142,10 +145,10 @@ def test_monitor_album_mirrors_with_active_profile(api):
                             (ids["ep"],)).fetchone()[0] == 1
         assert conn.execute("SELECT monitored FROM lib2_tracks WHERE id=?",
                             (ids["ep_track"],)).fetchone()[0] == 1
-    # The wishlist mirror carries the ACTIVE user profile (7, from the
-    # profile_id_getter) and the track's quality profile.
+    # The wishlist mirror carries the admin profile (the only profile that
+    # may write to Library v2 per ADR-01) and the track's quality profile.
     assert db.wishlist_adds, "monitoring a fileless track must queue it"
-    assert all(a["profile_id"] == 7 for a in db.wishlist_adds)
+    assert all(a["profile_id"] == 1 for a in db.wishlist_adds)
     assert all(a["quality_profile_id"] == 1 for a in db.wishlist_adds)
 
 
@@ -288,6 +291,50 @@ def test_artist_delete_preview_for_primary_artist(api):
     assert preview["file_links"] == 1 and preview["detached_albums"] == 0
     missing = client.get("/api/library/v2/artists/999999/delete-preview")
     assert missing.status_code == 404
+
+
+def test_non_admin_profile_writes_are_rejected(api):
+    """ADR-01 (admin-only, technically enforced): lib2 mutations from any
+    profile but the admin are rejected with 403 — not silently applied to the
+    global monitored columns and mirrored into the wrong profile's wishlist
+    (audit P0-02). Reads stay available to every profile."""
+    client, db, ids = api
+    db.active_profile = 7  # non-admin household profile
+
+    for method, url, body in (
+        ("post", f"/api/library/v2/albums/{ids['ep']}/monitor", {"monitored": True}),
+        ("post", f"/api/library/v2/artists/{ids['artist']}/quality-profile",
+         {"quality_profile_id": 2}),
+        ("post", f"/api/library/v2/albums/{ids['single']}/edit", {"album_type": "ep"}),
+        ("delete", f"/api/library/v2/artists/{ids['artist']}", None),
+        ("post", "/api/library/v2/import", {}),
+    ):
+        resp = getattr(client, method)(url, json=body) if body is not None else \
+            getattr(client, method)(url)
+        assert resp.status_code == 403, f"{method.upper()} {url} must be admin-only"
+        assert "admin" in (resp.get_json() or {}).get("error", "").lower()
+
+    with _conn(db) as conn:
+        # Nothing changed, nothing mirrored.
+        assert conn.execute(
+            "SELECT COUNT(*) FROM lib2_tracks WHERE monitored=1").fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) FROM lib2_artists").fetchone()[0] == 1
+    assert db.wishlist_adds == [] and db.wishlist_removes == []
+
+    # Reads still work for the non-admin profile.
+    resp = client.get(f"/api/library/v2/artists/{ids['artist']}")
+    assert resp.status_code == 200 and resp.get_json()["success"] is True
+
+
+def test_import_is_hard_limited_to_admin_profile(legacy_db=None):
+    """ADR-01: the importer derives GLOBAL monitored flags from one profile's
+    watchlist/wishlist — any profile but the admin must be refused."""
+    import pytest as _pytest
+    from core.library2.importer import import_legacy_library
+
+    with _pytest.raises(ValueError, match="admin-only"):
+        import_legacy_library(None, profile_id=7)
 
 
 def test_artist_list_rejects_non_numeric_page(api):

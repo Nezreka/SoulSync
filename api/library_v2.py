@@ -23,6 +23,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from flask import jsonify, request, send_file
 
+from core.library2 import ADMIN_PROFILE_ID
 from utils.logging_config import get_logger
 
 logger = get_logger("api.library_v2")
@@ -105,6 +106,18 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
     def _guard():
         if not _enabled():
             return jsonify({"success": False, "error": "Library v2 is disabled"}), 403
+        # ADR-01 (admin-only): Library v2 has exactly ONE authoritative user
+        # intent — the admin profile (profiles.id = 1). Mutations from any
+        # other profile are rejected outright, not silently ignored: the lib2
+        # monitored columns are global, so a non-admin write would overwrite
+        # the admin's state and mirror into the wrong profile's wishlist
+        # (audit P0-02). Other profiles keep read access.
+        if request.method not in ("GET", "HEAD", "OPTIONS") \
+                and _profile() != ADMIN_PROFILE_ID:
+            return jsonify({
+                "success": False,
+                "error": "Library v2 changes require the admin profile",
+            }), 403
         return None
 
     def _conn():

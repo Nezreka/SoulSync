@@ -230,7 +230,17 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
     optional callback for UI progress. ``profile_id`` scopes the watchlist/
     wishlist-derived monitoring to one user profile (None = legacy behavior,
     read everything).
+
+    ADR-01 (admin-only): only the admin profile may drive this import. The
+    lib2 monitored flags are GLOBAL columns derived from exactly one
+    profile's watchlist/wishlist here — importing with another profile would
+    overwrite the admin's monitoring intent for everyone (audit P0-02).
     """
+    from core.library2 import ADMIN_PROFILE_ID
+    if profile_id is not None and int(profile_id) != ADMIN_PROFILE_ID:
+        raise ValueError(
+            f"Library v2 import is admin-only (ADR-01): got profile_id={profile_id}, "
+            f"expected {ADMIN_PROFILE_ID}")
     stats = {
         "artists": 0,
         "albums": 0,
