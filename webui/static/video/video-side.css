@@ -248,6 +248,13 @@ body[data-side="video"] [data-stg="quality"]:not([data-video-only]) {
 body[data-side="video"] .dashboard-header-sweep {
     display: none;
 }
+/* Music's dashboard blows its header icon up to 176px (#dashboard-page scope) —
+   the video dashboard fell back to the 48px default, so its whole header read
+   smaller. Same treatment, same size. */
+.video-subpage[data-video-subpage="video-dashboard"] .page-header-icon {
+    width: 176px;
+    height: 176px;
+}
 
 /* ── Dashboard enrichment-worker buttons (isolated; music untouched) ────── */
 .video-enrich-container { position: relative; }
