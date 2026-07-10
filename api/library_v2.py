@@ -325,18 +325,24 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             logger.debug("watchlist mirror failed (artist %s): %s", artist_id, e)
 
     def _mirror_tracks_wishlist(db, conn, track_ids: List[int], monitored: bool,
-                                profile_id: Optional[int] = None) -> int:
+                                profile_id: Optional[int] = None,
+                                user_initiated: bool = False) -> int:
         """Delegates to the shared mirror (core/library2/wishlist_mirror.py) with
         the active user profile as the wishlist scope.
 
         Callers running in a BACKGROUND THREAD must resolve the profile in the
         request context and pass it explicitly — ``_profile()`` reads Flask's
         ``g`` and silently degrades to profile 1 outside a request.
+
+        ``user_initiated=True`` is reserved for the direct track-level monitor
+        toggle — it clears a user's wishlist-ignore. Cascades and jobs stay
+        False so a deliberate cancel/remove keeps sticking (audit P1-11).
         """
         from core.library2.wishlist_mirror import mirror_tracks_wishlist
         return mirror_tracks_wishlist(db, conn, track_ids, monitored,
                                       profile_id=profile_id if profile_id is not None
-                                      else _profile())
+                                      else _profile(),
+                                      user_initiated=user_initiated)
 
     @app.route("/api/library/v2/<entity>/<int:eid>/monitor", methods=["POST"])
     def lib2_set_monitored(entity, eid):
@@ -386,7 +392,11 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             if entity == "artists":
                 _mirror_artist_watchlist(db, conn, eid, monitored)
             elif track_ids:
-                mirrored = _mirror_tracks_wishlist(db, conn, track_ids, monitored)
+                # Only the track-level toggle is a direct user action on that
+                # track; an album toggle is a cascade and must respect a
+                # per-track ignore (user cancelled that download on purpose).
+                mirrored = _mirror_tracks_wishlist(db, conn, track_ids, monitored,
+                                                   user_initiated=(entity == "tracks"))
         finally:
             conn.close()
         return jsonify({"success": True, "monitored": monitored, "mirrored": mirrored})

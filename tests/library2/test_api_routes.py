@@ -36,6 +36,7 @@ class FakeDB:
         self.wishlist_adds.append({
             "id": payload.get("id"), "profile_id": profile_id,
             "quality_profile_id": quality_profile_id, "source_type": source_type,
+            "user_initiated": user_initiated,
         })
         return True
 
@@ -146,6 +147,32 @@ def test_monitor_album_mirrors_with_active_profile(api):
     assert db.wishlist_adds, "monitoring a fileless track must queue it"
     assert all(a["profile_id"] == 7 for a in db.wishlist_adds)
     assert all(a["quality_profile_id"] == 1 for a in db.wishlist_adds)
+
+
+def test_track_toggle_is_user_initiated_album_toggle_is_not(api):
+    """Audit P1-11: only the DIRECT track-level toggle may clear a user's
+    wishlist-ignore (user_initiated=True). An album toggle is a cascade over
+    tracks the user may have deliberately cancelled — it must respect the
+    ignore-list, as must scheduled jobs and profile assignments."""
+    client, db, ids = api
+    resp = client.post(f"/api/library/v2/tracks/{ids['ep_track']}/monitor",
+                       json={"monitored": True}).get_json()
+    assert resp["success"] is True
+    assert db.wishlist_adds and all(a["user_initiated"] for a in db.wishlist_adds)
+
+    db.wishlist_adds.clear()
+    resp = client.post(f"/api/library/v2/albums/{ids['ep']}/monitor",
+                       json={"monitored": True}).get_json()
+    assert resp["success"] is True
+    assert db.wishlist_adds and not any(a["user_initiated"] for a in db.wishlist_adds)
+
+    db.wishlist_adds.clear()
+    resp = client.post(
+        f"/api/library/v2/artists/{ids['artist']}/quality-profile",
+        json={"quality_profile_id": 2},
+    ).get_json()
+    assert resp["success"] is True
+    assert db.wishlist_adds and not any(a["user_initiated"] for a in db.wishlist_adds)
 
 
 def test_profile_assign_skips_consolidated_duplicates(api):

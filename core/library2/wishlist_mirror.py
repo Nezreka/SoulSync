@@ -101,12 +101,20 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
 
 
 def mirror_tracks_wishlist(db, conn, track_ids: List[int], monitored: bool,
-                           *, profile_id: int = 1) -> int:
+                           *, profile_id: int = 1,
+                           user_initiated: bool = False) -> int:
     """Add/remove the given lib2 tracks to/from the legacy Wishlist.
 
     ``profile_id`` is the legacy per-user profile scope of the wishlist, NOT a
     quality profile — the quality profile travels per item via
     ``quality_profile_id`` on the payload.
+
+    ``user_initiated`` must only be True for a DIRECT user action on that
+    specific track (the track-level monitor toggle). It bypasses the wishlist
+    ignore-list AND clears a stale ignore. Cascades (album/artist toggles,
+    bulk monitor, profile assignment) and scheduled jobs (upgrade scan,
+    discography auto-monitor) must leave it False so a deliberate user
+    cancel/remove keeps sticking (audit P1-11).
     """
     mirrored = 0
     for tid in track_ids:
@@ -128,7 +136,7 @@ def mirror_tracks_wishlist(db, conn, track_ids: List[int], monitored: bool,
                 # the actual search/import decisions.
                 ok = db.add_to_wishlist(payload, source_type=stype,
                                         source_info=source_info,
-                                        user_initiated=True,
+                                        user_initiated=user_initiated,
                                         profile_id=profile_id,
                                         quality_profile_id=payload.get("quality_profile_id"))
             else:
