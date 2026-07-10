@@ -2915,6 +2915,23 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def list_collection_syncs(self) -> list:
+        """Every ledger row (+ its definition's name) — maps server collections
+        back to the SoulSync definition that manages them, so the server-cleanup
+        view can tell ours from foreign (e.g. old Kometa) collections."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT s.definition_id, s.server_source, s.server_id, s.member_count, "
+                "s.synced_at, d.name AS definition_name "
+                "FROM collection_sync s "
+                "LEFT JOIN collection_definitions d ON d.id = s.definition_id").fetchall()
+            return [dict(r) for r in rows]
+        except sqlite3.Error:
+            return []
+        finally:
+            conn.close()
+
     def overlay_sample_data(self, kind: str, item_id: int) -> dict | None:
         """Real badge values for one library item — the "load from a real title"
         source for the overlay editor's sample data. Raw values (e.g. resolution

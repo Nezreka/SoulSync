@@ -12,6 +12,8 @@ SoulSync-managed movie/show collections. Admin-only (gated in __init__.py).
     POST   /api/video/collections/presets/apply   -> {ok,created,skipped}   (batch create)
     GET    /api/video/collections/<id>/poster     -> image/jpeg             (generated art)
     POST   /api/video/collections/<id>/poster/generate -> {ok,poster_url}   (render collage)
+    GET    /api/video/collections/server          -> {collections:[...]}    (all ON the server)
+    POST   /api/video/collections/server/delete   -> {ok,deleted,failed}    (bulk cleanup)
     POST   /api/video/collections/preview         -> {ok,count,sample,...}  (live preview)
     POST   /api/video/collections/<id>/sync       -> {ok,...}               (Sync now, one)
     POST   /api/video/collections/sync            -> {ok,...}               (Sync now, all)
@@ -228,3 +230,64 @@ def register_routes(bp):
         from . import get_video_db
         from core.video.collections.sync import run_sync
         return jsonify(run_sync(get_video_db()))
+
+    # ── server-side collections (cleanup view) ────────────────────────────────
+    @bp.route("/collections/server", methods=["GET"])
+    def collections_on_server():
+        """Everything that exists ON the media server right now — SoulSync-managed
+        AND foreign (old Kometa runs, hand-made). Managed ones are marked via the
+        sync ledger so the cleanup view can target just the foreign leftovers."""
+        from . import get_video_db
+        from core.video.collections.sync import get_collection_source
+        src = get_collection_source()
+        if src is None or not hasattr(src, "list_collections"):
+            return jsonify({"ok": False, "error": "No video server configured (or it can't do collections)"}), 400
+        try:
+            cols = src.list_collections()
+        except Exception:
+            logger.exception("list server collections failed")
+            return jsonify({"ok": False, "error": "Could not read collections from the server"}), 502
+        managed = {}
+        for s in get_video_db().list_collection_syncs():
+            if s.get("server_source") == src.server_name and s.get("server_id"):
+                managed[str(s["server_id"])] = s
+        for c in cols:
+            m = managed.get(str(c.get("server_id")))
+            c["managed"] = bool(m)
+            c["definition_id"] = m.get("definition_id") if m else None
+            c["definition_name"] = m.get("definition_name") if m else None
+        cols.sort(key=lambda c: (c["managed"], (c.get("name") or "").casefold()))
+        return jsonify({"ok": True, "server": src.server_name, "collections": cols})
+
+    @bp.route("/collections/server/delete", methods=["POST"])
+    def collections_server_delete():
+        """Bulk-delete collections ON the server by server id. For a SoulSync-
+        managed one the ledger row is cleared too (so we don't track a ghost —
+        the next sync recreates it while its definition stays enabled; the UI
+        says so). Definitions are never touched here."""
+        from . import get_video_db
+        from core.video.collections.sync import get_collection_source
+        d = request.get_json(silent=True) or {}
+        ids = [str(i) for i in (d.get("ids") or []) if str(i).strip()]
+        if not ids:
+            return jsonify({"ok": False, "error": "ids are required"}), 400
+        src = get_collection_source()
+        if src is None or not hasattr(src, "delete_collection"):
+            return jsonify({"ok": False, "error": "No video server configured (or it can't do collections)"}), 400
+        db = get_video_db()
+        ledger = {str(s.get("server_id")): s.get("definition_id")
+                  for s in db.list_collection_syncs()
+                  if s.get("server_source") == src.server_name and s.get("server_id")}
+        deleted, failed = 0, []
+        for sid in ids:
+            try:
+                r = src.delete_collection(sid)
+            except Exception as e:   # noqa: BLE001 - keep going; report per-id
+                r = {"ok": False, "error": str(e)}
+            if r.get("ok"):
+                deleted += 1
+                if sid in ledger and ledger[sid] is not None:
+                    db.delete_collection_sync(ledger[sid])
+            else:
+                failed.append({"server_id": sid, "error": r.get("error") or "delete failed"})
+        return jsonify({"ok": True, "deleted": deleted, "failed": failed})

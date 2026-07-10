@@ -232,6 +232,14 @@ textarea.vce-input { resize: vertical; min-height: 58px; }
 .vce-entry-name { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vce-entry-count { font-size: 11.5px; font-weight: 700; color: rgba(255,255,255,.4); font-variant-numeric: tabular-nums; }
 .vce-entry-added { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: #4ade80; }
+/* server-cleanup view */
+.vce-entries--rows { grid-template-columns: 1fr; max-width: 760px; }
+.vce-tag {
+    flex: 0 0 auto; font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em;
+    padding: 3px 8px; border-radius: 6px; background: rgba(255,255,255,.07); color: rgba(255,255,255,.55);
+}
+.vce-tag--ok { background: rgba(74,222,128,.14); color: #4ade80; }
+.vce-servnote { font-size: 12px; line-height: 1.55; color: rgba(255,255,255,.45); margin: 0 0 16px; max-width: 700px; }
 .vce-picker-foot {
     position: sticky; bottom: 0; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
     margin-top: 18px; padding: 14px 16px; border-radius: 14px;
