@@ -491,22 +491,54 @@ class VideoEnrichmentEngine:
                 return None
         return hit or None
 
-    def tmdb_from_imdb(self, imdb_id, kind) -> int | None:
-        """TMDB id for an IMDb tt-id (day-cached — the mapping never moves).
-        Powers the keyless IMDb chart/list sources."""
+    def _imdb_map(self, imdb_id) -> dict | None:
+        """The full tt→TMDB record. The mapping never changes, so it cascades
+        proc cache → PERSISTED map (imdb_tmdb_map) → the library's own rows
+        (an owned chart title maps with zero network) → one /find call, which
+        is then persisted — an IMDb chart costs its lookups exactly once ever."""
         w = self.workers.get("tmdb")
         if not w or not w.enabled or not imdb_id:
             return None
         ck = ("imdbmap", imdb_id)
         hit = self._cache_get(ck)
+        if hit is not None:
+            return hit
+        try:
+            hit = self.db.get_imdb_tmdb(imdb_id)
+        except Exception:   # noqa: BLE001 - persistence is an optimization
+            hit = None
         if hit is None:
             try:
-                hit = w.client.find_by_imdb(imdb_id) or {}
-                self._cache_put(ck, hit, ttl=86400)
-            except Exception:
-                logger.exception("imdb find failed (%s)", imdb_id)
-                return None
+                lib = self.db.tmdb_by_library_imdb(imdb_id)
+            except Exception:   # noqa: BLE001
+                lib = {"movie": None, "show": None}
+            if lib.get("movie") or lib.get("show"):
+                hit = lib
+            else:
+                try:
+                    hit = w.client.find_by_imdb(imdb_id) or {}
+                except Exception:
+                    logger.exception("imdb find failed (%s)", imdb_id)
+                    return None
+            try:
+                self.db.put_imdb_tmdb(imdb_id, hit.get("movie"), hit.get("show"),
+                                      movie_poster=hit.get("movie_poster"),
+                                      show_poster=hit.get("show_poster"))
+            except Exception:   # noqa: BLE001
+                pass
+        self._cache_put(ck, hit, ttl=86400)
+        return hit
+
+    def tmdb_from_imdb(self, imdb_id, kind) -> int | None:
+        """TMDB id for an IMDb tt-id (see _imdb_map for the lookup cascade)."""
+        hit = self._imdb_map(imdb_id)
         return (hit or {}).get("show" if kind == "show" else "movie")
+
+    def imdb_poster(self, imdb_id, kind) -> str | None:
+        """TMDB poster URL for an IMDb tt-id — gives IMDb chart/list entries
+        real art in the missing browser (IMDb's GraphQL carries none)."""
+        hit = self._imdb_map(imdb_id)
+        return (hit or {}).get("show_poster" if kind == "show" else "movie_poster")
 
     def keyword_id(self, query) -> int | None:
         """TMDB keyword id for a name (day-cached — keyword ids never move).

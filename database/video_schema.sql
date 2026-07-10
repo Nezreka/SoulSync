@@ -674,6 +674,18 @@ CREATE TABLE IF NOT EXISTS collection_definitions (
 );
 CREATE INDEX IF NOT EXISTS idx_collection_defs_updated ON collection_definitions(updated_at DESC);
 
+-- IMDb tt-id → TMDB id map (fed by the keyless IMDb chart/list sources).
+-- The mapping never changes, so persisting it makes an IMDb chart cost its
+-- 250 /find lookups exactly ONCE ever, not once per process restart.
+CREATE TABLE IF NOT EXISTS imdb_tmdb_map (
+    imdb_id      TEXT PRIMARY KEY,
+    movie_tmdb   INTEGER,
+    show_tmdb    INTEGER,
+    movie_poster TEXT,             -- TMDB poster URL (missing-browser art)
+    show_poster  TEXT,
+    updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- The server object we created for a definition + a signature of the last synced
 -- state. Keyed per definition (collections sync to the one active video server).
 -- Lets us update the right collection, never touch a user's manual collections,

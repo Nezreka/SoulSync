@@ -595,8 +595,9 @@ class TMDBClient:
         return None
 
     def find_by_imdb(self, imdb_id):
-        """TMDB ids for an IMDb tt-id via /find — {'movie': id|None, 'show': id|None}.
-        Powers the keyless IMDb chart/list sources (scraped tt-ids → TMDB)."""
+        """TMDB ids (+ poster art) for an IMDb tt-id via /find —
+        {'movie': id|None, 'show': id|None, 'movie_poster', 'show_poster'}.
+        Powers the keyless IMDb chart/list sources (tt-ids → TMDB)."""
         if not self.api_key or not (imdb_id or "").startswith("tt"):
             return None
         import requests
@@ -605,9 +606,15 @@ class TMDBClient:
                          timeout=15)
         r.raise_for_status()
         d = r.json() or {}
-        movie = next((m.get("id") for m in d.get("movie_results") or []), None)
-        show = next((s.get("id") for s in d.get("tv_results") or []), None)
-        return {"movie": movie, "show": show}
+        movie = next(iter(d.get("movie_results") or []), None) or {}
+        show = next(iter(d.get("tv_results") or []), None) or {}
+
+        def poster(it):
+            p = it.get("poster_path")
+            return ("https://image.tmdb.org/t/p/w342" + p) if p else None
+
+        return {"movie": movie.get("id"), "show": show.get("id"),
+                "movie_poster": poster(movie), "show_poster": poster(show)}
 
     def keyword_search(self, query):
         """TMDB keyword id for a query ('christmas' → 207317) — first exact-ish

@@ -31,7 +31,7 @@ logger = get_logger("video_database")
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 25
+SCHEMA_VERSION = 26
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -2947,6 +2947,57 @@ class VideoDatabase:
         except sqlite3.Error:
             logger.exception("items_by_server_ids failed")
             return []
+        finally:
+            conn.close()
+
+    def get_imdb_tmdb(self, imdb_id) -> dict | None:
+        """Persisted tt→TMDB mapping (+ poster art), or None when never resolved."""
+        conn = self._get_connection()
+        try:
+            r = conn.execute("SELECT movie_tmdb, show_tmdb, movie_poster, show_poster "
+                             "FROM imdb_tmdb_map WHERE imdb_id=?", (imdb_id,)).fetchone()
+            return ({"movie": r["movie_tmdb"], "show": r["show_tmdb"],
+                     "movie_poster": r["movie_poster"], "show_poster": r["show_poster"]}
+                    if r else None)
+        except sqlite3.Error:
+            return None
+        finally:
+            conn.close()
+
+    def put_imdb_tmdb(self, imdb_id, movie_tmdb, show_tmdb,
+                      movie_poster=None, show_poster=None) -> None:
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                "INSERT INTO imdb_tmdb_map (imdb_id, movie_tmdb, show_tmdb, movie_poster, show_poster) "
+                "VALUES (?,?,?,?,?) "
+                "ON CONFLICT(imdb_id) DO UPDATE SET movie_tmdb=excluded.movie_tmdb, "
+                "show_tmdb=excluded.show_tmdb, "
+                "movie_poster=COALESCE(excluded.movie_poster, imdb_tmdb_map.movie_poster), "
+                "show_poster=COALESCE(excluded.show_poster, imdb_tmdb_map.show_poster), "
+                "updated_at=datetime('now')",
+                (imdb_id, movie_tmdb, show_tmdb, movie_poster, show_poster))
+            conn.commit()
+        except sqlite3.Error:
+            logger.exception("put_imdb_tmdb failed")
+        finally:
+            conn.close()
+
+    def tmdb_by_library_imdb(self, imdb_id) -> dict:
+        """{'movie': tmdb|None, 'show': tmdb|None} from the LIBRARY's own rows —
+        a chart title you already own needs no network to map at all."""
+        out = {"movie": None, "show": None}
+        conn = self._get_connection()
+        try:
+            for kind, table in (("movie", "movies"), ("show", "shows")):
+                r = conn.execute(f"SELECT tmdb_id FROM {table} "
+                                 f"WHERE imdb_id=? AND tmdb_id IS NOT NULL LIMIT 1",
+                                 (imdb_id,)).fetchone()
+                if r:
+                    out[kind] = r["tmdb_id"]
+            return out
+        except sqlite3.Error:
+            return out
         finally:
             conn.close()
 
