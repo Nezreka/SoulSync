@@ -497,8 +497,8 @@
         // always have a row; TMDB pages only when owned (library_id resolves it).
         if (ownLibItem && window.VideoManage &&
                 (d.source !== 'tmdb' || d.library_id != null)) {
-            html += '<button class="vd-trailer-btn" type="button" data-vd-act="manage" title="Edit metadata">' +
-                '<span class="vd-trailer-ic">✎</span> Manage</button>';
+            html += '<button class="vd-manage-btn" type="button" data-vd-act="manage" title="Edit metadata">' +
+                '<span class="vd-manage-ic">✎</span> Manage</button>';
         }
         a.innerHTML = html;
     }
