@@ -154,86 +154,102 @@ def _fetch_union(eng, ref: Any) -> List[Dict[str, Any]]:
     return _dedup_normed(raw)[: _MAX_PAGES * 20]
 
 
-# ── IMDb (keyless — the Kometa trick) ───────────────────────────────────────
-# IMDb has NO public API; like Kometa we read the chart/list page and parse the
-# embedded JSON-LD ItemList, then map tt-ids → TMDB via /find (day-cached per
-# id, pooled). Scraping is inherently fragile: every step is best-effort and a
-# markup change degrades to owned-only, never an error.
+# ── IMDb (keyless — via IMDb's own public GraphQL endpoint) ─────────────────
+# IMDb has no documented API and the HTML is behind a bot-wall (202 + empty
+# body), so like current Kometa we use api.graphql.imdb.com — the endpoint
+# imdb.com itself calls, keyless. Charts come from chartTitles; user lists
+# (ls…) from list.titleListItemSearch (cursor-paginated). tt-ids then map →
+# TMDB via /find (day-cached per id, pooled). Unofficial: every step is
+# best-effort and degrades to owned-only, never an error.
+_IMDB_GQL = "https://api.graphql.imdb.com/"
 _IMDB_CHARTS = {
-    "top":     "https://www.imdb.com/chart/top/",          # IMDb Top 250 (movies)
-    "popular": "https://www.imdb.com/chart/moviemeter/",   # Most Popular Movies
-    "toptv":   "https://www.imdb.com/chart/toptv/",        # Top 250 TV
-    "tvmeter": "https://www.imdb.com/chart/tvmeter/",      # Most Popular TV
+    "top":     "TOP_RATED_MOVIES",        # IMDb Top 250 (movies)
+    "popular": "MOST_POPULAR_MOVIES",     # Most Popular Movies
+    "toptv":   "TOP_RATED_TV_SHOWS",      # Top 250 TV
+    "tvmeter": "MOST_POPULAR_TV_SHOWS",   # Most Popular TV
 }
-_IMDB_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+_TITLE_FIELDS = "id titleText { text } releaseYear { year }"
 
 
-def _http_text(url):
+def _imdb_graphql(query: str) -> dict:
     import requests
-    r = requests.get(url, headers={"User-Agent": _IMDB_UA,
-                                   "Accept-Language": "en-US,en;q=0.8"}, timeout=20)
+    r = requests.post(_IMDB_GQL, json={"query": query},
+                      headers={"Content-Type": "application/json",
+                               "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+                      timeout=30)
     r.raise_for_status()
-    return r.text
+    return r.json() or {}
 
 
-def _imdb_ids_from_page(html: str) -> List[tuple]:
-    """(tt_id, name) pairs from a page's JSON-LD ItemList, else a regex sweep of
-    /title/tt links (order-preserving, deduped) as the markup-change fallback."""
-    import json
-    import re
-    out, seen = [], set()
-    for m in re.finditer(r'<script type="application/ld\+json"[^>]*>(.*?)</script>',
-                         html, re.S):
-        try:
-            data = json.loads(m.group(1))
-        except ValueError:
-            continue
-        for el in (data.get("itemListElement") or []):
-            item = el.get("item") or el
-            url = str(item.get("url") or "")
-            tt = re.search(r"(tt\d+)", url)
-            if tt and tt.group(1) not in seen:
-                seen.add(tt.group(1))
-                out.append((tt.group(1), item.get("name")))
-    if not out:
-        for tt in re.findall(r"/title/(tt\d+)/", html):
-            if tt not in seen:
-                seen.add(tt)
-                out.append((tt, None))
+def _imdb_pairs_chart(chart_type: str) -> List[tuple]:
+    d = _imdb_graphql(
+        "query { chartTitles(first: 250, chart: {chartType: %s}) "
+        "{ edges { node { %s } } } }" % (chart_type, _TITLE_FIELDS))
+    out = []
+    for e in (((d.get("data") or {}).get("chartTitles") or {}).get("edges")) or []:
+        n = e.get("node") or {}
+        if n.get("id"):
+            out.append((n["id"], ((n.get("titleText") or {}).get("text")),
+                        (n.get("releaseYear") or {}).get("year")))
+    return out
+
+
+def _imdb_pairs_list(ls_id: str) -> List[tuple]:
+    out = []
+    cursor = ""
+    for _ in range(4):                        # 4×250 = 1000 items, plenty
+        after = ', after: "%s"' % cursor if cursor else ""
+        d = _imdb_graphql(
+            'query { list(id: "%s") { titleListItemSearch(first: 250%s) '
+            "{ edges { title { %s } } pageInfo { hasNextPage endCursor } } } }"
+            % (ls_id, after, _TITLE_FIELDS))
+        search = (((d.get("data") or {}).get("list") or {}).get("titleListItemSearch")) or {}
+        for e in search.get("edges") or []:
+            t = e.get("title") or {}
+            if t.get("id"):
+                out.append((t["id"], ((t.get("titleText") or {}).get("text")),
+                            (t.get("releaseYear") or {}).get("year")))
+        page = search.get("pageInfo") or {}
+        cursor = page.get("endCursor") or ""
+        if not page.get("hasNextPage") or not cursor:
+            break
     return out
 
 
 def _fetch_imdb(eng, ref: Any) -> List[Dict[str, Any]]:
-    """imdb_chart ({chart, kind}) or imdb_list ({url, kind}) — scrape, then map
+    """imdb_chart ({chart, kind}) or imdb_list ({url, kind}) — GraphQL, then map
     tt-ids → TMDB concurrently (each mapping is one cached /find call)."""
     if not isinstance(ref, dict):
         ref = {"url": str(ref or "")}
     kind = "show" if ref.get("kind") == "show" else "movie"
     chart = str(ref.get("chart") or "")
     if chart:
-        url = _IMDB_CHARTS.get(chart)
+        chart_type = _IMDB_CHARTS.get(chart)
+        if not chart_type:
+            return []
+        key = ("imdb", chart_type, kind)
+        pairs_fn = lambda: _imdb_pairs_chart(chart_type)   # noqa: E731
     else:
-        u = str(ref.get("url") or "").strip()
         import re
-        m = re.search(r"(ls\d+)", u)
-        url = f"https://www.imdb.com/list/{m.group(1)}/" if m else None
-    if not url:
-        return []
+        m = re.search(r"(ls\d+)", str(ref.get("url") or ""))
+        if not m:
+            return []
+        key = ("imdb", m.group(1), kind)
+        pairs_fn = lambda: _imdb_pairs_list(m.group(1))    # noqa: E731
 
     def build():
-        pairs = _imdb_ids_from_page(_http_text(url))
+        pairs = pairs_fn()
         if not pairs:
-            logger.info("imdb page yielded no titles (markup change?): %s", url)
+            logger.info("imdb source yielded no titles (schema change?): %s", key)
             return []
         from concurrent.futures import ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=8) as ex:
             tmdb_ids = list(ex.map(lambda p: eng.tmdb_from_imdb(p[0], kind), pairs))
-        raw = [{"tmdb_id": tid, "title": name}
-               for (tt, name), tid in zip(pairs, tmdb_ids, strict=False) if tid]
+        raw = [{"tmdb_id": tid, "title": name, "year": year}
+               for (tt, name, year), tid in zip(pairs, tmdb_ids, strict=False) if tid]
         return _dedup_normed(raw)
 
-    return _community_cached(("imdb", url, kind), build)
+    return _community_cached(key, build)
 
 
 # ── community list sources (Trakt / MDBList) ────────────────────────────────
