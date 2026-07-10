@@ -357,3 +357,25 @@ def test_imdb_map_persists_across_engine_restarts(tmp_path):
     conn.commit(); conn.close()
     assert eng().tmdb_from_imdb("tt7777777", "movie") == 999
     assert calls == ["tt0111161"]
+
+
+def test_imdb_map_table_upgrades_from_id_only_shape(tmp_path):
+    # Boulder's live DB materialized the table WITHOUT the poster columns
+    # (CREATE TABLE IF NOT EXISTS never upgrades an existing shape) — the
+    # column migration must repair it on the next boot.
+    import sqlite3
+    from database.video_database import VideoDatabase
+    path = tmp_path / "video_library.db"
+    conn = sqlite3.connect(path)
+    conn.execute("""CREATE TABLE imdb_tmdb_map (
+        imdb_id TEXT PRIMARY KEY, movie_tmdb INTEGER, show_tmdb INTEGER,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')))""")
+    conn.execute("INSERT INTO imdb_tmdb_map (imdb_id, movie_tmdb) VALUES ('tt1', 11)")
+    conn.commit()
+    conn.close()
+
+    db = VideoDatabase(database_path=str(path))          # boot → migrations run
+    db.put_imdb_tmdb("tt2", 22, None, movie_poster="https://img/22.jpg")
+    assert db.get_imdb_tmdb("tt2")["movie_poster"] == "https://img/22.jpg"
+    old = db.get_imdb_tmdb("tt1")                        # pre-upgrade row intact
+    assert old["movie"] == 11 and old["movie_poster"] is None
