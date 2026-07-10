@@ -606,6 +606,25 @@ class PlexVideoSource:
         except Exception as e:   # noqa: BLE001
             return {"ok": False, "error": str(e)}
 
+    def collection_reorder(self, collection_id, ordered_server_ids) -> dict:
+        """Arrange the collection's members in the given order (custom sort).
+        plexapi moveItem: no ``after`` moves to the front, then each next item
+        is placed after the previous one."""
+        try:
+            col = self._server.fetchItem(int(collection_id))
+            by_key = {str(i.ratingKey): i for i in col.items()}
+            prev = None
+            for sid in ordered_server_ids or []:
+                item = by_key.get(str(sid))
+                if item is None:
+                    continue
+                col.moveItem(item, after=prev)
+                prev = item
+            return {"ok": True}
+        except Exception as e:   # noqa: BLE001
+            logger.exception("Plex: collection_reorder failed")
+            return {"ok": False, "error": str(e)}
+
     def list_collections(self) -> list:
         """EVERY collection across all movie/show sections (not just the mapped
         one — foreign collections, e.g. Kometa's, can live anywhere). For the
@@ -984,14 +1003,31 @@ class JellyfinVideoSource:
 
     def set_collection_meta(self, collection_id, *, poster_url=None, poster_bytes=None,
                             summary=None, sort=None, pinned=None, mode=None) -> dict:
-        # Poster reuses the Primary-image endpoint. Summary/sort/pin need a full
-        # item-DTO update on Jellyfin and are deferred (a member sync is the point).
-        # 'mode' is a Plex library concept — no Jellyfin equivalent.
+        # Poster via the Primary-image endpoint; summary + display order via a
+        # full item-DTO update (Jellyfin's edit contract: GET the DTO, mutate,
+        # POST it back whole). Pin + 'mode' are Plex concepts — no equivalent.
         if poster_url or poster_bytes:
-            return self.set_poster(collection_id, image_url=poster_url,
-                                   image_bytes=poster_bytes, kind="collection")
-        if summary or sort or pinned is not None:
-            logger.debug("Jellyfin: collection summary/sort/pin not yet supported (%s)", collection_id)
+            r = self.set_poster(collection_id, image_url=poster_url,
+                                image_bytes=poster_bytes, kind="collection")
+            if not r.get("ok"):
+                return r
+        if summary or sort:
+            import requests
+            base, headers = self._jf()
+            try:
+                item = self._req(f"/Users/{self.uid}/Items/{collection_id}")
+                if item and item.get("Id"):
+                    if summary:
+                        item["Overview"] = summary
+                    disp = {"release": "PremiereDate", "alpha": "SortName"}.get(sort)
+                    if disp:
+                        item["DisplayOrder"] = disp
+                    headers = dict(headers, **{"Content-Type": "application/json"})
+                    requests.post(base + f"/Items/{collection_id}", json=item,
+                                  headers=headers, timeout=20).raise_for_status()
+            except Exception:   # noqa: BLE001 - meta is best-effort, never fail the sync
+                logger.debug("Jellyfin: collection meta update failed (%s)",
+                             collection_id, exc_info=True)
         return {"ok": True}
 
     def delete_collection(self, collection_id) -> dict:

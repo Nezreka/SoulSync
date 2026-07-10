@@ -181,6 +181,8 @@
                     '<button type="button" class="vce-kebab" data-top="more" aria-label="More actions" aria-haspopup="true">' + I.dots + '</button>' +
                     '<div class="vce-menu" data-menu hidden>' +
                         '<button type="button" data-top="artwork">' + I.image + 'Refresh artwork</button>' +
+                        '<button type="button" data-top="export">' + I.back.replace('M15 18l-6-6 6-6', 'M12 4v10M8 10l4 4 4-4M4 19h16') + 'Export collections</button>' +
+                        '<button type="button" data-top="import">' + I.back.replace('M15 18l-6-6 6-6', 'M12 14V4M8 8l4-4 4 4M4 19h16') + 'Import collections</button>' +
                     '</div>' +
                 '</div>' +
                 '<button type="button" class="vce-btn vce-btn--primary" data-top="new">' + I.plus + '<span>New collection</span></button>' +
@@ -209,6 +211,14 @@
         bar.querySelector('[data-top="artwork"]').addEventListener('click', function (e) {
             menu.hidden = true;
             refreshArtwork(e.currentTarget);
+        });
+        bar.querySelector('[data-top="export"]').addEventListener('click', function () {
+            menu.hidden = true;
+            exportCollections();
+        });
+        bar.querySelector('[data-top="import"]').addEventListener('click', function () {
+            menu.hidden = true;
+            importCollections();
         });
 
         var scroll = h('div', 'vce-scroll');
@@ -573,6 +583,47 @@
         var timer = setInterval(function () {
             api('/posters/regenerate/status', {}).then(paint);
         }, hasSocket ? 6000 : 2000);
+    }
+
+    // Share configs like Kometa's community YAMLs — minus the YAML.
+    function exportCollections() {
+        api('/export', {}).then(function (d) {
+            if (!d || !d.collections) { toast('Export failed', true); return; }
+            var blob = new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' });
+            var a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'soulsync-collections.json';
+            a.click();
+            setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000);
+            toast('Exported ' + d.collections.length + ' collection' + (d.collections.length === 1 ? '' : 's'));
+        }).catch(function () { toast('Export failed', true); });
+    }
+
+    function importCollections() {
+        var inp = document.createElement('input');
+        inp.type = 'file';
+        inp.accept = '.json,application/json';
+        inp.addEventListener('change', function () {
+            var f = inp.files && inp.files[0];
+            if (!f) return;
+            var reader = new FileReader();
+            reader.onload = function () {
+                var data;
+                try { data = JSON.parse(reader.result); } catch (e) { toast('That file isn\'t valid JSON', true); return; }
+                var rows = (data && data.collections) || (Array.isArray(data) ? data : null);
+                if (!rows || !rows.length) { toast('No collections found in that file', true); return; }
+                api('/import', { method: 'POST', body: JSON.stringify({ collections: rows }) }).then(function (r) {
+                    if (r && r.ok) {
+                        var bits = [(r.imported || []).length + ' imported'];
+                        if (r.skipped && r.skipped.length) bits.push(r.skipped.length + ' already existed');
+                        toast(bits.join(' · '));
+                        if (view === 'gallery') showGallery();
+                    } else { toast((r && r.error) || 'Import failed', true); }
+                }).catch(function () { toast('Import failed', true); });
+            };
+            reader.readAsText(f);
+        });
+        inp.click();
     }
 
     // Sync-all runs as a background job on the server; follow it live over the
@@ -1141,6 +1192,7 @@
             '<label class="vce-check"><input type="checkbox" data-f="pinned"' + (ed.pinned ? ' checked' : '') + '> Pin to server home</label>' +
             '<label class="vce-check" data-wishlist-row><input type="checkbox" data-f="wishlist_missing"' + (ed.wishlist_missing ? ' checked' : '') + '> Wishlist members I don\'t own</label>' +
             '<label class="vce-check"><input type="checkbox" data-f="enabled"' + (ed.enabled ? ' checked' : '') + '> Include in daily sync</label>' +
+            '<div class="vce-order" data-order hidden></div>' +
             '<label class="vce-flabel">In season only (optional)</label>' +
             '<div class="vce-window"><input class="vce-input vce-md" data-f="window_start" value="' + esc(ed.window_start) + '" placeholder="MM-DD" maxlength="5"> → ' +
             '<input class="vce-input vce-md" data-f="window_end" value="' + esc(ed.window_end) + '" placeholder="MM-DD" maxlength="5"></div>' +
@@ -1182,6 +1234,7 @@
                     } else { apply(); }
                 }
                 if (f === 'kind') { renderBuilder(); schedulePreview(); }
+                if (f === 'sort_order') refreshOrderPanel();
             });
         });
         page.querySelector('[data-act="save"]').addEventListener('click', function (e) { save(e.currentTarget); });
@@ -1221,6 +1274,7 @@
         toggleWishlistRow();
         renderBuilder();
         paintOverrides();
+        refreshOrderPanel();
         schedulePreview();
     }
 
@@ -1659,6 +1713,59 @@
                 });
             })
             .catch(function () { lEl.textContent = 'preview failed'; });
+    }
+
+    // ── custom member order (sort = Custom; drag to arrange) ─────────────────
+    function refreshOrderPanel() {
+        var panel = overlay.querySelector('[data-order]');
+        if (!panel) return;
+        if (ed.sort_order !== 'custom') { panel.hidden = true; return; }
+        panel.hidden = false;
+        if (!ed.id) {
+            panel.innerHTML = '<label class="vce-flabel">Custom order</label>' +
+                '<p class="vce-note">Save first, then drag members into the order you want on the server.</p>';
+            return;
+        }
+        panel.innerHTML = '<label class="vce-flabel">Custom order</label>' +
+            '<div class="vce-loading" style="padding:14px">Loading members…</div>';
+        api('/' + ed.id + '/members', {}).then(function (d) {
+            if (!d || d.ok === false) {
+                panel.innerHTML = '<label class="vce-flabel">Custom order</label>' +
+                    '<p class="vce-note">' + esc((d && d.error) || 'Could not resolve members') + '</p>';
+                return;
+            }
+            panel.innerHTML = '<label class="vce-flabel">Custom order — drag to arrange</label>';
+            var list = h('div', 'vce-order-list');
+            var dragging = null;
+            (d.members || []).forEach(function (m) {
+                var row = h('div', 'vce-order-row',
+                    '<span class="vce-order-grip">⋮⋮</span>' +
+                    '<span class="vce-order-name">' + esc(m.title || '') +
+                    (m.year ? ' <i>' + m.year + '</i>' : '') + '</span>');
+                row.draggable = true;
+                row.dataset.tmdb = m.tmdb_id;
+                row.addEventListener('dragstart', function () { dragging = row; row.classList.add('vce-order-row--drag'); });
+                row.addEventListener('dragend', function () {
+                    row.classList.remove('vce-order-row--drag');
+                    dragging = null;
+                    ed.definition.order = Array.prototype.map.call(
+                        list.querySelectorAll('.vce-order-row'),
+                        function (r) { return parseInt(r.dataset.tmdb, 10); }).filter(Boolean);
+                    ed.dirty = true;
+                });
+                row.addEventListener('dragover', function (e) {
+                    e.preventDefault();
+                    if (!dragging || dragging === row) return;
+                    var rect = row.getBoundingClientRect();
+                    var before = (e.clientY - rect.top) < rect.height / 2;
+                    list.insertBefore(dragging, before ? row : row.nextSibling);
+                });
+                list.appendChild(row);
+            });
+            panel.appendChild(list);
+            panel.appendChild(h('p', 'vce-note',
+                'Pushed to Plex on sync (Jellyfin has no reorder API). New members join at the end.'));
+        });
     }
 
     // ── missing-members browser (the acquisition view) ───────────────────────
