@@ -497,3 +497,30 @@ def test_broken_layer_does_not_sink_the_render():
     # a garbage layer shouldn't crash the whole composite
     out = render_overlay(base, {"layers": [{"type": "text"}, None, {"type": "shape", "w": "oops"}]}, {})
     assert Image.open(io.BytesIO(out)).format == "JPEG"
+
+
+def test_font_families_render_as_themselves():
+    # WYSIWYG type: each editor family loads its own bundled face (Georgia →
+    # Gelasio, its metric-compatible libre twin); unknown families fall back to
+    # Inter; variable faces get a real weight (Montserrat must never render Thin
+    # unless asked).
+    from core.video.overlays.compositor import _font
+    names = {fam: _font(fam, 800, 40).getname()[0] for fam in
+             ("Inter", "Archivo", "Oswald", "Bebas", "Anton",
+              "RobotoCondensed", "Montserrat", "Georgia", "NoSuchFamily")}
+    assert names["Archivo"] == "Archivo Black"
+    assert names["Oswald"] == "Oswald"
+    assert names["Bebas"] == "Bebas Neue"
+    assert names["Anton"] == "Anton"
+    assert names["RobotoCondensed"] == "Roboto Condensed"
+    assert names["Montserrat"] == "Montserrat"
+    assert names["Georgia"] == "Gelasio"
+    assert names["Inter"] == "Inter"
+    assert names["NoSuchFamily"] == "Inter"          # graceful fallback
+    # Weight axis actually applied: 300 vs 800 Montserrat differ in raster.
+    from PIL import Image, ImageDraw
+    def raster(w):
+        img = Image.new("L", (220, 60), 0)
+        ImageDraw.Draw(img).text((5, 5), "Weight", font=_font("Montserrat", w, 40), fill=255)
+        return img.tobytes()
+    assert raster(300) != raster(800)

@@ -41,31 +41,72 @@ _INTER_WEIGHTS = {
     400: "Inter-Regular.ttf", 500: "Inter-Medium.ttf", 600: "Inter-SemiBold.ttf",
     700: "Inter-Bold.ttf", 800: "Inter-ExtraBold.ttf", 900: "Inter-Black.ttf",
 }
+# The display families the editor offers, bundled (OFL) so the render matches
+# the on-canvas preview — WYSIWYG type instead of everything-as-Inter.
+# (file, is_variable). Variable fonts get their Weight axis set per request
+# (Montserrat's default instance is Thin — the axis must ALWAYS be applied);
+# single-weight display faces (Archivo Black / Bebas / Anton) ignore weight.
+# 'Georgia' renders as Gelasio, its metric-compatible libre twin.
+_FAMILY_FILES = {
+    "Archivo":         ("ArchivoBlack-Regular.ttf", False),
+    "Oswald":          ("Oswald.ttf",               True),
+    "Bebas":           ("BebasNeue-Regular.ttf",    False),
+    "Anton":           ("Anton-Regular.ttf",        False),
+    "RobotoCondensed": ("RobotoCondensed.ttf",      True),
+    "Montserrat":      ("Montserrat.ttf",           True),
+    "Georgia":         ("Gelasio.ttf",              True),
+}
 _FONT_CACHE: dict = {}
+
+
+def _inter(wsel: int, px: int):
+    """The bundled Inter weight — the always-present fallback."""
+    try:
+        return ImageFont.truetype(os.path.join(_FONT_DIR, _INTER_WEIGHTS[wsel]), px)
+    except Exception:
+        logger.warning("bundled Inter weight %s failed to load", wsel, exc_info=True)
+        for n in (("DejaVuSans-Bold.ttf" if wsel >= 700 else "DejaVuSans.ttf"), "DejaVuSans.ttf"):
+            try:
+                return ImageFont.truetype(n, px)
+            except Exception:
+                continue
+    return ImageFont.load_default()
 
 
 def _font(family: str, weight, px: int):
     px = max(1, int(px))
     w = _as_int(weight, 800)
-    wsel = min(_INTER_WEIGHTS, key=lambda a: abs(a - w))   # nearest bundled Inter weight
-    key = (wsel, px)
+    fam = str(family or "Inter")
+    key = (fam, w, px)
     if key in _FONT_CACHE:
         return _FONT_CACHE[key]
     font = None
-    # 1) the bundled Inter weight — always present, matches the editor preview.
-    try:
-        font = ImageFont.truetype(os.path.join(_FONT_DIR, _INTER_WEIGHTS[wsel]), px)
-    except Exception:
-        logger.warning("bundled Inter weight %s failed to load", wsel, exc_info=True)
-        # 2) system DejaVu (dev boxes only), then 3) Pillow's default (never invisible-safe).
-        for n in (("DejaVuSans-Bold.ttf" if wsel >= 700 else "DejaVuSans.ttf"), "DejaVuSans.ttf"):
-            try:
-                font = ImageFont.truetype(n, px)
-                break
-            except Exception:
-                continue
+    spec = _FAMILY_FILES.get(fam)
+    if spec is not None:
+        fname, variable = spec
+        try:
+            font = ImageFont.truetype(os.path.join(_FONT_DIR, fname), px)
+            if variable:
+                # Clamp the weight into the font's actual axis range and set
+                # every axis (Weight to our value, others to their default).
+                try:
+                    values = []
+                    for ax in font.get_variation_axes():
+                        name = ax.get("name")
+                        name = name.decode() if isinstance(name, bytes) else str(name)
+                        if "weight" in name.lower() or "wght" in name.lower():
+                            values.append(min(max(w, ax["minimum"]), ax["maximum"]))
+                        else:
+                            values.append(ax["default"])
+                    font.set_variation_by_axes(values)
+                except Exception:   # noqa: BLE001 - default instance beats no font
+                    logger.debug("variation axes failed for %s", fname, exc_info=True)
+        except Exception:   # noqa: BLE001 - fall through to Inter
+            logger.warning("bundled family %s failed to load", fam, exc_info=True)
+            font = None
     if font is None:
-        font = ImageFont.load_default()
+        wsel = min(_INTER_WEIGHTS, key=lambda a: abs(a - w))
+        font = _inter(wsel, px)
     _FONT_CACHE[key] = font
     return font
 
