@@ -154,6 +154,72 @@ def test_search_import_albums_preserves_musicbrainz_release_variants(monkeypatch
     assert results[1]["release_group_id"] == "rg-shock"
 
 
+def test_search_import_albums_source_override_bypasses_priority_chain(monkeypatch):
+    """The default priority-chain walk stops at the first source with ANY
+    non-empty result — a broad-catalog source ahead of a niche one (Discogs
+    ahead of Bandcamp) can permanently shadow it for ordinary queries.
+    An explicit source_override must search exactly that one source,
+    skipping the chain (and the "first non-empty wins" early-exit) entirely."""
+    discogs_client = FakeClient([
+        _album_result("discogs-1", "Unrelated Match", "Some Other Artist"),
+    ])
+    bandcamp_client = FakeClient([
+        _album_result("bandcamp-1", "Full Body Recordings, Episode 1", "Full Body Recordings"),
+    ])
+
+    monkeypatch.setattr(import_staging, "get_primary_source", lambda: "deezer")
+    monkeypatch.setattr(import_staging, "get_source_priority", lambda primary: [primary, "discogs", "bandcamp"])
+    monkeypatch.setattr(
+        import_staging,
+        "get_client_for_source",
+        lambda source: {"discogs": discogs_client, "bandcamp": bandcamp_client}.get(source),
+    )
+    monkeypatch.setattr(
+        import_staging,
+        "_search_albums_for_source",
+        lambda source, client, query, limit=5: client.search_albums(query, limit=limit),
+    )
+
+    results = import_staging.search_import_albums(
+        "Full Body Recordings", limit=5, source_override="bandcamp",
+    )
+
+    assert [result["id"] for result in results] == ["bandcamp-1"]
+    assert results[0]["source"] == "bandcamp"
+    assert discogs_client.calls == []  # never even queried
+
+
+def test_available_import_sources_lists_clients_with_search_albums(monkeypatch):
+    class _NoAlbumSearchClient:
+        def search_tracks(self, query, **kwargs):
+            return []
+
+    deezer_client = FakeClient([])
+    bandcamp_client = FakeClient([])
+
+    monkeypatch.setattr(import_staging, "get_primary_source", lambda: "deezer")
+    monkeypatch.setattr(
+        "core.metadata.registry.METADATA_SOURCE_PRIORITY",
+        ("deezer", "itunes", "bandcamp"),
+    )
+    monkeypatch.setattr(
+        import_staging,
+        "get_client_for_source",
+        lambda source: {
+            "deezer": deezer_client,
+            "itunes": _NoAlbumSearchClient(),
+            "bandcamp": bandcamp_client,
+        }.get(source),
+    )
+
+    sources = import_staging.available_import_sources()
+
+    assert sources == [
+        {"source": "deezer", "label": "Deezer", "active": True},
+        {"source": "bandcamp", "label": "Bandcamp", "active": False},
+    ]
+
+
 def test_search_import_tracks_prefers_primary_source(monkeypatch):
     deezer_client = FakeClient([
         SimpleNamespace(

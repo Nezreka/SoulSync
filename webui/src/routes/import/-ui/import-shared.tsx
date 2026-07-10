@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { HTTPError } from 'ky';
 import { useEffect } from 'react';
 
 import type { ImportQueueJob, ImportStagingFile } from '../-import.types';
@@ -85,6 +86,18 @@ export function useImportQueueActions() {
           errors.push(...payload.errors);
         }
       } catch (error) {
+        if (isMediaServerNotConnectedError(error)) {
+          // The whole batch would fail the same gate check on every remaining item —
+          // stop instead of repeating the same error once per file.
+          updateQueueEntry(entryId, {
+            status: 'error',
+            processed,
+            errors: [getErrorMessage(error)],
+            blockedByMediaServer: true,
+          });
+          void invalidateImportStagingQueries(queryClient);
+          return;
+        }
         errors.push(`${itemName}: ${getErrorMessage(error)}`);
       }
 
@@ -125,4 +138,14 @@ export function fallbackImage(event: { currentTarget: HTMLImageElement }) {
 
 export function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Unknown error';
+}
+
+export function isMediaServerNotConnectedError(error: unknown): boolean {
+  if (!(error instanceof HTTPError)) return false;
+  const data = error.data;
+  return Boolean(
+    data &&
+    typeof data === 'object' &&
+    (data as { error_code?: unknown }).error_code === 'media_server_not_connected',
+  );
 }

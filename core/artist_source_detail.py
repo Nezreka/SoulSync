@@ -45,6 +45,7 @@ def build_source_only_artist_detail(
     discogs_client: Optional[Any] = None,
     amazon_client: Optional[Any] = None,
     jiosaavn_client: Optional[Any] = None,
+    bandcamp_client: Optional[Any] = None,
     lastfm_api_key: Optional[str] = None,
 ) -> Tuple[Dict[str, Any], int]:
     """Build the artist-detail payload for a source-only artist.
@@ -126,6 +127,16 @@ def build_source_only_artist_detail(
                     source_genres = mb_artist.get("genres") or []
             except Exception as e:
                 logger.debug(f"MusicBrainz artist info lookup failed for {artist_id}: {e}")
+        elif source == "bandcamp" and bandcamp_client is not None:
+            # No numeric-ID lookup — resolve by name, same as the
+            # discography branch in core.metadata.album_tracks.
+            bc_artist = bandcamp_client.get_artist(resolved_name or artist_name)
+            if bc_artist:
+                if not artist_name and bc_artist.name:
+                    resolved_name = bc_artist.name
+                source_genres = bc_artist.genres or []
+                if not image_url and bc_artist.image_url:
+                    image_url = bc_artist.image_url
     except Exception as e:
         logger.debug(f"Source-side artist info lookup failed for {source}:{artist_id}: {e}")
 

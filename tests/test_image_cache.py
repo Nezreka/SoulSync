@@ -122,6 +122,29 @@ def test_no_content_length_still_caches(tmp_path):
     assert result.path.read_bytes() == b"chunked-cover-bytes"
 
 
+def test_fetch_sends_same_origin_referer_not_a_fixed_site(tmp_path):
+    """This cache serves artwork from every metadata source (Deezer,
+    Bandcamp, etc.), not just one. A fixed Referer for a single site gets
+    rejected by any other CDN with hotlink protection that checks it
+    (e.g. Bandcamp's bcbits.com) — the header must match each image URL's
+    own origin instead."""
+    calls = []
+
+    def fetcher(url, **kwargs):
+        calls.append(kwargs.get("headers", {}).get("Referer"))
+        return FakeResponse(b"cover-bytes")
+
+    cache = ImageCache(tmp_path, fetcher=fetcher)
+
+    cache.get_url("https://f4.bcbits.com/img/a1811014619_10.jpg")
+    cache.get_url("https://e-cdns-images.dzcdn.net/images/cover/abc/500x500.jpg")
+
+    assert calls == [
+        "https://f4.bcbits.com/",
+        "https://e-cdns-images.dzcdn.net/",
+    ]
+
+
 def test_get_url_rejects_non_image_responses(tmp_path):
     cache = ImageCache(
         tmp_path,

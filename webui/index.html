@@ -583,6 +583,28 @@
                                     </div>
                                 </div>
                             </div>
+                            <!-- Bandcamp Enrichment Status Icon (experimental — off by default) -->
+                            <div class="bandcamp-enrich-button-container">
+                                <button class="bandcamp-enrich-button" id="bandcamp-enrich-button" title="Bandcamp Library Enrichment">
+                                    <img src="https://upload.wikimedia.org/wikipedia/commons/9/90/Bandcamp-polygon-aqua.svg"
+                                        alt="Bandcamp" class="bandcamp-enrich-logo">
+                                    <div class="bandcamp-enrich-spinner"></div>
+                                </button>
+                                <div class="bandcamp-enrich-tooltip" id="bandcamp-enrich-tooltip">
+                                    <div class="bandcamp-enrich-tooltip-content">
+                                        <div class="bandcamp-enrich-tooltip-header">Bandcamp Enrichment</div>
+                                        <div class="bandcamp-enrich-tooltip-body" id="bandcamp-enrich-tooltip-body">
+                                            <div class="tooltip-status">Status: <span
+                                                    id="bandcamp-enrich-tooltip-status">Idle</span>
+                                            </div>
+                                            <div class="tooltip-current" id="bandcamp-enrich-tooltip-current">No active matches
+                                            </div>
+                                            <div class="tooltip-progress" id="bandcamp-enrich-tooltip-progress">Progress: 0 / 0
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                             <!-- Tidal Enrichment Status Icon -->
                             <div class="tidal-enrich-button-container">
                                 <button class="tidal-enrich-button" id="tidal-enrich-button" title="Tidal Library Enrichment">
@@ -7077,6 +7099,17 @@
                                             onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                     </div>
                                     <div class="setting-help-text setting-help-body" hidden>Exposes JioSaavn as a primary metadata source on the Connections tab and in search. Free, no account — strong for Indian and Bollywood catalogs; limited to 1 request/sec via the public proxy API. Off by default.</div>
+                                </div>
+                                <div class="form-group">
+                                    <div class="setting-row" style="flex:1;min-width:0;">
+                                        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:normal;margin:0;">
+                                            <input type="checkbox" id="experimental-bandcamp-enabled" style="width:auto;margin:0;" onchange="onExperimentalBandcampToggle(this)">
+                                            <span>Enable Bandcamp search &amp; enrichment</span>
+                                        </label>
+                                        <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    </div>
+                                    <div class="setting-help-text setting-help-body" hidden>Adds Bandcamp as a Discover search source and a track/album metadata enrichment source (tags, label, credits). Free, no account — uses Bandcamp's own public search and release-page endpoints (unofficial, no guaranteed uptime or rate limits). Off by default.</div>
                                 </div>
                             </div>
                             </div><!-- end Experimental body -->
