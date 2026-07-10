@@ -17,7 +17,8 @@ SoulSync-managed movie/show collections. Admin-only (gated in __init__.py).
     GET    /api/video/collections/server/delete/status -> job state         (polling fallback)
     POST   /api/video/collections/preview         -> {ok,count,sample,...}  (live preview)
     POST   /api/video/collections/<id>/sync       -> {ok,...}               (Sync now, one)
-    POST   /api/video/collections/sync            -> {ok,...}               (Sync now, all)
+    POST   /api/video/collections/sync            -> {ok,started}           (start sync-all job)
+    GET    /api/video/collections/sync/status     -> job state              (bell seed / polling)
 """
 
 from __future__ import annotations
@@ -243,9 +244,21 @@ def register_routes(bp):
 
     @bp.route("/collections/sync", methods=["POST"])
     def collections_sync_all():
+        """START the full sync in the background (charts fetch + default-on
+        poster generation make it long-running). Progress streams over the
+        'collections:sync' socket event (the bell + the studio button);
+        GET .../sync/status is the polling fallback."""
         from . import get_video_db
-        from core.video.collections.sync import run_sync
-        return jsonify(run_sync(get_video_db()))
+        from core.video.collections.sync_job import start_sync_all
+        r = start_sync_all(get_video_db())
+        if not r.get("ok"):
+            return jsonify(r), 409
+        return jsonify(r)
+
+    @bp.route("/collections/sync/status", methods=["GET"])
+    def collections_sync_status():
+        from core.video.collections.sync_job import status
+        return jsonify(status())
 
     # ── server-side collections (cleanup view) ────────────────────────────────
     @bp.route("/collections/server", methods=["GET"])
