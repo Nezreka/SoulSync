@@ -149,11 +149,14 @@ def test_delete_repoints_wishlist_references_to_null(db):
 
     conn = db._get_connection()
     try:
+        # Keyed `<track>::<album>` since composite ids became canonical.
         row = conn.execute(
-            "SELECT quality_profile_id FROM wishlist_tracks WHERE spotify_track_id='sp-del-1'"
+            "SELECT quality_profile_id FROM wishlist_tracks "
+            "WHERE spotify_track_id = 'sp-del-1' OR spotify_track_id LIKE 'sp-del-1::%'"
         ).fetchone()
     finally:
         conn.close()
+    assert row is not None
     assert row["quality_profile_id"] is None
 
 

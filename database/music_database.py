@@ -10133,27 +10133,65 @@ class MusicDatabase:
                 source_json = json.dumps(source_info or {})
 
                 # When allow_duplicates is on, make the key unique per album so the same
-                # track from different albums can coexist in the wishlist
+                # track from different albums can coexist in the wishlist.
+                # The composite key is CANONICAL from the first insert (P1-09) —
+                # deriving it from "does the bare id already exist" made a second
+                # add of the SAME album look like a different one (bare row has
+                # no album in its key), creating base + composite duplicates.
+                album_obj = spotify_track_data.get('album', {})
+                album_id = album_obj.get('id', '') if isinstance(album_obj, dict) else ''
                 insert_track_id = track_id
-                if allow_duplicates:
-                    album_obj = spotify_track_data.get('album', {})
-                    album_id = album_obj.get('id', '') if isinstance(album_obj, dict) else ''
-                    if album_id:
-                        # Check if this exact track+album combo already exists
-                        composite_id = f"{track_id}::{album_id}"
-                        cursor.execute("SELECT id FROM wishlist_tracks WHERE spotify_track_id = ? AND profile_id = ?",
-                                       (composite_id, profile_id))
-                        if cursor.fetchone():
-                            logger.debug(f"Skipping wishlist entry — same track+album already in wishlist: '{track_name}' on '{album_obj.get('name', '')}'")
-                            return False
-                        # Check if base track_id exists (from a different album)
-                        cursor.execute("SELECT id FROM wishlist_tracks WHERE spotify_track_id = ? AND profile_id = ?",
-                                       (track_id, profile_id))
-                        if cursor.fetchone():
-                            # Same track exists from different album — use composite ID
-                            insert_track_id = composite_id
+                if allow_duplicates and album_id:
+                    insert_track_id = f"{track_id}::{album_id}"
+
+                existing = cursor.execute(
+                    "SELECT id, source_type FROM wishlist_tracks "
+                    "WHERE spotify_track_id = ? AND profile_id = ?",
+                    (insert_track_id, profile_id)).fetchone()
+                if existing is None and insert_track_id != track_id:
+                    # Pre-fix rows keyed the first album under the bare track id.
+                    # Adopt such a row when it represents the SAME album so the
+                    # intent is updated in place instead of duplicated.
+                    base_row = cursor.execute(
+                        "SELECT id, source_type, spotify_data FROM wishlist_tracks "
+                        "WHERE spotify_track_id = ? AND profile_id = ?",
+                        (track_id, profile_id)).fetchone()
+                    if base_row is not None:
+                        try:
+                            base_album = (json.loads(base_row['spotify_data']).get('album') or {}).get('id', '')
+                        except Exception:
+                            base_album = ''
+                        if base_album == album_id:
+                            existing = base_row
 
                 resolved_qp_id = self._resolve_quality_profile_id(cursor, quality_profile_id)
+
+                if existing is not None:
+                    # Idempotent upsert (P1-10): the same intent refreshes the
+                    # waiting row's pipeline context instead of being dropped —
+                    # a later quality-profile change in Library v2 must reach
+                    # the entry that is actually queued. Payload follows the
+                    # newest request; manual provenance is never downgraded by
+                    # an automatic re-add; retry state / date_added stay put.
+                    updates = ["spotify_data = ?"]
+                    params: List[Any] = [spotify_json]
+                    if quality_profile_id is not None and resolved_qp_id is not None:
+                        updates.append("quality_profile_id = ?")
+                        params.append(resolved_qp_id)
+                    if source_info:
+                        updates.append("source_info = ?")
+                        params.append(source_json)
+                    if source_type == 'manual' or existing['source_type'] != 'manual':
+                        updates.append("source_type = ?")
+                        params.append(source_type)
+                    params.append(existing['id'])
+                    cursor.execute(
+                        f"UPDATE wishlist_tracks SET {', '.join(updates)} WHERE id = ?",
+                        params)
+                    conn.commit()
+                    logger.debug(f"Wishlist entry already present — refreshed context for '{track_name}' "
+                                 f"(key: {insert_track_id})")
+                    return False
 
                 # Insert the track
                 cursor.execute("""
@@ -10174,12 +10212,19 @@ class MusicDatabase:
             return False
     
     def remove_from_wishlist(self, spotify_track_id: str, profile_id: int = 1) -> bool:
-        """Remove a track from the wishlist (typically after successful download)"""
+        """Remove a track from the wishlist (typically after successful download).
+
+        A bare track id also removes its per-album composite rows
+        (``<track>::<album>``) — callers outside the wishlist processor only
+        know the source track id, not which album key the entry was stored
+        under."""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("DELETE FROM wishlist_tracks WHERE spotify_track_id = ? AND profile_id = ?",
-                               (spotify_track_id, profile_id))
+                cursor.execute(
+                    "DELETE FROM wishlist_tracks WHERE profile_id = ? AND "
+                    "(spotify_track_id = ? OR spotify_track_id LIKE ?)",
+                    (profile_id, spotify_track_id, f"{spotify_track_id}::%"))
                 conn.commit()
 
                 if cursor.rowcount > 0:
@@ -10465,13 +10510,15 @@ class MusicDatabase:
 
     def get_wishlist_spotify_data(self, track_id: str, profile_id: int = 1) -> Dict[str, Any]:
         """Parsed ``spotify_data`` for a wishlist row, or {}. Used to label an
-        ignore entry with the track's name/artist before the row is removed."""
+        ignore entry with the track's name/artist before the row is removed.
+        A bare track id also matches its per-album composite rows."""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    "SELECT spotify_data FROM wishlist_tracks WHERE spotify_track_id = ? AND profile_id = ?",
-                    (track_id, profile_id))
+                    "SELECT spotify_data FROM wishlist_tracks WHERE profile_id = ? AND "
+                    "(spotify_track_id = ? OR spotify_track_id LIKE ?) LIMIT 1",
+                    (profile_id, track_id, f"{track_id}::%"))
                 row = cursor.fetchone()
                 if not row or not row["spotify_data"]:
                     return {}
@@ -10558,8 +10605,14 @@ class MusicDatabase:
                 cursor = conn.cursor()
 
                 if success:
-                    # Remove from ALL profiles' wishlists — track is now in shared library
-                    cursor.execute("DELETE FROM wishlist_tracks WHERE spotify_track_id = ?", (spotify_track_id,))
+                    # Remove from ALL profiles' wishlists — track is now in the
+                    # shared library. A bare id also clears its per-album
+                    # composite rows (callers that didn't come from the
+                    # wishlist processor only know the source track id).
+                    cursor.execute(
+                        "DELETE FROM wishlist_tracks WHERE spotify_track_id = ? "
+                        "OR spotify_track_id LIKE ?",
+                        (spotify_track_id, f"{spotify_track_id}::%"))
                 else:
                     # Increment retry count and update failure reason
                     cursor.execute("""

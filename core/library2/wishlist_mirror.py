@@ -132,11 +132,9 @@ def mirror_tracks_wishlist(db, conn, track_ids: List[int], monitored: bool,
                                         profile_id=profile_id,
                                         quality_profile_id=payload.get("quality_profile_id"))
             else:
+                # remove_from_wishlist also clears `<id>::<album>` composite
+                # rows, so one call covers however the entry was keyed.
                 ok = db.remove_from_wishlist(payload["id"], profile_id)
-                if source_album_id:
-                    ok = db.remove_from_wishlist(
-                        f"{payload['id']}::{source_album_id}", profile_id
-                    ) or ok
             if ok:
                 mirrored += 1
         except Exception as e:  # noqa: BLE001
