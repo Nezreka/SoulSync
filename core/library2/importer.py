@@ -550,13 +550,42 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
     if not _table_exists(cursor, "wishlist_tracks"):
         return 0
 
+    wishlist_columns = _existing_columns(cursor, "wishlist_tracks")
     clause, params = _profile_filter(cursor, "wishlist_tracks", profile_id)
+    quality_select = ("quality_profile_id" if "quality_profile_id" in wishlist_columns
+                      else "NULL AS quality_profile_id")
     rows = cursor.execute(
-        "SELECT spotify_track_id, spotify_data, source_type, date_added FROM wishlist_tracks"
-        + (f" WHERE {clause}" if clause else ""),
+        "SELECT id, spotify_track_id, spotify_data, source_type, date_added, "
+        + quality_select + " FROM wishlist_tracks"
+        + (f" WHERE {clause}" if clause else "")
+        + " ORDER BY id",
         params,
     ).fetchall()
+
+    from core.library2.profile_lookup import default_quality_profile_id
+    default_profile_id = default_quality_profile_id(cursor.connection)
+    valid_profile_ids = {
+        int(row[0]) for row in cursor.execute("SELECT id FROM quality_profiles").fetchall()
+    }
+
+    def _track_profile(row) -> int:
+        raw_profile_id = row["quality_profile_id"]
+        if raw_profile_id is None:
+            return default_profile_id
+        try:
+            candidate = int(raw_profile_id)
+        except (TypeError, ValueError):
+            candidate = None
+        if candidate in valid_profile_ids:
+            return candidate
+        logger.warning(
+            "Wishlist row %s references invalid quality profile %r; using default %s",
+            row["id"], raw_profile_id, default_profile_id,
+        )
+        return default_profile_id
+
     created_or_updated = 0
+    assigned_profiles: Dict[Tuple[int, str], Tuple[int, int]] = {}
 
     for row in rows:
         try:
@@ -571,6 +600,7 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
         title = payload.get("name")
         if not track_id or not title:
             continue
+        quality_profile_id = _track_profile(row)
 
         album = payload.get("album") if isinstance(payload.get("album"), dict) else {}
         album_title = album.get("name") or title
@@ -659,6 +689,16 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
             "SELECT id FROM lib2_tracks WHERE album_id=? AND spotify_id=?",
             (album_id, track_id),
         ).fetchone()
+        entity_key = (album_id, track_id)
+        previous_assignment = assigned_profiles.get(entity_key)
+        if previous_assignment and previous_assignment[0] != quality_profile_id:
+            logger.warning(
+                "Wishlist rows %s and %s assign different quality profiles to "
+                "track %s on album %s; latest row wins (%s)",
+                previous_assignment[1], row["id"], track_id, album_id,
+                quality_profile_id,
+            )
+        assigned_profiles[entity_key] = (quality_profile_id, row["id"])
         track_number = payload.get("track_number")
         disc_number = payload.get("disc_number") or 1
         duration = payload.get("duration_ms")
@@ -669,19 +709,22 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
                 UPDATE lib2_tracks
                    SET title=?, track_number=COALESCE(track_number, ?),
                        disc_number=COALESCE(disc_number, ?), duration=COALESCE(duration, ?),
-                       monitored=1, updated_at=CURRENT_TIMESTAMP
+                       quality_profile_id=?, monitored=1,
+                       updated_at=CURRENT_TIMESTAMP
                  WHERE id=?
                 """,
-                (title, track_number, disc_number, duration, lib2_track_id),
+                (title, track_number, disc_number, duration, quality_profile_id,
+                 lib2_track_id),
             )
         else:
             cursor.execute(
                 """
                 INSERT INTO lib2_tracks(album_id, title, track_number, disc_number,
-                    duration, spotify_id, monitored)
-                VALUES(?,?,?,?,?,?,1)
+                    duration, spotify_id, quality_profile_id, monitored)
+                VALUES(?,?,?,?,?,?,?,1)
                 """,
-                (album_id, title, track_number, disc_number, duration, track_id),
+                (album_id, title, track_number, disc_number, duration, track_id,
+                 quality_profile_id),
             )
             lib2_track_id = cursor.lastrowid
             created_or_updated += 1

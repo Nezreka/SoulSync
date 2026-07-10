@@ -189,6 +189,123 @@ def test_wishlist_only_track_seeds_missing_monitored_library_rows(legacy_db):
     assert detail["tracks"][0]["monitored"] is True
 
 
+def test_wishlist_seed_preserves_valid_track_profile_only(legacy_db, caplog):
+    from core.quality.schema import ensure_quality_profiles_schema
+
+    conn = sqlite3.connect(legacy_db.path)
+    ensure_quality_profiles_schema(conn)
+    conn.execute("INSERT INTO quality_profiles(id, name) VALUES(7, 'Wishlist Hi-Res')")
+    conn.execute("""
+        CREATE TABLE wishlist_tracks(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            spotify_track_id TEXT NOT NULL,
+            spotify_data TEXT NOT NULL,
+            source_type TEXT DEFAULT 'manual',
+            date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            profile_id INTEGER DEFAULT 1,
+            quality_profile_id INTEGER
+        )
+    """)
+
+    def _payload(track_id, title):
+        return {
+            "id": track_id,
+            "name": title,
+            "artists": [{"id": "sp_artist_q", "name": "Profiled Artist"}],
+            "album": {
+                "id": "sp_album_q",
+                "name": "Profiled Album",
+                "album_type": "album",
+                "total_tracks": 2,
+                "artists": [{"id": "sp_artist_q", "name": "Profiled Artist"}],
+            },
+        }
+
+    conn.executemany(
+        "INSERT INTO wishlist_tracks(spotify_track_id, spotify_data, quality_profile_id) "
+        "VALUES(?,?,?)",
+        [
+            ("sp_profiled", json.dumps(_payload("sp_profiled", "Profiled")), 7),
+            ("sp_dangling", json.dumps(_payload("sp_dangling", "Dangling")), 999),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    caplog.set_level("WARNING")
+    import_legacy_library(legacy_db, reset=True)
+
+    conn = sqlite3.connect(legacy_db.path)
+    conn.row_factory = sqlite3.Row
+    default_id = conn.execute(
+        "SELECT id FROM quality_profiles WHERE is_default=1 ORDER BY id LIMIT 1"
+    ).fetchone()[0]
+    track_profiles = {
+        row["title"]: row["quality_profile_id"]
+        for row in conn.execute(
+            "SELECT title, quality_profile_id FROM lib2_tracks "
+            "WHERE spotify_id IN ('sp_profiled', 'sp_dangling')")
+    }
+    album_profile = conn.execute(
+        "SELECT quality_profile_id FROM lib2_albums WHERE spotify_id='sp_album_q'"
+    ).fetchone()[0]
+    artist_profile = conn.execute(
+        "SELECT quality_profile_id FROM lib2_artists WHERE spotify_id='sp_artist_q'"
+    ).fetchone()[0]
+    conn.close()
+
+    assert track_profiles == {"Profiled": 7, "Dangling": default_id}
+    assert album_profile == default_id
+    assert artist_profile == default_id
+    assert "invalid quality profile 999" in caplog.text
+
+
+def test_wishlist_profile_conflict_is_visible_and_latest_row_wins(legacy_db, caplog):
+    conn = sqlite3.connect(legacy_db.path)
+    conn.execute("""
+        CREATE TABLE wishlist_tracks(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            spotify_track_id TEXT NOT NULL,
+            spotify_data TEXT NOT NULL,
+            source_type TEXT DEFAULT 'manual',
+            date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            profile_id INTEGER DEFAULT 1,
+            quality_profile_id INTEGER
+        )
+    """)
+    payload = {
+        "id": "sp_conflict",
+        "name": "Conflicted",
+        "artists": [{"id": "sp_conflict_artist", "name": "Conflict Artist"}],
+        "album": {
+            "id": "sp_conflict_album",
+            "name": "Conflict Album",
+            "artists": [{"id": "sp_conflict_artist", "name": "Conflict Artist"}],
+        },
+    }
+    conn.executemany(
+        "INSERT INTO wishlist_tracks(spotify_track_id, spotify_data, quality_profile_id) "
+        "VALUES(?,?,?)",
+        [
+            ("sp_conflict::first", json.dumps(payload), 1),
+            ("sp_conflict::second", json.dumps(payload), 2),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    caplog.set_level("WARNING")
+    import_legacy_library(legacy_db, reset=True)
+
+    conn = sqlite3.connect(legacy_db.path)
+    profile_id = conn.execute(
+        "SELECT quality_profile_id FROM lib2_tracks WHERE spotify_id='sp_conflict'"
+    ).fetchone()[0]
+    conn.close()
+    assert profile_id == 2
+    assert "assign different quality profiles" in caplog.text
+
+
 def test_wishlist_seed_does_not_clamp_discography_expected_count(legacy_db):
     """A wishlist track that lands on a provider-only (discography) release must
     not shrink the release's expected_track_count to the wishlisted rows — the
