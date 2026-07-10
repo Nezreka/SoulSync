@@ -127,6 +127,69 @@ def test_franchise_and_engineless():
     assert dead("tmdb_chart", {"chart": "top_movies"}) == []
 
 
+# ── IMDb (keyless scrape, the Kometa trick) ──────────────────────────────────
+_IMDB_HTML = """<html><head>
+<script type="application/ld+json">
+{"@type":"ItemList","itemListElement":[
+ {"item":{"url":"https://www.imdb.com/title/tt0111161/","name":"The Shawshank Redemption"}},
+ {"item":{"url":"https://www.imdb.com/title/tt0068646/","name":"The Godfather"}},
+ {"item":{"url":"https://www.imdb.com/title/tt0111161/","name":"Dup"}},
+ {"item":{"url":"https://www.imdb.com/title/tt9999999/","name":"Unmappable"}}]}
+</script></head><body></body></html>"""
+
+
+class _ImdbEngine:
+    def tmdb_from_imdb(self, tt, kind):
+        return {"tt0111161": 278, "tt0068646": 238}.get(tt)
+
+
+def test_imdb_chart_scrapes_and_maps(monkeypatch):
+    import core.video.collections.list_sources as ls
+    monkeypatch.setattr(ls, "_COMMUNITY_CACHE", {})
+    fetched = []
+    monkeypatch.setattr(ls, "_http_text", lambda url: fetched.append(url) or _IMDB_HTML)
+
+    fetch = ls.build_list_fetcher(engine_factory=lambda: _ImdbEngine())
+    out = fetch("imdb_chart", {"chart": "top", "kind": "movie"})
+    assert [(o["tmdb_id"], o["title"]) for o in out] == \
+        [(278, "The Shawshank Redemption"), (238, "The Godfather")]   # deduped, unmappable dropped
+    assert fetched == ["https://www.imdb.com/chart/top/"]
+    assert fetch("imdb_chart", {"chart": "nope"}) == []
+
+
+def test_imdb_list_url_and_fallback_regex(monkeypatch):
+    import core.video.collections.list_sources as ls
+    monkeypatch.setattr(ls, "_COMMUNITY_CACHE", {})
+    # No JSON-LD (markup change) → regex sweep of /title/tt links still works.
+    monkeypatch.setattr(ls, "_http_text",
+                        lambda url: '<a href="/title/tt0111161/">x</a><a href="/title/tt0068646/">y</a>')
+    fetch = ls.build_list_fetcher(engine_factory=lambda: _ImdbEngine())
+    out = fetch("imdb_list", {"url": "https://www.imdb.com/list/ls055592025/?ref=x", "kind": "movie"})
+    assert [o["tmdb_id"] for o in out] == [278, 238]
+    assert fetch("imdb_list", {"url": "not-a-list"}) == []
+
+
+def test_resolver_imdb_refs():
+    from core.video.collections.resolver import resolve_collection
+    seen = []
+
+    def fetch(source, ref):
+        seen.append((source, ref))
+        return _items([5])
+
+    class _Db:
+        def owned_by_tmdb_ids(self, mt, ids):
+            return []
+
+    d = {"media_type": "show", "kind": "list",
+         "definition": {"source": "imdb_chart", "chart": "toptv"}}
+    assert resolve_collection(_Db(), d, list_fetcher=fetch).ok
+    assert seen[0][0] == "imdb_chart" and seen[0][1]["kind"] == "show"
+    bad = resolve_collection(_Db(), {"media_type": "movie", "kind": "list",
+                                     "definition": {"source": "imdb_list"}}, list_fetcher=fetch)
+    assert not bad.ok and "no list URL" in bad.error
+
+
 # ── community sources (Trakt / MDBList) ──────────────────────────────────────
 class _SettingsDb:
     def __init__(self, **settings):

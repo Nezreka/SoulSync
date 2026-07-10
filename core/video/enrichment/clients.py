@@ -594,6 +594,21 @@ class TMDBClient:
                 return "https://image.tmdb.org/t/p/w500" + it["logo_path"]
         return None
 
+    def find_by_imdb(self, imdb_id):
+        """TMDB ids for an IMDb tt-id via /find — {'movie': id|None, 'show': id|None}.
+        Powers the keyless IMDb chart/list sources (scraped tt-ids → TMDB)."""
+        if not self.api_key or not (imdb_id or "").startswith("tt"):
+            return None
+        import requests
+        r = requests.get(self.BASE + "/find/" + imdb_id,
+                         params={"api_key": self.api_key, "external_source": "imdb_id"},
+                         timeout=15)
+        r.raise_for_status()
+        d = r.json() or {}
+        movie = next((m.get("id") for m in d.get("movie_results") or []), None)
+        show = next((s.get("id") for s in d.get("tv_results") or []), None)
+        return {"movie": movie, "show": show}
+
     def keyword_search(self, query):
         """TMDB keyword id for a query ('christmas' → 207317) — first exact-ish
         match wins. Resolved at runtime instead of hardcoding ids so a TMDB-side

@@ -491,6 +491,23 @@ class VideoEnrichmentEngine:
                 return None
         return hit or None
 
+    def tmdb_from_imdb(self, imdb_id, kind) -> int | None:
+        """TMDB id for an IMDb tt-id (day-cached — the mapping never moves).
+        Powers the keyless IMDb chart/list sources."""
+        w = self.workers.get("tmdb")
+        if not w or not w.enabled or not imdb_id:
+            return None
+        ck = ("imdbmap", imdb_id)
+        hit = self._cache_get(ck)
+        if hit is None:
+            try:
+                hit = w.client.find_by_imdb(imdb_id) or {}
+                self._cache_put(ck, hit, ttl=86400)
+            except Exception:
+                logger.exception("imdb find failed (%s)", imdb_id)
+                return None
+        return (hit or {}).get("show" if kind == "show" else "movie")
+
     def keyword_id(self, query) -> int | None:
         """TMDB keyword id for a name (day-cached — keyword ids never move).
         Powers the seasonal/themed collection sources."""

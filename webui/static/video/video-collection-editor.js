@@ -1580,8 +1580,10 @@
             ['tmdb_chart', 'Chart (Top Rated / Popular / Trending)'],
             ['tmdb_keyword', 'Theme / keyword (Christmas, heist…)'],
             ['tmdb_list', 'TMDB list'],
+            ['imdb_chart', 'IMDb chart (Top 250, Popular — no key)'],
+            ['imdb_list', 'IMDb list URL (no key)'],
             ['trakt_list', 'Trakt list'],
-            ['mdblist_list', 'MDBList (IMDb charts, awards…)']
+            ['mdblist_list', 'MDBList (community lists, awards…)']
         ];
         var refHTML;
         if (def.source === 'tmdb_union') {
@@ -1608,17 +1610,30 @@
                 '<label class="vce-flabel">Keyword / theme</label>' +
                 '<input class="vce-input" data-listref placeholder="e.g. christmas, halloween, heist, time travel" value="' + esc(def.query || '') + '">' +
                 '<p class="vce-note">Matches TMDB\'s keyword tags — great for seasonal and mood collections. Refreshes on every sync.</p>';
+        } else if (def.source === 'imdb_chart') {
+            var icharts = ed.media_type === 'show'
+                ? [['toptv', 'IMDb Top 250 TV'], ['tvmeter', 'Most Popular TV']]
+                : [['top', 'IMDb Top 250'], ['popular', 'Most Popular Movies']];
+            if (!icharts.some(function (c) { return c[0] === def.chart; })) def.chart = icharts[0][0];
+            refHTML =
+                '<label class="vce-flabel">IMDb chart</label>' +
+                '<select class="vce-input" data-imdb-chart-sel>' +
+                    icharts.map(function (c) { return '<option value="' + c[0] + '"' + (c[0] === def.chart ? ' selected' : '') + '>' + esc(c[1]) + '</option>'; }).join('') +
+                '</select>' +
+                '<p class="vce-note">Read straight from imdb.com — no API key (IMDb has no API; this is the same trick Kometa uses). Re-resolves on every sync.</p>';
         } else {
             var refLabel = def.source === 'tmdb_collection' ? 'TMDB collection id'
                 : def.source === 'trakt_list' ? 'Trakt list URL (or user/slug)'
                 : def.source === 'mdblist_list' ? 'MDBList URL (or user/slug)'
+                : def.source === 'imdb_list' ? 'IMDb list URL (ls…)'
                 : 'TMDB list id';
             var refPh = def.source === 'tmdb_collection' ? 'e.g. 10 (Star Wars Collection)'
                 : def.source === 'trakt_list' ? 'https://trakt.tv/users/…/lists/…'
                 : def.source === 'mdblist_list' ? 'https://mdblist.com/lists/…/…'
+                : def.source === 'imdb_list' ? 'https://www.imdb.com/list/ls123456789/'
                 : 'reference';
-            var keyNote = def.source === 'trakt_list' ? ' Needs your Trakt Client ID (Settings → Metadata).'
-                : def.source === 'mdblist_list' ? ' Needs your MDBList API key (Settings → Metadata).' : '';
+            var keyNote = def.source === 'trakt_list' ? ' Needs your Trakt Client ID (Settings → Connections → API Configuration).'
+                : def.source === 'mdblist_list' ? ' Needs your MDBList API key (Settings → Connections → API Configuration).' : '';
             refHTML =
                 '<label class="vce-flabel">' + refLabel + '</label>' +
                 '<input class="vce-input" data-listref placeholder="' + refPh + '" value="' + esc(def.collection_id || def.list_id || def.url || '') + '">' +
@@ -1649,6 +1664,12 @@
             unionCols.addEventListener('input', updUnion);
             unionKws.addEventListener('input', updUnion);
         }
+        var iChartSel = host.querySelector('[data-imdb-chart-sel]');
+        if (iChartSel) iChartSel.addEventListener('change', function (e) {
+            def.chart = e.target.value;
+            ed.dirty = true;
+            schedulePreview();
+        });
         var chartSel = host.querySelector('[data-chart-sel]');
         if (chartSel) chartSel.addEventListener('change', function (e) {
             var charts = CHARTS[ed.media_type === 'show' ? 'show' : 'movie'];
@@ -1663,7 +1684,7 @@
             var v = e.target.value.trim();
             delete def.collection_id; delete def.list_id; delete def.url; delete def.query;
             if (def.source === 'tmdb_collection') def.collection_id = v ? parseInt(v, 10) : null;
-            else if (def.source === 'trakt_list' || def.source === 'mdblist_list') def.url = v;
+            else if (def.source === 'trakt_list' || def.source === 'mdblist_list' || def.source === 'imdb_list') def.url = v;
             else if (def.source === 'tmdb_keyword') { def.query = v; def.limit = 100; }
             else def.list_id = v;
             ed.dirty = true;

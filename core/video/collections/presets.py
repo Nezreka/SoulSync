@@ -328,25 +328,42 @@ def _expand_essentials(db, mt: str) -> List[Dict[str, Any]]:
 # Fetches run concurrently (each is 1-13 cached TMDB calls); a failed fetch
 # yields count=None ("resolves on sync") rather than hiding the entry.
 
+# Each row carries its full list definition — TMDB charts and the keyless IMDb
+# scrape (the real Top 250; IMDb has no API, we read the chart page like
+# Kometa does) live side by side.
 _CHART_ENTRIES = {
     "movie": [
-        ("top",      "Top Rated 250",      "top_movies",      250,
-         "TMDB's top-rated chart — the IMDb Top 250 equivalent. Re-resolves on every sync."),
-        ("popular",  "Most Popular",       "popular_movies",  100,
+        ("imdb-top", "IMDb Top 250",
+         {"source": "imdb_chart", "chart": "top"},
+         "The real IMDb Top 250 — no API key needed. Re-resolves on every sync."),
+        ("top",      "Top Rated 250",
+         {"source": "tmdb_chart", "chart": "top_movies", "limit": 250},
+         "TMDB's top-rated chart. Re-resolves on every sync."),
+        ("popular",  "Most Popular",
+         {"source": "tmdb_chart", "chart": "popular_movies", "limit": 100},
          "The most popular movies right now. Re-resolves on every sync."),
-        ("trending", "Trending This Week", "trending_movies", 20,
+        ("trending", "Trending This Week",
+         {"source": "tmdb_chart", "chart": "trending_movies", "limit": 20},
          "This week's trending movies. Re-resolves on every sync."),
-        ("theaters", "In Theaters",        "now_playing",     40,
+        ("theaters", "In Theaters",
+         {"source": "tmdb_chart", "chart": "now_playing", "limit": 40},
          "Playing in theaters right now. Re-resolves on every sync."),
     ],
     "show": [
-        ("top",      "Top Rated 250",      "top_shows",       250,
-         "TMDB's top-rated chart — the IMDb Top 250 equivalent. Re-resolves on every sync."),
-        ("popular",  "Most Popular",       "popular_shows",   100,
+        ("imdb-top", "IMDb Top 250 TV",
+         {"source": "imdb_chart", "chart": "toptv"},
+         "The real IMDb Top 250 TV shows — no API key needed. Re-resolves on every sync."),
+        ("top",      "Top Rated 250",
+         {"source": "tmdb_chart", "chart": "top_shows", "limit": 250},
+         "TMDB's top-rated chart. Re-resolves on every sync."),
+        ("popular",  "Most Popular",
+         {"source": "tmdb_chart", "chart": "popular_shows", "limit": 100},
          "The most popular shows right now. Re-resolves on every sync."),
-        ("trending", "Trending This Week", "trending_shows",  20,
+        ("trending", "Trending This Week",
+         {"source": "tmdb_chart", "chart": "trending_shows", "limit": 20},
          "This week's trending shows. Re-resolves on every sync."),
-        ("air",      "On The Air",         "on_the_air",      40,
+        ("air",      "On The Air",
+         {"source": "tmdb_chart", "chart": "on_the_air", "limit": 40},
          "Currently airing shows. Re-resolves on every sync."),
     ],
 }
@@ -411,13 +428,13 @@ def _remote_entry(key, name, count, summary, definition, pack, mt) -> Dict[str, 
 
 def _expand_charts(db, mt: str, fetcher=None) -> List[Dict[str, Any]]:
     rows = _CHART_ENTRIES.get(mt) or []
-    specs = [("tmdb_chart", {"chart": chart, "limit": limit})
-             for _, _, chart, limit, _ in rows]
+    specs = [(definition["source"], dict(definition, kind=mt))
+             for _, _, definition, _ in rows]
     counts = _owned_counts(db, mt, specs, fetcher)
     return [
-        _remote_entry("chart:" + key, name, counts[i], blurb,
-                      {"source": "tmdb_chart", "chart": chart, "limit": limit}, "charts", mt)
-        for i, (key, name, chart, limit, blurb) in enumerate(rows)
+        _remote_entry("chart:" + key, name, counts[i], blurb, dict(definition),
+                      "charts", mt)
+        for i, (key, name, definition, blurb) in enumerate(rows)
     ]
 
 
