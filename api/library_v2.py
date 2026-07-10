@@ -1083,6 +1083,13 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         db = get_database()
         conn = db._get_connection()
         try:
+            # The entity must exist — an unknown id must be a 404, not a scan
+            # whose empty scope silently widens to the whole library.
+            table = "lib2_albums" if entity == "albums" else "lib2_artists"
+            exists = conn.execute(f"SELECT 1 FROM {table} WHERE id=?", (eid,)).fetchone()
+            if not exists:
+                return jsonify({"success": False,
+                                "error": f"{entity[:-1].capitalize()} {eid} not found"}), 404
             # Collect the album ids in scope, then bust their cached artwork so the
             # next artwork request re-resolves from the (possibly retagged) files.
             if entity == "albums":

@@ -208,6 +208,28 @@ def test_album_edit_refiles_release_type(api):
     assert bad.status_code == 400
 
 
+def test_refresh_unknown_entity_is_404(api):
+    """An unknown id must be a 404 — not a success whose empty album scope
+    silently widens into a full-library rescan (audit P1-08)."""
+    client, _db, _ids = api
+    resp = client.post("/api/library/v2/artists/999999/refresh")
+    assert resp.status_code == 404
+    resp = client.post("/api/library/v2/albums/999999/refresh")
+    assert resp.status_code == 404
+
+
+def test_refresh_artist_without_albums_scans_nothing(api):
+    client, db, _ids = api
+    with _conn(db) as conn:
+        cur = conn.execute("INSERT INTO lib2_artists(name) VALUES('Empty Artist')")
+        empty_artist = cur.lastrowid
+        conn.commit()
+    resp = client.post(f"/api/library/v2/artists/{empty_artist}/refresh").get_json()
+    assert resp["success"] is True
+    assert resp["refreshed_albums"] == 0
+    assert resp["scan"].get("scanned") == 0
+
+
 def test_refresh_busts_full_artwork_and_thumbnails(api):
     """Refresh must invalidate BOTH cached variants — the thumb wins the serve
     fast path, so a stale one would pin the old cover in lists forever."""
