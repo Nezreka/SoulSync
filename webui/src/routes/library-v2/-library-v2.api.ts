@@ -451,6 +451,39 @@ export function libraryV2QualityProfilesQueryOptions() {
   });
 }
 
+// --- Mirror outbox (lib2 → legacy wishlist/watchlist, audit P0-04) -----------
+
+export interface LibraryV2MirrorStatus {
+  pending: number;
+  failed: number;
+}
+
+export async function fetchLibraryV2MirrorStatus(): Promise<LibraryV2MirrorStatus> {
+  const payload = await readJson<{
+    success: boolean;
+    pending?: number;
+    failed?: number;
+    error?: string;
+  }>(apiClient.get('library/v2/mirror-status'));
+  if (!payload.success) throw new Error(payload.error || 'Failed to load mirror status');
+  return { pending: payload.pending ?? 0, failed: payload.failed ?? 0 };
+}
+
+export async function retryLibraryV2Mirror(): Promise<void> {
+  const payload = await readJson<{ success: boolean; error?: string }>(
+    apiClient.post('library/v2/mirror-retry', { json: {} }),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Mirror retry failed');
+}
+
+export function libraryV2MirrorStatusQueryOptions() {
+  return queryOptions({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'mirror-status'],
+    queryFn: fetchLibraryV2MirrorStatus,
+    refetchInterval: 60_000,
+  });
+}
+
 export function invalidateLibraryV2(queryClient: QueryClient) {
   return queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
 }

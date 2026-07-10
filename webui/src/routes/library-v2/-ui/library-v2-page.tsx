@@ -21,10 +21,12 @@ import {
   libraryV2ArtistQueryOptions,
   libraryV2ArtistsQueryOptions,
   libraryV2EnabledQueryOptions,
+  libraryV2MirrorStatusQueryOptions,
   moveLibraryV2TrackFile,
   processWishlist,
   refreshLibraryV2,
   refreshLibraryV2Discography,
+  retryLibraryV2Mirror,
   runRepairJob,
   setLibraryV2Monitored,
   startLibraryV2Import,
@@ -829,8 +831,45 @@ export function LibraryV2Page() {
     );
   }
 
-  if (search.artist) return <ArtistDetailView artistId={search.artist} />;
-  return <ArtistIndexView />;
+  return (
+    <>
+      <MirrorStatusBanner />
+      {search.artist ? <ArtistDetailView artistId={search.artist} /> : <ArtistIndexView />}
+    </>
+  );
+}
+
+/** Split-brain guard (audit P0-04): monitor changes mirror into the legacy
+ *  wishlist through a transactional outbox. When ops are stuck or failed,
+ *  say so — the UI must not show "monitored" while the pipeline never
+ *  learned about it. */
+function MirrorStatusBanner() {
+  const queryClient = useQueryClient();
+  const statusQuery = useQuery(libraryV2MirrorStatusQueryOptions());
+  const retry = useMutation({
+    mutationFn: retryLibraryV2Mirror,
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: [...LIBRARY_V2_QUERY_KEY, 'mirror-status'] }),
+  });
+  const s = statusQuery.data;
+  if (!s || (s.pending === 0 && s.failed === 0)) return null;
+  const label =
+    s.failed > 0
+      ? `${s.failed} wishlist sync ${s.failed === 1 ? 'operation' : 'operations'} failed — monitoring shown here may not match what the pipeline searches.`
+      : `${s.pending} wishlist sync ${s.pending === 1 ? 'operation' : 'operations'} pending…`;
+  return (
+    <div className={`${styles.grabBanner} ${s.failed > 0 ? styles.grab_err : styles.grab_busy}`}>
+      <span>{label}</span>
+      <button
+        type="button"
+        className={styles.grabBannerClose}
+        disabled={retry.isPending}
+        onClick={() => retry.mutate()}
+      >
+        {retry.isPending ? 'Retrying…' : 'Retry'}
+      </button>
+    </div>
+  );
 }
 
 // --- artist overview ---------------------------------------------------------

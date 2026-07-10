@@ -105,6 +105,16 @@ def mirror_tracks_wishlist(db, conn, track_ids: List[int], monitored: bool,
                            user_initiated: bool = False) -> int:
     """Add/remove the given lib2 tracks to/from the legacy Wishlist.
 
+    Outbox-backed (audit P0-04): the intents are enqueued on ``conn``,
+    committed, and drained against the legacy tables. A failing legacy write
+    stays visible and retryable in ``lib2_mirror_outbox`` instead of being
+    swallowed. Returns how many of THIS call's intents completed.
+
+    NOTE: commits ``conn`` — callers must not be mid-transaction with
+    unrelated pending writes (all current callers invoke this after their
+    own commit; ``lib2_set_monitored`` enqueues inline instead, so its flag
+    write and outbox rows share one transaction).
+
     ``profile_id`` is the legacy per-user profile scope of the wishlist, NOT a
     quality profile — the quality profile travels per item via
     ``quality_profile_id`` on the payload.
@@ -116,38 +126,20 @@ def mirror_tracks_wishlist(db, conn, track_ids: List[int], monitored: bool,
     discography auto-monitor) must leave it False so a deliberate user
     cancel/remove keeps sticking (audit P1-11).
     """
-    mirrored = 0
-    for tid in track_ids:
-        payload = track_wishlist_payload(conn, tid)
-        if not payload:
-            continue
-        stype = "single" if payload.pop("_album_type", "") == "single" else "album"
-        should_queue = bool(payload.pop("_should_queue", False))
-        source_album_id = payload.pop("_source_album_id", "")
-        source_info = payload.pop("_source_info", {})
-        payload.pop("_has_file", None)
-        try:
-            if monitored:
-                if not should_queue:
-                    continue
-                # quality_profile_id is the app-wide profile the download/
-                # import pipeline resolves live (load_profile_by_id) — THIS
-                # is what makes "this artist must satisfy profile X" reach
-                # the actual search/import decisions.
-                ok = db.add_to_wishlist(payload, source_type=stype,
-                                        source_info=source_info,
-                                        user_initiated=user_initiated,
-                                        profile_id=profile_id,
-                                        quality_profile_id=payload.get("quality_profile_id"))
-            else:
-                # remove_from_wishlist also clears `<id>::<album>` composite
-                # rows, so one call covers however the entry was keyed.
-                ok = db.remove_from_wishlist(payload["id"], profile_id)
-            if ok:
-                mirrored += 1
-        except Exception as e:  # noqa: BLE001
-            logger.debug("wishlist mirror failed (track %s): %s", tid, e)
-    return mirrored
+    from core.library2.mirror_outbox import drain, enqueue_tracks
+
+    outbox_ids = enqueue_tracks(conn, track_ids, monitored,
+                                profile_id=profile_id,
+                                user_initiated=user_initiated)
+    if not outbox_ids:
+        return 0
+    conn.commit()
+    drain(db)
+    marks = ",".join("?" for _ in outbox_ids)
+    row = conn.execute(
+        f"SELECT COUNT(*) FROM lib2_mirror_outbox "
+        f"WHERE id IN ({marks}) AND status='done'", outbox_ids).fetchone()
+    return int(row[0]) if row else 0
 
 
 def upgrade_candidate_track_ids(conn) -> List[int]:

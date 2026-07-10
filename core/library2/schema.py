@@ -204,6 +204,7 @@ _INDEXES = (
     "CREATE INDEX IF NOT EXISTS idx_lib2_track_files_track ON lib2_track_files(track_id)",
     "CREATE INDEX IF NOT EXISTS idx_lib2_track_files_hash ON lib2_track_files(content_hash)",
     "CREATE INDEX IF NOT EXISTS idx_lib2_track_files_path ON lib2_track_files(path)",
+    "CREATE INDEX IF NOT EXISTS idx_lib2_mirror_outbox_status ON lib2_mirror_outbox(status)",
 )
 
 # Audit log: when a user manually downloads while skipping checks (AcoustID /
@@ -225,6 +226,26 @@ CREATE TABLE IF NOT EXISTS lib2_manual_skips (
 )
 """
 
+# Transactional outbox for lib2 → legacy watchlist/wishlist mirroring (audit
+# P0-04 / ADR-02). The outbox row is written in the SAME transaction as the
+# lib2 monitor-flag change; a worker replays it against the legacy tables and
+# records the outcome. A mirror failure is therefore visible and retryable
+# instead of silently leaving lib2 and the wishlist in split-brain.
+LIB2_MIRROR_OUTBOX_DDL = """
+CREATE TABLE IF NOT EXISTS lib2_mirror_outbox (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    op TEXT NOT NULL,                     -- 'wishlist_add'|'wishlist_remove'|'watchlist_add'|'watchlist_remove'
+    payload TEXT NOT NULL DEFAULT '{}',   -- JSON: everything the op needs (resolved at enqueue time)
+    profile_id INTEGER NOT NULL DEFAULT 1,
+    user_initiated INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'pending',  -- 'pending'|'done'|'failed'
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    processed_at TIMESTAMP
+)
+"""
+
 _ALL_DDL = (
     LIB2_ARTISTS_DDL,
     LIB2_ALBUMS_DDL,
@@ -233,6 +254,7 @@ _ALL_DDL = (
     LIB2_TRACK_ARTISTS_DDL,
     LIB2_TRACK_FILES_DDL,
     LIB2_MANUAL_SKIPS_DDL,
+    LIB2_MIRROR_OUTBOX_DDL,
 )
 
 

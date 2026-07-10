@@ -306,23 +306,38 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
     # -- monitoring (mirrors watchlist / wishlist) ----------------------------
 
-    def _mirror_artist_watchlist(db, conn, artist_id: int, monitored: bool) -> None:
-        row = conn.execute(
-            "SELECT name, spotify_id, musicbrainz_id FROM lib2_artists WHERE id=?", (artist_id,)
-        ).fetchone()
-        if not row:
-            return
-        ext = row["spotify_id"] or row["musicbrainz_id"]
-        if not ext:
-            return  # no external id → stays lib2-local only
-        source = "spotify" if row["spotify_id"] else "musicbrainz"
+    @app.route("/api/library/v2/mirror-status")
+    def lib2_mirror_status():
+        """Outbox visibility (audit P0-04): pending/failed mirror ops and the
+        most recent errors, so a mirror failure is a UI state, not a log line."""
+        guard = _guard()
+        if guard:
+            return guard
+        conn = _conn()
         try:
-            if monitored:
-                db.add_artist_to_watchlist(ext, row["name"], _profile(), source)
-            else:
-                db.remove_artist_from_watchlist(ext, _profile())
-        except Exception as e:  # noqa: BLE001
-            logger.debug("watchlist mirror failed (artist %s): %s", artist_id, e)
+            from core.library2.mirror_outbox import outbox_status
+            return jsonify({"success": True, **outbox_status(conn)})
+        finally:
+            conn.close()
+
+    @app.route("/api/library/v2/mirror-retry", methods=["POST"])
+    def lib2_mirror_retry():
+        """Reset failed mirror ops and drain the outbox once."""
+        guard = _guard()
+        if guard:
+            return guard
+        db = get_database()
+        conn = db._get_connection()
+        try:
+            from core.library2.mirror_outbox import drain, outbox_status, prune_done, retry_failed
+            retried = retry_failed(conn)
+            prune_done(conn)
+            conn.commit()
+            result = drain(db)
+            return jsonify({"success": True, "retried": retried, **result,
+                            **outbox_status(conn)})
+        finally:
+            conn.close()
 
     def _mirror_tracks_wishlist(db, conn, track_ids: List[int], monitored: bool,
                                 profile_id: Optional[int] = None,
@@ -382,24 +397,40 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                             (1 if monitored else 0, eid))
             elif entity == "tracks":
                 track_ids = [eid]
-            # Commit the lib2 flag FIRST so the write lock is released before the
-            # watchlist/wishlist mirror opens its own connections (avoids SQLite
-            # "database is locked" from nested writers).
-            conn.commit()
-            # Mirror to the existing watchlist / wishlist systems (reads via conn,
-            # writes via db.* on their own connections).
-            mirrored = 0
+            # Transactional outbox (audit P0-04): the mirror intents commit in
+            # the SAME transaction as the monitor flag — a crash or legacy-DB
+            # failure can no longer leave lib2 saying "monitored" while the
+            # pipeline never learned about it. The drain below replays them;
+            # failures stay visible in lib2_mirror_outbox instead of a 200.
+            from core.library2.mirror_outbox import (
+                drain as drain_mirror_outbox,
+                enqueue_artist_watchlist,
+                enqueue_tracks,
+            )
+            outbox_ids: List[int] = []
             if entity == "artists":
-                _mirror_artist_watchlist(db, conn, eid, monitored)
+                outbox_ids = enqueue_artist_watchlist(conn, eid, monitored,
+                                                      profile_id=_profile())
             elif track_ids:
                 # Only the track-level toggle is a direct user action on that
                 # track; an album toggle is a cascade and must respect a
                 # per-track ignore (user cancelled that download on purpose).
-                mirrored = _mirror_tracks_wishlist(db, conn, track_ids, monitored,
-                                                   user_initiated=(entity == "tracks"))
+                outbox_ids = enqueue_tracks(conn, track_ids, monitored,
+                                            profile_id=_profile(),
+                                            user_initiated=(entity == "tracks"))
+            conn.commit()
+            mirrored = mirror_pending = 0
+            if outbox_ids:
+                drain_mirror_outbox(db)
+                marks = ",".join("?" for _ in outbox_ids)
+                mirrored = conn.execute(
+                    f"SELECT COUNT(*) FROM lib2_mirror_outbox "
+                    f"WHERE id IN ({marks}) AND status='done'", outbox_ids).fetchone()[0]
+                mirror_pending = len(outbox_ids) - mirrored
         finally:
             conn.close()
-        return jsonify({"success": True, "monitored": monitored, "mirrored": mirrored})
+        return jsonify({"success": True, "monitored": monitored,
+                        "mirrored": mirrored, "mirror_pending": mirror_pending})
 
     @app.route("/api/library/v2/<entity>/<int:eid>/quality-profile", methods=["POST"])
     def lib2_set_quality_profile(entity, eid):
@@ -716,9 +747,12 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 "SELECT id FROM lib2_albums WHERE primary_artist_id=?",
                 (artist_id,))]
         track_ids = _bulk_track_ids_for_albums(conn, album_ids)
-        # Pull monitored tracks out of the wishlist BEFORE their rows vanish
-        # (the payload builder needs the rows to compute the wishlist keys).
-        unmirrored = _mirror_tracks_wishlist(db, conn, track_ids, False) if track_ids else 0
+        # Enqueue the wishlist un-mirrors BEFORE the rows vanish (the payload
+        # builder needs them) and in the SAME transaction as the deletes —
+        # the route drains the outbox after committing (audit P0-04).
+        from core.library2.mirror_outbox import enqueue_tracks
+        unmirrored = len(enqueue_tracks(conn, track_ids, False,
+                                        profile_id=_profile())) if track_ids else 0
         removed_albums = 0
         for aid_ in album_ids:
             conn.execute("DELETE FROM lib2_album_artists WHERE album_id=?", (aid_,))
@@ -797,7 +831,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             row = conn.execute("SELECT id FROM lib2_artists WHERE id=?", (artist_id,)).fetchone()
             if not row:
                 return jsonify({"success": False, "error": "Artist not found"}), 404
-            _mirror_artist_watchlist(db, conn, artist_id, False)
+            from core.library2.mirror_outbox import drain as drain_mirror_outbox
+            from core.library2.mirror_outbox import enqueue_artist_watchlist
+            enqueue_artist_watchlist(conn, artist_id, False, profile_id=_profile())
             stats = _unmonitor_tracks_and_delete(db, conn, artist_id=artist_id)
             # Detach the artist from releases owned by OTHER primary artists
             # (featured/various credits). Those albums, tracks, files and
@@ -808,6 +844,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             conn.execute("DELETE FROM lib2_track_artists WHERE artist_id=?", (artist_id,))
             conn.execute("DELETE FROM lib2_artists WHERE id=?", (artist_id,))
             conn.commit()
+            drain_mirror_outbox(db)
             _delete_artwork_files(db, "artist", artist_id)
         finally:
             conn.close()
@@ -826,6 +863,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 return jsonify({"success": False, "error": "Album not found"}), 404
             stats = _unmonitor_tracks_and_delete(db, conn, album_ids=[album_id])
             conn.commit()
+            from core.library2.mirror_outbox import drain as drain_mirror_outbox
+            drain_mirror_outbox(db)
         finally:
             conn.close()
         return jsonify({"success": True, **stats})
