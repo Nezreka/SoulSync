@@ -80,3 +80,70 @@ def test_profile_scoped_wishlist_clear_not_overgated(client, nonadmin):
     # Clearing your OWN wishlist is profile-scoped data — a non-admin MUST still
     # be allowed. This is the guard against a blanket sweep.
     assert _call(client, 'POST', '/api/wishlist/clear').status_code != 403
+
+
+def test_nonadmin_cannot_attach_library_v2_context(client, nonadmin):
+    response = client.post('/api/download', json={
+        'username': 'user',
+        'filename': 'folder/song.flac',
+        'lib2_track_id': 1,
+    })
+
+    assert response.status_code == 403
+    assert response.get_json()['error'] == 'Admin access required'
+
+
+def test_normal_nonadmin_download_is_not_admin_gated(client, nonadmin):
+    response = client.post('/api/download', json={'title': 'incomplete'})
+
+    assert response.status_code == 400
+    assert response.get_json()['error'] == 'Missing username or filename.'
+
+
+def test_library_v2_profile_reaches_download_pipeline(client, monkeypatch):
+    from core.library2.schema import ensure_library_v2_schema
+
+    database = web_server.get_database()
+    conn = database._get_connection()
+    ensure_library_v2_schema(conn)
+    cur = conn.cursor()
+    cur.execute("INSERT INTO lib2_artists(name) VALUES('Route Artist')")
+    artist_id = cur.lastrowid
+    cur.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title, quality_profile_id) "
+        "VALUES(?, 'Route Album', 7)", (artist_id,))
+    album_id = cur.lastrowid
+    cur.execute(
+        "INSERT INTO lib2_tracks(album_id, title, quality_profile_id) "
+        "VALUES(?, 'Route Track', 7)", (album_id,))
+    track_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+
+    class _DownloadOrchestrator:
+        @staticmethod
+        def download(*_args):
+            return object()
+
+    monkeypatch.setattr(web_server, 'download_orchestrator', _DownloadOrchestrator())
+    monkeypatch.setattr(web_server, 'run_async', lambda _result: 'download-id')
+    monkeypatch.setattr(web_server, 'add_activity_item', lambda *_args: None)
+
+    key = web_server._make_context_key('user', 'folder/song.flac')
+    web_server.matched_downloads_context.pop(key, None)
+    response = client.post('/api/download', json={
+        'username': 'user',
+        'filename': 'folder/song.flac',
+        'title': 'Route Track',
+        'artist': 'Route Artist',
+        'album_name': 'Route Album',
+        'quality_profile_id': 999,
+        'lib2_track_id': track_id,
+    })
+
+    assert response.status_code == 200
+    context = web_server.matched_downloads_context.pop(key)
+    assert context['lib2_entity']['track_id'] == track_id
+    assert context['track_info']['quality_profile_id'] == 7
+    assert context['track_info']['name'] == 'Route Track'
+    assert context['track_info']['artists'] == [{'name': 'Route Artist'}]

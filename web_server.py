@@ -7059,7 +7059,18 @@ def start_download():
         # lib2 track/album this grab acts for; existence and the effective
         # quality profile are resolved server-side. A named-but-invalid
         # entity fails the grab instead of degrading to a context-free one.
-        from core.library2.grab_context import resolve_lib2_grab_context
+        from core.library2 import ADMIN_PROFILE_ID
+        from core.library2.grab_context import (
+            build_lib2_track_info,
+            names_lib2_entity,
+            resolve_lib2_grab_context,
+        )
+        if (names_lib2_entity(data)
+                and get_current_profile_id() != ADMIN_PROFILE_ID):
+            return jsonify({
+                "success": False,
+                "error": "Admin access required",
+            }), 403
         _lib2_state, _lib2_ctx = resolve_lib2_grab_context(get_database(), data)
         if _lib2_state == 'invalid':
             return jsonify({"error": "Unknown Library v2 entity for this grab."}), 400
@@ -7105,7 +7116,11 @@ def start_download():
                                 },
                                 'spotify_artist': None,  # No Spotify metadata
                                 'spotify_album': None,
-                                'track_info': None,
+                                'track_info': build_lib2_track_info(
+                                    track_data,
+                                    _lib2_ctx,
+                                    album_name=data.get('album_name'),
+                                ),
                                 '_skip_quarantine_check': _album_skip_checks or None,
                                 'lib2_entity': _lib2_ctx,
                             }
@@ -7133,10 +7148,10 @@ def start_download():
             filename = data.get('filename')
             file_size = data.get('size', 0)
 
-            logger.info(f"Download request - Username: {username}, Filename: {filename[:50]}...")
-
             if not username or not filename:
                 return jsonify({"error": "Missing username or filename."}), 400
+
+            logger.info(f"Download request - Username: {username}, Filename: {filename[:50]}...")
 
             # Blocklist guard (Phase 2b): a manual download is source-file-centric
             # (no metadata IDs), so this matches the blocked ARTIST by name. The
@@ -7184,7 +7199,11 @@ def start_download():
                         },
                         'spotify_artist': None,  # No Spotify metadata
                         'spotify_album': None,
-                        'track_info': None,
+                        'track_info': build_lib2_track_info(
+                            data,
+                            _lib2_ctx,
+                            album_name=data.get('album_name'),
+                        ),
                         '_skip_quarantine_check': _skip_checks or None,
                         'lib2_entity': _lib2_ctx,
                     }

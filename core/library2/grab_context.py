@@ -14,11 +14,53 @@ processing can link the finished file to the exact lib2 row (see
 from __future__ import annotations
 
 import sqlite3
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Mapping, Optional, Tuple
 
 from utils.logging_config import get_logger
 
 logger = get_logger("library2.grab_context")
+
+
+def names_lib2_entity(data: Mapping[str, Any]) -> bool:
+    """Return whether a request explicitly names a Library-v2 entity."""
+    return (data.get("lib2_track_id") is not None
+            or data.get("lib2_album_id") is not None)
+
+
+def build_lib2_track_info(
+    data: Mapping[str, Any],
+    lib2_context: Optional[Mapping[str, Any]],
+    *,
+    album_name: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Build pipeline metadata with a server-owned quality-profile id.
+
+    ``track_info`` is also used for title/artist matching, so passing only the
+    profile id would hide the richer search-result metadata from downstream
+    consumers.  Copy the request metadata, normalise the common fields, then
+    overwrite any client-supplied profile with the value resolved from lib2.
+    """
+    if not lib2_context:
+        return None
+
+    info = dict(data)
+    if not info.get("name") and info.get("title"):
+        info["name"] = info["title"]
+
+    artists = info.get("artists")
+    artist = info.get("artist")
+    if (not isinstance(artists, list) or not artists) and artist:
+        if isinstance(artist, dict):
+            info["artists"] = [dict(artist)]
+        else:
+            info["artists"] = [{"name": str(artist)}]
+
+    album = info.get("album") or album_name
+    if album and not isinstance(album, dict):
+        info["album"] = {"name": str(album)}
+
+    info["quality_profile_id"] = lib2_context.get("quality_profile_id")
+    return info
 
 
 def resolve_lib2_grab_context(
@@ -81,4 +123,8 @@ def resolve_lib2_grab_context(
         conn.close()
 
 
-__all__ = ["resolve_lib2_grab_context"]
+__all__ = [
+    "build_lib2_track_info",
+    "names_lib2_entity",
+    "resolve_lib2_grab_context",
+]

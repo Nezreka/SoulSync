@@ -11,7 +11,11 @@ import sqlite3
 
 import pytest
 
-from core.library2.grab_context import resolve_lib2_grab_context
+from core.library2.grab_context import (
+    build_lib2_track_info,
+    names_lib2_entity,
+    resolve_lib2_grab_context,
+)
 from core.library2.schema import ensure_library_v2_schema
 
 
@@ -52,6 +56,37 @@ def db(tmp_path):
 def test_absent_when_no_entity_named(db):
     assert resolve_lib2_grab_context(db, {}) == ("absent", None)
     assert resolve_lib2_grab_context(db, {"title": "x"}) == ("absent", None)
+
+
+def test_only_non_null_ids_name_a_lib2_entity():
+    assert names_lib2_entity({"lib2_track_id": 1}) is True
+    assert names_lib2_entity({"lib2_album_id": "2"}) is True
+    assert names_lib2_entity({"lib2_track_id": None}) is False
+    assert names_lib2_entity({}) is False
+
+
+def test_pipeline_metadata_uses_server_resolved_profile():
+    request_data = {
+        "title": "Track",
+        "artist": "Artist",
+        "quality_profile_id": 999,
+    }
+
+    info = build_lib2_track_info(
+        request_data,
+        {"track_id": 3, "album_id": 2, "quality_profile_id": 9},
+        album_name="Album",
+    )
+
+    assert info["name"] == "Track"
+    assert info["artists"] == [{"name": "Artist"}]
+    assert info["album"] == {"name": "Album"}
+    assert info["quality_profile_id"] == 9
+    assert request_data["quality_profile_id"] == 999
+
+
+def test_pipeline_metadata_is_absent_without_lib2_context():
+    assert build_lib2_track_info({"title": "Normal download"}, None) is None
 
 
 def test_track_resolves_with_own_profile(db):
