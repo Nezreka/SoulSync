@@ -145,6 +145,34 @@ def test_windows_roundtrip_and_clear(db):
     assert c["window_start"] is None and c["window_end"] is None
 
 
+def test_collection_mode_roundtrips_and_pushes(db):
+    # Plex collection mode ('hideItems' = one collection tile instead of every
+    # member) rides the definition and reaches set_collection_meta.
+    from core.video.collections.sync import sync_collection
+    _seed(db)
+    cid = db.create_collection_definition(
+        "Modes", media_type="movie", collection_mode="hideItems",
+        definition={"rules": [{"field": "genre", "op": "in", "value": ["Family"]}]})
+    c = db.get_collection_definition(cid)
+    assert c["collection_mode"] == "hideItems"
+
+    class _MetaSource(_Source):
+        def __init__(self):
+            super().__init__()
+            self.meta = None
+
+        def set_collection_meta(self, cid_, **kw):
+            self.meta = kw
+            return {"ok": True}
+
+    src = _MetaSource()
+    assert sync_collection(db, c, source=src, today=_d("07-01"))["ok"]
+    assert src.meta["mode"] == "hideItems"
+    # Clearing via '' → back to leave-alone (NULL).
+    db.update_collection_definition(cid, collection_mode="")
+    assert db.get_collection_definition(cid)["collection_mode"] is None
+
+
 def test_seasonal_pack_applies_windows(db):
     from core.video.collections.presets import apply_pack
     r = apply_pack(db, "seasonal", "movie", ["seasonal:christmas"],

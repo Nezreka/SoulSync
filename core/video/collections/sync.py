@@ -48,6 +48,7 @@ def members_signature(definition: Dict[str, Any], server_ids) -> str:
         "sync_mode": (definition or {}).get("sync_mode"),
         "pinned": bool((definition or {}).get("pinned")),
         "poster": (definition or {}).get("poster_url"),
+        "mode": (definition or {}).get("collection_mode"),
     }
     return hashlib.sha1(json.dumps(sub, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
@@ -234,6 +235,7 @@ def sync_collection(db, definition: Dict[str, Any], *, source,
             summary=definition.get("summary"),
             sort=definition.get("sort_order"),
             pinned=bool(definition.get("pinned")),
+            mode=definition.get("collection_mode"),
         )
     except Exception:   # noqa: BLE001
         logger.debug("set_collection_meta failed for %s", collection_id, exc_info=True)

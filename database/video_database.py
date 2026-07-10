@@ -31,7 +31,7 @@ logger = get_logger("video_database")
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 23
+SCHEMA_VERSION = 24
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -247,6 +247,8 @@ _COLUMN_MIGRATIONS = [
     # Seasonal collection windows (MM-DD): in-window syncs, out-of-window removes ours
     ("collection_definitions", "window_start", "TEXT"),
     ("collection_definitions", "window_end", "TEXT"),
+    # Plex collection mode (hide members in library view, etc.); NULL = leave alone
+    ("collection_definitions", "collection_mode", "TEXT"),
     ("youtube_video_stats", "dearrow_attempted", "TEXT"),
     # TMDB details backfill: the server pre-matches shows/movies (so the matcher
     # skips them) but never supplies details-only fields like `status` (airing vs
@@ -2619,7 +2621,7 @@ class VideoDatabase:
             rows = conn.execute(
                 "SELECT id, name, kind, media_type, poster_url, summary, sort_order, "
                 "sync_mode, pinned, wishlist_missing, enabled, window_start, window_end, "
-                "created_at, updated_at "
+                "collection_mode, created_at, updated_at "
                 "FROM collection_definitions ORDER BY updated_at DESC, id DESC").fetchall()
             out = []
             for r in rows:
@@ -2655,7 +2657,8 @@ class VideoDatabase:
                                      definition=None, poster_url=None, summary=None,
                                      sort_order="release", sync_mode="sync", pinned=False,
                                      wishlist_missing=False, enabled=True,
-                                     window_start=None, window_end=None) -> int | None:
+                                     window_start=None, window_end=None,
+                                     collection_mode=None) -> int | None:
         """Insert a collection definition; returns its id. `definition` may be a
         dict or a JSON string (dicts are serialized)."""
         name = (name or "").strip() or "Untitled collection"
@@ -2665,11 +2668,12 @@ class VideoDatabase:
             cur = conn.execute(
                 "INSERT INTO collection_definitions (name, kind, media_type, definition, "
                 "poster_url, summary, sort_order, sync_mode, pinned, wishlist_missing, enabled, "
-                "window_start, window_end) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "window_start, window_end, collection_mode) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (name, kind, media_type, raw, poster_url, summary, sort_order, sync_mode,
                  1 if pinned else 0, 1 if wishlist_missing else 0, 1 if enabled else 0,
-                 (window_start or "").strip() or None, (window_end or "").strip() or None))
+                 (window_start or "").strip() or None, (window_end or "").strip() or None,
+                 (collection_mode or "").strip() or None))
             conn.commit()
             return cur.lastrowid
         except sqlite3.Error:
@@ -2683,7 +2687,7 @@ class VideoDatabase:
         updated_at. Booleans coerced to 0/1; `definition` dicts serialized."""
         allowed = {"name", "kind", "media_type", "definition", "poster_url", "summary",
                    "sort_order", "sync_mode", "pinned", "wishlist_missing", "enabled",
-                   "window_start", "window_end"}
+                   "window_start", "window_end", "collection_mode"}
         sets, params = [], []
         for k, v in fields.items():
             if k not in allowed or v is None:
@@ -2694,8 +2698,8 @@ class VideoDatabase:
                 v = 1 if v else 0
             elif k == "name":
                 v = (v or "").strip() or "Untitled collection"
-            elif k in ("window_start", "window_end"):
-                v = (v or "").strip() or None   # "" clears the window
+            elif k in ("window_start", "window_end", "collection_mode"):
+                v = (v or "").strip() or None   # "" clears (mode: back to leave-alone)
             sets.append(f"{k}=?")
             params.append(v)
         if not sets:

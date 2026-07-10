@@ -1018,7 +1018,7 @@
                definition: { match: 'all', rules: [] },
                summary: '', sort_order: 'release', sync_mode: 'sync',
                pinned: false, wishlist_missing: false, enabled: true, poster_url: '',
-               window_start: '', window_end: '', dirty: false };
+               window_start: '', window_end: '', collection_mode: '', dirty: false };
         renderEditor();
     }
 
@@ -1039,7 +1039,8 @@
                 sync_mode: c.sync_mode || 'sync', pinned: !!c.pinned,
                 wishlist_missing: !!c.wishlist_missing, enabled: c.enabled == null ? true : !!c.enabled,
                 poster_url: c.poster_url || '',
-                window_start: c.window_start || '', window_end: c.window_end || '', dirty: false
+                window_start: c.window_start || '', window_end: c.window_end || '',
+                collection_mode: c.collection_mode || '', dirty: false
             };
             renderEditor();
         });
@@ -1130,6 +1131,13 @@
                 '<div><label class="vce-flabel">Sync mode</label>' +
                     sel('sync_mode', ed.sync_mode, [['sync', 'Sync (add + remove)'], ['append', 'Append (add only)']]) + '</div>' +
             '</div>' +
+            '<label class="vce-flabel">Library behavior (Plex)</label>' +
+            sel('collection_mode', ed.collection_mode, [
+                ['', 'Leave as-is'],
+                ['hideItems', 'Hide members — the library shows one collection tile'],
+                ['showItems', 'Show the collection and its members'],
+                ['hide', 'Hide the collection itself'],
+                ['default', 'Library default']]) +
             '<label class="vce-check"><input type="checkbox" data-f="pinned"' + (ed.pinned ? ' checked' : '') + '> Pin to server home</label>' +
             '<label class="vce-check" data-wishlist-row><input type="checkbox" data-f="wishlist_missing"' + (ed.wishlist_missing ? ' checked' : '') + '> Wishlist members I don\'t own</label>' +
             '<label class="vce-check"><input type="checkbox" data-f="enabled"' + (ed.enabled ? ' checked' : '') + '> Include in daily sync</label>' +
@@ -1696,7 +1704,8 @@
             definition: ed.definition, summary: ed.summary, sort_order: ed.sort_order,
             sync_mode: ed.sync_mode, pinned: !!ed.pinned, wishlist_missing: !!ed.wishlist_missing,
             enabled: !!ed.enabled, poster_url: ed.poster_url,
-            window_start: ed.window_start || '', window_end: ed.window_end || ''
+            window_start: ed.window_start || '', window_end: ed.window_end || '',
+            collection_mode: ed.collection_mode || ''
         };
     }
     function save(btn) {
