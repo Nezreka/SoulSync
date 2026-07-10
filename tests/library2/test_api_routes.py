@@ -32,7 +32,8 @@ class FakeDB:
 
     # -- wishlist/watchlist mirror surface (recorded, always succeeds) -------
     def add_to_wishlist(self, payload, source_type="unknown", source_info=None,
-                        user_initiated=False, profile_id=1, quality_profile_id=None):
+                        user_initiated=False, profile_id=1, quality_profile_id=None,
+                        raise_on_error=False):
         self.wishlist_adds.append({
             "id": payload.get("id"), "profile_id": profile_id,
             "quality_profile_id": quality_profile_id, "source_type": source_type,
@@ -40,15 +41,17 @@ class FakeDB:
         })
         return True
 
-    def remove_from_wishlist(self, track_id, profile_id=1):
+    def remove_from_wishlist(self, track_id, profile_id=1, raise_on_error=False):
         self.wishlist_removes.append({"id": track_id, "profile_id": profile_id})
         return True
 
-    def add_artist_to_watchlist(self, ext_id, name, profile_id, source):
+    def add_artist_to_watchlist(self, ext_id, name, profile_id, source,
+                                raise_on_error=False):
         self.watchlist_adds.append({"ext_id": ext_id, "profile_id": profile_id})
         return True
 
-    def remove_artist_from_watchlist(self, ext_id, profile_id):
+    def remove_artist_from_watchlist(self, ext_id, profile_id,
+                                     raise_on_error=False):
         self.watchlist_removes.append({"ext_id": ext_id, "profile_id": profile_id})
         return True
 

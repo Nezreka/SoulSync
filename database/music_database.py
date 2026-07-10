@@ -9991,6 +9991,7 @@ class MusicDatabase:
         track_data: Dict[str, Any] = None,
         user_initiated: bool = False,
         quality_profile_id: Optional[int] = None,
+        raise_on_error: bool = False,
     ) -> bool:
         """Add a failed track to the wishlist for retry.
 
@@ -10209,9 +10210,12 @@ class MusicDatabase:
 
         except Exception as e:
             logger.error(f"Error adding track to wishlist: {e}")
+            if raise_on_error:
+                raise
             return False
     
-    def remove_from_wishlist(self, spotify_track_id: str, profile_id: int = 1) -> bool:
+    def remove_from_wishlist(self, spotify_track_id: str, profile_id: int = 1,
+                             raise_on_error: bool = False) -> bool:
         """Remove a track from the wishlist (typically after successful download).
 
         A bare track id also removes its per-album composite rows
@@ -10236,6 +10240,8 @@ class MusicDatabase:
 
         except Exception as e:
             logger.error(f"Error removing track from wishlist: {e}")
+            if raise_on_error:
+                raise
             return False
 
     # ── Wishlist ignore-list (#874) ──────────────────────────────────────
@@ -10741,7 +10747,9 @@ class MusicDatabase:
             return 0
 
     # Watchlist operations
-    def add_artist_to_watchlist(self, artist_id: str, artist_name: str, profile_id: int = 1, source: str = None) -> bool:
+    def add_artist_to_watchlist(self, artist_id: str, artist_name: str,
+                                profile_id: int = 1, source: str = None,
+                                raise_on_error: bool = False) -> bool:
         """Add an artist to the watchlist for monitoring new releases.
 
         Automatically detects if artist_id is a Spotify ID (alphanumeric) or iTunes/Deezer ID (numeric).
@@ -10829,9 +10837,12 @@ class MusicDatabase:
 
         except Exception as e:
             logger.error(f"Error adding artist '{artist_name}' to watchlist: {e}")
+            if raise_on_error:
+                raise
             return False
 
-    def remove_artist_from_watchlist(self, artist_id: str, profile_id: int = 1) -> bool:
+    def remove_artist_from_watchlist(self, artist_id: str, profile_id: int = 1,
+                                     raise_on_error: bool = False) -> bool:
         """Remove an artist from the watchlist (checks cross-provider artist IDs)"""
         try:
             with self._get_connection() as conn:
@@ -10862,6 +10873,8 @@ class MusicDatabase:
 
         except Exception as e:
             logger.error(f"Error removing artist from watchlist (ID: {artist_id}): {e}")
+            if raise_on_error:
+                raise
             return False
 
     def is_artist_in_watchlist(self, artist_id: str, profile_id: int = 1, artist_name: str = None) -> bool:

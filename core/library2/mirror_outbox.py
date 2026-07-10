@@ -120,14 +120,18 @@ def _execute_op(db, op: str, data: Dict[str, Any], profile_id: int,
                            source_info=data.get("source_info") or {},
                            user_initiated=user_initiated,
                            profile_id=profile_id,
-                           quality_profile_id=data.get("quality_profile_id"))
+                           quality_profile_id=data.get("quality_profile_id"),
+                           raise_on_error=True)
     elif op == "wishlist_remove":
-        db.remove_from_wishlist(data.get("id"), profile_id)
+        db.remove_from_wishlist(data.get("id"), profile_id,
+                                raise_on_error=True)
     elif op == "watchlist_add":
         db.add_artist_to_watchlist(data.get("ext"), data.get("name"),
-                                   profile_id, data.get("source"))
+                                   profile_id, data.get("source"),
+                                   raise_on_error=True)
     elif op == "watchlist_remove":
-        db.remove_artist_from_watchlist(data.get("ext"), profile_id)
+        db.remove_artist_from_watchlist(data.get("ext"), profile_id,
+                                        raise_on_error=True)
     else:
         raise ValueError(f"Unknown mirror op: {op!r}")
 

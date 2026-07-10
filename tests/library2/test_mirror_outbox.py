@@ -33,23 +33,27 @@ class FlakyDB:
         return conn
 
     def add_to_wishlist(self, payload, source_type="unknown", source_info=None,
-                        user_initiated=False, profile_id=1, quality_profile_id=None):
+                        user_initiated=False, profile_id=1, quality_profile_id=None,
+                        raise_on_error=False):
         if self.fail_adds:
-            raise RuntimeError("legacy db locked")
+            if raise_on_error:
+                raise RuntimeError("legacy db locked")
+            return False
         self.adds.append({"id": payload.get("id"), "profile_id": profile_id,
                           "user_initiated": user_initiated,
                           "quality_profile_id": quality_profile_id})
         return True
 
-    def remove_from_wishlist(self, track_id, profile_id=1):
+    def remove_from_wishlist(self, track_id, profile_id=1, raise_on_error=False):
         self.removes.append({"id": track_id, "profile_id": profile_id})
         return True
 
-    def add_artist_to_watchlist(self, ext, name, profile_id, source):
+    def add_artist_to_watchlist(self, ext, name, profile_id, source,
+                                raise_on_error=False):
         self.watchlist_adds.append({"ext": ext, "profile_id": profile_id})
         return True
 
-    def remove_artist_from_watchlist(self, ext, profile_id):
+    def remove_artist_from_watchlist(self, ext, profile_id, raise_on_error=False):
         self.watchlist_removes.append({"ext": ext, "profile_id": profile_id})
         return True
 
@@ -120,6 +124,22 @@ def test_failed_mirror_stays_pending_and_later_drain_completes(db):
     assert result == {"done": 1, "failed": 0}
     assert flaky.adds
     assert _outbox_rows(conn)[0]["status"] == "done"
+
+
+def test_outbox_uses_strict_legacy_write_mode(db):
+    """The real legacy helpers normally convert DB errors to False. The outbox
+    must request their strict mode or it would mark that silent failure done."""
+    flaky, conn = db
+    MO.enqueue_tracks(conn, [flaky.ids["track"]], True)
+    conn.commit()
+    flaky.fail_adds = True
+
+    result = MO.drain(flaky)
+
+    assert result == {"done": 0, "failed": 1}
+    row = _outbox_rows(conn)[0]
+    assert row["status"] == "pending"
+    assert "legacy db locked" in row["last_error"]
 
 
 def test_row_flips_to_failed_after_max_attempts_and_retry_resets(db):
