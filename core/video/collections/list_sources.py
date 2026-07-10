@@ -154,6 +154,88 @@ def _fetch_union(eng, ref: Any) -> List[Dict[str, Any]]:
     return _dedup_normed(raw)[: _MAX_PAGES * 20]
 
 
+# ── IMDb (keyless — the Kometa trick) ───────────────────────────────────────
+# IMDb has NO public API; like Kometa we read the chart/list page and parse the
+# embedded JSON-LD ItemList, then map tt-ids → TMDB via /find (day-cached per
+# id, pooled). Scraping is inherently fragile: every step is best-effort and a
+# markup change degrades to owned-only, never an error.
+_IMDB_CHARTS = {
+    "top":     "https://www.imdb.com/chart/top/",          # IMDb Top 250 (movies)
+    "popular": "https://www.imdb.com/chart/moviemeter/",   # Most Popular Movies
+    "toptv":   "https://www.imdb.com/chart/toptv/",        # Top 250 TV
+    "tvmeter": "https://www.imdb.com/chart/tvmeter/",      # Most Popular TV
+}
+_IMDB_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+
+
+def _http_text(url):
+    import requests
+    r = requests.get(url, headers={"User-Agent": _IMDB_UA,
+                                   "Accept-Language": "en-US,en;q=0.8"}, timeout=20)
+    r.raise_for_status()
+    return r.text
+
+
+def _imdb_ids_from_page(html: str) -> List[tuple]:
+    """(tt_id, name) pairs from a page's JSON-LD ItemList, else a regex sweep of
+    /title/tt links (order-preserving, deduped) as the markup-change fallback."""
+    import json
+    import re
+    out, seen = [], set()
+    for m in re.finditer(r'<script type="application/ld\+json"[^>]*>(.*?)</script>',
+                         html, re.S):
+        try:
+            data = json.loads(m.group(1))
+        except ValueError:
+            continue
+        for el in (data.get("itemListElement") or []):
+            item = el.get("item") or el
+            url = str(item.get("url") or "")
+            tt = re.search(r"(tt\d+)", url)
+            if tt and tt.group(1) not in seen:
+                seen.add(tt.group(1))
+                out.append((tt.group(1), item.get("name")))
+    if not out:
+        for tt in re.findall(r"/title/(tt\d+)/", html):
+            if tt not in seen:
+                seen.add(tt)
+                out.append((tt, None))
+    return out
+
+
+def _fetch_imdb(eng, ref: Any) -> List[Dict[str, Any]]:
+    """imdb_chart ({chart, kind}) or imdb_list ({url, kind}) — scrape, then map
+    tt-ids → TMDB concurrently (each mapping is one cached /find call)."""
+    if not isinstance(ref, dict):
+        ref = {"url": str(ref or "")}
+    kind = "show" if ref.get("kind") == "show" else "movie"
+    chart = str(ref.get("chart") or "")
+    if chart:
+        url = _IMDB_CHARTS.get(chart)
+    else:
+        u = str(ref.get("url") or "").strip()
+        import re
+        m = re.search(r"(ls\d+)", u)
+        url = f"https://www.imdb.com/list/{m.group(1)}/" if m else None
+    if not url:
+        return []
+
+    def build():
+        pairs = _imdb_ids_from_page(_http_text(url))
+        if not pairs:
+            logger.info("imdb page yielded no titles (markup change?): %s", url)
+            return []
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            tmdb_ids = list(ex.map(lambda p: eng.tmdb_from_imdb(p[0], kind), pairs))
+        raw = [{"tmdb_id": tid, "title": name}
+               for (tt, name), tid in zip(pairs, tmdb_ids, strict=False) if tid]
+        return _dedup_normed(raw)
+
+    return _community_cached(("imdb", url, kind), build)
+
+
 # ── community list sources (Trakt / MDBList) ────────────────────────────────
 # Both need a free user key (video Settings → Metadata): Trakt reads public
 # lists with just an app Client ID; MDBList aggregates IMDb/Trakt lists (the
@@ -313,6 +395,8 @@ def build_list_fetcher(db=None, *, engine_factory: Optional[Callable] = None) ->
                 return _fetch_union(eng, ref)
             if source == "tmdb_list":
                 return _fetch_list(eng, ref)
+            if source in ("imdb_chart", "imdb_list"):
+                return _fetch_imdb(eng, ref)
         except Exception:   # noqa: BLE001 - membership is best-effort; owned still syncs
             logger.debug("list fetch failed for %s %r", source, ref, exc_info=True)
             return []

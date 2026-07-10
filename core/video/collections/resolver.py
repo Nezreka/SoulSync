@@ -174,6 +174,12 @@ def _resolve_list(db, media_type: str, body: Dict[str, Any],
             return ResolvedCollection(media_type=media_type,
                                       error="universe source: no franchises or keywords")
         ref = dict(body, kind=media_type)
+    elif source in ("imdb_chart", "imdb_list"):
+        if source == "imdb_chart" and not body.get("chart"):
+            return ResolvedCollection(media_type=media_type, error="imdb chart: no chart chosen")
+        if source == "imdb_list" and not (body.get("url") or "").strip():
+            return ResolvedCollection(media_type=media_type, error="imdb list: no list URL")
+        ref = dict(body, kind=media_type)
     else:
         ref = body.get("list_id") or body.get("url") or body.get("ref")
         if not ref:

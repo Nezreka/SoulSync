@@ -197,14 +197,16 @@ def test_charts_pack_counts_owned_against_chart(db):
     # (missing shows expand into aired-episode rows on sync).
     shows = expand_pack(db, "charts", "show", fetcher=None)
     assert {e["definition"]["chart"] for e in shows} == \
-        {"top_shows", "popular_shows", "trending_shows", "on_the_air"}
+        {"toptv", "top_shows", "popular_shows", "trending_shows", "on_the_air"}
+    imdb = [e for e in shows if e["name"] == "IMDb Top 250 TV"][0]
+    assert imdb["definition"] == {"source": "imdb_chart", "chart": "toptv"}
     assert all(e["wishlist_capable"] is True for e in shows)
 
 
 def test_charts_pack_survives_fetch_failure(db):
     _seed_movies(db)
     entries = expand_pack(db, "charts", "movie", fetcher=lambda s, r: (_ for _ in ()).throw(RuntimeError()))
-    assert len(entries) == 4
+    assert len(entries) == 5
     assert all(e["count"] is None for e in entries)     # '—' in the picker
     assert all(e["suggested"] for e in entries)         # charts stay pre-checked
     # No fetcher at all behaves the same.
@@ -354,7 +356,7 @@ def test_presets_api_browse_and_apply(tmp_path):
                           "studios", "directors", "essentials", "seasonal", "stories"}
     assert packs["genres"]["available"] >= 3
     # Remote packs list fine with no engine — counts just resolve on sync.
-    assert packs["charts"]["available"] == 4
+    assert packs["charts"]["available"] == 5
     action = [e for e in packs["genres"]["entries"] if e["name"] == "Action"][0]
     assert action["count"] == 4 and action["exists"] is False
 
