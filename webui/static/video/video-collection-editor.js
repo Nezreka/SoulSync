@@ -89,7 +89,8 @@
         essentials: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2.5 6.5L21 9l-5 4.5L17.5 21 12 17l-5.5 4L8 13.5 3 9l6.5-.5z"/></svg>',
         charts: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8M12 17v4M17 4H7v6a5 5 0 0 0 10 0z"/><path d="M17 5h3a1 1 0 0 1 1 1c0 2.5-2 4.5-4 4.5M7 5H4a1 1 0 0 0-1 1c0 2.5 2 4.5 4 4.5"/></svg>',
         seasonal: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M5 12v8a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-8M12 8v13"/><path d="M12 8s-2.5-5-5-3.5S9 8 12 8zM12 8s2.5-5 5-3.5S15 8 12 8z"/></svg>',
-        stories: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>'
+        stories: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>',
+        universes: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><ellipse cx="12" cy="12" rx="10" ry="4.4" transform="rotate(-22 12 12)"/><ellipse cx="12" cy="12" rx="10" ry="4.4" transform="rotate(22 12 12)"/></svg>'
     };
 
     // ── open / close / shell ─────────────────────────────────────────────────
@@ -1037,13 +1038,21 @@
         if (!def.source) def.source = 'tmdb_collection';
         var sources = [
             ['tmdb_collection', 'TMDB franchise (collection id)'],
+            ['tmdb_union', 'Universe (several franchises + keywords)'],
             ['tmdb_chart', 'Chart (Top Rated / Popular / Trending)'],
             ['tmdb_keyword', 'Theme / keyword (Christmas, heist…)'],
             ['tmdb_list', 'TMDB list'],
             ['trakt_list', 'Trakt list URL (coming soon)']
         ];
         var refHTML;
-        if (def.source === 'tmdb_chart') {
+        if (def.source === 'tmdb_union') {
+            refHTML =
+                '<label class="vce-flabel">TMDB franchise ids</label>' +
+                '<input class="vce-input" data-union-cols placeholder="e.g. 119, 121938 (LOTR + The Hobbit)" value="' + esc((def.collections || []).join(', ')) + '">' +
+                '<label class="vce-flabel">Keywords</label>' +
+                '<input class="vce-input" data-union-kws placeholder="e.g. marvel cinematic universe" value="' + esc((def.keywords || []).join(', ')) + '">' +
+                '<p class="vce-note">A universe is the UNION of everything above — franchise ids where TMDB defines a series cleanly, keyword themes where one series isn\'t enough (the MCU). Refreshes on every sync.</p>';
+        } else if (def.source === 'tmdb_chart') {
             var charts = CHARTS[ed.media_type === 'show' ? 'show' : 'movie'];
             // Also covers a library switch: a movie chart is invalid for shows.
             if (!charts.some(function (c) { return c[0] === def.chart; })) {
@@ -1078,6 +1087,19 @@
             renderListBuilder(host);
             schedulePreview();
         });
+        var unionCols = host.querySelector('[data-union-cols]');
+        if (unionCols) {
+            var unionKws = host.querySelector('[data-union-kws]');
+            function updUnion() {
+                def.collections = unionCols.value.split(',').map(function (s) { return parseInt(s.trim(), 10); }).filter(function (n) { return n > 0; });
+                def.keywords = unionKws.value.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+                def.limit = 200;
+                ed.dirty = true;
+                schedulePreview();
+            }
+            unionCols.addEventListener('input', updUnion);
+            unionKws.addEventListener('input', updUnion);
+        }
         var chartSel = host.querySelector('[data-chart-sel]');
         if (chartSel) chartSel.addEventListener('change', function (e) {
             var charts = CHARTS[ed.media_type === 'show' ? 'show' : 'movie'];

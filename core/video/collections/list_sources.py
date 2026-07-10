@@ -133,6 +133,25 @@ def _fetch_keyword(eng, ref: Any) -> List[Dict[str, Any]]:
     return _dedup_normed(raw)[:limit]
 
 
+def _fetch_union(eng, ref: Any) -> List[Dict[str, Any]]:
+    """Universe collections — the UNION of several TMDB franchises and/or
+    keyword themes (the MCU isn't a TMDB collection; Middle-earth is LOTR +
+    The Hobbit). ref: {collections: [ids], keywords: [queries], kind, limit}."""
+    if not isinstance(ref, dict):
+        return []
+    kind = "show" if ref.get("kind") == "show" else "movie"
+    limit = _limit_of(ref)
+    raw: list = []
+    for cid in ref.get("collections") or []:
+        try:
+            raw.extend(eng.collection(int(cid)) or [])
+        except (TypeError, ValueError):
+            continue
+    for q in ref.get("keywords") or []:
+        raw.extend(_fetch_keyword(eng, {"kind": kind, "query": q, "limit": limit}))
+    return _dedup_normed(raw)[: _MAX_PAGES * 20]
+
+
 def _fetch_list(eng, ref: Any) -> List[Dict[str, Any]]:
     raw: list = []
     page, total = 1, 1
@@ -174,6 +193,8 @@ def build_list_fetcher(db=None, *, engine_factory: Optional[Callable] = None) ->
                 return _fetch_chart(eng, ref)
             if source == "tmdb_keyword":
                 return _fetch_keyword(eng, ref)
+            if source == "tmdb_union":
+                return _fetch_union(eng, ref)
             if source == "tmdb_list":
                 return _fetch_list(eng, ref)
         except Exception:   # noqa: BLE001 - membership is best-effort; owned still syncs

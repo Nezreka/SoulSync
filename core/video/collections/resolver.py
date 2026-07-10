@@ -120,6 +120,11 @@ def _resolve_list(db, media_type: str, body: Dict[str, Any],
         if not (body.get("query") or "").strip():
             return ResolvedCollection(media_type=media_type, error="keyword source: no keyword")
         ref = dict(body, kind=media_type)
+    elif source == "tmdb_union":
+        if not (body.get("collections") or body.get("keywords")):
+            return ResolvedCollection(media_type=media_type,
+                                      error="universe source: no franchises or keywords")
+        ref = dict(body, kind=media_type)
     else:
         ref = body.get("list_id") or body.get("url") or body.get("ref")
         if not ref:

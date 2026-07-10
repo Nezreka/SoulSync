@@ -15,6 +15,7 @@ for hand-built list collections.
 
 from __future__ import annotations
 
+import threading
 from typing import Any, Dict, List, Optional
 
 from utils.logging_config import get_logger
@@ -24,7 +25,7 @@ logger = get_logger("video.collections.presets")
 # Entries at/above this owned count are pre-checked in the picker UI.
 _SUGGEST_MIN = {"genres": 5, "decades": 5, "franchises": 2, "studios": 4,
                 "networks": 3, "directors": 3, "essentials": 3,
-                "seasonal": 3, "stories": 3}
+                "seasonal": 3, "stories": 3, "universes": 2}
 
 # ── pack catalog ────────────────────────────────────────────────────────────
 # id -> {title, blurb, icon, media: tuple of media types the pack supports}
@@ -79,10 +80,15 @@ _PACKS: Dict[str, Dict[str, Any]] = {
         "blurb": "Books, comics, true stories, video games — what your titles were made from.",
         "icon": "stories", "media": ("movie", "show"),
     },
+    "universes": {
+        "title": "Universes",
+        "blurb": "The MCU, Middle-earth, the Wizarding World… whole cinematic universes — TMDB franchises only cover single series, these span them.",
+        "icon": "universes", "media": ("movie",),
+    },
 }
 
-_PACK_ORDER = ["charts", "genres", "franchises", "decades", "seasonal",
-               "stories", "studios", "networks", "directors", "essentials"]
+_PACK_ORDER = ["charts", "genres", "franchises", "universes", "decades",
+               "seasonal", "stories", "studios", "networks", "directors", "essentials"]
 
 
 def _norm(name: str) -> str:
@@ -322,7 +328,7 @@ def _remote_entry(key, name, count, summary, definition, pack, mt) -> Dict[str, 
                definition=definition, pack=pack, wishlist_capable=(mt == "movie"))
     if count is None:
         e["count"] = None            # fetch failed/offline — resolves on sync
-        e["suggested"] = pack == "charts"
+        e["suggested"] = pack in ("charts", "universes")
     else:
         e["of_total"] = count[1]
         if pack == "charts":
@@ -352,6 +358,45 @@ def _expand_keyword_pack(db, mt: str, fetcher, rows, pack: str, blurb_fmt) -> Li
     ]
 
 
+# Curated universes (movies): TMDB collections cover single series only, so a
+# universe is a UNION — franchise ids where TMDB defines them cleanly, keyword
+# themes where it doesn't (the MCU/DCEU/MonsterVerse carry maintained TMDB
+# keywords; ids resolve at runtime, nothing hardcoded to rot).
+_UNIVERSES = [
+    ("mcu", "Marvel Cinematic Universe",
+     {"keywords": ["marvel cinematic universe"]},
+     "Every MCU film, phase by phase."),
+    ("dc", "DC Extended Universe",
+     {"keywords": ["dc extended universe"]},
+     "The DCEU, from Man of Steel on."),
+    ("middle-earth", "Middle-earth",
+     {"collections": [119, 121938]},
+     "The Lord of the Rings and The Hobbit trilogies."),
+    ("wizarding", "Wizarding World",
+     {"collections": [1241, 435259]},
+     "Harry Potter and Fantastic Beasts."),
+    ("star-wars", "Star Wars Saga",
+     {"collections": [10]},
+     "The nine-film Skywalker saga."),
+    ("monsterverse", "MonsterVerse",
+     {"keywords": ["monsterverse"]},
+     "Godzilla, Kong, and the Titans."),
+]
+
+
+def _expand_universes(db, mt: str, fetcher=None) -> List[Dict[str, Any]]:
+    if mt != "movie":
+        return []
+    specs = [("tmdb_union", dict(spec, kind="movie", limit=200))
+             for _, _, spec, _ in _UNIVERSES]
+    counts = _owned_counts(db, mt, specs, fetcher)
+    return [
+        _remote_entry("universe:" + key, name, counts[i], blurb,
+                      dict({"source": "tmdb_union", "limit": 200}, **spec), "universes", mt)
+        for i, (key, name, spec, blurb) in enumerate(_UNIVERSES)
+    ]
+
+
 def _expand_seasonal(db, mt: str, fetcher=None) -> List[Dict[str, Any]]:
     return _expand_keyword_pack(
         db, mt, fetcher, _SEASONAL, "seasonal",
@@ -370,8 +415,9 @@ _EXPANDERS = {
     "networks": _expand_networks, "directors": _expand_directors,
     "essentials": _expand_essentials,
     "charts": _expand_charts, "seasonal": _expand_seasonal, "stories": _expand_stories,
+    "universes": _expand_universes,
 }
-_REMOTE_PACKS = {"charts", "seasonal", "stories"}
+_REMOTE_PACKS = {"charts", "seasonal", "stories", "universes"}
 
 
 # ── public surface ──────────────────────────────────────────────────────────
@@ -450,4 +496,65 @@ def apply_pack(db, pack_id: str, media_type: str, keys, *,
     return {"created": created, "skipped": skipped}
 
 
-__all__ = ["list_packs", "expand_pack", "apply_pack"]
+# ── franchise-id backfill ────────────────────────────────────────────────────
+# The Franchises pack expands from movies.tmdb_collection_id, but that column is
+# only backfilled lazily (20 per Discover-page visit) for movies matched before
+# it existed — so the pack silently under-reports owned franchises (the "where's
+# my LOTR collection?" problem). Browsing presets drains the WHOLE backlog in a
+# background thread instead (one cached TMDB call per movie, singleton-guarded).
+_backfill_lock = threading.Lock()
+_backfill_running = [False]
+
+
+def backfill_missing_franchises(db, engine=None, batch: int = 50, cap: int = 4000) -> int:
+    """Fill tmdb_collection_id for every owned, TMDB-matched movie that lacks it.
+    Returns how many movies were checked. Synchronous — callers thread it."""
+    if engine is None:
+        try:
+            from core.video.enrichment.engine import get_video_enrichment_engine
+            engine = get_video_enrichment_engine()
+        except Exception:   # noqa: BLE001 - no engine → nothing to backfill with
+            return 0
+    if engine is None:
+        return 0
+    checked = 0
+    seen: set = set()          # failed lookups stay in the backlog — never re-loop them
+    while checked < cap:
+        rows = [r for r in (db.movies_missing_collection(limit=batch + len(seen)) or [])
+                if r["id"] not in seen]
+        if not rows:
+            break
+        for mv in rows[:batch]:
+            seen.add(mv["id"])
+            coll = engine.movie_collection(mv["tmdb_id"])
+            # None = lookup failed (leave for retry); {'id': None} = genuinely no
+            # franchise — record it so this movie leaves the backlog.
+            if coll is not None:
+                db.set_movie_collection(mv["id"], coll.get("id"), coll.get("name"))
+            checked += 1
+    return checked
+
+
+def kick_franchise_backfill(db) -> bool:
+    """Run the backfill in a background thread (at most one at a time)."""
+    with _backfill_lock:
+        if _backfill_running[0]:
+            return False
+        _backfill_running[0] = True
+
+    def run():
+        try:
+            n = backfill_missing_franchises(db)
+            if n:
+                logger.info("franchise backfill checked %d movies", n)
+        except Exception:   # noqa: BLE001 - background nicety
+            logger.exception("franchise backfill failed")
+        finally:
+            _backfill_running[0] = False
+
+    threading.Thread(target=run, name="franchise-backfill", daemon=True).start()
+    return True
+
+
+__all__ = ["list_packs", "expand_pack", "apply_pack",
+           "backfill_missing_franchises", "kick_franchise_backfill"]
