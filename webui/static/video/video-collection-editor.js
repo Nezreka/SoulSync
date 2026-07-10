@@ -380,6 +380,8 @@
                     '<span class="vce-chip">' + (c.kind === 'list' ? 'List' : 'Smart') + '</span>' +
                     (c.pinned ? '<span class="vce-chip">Pinned</span>' : '') +
                     (c.wishlist_missing ? '<span class="vce-chip vce-chip--warn">Wishlists</span>' : '') +
+                    (c.in_season === true ? '<span class="vce-chip vce-chip--ok">In season</span>' : '') +
+                    (c.in_season === false ? '<span class="vce-chip vce-chip--warn">Off season</span>' : '') +
                 '</div>' +
                 '<button type="button" class="vce-toggle' + (c.enabled ? ' vce-toggle--on' : '') + '" data-act="toggle" ' +
                     'title="' + (c.enabled ? 'In daily sync — click to pause' : 'Paused — click to include in daily sync') + '"></button>' +
@@ -879,7 +881,7 @@
                definition: { match: 'all', rules: [] },
                summary: '', sort_order: 'release', sync_mode: 'sync',
                pinned: false, wishlist_missing: false, enabled: true, poster_url: '',
-               dirty: false };
+               window_start: '', window_end: '', dirty: false };
         renderEditor();
     }
 
@@ -899,7 +901,8 @@
                 summary: c.summary || '', sort_order: c.sort_order || 'release',
                 sync_mode: c.sync_mode || 'sync', pinned: !!c.pinned,
                 wishlist_missing: !!c.wishlist_missing, enabled: c.enabled == null ? true : !!c.enabled,
-                poster_url: c.poster_url || '', dirty: false
+                poster_url: c.poster_url || '',
+                window_start: c.window_start || '', window_end: c.window_end || '', dirty: false
             };
             renderEditor();
         });
@@ -980,7 +983,11 @@
             '</div>' +
             '<label class="vce-check"><input type="checkbox" data-f="pinned"' + (ed.pinned ? ' checked' : '') + '> Pin to server home</label>' +
             '<label class="vce-check" data-wishlist-row><input type="checkbox" data-f="wishlist_missing"' + (ed.wishlist_missing ? ' checked' : '') + '> Wishlist members I don\'t own</label>' +
-            '<label class="vce-check"><input type="checkbox" data-f="enabled"' + (ed.enabled ? ' checked' : '') + '> Include in daily sync</label>'));
+            '<label class="vce-check"><input type="checkbox" data-f="enabled"' + (ed.enabled ? ' checked' : '') + '> Include in daily sync</label>' +
+            '<label class="vce-flabel">In season only (optional)</label>' +
+            '<div class="vce-window"><input class="vce-input vce-md" data-f="window_start" value="' + esc(ed.window_start) + '" placeholder="MM-DD" maxlength="5"> → ' +
+            '<input class="vce-input vce-md" data-f="window_end" value="' + esc(ed.window_end) + '" placeholder="MM-DD" maxlength="5"></div>' +
+            '<p class="vce-note">With a window set, the collection appears on the server when the season starts and is removed when it ends (it can wrap the new year, e.g. 12-26 → 01-08). Leave empty for year-round.</p>'));
         cols.appendChild(right);
         page.appendChild(cols);
 
@@ -1361,7 +1368,8 @@
             name: ed.name || 'Untitled collection', kind: ed.kind, media_type: ed.media_type,
             definition: ed.definition, summary: ed.summary, sort_order: ed.sort_order,
             sync_mode: ed.sync_mode, pinned: !!ed.pinned, wishlist_missing: !!ed.wishlist_missing,
-            enabled: !!ed.enabled, poster_url: ed.poster_url
+            enabled: !!ed.enabled, poster_url: ed.poster_url,
+            window_start: ed.window_start || '', window_end: ed.window_end || ''
         };
     }
     function save(btn) {

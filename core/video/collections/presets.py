@@ -315,13 +315,16 @@ _CHART_ENTRIES = {
     ],
 }
 
+# (key, name, tmdb keyword, seasonal window MM-DD→MM-DD). The window makes the
+# shelf LIVE: the collection appears on the server when the season starts and
+# is removed when it ends (Kometa's schedule ranges, minus the YAML).
 _SEASONAL = [
-    ("christmas",    "Christmas",       "christmas"),
-    ("halloween",    "Halloween",       "halloween"),
-    ("valentine",    "Valentine's Day", "valentine's day"),
-    ("easter",       "Easter",          "easter"),
-    ("thanksgiving", "Thanksgiving",    "thanksgiving"),
-    ("newyear",      "New Year's Eve",  "new year's eve"),
+    ("christmas",    "Christmas",       "christmas",       ("11-20", "01-06")),
+    ("halloween",    "Halloween",       "halloween",       ("09-15", "11-02")),
+    ("valentine",    "Valentine's Day", "valentine's day", ("01-25", "02-15")),
+    ("easter",       "Easter",          "easter",          ("03-01", "04-30")),
+    ("thanksgiving", "Thanksgiving",    "thanksgiving",    ("11-01", "11-30")),
+    ("newyear",      "New Year's Eve",  "new year's eve",  ("12-26", "01-08")),
 ]
 
 _STORIES = [
@@ -385,13 +388,17 @@ def _expand_charts(db, mt: str, fetcher=None) -> List[Dict[str, Any]]:
 def _expand_keyword_pack(db, mt: str, fetcher, rows, pack: str, blurb_fmt) -> List[Dict[str, Any]]:
     # 250 (not 100): a theme's owned deep-cuts live in the popularity long tail —
     # a Christmas movie the user owns must land in the Christmas collection.
-    specs = [("tmdb_keyword", {"kind": mt, "query": q, "limit": 250}) for _, _, q in rows]
+    specs = [("tmdb_keyword", {"kind": mt, "query": r[2], "limit": 250}) for r in rows]
     counts = _owned_counts(db, mt, specs, fetcher)
-    return [
-        _remote_entry(pack + ":" + key, name, counts[i], blurb_fmt(name, mt),
-                      {"source": "tmdb_keyword", "query": q, "limit": 250}, pack, mt)
-        for i, (key, name, q) in enumerate(rows)
-    ]
+    out = []
+    for i, row in enumerate(rows):
+        key, name, q = row[0], row[1], row[2]
+        e = _remote_entry(pack + ":" + key, name, counts[i], blurb_fmt(name, mt),
+                          {"source": "tmdb_keyword", "query": q, "limit": 250}, pack, mt)
+        if len(row) > 3 and row[3]:
+            e["window"] = row[3]        # (start MM-DD, end MM-DD) — seasonal shelf
+        out.append(e)
+    return out
 
 
 # Curated universes (movies): TMDB collections cover single series only, so a
@@ -438,7 +445,7 @@ def _expand_universes(db, mt: str, fetcher=None) -> List[Dict[str, Any]]:
 def _expand_seasonal(db, mt: str, fetcher=None) -> List[Dict[str, Any]]:
     return _expand_keyword_pack(
         db, mt, fetcher, _SEASONAL, "seasonal",
-        lambda name, m: f"{name} {_media_word(m)} — refreshes on every sync.")
+        lambda name, m: f"{name} {_media_word(m)} — on the server for the season, gone after it.")
 
 
 def _expand_stories(db, mt: str, fetcher=None) -> List[Dict[str, Any]]:
@@ -521,12 +528,13 @@ def apply_pack(db, pack_id: str, media_type: str, keys, *,
         if e.get("exists"):
             skipped.append(e["name"])
             continue
+        window = e.get("window") or (None, None)
         cid = db.create_collection_definition(
             e["name"], kind=e["kind"], media_type=media_type,
             definition=e["definition"], summary=e["summary"],
             sort_order="release", sync_mode="sync",
             wishlist_missing=bool(wishlist_missing and e.get("wishlist_capable")),
-            enabled=True)
+            enabled=True, window_start=window[0], window_end=window[1])
         if cid is None:
             skipped.append(e["name"])
             continue
