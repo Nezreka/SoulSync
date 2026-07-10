@@ -21,7 +21,8 @@
     var presetCache = {};         // media_type -> packs[]
     var ed = null;                // editor state
     var gal = { tab: 'all', q: '', collections: null,
-                sort: _pref('vce:sort', 'smart'), density: _pref('vce:density', 'cozy') };
+                sort: _pref('vce:sort', 'smart'), density: _pref('vce:density', 'cozy'),
+                selecting: false, selected: {} };
     var view = 'gallery';         // gallery | presets | picker | editor | server
 
     function _pref(key, fallback) {
@@ -315,12 +316,90 @@
             grid.classList.toggle('vce-gallery--compact', gal.density === 'compact');
         });
         filters.appendChild(density);
+        var selBtn = h('button', 'vce-btn vce-btn--ghost', gal.selecting ? 'Done' : 'Select');
+        selBtn.type = 'button';
+        selBtn.addEventListener('click', function () {
+            gal.selecting = !gal.selecting;
+            gal.selected = {};
+            renderGallery(page);
+        });
+        filters.appendChild(selBtn);
         page.appendChild(filters);
 
-        var grid = h('div', 'vce-gallery' + (gal.density === 'compact' ? ' vce-gallery--compact' : ''));
+        var grid = h('div', 'vce-gallery' + (gal.density === 'compact' ? ' vce-gallery--compact' : '') +
+                          (gal.selecting ? ' vce-gallery--selecting' : ''));
         page.appendChild(grid);
         paintCards(grid);
-        if (gal.q) { si.focus(); si.setSelectionRange(si.value.length, si.value.length); }
+        if (gal.selecting) page.appendChild(buildSelectFoot(page, grid));
+        if (gal.q && !gal.selecting) { si.focus(); si.setSelectionRange(si.value.length, si.value.length); }
+    }
+
+    // Bulk-select footer: count · Select all / None · Delete selected.
+    function buildSelectFoot(page, grid) {
+        var foot = h('div', 'vce-picker-foot');
+        var sum = h('span', 'vce-selsum', '');
+        foot.appendChild(sum);
+        [['All', function (c) { return true; }], ['None', function () { return false; }]]
+            .forEach(function (q) {
+                var b = h('button', 'vce-link', esc(q[0]));
+                b.type = 'button';
+                b.addEventListener('click', function () {
+                    gal.selected = {};
+                    visibleCols().forEach(function (c) { if (q[1](c)) gal.selected[c.id] = true; });
+                    paintCards(grid);
+                    paintSelectFoot(foot, grid);
+                });
+                foot.appendChild(b);
+            });
+        foot.appendChild(h('div', 'vce-foot-spacer'));
+        var del = h('button', 'vce-btn vce-btn--danger', I.trash + 'Delete selected');
+        del.type = 'button';
+        del.addEventListener('click', function () {
+            var ids = Object.keys(gal.selected);
+            if (!ids.length) return;
+            ask({ title: 'Delete ' + ids.length + ' collection' + (ids.length === 1 ? '' : 's') + '?',
+                  message: 'Removes the SoulSync definitions. Collections already on your server are left ' +
+                           'in place — remove those from the On server view if you want them gone there too.',
+                  confirmText: 'Delete', cancelText: 'Cancel', destructive: true }).then(function (ok) {
+                if (!ok) return;
+                del.disabled = true;
+                del.textContent = 'Deleting…';
+                // Sequential deletes — the endpoint is per-id and fast.
+                var chain = Promise.resolve();
+                ids.forEach(function (id) {
+                    chain = chain.then(function () { return api('/' + id, { method: 'DELETE' }); });
+                });
+                chain.then(function () {
+                    toast('Deleted ' + ids.length + ' collection' + (ids.length === 1 ? '' : 's'));
+                    gal.selecting = false;
+                    gal.selected = {};
+                    showGallery();
+                }).catch(function () {
+                    toast('Some deletes failed', true);
+                    showGallery();
+                });
+            });
+        });
+        foot.appendChild(del);
+        paintSelectFoot(foot, grid);
+        return foot;
+    }
+
+    function paintSelectFoot(foot, grid) {
+        var n = Object.keys(gal.selected).length;
+        var sum = foot.querySelector('.vce-selsum');
+        if (sum) sum.textContent = n ? (n + ' selected') : 'Select collections to act on';
+        var del = foot.querySelector('.vce-btn--danger');
+        if (del) del.disabled = !n;
+    }
+
+    function visibleCols() {
+        var q = (gal.q || '').trim().toLowerCase();
+        return (gal.collections || []).filter(function (c) {
+            if (gal.tab !== 'all' && (c.media_type || 'movie') !== gal.tab) return false;
+            if (q && (c.name || '').toLowerCase().indexOf(q) < 0) return false;
+            return true;
+        });
     }
 
     // Sort for the gallery. 'smart' = pinned first, then wishlist-feeding, then
@@ -344,18 +423,15 @@
     }
 
     function paintCards(grid) {
-        var q = (gal.q || '').trim().toLowerCase();
-        var cols = sortCols((gal.collections || []).filter(function (c) {
-            if (gal.tab !== 'all' && (c.media_type || 'movie') !== gal.tab) return false;
-            if (q && (c.name || '').toLowerCase().indexOf(q) < 0) return false;
-            return true;
-        }));
+        var cols = sortCols(visibleCols());
         grid.innerHTML = '';
 
-        var add = h('button', 'vce-card vce-card--new', I.plus + '<span>New collection</span>');
-        add.type = 'button';
-        add.addEventListener('click', function () { newCollection(); });
-        grid.appendChild(add);
+        if (!gal.selecting) {
+            var add = h('button', 'vce-card vce-card--new', I.plus + '<span>New collection</span>');
+            add.type = 'button';
+            add.addEventListener('click', function () { newCollection(); });
+            grid.appendChild(add);
+        }
 
         cols.forEach(function (c) { grid.appendChild(card(c)); });
     }
@@ -371,11 +447,13 @@
         if (!c.enabled) syncLine = '<span class="vce-dot vce-dot--warn"></span>Paused';
         // Poster-forward: the art is a zoomable layer under a scrim; name/meta/state
         // sit ON the art like a shelf label, and actions slide up over them on hover.
+        if (gal.selecting && gal.selected[c.id]) el.classList.add('vce-card--picked');
         el.innerHTML =
             '<div class="vce-card-thumb">' +
                 '<div class="vce-card-art"' + thumbStyle + '></div>' +
                 (c.poster_url ? '' : '<div class="vce-card-mono">' + mono + '</div>') +
                 '<div class="vce-card-scrim"></div>' +
+                (gal.selecting ? '<span class="vce-card-pick">' + I.check + '</span>' : '') +
                 '<div class="vce-card-badges">' +
                     '<span class="vce-chip">' + (c.kind === 'list' ? 'List' : 'Smart') + '</span>' +
                     (c.pinned ? '<span class="vce-chip">Pinned</span>' : '') +
@@ -396,7 +474,16 @@
                     '<button type="button" class="vce-mini vce-mini--danger" data-act="del" aria-label="Delete">' + I.trash + '</button>' +
                 '</div>' +
             '</div>';
-        el.addEventListener('click', function () { loadEditor(c.id); });
+        el.addEventListener('click', function () {
+            if (gal.selecting) {
+                if (gal.selected[c.id]) delete gal.selected[c.id]; else gal.selected[c.id] = true;
+                el.classList.toggle('vce-card--picked', !!gal.selected[c.id]);
+                var foot = overlay.querySelector('.vce-page > .vce-picker-foot');
+                if (foot) paintSelectFoot(foot, el.parentNode);
+                return;
+            }
+            loadEditor(c.id);
+        });
         el.querySelector('[data-act="edit"]').addEventListener('click', function (e) {
             e.stopPropagation(); loadEditor(c.id);
         });
@@ -1584,6 +1671,7 @@
         if (view === 'editor') leaveEditor();
         else if (view === 'picker') showPresets();
         else if (view === 'presets' || view === 'server') showGallery();
+        else if (gal.selecting) { gal.selecting = false; gal.selected = {}; showGallery(); }
         else close();
     });
 

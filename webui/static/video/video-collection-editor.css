@@ -301,6 +301,20 @@ textarea.vce-input { resize: vertical; min-height: 58px; }
 .vce-mini--danger { flex: 0 0 auto; padding: 8px 10px; }
 .vce-mini--danger:hover { background: rgba(255,70,70,.72); }
 
+/* bulk-select mode: cards become pickable, per-card actions get out of the way */
+.vce-gallery--selecting .vce-card-acts,
+.vce-gallery--selecting .vce-toggle { display: none; }
+.vce-card-pick {
+    position: absolute; top: 10px; right: 10px; width: 24px; height: 24px; z-index: 3;
+    display: grid; place-items: center; border-radius: 50%;
+    background: rgba(8, 9, 14, 0.66); border: 1.5px solid rgba(255,255,255,.35);
+    backdrop-filter: blur(6px); transition: background .13s ease, border-color .13s ease;
+}
+.vce-card-pick svg { width: 12px; height: 12px; stroke: #fff; stroke-width: 3; opacity: 0; }
+.vce-card--picked { border-color: rgba(var(--a), 0.75); box-shadow: 0 0 0 2px rgba(var(--a), 0.35); }
+.vce-card--picked .vce-card-pick { background: rgb(var(--a)); border-color: rgb(var(--a)); }
+.vce-card--picked .vce-card-pick svg { opacity: 1; }
+
 /* "new collection" tile */
 .vce-card--new {
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
