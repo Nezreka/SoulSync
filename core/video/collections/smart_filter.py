@@ -60,7 +60,10 @@ _OPS_BY_TYPE = {
 }
 
 # Join/EXISTS-backed fields and franchise handled specially in _build_rule.
-_SPECIAL_FIELDS = {"genre", "director", "actor", "resolution", "source", "decade", "franchise"}
+_SPECIAL_FIELDS = {"genre", "director", "actor", "resolution", "source", "decade",
+                   "franchise", "watched"}
+
+_TRUTHY = {True, "1", "true", "True", "yes", "watched"}
 
 
 def _col_for(spec: Dict[str, Any], media_type: str) -> str:
@@ -230,6 +233,16 @@ def _build_rule(rule: Dict[str, Any], mt: str) -> Tuple[str, list]:
             params.extend([base, base + 9])
         return "(" + " OR ".join(parts) + ")", params
 
+    if field == "watched":
+        # Server watch state: a movie is watched when it has plays; a show when
+        # any episode has been viewed (Plex viewedLeafCount / Jellyfin UserData).
+        if op != "is":
+            raise SmartFilterError(f"operator {op!r} is not valid for 'watched'")
+        col = ("COALESCE(movies.play_count, 0) > 0" if mt == "movie"
+               else "COALESCE(shows.watched_episodes, 0) > 0")
+        want = value in _TRUTHY
+        return (col if want else f"NOT ({col})"), []
+
     if field == "franchise":
         if mt != "movie":
             raise SmartFilterError("'franchise' only applies to movies")
@@ -276,7 +289,7 @@ def compile_rules(definition: Dict[str, Any], media_type: str) -> Tuple[str, lis
 def known_fields(media_type: str) -> List[str]:
     """The field names usable for a given media type (for the UI's field picker)."""
     out = [f for f, spec in _COLUMN_FIELDS.items() if media_type in spec["media"]]
-    out += ["genre", "director", "actor", "resolution", "source", "decade"]
+    out += ["genre", "director", "actor", "resolution", "source", "decade", "watched"]
     if media_type == "movie":
         out.append("franchise")
     return sorted(out)
@@ -291,6 +304,7 @@ _SPECIAL_META = {
     "source":     ("multi",     ["in", "not_in"]),
     "decade":     ("decade",    ["in"]),
     "franchise":  ("franchise", ["exists", "is", "in"]),
+    "watched":    ("bool",      ["is"]),
 }
 _FIELD_LABELS = {
     "year": "Year", "rating": "Audience rating", "critic_rating": "Critic rating",
@@ -299,6 +313,7 @@ _FIELD_LABELS = {
     "status": "Status", "title": "Title", "added": "Date added", "released": "Release date",
     "genre": "Genre", "director": "Director", "actor": "Actor", "resolution": "Resolution",
     "source": "Release source", "decade": "Decade", "franchise": "Franchise",
+    "watched": "Watched",
 }
 # Suggested value options for the pick-list widgets.
 _STATIC_OPTIONS = {

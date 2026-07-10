@@ -31,7 +31,7 @@ logger = get_logger("video_database")
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 24
+SCHEMA_VERSION = 25
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -249,6 +249,9 @@ _COLUMN_MIGRATIONS = [
     ("collection_definitions", "window_end", "TEXT"),
     # Plex collection mode (hide members in library view, etc.); NULL = leave alone
     ("collection_definitions", "collection_mode", "TEXT"),
+    # Watch state from the server (drives 'watched' smart-collection rules)
+    ("movies", "play_count", "INTEGER"),
+    ("shows", "watched_episodes", "INTEGER"),
     ("youtube_video_stats", "dearrow_attempted", "TEXT"),
     # TMDB details backfill: the server pre-matches shows/movies (so the matcher
     # skips them) but never supplies details-only fields like `status` (airing vs
@@ -2056,6 +2059,7 @@ class VideoDatabase:
                 "runtime_minutes": item.get("runtime_minutes"), "content_rating": item.get("content_rating"),
                 "studio": item.get("studio"), "tagline": item.get("tagline"),
                 "rating": item.get("rating"), "rating_critic": item.get("rating_critic"),
+                "play_count": item.get("play_count"),
                 "poster_url": item.get("poster_url"), "has_file": 1 if item.get("file") else 0,
             }, {"tmdb_id": item.get("tmdb_id"), "imdb_id": item.get("imdb_id")},
                 preserve_enrichment=preserve_enrichment)
@@ -2086,6 +2090,7 @@ class VideoDatabase:
                 "runtime_minutes": item.get("runtime_minutes"), "content_rating": item.get("content_rating"),
                 "tagline": item.get("tagline"), "rating": item.get("rating"),
                 "first_air_date": item.get("first_air_date"), "last_air_date": item.get("last_air_date"),
+                "watched_episodes": item.get("watched_episodes"),
                 "poster_url": item.get("poster_url"),
             }, {"tvdb_id": item.get("tvdb_id"), "tmdb_id": item.get("tmdb_id"), "imdb_id": item.get("imdb_id")},
                 preserve_enrichment=preserve_enrichment)
