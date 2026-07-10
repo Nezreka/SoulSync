@@ -1834,20 +1834,20 @@ nicht mehr still Daten oder Secrets gefährden.
 
 #### Aufgaben
 
-- [ ] `routeTree.gen.ts` korrekt generieren und einchecken.
-- [ ] Route-Manifest-Test um `library-v2` ergänzen.
-- [ ] Library-v2-Typecheck auf null Fehler bringen; redundante Uniontypen bereinigen.
-- [ ] Frontendtest-Locale festsetzen oder locale-unabhängig testen.
-- [ ] Import-Routen-Test stabilisieren.
+- [x] `routeTree.gen.ts` korrekt generieren und einchecken. *(LIB2-001)*
+- [x] Route-Manifest-Test um `library-v2` ergänzen. *(LIB2-001)*
+- [x] Library-v2-Typecheck auf null Fehler bringen; redundante Uniontypen bereinigen. *(LIB2-001)*
+- [x] Frontendtest-Locale festsetzen oder locale-unabhängig testen. *(LIB2-001)*
+- [x] Import-Routen-Test stabilisieren. *(LIB2-003: Retry-Backoff-Race behoben)*
 - [ ] CI-Gate: Generatorlauf darf keinen Git-Diff hinterlassen.
-- [ ] Artist-Delete auf Primary-Artist-Alben begrenzen.
-- [ ] Delete-Impact-Preview und Tests für Featured Artists ergänzen.
-- [ ] Refresh-Scope `None` versus `[]` korrigieren; 404-Validierung.
-- [ ] Wishlist-Composite-ID-Idempotenz korrigieren.
-- [ ] Candidate-URLs nicht mehr an Browser geben; zunächst ein kleiner
-  serverseitiger TTL-Store als Sicherheitsfix.
-- [ ] Manual Grab muss Lib2 Entity und Quality Profile serverseitig validiert tragen.
-- [ ] Feature-Flag standardmäßig aus lassen, solange P0-Gates fehlen.
+- [x] Artist-Delete auf Primary-Artist-Alben begrenzen. *(LIB2-003)*
+- [x] Delete-Impact-Preview und Tests für Featured Artists ergänzen. *(LIB2-003)*
+- [x] Refresh-Scope `None` versus `[]` korrigieren; 404-Validierung. *(LIB2-002)*
+- [x] Wishlist-Composite-ID-Idempotenz korrigieren. *(LIB2-004)*
+- [x] Candidate-URLs nicht mehr an Browser geben; zunächst ein kleiner
+  serverseitiger TTL-Store als Sicherheitsfix. *(LIB2-006: `core/download_plugins/candidate_store.py`)*
+- [x] Manual Grab muss Lib2 Entity und Quality Profile serverseitig validiert tragen. *(LIB2-007: `core/library2/grab_context.py`)*
+- [x] Feature-Flag standardmäßig aus lassen, solange P0-Gates fehlen. *(Default ist weiterhin `False`)*
 
 #### Testgate
 
@@ -2127,19 +2127,21 @@ quellenspezifische Fähigkeiten zu verlieren.
 Der erste konkrete Arbeitsblock sollte klein genug bleiben, um schnell sicher zu
 werden, aber die gefährlichsten Grundlagen schließen:
 
-1. **LIB2-001:** RouteTree/Manifest/Typecheck/Vitest grün machen.
-2. **LIB2-002:** Empty-Scope-Refresh und Entity-404 fixen.
-3. **LIB2-003:** Artist-Delete Primary-vs-Featured absichern.
-4. **LIB2-004:** Wishlist-ID-Idempotenz und Profil-Upsert fixen.
-5. **LIB2-005:** `user_initiated`-Semantik korrigieren.
-6. **LIB2-006:** Candidate-URL aus Browser entfernen.
-7. **LIB2-007:** Entity-/Profilkontext im manuellen Grab durchtragen.
-8. **LIB2-008:** Monitor/Profile nicht mehr implizit koppeln.
-9. **LIB2-009:** Mirror-Outbox minimal einführen.
+1. **LIB2-001:** RouteTree/Manifest/Typecheck/Vitest grün machen. ✅ *(2026-07-10)*
+2. **LIB2-002:** Empty-Scope-Refresh und Entity-404 fixen. ✅ *(2026-07-10)*
+3. **LIB2-003:** Artist-Delete Primary-vs-Featured absichern. ✅ *(2026-07-10)*
+4. **LIB2-004:** Wishlist-ID-Idempotenz und Profil-Upsert fixen. ✅ *(2026-07-10)*
+5. **LIB2-005:** `user_initiated`-Semantik korrigieren. ✅ *(2026-07-10)*
+6. **LIB2-006:** Candidate-URL aus Browser entfernen. ✅ *(2026-07-10)*
+7. **LIB2-007:** Entity-/Profilkontext im manuellen Grab durchtragen. ✅ *(2026-07-10)*
+8. **LIB2-008:** Monitor/Profile nicht mehr implizit koppeln. ✅ *(2026-07-10)*
+9. **LIB2-009:** Mirror-Outbox minimal einführen. ✅ *(2026-07-10, `lib2_mirror_outbox` + Drain/Status/Retry)*
 10. **LIB2-010:** Entscheidung Multi-Profil und Source of Truth als ADR festhalten.
+    ✅ *(2026-07-10, ADRs in §25a; Admin-only technisch erzwungen: API-Write-Guard + Import-Guard)*
 
-Erst danach sollten ReleaseEdition/Recording und der größere Acquisition-Layer
-beginnen.
+Damit sind P0-01, P0-02, P0-03, P0-04, P1-08, P1-09, P1-10, P1-11, P1-15,
+P1-16, P1-17, P1-29 sowie Teile von P1-18 geschlossen. Erst danach sollten
+ReleaseEdition/Recording und der größere Acquisition-Layer beginnen.
 
 ## 17. Teststrategie
 
