@@ -271,6 +271,90 @@ def wishlist_missing_movies(db, definition: Dict[str, Any], missing) -> int:
     return n
 
 
+# Full-series expansion is heavy (a chart can be 100+ missing shows × N seasons
+# of TMDB fetches) — cap NEW shows per sync run; the nightly sync drains the rest.
+_SHOW_WISHLIST_CAP = 5
+
+
+def wishlist_missing_shows(db, definition: Dict[str, Any], missing, *,
+                           engine=None, today: Optional[str] = None,
+                           cap: int = _SHOW_WISHLIST_CAP) -> int:
+    """For a 'list' SHOW collection with wishlist_missing on, expand each missing
+    show into its AIRED episodes (the wishlist's atomic unit) with the same TMDB
+    season metadata a manual add stores — stills, overviews, season posters —
+    so rows render as real cards, never art-less orbs. Unaired episodes are the
+    airing automation's job. Shows already on the wishlist are skipped; at most
+    ``cap`` new shows expand per run. Returns episodes added."""
+    if not (definition.get("wishlist_missing") and definition.get("kind") == "list"
+            and (definition.get("media_type") or "movie") == "show"):
+        return 0
+    add = getattr(db, "add_episodes_to_wishlist", None)
+    seen_fn = getattr(db, "wishlisted_show_tmdb_ids", None)
+    if not callable(add):
+        return 0
+    if engine is None:
+        try:
+            from core.video.enrichment.engine import get_video_enrichment_engine
+            engine = get_video_enrichment_engine()
+        except Exception:   # noqa: BLE001 - no engine → nothing to expand with
+            return 0
+    if engine is None:
+        return 0
+    if today is None:
+        import datetime
+        today = datetime.date.today().isoformat()
+    already = set(seen_fn() if callable(seen_fn) else [])
+
+    added_eps = 0
+    shows_done = 0
+    for m in missing or []:
+        tid = m.get("tmdb_id")
+        if not tid or int(tid) in already:
+            continue
+        if shows_done >= cap:
+            logger.info("show wishlist cap reached (%d) — remaining missing shows "
+                        "expand on the next sync", cap)
+            break
+        try:
+            detail = engine.tmdb_full_detail("show", int(tid)) or {}
+            seasons = [s.get("season_number") for s in (detail.get("seasons") or [])
+                       if (s.get("season_number") or 0) > 0]    # skip specials
+            episodes = []
+            for sn in seasons:
+                se = engine.tmdb_season(int(tid), sn) or {}
+                for e in se.get("episodes") or []:
+                    ad = e.get("air_date")
+                    if not ad or str(ad) > today:               # aired only
+                        continue
+                    episodes.append({
+                        "season_number": sn,
+                        "episode_number": e.get("episode_number"),
+                        "title": e.get("title"),
+                        "air_date": ad,
+                        "overview": e.get("overview"),
+                        "still_url": e.get("still_url"),
+                        "season_poster_url": se.get("poster_url"),
+                    })
+            if not episodes:
+                continue
+            n = add(int(tid), m.get("title") or "Untitled", episodes,
+                    poster_url=m.get("poster_url"), library_id=None)
+            if n:
+                added_eps += n
+                shows_done += 1
+        except Exception:   # noqa: BLE001 - one bad show shouldn't stop the sync
+            logger.debug("show wishlist expansion failed for tmdb %s", tid, exc_info=True)
+    return added_eps
+
+
+def wishlist_missing_members(db, definition: Dict[str, Any], missing) -> int:
+    """Feed a list collection's missing members to the wishlist — movies as
+    movie rows, shows expanded into aired-episode rows."""
+    if (definition.get("media_type") or "movie") == "show":
+        return wishlist_missing_shows(db, definition, missing)
+    return wishlist_missing_movies(db, definition, missing)
+
+
 def sync_all_collections(db, *, source, list_fetcher: Optional[Callable] = None,
                          force: bool = False, on_progress: Optional[Callable] = None,
                          poster_generator: Optional[Callable] = None) -> Dict[str, Any]:
@@ -290,7 +374,7 @@ def sync_all_collections(db, *, source, list_fetcher: Optional[Callable] = None,
             r = sync_collection(db, full, source=source, list_fetcher=list_fetcher,
                                 force=force, poster_generator=poster_generator)
             if r.get("ok"):
-                wishlisted += wishlist_missing_movies(db, full, r.get("missing"))
+                wishlisted += wishlist_missing_members(db, full, r.get("missing"))
         except Exception as e:   # noqa: BLE001 - never let one collection kill the batch
             logger.exception("Collection sync crashed for %s", light.get("name"))
             r = {"ok": False, "definition_id": light["id"], "name": light.get("name"), "error": str(e)}
@@ -372,10 +456,10 @@ def sync_one_now(db, definition_id, *, force: bool = False) -> Dict[str, Any]:
     r = sync_collection(db, c, source=src, list_fetcher=_default_fetcher(db, None), force=force,
                         poster_generator=_default_poster_generator(db))
     if r.get("ok"):
-        r["wishlisted"] = wishlist_missing_movies(db, c, r.get("missing"))
+        r["wishlisted"] = wishlist_missing_members(db, c, r.get("missing"))
     return r
 
 
 __all__ = ["sync_collection", "sync_all_collections", "members_signature",
-           "wishlist_missing_movies", "run_sync", "sync_one_now", "get_collection_source",
-           "in_season"]
+           "wishlist_missing_movies", "wishlist_missing_shows", "wishlist_missing_members",
+           "run_sync", "sync_one_now", "get_collection_source", "in_season"]

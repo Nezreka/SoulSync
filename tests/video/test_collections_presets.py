@@ -174,11 +174,12 @@ def test_charts_pack_counts_owned_against_chart(db):
     assert top["kind"] == "list" and top["suggested"] is True
     assert top["definition"] == {"source": "tmdb_chart", "chart": "top_movies", "limit": 250}
     assert by_name["Most Popular"]["definition"]["chart"] == "popular_movies"
-    # Show charts use the show-side chart keys and are NOT wishlist-capable.
+    # Show charts use the show-side chart keys; shows are wishlist-capable too
+    # (missing shows expand into aired-episode rows on sync).
     shows = expand_pack(db, "charts", "show", fetcher=None)
     assert {e["definition"]["chart"] for e in shows} == \
         {"top_shows", "popular_shows", "trending_shows", "on_the_air"}
-    assert all(e["wishlist_capable"] is False for e in shows)
+    assert all(e["wishlist_capable"] is True for e in shows)
 
 
 def test_charts_pack_survives_fetch_failure(db):

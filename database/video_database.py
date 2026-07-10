@@ -3672,6 +3672,20 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def wishlisted_show_tmdb_ids(self) -> list:
+        """Distinct show tmdb ids with episode rows on the wishlist — lets the
+        collections tie-in skip shows it (or anything else) already expanded."""
+        conn = self._get_connection()
+        try:
+            return [int(r["tmdb_id"]) for r in conn.execute(
+                "SELECT DISTINCT tmdb_id FROM video_wishlist "
+                "WHERE kind='episode' AND tmdb_id IS NOT NULL")]
+        except Exception:
+            logger.exception("wishlisted_show_tmdb_ids failed")
+            return []
+        finally:
+            conn.close()
+
     def wishlisted_movie_status(self) -> dict:
         """{tmdb_id: status} for every movie on the wishlist. Lets the watchlist-people
         scan skip movies it's already handled (fast re-runs) and spot 'monitored' rows
