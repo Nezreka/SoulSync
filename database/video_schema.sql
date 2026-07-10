@@ -95,7 +95,8 @@ CREATE TABLE IF NOT EXISTS movies (
     root_folder_id       INTEGER REFERENCES root_folders(id)     ON DELETE SET NULL,
     path                 TEXT,            -- folder on disk once owned
     added_at             TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at           TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at           TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    play_count       INTEGER                          -- server watch state (viewCount)
 );
 CREATE INDEX IF NOT EXISTS idx_movies_tmdb       ON movies(tmdb_id);
 CREATE INDEX IF NOT EXISTS idx_movies_monitored  ON movies(monitored, has_file);
@@ -144,7 +145,8 @@ CREATE TABLE IF NOT EXISTS shows (
     root_folder_id     INTEGER REFERENCES root_folders(id)     ON DELETE SET NULL,
     path               TEXT,
     added_at           TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at         TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at         TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    watched_episodes INTEGER                          -- server watch state (viewed leaf count)
 );
 CREATE INDEX IF NOT EXISTS idx_shows_tvdb      ON shows(tvdb_id);
 CREATE INDEX IF NOT EXISTS idx_shows_monitored ON shows(monitored);

@@ -743,6 +743,7 @@ class PlexVideoSource:
             "tagline": getattr(m, "tagline", None),
             "rating": getattr(m, "audienceRating", None),
             "rating_critic": getattr(m, "rating", None),
+            "play_count": int(getattr(m, "viewCount", 0) or 0),
             "genres": self._tags(getattr(m, "genres", None)),
             "runtime_minutes": int(dur / 60000) if dur else None,
             "file": self._part_file(m),
@@ -816,6 +817,7 @@ class PlexVideoSource:
             "rating": getattr(sh, "audienceRating", None),
             "first_air_date": self._date(getattr(sh, "originallyAvailableAt", None)),
             "last_air_date": None,
+            "watched_episodes": int(getattr(sh, "viewedLeafCount", 0) or 0),
             "genres": self._tags(getattr(sh, "genres", None)),
             "seasons": seasons,
         }
@@ -825,11 +827,11 @@ class PlexVideoSource:
 
 # ── Jellyfin ────────────────────────────────────────────────────────────────
 _JF_MOVIE_FIELDS = ("Overview,Path,MediaSources,ProductionYear,OfficialRating,RunTimeTicks,Studios,"
-                    "ProviderIds,Genres,Taglines,CommunityRating,CriticRating")
+                    "ProviderIds,Genres,Taglines,CommunityRating,CriticRating,UserData")
 _JF_EP_FIELDS = ("Overview,Path,MediaSources,PremiereDate,RunTimeTicks,IndexNumber,ParentIndexNumber,"
                  "ProviderIds,CommunityRating")
 _JF_SHOW_FIELDS = ("Overview,ProductionYear,OfficialRating,ProviderIds,Genres,Taglines,CommunityRating,"
-                   "PremiereDate,EndDate")
+                   "PremiereDate,EndDate,UserData,RecursiveItemCount")
 
 
 class JellyfinVideoSource:
@@ -1181,6 +1183,8 @@ class JellyfinVideoSource:
             "tagline": self._first(it.get("Taglines")),
             "rating": it.get("CommunityRating"),
             "rating_critic": it.get("CriticRating"),
+            "play_count": int((it.get("UserData") or {}).get("PlayCount")
+                              or (1 if (it.get("UserData") or {}).get("Played") else 0)),
             "genres": it.get("Genres") or [],
             "runtime_minutes": int(ticks / 600_000_000) if ticks else None,
             "file": self._file(it),

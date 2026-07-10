@@ -302,6 +302,9 @@ _ESSENTIALS = [
     ("new", "New Releases",
      lambda mt: "Released in the last year — refreshes on every sync.",
      [{"field": "released", "op": "in_last_days", "value": 365}]),
+    ("unwatched", "Unwatched",
+     lambda mt: f"{_media_word(mt).capitalize()} you haven't watched yet — shrinks as you watch.",
+     [{"field": "watched", "op": "is", "value": False}]),
 ]
 
 

@@ -1462,6 +1462,20 @@
     function mkValueInput(spec, rule, i) {
         var wrap = h('span', 'vce-rule-val');
         if (rule.op === 'exists') { wrap.innerHTML = '<span class="vce-rule-noval">(no value)</span>'; return wrap; }
+        if (spec.type === 'bool') {
+            var bsel = h('select', 'vce-input');
+            var bval = String(rule.value) === 'true' || rule.value === true;
+            if (rule.value === '' || rule.value == null) { bval = true; rule.value = true; }
+            bsel.innerHTML = '<option value="true"' + (bval ? ' selected' : '') + '>yes</option>' +
+                             '<option value="false"' + (!bval ? ' selected' : '') + '>no</option>';
+            bsel.addEventListener('change', function () {
+                rule.value = bsel.value === 'true';
+                ed.dirty = true;
+                schedulePreview();
+            });
+            wrap.appendChild(bsel);
+            return wrap;
+        }
         if (rule.op === 'between') {
             var v = Array.isArray(rule.value) ? rule.value : ['', ''];
             wrap.innerHTML = '<input class="vce-input vce-vnum" placeholder="low" value="' + esc(v[0]) + '"> – <input class="vce-input vce-vnum" placeholder="high" value="' + esc(v[1]) + '">';
