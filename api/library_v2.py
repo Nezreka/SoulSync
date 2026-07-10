@@ -691,11 +691,15 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
         NEVER touches files on disk — this removes library entries only,
         exactly like Lidarr's 'delete artist' without the delete-files box.
+
+        For an artist, only albums whose ``primary_artist_id`` IS the artist
+        cascade. Albums the artist merely appears on (featured/various) belong
+        to another primary artist and must survive; only the credit rows are
+        detached by the caller (audit P0-01).
         """
         if album_ids is None:
             album_ids = [r["id"] for r in conn.execute(
-                """SELECT al.id FROM lib2_album_artists aa
-                   JOIN lib2_albums al ON al.id = aa.album_id WHERE aa.artist_id=?""",
+                "SELECT id FROM lib2_albums WHERE primary_artist_id=?",
                 (artist_id,))]
         track_ids = _bulk_track_ids_for_albums(conn, album_ids)
         # Pull monitored tracks out of the wishlist BEFORE their rows vanish
@@ -729,6 +733,42 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         except Exception as e:  # noqa: BLE001
             logger.debug("artwork cleanup failed (%s %s): %s", kind, eid, e)
 
+    @app.route("/api/library/v2/artists/<int:artist_id>/delete-preview")
+    def lib2_artist_delete_preview(artist_id):
+        """Impact preview for artist delete: what cascades, what survives.
+
+        Only releases the artist owns (``primary_artist_id``) are removed.
+        Featured/various participations on other artists' releases are merely
+        detached; the UI shows both numbers before the user commits."""
+        guard = _guard()
+        if guard:
+            return guard
+        conn = _conn()
+        try:
+            row = conn.execute("SELECT name FROM lib2_artists WHERE id=?",
+                               (artist_id,)).fetchone()
+            if not row:
+                return jsonify({"success": False, "error": "Artist not found"}), 404
+            album_ids = [r["id"] for r in conn.execute(
+                "SELECT id FROM lib2_albums WHERE primary_artist_id=?", (artist_id,))]
+            track_ids = _bulk_track_ids_for_albums(conn, album_ids)
+            file_links = 0
+            if track_ids:
+                marks = ",".join("?" for _ in track_ids)
+                file_links = conn.execute(
+                    f"SELECT COUNT(*) FROM lib2_track_files WHERE track_id IN ({marks})",
+                    track_ids).fetchone()[0]
+            detached = conn.execute(
+                """SELECT COUNT(*) FROM lib2_album_artists aa
+                   JOIN lib2_albums al ON al.id = aa.album_id
+                   WHERE aa.artist_id=? AND al.primary_artist_id<>?""",
+                (artist_id, artist_id)).fetchone()[0]
+            return jsonify({"success": True, "artist": row["name"],
+                            "albums": len(album_ids), "tracks": len(track_ids),
+                            "file_links": file_links, "detached_albums": detached})
+        finally:
+            conn.close()
+
     @app.route("/api/library/v2/artists/<int:artist_id>", methods=["DELETE"])
     def lib2_delete_artist(artist_id):
         """Remove an artist (and their releases/tracks/file links) from
@@ -745,6 +785,13 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 return jsonify({"success": False, "error": "Artist not found"}), 404
             _mirror_artist_watchlist(db, conn, artist_id, False)
             stats = _unmonitor_tracks_and_delete(db, conn, artist_id=artist_id)
+            # Detach the artist from releases owned by OTHER primary artists
+            # (featured/various credits). Those albums, tracks, files and
+            # monitor state stay untouched — deleting a featured artist must
+            # never take another artist's album with it.
+            cur = conn.execute("DELETE FROM lib2_album_artists WHERE artist_id=?", (artist_id,))
+            stats["detached_albums"] = cur.rowcount
+            conn.execute("DELETE FROM lib2_track_artists WHERE artist_id=?", (artist_id,))
             conn.execute("DELETE FROM lib2_artists WHERE id=?", (artist_id,))
             conn.commit()
             _delete_artwork_files(db, "artist", artist_id)

@@ -189,6 +189,61 @@ def test_delete_artist_removes_rows_mirrors_and_artwork(api):
     assert not thumb.exists()
 
 
+def test_delete_featured_artist_keeps_owner_album(api):
+    """Audit P0-01: deleting an artist who is merely featured on another
+    artist's album must NOT delete that album — only the credit rows."""
+    client, db, ids = api
+    with _conn(db) as conn:
+        cur = conn.execute(
+            "INSERT INTO lib2_artists(name, spotify_id) VALUES('Wizkid','sp-wizkid')")
+        wizkid = cur.lastrowid
+        conn.execute(
+            "INSERT INTO lib2_album_artists(album_id, artist_id, role) VALUES(?,?,'featured')",
+            (ids["views"], wizkid))
+        conn.execute(
+            "INSERT INTO lib2_track_artists(track_id, artist_id, role) VALUES(?,?,'featured')",
+            (ids["album_track"], wizkid))
+        conn.commit()
+
+    # Preview shows the real blast radius: nothing owned, one detachment.
+    preview = client.get(f"/api/library/v2/artists/{wizkid}/delete-preview").get_json()
+    assert preview["success"] is True
+    assert preview["albums"] == 0 and preview["tracks"] == 0
+    assert preview["detached_albums"] == 1
+
+    resp = client.delete(f"/api/library/v2/artists/{wizkid}").get_json()
+    assert resp["success"] is True
+    assert resp["albums"] == 0 and resp["detached_albums"] == 1
+
+    with _conn(db) as conn:
+        # Drake's album, tracks and file links all survive.
+        assert conn.execute("SELECT COUNT(*) FROM lib2_albums WHERE id=?",
+                            (ids["views"],)).fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM lib2_tracks WHERE album_id=?",
+                            (ids["views"],)).fetchone()[0] > 0
+        assert conn.execute("SELECT COUNT(*) FROM lib2_track_files WHERE track_id=?",
+                            (ids["album_track"],)).fetchone()[0] == 1
+        # Only the credit rows are gone.
+        assert conn.execute("SELECT COUNT(*) FROM lib2_album_artists WHERE artist_id=?",
+                            (wizkid,)).fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM lib2_track_artists WHERE artist_id=?",
+                            (wizkid,)).fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM lib2_artists WHERE id=?",
+                            (wizkid,)).fetchone()[0] == 0
+    # No wishlist withdrawals for the surviving album's tracks.
+    assert not db.wishlist_removes
+
+
+def test_artist_delete_preview_for_primary_artist(api):
+    client, _db, ids = api
+    preview = client.get(f"/api/library/v2/artists/{ids['artist']}/delete-preview").get_json()
+    assert preview["success"] is True
+    assert preview["albums"] == 3 and preview["tracks"] == 3
+    assert preview["file_links"] == 1 and preview["detached_albums"] == 0
+    missing = client.get("/api/library/v2/artists/999999/delete-preview")
+    assert missing.status_code == 404
+
+
 def test_artist_list_rejects_non_numeric_page(api):
     client, _db, _ids = api
     resp = client.get("/api/library/v2/artists?page=abc")

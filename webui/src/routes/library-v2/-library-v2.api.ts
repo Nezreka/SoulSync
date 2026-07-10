@@ -208,6 +208,26 @@ export async function deleteLibraryV2Entity(
   if (!payload.success) throw new Error(payload.error || 'Delete failed');
 }
 
+/** Impact preview for artist delete: owned releases cascade, featured
+ *  appearances on other artists' releases are only detached. */
+export interface LibraryV2ArtistDeletePreview {
+  artist: string;
+  albums: number;
+  tracks: number;
+  file_links: number;
+  detached_albums: number;
+}
+
+export async function fetchLibraryV2ArtistDeletePreview(
+  id: number,
+): Promise<LibraryV2ArtistDeletePreview> {
+  const payload = await readJson<
+    { success: boolean; error?: string } & LibraryV2ArtistDeletePreview
+  >(apiClient.get(`library/v2/artists/${id}/delete-preview`));
+  if (!payload.success) throw new Error(payload.error || 'Delete preview failed');
+  return payload;
+}
+
 export interface LibraryV2HistoryEntry {
   title: string | null;
   album: string | null;

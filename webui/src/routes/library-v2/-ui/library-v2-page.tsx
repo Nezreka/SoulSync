@@ -10,6 +10,7 @@ import {
   deleteLibraryV2Entity,
   editLibraryV2AlbumType,
   editLibraryV2Artist,
+  fetchLibraryV2ArtistDeletePreview,
   fetchLibraryV2ArtistHistory,
   fetchLibraryV2Duplicates,
   fetchLibraryV2ImportStatus,
@@ -449,12 +450,31 @@ function DeleteConfirmModal({
   const queryClient = useQueryClient();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Show the real blast radius before the user commits: only releases the
+  // artist OWNS are removed; featured appearances on other artists' releases
+  // survive (they are merely detached).
+  const preview = useQuery({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'delete-preview', id],
+    queryFn: () => fetchLibraryV2ArtistDeletePreview(id),
+    enabled: entity === 'artists',
+  });
   return (
     <ModalShell title={`Delete ${entity === 'artists' ? 'Artist' : 'Album'}`} onClose={onClose}>
       <p>
         Remove <strong>{title}</strong> from the library? Monitoring stops and wishlist entries
         are withdrawn. <strong>Files on disk are not deleted.</strong>
       </p>
+      {entity === 'artists' && preview.data ? (
+        <p className={styles.muted}>
+          Removes {preview.data.albums} release{preview.data.albums === 1 ? '' : 's'} /{' '}
+          {preview.data.tracks} track{preview.data.tracks === 1 ? '' : 's'} owned by this artist.
+          {preview.data.detached_albums > 0
+            ? ` Appears on ${preview.data.detached_albums} other ${
+                preview.data.detached_albums === 1 ? 'release' : 'releases'
+              } — those stay in the library.`
+            : ''}
+        </p>
+      ) : null}
       {error ? <div className={styles.searchError}>{error}</div> : null}
       <div className={styles.modalActions}>
         <button type="button" className={styles.btnGhost} disabled={busy} onClick={onClose}>
