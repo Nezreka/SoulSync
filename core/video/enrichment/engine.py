@@ -442,6 +442,39 @@ class VideoEnrichmentEngine:
                 return []
         return items
 
+    def collection_poster(self, collection_id) -> str | None:
+        """A TMDB collection's own poster URL (real title art), day-cached."""
+        w = self.workers.get("tmdb")
+        if not w or not w.enabled or not collection_id:
+            return None
+        ck = ("colposter", int(collection_id))
+        hit = self._cache_get(ck)
+        if hit is None:
+            try:
+                info = w.client.collection_info(collection_id) or {}
+                hit = info.get("poster_url") or ""   # "" = cached miss
+                self._cache_put(ck, hit, ttl=86400)
+            except Exception:
+                logger.exception("collection poster lookup failed (%s)", collection_id)
+                return None
+        return hit or None
+
+    def person_photo(self, name) -> str | None:
+        """A person's TMDB profile photo URL by name, day-cached."""
+        w = self.workers.get("tmdb")
+        if not w or not w.enabled or not (name or "").strip():
+            return None
+        ck = ("personphoto", name.strip().lower())
+        hit = self._cache_get(ck)
+        if hit is None:
+            try:
+                hit = w.client.person_photo(name) or ""   # "" = cached miss
+                self._cache_put(ck, hit, ttl=86400)
+            except Exception:
+                logger.exception("person photo lookup failed (%s)", name)
+                return None
+        return hit or None
+
     def keyword_id(self, query) -> int | None:
         """TMDB keyword id for a name (day-cached — keyword ids never move).
         Powers the seasonal/themed collection sources."""
