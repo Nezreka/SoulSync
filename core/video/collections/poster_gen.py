@@ -447,22 +447,39 @@ def regenerate_candidates(db) -> list:
 
 def regenerate_all(db, *, mode: str = "auto", fetch: Optional[Callable] = None,
                    root: Optional[Path] = None,
-                   on_progress: Optional[Callable] = None) -> int:
+                   on_progress: Optional[Callable] = None,
+                   workers: int = 3) -> int:
     """Re-render every owned poster with the current art pipeline (context art
-    first). ``on_progress(done, total, name, ok)`` after each. Returns how many
+    first). Renders run on a small worker pool — each poster is I/O-bound
+    (member art from the media server + TMDB lookups), so sequential rendering
+    made a big refresh take ~3× longer than it needed to.
+    ``on_progress(done, total, name, rendered, failed)`` fires as each finishes
+    (counters computed under the lock — safe across workers). Returns how many
     were regenerated. Synchronous — callers thread it."""
     cands = regenerate_candidates(db)
-    n = 0
-    for i, cand in enumerate(cands):
+    if not cands:
+        return 0
+    state = {"done": 0, "rendered": 0, "failed": 0}
+    lock = threading.Lock()
+
+    def one(cand):
         d = db.get_collection_definition(cand["id"])
         ok = bool(d and generate_for_definition(db, d, mode=mode, fetch=fetch, root=root))
-        n += 1 if ok else 0
+        with lock:
+            state["done"] += 1
+            state["rendered" if ok else "failed"] += 1
+            snap = dict(state)
         if on_progress:
             try:
-                on_progress(i + 1, len(cands), cand.get("name"), ok)
+                on_progress(snap["done"], len(cands), cand.get("name"),
+                            snap["rendered"], snap["failed"])
             except Exception:   # noqa: BLE001 - a progress hook can't kill the run
                 pass
-    return n
+
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
+        list(ex.map(one, cands))
+    return state["rendered"]
 
 
 def kick_regenerate_all(db) -> dict:
@@ -476,10 +493,9 @@ def kick_regenerate_all(db) -> dict:
         try:
             _JOB.update(phase="running")
 
-            def prog(done, tot, name, ok):
+            def prog(done, tot, name, rendered, failed):
                 _JOB.update(done=done, total=tot, name=name,
-                            rendered=_JOB["rendered"] + (1 if ok else 0),
-                            failed=_JOB["failed"] + (0 if ok else 1))
+                            rendered=rendered, failed=failed)
                 _channel.emit()
 
             n = regenerate_all(db, on_progress=prog)
