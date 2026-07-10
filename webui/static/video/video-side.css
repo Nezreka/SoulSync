@@ -4339,3 +4339,125 @@ body[data-side="video"] #gsearch-aura {
 .vdpg-group--collapsed .vdpg-group-body { display: none; }
 /* nested episode cards read as children of the group */
 .vdpg-group-body .vdpg-card { background: rgba(255,255,255,0.015); }
+
+/* ── Library bulk select mode + action bar ─────────────────────────────────
+   Select N cards → floating action bar (bulk metadata via /api/video/bulk —
+   the same edit-and-lock engine as the Manage sidebar). */
+.video-lib-select-btn {
+    padding: 8px 16px; border-radius: 10px; font-size: 12.5px; font-weight: 700;
+    cursor: pointer; background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12); color: rgba(255,255,255,0.75);
+    transition: all .13s; white-space: nowrap;
+}
+.video-lib-select-btn:hover { background: rgba(255,255,255,0.11); color: #fff; }
+.video-lib-select-btn.active {
+    background: rgba(var(--accent-rgb, 88 101 242), 0.22);
+    border-color: rgba(var(--accent-rgb, 88 101 242), 0.55); color: #fff;
+}
+
+/* Cards in select mode: no nav affordance, overlay controls parked, and a
+   pick ring — the circle appears on every card, the check fills the picked. */
+.video-lib--selecting .library-artist-card { cursor: copy; position: relative; }
+.video-lib--selecting .library-artist-card button { pointer-events: none; opacity: 0 !important; }
+.video-lib--selecting .library-artist-card::after {
+    content: ""; position: absolute; top: 10px; right: 10px; width: 22px; height: 22px;
+    border-radius: 50%; border: 2px solid rgba(255,255,255,0.55);
+    background: rgba(0,0,0,0.45); z-index: 5; transition: all .12s;
+}
+.video-lib--selecting .video-card--picked::after {
+    content: "\2713"; display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 900; color: #fff;
+    background: rgb(var(--accent-rgb, 88 101 242));
+    border-color: rgb(var(--accent-rgb, 88 101 242));
+    box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+}
+.video-lib--selecting .video-card--picked {
+    outline: 2px solid rgba(var(--accent-rgb, 88 101 242), 0.85);
+    outline-offset: 2px; border-radius: 12px;
+}
+
+/* The floating bar (fixed; hides with the page since ancestors display:none) */
+.video-bulkbar {
+    position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
+    z-index: 8900; display: flex; flex-direction: column; gap: 8px;
+    max-width: min(860px, calc(100vw - 32px));
+}
+.video-bulkbar.hidden { display: none; }
+.vbb-row {
+    display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+    background: rgba(14,14,19,0.96); border: 1px solid rgba(255,255,255,0.11);
+    border-radius: 16px; box-shadow: 0 18px 50px rgba(0,0,0,0.6);
+    backdrop-filter: blur(12px); flex-wrap: wrap;
+}
+.vbb-count { font-size: 12.5px; font-weight: 800; color: #fff; white-space: nowrap; }
+.vbb-link {
+    all: unset; cursor: pointer; font-size: 11.5px; font-weight: 700;
+    color: rgba(255,255,255,0.55); padding: 2px 4px;
+}
+.vbb-link:hover { color: #fff; }
+.vbb-link[disabled] { opacity: 0.35; cursor: default; }
+.vbb-sep { width: 1px; height: 18px; background: rgba(255,255,255,0.12); }
+.vbb-spacer { flex: 1; min-width: 6px; }
+.vbb-act {
+    padding: 7px 13px; border-radius: 10px; font-size: 12px; font-weight: 700;
+    cursor: pointer; background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12); color: rgba(255,255,255,0.8);
+    transition: all .12s; white-space: nowrap;
+}
+.vbb-act:hover:not(:disabled) { background: rgba(255,255,255,0.12); color: #fff; }
+.vbb-act:disabled { opacity: 0.35; cursor: default; }
+.vbb-act--on {
+    background: rgba(var(--accent-rgb, 88 101 242), 0.22);
+    border-color: rgba(var(--accent-rgb, 88 101 242), 0.55); color: #fff;
+}
+.vbb-close {
+    all: unset; cursor: pointer; width: 28px; height: 28px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; font-size: 17px;
+    color: rgba(255,255,255,0.6); border: 1px solid rgba(255,255,255,0.14);
+}
+.vbb-close:hover { color: #fff; background: rgba(255,255,255,0.08); }
+
+/* The action popover (rendered above the row) */
+.vbb-pop {
+    display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+    background: rgba(14,14,19,0.96); border: 1px solid rgba(255,255,255,0.11);
+    border-radius: 14px; box-shadow: 0 18px 50px rgba(0,0,0,0.6);
+    backdrop-filter: blur(12px); flex-wrap: wrap;
+}
+.vbb-pop-label { font-size: 12px; font-weight: 700; color: rgba(255,255,255,0.6); white-space: nowrap; }
+.vbb-input {
+    padding: 8px 11px; border-radius: 9px; font-size: 12.5px; font-family: inherit;
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
+    color: #eef1f7; outline: none; min-width: 150px; transition: border .13s, box-shadow .13s;
+}
+.vbb-input:focus {
+    border-color: rgba(var(--accent-rgb, 88 101 242), 0.6);
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb, 88 101 242), 0.14);
+}
+.vbb-select { min-width: 190px; }
+.vbb-select option { background: #16161d; color: #eef1f7; }
+.vbb-apply {
+    padding: 8px 14px; border-radius: 10px; font-size: 12px; font-weight: 800;
+    cursor: pointer; border: none; color: #fff;
+    background: rgb(var(--accent-rgb, 88 101 242));
+    box-shadow: 0 5px 14px rgba(var(--accent-rgb, 88 101 242), 0.3);
+    transition: filter .13s; white-space: nowrap;
+}
+.vbb-apply:hover { filter: brightness(1.12); }
+.vbb-apply--ghost {
+    background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.14);
+    box-shadow: none; color: rgba(255,255,255,0.85);
+}
+.vbb-apply--ghost:hover { background: rgba(255,255,255,0.13); filter: none; }
+
+/* Progress view while a bulk job runs */
+.vbb-row--progress { flex-wrap: nowrap; min-width: min(430px, calc(100vw - 60px)); }
+.vbb-track {
+    flex: 1; height: 7px; border-radius: 999px; background: rgba(255,255,255,0.1);
+    overflow: hidden; min-width: 120px;
+}
+.vbb-fill {
+    height: 100%; border-radius: 999px;
+    background: rgb(var(--accent-rgb, 88 101 242)); transition: width .4s ease;
+}
+@media (prefers-reduced-motion: reduce) { .vbb-fill { transition: none; } }

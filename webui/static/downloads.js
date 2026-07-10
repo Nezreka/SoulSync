@@ -5654,7 +5654,7 @@ function _overlayTaskActive() {
 function _updateOverlayBell() {
     const btn = document.getElementById('notif-bell-btn');
     if (btn) btn.classList.toggle('notif-bell-working',
-        _overlayTaskActive() || _colSyncTaskActive() || _colArtTaskActive());
+        _overlayTaskActive() || _colSyncTaskActive() || _colArtTaskActive() || _videoBulkTaskActive());
     _ensureTaskPolling();
 }
 
@@ -5663,12 +5663,13 @@ function _updateOverlayBell() {
 // strand an Active card in its last "running" state. Stops itself when idle.
 let _taskPollTimer = null;
 function _ensureTaskPolling() {
-    const active = _overlayTaskActive() || _colSyncTaskActive() || _colArtTaskActive();
+    const active = _overlayTaskActive() || _colSyncTaskActive() || _colArtTaskActive() || _videoBulkTaskActive();
     if (active && !_taskPollTimer) {
         _taskPollTimer = setInterval(() => {
             _seedOverlayTask();
             _seedCollectionSyncTask();
             _seedCollectionArtTask();
+            _seedVideoBulkTask();
         }, 12000);
     } else if (!active && _taskPollTimer) {
         clearInterval(_taskPollTimer);
@@ -5719,6 +5720,57 @@ function _colArtActiveHTML() {
     return `
         <div class="notif-active notif-active-${cls}">
             <div class="notif-active-head"><span class="notif-active-title">Refreshing collection artwork</span><span class="notif-active-pct">${pct}%</span></div>
+            <div class="notif-active-bar"><div class="notif-active-fill" style="width:${pct}%"></div></div>
+            <div class="notif-active-sub">${line}</div>
+        </div>`;
+}
+
+// ── Active bulk-metadata task ('video:bulk' socket event) ──────────────────────
+// The library grid's multi-select bar shows inline progress while you watch;
+// this card covers the job when you navigate away mid-run.
+let _videoBulkTask = null;
+let _videoBulkClearTimer = null;
+
+function updateVideoBulkTask(data) {
+    if (!data) return;
+    if (_videoBulkClearTimer) { clearTimeout(_videoBulkClearTimer); _videoBulkClearTimer = null; }
+    const active = data.running || data.phase === 'starting' || data.phase === 'running';
+    if (active) {
+        _videoBulkTask = data;
+    } else if (data.phase === 'done' || data.phase === 'error') {
+        _videoBulkTask = data;    // keep the final result on screen briefly, then clear
+        _videoBulkClearTimer = setTimeout(() => { _videoBulkTask = null; _updateOverlayBell(); _patchOverlayActive(); }, 6000);
+    } else {
+        _videoBulkTask = null;    // idle
+    }
+    _updateOverlayBell();
+    _patchOverlayActive();
+}
+
+function _seedVideoBulkTask() {
+    fetch('/api/video/bulk/status')
+        .then(r => r.ok ? r.json() : null)
+        .then(s => { if (s) updateVideoBulkTask(s); })
+        .catch(() => {});
+}
+
+function _videoBulkTaskActive() {
+    return !!(_videoBulkTask && (_videoBulkTask.running || _videoBulkTask.phase === 'starting' || _videoBulkTask.phase === 'running'));
+}
+
+function _videoBulkActiveHTML() {
+    const t = _videoBulkTask;
+    if (!t) return '';
+    const total = t.total || 0, done = t.done || 0;
+    const pct = total ? Math.min(100, Math.round(done / total * 100)) : (t.phase === 'done' ? 100 : 4);
+    let line, cls = '';
+    if (t.phase === 'done') { line = `Done · ${t.ok || 0} updated` + (t.failed ? `, ${t.failed} failed` : ''); cls = 'done'; }
+    else if (t.phase === 'error') { line = 'Failed: ' + _escToast(t.error || 'error'); cls = 'error'; }
+    else line = `${done} / ${total || '…'}`;
+    const title = t.label ? _escToast(t.label) : 'Bulk metadata edit';
+    return `
+        <div class="notif-active notif-active-${cls}">
+            <div class="notif-active-head"><span class="notif-active-title">${title}</span><span class="notif-active-pct">${pct}%</span></div>
             <div class="notif-active-bar"><div class="notif-active-fill" style="width:${pct}%"></div></div>
             <div class="notif-active-sub">${line}</div>
         </div>`;
@@ -5799,7 +5851,7 @@ function _overlayActiveHTML() {
 
 function _patchOverlayActive() {
     const host = document.querySelector('#notif-panel [data-notif-active-host]');
-    if (host) host.innerHTML = _overlayActiveHTML() + _colSyncActiveHTML() + _colArtActiveHTML();
+    if (host) host.innerHTML = _overlayActiveHTML() + _colSyncActiveHTML() + _colArtActiveHTML() + _videoBulkActiveHTML();
 }
 
 function showToast(message, type = 'success', helpSection = null) {
@@ -5919,6 +5971,7 @@ function _openNotifPanel() {
     _seedOverlayTask();   // refresh the Active cards from the server on open (socket keeps them live after)
     _seedCollectionSyncTask();
     _seedCollectionArtTask();
+    _seedVideoBulkTask();
 
     // Position above the bell button
     if (btn) {
@@ -6194,6 +6247,7 @@ let _gsController = null;
         if (typeof _seedOverlayTask === 'function') _seedOverlayTask();
         if (typeof _seedCollectionSyncTask === 'function') _seedCollectionSyncTask();
         if (typeof _seedCollectionArtTask === 'function') _seedCollectionArtTask();
+        if (typeof _seedVideoBulkTask === 'function') _seedVideoBulkTask();
     }, 1200);
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run);
     else run();
