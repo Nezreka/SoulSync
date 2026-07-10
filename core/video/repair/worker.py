@@ -227,7 +227,7 @@ class VideoRepairWorker:
             result.scanned = r.scanned or result.scanned
             result.errors = r.errors or result.errors
             result.auto_fixed = r.auto_fixed or result.auto_fixed
-            state["status"] = "completed"
+            state["status"] = "finished"   # music progress vocabulary: running|finished|error
             state["phase"] = "done"
             self._log(state, "info", f"scanned {result.scanned}, "
                       f"{result.findings_created} new findings")
@@ -243,7 +243,7 @@ class VideoRepairWorker:
             self._log(state, "error", str(e))
         finally:
             state["finished_at"] = time.time()
-            state["progress"] = 100 if state["status"] == "completed" else state["progress"]
+            state["progress"] = 100 if state["status"] == "finished" else state["progress"]
             self.db.repair_record_job_finish(
                 run_id, items_scanned=result.scanned,
                 findings_created=result.findings_created,

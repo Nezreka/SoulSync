@@ -1,18 +1,23 @@
 /*
  * SoulSync — Video Library Maintenance (Tools page).
  *
- * The music repair UI, video-scoped: master toggle, Jobs / Findings / History
- * tabs, finding cards with approve/dismiss + bulk actions, live per-job
- * progress from the 'video:repair:progress' socket event. Reuses the music
- * hero's .repair-* CSS classes (shared stylesheet) against /api/video/repair.
- * Exposes window.updateVideoRepairProgressFromData for core.js's socket hook.
+ * The music repair UI, video-scoped — SAME card DOM as enrichment.js's
+ * loadRepairJobs/loadRepairFindings/loadRepairHistory so the shared .repair-*
+ * stylesheet renders both sides identically. Ids are video-prefixed (both
+ * Tools pages share this document) and all queries are scoped to the
+ * [data-video-repair] root so the two heroes never cross-talk.
+ * Exposes window.updateVideoRepairProgressFromData for core.js's
+ * 'video:repair:progress' socket hook.
  */
 (function () {
     'use strict';
 
     var API = '/api/video/repair';
-    var state = { tab: 'jobs', page: 1, selected: {}, jobs: [], loadedOnce: false };
+    var state = { page: 0, selected: {}, jobs: [] };
+    var hideTimers = {};
+    var logCounts = {};
 
+    function root() { return document.querySelector('[data-video-repair]'); }
     function $(id) { return document.getElementById(id); }
     function esc(s) {
         return String(s == null ? '' : s)
@@ -22,20 +27,31 @@
     function confirmDlg(o) {
         return (typeof showConfirmDialog === 'function') ? showConfirmDialog(o) : Promise.resolve(true);
     }
+    function age(ts) {
+        return (typeof formatCacheAge === 'function' && ts) ? formatCacheAge(ts) : (ts || 'Never');
+    }
+    function pretty(key) {
+        if (typeof _prettifyRepairSettingKey === 'function') return _prettifyRepairSettingKey(key);
+        return String(key).replace(/^_+/, '').split('_').map(function (w) {
+            return w.charAt(0).toUpperCase() + w.slice(1);
+        }).join(' ');
+    }
     function jget(url) { return fetch(url).then(function (r) { return r.ok ? r.json() : null; }); }
-    function jpost(url, body, method) {
+    function jsend(url, body, method) {
         return fetch(url, { method: method || 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body || {}) })
             .then(function (r) { return r.json().then(function (b) { return { ok: r.ok, body: b }; }); });
     }
 
-    // Per-finding-type presentation (label, approve-button text) — the video
-    // sibling of the music typeLabels/fixableTypes maps.
-    var TYPES = {
-        missing_episodes: { label: 'Missing episodes', fixText: 'Send to Wishlist' },
-    };
+    var PAGE_SIZE = 25;
+    var SEVERITY_ICONS = { info: 'ℹ️', warning: '⚠️', critical: '🔴' };
+    // Per-finding-type presentation — the video siblings of the music
+    // typeLabels / fixableTypes / actionLabels maps (keep in sync with jobs).
+    var TYPE_LABELS = { missing_episodes: 'Missing Episodes' };
+    var FIXABLE_TYPES = { missing_episodes: 'Send to Wishlist' };
+    var ACTION_LABELS = { wishlisted: 'Wishlisted', resolved: 'Resolved' };
 
-    // ── master toggle + tabs ─────────────────────────────────────────────────
+    // ── status + master toggle ───────────────────────────────────────────────
     function loadStatus() {
         jget(API + '/status').then(function (s) {
             if (!s) return;
@@ -55,7 +71,6 @@
     }
 
     function switchTab(tab) {
-        state.tab = tab;
         var tabs = document.querySelectorAll('[data-video-repair-tab]');
         for (var i = 0; i < tabs.length; i++) {
             tabs[i].classList.toggle('active', tabs[i].getAttribute('data-video-repair-tab') === tab);
@@ -65,119 +80,236 @@
             if (el) el.style.display = (t === tab) ? '' : 'none';
         });
         if (tab === 'jobs') loadJobs();
-        else if (tab === 'findings') { state.page = 1; loadFindings(); }
+        else if (tab === 'findings') { state.page = 0; loadFindings(); }
         else loadHistory();
     }
 
-    // ── jobs ─────────────────────────────────────────────────────────────────
+    // ── jobs (the music card DOM, verbatim) ──────────────────────────────────
     function loadJobs() {
-        jget(API + '/jobs').then(function (d) {
-            var host = $('video-repair-jobs-list');
-            if (!host || !d) return;
-            state.jobs = d.jobs || [];
-            host.innerHTML = state.jobs.map(jobCardHTML).join('') ||
-                '<div class="repair-loading">No jobs registered</div>';
-            fillJobFilter();
+        var container = $('video-repair-jobs-list');
+        if (!container) return;
+        jget(API + '/jobs').then(function (data) {
+            if (!data) { container.innerHTML = '<div class="repair-empty">Error loading jobs</div>'; return; }
+            var jobs = data.jobs || [];
+            state.jobs = jobs;
+            if (!jobs.length) {
+                container.innerHTML = '<div class="repair-empty-state">' +
+                    '<div class="repair-empty-icon">🔧</div>' +
+                    '<div class="repair-empty-title">No Maintenance Jobs</div>' +
+                    '<div class="repair-empty-text">Library maintenance jobs will appear here once available.</div></div>';
+                return;
+            }
+            fillJobFilter(jobs);
+            container.innerHTML = jobs.map(jobCardHTML).join('');
         });
     }
 
-    function jobCardHTML(j) {
-        var last = j.last_run;
-        var lastTxt = 'Never';
-        if (last && last.finished_at) {
-            lastTxt = esc(String(last.finished_at).replace('T', ' ')) +
-                ' · ' + (last.items_scanned || 0) + ' scanned, ' +
-                (last.findings_created || 0) + ' findings';
+    function jobCardHTML(job) {
+        var lastRunText = job.last_run ? age(job.last_run.finished_at) : 'Never';
+        var nextRunText = job.next_run ? esc(job.next_run) : (job.enabled ? 'Pending' : '-');
+        var dotClass = job.is_running ? 'running' : (job.enabled ? 'enabled' : 'disabled');
+        var cardClass = job.is_running ? 'running' : (!job.enabled ? 'disabled' : '');
+
+        var flowParts = ['<span class="repair-flow-badge scan">' +
+            (job.is_running ? '&#9654; Running' : 'Scan') + '</span>'];
+        if (job.auto_fix) {
+            flowParts.push('<span class="repair-flow-arrow">&rarr;</span>');
+            flowParts.push('<span class="repair-flow-badge autofix">Auto-fix</span>');
         }
-        var settings = Object.keys(j.setting_options || {}).map(function (k) {
-            var opts = j.setting_options[k].map(function (o) {
-                var sel = String(j.settings[k]) === String(o) ? ' selected' : '';
-                return '<option value="' + esc(o) + '"' + sel + '>' +
-                    esc(o === true ? 'Yes' : o === false ? 'No' : o) + '</option>';
+        var pendingCount = job.pending_findings_count || 0;
+        var lastScanCount = job.last_run ? (job.last_run.findings_created || 0) : 0;
+        if (pendingCount > 0) {
+            flowParts.push('<span class="repair-flow-arrow">&rarr;</span>');
+            flowParts.push('<span class="repair-flow-badge findings">' + pendingCount + ' pending</span>');
+        } else if (lastScanCount > 0) {
+            flowParts.push('<span class="repair-flow-arrow">&rarr;</span>');
+            flowParts.push('<span class="repair-flow-badge findings findings-historical">' +
+                lastScanCount + ' found in last scan</span>');
+        }
+
+        var metaParts = ['Last: ' + lastRunText, 'Next: ' + nextRunText];
+        if (job.last_run) {
+            metaParts.push('Scanned: ' + (job.last_run.items_scanned || 0).toLocaleString());
+            if (job.last_run.auto_fixed) metaParts.push('Fixed: ' + job.last_run.auto_fixed);
+            if (job.last_run.duration_seconds) {
+                metaParts.push(job.last_run.duration_seconds.toFixed(1) + 's');
+            }
+        }
+
+        var settingsHtml = '';
+        var settingKeys = Object.keys(job.settings || {});
+        if (settingKeys.length) {
+            var settingsRows = settingKeys.map(function (key) {
+                var val = job.settings[key];
+                var label = pretty(key);
+                var opts = job.setting_options && job.setting_options[key];
+                if (Array.isArray(opts) && opts.length) {
+                    var optionsHtml = opts.map(function (o) {
+                        return '<option value="' + esc(o) + '"' + (o === val ? ' selected' : '') + '>' +
+                            esc(pretty(String(o))) + '</option>';
+                    }).join('');
+                    return '<div class="repair-setting-row"><label>' + esc(label) + '</label>' +
+                        '<select class="repair-setting-input" data-job="' + esc(job.job_id) +
+                        '" data-key="' + esc(key) + '">' + optionsHtml + '</select></div>';
+                }
+                var inputType = typeof val === 'boolean' ? 'checkbox' :
+                    typeof val === 'number' ? 'number' : 'text';
+                var inputVal = inputType === 'checkbox' ? (val ? ' checked' : '') :
+                    ' value="' + esc(val) + '"';
+                return '<div class="repair-setting-row"><label>' + esc(label) + '</label>' +
+                    '<input type="' + inputType + '" class="repair-setting-input" data-job="' +
+                    esc(job.job_id) + '" data-key="' + esc(key) + '"' + inputVal +
+                    (inputType === 'number' ? ' step="0.01" min="0"' : '') + '></div>';
             }).join('');
-            return '<label class="repair-job-setting"><span>' + esc(k.replace(/_/g, ' ')) +
-                '</span><select data-vjr-setting="' + esc(k) + '">' + opts + '</select></label>';
-        }).join('');
-        return '' +
-            '<div class="repair-job-card" data-vjr-job="' + esc(j.job_id) + '">' +
-                '<div class="repair-job-head">' +
-                    '<span class="repair-job-dot' + (j.is_running ? ' repair-job-dot--on' : '') + '"></span>' +
-                    '<span class="repair-job-icon">' + esc(j.icon) + '</span>' +
-                    '<div class="repair-job-titles">' +
-                        '<div class="repair-job-name">' + esc(j.display_name) +
-                            (j.pending_findings_count ? ' <span class="repair-tab-badge">' +
-                                j.pending_findings_count + '</span>' : '') + '</div>' +
-                        '<div class="repair-job-desc" title="' + esc(j.help_text) + '">' +
-                            esc(j.description) + '</div>' +
-                    '</div>' +
-                    '<label class="repair-master-toggle repair-master-toggle--sm" title="Run on a schedule">' +
-                        '<input type="checkbox" data-vjr-enable' + (j.enabled ? ' checked' : '') + '>' +
-                        '<span class="repair-toggle-slider"></span>' +
+            settingsHtml =
+                '<div class="repair-job-settings" id="video-repair-settings-' + esc(job.job_id) +
+                    '" style="display:none;">' +
+                    '<div class="repair-setting-row"><label>Interval (hours)</label>' +
+                        '<input type="number" class="repair-setting-input" data-job="' + esc(job.job_id) +
+                        '" data-key="_interval_hours" value="' + job.interval_hours + '" min="1" step="1"></div>' +
+                    settingsRows +
+                    '<button class="repair-save-settings-btn" type="button" data-vjr-save="' +
+                        esc(job.job_id) + '">Save Settings</button>' +
+                '</div>';
+        }
+
+        return '<div class="repair-job-card ' + cardClass + '" data-job-id="' + esc(job.job_id) + '">' +
+            '<div class="repair-job-main">' +
+                '<div class="repair-job-status ' + dotClass + '"></div>' +
+                '<div class="repair-job-info">' +
+                    '<div class="repair-job-name">' + esc(job.display_name) + '</div>' +
+                    '<div class="repair-job-desc">' + esc(job.description || '') + '</div>' +
+                    '<div class="repair-job-flow">' + flowParts.join('') + '</div>' +
+                    '<div class="repair-job-meta">' + metaParts.join(' &middot; ') + '</div>' +
+                '</div>' +
+                '<div class="repair-job-actions">' +
+                    '<label class="repair-job-toggle">' +
+                        '<input type="checkbox" data-vjr-enable' + (job.enabled ? ' checked' : '') + '>' +
+                        '<span class="repair-toggle-slider small"></span>' +
                     '</label>' +
+                    (job.is_running
+                        ? '<button class="repair-stop-btn" type="button" data-vjr-stop title="Stop this run">&#9209;</button>'
+                        : '<button class="repair-run-btn" type="button" data-vjr-run title="Run now">&#9654;</button>') +
+                    (settingKeys.length
+                        ? '<button class="repair-settings-btn" type="button" data-vjr-settings title="Settings">&#9881;</button>'
+                        : '') +
+                    '<button class="repair-help-btn" type="button" data-vjr-help title="About this job">?</button>' +
                 '</div>' +
-                '<div class="repair-job-meta">' +
-                    '<span>Last: ' + lastTxt + '</span>' +
-                    '<label>Every <input type="number" min="1" max="720" data-vjr-interval value="' +
-                        (j.interval_hours || 24) + '"> h</label>' +
-                    settings +
-                    '<span class="repair-job-actions">' +
-                        (j.is_running
-                            ? '<button class="btn btn--sm btn--secondary" type="button" data-vjr-stop>Stop</button>'
-                            : '<button class="btn btn--sm btn--primary" type="button" data-vjr-run>Run Now</button>') +
-                    '</span>' +
-                '</div>' +
-                '<div class="repair-job-progress" data-vjr-progress style="display:none">' +
-                    '<div class="progress-bar-container"><div class="progress-bar-fill" data-vjr-bar style="width:0%"></div></div>' +
-                    '<p class="progress-details-label" data-vjr-phase></p>' +
-                '</div>' +
-            '</div>';
+            '</div>' +
+            settingsHtml +
+        '</div>';
     }
 
-    function fillJobFilter() {
+    function fillJobFilter(jobs) {
         var sel = $('video-repair-findings-job-filter');
-        if (!sel) return;
-        var cur = sel.value;
-        sel.innerHTML = '<option value="">All Jobs</option>' + state.jobs.map(function (j) {
-            return '<option value="' + esc(j.job_id) + '">' + esc(j.display_name) + '</option>';
-        }).join('');
-        sel.value = cur;
+        if (!sel || sel.options.length > 1) return;
+        jobs.forEach(function (job) {
+            var opt = document.createElement('option');
+            opt.value = job.job_id;
+            opt.textContent = job.display_name;
+            sel.appendChild(opt);
+        });
     }
 
-    // ── live progress (socket 'video:repair:progress' via core.js) ──────────
+    function saveJobSettings(jobId) {
+        var panel = $('video-repair-settings-' + jobId);
+        if (!panel) return;
+        var body = { settings: {} };
+        panel.querySelectorAll('.repair-setting-input').forEach(function (el) {
+            var key = el.getAttribute('data-key');
+            var val;
+            if (el.type === 'checkbox') val = el.checked;
+            else if (el.type === 'number') val = parseFloat(el.value) || 0;
+            else val = el.value === 'true' ? true : el.value === 'false' ? false : el.value;
+            if (key === '_interval_hours') body.interval_hours = parseInt(el.value, 10) || 24;
+            else body.settings[key] = val;
+        });
+        jsend(API + '/jobs/' + jobId + '/settings', body, 'PUT').then(function (r) {
+            toast(r.ok ? 'Settings saved' : 'Could not save settings', r.ok ? 'success' : 'error');
+            if (r.ok) loadJobs();
+        });
+    }
+
+    // ── live progress (music's updateRepairJobProgressFromData, scoped) ──────
     function updateProgress(data) {
-        if (!data) return;
-        var running = false;
+        if (!data || !root()) return;
         Object.keys(data).forEach(function (jobId) {
             var st = data[jobId];
-            if (st.status === 'running') running = true;
-            var card = document.querySelector('[data-vjr-job="' + jobId + '"]');
+            var card = root().querySelector('.repair-job-card[data-job-id="' + jobId + '"]');
             if (!card) return;
-            var dot = card.querySelector('.repair-job-dot');
-            if (dot) dot.classList.toggle('repair-job-dot--on', st.status === 'running');
-            var panel = card.querySelector('[data-vjr-progress]');
-            if (!panel) return;
+
+            var statusDot = card.querySelector('.repair-job-status');
+            if (statusDot) {
+                statusDot.className = 'repair-job-status ' +
+                    (st.status === 'running' ? 'running' : 'enabled');
+            }
+            var firstBadge = card.querySelector('.repair-flow-badge.scan');
+            if (firstBadge) {
+                if (st.status === 'running') firstBadge.innerHTML = '&#9654; Running';
+                else if (st.status === 'finished') firstBadge.innerHTML = '&#10003; Complete';
+                else if (st.status === 'error') firstBadge.innerHTML = '&#10007; Error';
+                else if (st.status === 'cancelled') firstBadge.innerHTML = 'Stopped';
+            }
+            card.classList.toggle('running', st.status === 'running');
+            card.classList.remove('disabled');
+
+            var panel = card.querySelector('.repair-job-progress');
+            if (!panel) {
+                panel = document.createElement('div');
+                panel.className = 'repair-job-progress';
+                panel.innerHTML =
+                    '<div class="repair-progress-bar-wrap"><div class="repair-progress-bar" style="width:0%"></div></div>' +
+                    '<div class="repair-progress-phase"></div>' +
+                    '<div class="repair-progress-log"></div>';
+                card.appendChild(panel);
+            }
+            panel.classList.add('visible');
+            panel.classList.toggle('finished', st.status === 'finished');
+            panel.classList.toggle('error', st.status === 'error');
             if (st.status === 'running') {
-                panel.style.display = '';
-                var bar = panel.querySelector('[data-vjr-bar]');
-                if (bar) bar.style.width = (st.progress || 0) + '%';
-                var ph = panel.querySelector('[data-vjr-phase]');
-                if (ph) {
-                    ph.textContent = (st.phase || '') +
-                        (st.total ? ' · ' + st.processed + '/' + st.total : '') +
-                        (st.current_item ? ' · ' + st.current_item : '');
+                panel.classList.remove('finished', 'error');
+                if (hideTimers[jobId]) { clearTimeout(hideTimers[jobId]); delete hideTimers[jobId]; }
+                if (logCounts[jobId] > 0 && st.log && st.log.length < logCounts[jobId]) {
+                    var el = panel.querySelector('.repair-progress-log');
+                    if (el) el.innerHTML = '';
+                    logCounts[jobId] = 0;
                 }
-            } else if (panel.style.display !== 'none') {
-                panel.style.display = 'none';
-                loadJobs();            // repaint the finished card (last-run line)
-                loadStatus();          // pending badge may have grown
-                if (state.tab === 'findings') loadFindings();
+            }
+            var bar = panel.querySelector('.repair-progress-bar');
+            if (bar) bar.style.width = (st.progress || 0) + '%';
+            var phaseEl = panel.querySelector('.repair-progress-phase');
+            if (phaseEl && st.phase) {
+                phaseEl.textContent = st.phase +
+                    (st.total ? ' — ' + st.processed + '/' + st.total : '') +
+                    (st.current_item ? ' · ' + st.current_item : '');
+            }
+            var logEl = panel.querySelector('.repair-progress-log');
+            if (logEl && st.log) {
+                var seen = logCounts[jobId] || 0;
+                st.log.slice(seen).forEach(function (line) {
+                    var div = document.createElement('div');
+                    div.className = 'repair-log-line ' + (line.type || 'info');
+                    div.textContent = line.text || '';
+                    logEl.appendChild(div);
+                });
+                logCounts[jobId] = st.log.length;
+                logEl.scrollTop = logEl.scrollHeight;
+            }
+            if (st.status !== 'running' && !hideTimers[jobId]) {
+                loadStatus();   // the pending badge may have grown
+                hideTimers[jobId] = setTimeout(function () {
+                    panel.classList.remove('visible');
+                    card.classList.remove('running');
+                    delete hideTimers[jobId];
+                    delete logCounts[jobId];
+                    loadJobs();
+                }, 30000);
             }
         });
-        return running;
     }
     window.updateVideoRepairProgressFromData = updateProgress;
 
-    // ── findings ─────────────────────────────────────────────────────────────
+    // ── findings (the music card DOM, verbatim) ──────────────────────────────
     function filters() {
         return {
             job_id: ($('video-repair-findings-job-filter') || {}).value || '',
@@ -187,58 +319,75 @@
     }
 
     function loadFindings() {
+        var container = $('video-repair-findings-list');
+        if (!container) return;
         var f = filters();
-        var q = new URLSearchParams({ page: state.page, limit: 25 });
+        var q = new URLSearchParams({ page: state.page + 1, limit: PAGE_SIZE });
         if (f.job_id) q.set('job_id', f.job_id);
         if (f.severity) q.set('severity', f.severity);
         if (f.status) q.set('status', f.status);
-        jget(API + '/findings?' + q.toString()).then(function (d) {
-            var host = $('video-repair-findings-list');
-            if (!host || !d) return;
+        jget(API + '/findings?' + q.toString()).then(function (data) {
+            if (!data) { container.innerHTML = '<div class="repair-empty">Error loading findings</div>'; return; }
             state.selected = {};
             paintBulk();
             var cb = $('video-repair-select-all-cb');
             if (cb) cb.checked = false;
-            host.innerHTML = (d.items || []).map(findingCardHTML).join('') ||
-                '<div class="repair-loading">Nothing here — run a job from the Jobs tab.</div>';
-            paginate(d);
+            var items = data.items || [];
+            if (!items.length) {
+                container.innerHTML = '<div class="repair-empty-state">' +
+                    '<div class="repair-empty-icon">✨</div>' +
+                    '<div class="repair-empty-title">No Findings</div>' +
+                    '<div class="repair-empty-text">Run a job from the Jobs tab — anything it finds lands here for review.</div></div>';
+            } else {
+                container.innerHTML = items.map(findingCardHTML).join('');
+            }
+            renderPagination(data.total || 0, state.page);
         });
         jget(API + '/findings/counts').then(function (c) { if (c) badge(c.pending); });
     }
 
-    function sevIcon(sev) {
-        return sev === 'critical' ? '🔴' : sev === 'warning' ? '🟠' : '🔵';
-    }
-
     function findingCardHTML(f) {
-        var t = TYPES[f.finding_type] || { label: f.finding_type, fixText: 'Approve' };
-        var pending = f.status === 'pending';
-        var statusBadge = pending ? '' :
-            '<span class="repair-finding-status repair-finding-status--' + esc(f.status) + '">' +
-                esc(f.user_action || f.status) + '</span>';
-        return '' +
-            '<div class="repair-finding-card" data-vjr-finding="' + f.id + '">' +
-                '<div class="repair-finding-row">' +
-                    (pending ? '<input type="checkbox" class="repair-finding-cb" data-vjr-check>' : '') +
-                    '<span class="repair-finding-sev" title="' + esc(f.severity) + '">' +
-                        sevIcon(f.severity) + '</span>' +
-                    '<div class="repair-finding-main">' +
-                        '<div class="repair-finding-title">' + esc(f.title) +
-                            ' <span class="repair-finding-type">' + esc(t.label) + '</span>' +
-                            statusBadge + '</div>' +
-                        (f.description ? '<div class="repair-finding-desc">' + esc(f.description) + '</div>' : '') +
-                    '</div>' +
-                    '<span class="repair-finding-actions">' +
-                        (pending ? '<button class="btn btn--sm btn--primary" type="button" data-vjr-fix>' +
-                            esc(t.fixText) + '</button>' +
-                            '<button class="btn btn--sm btn--secondary" type="button" data-vjr-dismiss title="Dismiss">×</button>'
-                            : '') +
-                        '<button class="btn btn--sm btn--secondary" type="button" data-vjr-expand title="Details">▾</button>' +
-                    '</span>' +
+        var icon = SEVERITY_ICONS[f.severity] || 'ℹ️';
+        var typeLabel = TYPE_LABELS[f.finding_type] || f.finding_type.replace(/_/g, ' ');
+        var fixLabel = FIXABLE_TYPES[f.finding_type];
+        var statusBadge = '';
+        if (f.status !== 'pending') {
+            var actionText = ACTION_LABELS[f.user_action] || f.user_action || f.status;
+            statusBadge = '<span class="repair-finding-status-badge ' + esc(f.status) + '">' +
+                esc(actionText) + '</span>';
+        }
+        return '<div class="repair-finding-card ' + esc(f.severity) + '" data-id="' + f.id + '">' +
+            '<div class="repair-finding-main" data-vjr-expandrow>' +
+                '<div class="repair-finding-select" data-vjr-noexpand>' +
+                    (f.status === 'pending' ? '<input type="checkbox" data-vjr-check>' : '') +
                 '</div>' +
-                '<div class="repair-finding-detail" data-vjr-detail style="display:none">' +
-                    detailHTML(f) + '</div>' +
-            '</div>';
+                '<div class="repair-finding-content">' +
+                    '<div class="repair-finding-title">' +
+                        '<span class="repair-finding-icon">' + icon + '</span>' +
+                        esc(f.title) +
+                        '<span class="repair-finding-type-badge">' + esc(typeLabel) + '</span>' +
+                        statusBadge +
+                    '</div>' +
+                    '<div class="repair-finding-desc">' + esc(f.description || '') + '</div>' +
+                    '<div class="repair-finding-meta">' +
+                        '<span>' + esc(f.job_id.replace(/_/g, ' ')) + '</span>' +
+                        '<span>&middot;</span><span>' + esc(f.entity_type || 'item') + '</span>' +
+                        '<span>&middot;</span><span>' + esc(age(f.created_at)) + '</span>' +
+                    '</div>' +
+                '</div>' +
+                '<div class="repair-finding-actions" data-vjr-noexpand>' +
+                    (f.status === 'pending'
+                        ? (fixLabel ? '<button class="repair-finding-btn fix" type="button" data-vjr-fix title="' +
+                              esc(fixLabel) + '">' + esc(fixLabel) + '</button>' : '') +
+                          '<button class="repair-finding-btn dismiss" type="button" data-vjr-dismiss title="Dismiss">&times;</button>'
+                        : '') +
+                    '<button class="repair-finding-expand-btn" type="button" data-vjr-expand title="Details">&#9660;</button>' +
+                '</div>' +
+            '</div>' +
+            '<div class="repair-finding-detail" id="video-repair-detail-' + f.id + '">' +
+                '<div class="repair-finding-detail-inner">' + detailHTML(f) + '</div>' +
+            '</div>' +
+        '</div>';
     }
 
     function detailHTML(f) {
@@ -258,16 +407,37 @@
         return '<pre class="repair-finding-json">' + esc(JSON.stringify(d, null, 2)) + '</pre>';
     }
 
-    function paginate(d) {
-        var host = $('video-repair-findings-pagination');
-        if (!host) return;
-        var pages = Math.max(1, Math.ceil((d.total || 0) / (d.limit || 25)));
-        host.innerHTML = pages <= 1 ? '' :
-            '<button class="pagination-btn" type="button" data-vjr-page="-1"' +
-                (d.page <= 1 ? ' disabled' : '') + '>←</button>' +
-            '<span class="pagination-info">Page ' + d.page + ' of ' + pages + '</span>' +
-            '<button class="pagination-btn" type="button" data-vjr-page="1"' +
-                (d.page >= pages ? ' disabled' : '') + '>→</button>';
+    function renderPagination(total, currentPage) {
+        var container = $('video-repair-findings-pagination');
+        if (!container) return;
+        var totalPages = Math.ceil(total / PAGE_SIZE);
+        if (totalPages <= 1) { container.innerHTML = ''; return; }
+        var html = '';
+        if (currentPage > 0) {
+            html += '<button class="repair-page-btn" type="button" data-vjr-goto="' +
+                (currentPage - 1) + '">&larr;</button>';
+        }
+        var startPage = Math.max(0, currentPage - 3);
+        var endPage = Math.min(totalPages, startPage + 7);
+        if (endPage - startPage < 7) startPage = Math.max(0, endPage - 7);
+        if (startPage > 0) {
+            html += '<button class="repair-page-btn" type="button" data-vjr-goto="0">1</button>';
+            if (startPage > 1) html += '<span class="repair-page-info">...</span>';
+        }
+        for (var p = startPage; p < endPage; p++) {
+            html += '<button class="repair-page-btn' + (p === currentPage ? ' active' : '') +
+                '" type="button" data-vjr-goto="' + p + '">' + (p + 1) + '</button>';
+        }
+        if (endPage < totalPages) {
+            if (endPage < totalPages - 1) html += '<span class="repair-page-info">...</span>';
+            html += '<button class="repair-page-btn" type="button" data-vjr-goto="' +
+                (totalPages - 1) + '">' + totalPages + '</button>';
+        }
+        if (currentPage < totalPages - 1) {
+            html += '<button class="repair-page-btn" type="button" data-vjr-goto="' +
+                (currentPage + 1) + '">&rarr;</button>';
+        }
+        container.innerHTML = html;
     }
 
     function paintBulk() {
@@ -278,93 +448,169 @@
         if (c) c.textContent = n + ' selected';
     }
 
-    // ── actions ──────────────────────────────────────────────────────────────
-    function fixFinding(id, card) {
-        jpost(API + '/findings/' + id + '/fix').then(function (r) {
-            if (r.ok && r.body.success) {
-                toast(r.body.message || 'Approved', 'success');
-                loadFindings();
-                loadStatus();
-            } else {
-                toast((r.body && r.body.error) || 'Fix failed', 'error');
+    // ── history (the music entry DOM, verbatim) ──────────────────────────────
+    function loadHistory() {
+        var container = $('video-repair-history-list');
+        if (!container) return;
+        jget(API + '/history?limit=50').then(function (data) {
+            if (!data) { container.innerHTML = '<div class="repair-empty">Error loading history</div>'; return; }
+            var runs = data.runs || [];
+            if (!runs.length) {
+                container.innerHTML = '<div class="repair-empty-state">' +
+                    '<div class="repair-empty-icon">&#128337;</div>' +
+                    '<div class="repair-empty-title">No History Yet</div>' +
+                    '<div class="repair-empty-text">Job run history will appear here after maintenance jobs complete their first scan.</div></div>';
+                return;
             }
+            var names = {};
+            state.jobs.forEach(function (j) { names[j.job_id] = j.display_name; });
+            container.innerHTML = runs.map(function (run) {
+                var duration = run.duration_seconds ? run.duration_seconds.toFixed(1) + 's' : '-';
+                var statusClass = run.status === 'completed' ? 'success' :
+                    run.status === 'failed' ? 'error' : 'running';
+                var stats = ['<span class="repair-history-stat"><strong>' +
+                    (run.items_scanned || 0).toLocaleString() + '</strong> scanned</span>'];
+                if (run.findings_created) {
+                    stats.push('<span class="repair-history-stat findings"><strong>' +
+                        run.findings_created + '</strong> findings</span>');
+                }
+                if (run.auto_fixed) {
+                    stats.push('<span class="repair-history-stat fixed"><strong>' +
+                        run.auto_fixed + '</strong> fixed</span>');
+                }
+                if (run.errors) {
+                    stats.push('<span class="repair-history-stat errors"><strong>' +
+                        run.errors + '</strong> errors</span>');
+                }
+                var startTime = run.started_at ? new Date(run.started_at + 'Z').toLocaleString() : '-';
+                var endTime = run.finished_at ? new Date(run.finished_at + 'Z').toLocaleString() : 'In progress';
+                return '<div class="repair-history-entry">' +
+                    '<div class="repair-history-header">' +
+                        '<div class="repair-history-dot ' + statusClass + '"></div>' +
+                        '<span class="repair-history-name">' + esc(names[run.job_id] || run.job_id) + '</span>' +
+                        '<span class="repair-history-status ' + statusClass + '">' + esc(run.status) + '</span>' +
+                        '<span class="repair-history-duration">' + duration + '</span>' +
+                    '</div>' +
+                    '<div class="repair-history-stats">' + stats.join('') + '</div>' +
+                    '<div class="repair-history-meta">' + esc(age(run.started_at)) + ' &middot; ' +
+                        esc(startTime) + ' &rarr; ' + esc(endTime) + '</div>' +
+                '</div>';
+            }).join('');
         });
     }
 
+    // ── wiring ───────────────────────────────────────────────────────────────
     function wire() {
-        var root = document.querySelector('[data-video-repair]');
-        if (!root || root.getAttribute('data-wired')) return;
-        root.setAttribute('data-wired', '1');
+        var r = root();
+        if (!r || r.getAttribute('data-wired')) return;
+        r.setAttribute('data-wired', '1');
 
         var master = $('video-repair-master-toggle');
         if (master) {
             master.addEventListener('change', function () {
-                jpost(API + '/toggle', { enabled: master.checked }).then(function (r) {
+                jsend(API + '/toggle', { enabled: master.checked }).then(function (res) {
                     var l = $('video-repair-master-label');
-                    if (l && r.ok) l.textContent = r.body.enabled ? 'Enabled' : 'Disabled';
+                    if (l && res.ok) l.textContent = res.body.enabled ? 'Enabled' : 'Disabled';
                 });
             });
         }
-        root.addEventListener('click', function (e) {
+
+        r.addEventListener('click', function (e) {
             var tab = e.target.closest('[data-video-repair-tab]');
             if (tab) { switchTab(tab.getAttribute('data-video-repair-tab')); return; }
 
-            var jobCard = e.target.closest('[data-vjr-job]');
+            var save = e.target.closest('[data-vjr-save]');
+            if (save) { saveJobSettings(save.getAttribute('data-vjr-save')); return; }
+
+            var jobCard = e.target.closest('.repair-job-card[data-job-id]');
             if (jobCard) {
-                var jobId = jobCard.getAttribute('data-vjr-job');
+                var jobId = jobCard.getAttribute('data-job-id');
                 if (e.target.closest('[data-vjr-run]')) {
-                    jpost(API + '/jobs/' + jobId + '/run').then(function (r) {
-                        toast(r.ok ? 'Job started' : 'Could not start job', r.ok ? 'success' : 'error');
+                    jsend(API + '/jobs/' + jobId + '/run').then(function (res) {
+                        toast(res.ok ? 'Job started' : 'Could not start job', res.ok ? 'success' : 'error');
                         setTimeout(loadJobs, 400);
                     });
                     return;
                 }
                 if (e.target.closest('[data-vjr-stop]')) {
-                    jpost(API + '/jobs/' + jobId + '/stop').then(function () { setTimeout(loadJobs, 400); });
+                    jsend(API + '/jobs/' + jobId + '/stop').then(function () { setTimeout(loadJobs, 400); });
+                    return;
+                }
+                if (e.target.closest('[data-vjr-settings]')) {
+                    var panel = $('video-repair-settings-' + jobId);
+                    if (panel) panel.style.display = panel.style.display === 'none' ? '' : 'none';
+                    return;
+                }
+                if (e.target.closest('[data-vjr-help]')) {
+                    var job = state.jobs.filter(function (j) { return j.job_id === jobId; })[0];
+                    if (job) {
+                        confirmDlg({ title: job.display_name, message: job.help_text || job.description,
+                            confirmText: 'Got it', cancelText: 'Close' });
+                    }
                     return;
                 }
             }
 
-            var page = e.target.closest('[data-vjr-page]');
-            if (page && !page.disabled) {
-                state.page += parseInt(page.getAttribute('data-vjr-page'), 10);
+            var goto_ = e.target.closest('[data-vjr-goto]');
+            if (goto_) {
+                state.page = parseInt(goto_.getAttribute('data-vjr-goto'), 10) || 0;
                 loadFindings();
                 return;
             }
-            var card = e.target.closest('[data-vjr-finding]');
+
+            var card = e.target.closest('.repair-finding-card[data-id]');
             if (card) {
-                var fid = card.getAttribute('data-vjr-finding');
-                if (e.target.closest('[data-vjr-fix]')) { fixFinding(fid, card); return; }
-                if (e.target.closest('[data-vjr-dismiss]')) {
-                    jpost(API + '/findings/' + fid + '/dismiss').then(function (r) {
-                        if (r.ok) { loadFindings(); loadStatus(); }
+                var fid = card.getAttribute('data-id');
+                if (e.target.closest('[data-vjr-fix]')) {
+                    jsend(API + '/findings/' + fid + '/fix').then(function (res) {
+                        if (res.ok && res.body.success) {
+                            toast(res.body.message || 'Approved', 'success');
+                            loadFindings(); loadStatus();
+                        } else {
+                            toast((res.body && res.body.error) || 'Fix failed', 'error');
+                        }
                     });
                     return;
                 }
-                if (e.target.closest('[data-vjr-expand]')) {
-                    var det = card.querySelector('[data-vjr-detail]');
-                    if (det) det.style.display = det.style.display === 'none' ? '' : 'none';
+                if (e.target.closest('[data-vjr-dismiss]')) {
+                    jsend(API + '/findings/' + fid + '/dismiss').then(function (res) {
+                        if (res.ok) { loadFindings(); loadStatus(); }
+                    });
+                    return;
+                }
+                // Expand: the ▼ button OR anywhere on the main row (music behavior),
+                // except the checkbox / action zones.
+                if (e.target.closest('[data-vjr-expand]') ||
+                        (e.target.closest('[data-vjr-expandrow]') && !e.target.closest('[data-vjr-noexpand]'))) {
+                    var det = $('video-repair-detail-' + fid);
+                    var btn = card.querySelector('.repair-finding-expand-btn');
+                    if (det) {
+                        var open = det.classList.toggle('open');
+                        if (btn) btn.classList.toggle('open', open);
+                    }
                     return;
                 }
             }
+
             var bulk = e.target.closest('[data-video-repair-bulk]');
             if (bulk) {
                 var ids = Object.keys(state.selected).map(Number);
                 if (!ids.length) return;
                 if (bulk.getAttribute('data-video-repair-bulk') === 'fix') {
-                    jpost(API + '/findings/bulk-fix', { ids: ids }).then(function (r) {
-                        var b = r.body || {};
+                    jsend(API + '/findings/bulk-fix', { ids: ids }).then(function (res) {
+                        var b = res.body || {};
                         toast('Approved ' + (b.fixed || 0) + (b.failed ? ', ' + b.failed + ' failed' : ''),
                             b.failed ? 'warning' : 'success');
                         loadFindings(); loadStatus();
                     });
                 } else {
-                    jpost(API + '/findings/bulk', { ids: ids, action: 'dismiss' }).then(function () {
+                    jsend(API + '/findings/bulk', { ids: ids, action: 'dismiss' }).then(function () {
                         loadFindings(); loadStatus();
                     });
                 }
                 return;
             }
+
             if (e.target.closest('[data-video-repair-clear]')) {
                 var f = filters();
                 confirmDlg({
@@ -373,37 +619,26 @@
                     confirmText: 'Clear', destructive: true,
                 }).then(function (yes) {
                     if (!yes) return;
-                    jpost(API + '/findings/clear',
+                    jsend(API + '/findings/clear',
                           { job_id: f.job_id || null, status: f.status || null })
-                        .then(function (r) {
-                            toast('Cleared ' + ((r.body || {}).deleted || 0) + ' findings', 'info');
+                        .then(function (res) {
+                            toast('Cleared ' + ((res.body || {}).deleted || 0) + ' findings', 'info');
                             loadFindings(); loadStatus();
                         });
                 });
             }
         });
-        root.addEventListener('change', function (e) {
-            var jobCard = e.target.closest('[data-vjr-job]');
-            if (jobCard) {
-                var jobId = jobCard.getAttribute('data-vjr-job');
-                if (e.target.hasAttribute('data-vjr-enable')) {
-                    jpost(API + '/jobs/' + jobId + '/toggle', { enabled: e.target.checked });
-                    return;
-                }
-                if (e.target.hasAttribute('data-vjr-interval')) {
-                    jpost(API + '/jobs/' + jobId + '/settings',
-                          { interval_hours: parseInt(e.target.value, 10) || 24 }, 'PUT');
-                    return;
-                }
-                if (e.target.hasAttribute('data-vjr-setting')) {
-                    var key = e.target.getAttribute('data-vjr-setting');
-                    var raw = e.target.value;
-                    var val = raw === 'true' ? true : raw === 'false' ? false : raw;
-                    var settings = {};
-                    settings[key] = val;
-                    jpost(API + '/jobs/' + jobId + '/settings', { settings: settings }, 'PUT');
-                    return;
-                }
+
+        r.addEventListener('change', function (e) {
+            var jobCard = e.target.closest('.repair-job-card[data-job-id]');
+            if (jobCard && e.target.hasAttribute('data-vjr-enable')) {
+                var jobId = jobCard.getAttribute('data-job-id');
+                var enabled = e.target.checked;
+                jsend(API + '/jobs/' + jobId + '/toggle', { enabled: enabled });
+                jobCard.classList.toggle('disabled', !enabled);
+                var dot = jobCard.querySelector('.repair-job-status');
+                if (dot) dot.className = 'repair-job-status ' + (enabled ? 'enabled' : 'disabled');
+                return;
             }
             if (e.target.id === 'video-repair-select-all-cb') {
                 var boxes = document.querySelectorAll('#video-repair-findings-list [data-vjr-check]');
@@ -411,48 +646,26 @@
                 for (var i = 0; i < boxes.length; i++) {
                     boxes[i].checked = e.target.checked;
                     if (e.target.checked) {
-                        state.selected[boxes[i].closest('[data-vjr-finding]')
-                            .getAttribute('data-vjr-finding')] = true;
+                        state.selected[boxes[i].closest('.repair-finding-card')
+                            .getAttribute('data-id')] = true;
                     }
                 }
                 paintBulk();
                 return;
             }
             if (e.target.hasAttribute && e.target.hasAttribute('data-vjr-check')) {
-                var fid2 = e.target.closest('[data-vjr-finding]').getAttribute('data-vjr-finding');
-                if (e.target.checked) state.selected[fid2] = true;
-                else delete state.selected[fid2];
+                var fid = e.target.closest('.repair-finding-card').getAttribute('data-id');
+                if (e.target.checked) state.selected[fid] = true;
+                else delete state.selected[fid];
                 paintBulk();
                 return;
             }
             if (e.target.id === 'video-repair-findings-job-filter' ||
                     e.target.id === 'video-repair-findings-severity-filter' ||
                     e.target.id === 'video-repair-findings-status-filter') {
-                state.page = 1;
+                state.page = 0;
                 loadFindings();
             }
-        });
-    }
-
-    // ── history ──────────────────────────────────────────────────────────────
-    function loadHistory() {
-        jget(API + '/history?limit=50').then(function (d) {
-            var host = $('video-repair-history-list');
-            if (!host || !d) return;
-            var names = {};
-            state.jobs.forEach(function (j) { names[j.job_id] = j.display_name; });
-            host.innerHTML = (d.runs || []).map(function (r) {
-                return '<div class="repair-history-row">' +
-                    '<span class="repair-history-job">' + esc(names[r.job_id] || r.job_id) + '</span>' +
-                    '<span class="repair-history-when">' +
-                        esc(String(r.started_at || '').replace('T', ' ')) + '</span>' +
-                    '<span class="repair-history-stats">' + (r.items_scanned || 0) + ' scanned · ' +
-                        (r.findings_created || 0) + ' findings' +
-                        (r.errors ? ' · ' + r.errors + ' errors' : '') + '</span>' +
-                    '<span class="repair-history-dur">' +
-                        (r.duration_seconds != null ? r.duration_seconds.toFixed(1) + 's' : '…') + '</span>' +
-                '</div>';
-            }).join('') || '<div class="repair-loading">No runs yet</div>';
         });
     }
 
