@@ -174,6 +174,9 @@ def test_restart_adopts_open_client_jobs(grab_db):
                 external_job_id="nzo-run")
     record_grab(conn, "dl-lost", "usenet", title="Never Submitted",
                 context={"flow": "track"})
+    record_grab(conn, "dl-unknown", "usenet", title="Maybe Submitted",
+                context={"flow": "track"})
+    update_grab(conn, "dl-unknown", last_client_state="submission_unknown")
     record_grab(conn, "dl-bundle", "usenet", title="Bundle",
                 context={"flow": "album_bundle"})
     update_grab(conn, "dl-bundle", status=STATUS_DOWNLOADING,
@@ -196,12 +199,17 @@ def test_restart_adopts_open_client_jobs(grab_db):
     conn = grab_db()
     adopted = get_grab(conn, "dl-run")
     lost = get_grab(conn, "dl-lost")
+    unknown = get_grab(conn, "dl-unknown")
     bundle = get_grab(conn, "dl-bundle")
     conn.close()
     assert adopted["adopted"] == 1
     # submitting rows never reached the client — their NZB URL died with
     # the process; they fail visibly instead of hanging forever.
     assert lost["status"] == STATUS_FAILED
+    # A timed-out add call may have been accepted remotely. Keep it open;
+    # retrying would risk a duplicate until Category adoption resolves it.
+    assert unknown["status"] == "submitting"
+    assert unknown["last_client_state"] == "submission_unknown"
     # Bundle grabs keep their history row but are not adopted (their
     # synchronous worker is gone; Phase-5 client monitor takes over).
     assert bundle["adopted"] == 0

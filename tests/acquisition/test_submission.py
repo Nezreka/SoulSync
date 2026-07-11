@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
+from unittest.mock import patch
 
 import pytest
 
@@ -15,8 +16,10 @@ from core.acquisition.decision_engine import (
     RuntimeContext,
 )
 from core.acquisition.grabs import get_grab
+from core.acquisition.blocklist import active_blocklisted_dedupe_keys
 from core.acquisition.history import list_history_events, record_history_event
 from core.acquisition.requests import create_request, transition_request
+from core.acquisition.requests import get_request
 from core.acquisition.submission import (
     SubmissionError,
     UsenetSubmissionAdapter,
@@ -167,7 +170,72 @@ def test_client_exception_is_uncertain_and_does_not_mark_failed(conn):
     assert grab["last_client_state"] == "submission_unknown"
     assert list_history_events(
         conn, download_id=prepared.download_id)[-1].event_type == (
-            "grab_submission_uncertain")
+        "grab_submission_uncertain")
+
+
+def test_usenet_plugin_attaches_exactly_one_poller(conn):
+    from core.download_plugins.usenet import UsenetDownloadPlugin
+
+    store = CandidateStore()
+    prepared = _prepared(conn, store)
+    submission = type("Submission", (), {
+        "source": "usenet",
+        "external_job_id": "nzo-monitor",
+    })()
+    plugin = UsenetDownloadPlugin()
+
+    with patch("core.download_plugins.usenet.threading.Thread") as thread_cls:
+        plugin.monitor_acquisition_submission(prepared, submission)
+        plugin.monitor_acquisition_submission(prepared, submission)
+
+    assert plugin.active_downloads[prepared.download_id]["job_id"] == "nzo-monitor"
+    assert thread_cls.call_count == 1
+    assert thread_cls.call_args.kwargs["target"] == plugin._poll_job
+    assert thread_cls.call_args.kwargs["args"] == (
+        prepared.download_id, "nzo-monitor")
+
+
+def test_plugin_candidate_failure_updates_request_history_and_blocklist(tmp_path):
+    from core.download_plugins.usenet import UsenetDownloadPlugin
+
+    path = str(tmp_path / "acquisition.db")
+    seed = sqlite3.connect(path)
+    seed.row_factory = sqlite3.Row
+    ensure_acquisition_schema(seed)
+    store = CandidateStore()
+    prepared = _prepared(seed, store)
+    submission = type("Submission", (), {
+        "source": "usenet",
+        "external_job_id": "nzo-failed",
+        "client": "FakeSAB",
+        "category": "soulsync",
+    })()
+    record_external_submission(seed, prepared, submission)
+    seed.commit()
+    seed.close()
+
+    def connect():
+        connection = sqlite3.connect(path)
+        connection.row_factory = sqlite3.Row
+        return connection
+
+    plugin = UsenetDownloadPlugin()
+    with patch(
+        "core.download_plugins.usenet._grabs_conn", side_effect=connect,
+    ):
+        plugin._mark_error(
+            prepared.download_id,
+            "Client reported a bad NZB",
+            failure_kind="candidate",
+        )
+
+    check = connect()
+    assert get_request(check, prepared.request.id).status == "failed"
+    assert prepared.candidate.dedupe_key in active_blocklisted_dedupe_keys(check)
+    assert [event.event_type for event in list_history_events(
+        check, download_id=prepared.download_id)][-2:] == [
+            "grab_failed", "candidate_blocklisted"]
+    check.close()
 
 
 def test_history_schema_migrates_closed_event_enum_without_losing_rows():

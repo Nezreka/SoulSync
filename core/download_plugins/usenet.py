@@ -125,6 +125,103 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
         finally:
             conn.close()
 
+    @staticmethod
+    def _apply_terminal_grab(
+        conn, download_id: str, *, completed: bool,
+        error: Optional[str] = None, output_path: Optional[str] = None,
+        failure_kind: Optional[str] = None,
+    ) -> None:
+        """Use the full acquisition lifecycle for request-bound grabs."""
+        from core.acquisition.grabs import (
+            STATUS_COMPLETED,
+            STATUS_FAILED,
+            get_grab,
+            update_grab,
+        )
+
+        grab = get_grab(conn, download_id)
+        if grab and grab.get("acquisition_request_id"):
+            from core.acquisition.workflow import record_grab_outcome
+            record_grab_outcome(
+                conn,
+                download_id,
+                completed=completed,
+                error=error,
+                output_path=output_path,
+                failure_kind=failure_kind,
+            )
+            return
+        update_grab(
+            conn,
+            download_id,
+            status=STATUS_COMPLETED if completed else STATUS_FAILED,
+            error=error,
+            output_path=output_path,
+        )
+
+    def _persist_terminal_grab(
+        self, download_id: str, *, completed: bool,
+        error: Optional[str] = None, output_path: Optional[str] = None,
+        failure_kind: Optional[str] = None,
+    ) -> None:
+        conn = _grabs_conn()
+        if conn is None:
+            return
+        try:
+            self._apply_terminal_grab(
+                conn,
+                download_id,
+                completed=completed,
+                error=error,
+                output_path=output_path,
+                failure_kind=failure_kind,
+            )
+            conn.commit()
+        except Exception as exc:  # noqa: BLE001
+            conn.rollback()
+            logger.warning(
+                "terminal acquisition update failed (%s): %s",
+                download_id[:8], exc,
+            )
+        finally:
+            conn.close()
+
+    def monitor_acquisition_submission(self, prepared, submission) -> None:
+        """Attach the existing poller to an already-submitted client job."""
+        if prepared.candidate.source != "usenet" or submission.source != "usenet":
+            raise ValueError("Usenet monitor received a non-Usenet submission")
+        if not submission.external_job_id:
+            raise ValueError("Usenet monitor requires an external job id")
+        download_id = prepared.download_id
+        with self._lock:
+            existing = self.active_downloads.get(download_id)
+            if existing is not None:
+                if existing.get("job_id") != submission.external_job_id:
+                    raise ValueError(
+                        "download id already monitors a different Usenet job")
+                return
+            self.active_downloads[download_id] = {
+                "id": download_id,
+                "filename": f"{prepared.server_ref}{_FILENAME_SEP}{prepared.candidate.title}",
+                "username": "usenet",
+                "display_name": prepared.candidate.title,
+                "state": "Queued",
+                "progress": 0.0,
+                "size": prepared.candidate.size_bytes or 0,
+                "transferred": 0,
+                "speed": 0,
+                "file_path": None,
+                "audio_files": [],
+                "job_id": submission.external_job_id,
+                "error": None,
+            }
+        threading.Thread(
+            target=self._poll_job,
+            args=(download_id, submission.external_job_id),
+            daemon=True,
+            name=f"usenet-acq-{download_id[:8]}",
+        ).start()
+
     def _restore_grabs_once(self) -> None:
         """Re-attach to client jobs that survived a SoulSync restart.
 
@@ -145,7 +242,6 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
         try:
             from core.acquisition.grabs import (
                 STATUS_CANCEL_PENDING,
-                STATUS_FAILED,
                 ensure_acquisition_grabs_schema,
                 open_grabs,
                 update_grab,
@@ -158,8 +254,20 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
                 download_id = grab["download_id"]
                 job_id = grab.get("external_job_id")
                 if not job_id:
-                    update_grab(conn, download_id, status=STATUS_FAILED,
-                                error="Lost before client submission (restart)")
+                    if grab.get("last_client_state") == "submission_unknown":
+                        logger.warning(
+                            "Usenet grab %s has an uncertain client submission; "
+                            "leaving it open to prevent a duplicate retry",
+                            download_id[:8],
+                        )
+                        continue
+                    self._apply_terminal_grab(
+                        conn,
+                        download_id,
+                        completed=False,
+                        error="Lost before client submission (restart)",
+                        failure_kind="runtime",
+                    )
                     continue
                 with self._lock:
                     if download_id in self.active_downloads:
@@ -441,6 +549,7 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
                     self._mark_error(
                         download_id,
                         f"Usenet job disappeared from client (no status after {misses.threshold} polls)",
+                        failure_kind="client",
                     )
                     return
                 time.sleep(_POLL_INTERVAL_SECONDS)
@@ -503,7 +612,11 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
                 time.sleep(_POLL_INTERVAL_SECONDS)
                 continue
             if status.state == 'failed':
-                self._mark_error(download_id, status.error or "Usenet client reported failure")
+                self._mark_error(
+                    download_id,
+                    status.error or "Usenet client reported failure",
+                    failure_kind="candidate",
+                )
                 return
             if status.state == 'error':
                 logger.warning(
@@ -539,7 +652,11 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
             return
         if not audio_files:
             suffix = f" (resolved: {local_path})" if local_path != save_path else ""
-            self._mark_error(download_id, f"No audio files found in {save_path}{suffix}")
+            self._mark_error(
+                download_id,
+                f"No audio files found in {save_path}{suffix}",
+                failure_kind="candidate",
+            )
             return
         primary = audio_files[0]
         with self._lock:
@@ -549,21 +666,26 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
                 row['progress'] = 100.0
                 row['file_path'] = str(primary)
                 row['audio_files'] = [str(path) for path in audio_files]
-        from core.acquisition.grabs import STATUS_COMPLETED
-        self._update_grab(download_id, status=STATUS_COMPLETED,
-                          output_path=str(local_path))
+        self._persist_terminal_grab(
+            download_id, completed=True, output_path=str(local_path))
         logger.info("Usenet download complete: %s -> %s (%d audio files)",
                     download_id[:8], primary.name, len(audio_files))
 
-    def _mark_error(self, download_id: str, message: str) -> None:
+    def _mark_error(
+        self, download_id: str, message: str, *, failure_kind: str = "runtime",
+    ) -> None:
         logger.error("Usenet download %s failed: %s", download_id[:8], message)
         with self._lock:
             row = self.active_downloads.get(download_id)
             if row is not None:
                 row['state'] = 'Completed, Errored'
                 row['error'] = message
-        from core.acquisition.grabs import STATUS_FAILED
-        self._update_grab(download_id, status=STATUS_FAILED, error=message)
+        self._persist_terminal_grab(
+            download_id,
+            completed=False,
+            error=message,
+            failure_kind=failure_kind,
+        )
 
     # ------------------------------------------------------------------
     # Status / lifecycle

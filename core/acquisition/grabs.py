@@ -194,6 +194,41 @@ def get_grab(conn: Any, download_id: str) -> Optional[Dict[str, Any]]:
     return grab
 
 
+def find_request_candidate_grab(
+    conn: Any, request_id: str, candidate_id: str,
+) -> Optional[Dict[str, Any]]:
+    """Find the latest persisted attempt for one exact request/candidate."""
+    ensure_acquisition_grabs_schema(conn)
+    row = conn.execute(
+        """SELECT download_id FROM acquisition_grabs
+            WHERE acquisition_request_id=? AND release_candidate_id=?
+            ORDER BY id DESC LIMIT 1""",
+        (str(request_id), str(candidate_id)),
+    ).fetchone()
+    return get_grab(conn, row[0]) if row is not None else None
+
+
+def public_grab(grab: Dict[str, Any]) -> Dict[str, Any]:
+    """Browser-safe business state without context, paths, or client job ids."""
+    return {
+        "download_id": grab.get("download_id"),
+        "request_id": grab.get("acquisition_request_id"),
+        "candidate_id": grab.get("release_candidate_id"),
+        "decision_run_id": grab.get("decision_run_id"),
+        "source": grab.get("source"),
+        "client": grab.get("client"),
+        "category": grab.get("category"),
+        "title": grab.get("title"),
+        "status": grab.get("status"),
+        "last_client_state": grab.get("last_client_state"),
+        "error": grab.get("error"),
+        "has_output_path": bool(grab.get("output_path")),
+        "adopted": bool(grab.get("adopted")),
+        "created_at": grab.get("created_at"),
+        "updated_at": grab.get("updated_at"),
+    }
+
+
 def open_grabs(conn: Any, source: str) -> List[Dict[str, Any]]:
     """Non-terminal grabs of one source — what a restart has to reconcile."""
     marks = ",".join("?" for _ in OPEN_STATUSES)
@@ -217,8 +252,10 @@ __all__ = [
     "STATUS_SUBMITTING",
     "TERMINAL_STATUSES",
     "ensure_acquisition_grabs_schema",
+    "find_request_candidate_grab",
     "get_grab",
     "open_grabs",
+    "public_grab",
     "record_grab",
     "update_grab",
 ]

@@ -95,7 +95,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                                profile_id_getter: Optional[Callable[[], int]] = None,
                                acquisition_runtime_getter: Optional[Callable[..., Any]] = None,
                                acquisition_search_adapters_getter: Optional[Callable[..., Any]] = None,
-                               acquisition_async_runner: Optional[Callable[..., Any]] = None) -> None:
+                               acquisition_async_runner: Optional[Callable[..., Any]] = None,
+                               acquisition_submission_adapter_getter: Optional[Callable[..., Any]] = None) -> None:
     """Attach the Library v2 routes to ``app``.
 
     ``get_database`` → shared ``MusicDatabase``; ``config_get(key, default)`` reads
@@ -143,6 +144,14 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             return acquisition_async_runner(coro)
         from utils.async_helpers import run_async
         return run_async(coro)
+
+    def _acquisition_submission_adapter(source: str):
+        if acquisition_submission_adapter_getter:
+            return acquisition_submission_adapter_getter(source)
+        if source == "usenet":
+            from core.acquisition.submission import UsenetSubmissionAdapter
+            return UsenetSubmissionAdapter()
+        return None
 
     # -- read endpoints -------------------------------------------------------
 
@@ -388,6 +397,199 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         except ValueError as exc:
             conn.rollback()
             return jsonify({"success": False, "error": str(exc)}), 400
+        finally:
+            conn.close()
+
+    @app.route(
+        "/api/library/v2/acquisition/requests/<request_id>/grab",
+        methods=["POST"],
+    )
+    def lib2_grab_acquisition_candidate(request_id):
+        """Persist intent first, then submit to the external client."""
+        guard = _guard()
+        if guard:
+            return guard
+        body = request.get_json(silent=True) or {}
+        candidate_id = str(body.get("candidate_id") or "").strip()
+        if not candidate_id:
+            return jsonify({"success": False, "error": "candidate_id is required"}), 400
+        force = body.get("force", False)
+        if not isinstance(force, bool):
+            return jsonify({"success": False, "error": "force must be a boolean"}), 400
+
+        prepare_conn = _conn()
+        try:
+            import uuid
+
+            from core.acquisition.catalog import resolve_request_context
+            from core.acquisition.decision_engine import RuntimeContext
+            from core.acquisition.grabs import (
+                find_request_candidate_grab,
+                public_grab,
+            )
+            from core.acquisition.requests import get_request
+            from core.acquisition.workflow import prepare_candidate_grab
+            acquisition_request = get_request(prepare_conn, request_id)
+            if acquisition_request is None or acquisition_request.profile_id != ADMIN_PROFILE_ID:
+                return jsonify({"success": False, "error": "Request not found"}), 404
+            existing = find_request_candidate_grab(
+                prepare_conn, request_id, candidate_id)
+            if existing is not None:
+                return jsonify({
+                    "success": True,
+                    "created": False,
+                    "grab": public_grab(existing),
+                })
+            catalog, policy = resolve_request_context(
+                prepare_conn, acquisition_request)
+            runtime = (
+                acquisition_runtime_getter(acquisition_request)
+                if acquisition_runtime_getter else RuntimeContext()
+            )
+            if not isinstance(runtime, RuntimeContext):
+                raise ValueError("acquisition runtime provider returned an invalid context")
+            prepared = prepare_candidate_grab(
+                prepare_conn,
+                request_id,
+                candidate_id,
+                download_id="acq-" + str(uuid.uuid4()),
+                catalog=catalog,
+                runtime=runtime,
+                policy=policy,
+                profile_id=ADMIN_PROFILE_ID,
+                force=force,
+                is_admin=True,
+            )
+            prepare_conn.commit()
+        except ValueError as exc:
+            prepare_conn.rollback()
+            return jsonify({"success": False, "error": str(exc)}), 409
+        finally:
+            prepare_conn.close()
+
+        from core.acquisition.submission import (
+            SubmissionError,
+            record_external_submission,
+            record_uncertain_submission,
+        )
+        adapter = _acquisition_submission_adapter(prepared.candidate.source)
+        if adapter is None or str(getattr(adapter, "source", "")) != prepared.candidate.source:
+            submission_error = SubmissionError(
+                "No submission adapter is available for this candidate source")
+        else:
+            try:
+                submission = _run_acquisition_async(adapter.submit(prepared))
+                submission_error = None
+            except SubmissionError as exc:
+                submission_error = exc
+            except Exception as exc:  # noqa: BLE001 - accepted remotely is possible
+                from core.acquisition.search_contract import safe_external_error
+                submission_error = SubmissionError(
+                    f"External submission outcome is unknown: {safe_external_error(exc)}",
+                    uncertain=True,
+                )
+
+        if submission_error is not None:
+            outcome_conn = _conn()
+            try:
+                from core.acquisition.grabs import get_grab, public_grab
+                if submission_error.uncertain:
+                    grab = record_uncertain_submission(
+                        outcome_conn, prepared, str(submission_error))
+                    outcome_conn.commit()
+                    return jsonify({
+                        "success": True,
+                        "created": True,
+                        "submission_status": "unknown",
+                        "grab": public_grab(grab),
+                    }), 202
+                from core.acquisition.workflow import record_grab_outcome
+                record_grab_outcome(
+                    outcome_conn,
+                    prepared.download_id,
+                    completed=False,
+                    error=str(submission_error),
+                    failure_kind=submission_error.failure_kind,
+                )
+                grab = get_grab(outcome_conn, prepared.download_id)
+                outcome_conn.commit()
+                return jsonify({
+                    "success": False,
+                    "error": str(submission_error),
+                    "created": True,
+                    "submission_status": "failed",
+                    "grab": public_grab(grab),
+                }), 502
+            except Exception:
+                outcome_conn.rollback()
+                raise
+            finally:
+                outcome_conn.close()
+
+        submit_conn = _conn()
+        try:
+            from core.acquisition.grabs import public_grab
+            grab = record_external_submission(
+                submit_conn, prepared, submission)
+            submit_conn.commit()
+        except Exception as exc:  # noqa: BLE001 - external job may already exist
+            submit_conn.rollback()
+            from core.acquisition.search_contract import safe_external_error
+            safe_error = safe_external_error(exc)
+            recovery_conn = _conn()
+            try:
+                grab = record_uncertain_submission(
+                    recovery_conn,
+                    prepared,
+                    f"External job accepted but correlation persistence failed: {safe_error}",
+                )
+                recovery_conn.commit()
+            finally:
+                recovery_conn.close()
+            return jsonify({
+                "success": True,
+                "created": True,
+                "submission_status": "unknown",
+                "grab": public_grab(grab),
+            }), 202
+        finally:
+            submit_conn.close()
+
+        monitor_attached = True
+        try:
+            adapter.start_monitor(prepared, submission)
+        except Exception as exc:  # noqa: BLE001 - persisted job is restart-adoptable
+            monitor_attached = False
+            logger.warning(
+                "Acquisition monitor attach failed for %s: %s",
+                prepared.download_id,
+                exc,
+            )
+        return jsonify({
+            "success": True,
+            "created": True,
+            "submission_status": "queued",
+            "monitor_attached": monitor_attached,
+            "grab": public_grab(grab),
+        }), 202
+
+    @app.route("/api/library/v2/acquisition/grabs/<download_id>")
+    def lib2_get_acquisition_grab(download_id):
+        guard = _guard()
+        if guard:
+            return guard
+        conn = _conn()
+        try:
+            from core.acquisition.grabs import get_grab, public_grab
+            from core.acquisition.requests import get_request
+            grab = get_grab(conn, download_id)
+            if grab is None or not grab.get("acquisition_request_id"):
+                return jsonify({"success": False, "error": "Grab not found"}), 404
+            acquisition_request = get_request(
+                conn, grab["acquisition_request_id"])
+            if acquisition_request is None or acquisition_request.profile_id != ADMIN_PROFILE_ID:
+                return jsonify({"success": False, "error": "Grab not found"}), 404
+            return jsonify({"success": True, "grab": public_grab(grab)})
         finally:
             conn.close()
 

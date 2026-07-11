@@ -109,6 +109,7 @@ def api(tmp_path):
     # non-admin id to probe the rejection path.
     db.active_profile = 1
     db.acquisition_search_adapters = []
+    db.acquisition_submission_adapters = {}
     app = flask.Flask(__name__)
     from api.library_v2 import register_library_v2_routes
     register_library_v2_routes(
@@ -121,6 +122,8 @@ def api(tmp_path):
         acquisition_search_adapters_getter=(
             lambda _criteria: db.acquisition_search_adapters),
         acquisition_async_runner=asyncio.run,
+        acquisition_submission_adapter_getter=(
+            lambda source: db.acquisition_submission_adapters.get(source)),
     )
     ids = {"artist": artist_id, "views": views_id, "single": single_id,
            "ep": ep_id, "album_track": album_track,
@@ -403,6 +406,104 @@ def test_acquisition_blocklist_can_be_read_and_manually_unblocked(api):
     assert removed.get_json()["entry"]["active"] is False
     assert client.get(
         "/api/library/v2/acquisition/blocklist").get_json()["entries"] == []
+
+
+def test_acquisition_grab_submits_once_and_returns_only_public_state(api):
+    client, db, ids = api
+    from core.acquisition.submission import ExternalSubmission
+
+    class Submitter:
+        source = "usenet"
+
+        def __init__(self):
+            self.calls = 0
+            self.monitored = []
+
+        async def submit(self, prepared):
+            self.calls += 1
+            return ExternalSubmission(
+                source="usenet",
+                external_job_id="secret-client-job-id",
+                client="FakeSAB",
+                category="soulsync",
+            )
+
+        def start_monitor(self, prepared, submission):
+            self.monitored.append((prepared.download_id, submission.external_job_id))
+
+    submitter = Submitter()
+    db.acquisition_submission_adapters["usenet"] = submitter
+    created = client.post("/api/library/v2/acquisition/requests", json={
+        "scope": "release_group",
+        "entity_id": ids["views"],
+        "idempotency_key": "grab-api",
+    }).get_json()
+    request_id = created["request"]["id"]
+    conn = db._get_connection()
+    try:
+        from core.acquisition.candidates import register_candidate
+        candidate, _ = register_candidate(
+            conn,
+            request_id=request_id,
+            source="usenet",
+            protocol="usenet",
+            content_scope="release_bundle",
+            server_ref="ssc1-private-token",
+            title="Drake - Views",
+            guid="grab-guid",
+            # Missing artist is a visible, admin-overridable policy reject.
+            facts={"release_title": "Views"},
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    evaluated = client.post(
+        f"/api/library/v2/acquisition/requests/{request_id}/evaluate")
+    assert evaluated.status_code == 200
+    assert evaluated.get_json()["candidates"][0]["decision"]["can_force"] is True
+
+    first = client.post(
+        f"/api/library/v2/acquisition/requests/{request_id}/grab",
+        json={
+            "candidate_id": candidate.id,
+            "force": True,
+            "download_url": "https://attacker.invalid/ignored",
+        },
+    )
+    second = client.post(
+        f"/api/library/v2/acquisition/requests/{request_id}/grab",
+        json={"candidate_id": candidate.id, "force": True},
+    )
+
+    assert first.status_code == 202
+    first_data = first.get_json()
+    assert first_data["submission_status"] == "queued"
+    assert first_data["grab"]["status"] == "queued"
+    assert second.status_code == 200
+    assert second.get_json()["created"] is False
+    assert submitter.calls == 1
+    assert len(submitter.monitored) == 1
+    assert "secret-client-job-id" not in str(first_data)
+    assert "ssc1-private-token" not in str(first_data)
+    assert "attacker.invalid" not in str(first_data)
+    assert "external_job_id" not in str(first_data)
+    assert "output_path" not in first_data["grab"]
+    assert first_data["grab"]["has_output_path"] is False
+
+    download_id = first_data["grab"]["download_id"]
+    recovered = client.get(
+        f"/api/library/v2/acquisition/grabs/{download_id}").get_json()
+    assert recovered["grab"] == first_data["grab"]
+    history = client.get(
+        f"/api/library/v2/acquisition/requests/{request_id}/history"
+    ).get_json()
+    assert [event["event_type"] for event in history["events"]] == [
+        "request_created",
+        "candidates_evaluated",
+        "force_grab",
+        "grab_prepared",
+        "grab_submitted",
+    ]
 
 
 def test_wanted_materialize_endpoint_is_shadow_only_and_idempotent(api):

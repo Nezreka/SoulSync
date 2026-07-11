@@ -40639,12 +40639,26 @@ except Exception:
 # Library Manager v2 (opt-in) — UI-facing read API mounted on /api/library/v2/*.
 # Gated on features.library_v2; no-op surface when the flag is off.
 from api.library_v2 import register_library_v2_routes as _register_library_v2_routes
+
+
+def _library_v2_submission_adapter(source):
+    if source != "usenet" or download_orchestrator is None:
+        return None
+    plugin = download_orchestrator.registry.get("usenet")
+    if plugin is None:
+        return None
+    from core.acquisition.submission import UsenetSubmissionAdapter
+    return UsenetSubmissionAdapter(
+        monitor_callback=plugin.monitor_acquisition_submission)
+
+
 _register_library_v2_routes(
     app,
     get_database=get_database,
     config_get=lambda key, default=None: config_manager.get(key, default),
     config_manager=config_manager,
     profile_id_getter=get_current_profile_id,
+    acquisition_submission_adapter_getter=_library_v2_submission_adapter,
 )
 
 
