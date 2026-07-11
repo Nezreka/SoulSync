@@ -76,11 +76,14 @@
                 ? '<div class="library-artist-image"><img src="' + esc(av) +
                   '" alt="" loading="lazy" onerror="this.parentNode.innerHTML=\'<div class=&quot;library-artist-image-fallback&quot;>📺</div>\'"></div>'
                 : '<div class="library-artist-image"><div class="library-artist-image-fallback">📺</div></div>';
-            var cstats = (it.owned_count || 0) + ' downloaded' +
-                (it.video_count ? ' · ' + it.video_count + ' known' : '') +
-                (it.followed ? '' : ' · not following');
+            // One compact stat ('2 / 351 downloaded'); the follow state rides as a
+            // poster badge (like the movie resolution chip), not more inline text.
+            var cstats = it.video_count
+                ? (it.owned_count || 0) + ' / ' + it.video_count + ' downloaded'
+                : (it.owned_count || 0) + ' downloaded';
+            var cbadge = it.followed ? '' : '<div class="video-card-badge">Not following</div>';
             return '<a class="library-artist-card video-card--clickable" href="#" ' +
-                'data-video-card-open="channel" data-video-card-id="' + esc(it.id) + '">' + cimg +
+                'data-video-card-open="channel" data-video-card-id="' + esc(it.id) + '">' + cimg + cbadge +
                 '<div class="library-artist-info">' +
                 '<h3 class="library-artist-name" title="' + esc(it.title) + '">' + esc(it.title) + '</h3>' +
                 '<div class="library-artist-stats"><span class="library-artist-stat">' +
