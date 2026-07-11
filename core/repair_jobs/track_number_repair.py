@@ -178,23 +178,30 @@ class TrackNumberRepairJob(RepairJob):
 
         result = JobResult()
 
-        # Step 0: Anomaly detection
-        track_num_counts: Dict[int, int] = {}
-        file_track_data: List[Tuple[str, str, Optional[int]]] = []
+        # Step 0: Anomaly detection. Keyed on (disc, track): a multi-disc album
+        # stored flat in one folder legitimately repeats every track number once
+        # per disc (disc 1 track 1, disc 2 track 1, …) — counting bare track
+        # numbers declared a perfectly-tagged 5-disc box set anomalous (#1009).
+        # Untagged discs fall back to 1, so the real all-tracks-say-01 bug this
+        # job exists for still trips the threshold exactly as before.
+        track_num_counts: Dict[Tuple[int, int], int] = {}
+        file_track_data: List[Tuple[str, str, Optional[int], Optional[int]]] = []
 
         for fname in filenames:
             fpath = os.path.join(folder_path, fname)
             try:
                 audio = MutagenFile(fpath)
                 if audio is None:
-                    file_track_data.append((fpath, fname, None))
+                    file_track_data.append((fpath, fname, None, None))
                     continue
                 track_num, _ = _read_track_number_tag(audio)
-                file_track_data.append((fpath, fname, track_num))
+                disc_num, _ = _read_disc_number_tag(audio)
+                file_track_data.append((fpath, fname, track_num, disc_num))
                 if track_num is not None:
-                    track_num_counts[track_num] = track_num_counts.get(track_num, 0) + 1
+                    key = (disc_num or 1, track_num)
+                    track_num_counts[key] = track_num_counts.get(key, 0) + 1
             except Exception:
-                file_track_data.append((fpath, fname, None))
+                file_track_data.append((fpath, fname, None, None))
 
         has_anomaly = any(count >= anomaly_threshold for count in track_num_counts.values())
         if not has_anomaly:
@@ -219,14 +226,14 @@ class TrackNumberRepairJob(RepairJob):
         # Look up album/artist art once per album folder for enriched findings
         art_info = _lookup_album_artist_art(file_track_data, context) if dry_run else {}
 
-        for fpath, fname, _ in file_track_data:
+        for fpath, fname, _, _ in file_track_data:
             if context.check_stop():
                 return result
 
             result.scanned += 1
             try:
                 if dry_run:
-                    finding = _check_single_track(fpath, fname, api_tracks, len(api_tracks), title_sim)
+                    finding = _check_single_track(fpath, fname, api_tracks, title_sim)
                     if finding:
                         if context.create_finding:
                             details = finding['details']
@@ -255,7 +262,7 @@ class TrackNumberRepairJob(RepairJob):
                             else:
                                 result.findings_skipped_dedup += 1
                 else:
-                    if _repair_single_track(fpath, fname, api_tracks, len(api_tracks), title_sim, context):
+                    if _repair_single_track(fpath, fname, api_tracks, title_sim, context):
                         result.auto_fixed += 1
             except Exception as e:
                 logger.error("Error repairing %s: %s", fpath, e, exc_info=True)
@@ -303,7 +310,7 @@ class TrackNumberRepairJob(RepairJob):
         album_name = None
         artist_name = None
 
-        for fpath, _fname, _ in file_track_data:
+        for fpath, *_rest in file_track_data:
             if 'spotify' not in source_album_ids or 'itunes' not in source_album_ids:
                 aid, source = _read_album_id_from_file(fpath)
                 if aid and source in ('spotify', 'itunes') and source not in source_album_ids:
@@ -470,6 +477,53 @@ def _parse_track_str(s: str) -> Tuple[Optional[int], Optional[int]]:
         return None, None
 
 
+def _read_disc_number_tag(audio) -> Tuple[Optional[int], Optional[int]]:
+    """Read disc number and total discs from tags. Returns (disc_num, total)."""
+    from mutagen.id3 import ID3
+    from mutagen.flac import FLAC
+    from mutagen.oggvorbis import OggVorbis
+    from mutagen.mp4 import MP4
+
+    try:
+        if hasattr(audio, 'tags') and audio.tags is not None:
+            if isinstance(audio.tags, ID3):
+                frames = audio.tags.getall('TPOS')
+                if frames and frames[0].text:
+                    return _parse_track_str(str(frames[0].text[0]))
+            elif isinstance(audio, (FLAC, OggVorbis)):
+                val = audio.get('discnumber')
+                if val:
+                    return _parse_track_str(str(val[0]))
+            elif isinstance(audio, MP4):
+                val = audio.tags.get('disk')
+                if val and val[0]:
+                    d = val[0]
+                    return (int(d[0]), int(d[1]) if d[1] else None)
+    except Exception as e:
+        logger.debug("Error reading disc number tag: %s", e)
+    return None, None
+
+
+def _api_disc_count(api_tracks: List[Dict]) -> int:
+    """The number of discs the API tracklist spans (1 for single-disc albums)."""
+    count = 1
+    for t in api_tracks:
+        try:
+            d = int(t.get('disc_number') or 1)
+        except (TypeError, ValueError):
+            d = 1
+        if d > count:
+            count = d
+    return count
+
+
+def _api_disc_of(track: Dict) -> int:
+    try:
+        return int(track.get('disc_number') or 1)
+    except (TypeError, ValueError):
+        return 1
+
+
 def _read_title_tag(audio) -> Optional[str]:
     """Read the title tag from an already-opened Mutagen file."""
     from mutagen.id3 import ID3
@@ -493,15 +547,6 @@ def _read_title_tag(audio) -> Optional[str]:
                     return str(val[0])
     except Exception as e:
         logger.debug("Error reading title tag: %s", e)
-    return None
-
-
-def _extract_track_number_from_filename(filename: str) -> Optional[int]:
-    """Extract leading track number from filename like '01 - Song.flac'."""
-    basename = os.path.splitext(filename)[0]
-    match = re.match(r'^(\d{1,3})', basename.strip())
-    if match:
-        return int(match.group(1))
     return None
 
 
@@ -699,6 +744,128 @@ def _read_album_artist_from_file(file_path: str) -> Tuple[Optional[str], Optiona
     return None, None
 
 
+def _match_disc_aware(query: str, api_tracks: List[Dict], threshold: float,
+                      file_disc: Optional[int], multi_disc: bool) -> Tuple[Optional[Dict], float]:
+    """Fuzzy title match that prefers the file's own disc on multi-disc albums.
+
+    #1009: two discs of a box set can carry same/similar titles and per-disc
+    track numbers repeat; matching across the whole album picks an arbitrary
+    disc. When the file says which disc it's on (tag or a DDTT filename
+    prefix), same-disc candidates are tried first; a miss there still falls
+    back to the full tracklist (a WRONG disc tag mustn't block the repair)."""
+    if multi_disc and file_disc:
+        same_disc = [t for t in api_tracks if _api_disc_of(t) == file_disc]
+        if same_disc:
+            matched, score = _match_title_to_api_track(query, same_disc, threshold)
+            if matched:
+                return matched, score
+    return _match_title_to_api_track(query, api_tracks, threshold)
+
+
+def _planned_prefix(prefix: str, correct_num: int, correct_disc: int,
+                    multi_disc: bool) -> Optional[str]:
+    """The corrected filename prefix, PRESERVING the file's own convention.
+
+    #1009: the old logic replaced the first 1-3 digits of the prefix with the
+    2-digit track — so a 4-digit disc+track name like '0213 - X' (disc 2,
+    track 13; the $disc$track template) became '133 - X': it swallowed '021',
+    wrote '13', and left the stray '3' behind. The reporter read that stray
+    digit as "a digit from the album's total track count"; it's really the
+    tail of their own prefix.
+
+    - 4-digit prefix on a multi-disc album → the $disc$track convention:
+      rebuild as DDTT from the MATCHED track's disc + number.
+    - 1-3 digit prefix → plain track number (both conventions pad to 2).
+    - 4 digits on a single-disc album (a year: '1999 - ...') or 5+ digits →
+      not a track prefix we understand; leave the filename alone.
+    Returns the new prefix, or None when the filename must not be touched.
+    """
+    if not prefix:
+        return None
+    if len(prefix) == 4:
+        if not multi_disc:
+            return None
+        return f"{correct_disc:02d}{correct_num:02d}"
+    if len(prefix) <= 3:
+        return f"{correct_num:02d}"
+    return None
+
+
+def _plan_track_repair(file_path: str, filename: str, api_tracks: List[Dict],
+                       title_similarity: float) -> Optional[Dict]:
+    """Work out what (if anything) needs fixing for one file. Shared by the
+    dry-run check and the live repair so the finding can never promise a
+    different change than the fix applies.
+
+    Returns None when the file couldn't be matched or is already correct,
+    else a dict with the matched track, corrected numbers, per-disc total,
+    and the planned new basename (None = filename untouched)."""
+    from mutagen import File as MutagenFile
+
+    audio = MutagenFile(file_path)
+    if audio is None:
+        return None
+
+    multi_disc = _api_disc_count(api_tracks) > 1
+    basename = os.path.splitext(filename)[0]
+    prefix_match = re.match(r'^(\d+)', basename.strip())
+    prefix = prefix_match.group(1) if prefix_match else ''
+
+    file_disc, _ = _read_disc_number_tag(audio)
+    # a DDTT filename prefix reveals the disc when the tag doesn't
+    if not file_disc and multi_disc and len(prefix) == 4:
+        file_disc = int(prefix[:2]) or None
+
+    file_title = _read_title_tag(audio)
+    matched_track, match_score = (None, 0.0)
+    if file_title:
+        matched_track, match_score = _match_disc_aware(
+            file_title, api_tracks, title_similarity, file_disc, multi_disc)
+    if not matched_track:
+        # strip the WHOLE leading digit run ('0213 - X' → 'X', not '3 - X')
+        clean_name = re.sub(r'^\d+[\s.\-_]*', '', basename).strip()
+        if clean_name:
+            matched_track, match_score = _match_disc_aware(
+                clean_name, api_tracks, title_similarity, file_disc, multi_disc)
+    if not matched_track:
+        return None
+
+    correct_num = matched_track.get('track_number')
+    if correct_num is None:
+        return None
+    correct_disc = _api_disc_of(matched_track)
+    # tag totals are PER DISC ('13/20'), matching standard tagging — the old
+    # whole-album total is also accepted below so files it wrote stay quiet
+    disc_total = sum(1 for t in api_tracks if _api_disc_of(t) == correct_disc)
+
+    current_num, current_total = _read_track_number_tag(audio)
+    tag_ok = (current_num == correct_num
+              and current_total in (None, disc_total, len(api_tracks)))
+
+    planned = _planned_prefix(prefix, correct_num, correct_disc, multi_disc)
+    new_basename = None
+    if planned is not None and prefix:
+        candidate = re.sub(r'^\d+', planned, basename, count=1)
+        if candidate != basename:
+            new_basename = candidate
+
+    if tag_ok and new_basename is None:
+        return None
+    return {
+        'matched_track': matched_track,
+        'match_score': match_score,
+        'correct_num': correct_num,
+        'correct_disc': correct_disc,
+        'disc_total': disc_total,
+        'multi_disc': multi_disc,
+        'current_num': current_num,
+        'current_total': current_total,
+        'tag_ok': tag_ok,
+        'new_basename': new_basename,
+        'file_title': file_title,
+    }
+
+
 def _match_title_to_api_track(file_title: str, api_tracks: List[Dict],
                                threshold: float) -> Tuple[Optional[Dict], float]:
     """Fuzzy-match a file title to an API track. Returns (track, score)."""
@@ -764,13 +931,12 @@ def _fix_track_number_tag(file_path: str, correct_num: int, total: int):
         logger.error("Error fixing track tag in %s: %s", file_path, e, exc_info=True)
 
 
-def _fix_filename_track_number(file_path: str, filename: str, correct_num: int) -> Optional[str]:
-    """Fix the track number prefix in a filename. Returns new path or None."""
+def _rename_to_basename(file_path: str, filename: str, new_basename: str) -> Optional[str]:
+    """Rename a file to the planned basename (extension kept). Returns new path or
+    None. The prefix itself is decided by ``_planned_prefix`` — this only moves."""
     try:
         basename = os.path.splitext(filename)[0]
         ext = os.path.splitext(filename)[1]
-
-        new_basename = re.sub(r'^\d{1,3}', f'{correct_num:02d}', basename)
         if new_basename == basename:
             return None
 
@@ -825,7 +991,7 @@ def _update_db_file_path(db, old_path: str, new_path: str):
             conn.close()
 
 
-def _lookup_canonical_from_db(file_track_data: List[Tuple[str, str, Any]],
+def _lookup_canonical_from_db(file_track_data: List[Tuple[str, str, Any, Any]],
                               context: JobContext) -> Optional[Tuple[str, str]]:
     """Return the album's pinned canonical ``(source, album_id)`` or None.
 
@@ -843,7 +1009,7 @@ def _lookup_canonical_from_db(file_track_data: List[Tuple[str, str, Any]],
         cols = {row[1] for row in cursor.fetchall()}
         if 'canonical_source' not in cols or 'canonical_album_id' not in cols:
             return None
-        for fpath, _, _ in file_track_data:
+        for fpath, *_rest in file_track_data:
             cursor.execute(
                 """
                 SELECT al.canonical_source, al.canonical_album_id
@@ -865,7 +1031,7 @@ def _lookup_canonical_from_db(file_track_data: List[Tuple[str, str, Any]],
     return None
 
 
-def _lookup_album_ids_from_db(file_track_data: List[Tuple[str, str, Any]],
+def _lookup_album_ids_from_db(file_track_data: List[Tuple[str, str, Any, Any]],
                               context: JobContext) -> Dict[str, Optional[str]]:
     """Look up album IDs from the database using file paths.
 
@@ -892,7 +1058,7 @@ def _lookup_album_ids_from_db(file_track_data: List[Tuple[str, str, Any]],
             return {}
 
         # Try each file path until we find one tracked in the DB
-        for fpath, _, _ in file_track_data:
+        for fpath, *_rest in file_track_data:
             select_cols = ", ".join(f"al.{column}" for _source, column in selected_sources)
             cursor.execute(f"""
                 SELECT {select_cols}
@@ -918,7 +1084,7 @@ def _lookup_album_ids_from_db(file_track_data: List[Tuple[str, str, Any]],
     return {}
 
 
-def _lookup_album_artist_art(file_track_data: List[Tuple[str, str, Any]],
+def _lookup_album_artist_art(file_track_data: List[Tuple[str, str, Any, Any]],
                              context: JobContext) -> Dict[str, Optional[str]]:
     """Look up album/artist thumb URLs and names from DB for enriched finding details.
 
@@ -936,7 +1102,7 @@ def _lookup_album_artist_art(file_track_data: List[Tuple[str, str, Any]],
         cursor = conn.cursor()
 
         # First try exact path match (fast)
-        for fpath, _, _ in file_track_data:
+        for fpath, *_rest in file_track_data:
             cursor.execute("""
                 SELECT al.thumb_url, ar.thumb_url, al.title, ar.name
                 FROM tracks t
@@ -987,114 +1153,64 @@ def _lookup_album_artist_art(file_track_data: List[Tuple[str, str, Any]],
 
 
 def _check_single_track(file_path: str, filename: str, api_tracks: List[Dict],
-                        total_tracks: int, title_similarity: float) -> Optional[Dict]:
+                        title_similarity: float) -> Optional[Dict]:
     """Check if a track needs repair and return finding info (dry run mode).
 
     Returns a dict with 'description' and 'details' if repair is needed, else None.
     """
-    from mutagen import File as MutagenFile
-
-    audio = MutagenFile(file_path)
-    if audio is None:
+    plan = _plan_track_repair(file_path, filename, api_tracks, title_similarity)
+    if not plan:
         return None
-
-    file_title = _read_title_tag(audio)
-    matched_track = None
-    match_score = 0.0
-
-    if file_title:
-        matched_track, match_score = _match_title_to_api_track(file_title, api_tracks, title_similarity)
-
-    if not matched_track:
-        basename = os.path.splitext(filename)[0]
-        clean_name = re.sub(r'^\d{1,3}[\s.\-_]*', '', basename).strip()
-        if clean_name:
-            matched_track, match_score = _match_title_to_api_track(clean_name, api_tracks, title_similarity)
-
-    if not matched_track:
-        return None
-
-    correct_num = matched_track.get('track_number')
-    if correct_num is None:
-        return None
-
-    current_num, current_total = _read_track_number_tag(audio)
-    if current_num == correct_num and current_total == total_tracks:
-        return None  # Already correct
 
     changes = []
-    if current_num != correct_num:
-        changes.append(f'Track number: {current_num} -> {correct_num}')
-    if current_total != total_tracks:
-        changes.append(f'Total tracks: {current_total} -> {total_tracks}')
+    if plan['current_num'] != plan['correct_num']:
+        changes.append(f"Track number: {plan['current_num']} -> {plan['correct_num']}")
+    if not plan['tag_ok'] and plan['current_total'] != plan['disc_total']:
+        changes.append(f"Total tracks: {plan['current_total']} -> {plan['disc_total']}")
+    if plan['new_basename']:
+        changes.append(f"Filename: {filename} -> {plan['new_basename']}{os.path.splitext(filename)[1]}")
 
-    # Check if filename would change
-    basename_noext = os.path.splitext(filename)[0]
-    new_basename = re.sub(r'^\d{1,3}', f'{correct_num:02d}', basename_noext)
-    if new_basename != basename_noext:
-        changes.append(f'Filename: {filename} -> {new_basename}{os.path.splitext(filename)[1]}')
-
+    matched_track = plan['matched_track']
+    details = {
+        'current_track_num': plan['current_num'],
+        'correct_track_num': plan['correct_num'],
+        'total_tracks': plan['disc_total'],
+        'matched_title': matched_track.get('name', ''),
+        'file_title': plan['file_title'] or filename,
+        'changes': changes,
+        'match_score': round(plan['match_score'], 3),
+        # the approval-time fixer applies EXACTLY this plan — the tag skip and
+        # the rename target ride in the finding so approve can never invent a
+        # different (convention-mangling) rename than the one shown (#1009)
+        'tag_ok': plan['tag_ok'],
+    }
+    if plan['new_basename']:
+        details['new_filename'] = plan['new_basename'] + os.path.splitext(filename)[1]
+    if plan['multi_disc']:
+        details['disc_number'] = plan['correct_disc']
     return {
         'description': f'Matched to: "{matched_track.get("name", "?")}"\n' + '\n'.join(changes),
-        'details': {
-            'current_track_num': current_num,
-            'correct_track_num': correct_num,
-            'total_tracks': total_tracks,
-            'matched_title': matched_track.get('name', ''),
-            'file_title': file_title or filename,
-            'changes': changes,
-            'match_score': round(match_score, 3),
-        }
+        'details': details,
     }
 
 
 def _repair_single_track(file_path: str, filename: str, api_tracks: List[Dict],
-                         total_tracks: int, title_similarity: float,
-                         context: JobContext) -> bool:
+                         title_similarity: float, context: JobContext) -> bool:
     """Match a single file to the API tracklist and fix its track number tag + filename.
 
     Returns True if the track was actually repaired.
     """
-    from mutagen import File as MutagenFile
-
-    audio = MutagenFile(file_path)
-    if audio is None:
+    plan = _plan_track_repair(file_path, filename, api_tracks, title_similarity)
+    if not plan:
         return False
 
-    # Try to match via embedded title tag first
-    file_title = _read_title_tag(audio)
-    matched_track = None
+    if not plan['tag_ok']:
+        _fix_track_number_tag(file_path, plan['correct_num'], plan['disc_total'])
 
-    if file_title:
-        matched_track, _ = _match_title_to_api_track(file_title, api_tracks, title_similarity)
-
-    # Fallback: match via filename (without track number prefix and extension)
-    if not matched_track:
-        basename = os.path.splitext(filename)[0]
-        # Strip leading track number prefix like "01 - " or "01. "
-        clean_name = re.sub(r'^\d{1,3}[\s.\-_]*', '', basename).strip()
-        if clean_name:
-            matched_track, _ = _match_title_to_api_track(clean_name, api_tracks, title_similarity)
-
-    if not matched_track:
-        return False
-
-    correct_num = matched_track.get('track_number')
-    if correct_num is None:
-        return False
-
-    # Check if track number already correct
-    current_num, current_total = _read_track_number_tag(audio)
-    if current_num == correct_num and current_total == total_tracks:
-        return False  # Already correct
-
-    # Fix the track number tag
-    _fix_track_number_tag(file_path, correct_num, total_tracks)
-
-    # Fix filename prefix if it starts with a track number
-    new_path = _fix_filename_track_number(file_path, filename, correct_num)
-    if new_path and context.db:
-        _update_db_file_path(context.db, file_path, new_path)
+    if plan['new_basename']:
+        new_path = _rename_to_basename(file_path, filename, plan['new_basename'])
+        if new_path and context.db:
+            _update_db_file_path(context.db, file_path, new_path)
 
     return True
 
