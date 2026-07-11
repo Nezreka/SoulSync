@@ -138,6 +138,106 @@ def test_eps_get_local_artwork_urls(api):
             assert entry["image_url"] == f"/api/library/v2/artwork/album/{entry['id']}"
 
 
+def test_acquisition_request_resolves_server_owned_profiles_and_is_idempotent(api):
+    client, _db, ids = api
+    payload = {
+        "scope": "release_group",
+        "entity_id": ids["views"],
+        "idempotency_key": "manual:views:1",
+        "quality_profile_id": 999,
+    }
+
+    first = client.post(
+        "/api/library/v2/acquisition/requests", json=payload)
+    second = client.post(
+        "/api/library/v2/acquisition/requests", json=payload)
+
+    assert first.status_code == 201
+    assert second.status_code == 200
+    first_data = first.get_json()
+    second_data = second.get_json()
+    assert first_data["request"]["id"] == second_data["request"]["id"]
+    assert first_data["request"]["profile_id"] == 1
+    assert first_data["request"]["quality_profile_id"] == 1
+    assert first_data["request"]["status"] == "searching"
+    assert second_data["created"] is False
+
+
+def test_non_admin_cannot_create_acquisition_request(api):
+    client, db, ids = api
+    db.active_profile = 2
+
+    response = client.post("/api/library/v2/acquisition/requests", json={
+        "scope": "release_group",
+        "entity_id": ids["views"],
+        "idempotency_key": "forbidden",
+    })
+
+    assert response.status_code == 403
+
+
+def test_acquisition_evaluation_returns_only_public_candidates_and_reasons(api):
+    client, db, ids = api
+    created = client.post("/api/library/v2/acquisition/requests", json={
+        "scope": "release_group",
+        "entity_id": ids["views"],
+        "idempotency_key": "evaluate-views",
+    }).get_json()
+    request_id = created["request"]["id"]
+    conn = db._get_connection()
+    try:
+        from core.acquisition.candidates import register_candidate
+        good, _ = register_candidate(
+            conn,
+            request_id=request_id,
+            source="usenet",
+            protocol="usenet",
+            content_scope="release_bundle",
+            server_ref="ssc1-secret-good",
+            title="Drake - Views",
+            guid="good",
+            facts={
+                "artist": "Drake", "release_title": "Views",
+                "format": "flac", "bit_depth": 24,
+                "sample_rate": 96000, "track_count": 1,
+            },
+        )
+        bad, _ = register_candidate(
+            conn,
+            request_id=request_id,
+            source="usenet",
+            protocol="usenet",
+            content_scope="release_bundle",
+            server_ref="ssc1-secret-bad",
+            title="Other - Views",
+            guid="bad",
+            facts={"artist": "Other", "release_title": "Views", "format": "flac"},
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    evaluated = client.post(
+        f"/api/library/v2/acquisition/requests/{request_id}/evaluate",
+        json={"automatic": False},
+    )
+
+    assert evaluated.status_code == 200
+    data = evaluated.get_json()
+    assert {item["id"] for item in data["candidates"]} == {good.id, bad.id}
+    rejected = next(item for item in data["candidates"] if item["id"] == bad.id)
+    assert rejected["decision"]["accepted"] is False
+    assert "artist_mismatch" in {
+        reason["code"] for reason in rejected["decision"]["rejections"]}
+    assert "server_ref" not in str(data)
+    assert "ssc1-secret" not in str(data)
+
+    listed = client.get(
+        f"/api/library/v2/acquisition/requests/{request_id}/candidates"
+    ).get_json()
+    assert "server_ref" not in str(listed)
+
+
 def test_monitor_album_mirrors_with_active_profile(api):
     client, db, ids = api
     resp = client.post(f"/api/library/v2/albums/{ids['ep']}/monitor",

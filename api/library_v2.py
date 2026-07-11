@@ -92,7 +92,8 @@ def _apply_artwork_urls(data: Any, kind: str) -> Any:
 def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                                config_get: Callable[..., Any],
                                config_manager: Any = None,
-                               profile_id_getter: Optional[Callable[[], int]] = None) -> None:
+                               profile_id_getter: Optional[Callable[[], int]] = None,
+                               acquisition_runtime_getter: Optional[Callable[..., Any]] = None) -> None:
     """Attach the Library v2 routes to ``app``.
 
     ``get_database`` → shared ``MusicDatabase``; ``config_get(key, default)`` reads
@@ -134,6 +135,141 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
     @app.route("/api/library/v2/enabled")
     def lib2_enabled():
         return jsonify({"success": True, "enabled": _enabled()})
+
+    # -- acquisition requests / decisions (Phase 4) -------------------------
+
+    @app.route("/api/library/v2/acquisition/requests", methods=["POST"])
+    def lib2_create_acquisition_request():
+        guard = _guard()
+        if guard:
+            return guard
+        body = request.get_json(silent=True) or {}
+        scope = str(body.get("scope") or "").strip().lower()
+        idempotency_key = str(body.get("idempotency_key") or "").strip()
+        try:
+            entity_id = int(body.get("entity_id"))
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "error": "entity_id must be an integer"}), 400
+        search_options = body.get("search_options") or {}
+        if not isinstance(search_options, dict):
+            return jsonify({"success": False, "error": "search_options must be an object"}), 400
+        conn = _conn()
+        try:
+            from core.acquisition import ensure_acquisition_schema
+            from core.acquisition.catalog import resolve_entity_quality_profile
+            from core.acquisition.requests import create_request, transition_request
+            ensure_acquisition_schema(conn)
+            quality_profile_id = resolve_entity_quality_profile(
+                conn, scope, entity_id, search_options=search_options)
+            acquisition_request, created = create_request(
+                conn,
+                profile_id=ADMIN_PROFILE_ID,
+                scope=scope,
+                entity_id=entity_id,
+                quality_profile_id=quality_profile_id,
+                trigger="manual",
+                idempotency_key=idempotency_key,
+                search_options=search_options,
+            )
+            if created:
+                acquisition_request = transition_request(
+                    conn, acquisition_request.id, "searching",
+                    expected_status="pending", increment_attempts=True)
+            conn.commit()
+            return jsonify({
+                "success": True,
+                "created": created,
+                "request": acquisition_request.to_dict(),
+            }), 201 if created else 200
+        except ValueError as exc:
+            conn.rollback()
+            return jsonify({"success": False, "error": str(exc)}), 400
+        finally:
+            conn.close()
+
+    @app.route("/api/library/v2/acquisition/requests/<request_id>")
+    def lib2_get_acquisition_request(request_id):
+        guard = _guard()
+        if guard:
+            return guard
+        conn = _conn()
+        try:
+            from core.acquisition.requests import get_request
+            acquisition_request = get_request(conn, request_id)
+            if acquisition_request is None:
+                return jsonify({"success": False, "error": "Request not found"}), 404
+            if acquisition_request.profile_id != ADMIN_PROFILE_ID:
+                return jsonify({"success": False, "error": "Request not found"}), 404
+            return jsonify({"success": True, "request": acquisition_request.to_dict()})
+        finally:
+            conn.close()
+
+    @app.route("/api/library/v2/acquisition/requests/<request_id>/candidates")
+    def lib2_get_acquisition_candidates(request_id):
+        guard = _guard()
+        if guard:
+            return guard
+        conn = _conn()
+        try:
+            from core.acquisition.candidates import list_request_candidates
+            from core.acquisition.decisions import latest_decision_run
+            from core.acquisition.requests import get_request
+            acquisition_request = get_request(conn, request_id)
+            if acquisition_request is None or acquisition_request.profile_id != ADMIN_PROFILE_ID:
+                return jsonify({"success": False, "error": "Request not found"}), 404
+            payload = []
+            for candidate in list_request_candidates(conn, request_id):
+                decision = latest_decision_run(conn, candidate.id)
+                payload.append({
+                    **candidate.to_public_dict(),
+                    "decision_run_id": decision.id if decision else None,
+                    "decision": decision.decision.to_public_dict() if decision else None,
+                })
+            return jsonify({"success": True, "candidates": payload})
+        finally:
+            conn.close()
+
+    @app.route(
+        "/api/library/v2/acquisition/requests/<request_id>/evaluate",
+        methods=["POST"],
+    )
+    def lib2_evaluate_acquisition_request(request_id):
+        guard = _guard()
+        if guard:
+            return guard
+        body = request.get_json(silent=True) or {}
+        automatic = bool(body.get("automatic", False))
+        conn = _conn()
+        try:
+            from core.acquisition.catalog import resolve_request_context
+            from core.acquisition.decision_engine import RuntimeContext
+            from core.acquisition.requests import get_request
+            from core.acquisition.workflow import evaluate_request_candidates
+            acquisition_request = get_request(conn, request_id)
+            if acquisition_request is None or acquisition_request.profile_id != ADMIN_PROFILE_ID:
+                return jsonify({"success": False, "error": "Request not found"}), 404
+            catalog, policy = resolve_request_context(conn, acquisition_request)
+            runtime = (
+                acquisition_runtime_getter(acquisition_request)
+                if acquisition_runtime_getter else RuntimeContext()
+            )
+            if not isinstance(runtime, RuntimeContext):
+                raise ValueError("acquisition runtime provider returned an invalid context")
+            result = evaluate_request_candidates(
+                conn,
+                request_id,
+                catalog=catalog,
+                runtime=runtime,
+                policy=policy,
+                automatic=automatic,
+            )
+            conn.commit()
+            return jsonify({"success": True, **result.to_public_dict()})
+        except ValueError as exc:
+            conn.rollback()
+            return jsonify({"success": False, "error": str(exc)}), 400
+        finally:
+            conn.close()
 
     @app.route("/api/library/v2/artists")
     def lib2_list_artists():
