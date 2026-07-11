@@ -8,6 +8,7 @@ browser). Falls back to 404 so the frontend shows its placeholder.
 from __future__ import annotations
 
 from flask import Response, abort, request
+from werkzeug.exceptions import HTTPException
 
 from utils.logging_config import get_logger
 
@@ -141,12 +142,17 @@ def register_routes(bp):
                 "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
             })
             if upstream.status_code != 200:
+                # An expected miss (e.g. a video with no maxresdefault.jpg — the UI
+                # falls back) — a quiet 404, never an ERROR traceback in the log.
+                logger.debug("img proxy upstream %s for %s", upstream.status_code, url)
                 abort(404)
             resp = Response(upstream.iter_content(8192),
                             content_type=upstream.headers.get("Content-Type", "image/jpeg"))
             resp.headers["Cache-Control"] = "public, max-age=604800"
             resp.headers["Access-Control-Allow-Origin"] = "*"
             return resp
+        except HTTPException:
+            raise   # our own abort(404) above — already handled, don't re-log it
         except Exception:
             logger.exception("video image proxy failed for %s", url)
             abort(404)
