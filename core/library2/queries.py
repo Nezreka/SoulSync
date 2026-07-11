@@ -351,10 +351,8 @@ def _bitrate_kbps(value: Any) -> Any:
 
 def _serialize_track(conn, t, album=None) -> Dict[str, Any]:
     """Build a track dict with linked artists, primary file, and computed status."""
-    row = conn.execute(
-        "SELECT * FROM lib2_track_files WHERE track_id = ? ORDER BY id LIMIT 1", (t["id"],)
-    ).fetchone()
-    file_row = dict(row) if row else None
+    from core.library2.track_files import primary_file_row
+    file_row = primary_file_row(conn, t["id"])
     artists = _track_artists(conn, t["id"])
     track_meta = {
         "title": t["title"],

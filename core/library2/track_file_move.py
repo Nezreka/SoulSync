@@ -56,9 +56,13 @@ def move_track_file(db, conn, from_track_id: int, to_track_id: int,
     if not dst:
         raise MoveError("Target track not found", status=404)
 
+    # Move the PRIMARY file (ADR-03), not an arbitrary sibling copy; the
+    # schema triggers re-elect primaries on both tracks after the UPDATE.
+    from core.library2.track_files import primary_order
     file_row = conn.execute(
-        "SELECT id, path FROM lib2_track_files "
-        "WHERE track_id=? AND path IS NOT NULL AND path <> '' ORDER BY id LIMIT 1",
+        f"SELECT id, path FROM lib2_track_files "
+        f"WHERE track_id=? AND path IS NOT NULL AND path <> '' "
+        f"ORDER BY {primary_order()} LIMIT 1",
         (from_track_id,),
     ).fetchone()
     if not file_row:

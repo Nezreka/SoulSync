@@ -960,9 +960,11 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             ).fetchall()
 
             def _file_summary(track_id: int) -> Optional[Dict[str, Any]]:
+                from core.library2.track_files import primary_order
                 f = conn.execute(
-                    "SELECT path, format, bitrate, sample_rate, bit_depth FROM lib2_track_files "
-                    "WHERE track_id=? ORDER BY id LIMIT 1", (track_id,)).fetchone()
+                    f"SELECT path, format, bitrate, sample_rate, bit_depth "
+                    f"FROM lib2_track_files WHERE track_id=? "
+                    f"ORDER BY {primary_order()} LIMIT 1", (track_id,)).fetchone()
                 return dict(f) if f else None
 
             pairs = [{

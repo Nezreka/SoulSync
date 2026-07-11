@@ -27,10 +27,12 @@ MAX_TRACKS = 500
 def _track_rows(conn, track_ids: List[int]) -> List[Any]:
     """Track+album metadata rows for the given ids (single query batch).
 
-    The file path comes from a correlated subquery picking the FIRST file row
-    (lowest id) — a bare-column GROUP BY would let SQLite pick an arbitrary
+    The file path comes from a correlated subquery picking the PRIMARY file
+    (ADR-03) — a bare-column GROUP BY would let SQLite pick an arbitrary
     file when a track has several.
     """
+    from core.library2.track_files import primary_order
+
     if not track_ids:
         return []
     batch = track_ids[:MAX_TRACKS]
@@ -43,7 +45,7 @@ def _track_rows(conn, track_ids: List[int]) -> List[Any]:
                    ar.name AS album_artist_name,
                    (SELECT tf.path FROM lib2_track_files tf
                      WHERE tf.track_id = t.id AND tf.path IS NOT NULL AND tf.path <> ''
-                     ORDER BY tf.id LIMIT 1) AS file_path
+                     ORDER BY {primary_order('tf')} LIMIT 1) AS file_path
             FROM lib2_tracks t
             JOIN lib2_albums al ON al.id = t.album_id
             LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id

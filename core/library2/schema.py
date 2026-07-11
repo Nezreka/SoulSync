@@ -186,6 +186,8 @@ CREATE TABLE IF NOT EXISTS lib2_track_files (
     missing_tags_json TEXT NOT NULL DEFAULT '[]',     -- list of missing tag keys
     metadata_gaps_json TEXT NOT NULL DEFAULT '[]',    -- list of gap descriptors
     content_hash TEXT,                                -- for dedup / single-vs-album
+    is_primary INTEGER NOT NULL DEFAULT 0,            -- exactly one per track (ADR-03)
+    file_state TEXT NOT NULL DEFAULT 'active',        -- 'active'|'missing_suspected'|'missing_confirmed'|'quarantined'|'deleted'
     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (track_id) REFERENCES lib2_tracks(id) ON DELETE SET NULL
@@ -318,6 +320,13 @@ _ADDED_COLUMNS = (
      "ALTER TABLE lib2_albums ADD COLUMN stable_id TEXT"),
     ("lib2_tracks", "stable_id",
      "ALTER TABLE lib2_tracks ADD COLUMN stable_id TEXT"),
+    # Multi-file model (audit P1-07 / ADR-03): exactly one primary file per
+    # track plus a lifecycle state per file. Backfill + triggers live in
+    # core/library2/track_files.py.
+    ("lib2_track_files", "is_primary",
+     "ALTER TABLE lib2_track_files ADD COLUMN is_primary INTEGER NOT NULL DEFAULT 0"),
+    ("lib2_track_files", "file_state",
+     "ALTER TABLE lib2_track_files ADD COLUMN file_state TEXT NOT NULL DEFAULT 'active'"),
 )
 
 
@@ -560,6 +569,20 @@ def ensure_library_v2_schema(connection: Any) -> None:
         backfill_stable_ids(cursor)
     except Exception as e:  # noqa: BLE001
         logger.error("stable_id backfill failed (will retry next start): %s", e)
+    # Multi-file primary model (audit P1-07 / ADR-03): elect a primary where
+    # missing, repair accidental extras, and keep the invariant via triggers
+    # so every write path participates without changes.
+    try:
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_lib2_track_files_primary "
+            "ON lib2_track_files(track_id, is_primary)")
+        from core.library2.track_files import backfill_primary_flags, install_primary_triggers
+        changed = backfill_primary_flags(cursor)
+        if changed:
+            logger.info("Primary-file backfill adjusted %d file rows", changed)
+        install_primary_triggers(cursor)
+    except Exception as e:  # noqa: BLE001
+        logger.error("primary-file migration failed (will retry next start): %s", e)
     # Monitor rules with provenance (audit P1-13/P1-14). Seeding runs only on
     # the migration that CREATES the table: pre-existing flags get a truthful
     # 'legacy_import' provenance exactly once; afterwards rules exist only

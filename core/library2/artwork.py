@@ -68,13 +68,14 @@ def _resolve_abs(file_path: str, config_manager) -> Optional[str]:
 
 def _embedded_art_for_album(conn, config_manager, album_id: int) -> Optional[bytes]:
     """Extract embedded cover from any track file belonging to the album."""
+    from core.library2.track_files import primary_order
     from core.metadata.art_apply import extract_embedded_art
     rows = conn.execute(
-        """
+        f"""
         SELECT tf.path FROM lib2_track_files tf
         JOIN lib2_tracks t ON t.id = tf.track_id
         WHERE t.album_id = ? AND tf.path IS NOT NULL
-        ORDER BY t.track_number, t.id LIMIT 5
+        ORDER BY t.track_number, t.id, {primary_order('tf')} LIMIT 5
         """,
         (album_id,),
     ).fetchall()
