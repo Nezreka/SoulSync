@@ -1871,7 +1871,10 @@
                 var ic = btns[i].querySelector('.watchlist-icon'); if (ic) ic.textContent = val ? '✓' : '＋';
                 var tx = btns[i].querySelector('.watchlist-text'); if (tx) tx.textContent = val ? 'In Wishlist' : 'Wishlist';
             }
-            var ep = ytFindEp(id); if (ep) { ep.wished = val; renderSeasonNav(); }
+            // No rail re-render: wished no longer drives the owned counts (real
+            // downloads do), and the buttons above were already patched in place —
+            // re-rendering here just refetched every rail poster per click.
+            var ep = ytFindEp(id); if (ep) ep.wished = val;
             document.dispatchEvent(new CustomEvent('soulsync:video-wishlist-changed'));
         };
         if (on) yc.removeWish('video', id).then(function (d) { setOn(!(d && d.success)); }).catch(function () { btn.disabled = false; });
