@@ -283,6 +283,12 @@ def register_routes(bp):
             vids = channel.get("videos") or []
             ids = [v.get("youtube_id") for v in vids]
             wished = db.youtube_video_wish_state(ids)
+            # Real ownership: a completed download in the permanent history —
+            # 'owned' on the channel page means ON DISK, not merely wished.
+            try:
+                downloaded = set(db.downloaded_youtube_video_ids() or [])
+            except Exception:   # noqa: BLE001 - ownership is an annotation, never a 500
+                downloaded = set()
             # Dates → year-seasons. Cached list already carries them; only pull a
             # fresh RSS (recent ~15) on a live MISS so the cache-hit stays instant.
             dates = db.get_video_dates(ids)
@@ -293,6 +299,7 @@ def register_routes(bp):
                     pass
             for v in vids:
                 v["wished"] = v.get("youtube_id") in wished
+                v["downloaded"] = v.get("youtube_id") in downloaded
                 if not v.get("published_at") and dates.get(v.get("youtube_id")):
                     v["published_at"] = dates[v["youtube_id"]]
             try:

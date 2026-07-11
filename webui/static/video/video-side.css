@@ -4621,3 +4621,6 @@ body[data-side="video"] #gsearch-aura {
     background: linear-gradient(90deg, #e0564a, #e0a34a);
 }
 .vrf-runtime-label { font-size: 11.5px; color: rgba(255,255,255,0.5); margin-top: 5px; }
+
+/* YouTube episodes that are ON DISK (real ownership from download history) */
+.vd-ep--got { border-left: 3px solid rgba(80, 200, 120, 0.75); }
