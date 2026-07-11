@@ -2,8 +2,8 @@ import { createMemoryHistory } from '@tanstack/react-router';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createAppQueryClient } from '@/app/query-client';
 import { AppRouterProvider, createAppRouter } from '@/app/router';
+import { createTestQueryClient } from '@/test/query-client';
 import { createShellBridge } from '@/test/shell-bridge';
 
 function createResponse(body: unknown, ok = true, status = 200) {
@@ -14,7 +14,7 @@ function createResponse(body: unknown, ok = true, status = 200) {
 }
 
 function renderIssuesRoute(initialEntries = ['/issues']) {
-  const queryClient = createAppQueryClient();
+  const queryClient = createTestQueryClient();
   const history = createMemoryHistory({ initialEntries });
   const router = createAppRouter({ history, queryClient });
 

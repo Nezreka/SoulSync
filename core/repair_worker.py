@@ -1647,26 +1647,53 @@ class RepairWorker:
             return {'success': False, 'error': f'File not found: {os.path.basename(file_path)}'}
 
         try:
-            from core.repair_jobs.track_number_repair import _fix_track_number_tag, _fix_filename_track_number
+            from core.repair_jobs.track_number_repair import (
+                _fix_track_number_tag,
+                _planned_prefix,
+                _rename_to_basename,
+            )
 
-            # Write corrected track number to file tags
-            total_tracks = details.get('total_tracks')
-            if not total_tracks:
-                # Fallback: read current total from file to preserve it
-                try:
-                    from core.repair_jobs.track_number_repair import _read_track_number_tag
-                    from mutagen import File as MutagenFile
-                    audio = MutagenFile(resolved)
-                    if audio:
-                        _, total_tracks = _read_track_number_tag(audio)
-                except Exception as e:
-                    logger.debug("Failed to read total_tracks tag from file: %s", e)
-            total_tracks = int(total_tracks or 0)
-            _fix_track_number_tag(resolved, int(correct_num), total_tracks)
+            # Write corrected track number to file tags — skipped when the scan
+            # already judged the tag fine (#1009: a filename-only finding must
+            # not rewrite a correct tag with a different total).
+            if not details.get('tag_ok', False):
+                total_tracks = details.get('total_tracks')
+                if not total_tracks:
+                    # Fallback: read current total from file to preserve it
+                    try:
+                        from core.repair_jobs.track_number_repair import _read_track_number_tag
+                        from mutagen import File as MutagenFile
+                        audio = MutagenFile(resolved)
+                        if audio:
+                            _, total_tracks = _read_track_number_tag(audio)
+                    except Exception as e:
+                        logger.debug("Failed to read total_tracks tag from file: %s", e)
+                total_tracks = int(total_tracks or 0)
+                _fix_track_number_tag(resolved, int(correct_num), total_tracks)
 
-            # Rename file if it has a track number prefix
+            # Rename to EXACTLY what the finding promised (#1009 — the old code
+            # recomputed the prefix here and mangled 4-digit disc+track names:
+            # '0213 - X' became '133 - X'). Findings created before the plan
+            # rode along rebuild it conservatively: plain 1-3 digit prefixes
+            # get the 2-digit track; 4+ digit prefixes are left untouched
+            # (without the album's disc list we can't know DDTT's disc half).
             fname = os.path.basename(resolved)
-            new_path = _fix_filename_track_number(resolved, fname, int(correct_num))
+            new_filename = details.get('new_filename')
+            if new_filename is None and 'tag_ok' not in details:   # legacy finding
+                base, ext = os.path.splitext(fname)
+                m = re.match(r'^(\d+)', base.strip())
+                prefix = m.group(1) if m else ''
+                planned = _planned_prefix(prefix, int(correct_num),
+                                          int(details.get('disc_number') or 1),
+                                          multi_disc=False)
+                if planned is not None and prefix:
+                    candidate = re.sub(r'^\d+', planned, base, count=1)
+                    if candidate != base:
+                        new_filename = candidate + ext
+            new_path = None
+            if new_filename:
+                new_path = _rename_to_basename(resolved, fname,
+                                               os.path.splitext(new_filename)[0])
 
             # Update DB file path if renamed
             if new_path:

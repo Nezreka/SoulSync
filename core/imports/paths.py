@@ -608,8 +608,16 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         # any miss falls through to the template path below. Best-effort.
         # Compilations skip reuse — their namespace moved from artist-based to
         # Compilations/, so matching an old artist folder would scatter tracks.
+        # Multi-disc albums skip reuse too (#1009): their correct layout is
+        # SEVERAL folders (one per disc — $cdnum/$disc templates or the auto
+        # "Disc N" folder), but the resolver can only answer "the album's one
+        # existing folder" (DatabaseTrack carries no disc number). Mid-download
+        # that one folder is whichever disc landed first, so every later track
+        # of a box set would be funneled into it — collapsing all discs into a
+        # single disc folder and colliding same-numbered filenames.
         reuse_folder = None
-        if filename_base and raw_album_type not in ("compilation", "compile"):
+        _multi_disc_album = total_discs > 1 or disc_number > 1
+        if filename_base and not _multi_disc_album and raw_album_type not in ("compilation", "compile"):
             try:
                 from core.library.existing_album_folder import resolve_existing_album_folder
                 from database.music_database import get_database

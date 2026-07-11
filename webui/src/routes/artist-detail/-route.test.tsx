@@ -2,12 +2,12 @@ import { createMemoryHistory } from '@tanstack/react-router';
 import { render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createAppQueryClient } from '@/app/query-client';
 import { AppRouterProvider, createAppRouter } from '@/app/router';
+import { createTestQueryClient } from '@/test/query-client';
 import { createShellBridge } from '@/test/shell-bridge';
 
 function renderArtistDetailRoute(initialEntries = ['/artist-detail/library/42']) {
-  const queryClient = createAppQueryClient();
+  const queryClient = createTestQueryClient();
   const history = createMemoryHistory({ initialEntries });
   const router = createAppRouter({ history, queryClient });
 
