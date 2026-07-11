@@ -49,6 +49,19 @@ function syncAcoustidRequireVerifiedVisibility() {
 }
 window.syncAcoustidRequireVerifiedVisibility = syncAcoustidRequireVerifiedVisibility;
 
+// #923: "Prefer explicit versions" only makes sense while explicit content is
+// allowed at all — grey the sub-checkbox out (keeping its saved value) when
+// the parent filter is off. Called on settings load + the parent's onchange.
+function syncPreferExplicitState() {
+    const parent = document.getElementById('allow-explicit');
+    const child = document.getElementById('prefer-explicit');
+    if (!parent || !child) return;
+    child.disabled = !parent.checked;
+    const label = child.closest('.checkbox-label');
+    if (label) label.style.opacity = parent.checked ? '' : '0.45';
+}
+window.syncPreferExplicitState = syncPreferExplicitState;
+
 // Retry Logic: the two numeric rows are only meaningful when their parent toggle
 // is on — hide them otherwise. "Retries per query" needs Exhaustive retry;
 // "Minimum matching mismatches" needs the version-mismatch fallback.
@@ -1658,6 +1671,8 @@ async function loadSettingsData() {
 
         // Populate Content Filter settings
         document.getElementById('allow-explicit').checked = settings.content_filter?.allow_explicit !== false;
+        document.getElementById('prefer-explicit').checked = settings.content_filter?.prefer_explicit === true;
+        syncPreferExplicitState();
 
         // Populate Genre Whitelist
         const gwEnabled = settings.genre_whitelist?.enabled === true;
@@ -4485,7 +4500,8 @@ async function saveSettings(quiet = false) {
             mode: document.getElementById('playlist-sync-mode')?.value || 'replace'
         },
         content_filter: {
-            allow_explicit: document.getElementById('allow-explicit').checked
+            allow_explicit: document.getElementById('allow-explicit').checked,
+            prefer_explicit: document.getElementById('prefer-explicit').checked
         },
         genre_whitelist: {
             enabled: document.getElementById('genre-whitelist-enabled').checked,
