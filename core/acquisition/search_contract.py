@@ -27,7 +27,7 @@ _SENSITIVE_ERROR_VALUE = re.compile(
 )
 
 
-def _safe_error(exc: Exception) -> str:
+def safe_external_error(exc: Exception) -> str:
     return _SENSITIVE_ERROR_VALUE.sub("[redacted]", str(exc))[:500]
 
 
@@ -227,7 +227,7 @@ def parse_candidate_batch(
                     "candidate content scope does not match acquisition request")
             parsed.append(candidate)
         except (CandidateParseError, KeyError, TypeError, ValueError) as exc:
-            failures.append(ParseFailure(source, position, _safe_error(exc)))
+            failures.append(ParseFailure(source, position, safe_external_error(exc)))
     return ParsedBatch(source, tuple(parsed), tuple(failures), skipped)
 
 
@@ -305,4 +305,5 @@ __all__ = [
     "aggregate_candidates",
     "build_search_criteria",
     "parse_candidate_batch",
+    "safe_external_error",
 ]
