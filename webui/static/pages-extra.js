@@ -2093,6 +2093,13 @@ async function _serverSelectTrack(trackIndex, mode, newTrackId, el) {
                 track.match_status = 'matched';
                 track.confidence = 1.0;
                 track.override = true;
+                // Link case: the picked track may already sit in the playlist as
+                // an "extra" row (the backend links instead of duplicating) —
+                // drop that row or the track shows twice until the next full load.
+                const dupIdx = _serverEditorState.tracks.findIndex(p =>
+                    p !== track && !p.source_track && p.server_track &&
+                    String(p.server_track.id) === String(newTrackId));
+                if (dupIdx >= 0) _serverEditorState.tracks.splice(dupIdx, 1);
                 _rerenderCompare();
             } else {
                 // couldn't identify the picked track locally — full reload fallback

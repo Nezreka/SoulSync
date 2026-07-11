@@ -44,3 +44,11 @@ def test_rerender_keeps_scroll_and_filter():
     block = _JS.split("function _rerenderCompare")[1].split("\n}\n")[0]
     assert "scrollTop" in block
     assert "_applyServerEditorFilter(_activeServerEditorFilter())" in block
+
+
+def test_linking_an_extra_track_drops_its_extra_row():
+    # backend links (never duplicates) when the picked track is already in the
+    # playlist — the local patch must drop the extra row or the track shows twice
+    block = _JS.split("async function _serverSelectTrack")[1].split("async function _serverRemoveTrack")[0]
+    assert "!p.source_track && p.server_track" in block
+    assert "splice(dupIdx, 1)" in block
