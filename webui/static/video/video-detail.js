@@ -1113,13 +1113,15 @@
         if (ep.dislike_count) { meta.push('👎 ' + (yc0 ? yc0.compactCount(ep.dislike_count) : ep.dislike_count)); }
         if (ep.air_date) meta.push(fmtDate(ep.air_date));
         var wished = !!ep.wished;
-        if (ep.owned) meta.push('✓ downloaded');
-        return '<div class="vd-ep vd-ep--yt' + (ep.owned ? ' vd-ep--got' : '') +
+        // Downloaded videos wear the SAME owned treatment as TV episodes
+        // (green badge via .vd-ep--owned) — parity, not a bespoke marker.
+        return '<div class="vd-ep vd-ep--yt' + (ep.owned ? ' vd-ep--owned vd-ep--got' : '') +
             '" data-vd-ep-key="' + key + '" data-vd-yt-vid="' + esc(ep.youtube_id) + '">' +
             '<div class="vd-ep-thumb vd-ep-thumb--play" data-vd-yt-play="' + esc(ep.youtube_id) + '" title="Play video">' +
             still + '<span class="vd-ep-thumb-ic">▶</span>' + dur + '</div>' +
             '<div class="vd-ep-info"><div class="vd-ep-top"><span class="vd-ep-title">' +
             esc(ep.title || 'Untitled') + '</span>' +
+            (ep.owned ? '<div class="vd-ep-badge">Downloaded</div>' : '') +
             (meta.length ? '<span class="vd-ep-rt">' + esc(meta.join(' · ')) + '</span>' : '') + '</div>' +
             (ep.overview ? '<p class="vd-ep-desc">' + esc(ep.overview) + '</p>' : '') + '</div>' +
             ytWishBtn(ep.youtube_id, wished, false) +
