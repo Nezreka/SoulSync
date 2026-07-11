@@ -50,12 +50,28 @@ def test_query_channel_library_counts_and_search(db):
     assert db.query_channel_library(page=2, limit=1)["pagination"]["has_prev"]
 
 
-def test_query_channel_library_only_followed(db):
+def test_query_channel_library_includes_unfollowed_with_downloads(db):
+    """A library shows what you OWN: a one-off download from an unfollowed
+    channel appears (title/avatar from the meta cache), marked not-followed.
+    Muted follows with no downloads stay hidden."""
     _follow(db, "UC1", "Followed")
     conn = db._get_connection()
     conn.execute("UPDATE video_watchlist SET state='mute' WHERE source_id='UC1'")
     conn.commit(); conn.close()
     assert db.query_channel_library()["pagination"]["total_count"] == 0
+    _downloaded(db, "UCslomo", "v1", 1)
+    db.cache_channel_meta("UCslomo", {"title": "The Slow Mo Guys",
+                                      "avatar_url": "https://yt/slomo.jpg"})
+    got = db.query_channel_library()
+    assert got["pagination"]["total_count"] == 1
+    c = got["items"][0]
+    assert c["id"] == "UCslomo" and c["title"] == "The Slow Mo Guys"
+    assert c["poster_url"] == "https://yt/slomo.jpg"
+    assert c["followed"] is False and c["owned_count"] == 1
+    # No meta cached → the id stands in for the title rather than hiding the row.
+    _downloaded(db, "UCmystery", "v2", 2)
+    titles = {c["id"]: c["title"] for c in db.query_channel_library()["items"]}
+    assert titles["UCmystery"] == "UCmystery"
 
 
 # ── API: /api/video/library?kind=channels ────────────────────────────────────
@@ -71,7 +87,7 @@ def test_library_api_channels_kind(tmp_path):
         d = app.test_client().get("/api/video/library?kind=channels").get_json()
         assert d["pagination"]["total_count"] == 1
         assert d["items"][0] == {"kind": "channel", "id": "UC1", "title": "Kurzgesagt",
-                                 "poster_url": "https://yt/av.jpg",
+                                 "poster_url": "https://yt/av.jpg", "followed": True,
                                  "video_count": 0, "owned_count": 1}
     finally:
         videoapi._video_db = None

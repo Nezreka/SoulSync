@@ -4802,44 +4802,63 @@ class VideoDatabase:
 
     def query_channel_library(self, *, search=None, letter=None, sort="title",
                               page=1, limit=75) -> dict:
-        """One page of FOLLOWED YouTube channels for the Library's Channels tab —
-        same paged shape as query_library. ``owned_count`` is real ownership:
-        completed downloads in the permanent history (the YouTube source of
-        truth); ``video_count`` is the remembered catalog size."""
+        """One page of the Library's Channels tab: FOLLOWED channels ∪ channels
+        you HAVE DOWNLOADS FROM (a library shows what you own — a one-off grab
+        from an unfollowed channel still belongs here). Same paged shape as
+        query_library. ``owned_count`` = completed downloads in the permanent
+        history; ``video_count`` = remembered catalog size; unfollowed channels
+        fill title/avatar from the channel-meta cache."""
         try:
             page = max(1, int(page or 1))
             limit = max(1, min(500, int(limit or 75)))
         except (TypeError, ValueError):
             page, limit = 1, 75
-        where, params = ["w.kind='channel'", "w.state='follow'"], []
+        base = (
+            "WITH chans AS ("
+            "  SELECT w.source_id AS cid, w.title AS wl_title, w.poster_url AS wl_poster, "
+            "         1 AS followed, w.date_added AS added "
+            "  FROM video_watchlist w WHERE w.kind='channel' AND w.state='follow' "
+            "  UNION ALL "
+            "  SELECT h.channel_id, NULL, NULL, 0, MAX(h.completed_at) "
+            "  FROM video_download_history h "
+            "  WHERE h.source='youtube' AND h.outcome='completed' AND h.channel_id IS NOT NULL "
+            "    AND h.channel_id NOT IN (SELECT source_id FROM video_watchlist "
+            "                             WHERE kind='channel' AND state='follow') "
+            "  GROUP BY h.channel_id"
+            "), named AS ("
+            "  SELECT c.cid, COALESCE(c.wl_title, m.title, c.cid) AS title, "
+            "         COALESCE(c.wl_poster, m.avatar_url) AS poster_url, "
+            "         c.followed, c.added "
+            "  FROM chans c LEFT JOIN youtube_channel_meta m ON m.channel_id = c.cid"
+            ") ")
+        where, params = [], []
         if search:
-            where.append("w.title LIKE ? COLLATE NOCASE")
+            where.append("title LIKE ? COLLATE NOCASE")
             params.append("%" + str(search) + "%")
         if letter and letter != "all":
             if letter == "#":
-                where.append("substr(UPPER(w.title), 1, 1) NOT BETWEEN 'A' AND 'Z'")
+                where.append("substr(UPPER(title), 1, 1) NOT BETWEEN 'A' AND 'Z'")
             else:
-                where.append("w.title LIKE ? COLLATE NOCASE")
+                where.append("title LIKE ? COLLATE NOCASE")
                 params.append(str(letter) + "%")
-        order = ("w.date_added DESC, w.id DESC" if sort == "added"
-                 else "w.title COLLATE NOCASE")
-        w = " AND ".join(where)
+        w = (" WHERE " + " AND ".join(where)) if where else ""
+        order = "added DESC" if sort == "added" else "title COLLATE NOCASE"
         conn = self._get_connection()
         try:
-            total = conn.execute(
-                f"SELECT COUNT(*) FROM video_watchlist w WHERE {w}", params).fetchone()[0]
+            total = conn.execute(base + f"SELECT COUNT(*) FROM named{w}", params).fetchone()[0]
             rows = conn.execute(
-                f"SELECT w.title, w.poster_url, w.source_id, w.date_added, "
+                base + "SELECT cid, title, poster_url, followed, "
                 "(SELECT COUNT(*) FROM youtube_channel_videos cv "
-                "  WHERE cv.channel_id = w.source_id) AS video_count, "
+                "  WHERE cv.channel_id = named.cid) AS video_count, "
                 "(SELECT COUNT(DISTINCT h.media_id) FROM video_download_history h "
                 "  WHERE h.source='youtube' AND h.outcome='completed' "
-                "  AND h.channel_id = w.source_id) AS owned_count "
-                f"FROM video_watchlist w WHERE {w} ORDER BY {order} LIMIT ? OFFSET ?",
+                "  AND h.channel_id = named.cid) AS owned_count "
+                f"FROM named{w} ORDER BY {order} LIMIT ? OFFSET ?",
                 (*params, limit, (page - 1) * limit)).fetchall()
             pages = max(1, (total + limit - 1) // limit)
-            return {"items": [{"kind": "channel", "id": r["source_id"],
+            return {"items": [{"kind": "channel", "id": r["cid"],
                                "title": r["title"], "poster_url": r["poster_url"],
+                               "followed": bool(r["followed"]),
                                "video_count": r["video_count"],
                                "owned_count": r["owned_count"]} for r in rows],
                     "pagination": {"page": page, "total_pages": pages, "total_count": total,
