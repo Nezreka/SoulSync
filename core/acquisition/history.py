@@ -20,6 +20,8 @@ EVENT_TYPES = frozenset({
     "candidates_evaluated",
     "no_candidate",
     "grab_prepared",
+    "grab_submitted",
+    "grab_submission_uncertain",
     "force_grab",
     "grab_completed",
     "grab_failed",
@@ -44,14 +46,7 @@ CREATE TABLE IF NOT EXISTS acquisition_history (
     message TEXT,
     payload_json TEXT NOT NULL DEFAULT '{}',
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CHECK(actor_profile_id = 1),
-    CHECK(event_type IN (
-        'request_created','search_started','search_completed','search_failed',
-        'candidates_evaluated','no_candidate','grab_prepared','force_grab',
-        'grab_completed','grab_failed','candidate_blocklisted',
-        'candidate_unblocked','retry_started','cancelled','import_started',
-        'import_completed','import_failed'
-    ))
+    CHECK(actor_profile_id = 1)
 )
 """
 
@@ -108,6 +103,28 @@ class AcquisitionHistoryEvent:
 
 
 def ensure_acquisition_history_schema(conn: Any) -> None:
+    existing = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='acquisition_history'"
+    ).fetchone()
+    existing_sql = str(existing[0] or "") if existing is not None else ""
+    if existing_sql and "CHECK(event_type IN" in existing_sql:
+        # Early Phase-4 builds constrained event names in SQLite. That makes
+        # an append-only history impossible to extend without a table rebuild.
+        # Preserve every row, remove only the closed enum constraint, then
+        # recreate append-only triggers below.
+        for trigger in (
+            "trg_acquisition_history_no_update",
+            "trg_acquisition_history_no_delete",
+        ):
+            conn.execute(f"DROP TRIGGER IF EXISTS {trigger}")
+        conn.execute(
+            "ALTER TABLE acquisition_history RENAME TO acquisition_history_legacy")
+        conn.execute(ACQUISITION_HISTORY_DDL)
+        columns = ", ".join(_COLUMNS)
+        conn.execute(
+            f"""INSERT INTO acquisition_history({columns})
+                SELECT {columns} FROM acquisition_history_legacy""")
+        conn.execute("DROP TABLE acquisition_history_legacy")
     conn.execute(ACQUISITION_HISTORY_DDL)
     for sql in _INDEXES:
         conn.execute(sql)

@@ -139,6 +139,7 @@ def update_grab(conn: Any, download_id: str, *,
                 status: Optional[str] = None,
                 external_job_id: Optional[str] = None,
                 client: Optional[str] = None,
+                category: Optional[str] = None,
                 last_client_state: Optional[str] = None,
                 output_path: Optional[str] = None,
                 error: Optional[str] = None,
@@ -156,6 +157,7 @@ def update_grab(conn: Any, download_id: str, *,
                     "AND status<>? THEN status ELSE ? END")
         args.extend([status, status])
     for column, value in (("external_job_id", external_job_id), ("client", client),
+                          ("category", category),
                           ("last_client_state", last_client_state),
                           ("output_path", output_path), ("error", error)):
         if value is not None:
