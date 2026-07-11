@@ -2210,38 +2210,59 @@ ADR-Log in §25a.
 | P1-12 | Providerlose Wishlist-IDs verwenden eine persistierte `stable_id` (deterministischer Hash der natürlichen Identität) statt der Rowid. Reset+Reimport reproduziert dieselbe ID; Metadaten-Edits ändern eine einmal geprägte ID nicht. Schema-Backfill + Importer-Backfill + Lazy-Fill. | `52b0e51` |
 | P1-13/P1-14 | `lib2_monitor_rules` erfasst Monitor-Intent mit Provenance (`user_explicit`/`cascade`/`new_release`/`legacy_import`); die `monitored`-Flags bleiben die effektive Projektion. Album-Kaskaden und der Profile-Assign-Opt-in überschreiben explizite Track-Entscheidungen nicht mehr; Bestandsflags und Import-Flags sind einmalig als `legacy_import` gelabelt; verwaiste Regeln werden gepruned. | `705beb4` |
 | Job-Profilscope | Der periodische Upgrade-Scan mirrort explizit als Admin-Profil statt über den Parameterdefault; Discography-Refresh war bereits explizit, Reconciler-Outbox-Rows tragen ihr Profil selbst. | `a38bf41` |
+| ADR-03 / P1-07 | `lib2_track_files` hat `is_primary` + `file_state` (`active`/`missing_suspected`/`missing_confirmed`/`quarantined`/`deleted`). Auswahlstrategie einmal dokumentiert (active > lossless > Bit-Tiefe/Sample-Rate/Bitrate > neueste Zeile) und über Insert-/Move-/Delete-Trigger plus idempotenten Backfill erzwungen. Alle Read-Pfade, die vorher `ORDER BY id LIMIT 1` (älteste Zeile) wählten — Track-Serialisierung, Wishlist-Upgrade-Eval, Retag, Track-File-Move, Duplicate-View, Embedded-Artwork — agieren jetzt auf der Primary-Datei. | `1df403d` |
+| ADR-04 / P1-04 | Additives Shadow-Modell: `lib2_albums` bleibt die Release Group; neu sind `lib2_release_editions` (eine Default-Edition je Album, partieller Unique-Index erzwingt genau eine Default-Edition pro Gruppe), `lib2_recordings` (harte IDs per partiellem Unique-Index) und `lib2_release_tracks` (Kompat-Link auf `lib2_tracks`). Recordings mergen ausschließlich über ISRC/MB-Recording-ID/Spotify-ID — Titel mergen nie (Live/Remaster bleiben getrennt); unverifizierte Canonical-Links werden als `lib2_recording_review`-Findings erfasst statt still gemergt. Backfill läuft idempotent aus Schema-Ensure und Importer. | `7743641` |
+| ADR-07 / P1-20/21 (Korrelation) | `acquisition_grabs` persistiert die fachliche Korrelation zu externen Downloadclients: externe Job-ID, Business-Status (`submitting/queued/downloading/completed/failed/cancel_pending/cancelled`), letzter beobachteter Clientstatus, Output-Path — nie Prozentfortschritt. Das Usenet-Plugin schreibt jede Transition, adoptiert nach Neustart noch laufende Client-Jobs (Poll-Thread wird wieder angehängt, `adopted`-Flag), markiert nie submittete Grabs sichtbar als failed und cancelt zweistufig: `cancel_pending` → `cancelled` erst nach erfolgreichem, idempotentem Client-Remove. Terminale Status können von späten Poll-Threads nicht überschrieben werden. | `83ebc1c` |
+| Wanted-Projektion | `lib2_wanted_tracks` materialisiert den effektiven Wanted-Zustand pro Track aus den Monitor-Rules mit testfixierter Priorität: expliziter Track > projizierter Track (`cascade`/`new_release`) > Album-Regel > Artist-Regel > `legacy_import` > Default unmonitored. Album-Toggles projizieren Cascade-Rules auf die reprojizieren Tracks (explizite Regeln werden nie downgegradet, auch nicht bei gleichem Wert); Monitor-Endpoint, Profil-Opt-in, Discography-Auto-Monitor und Importer halten die Projektion in derselben Transaktion aktuell, Deletes prunen sie, ein Versionsfeld erzwingt Rebuilds bei Prioritätsänderungen. Divergenz zu den `monitored`-Flags wird gezählt und geloggt, aber nicht angewendet (ADR-02: Flags bleiben operativ bis zum Cutover). | `45fc67a` |
 
-#### Verifizierter Teststand (2026-07-11)
+#### Verifizierter Teststand (2026-07-12)
 
-- Vollständige Backend-Suite (`pytest tests`): **7765 bestanden, 7 übersprungen,
-  0 Fehler** (2026-07-11, Stand nach den Commits oben; die Library-v2-relevanten
-  Subsets liefen zusätzlich einzeln).
+- Vollständige Backend-Suite (`pytest tests`): **7807 bestanden, 7 übersprungen,
+  2 deselektiert, 0 Fehler** (2026-07-12, Stand nach den ADR-03/04/07- und
+  Wanted-Projektions-Commits unten; Laufzeit ~18:26 min. Die neuen Library-v2-
+  und Acquisition-Subsets liefen zusätzlich einzeln vorab grün).
 - Frontend: `oxfmt --check` und `oxlint --type-check`: **0 Warnungen,
   0 Fehler**; Vitest: **96/96 bestanden**.
 - Die früher dokumentierten **7 vorbestehenden Vitest-Fehler** (Form-Slider,
   Import, Issues) reproduzieren nicht mehr; die Suite läuft seit `b53ce43`
   verpflichtend im CI-Job.
 - Library-v2-spezifische Import-, API-, Outbox-, Profil-, Candidate-,
-  Stable-ID-, Monitor-Rules- und Wishlist-Tests sind in den oben genannten
+  Stable-ID-, Monitor-Rules-, Wishlist-, Primary-File-, Edition/Recording-,
+  Wanted-Projektions- und Acquisition-Grab-Tests sind in den oben genannten
   Commits enthalten.
 
 #### Bewusst noch offen
 
-- [ ] Release Group/Edition, Multi-File-Primary-Modell und persistente
-  Acquisition-Korrelation gemäß ADR-03/04/07 implementieren (Phase 3/4).
-- [ ] Wanted-Projektion über die Monitor-Rules hinaus ausbauen (effektiver
-  Zustand als Projektion aus Track-/Release-/Artist-/New-Release-Regeln;
-  aktuell: Rules + Provenance + kaskadenfeste explizite Track-Intents).
+- [ ] Phase 3, Rest: typisierte Provideradapter, `library_provider_snapshots`
+  (Provenance-Vertrag, ADR-06), Refresh nach Foreign/Old IDs, Merge-/Move-
+  History; das Edition/Recording-Modell ist bisher ein Shadow-Modell —
+  Discography-Matching und Duplicate-Linking lesen noch nicht daraus.
+- [ ] Phase 4, Rest: `acquisition_requests` + Idempotency-Key,
+  `release_candidates`/`candidate_decisions`, Spezifikationspipeline
+  (Kap. 12), Wishlist-Adapter auf AcquisitionRequests; `acquisition_grabs`
+  ist der erste Baustein.
+- [ ] ADR-02-Cutover: Konsumenten (Wishlist-Mirror, Upgrade-Scan, Queries)
+  schrittweise von den `monitored`-Flags auf `lib2_wanted_tracks` umstellen;
+  aktuell wird Divergenz nur gezählt/geloggt.
+- [ ] ADR-07 auf Torrent ausweiten (Phase 6) und den zentralen Client-Monitor
+  mit Category-Adoption bauen (Phase 5) — Adoption läuft bisher nur über die
+  persistierte externe Job-ID des Usenet-Plugins.
+- [ ] `file_state`-Lifecycle mit dem Scan verdrahten (P2-02): Missing-
+  Erkennung setzt die Zustände noch nicht automatisch.
 
 Damit sind P0-01, P0-02, der akute URL-/Secret-Leak aus P0-03 samt
-Profil-/Entity-Bindung und Shared Store, P0-04, P1-01, P1-08, P1-09, P1-10,
-P1-11, P1-12, P1-14, P1-15, P1-16, P1-17, P1-29, P1-30, P1-31 sowie Teile von
-P1-13 (Provenance/Labeling; Reconciler aus `3ca3000`) und P1-18 geschlossen.
-P0-04 wurde mit strikter Fehlerweitergabe im Outbox-Worker nachgehärtet
-(`895d27e`) und durch den periodischen Reconciler (`3ca3000`) ergänzt; der manuelle
-Grab-Pfad übergibt das serverseitige Profil nun nachweislich an die Pipeline und ist
-für Nicht-Admins gesperrt (`a7b08a8`). Als Nächstes können ReleaseEdition/Recording
-und der größere Acquisition-Layer (Phase 3/4) beginnen.
+Profil-/Entity-Bindung und Shared Store, P0-04, P1-01, P1-07 (Multi-File-
+Primary, ADR-03), P1-08, P1-09, P1-10, P1-11, P1-12, P1-14, P1-15, P1-16,
+P1-17, P1-29, P1-30, P1-31 sowie Teile von P1-04 (Edition/Recording-Schema +
+Backfill, ADR-04), P1-05 (Review-Findings statt stiller Titel-Merges), P1-13
+(Provenance/Labeling + Wanted-Projektion), P1-18 und P1-20/P1-21 (persistente
+Grab-Korrelation, Adoption, zweistufiger Cancel — der zentrale Client-Monitor
+fehlt noch) geschlossen. P0-04 wurde mit strikter Fehlerweitergabe im
+Outbox-Worker nachgehärtet (`895d27e`) und durch den periodischen Reconciler
+(`3ca3000`) ergänzt; der manuelle Grab-Pfad übergibt das serverseitige Profil
+nachweislich an die Pipeline und ist für Nicht-Admins gesperrt (`a7b08a8`).
+Als Nächstes: Phase-3-Rest (Provider-Snapshots/typisierte Adapter) oder
+Phase-4-Kern (`acquisition_requests` + Decision Engine).
 
 ## 17. Teststrategie
 
