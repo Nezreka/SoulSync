@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS lib2_artists (
     summary TEXT,
     monitored INTEGER NOT NULL DEFAULT 1,
     monitor_new_items TEXT NOT NULL DEFAULT 'all',   -- 'all' | 'none' | 'new'
-    quality_profile_id INTEGER NOT NULL DEFAULT 1,
+    quality_profile_id INTEGER REFERENCES quality_profiles(id) ON DELETE RESTRICT,
     legacy_artist_id INTEGER,                         -- source row in legacy `artists`
     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -92,7 +92,7 @@ CREATE TABLE IF NOT EXISTS lib2_albums (
     tracklist_json TEXT,                               -- cached canonical tracklist (missing-track titles)
     origin TEXT NOT NULL DEFAULT 'library',            -- 'library' (has/had files) | 'discography' (provider-only)
     monitored INTEGER NOT NULL DEFAULT 1,
-    quality_profile_id INTEGER NOT NULL DEFAULT 1,
+    quality_profile_id INTEGER REFERENCES quality_profiles(id) ON DELETE RESTRICT,
     legacy_album_id INTEGER,                           -- source row in legacy `albums`
     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -129,7 +129,7 @@ CREATE TABLE IF NOT EXISTS lib2_tracks (
     musicbrainz_id TEXT,
     spotify_id TEXT,                                  -- for wishlist mirroring
     monitored INTEGER NOT NULL DEFAULT 1,
-    quality_profile_id INTEGER NOT NULL DEFAULT 1,
+    quality_profile_id INTEGER REFERENCES quality_profiles(id) ON DELETE RESTRICT,
     canonical_track_id INTEGER,                       -- self-ref; NULL = canonical
     legacy_track_id INTEGER,                          -- source row in legacy `tracks`
     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -267,11 +267,11 @@ _ADDED_COLUMNS = (
     ("lib2_albums", "tracklist_json",
      "ALTER TABLE lib2_albums ADD COLUMN tracklist_json TEXT"),
     ("lib2_artists", "quality_profile_id",
-     "ALTER TABLE lib2_artists ADD COLUMN quality_profile_id INTEGER NOT NULL DEFAULT 1"),
+     "ALTER TABLE lib2_artists ADD COLUMN quality_profile_id INTEGER"),
     ("lib2_albums", "quality_profile_id",
-     "ALTER TABLE lib2_albums ADD COLUMN quality_profile_id INTEGER NOT NULL DEFAULT 1"),
+     "ALTER TABLE lib2_albums ADD COLUMN quality_profile_id INTEGER"),
     ("lib2_tracks", "quality_profile_id",
-     "ALTER TABLE lib2_tracks ADD COLUMN quality_profile_id INTEGER NOT NULL DEFAULT 1"),
+     "ALTER TABLE lib2_tracks ADD COLUMN quality_profile_id INTEGER"),
     ("lib2_albums", "origin",
      "ALTER TABLE lib2_albums ADD COLUMN origin TEXT NOT NULL DEFAULT 'library'"),
     # NULL = the artist's provider catalog was never expanded; used by the
@@ -328,6 +328,154 @@ def _migrate_lib2_profiles_to_app_wide(cursor: Any) -> None:
         logger.error("lib2 quality-profile migration failed (will retry next start): %s", e)
 
 
+_QUALITY_PROFILE_TABLES = ("lib2_artists", "lib2_albums", "lib2_tracks")
+
+
+def _has_quality_profile_fk(cursor: Any, table: str) -> bool:
+    return any(
+        row[2] == "quality_profiles" and row[3] == "quality_profile_id"
+        and row[4] == "id"
+        for row in cursor.execute(f"PRAGMA foreign_key_list({table})").fetchall()
+    )
+
+
+def _install_quality_profile_triggers(cursor: Any, table: str) -> None:
+    """Enforce a live default and referential integrity on every SQLite build.
+
+    Existing tables are migrated through an additive nullable column because
+    SQLite cannot add ``NOT NULL REFERENCES`` to a populated table. These
+    triggers make the persisted invariant equivalent: NULL inserts resolve to
+    the current default, while invalid explicit values and NULL updates fail.
+    """
+    trigger_names = {
+        "default": f"trg_{table}_quality_profile_default",
+        "insert": f"trg_{table}_quality_profile_insert",
+        "update": f"trg_{table}_quality_profile_update",
+    }
+    for name in trigger_names.values():
+        cursor.execute(f"DROP TRIGGER IF EXISTS {name}")
+    cursor.execute(f"""
+        CREATE TRIGGER {trigger_names['insert']}
+        BEFORE INSERT ON {table}
+        FOR EACH ROW
+        WHEN NEW.quality_profile_id IS NOT NULL
+         AND NOT EXISTS (
+             SELECT 1 FROM quality_profiles WHERE id=NEW.quality_profile_id
+         )
+        BEGIN
+            SELECT RAISE(ABORT, 'invalid Library v2 quality_profile_id');
+        END
+    """)
+    cursor.execute(f"""
+        CREATE TRIGGER {trigger_names['default']}
+        AFTER INSERT ON {table}
+        FOR EACH ROW
+        WHEN NEW.quality_profile_id IS NULL
+        BEGIN
+            UPDATE {table}
+               SET quality_profile_id=(
+                   SELECT id FROM quality_profiles
+                    ORDER BY is_default DESC, id LIMIT 1
+               )
+             WHERE id=NEW.id;
+        END
+    """)
+    cursor.execute(f"""
+        CREATE TRIGGER {trigger_names['update']}
+        BEFORE UPDATE OF quality_profile_id ON {table}
+        FOR EACH ROW
+        WHEN NEW.quality_profile_id IS NULL
+          OR NOT EXISTS (
+              SELECT 1 FROM quality_profiles WHERE id=NEW.quality_profile_id
+          )
+        BEGIN
+            SELECT RAISE(ABORT, 'invalid Library v2 quality_profile_id');
+        END
+    """)
+
+
+def _migrate_quality_profile_constraints(cursor: Any) -> None:
+    """Remove numeric defaults and attach Lib2 rows to app-wide profiles.
+
+    ``ALTER TABLE ... ADD COLUMN`` can add a nullable FK without rebuilding
+    the heavily connected Library-v2 graph. Populate that column with either
+    the valid old assignment or the live default, drop the old DEFAULT-1
+    column, then rename the FK column into place. Each table uses a savepoint
+    so a failed SQLite capability check cannot leave a half-migrated schema.
+    """
+    default_row = cursor.execute(
+        "SELECT id FROM quality_profiles ORDER BY is_default DESC, id LIMIT 1"
+    ).fetchone()
+    if default_row is None:
+        raise RuntimeError("Library v2 requires at least one quality profile")
+    default_id = int(default_row[0])
+
+    for table in _QUALITY_PROFILE_TABLES:
+        info = {
+            row[1]: row for row in cursor.execute(
+                f"PRAGMA table_info({table})"
+            ).fetchall()
+        }
+        if "quality_profile_id" not in info:
+            continue
+        needs_fk_migration = (
+            info["quality_profile_id"][4] is not None
+            or not _has_quality_profile_fk(cursor, table)
+        )
+        savepoint = f"migrate_{table}_quality_profile"
+        cursor.execute(f"SAVEPOINT {savepoint}")
+        try:
+            for suffix in ("default", "insert", "update"):
+                cursor.execute(
+                    f"DROP TRIGGER IF EXISTS trg_{table}_quality_profile_{suffix}")
+            if needs_fk_migration:
+                if "quality_profile_id_v2" in info:
+                    cursor.execute(
+                        f"ALTER TABLE {table} DROP COLUMN quality_profile_id_v2")
+                cursor.execute(
+                    f"ALTER TABLE {table} ADD COLUMN quality_profile_id_v2 "
+                    "INTEGER REFERENCES quality_profiles(id) ON DELETE RESTRICT")
+                cursor.execute(f"""
+                    UPDATE {table}
+                       SET quality_profile_id_v2=CASE
+                           WHEN quality_profile_id IN (SELECT id FROM quality_profiles)
+                           THEN quality_profile_id ELSE ? END
+                """, (default_id,))
+                cursor.execute(
+                    f"ALTER TABLE {table} DROP COLUMN quality_profile_id")
+                cursor.execute(
+                    f"ALTER TABLE {table} RENAME COLUMN quality_profile_id_v2 "
+                    "TO quality_profile_id")
+            else:
+                cursor.execute(f"""
+                    UPDATE {table}
+                       SET quality_profile_id=?
+                     WHERE quality_profile_id IS NULL
+                        OR quality_profile_id NOT IN (
+                            SELECT id FROM quality_profiles
+                        )
+                """, (default_id,))
+            _install_quality_profile_triggers(cursor, table)
+            cursor.execute(f"RELEASE SAVEPOINT {savepoint}")
+        except Exception:
+            cursor.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
+            cursor.execute(f"RELEASE SAVEPOINT {savepoint}")
+            raise
+
+    cursor.execute("DROP TRIGGER IF EXISTS trg_quality_profiles_lib2_restrict")
+    cursor.execute("""
+        CREATE TRIGGER trg_quality_profiles_lib2_restrict
+        BEFORE DELETE ON quality_profiles
+        FOR EACH ROW
+        WHEN EXISTS (SELECT 1 FROM lib2_artists WHERE quality_profile_id=OLD.id)
+          OR EXISTS (SELECT 1 FROM lib2_albums WHERE quality_profile_id=OLD.id)
+          OR EXISTS (SELECT 1 FROM lib2_tracks WHERE quality_profile_id=OLD.id)
+        BEGIN
+            SELECT RAISE(ABORT, 'quality profile is referenced by Library v2');
+        END
+    """)
+
+
 def ensure_library_v2_schema(connection: Any) -> None:
     """Create the Library v2 tables + indexes if missing.
 
@@ -359,6 +507,7 @@ def ensure_library_v2_schema(connection: Any) -> None:
             except Exception as e:  # noqa: BLE001
                 logger.debug("column migration %s.%s: %s", table, column, e)
     _migrate_lib2_profiles_to_app_wide(cursor)
+    _migrate_quality_profile_constraints(cursor)
     # The read API falls back to download provenance (track_downloads) for
     # files the importer knew no quality data for — index the lookup column so
     # album views don't table-scan a large history per track. Guarded: the

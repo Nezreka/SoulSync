@@ -36,6 +36,10 @@ def db(tmp_path):
     conn.row_factory = sqlite3.Row
     ensure_library_v2_schema(conn)
     cur = conn.cursor()
+    cur.executemany(
+        "INSERT INTO quality_profiles(id, name) VALUES(?, ?)",
+        [(7, "Album Profile"), (9, "Track Profile")],
+    )
     cur.execute("INSERT INTO lib2_artists(name) VALUES('A')")
     artist_id = cur.lastrowid
     cur.execute(

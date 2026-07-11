@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import sqlite3
 
+import pytest
+
 from core.library2.schema import ensure_library_v2_schema
 
 _EXPECTED_TABLES = {
@@ -109,9 +111,129 @@ def test_foreign_keys_and_inserts():
     cur.execute("INSERT INTO lib2_track_files(track_id, path) VALUES(?, '/x.flac')", (tid,))
     conn.commit()
     assert conn.execute("SELECT COUNT(*) FROM lib2_tracks").fetchone()[0] == 1
+    for table in ("lib2_artists", "lib2_albums", "lib2_tracks"):
+        row = conn.execute(
+            f"SELECT quality_profile_id FROM {table} LIMIT 1"
+        ).fetchone()
+        assert row[0] == 1
+        info = {
+            column[1]: column for column in conn.execute(
+                f"PRAGMA table_info({table})")
+        }
+        assert info["quality_profile_id"][4] is None
+        assert any(
+            fk[2] == "quality_profiles" and fk[3] == "quality_profile_id"
+            for fk in conn.execute(f"PRAGMA foreign_key_list({table})")
+        )
 
     # Deleting the artist cascades to album/track (ON DELETE CASCADE).
     cur.execute("DELETE FROM lib2_artists WHERE id=?", (aid,))
     conn.commit()
     assert conn.execute("SELECT COUNT(*) FROM lib2_albums").fetchone()[0] == 0
     assert conn.execute("SELECT COUNT(*) FROM lib2_tracks").fetchone()[0] == 0
+
+
+def test_live_default_trigger_and_quality_reference_guards():
+    conn = sqlite3.connect(":memory:")
+    conn.execute("PRAGMA foreign_keys = ON")
+    ensure_library_v2_schema(conn)
+    conn.execute("UPDATE quality_profiles SET is_default=0")
+    conn.execute("UPDATE quality_profiles SET is_default=1 WHERE id=2")
+    conn.execute("DELETE FROM quality_profiles WHERE id=1")
+
+    artist_id = conn.execute(
+        "INSERT INTO lib2_artists(name) VALUES('A')"
+    ).lastrowid
+    album_id = conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title) VALUES(?, 'Album')",
+        (artist_id,),
+    ).lastrowid
+    conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title) VALUES(?, 'Track')",
+        (album_id,),
+    )
+    for table in ("lib2_artists", "lib2_albums", "lib2_tracks"):
+        assert conn.execute(
+            f"SELECT quality_profile_id FROM {table} LIMIT 1"
+        ).fetchone()[0] == 2
+
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            "INSERT INTO lib2_artists(name, quality_profile_id) VALUES('Bad', 999)"
+        )
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            "UPDATE lib2_artists SET quality_profile_id=NULL WHERE id=?",
+            (artist_id,),
+        )
+    with pytest.raises(sqlite3.IntegrityError, match="referenced by Library v2"):
+        conn.execute("DELETE FROM quality_profiles WHERE id=2")
+
+
+def test_migrates_default_one_columns_without_losing_graph_data():
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    ensure_library_v2_schema(conn)
+    artist_id = conn.execute("INSERT INTO lib2_artists(name) VALUES('A')").lastrowid
+    album_id = conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title) VALUES(?, 'Album')",
+        (artist_id,),
+    ).lastrowid
+    track_id = conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title) VALUES(?, 'Track')",
+        (album_id,),
+    ).lastrowid
+    conn.execute(
+        "INSERT INTO lib2_album_artists(album_id, artist_id) VALUES(?, ?)",
+        (album_id, artist_id),
+    )
+    conn.execute(
+        "INSERT INTO lib2_track_artists(track_id, artist_id) VALUES(?, ?)",
+        (track_id, artist_id),
+    )
+
+    conn.execute("DROP TRIGGER trg_quality_profiles_lib2_restrict")
+    for table in ("lib2_artists", "lib2_albums", "lib2_tracks"):
+        for suffix in ("default", "insert", "update"):
+            conn.execute(f"DROP TRIGGER trg_{table}_quality_profile_{suffix}")
+        conn.execute(
+            f"ALTER TABLE {table} ADD COLUMN quality_profile_id_old "
+            "INTEGER NOT NULL DEFAULT 1")
+        conn.execute(
+            f"UPDATE {table} SET quality_profile_id_old=quality_profile_id")
+        conn.execute(f"ALTER TABLE {table} DROP COLUMN quality_profile_id")
+        conn.execute(
+            f"ALTER TABLE {table} RENAME COLUMN quality_profile_id_old "
+            "TO quality_profile_id")
+    conn.execute("UPDATE lib2_artists SET quality_profile_id=999")
+    conn.execute("UPDATE lib2_albums SET quality_profile_id=2")
+    conn.execute("UPDATE quality_profiles SET is_default=0")
+    conn.execute("UPDATE quality_profiles SET is_default=1 WHERE id=2")
+    conn.execute("DELETE FROM quality_profiles WHERE id=1")
+    conn.commit()
+
+    ensure_library_v2_schema(conn)
+
+    assert conn.execute(
+        "SELECT quality_profile_id FROM lib2_artists WHERE id=?", (artist_id,)
+    ).fetchone()[0] == 2
+    assert conn.execute(
+        "SELECT quality_profile_id FROM lib2_albums WHERE id=?", (album_id,)
+    ).fetchone()[0] == 2
+    assert conn.execute(
+        "SELECT quality_profile_id FROM lib2_tracks WHERE id=?", (track_id,)
+    ).fetchone()[0] == 2
+    assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+    assert conn.execute("SELECT COUNT(*) FROM lib2_album_artists").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM lib2_track_artists").fetchone()[0] == 1
+    for table in ("lib2_artists", "lib2_albums", "lib2_tracks"):
+        info = {
+            column[1]: column for column in conn.execute(
+                f"PRAGMA table_info({table})")
+        }
+        assert info["quality_profile_id"][4] is None
+        assert any(
+            fk[2] == "quality_profiles" and fk[3] == "quality_profile_id"
+            for fk in conn.execute(f"PRAGMA foreign_key_list({table})")
+        )
