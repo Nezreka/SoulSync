@@ -6672,8 +6672,23 @@ def search_music():
     logger.info(f"Web UI Search initiated for: '{query}'" + (f" (source={requested_source})" if requested_source else ""))
     add_activity_item("", "Search Started", f"'{query}'", "Now")
 
+    # Candidate-token binding (audit §16.1): torrent/usenet results carry
+    # opaque candidate tokens; mint them bound to the searching profile.
+    # An entity-scoped search (Library-v2 interactive search names the
+    # track/album it acts for) additionally pins its tokens to that entity —
+    # a named-but-invalid entity fails the search instead of minting
+    # unbound tokens.
+    from core.download_plugins.candidate_store import candidate_binding
+    from core.library2.grab_context import resolve_lib2_grab_context
+    _lib2_state, _lib2_ctx = resolve_lib2_grab_context(get_database(), data)
+    if _lib2_state == 'invalid':
+        return jsonify({"error": "Unknown Library v2 entity for this search."}), 400
+
     try:
-        results = _search_basic.run_basic_search(query, download_orchestrator, run_async, source=requested_source)
+        with candidate_binding(get_current_profile_id(),
+                               lib2_track_id=(_lib2_ctx or {}).get('track_id'),
+                               lib2_album_id=(_lib2_ctx or {}).get('album_id')):
+            results = _search_basic.run_basic_search(query, download_orchestrator, run_async, source=requested_source)
         add_activity_item("", "Search Complete", f"'{query}' - {len(results)} results", "Now")
         return jsonify({"results": results})
     except ValueError as ve:
@@ -7065,6 +7080,7 @@ def start_download():
             names_lib2_entity,
             resolve_lib2_grab_context,
         )
+        from core.download_plugins.candidate_store import candidate_binding
         if (names_lib2_entity(data)
                 and get_current_profile_id() != ADMIN_PROFILE_ID):
             return jsonify({
@@ -7074,6 +7090,20 @@ def start_download():
         _lib2_state, _lib2_ctx = resolve_lib2_grab_context(get_database(), data)
         if _lib2_state == 'invalid':
             return jsonify({"error": "Unknown Library v2 entity for this grab."}), 400
+
+        # Candidate-token binding (audit §16.1): torrent/usenet grabs resolve
+        # an opaque candidate token server-side; the store revalidates that
+        # the token was minted for THIS profile (and, when entity-scoped,
+        # THIS lib2 entity). Grabs without tokens are unaffected. Factory,
+        # not instance — the album branch enters one scope per track.
+        _requesting_profile = get_current_profile_id()
+
+        def _cand_scope():
+            return candidate_binding(
+                _requesting_profile,
+                lib2_track_id=(_lib2_ctx or {}).get('track_id'),
+                lib2_album_id=(_lib2_ctx or {}).get('album_id'),
+            )
 
         if result_type == 'album':
             tracks = data.get('tracks', [])
@@ -7095,11 +7125,12 @@ def start_download():
                     filename = track_data.get('filename')
                     file_size = track_data.get('size', 0)
 
-                    download_id = run_async(download_orchestrator.download(
-                        username,
-                        filename,
-                        file_size
-                    ))
+                    with _cand_scope():
+                        download_id = run_async(download_orchestrator.download(
+                            username,
+                            filename,
+                            file_size
+                        ))
                     if download_id:
                         # Register download for post-processing (simple transfer to /Transfer)
                         context_key = _make_context_key(username, filename)
@@ -7172,7 +7203,8 @@ def start_download():
                 except Exception as _bl_err:
                     logger.debug("manual download blocklist check skipped: %s", _bl_err)
 
-            download_id = run_async(download_orchestrator.download(username, filename, file_size))
+            with _cand_scope():
+                download_id = run_async(download_orchestrator.download(username, filename, file_size))
             logger.info(f"Download ID returned: {download_id}")
 
             if download_id:
@@ -8103,10 +8135,18 @@ def download_selected_candidate(task_id):
         # pick indefinitely, leaving the user stuck at "downloading 0%".
         # Manual picks are user-initiated and infrequent; a fresh thread
         # per pick is cheaper than starving them behind background work.
+        # Candidate-token binding (audit §16.1): the worker thread below has
+        # no request context, so a torrent/usenet candidate token would be
+        # resolved as admin and rejected for any other profile. Bind the
+        # grab to the requesting profile explicitly.
+        from core.download_plugins.candidate_store import candidate_binding
+        _grab_profile = get_current_profile_id()
+
         def _run_manual_download():
             logger.info(f"[Manual Download] worker started for task {task_id} ({username} / {track_name})")
             try:
-                success = _attempt_download_with_candidates(task_id, [candidate], track, batch_id)
+                with candidate_binding(_grab_profile):
+                    success = _attempt_download_with_candidates(task_id, [candidate], track, batch_id)
                 logger.info(f"[Manual Download] worker finished for task {task_id} success={success}")
                 if not success:
                     with tasks_lock:
@@ -8272,13 +8312,21 @@ def manual_search_for_task(task_id):
         }
 
         from concurrent.futures import ThreadPoolExecutor, as_completed
+        from core.download_plugins.candidate_store import candidate_binding
+
+        # Captured NOW: the pool threads and the streaming generator run
+        # outside the Flask request context, where get_current_profile_id()
+        # would silently degrade to admin. Candidate tokens minted by this
+        # search must belong to the profile that asked for it (audit §16.1).
+        _search_profile = get_current_profile_id()
 
         def _search_one(src_name: str):
             client = download_orchestrator.client(src_name) if download_orchestrator else None
             if not client:
                 return src_name, [], None
             try:
-                result = run_async(client.search(query))
+                with candidate_binding(_search_profile):
+                    result = run_async(client.search(query))
                 if isinstance(result, tuple):
                     tracks = result[0] if result else []
                 else:
