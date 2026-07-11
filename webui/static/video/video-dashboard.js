@@ -116,19 +116,29 @@
 
     // Attention badges: open issues (everyone) + pending maintenance findings
     // (admins — the repair API is admin-gated; a 403 just leaves it hidden).
+    // Issues/Findings are EXCEPTION states, not destinations (unlike Watchlist/
+    // Wishlist) — both already have permanent homes (the Issues nav badge, the
+    // Tools page). Their header buttons only appear when something actually
+    // needs attention; at zero they stay out of the chrome entirely.
+    function _toggleAttentionBtn(sel, count) {
+        var btn = document.querySelector(sel);
+        if (btn) btn.style.display = count > 0 ? '' : 'none';
+    }
+
     function loadAttention() {
         fetch('/api/video/issues/counts', { headers: { Accept: 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
-                if (d && d.counts) applyBadges({ issues_open: d.counts.open || 0 });
-            }).catch(function () { /* badge stays */ });
+                var open = (d && d.counts && d.counts.open) || 0;
+                applyBadges({ issues_open: open });
+                _toggleAttentionBtn('[data-video-issues-btn]', open);
+            }).catch(function () { /* button stays hidden */ });
         fetch('/api/video/repair/findings/counts', { headers: { Accept: 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
-                if (!d) return;
-                var btn = document.querySelector('[data-video-maint-btn]');
-                if (btn) btn.style.display = '';
-                applyBadges({ findings_pending: d.pending || 0 });
+                var pending = (d && d.pending) || 0;
+                applyBadges({ findings_pending: pending });
+                _toggleAttentionBtn('[data-video-maint-btn]', pending);
             }).catch(function () { /* non-admin / unavailable → button stays hidden */ });
     }
 
