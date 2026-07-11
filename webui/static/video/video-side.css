@@ -4573,3 +4573,51 @@ body[data-side="video"] #gsearch-aura {
     font-size: 11.5px; color: rgba(255,255,255,0.5); line-height: 1.5; margin: 4px 0 0;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
+
+/* Movie-side finding details: poster rails, file cards, runtime bar */
+.vrf-rail {
+    display: flex; gap: 10px; overflow-x: auto; padding: 4px 2px 8px; margin-top: 10px;
+}
+.vrf-rail::-webkit-scrollbar { height: 8px; }
+.vrf-rail::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 4px; }
+.vrf-mini { position: relative; flex: 0 0 92px; }
+.vrf-mini-poster {
+    width: 92px; aspect-ratio: 2/3; border-radius: 8px; object-fit: cover;
+    background: #1b1b22; border: 1px solid rgba(255,255,255,0.1); display: block; font-size: 18px;
+}
+.vrf-mini--want .vrf-mini-poster {
+    border-color: rgba(var(--accent-rgb, 88 101 242), 0.65);
+    box-shadow: 0 0 12px rgba(var(--accent-rgb, 88 101 242), 0.25);
+}
+.vrf-mini--dim { opacity: 0.55; }
+.vrf-mini-chip {
+    position: absolute; top: 6px; right: 6px; padding: 1px 7px; border-radius: 999px;
+    font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em;
+    background: rgba(var(--accent-rgb, 88 101 242), 0.9); color: #fff;
+}
+.vrf-mini-chip--got { background: rgba(80,200,120,0.85); }
+.vrf-mini-title {
+    font-size: 11px; font-weight: 700; color: rgba(255,255,255,0.8); margin-top: 5px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.vrf-mini-year { font-size: 10px; color: rgba(255,255,255,0.4); }
+.vrf-files { display: flex; flex-direction: column; gap: 8px; }
+.vrf-file {
+    padding: 10px 12px; border-radius: 10px; background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.07); margin-top: 8px;
+}
+.vrf-file-head { font-size: 12.5px; font-weight: 700; color: #eef1f7; }
+.vrf-file-path {
+    font-size: 11px; color: rgba(255,255,255,0.45); margin-top: 3px;
+    font-family: ui-monospace, monospace; word-break: break-all;
+}
+.vrf-file .vrf-btn { margin-top: 8px; }
+.vrf-runtime {
+    height: 8px; border-radius: 999px; background: rgba(255,255,255,0.1);
+    overflow: hidden; margin-top: 12px;
+}
+.vrf-runtime-fill {
+    height: 100%; border-radius: 999px;
+    background: linear-gradient(90deg, #e0564a, #e0a34a);
+}
+.vrf-runtime-label { font-size: 11.5px; color: rgba(255,255,255,0.5); margin-top: 5px; }

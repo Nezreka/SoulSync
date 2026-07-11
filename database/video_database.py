@@ -3910,6 +3910,118 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    # ── repair-job source queries (movie-side jobs) ───────────────────────────
+    def repair_movie_franchises(self) -> dict:
+        """Owned movies grouped by TMDB collection:
+        {collection_id: {"name", "movies": [{library_id, tmdb_id, title, year}]}}."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT id, tmdb_id, title, year, tmdb_collection_id, tmdb_collection_name "
+                "FROM movies WHERE has_file=1 AND tmdb_collection_id IS NOT NULL "
+                "AND tmdb_id IS NOT NULL ORDER BY year, title").fetchall()
+        finally:
+            conn.close()
+        out: dict = {}
+        for r in rows:
+            g = out.setdefault(r["tmdb_collection_id"],
+                               {"name": r["tmdb_collection_name"], "movies": []})
+            if not g["name"] and r["tmdb_collection_name"]:
+                g["name"] = r["tmdb_collection_name"]
+            g["movies"].append({"library_id": r["id"], "tmdb_id": r["tmdb_id"],
+                                "title": r["title"], "year": r["year"]})
+        return out
+
+    def repair_owned_movie_files(self) -> list:
+        """Every owned movie with each of its files (quality/runtime checks)."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT m.id AS movie_id, m.tmdb_id, m.title, m.year, m.runtime_minutes, "
+                "f.id AS file_id, f.relative_path, f.size_bytes, f.resolution, f.quality, "
+                "f.video_codec, f.audio_codec, f.release_source, f.runtime_seconds "
+                "FROM movies m JOIN media_files f ON f.movie_id = m.id "
+                "WHERE m.has_file=1 ORDER BY m.title COLLATE NOCASE, f.size_bytes DESC").fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def repair_movie_metadata_gaps(self) -> list:
+        """Owned movies with enrichment gaps: unmatched, or missing overview /
+        genres / poster / backdrop. Returns the raw signals; the job decides
+        (user-locked blank fields are deliberate and get filtered there)."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT m.id AS movie_id, m.tmdb_id, m.title, m.year, m.tmdb_match_status, "
+                "m.locked_fields, "
+                "(m.overview IS NULL OR m.overview='') AS no_overview, "
+                "(m.poster_url IS NULL OR m.poster_url='') AS no_poster, "
+                "(m.backdrop_url IS NULL OR m.backdrop_url='') AS no_backdrop, "
+                "NOT EXISTS (SELECT 1 FROM movie_genres mg WHERE mg.movie_id=m.id) AS no_genres "
+                "FROM movies m WHERE m.has_file=1 "
+                "AND (m.tmdb_match_status IS NULL OR m.tmdb_match_status<>'matched' "
+                "     OR m.overview IS NULL OR m.overview='' "
+                "     OR m.poster_url IS NULL OR m.poster_url='' "
+                "     OR m.backdrop_url IS NULL OR m.backdrop_url='' "
+                "     OR NOT EXISTS (SELECT 1 FROM movie_genres mg WHERE mg.movie_id=m.id)) "
+                "ORDER BY m.title COLLATE NOCASE").fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def repair_duplicate_movies(self) -> dict:
+        """Duplicate signals: {"rows": [[movie,…] same tmdb_id twice],
+        "files": [{movie + its 2+ files}]} — both owned-only."""
+        conn = self._get_connection()
+        try:
+            dup_rows = conn.execute(
+                "SELECT m.id, m.tmdb_id, m.title, m.year, m.server_source, m.path "
+                "FROM movies m WHERE m.has_file=1 AND m.tmdb_id IN ("
+                "  SELECT tmdb_id FROM movies WHERE has_file=1 AND tmdb_id IS NOT NULL "
+                "  GROUP BY tmdb_id HAVING COUNT(*)>1) ORDER BY m.tmdb_id, m.id").fetchall()
+            multi = conn.execute(
+                "SELECT m.id AS movie_id, m.tmdb_id, m.title, m.year, "
+                "f.id AS file_id, f.relative_path, f.size_bytes, f.resolution, f.quality, "
+                "f.video_codec FROM movies m JOIN media_files f ON f.movie_id=m.id "
+                "WHERE m.has_file=1 AND m.id IN ("
+                "  SELECT movie_id FROM media_files WHERE movie_id IS NOT NULL "
+                "  GROUP BY movie_id HAVING COUNT(*)>1) "
+                "ORDER BY m.id, f.size_bytes DESC").fetchall()
+        finally:
+            conn.close()
+        by_tmdb: dict = {}
+        for r in dup_rows:
+            by_tmdb.setdefault(r["tmdb_id"], []).append(dict(r))
+        by_movie: dict = {}
+        for r in multi:
+            by_movie.setdefault(r["movie_id"], []).append(dict(r))
+        return {"rows": list(by_tmdb.values()), "files": list(by_movie.values())}
+
+    def repair_stale_wishlist(self) -> list:
+        """Wishlist rows whose target is ALREADY OWNED (the drain skips them
+        forever — they're clutter): movie rows with an owned library match and
+        episode rows whose episode has a file."""
+        conn = self._get_connection()
+        try:
+            movies = conn.execute(
+                "SELECT w.id AS wishlist_id, 'movie' AS kind, w.tmdb_id, w.title, "
+                "w.poster_url, NULL AS season_number, NULL AS episode_number, "
+                "(SELECT m.id FROM movies m WHERE m.tmdb_id=w.tmdb_id AND m.has_file=1 LIMIT 1) "
+                "AS library_id FROM video_wishlist w WHERE w.kind='movie' "
+                "AND w.tmdb_id IN (SELECT tmdb_id FROM movies WHERE has_file=1 "
+                "AND tmdb_id IS NOT NULL)").fetchall()
+            eps = conn.execute(
+                "SELECT w.id AS wishlist_id, 'episode' AS kind, w.tmdb_id, w.title, "
+                "w.poster_url, w.season_number, w.episode_number, w.library_id "
+                "FROM video_wishlist w WHERE w.kind='episode' "
+                "AND EXISTS (SELECT 1 FROM episodes e JOIN shows s ON e.show_id=s.id "
+                "  WHERE s.tmdb_id=w.tmdb_id AND e.season_number=w.season_number "
+                "  AND e.episode_number=w.episode_number AND e.has_file=1)").fetchall()
+            return [dict(r) for r in movies] + [dict(r) for r in eps]
+        finally:
+            conn.close()
+
     def repair_record_job_start(self, job_id: str) -> int:
         conn = self._get_connection()
         try:

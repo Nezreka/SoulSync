@@ -10,6 +10,12 @@ JOB_REGISTRY: dict = {}
 # Every job module (registration is an import side-effect, like music's list).
 _JOB_MODULES = [
     "missing_episodes",
+    "movie_collections",
+    "quality_upgrade",
+    "broken_files",
+    "metadata_gaps",
+    "duplicate_movies",
+    "wishlist_audit",
 ]
 
 
