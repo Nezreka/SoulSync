@@ -634,7 +634,9 @@ def _set_profile_context():
     # music-DB read. Admin (1) is always allowed.
     g.can_download = True
     g.profile_name = "Admin"   # display name for isolated blueprints (video issues reporter)
+    g.is_admin = True          # profile 1 is always admin; others per their is_admin flag
     if pid != 1 and 'profile_id' in session:
+        g.is_admin = False
         try:
             database = get_database()
             profile = database.get_profile(pid)
@@ -644,6 +646,7 @@ def _set_profile_context():
                 return _jsonify({"error": "profile_required", "message": "Profile no longer exists"}), 401
             g.can_download = bool((profile or {}).get('can_download', True))
             g.profile_name = (profile or {}).get('name') or ("Profile %s" % pid)
+            g.is_admin = bool((profile or {}).get('is_admin', False))
         except Exception as e:
             logger.debug("profile session validate: %s", e)
 
