@@ -50,6 +50,9 @@ ACQUISITION_GRABS_DDL = """
 CREATE TABLE IF NOT EXISTS acquisition_grabs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     download_id TEXT NOT NULL UNIQUE,     -- SoulSync-side correlation id
+    acquisition_request_id TEXT,
+    release_candidate_id TEXT,
+    decision_run_id TEXT,
     source TEXT NOT NULL,                 -- 'usenet'|'torrent'|...
     client TEXT,                          -- adapter identity ('SABnzbdAdapter'|...)
     external_job_id TEXT,                 -- the client's job id (nzo_id, ...)
@@ -62,7 +65,10 @@ CREATE TABLE IF NOT EXISTS acquisition_grabs (
     context_json TEXT NOT NULL DEFAULT '{}',  -- flow / entity / profile context
     adopted INTEGER NOT NULL DEFAULT 0,   -- re-attached after a restart
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (acquisition_request_id) REFERENCES acquisition_requests(id) ON DELETE SET NULL,
+    FOREIGN KEY (release_candidate_id) REFERENCES release_candidates(id) ON DELETE SET NULL,
+    FOREIGN KEY (decision_run_id) REFERENCES candidate_decision_runs(id) ON DELETE SET NULL
 )
 """
 
@@ -71,6 +77,20 @@ _INDEXES = (
     "ON acquisition_grabs(source, status)",
     "CREATE INDEX IF NOT EXISTS idx_acquisition_grabs_job "
     "ON acquisition_grabs(external_job_id)",
+    "CREATE INDEX IF NOT EXISTS idx_acquisition_grabs_request "
+    "ON acquisition_grabs(acquisition_request_id, status)",
+)
+
+_ADDED_COLUMNS = (
+    ("acquisition_request_id",
+     "ALTER TABLE acquisition_grabs ADD COLUMN acquisition_request_id TEXT "
+     "REFERENCES acquisition_requests(id) ON DELETE SET NULL"),
+    ("release_candidate_id",
+     "ALTER TABLE acquisition_grabs ADD COLUMN release_candidate_id TEXT "
+     "REFERENCES release_candidates(id) ON DELETE SET NULL"),
+    ("decision_run_id",
+     "ALTER TABLE acquisition_grabs ADD COLUMN decision_run_id TEXT "
+     "REFERENCES candidate_decision_runs(id) ON DELETE SET NULL"),
 )
 
 
@@ -78,6 +98,13 @@ def ensure_acquisition_grabs_schema(conn: Any) -> None:
     """Create the grabs table + indexes. Idempotent; caller commits."""
     cursor = conn.cursor()
     cursor.execute(ACQUISITION_GRABS_DDL)
+    columns = {
+        row[1] for row in cursor.execute(
+            "PRAGMA table_info(acquisition_grabs)").fetchall()
+    }
+    for column, alter_sql in _ADDED_COLUMNS:
+        if column not in columns:
+            cursor.execute(alter_sql)
     for index_sql in _INDEXES:
         cursor.execute(index_sql)
 
@@ -86,6 +113,9 @@ def record_grab(conn: Any, download_id: str, source: str, *,
                 client: Optional[str] = None, title: Optional[str] = None,
                 category: Optional[str] = None,
                 context: Optional[Dict[str, Any]] = None,
+                acquisition_request_id: Optional[str] = None,
+                release_candidate_id: Optional[str] = None,
+                decision_run_id: Optional[str] = None,
                 status: str = STATUS_SUBMITTING) -> None:
     """Insert the correlation row for a new grab. Does not commit.
 
@@ -94,10 +124,15 @@ def record_grab(conn: Any, download_id: str, source: str, *,
     """
     conn.execute(
         """INSERT OR IGNORE INTO acquisition_grabs(
-               download_id, source, client, title, category, status, context_json)
-           VALUES(?,?,?,?,?,?,?)""",
-        (download_id, source, client, title, category, status,
-         json.dumps(context or {})))
+               download_id, acquisition_request_id, release_candidate_id,
+               decision_run_id, source, client, title, category, status,
+               context_json)
+           VALUES(?,?,?,?,?,?,?,?,?,?)""",
+        (
+            download_id, acquisition_request_id, release_candidate_id,
+            decision_run_id, source, client, title, category, status,
+            json.dumps(context or {}),
+        ))
 
 
 def update_grab(conn: Any, download_id: str, *,
@@ -136,7 +171,9 @@ def update_grab(conn: Any, download_id: str, *,
     return cur.rowcount > 0
 
 
-_COLUMNS = ("id", "download_id", "source", "client", "external_job_id",
+_COLUMNS = ("id", "download_id", "acquisition_request_id",
+            "release_candidate_id", "decision_run_id",
+            "source", "client", "external_job_id",
             "category", "title", "status", "last_client_state", "output_path",
             "error", "context_json", "adopted", "created_at", "updated_at")
 
