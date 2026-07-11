@@ -36,6 +36,7 @@ class SearchCriteria:
     """Server-owned search intent passed to source adapters."""
 
     request_id: str
+    profile_id: int
     request_scope: str
     entity_id: int
     content_scope: str
@@ -97,6 +98,7 @@ def build_search_criteria(
     """Build criteria only from the persisted request and current catalog."""
     return SearchCriteria(
         request_id=request.id,
+        profile_id=request.profile_id,
         request_scope=request.scope,
         entity_id=request.entity_id,
         content_scope=_request_content_scope(request),
