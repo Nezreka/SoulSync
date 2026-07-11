@@ -116,7 +116,8 @@ def _make_organizer(db):
             db.update_video_download(dl["id"], status="importing", progress=100)
         except Exception:   # noqa: BLE001, S110 - a status blip must never wedge the import
             pass
-        patch = run_import(dl, src, fs=fs, prober=prober, settings=settings)
+        patch = run_import(dl, src, fs=fs, prober=prober, settings=settings,
+                           library_dir=_owned_library_dir(db, dl))
         if patch.get("status") == "completed" and patch.get("dest_path"):
             if settings.get("save_artwork") or settings.get("write_nfo"):
                 write_sidecars(db, dl, patch["dest_path"], settings, fs)
@@ -284,6 +285,30 @@ def _wishlist_ids(db, dl):
         return "movie", (_as_int(media_id) if is_tmdb else db.movie_tmdb_id(media_id)), None, None, ctx
     return ("show", (_as_int(media_id) if is_tmdb else db.show_tmdb_id(media_id)),
             ctx.get("season"), ctx.get("episode"), ctx)
+
+
+def _owned_library_dir(db, dl):
+    """The REAL local folder of the copy the library already owns for this
+    download's target, or None for brand-new items. The DB stores the SERVER's
+    view of the file path (Plex part.file / Jellyfin Path — a different Docker
+    mount, drive letter, or NAS export from here); the video path resolver
+    re-roots it against the folders SoulSync knows. This is what makes an
+    upgrade replace the copy WHERE IT LIVES instead of forking a second copy
+    into the template location. Best-effort — None falls back to the template."""
+    try:
+        import os as _os
+
+        from core.video.path_resolver import resolve_video_file_path, video_base_dirs
+        kind, tmdb_id, sn, en, _ctx = _wishlist_ids(db, dl)
+        if not tmdb_id:
+            return None
+        stored = db.video_stored_file_path("movie" if kind == "movie" else "episode",
+                                           tmdb_id=int(tmdb_id), season=sn, episode=en)
+        resolved = resolve_video_file_path(stored, video_base_dirs(db))
+        return _os.path.dirname(resolved) if resolved else None
+    except Exception:   # noqa: BLE001 - resolution is an assist, never a blocker
+        logger.debug("owned-library-dir resolution failed", exc_info=True)
+        return None
 
 
 def _wishlist_failed(db, dl) -> None:

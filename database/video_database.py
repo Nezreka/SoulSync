@@ -3920,6 +3920,40 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def video_stored_file_path(self, kind: str, *, tmdb_id=None,
+                               season=None, episode=None):
+        """The server-reported path of the library's existing file for this
+        item (largest file first), or None when nothing is owned. This is the
+        SERVER's filesystem view — feed it through core.video.path_resolver
+        to get a path that exists locally (upgrade-in-place needs the real
+        folder, not the template destination)."""
+        if not tmdb_id:
+            return None
+        conn = self._get_connection()
+        try:
+            if kind == "movie":
+                r = conn.execute(
+                    "SELECT f.relative_path FROM media_files f "
+                    "JOIN movies m ON m.id = f.movie_id "
+                    "WHERE m.tmdb_id=? AND m.has_file=1 AND f.relative_path<>'' "
+                    "ORDER BY f.size_bytes DESC LIMIT 1", (int(tmdb_id),)).fetchone()
+            elif season is not None and episode is not None:
+                r = conn.execute(
+                    "SELECT f.relative_path FROM media_files f "
+                    "JOIN episodes e ON e.id = f.episode_id "
+                    "JOIN shows s ON s.id = e.show_id "
+                    "WHERE s.tmdb_id=? AND e.season_number=? AND e.episode_number=? "
+                    "AND e.has_file=1 AND f.relative_path<>'' "
+                    "ORDER BY f.size_bytes DESC LIMIT 1",
+                    (int(tmdb_id), int(season), int(episode))).fetchone()
+            else:
+                return None
+            return r["relative_path"] if r else None
+        except (sqlite3.Error, ValueError, TypeError):
+            return None
+        finally:
+            conn.close()
+
     # ── repair-job source queries (movie-side jobs) ───────────────────────────
     def repair_movie_franchises(self) -> dict:
         """Owned movies grouped by TMDB collection:

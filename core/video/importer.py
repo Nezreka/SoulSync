@@ -139,7 +139,7 @@ def _existing_match(scope: str, dest_dir: str, ctx: dict, list_dir: Callable) ->
 
 def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | None = None,
                 settings: dict | None = None, force: bool = False,
-                override: dict | None = None) -> dict:
+                override: dict | None = None, library_dir: str | None = None) -> dict:
     """Decide what to do with a finished download. Returns one of:
 
       {"action": "import",  "dest": {...}, "quality_label": str}
@@ -229,6 +229,14 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
         "tvdbid": media_id if scope == "episode" else None,
     }
     dest = organization.render_path(scope, root, fields, settings, ext)
+    # The library already owns this item at a REAL, resolved location
+    # (``library_dir`` — the server-stored path re-rooted by the video path
+    # resolver): upgrades must land beside/replace THAT copy, not fork a
+    # second one in the template location. Templated filename kept; a forced
+    # manual placement still goes exactly where the user pointed.
+    if library_dir and not force:
+        dest = {"dir": library_dir, "filename": dest["filename"],
+                "path": os.path.join(library_dir, dest["filename"])}
     # Where poster.jpg goes: the movie folder, or the SHOW root for an episode
     # (parent of the Season folder) — so it isn't dropped per-season.
     artwork_dir = dest["dir"] if scope == "movie" else os.path.dirname(dest["dir"])
@@ -280,7 +288,7 @@ def plan_subs(src_path: str, dest_path: str, list_dir: Callable) -> list:
 
 def run_import(dl: dict, src_path: str, *, fs: Any, prober: Callable | None = None,
                settings: dict | None = None, force: bool = False,
-               override: dict | None = None) -> dict:
+               override: dict | None = None, library_dir: str | None = None) -> dict:
     """Execute the import and return a DB patch dict for the download row.
 
     ``fs`` is an injected facade with: ``list_dir(dir)->iterable[name]``,
@@ -299,7 +307,8 @@ def run_import(dl: dict, src_path: str, *, fs: Any, prober: Callable | None = No
         except Exception:   # noqa: BLE001 - a probe crash must not block the import
             probe_info = None
     plan = plan_import(dl, src_path, list_dir=fs.list_dir, probe=probe_info,
-                       settings=settings, force=force, override=override)
+                       settings=settings, force=force, override=override,
+                       library_dir=library_dir)
     if plan["action"] == "reject":
         # Leave the file where it is; remember WHERE so manual import can find it.
         return {"status": "import_failed", "progress": 100.0, "error": plan["reason"],
