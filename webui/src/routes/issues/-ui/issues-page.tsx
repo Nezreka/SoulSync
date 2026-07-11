@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from '@tanstack/react-router';
 
 import { Select } from '@/components/form';
+import { PageHeader } from '@/components/page-header';
 import { Show } from '@/components/primitives';
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 
@@ -125,16 +126,31 @@ function IssueBoardHeader({
   onStatusChange: (status: IssuesSearch['status']) => void;
 }) {
   return (
-    <div className={styles.issuesHeader} id="issues-header">
-      <div className={styles.issuesHeaderLeft}>
-        <h2 className={styles.issuesTitle}>Issues</h2>
-        <p className={styles.issuesSubtitle} id="issues-subtitle">
-          {isAdmin
-            ? 'Manage and resolve reported library problems'
-            : 'Track and resolve library problems'}
-        </p>
-      </div>
-      <div className={styles.issuesHeaderRight}>
+    <PageHeader
+      id="issues-header"
+      icon={
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.6}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          style={{ color: 'rgb(var(--accent-light-rgb))' }}
+          aria-hidden="true"
+        >
+          <path d="M9 3h6a2 2 0 0 1 2 2h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h1a2 2 0 0 1 2-2Z" />
+          <path d="M9.5 3.6a1.8 1.8 0 0 0 0 3.4h5a1.8 1.8 0 0 0 0-3.4" />
+          <path d="M8.5 13.5l2 2 4-4" />
+        </svg>
+      }
+      title="Issues"
+      subtitle={
+        isAdmin
+          ? 'Manage and resolve reported library problems'
+          : 'Track and resolve library problems'
+      }
+      actions={
         <div className={styles.issuesFilters} id="issues-filters">
           <Select
             id="issues-filter-status"
@@ -166,8 +182,8 @@ function IssueBoardHeader({
             ))}
           </Select>
         </div>
-      </div>
-    </div>
+      }
+    />
   );
 }
 
@@ -271,11 +287,7 @@ function IssueBoardList({
     }
 
     return issues.map((issue) => (
-      <IssueBoardCard
-        key={issue.id}
-        issue={issue}
-        showReporterName={showReporterName}
-      />
+      <IssueBoardCard key={issue.id} issue={issue} showReporterName={showReporterName} />
     ));
   }
 }

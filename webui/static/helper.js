@@ -3404,19 +3404,14 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Convention: keep only the CURRENT release here, plus a single brief
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '2.8.8': [
-        { date: 'July 2026 — 2.8.8' },
-        { title: 'Fixed a bug that could corrupt FLAC files on a tag write (#1000)', desc: 'writing tags to a FLAC (album consistency, the repair passes, ReplayGain) could damage the audio on some setups — the kind of skips/mutes flac -t catches. every tag write now goes to a temp copy, verifies the audio is byte-for-byte intact, and only then swaps the file in, so a bad write can never replace a good one. completing an album also adopts the album\'s existing tags instead of re-stamping every track, and the consistency pass pins one MusicBrainz release so albums stop splitting into 2-3 copies.', page: 'library' },
-        { title: 'New: Corrupt File Detector repair job', desc: 'decode-tests your FLAC library, flags any that are physically damaged, and lets you delete + re-download them in one click. opt-in, under the repair jobs.', page: 'tools' },
-        { title: 'New: Bandcamp enrichment source', desc: 'an experimental metadata/enrichment source for Bandcamp — big thanks to @shkarlsson for the contribution. off by default; turn it on in the enrichment sources.', page: 'settings' },
-        { title: 'Atomic album publishing (opt-in)', desc: 'a new toggle in Settings → Downloads: stage an album\'s tracks privately and only move the whole album into your library once it finishes downloading, so Plex/Jellyfin never shows a half-loaded album mid-download. off by default — nothing changes unless you enable it.', page: 'settings' },
-        { title: 'Downloads unjammed', desc: 'fixed a batch-slot leak and a few deadlocks that could wedge the download queue with orphaned tasks that never cleared — the "found N orphaned tasks" loop.', page: 'active-downloads' },
-        { title: 'Tidal downloads survive restarts (#1002)', desc: 'the Tidal download session now refreshes its token on restart instead of silently dropping it, so the source stays connected instead of forcing a manual re-link.', page: 'settings' },
-        { title: 'Compilations stay together (#1003)', desc: 'various-artists compilations now land under Compilations/ instead of scattering their tracks across individual artist folders.', page: 'settings' },
-        { title: 'Lossy converter + auto-scan fixes (#995)', desc: 'the lossy converter surfaces the real ffmpeg error instead of the version banner, and simple downloads now honor the "Auto-Scan After Downloads" toggle instead of always scanning.', page: 'tools' },
-        { title: 'UI + mobile polish', desc: 'a big cleanup pass across headers, buttons, filters, mobile touch targets, and general layout. thanks to @bluejorts.', page: 'dashboard' },
-        { title: 'Imports refused when your media server isn\'t connected', desc: 'a download/import can\'t land orphaned when SoulSync can\'t reach Plex/Jellyfin/Navidrome.', page: 'import' },
-        { title: 'Earlier versions', desc: '2.8.7 made the SoulSync discovery playlists first-class Auto-Sync items, fixed a settings-save that could wipe a stored API secret (#992), and added Navidrome playlist cover art (#993). 2.8.6 was a fix batch (Spotify search without an account, the Docker Import/Stats black screen #986, mirrored-playlist wipes #990, artist browse #988, iTunes singles #989, Reorganize folder pruning #985). 2.8.4 added Artist Web + named Quality Profiles (#974); 2.8.3 rebuilt Discover; 2.7.0 made multi-user real.' },
+    '2.8.9': [
+        { date: 'July 2026 — 2.8.9' },
+        { title: 'Multi-disc downloads fixed (#1009)', desc: 'downloading a box set was collapsing every disc into one folder — multi-disc albums now always follow your naming template, so $cdnum/$disc folders and the auto "Disc N" folders actually stick.', page: 'library' },
+        { title: 'Track Number Repair understands discs (#1009)', desc: 'the repair job was mangling $disc$track filenames (0213 became 133) and flagging perfectly-formatted box sets as broken. repairs now keep your naming convention (0213 for disc 2 track 13, plain 01 for single disc), correct files are left alone, and approving a finding applies exactly the change it shows.', page: 'tools' },
+        { title: 'Server Playlists page is fast now (#1005)', desc: 'opening a big synced playlist took 15+ seconds; it\'s a few seconds now. the missing/matched filter actually filters after a reload, and syncing a single song updates just that row instead of reloading the whole playlist.', page: 'sync' },
+        { title: 'New: prefer explicit versions (#923)', desc: 'a sub-setting under "Allow explicit content": explicit-marked soulseek files rank up, clean/censored/radio-edit files rank down. nothing is ever skipped — if only a clean version exists it still downloads.', page: 'settings' },
+        { title: 'Stability + mobile fixes', desc: 'the status endpoint could 500 with several tabs open (a thread race — fixed with a lock), and on phones the floating bell/help buttons no longer cover the album modal\'s buttons. plus unified React page headers and a webui CI gate — thanks @bluejorts.', page: 'dashboard' },
+        { title: 'Earlier versions', desc: '2.8.8 fixed a tag write that could corrupt FLAC audio (#1000, atomic + audio-verified writes now), added the Corrupt File Detector job, Bandcamp enrichment, opt-in atomic album publishing, and unjammed the download queue. 2.8.7 made the discovery playlists first-class Auto-Sync items and fixed a settings-save that could wipe API secrets (#992). 2.8.6/2.8.5 were fix batches (Docker black screens, mirrored-playlist wipes, iTunes singles, Reorganize pruning). 2.8.4 added Artist Web + Quality Profiles; 2.8.3 rebuilt Discover; 2.7.0 made multi-user real.' },
     ],
 };
 
@@ -3447,16 +3442,23 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "2.8.8 — no more corrupted FLACs, Bandcamp, and atomic album publishing",
-        description: "the headline is a fix for a tag write that could corrupt a FLAC's audio on some setups — every tag write is atomic and audio-verified now. plus a Corrupt File Detector, a new Bandcamp source, and opt-in atomic album publishing.",
+        title: "2.8.9 — multi-disc fixed, fast server playlists, prefer explicit",
+        description: "a bug-fix + quality-of-life release: box sets keep their disc folders, the Server Playlists compare view stopped taking 15 seconds, and a new matching preference for explicit versions.",
         features: [
-            "#1000 — a tag write (album consistency, the repair passes, ReplayGain) could damage a FLAC's audio on some setups. every tag write now writes to a temp copy, verifies the audio is byte-for-byte intact, and only then swaps the file in — so a bad write can never replace a good file. completing an album adopts the album's existing tags instead of re-stamping every track, and the consistency pass pins one MusicBrainz release so albums stop splitting into 2-3 copies",
-            "new Corrupt File Detector repair job — decode-tests your FLACs and lets you delete + re-download any that are already damaged",
-            "Bandcamp — a new experimental enrichment source (big thanks to @shkarlsson); off by default, enable it in the enrichment sources",
-            "atomic album publishing — an opt-in toggle in Settings → Downloads that stages an album privately and only moves it into your library once the whole thing finishes, so Plex/Jellyfin never shows a half-loaded album mid-download",
-            "downloads unjammed — fixed a batch-slot leak and a few deadlocks that could wedge the queue with orphaned tasks that never cleared",
-            "#1002 — Tidal downloads survive a restart: the session refreshes its token instead of silently dropping it and forcing a re-link",
-            "#1003 — various-artists compilations stay together under Compilations/ instead of scattering by artist; #995 — the lossy converter shows the real ffmpeg error and simple downloads honor the auto-scan toggle; plus a big UI + mobile polish pass (thanks @bluejorts)",
+            "#1009 — downloading a multi-disc album was collapsing every disc into one folder (and the Track Number Repair job mangled $disc$track filenames like 0213 into 133, flagging correct box sets as broken). both fixed: disc folders follow your template, repairs keep your naming convention, and approving a repair finding applies exactly the change it shows",
+            "#1005 — the Server Playlists compare view loads big synced playlists in a few seconds instead of 15+, the missing/matched filter actually filters after a reload, and syncing a single song updates that row in place instead of reloading everything",
+            "#923 — new 'prefer explicit versions' sub-setting under the explicit content toggle: explicit-marked soulseek files rank up, clean/censored/radio-edit files rank down, and nothing is ever skipped — a clean version still downloads when it's all that exists",
+            "the status endpoint could 500 when several tabs polled it at once (thread race, now locked), and on mobile the floating bell/help buttons no longer sit on top of the album modal's buttons (#1007)",
+            "under the hood: unified React page headers, a webui CI gate (lint, build, vitest), and a new e2e route sweep at desktop+mobile that caught the status race — all thanks to @bluejorts (#1008, #1010, #1012)",
+        ],
+    },
+    {
+        title: "Earlier in 2.8.8",
+        description: "no more corrupted FLACs, Bandcamp, and atomic album publishing.",
+        features: [
+            "#1000 — a tag write could damage a FLAC's audio on some setups. every tag write now goes to a temp copy, verifies the audio byte-for-byte, and only then swaps the file in. plus the Corrupt File Detector repair job for finding + re-downloading already-damaged files",
+            "Bandcamp — a new experimental enrichment source (thanks @shkarlsson), and opt-in atomic album publishing so Plex/Jellyfin never sees a half-loaded album mid-download",
+            "downloads unjammed (batch-slot leak + deadlocks), Tidal sessions survive restarts (#1002), compilations stay together under Compilations/ (#1003), and a big UI + mobile polish pass (thanks @bluejorts)",
         ],
     },
     {
@@ -3478,24 +3480,6 @@ const VERSION_MODAL_SECTIONS = [
             "#988 — browsing an artist could surface a completely different artist's tracks (e.g. The Outfield showing Beatles) because a Deezer name-search accepted the first result on a poor match; it requires a real name match now",
             "#989 — iTunes singles could file and tag under \"Unknown Artist\" when the album-artist came back empty; they fall back to the real track artist now",
             "#985 — Library Reorganize left the old, now-empty disc/album folders behind after moving files; it prunes them now, safely (never climbing to the artist or library root)",
-        ],
-    },
-    {
-        title: "Earlier in 2.8.51",
-        description: "a one-fix follow-up to 2.8.5.",
-        features: [
-            "#983 — on a fresh install, opening a watchlist artist's settings could fail with \"no such column: preferred_metadata_source\" (a restart worked around it). first-run setup was rebuilding the watchlist table from a column list that dropped two newer columns; they survive now, so it works from the first boot",
-        ],
-    },
-    {
-        title: "Earlier in 2.8.5",
-        description: "2.8.5 was a focused fix release across import, library, repair, and the webui.",
-        features: [
-            "#979 — Import & Stats loaded as a black screen on some setups (mostly Windows, where the OS served the app's JS bundle with the wrong MIME type and the browser refused it). we force the correct type now, so they load for everyone",
-            "#980 — iTunes singles were landing in \"Unknown Artist\" with no album tag; a single's album is its own title now, so they file and tag correctly",
-            "#981 — $disc/$discnum stamped a \"01-\" prefix on single-disc albums; they're smart now like $cdnum (empty on single-disc, shown only for real multi-disc), for both import and rename/reorganize",
-            "#976 — cleanup never deletes a folder you've set as a root, and self-heals a missing staging/import folder if a sweep removed it",
-            "#978 — repair \"Fix All\" now works for libraries outside the transfer path and stops pulling media-server files into transfer; #977 — discography backfill only touches artists you own",
         ],
     },
     {

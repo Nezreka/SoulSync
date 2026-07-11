@@ -13002,6 +13002,83 @@ class MusicDatabase:
             logger.error(f"Error reading sync match cache: {e}")
             return None
 
+    def read_sync_match_cache_bulk(self, spotify_track_ids, server_source: str) -> Dict[str, Dict]:
+        """Bulk ``read_sync_match_cache``: ONE connection + chunked IN queries and a
+        single commit, instead of a fresh connection, SELECT and per-hit
+        UPDATE+COMMIT for every track (#1005 — the compare view resolved overrides
+        per source track, so a 1500-track playlist paid ~15s of connection/fsync
+        churn before rendering). Returns {spotify_track_id: row-dict}; bumps
+        last_used_at/use_count for the hits like the per-row method."""
+        ids = [str(i) for i in (spotify_track_ids or []) if i]
+        out: Dict[str, Dict] = {}
+        if not ids:
+            return out
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                chunk_size = 500
+                for k in range(0, len(ids), chunk_size):
+                    chunk = ids[k:k + chunk_size]
+                    ph = ",".join("?" * len(chunk))
+                    cursor.execute(f"""
+                        SELECT spotify_track_id, server_track_id, server_track_title, confidence
+                        FROM sync_match_cache
+                        WHERE server_source = ? AND spotify_track_id IN ({ph})
+                    """, [server_source, *chunk])
+                    hits = cursor.fetchall()
+                    for row in hits:
+                        out[str(row['spotify_track_id'])] = {
+                            'server_track_id': row['server_track_id'],
+                            'server_track_title': row['server_track_title'],
+                            'confidence': row['confidence'],
+                        }
+                    if hits:
+                        hit_ids = [str(r['spotify_track_id']) for r in hits]
+                        ph2 = ",".join("?" * len(hit_ids))
+                        cursor.execute(f"""
+                            UPDATE sync_match_cache
+                            SET last_used_at = CURRENT_TIMESTAMP, use_count = use_count + 1
+                            WHERE server_source = ? AND spotify_track_id IN ({ph2})
+                        """, [server_source, *hit_ids])
+            return out
+        except Exception as e:
+            logger.error(f"Error bulk-reading sync match cache: {e}")
+            return out
+
+    def find_manual_library_matches_bulk(self, profile_id: int, source_track_ids,
+                                         server_source: str = '') -> Dict[str, Dict[str, Any]]:
+        """Bulk ``find_manual_library_match_by_source_track_id`` (#1005) — one
+        connection for the whole id set. Same per-id precedence: an exact
+        server_source row beats a ''-scoped one, newest updated_at first."""
+        ids = [str(i) for i in (source_track_ids or []) if i]
+        out: Dict[str, Dict[str, Any]] = {}
+        if not ids:
+            return out
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                chunk_size = 500
+                for k in range(0, len(ids), chunk_size):
+                    chunk = ids[k:k + chunk_size]
+                    ph = ",".join("?" * len(chunk))
+                    cursor.execute(f"""
+                        SELECT * FROM manual_library_track_matches
+                        WHERE profile_id = ?
+                          AND (server_source = ? OR server_source = '')
+                          AND source_track_id IN ({ph})
+                        ORDER BY
+                            CASE WHEN server_source = ? THEN 0 ELSE 1 END,
+                            updated_at DESC
+                    """, [profile_id, server_source or '', *chunk, server_source or ''])
+                    for row in cursor.fetchall():
+                        d = dict(row)
+                        # rows arrive best-first per id — keep the first seen
+                        out.setdefault(str(d.get('source_track_id')), d)
+            return out
+        except Exception as e:
+            logger.error(f"find_manual_library_matches_bulk error: {e}")
+            return out
+
     def save_sync_match_cache(self, spotify_track_id: str, normalized_title: str,
                                normalized_artist: str, server_source: str,
                                server_track_id, server_track_title: str,
