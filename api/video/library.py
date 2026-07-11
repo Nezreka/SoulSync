@@ -19,6 +19,16 @@ def register_routes(bp):
         from . import get_video_db
         from core.video.sources import resolve_video_server
         try:
+            # Channels tab: followed YouTube channels (no media server involved —
+            # ownership comes from the permanent download history).
+            if request.args.get("kind") == "channels":
+                return jsonify(get_video_db().query_channel_library(
+                    search=request.args.get("search") or None,
+                    letter=request.args.get("letter") or None,
+                    sort=request.args.get("sort", "title"),
+                    page=request.args.get("page", 1),
+                    limit=request.args.get("limit", 75),
+                ))
             return jsonify(get_video_db().query_library(
                 request.args.get("kind", "movies"),
                 search=request.args.get("search") or None,

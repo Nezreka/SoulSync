@@ -4800,6 +4800,53 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def query_channel_library(self, *, search=None, letter=None, sort="title",
+                              page=1, limit=75) -> dict:
+        """One page of FOLLOWED YouTube channels for the Library's Channels tab —
+        same paged shape as query_library. ``owned_count`` is real ownership:
+        completed downloads in the permanent history (the YouTube source of
+        truth); ``video_count`` is the remembered catalog size."""
+        try:
+            page = max(1, int(page or 1))
+            limit = max(1, min(500, int(limit or 75)))
+        except (TypeError, ValueError):
+            page, limit = 1, 75
+        where, params = ["w.kind='channel'", "w.state='follow'"], []
+        if search:
+            where.append("w.title LIKE ? COLLATE NOCASE")
+            params.append("%" + str(search) + "%")
+        if letter and letter != "all":
+            if letter == "#":
+                where.append("substr(UPPER(w.title), 1, 1) NOT BETWEEN 'A' AND 'Z'")
+            else:
+                where.append("w.title LIKE ? COLLATE NOCASE")
+                params.append(str(letter) + "%")
+        order = ("w.date_added DESC, w.id DESC" if sort == "added"
+                 else "w.title COLLATE NOCASE")
+        w = " AND ".join(where)
+        conn = self._get_connection()
+        try:
+            total = conn.execute(
+                f"SELECT COUNT(*) FROM video_watchlist w WHERE {w}", params).fetchone()[0]
+            rows = conn.execute(
+                f"SELECT w.title, w.poster_url, w.source_id, w.date_added, "
+                "(SELECT COUNT(*) FROM youtube_channel_videos cv "
+                "  WHERE cv.channel_id = w.source_id) AS video_count, "
+                "(SELECT COUNT(DISTINCT h.media_id) FROM video_download_history h "
+                "  WHERE h.source='youtube' AND h.outcome='completed' "
+                "  AND h.channel_id = w.source_id) AS owned_count "
+                f"FROM video_watchlist w WHERE {w} ORDER BY {order} LIMIT ? OFFSET ?",
+                (*params, limit, (page - 1) * limit)).fetchall()
+            pages = max(1, (total + limit - 1) // limit)
+            return {"items": [{"kind": "channel", "id": r["source_id"],
+                               "title": r["title"], "poster_url": r["poster_url"],
+                               "video_count": r["video_count"],
+                               "owned_count": r["owned_count"]} for r in rows],
+                    "pagination": {"page": page, "total_pages": pages, "total_count": total,
+                                   "has_prev": page > 1, "has_next": page < pages}}
+        finally:
+            conn.close()
+
     def channel_watch_state(self, youtube_ids) -> dict:
         """{youtube_id: True} for followed channels — hydrates the Follow button."""
         out: dict = {}

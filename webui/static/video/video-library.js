@@ -21,7 +21,9 @@
     var searchTimer = null;
 
     function toast(msg, type) { if (typeof showToast === 'function') showToast(msg, type); }
-    function cardKind() { return state.tab === 'movies' ? 'movie' : 'show'; }
+    function cardKind() {
+        return state.tab === 'movies' ? 'movie' : state.tab === 'shows' ? 'show' : 'channel';
+    }
     function selCount() { return Object.keys(state.selected).length; }
 
     function $(sel) { return document.querySelector(sel); }
@@ -65,6 +67,24 @@
     }
 
     function cardHTML(it, kind) {
+        // Channels: avatar poster (proxied), downloaded/known counts, and the
+        // same card chrome — clicking opens the in-app channel page.
+        if (kind === 'channel') {
+            var av = (it.poster_url && window.VideoYoutube) ? VideoYoutube.img(it.poster_url)
+                : (it.poster_url || '');
+            var cimg = av
+                ? '<div class="library-artist-image"><img src="' + esc(av) +
+                  '" alt="" loading="lazy" onerror="this.parentNode.innerHTML=\'<div class=&quot;library-artist-image-fallback&quot;>📺</div>\'"></div>'
+                : '<div class="library-artist-image"><div class="library-artist-image-fallback">📺</div></div>';
+            var cstats = (it.owned_count || 0) + ' downloaded' +
+                (it.video_count ? ' · ' + it.video_count + ' known' : '');
+            return '<a class="library-artist-card video-card--clickable" href="#" ' +
+                'data-video-card-open="channel" data-video-card-id="' + esc(it.id) + '">' + cimg +
+                '<div class="library-artist-info">' +
+                '<h3 class="library-artist-name" title="' + esc(it.title) + '">' + esc(it.title) + '</h3>' +
+                '<div class="library-artist-stats"><span class="library-artist-stat">' +
+                esc(cstats) + '</span></div></div></a>';
+        }
         var fallback = kind === 'movie' ? '🎬' : '📺';
         var img = it.has_poster
             ? '<div class="library-artist-image"><img src="/api/video/poster/' + kind + '/' + it.id +
@@ -148,14 +168,17 @@
         var c = $('[data-video-lib-count]');
         var lbl = $('[data-video-lib-count-label]');
         if (c) c.textContent = n;
-        if (lbl) lbl.textContent = state.tab === 'movies' ? 'Movies' : 'Shows';
+        if (lbl) {
+            lbl.textContent = state.tab === 'movies' ? 'Movies'
+                : state.tab === 'shows' ? 'Shows' : 'Channels';
+        }
     }
 
     function load() {
         state.loaded = true;
         showLoading(true);
-        var apiKind = state.tab === 'movies' ? 'movies' : 'shows';   // query param (plural)
-        var cardKind = state.tab === 'movies' ? 'movie' : 'show';    // card + poster URL (singular)
+        var apiKind = state.tab;                                     // query param (plural)
+        var cardKind = apiKind === 'movies' ? 'movie' : apiKind === 'shows' ? 'show' : 'channel';
         var params = new URLSearchParams({
             kind: apiKind, search: state.search, letter: state.letter, sort: state.sort,
             status: state.status, page: state.page, limit: state.limit });
@@ -431,9 +454,14 @@
                     paintBulkBar();
                     return;
                 }
+                var openKind = card.getAttribute('data-video-card-open');
                 document.dispatchEvent(new CustomEvent('soulsync:video-open-detail', {
-                    detail: { kind: card.getAttribute('data-video-card-open'),
-                              id: parseInt(card.getAttribute('data-video-card-id'), 10), source: 'library' },
+                    detail: openKind === 'channel'
+                        ? { kind: 'channel', id: card.getAttribute('data-video-card-id'),
+                            source: 'youtube' }
+                        : { kind: openKind,
+                            id: parseInt(card.getAttribute('data-video-card-id'), 10),
+                            source: 'library' },
                 }));
             });
         }
@@ -448,7 +476,13 @@
                     var all = document.querySelectorAll('[data-video-lib-tab]');
                     for (var j = 0; j < all.length; j++) all[j].classList.toggle('active', all[j] === tab);
                     var s = $('[data-video-lib-search]');
-                    if (s) s.placeholder = 'Search ' + (state.tab === 'movies' ? 'movies' : 'shows') + '...';
+                    if (s) s.placeholder = 'Search ' + state.tab + '...';
+                    // Channels have no bulk metadata ops or owned/wanted filter.
+                    var isCh = state.tab === 'channels';
+                    var selBtn = $('[data-video-lib-select]');
+                    if (selBtn) selBtn.style.display = isCh ? 'none' : '';
+                    var status = $('[data-video-lib-status]');
+                    if (status) status.style.display = isCh ? 'none' : '';
                     reload();
                 });
             })(tabs[i]);

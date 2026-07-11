@@ -1112,8 +1112,10 @@
         if (ep.like_count) { meta.push('👍 ' + (yc0 ? yc0.compactCount(ep.like_count) : ep.like_count)); }
         if (ep.dislike_count) { meta.push('👎 ' + (yc0 ? yc0.compactCount(ep.dislike_count) : ep.dislike_count)); }
         if (ep.air_date) meta.push(fmtDate(ep.air_date));
-        var wished = !!ep.owned;
-        return '<div class="vd-ep vd-ep--yt" data-vd-ep-key="' + key + '" data-vd-yt-vid="' + esc(ep.youtube_id) + '">' +
+        var wished = !!ep.wished;
+        if (ep.owned) meta.push('✓ downloaded');
+        return '<div class="vd-ep vd-ep--yt' + (ep.owned ? ' vd-ep--got' : '') +
+            '" data-vd-ep-key="' + key + '" data-vd-yt-vid="' + esc(ep.youtube_id) + '">' +
             '<div class="vd-ep-thumb vd-ep-thumb--play" data-vd-yt-play="' + esc(ep.youtube_id) + '" title="Play video">' +
             still + '<span class="vd-ep-thumb-ic">▶</span>' + dur + '</div>' +
             '<div class="vd-ep-info"><div class="vd-ep-top"><span class="vd-ep-title">' +
@@ -1602,8 +1604,10 @@
     }
 
     function ytEpisodeOf(v, i) {
+        // owned = ON DISK (a completed download in history); wished = queued.
+        // The old owned:!!v.wished faked ownership from the wishlist flag.
         return { episode_number: i + 1, title: v.title, overview: v.description || '',
-            air_date: v.published_at, owned: !!v.wished, has_still: false,
+            air_date: v.published_at, owned: !!v.downloaded, wished: !!v.wished, has_still: false,
             still_url: ytProx(v.thumbnail_url), youtube_id: v.youtube_id,
             yt_duration: v.duration || '', view_count: v.view_count || 0,
             like_count: v.like_count || 0, dislike_count: v.dislike_count || 0 };
@@ -1867,7 +1871,7 @@
                 var ic = btns[i].querySelector('.watchlist-icon'); if (ic) ic.textContent = val ? '✓' : '＋';
                 var tx = btns[i].querySelector('.watchlist-text'); if (tx) tx.textContent = val ? 'In Wishlist' : 'Wishlist';
             }
-            var ep = ytFindEp(id); if (ep) { ep.owned = val; renderSeasonNav(); }
+            var ep = ytFindEp(id); if (ep) { ep.wished = val; renderSeasonNav(); }
             document.dispatchEvent(new CustomEvent('soulsync:video-wishlist-changed'));
         };
         if (on) yc.removeWish('video', id).then(function (d) { setOn(!(d && d.success)); }).catch(function () { btn.disabled = false; });
