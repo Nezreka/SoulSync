@@ -41,8 +41,13 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
     artists = [r["name"] for r in conn.execute(
         """SELECT ar.name FROM lib2_track_artists ta JOIN lib2_artists ar ON ar.id = ta.artist_id
            WHERE ta.track_id = ? ORDER BY ta.position""", (track_id,))]
-    source_track_id = t["spotify_id"] or f"lib2-track:{t['track_id']}"
-    source_album_id = t["album_spotify"] or f"lib2-album:{t['album_id']}"
+    # Provider-less rows use the persisted stable_id, never the rowid: a
+    # library reset + reimport reproduces the same stable_id, so existing
+    # wishlist rows keep matching instead of orphaning or double-queueing
+    # against fresh rowids (audit P1-12).
+    from core.library2.stable_ids import ensure_album_stable_id, ensure_track_stable_id
+    source_track_id = t["spotify_id"] or f"lib2-track:{ensure_track_stable_id(conn, t['track_id'])}"
+    source_album_id = t["album_spotify"] or f"lib2-album:{ensure_album_stable_id(conn, t['album_id'])}"
     file_row = conn.execute(
         "SELECT * FROM lib2_track_files WHERE track_id = ? ORDER BY id LIMIT 1",
         (track_id,),

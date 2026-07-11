@@ -458,6 +458,10 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
         stats["wishlist_tracks"] = seed_wishlist_tracks(cursor, resolver, profile_id)
         stats["linked_duplicates"] = link_single_album_duplicates(cursor)
         apply_monitoring_from_watchlist_wishlist(cursor, profile_id)
+        # Mint provider-less stable ids for everything this run inserted
+        # (audit P1-12) — the schema-ensure backfill ran before the inserts.
+        from core.library2.stable_ids import backfill_stable_ids
+        backfill_stable_ids(cursor)
         conn.commit()
         logger.info("Library v2 import complete: %s", stats)
     finally:

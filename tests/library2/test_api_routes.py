@@ -217,7 +217,10 @@ def test_profile_assign_skips_consolidated_duplicates(api):
     assert monitored[ids["single_track"]] == 0, (
         "the consolidated single variant must not be re-wanted")
     queued = {a["id"] for a in db.wishlist_adds}
-    assert f"lib2-track:{ids['single_track']}" not in queued
+    from core.library2.stable_ids import ensure_track_stable_id
+    with _conn(db) as conn:
+        single_stable = ensure_track_stable_id(conn, ids["single_track"])
+    assert f"lib2-track:{single_stable}" not in queued
 
 
 def test_delete_artist_removes_rows_mirrors_and_artwork(api):

@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS lib2_albums (
     tracklist_error TEXT,
     tracklist_retry_at TIMESTAMP,
     origin TEXT NOT NULL DEFAULT 'library',            -- 'library' (has/had files) | 'discography' (provider-only)
+    stable_id TEXT,                                    -- provider-less identity (audit P1-12); minted once, survives reset+reimport
     monitored INTEGER NOT NULL DEFAULT 1,
     quality_profile_id INTEGER REFERENCES quality_profiles(id) ON DELETE RESTRICT,
     legacy_album_id INTEGER,                           -- source row in legacy `albums`
@@ -132,6 +133,7 @@ CREATE TABLE IF NOT EXISTS lib2_tracks (
     isrc TEXT,
     musicbrainz_id TEXT,
     spotify_id TEXT,                                  -- for wishlist mirroring
+    stable_id TEXT,                                   -- provider-less identity (audit P1-12); minted once, survives reset+reimport
     monitored INTEGER NOT NULL DEFAULT 1,
     quality_profile_id INTEGER REFERENCES quality_profiles(id) ON DELETE RESTRICT,
     canonical_track_id INTEGER,                       -- self-ref; NULL = canonical
@@ -290,6 +292,13 @@ _ADDED_COLUMNS = (
     # monitor_new_items enforcement to tell first expansion from re-expansion.
     ("lib2_artists", "discography_synced_at",
      "ALTER TABLE lib2_artists ADD COLUMN discography_synced_at TIMESTAMP"),
+    # Provider-less stable identity (audit P1-12): deterministic hash of the
+    # natural identity, minted once and persisted; replaces rowid-based
+    # wishlist surrogate ids that broke across reset/reimport.
+    ("lib2_albums", "stable_id",
+     "ALTER TABLE lib2_albums ADD COLUMN stable_id TEXT"),
+    ("lib2_tracks", "stable_id",
+     "ALTER TABLE lib2_tracks ADD COLUMN stable_id TEXT"),
 )
 
 
@@ -520,6 +529,18 @@ def ensure_library_v2_schema(connection: Any) -> None:
                 logger.debug("column migration %s.%s: %s", table, column, e)
     _migrate_lib2_profiles_to_app_wide(cursor)
     _migrate_quality_profile_constraints(cursor)
+    # Provider-less stable ids (audit P1-12). Index + backfill run AFTER the
+    # additive column migration above so they also work on installs that
+    # predate the stable_id columns.
+    try:
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_lib2_albums_stable "
+                       "ON lib2_albums(stable_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_lib2_tracks_stable "
+                       "ON lib2_tracks(stable_id)")
+        from core.library2.stable_ids import backfill_stable_ids
+        backfill_stable_ids(cursor)
+    except Exception as e:  # noqa: BLE001
+        logger.error("stable_id backfill failed (will retry next start): %s", e)
     # The read API falls back to download provenance (track_downloads) for
     # files the importer knew no quality data for — index the lookup column so
     # album views don't table-scan a large history per track. Guarded: the
