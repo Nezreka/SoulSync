@@ -1475,8 +1475,11 @@ async function _openServerCompareView(playlistId, playlistName, mirroredPlaylist
             }
         }
 
-        // Render columns
+        // Render columns — re-applying the active filter pill so the rows always
+        // agree with it (a reload used to reset the rows to "all" while the
+        // Missing pill stayed selected — #1005).
         _renderCompareColumns(tracks);
+        _applyServerEditorFilter(_activeServerEditorFilter());
 
         // Scroll linking
         _setupScrollLinking();
@@ -1838,14 +1841,40 @@ function serverEditorBack() {
 function _serverEditorFilter(btn, filter) {
     btn.closest('.server-editor-filters').querySelectorAll('.discog-filter').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
+    _applyServerEditorFilter(filter);
+}
 
-    // Filter both columns simultaneously
+// Show/hide rows for the given filter. Split out of the click handler because a
+// re-render must re-apply it (#1005: reloading the compare view rebuilt both
+// columns fully visible while the "Missing" pill stayed active — pill said
+// Missing, columns showed everything).
+function _applyServerEditorFilter(filter) {
     ['server-col-source-scroll', 'server-col-server-scroll'].forEach(colId => {
         document.querySelectorAll(`#${colId} .server-track-item`).forEach(item => {
             const status = item.dataset.status;
             item.style.display = (filter === 'all' || status === filter) ? '' : 'none';
         });
     });
+}
+
+function _activeServerEditorFilter() {
+    const btn = document.querySelector('#server-editor .server-editor-filters .discog-filter.active[data-filter]');
+    return btn ? btn.dataset.filter : 'all';
+}
+
+// Repaint stats + both columns from _serverEditorState.tracks, keeping the
+// active filter applied and each column's scroll position (an in-place row
+// patch must not throw the user back to the top of a 2k-track list).
+function _rerenderCompare() {
+    const tracks = _serverEditorState.tracks || [];
+    const sourceScroll = document.getElementById('server-col-source-scroll');
+    const serverScroll = document.getElementById('server-col-server-scroll');
+    const keep = [sourceScroll?.scrollTop || 0, serverScroll?.scrollTop || 0];
+    _updateCompareStats(tracks);
+    _renderCompareColumns(tracks);
+    _applyServerEditorFilter(_activeServerEditorFilter());
+    if (sourceScroll) sourceScroll.scrollTop = keep[0];
+    if (serverScroll) serverScroll.scrollTop = keep[1];
 }
 
 // ── Track Search / Replace ──
@@ -1956,6 +1985,9 @@ async function _serverSearchExecute() {
         const trackIndex = parseInt(popover.dataset.trackIndex);
         const mode = popover.dataset.mode;
 
+        // Kept so a Select can patch the compare row in place (no full reload)
+        _serverEditorState._searchResults = data.tracks;
+
         if (resultsHeader) resultsHeader.textContent = `${data.tracks.length} result${data.tracks.length !== 1 ? 's' : ''}`;
 
         results.innerHTML = data.tracks.map((t, i) => {
@@ -2042,9 +2074,30 @@ async function _serverSelectTrack(trackIndex, mode, newTrackId, el) {
             // Update playlist ID if server recreated it (Plex deletes+recreates)
             if (data.new_playlist_id) _serverEditorState.playlistId = data.new_playlist_id;
 
-            // Re-fetch from server so the compare view reflects the actual server state
-            // and the matching algorithm can correctly wire up the newly added/replaced track
-            _openServerCompareView(_serverEditorState.playlistId, _serverEditorState.playlistName, _serverEditorState.mirroredPlaylist);
+            // Patch the pair in place instead of re-fetching + re-matching the
+            // whole playlist (#1005: one Find & Add threw a 2k-track compare
+            // back to "Loading comparison..."). The server call above already
+            // succeeded; the picked library track IS the server track (same id
+            // space). The next full open recomputes order-status etc.
+            const picked = (_serverEditorState._searchResults || [])
+                .find(x => String(x.id) === String(newTrackId));
+            if (picked) {
+                track.server_track = {
+                    id: String(newTrackId),
+                    title: picked.title || '',
+                    artist: picked.artist_name || '',
+                    album: picked.album_title || '',
+                    duration: picked.duration || 0,
+                    thumb: picked.album_thumb_url || '',
+                };
+                track.match_status = 'matched';
+                track.confidence = 1.0;
+                track.override = true;
+                _rerenderCompare();
+            } else {
+                // couldn't identify the picked track locally — full reload fallback
+                _openServerCompareView(_serverEditorState.playlistId, _serverEditorState.playlistName, _serverEditorState.mirroredPlaylist);
+            }
         } else {
             showToast(data.error || 'Failed to update track', 'error');
             if (btn) { btn.disabled = false; btn.textContent = 'Select'; }
@@ -2076,9 +2129,17 @@ async function _serverRemoveTrack(trackIndex, serverTrackId) {
         const data = await response.json();
         if (data.success) {
             showToast(data.message || 'Track removed', 'success');
-            const pid = data.new_playlist_id || _serverEditorState.playlistId;
-            _serverEditorState.playlistId = pid;
-            _openServerCompareView(pid, _serverEditorState.playlistName, _serverEditorState.mirroredPlaylist);
+            _serverEditorState.playlistId = data.new_playlist_id || _serverEditorState.playlistId;
+            // Patch in place (#1005 — same as Find & Add): a matched pair loses
+            // its server side and becomes missing; an extra row disappears.
+            if (track && track.source_track) {
+                track.server_track = null;
+                track.match_status = 'missing';
+                track.confidence = 0.0;
+            } else {
+                _serverEditorState.tracks.splice(trackIndex, 1);
+            }
+            _rerenderCompare();
         } else {
             showToast(data.error || 'Failed to remove track', 'error');
         }

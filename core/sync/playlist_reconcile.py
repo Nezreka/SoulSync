@@ -151,16 +151,34 @@ def reconcile_playlist(
 
     # Pass 2: fuzzy match on remaining unmatched source tracks. Build the key
     # from the canonicalized title/artist so YouTube-shaped sources can pair.
+    #
+    # Perf (#1005): the old loop rebuilt every server key AND re-seeded a fresh
+    # SequenceMatcher for every (source × server) pair — a 2k-track playlist
+    # with a few hundred missing rows meant ~400k full ratio() calls and a
+    # multi-second load on every open. Same scores, three cuts:
+    #   * server keys + matchers built ONCE (seq2/b2j prep is the costly side;
+    #     set_seq1 is cheap and scoring stays identical to
+    #     SequenceMatcher(None, src_key, svr_key))
+    #   * real_quick_ratio/quick_ratio gates — documented UPPER BOUNDS on
+    #     ratio(), so a pair skipped here could never have reached the
+    #     threshold (no behavior change)
+    server_matchers: List[SequenceMatcher] = []
+    if unmatched_source:
+        for svr in server_tracks:
+            svr_key = f"{svr.get('artist', '')} {norm_title(svr.get('title', ''))}".strip().lower()
+            server_matchers.append(SequenceMatcher(None, '', svr_key))
     for combo_idx, src_entry, canon_artist in unmatched_source:
         canon_title, _ = canonical_source_track(src_entry['name'], src_entry['artist'])
         src_key = f"{canon_artist} {norm_title(canon_title)}".strip().lower()
         best_score = 0.0
         best_j = -1
-        for j, svr in enumerate(server_tracks):
+        for j, sm in enumerate(server_matchers):
             if j in used_server_indices:
                 continue
-            svr_key = f"{svr.get('artist', '')} {norm_title(svr.get('title', ''))}".strip().lower()
-            score = SequenceMatcher(None, src_key, svr_key).ratio()
+            sm.set_seq1(src_key)
+            if sm.real_quick_ratio() < _FUZZY_THRESHOLD or sm.quick_ratio() < _FUZZY_THRESHOLD:
+                continue
+            score = sm.ratio()
             if score > best_score and score >= _FUZZY_THRESHOLD:
                 best_score = score
                 best_j = j
