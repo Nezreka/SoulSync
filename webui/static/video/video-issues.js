@@ -27,6 +27,21 @@
         return !(typeof currentProfile !== 'undefined' && currentProfile && !currentProfile.is_admin);
     }
     function jget(url) { return fetch(url).then(function (r) { return r.ok ? r.json() : null; }); }
+
+    // Every vi modal closes on Escape (self-cleaning listener).
+    function escClosable(ov) {
+        function onKey(e) {
+            if (e.key === 'Escape') { e.stopPropagation(); ov.remove(); }
+        }
+        document.addEventListener('keydown', onKey, true);
+        var obs = new MutationObserver(function () {
+            if (!document.body.contains(ov)) {
+                document.removeEventListener('keydown', onKey, true);
+                obs.disconnect();
+            }
+        });
+        obs.observe(document.body, { childList: true });
+    }
     function jsend(url, body, method) {
         return fetch(url, { method: method || 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body || {}) })
@@ -212,6 +227,7 @@
                     '<span class="vbb-spacer"></span>' + actions.join('') + '</div>' +
             '</div>';
             document.body.appendChild(ov);
+            escClosable(ov);
             ov.addEventListener('click', function (e) {
                 if (e.target === ov || e.target.closest('[data-vi-close]')) { ov.remove(); return; }
                 if (e.target.closest('[data-vi-view]')) {
@@ -285,6 +301,7 @@
                     '<button class="vi-btn-primary" data-vi-submit disabled>Report issue</button></div>' +
             '</div>';
             document.body.appendChild(ov);
+            escClosable(ov);
             var picked = { cat: null, priority: 'normal' };
 
             function paintOk() {

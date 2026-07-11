@@ -37,9 +37,10 @@ CATEGORIES = {
 
 
 def _is_admin() -> bool:
-    # The video side's convention throughout (collections/overlays/repair gates):
-    # profile 1 is the admin.
-    return getattr(g, "profile_id", 1) == 1
+    # The REAL admin flag (web_server stashes g.is_admin from the profile —
+    # music supports secondary admins, and the frontend checks the same flag).
+    # Fallback: the video convention, profile 1.
+    return bool(getattr(g, "is_admin", getattr(g, "profile_id", 1) == 1))
 
 
 def _pid() -> int:
@@ -142,11 +143,12 @@ def register_routes(bp):
             return jsonify({"success": False, "error": "not found"}), 404
         body = request.get_json(silent=True) or {}
         if not _is_admin():
-            # Owners may edit only their own issue's title/description (music rule).
+            # Owners may edit only their own issue's title/description (music
+            # rule) — ANY other field in the payload is an outright 403, never
+            # a silent partial apply.
             if issue["profile_id"] != _pid():
                 return jsonify({"success": False, "error": "forbidden"}), 403
-            body = {k: v for k, v in body.items() if k in ("title", "description")}
-            if not body:
+            if not body or any(k not in ("title", "description") for k in body):
                 return jsonify({"success": False, "error": "forbidden"}), 403
         else:
             status = body.get("status")

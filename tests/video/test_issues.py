@@ -59,6 +59,9 @@ def client(tmp_path):
         g.profile_id = int(request.headers.get("X-Test-Profile", 1))
         g.profile_name = "Tester %s" % g.profile_id
         g.can_download = True
+        # Mirrors web_server: profile 1 is always admin; others per their flag
+        # (X-Test-Admin simulates a secondary admin profile).
+        g.is_admin = g.profile_id == 1 or request.headers.get("X-Test-Admin") == "1"
 
     try:
         yield app.test_client(), videoapi._video_db
@@ -112,6 +115,30 @@ def test_report_and_admin_triage_over_http(client):
                     headers={"X-Test-Profile": "3"}).status_code == 403
     assert c.delete(f"/api/video/issues/{iid}",
                     headers={"X-Test-Profile": "2"}).get_json()["success"]
+
+
+def test_secondary_admin_and_strict_owner_edits(client):
+    """A profile flagged is_admin (not profile 1) gets FULL admin powers — the
+    frontend checks the same flag, so the two sides can't split-brain. And an
+    owner's mixed payload (title + status) is an outright 403, never a silent
+    partial apply (music rule)."""
+    c, db = client
+    mid = _seed_movie(db)
+    iid = c.post("/api/video/issues", headers={"X-Test-Profile": "2"},
+                 json={"entity_type": "movie", "entity_id": mid, "category": "other",
+                       "title": "Hm"}).get_json()["id"]
+    # Mixed owner payload → 403, and nothing applied.
+    r = c.put(f"/api/video/issues/{iid}", headers={"X-Test-Profile": "2"},
+              json={"title": "sneaky", "status": "resolved"})
+    assert r.status_code == 403
+    assert db.get_issue(iid)["title"] == "Hm"
+    # Secondary admin (profile 7, is_admin) sees all + reporter name + resolves.
+    adm = {"X-Test-Profile": "7", "X-Test-Admin": "1"}
+    seen = c.get("/api/video/issues", headers=adm).get_json()["issues"]
+    assert len(seen) == 1 and seen[0]["reporter_name"] == "Tester 2"
+    assert c.put(f"/api/video/issues/{iid}", headers=adm,
+                 json={"status": "resolved"}).get_json()["success"]
+    assert db.get_issue(iid)["resolved_by"] == 7
 
 
 def test_create_validation(client):
