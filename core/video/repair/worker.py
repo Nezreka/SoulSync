@@ -36,6 +36,7 @@ class VideoRepairWorker:
         self.db = db
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
+        self._wake = threading.Event()          # run_job_now pokes the scheduler awake
         self._cancel_current = threading.Event()
         self._paused = False
         self._force_queue: list = []
@@ -101,6 +102,7 @@ class VideoRepairWorker:
     def stop(self) -> None:
         self._stop_event.set()
         self._cancel_current.set()
+        self._wake.set()
 
     def pause(self) -> None:
         self._paused = True
@@ -115,6 +117,7 @@ class VideoRepairWorker:
             if job_id == self._current_job_id or job_id in self._force_queue:
                 return True   # already queued/running — idempotent
             self._force_queue.append(job_id)
+        self._wake.set()   # start immediately — never wait out the idle tick
         return True
 
     def stop_current_job(self, job_id: str) -> dict:
@@ -146,7 +149,8 @@ class VideoRepairWorker:
                 except Exception:   # noqa: BLE001 - the scheduler must survive any job
                     logger.exception("repair job %s crashed", job_id)
             else:
-                self._stop_event.wait(_IDLE_SLEEP)
+                self._wake.wait(_IDLE_SLEEP)   # a Run Now click ends the nap instantly
+                self._wake.clear()
 
     def _pick_next_job(self) -> Optional[str]:
         """The stalest enabled job whose interval has elapsed (music policy)."""
