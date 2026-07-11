@@ -16,9 +16,10 @@
 
     var PAGE_ID = 'video-import';
     var POLL_MS = 5000;
-    var state = { loaded: false, items: [], resolve: null };
+    var state = { loaded: false, items: [], resolve: null, expanded: {} };
     var pollTimer = null;
     var searchTimer = null;
+    var _lastSig = null;
 
     function $(s, r) { return (r || document).querySelector(s); }
     function esc(s) {
@@ -28,6 +29,26 @@
     function basename(p) { return String(p || '').replace(/\\/g, '/').replace(/\/+$/, '').split('/').pop(); }
     function toast(msg, kind) { if (typeof showToast === 'function') showToast(msg, kind || 'info'); }
     function isShown() { return document.body.getAttribute('data-video-page') === PAGE_ID; }
+    function fmtSize(bytes) {
+        if (bytes == null) return '';
+        var gb = bytes / (1024 * 1024 * 1024);
+        return gb >= 0.1 ? (Math.round(gb * 10) / 10) + ' GB' : Math.round(bytes / (1024 * 1024)) + ' MB';
+    }
+    function pad2(n) { n = parseInt(n, 10) || 0; return (n < 10 ? '0' : '') + n; }
+
+    // Why the auto-importer parked it — classified into a colored chip so the
+    // queue reads at a glance (the full error text lives in the drawer).
+    var REASONS = [
+        [/sample|too short|short file|duration|min\b/i, ['sample', 'Sample / too short']],
+        [/upgrade|better|not an? improvement|existing copy/i, ['upgrade', 'Not an upgrade']],
+        [/corrupt|unreadable|ffprobe|damaged|invalid stream/i, ['corrupt', 'Corrupt file']],
+        [/parse|identif|match|recogni|couldn.t tell|unknown episode|wrong episode/i, ['identify', "Couldn't identify"]],
+    ];
+    function classifyReason(text) {
+        var t = String(text || '');
+        for (var i = 0; i < REASONS.length; i++) if (REASONS[i][0].test(t)) return REASONS[i][1];
+        return ['other', 'Needs attention'];
+    }
 
     // ── needs-attention list ──────────────────────────────────────────────────
     function load() {
@@ -41,27 +62,86 @@
             .catch(function () { state.loaded = true; render(); });
     }
 
+    function isEpisode(it) { return it.scope === 'episode' || it.kind === 'show'; }
+
+    function drawerHTML(it) {
+        function fact(k, v, cls) {
+            return v ? '<div class="vimp-f' + (cls ? ' ' + cls : '') + '"><span class="vimp-fk">' + esc(k) +
+                '</span><span class="vimp-fv">' + v + '</span></div>' : '';
+        }
+        var se = (it.season != null && it.episode != null)
+            ? 'S' + pad2(it.season) + 'E' + pad2(it.episode) : '';
+        var facts = '';
+        facts += fact('Identified as', esc([it.title, it.year ? '(' + it.year + ')' : '', se].filter(Boolean).join(' ')));
+        facts += fact('Release', esc(it.release_title));
+        facts += fact('Quality', esc(it.quality_label));
+        facts += fact('On disk', it.file_exists ? esc(fmtSize(it.file_size)) :
+            '<span class="vimp-fv-warn">file is gone</span>');
+        if (it.size_bytes && it.file_size && Math.abs(it.size_bytes - it.file_size) > 1024 * 1024) {
+            facts += fact('Advertised', esc(fmtSize(it.size_bytes)) + ' <span class="vimp-fv-dim">(differs from disk)</span>');
+        }
+        facts += fact('Source', esc([it.source, it.username ? '👤 ' + it.username : ''].filter(Boolean).join('  ·  ')));
+        facts += fact('Attempts', it.attempts > 1 ? esc(it.attempts + 'x') : '');
+        facts += fact('Grabbed', esc(String(it.grabbed_at || '').slice(0, 16).replace('T', '  ')));
+        var path = it.file
+            ? '<div class="vimp-f vimp-f--wide"><span class="vimp-fk">Path</span>' +
+              '<span class="vimp-fv vimp-mono">' + esc(it.file) + '</span>' +
+              '<button class="vimp-copy" type="button" data-vimp-copy="' + esc(it.file) + '" title="Copy path">⧉</button></div>'
+            : '';
+        var reason = it.reason
+            ? '<div class="vimp-f vimp-f--wide vimp-f--err"><span class="vimp-fk">Why it\'s here</span>' +
+              '<span class="vimp-fv">' + esc(it.reason) + '</span></div>'
+            : '';
+        return '<div class="vimp-dr-facts">' + facts + path + reason + '</div>' +
+            '<div class="vimp-dr-actions">' +
+                '<button class="vimp-btn vimp-btn--danger" type="button" data-vimp-delete="' + esc(it.id) + '"' +
+                    (it.file_exists ? '' : ' disabled title="The file is no longer on disk"') + '>Delete file</button>' +
+                '<span class="vimp-dr-spacer"></span>' +
+                '<button class="vimp-btn vimp-btn--ghost" type="button" data-vimp-dismiss="' + esc(it.id) + '">Dismiss</button>' +
+                '<button class="vimp-btn vimp-btn--place" type="button" data-vimp-place="' + esc(it.id) + '">' + PLACE_SVG + ' Place&hellip;</button>' +
+            '</div>';
+    }
+
+    var PLACE_SVG = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+
     function card(it) {
-        var scopeLabel = it.scope === 'episode' || it.kind === 'show' ? 'Episode' : 'Movie';
-        var sub = [scopeLabel, it.year || null].filter(Boolean).join(' · ');
-        return '<div class="vimp-card" data-vimp-card="' + esc(it.id) + '">' +
-            '<div class="vimp-card-main">' +
-                '<div class="vimp-card-title" title="' + esc(it.title || it.release_title) + '">' +
-                    esc(it.title || it.release_title || 'Unknown') + '</div>' +
-                '<div class="vimp-card-file" title="' + esc(it.file) + '">' + esc(basename(it.file) || '—') + '</div>' +
-                '<div class="vimp-card-reason">' + esc(it.reason || 'Needs manual import') + '</div>' +
-            '</div>' +
-            '<div class="vimp-card-side">' +
-                (sub ? '<span class="vimp-card-kind">' + esc(sub) + '</span>' : '') +
-                '<div class="vimp-card-actions">' +
-                    '<button class="vimp-btn vimp-btn--place" type="button" data-vimp-place="' + esc(it.id) + '">Place&hellip;</button>' +
-                    '<button class="vimp-btn vimp-btn--dismiss" type="button" data-vimp-dismiss="' + esc(it.id) + '">Dismiss</button>' +
+        var ep = isEpisode(it);
+        var open = !!state.expanded[it.id];
+        var rc = classifyReason(it.reason);
+        var se = (it.season != null && it.episode != null)
+            ? ' · S' + pad2(it.season) + 'E' + pad2(it.episode) : '';
+        var art = it.poster_url
+            ? '<div class="vimp-art"><img src="' + esc(it.poster_url) + '" alt="" loading="lazy" ' +
+              'onerror="this.parentNode.classList.add(\'vimp-art--none\');this.remove()">' +
+              '<span class="vimp-art-badge">' + (ep ? '📺' : '🎬') + '</span></div>'
+            : '<div class="vimp-art vimp-art--none">' + (ep ? '📺' : '🎬') +
+              '<span class="vimp-art-badge">' + (ep ? '📺' : '🎬') + '</span></div>';
+        return '<div class="vimp-card' + (open ? ' vimp-card--open' : '') +
+            '" data-vimp-card="' + esc(it.id) + '" data-vtype="' + (ep ? 'tv' : 'movie') + '">' +
+            '<div class="vimp-card-row">' +
+                art +
+                '<div class="vimp-card-main">' +
+                    '<div class="vimp-card-title" title="' + esc(it.title || it.release_title) + '">' +
+                        esc(it.title || it.release_title || 'Unknown') +
+                        (it.year ? ' <span class="vimp-card-year">(' + esc(it.year) + ')</span>' : '') +
+                        esc(se) + '</div>' +
+                    '<div class="vimp-card-meta">' +
+                        '<span class="vimp-rchip vimp-rchip--' + rc[0] + '">' + esc(rc[1]) + '</span>' +
+                        (it.quality_label ? '<span class="vimp-qchip">' + esc(it.quality_label) + '</span>' : '') +
+                        '<span class="vimp-card-file" title="' + esc(it.file) + '">' + esc(basename(it.file) || '—') + '</span>' +
+                    '</div>' +
+                '</div>' +
+                '<div class="vimp-card-side">' +
+                    (it.file_size != null ? '<span class="vimp-card-size">' + esc(fmtSize(it.file_size)) + '</span>' : '') +
+                    '<button class="vimp-btn vimp-btn--place" type="button" data-vimp-place="' + esc(it.id) + '">' + PLACE_SVG + ' Place&hellip;</button>' +
+                    '<span class="vimp-caret">' + (open ? '▴' : '▾') + '</span>' +
                 '</div>' +
             '</div>' +
+            '<div class="vimp-drawer"' + (open ? '' : ' hidden') + '>' + (open ? drawerHTML(it) : '') + '</div>' +
         '</div>';
     }
 
-    function render() {
+    function render(force) {
         var grid = $('[data-vimp-grid]');
         var loading = $('[data-vimp-loading]');
         var empty = $('[data-vimp-empty]');
@@ -70,6 +150,11 @@
         if (loading) loading.classList.toggle('hidden', state.loaded);
         if (count) count.textContent = state.items.length ? String(state.items.length) : '';
         if (!state.loaded) { grid.innerHTML = ''; return; }
+        // The 5s poll re-renders the whole grid; skip when nothing changed so an
+        // open drawer (or a text selection) never blinks away under the user.
+        var sig = JSON.stringify([state.items, state.expanded]);
+        if (!force && sig === _lastSig) return;
+        _lastSig = sig;
         if (!state.items.length) {
             grid.innerHTML = '';
             if (empty) empty.classList.remove('hidden');
@@ -244,7 +329,7 @@
             body: JSON.stringify(body),
         }).then(function (res) { return res.ok ? res.json() : res.json().catch(function () { return null; }); })
             .then(function (d) {
-                if (d && d.success) { toast('Placed “' + r.picked.title + '”', 'success'); closeResolve(); load(); }
+                if (d && d.success) { toast('Placed “' + r.picked.title + '”', 'success'); delete state.expanded[r.item.id]; closeResolve(); load(); }
                 else { toast((d && d.error) || 'Couldn’t place the file', 'error');
                     if (btn) { btn.disabled = false; btn.textContent = 'Place file'; } }
             })
@@ -252,25 +337,37 @@
                 if (btn) { btn.disabled = false; btn.textContent = 'Place file'; } });
     }
 
+    function _dismissCall(id, del, doneMsg) {
+        fetch('/api/video/import/' + id + '/dismiss', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ delete_file: !!del }),
+        }).then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) { if (d && d.success) { toast(doneMsg, 'info'); delete state.expanded[id]; load(); }
+                else toast('Couldn’t dismiss', 'error'); })
+            .catch(function () { toast('Couldn’t dismiss', 'error'); });
+    }
+
     function dismiss(id) {
         var it = itemById(id);
-        var go = function (del) {
-            fetch('/api/video/import/' + id + '/dismiss', {
-                method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-                body: JSON.stringify({ delete_file: !!del }),
-            }).then(function (r) { return r.ok ? r.json() : null; })
-                .then(function (d) { if (d && d.success) { toast('Dismissed', 'info'); load(); }
-                    else toast('Couldn’t dismiss', 'error'); })
-                .catch(function () { toast('Couldn’t dismiss', 'error'); });
-        };
         if (typeof showConfirmDialog === 'function') {
             showConfirmDialog({
                 title: 'Dismiss this import',
                 message: 'Remove “' + ((it && it.title) || basename(it && it.file)) + '” from the list? ' +
-                    'The file stays on disk unless you choose to delete it.',
+                    'The file stays on disk.',
                 confirmText: 'Dismiss', cancelText: 'Cancel',
-            }).then(function (ok) { if (ok) go(false); });
-        } else if (window.confirm('Dismiss this import?')) { go(false); }
+            }).then(function (ok) { if (ok) _dismissCall(id, false, 'Dismissed'); });
+        } else { _dismissCall(id, false, 'Dismissed'); }
+    }
+
+    function dismissDelete(id) {
+        var it = itemById(id);
+        if (typeof showConfirmDialog !== 'function') return;
+        showConfirmDialog({
+            title: 'Delete this file',
+            message: 'Delete “' + basename(it && it.file) + '” from disk and remove it from the ' +
+                'list? This can’t be undone.',
+            confirmText: 'Delete file', cancelText: 'Cancel', destructive: true,
+        }).then(function (ok) { if (ok) _dismissCall(id, true, 'File deleted'); });
     }
 
     // ── events ────────────────────────────────────────────────────────────────
@@ -279,6 +376,25 @@
         if (p) { var it = itemById(p.getAttribute('data-vimp-place')); if (it) openResolve(it); return; }
         var d = e.target.closest('[data-vimp-dismiss]');
         if (d) { dismiss(d.getAttribute('data-vimp-dismiss')); return; }
+        var del = e.target.closest('[data-vimp-delete]');
+        if (del) { if (!del.disabled) dismissDelete(del.getAttribute('data-vimp-delete')); return; }
+        var cp = e.target.closest('[data-vimp-copy]');
+        if (cp) {
+            var path = cp.getAttribute('data-vimp-copy');
+            if (navigator.clipboard) navigator.clipboard.writeText(path).then(function () { toast('Path copied', 'success'); }, function () {});
+            else toast('Copy not supported here', 'info');
+            return;
+        }
+        // click anywhere else on the card ROW → toggle its detail drawer
+        // (clicks inside the drawer body — selecting a path, say — don't close it)
+        if (e.target.closest('button, a, input') || e.target.closest('.vimp-drawer')) return;
+        var cardEl = e.target.closest('[data-vimp-card]');
+        if (cardEl) {
+            var id = cardEl.getAttribute('data-vimp-card');
+            if (state.expanded[id]) delete state.expanded[id];
+            else state.expanded[id] = true;
+            render(true);
+        }
     }
 
     function onModalClick(e) {

@@ -4045,24 +4045,91 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vimp-refresh:hover { background: rgba(255, 255, 255, 0.12); border-color: rgba(255, 255, 255, 0.28); }
 
 .vimp-grid { display: flex; flex-direction: column; gap: 10px; }
-.vimp-card { display: flex; align-items: center; gap: 16px; padding: 14px 16px; border-radius: 14px;
+
+/* Cards speak the Downloads page's Cinema language: a type accent bar (movie
+   azure / TV violet), poster art with a corner type badge, and a click-to-expand
+   drawer with the full story. --vt is the type's RGB triplet. */
+.vimp-card[data-vtype="movie"] { --vt: 79, 143, 247; }
+.vimp-card[data-vtype="tv"]    { --vt: 164, 114, 245; }
+.vimp-card { position: relative; overflow: hidden; padding: 12px 16px 12px 19px; border-radius: 14px; cursor: pointer;
     background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.022));
-    border: 1px solid rgba(255, 255, 255, 0.08); }
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    transition: transform 0.16s ease, box-shadow 0.16s ease, background 0.16s ease; }
+.vimp-card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+    background: rgb(var(--vt, 255, 255, 255)); opacity: 0.9; }
+.vimp-card:hover { transform: translateY(-1px); background: rgba(var(--vt, 255, 255, 255), 0.05);
+    box-shadow: 0 7px 24px rgba(0, 0, 0, 0.3), inset 0 0 0 1px rgba(var(--vt, 255, 255, 255), 0.14); }
+.vimp-card--open { background: rgba(var(--vt, 255, 255, 255), 0.045); }
+.vimp-card-row { display: flex; align-items: center; gap: 14px; }
+
+/* poster tile + type corner badge */
+.vimp-art { position: relative; flex-shrink: 0; width: 50px; height: 74px; border-radius: 8px; overflow: visible;
+    background: rgba(255, 255, 255, 0.06); display: grid; place-items: center; font-size: 22px; }
+.vimp-art img { width: 100%; height: 100%; object-fit: cover; border-radius: 8px; }
+.vimp-art--none { font-size: 22px; }
+.vimp-art-badge { position: absolute; right: -5px; bottom: -5px; width: 20px; height: 20px; border-radius: 6px;
+    display: grid; place-items: center; font-size: 11px; line-height: 1;
+    background: rgb(var(--vt, 90, 90, 90)); box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5), 0 0 0 2px rgba(0, 0, 0, 0.4); }
+
 .vimp-card-main { flex: 1; min-width: 0; }
 .vimp-card-title { font-size: 14.5px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vimp-card-year { color: rgba(255, 255, 255, 0.5); font-weight: 600; }
+.vimp-card-meta { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: 6px; }
 .vimp-card-file { font-size: 12px; color: rgba(255, 255, 255, 0.5); font-family: 'JetBrains Mono', ui-monospace, monospace;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 3px; }
-.vimp-card-reason { font-size: 12px; font-weight: 600; color: #e8a23a; margin-top: 5px; }
-.vimp-card-side { flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 9px; }
-.vimp-card-kind { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: rgba(255, 255, 255, 0.45); }
-.vimp-card-actions { display: flex; gap: 8px; }
-.vimp-btn { padding: 7px 14px; border-radius: 9px; cursor: pointer; font-size: 12.5px; font-weight: 700; border: 1px solid transparent;
-    transition: background 0.15s, border-color 0.15s, filter 0.15s; }
-.vimp-btn--place { color: #06210f; background: rgb(var(--accent-rgb)); }
-.vimp-btn--place:hover { filter: brightness(1.08); }
-.vimp-btn--place:disabled { opacity: 0.5; cursor: default; filter: none; }
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.vimp-card-side { flex-shrink: 0; display: flex; align-items: center; gap: 12px; }
+.vimp-card-size { font-size: 12px; font-weight: 700; color: rgba(255, 255, 255, 0.55);
+    font-variant-numeric: tabular-nums; }
+.vimp-caret { color: rgba(255, 255, 255, 0.4); font-size: 12px; width: 14px; text-align: center; }
+
+/* reason chip — why the auto-importer parked it, color-coded */
+.vimp-rchip { flex-shrink: 0; font-size: 9.5px; font-weight: 800; letter-spacing: 0.02em; text-transform: uppercase;
+    padding: 2px 7px; border-radius: 5px; border: 1px solid transparent; white-space: nowrap; }
+.vimp-rchip--sample   { color: #fbbf24; background: rgba(251, 191, 36, 0.12); border-color: rgba(251, 191, 36, 0.32); }
+.vimp-rchip--upgrade  { color: #60a5fa; background: rgba(96, 165, 250, 0.12); border-color: rgba(96, 165, 250, 0.3); }
+.vimp-rchip--corrupt  { color: #f87171; background: rgba(239, 68, 68, 0.13); border-color: rgba(239, 68, 68, 0.34); }
+.vimp-rchip--identify { color: #c4b5fd; background: rgba(164, 114, 245, 0.14); border-color: rgba(164, 114, 245, 0.34); }
+.vimp-rchip--other    { color: rgba(255, 255, 255, 0.6); background: rgba(255, 255, 255, 0.07); border-color: rgba(255, 255, 255, 0.16); }
+.vimp-qchip { flex-shrink: 0; font-size: 9.5px; font-weight: 800; letter-spacing: 0.02em; text-transform: uppercase;
+    padding: 2px 7px; border-radius: 5px; color: #fff;
+    background: rgba(var(--vt), 0.16); border: 1px solid rgba(var(--vt), 0.36); }
+
+/* expand drawer */
+.vimp-drawer { cursor: default; margin-top: 12px; padding: 14px 16px 14px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px; background: rgba(0, 0, 0, 0.2); }
+.vimp-drawer[hidden] { display: none; }
+.vimp-dr-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 9px 22px; }
+.vimp-f { display: flex; align-items: baseline; gap: 10px; min-width: 0; font-size: 12.5px; }
+.vimp-f--wide { grid-column: 1 / -1; }
+.vimp-fk { flex-shrink: 0; width: 92px; font-size: 10.5px; font-weight: 800; letter-spacing: 0.05em;
+    text-transform: uppercase; color: rgba(255, 255, 255, 0.4); }
+.vimp-fv { color: rgba(255, 255, 255, 0.85); min-width: 0; overflow-wrap: anywhere; }
+.vimp-fv-warn { color: #f87171; font-weight: 700; }
+.vimp-fv-dim { color: rgba(255, 255, 255, 0.45); }
+.vimp-mono { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; }
+.vimp-f--err .vimp-fv { color: #fca5a5; }
+.vimp-copy { flex-shrink: 0; width: 24px; height: 24px; border-radius: 6px; cursor: pointer; font-size: 12px;
+    display: inline-grid; place-items: center; color: rgba(255, 255, 255, 0.6);
+    background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.14); }
+.vimp-copy:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
+.vimp-dr-actions { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
+.vimp-dr-spacer { flex: 1; }
+
+/* buttons — a real CTA for Place, quiet ghost for Dismiss, red for Delete */
+.vimp-btn { display: inline-flex; align-items: center; gap: 7px; padding: 8px 15px; border-radius: 10px;
+    cursor: pointer; font-size: 12.5px; font-weight: 800; border: 1px solid transparent;
+    transition: background 0.15s, border-color 0.15s, filter 0.15s, transform 0.15s, box-shadow 0.15s; }
+.vimp-btn--place { color: #fff;
+    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.95), rgba(var(--accent-rgb), 0.72));
+    border-color: rgba(var(--accent-rgb), 0.55); box-shadow: 0 4px 14px rgba(var(--accent-rgb), 0.28); }
+.vimp-btn--place:hover { filter: brightness(1.1); transform: translateY(-1px);
+    box-shadow: 0 6px 18px rgba(var(--accent-rgb), 0.4); }
+.vimp-btn--place:disabled { opacity: 0.5; cursor: default; filter: none; transform: none; }
 .vimp-btn--dismiss, .vimp-btn--ghost { color: rgba(255, 255, 255, 0.85); background: rgba(255, 255, 255, 0.06); border-color: rgba(255, 255, 255, 0.14); }
 .vimp-btn--dismiss:hover, .vimp-btn--ghost:hover { background: rgba(255, 255, 255, 0.12); border-color: rgba(255, 255, 255, 0.28); }
+.vimp-btn--danger { color: #f87171; background: rgba(239, 68, 68, 0.1); border-color: rgba(239, 68, 68, 0.3); }
+.vimp-btn--danger:hover:not(:disabled) { background: rgba(239, 68, 68, 0.2); color: #fca5a5; }
+.vimp-btn--danger:disabled { opacity: 0.45; cursor: default; }
 
 .vimp-state { text-align: center; padding: 64px 20px; }
 .vimp-state-ic { font-size: 38px; color: #6cd391; }
