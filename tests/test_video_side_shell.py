@@ -37,6 +37,8 @@ EXPECTED_VIDEO_PAGES = {
 _ALLOWED_WINDOW = {
     # sibling video-side module namespaces (each published by its own IIFE)
     "window.VideoGet", "window.VideoWatchlist", "window.VideoYoutube", "window.VideoDownload",
+    "window.VideoGrab", "window.VideoManage", "window.VideoPoster", "window.VideoIssues",
+    "window.VideoCalendar", "window.VideoOverlayEditor", "window.VideoCollectionEditor",
     "window.videoWorkerOrbs", "window._videoWorkerOrbsEnabled",
     "window._buildAutomationSection", "window._buildAutomationHub",
     "window._reloadVideoAutomations", "window._vdpgAnyActive", "window._reduceEffectsActive",
@@ -76,7 +78,9 @@ def test_video_nav_has_all_expected_pages():
     block = _block(_INDEX, r'<nav class="sidebar-nav video-nav"', "</nav>")
     found = set(re.findall(r'data-video-page="([^"]+)"', block))
     assert found == EXPECTED_VIDEO_PAGES, f"video nav pages mismatch: {found ^ EXPECTED_VIDEO_PAGES}"
-    assert "onclick" not in block  # data-attr wired, no inline handlers
+    # data-attr wired — the ONE sanctioned inline handler is the collapsible
+    # section header, which reuses the music nav's shared toggleNavSection.
+    assert block.count("onclick") == block.count('onclick="toggleNavSection(this)"')
 
 
 def test_video_page_host_present():
@@ -107,8 +111,10 @@ def test_music_sidebar_nav_still_intact():
 def test_video_dashboard_subpage_present_with_expected_cards():
     block = _block(
         _INDEX, r'<section class="video-subpage" data-video-subpage="video-dashboard"', "</section>")
-    # Mirrors the music dashboard's sections (minus enrichment), reusing its CSS.
-    for card in ("services", "stats", "library", "downloads", "tools", "activity"):
+    # The video landing page's own card set (redesigned Jul 2026: recently-added
+    # hero, stats, library, upcoming, tools + the two admin studio cards).
+    for card in ("recent", "stats", "library", "upcoming", "tools",
+                 "overlay-studio", "collection-studio"):
         assert f'data-card="{card}"' in block, f"video dashboard missing the '{card}' card"
     # Reuses music's dashboard classes so the look matches.
     assert 'class="dash-grid"' in block
@@ -152,10 +158,12 @@ def test_video_dashboard_data_module_referenced_and_isolated():
     assert stripped.startswith("/*") or stripped.startswith("(function")
     assert "(function" in _DASH_JS and "})();" in _DASH_JS
     # Decoupled from the controller: it listens for the page-shown event rather
-    # than being called directly, and adds no globals / inline handlers.
+    # than being called directly. READING sibling-video handles (window.VideoX)
+    # is fine; the isolation contract is that it never ASSIGNS a global.
     assert "soulsync:video-page-shown" in _DASH_JS
     assert "addEventListener" in _DASH_JS
-    assert "window." not in _DASH_JS
+    assert not re.search(r"window\.\w+\s*=[^=]", _DASH_JS), "dashboard module must not add globals"
+    assert _window_isolated(_DASH_JS)
 
 
 def test_video_library_subpage_present():
@@ -509,8 +517,12 @@ def test_smart_back_button_remembers_origin():
 def test_music_worker_orbs_untouched_by_video():
     # The video orbs are a separate file; the music orbs must not learn about
     # the video side (one-way isolation — music never depends on video).
+    # Comments are allowed to EXPLAIN the side toggle (the ResizeObserver
+    # re-measure fix documents why); the CODE must stay video-free.
     music = (_ROOT / "webui" / "static" / "worker-orbs.js").read_text(encoding="utf-8")
-    assert "video" not in music.lower()
+    code = re.sub(r"/\*.*?\*/", "", music, flags=re.S)
+    code = re.sub(r"(^|\s)//[^\n]*", "", code)
+    assert "video" not in code.lower()
 
 
 def test_controller_is_isolated_iife_with_no_globals():
@@ -523,3 +535,35 @@ def test_controller_is_isolated_iife_with_no_globals():
     # dependence — everything is addEventListener.
     assert "window." not in _JS or "window.location" in _JS  # tolerate none; none expected
     assert "addEventListener" in _JS
+
+
+# ── library page: rating/watched/genre filters + card enrichments (overnight pass) ──
+
+def test_library_toolbar_has_rating_sort_watched_filter_and_genre_dropdown():
+    assert '<option value="rating">Rating</option>' in _INDEX
+    assert '<option value="watched">Watched</option>' in _INDEX
+    assert '<option value="unwatched">Unwatched</option>' in _INDEX
+    assert 'data-video-lib-genre' in _INDEX
+    # the JS wires + sends them
+    assert "state.genre" in _LIB_JS
+    assert "/api/video/library/genres?kind=" in _LIB_JS
+
+
+def test_library_cards_show_rating_show_progress_and_status_chip():
+    assert "vlib-rate" in _LIB_JS                      # ★ rating in the stat line
+    assert "vlib-watched" in _LIB_JS                   # watched tick on movie cards
+    assert "function showStatusChip(" in _LIB_JS       # Airing/Ended/Upcoming chip
+    assert "vlib-prog" in _LIB_JS                      # owned-episodes progress line
+    css = _CSS_PATH.read_text(encoding="utf-8")
+    for cls in (".vlib-rate", ".vlib-chip--airing", ".vlib-chip--ended", ".vlib-prog-fill"):
+        assert cls in css, cls
+
+
+def test_library_pagination_shows_item_range():
+    assert "' of ' + p.total_count" in _LIB_JS
+
+
+def test_video_side_remembers_per_page_scroll():
+    assert "_scrollMemo" in _JS
+    # detail subpages are reused between titles — they must always reopen at the top
+    assert "DETAIL_PAGES[meta.id] ? 0" in _JS
