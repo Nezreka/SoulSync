@@ -70,10 +70,7 @@ export const STATS_ENRICHMENT_SERVICES = [
   { key: 'bandcamp', label: 'Bandcamp', color: '#1da0c3' },
 ] as const;
 
-export function visibleStatsEnrichmentServices(
-  jiosaavnEnabled: boolean,
-  bandcampEnabled: boolean,
-) {
+export function visibleStatsEnrichmentServices(jiosaavnEnabled: boolean, bandcampEnabled: boolean) {
   return STATS_ENRICHMENT_SERVICES.filter((service) => {
     if (service.key === 'jiosaavn') return jiosaavnEnabled;
     if (service.key === 'bandcamp') return bandcampEnabled;
