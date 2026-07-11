@@ -90,14 +90,36 @@ def test_token_values_cannot_inject_extra_folders():
     assert got["dir"] == os.path.join("/m", "ACDC Live (2020)")
 
 
-# ── youtube channels: Plex "TV by date" organisation ─────────────────────────
-def test_youtube_default_template_is_channel_year_date():
+# ── youtube channels: agentless-indexable TV organisation ────────────────────
+def test_youtube_default_template_is_channel_year_sxe():
+    """The default carries the ytdl-sub-style s<year>e<MMDD> token — the thing that
+    lets Plex's Series Scanner index a channel with NO online agent (a YouTube
+    channel isn't on TVDB, so the old date-only names never indexed)."""
     fields = {"channel": "Veritasium", "title": "How Electricity Works",
               "published_at": "2024-03-15", "youtube_id": "abc123"}
     got = organization.render_path("youtube", "/yt", fields, organization.default_settings(), ".mp4")
     assert got["path"] == os.path.join(
         "/yt", "Veritasium", "Season 2024",
-        "Veritasium - 2024-03-15 - How Electricity Works.mp4")
+        "Veritasium - s2024e0315 - How Electricity Works.mp4")
+
+
+def test_youtube_legacy_default_template_upgrades():
+    """Saved settings snapshot the old default — a stored value that IS the old
+    default renders with the NEW naming; a genuinely custom template is untouched."""
+    fields = {"channel": "Chan", "title": "T", "published_at": "2024-03-15", "youtube_id": "v"}
+    legacy = {"youtube_template": "$channel/Season $year/$channel - $date - $title"}
+    got = organization.render_path("youtube", "/yt", fields, legacy, ".mp4")
+    assert got["filename"] == "Chan - s2024e0315 - T.mp4"
+    custom = {"youtube_template": "$channel/$date $title"}
+    got2 = organization.render_path("youtube", "/yt", fields, custom, ".mp4")
+    assert got2["path"] == os.path.join("/yt", "Chan", "2024-03-15 T.mp4")
+
+
+def test_youtube_sxe_token_drops_cleanly_without_a_date():
+    fields = {"channel": "Chan", "title": "T", "youtube_id": "v"}
+    got = organization.render_path(
+        "youtube", "/yt", fields, {"youtube_template": "$channel/$channel - $sxe - $title"}, ".mp4")
+    assert got["filename"] == "Chan - T.mp4"          # dangling ' - ' tidied away
 
 
 def test_youtube_sanitises_channel_and_title():
@@ -106,7 +128,7 @@ def test_youtube_sanitises_channel_and_title():
               "published_at": "2023-12-01", "youtube_id": "v1"}
     got = organization.render_path("youtube", "/yt", fields, organization.default_settings(), ".mp4")
     assert got["dir"] == os.path.join("/yt", "MarkRober", "Season 2023")
-    assert got["filename"] == "MarkRober - 2023-12-01 - Glitter Bomb 45.mp4"
+    assert got["filename"] == "MarkRober - s2023e1201 - Glitter Bomb 45.mp4"
 
 
 def test_youtube_undated_falls_back_cleanly():

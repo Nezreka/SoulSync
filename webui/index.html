@@ -6466,8 +6466,9 @@
 
                                 <div class="form-group">
                                     <label>YouTube Path Template:</label>
-                                    <input type="text" id="vo-youtube-template" placeholder="$channel/Season $year/$channel - $date - $title">
-                                    <small class="settings-hint">Followed YouTube channels organize as a Plex "TV by date" show. Variables: $channel, $year, $date (2024-03-15), $month (03), $day (15), $title, $videoid.</small>
+                                    <input type="text" id="vo-youtube-template" placeholder="$channel/Season $year/$channel - $sxe - $title">
+                                    <small class="settings-hint">Followed YouTube channels organize as a TV show. Variables: $channel, $year, $sxe (s2024e0315 &mdash; lets Plex/Jellyfin index episodes without an online agent), $date (2024-03-15), $month (03), $day (15), $title, $videoid.</small>
+                                    <small class="settings-hint">Plex tip: set the YouTube library's agent to <strong>Personal Media Shows</strong> &mdash; episode titles then come straight from the filename, and the channel folder gets its poster/fanart automatically.</small>
                                     <small class="settings-hint">Example: <code id="vo-youtube-preview">&hellip;</code></small>
                                 </div>
 

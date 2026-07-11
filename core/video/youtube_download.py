@@ -58,6 +58,11 @@ def youtube_fields_from_download(dl: Dict[str, Any]) -> Dict[str, Any]:
         "title": ctx.get("video_title") or dl.get("title"),
         "published_at": ctx.get("published_at") or dl.get("year"),
         "youtube_id": dl.get("media_id"),
+        # for the CHANNEL-level sidecars (poster/fanart/tvshow.nfo): the row's
+        # poster_url is the channel avatar on youtube rows, channel_id keys the
+        # remembered channel meta (banner/description)
+        "channel_id": ctx.get("channel_id"),
+        "poster_url": dl.get("poster_url"),
     }
 
 
@@ -224,25 +229,36 @@ def _silent_remove(path: str) -> None:
 
 
 def _default_sidecars(staged_video: str, final_video: str, fields: Dict[str, Any],
-                      settings: Dict[str, Any]) -> None:
+                      settings: Dict[str, Any],
+                      channel_meta_lookup: Optional[Callable[[str], Any]] = None) -> None:
     """Place the YouTube episode's sidecars next to the imported video — gated by the SAME
-    post-processing toggles as the movie/TV side: ``save_artwork`` → ``<name>-thumb.jpg``
-    (server episode art), ``write_nfo`` → ``<name>.nfo`` (metadata). yt-dlp dropped a
+    post-processing toggles as the movie/TV side: ``save_artwork`` → episode art in BOTH
+    server conventions (``<name>.jpg`` for Plex Local Media Assets, ``<name>-thumb.jpg``
+    for Jellyfin/Kodi), ``write_nfo`` → ``<name>.nfo`` (metadata). yt-dlp dropped a
     thumbnail + ``.info.json`` next to the staged video; we always clean those up (move the
     wanted ones into the library, delete the rest), so nothing litters the download folder
-    when a toggle is off. Best-effort — never fails the grab."""
+    when a toggle is off. Also seeds the CHANNEL folder's show-level assets (poster/fanart/
+    tvshow.nfo) once. Best-effort — never fails the grab."""
     settings = settings if isinstance(settings, dict) else {}
     want_thumb, want_nfo = bool(settings.get("save_artwork")), bool(settings.get("write_nfo"))
     try:
         src_dir, src_stem = os.path.dirname(staged_video), os.path.splitext(os.path.basename(staged_video))[0]
         dst_dir, dst_stem = os.path.dirname(final_video), os.path.splitext(os.path.basename(final_video))[0]
-        # thumbnail: keep as -thumb when wanted, else discard the staged copy
+        # thumbnail: episode art in both conventions when wanted (Plex reads the
+        # SAME-STEM jpg, Jellyfin/Kodi read -thumb — two cheap copies, both servers
+        # happy), else discard the staged copy
         for ext in (".jpg", ".jpeg", ".png", ".webp"):
             src_thumb = os.path.join(src_dir, src_stem + ext)
             if os.path.exists(src_thumb):
                 if want_thumb:
                     os.makedirs(dst_dir or ".", exist_ok=True)
-                    shutil.move(src_thumb, os.path.join(dst_dir, dst_stem + "-thumb" + (".jpg" if ext == ".jpeg" else ext)))
+                    art_ext = ".jpg" if ext == ".jpeg" else ext
+                    plex_thumb = os.path.join(dst_dir, dst_stem + art_ext)
+                    shutil.move(src_thumb, plex_thumb)
+                    try:
+                        shutil.copy2(plex_thumb, os.path.join(dst_dir, dst_stem + "-thumb" + art_ext))
+                    except OSError:
+                        pass
                 else:
                     _silent_remove(src_thumb)
                 break
@@ -260,8 +276,58 @@ def _default_sidecars(staged_video: str, final_video: str, fields: Dict[str, Any
             os.makedirs(dst_dir or ".", exist_ok=True)
             with open(os.path.join(dst_dir, dst_stem + ".nfo"), "w", encoding="utf-8") as f:
                 f.write(build_episode_nfo(fields, description=info.get("description"), runtime=info.get("duration")))
+        _ensure_channel_assets(final_video, fields, settings, channel_meta_lookup)
     except Exception:   # noqa: BLE001 - sidecars are a nice-to-have, never fatal to the grab
         logger.exception("youtube sidecars failed for %s", final_video)
+
+
+def _channel_dir_of(final_video: str, channel: Any) -> Optional[str]:
+    """The ancestor directory named after the channel — template-agnostic (works for
+    the default channel/Season YYYY/ layout AND custom depths). None when the user's
+    template doesn't give the channel its own folder (flat layouts get no show assets)."""
+    from core.video.organization import sanitize
+    want = sanitize(channel)
+    if not want:
+        return None
+    d = os.path.dirname(os.path.abspath(final_video))
+    for _ in range(6):
+        if os.path.basename(d) == want:
+            return d
+        parent = os.path.dirname(d)
+        if parent == d:
+            break
+        d = parent
+    return None
+
+
+def _ensure_channel_assets(final_video: str, fields: Dict[str, Any], settings: Dict[str, Any],
+                           channel_meta_lookup: Optional[Callable[[str], Any]] = None) -> None:
+    """Seed the CHANNEL folder's show-level assets so servers index it like a real
+    show: ``poster.jpg`` (channel avatar — rides the download row), ``fanart.jpg``
+    (channel banner, via the remembered channel meta) and ``tvshow.nfo``. Reuses the
+    movie/TV sidecar writer, so it's idempotent (existing files are never refetched)
+    and each file is independently best-effort."""
+    channel_dir = _channel_dir_of(final_video, fields.get("channel"))
+    if not channel_dir:
+        return
+    meta: Dict[str, Any] = {"title": fields.get("channel")}
+    if fields.get("poster_url"):
+        meta["poster_url"] = fields["poster_url"]
+    cid = str(fields.get("channel_id") or "").strip()
+    if cid and channel_meta_lookup is not None:
+        try:
+            remembered = channel_meta_lookup(cid) or {}
+        except Exception:   # noqa: BLE001 - the lookup is a bonus, not a dependency
+            remembered = {}
+        if isinstance(remembered, dict):
+            meta.setdefault("poster_url", remembered.get("avatar_url"))
+            if remembered.get("banner_url"):
+                meta["backdrop_url"] = remembered["banner_url"]
+            if remembered.get("description"):
+                meta["overview"] = remembered["description"]
+    from core.video import sidecars as _sidecars
+    from core.video.importer import real_fs
+    _sidecars.write(channel_dir, "youtube_channel", meta, settings, real_fs())
 
 
 def process_youtube_download(
@@ -484,6 +550,10 @@ def run_youtube_download(dl_id: Any, db_provider: Callable) -> None:
             update_row=db.update_video_download, archive=_archive,
             clear_wishlist=lambda vid: db.remove_youtube_from_wishlist("video", vid),
             stage_dir=stage_dir,
+            # default sidecars + the remembered-channel-meta lookup (banner/description
+            # for the channel folder's fanart.jpg / tvshow.nfo)
+            sidecars=lambda st, fin, flds, stg: _default_sidecars(
+                st, fin, flds, stg, channel_meta_lookup=db.get_channel_meta),
             progress_hook=_progress, postprocess_hook=_postprocess, cookie_opts=cookie_opts, now=_now)
     finally:
         _active_worker_ids.discard(dl_id)      # worker done — no longer protects this row

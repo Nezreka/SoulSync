@@ -19,7 +19,8 @@ def test_fields_prefer_search_ctx_then_fall_back():
                                      "published_at": "2024-03-15"})}
     f = ytd.youtube_fields_from_download(dl)
     assert f == {"channel": "Veritasium", "title": "Electricity",
-                 "published_at": "2024-03-15", "youtube_id": "vid1"}
+                 "published_at": "2024-03-15", "youtube_id": "vid1",
+                 "channel_id": None, "poster_url": None}
 
 
 def test_fields_fall_back_to_row_when_ctx_absent_or_garbage():
@@ -36,7 +37,7 @@ def test_plan_destination_uses_the_youtube_template():
                                     "published_at": "2024-03-15"})}
     dest = ytd.plan_destination(dl, {}, "mp4")
     assert dest["path"] == os.path.join("/yt", "Veritasium", "Season 2024",
-                                        "Veritasium - 2024-03-15 - How It Works.mp4")
+                                        "Veritasium - s2024e0315 - How It Works.mp4")
 
 
 # ── yt-dlp opts ───────────────────────────────────────────────────────────────
@@ -166,7 +167,7 @@ def test_process_replans_titleless_download_with_extractor_title():
         update_row=update_row, archive=archive, clear_wishlist=clear,
         move=lambda s, d: moves.append((s, d)), now=lambda: "t")
     assert res["status"] == "completed"
-    assert res["dest_path"].endswith("Chan - 2024-03-15 - Real Title.mp4")
+    assert res["dest_path"].endswith("Chan - s2024e0315 - Real Title.mp4")
     assert moves == [("/yt/Chan/Season 2024/Chan - 2024-03-15 - Chan.mp4",
                       res["dest_path"])]                    # renamed into the titled path
     assert calls["rows"][-1][1]["title"] == "Real Title"    # the row learns the title too
@@ -198,7 +199,7 @@ def test_process_stages_in_download_folder_then_imports_to_library():
     assert res["status"] == "completed"
     statuses = [kw.get("status") for _, kw in calls["rows"]]
     assert statuses == ["downloading", "importing", "completed"]      # the visible phases
-    final = "/yt/Chan/Season 2024/Chan - 2024-03-15 - T.mp4"
+    final = "/yt/Chan/Season 2024/Chan - s2024e0315 - T.mp4"
     assert moves == [(staged, final)]                                 # staged → organised library
     assert res["dest_path"] == final and calls["unwish"] == ["vid1"]
 
@@ -315,7 +316,7 @@ def test_process_passes_the_organised_dir_to_the_downloader():
                                  archive=archive, clear_wishlist=clear, now=lambda: "t")
     assert seen["video_id"] == "vid1"
     assert seen["dest_dir"] == os.path.join("/yt", "Chan", "Season 2024")
-    assert seen["stem"] == "Chan - 2024-03-15 - T" and seen["container"] == "mp4"
+    assert seen["stem"] == "Chan - s2024e0315 - T" and seen["container"] == "mp4"
 
 
 def test_process_never_clobbers_target_dir_so_reruns_dont_nest():
@@ -339,3 +340,85 @@ def test_process_never_clobbers_target_dir_so_reruns_dont_nest():
     assert all("target_dir" not in kw for _, kw in calls["rows"])
     # both runs target the SAME organised dir — not a doubly-nested one
     assert seen[0] == seen[1] == os.path.join("/yt", "Chan", "Season 2024")
+
+
+# ── ytdl-sub parity: dual-convention episode art + channel show assets ────────
+
+def test_thumb_lands_in_both_server_conventions(tmp_path):
+    """Plex Local Media Assets reads the SAME-STEM jpg; Jellyfin/Kodi read -thumb.
+    Two cheap copies, both servers happy."""
+    stage, lib = tmp_path / "stage", tmp_path / "lib"
+    stage.mkdir(); lib.mkdir()
+    base = "Chan - s2026e0622 - Vid"
+    (stage / (base + ".mp4")).write_text("v")
+    (stage / (base + ".jpg")).write_text("img")
+    ytd._default_sidecars(str(stage / (base + ".mp4")), str(lib / (base + ".mp4")),
+                          {"title": "Vid", "channel": "Chan"},
+                          {"save_artwork": True})
+    assert (lib / (base + ".jpg")).exists()          # Plex convention
+    assert (lib / (base + "-thumb.jpg")).exists()    # Jellyfin/Kodi convention
+    assert not (stage / (base + ".jpg")).exists()    # staging cleaned
+
+
+class _FakeFS:
+    """Records save_url instead of hitting the network; real text/dir ops."""
+    def __init__(self):
+        self.saved = []
+    def list_dir(self, path):
+        import os
+        try: return os.listdir(path)
+        except OSError: return []
+    def makedirs(self, path):
+        import os
+        os.makedirs(path, exist_ok=True)
+    def write_text(self, path, content):
+        with open(path, "w", encoding="utf-8") as f: f.write(content)
+    def save_url(self, url, dst):
+        self.saved.append((url, dst))
+        with open(dst, "wb") as f: f.write(b"art")
+
+
+def test_channel_folder_gets_show_assets_once(tmp_path, monkeypatch):
+    """The channel dir (found template-agnostically) is seeded with poster.jpg
+    (avatar from the row), fanart.jpg (banner via the remembered channel meta)
+    and tvshow.nfo — idempotently, so a second episode refetches nothing."""
+    import core.video.importer as imp
+    fs = _FakeFS()
+    monkeypatch.setattr(imp, "real_fs", lambda: fs)
+
+    lib = tmp_path / "yt" / "Veritasium" / "Season 2026"
+    lib.mkdir(parents=True)
+    final = lib / "Veritasium - s2026e0711 - Vid.mp4"
+    final.write_text("v")
+    fields = {"title": "Vid", "channel": "Veritasium", "channel_id": "UC123",
+              "poster_url": "http://a/avatar.jpg", "published_at": "2026-07-11", "youtube_id": "v1"}
+    lookup_calls = []
+    def lookup(cid):
+        lookup_calls.append(cid)
+        return {"banner_url": "http://a/banner.jpg", "description": "Science videos."}
+
+    ytd._ensure_channel_assets(str(final), fields, {"save_artwork": True, "write_nfo": True}, lookup)
+
+    chan = tmp_path / "yt" / "Veritasium"
+    assert (chan / "poster.jpg").exists() and (chan / "fanart.jpg").exists()
+    assert lookup_calls == ["UC123"]
+    nfo = (chan / "tvshow.nfo").read_text()
+    assert "<title>Veritasium</title>" in nfo and "Science videos." in nfo
+    assert ("http://a/avatar.jpg", str(chan / "poster.jpg")) in fs.saved
+
+    # second episode: everything already present → zero refetches
+    before = list(fs.saved)
+    ytd._ensure_channel_assets(str(final), fields, {"save_artwork": True, "write_nfo": True}, lookup)
+    assert fs.saved == before
+
+
+def test_channel_assets_skipped_for_flat_templates(tmp_path, monkeypatch):
+    """A custom template without a channel folder gets no show assets (nowhere
+    correct to put them) — and nothing blows up."""
+    import core.video.importer as imp
+    monkeypatch.setattr(imp, "real_fs", lambda: _FakeFS())
+    final = tmp_path / "Chan - s2026e0711 - Vid.mp4"
+    final.write_text("v")
+    ytd._ensure_channel_assets(str(final), {"title": "Vid", "channel": "Chan"},
+                               {"save_artwork": True, "write_nfo": True}, None)
+    assert not (tmp_path / "tvshow.nfo").exists()
