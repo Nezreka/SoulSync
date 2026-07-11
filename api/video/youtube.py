@@ -332,11 +332,18 @@ def register_routes(bp):
             ids = [v.get("youtube_id") for v in videos if v.get("youtube_id")]
             cached = db.get_video_dates(ids)
             wished = db.youtube_video_wish_state(ids)
+            # Same ownership annotation as the initial detail load — without it
+            # every video streamed in via continuation looked un-downloaded.
+            try:
+                downloaded = set(db.downloaded_youtube_video_ids() or [])
+            except Exception:   # noqa: BLE001 - ownership is an annotation, never a 500
+                downloaded = set()
             for v in videos:
                 vid = v.get("youtube_id")
                 if cached.get(vid):                 # a cached (possibly exact) date wins
                     v["published_at"] = cached[vid]
                 v["wished"] = vid in wished
+                v["downloaded"] = vid in downloaded
             try:
                 db.cache_channel_videos(channel_id, videos)   # remember the list
                 db.cache_video_dates([{"youtube_id": v["youtube_id"], "published_at": v.get("published_at")}
