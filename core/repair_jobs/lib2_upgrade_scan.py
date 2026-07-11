@@ -6,6 +6,11 @@ into the Wishlist — same logic as the manual "Search Upgrades" button
 (``core/library2/wishlist_mirror``), just on the repair-worker cadence so
 upgrades keep flowing without the user pressing anything.
 
+Scheduled runs have no request context; wishlist mirrors are pinned to the
+admin profile explicitly (ADR-01: Library v2 is admin-only, and every other
+scheduled acquisition path is scoped the same way) — never to whatever a
+default parameter happens to be.
+
 No-op when ``features.library_v2`` is off. Never touches files.
 """
 
@@ -73,7 +78,9 @@ class Lib2UpgradeScanJob(RepairJob):
                 if context.check_stop() or context.wait_if_paused():
                     break
                 chunk = track_ids[start:start + batch]
-                queued += mirror_tracks_wishlist(context.db, conn, chunk, True)
+                from core.library2 import ADMIN_PROFILE_ID
+                queued += mirror_tracks_wishlist(context.db, conn, chunk, True,
+                                                 profile_id=ADMIN_PROFILE_ID)
                 result.scanned += len(chunk)
                 if context.update_progress:
                     context.update_progress(result.scanned, total)
