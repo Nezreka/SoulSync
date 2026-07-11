@@ -304,7 +304,10 @@ def _owned_library_dir(db, dl):
             return None
         stored = db.video_stored_file_path("movie" if kind == "movie" else "episode",
                                            tmdb_id=int(tmdb_id), season=sn, episode=en)
-        resolved = resolve_video_file_path(stored, video_base_dirs(db))
+        if not stored:
+            return None
+        resolved = resolve_video_file_path(stored["path"], video_base_dirs(db),
+                                           size_bytes=stored.get("size_bytes"))
         return _os.path.dirname(resolved) if resolved else None
     except Exception:   # noqa: BLE001 - resolution is an assist, never a blocker
         logger.debug("owned-library-dir resolution failed", exc_info=True)
