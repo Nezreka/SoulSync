@@ -144,3 +144,45 @@ def test_settings_ui_wires_the_sub_toggle():
     assert 'function syncPreferExplicitState' in settings_js
     assert "prefer_explicit: document.getElementById('prefer-explicit').checked" in settings_js
     assert "settings.content_filter?.prefer_explicit === true" in settings_js
+
+
+# ── slskd reality: full remote paths, markers on FOLDER names ────────────────
+
+def _slskd_result(path):
+    from core.download_plugins.types import TrackResult
+    return TrackResult(username='someuser', filename=path, size=30_000_000,
+                       bitrate=999, duration=210000, quality='flac',
+                       free_upload_slots=1, upload_speed=500, queue_length=0)
+
+
+def test_full_remote_paths_rank_end_to_end(engine, monkeypatch):
+    """slskd filenames are whole remote paths ('Music\\Artist\\Album (Clean)\\01
+    - Song.flac'). Version markers on ALBUM FOLDERS classify the files inside
+    them — that's how peers actually label clean/explicit rips — and the
+    ladder holds through the real ranking entry point with real TrackResults."""
+    from core.spotify_client import Track
+    _set_config(monkeypatch, **{'content_filter.prefer_explicit': True,
+                                'content_filter.allow_explicit': True})
+    src = Track(id='x', name='Godzilla', artists=['Eminem'],
+                album='Music To Be Murdered By', duration_ms=210000, popularity=80)
+    explicit_file = _slskd_result(r"Music\Eminem\MTBMB\04 - Godzilla (Explicit).flac")
+    unmarked = _slskd_result(r"Music\Eminem\MTBMB\04 - Godzilla.flac")
+    clean_folder = _slskd_result(r"Rap - Clean Versions\Eminem\04 - Godzilla.flac")
+    clean_file = _slskd_result(r"Music\Eminem\MTBMB\04 - Godzilla (Clean).flac")
+
+    ranked = engine.find_best_slskd_matches_enhanced(
+        src, [clean_file, unmarked, clean_folder, explicit_file])
+    assert len(ranked) == 4                       # ladder = ordering, never a skip
+    assert ranked[0] is explicit_file
+    assert ranked[1] is unmarked
+    # TrackResult is unhashable — compare by identity, not set()
+    assert all(any(r is c for c in (clean_file, clean_folder)) for r in ranked[2:])
+    assert all(r.confidence > 0.6 for r in ranked)   # clean survives validation's floor
+
+
+def test_folder_guards_hold_on_full_paths(engine):
+    # band/title names containing 'clean' anywhere in the remote path
+    for path in (r"Music\Clean Bandit\Rather Be\01 - Rather Be.flac",
+                 r"Music\Mr. Clean OST\01 - Theme.flac",
+                 r"Music\DJ Clean - Mixtape\01 - Intro.flac"):
+        assert engine.detect_version_type(path)[0] == 'original', path
