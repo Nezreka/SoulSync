@@ -93,7 +93,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                                config_get: Callable[..., Any],
                                config_manager: Any = None,
                                profile_id_getter: Optional[Callable[[], int]] = None,
-                               acquisition_runtime_getter: Optional[Callable[..., Any]] = None) -> None:
+                               acquisition_runtime_getter: Optional[Callable[..., Any]] = None,
+                               acquisition_search_adapters_getter: Optional[Callable[..., Any]] = None,
+                               acquisition_async_runner: Optional[Callable[..., Any]] = None) -> None:
     """Attach the Library v2 routes to ``app``.
 
     ``get_database`` → shared ``MusicDatabase``; ``config_get(key, default)`` reads
@@ -129,6 +131,18 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             return int(profile_id_getter()) if profile_id_getter else 1
         except Exception:
             return 1
+
+    def _acquisition_search_adapters(criteria):
+        if acquisition_search_adapters_getter:
+            return tuple(acquisition_search_adapters_getter(criteria) or ())
+        from core.acquisition.prowlarr_adapter import default_usenet_search_adapter
+        return (default_usenet_search_adapter(),)
+
+    def _run_acquisition_async(coro):
+        if acquisition_async_runner:
+            return acquisition_async_runner(coro)
+        from utils.async_helpers import run_async
+        return run_async(coro)
 
     # -- read endpoints -------------------------------------------------------
 
@@ -237,8 +251,6 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         guard = _guard()
         if guard:
             return guard
-        body = request.get_json(silent=True) or {}
-        automatic = bool(body.get("automatic", False))
         conn = _conn()
         try:
             from core.acquisition.catalog import resolve_request_context
@@ -248,6 +260,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             acquisition_request = get_request(conn, request_id)
             if acquisition_request is None or acquisition_request.profile_id != ADMIN_PROFILE_ID:
                 return jsonify({"success": False, "error": "Request not found"}), 404
+            automatic = acquisition_request.trigger != "manual"
             catalog, policy = resolve_request_context(conn, acquisition_request)
             runtime = (
                 acquisition_runtime_getter(acquisition_request)
@@ -270,6 +283,145 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             return jsonify({"success": False, "error": str(exc)}), 400
         finally:
             conn.close()
+
+    @app.route(
+        "/api/library/v2/acquisition/requests/<request_id>/search",
+        methods=["POST"],
+    )
+    def lib2_search_acquisition_request(request_id):
+        """Search configured sources without holding a database transaction."""
+        guard = _guard()
+        if guard:
+            return guard
+
+        read_conn = _conn()
+        try:
+            from core.acquisition.catalog import resolve_catalog_context
+            from core.acquisition.requests import get_request
+            from core.acquisition.search_contract import build_search_criteria
+            acquisition_request = get_request(read_conn, request_id)
+            if acquisition_request is None or acquisition_request.profile_id != ADMIN_PROFILE_ID:
+                return jsonify({"success": False, "error": "Request not found"}), 404
+            if acquisition_request.status != "searching":
+                return jsonify({
+                    "success": False,
+                    "error": f"Request cannot be searched while {acquisition_request.status}",
+                }), 409
+            criteria = build_search_criteria(
+                acquisition_request,
+                resolve_catalog_context(read_conn, acquisition_request),
+            )
+        except ValueError as exc:
+            return jsonify({"success": False, "error": str(exc)}), 400
+        finally:
+            read_conn.close()
+
+        try:
+            from core.acquisition.search_service import collect_search_results
+            collection = _run_acquisition_async(collect_search_results(
+                criteria,
+                _acquisition_search_adapters(criteria),
+                timeout_seconds=float(config_get(
+                    "acquisition.search_timeout_seconds", 30.0)),
+            ))
+        except Exception as exc:  # noqa: BLE001 - external source boundary
+            from core.acquisition.search_contract import safe_external_error
+            error = safe_external_error(exc)
+            logger.warning("Acquisition search setup failed for %s: %s", request_id, error)
+            collection = None
+
+        searched_sources = (
+            [item for item in collection.outcomes if item.status == "searched"]
+            if collection else []
+        )
+        if not searched_sources:
+            error = (
+                "No configured compatible acquisition source"
+                if collection is not None and not any(
+                    item.status == "failed" for item in collection.outcomes)
+                else "All compatible acquisition source searches failed"
+            )
+            write_conn = _conn()
+            try:
+                from core.acquisition.requests import get_request, transition_request
+                current = get_request(write_conn, request_id)
+                if current is None or current.profile_id != ADMIN_PROFILE_ID:
+                    return jsonify({"success": False, "error": "Request not found"}), 404
+                if current.status != "searching":
+                    return jsonify({
+                        "success": False,
+                        "error": "Request changed while sources were being searched",
+                    }), 409
+                current = transition_request(
+                    write_conn,
+                    current.id,
+                    "failed",
+                    expected_status="searching",
+                    error=error,
+                )
+                write_conn.commit()
+                payload = collection.to_public_dict() if collection else {
+                    "candidate_count": 0,
+                    "sources": [],
+                }
+                return jsonify({
+                    "success": False,
+                    "error": error,
+                    "request": current.to_dict(),
+                    "search": payload,
+                }), 503
+            except Exception:
+                write_conn.rollback()
+                raise
+            finally:
+                write_conn.close()
+
+        write_conn = _conn()
+        try:
+            from core.acquisition.catalog import resolve_request_context
+            from core.acquisition.decision_engine import RuntimeContext
+            from core.acquisition.requests import get_request
+            from core.acquisition.search_service import persist_search_results
+            from core.acquisition.workflow import evaluate_request_candidates
+            current = get_request(write_conn, request_id)
+            if current is None or current.profile_id != ADMIN_PROFILE_ID:
+                return jsonify({"success": False, "error": "Request not found"}), 404
+            if current.status != "searching":
+                return jsonify({
+                    "success": False,
+                    "error": "Request changed while sources were being searched",
+                }), 409
+            persisted = persist_search_results(write_conn, collection)
+            catalog, policy = resolve_request_context(write_conn, current)
+            runtime = (
+                acquisition_runtime_getter(current)
+                if acquisition_runtime_getter else RuntimeContext()
+            )
+            if not isinstance(runtime, RuntimeContext):
+                raise ValueError("acquisition runtime provider returned an invalid context")
+            evaluated = evaluate_request_candidates(
+                write_conn,
+                current.id,
+                catalog=catalog,
+                runtime=runtime,
+                policy=policy,
+                automatic=current.trigger != "manual",
+            )
+            write_conn.commit()
+            return jsonify({
+                "success": True,
+                "search": collection.to_public_dict(),
+                "persisted": {
+                    "created": persisted.created_count,
+                    "refreshed": persisted.refreshed_count,
+                },
+                **evaluated.to_public_dict(),
+            })
+        except ValueError as exc:
+            write_conn.rollback()
+            return jsonify({"success": False, "error": str(exc)}), 400
+        finally:
+            write_conn.close()
 
     @app.route(
         "/api/library/v2/acquisition/wanted/materialize",

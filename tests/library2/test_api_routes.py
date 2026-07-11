@@ -8,6 +8,7 @@ a real (temp) SQLite schema with a fake MusicDatabase for the mirror calls.
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 
 import pytest
@@ -107,6 +108,7 @@ def api(tmp_path):
     # ADR-01: lib2 writes are admin-only (profile 1). Tests flip this to a
     # non-admin id to probe the rejection path.
     db.active_profile = 1
+    db.acquisition_search_adapters = []
     app = flask.Flask(__name__)
     from api.library_v2 import register_library_v2_routes
     register_library_v2_routes(
@@ -116,6 +118,9 @@ def api(tmp_path):
             True if key == "features.library_v2" else default),
         config_manager=None,
         profile_id_getter=lambda: db.active_profile,
+        acquisition_search_adapters_getter=(
+            lambda _criteria: db.acquisition_search_adapters),
+        acquisition_async_runner=asyncio.run,
     )
     ids = {"artist": artist_id, "views": views_id, "single": single_id,
            "ep": ep_id, "album_track": album_track,
@@ -231,11 +236,107 @@ def test_acquisition_evaluation_returns_only_public_candidates_and_reasons(api):
         reason["code"] for reason in rejected["decision"]["rejections"]}
     assert "server_ref" not in str(data)
     assert "ssc1-secret" not in str(data)
+    assert data["selected_candidate_id"] is None
 
     listed = client.get(
         f"/api/library/v2/acquisition/requests/{request_id}/candidates"
     ).get_json()
     assert "server_ref" not in str(listed)
+
+
+def test_acquisition_search_is_server_owned_and_persists_public_decisions(api):
+    client, db, ids = api
+    from core.acquisition.prowlarr_adapter import (
+        ProwlarrAcquisitionAdapter,
+        ProwlarrCandidateParser,
+    )
+    from core.download_plugins.candidate_store import CandidateStore
+    from core.prowlarr_client import ProwlarrSearchResult
+
+    class Prowlarr:
+        def is_configured(self):
+            return True
+
+        async def search(self, query, **kwargs):
+            assert query == "Drake Views"
+            return [ProwlarrSearchResult(
+                guid="views-flac",
+                title="Drake - Views [24bit 96kHz FLAC]",
+                indexer_id=7,
+                indexer_name="Test Indexer",
+                protocol="usenet",
+                download_url="https://indexer.invalid/get?api_key=secret",
+                size=800_000_000,
+                grabs=10,
+                raw={"downloadUrl": "https://indexer.invalid/secret"},
+            )]
+
+    db.acquisition_search_adapters = [ProwlarrAcquisitionAdapter(
+        "usenet",
+        client=Prowlarr(),
+        parser=ProwlarrCandidateParser(
+            "usenet", candidate_store=CandidateStore()),
+        download_client_configured=lambda: True,
+    )]
+    created = client.post("/api/library/v2/acquisition/requests", json={
+        "scope": "release_group",
+        "entity_id": ids["views"],
+        "idempotency_key": "search-views",
+    }).get_json()
+
+    searched = client.post(
+        f"/api/library/v2/acquisition/requests/{created['request']['id']}/search",
+        json={"automatic": True, "sources": ["torrent"]},
+    )
+
+    assert searched.status_code == 200
+    data = searched.get_json()
+    assert data["success"] is True
+    assert data["search"]["sources"][0]["source"] == "usenet"
+    assert data["persisted"] == {"created": 1, "refreshed": 0}
+    assert len(data["candidates"]) == 1
+    assert data["candidates"][0]["decision"]["accepted"] is True
+    # Persisted trigger owns Manual/Auto behavior; browser flags are ignored.
+    assert data["selected_candidate_id"] is None
+    assert "server_ref" not in str(data)
+    assert "indexer.invalid" not in str(data)
+    assert "secret" not in str(data)
+
+
+def test_acquisition_search_operational_failure_is_retryable_not_no_candidate(api):
+    client, db, ids = api
+
+    class Parser:
+        source = "usenet"
+
+        def parse(self, payload, *, criteria):  # pragma: no cover - not called
+            return None
+
+    class Unconfigured:
+        source = "usenet"
+        parser = Parser()
+
+        def is_configured(self):
+            return False
+
+        async def search(self, criteria):  # pragma: no cover - not called
+            return []
+
+    db.acquisition_search_adapters = [Unconfigured()]
+    created = client.post("/api/library/v2/acquisition/requests", json={
+        "scope": "release_group",
+        "entity_id": ids["views"],
+        "idempotency_key": "search-unconfigured",
+    }).get_json()
+
+    searched = client.post(
+        f"/api/library/v2/acquisition/requests/{created['request']['id']}/search")
+
+    assert searched.status_code == 503
+    data = searched.get_json()
+    assert data["request"]["status"] == "failed"
+    assert data["request"]["status"] != "no_candidate"
+    assert data["search"]["sources"][0]["status"] == "unconfigured"
 
 
 def test_wanted_materialize_endpoint_is_shadow_only_and_idempotent(api):
