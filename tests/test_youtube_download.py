@@ -380,8 +380,10 @@ class _FakeFS:
 
 def test_channel_folder_gets_show_assets_once(tmp_path, monkeypatch):
     """The channel dir (found template-agnostically) is seeded with poster.jpg
-    (avatar from the row), fanart.jpg (banner via the remembered channel meta)
-    and tvshow.nfo — idempotently, so a second episode refetches nothing."""
+    (channel AVATAR via the remembered channel meta — the download row's
+    poster_url is the VIDEO thumbnail and must never become the show poster),
+    fanart.jpg (banner) and tvshow.nfo; the season folder gets a poster too.
+    All idempotent — a second episode refetches nothing."""
     import core.video.importer as imp
     fs = _FakeFS()
     monkeypatch.setattr(imp, "real_fs", lambda: fs)
@@ -391,11 +393,13 @@ def test_channel_folder_gets_show_assets_once(tmp_path, monkeypatch):
     final = lib / "Veritasium - s2026e0711 - Vid.mp4"
     final.write_text("v")
     fields = {"title": "Vid", "channel": "Veritasium", "channel_id": "UC123",
-              "poster_url": "http://a/avatar.jpg", "published_at": "2026-07-11", "youtube_id": "v1"}
+              "poster_url": "http://a/VIDEO-THUMB.jpg",   # video thumb — not the poster
+              "published_at": "2026-07-11", "youtube_id": "v1"}
     lookup_calls = []
     def lookup(cid):
         lookup_calls.append(cid)
-        return {"banner_url": "http://a/banner.jpg", "description": "Science videos."}
+        return {"avatar_url": "http://a/avatar.jpg", "banner_url": "http://a/banner.jpg",
+                "description": "Science videos."}
 
     ytd._ensure_channel_assets(str(final), fields, {"save_artwork": True, "write_nfo": True}, lookup)
 
@@ -405,11 +409,31 @@ def test_channel_folder_gets_show_assets_once(tmp_path, monkeypatch):
     nfo = (chan / "tvshow.nfo").read_text()
     assert "<title>Veritasium</title>" in nfo and "Science videos." in nfo
     assert ("http://a/avatar.jpg", str(chan / "poster.jpg")) in fs.saved
+    assert not any(u == "http://a/VIDEO-THUMB.jpg" for u, _ in fs.saved)
+    # the year folder gets a poster as well (bare 'Season 2026' cards look broken)
+    assert (lib / "poster.jpg").exists()
 
     # second episode: everything already present → zero refetches
     before = list(fs.saved)
     ytd._ensure_channel_assets(str(final), fields, {"save_artwork": True, "write_nfo": True}, lookup)
     assert fs.saved == before
+
+
+def test_channel_assets_skip_relative_proxied_urls(tmp_path, monkeypatch):
+    """A proxied /api/... avatar url must never reach the fetcher (it was why a
+    fresh channel got no poster at all — urlopen can't open a relative url)."""
+    import core.video.importer as imp
+    fs = _FakeFS()
+    monkeypatch.setattr(imp, "real_fs", lambda: fs)
+    lib = tmp_path / "yt" / "Chan" / "Season 2026"
+    lib.mkdir(parents=True)
+    final = lib / "Chan - s2026e0711 - Vid.mp4"
+    final.write_text("v")
+    ytd._ensure_channel_assets(str(final), {"title": "Vid", "channel": "Chan", "channel_id": "UC1"},
+                               {"save_artwork": True, "write_nfo": True},
+                               lambda cid: {"avatar_url": "/api/video/youtube/img?u=x"})
+    assert fs.saved == []                                  # nothing fetched
+    assert (tmp_path / "yt" / "Chan" / "tvshow.nfo").exists()   # nfo still lands
 
 
 def test_channel_assets_skipped_for_flat_templates(tmp_path, monkeypatch):

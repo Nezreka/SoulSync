@@ -636,7 +636,10 @@ class VideoDatabase:
                 "GROUP BY cv.youtube_id LIMIT 1").fetchone()
             if not row:
                 return None
-            return {"kind": "video", "id": row["youtube_id"],
+            # "title" is what the worker base class logs/displays (movie/show
+            # feeds use it) — the old name-only shape made every YouTube
+            # enrichment log as "Enriched video 'None'".
+            return {"kind": "video", "id": row["youtube_id"], "title": row["title"],
                     "name": row["title"], "youtube_id": row["youtube_id"]}
         finally:
             conn.close()

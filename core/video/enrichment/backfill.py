@@ -238,7 +238,11 @@ class VideoBackfillWorker:
         if data:
             self.record_ok(item, data)
             self.stats["matched"] += 1
-            logger.info("Enriched %s '%s' via %s", item.get("kind"), item.get("title"), self.display_name)
+            # per-VIDEO extras (RYD/SponsorBlock/DeArrow) drain a whole channel
+            # catalog at one line every second or two — that's log flood, not
+            # signal. Movie/show enrichments stay INFO (rare + meaningful).
+            _log = logger.debug if item.get("kind") == "video" else logger.info
+            _log("Enriched %s '%s' via %s", item.get("kind"), item.get("title"), self.display_name)
         else:
             self.record_empty(item)
             self.stats["not_found"] += 1
