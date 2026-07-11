@@ -1148,6 +1148,7 @@
         var meta = [];
         var rt = runtimeLabel(ep.runtime_minutes); if (rt) meta.push(rt);
         if (ep.air_date) meta.push(ep.air_date);
+        if (ep.owned && ep.resolution) meta.push(mediaRes(ep.resolution));
         var stillSrc = (data && data.source === 'tmdb')
             ? (ep.still_url || '')
             : (ep.has_still ? '/api/video/poster/episode/' + ep.id : '');
@@ -1165,7 +1166,8 @@
             (meta.length ? '<span class="vd-ep-rt">' + esc(meta.join(' · ')) + '</span>' : '') + '</div>' +
             (ep.overview ? '<p class="vd-ep-desc">' + esc(ep.overview) + '</p>' : '') + '</div>' +
             (ep.owned || !window.VideoGrab
-                ? '<div class="vd-ep-badge">' + (ep.owned ? 'Owned' : 'Missing') + '</div>'
+                ? '<div class="vd-ep-badge">' + (ep.owned
+                    ? 'Owned' + (ep.versions > 1 ? ' ×' + ep.versions : '') : 'Missing') + '</div>'
                 : '<div class="vd-ep-get" data-vd-ep-get="' + ep.episode_number + '">' +
                     '<span class="vd-ep-dl" data-vd-ep-dl></span>' +
                     '<button class="vd-ep-getbtn vd-ep-grab" type="button" data-vd-ep-grab="' + ep.episode_number +
