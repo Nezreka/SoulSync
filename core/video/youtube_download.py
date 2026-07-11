@@ -342,15 +342,33 @@ def _ensure_channel_assets(final_video: str, fields: Dict[str, Any], settings: D
     fs = real_fs()
     _sidecars.write(channel_dir, "youtube_channel", meta, settings, fs)
     # season folder poster (the year folder between channel and file, when the
-    # template has one): the avatar again — Plex/Jellyfin read poster.jpg inside
-    # a season directory, and a bare 'Season 2026' card looks broken.
+    # template has one). A COMPOSED per-year card — blurred-avatar backdrop,
+    # circular avatar, the big year — so seasons are visually distinct from the
+    # channel poster (Boulder: the plain avatar copy made them identical).
+    # Render trouble falls back to the avatar copy; either way art lands.
     season_dir = os.path.dirname(os.path.abspath(final_video))
-    if settings.get("save_artwork") and meta.get("poster_url") and             os.path.normpath(season_dir) != os.path.normpath(channel_dir):
+    if settings.get("save_artwork") and meta.get("poster_url") and \
+            os.path.normpath(season_dir) != os.path.normpath(channel_dir):
         try:
             fs.makedirs(season_dir)   # pre-move seeding: the dir may not exist yet
             existing = {str(n).lower() for n in (fs.list_dir(season_dir) or [])}
             if "poster.jpg" not in existing:
-                fs.save_url(meta["poster_url"], os.path.join(season_dir, "poster.jpg"))
+                target = os.path.join(season_dir, "poster.jpg")
+                data = None
+                year = str(fields.get("published_at") or "")[:4]
+                chan_poster = os.path.join(channel_dir, "poster.jpg")
+                if year.isdigit() and os.path.isfile(chan_poster):
+                    try:
+                        from core.video.collections.poster_gen import render_season_poster
+                        with open(chan_poster, "rb") as f:
+                            data = render_season_poster(f.read(), year, str(fields.get("channel") or ""))
+                    except Exception:   # noqa: BLE001 - fall back to the avatar copy
+                        data = None
+                if data:
+                    with open(target, "wb") as f:
+                        f.write(data)
+                else:
+                    fs.save_url(meta["poster_url"], target)
         except Exception:   # noqa: BLE001 - season art is a nicety
             pass
 

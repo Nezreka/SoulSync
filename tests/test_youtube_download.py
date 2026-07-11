@@ -495,3 +495,40 @@ def test_channel_art_lands_BEFORE_the_video_moves_in(tmp_path, monkeypatch):
     assert res["status"] == "completed"
     assert seen["poster_at_move"] is True
     assert seen["season_at_move"] is True
+
+
+def test_season_poster_is_a_composed_year_card_not_an_avatar_copy(tmp_path, monkeypatch):
+    """Boulder: the avatar-copy season poster made every season identical to the
+    channel. With a real avatar image on disk, the season poster is COMPOSED
+    (year card) — different bytes per year, JPEG output, never a byte-copy."""
+    import io as _io
+    from PIL import Image
+    import core.video.importer as imp
+    fs = _FakeFS()
+    monkeypatch.setattr(imp, "real_fs", lambda: fs)
+
+    lib = tmp_path / "yt" / "Chan" / "Season 2026"
+    lib.mkdir(parents=True)
+    lib25 = tmp_path / "yt" / "Chan" / "Season 2025"
+    lib25.mkdir()
+    # a real avatar image at the channel poster path (as the writer creates it)
+    buf = _io.BytesIO()
+    Image.new("RGB", (400, 400), (200, 40, 40)).save(buf, "PNG")
+    (tmp_path / "yt" / "Chan" / "poster.jpg").write_bytes(buf.getvalue())
+
+    fields = {"title": "Vid", "channel": "Chan", "channel_id": "UC1",
+              "published_at": "2026-07-11", "youtube_id": "v1"}
+    lookup = lambda cid: {"avatar_url": "http://a/av.jpg"}
+    ytd._ensure_channel_assets(str(lib / "Chan - s2026e0711 - Vid.mp4"),
+                               fields, {"save_artwork": True}, lookup)
+    fields25 = dict(fields, published_at="2025-03-01")
+    ytd._ensure_channel_assets(str(lib25 / "Chan - s2025e0301 - Vid.mp4"),
+                               fields25, {"save_artwork": True}, lookup)
+
+    p26, p25 = (lib / "poster.jpg").read_bytes(), (lib25 / "poster.jpg").read_bytes()
+    avatar = (tmp_path / "yt" / "Chan" / "poster.jpg").read_bytes()
+    assert p26[:3] == b"\xff\xd8\xff"                 # JPEG, actually composed
+    assert p26 != avatar and p25 != avatar            # never a plain copy
+    assert p26 != p25                                 # distinct per year
+    img = Image.open(_io.BytesIO(p26))
+    assert img.size == (1000, 1500)                   # proper 2:3 poster
