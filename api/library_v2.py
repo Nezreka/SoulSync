@@ -271,6 +271,42 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         finally:
             conn.close()
 
+    @app.route(
+        "/api/library/v2/acquisition/wanted/materialize",
+        methods=["POST"],
+    )
+    def lib2_materialize_wanted_acquisition():
+        """Create Phase-4 shadow requests; legacy Wishlist remains operative."""
+        guard = _guard()
+        if guard:
+            return guard
+        body = request.get_json(silent=True) or {}
+        track_ids = body.get("track_ids")
+        if track_ids is not None and not isinstance(track_ids, list):
+            return jsonify({"success": False, "error": "track_ids must be an array"}), 400
+        conn = _conn()
+        try:
+            from core.acquisition import ensure_acquisition_schema
+            from core.acquisition.wanted_adapter import materialize_wanted_requests
+            ensure_acquisition_schema(conn)
+            results = materialize_wanted_requests(
+                conn,
+                profile_id=ADMIN_PROFILE_ID,
+                track_ids=track_ids,
+                trigger="manual",
+            )
+            conn.commit()
+            return jsonify({
+                "success": True,
+                "shadow": True,
+                "requests": [item.to_dict() for item in results],
+            })
+        except (TypeError, ValueError) as exc:
+            conn.rollback()
+            return jsonify({"success": False, "error": str(exc)}), 400
+        finally:
+            conn.close()
+
     @app.route("/api/library/v2/artists")
     def lib2_list_artists():
         guard = _guard()

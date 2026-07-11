@@ -238,6 +238,45 @@ def test_acquisition_evaluation_returns_only_public_candidates_and_reasons(api):
     assert "server_ref" not in str(listed)
 
 
+def test_wanted_materialize_endpoint_is_shadow_only_and_idempotent(api):
+    client, db, ids = api
+    conn = db._get_connection()
+    try:
+        from core.library2.wanted import recompute_wanted
+        conn.execute("DELETE FROM lib2_track_files WHERE track_id=?", (ids["album_track"],))
+        conn.execute(
+            """INSERT INTO lib2_monitor_rules(
+                   entity_type, entity_id, profile_id, monitored, provenance)
+               VALUES('track', ?, 1, 1, 'user_explicit')
+               ON CONFLICT(entity_type, entity_id, profile_id) DO UPDATE SET
+                   monitored=1, provenance='user_explicit'""",
+            (ids["album_track"],),
+        )
+        recompute_wanted(conn, profile_id=1, track_ids=[ids["album_track"]])
+        # Fixture rows were inserted after schema ensure; backfill their shadow
+        # recording/edition rows now, as production importer does.
+        from core.library2.editions import backfill_editions
+        backfill_editions(conn.cursor())
+        conn.commit()
+    finally:
+        conn.close()
+
+    first = client.post(
+        "/api/library/v2/acquisition/wanted/materialize",
+        json={"track_ids": [ids["album_track"]]},
+    ).get_json()
+    second = client.post(
+        "/api/library/v2/acquisition/wanted/materialize",
+        json={"track_ids": [ids["album_track"]]},
+    ).get_json()
+
+    assert first["success"] is True and first["shadow"] is True
+    assert len(first["requests"]) == 1
+    assert first["requests"][0]["created"] is True
+    assert second["requests"][0]["created"] is False
+    assert first["requests"][0]["request"]["id"] == second["requests"][0]["request"]["id"]
+
+
 def test_monitor_album_mirrors_with_active_profile(api):
     client, db, ids = api
     resp = client.post(f"/api/library/v2/albums/{ids['ep']}/monitor",
