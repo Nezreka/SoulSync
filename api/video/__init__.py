@@ -46,10 +46,15 @@ def create_video_blueprint() -> Blueprint:
     def _video_perm_gate():
         from flask import request, g, jsonify
         path = request.path or ""
+        # Admin = the profile's REAL is_admin flag (web_server stashes g.is_admin;
+        # music supports secondary admins, and the frontend gates on the same
+        # flag — a profile-1-only check here split-brained against it). Fallback
+        # keeps the old convention when g wasn't populated (tests, edge callers).
+        is_admin = bool(getattr(g, "is_admin", getattr(g, "profile_id", 1) == 1))
         if (path.startswith("/api/video/overlays") or path.startswith("/api/video/import")
                 or path.startswith("/api/video/collections")
                 or path.startswith("/api/video/repair")) \
-                and getattr(g, "profile_id", 1) != 1:
+                and not is_admin:
             return jsonify({"error": "Admin only."}), 403
         if request.method == "POST" and not getattr(g, "can_download", True) and (
                 path.startswith("/api/video/downloads/grab") or path == "/api/video/wishlist/add"):
