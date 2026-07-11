@@ -46,6 +46,7 @@ class BrokenFilesJob(VideoRepairJob):
             min_pct = 75
         rows = context.db.repair_owned_movie_files()
         context.report(total=len(rows), phase="checking runtimes")
+        valid = []
         for i, r in enumerate(rows, 1):
             context.check_stop()
             result.scanned += 1
@@ -60,6 +61,7 @@ class BrokenFilesJob(VideoRepairJob):
             reason = ("stub file (%.1f MB)" % (size / 1048576)) if stub else \
                 ("runs %d of %d min" % (actual // 60, expected // 60))
             entity_id = f"{r['movie_id']}:{r['file_id']}"
+            valid.append(entity_id)
             context.create_finding(
                 finding_type="broken_file", severity="warning",
                 entity_type="movie", entity_id=entity_id,
@@ -73,6 +75,9 @@ class BrokenFilesJob(VideoRepairJob):
                          "file": {"relative_path": r.get("relative_path"),
                                   "size_bytes": size, "resolution": r.get("resolution"),
                                   "quality": r.get("quality")}})
+        # Retire pending findings for files replaced/removed since the scan.
+        if result.errors == 0:
+            context.db.repair_dismiss_absent(self.job_id, "broken_file", valid)
         return result
 
     def fix(self, context: JobContext, finding: dict, fix_action=None) -> dict:

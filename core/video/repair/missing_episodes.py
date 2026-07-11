@@ -4,9 +4,9 @@ Scan: every LIBRARY show, one finding per show listing its aired, monitored,
 un-owned episodes (specials opt-in; 'ended' shows included — ended matters for
 watching-for-NEW, not for filling back-catalog gaps). The finding's entity_id
 is show_id + a hash of the missing set, so when the set changes (new episode
-airs, some got downloaded) the old pending finding is superseded and a fresh
-one appears — while a dismissed/resolved finding for the SAME set never comes
-back (standard dedup).
+airs, some got downloaded) a fresh finding appears and the end-of-scan
+absent-dismissal retires the stale pending one — while a dismissed/resolved
+finding for the SAME set never comes back (standard dedup).
 
 Fix (approve): send the episodes to the video wishlist through the SAME
 write-parity path as a manual add — show poster proxy URL + library_id +
@@ -70,16 +70,14 @@ class MissingEpisodesJob(VideoRepairJob):
         for r in rows:
             shows.setdefault(r["show_id"], []).append(r)
         context.report(total=len(shows), phase="scanning shows")
+        valid = []
         for i, (show_id, eps) in enumerate(shows.items(), 1):
             context.check_stop()
             result.scanned += 1
             head = eps[0]
             sig = _sig(eps)
             entity_id = f"{show_id}:{sig}"
-            # The situation changed since an earlier scan? Retire the stale
-            # pending finding for this show before creating the fresh one.
-            context.db.repair_dismiss_stale(self.job_id, "missing_episodes",
-                                            f"{show_id}:", entity_id)
+            valid.append(entity_id)
             n = len(eps)
             context.create_finding(
                 finding_type="missing_episodes",
@@ -100,6 +98,10 @@ class MissingEpisodesJob(VideoRepairJob):
                                   "overview": e["overview"]} for e in eps],
                 })
             context.report(processed=i, current_item=head["show_title"])
+        # A COMPLETE scan retires pending findings it no longer produced (the
+        # set changed or the gaps got filled elsewhere) — never on errors.
+        if result.errors == 0:
+            context.db.repair_dismiss_absent(self.job_id, "missing_episodes", valid)
         return result
 
     # ── approve == fix: wishlist the episodes (write-parity standard) ─────────

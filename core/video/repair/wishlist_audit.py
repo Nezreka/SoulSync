@@ -25,7 +25,7 @@ class WishlistAuditJob(VideoRepairJob):
                  "wishlist row only — your files are never touched.")
     icon = "🧹"
     default_enabled = False
-    default_interval_hours = 72
+    default_interval_hours = 1     # cheap DB sweep — keeps pace with the download engine
     default_settings = {}
     setting_options = {}
     auto_fix = False
@@ -35,6 +35,7 @@ class WishlistAuditJob(VideoRepairJob):
         result = JobResult()
         rows = context.db.repair_stale_wishlist()
         context.report(total=len(rows), phase="auditing wishlist")
+        valid = []
         for i, r in enumerate(rows, 1):
             context.check_stop()
             result.scanned += 1
@@ -46,6 +47,7 @@ class WishlistAuditJob(VideoRepairJob):
                 code = "S%02dE%02d" % (r.get("season_number") or 0, r.get("episode_number") or 0)
                 entity_id = f"e:{r['tmdb_id']}:{r.get('season_number')}:{r.get('episode_number')}"
                 title = f"{r.get('title') or '?'} {code} — already owned, still wishlisted"
+            valid.append(entity_id)
             context.create_finding(
                 finding_type="stale_wishlist", severity="info",
                 entity_type="wishlist", entity_id=entity_id,
@@ -54,6 +56,9 @@ class WishlistAuditJob(VideoRepairJob):
                          "poster_url": r.get("poster_url"), "library_id": r.get("library_id"),
                          "season_number": r.get("season_number"),
                          "episode_number": r.get("episode_number")})
+        # Retire pending findings for rows that got removed by hand since.
+        if result.errors == 0:
+            context.db.repair_dismiss_absent(self.job_id, "stale_wishlist", valid)
         return result
 
     def fix(self, context: JobContext, finding: dict, fix_action=None) -> dict:

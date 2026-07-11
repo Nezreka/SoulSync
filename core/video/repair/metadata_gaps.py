@@ -56,6 +56,7 @@ class MetadataGapsJob(VideoRepairJob):
         result = JobResult()
         rows = context.db.repair_movie_metadata_gaps()
         context.report(total=len(rows), phase="sweeping metadata")
+        valid = []
         for i, r in enumerate(rows, 1):
             context.check_stop()
             result.scanned += 1
@@ -77,8 +78,7 @@ class MetadataGapsJob(VideoRepairJob):
                 continue
             labels = {k: lbl for k, lbl, _f in _GAPS}
             entity_id = f"{r['movie_id']}:{_sig(gaps)}"
-            context.db.repair_dismiss_stale(self.job_id, "metadata_gap",
-                                            f"{r['movie_id']}:", entity_id)
+            valid.append(entity_id)
             context.create_finding(
                 finding_type="metadata_gap",
                 severity="warning" if unmatched else "info",
@@ -88,6 +88,9 @@ class MetadataGapsJob(VideoRepairJob):
                 description=" · ".join(labels[g] for g in gaps),
                 details={"movie_id": r["movie_id"], "tmdb_id": r.get("tmdb_id"),
                          "title": r["title"], "year": r.get("year"), "gaps": gaps})
+        # Retire pending findings whose gaps the workers have since filled.
+        if result.errors == 0:
+            context.db.repair_dismiss_absent(self.job_id, "metadata_gap", valid)
         return result
 
     def fix(self, context: JobContext, finding: dict, fix_action=None) -> dict:

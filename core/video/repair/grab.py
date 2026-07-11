@@ -27,12 +27,19 @@ def grab_movie(details: dict) -> dict:
         return {"success": False, "error": "movie is not TMDB-matched yet"}
     try:
         from core.automation.handlers import video_process_wishlist as vpw
-        candidates = vpw._default_search(item, "movie") or []
+        # _default_search returns (candidates, error): candidates is None when
+        # the search never ran (slskd down/unconfigured), [] for a real miss.
+        candidates, err = vpw._default_search(item, "movie")
+        if candidates is None:
+            return {"success": False, "error": err or "search backend unavailable"}
         best = vpw.pick_best(candidates)
         if not best:
             return {"success": False,
                     "error": "no release matched your quality profile — finding stays pending"}
-        vpw._default_enqueue(item, best, candidates, "movie")
+        ok = vpw._default_enqueue(item, best, candidates, "movie",
+                                  vpw._default_target_dir("movie"))
+        if not ok:
+            return {"success": False, "error": "slskd did not accept the download"}
         name = best.get("quality") or best.get("resolution") or "release"
         return {"success": True, "action": "grabbed",
                 "message": f"Grabbed a {name} of {item['title']} — watch the Downloads page"}

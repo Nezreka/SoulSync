@@ -51,16 +51,23 @@ def _pending(db):
 def test_movie_collections_scan_and_fix(db, worker, monkeypatch):
     _seed_movie(db, sid="m1", tmdb=603, title="The Matrix", collection=2344,
                 col_name="The Matrix Collection")
-    members = [{"tmdb_id": 603, "title": "The Matrix", "year": 1999, "poster_url": "/a.jpg"},
-               {"tmdb_id": 604, "title": "Reloaded", "year": 2003, "poster_url": "/b.jpg"},
-               {"tmdb_id": 605, "title": "Revolutions", "year": 2003, "poster_url": "/c.jpg"},
-               {"tmdb_id": 999, "title": "Matrix 5", "year": 2099, "poster_url": None}]
+    members = [{"tmdb_id": 603, "title": "The Matrix", "year": 1999, "date": "1999-03-31",
+                "poster_url": "https://img/a.jpg"},
+               {"tmdb_id": 604, "title": "Reloaded", "year": 2003, "date": "2003-05-15",
+                "poster_url": "https://img/b.jpg"},
+               {"tmdb_id": 605, "title": "Revolutions", "year": 2003, "date": "2003-11-05",
+                "poster_url": "https://img/c.jpg"},
+               {"tmdb_id": 999, "title": "Matrix 5", "year": 2099, "date": "2099-01-01",
+                "poster_url": None},
+               {"tmdb_id": 998, "title": "Matrix 6", "year": None, "date": "",
+                "poster_url": None}]
     monkeypatch.setattr("core.video.repair.movie_collections._members",
                         lambda cid: members if cid == 2344 else [])
     worker._run_job("movie_collections", forced=True)
     f = _pending(db)[0]
-    assert f["title"] == "The Matrix Collection — 1 of 4 owned"
-    assert [m["tmdb_id"] for m in f["details"]["missing"]] == [604, 605]   # 2099 excluded
+    assert f["title"] == "The Matrix Collection — 1 of 5 owned"
+    # Future-dated + dateless members never count as missing.
+    assert [m["tmdb_id"] for m in f["details"]["missing"]] == [604, 605]
     res = worker.fix_finding(f["id"])
     assert res["success"] and res["action"] == "wishlisted" and "2 films" in res["message"]
     conn = db._get_connection()
@@ -72,13 +79,13 @@ def test_movie_collections_scan_and_fix(db, worker, monkeypatch):
 
 def test_movie_collections_supersede_on_change(db, worker, monkeypatch):
     _seed_movie(db, sid="m1", tmdb=603, title="The Matrix", collection=2344, col_name="Matrix")
-    members = [{"tmdb_id": 603, "title": "A", "year": 1999, "poster_url": None},
-               {"tmdb_id": 604, "title": "B", "year": 2003, "poster_url": None}]
+    members = [{"tmdb_id": 603, "title": "A", "year": 1999, "date": "1999-01-01", "poster_url": None},
+               {"tmdb_id": 604, "title": "B", "year": 2003, "date": "2003-01-01", "poster_url": None}]
     monkeypatch.setattr("core.video.repair.movie_collections._members", lambda cid: members)
     worker._run_job("movie_collections", forced=True)
     old = _pending(db)[0]
     _seed_movie(db, sid="m2", tmdb=604, title="B", collection=2344, col_name="Matrix")
-    members.append({"tmdb_id": 605, "title": "C", "year": 2005, "poster_url": None})
+    members.append({"tmdb_id": 605, "title": "C", "year": 2005, "date": "2005-01-01", "poster_url": None})
     worker._run_job("movie_collections", forced=True)
     pend = _pending(db)
     assert len(pend) == 1 and [m["tmdb_id"] for m in pend[0]["details"]["missing"]] == [605]
@@ -186,6 +193,50 @@ def test_duplicate_movies_reports_and_has_no_fix(db, worker):
     assert not res["success"]                                  # report-only: no fix
     assert db.repair_get_finding(rows_f["id"])["status"] == "pending"
     assert worker.dismiss_finding(rows_f["id"])
+
+
+# ── absent-dismissal: a resolved-elsewhere problem retires its finding ───────
+def test_complete_scan_retires_findings_for_fixed_problems(db, worker):
+    ok = _seed_movie(db, sid="m1", tmdb=1, title="Was Broken", file={"path": "/w.mkv"})
+    conn = db._get_connection()
+    conn.execute("UPDATE movies SET runtime_minutes=120")
+    conn.commit(); conn.close()
+    _add_file(db, ok, path="/w.mkv", runtime_seconds=30 * 60)
+    worker._run_job("broken_files", forced=True)
+    old = _pending(db)[0]
+    # The file gets replaced outside SoulSync (rescan updates the probe).
+    conn = db._get_connection()
+    conn.execute("UPDATE media_files SET runtime_seconds=? WHERE relative_path='/w.mkv'",
+                 (118 * 60,))
+    conn.commit(); conn.close()
+    worker._run_job("broken_files", forced=True)
+    assert _pending(db) == []
+    assert db.repair_get_finding(old["id"])["status"] == "dismissed"
+
+
+# ── the grab seam (upgrade/re-download fixes) ────────────────────────────────
+def test_grab_movie_contract(monkeypatch):
+    from core.automation.handlers import video_process_wishlist as vpw
+    from core.video.repair.grab import grab_movie
+    calls = {}
+    monkeypatch.setattr(vpw, "_default_search",
+                        lambda item, mt: ([{"accepted": True, "quality": "1080p",
+                                            "username": "u", "filename": "f",
+                                            "size_bytes": 1}], None))
+    monkeypatch.setattr(vpw, "_default_target_dir", lambda mt: "/movies")
+    monkeypatch.setattr(vpw, "_default_enqueue",
+                        lambda item, best, cands, mt, tdir: calls.update(
+                            item=item, best=best, mt=mt, tdir=tdir) or True)
+    res = grab_movie({"tmdb_id": 7, "title": "Film", "year": 2020})
+    assert res["success"] and res["action"] == "grabbed" and "1080p" in res["message"]
+    assert calls["mt"] == "movie" and calls["tdir"] == "/movies"
+    # Search backend down → honest error, not a crash.
+    monkeypatch.setattr(vpw, "_default_search", lambda item, mt: (None, "slskd offline"))
+    res = grab_movie({"tmdb_id": 7, "title": "Film"})
+    assert not res["success"] and res["error"] == "slskd offline"
+    # Real search, nothing acceptable → stays pending.
+    monkeypatch.setattr(vpw, "_default_search", lambda item, mt: ([], None))
+    assert "quality profile" in grab_movie({"tmdb_id": 7, "title": "Film"})["error"]
 
 
 # ── Wishlist Audit ───────────────────────────────────────────────────────────
