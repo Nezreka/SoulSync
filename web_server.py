@@ -1213,6 +1213,10 @@ from core.runtime_state import batch_locks
 _orphaned_download_keys = set()
 
 _enrichment_activity_log = {}
+# Guards _enrichment_activity_log's deques: every /status request appends to
+# and scans them via _get_windowed_calls, so concurrent polls (multiple tabs)
+# race into "deque mutated during iteration" without it.
+_enrichment_activity_lock = threading.Lock()
 _idle_since = {}
 _IDLE_GRACE_SECONDS = 5
 
@@ -2394,23 +2398,24 @@ def _get_windowed_calls(key, current_total):
     Deque stores (timestamp, cumulative_total) in chronological order.
     To get calls in a window: current_total minus the oldest total within that window."""
     now = time.time()
-    history = _enrichment_activity_log.setdefault(key, collections.deque(maxlen=17300))
-    history.append((now, current_total))
-
     cutoff_1h = now - 3600
     cutoff_24h = now - 86400
 
-    # Forward scan: first entry with ts >= cutoff is the oldest in that window
-    oldest_1h_total = current_total
-    oldest_24h_total = current_total
-    found_24h = False
-    for ts, total in history:
-        if not found_24h and ts >= cutoff_24h:
-            oldest_24h_total = total
-            found_24h = True
-        if ts >= cutoff_1h:
-            oldest_1h_total = total
-            break
+    with _enrichment_activity_lock:
+        history = _enrichment_activity_log.setdefault(key, collections.deque(maxlen=17300))
+        history.append((now, current_total))
+
+        # Forward scan: first entry with ts >= cutoff is the oldest in that window
+        oldest_1h_total = current_total
+        oldest_24h_total = current_total
+        found_24h = False
+        for ts, total in history:
+            if not found_24h and ts >= cutoff_24h:
+                oldest_24h_total = total
+                found_24h = True
+            if ts >= cutoff_1h:
+                oldest_1h_total = total
+                break
 
     return max(0, current_total - oldest_1h_total), max(0, current_total - oldest_24h_total)
 
