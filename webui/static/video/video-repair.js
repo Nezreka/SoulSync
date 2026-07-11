@@ -253,6 +253,15 @@
             card.classList.toggle('running', st.status === 'running');
             card.classList.remove('disabled');
 
+            // The Run button IS the Stop button while a run is live (music UX).
+            var runBtn = card.querySelector('[data-vjr-run]');
+            var stopBtn = card.querySelector('[data-vjr-stop]');
+            if (st.status === 'running' && runBtn) {
+                runBtn.outerHTML = '<button class="repair-stop-btn" type="button" data-vjr-stop title="Stop this run">&#9209;</button>';
+            } else if (st.status !== 'running' && stopBtn) {
+                stopBtn.outerHTML = '<button class="repair-run-btn" type="button" data-vjr-run title="Run now">&#9654;</button>';
+            }
+
             var panel = card.querySelector('.repair-job-progress');
             if (!panel) {
                 panel = document.createElement('div');
@@ -329,6 +338,8 @@
         jget(API + '/findings?' + q.toString()).then(function (data) {
             if (!data) { container.innerHTML = '<div class="repair-empty">Error loading findings</div>'; return; }
             state.selected = {};
+            state.findingsById = {};
+            (data.items || []).forEach(function (it) { state.findingsById[it.id] = it; });
             paintBulk();
             var cb = $('video-repair-select-all-cb');
             if (cb) cb.checked = false;
@@ -393,18 +404,125 @@
     function detailHTML(f) {
         var d = f.details || {};
         if (f.finding_type === 'missing_episodes' && d.episodes) {
-            var rows = d.episodes.map(function (e) {
-                var code = 'S' + String(e.season_number).padStart(2, '0') +
-                    'E' + String(e.episode_number).padStart(2, '0');
-                return '<div class="repair-ep-row"><span class="repair-ep-code">' + esc(code) +
-                    '</span><span class="repair-ep-title">' + esc(e.title || '—') + '</span>' +
-                    '<span class="repair-ep-date">' + esc(e.air_date || '') + '</span></div>';
-            }).join('');
-            return '<div class="repair-ep-list">' + rows + '</div>' +
-                '<p class="repair-finding-hint">Approving sends these to the wishlist — the ' +
-                'auto-downloader takes it from there.</p>';
+            // Rich panel loads lazily on first expand (show + season + episode
+            // art pulled live from /api/video/detail/show — always current).
+            return '<div class="vrf-detail" data-vrf-fid="' + f.id + '">' +
+                '<div class="repair-loading">Loading details…</div></div>';
         }
         return '<pre class="repair-finding-json">' + esc(JSON.stringify(d, null, 2)) + '</pre>';
+    }
+
+    function simpleEpisodeList(d) {
+        var rows = (d.episodes || []).map(function (e) {
+            var code = 'S' + String(e.season_number).padStart(2, '0') +
+                'E' + String(e.episode_number).padStart(2, '0');
+            return '<div class="repair-ep-row"><span class="repair-ep-code">' + esc(code) +
+                '</span><span class="repair-ep-title">' + esc(e.title || '—') + '</span>' +
+                '<span class="repair-ep-date">' + esc(e.air_date || '') + '</span></div>';
+        }).join('');
+        return '<div class="repair-ep-list">' + rows + '</div>' +
+            '<p class="repair-finding-hint">Approving sends these to the wishlist — the ' +
+            'auto-downloader takes it from there.</p>';
+    }
+
+    // ── rich missing-episodes detail (lazy; live library data + art) ─────────
+    function buildRichDetail(fid) {
+        var f = (state.findingsById || {})[fid];
+        var host = document.querySelector('#video-repair-detail-' + fid + ' .vrf-detail');
+        if (!f || !host || host.getAttribute('data-loaded')) return;
+        host.setAttribute('data-loaded', '1');
+        var d = f.details || {};
+        if (d.show_id == null) { host.innerHTML = simpleEpisodeList(d); return; }
+        jget('/api/video/detail/show/' + d.show_id)
+            .then(function (show) {
+                host.innerHTML = show ? richDetailHTML(f, d, show) : simpleEpisodeList(d);
+            })
+            .catch(function () { host.innerHTML = simpleEpisodeList(d); });
+    }
+
+    function richDetailHTML(f, d, show) {
+        // Which (season, episode) pairs this finding names.
+        var missing = {};
+        (d.episodes || []).forEach(function (e) {
+            missing[e.season_number + ':' + e.episode_number] = e;
+        });
+        var poster = show.has_poster
+            ? '<img class="vrf-poster" src="/api/video/poster/show/' + show.id +
+              '" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
+            : '<div class="vrf-poster vrf-poster--empty">📺</div>';
+        var subBits = [];
+        if (show.network) subBits.push(esc(show.network));
+        if (show.status) {
+            subBits.push(esc(show.status.charAt(0).toUpperCase() + show.status.slice(1)));
+        }
+        if (show.content_rating) subBits.push(esc(show.content_rating));
+
+        var chips = ['<span class="vrf-chip vrf-chip--miss">' + (d.count || (d.episodes || []).length) +
+            ' missing</span>'];
+        if (show.episode_total) {
+            chips.push('<span class="vrf-chip">' + (show.episode_owned || 0) + ' / ' +
+                show.episode_total + ' owned</span>');
+        }
+        if (show.first_air_date) {
+            chips.push('<span class="vrf-chip">' + esc(String(show.first_air_date).slice(0, 4)) +
+                (show.last_air_date ? '–' + esc(String(show.last_air_date).slice(0, 4)) : '') + '</span>');
+        }
+
+        var head =
+            '<div class="vrf-show">' + poster +
+                '<div class="vrf-show-info">' +
+                    '<div class="vrf-show-title">' + esc(show.title) +
+                        (show.year ? ' <span class="vrf-show-year">(' + show.year + ')</span>' : '') + '</div>' +
+                    (subBits.length ? '<div class="vrf-show-sub">' + subBits.join(' · ') + '</div>' : '') +
+                    '<div class="vrf-chips">' + chips.join('') + '</div>' +
+                    (show.overview ? '<p class="vrf-show-overview">' + esc(show.overview) + '</p>' : '') +
+                    '<div class="vrf-actions">' +
+                        '<button class="vrf-btn" type="button" data-vjr-open-show="' + show.id +
+                            '">View show →</button>' +
+                    '</div>' +
+                '</div>' +
+            '</div>';
+
+        var sections = (show.seasons || []).map(function (s) {
+            var eps = (s.episodes || []).filter(function (e) {
+                return missing[s.season_number + ':' + e.episode_number];
+            });
+            if (!eps.length) return '';
+            var sPoster = (s.has_poster && s.id != null)
+                ? '<img class="vrf-season-poster" src="/api/video/poster/season/' + s.id +
+                  '" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
+                : '<div class="vrf-season-poster vrf-poster--empty">' +
+                    (s.season_number === 0 ? '⭐' : 'S' + s.season_number) + '</div>';
+            var rows = eps.map(function (e) {
+                var code = 'S' + String(s.season_number).padStart(2, '0') +
+                    'E' + String(e.episode_number).padStart(2, '0');
+                var still = e.has_still && e.id != null
+                    ? '<img class="vrf-ep-still" src="/api/video/poster/episode/' + e.id +
+                      '?w=500" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
+                    : '<div class="vrf-ep-still vrf-poster--empty">▷</div>';
+                return '<div class="vrf-ep">' + still +
+                    '<div class="vrf-ep-body">' +
+                        '<div class="vrf-ep-head"><span class="vrf-ep-code">' + esc(code) + '</span>' +
+                            '<span class="vrf-ep-title">' + esc(e.title || 'Episode ' + e.episode_number) + '</span>' +
+                            (e.owned ? '<span class="vrf-chip vrf-chip--got">✓ got it since</span>' : '') +
+                            '<span class="vrf-ep-date">' + esc(e.air_date || '') + '</span></div>' +
+                        (e.overview ? '<p class="vrf-ep-overview">' + esc(e.overview) + '</p>' : '') +
+                    '</div>' +
+                '</div>';
+            }).join('');
+            return '<div class="vrf-season">' +
+                '<div class="vrf-season-head">' + sPoster +
+                    '<span class="vrf-season-name">' + esc(s.title) + '</span>' +
+                    '<span class="vrf-season-count">' + eps.length + ' missing of ' +
+                        (s.episode_total || eps.length) + '</span>' +
+                '</div>' +
+                '<div class="vrf-eps">' + rows + '</div>' +
+            '</div>';
+        }).join('');
+
+        return head + (sections ||
+            '<p class="repair-finding-hint">These episodes are no longer in the library listing — re-run the job to refresh this finding.</p>') +
+            '<p class="repair-finding-hint">Approving sends every listed episode to the wishlist — the auto-downloader takes it from there.</p>';
     }
 
     function renderPagination(total, currentPage) {
@@ -526,14 +644,18 @@
             if (jobCard) {
                 var jobId = jobCard.getAttribute('data-job-id');
                 if (e.target.closest('[data-vjr-run]')) {
+                    // Optimistic swap ▶ → ⏹; the progress socket confirms within a second.
+                    var rb = e.target.closest('[data-vjr-run]');
+                    rb.outerHTML = '<button class="repair-stop-btn" type="button" data-vjr-stop title="Stop this run">&#9209;</button>';
                     jsend(API + '/jobs/' + jobId + '/run').then(function (res) {
-                        toast(res.ok ? 'Job started' : 'Could not start job', res.ok ? 'success' : 'error');
-                        setTimeout(loadJobs, 400);
+                        if (!res.ok) { toast('Could not start job', 'error'); loadJobs(); }
                     });
                     return;
                 }
                 if (e.target.closest('[data-vjr-stop]')) {
-                    jsend(API + '/jobs/' + jobId + '/stop').then(function () { setTimeout(loadJobs, 400); });
+                    var sb = e.target.closest('[data-vjr-stop]');
+                    sb.disabled = true;
+                    jsend(API + '/jobs/' + jobId + '/stop').then(function () { setTimeout(loadJobs, 600); });
                     return;
                 }
                 if (e.target.closest('[data-vjr-settings]')) {
@@ -578,6 +700,15 @@
                     });
                     return;
                 }
+                var openShow = e.target.closest('[data-vjr-open-show]');
+                if (openShow) {
+                    document.dispatchEvent(new CustomEvent('soulsync:video-open-detail', {
+                        detail: { kind: 'show',
+                                  id: parseInt(openShow.getAttribute('data-vjr-open-show'), 10),
+                                  source: 'library' },
+                    }));
+                    return;
+                }
                 // Expand: the ▼ button OR anywhere on the main row (music behavior),
                 // except the checkbox / action zones.
                 if (e.target.closest('[data-vjr-expand]') ||
@@ -587,6 +718,7 @@
                     if (det) {
                         var open = det.classList.toggle('open');
                         if (btn) btn.classList.toggle('open', open);
+                        if (open) buildRichDetail(fid);
                     }
                     return;
                 }
