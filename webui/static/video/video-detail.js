@@ -1113,18 +1113,19 @@
         if (ep.dislike_count) { meta.push('👎 ' + (yc0 ? yc0.compactCount(ep.dislike_count) : ep.dislike_count)); }
         if (ep.air_date) meta.push(fmtDate(ep.air_date));
         var wished = !!ep.wished;
-        // Downloaded videos wear the SAME owned treatment as TV episodes
-        // (green badge via .vd-ep--owned) — parity, not a bespoke marker.
-        return '<div class="vd-ep vd-ep--yt' + (ep.owned ? ' vd-ep--owned vd-ep--got' : '') +
+        // Downloaded videos wear the SAME owned treatment as TV episodes:
+        // the .vd-ep--owned state, and the badge REPLACES the action button —
+        // an owned row offers no re-download affordance (TV parity).
+        return '<div class="vd-ep vd-ep--yt' + (ep.owned ? ' vd-ep--owned' : '') +
             '" data-vd-ep-key="' + key + '" data-vd-yt-vid="' + esc(ep.youtube_id) + '">' +
             '<div class="vd-ep-thumb vd-ep-thumb--play" data-vd-yt-play="' + esc(ep.youtube_id) + '" title="Play video">' +
             still + '<span class="vd-ep-thumb-ic">▶</span>' + dur + '</div>' +
             '<div class="vd-ep-info"><div class="vd-ep-top"><span class="vd-ep-title">' +
             esc(ep.title || 'Untitled') + '</span>' +
-            (ep.owned ? '<div class="vd-ep-badge">Downloaded</div>' : '') +
             (meta.length ? '<span class="vd-ep-rt">' + esc(meta.join(' · ')) + '</span>' : '') + '</div>' +
             (ep.overview ? '<p class="vd-ep-desc">' + esc(ep.overview) + '</p>' : '') + '</div>' +
-            ytWishBtn(ep.youtube_id, wished, false) +
+            (ep.owned ? '<div class="vd-ep-badge">Downloaded</div>'
+                      : ytWishBtn(ep.youtube_id, wished, false)) +
             '<span class="vd-ep-chev" aria-hidden="true">⌄</span></div>' +
             '<div class="vd-ep-extra" data-vd-ep-panel="' + key + '" hidden></div>';
     }
@@ -2006,7 +2007,8 @@
             '<div class="vd-yt-plvid-thumb" data-vd-yt-play="' + esc(v.youtube_id) + '" title="Play video">' +
                 thumb + '<span class="vd-yt-plvid-play">▶</span></div>' +
             '<div class="vd-yt-plvid-title" title="' + esc(v.title) + '">' + esc(v.title || 'Untitled') + '</div>' +
-            ytWishBtn(v.youtube_id, v.wished, true) + '</div>';
+            (v.downloaded ? '<div class="vd-ep-badge">Downloaded</div>'
+                          : ytWishBtn(v.youtube_id, v.wished, true)) + '</div>';
     }
     function toggleYtPlaylist(el) {
         var pid = el.getAttribute('data-vd-yt-pl-toggle');
