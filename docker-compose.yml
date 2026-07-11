@@ -48,6 +48,9 @@ services:
       - ./YouTube:/media/youtube
       # Use named volume for database persistence (separate from host database)
       # NOTE: Changed from /app/database to /app/data to avoid overwriting Python package
+      # Holds BOTH databases (music_library.db + video_library.db) plus the video
+      # poster-asset store — watchlists/collections/overlays/issues/download-ledger
+      # all persist here across container upgrades.
       - soulsync_database:/app/data
       # IMPORTANT: Mount host paths that your input/output folders live on.
       # Replace these examples with your actual paths:
