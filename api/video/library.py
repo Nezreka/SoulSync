@@ -35,6 +35,7 @@ def register_routes(bp):
                 letter=request.args.get("letter") or None,
                 sort=request.args.get("sort", "title"),
                 status=request.args.get("status", "all"),
+                genre=request.args.get("genre") or None,
                 page=request.args.get("page", 1),
                 limit=request.args.get("limit", 75),
                 server_source=resolve_video_server(),
@@ -42,3 +43,16 @@ def register_routes(bp):
         except Exception:
             logger.exception("Failed to query video library")
             return jsonify({"error": "Failed to load video library"}), 500
+
+    @bp.route("/library/genres", methods=["GET"])
+    def video_library_genres():
+        """Genre names in use for the given kind — the library filter dropdown.
+        Read-only and ungated (unlike the collections field-suggestions endpoint)."""
+        from . import get_video_db
+        from core.video.sources import resolve_video_server
+        try:
+            return jsonify({"genres": get_video_db().library_genres(
+                request.args.get("kind", "movies"), server_source=resolve_video_server())})
+        except Exception:
+            logger.exception("Failed to list library genres")
+            return jsonify({"genres": []})

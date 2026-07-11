@@ -14,7 +14,7 @@
     var LETTERS = 'abcdefghijklmnopqrstuvwxyz'.split('');
 
     var state = { tab: 'movies', search: '', letter: 'all', sort: 'title',
-                  status: 'all', page: 1, limit: 75, loaded: false,
+                  status: 'all', genre: '', page: 1, limit: 75, loaded: false,
                   // Bulk select mode: id→true map (persists across pages), the
                   // open action popover, and the running-job poll timer.
                   selecting: false, selected: {}, bulkPop: null, bulkTimer: null };
@@ -111,10 +111,29 @@
             if (rl) badge = '<div class="video-card-badge">' + rl + '</div>';
         }
 
+        // Stat line: year · ★ rating · owned-state (+ watched tick). Parts are
+        // individually escaped because the rating/watched bits carry markup.
         var meta = [];
-        if (it.year) meta.push(String(it.year));
-        if (kind === 'movie') meta.push(it.has_file ? 'Owned' : 'Wanted');
-        else meta.push((it.owned_count || 0) + '/' + (it.episode_count || 0) + ' eps');
+        if (it.year) meta.push(esc(String(it.year)));
+        if (it.rating) meta.push('<span class="vlib-rate">★ ' + (Math.round(it.rating * 10) / 10) + '</span>');
+        if (kind === 'movie') {
+            meta.push(it.has_file ? 'Owned' : 'Wanted');
+            if (it.play_count) meta.push('<span class="vlib-watched" title="Watched on your server">✓</span>');
+        } else {
+            meta.push((it.owned_count || 0) + '/' + (it.episode_count || 0) + ' eps');
+            var chip = showStatusChip(it.status);
+            if (chip) meta.push(chip);
+        }
+
+        // Shows: a slim owned-episodes progress line under the stats — collection
+        // completeness at a glance without opening the show.
+        var extra = '';
+        if (kind === 'show' && it.episode_count) {
+            var pctv = Math.max(0, Math.min(100, Math.round(100 * (it.owned_count || 0) / it.episode_count)));
+            extra = '<div class="vlib-prog" title="' + (it.owned_count || 0) + ' of ' + it.episode_count +
+                ' episodes owned"><div class="vlib-prog-fill' + (pctv >= 100 ? ' vlib-prog-fill--full' : '') +
+                '" style="width:' + pctv + '%"></div></div>';
+        }
 
         // A REAL link (like the music artist cards) so reload / new-tab / Back all
         // work; the click handler intercepts plain left-clicks into SPA nav.
@@ -124,7 +143,23 @@
             '<div class="library-artist-info">' +
             '<h3 class="library-artist-name" title="' + esc(it.title) + '">' + esc(it.title) + '</h3>' +
             '<div class="library-artist-stats"><span class="library-artist-stat">' +
-            esc(meta.join(' · ')) + '</span></div></div></a>';
+            meta.join(' · ') + '</span></div>' + extra + '</div></a>';
+    }
+
+    // Show lifecycle chip: the server/TMDB status strings collapse to three states.
+    function showStatusChip(status) {
+        var st = String(status || '').toLowerCase();
+        if (!st) return '';
+        if (st.indexOf('continu') > -1 || st.indexOf('return') > -1 || st.indexOf('air') > -1) {
+            return '<span class="vlib-chip vlib-chip--airing">Airing</span>';
+        }
+        if (st.indexOf('end') > -1 || st.indexOf('cancel') > -1) {
+            return '<span class="vlib-chip vlib-chip--ended">Ended</span>';
+        }
+        if (st.indexOf('upcoming') > -1 || st.indexOf('production') > -1 || st.indexOf('planned') > -1) {
+            return '<span class="vlib-chip vlib-chip--upcoming">Upcoming</span>';
+        }
+        return '';
     }
 
     function showLoading(on) {
@@ -164,7 +199,12 @@
         if (!p) { box.classList.add('hidden'); return; }
         if (prev) prev.disabled = !p.has_prev;
         if (next) next.disabled = !p.has_next;
-        if (info) info.textContent = 'Page ' + p.page + ' of ' + p.total_pages;
+        if (info) {
+            var from = (p.page - 1) * state.limit + 1;
+            var to = Math.min(p.page * state.limit, p.total_count);
+            info.textContent = 'Page ' + p.page + ' of ' + p.total_pages +
+                '  ·  ' + from + '–' + to + ' of ' + p.total_count;
+        }
         box.classList.toggle('hidden', p.total_pages <= 1);
     }
 
@@ -185,7 +225,7 @@
         var cardKind = apiKind === 'movies' ? 'movie' : apiKind === 'shows' ? 'show' : 'channel';
         var params = new URLSearchParams({
             kind: apiKind, search: state.search, letter: state.letter, sort: state.sort,
-            status: state.status, page: state.page, limit: state.limit });
+            status: state.status, genre: state.genre, page: state.page, limit: state.limit });
         fetch(LIBRARY_URL + '?' + params.toString(), { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
@@ -199,6 +239,26 @@
     }
 
     function reload() { state.page = 1; load(); }
+
+    // Fill the genre dropdown with the genres actually in use for the current
+    // kind (movies/shows differ). Cached per tab; channels have no genres.
+    function loadGenres() {
+        var sel = $('[data-video-lib-genre]');
+        if (!sel || state.tab === 'channels' || sel._for === state.tab) return;
+        var tab = state.tab;
+        fetch('/api/video/library/genres?kind=' + tab, { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d || state.tab !== tab) return;
+                sel._for = tab;
+                sel.innerHTML = '<option value="">All Genres</option>' +
+                    (d.genres || []).map(function (g) {
+                        return '<option value="' + esc(g) + '"' +
+                            (g === state.genre ? ' selected' : '') + '>' + esc(g) + '</option>';
+                    }).join('');
+            })
+            .catch(function () { /* the dropdown just stays on All Genres */ });
+    }
 
     // ── Bulk select mode + action bar ────────────────────────────────────────
     // Select N cards → a floating bar of bulk actions. Every action runs through
@@ -481,12 +541,19 @@
                     for (var j = 0; j < all.length; j++) all[j].classList.toggle('active', all[j] === tab);
                     var s = $('[data-video-lib-search]');
                     if (s) s.placeholder = 'Search ' + state.tab + '...';
-                    // Channels have no bulk metadata ops or owned/wanted filter.
+                    // Channels have no bulk metadata ops, owned/wanted filter or genres.
                     var isCh = state.tab === 'channels';
                     var selBtn = $('[data-video-lib-select]');
                     if (selBtn) selBtn.style.display = isCh ? 'none' : '';
                     var status = $('[data-video-lib-status]');
                     if (status) status.style.display = isCh ? 'none' : '';
+                    var genreSel = $('[data-video-lib-genre]');
+                    if (genreSel) {
+                        genreSel.style.display = isCh ? 'none' : '';
+                        // movie/show genre sets differ — reset the pick on a tab switch
+                        state.genre = ''; genreSel.value = '';
+                    }
+                    loadGenres();
                     reload();
                 });
             })(tabs[i]);
@@ -503,6 +570,8 @@
         if (sort) sort.addEventListener('change', function () { state.sort = sort.value; reload(); });
         var status = $('[data-video-lib-status]');
         if (status) status.addEventListener('change', function () { state.status = status.value; reload(); });
+        var genreSel = $('[data-video-lib-genre]');
+        if (genreSel) genreSel.addEventListener('change', function () { state.genre = genreSel.value; reload(); });
         var prev = $('[data-video-lib-prev]');
         if (prev) prev.addEventListener('click', function () {
             if (state.page > 1) { state.page--; load(); }
@@ -556,6 +625,7 @@
     function onPageShown(e) {
         if (!e || e.detail !== PAGE_ID) return;
         checkServer();
+        loadGenres();
         if (!state.loaded) load();
     }
 

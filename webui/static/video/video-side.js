@@ -220,12 +220,27 @@
         slot.appendChild(note);
     }
 
+    // Per-page scroll memory: leaving a page remembers where you were, coming
+    // back restores it (browse deep into the library grid → open a movie → Back
+    // lands on the same row). Detail pages always REopen at the top — the same
+    // subpage element is reused for every title, so a remembered offset would
+    // open the NEXT movie mid-scroll. .main-content is the app's one scroller.
+    var _scrollMemo = {};
+
     // Show one video page: reveal its built .video-subpage if one exists, else
     // fall back to the placeholder slot. Then announce it so per-page data
     // modules (e.g. video-dashboard.js) can populate themselves — they listen
     // for this event instead of being called directly, keeping each isolated.
     function showPage(pageId) {
         var meta = pageMeta(pageId);
+        var scroller = document.querySelector('.main-content');
+        var prevPage = document.body.getAttribute('data-video-page');
+        // (only while ON the video side — after a music detour the scroller holds
+        // the music page's offset, which must not overwrite the video memo)
+        if (scroller && prevPage && prevPage !== meta.id &&
+                document.body.getAttribute('data-side') === 'video') {
+            _scrollMemo[prevPage] = scroller.scrollTop;
+        }
         // Drives the CSS that reveals shared music pages (e.g. Settings) and
         // hides the video host for them.
         document.body.setAttribute('data-video-page', meta.id);
@@ -252,6 +267,9 @@
         if (slot) {
             slot.hidden = !!matched;
             if (!matched) renderPlaceholder(slot, meta);
+        }
+        if (scroller && prevPage !== meta.id) {
+            scroller.scrollTop = DETAIL_PAGES[meta.id] ? 0 : (_scrollMemo[meta.id] || 0);
         }
         document.dispatchEvent(new CustomEvent('soulsync:video-page-shown', { detail: meta.id }));
     }

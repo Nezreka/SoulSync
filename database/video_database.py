@@ -5582,11 +5582,12 @@ class VideoDatabase:
 
     # ── paged/filtered/sorted library query (server-side, like music) ─────────
     def query_library(self, kind: str, *, search=None, letter=None, sort="title",
-                      status="all", page=1, limit=75, server_source=None) -> dict:
-        """One page of movies/shows with search + A–Z + sort + owned/wanted
-        filtering done in SQL. Scoped to ``server_source`` (the active video
-        server) so Plex and Jellyfin libraries never commingle — mirrors how the
-        music side keeps servers separate. Returns {items, pagination:{...}}."""
+                      status="all", genre=None, page=1, limit=75, server_source=None) -> dict:
+        """One page of movies/shows with search + A–Z + sort + owned/wanted/
+        watched + genre filtering done in SQL. Scoped to ``server_source`` (the
+        active video server) so Plex and Jellyfin libraries never commingle —
+        mirrors how the music side keeps servers separate.
+        Returns {items, pagination:{...}}."""
         try:
             page = max(1, int(page or 1))
             limit = max(1, min(500, int(limit or 75)))
@@ -5610,33 +5611,53 @@ class VideoDatabase:
             else:
                 where.append(f"{col} LIKE ? COLLATE NOCASE")
                 params.append(letter + "%")
+        if genre:
+            jt, fk = ("show_genres", "show_id") if is_shows else ("movie_genres", "movie_id")
+            where.append(f"EXISTS (SELECT 1 FROM {jt} xg JOIN genres g ON g.id=xg.genre_id "
+                         f"WHERE xg.{fk}={alias}.id AND g.name = ? COLLATE NOCASE)")
+            params.append(genre)
         if not is_shows:
             if status == "owned":
                 where.append("m.has_file = 1")
             elif status == "wanted":
                 where.append("m.has_file = 0")
+            elif status == "watched":
+                where.append("COALESCE(m.play_count, 0) > 0")
+            elif status == "unwatched":
+                # owned-but-untouched — the "what should I put on tonight" filter
+                where.append("m.has_file = 1 AND COALESCE(m.play_count, 0) = 0")
         else:
             if status == "owned":
                 where.append("EXISTS (SELECT 1 FROM episodes e WHERE e.show_id=s.id AND e.has_file=1)")
             elif status == "wanted":
                 where.append("NOT EXISTS (SELECT 1 FROM episodes e WHERE e.show_id=s.id AND e.has_file=1)")
+            elif status == "watched":
+                where.append("COALESCE(s.watched_episodes, 0) > 0")
+            elif status == "unwatched":
+                where.append("COALESCE(s.watched_episodes, 0) = 0 AND "
+                             "EXISTS (SELECT 1 FROM episodes e WHERE e.show_id=s.id AND e.has_file=1)")
         where_sql = (" WHERE " + " AND ".join(where)) if where else ""
 
         title_key = f"COALESCE({alias}.sort_title, {alias}.title) COLLATE NOCASE ASC"
+        # display rating: IMDb once OMDb has synced it, TMDB audience score before (both 0-10)
+        rating_key = f"COALESCE({alias}.imdb_rating, {alias}.rating)"
         order_sql = {
             "title": title_key,
             "year": f"{alias}.year DESC, " + title_key,
             "added": f"{alias}.added_at DESC",
+            "rating": f"{rating_key} IS NULL, {rating_key} DESC, " + title_key,
         }.get(sort, title_key)
 
         if is_shows:
             select = ("SELECT s.id, s.title, s.year, s.tmdb_id, s.status, "
+                      f"{rating_key} AS rating, s.watched_episodes, "
                       "(s.poster_url IS NOT NULL AND s.poster_url <> '') AS has_poster, "
                       "(SELECT COUNT(*) FROM episodes e WHERE e.show_id=s.id) AS episode_count, "
                       "(SELECT COUNT(*) FROM episodes e WHERE e.show_id=s.id AND e.has_file=1) AS owned_count "
                       "FROM shows s")
         else:
             select = ("SELECT m.id, m.title, m.year, m.has_file, m.tmdb_id, "
+                      f"{rating_key} AS rating, m.play_count, "
                       "(m.poster_url IS NOT NULL AND m.poster_url <> '') AS has_poster, "
                       "(SELECT mf.resolution FROM media_files mf WHERE mf.movie_id=m.id LIMIT 1) AS resolution "
                       "FROM movies m")
@@ -5658,6 +5679,26 @@ class VideoDatabase:
             return {"items": items, "pagination": {
                 "page": page, "total_pages": total_pages, "total_count": total,
                 "has_prev": page > 1, "has_next": page < total_pages}}
+        finally:
+            conn.close()
+
+    def library_genres(self, kind: str, server_source=None) -> list:
+        """Distinct genre names in use for movies/shows — feeds the library page's
+        genre filter dropdown (only genres that would actually match something)."""
+        is_shows = kind == "shows"
+        jt, fk = ("show_genres", "show_id") if is_shows else ("movie_genres", "movie_id")
+        tbl, alias = ("shows", "s") if is_shows else ("movies", "m")
+        sql = (f"SELECT DISTINCT g.name FROM genres g "
+               f"JOIN {jt} xg ON xg.genre_id=g.id "
+               f"JOIN {tbl} {alias} ON {alias}.id=xg.{fk}")
+        params = []
+        if server_source:
+            sql += f" WHERE {alias}.server_source = ?"
+            params.append(server_source)
+        sql += " ORDER BY g.name COLLATE NOCASE"
+        conn = self._get_connection()
+        try:
+            return [r[0] for r in conn.execute(sql, params)]
         finally:
             conn.close()
 

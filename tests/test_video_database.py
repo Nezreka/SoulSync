@@ -446,6 +446,50 @@ def test_query_library_shows_status_and_counts(db):
     assert (owned["episode_count"], owned["owned_count"]) == (1, 1)
 
 
+def test_query_library_rating_watched_and_genre(db):
+    db.upsert_movie("plex", {"server_id": "1", "title": "The Matrix", "rating": 8.7,
+                             "genres": ["Sci-Fi", "Action"], "play_count": 3,
+                             "file": {"relative_path": "x.mkv"}})
+    db.upsert_movie("plex", {"server_id": "2", "title": "Akira", "rating": 7.7,
+                             "genres": ["Sci-Fi", "Animation"],
+                             "file": {"relative_path": "a.mkv"}})
+    db.upsert_movie("plex", {"server_id": "3", "title": "Unrated", "genres": ["Drama"]})
+    # imdb_rating comes from the OMDb ratings worker, not the scan upsert
+    with db.connect() as c:
+        c.execute("UPDATE movies SET imdb_rating=8.0 WHERE title='Akira'")
+
+    # rating sort: highest first, IMDb preferred over TMDB, unrated last
+    got = [i["title"] for i in db.query_library("movies", sort="rating")["items"]]
+    assert got == ["The Matrix", "Akira", "Unrated"]
+    assert db.query_library("movies", search="akira")["items"][0]["rating"] == 8.0
+
+    # watched = played on the server; unwatched = owned but untouched
+    assert [i["title"] for i in db.query_library("movies", status="watched")["items"]] == ["The Matrix"]
+    assert [i["title"] for i in db.query_library("movies", status="unwatched")["items"]] == ["Akira"]
+
+    # genre filter (case-insensitive) + the dropdown's in-use genre list
+    assert {i["title"] for i in db.query_library("movies", genre="sci-fi")["items"]} == {"The Matrix", "Akira"}
+    assert [i["title"] for i in db.query_library("movies", genre="Drama")["items"]] == ["Unrated"]
+    assert db.library_genres("movies") == ["Action", "Animation", "Drama", "Sci-Fi"]
+    assert db.library_genres("movies", server_source="jellyfin") == []
+
+
+def test_query_library_shows_watched_and_status_chip_fields(db):
+    db.upsert_show_tree("plex", {"server_id": "s1", "title": "Watched Show",
+                                 "status": "continuing", "watched_episodes": 2,
+                                 "rating": 8.2, "genres": ["Drama"], "seasons": [
+        {"season_number": 1, "episodes": [{"episode_number": 1, "file": {"relative_path": "e.mkv"}}]}]})
+    db.upsert_show_tree("plex", {"server_id": "s2", "title": "Fresh Show", "status": "ended", "seasons": [
+        {"season_number": 1, "episodes": [{"episode_number": 1, "file": {"relative_path": "f.mkv"}}]}]})
+    assert [i["title"] for i in db.query_library("shows", status="watched")["items"]] == ["Watched Show"]
+    assert [i["title"] for i in db.query_library("shows", status="unwatched")["items"]] == ["Fresh Show"]
+    got = db.query_library("shows", search="Watched")["items"][0]
+    # the card needs status (Airing/Ended chip), rating and watched_episodes
+    assert got["status"] == "continuing" and got["rating"] == 8.2 and got["watched_episodes"] == 2
+    assert [i["title"] for i in db.query_library("shows", genre="drama")["items"]] == ["Watched Show"]
+    assert db.library_genres("shows") == ["Drama"]
+
+
 # ── enrichment plumbing ───────────────────────────────────────────────────────
 
 def test_enrichment_columns_present(db):
