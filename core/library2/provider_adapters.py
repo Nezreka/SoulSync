@@ -10,8 +10,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Mapping, Optional, Tuple
 
+from utils.logging_config import get_logger
+
 
 DISCOGRAPHY_PARSER_VERSION = "library2-discography/1"
+TRACKLIST_PARSER_VERSION = "library2-tracklist/1"
+logger = get_logger("library2.provider_adapters")
 
 
 def _optional_text(value: Any) -> Optional[str]:
@@ -105,6 +109,134 @@ class DiscographyProviderResult:
         return {"releases": [release.to_payload() for release in self.releases]}
 
 
+@dataclass(frozen=True)
+class TracklistTrack:
+    title: str
+    track_number: Optional[int]
+    disc_number: int
+    duration_ms: Optional[int]
+    spotify_id: Optional[str]
+
+    @classmethod
+    def from_item(cls, item: Mapping[str, Any], *, provider: str) -> Optional["TracklistTrack"]:
+        title = str(item.get("name") or item.get("title") or "").strip()
+        if not title:
+            return None
+        number = _optional_nonnegative_int(
+            item.get("track_number") or item.get("track_position") or item.get("position"))
+        disc = _optional_nonnegative_int(item.get("disc_number")) or 1
+        duration = _optional_nonnegative_int(item.get("duration_ms"))
+        if duration is None and provider == "deezer":
+            seconds = _optional_nonnegative_int(item.get("duration"))
+            duration = seconds * 1000 if seconds is not None else None
+        return cls(
+            title=title,
+            track_number=number,
+            disc_number=disc,
+            duration_ms=duration,
+            spotify_id=(str(item.get("id"))
+                        if provider == "spotify" and item.get("id") else None),
+        )
+
+    def to_payload(self) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "track_number": self.track_number,
+            "disc_number": self.disc_number,
+            "title": self.title,
+        }
+        if self.duration_ms is not None:
+            payload["duration_ms"] = self.duration_ms
+        if self.spotify_id:
+            payload["spotify_id"] = self.spotify_id
+        return payload
+
+
+@dataclass(frozen=True)
+class TracklistProviderResult:
+    provider: str
+    provider_entity_id: str
+    tracks: Tuple[TracklistTrack, ...]
+    is_complete: bool = True
+    parser_version: str = TRACKLIST_PARSER_VERSION
+
+    def track_payloads(self) -> list[Dict[str, Any]]:
+        return [track.to_payload() for track in self.tracks]
+
+    def snapshot_payload(self, reference: Mapping[str, Any]) -> Dict[str, Any]:
+        return {
+            "reference": dict(reference),
+            "tracks": self.track_payloads(),
+        }
+
+
+def _track_items(payload: Any) -> list[Mapping[str, Any]]:
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, Mapping)]
+    if not isinstance(payload, Mapping):
+        return []
+    for key in ("items", "tracks", "data"):
+        value = payload.get(key)
+        if isinstance(value, Mapping):
+            value = value.get("items") or value.get("data")
+        if isinstance(value, list):
+            return [item for item in value if isinstance(item, Mapping)]
+    return []
+
+
+def _normalize_tracklist(payload: Any, provider: str) -> Tuple[TracklistTrack, ...]:
+    tracks = []
+    for item in _track_items(payload):
+        track = TracklistTrack.from_item(item, provider=provider)
+        if track is not None:
+            tracks.append(track)
+    return tuple(tracks)
+
+
+def fetch_album_tracklist(
+    album_title: str,
+    artist_name: str,
+    *,
+    source_album_ids: Optional[Mapping[str, str]] = None,
+) -> Optional[TracklistProviderResult]:
+    """Resolve a canonical tracklist through typed Spotify/Deezer adapters."""
+    from core.metadata.registry import get_deezer_client, get_spotify_client
+
+    source_ids = {
+        str(source).strip().lower(): str(value).strip()
+        for source, value in (source_album_ids or {}).items()
+        if str(source).strip() and str(value).strip()
+    }
+    spotify_id = source_ids.get("spotify")
+    if spotify_id:
+        try:
+            client = get_spotify_client()
+            if client:
+                tracks = _normalize_tracklist(
+                    client.get_album_tracks(spotify_id), "spotify")
+                if tracks:
+                    return TracklistProviderResult("spotify", spotify_id, tracks)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("spotify tracklist lookup failed (%s): %s", spotify_id, exc)
+
+    if artist_name and album_title:
+        try:
+            client = get_deezer_client()
+            if client:
+                deezer_id = source_ids.get("deezer")
+                if not deezer_id:
+                    album = client.search_album(artist_name, album_title)
+                    if isinstance(album, Mapping) and album.get("id"):
+                        deezer_id = str(album["id"])
+                if deezer_id:
+                    tracks = _normalize_tracklist(
+                        client.get_album_tracks(deezer_id), "deezer")
+                    if tracks:
+                        return TracklistProviderResult("deezer", deezer_id, tracks)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("deezer tracklist lookup failed (%s): %s", album_title, exc)
+    return None
+
+
 def fetch_artist_discography(
     artist_name: str,
     *,
@@ -164,7 +296,11 @@ def fetch_artist_discography(
 
 __all__ = [
     "DISCOGRAPHY_PARSER_VERSION",
+    "TRACKLIST_PARSER_VERSION",
     "DiscographyProviderResult",
     "DiscographyRelease",
+    "TracklistProviderResult",
+    "TracklistTrack",
+    "fetch_album_tracklist",
     "fetch_artist_discography",
 ]

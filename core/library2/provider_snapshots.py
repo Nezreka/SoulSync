@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 
@@ -112,7 +113,10 @@ def canonical_payload(payload: Any) -> tuple[str, str]:
 def _row_dict(cursor: Any, row: Any) -> Dict[str, Any]:
     if hasattr(row, "keys"):
         return dict(row)
-    return {column[0]: value for column, value in zip(cursor.description, row)}
+    return {
+        column[0]: value
+        for column, value in zip(cursor.description, row, strict=True)
+    }
 
 
 def _snapshot_from_row(cursor: Any, row: Any) -> ProviderSnapshot:
@@ -148,6 +152,22 @@ def get_provider_snapshot(conn: Any, *, provider: str, entity_type: str,
         """SELECT * FROM library_provider_snapshots
             WHERE provider=? AND entity_type=? AND entity_id=? AND scope=?""",
         (provider, entity_type, entity_id, scope),
+    )
+    row = cursor.fetchone()
+    return _snapshot_from_row(cursor, row) if row is not None else None
+
+
+def get_latest_provider_snapshot(
+    conn: Any, *, entity_type: str, entity_id: int, scope: str,
+) -> Optional[ProviderSnapshot]:
+    """Read the most recently fetched snapshot across all providers."""
+    entity_type = _required_text(entity_type, "entity_type", lowercase=True)
+    scope = _required_text(scope, "scope", lowercase=True)
+    cursor = conn.execute(
+        """SELECT * FROM library_provider_snapshots
+            WHERE entity_type=? AND entity_id=? AND scope=?
+            ORDER BY fetched_at DESC, id DESC LIMIT 1""",
+        (entity_type, int(entity_id), scope),
     )
     row = cursor.fetchone()
     return _snapshot_from_row(cursor, row) if row is not None else None
@@ -192,17 +212,18 @@ def record_provider_snapshot(
         scope=scope,
     )
     previous_hash = existing.payload_hash if existing else None
+    fetched_at = datetime.now(timezone.utc).isoformat(timespec="microseconds")
     conn.execute(
         """INSERT INTO library_provider_snapshots(
                provider, entity_type, entity_id, scope, provider_entity_id,
-               etag, provider_version, is_complete, cursor, page_count,
+               etag, provider_version, fetched_at, is_complete, cursor, page_count,
                parser_version, payload_hash, payload_json)
-           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
            ON CONFLICT(provider, entity_type, entity_id, scope) DO UPDATE SET
                provider_entity_id=excluded.provider_entity_id,
                etag=excluded.etag,
                provider_version=excluded.provider_version,
-               fetched_at=CURRENT_TIMESTAMP,
+               fetched_at=excluded.fetched_at,
                is_complete=excluded.is_complete,
                cursor=excluded.cursor,
                page_count=excluded.page_count,
@@ -213,7 +234,8 @@ def record_provider_snapshot(
         (
             provider, entity_type, entity_id, scope,
             str(provider_entity_id) if provider_entity_id is not None else None,
-            etag, provider_version, 1 if is_complete else 0, cursor, page_count,
+            etag, provider_version, fetched_at, 1 if is_complete else 0,
+            cursor, page_count,
             parser_version, payload_hash, payload_json,
         ),
     )
@@ -250,6 +272,7 @@ __all__ = [
     "canonical_payload",
     "delete_entity_snapshots",
     "ensure_provider_snapshot_schema",
+    "get_latest_provider_snapshot",
     "get_provider_snapshot",
     "record_provider_snapshot",
 ]

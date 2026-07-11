@@ -13,54 +13,80 @@ the UI falls back to numbered missing slots.
 from __future__ import annotations
 
 import json
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from utils.logging_config import get_logger
 
 logger = get_logger("library2.completeness")
 
 
-def _extract_tracks(payload: Any, *, source: str = "") -> List[dict]:
-    """Pull ``[{track_number, title}]`` out of a provider get_album_tracks payload,
-    tolerant of the various container shapes (items / tracks / data)."""
-    if not payload:
-        return []
-    items: Optional[list] = None
-    if isinstance(payload, list):
-        items = payload
-    elif isinstance(payload, dict):
-        for key in ("items", "tracks", "data"):
-            v = payload.get(key)
-            if isinstance(v, dict):
-                v = v.get("items") or v.get("data")
-            if isinstance(v, list):
-                items = v
-                break
-    out: List[dict] = []
-    for it in items or []:
-        if not isinstance(it, dict):
-            continue
-        title = it.get("name") or it.get("title")
-        num = it.get("track_number") or it.get("track_position") or it.get("position")
-        disc = it.get("disc_number") or 1
-        duration = it.get("duration_ms")
-        if duration is None and source == "deezer" and it.get("duration"):
-            try:
-                duration = int(it.get("duration")) * 1000
-            except (TypeError, ValueError):
-                duration = None
-        if title:
-            entry = {
-                "track_number": int(num) if num else None,
-                "disc_number": int(disc) if disc else 1,
-                "title": str(title),
-            }
-            if duration:
-                entry["duration_ms"] = duration
-            if source == "spotify" and it.get("id"):
-                entry["spotify_id"] = str(it.get("id"))
-            out.append(entry)
-    return out
+def _json_object(raw: Any) -> Dict[str, str]:
+    try:
+        value = json.loads(raw or "{}")
+    except (TypeError, ValueError):
+        return {}
+    if not isinstance(value, dict):
+        return {}
+    return {
+        str(key).strip().lower(): str(item).strip()
+        for key, item in value.items()
+        if str(key).strip() and str(item).strip()
+    }
+
+
+def _album_tracklist_context(
+    conn: Any, album_id: int,
+) -> Optional[Tuple[Any, Dict[str, Any], Dict[str, str]]]:
+    """Return album row, edition reference and provider IDs for cache binding."""
+    row = conn.execute(
+        """SELECT al.title, al.primary_artist_id, al.tracklist_json,
+                  al.spotify_id AS album_spotify_id,
+                  al.musicbrainz_id AS album_musicbrainz_id,
+                  al.external_ids AS album_external_ids,
+                  ed.id AS release_edition_id,
+                  ed.spotify_id AS edition_spotify_id,
+                  ed.musicbrainz_id AS edition_musicbrainz_id,
+                  ed.external_ids AS edition_external_ids
+             FROM lib2_albums al
+             LEFT JOIN lib2_release_editions ed
+                    ON ed.release_group_id=al.id AND ed.is_default=1
+            WHERE al.id=?""",
+        (album_id,),
+    ).fetchone()
+    if row is None:
+        return None
+
+    source_ids = _json_object(row["album_external_ids"])
+    source_ids.update(_json_object(row["edition_external_ids"]))
+    spotify_id = row["edition_spotify_id"] or row["album_spotify_id"]
+    musicbrainz_id = row["edition_musicbrainz_id"] or row["album_musicbrainz_id"]
+    if spotify_id:
+        source_ids["spotify"] = str(spotify_id)
+    if musicbrainz_id:
+        source_ids["musicbrainz"] = str(musicbrainz_id)
+    reference = {
+        "release_edition_id": row["release_edition_id"],
+        "spotify_id": source_ids.get("spotify"),
+        "musicbrainz_id": source_ids.get("musicbrainz"),
+        "external_ids": dict(sorted(source_ids.items())),
+    }
+    return row, reference, source_ids
+
+
+def _snapshot_tracks(snapshot: Any, reference: Mapping[str, Any]) -> Optional[List[dict]]:
+    from core.library2.provider_adapters import TRACKLIST_PARSER_VERSION
+
+    if snapshot is None or not snapshot.is_complete:
+        return None
+    if snapshot.parser_version != TRACKLIST_PARSER_VERSION:
+        return None
+    payload = snapshot.payload
+    if not isinstance(payload, dict) or payload.get("reference") != dict(reference):
+        return None
+    tracks = payload.get("tracks")
+    if not isinstance(tracks, list) or not tracks:
+        return None
+    return [track for track in tracks if isinstance(track, dict)] or None
 
 
 def _trim_excess_fileless_tracks(conn, album_id: int, expected: int,
@@ -189,60 +215,89 @@ def _persist_tracklist_tracks(conn, album_id: int, tracks: List[dict]) -> int:
 
 def resolve_tracklist(config_manager, conn, album_id: int) -> Optional[List[dict]]:
     """Return + cache the album's canonical tracklist. None when unavailable."""
-    al = conn.execute(
-        "SELECT title, spotify_id, primary_artist_id, tracklist_json FROM lib2_albums WHERE id=?",
-        (album_id,),
-    ).fetchone()
-    if not al:
+    context = _album_tracklist_context(conn, album_id)
+    if context is None:
         return None
+    al, reference, source_ids = context
+
+    from core.library2.provider_snapshots import (
+        get_latest_provider_snapshot, record_provider_snapshot)
+    snapshot = get_latest_provider_snapshot(
+        conn, entity_type="album", entity_id=album_id, scope="tracklist")
+    durable_tracks = _snapshot_tracks(snapshot, reference)
+    cached: Optional[List[dict]] = None
     if al["tracklist_json"]:
         try:
-            cached = json.loads(al["tracklist_json"])
-            if cached:
-                _persist_tracklist_tracks(conn, album_id, cached)
-                conn.execute(
-                    """UPDATE lib2_albums
-                          SET tracklist_status='ready', tracklist_attempts=0,
-                              tracklist_error=NULL, tracklist_retry_at=NULL
-                        WHERE id=?""",
-                    (album_id,),
-                )
-                conn.commit()
-                return cached
+            parsed = json.loads(al["tracklist_json"])
+            if isinstance(parsed, list) and parsed:
+                cached = [track for track in parsed if isinstance(track, dict)]
         except (ValueError, TypeError):
             pass
+    if cached and snapshot is None:
+        # Upgrade path: preserve an existing cache once, but bind it to the
+        # current edition reference so a later edition switch invalidates it.
+        from core.library2.provider_adapters import TRACKLIST_PARSER_VERSION
+        record_provider_snapshot(
+            conn,
+            provider="legacy-cache",
+            entity_type="album",
+            entity_id=album_id,
+            scope="tracklist",
+            parser_version=TRACKLIST_PARSER_VERSION,
+            payload={"reference": reference, "tracks": cached},
+            is_complete=True,
+        )
+        durable_tracks = cached
+    elif snapshot is not None and durable_tracks is None and cached:
+        logger.info(
+            "Invalidating tracklist cache for album %s after edition/provider change",
+            album_id,
+        )
+        cached = None
+        conn.execute(
+            """UPDATE lib2_albums
+                  SET tracklist_json=NULL, tracklist_status='idle',
+                      tracklist_error=NULL, tracklist_retry_at=NULL
+                WHERE id=?""",
+            (album_id,),
+        )
+        conn.commit()
+
+    reusable = durable_tracks or cached
+    if reusable:
+        _persist_tracklist_tracks(conn, album_id, reusable)
+        conn.execute(
+            """UPDATE lib2_albums
+                  SET tracklist_json=?, tracklist_status='ready',
+                      tracklist_attempts=0, tracklist_error=NULL,
+                      tracklist_retry_at=NULL
+                WHERE id=?""",
+            (json.dumps(reusable), album_id),
+        )
+        conn.commit()
+        return reusable
 
     artist = conn.execute(
         "SELECT name FROM lib2_artists WHERE id=?", (al["primary_artist_id"],)
     ).fetchone()
     artist_name = artist["name"] if artist else ""
-    tracks: List[dict] = []
-
-    # 1) Spotify by stored album id (works when Spotify is authenticated).
-    if al["spotify_id"]:
+    from core.library2.provider_adapters import fetch_album_tracklist
+    provider_result = fetch_album_tracklist(
+        al["title"], artist_name, source_album_ids=source_ids)
+    if provider_result:
+        tracks = provider_result.track_payloads()
         try:
-            from core.metadata.registry import get_spotify_client
-            sp = get_spotify_client()
-            if sp:
-                tracks = _extract_tracks(sp.get_album_tracks(al["spotify_id"]), source="spotify")
-        except Exception as e:  # noqa: BLE001
-            logger.debug("spotify tracklist failed (%s): %s", album_id, e)
-
-    # 2) Deezer by search (free, no auth) as a fallback.
-    if not tracks and artist_name and al["title"]:
-        try:
-            from core.metadata.registry import get_deezer_client
-            dz = get_deezer_client()
-            if dz:
-                album = dz.search_album(artist_name, al["title"])
-                aid = album.get("id") if isinstance(album, dict) else None
-                if aid:
-                    tracks = _extract_tracks(dz.get_album_tracks(str(aid)), source="deezer")
-        except Exception as e:  # noqa: BLE001
-            logger.debug("deezer tracklist failed (%s): %s", album_id, e)
-
-    if tracks:
-        try:
+            record_provider_snapshot(
+                conn,
+                provider=provider_result.provider,
+                entity_type="album",
+                entity_id=album_id,
+                scope="tracklist",
+                provider_entity_id=provider_result.provider_entity_id,
+                parser_version=provider_result.parser_version,
+                payload=provider_result.snapshot_payload(reference),
+                is_complete=provider_result.is_complete,
+            )
             conn.execute(
                 """UPDATE lib2_albums
                       SET tracklist_json=?, tracklist_status='ready',
@@ -255,7 +310,8 @@ def resolve_tracklist(config_manager, conn, album_id: int) -> Optional[List[dict
             conn.commit()
         except Exception as e:  # noqa: BLE001
             logger.debug("tracklist cache write failed (%s): %s", album_id, e)
-    return tracks or None
+        return tracks
+    return None
 
 
 def _partial_album_rows(conn, *, cached: Optional[bool] = None) -> List[Any]:
