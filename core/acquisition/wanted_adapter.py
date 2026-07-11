@@ -144,12 +144,25 @@ def materialize_wanted_requests(
             request = transition_request(
                 conn, request.id, "searching", expected_status="pending",
                 increment_attempts=True)
+            if created:
+                from core.acquisition.history import record_history_event
+                record_history_event(
+                    conn,
+                    "request_created",
+                    request_id=request.id,
+                    payload={
+                        "scope": request.scope,
+                        "entity_id": request.entity_id,
+                        "quality_profile_id": request.quality_profile_id,
+                        "trigger": request.trigger,
+                        "shadow_source": "lib2_wanted_tracks",
+                    },
+                )
         elif request.status in {"no_candidate", "failed"} and _retry_due(
             request, current_time
         ):
-            request = transition_request(
-                conn, request.id, "searching",
-                expected_status=request.status, increment_attempts=True)
+            from core.acquisition.workflow import retry_acquisition_request
+            request = retry_acquisition_request(conn, request.id)
         results.append(WantedRequest(
             int(row["track_id"]), int(row["recording_id"]), request, created))
     return tuple(results)

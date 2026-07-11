@@ -8,6 +8,7 @@ pytest_plugins = ["tests.library2.conftest"]
 
 from core.acquisition import ensure_acquisition_schema
 from core.acquisition.requests import transition_request
+from core.acquisition.history import list_history_events
 from core.acquisition.wanted_adapter import materialize_wanted_requests
 from core.library2.importer import import_legacy_library
 from core.library2.wanted import recompute_wanted
@@ -48,6 +49,8 @@ def test_wanted_missing_track_creates_recording_request(legacy_db):
         assert item.request.profile_id == 1
         assert item.request.search_options["content_scope"] == "recording"
         assert item.request.search_options["shadow_source"] == "lib2_wanted_tracks"
+        assert [event.event_type for event in list_history_events(
+            conn, request_id=item.request.id)] == ["request_created"]
     finally:
         conn.close()
 
@@ -98,6 +101,9 @@ def test_due_no_candidate_request_retries_same_identity(legacy_db):
         assert retried.request.id == first.request.id
         assert retried.request.status == "searching"
         assert retried.request.attempts == 2
+        assert [event.event_type for event in list_history_events(
+            conn, request_id=first.request.id)] == [
+                "request_created", "retry_started"]
     finally:
         conn.close()
 

@@ -166,6 +166,11 @@ def test_acquisition_request_resolves_server_owned_profiles_and_is_idempotent(ap
     assert first_data["request"]["quality_profile_id"] == 1
     assert first_data["request"]["status"] == "searching"
     assert second_data["created"] is False
+    history = client.get(
+        f"/api/library/v2/acquisition/requests/{first_data['request']['id']}/history"
+    ).get_json()
+    assert [event["event_type"] for event in history["events"]] == [
+        "request_created"]
 
 
 def test_non_admin_cannot_create_acquisition_request(api):
@@ -301,6 +306,11 @@ def test_acquisition_search_is_server_owned_and_persists_public_decisions(api):
     assert "server_ref" not in str(data)
     assert "indexer.invalid" not in str(data)
     assert "secret" not in str(data)
+    history = client.get(
+        f"/api/library/v2/acquisition/requests/{created['request']['id']}/history"
+    ).get_json()
+    assert [event["event_type"] for event in history["events"]] == [
+        "request_created", "search_completed", "candidates_evaluated"]
 
 
 def test_acquisition_search_operational_failure_is_retryable_not_no_candidate(api):
@@ -337,6 +347,62 @@ def test_acquisition_search_operational_failure_is_retryable_not_no_candidate(ap
     assert data["request"]["status"] == "failed"
     assert data["request"]["status"] != "no_candidate"
     assert data["search"]["sources"][0]["status"] == "unconfigured"
+
+    retried = client.post(
+        f"/api/library/v2/acquisition/requests/{created['request']['id']}/retry"
+    )
+    assert retried.status_code == 200
+    retried_data = retried.get_json()["request"]
+    assert retried_data["status"] == "searching"
+    assert retried_data["attempts"] == 2
+    history = client.get(
+        f"/api/library/v2/acquisition/requests/{created['request']['id']}/history"
+    ).get_json()
+    assert [event["event_type"] for event in history["events"]] == [
+        "request_created", "search_failed", "retry_started"]
+
+
+def test_acquisition_blocklist_can_be_read_and_manually_unblocked(api):
+    client, db, ids = api
+    created = client.post("/api/library/v2/acquisition/requests", json={
+        "scope": "release_group",
+        "entity_id": ids["views"],
+        "idempotency_key": "blocklist-api",
+    }).get_json()
+    conn = db._get_connection()
+    try:
+        from core.acquisition.blocklist import block_candidate
+        from core.acquisition.candidates import register_candidate
+        candidate, _ = register_candidate(
+            conn,
+            request_id=created["request"]["id"],
+            source="usenet",
+            protocol="usenet",
+            content_scope="release_bundle",
+            server_ref="ssc1-blocked",
+            title="Drake - Views",
+            indexer="Indexer",
+            guid="blocked-guid",
+            facts={"artist": "Drake", "release_title": "Views"},
+        )
+        entry, _ = block_candidate(
+            conn, candidate.id, reason_code="client_failure")
+        conn.commit()
+    finally:
+        conn.close()
+
+    listed = client.get(
+        "/api/library/v2/acquisition/blocklist").get_json()
+    assert [item["id"] for item in listed["entries"]] == [entry.id]
+    assert "dedupe_key" not in str(listed)
+    assert "server_ref" not in str(listed)
+
+    removed = client.delete(
+        f"/api/library/v2/acquisition/blocklist/{entry.id}")
+    assert removed.status_code == 200
+    assert removed.get_json()["entry"]["active"] is False
+    assert client.get(
+        "/api/library/v2/acquisition/blocklist").get_json()["entries"] == []
 
 
 def test_wanted_materialize_endpoint_is_shadow_only_and_idempotent(api):

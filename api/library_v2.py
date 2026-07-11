@@ -189,6 +189,18 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 acquisition_request = transition_request(
                     conn, acquisition_request.id, "searching",
                     expected_status="pending", increment_attempts=True)
+                from core.acquisition.history import record_history_event
+                record_history_event(
+                    conn,
+                    "request_created",
+                    request_id=acquisition_request.id,
+                    payload={
+                        "scope": acquisition_request.scope,
+                        "entity_id": acquisition_request.entity_id,
+                        "quality_profile_id": acquisition_request.quality_profile_id,
+                        "trigger": acquisition_request.trigger,
+                    },
+                )
             conn.commit()
             return jsonify({
                 "success": True,
@@ -215,6 +227,101 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             if acquisition_request.profile_id != ADMIN_PROFILE_ID:
                 return jsonify({"success": False, "error": "Request not found"}), 404
             return jsonify({"success": True, "request": acquisition_request.to_dict()})
+        finally:
+            conn.close()
+
+    @app.route("/api/library/v2/acquisition/requests/<request_id>/history")
+    def lib2_get_acquisition_history(request_id):
+        guard = _guard()
+        if guard:
+            return guard
+        try:
+            limit = int(request.args.get("limit", 200))
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "error": "limit must be an integer"}), 400
+        conn = _conn()
+        try:
+            from core.acquisition.history import list_history_events
+            from core.acquisition.requests import get_request
+            acquisition_request = get_request(conn, request_id)
+            if acquisition_request is None or acquisition_request.profile_id != ADMIN_PROFILE_ID:
+                return jsonify({"success": False, "error": "Request not found"}), 404
+            events = list_history_events(
+                conn, request_id=request_id, limit=limit)
+            return jsonify({
+                "success": True,
+                "events": [event.to_public_dict() for event in events],
+            })
+        except ValueError as exc:
+            return jsonify({"success": False, "error": str(exc)}), 400
+        finally:
+            conn.close()
+
+    @app.route(
+        "/api/library/v2/acquisition/requests/<request_id>/retry",
+        methods=["POST"],
+    )
+    def lib2_retry_acquisition_request(request_id):
+        guard = _guard()
+        if guard:
+            return guard
+        conn = _conn()
+        try:
+            from core.acquisition.requests import get_request
+            from core.acquisition.workflow import retry_acquisition_request
+            acquisition_request = get_request(conn, request_id)
+            if acquisition_request is None or acquisition_request.profile_id != ADMIN_PROFILE_ID:
+                return jsonify({"success": False, "error": "Request not found"}), 404
+            retried = retry_acquisition_request(conn, request_id)
+            conn.commit()
+            return jsonify({"success": True, "request": retried.to_dict()})
+        except ValueError as exc:
+            conn.rollback()
+            return jsonify({"success": False, "error": str(exc)}), 409
+        finally:
+            conn.close()
+
+    @app.route("/api/library/v2/acquisition/blocklist")
+    def lib2_get_acquisition_blocklist():
+        guard = _guard()
+        if guard:
+            return guard
+        conn = _conn()
+        try:
+            from core.acquisition.blocklist import list_blocklist_entries
+            entries = list_blocklist_entries(conn)
+            return jsonify({
+                "success": True,
+                "entries": [entry.to_public_dict() for entry in entries],
+            })
+        finally:
+            conn.close()
+
+    @app.route(
+        "/api/library/v2/acquisition/blocklist/<entry_id>",
+        methods=["DELETE"],
+    )
+    def lib2_delete_acquisition_blocklist_entry(entry_id):
+        guard = _guard()
+        if guard:
+            return guard
+        conn = _conn()
+        try:
+            from core.acquisition.blocklist import unblock_candidate
+            entry, changed = unblock_candidate(
+                conn, entry_id, actor_profile_id=ADMIN_PROFILE_ID)
+            conn.commit()
+            return jsonify({
+                "success": True,
+                "changed": changed,
+                "entry": entry.to_public_dict(),
+            })
+        except KeyError:
+            conn.rollback()
+            return jsonify({"success": False, "error": "Blocklist entry not found"}), 404
+        except ValueError as exc:
+            conn.rollback()
+            return jsonify({"success": False, "error": str(exc)}), 400
         finally:
             conn.close()
 
@@ -359,6 +466,20 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     expected_status="searching",
                     error=error,
                 )
+                from core.acquisition.history import record_history_event
+                record_history_event(
+                    write_conn,
+                    "search_failed",
+                    request_id=current.id,
+                    reason_code="sources_unavailable",
+                    message=error,
+                    payload=(
+                        collection.to_public_dict() if collection else {
+                            "candidate_count": 0,
+                            "sources": [],
+                        }
+                    ),
+                )
                 write_conn.commit()
                 payload = collection.to_public_dict() if collection else {
                     "candidate_count": 0,
@@ -392,6 +513,17 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     "error": "Request changed while sources were being searched",
                 }), 409
             persisted = persist_search_results(write_conn, collection)
+            from core.acquisition.history import record_history_event
+            record_history_event(
+                write_conn,
+                "search_completed",
+                request_id=current.id,
+                payload={
+                    **collection.to_public_dict(),
+                    "created": persisted.created_count,
+                    "refreshed": persisted.refreshed_count,
+                },
+            )
             catalog, policy = resolve_request_context(write_conn, current)
             runtime = (
                 acquisition_runtime_getter(current)
