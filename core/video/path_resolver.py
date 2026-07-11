@@ -35,14 +35,21 @@ def video_base_dirs(db) -> list:
     return dirs
 
 
-def resolve_video_file_path(stored_path, base_dirs,
-                            exists: Callable[[str], bool] = os.path.exists) -> Optional[str]:
+def resolve_video_file_path(stored_path, base_dirs, *, size_bytes=None,
+                            exists: Callable[[str], bool] = os.path.exists,
+                            getsize: Callable[[str], int] = os.path.getsize) -> Optional[str]:
     """Resolve a DB-stored (server-view) file path to a file that exists HERE.
 
-    Tries the raw path first, then joins the path's last 1..N segments onto
-    each base dir ('/data/movies/The Matrix (1999)/matrix.mkv' under a local
-    '/mnt/media/movies' probes 'matrix.mkv', 'The Matrix (1999)/matrix.mkv', …).
-    Returns the first hit or None — never raises."""
+    Tries the raw path first, then joins the path's last N..1 segments onto
+    each base dir — DEEPEST FIRST, so the most specific match wins (a bare
+    basename like 'movie.mkv' must never shadow the real
+    'The Matrix (1999)/movie.mkv' when both exist).
+
+    This resolver's callers REPLACE the file they resolve to (upgrades), so a
+    re-rooted candidate must prove identity: when ``size_bytes`` is known, a
+    candidate whose on-disk size differs is rejected. The raw stored path is
+    exempt (it IS the recorded location). Returns the first hit or None —
+    never raises."""
     if not isinstance(stored_path, str) or not stored_path:
         return None
     if exists(stored_path):
@@ -50,12 +57,21 @@ def resolve_video_file_path(stored_path, base_dirs,
     parts = [p for p in stored_path.replace("\\", "/").split("/") if p]
     if not parts:
         return None
+
+    def _same_file(cand: str) -> bool:
+        if not size_bytes:
+            return True
+        try:
+            return int(getsize(cand)) == int(size_bytes)
+        except Exception:   # noqa: BLE001 - unreadable size → can't prove identity
+            return False
+
     for base in (base_dirs or []):
         base = str(base or "").rstrip("/\\")
         if not base:
             continue
-        for k in range(1, min(_PROBE_DEPTH, len(parts)) + 1):
+        for k in range(min(_PROBE_DEPTH, len(parts)), 0, -1):
             cand = os.path.join(base, *parts[-k:])
-            if exists(cand):
+            if exists(cand) and _same_file(cand):
                 return cand
     return None

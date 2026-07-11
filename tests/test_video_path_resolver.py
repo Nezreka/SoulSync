@@ -38,6 +38,33 @@ def test_tail_reroot_probes_deeper_segments():
         == "/mnt/flat/matrix.mkv"
 
 
+def test_deepest_match_wins_over_bare_basename():
+    # The resolver's callers REPLACE the file they resolve to — a generic
+    # 'movie.mkv' at the library root must never shadow the real folder match.
+    have = {"/mnt/media/movie.mkv",                          # a DIFFERENT film, flat
+            "/mnt/media/The Matrix (1999)/movie.mkv"}        # the real one
+    got = resolve_video_file_path("/data/movies/The Matrix (1999)/movie.mkv",
+                                  ["/mnt/media"], exists=lambda p: p in have)
+    assert got == "/mnt/media/The Matrix (1999)/movie.mkv"
+
+
+def test_size_proves_identity_for_rerooted_candidates():
+    have = {"/mnt/media/movie.mkv"}
+    sizes = {"/mnt/media/movie.mkv": 111}
+    # Wrong size → not our file → no match (better no upgrade than a wrong delete).
+    assert resolve_video_file_path("/data/movies/X/movie.mkv", ["/mnt/media"],
+                                   size_bytes=999, exists=lambda p: p in have,
+                                   getsize=lambda p: sizes[p]) is None
+    # Matching size → identity proven.
+    assert resolve_video_file_path("/data/movies/X/movie.mkv", ["/mnt/media"],
+                                   size_bytes=111, exists=lambda p: p in have,
+                                   getsize=lambda p: sizes[p]) == "/mnt/media/movie.mkv"
+    # Unknown stored size → size can't gate (classic probe).
+    assert resolve_video_file_path("/data/movies/X/movie.mkv", ["/mnt/media"],
+                                   size_bytes=None, exists=lambda p: p in have,
+                                   getsize=lambda p: sizes[p]) == "/mnt/media/movie.mkv"
+
+
 def test_resolver_never_matches_beyond_probe_depth_or_junk():
     assert resolve_video_file_path("", ["/mnt"], exists=lambda p: True) is None
     assert resolve_video_file_path(None, ["/mnt"], exists=lambda p: False) is None
@@ -61,9 +88,10 @@ def test_video_stored_file_path(db):
         {"season_number": 1, "episodes": [
             {"server_id": "e1", "episode_number": 1, "title": "E1",
              "file": {"relative_path": "/data/tv/show/s01e01.mkv", "size_bytes": 5}}]}]})
-    assert db.video_stored_file_path("movie", tmdb_id=603) == "/data/movies/mx/matrix.mkv"
+    assert db.video_stored_file_path("movie", tmdb_id=603) \
+        == {"path": "/data/movies/mx/matrix.mkv", "size_bytes": 5}
     assert db.video_stored_file_path("episode", tmdb_id=9, season=1, episode=1) \
-        == "/data/tv/show/s01e01.mkv"
+        == {"path": "/data/tv/show/s01e01.mkv", "size_bytes": 5}
     assert db.video_stored_file_path("movie", tmdb_id=999) is None
     assert db.video_stored_file_path("episode", tmdb_id=9, season=1, episode=2) is None
     assert db.video_stored_file_path("movie", tmdb_id=None) is None
@@ -105,7 +133,7 @@ def test_owned_library_dir_resolves_real_folder(db, tmp_path, monkeypatch):
     from core.video.download_monitor import _owned_library_dir
     real = tmp_path / "media" / "The Matrix (1999)"
     real.mkdir(parents=True)
-    (real / "matrix.mkv").write_bytes(b"x")
+    (real / "matrix.mkv").write_bytes(b"xxxxx")   # 5 bytes — must match the stored size
     db.set_setting("movies_path", str(tmp_path / "media"))
     db.upsert_movie("plex", {"server_id": "m1", "tmdb_id": 603, "title": "The Matrix",
                              "file": {"relative_path": "/data/The Matrix (1999)/matrix.mkv",
