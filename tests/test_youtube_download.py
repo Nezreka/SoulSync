@@ -410,9 +410,8 @@ def test_channel_folder_gets_show_assets_once(tmp_path, monkeypatch):
     assert "<title>Veritasium</title>" in nfo and "Science videos." in nfo
     assert ("http://a/avatar.jpg", str(chan / "poster.jpg")) in fs.saved
     assert not any(u == "http://a/VIDEO-THUMB.jpg" for u, _ in fs.saved)
-    # NO season poster (a year has no art of its own; servers fall back to the
-    # show poster on season cards — ytdl-sub writes none either)
-    assert not (lib / "poster.jpg").exists()
+    # the year folder gets a poster as well (bare 'Season 2026' cards look broken)
+    assert (lib / "poster.jpg").exists()
 
     # second episode: everything already present → zero refetches
     before = list(fs.saved)
@@ -476,6 +475,7 @@ def test_channel_art_lands_BEFORE_the_video_moves_in(tmp_path, monkeypatch):
     def move(src, dst):
         # the assertion that matters: poster is there before the video is
         seen["poster_at_move"] = (lib / "Chan" / "poster.jpg").exists()
+        seen["season_at_move"] = (lib / "Chan" / "Season 2026" / "poster.jpg").exists()
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         os.replace(src, dst)
 
@@ -494,3 +494,4 @@ def test_channel_art_lands_BEFORE_the_video_moves_in(tmp_path, monkeypatch):
         now=lambda: "t")
     assert res["status"] == "completed"
     assert seen["poster_at_move"] is True
+    assert seen["season_at_move"] is True
