@@ -697,7 +697,7 @@
     var _ORG_EP_EG = { series: 'Breaking Bad', season: '01', seasonraw: '1', episode: '01', episodetitle: 'Pilot',
         year: '2008', quality: 'WEBDL-1080p', resolution: '1080p', source: 'WEBDL', codec: 'H264', tvdbid: '81189' };
     var _ORG_YT_EG = { channel: 'Veritasium', title: 'How Electricity Actually Works', year: '2024',
-        date: '2024-03-15', month: '03', day: '15', videoid: 'oI_X2cMHNe0' };
+        date: '2024-03-15', month: '03', day: '15', sxe: 's2024e0315', videoid: 'oI_X2cMHNe0' };
 
     function _orgSanitize(v) {
         return String(v == null ? '' : v).replace(/[\\/:*?"<>|\x00-\x1f]/g, '')

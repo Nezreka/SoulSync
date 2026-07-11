@@ -153,7 +153,9 @@ def plan_sidecars(scope: Any, meta: dict, settings: dict) -> dict:
     if settings.get("write_nfo"):
         if sc == "movie":
             nfo = ("movie.nfo", nfo_movie(meta))
-        elif sc == "episode":
+        elif sc in ("episode", "youtube_channel"):
+            # a YouTube channel folder is a "show" too — nfo_tvshow degrades
+            # gracefully to just title/plot/studio when the TMDB fields are absent
             nfo = ("tvshow.nfo", nfo_tvshow(meta))
 
     if settings.get("save_artwork"):
@@ -165,6 +167,7 @@ def plan_sidecars(scope: Any, meta: dict, settings: dict) -> dict:
             art.append((meta["logo"], "clearlogo.png"))
         if sc == "episode":
             art.extend(_season_art(meta))
+        # (youtube_channel: poster/fanart above cover it — channel avatar/banner)
 
     return {"nfo": nfo, "art": art}
 

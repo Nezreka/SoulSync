@@ -37,9 +37,13 @@ DEFAULTS = {
     "version": 1,
     "movie_template": "$title ($year)/$title ($year) $quality",
     "episode_template": "$series/Season $season/$series - S$seasonE$episode - $episodetitle $quality",
-    # YouTube channels organise as a Plex "TV by date" show: channel = series,
-    # season = upload YEAR, episode named by upload DATE + title.
-    "youtube_template": "$channel/Season $year/$channel - $date - $title",
+    # YouTube channels organise as a TV show Plex/Jellyfin can index WITHOUT any
+    # online agent: channel = series, season = upload YEAR, and the ytdl-sub-style
+    # $sxe token (s2026e0711) in the FILENAME. Plex's Series Scanner parses that
+    # structurally — the old date-only naming ("... - 2026-07-11 - ...") only works
+    # for shows a metadata agent can match, and YouTube channels aren't on TVDB,
+    # so those folders never indexed (the "Plex isn't picking it up" report).
+    "youtube_template": "$channel/Season $year/$channel - $sxe - $title",
     "verify_with_ffprobe": True,
     "replace_existing": True,
     "transfer_mode": "copy",
@@ -51,6 +55,10 @@ DEFAULTS = {
 }
 
 _TRANSFER_MODES = ("copy", "move")
+
+# The pre-$sxe default (see youtube_template above) — recognised and upgraded at
+# render time so existing saved settings get the Plex-indexable naming too.
+_LEGACY_YOUTUBE_TEMPLATE = "$channel/Season $year/$channel - $date - $title"
 
 
 def default_settings() -> dict:
@@ -173,6 +181,9 @@ def _youtube_values(f: dict) -> dict:
         "date": pub if has_year else "",     # only a trustworthy full date
         "month": m if has_year else "",
         "day": d if has_year else "",
+        # ytdl-sub-style season/episode token: s<year>e<MMDD>. The one thing that
+        # lets Plex's Series Scanner index a YouTube channel with no online agent.
+        "sxe": ("s%se%s%s" % (y, m, d)) if (has_year and m and d) else "",
         "videoid": _str(f.get("youtube_id")),
     }
 
@@ -219,6 +230,12 @@ def render_path(scope: Any, root: Any, fields: dict, settings: Any, ext: Any) ->
         values = _episode_values(fields)
     elif sc == "youtube":
         tmpl = settings.get("youtube_template") or DEFAULTS["youtube_template"]
+        # Saved settings snapshot the default, so simply changing DEFAULTS would
+        # strand everyone who never customised the template on the old broken
+        # naming. A stored value that IS the old default upgrades to the new one;
+        # anything the user actually edited is untouched.
+        if tmpl == _LEGACY_YOUTUBE_TEMPLATE:
+            tmpl = DEFAULTS["youtube_template"]
         values = _youtube_values(fields)
     else:
         base = (sanitize(fields.get("title")) or "download") + _ext(ext)
