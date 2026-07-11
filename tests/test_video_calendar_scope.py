@@ -37,13 +37,18 @@ def _tmdbs(rows):
 
 def test_watchlist_scope_only_returns_followed_shows(db):
     _seed_show(db, 11, "A", "sA")
-    _seed_show(db, 22, "B", "sB")
-    db.add_to_watchlist("show", 11, "A")     # follow A only (B is not airing → not auto-included)
+    b = _seed_show(db, 22, "B", "sB")
+    _set_status(db, b, "Ended")              # KNOWN-terminal → excluded unless followed
+    _seed_show(db, 44, "C", "sC")            # NULL status (enrichment gap)
+    db.add_to_watchlist("show", 11, "A")
 
     allp = db.calendar_upcoming("2026-06-01", "2026-06-30", server_source="plex", watchlist_only=False)
     wl = db.calendar_upcoming("2026-06-01", "2026-06-30", server_source="plex", watchlist_only=True)
-    assert _tmdbs(allp) == {11, 22}          # all-library sees both
-    assert _tmdbs(wl) == {11}                # watchlist sees only the followed one
+    assert _tmdbs(allp) == {11, 22, 44}      # all-library sees everything
+    # watchlist = followed ∪ airing-not-muted. A show with an episode in the
+    # window is airing BY DEFINITION, so C's missing status must not hide it
+    # (the enrichment-gap rule); only known-terminal B drops out.
+    assert _tmdbs(wl) == {11, 44}
 
 
 def test_watchlist_scope_includes_airing_default_and_respects_mute(db):
@@ -83,3 +88,24 @@ def test_calendar_js_defaults_watchlist_and_sends_scope():
     assert "'&scope=' + (state.scope" in _JS            # sent to the API
     assert "function setScope(" in _JS                  # toggle refetches
     assert "localStorage.setItem('vcalScope'" in _JS    # remembers the choice
+
+
+def test_episode_modal_offers_single_episode_wishlist_action():
+    """Aired-and-missing episodes can be wished straight from the calendar modal —
+    same eligibility rule and same write-parity payload as the bulk catch-up
+    button (show identity + poster proxy + library_id), so the wishlist row
+    renders with full art. Unaired episodes never get the button (the drain
+    would hunt a release that can't exist yet)."""
+    from pathlib import Path
+    js = (Path(__file__).resolve().parent.parent
+          / "webui" / "static" / "video" / "video-calendar.js").read_text(encoding="utf-8")
+    assert "data-vcm-wish" in js
+    # gate: missing + aired only
+    assert "!ep.has_file && ep.show_tmdb_id" in js
+    assert "ep.air_date < state.data.today" in js
+    # pre-check against what's already queued, then the parity payload
+    assert js.count("/api/video/wishlist/check") == 2      # bulk button + modal
+    assert "library_id: ep.show_id" in js
+    assert "'/api/video/poster/show/' + ep.show_id" in js
+    # the bulk catch-up count refreshes after a single add
+    assert "refreshAddMissing();   // the bulk catch-up count just changed" in js
