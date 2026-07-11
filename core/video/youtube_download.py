@@ -347,6 +347,7 @@ def _ensure_channel_assets(final_video: str, fields: Dict[str, Any], settings: D
     season_dir = os.path.dirname(os.path.abspath(final_video))
     if settings.get("save_artwork") and meta.get("poster_url") and             os.path.normpath(season_dir) != os.path.normpath(channel_dir):
         try:
+            fs.makedirs(season_dir)   # pre-move seeding: the dir may not exist yet
             existing = {str(n).lower() for n in (fs.list_dir(season_dir) or [])}
             if "poster.jpg" not in existing:
                 fs.save_url(meta["poster_url"], os.path.join(season_dir, "poster.jpg"))
@@ -366,6 +367,7 @@ def process_youtube_download(
     stage_dir: Optional[str] = None,
     move: Callable[[str, str], Any] = _default_move,
     sidecars: Callable[[str, str, Dict[str, Any], Dict[str, Any]], Any] = _default_sidecars,
+    channel_assets: Callable[..., Any] = _ensure_channel_assets,
     progress_hook: Optional[Callable] = None,
     postprocess_hook: Optional[Callable] = None,
     cookie_opts: Optional[dict] = None,
@@ -420,6 +422,15 @@ def process_youtube_download(
     # name — the file on disk still wears the titleless stem and needs the rename.
     if staged_path and final_path and staged_path != final_path and (stage_dir or replanned):
         update_row(dl.get("id"), status="importing", progress=100, filename=dest.get("filename"))
+        # Show/season art must EXIST before the video lands: Plex's folder watch
+        # ingests the mp4 the instant it appears and reads show-level art at SHOW
+        # CREATION — art written after the move stays invisible until a manual
+        # metadata refresh (the "channel has no poster" report; ytdl-sub avoids
+        # this by moving its prepared output art-first). Best-effort, never blocks.
+        try:
+            channel_assets(final_path, youtube_fields_from_download(dl), settings)
+        except Exception:   # noqa: BLE001
+            logger.exception("youtube channel assets (pre-move) failed for %s", final_path)
         try:
             move(staged_path, final_path)
         except Exception as e:   # noqa: BLE001 - downloaded fine but couldn't be placed
@@ -578,6 +589,8 @@ def run_youtube_download(dl_id: Any, db_provider: Callable) -> None:
             # for the channel folder's fanart.jpg / tvshow.nfo)
             sidecars=lambda st, fin, flds, stg: _default_sidecars(
                 st, fin, flds, stg, channel_meta_lookup=db.get_channel_meta),
+            channel_assets=lambda fin, flds, stg: _ensure_channel_assets(
+                fin, flds, stg, db.get_channel_meta),
             progress_hook=_progress, postprocess_hook=_postprocess, cookie_opts=cookie_opts, now=_now)
     finally:
         _active_worker_ids.discard(dl_id)      # worker done — no longer protects this row
