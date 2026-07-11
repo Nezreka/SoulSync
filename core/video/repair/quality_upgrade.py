@@ -60,6 +60,7 @@ class QualityUpgradeJob(VideoRepairJob):
         for r in context.db.repair_owned_movie_files():
             by_movie.setdefault(r["movie_id"], []).append(r)
         context.report(total=len(by_movie), phase="judging files")
+        valid = []
         for i, (movie_id, files) in enumerate(by_movie.items(), 1):
             context.check_stop()
             result.scanned += 1
@@ -69,8 +70,7 @@ class QualityUpgradeJob(VideoRepairJob):
                 continue
             label = resolution_label(best.get("resolution")) or best.get("resolution") or "unknown"
             entity_id = f"{movie_id}:{resolution_rank(best.get('resolution'))}"
-            context.db.repair_dismiss_stale(self.job_id, "quality_upgrade",
-                                            f"{movie_id}:", entity_id)
+            valid.append(entity_id)
             context.create_finding(
                 finding_type="quality_upgrade", severity="info",
                 entity_type="movie", entity_id=entity_id,
@@ -84,6 +84,10 @@ class QualityUpgradeJob(VideoRepairJob):
                          "title": best["title"], "year": best.get("year"),
                          "cutoff": resolution_label(cutoff) or cutoff,
                          "file": {k: best.get(k) for k in _FILE_FIELDS}})
+        # A complete scan retires pending findings for movies that got upgraded
+        # or removed since (never on a partial/errored pass).
+        if result.errors == 0:
+            context.db.repair_dismiss_absent(self.job_id, "quality_upgrade", valid)
         return result
 
     def fix(self, context: JobContext, finding: dict, fix_action=None) -> dict:

@@ -155,10 +155,10 @@
             }
         }
 
-        var settingsHtml = '';
+        // The settings panel ALWAYS exists — the interval row lives in it, so
+        // even a job with no settings of its own needs the gear.
         var settingKeys = Object.keys(job.settings || {});
-        if (settingKeys.length) {
-            var settingsRows = settingKeys.map(function (key) {
+        var settingsRows = settingKeys.map(function (key) {
                 var val = job.settings[key];
                 var label = pretty(key);
                 var opts = job.setting_options && job.setting_options[key];
@@ -190,7 +190,6 @@
                     '<button class="repair-save-settings-btn" type="button" data-vjr-save="' +
                         esc(job.job_id) + '">Save Settings</button>' +
                 '</div>';
-        }
 
         return '<div class="repair-job-card ' + cardClass + '" data-job-id="' + esc(job.job_id) + '">' +
             '<div class="repair-job-main">' +
@@ -209,9 +208,7 @@
                     (job.is_running
                         ? '<button class="repair-stop-btn" type="button" data-vjr-stop title="Stop this run">&#9209;</button>'
                         : '<button class="repair-run-btn" type="button" data-vjr-run title="Run now">&#9654;</button>') +
-                    (settingKeys.length
-                        ? '<button class="repair-settings-btn" type="button" data-vjr-settings title="Settings">&#9881;</button>'
-                        : '') +
+                    '<button class="repair-settings-btn" type="button" data-vjr-settings title="Settings">&#9881;</button>' +
                     '<button class="repair-help-btn" type="button" data-vjr-help title="About this job">?</button>' +
                 '</div>' +
             '</div>' +

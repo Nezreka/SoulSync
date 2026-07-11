@@ -3860,21 +3860,31 @@ class VideoDatabase:
         finally:
             conn.close()
 
-    def repair_dismiss_stale(self, job_id: str, finding_type: str,
-                             entity_prefix: str, keep_entity_id: str) -> int:
-        """Dismiss PENDING findings whose entity shares a prefix (same show) but
-        isn't the current one — the situation changed, the old finding is stale.
-        Handled findings are never touched."""
+    def repair_dismiss_absent(self, job_id: str, finding_type: str, keep_entity_ids) -> int:
+        """After a COMPLETE scan: dismiss PENDING findings whose entity the scan
+        no longer produced — the situation changed (set shrank, file replaced,
+        row removed by hand) or resolved itself entirely. Handled findings are
+        never touched, and callers must skip this on a cancelled/errored scan
+        (a partial enumeration would wrongly retire live findings)."""
+        keep = {str(e) for e in (keep_entity_ids or [])}
         conn = self._get_connection()
         try:
-            cur = conn.execute(
-                "UPDATE video_repair_findings SET status='dismissed', "
-                "user_action='superseded by a newer scan', resolved_at=CURRENT_TIMESTAMP, "
-                "updated_at=CURRENT_TIMESTAMP WHERE job_id=? AND finding_type=? "
-                "AND status='pending' AND entity_id LIKE ? AND entity_id<>?",
-                (job_id, finding_type, entity_prefix + "%", keep_entity_id))
+            rows = conn.execute(
+                "SELECT id, entity_id FROM video_repair_findings "
+                "WHERE job_id=? AND finding_type=? AND status='pending'",
+                (job_id, finding_type)).fetchall()
+            stale = [r["id"] for r in rows if (r["entity_id"] or "") not in keep]
+            n = 0
+            for i in range(0, len(stale), 500):
+                chunk = stale[i:i + 500]
+                marks = ",".join("?" * len(chunk))
+                cur = conn.execute(
+                    "UPDATE video_repair_findings SET status='dismissed', "
+                    "user_action='superseded by a newer scan', resolved_at=CURRENT_TIMESTAMP, "
+                    f"updated_at=CURRENT_TIMESTAMP WHERE id IN ({marks})", chunk)
+                n += cur.rowcount
             conn.commit()
-            return cur.rowcount
+            return n
         finally:
             conn.close()
 

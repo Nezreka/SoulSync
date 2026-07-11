@@ -28,9 +28,24 @@ def _sig(ids) -> str:
 
 
 def _members(collection_id):
+    """Franchise members with FULL release dates + full poster URLs (the TMDB
+    client provides both; the generic list normalizer drops the date, and the
+    date is what makes the unreleased filter precise)."""
     from core.video.enrichment.engine import get_video_enrichment_engine
-    from core.video.collections.list_sources import _dedup_normed
-    return _dedup_normed(get_video_enrichment_engine().collection(int(collection_id)) or [])
+    out, seen = [], set()
+    for it in (get_video_enrichment_engine().collection(int(collection_id)) or []):
+        tid = it.get("tmdb_id") if it.get("tmdb_id") is not None else it.get("id")
+        if tid is None or tid in seen:
+            continue
+        seen.add(tid)
+        try:
+            year = int(it.get("year")) if it.get("year") is not None else None
+        except (TypeError, ValueError):
+            year = None
+        out.append({"tmdb_id": int(tid), "title": it.get("title"), "year": year,
+                    "date": it.get("date") or "",
+                    "poster_url": it.get("poster") or it.get("poster_url")})
+    return out
 
 
 @register_job
@@ -54,7 +69,8 @@ class MovieCollectionsJob(VideoRepairJob):
         result = JobResult()
         groups = context.db.repair_movie_franchises()
         context.report(total=len(groups), phase="checking franchises")
-        this_year = datetime.date.today().year
+        today = datetime.date.today().isoformat()
+        valid = []
         for i, (cid, g) in enumerate(groups.items(), 1):
             context.check_stop()
             result.scanned += 1
@@ -68,15 +84,16 @@ class MovieCollectionsJob(VideoRepairJob):
             if not members:
                 continue
             owned_ids = {m["tmdb_id"] for m in g["movies"]}
+            # Released only: a full release date makes this precise — a sequel
+            # out this December is upcoming, not missing. No date = not out.
             missing = [m for m in members
                        if m["tmdb_id"] not in owned_ids
-                       and m.get("year") is not None and m["year"] <= this_year]
+                       and m.get("date") and m["date"] <= today]
             if not missing:
                 continue
             name = g.get("name") or (members[0].get("title") or "Collection")
             entity_id = f"{cid}:{_sig([m['tmdb_id'] for m in missing])}"
-            context.db.repair_dismiss_stale(self.job_id, "incomplete_collection",
-                                            f"{cid}:", entity_id)
+            valid.append(entity_id)
             n = len(missing)
             context.create_finding(
                 finding_type="incomplete_collection", severity="info",
@@ -87,6 +104,10 @@ class MovieCollectionsJob(VideoRepairJob):
                 details={"collection_id": cid, "name": name,
                          "owned": g["movies"], "missing": missing,
                          "total": len(members), "count": n})
+        # Retire pending findings a COMPLETE scan no longer produced — but a
+        # fetch error means partial knowledge, so leave everything standing.
+        if result.errors == 0:
+            context.db.repair_dismiss_absent(self.job_id, "incomplete_collection", valid)
         return result
 
     def fix(self, context: JobContext, finding: dict, fix_action=None) -> dict:

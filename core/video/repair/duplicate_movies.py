@@ -50,15 +50,18 @@ class DuplicateMoviesJob(VideoRepairJob):
         multi = dupes.get("files") or []
         context.report(total=len(groups) + len(multi), phase="comparing copies")
         done = 0
+        valid = []
         for rows in groups:
             context.check_stop()
             done += 1
             result.scanned += 1
             head = rows[0]
             context.report(processed=done, current_item=head["title"])
+            entity_rows = f"rows:{head['tmdb_id']}:{_sig([r['id'] for r in rows])}"
+            valid.append(entity_rows)
             context.create_finding(
                 finding_type="duplicate_movie", severity="info",
-                entity_type="movie", entity_id=f"rows:{head['tmdb_id']}:{_sig([r['id'] for r in rows])}",
+                entity_type="movie", entity_id=entity_rows,
                 title=f"{head['title']} — {len(rows)} library entries",
                 description=" · ".join(f"#{r['id']} ({r.get('server_source') or '?'})"
                                        for r in rows),
@@ -70,10 +73,12 @@ class DuplicateMoviesJob(VideoRepairJob):
             result.scanned += 1
             head = files[0]
             context.report(processed=done, current_item=head["title"])
+            entity_files = f"files:{head['movie_id']}:{_sig([f['file_id'] for f in files])}"
+            valid.append(entity_files)
             context.create_finding(
                 finding_type="duplicate_movie", severity="info",
                 entity_type="movie",
-                entity_id=f"files:{head['movie_id']}:{_sig([f['file_id'] for f in files])}",
+                entity_id=entity_files,
                 title=f"{head['title']} — {len(files)} version files",
                 description=" · ".join(f"{f.get('resolution') or '?'} "
                                        f"({(f.get('size_bytes') or 0) / 1073741824:.1f} GB)"
@@ -81,4 +86,7 @@ class DuplicateMoviesJob(VideoRepairJob):
                 details={"kind": "files", "movie_id": head["movie_id"],
                          "tmdb_id": head.get("tmdb_id"), "title": head["title"],
                          "year": head.get("year"), "files": files})
+        # Retire pending findings for duplicates cleaned up since the scan.
+        if result.errors == 0:
+            context.db.repair_dismiss_absent(self.job_id, "duplicate_movie", valid)
         return result
