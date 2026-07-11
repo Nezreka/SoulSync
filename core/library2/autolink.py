@@ -62,8 +62,10 @@ def _find_or_create_artist(conn, name: str) -> Optional[int]:
     for row in conn.execute("SELECT id, name FROM lib2_artists"):
         if normalize_name(row["name"]) == key:
             return row["id"]
+    from core.library2.profile_lookup import default_quality_profile_id
     cur = conn.execute(
-        "INSERT INTO lib2_artists(name, sort_name) VALUES(?, ?)", (name, name))
+        "INSERT INTO lib2_artists(name, sort_name, quality_profile_id) VALUES(?, ?, ?)",
+        (name, name, default_quality_profile_id(conn)))
     return cur.lastrowid
 
 

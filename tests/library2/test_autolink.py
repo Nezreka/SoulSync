@@ -72,6 +72,26 @@ def test_links_new_album_track_and_file(lib2_enabled, imported_conn):
         "SELECT COUNT(*) c FROM lib2_artists WHERE name='Drake'").fetchone()["c"] == 1
 
 
+def test_new_autolink_artist_uses_live_default_profile(lib2_enabled, imported_conn):
+    conn = lib2_enabled._get_connection()
+    try:
+        conn.execute("UPDATE quality_profiles SET is_default=0")
+        conn.execute("UPDATE quality_profiles SET is_default=1 WHERE id=2")
+        for table in ("lib2_artists", "lib2_albums", "lib2_tracks"):
+            conn.execute(f"UPDATE {table} SET quality_profile_id=2 WHERE quality_profile_id=1")
+        conn.execute("DELETE FROM quality_profiles WHERE id=1")
+
+        artist_id = A._find_or_create_artist(conn, "Dynamic Default Artist")
+        profile_id = conn.execute(
+            "SELECT quality_profile_id FROM lib2_artists WHERE id=?", (artist_id,)
+        ).fetchone()[0]
+        conn.rollback()
+    finally:
+        conn.close()
+
+    assert profile_id == 2
+
+
 def test_attaches_file_to_materialized_missing_track(lib2_enabled, imported_conn):
     """A fileless provider-tracklist row (wanted/missing) gains the file instead
     of a duplicate track being created."""

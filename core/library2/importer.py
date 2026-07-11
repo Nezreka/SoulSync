@@ -27,6 +27,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from utils.logging_config import get_logger
 
+from .profile_lookup import default_quality_profile_id
 from .schema import ensure_library_v2_schema
 
 logger = get_logger("library2.importer")
@@ -122,8 +123,9 @@ class _ArtistResolver:
     the name matches, and only create a new row when genuinely new.
     """
 
-    def __init__(self, cursor):
+    def __init__(self, cursor, default_profile_id: int):
         self.cursor = cursor
+        self.default_profile_id = default_profile_id
         self._by_name: Dict[str, int] = {}
         self._by_legacy: Dict[int, int] = {}
 
@@ -147,7 +149,9 @@ class _ArtistResolver:
         if existing is not None:
             return existing
         self.cursor.execute(
-            "INSERT INTO lib2_artists(name, sort_name) VALUES(?, ?)", (name, name)
+            "INSERT INTO lib2_artists(name, sort_name, quality_profile_id) "
+            "VALUES(?, ?, ?)",
+            (name, name, self.default_profile_id),
         )
         new_id = self.cursor.lastrowid
         self._by_name[key] = new_id
@@ -169,10 +173,11 @@ class _ArtistResolver:
             return existing
         self.cursor.execute(
             "INSERT INTO lib2_artists(name, sort_name, spotify_id, musicbrainz_id, "
-            "image_url, genres, summary, legacy_artist_id) VALUES(?,?,?,?,?,?,?,?)",
+            "image_url, genres, summary, legacy_artist_id, quality_profile_id) "
+            "VALUES(?,?,?,?,?,?,?,?,?)",
             (fields["name"], fields["sort_name"], fields["spotify_id"],
              fields["musicbrainz_id"], fields["image_url"], fields["genres"],
-             fields["summary"], legacy_id),
+             fields["summary"], legacy_id, self.default_profile_id),
         )
         new_id = self.cursor.lastrowid
         self._by_legacy[legacy_id] = new_id
@@ -268,7 +273,8 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
         album_cols = _existing_columns(cursor, "albums")
         track_cols = _existing_columns(cursor, "tracks")
 
-        resolver = _ArtistResolver(cursor)
+        default_profile_id = default_quality_profile_id(conn)
+        resolver = _ArtistResolver(cursor, default_profile_id)
         resolver.seed_existing()
 
         # --- Artists -------------------------------------------------------
@@ -347,9 +353,9 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 cursor.execute(
                     "INSERT INTO lib2_albums(primary_artist_id, title, album_type, "
                     "release_date, year, spotify_id, musicbrainz_id, image_url, genres, "
-                    "track_count, expected_track_count, legacy_album_id) "
-                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (*fields, row["id"]),
+                    "track_count, expected_track_count, legacy_album_id, "
+                    "quality_profile_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (*fields, row["id"], default_profile_id),
                 )
                 album_id = cursor.lastrowid
                 album_map[row["id"]] = album_id
@@ -392,9 +398,9 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
             else:
                 cursor.execute(
                     "INSERT INTO lib2_tracks(album_id, title, track_number, disc_number, "
-                    "duration, isrc, musicbrainz_id, spotify_id, legacy_track_id) "
-                    "VALUES(?,?,?,?,?,?,?,?,?)",
-                    (*tfields, row["id"]),
+                    "duration, isrc, musicbrainz_id, spotify_id, legacy_track_id, "
+                    "quality_profile_id) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                    (*tfields, row["id"], default_profile_id),
                 )
                 track_id = cursor.lastrowid
                 track_map[row["id"]] = track_id
@@ -562,7 +568,6 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
         params,
     ).fetchall()
 
-    from core.library2.profile_lookup import default_quality_profile_id
     default_profile_id = default_quality_profile_id(cursor.connection)
     valid_profile_ids = {
         int(row[0]) for row in cursor.execute("SELECT id FROM quality_profiles").fetchall()
@@ -673,10 +678,10 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
                 """
                 INSERT INTO lib2_albums(primary_artist_id, title, album_type,
                     release_date, year, spotify_id, image_url, track_count,
-                    expected_track_count, monitored)
-                VALUES(?,?,?,?,?,?,?,?,?,0)
+                    expected_track_count, monitored, quality_profile_id)
+                VALUES(?,?,?,?,?,?,?,?,?,0,?)
                 """,
-                album_fields,
+                (*album_fields, default_profile_id),
             )
             album_id = cursor.lastrowid
         cursor.execute(

@@ -122,6 +122,31 @@ def test_reset_rebuilds(legacy_db):
     conn.close()
 
 
+def test_import_uses_live_default_after_profile_one_is_deleted(legacy_db):
+    from core.library2.schema import ensure_library_v2_schema
+
+    conn = legacy_db._get_connection()
+    ensure_library_v2_schema(conn)
+    conn.execute("UPDATE quality_profiles SET is_default=0")
+    conn.execute("UPDATE quality_profiles SET is_default=1 WHERE id=2")
+    conn.execute("DELETE FROM quality_profiles WHERE id=1")
+    conn.commit()
+    conn.close()
+
+    import_legacy_library(legacy_db, reset=True)
+
+    conn = legacy_db._get_connection()
+    try:
+        for table in ("lib2_artists", "lib2_albums", "lib2_tracks"):
+            profile_ids = {
+                row[0] for row in conn.execute(
+                    f"SELECT DISTINCT quality_profile_id FROM {table}")
+            }
+            assert profile_ids == {2}, table
+    finally:
+        conn.close()
+
+
 def test_wishlist_only_track_seeds_missing_monitored_library_rows(legacy_db):
     conn = sqlite3.connect(legacy_db.path)
     conn.execute("""
