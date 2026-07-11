@@ -8,8 +8,103 @@ from core.acquisition.decision_engine import CatalogContext, EffectivePolicy
 from core.acquisition.requests import AcquisitionRequest
 
 
+PUBLIC_REQUEST_SCOPES = frozenset({
+    "recording", "release_group", "release_edition", "artist_missing",
+})
+
+
 def _row_dict(row: Any) -> Dict[str, Any]:
     return dict(row) if row is not None else {}
+
+
+def _external_identifiers(**values: Any) -> Dict[str, str]:
+    return {
+        key: str(value).strip()
+        for key, value in values.items()
+        if str(value or "").strip()
+    }
+
+
+def resolve_public_request_search_options(
+    conn: Any, scope: str, entity_id: int,
+) -> Dict[str, Any]:
+    """Build browser-invariant search context from current catalog rows."""
+    scope = str(scope or "").strip().lower()
+    entity_id = int(entity_id)
+    if scope not in PUBLIC_REQUEST_SCOPES:
+        raise ValueError(
+            "public acquisition scope must be recording, release_group, "
+            "release_edition, or artist_missing")
+    if scope == "release_group":
+        row = conn.execute(
+            """SELECT al.id AS release_group_id,
+                      ed.id AS release_edition_id,
+                      COALESCE(ed.spotify_id, al.spotify_id) AS spotify_release_id,
+                      COALESCE(ed.musicbrainz_id, al.musicbrainz_id)
+                          AS musicbrainz_release_id
+                 FROM lib2_albums al
+                 LEFT JOIN lib2_release_editions ed
+                        ON ed.release_group_id=al.id AND ed.is_default=1
+                WHERE al.id=?""",
+            (entity_id,),
+        ).fetchone()
+        content_scope = "release_bundle"
+    elif scope == "release_edition":
+        row = conn.execute(
+            """SELECT ed.release_group_id, ed.id AS release_edition_id,
+                      ed.spotify_id AS spotify_release_id,
+                      ed.musicbrainz_id AS musicbrainz_release_id
+                 FROM lib2_release_editions ed WHERE ed.id=?""",
+            (entity_id,),
+        ).fetchone()
+        content_scope = "release_bundle"
+    elif scope == "recording":
+        row = conn.execute(
+            """SELECT rec.id AS recording_id,
+                      rt.track_id AS lib2_track_id,
+                      rt.release_edition_id,
+                      ed.release_group_id,
+                      rec.isrc, rec.spotify_id AS spotify_recording_id,
+                      rec.musicbrainz_id AS musicbrainz_recording_id
+                 FROM lib2_recordings rec
+                 JOIN lib2_release_tracks rt ON rt.recording_id=rec.id
+                 JOIN lib2_release_editions ed ON ed.id=rt.release_edition_id
+                WHERE rec.id=?
+                ORDER BY ed.is_default DESC, rt.id LIMIT 1""",
+            (entity_id,),
+        ).fetchone()
+        content_scope = "recording"
+    else:
+        row = conn.execute(
+            """SELECT id AS artist_id, spotify_id AS spotify_artist_id,
+                      musicbrainz_id AS musicbrainz_artist_id
+                 FROM lib2_artists WHERE id=?""",
+            (entity_id,),
+        ).fetchone()
+        content_scope = "release_bundle"
+    if row is None:
+        raise ValueError("acquisition entity does not exist")
+    data = _row_dict(row)
+    relationship_keys = (
+        "artist_id", "lib2_track_id", "recording_id", "release_group_id",
+        "release_edition_id",
+    )
+    options = {
+        "content_scope": content_scope,
+        **{
+            key: int(data[key])
+            for key in relationship_keys
+            if data.get(key) is not None
+        },
+    }
+    identifiers = _external_identifiers(**{
+        key: value
+        for key, value in data.items()
+        if key not in relationship_keys and value not in (None, "")
+    })
+    if identifiers:
+        options["identifiers"] = identifiers
+    return options
 
 
 def resolve_entity_quality_profile(
@@ -150,7 +245,9 @@ def resolve_request_context(
 
 __all__ = [
     "load_effective_policy",
+    "PUBLIC_REQUEST_SCOPES",
     "resolve_catalog_context",
     "resolve_entity_quality_profile",
+    "resolve_public_request_search_options",
     "resolve_request_context",
 ]

@@ -168,12 +168,80 @@ def test_acquisition_request_resolves_server_owned_profiles_and_is_idempotent(ap
     assert first_data["request"]["profile_id"] == 1
     assert first_data["request"]["quality_profile_id"] == 1
     assert first_data["request"]["status"] == "searching"
+    assert first_data["request"]["search_options"]["content_scope"] == (
+        "release_bundle")
+    assert first_data["request"]["search_options"]["release_group_id"] == (
+        ids["views"])
     assert second_data["created"] is False
     history = client.get(
         f"/api/library/v2/acquisition/requests/{first_data['request']['id']}/history"
     ).get_json()
     assert [event["event_type"] for event in history["events"]] == [
         "request_created"]
+
+
+def test_public_acquisition_request_rejects_browser_owned_search_options(api):
+    client, _db, ids = api
+
+    response = client.post("/api/library/v2/acquisition/requests", json={
+        "scope": "release_group",
+        "entity_id": ids["views"],
+        "idempotency_key": "forged-options",
+        "search_options": {
+            "content_scope": "recording",
+            "any_release_ok": True,
+            "identifiers": {"download_url": "https://attacker.invalid"},
+        },
+    })
+    upgrade = client.post("/api/library/v2/acquisition/requests", json={
+        "scope": "upgrade",
+        "entity_id": ids["views"],
+        "idempotency_key": "forged-upgrade",
+    })
+
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "search_options are server-managed"
+    assert upgrade.status_code == 400
+    assert "public acquisition scope" in upgrade.get_json()["error"]
+
+
+def test_public_acquisition_options_preserve_group_edition_recording_layers(api):
+    client, db, ids = api
+    conn = db._get_connection()
+    try:
+        from core.library2.editions import backfill_editions
+        backfill_editions(conn.cursor())
+        row = conn.execute(
+            """SELECT rt.recording_id, rt.release_edition_id
+                 FROM lib2_release_tracks rt WHERE rt.track_id=?""",
+            (ids["album_track"],),
+        ).fetchone()
+        conn.commit()
+    finally:
+        conn.close()
+
+    edition = client.post("/api/library/v2/acquisition/requests", json={
+        "scope": "release_edition",
+        "entity_id": row["release_edition_id"],
+        "idempotency_key": "public-edition-options",
+    }).get_json()["request"]
+    recording = client.post("/api/library/v2/acquisition/requests", json={
+        "scope": "recording",
+        "entity_id": row["recording_id"],
+        "idempotency_key": "public-recording-options",
+    }).get_json()["request"]
+
+    assert edition["search_options"] == {
+        "content_scope": "release_bundle",
+        "release_edition_id": row["release_edition_id"],
+        "release_group_id": ids["views"],
+    }
+    assert recording["search_options"]["content_scope"] == "recording"
+    assert recording["search_options"]["recording_id"] == row["recording_id"]
+    assert recording["search_options"]["release_edition_id"] == row[
+        "release_edition_id"]
+    assert recording["search_options"]["release_group_id"] == ids["views"]
+    assert recording["search_options"]["lib2_track_id"] == ids["album_track"]
 
 
 def test_non_admin_cannot_create_acquisition_request(api):

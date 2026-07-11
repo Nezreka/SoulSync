@@ -173,15 +173,22 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             entity_id = int(body.get("entity_id"))
         except (TypeError, ValueError):
             return jsonify({"success": False, "error": "entity_id must be an integer"}), 400
-        search_options = body.get("search_options") or {}
-        if not isinstance(search_options, dict):
-            return jsonify({"success": False, "error": "search_options must be an object"}), 400
+        if body.get("search_options") not in (None, {}):
+            return jsonify({
+                "success": False,
+                "error": "search_options are server-managed",
+            }), 400
         conn = _conn()
         try:
             from core.acquisition import ensure_acquisition_schema
-            from core.acquisition.catalog import resolve_entity_quality_profile
+            from core.acquisition.catalog import (
+                resolve_entity_quality_profile,
+                resolve_public_request_search_options,
+            )
             from core.acquisition.requests import create_request, transition_request
             ensure_acquisition_schema(conn)
+            search_options = resolve_public_request_search_options(
+                conn, scope, entity_id)
             quality_profile_id = resolve_entity_quality_profile(
                 conn, scope, entity_id, search_options=search_options)
             acquisition_request, created = create_request(
