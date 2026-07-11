@@ -9096,7 +9096,7 @@
                             <div class="settings-group" data-stg="library">
                                 <div class="form-group">
                                     <label class="checkbox-label">
-                                        <input type="checkbox" id="allow-explicit" checked>
+                                        <input type="checkbox" id="allow-explicit" checked onchange="if(typeof syncPreferExplicitState==='function')syncPreferExplicitState()">
                                         Allow explicit content in downloads
                                     </label>
                                     <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
@@ -9104,6 +9104,22 @@
                                 <div class="help-text setting-help-body" hidden>
                                     When disabled, tracks marked as explicit on Spotify will be skipped
                                     during matched downloads. Does not affect manual Soulseek searches.
+                                </div>
+
+                                <!-- #923: sub-setting — only meaningful while the parent allows explicit
+                                     (syncPreferExplicitState in settings.js greys it out otherwise) -->
+                                <div class="form-group" style="margin-left: 26px;">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="prefer-explicit">
+                                        Prefer explicit versions when matching
+                                    </label>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                </div>
+                                <div class="help-text setting-help-body" style="margin-left: 26px;" hidden>
+                                    When picking between Soulseek results, files marked Explicit/Uncensored
+                                    rank higher and Clean/Censored/Radio-Edit files rank lower. Nothing is
+                                    ever skipped &mdash; if only a clean version exists, it still downloads.
+                                    Requires explicit content to be allowed.
                                 </div>
 
                                 <div class="form-group">

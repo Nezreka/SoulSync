@@ -4,46 +4,6 @@
   padding: 24px 32px;
 }
 
-.importPageHeader {
-  margin-bottom: 20px;
-}
-
-.importPageTitleRow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12px;
-}
-
-.importPageTitle {
-  font-size: 28px;
-  font-weight: 700;
-  margin: 0;
-  letter-spacing: -0.3px;
-  font-family:
-    'SF Pro Display',
-    -apple-system,
-    BlinkMacSystemFont,
-    sans-serif;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
-.importPageTitle > span {
-  background: linear-gradient(
-    90deg,
-    #ffffff 0%,
-    rgb(var(--accent-light-rgb)) 50%,
-    rgb(var(--accent-rgb)) 100%
-  );
-  background-size: 200% 100%;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  animation: page-title-shimmer 6s ease-in-out infinite;
-}
-
 .importPageStagingBar {
   display: flex;
   align-items: center;

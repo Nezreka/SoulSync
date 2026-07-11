@@ -2,6 +2,7 @@ import { Link, Outlet } from '@tanstack/react-router';
 import clsx from 'clsx';
 
 import { Button } from '@/components/form/form';
+import { PageHeader } from '@/components/page-header';
 import { Show } from '@/components/primitives';
 import { useReactPageShell } from '@/platform/shell/route-controllers';
 
@@ -61,7 +62,6 @@ function formatShortTime(timestamp: number) {
   });
 }
 
-
 function ImportHeader({
   error,
   fileCountText,
@@ -80,23 +80,23 @@ function ImportHeader({
   onRefresh: () => void;
 }) {
   return (
-    <header className={styles.importPageHeader}>
-      <div className={styles.importPageTitleRow}>
-        <h1 className={styles.importPageTitle}>
-          <img src="/static/import.png" className="page-header-icon" alt="" />
-          <span>Import Music</span>
-        </h1>
-        <Button
-          variant="secondary"
-          title="Re-scan import folder"
-          aria-busy={refreshing}
-          disabled={refreshing}
-          onClick={onRefresh}
-        >
-          <RefreshIcon />
-          {refreshing ? 'Refreshing...' : 'Refresh'}
-        </Button>
-      </div>
+    <>
+      <PageHeader
+        icon={<img src="/static/import.png" alt="" />}
+        title="Import Music"
+        actions={
+          <Button
+            variant="secondary"
+            title="Re-scan import folder"
+            aria-busy={refreshing}
+            disabled={refreshing}
+            onClick={onRefresh}
+          >
+            <RefreshIcon />
+            {refreshing ? 'Refreshing...' : 'Refresh'}
+          </Button>
+        }
+      />
       <div className={styles.importPageStagingBar} id="import-staging-bar">
         <span className={styles.importStagingPath} id="import-page-staging-path">
           {error ? 'Import folder: error' : `Import: ${stagingPath}`}
@@ -110,7 +110,7 @@ function ImportHeader({
           {loading ? 'loading...' : fileCountText}
         </span>
       </div>
-    </header>
+    </>
   );
 }
 

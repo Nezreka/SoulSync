@@ -228,7 +228,10 @@ export function AutoImportPanel({
                 <option value="300">5m</option>
               </Select>
             </div>
-            <div className={styles.autoImportSetting} title="Which quality profile Auto-Import checks new files against. Leave on the app-wide default unless you specifically want different rules (e.g. AcoustID, quality targets) for Auto-Import than for normal downloads.">
+            <div
+              className={styles.autoImportSetting}
+              title="Which quality profile Auto-Import checks new files against. Leave on the app-wide default unless you specifically want different rules (e.g. AcoustID, quality targets) for Auto-Import than for normal downloads."
+            >
               <span>Quality profile:</span>
               <Select
                 id="auto-import-quality-profile"

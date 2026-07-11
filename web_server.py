@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "2.8.8"
+_SOULSYNC_BASE_VERSION = "2.8.9"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -1253,6 +1253,10 @@ from core.runtime_state import batch_locks
 _orphaned_download_keys = set()
 
 _enrichment_activity_log = {}
+# Guards _enrichment_activity_log's deques: every /status request appends to
+# and scans them via _get_windowed_calls, so concurrent polls (multiple tabs)
+# race into "deque mutated during iteration" without it.
+_enrichment_activity_lock = threading.Lock()
 _idle_since = {}
 _IDLE_GRACE_SECONDS = 5
 
@@ -2445,23 +2449,24 @@ def _get_windowed_calls(key, current_total):
     Deque stores (timestamp, cumulative_total) in chronological order.
     To get calls in a window: current_total minus the oldest total within that window."""
     now = time.time()
-    history = _enrichment_activity_log.setdefault(key, collections.deque(maxlen=17300))
-    history.append((now, current_total))
-
     cutoff_1h = now - 3600
     cutoff_24h = now - 86400
 
-    # Forward scan: first entry with ts >= cutoff is the oldest in that window
-    oldest_1h_total = current_total
-    oldest_24h_total = current_total
-    found_24h = False
-    for ts, total in history:
-        if not found_24h and ts >= cutoff_24h:
-            oldest_24h_total = total
-            found_24h = True
-        if ts >= cutoff_1h:
-            oldest_1h_total = total
-            break
+    with _enrichment_activity_lock:
+        history = _enrichment_activity_log.setdefault(key, collections.deque(maxlen=17300))
+        history.append((now, current_total))
+
+        # Forward scan: first entry with ts >= cutoff is the oldest in that window
+        oldest_1h_total = current_total
+        oldest_24h_total = current_total
+        found_24h = False
+        for ts, total in history:
+            if not found_24h and ts >= cutoff_24h:
+                oldest_24h_total = total
+                found_24h = True
+            if ts >= cutoff_1h:
+                oldest_1h_total = total
+                break
 
     return max(0, current_total - oldest_1h_total), max(0, current_total - oldest_24h_total)
 
@@ -20979,22 +20984,22 @@ def get_server_playlist_tracks(playlist_id):
         # exact/fuzzy passes entirely. Stale-cache safe — if the cached
         # server track no longer exists, the override is silently
         # skipped and normal matching runs.
-        from core.sync.match_overrides import resolve_override_server_id, resolve_match_overrides
+        from core.sync.match_overrides import build_bulk_override_lookup, resolve_match_overrides
         _db_for_overrides = get_database()
         # Set of server track ids currently in this playlist — used to validate
         # a cached/durable match actually exists in this playlist before pairing it.
         _server_ids = {str(t.get('id')) for t in server_tracks if isinstance(t, dict) and t.get('id') is not None}
         _ov_profile = get_current_profile_id()
 
-        def _override_lookup(src_id):
-            # Validated fast-cache hit, else durable manual match (#787) which
-            # self-heals a stale library id via the stored file path. A cache hit
-            # that no longer points into THIS playlist must not short-circuit the
-            # durable path, or the manual match silently never applies (wolf39us).
-            return resolve_override_server_id(
-                _db_for_overrides, _ov_profile, src_id, active_server, _server_ids,
-                _db_for_overrides.read_sync_match_cache,
-            )
+        # Validated fast-cache hit, else durable manual match (#787) which
+        # self-heals a stale library id via the stored file path. A cache hit
+        # that no longer points into THIS playlist must not short-circuit the
+        # durable path, or the manual match silently never applies (wolf39us).
+        # Bulk-backed (#1005): the per-track resolver opened 2-3 fresh SQLite
+        # connections (and committed per cache hit) for EVERY source track —
+        # ~15s of pass-0 churn on a 1500-track playlist.
+        _override_lookup = build_bulk_override_lookup(
+            _db_for_overrides, _ov_profile, active_server, _server_ids, source_tracks)
 
         _override_pairs = resolve_match_overrides(source_tracks, server_tracks, _override_lookup)
 
