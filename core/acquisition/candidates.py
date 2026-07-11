@@ -69,6 +69,9 @@ _SECRET_KEYS = re.compile(
     r"(^|_)(api_?key|token|secret|password|download_?url|url|magnet)(_|$)",
     re.IGNORECASE,
 )
+_SENSITIVE_TEXT = re.compile(
+    r"(?i)(?:https?://|magnet:)\S+|\b(?:api[_-]?key|token|secret|password)=\S+"
+)
 
 
 @dataclass(frozen=True)
@@ -199,20 +202,25 @@ def _json(value: Any) -> str:
     )
 
 
-def _redact_payload(value: Any) -> Any:
+def redact_payload(value: Any) -> Any:
     if isinstance(value, Mapping):
         return {
             str(key): "[redacted]" if _SECRET_KEYS.search(str(key))
-            else _redact_payload(item)
+            else redact_payload(item)
             for key, item in value.items()
         }
-    if isinstance(value, list):
-        return [_redact_payload(item) for item in value]
+    if isinstance(value, (list, tuple)):
+        return [redact_payload(item) for item in value]
     if isinstance(value, str) and (
         "://" in value or value.strip().lower().startswith("magnet:")
     ):
         return "[redacted]"
     return value
+
+
+def redact_sensitive_text(value: Any, *, max_length: int = 2000) -> str:
+    """Redact URL/token fragments in diagnostic text before persistence/API."""
+    return _SENSITIVE_TEXT.sub("[redacted]", str(value or ""))[:int(max_length)]
 
 
 def _optional_nonnegative_int(value: Any, name: str) -> Optional[int]:
@@ -367,7 +375,7 @@ def register_candidate(
     indexer = str(indexer).strip() if indexer not in (None, "") else None
     guid = str(guid).strip() if guid not in (None, "") else None
     typed_facts = CandidateFacts.from_mapping(facts)
-    redacted_payload = _redact_payload(dict(raw_payload or {}))
+    redacted_payload = redact_payload(dict(raw_payload or {}))
     dedupe_key = candidate_dedupe_key(
         source=source,
         protocol=protocol,
@@ -458,6 +466,8 @@ __all__ = [
     "get_candidate",
     "list_request_candidates",
     "prune_expired_candidates",
+    "redact_payload",
+    "redact_sensitive_text",
     "register_candidate",
     "resolve_candidate",
 ]

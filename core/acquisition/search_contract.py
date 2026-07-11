@@ -8,11 +8,14 @@ the Decision Engine (audit section 9.4 and ADR-08).
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, Mapping, Optional, Protocol, Sequence, Tuple
 
-from core.acquisition.candidates import ReleaseCandidate, register_candidate
+from core.acquisition.candidates import (
+    ReleaseCandidate,
+    redact_sensitive_text,
+    register_candidate,
+)
 from core.acquisition.capabilities import require_source_capabilities
 from core.acquisition.decision_engine import CatalogContext
 from core.acquisition.requests import AcquisitionRequest
@@ -22,13 +25,8 @@ class CandidateParseError(ValueError):
     """One provider result could not be normalized into a candidate."""
 
 
-_SENSITIVE_ERROR_VALUE = re.compile(
-    r"(?i)(?:https?://|magnet:)\S+|\b(?:api[_-]?key|token|secret|password)=\S+"
-)
-
-
 def safe_external_error(exc: Exception) -> str:
-    return _SENSITIVE_ERROR_VALUE.sub("[redacted]", str(exc))[:500]
+    return redact_sensitive_text(exc, max_length=500)
 
 
 @dataclass(frozen=True)
