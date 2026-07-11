@@ -118,3 +118,21 @@ def test_dismiss_drops_row_and_can_delete_file(env):
     assert r["success"]
     assert not env["src"].exists()                     # file removed
     assert env["client"].get("/api/video/import/failed").get_json()["items"] == []
+
+
+def test_failed_view_carries_drawer_facts(env):
+    """The card's expand drawer needs grab provenance + on-disk truth: quality,
+    source/user, attempts, grabbed date, and the REAL file size (file_exists
+    False + size None once the file vanishes — the drawer says so instead of
+    a stale number)."""
+    it = env["client"].get("/api/video/import/failed").get_json()["items"][0]
+    for key in ("quality_label", "size_bytes", "source", "username", "attempts",
+                "grabbed_at", "file_exists", "file_size", "poster_url"):
+        assert key in it, key
+    assert it["file_exists"] is True
+    assert it["file_size"] == env["src"].stat().st_size
+
+    import os
+    os.remove(env["src"])
+    it2 = env["client"].get("/api/video/import/failed").get_json()["items"][0]
+    assert it2["file_exists"] is False and it2["file_size"] is None

@@ -36,17 +36,36 @@ def _ctx(row):
 
 
 def _failed_view(row):
-    """The render-ready shape for one unplaced download."""
+    """The render-ready shape for one unplaced download — everything the card's
+    expand drawer shows (grab provenance, on-disk facts, identity context)."""
     c = _ctx(row)
+    path = row.get("dest_path")
+    file_size, file_exists = None, False
+    if path:
+        try:
+            file_size = os.path.getsize(path)
+            file_exists = True
+        except OSError:
+            pass
     return {
         "id": row.get("id"),
         "title": row.get("title"),
         "kind": row.get("kind"),
         "year": row.get("year"),
         "reason": row.get("error"),
-        "file": row.get("dest_path"),         # where the file is sitting, unplaced
+        "file": path,                         # where the file is sitting, unplaced
+        "file_exists": file_exists,
+        "file_size": file_size,               # actual bytes on disk (None if gone)
         "release_title": row.get("release_title"),
         "poster_url": row.get("poster_url"),
+        "quality_label": row.get("quality_label"),
+        "size_bytes": row.get("size_bytes"),  # the release's advertised size
+        "source": row.get("source"),
+        "username": row.get("username"),
+        "attempts": row.get("attempts"),
+        "grabbed_at": row.get("created_at"),
+        "media_id": row.get("media_id"),
+        "media_source": row.get("media_source"),
         "scope": c.get("scope"),
         "season": c.get("season"),
         "episode": c.get("episode"),

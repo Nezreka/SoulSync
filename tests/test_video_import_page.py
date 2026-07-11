@@ -59,3 +59,35 @@ def test_resolve_flow_wired_to_place_and_search():
 def test_endpoints_registered_on_the_blueprint():
     init = (_ROOT / "api" / "video" / "__init__.py").read_text(encoding="utf-8")
     assert "reg_manual_import(bp)" in init
+
+
+# ── card redesign: Cinema language + expand drawer + real actions ────────────
+
+def test_cards_use_the_cinema_card_language():
+    assert 'data-vtype="' in _JS                    # movie azure / tv violet accent
+    assert '.vimp-card[data-vtype="movie"]' in _CSS and '.vimp-card[data-vtype="tv"]' in _CSS
+    assert "vimp-art" in _JS                        # poster tile (poster_url finally used)
+    assert "vimp-art-badge" in _JS                  # type corner badge
+
+
+def test_cards_expand_into_a_detail_drawer():
+    assert "function drawerHTML(" in _JS
+    assert "state.expanded" in _JS                  # open state survives the poll
+    assert "vimp-dr-facts" in _JS and ".vimp-dr-facts" in _CSS
+    assert "data-vimp-copy" in _JS                  # copy-path action
+    # the 5s poll must not blink an open drawer away — renders are signature-gated
+    assert "_lastSig" in _JS
+
+
+def test_reasons_are_classified_into_chips():
+    assert "function classifyReason(" in _JS
+    for cls in ("vimp-rchip--sample", "vimp-rchip--upgrade", "vimp-rchip--corrupt",
+                "vimp-rchip--identify", "vimp-rchip--other"):
+        assert cls in _CSS, cls
+
+
+def test_drawer_offers_delete_file_with_destructive_confirm():
+    assert "data-vimp-delete" in _JS
+    assert "delete_file: !!del" in _JS
+    assert "destructive: true" in _JS               # SoulSync confirm modal, red button
+    assert ".vimp-btn--danger" in _CSS
