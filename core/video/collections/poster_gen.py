@@ -202,6 +202,48 @@ def render_collage(member_posters: List[bytes], title: str) -> bytes:
     return out.getvalue()
 
 
+def render_season_poster(avatar_bytes: bytes, year: str, channel: str = "") -> Optional[bytes]:
+    """A DISTINCT poster for a YouTube channel's year-season (Boulder: the plain
+    avatar copy made every season look identical to the channel). Blurred,
+    darkened avatar as the backdrop, the avatar again as a centered circle, the
+    YEAR big underneath, channel name small. 2:3 like every other poster here.
+    None when Pillow/decoding fails — the caller falls back to the avatar copy."""
+    try:
+        from PIL import Image, ImageDraw, ImageFilter
+
+        imgs = _decode([avatar_bytes])
+        if not imgs:
+            return None
+        av = imgs[0].convert("RGB")
+
+        canvas = _cover(av, _W, _H).filter(ImageFilter.GaussianBlur(70))
+        canvas = Image.blend(canvas, Image.new("RGB", (_W, _H), (8, 9, 14)), 0.55)
+
+        size = 600
+        circle = _cover(av, size, size)
+        mask = Image.new("L", (size, size), 0)
+        ImageDraw.Draw(mask).ellipse((0, 0, size, size), fill=255)
+        canvas.paste(circle, ((_W - size) // 2, 220), mask)
+
+        from core.video.overlays.compositor import _font
+        d = ImageDraw.Draw(canvas)
+        year = str(year or "").strip()
+        yf = _font("Inter", 800, 220)
+        box = d.textbbox((0, 0), year, font=yf)
+        d.text(((_W - (box[2] - box[0])) // 2, 960), year, font=yf, fill=(255, 255, 255))
+        if channel:
+            cf = _font("Inter", 700, 54)
+            box = d.textbbox((0, 0), channel, font=cf)
+            d.text(((_W - (box[2] - box[0])) // 2, 1250), channel, font=cf, fill=(226, 228, 235))
+
+        buf = io.BytesIO()
+        canvas.save(buf, "JPEG", quality=88)
+        return buf.getvalue()
+    except Exception:   # noqa: BLE001 - a failed render just means the plain-avatar fallback
+        logger.debug("season poster render failed", exc_info=True)
+        return None
+
+
 def render_logo_poster(logo_bytes: bytes, title: str) -> Optional[bytes]:
     """A studio-card poster: the studio's (transparent) logo centered on a
     name-seeded gradient. Dark logos get a light card so they never vanish.
