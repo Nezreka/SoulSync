@@ -687,3 +687,102 @@ def test_build_final_path_keeps_real_year_in_folder(monkeypatch, tmp_path):
 
     album_folder = os.path.basename(os.path.dirname(final_path))
     assert album_folder == "Mantras (Deluxe) (2026) [Album]"
+
+
+# ── #1009: album-folder reuse (#829) must never collapse a multi-disc album ──
+
+def _reuse_test_config(tmp_path, template):
+    return _Config(
+        {
+            "soulseek.transfer_path": str(tmp_path / "Transfer"),
+            "file_organization.enabled": True,
+            "file_organization.templates": {
+                "album_path": template,
+                "single_path": "$artist/$artist - $title",
+            },
+            "file_organization.collab_artist_mode": "first",
+            "file_organization.disc_label": "Disc",
+        }
+    )
+
+
+def _reuse_context(disc_number, total_discs_from_api):
+    return {
+        "artist": {"name": "Artist One"},
+        "album": {
+            "name": "Album One",
+            "id": "album-1",
+            "release_date": "2026-01-01",
+            "total_tracks": 40,
+            "total_discs": total_discs_from_api,
+            "album_type": "album",
+            "artists": [{"name": "Artist One"}],
+        },
+        "track_info": {
+            "name": "Song One", "id": "track-1",
+            "track_number": 13, "disc_number": disc_number,
+            "artists": [{"name": "Artist One"}],
+        },
+        "original_search_result": {
+            "title": "Song One", "clean_title": "Song One",
+            "clean_album": "Album One", "clean_artist": "Artist One",
+            "artists": [{"name": "Artist One"}],
+        },
+        "source": "deezer",
+        "is_album_download": True,
+    }
+
+
+def test_multi_disc_album_skips_folder_reuse(monkeypatch, tmp_path):
+    """#1009: mid-download the album 'exists' in exactly one folder — whichever
+    disc landed first. Reusing it funnels every later track of the box set into
+    that one disc folder ($cdnum templates AND the auto 'Disc N' folder alike),
+    colliding the per-disc '01 - …' filenames. Multi-disc albums must always
+    take the template path."""
+    config = _reuse_test_config(tmp_path, "$albumartist/$album/$cdnum/$track - $title")
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: config)
+
+    # a poisoned resolver: reuse would drop this disc-2 track into the CD01 folder
+    cd01 = tmp_path / "Transfer" / "Artist One" / "Album One" / "CD01"
+    cd01.mkdir(parents=True)
+    import core.library.existing_album_folder as eaf
+    import database.music_database as mdb
+    monkeypatch.setattr(mdb, "get_database", lambda: object(), raising=False)
+    monkeypatch.setattr(eaf, "resolve_existing_album_folder",
+                        lambda **kw: str(cd01))
+
+    final_path, created = import_paths.build_final_path_for_track(
+        _reuse_context(disc_number=2, total_discs_from_api=5),
+        {"name": "Artist One"},
+        {"is_album": True, "album_name": "Album One", "track_number": 13, "disc_number": 2},
+        ".flac",
+    )
+    assert created is True
+    assert final_path == str(
+        tmp_path / "Transfer" / "Artist One" / "Album One" / "CD02" / "13 - Song One.flac")
+
+
+def test_single_disc_album_still_reuses_existing_folder(monkeypatch, tmp_path):
+    """The #829 behavior the gate must NOT break: single-disc albums keep
+    joining their existing folder so $albumtype/$year drift can't split them."""
+    config = _reuse_test_config(
+        tmp_path, "$albumartist/$albumartist - $album/$track - $title")
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: config)
+    monkeypatch.setattr(import_paths, "_get_album_tracks_for_source", lambda *a: None)
+
+    existing = tmp_path / "Transfer" / "Artist One" / "Artist One - Album One (2020)"
+    existing.mkdir(parents=True)
+    import core.library.existing_album_folder as eaf
+    import database.music_database as mdb
+    monkeypatch.setattr(mdb, "get_database", lambda: object(), raising=False)
+    monkeypatch.setattr(eaf, "resolve_existing_album_folder",
+                        lambda **kw: str(existing))
+
+    final_path, created = import_paths.build_final_path_for_track(
+        _reuse_context(disc_number=1, total_discs_from_api=1),
+        {"name": "Artist One"},
+        {"is_album": True, "album_name": "Album One", "track_number": 13, "disc_number": 1},
+        ".flac",
+    )
+    assert created is True
+    assert final_path == str(existing / "13 - Song One.flac")
