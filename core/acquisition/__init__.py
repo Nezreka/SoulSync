@@ -1,5 +1,17 @@
-"""Acquisition layer (audit Kap. 11.4, Phase 4).
+"""Acquisition layer (audit Kap. 11.4, Phase 4)."""
 
-Grows incrementally: ``grabs`` (ADR-07 persistent client correlation) first;
-``acquisition_requests`` / ``release_candidates`` / decision engine follow.
-"""
+from __future__ import annotations
+
+from typing import Any
+
+
+def ensure_acquisition_schema(conn: Any) -> None:
+    """Create every durable acquisition table known to this build."""
+    from core.acquisition.grabs import ensure_acquisition_grabs_schema
+    from core.acquisition.requests import ensure_acquisition_requests_schema
+
+    ensure_acquisition_requests_schema(conn)
+    ensure_acquisition_grabs_schema(conn)
+
+
+__all__ = ["ensure_acquisition_schema"]

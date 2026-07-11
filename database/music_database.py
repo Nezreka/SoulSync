@@ -1114,14 +1114,14 @@ class MusicDatabase:
             except Exception as lib2_err:
                 logger.error(f"Library v2 schema init failed: {lib2_err}")
 
-            # Persistent grab correlation with external download clients
-            # (audit ADR-07): survives restarts so client jobs stay traceable.
+            # Durable acquisition root + persistent external-client correlation
+            # (audit Phase 4 / ADR-07).
             try:
-                from core.acquisition.grabs import ensure_acquisition_grabs_schema
-                ensure_acquisition_grabs_schema(conn)
-                self._record_migration(cursor, 'acquisition_grabs_schema')
+                from core.acquisition import ensure_acquisition_schema
+                ensure_acquisition_schema(conn)
+                self._record_migration(cursor, 'acquisition_phase4_schema')
             except Exception as grabs_err:
-                logger.error(f"Acquisition grabs schema init failed: {grabs_err}")
+                logger.error(f"Acquisition schema init failed: {grabs_err}")
 
             self._ensure_core_media_schema_columns(cursor)
             self._normalize_genres_to_json(cursor)
