@@ -199,6 +199,7 @@ class T2TunesSearchItem:
     asin: str
     title: str
     artist_name: str
+    artist_asins: List[str]
     item_type: str
     album_name: str = ""
     album_asin: str = ""
@@ -726,32 +727,46 @@ class AmazonClient:
 
     @staticmethod
     def _iter_search_items(response: Any) -> Iterator[T2TunesSearchItem]:
+        import json
+
         if not isinstance(response, dict):
             raise AmazonClientError(
                 f"Unexpected search response type: {type(response).__name__}"
             )
-        for result in response.get("results") or []:
+        """
+        {
+            "data": {
+                "searchTracks": {
+                    "edgeCount": 11,
+                    "edges": [
+                        {
+                        "node": {
+                            "id": "B0CQ575LSY",
+        """
+        # TODO: Handle albums
+        results: List[dict] = response["data"]["searchTracks"]["edges"] or []
+        for result in results:
             if not isinstance(result, dict):
                 continue
-            for hit in result.get("hits") or []:
-                if not isinstance(hit, dict):
-                    continue
-                doc = hit.get("document")
-                if not isinstance(doc, dict):
-                    continue
-                asin = str(doc.get("asin") or "")
-                if not asin:
-                    continue
-                yield T2TunesSearchItem(
-                    asin=asin,
-                    title=str(doc.get("title") or ""),
-                    artist_name=str(doc.get("artistName") or ""),
-                    item_type=str(doc.get("__type") or ""),
-                    album_name=str(doc.get("albumName") or ""),
-                    album_asin=str(doc.get("albumAsin") or ""),
-                    duration_seconds=int(doc.get("duration") or 0),
-                    isrc=str(doc.get("isrc") or ""),
-                )
+            doc = result.get("node")
+            if not isinstance(doc, dict):
+                continue
+            asin = str(doc.get("id") or "")
+            if not asin:
+                continue
+            contributing_artists = doc.get("contributingArtists") or {}
+            artist_asins = [edge["node"]["id"] for edge in contributing_artists.get("edges") or []]
+            yield T2TunesSearchItem(
+                asin=asin,
+                title=str(doc.get("shortTitle") or doc.get("title") or ""),
+                artist_name=str(contributing_artists.get("concatenatedName") or ""),
+                item_type="track", # searchTracks would always contain tracks.
+                album_name=str(doc["album"]["title"] or ""),
+                album_asin=str(doc["album"]["id"] or ""),
+                duration_seconds=int(doc.get("duration") or 0),
+                isrc=str(doc.get("uri") or ""),
+                artist_asins=artist_asins
+            )
 
     @staticmethod
     def _parse_stream_info(item: Dict[str, Any]) -> T2TunesStreamInfo:
@@ -788,8 +803,8 @@ class AmazonClient:
             album=str(tags.get("album") or ""),
             isrc=str(tags.get("isrc") or ""),
             cover_url=str(item.get("coverUrl") or ""),
-            track_number=_int_tag("trackNumber"),
-            disc_number=_int_tag("discNumber"),
+            track_number=_int_tag("track"),
+            disc_number=_int_tag("disc"),
             genre=str(tags.get("genre") or ""),
             label=str(tags.get("label") or ""),
             date=str(tags.get("date") or ""),
