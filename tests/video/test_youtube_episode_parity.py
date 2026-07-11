@@ -84,6 +84,19 @@ def test_yt_rows_carry_the_tv_action_cluster():
     assert "data-vd-ep-search" not in yt_row           # NO manual search — no release to pick
 
 
+def test_owned_yt_rows_keep_the_download_button():
+    """A server-side delete leaves the ownership ledger intact — the sanctioned
+    way back is downloading again, so owned rows keep ⭳ next to the badge
+    (Boulder). The wish toggle stays missing-rows-only."""
+    yt_row = _DETAIL_JS.split("function ytEpisodeRow")[1].split("function ytWishBtn")[0]
+    # the ACTION ternary (the first "ep.owned ?" is the row-class one)
+    owned_branch = yt_row.split("ep.owned ? '<div")[1].split(": '<div")[0]
+    assert "data-vd-yt-grab" in owned_branch           # re-download affordance
+    assert "vd-ep-badge" in owned_branch               # badge stays
+    assert "data-vd-yt-wish" not in owned_branch       # no wish toggle on owned rows
+    assert "data-vd-ep-dl" in owned_branch             # live tracking on re-grabs too
+
+
 def test_channel_season_bar_matches_tv_minus_manual_search():
     bar = _DETAIL_JS.split("Season-level acquisition bar")[1].split("host.innerHTML = seasonBar")[0]
     assert "isYt" in bar

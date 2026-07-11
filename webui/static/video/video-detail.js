@@ -1113,9 +1113,9 @@
         if (ep.dislike_count) { meta.push('👎 ' + (yc0 ? yc0.compactCount(ep.dislike_count) : ep.dislike_count)); }
         if (ep.air_date) meta.push(fmtDate(ep.air_date));
         var wished = !!ep.wished;
-        // Downloaded videos wear the SAME owned treatment as TV episodes:
-        // the .vd-ep--owned state, and the badge REPLACES the action button —
-        // an owned row offers no re-download affordance (TV parity).
+        // Downloaded videos wear the SAME owned treatment as TV episodes (.vd-ep--owned
+        // + badge) but KEEP the direct-download button: a server-side delete leaves the
+        // ownership ledger intact, and re-grabbing is the sanctioned way back (Boulder).
         return '<div class="vd-ep vd-ep--yt' + (ep.owned ? ' vd-ep--owned' : '') +
             '" data-vd-ep-key="' + key + '" data-vd-yt-vid="' + esc(ep.youtube_id) + '">' +
             '<div class="vd-ep-thumb vd-ep-thumb--play" data-vd-yt-play="' + esc(ep.youtube_id) + '" title="Play video">' +
@@ -1124,7 +1124,12 @@
             esc(ep.title || 'Untitled') + '</span>' +
             (meta.length ? '<span class="vd-ep-rt">' + esc(meta.join(' · ')) + '</span>' : '') + '</div>' +
             (ep.overview ? '<p class="vd-ep-desc">' + esc(ep.overview) + '</p>' : '') + '</div>' +
-            (ep.owned ? '<div class="vd-ep-badge">Downloaded</div>'
+            (ep.owned ? '<div class="vd-ep-get" data-vd-ep-get="' + esc(ep.youtube_id) + '">' +
+                            '<span class="vd-ep-dl" data-vd-ep-dl></span>' +
+                            '<div class="vd-ep-badge">Downloaded</div>' +
+                            '<button class="vd-ep-getbtn vd-ep-grab" type="button" data-vd-yt-grab="' + esc(ep.youtube_id) +
+                                '" title="Download again (e.g. after deleting it on the server)" aria-label="Download again">⭳</button>' +
+                        '</div>'
                       : '<div class="vd-ep-get" data-vd-ep-get="' + esc(ep.youtube_id) + '">' +
                             '<span class="vd-ep-dl" data-vd-ep-dl></span>' +
                             '<button class="vd-ep-getbtn vd-ep-grab" type="button" data-vd-yt-grab="' + esc(ep.youtube_id) +
