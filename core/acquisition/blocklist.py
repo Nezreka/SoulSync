@@ -141,6 +141,7 @@ def block_candidate(
     reason_code: str,
     message: Optional[str] = None,
     actor_profile_id: int = ADMIN_PROFILE_ID,
+    download_id: Optional[str] = None,
     expires_at: Optional[float] = None,
     now: Optional[float] = None,
 ) -> Tuple[BlocklistEntry, bool]:
@@ -212,6 +213,7 @@ def block_candidate(
         "candidate_blocklisted",
         request_id=candidate.request_id,
         candidate_id=candidate.id,
+        download_id=download_id,
         actor_profile_id=ADMIN_PROFILE_ID,
         reason_code=reason_code,
         message=message,

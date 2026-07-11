@@ -119,12 +119,14 @@ def resolve_catalog_context(conn: Any, request: AcquisitionRequest) -> CatalogCo
     if row is None:
         raise ValueError("acquisition catalog entity no longer exists")
     data = _row_dict(row)
+    from core.acquisition.blocklist import active_blocklisted_dedupe_keys
     return CatalogContext(
         artist=data.get("artist"),
         release_title=data.get("release_title"),
         edition=data.get("edition"),
         track_count=data.get("track_count"),
         any_release_ok=bool(request.search_options.get("any_release_ok", False)),
+        blocklisted_dedupe_keys=active_blocklisted_dedupe_keys(conn),
     )
 
 

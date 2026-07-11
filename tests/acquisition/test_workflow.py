@@ -8,6 +8,7 @@ import pytest
 
 from core.acquisition import ensure_acquisition_schema
 from core.acquisition.candidates import register_candidate
+from core.acquisition.blocklist import active_blocklisted_dedupe_keys
 from core.acquisition.decision_engine import (
     CatalogContext,
     EffectivePolicy,
@@ -15,11 +16,13 @@ from core.acquisition.decision_engine import (
 )
 from core.acquisition.decisions import public_decision_history
 from core.acquisition.grabs import get_grab
+from core.acquisition.history import list_history_events
 from core.acquisition.requests import create_request, get_request, transition_request
 from core.acquisition.workflow import (
     evaluate_request_candidates,
     prepare_candidate_grab,
     record_grab_outcome,
+    retry_acquisition_request,
 )
 from core.quality.model import QualityTarget
 
@@ -44,7 +47,8 @@ def _request(conn, key="workflow"):
         trigger="manual",
         idempotency_key=key,
     )
-    return transition_request(conn, request.id, "searching")
+    return transition_request(
+        conn, request.id, "searching", increment_attempts=True)
 
 
 def _candidate(conn, request, *, guid, title="Artist - Album", fmt="flac",
@@ -106,6 +110,8 @@ def test_manual_search_returns_rejected_candidates_with_reasons(conn):
     assert rejected["decision"]["accepted"] is False
     assert rejected["decision"]["rejections"][0]["code"] == "artist_mismatch"
     assert "server_ref" not in str(public)
+    events = list_history_events(conn, request_id=request.id)
+    assert events[-1].event_type == "candidates_evaluated"
 
 
 def test_automatic_search_selects_best_accepted_server_decision(conn):
@@ -136,6 +142,9 @@ def test_automatic_search_with_only_rejections_becomes_no_candidate(conn):
     assert result.selected is None
     assert result.request.status == "no_candidate"
     assert public_decision_history(conn, rejected.id)[0]["accepted"] is False
+    assert [event.event_type for event in list_history_events(
+        conn, request_id=request.id)] == [
+            "candidates_evaluated", "no_candidate"]
 
 
 def test_prepare_grab_rechecks_and_links_full_correlation(conn):
@@ -165,6 +174,8 @@ def test_prepare_grab_rechecks_and_links_full_correlation(conn):
     assert grab["context"]["quality_profile_id"] == 2
     assert get_request(conn, request.id).status == "grabbing"
     assert len(public_decision_history(conn, candidate.id)) == 2
+    assert list_history_events(
+        conn, download_id="download-1")[-1].event_type == "grab_prepared"
 
 
 def test_prepare_grab_is_idempotent_per_download_id(conn):
@@ -224,8 +235,99 @@ def test_terminal_grab_outcome_updates_owning_request(conn, completed):
         completed=completed,
         error=None if completed else "client failed",
         output_path="/done" if completed else None,
+        failure_kind=None if completed else "client",
     )
 
     assert updated.status == ("completed" if completed else "failed")
     grab = get_grab(conn, f"download-{completed}")
     assert grab["status"] == ("completed" if completed else "failed")
+    events = list_history_events(conn, download_id=f"download-{completed}")
+    assert events[-1].event_type == (
+        "grab_completed" if completed else "candidate_blocklisted")
+    blocked = active_blocklisted_dedupe_keys(conn)
+    assert (candidate.dedupe_key in blocked) is (not completed)
+
+
+def test_runtime_failure_is_recorded_but_does_not_block_release(conn):
+    request = _request(conn, key="runtime-failure")
+    candidate = _candidate(conn, request, guid="runtime")
+    evaluate_request_candidates(
+        conn, request.id, catalog=CATALOG, runtime=RUNTIME,
+        policy=POLICY, automatic=False, now=1001.0)
+    prepare_candidate_grab(
+        conn, request.id, candidate.id, download_id="download-runtime",
+        catalog=CATALOG, runtime=RUNTIME, policy=POLICY, now=1002.0)
+
+    record_grab_outcome(
+        conn,
+        "download-runtime",
+        completed=False,
+        error="staging path unavailable",
+        failure_kind="runtime",
+    )
+
+    assert candidate.dedupe_key not in active_blocklisted_dedupe_keys(conn)
+    assert list_history_events(
+        conn, download_id="download-runtime")[-1].event_type == "grab_failed"
+
+
+def test_failed_outcome_requires_explicit_failure_classification(conn):
+    request = _request(conn, key="unclassified-failure")
+    candidate = _candidate(conn, request, guid="unclassified")
+    evaluate_request_candidates(
+        conn, request.id, catalog=CATALOG, runtime=RUNTIME,
+        policy=POLICY, automatic=False, now=1001.0)
+    prepare_candidate_grab(
+        conn, request.id, candidate.id, download_id="download-unclassified",
+        catalog=CATALOG, runtime=RUNTIME, policy=POLICY, now=1002.0)
+
+    with pytest.raises(ValueError, match="require failure_kind"):
+        record_grab_outcome(
+            conn, "download-unclassified", completed=False, error="failed")
+
+    assert get_request(conn, request.id).status == "grabbing"
+
+
+def test_blocklisted_failed_candidate_is_rejected_after_retry(conn):
+    request = _request(conn, key="retry-blocklist")
+    failed = _candidate(conn, request, guid="failed")
+    evaluate_request_candidates(
+        conn, request.id, catalog=CATALOG, runtime=RUNTIME,
+        policy=POLICY, automatic=False, now=1001.0)
+    prepare_candidate_grab(
+        conn, request.id, failed.id, download_id="download-failed",
+        catalog=CATALOG, runtime=RUNTIME, policy=POLICY, now=1002.0)
+    record_grab_outcome(
+        conn,
+        "download-failed",
+        completed=False,
+        error="bad NZB",
+        failure_kind="candidate",
+    )
+    retried = retry_acquisition_request(conn, request.id)
+    replacement = _candidate(conn, retried, guid="replacement", grabs=1)
+    retry_catalog = CatalogContext(
+        artist="Artist",
+        release_title="Album",
+        edition="Deluxe",
+        track_count=10,
+        blocklisted_dedupe_keys=active_blocklisted_dedupe_keys(conn),
+    )
+
+    result = evaluate_request_candidates(
+        conn,
+        retried.id,
+        catalog=retry_catalog,
+        runtime=RUNTIME,
+        policy=POLICY,
+        automatic=True,
+        now=1003.0,
+    )
+
+    assert result.selected.candidate.id == replacement.id
+    failed_decision = next(
+        item.decision_run.decision
+        for item in result.candidates if item.candidate.id == failed.id)
+    assert "candidate_blocklisted" in {
+        reason.code for reason in failed_decision.rejections}
+    assert retried.attempts == 2

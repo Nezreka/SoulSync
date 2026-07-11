@@ -5,9 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
+from core.acquisition.blocklist import block_candidate
 from core.acquisition.candidates import (
     ReleaseCandidate,
     list_request_candidates,
+    redact_sensitive_text,
     resolve_candidate,
 )
 from core.acquisition.decision_engine import (
@@ -26,11 +28,15 @@ from core.acquisition.grabs import (
     record_grab,
     update_grab,
 )
+from core.acquisition.history import record_history_event
 from core.acquisition.requests import (
     AcquisitionRequest,
     get_request,
     transition_request,
 )
+
+
+FAILURE_KINDS = frozenset({"candidate", "client", "runtime"})
 
 
 @dataclass(frozen=True)
@@ -132,6 +138,28 @@ def evaluate_request_candidates(
             expected_status="candidates_ready",
             error="No candidate passed the Decision Engine",
         )
+    record_history_event(
+        conn,
+        "candidates_evaluated",
+        request_id=request.id,
+        candidate_id=selected.candidate.id if selected else None,
+        payload={
+            "automatic": bool(automatic),
+            "candidate_count": len(evaluated),
+            "accepted_count": len(accepted),
+            "selected_candidate_id": selected.candidate.id if selected else None,
+            "decision_run_ids": [item.decision_run.id for item in evaluated],
+        },
+    )
+    if request.status == "no_candidate":
+        record_history_event(
+            conn,
+            "no_candidate",
+            request_id=request.id,
+            reason_code=("no_results" if not candidates else "all_rejected"),
+            message=request.last_error,
+            payload={"candidate_count": len(candidates)},
+        )
     return SearchEvaluation(request, tuple(evaluated), selected)
 
 
@@ -211,6 +239,32 @@ def prepare_candidate_grab(
         },
         status=STATUS_SUBMITTING,
     )
+    if decision.forced:
+        record_history_event(
+            conn,
+            "force_grab",
+            request_id=request.id,
+            candidate_id=candidate.id,
+            download_id=download_id,
+            reason_code="manual_policy_override",
+            payload={
+                "decision_run_id": run.id,
+                "overridden_reasons": [
+                    reason.code for reason in decision.rejections],
+            },
+        )
+    record_history_event(
+        conn,
+        "grab_prepared",
+        request_id=request.id,
+        candidate_id=candidate.id,
+        download_id=download_id,
+        payload={
+            "decision_run_id": run.id,
+            "source": candidate.source,
+            "forced": decision.forced,
+        },
+    )
     return PreparedGrab(request, candidate, run, download_id)
 
 
@@ -221,28 +275,92 @@ def record_grab_outcome(
     completed: bool,
     error: Optional[str] = None,
     output_path: Optional[str] = None,
+    failure_kind: Optional[str] = None,
 ) -> AcquisitionRequest:
     """Persist a terminal business outcome on grab and owning request."""
     grab = get_grab(conn, download_id)
     if grab is None or not grab.get("acquisition_request_id"):
         raise ValueError("download is not linked to an acquisition request")
+    if completed and failure_kind is not None:
+        raise ValueError("completed grabs cannot declare a failure_kind")
+    if not completed:
+        failure_kind = str(failure_kind or "").strip().lower()
+        if failure_kind not in FAILURE_KINDS:
+            raise ValueError(
+                "failed grabs require failure_kind candidate|client|runtime")
+    safe_error = redact_sensitive_text(error) if error else None
     status = STATUS_COMPLETED if completed else STATUS_FAILED
     update_grab(
-        conn, download_id, status=status, error=error, output_path=output_path)
-    return transition_request(
+        conn, download_id, status=status, error=safe_error, output_path=output_path)
+    request = transition_request(
         conn,
         grab["acquisition_request_id"],
         "completed" if completed else "failed",
         expected_status="grabbing",
-        error=error,
+        error=safe_error,
     )
+    candidate_id = grab.get("release_candidate_id")
+    record_history_event(
+        conn,
+        "grab_completed" if completed else "grab_failed",
+        request_id=request.id,
+        candidate_id=candidate_id,
+        download_id=download_id,
+        reason_code=None if completed else f"{failure_kind}_failure",
+        message=safe_error,
+        payload={
+            "failure_kind": failure_kind,
+            "has_output_path": bool(output_path),
+        },
+    )
+    if not completed and failure_kind in {"candidate", "client"}:
+        if not candidate_id:
+            raise ValueError("failed acquisition grab has no release candidate")
+        block_candidate(
+            conn,
+            candidate_id,
+            reason_code=f"{failure_kind}_failure",
+            message=safe_error,
+            download_id=download_id,
+        )
+    return request
+
+
+def retry_acquisition_request(conn: Any, request_id: str) -> AcquisitionRequest:
+    """Begin another search attempt for a retryable terminal search outcome."""
+    current = get_request(conn, request_id)
+    if current is None:
+        raise KeyError(f"acquisition request not found: {request_id}")
+    if current.status not in {"failed", "no_candidate"}:
+        raise ValueError(
+            f"request cannot be retried while {current.status}")
+    retried = transition_request(
+        conn,
+        current.id,
+        "searching",
+        expected_status=current.status,
+        increment_attempts=True,
+    )
+    record_history_event(
+        conn,
+        "retry_started",
+        request_id=retried.id,
+        reason_code=f"retry_after_{current.status}",
+        payload={
+            "previous_status": current.status,
+            "attempt": retried.attempts,
+        },
+    )
+    return retried
 
 
 __all__ = [
     "EvaluatedCandidate",
+    "FAILURE_KINDS",
     "PreparedGrab",
     "SearchEvaluation",
     "evaluate_request_candidates",
     "prepare_candidate_grab",
     "record_grab_outcome",
+    "retry_acquisition_request",
 ]
