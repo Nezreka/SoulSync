@@ -109,7 +109,12 @@ def ydl_download_opts(profile: Any, dest_dir: str, dest_stem: str,
         # normalises the thumbnail to jpg.
         "writethumbnail": True,
         "writeinfojson": True,
-        "postprocessors": [{"key": "FFmpegThumbnailsConvertor", "format": "jpg"}],
+        # FFmpegMetadata embeds title/upload date/description into the container —
+        # Plex's Local Media Assets shows the EMBEDDED title on episodes (the
+        # filename-derived title only works on the Personal Media agent), and
+        # Jellyfin/Kodi read it too. ffmpeg is already required for the merge.
+        "postprocessors": [{"key": "FFmpegMetadata"},
+                           {"key": "FFmpegThumbnailsConvertor", "format": "jpg"}],
     }
     if cookie_opts:
         opts.update(cookie_opts)
@@ -310,9 +315,12 @@ def _ensure_channel_assets(final_video: str, fields: Dict[str, Any], settings: D
     channel_dir = _channel_dir_of(final_video, fields.get("channel"))
     if not channel_dir:
         return
+
+    def _http(u):
+        u = str(u or "")
+        return u if u.startswith("http://") or u.startswith("https://") else ""
+
     meta: Dict[str, Any] = {"title": fields.get("channel")}
-    if fields.get("poster_url"):
-        meta["poster_url"] = fields["poster_url"]
     cid = str(fields.get("channel_id") or "").strip()
     if cid and channel_meta_lookup is not None:
         try:
@@ -320,14 +328,30 @@ def _ensure_channel_assets(final_video: str, fields: Dict[str, Any], settings: D
         except Exception:   # noqa: BLE001 - the lookup is a bonus, not a dependency
             remembered = {}
         if isinstance(remembered, dict):
-            meta.setdefault("poster_url", remembered.get("avatar_url"))
-            if remembered.get("banner_url"):
+            # the AVATAR is the channel poster. The download row's poster_url is
+            # the VIDEO thumbnail (every enqueue path) — never use it here, and
+            # never hand the fetcher a relative/proxied URL.
+            if _http(remembered.get("avatar_url")):
+                meta["poster_url"] = remembered["avatar_url"]
+            if _http(remembered.get("banner_url")):
                 meta["backdrop_url"] = remembered["banner_url"]
             if remembered.get("description"):
                 meta["overview"] = remembered["description"]
     from core.video import sidecars as _sidecars
     from core.video.importer import real_fs
-    _sidecars.write(channel_dir, "youtube_channel", meta, settings, real_fs())
+    fs = real_fs()
+    _sidecars.write(channel_dir, "youtube_channel", meta, settings, fs)
+    # season folder poster (the year folder between channel and file, when the
+    # template has one): the avatar again — Plex/Jellyfin read poster.jpg inside
+    # a season directory, and a bare 'Season 2026' card looks broken.
+    season_dir = os.path.dirname(os.path.abspath(final_video))
+    if settings.get("save_artwork") and meta.get("poster_url") and             os.path.normpath(season_dir) != os.path.normpath(channel_dir):
+        try:
+            existing = {str(n).lower() for n in (fs.list_dir(season_dir) or [])}
+            if "poster.jpg" not in existing:
+                fs.save_url(meta["poster_url"], os.path.join(season_dir, "poster.jpg"))
+        except Exception:   # noqa: BLE001 - season art is a nicety
+            pass
 
 
 def process_youtube_download(

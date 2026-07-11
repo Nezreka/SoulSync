@@ -2244,11 +2244,15 @@
     }
     // ── YouTube: direct download (TV-parity grab — no search, the video IS the release) ──
     function _ytGrabBody(id) {
-        var ep = ytFindEp(id) || ytVideoMap[id] || {};
+        var raw = ytVideoMap[id] || {};          // the raw catalog object (unproxied urls)
+        var ep = ytFindEp(id) || raw;
         var ch = (data && data._channel) || {};
         return { video_id: id, channel_id: ch.youtube_id, channel_title: ch.title,
-                 video_title: ep.title, published_at: ep.air_date || ep.published_at,
-                 thumbnail_url: ep.still_url || ep.thumbnail_url };
+                 video_title: ep.title || raw.title,
+                 published_at: ep.air_date || raw.published_at,
+                 // RAW thumbnail only — ep.still_url is proxied for rendering and
+                 // a relative /api/... url is useless on the download row
+                 thumbnail_url: raw.thumbnail_url };
     }
     function _ytStartGrab(id) {
         return fetch('/api/video/youtube/download', {
