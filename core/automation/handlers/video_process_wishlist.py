@@ -30,13 +30,63 @@ from core.automation.deps import AutomationDeps
 
 
 # ── pure helpers ──────────────────────────────────────────────────────────────
-def pick_best(candidates: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+def pick_best(candidates: List[Dict[str, Any]], min_rank: int = 0) -> Optional[Dict[str, Any]]:
     """The best ACCEPTED release from a ranked candidate list. ``_evaluate_hits`` already
-    sorts best-first (accepted, score, availability), so the first accepted is the pick."""
+    sorts best-first (accepted, score, availability), so the first accepted is the pick.
+
+    ``min_rank`` > 0 = an UPGRADE pick for an owned item: only releases with a
+    resolution STRICTLY better than the current copy qualify (a same-quality
+    re-grab would just import_fail as 'not an upgrade' — the old re-download
+    loop). Unknown-resolution releases can't prove they're better, so they
+    don't qualify either."""
+    from core.video.quality_eval import resolution_rank
     for c in candidates or []:
-        if c.get("accepted"):
-            return c
+        if not c.get("accepted"):
+            continue
+        if min_rank and resolution_rank(c.get("resolution")) <= min_rank:
+            continue
+        return c
     return None
+
+
+def annotate_upgrades(items: List[Dict[str, Any]], cutoff_rank: int) -> List[Dict[str, Any]]:
+    """Upgrade-until-cutoff eligibility over the wishlist rows (pure).
+
+    Unowned items pass through untouched. Owned items (the queries annotate
+    ``owned`` + ``owned_resolutions``) are judged against the cutoff:
+      · already meet it       → skipped (their row should be gone; the Wishlist
+                                Audit job sweeps stragglers)
+      · below it              → kept, carrying ``_min_rank`` = the current
+                                copy's rank so only strictly-better wins
+      · resolution unreadable → skipped (can't prove an upgrade; the audit job
+                                surfaces these)
+    An empty cutoff ('always chase the best') means owned items are never
+    'done' — they stay upgrade-eligible forever."""
+    from core.video.quality_eval import resolution_rank
+    out = []
+    for it in items or []:
+        if not it.get("owned"):
+            out.append(it)
+            continue
+        rks = [resolution_rank(r) for r in str(it.get("owned_resolutions") or "").split(",")
+               if r.strip()]
+        cur = max(rks, default=0)
+        if cur == 0:
+            continue
+        if cutoff_rank and cur >= cutoff_rank:
+            continue
+        it = dict(it)
+        it["_min_rank"] = cur
+        out.append(it)
+    return out
+
+
+def _default_cutoff_rank() -> int:
+    """The profile cutoff as a resolution rank (0 = no cutoff set)."""
+    from api.video import get_video_db
+    from core.video.quality_eval import resolution_rank
+    from core.video.quality_profile import load as load_profile
+    return resolution_rank((load_profile(get_video_db()) or {}).get("cutoff_resolution"))
 
 
 def item_key(item: Dict[str, Any], media_type: str) -> tuple:
@@ -211,6 +261,15 @@ def auto_video_process_wishlist(
         deps.update_progress(automation_id, phase='Checking the wishlist…', progress=5,
                              log_line='Looking for wished %ss to grab' % label, log_type='info')
         items = fetch_items(media_type) or []
+        # Upgrade-until-cutoff: owned rows are judged against the profile cutoff
+        # (skip when met; strictly-better-only when below). Only loaded when an
+        # owned row is actually present — the common all-new case stays DB-free.
+        if any(it.get("owned") for it in items):
+            try:
+                cutoff_rank = _default_cutoff_rank()
+            except Exception:   # noqa: BLE001 - no profile → treat as no cutoff
+                cutoff_rank = 0
+            items = annotate_upgrades(items, cutoff_rank)
         active = set(active_keys(media_type) or set())
         todo = [it for it in items if item_key(it, media_type) not in active]
         if not todo:
@@ -233,7 +292,7 @@ def auto_video_process_wishlist(
             cands, err = found if isinstance(found, tuple) else (found, None)
             didnt_run = cands is None       # slskd not configured / errored / rate-limited
             cands = cands or []
-            best = pick_best(cands)
+            best = pick_best(cands, it.get("_min_rank") or 0)
             ok = bool(best) and bool(enqueue(it, best, cands, media_type, root))
             name = it.get('title') or it.get('show_title') or '?'
             if media_type == 'episode':
@@ -248,6 +307,10 @@ def auto_video_process_wishlist(
                 lt = 'warning'
             elif not cands:
                 msg, lt = "No search results for '%s'" % name, 'info'
+            elif it.get('_min_rank'):
+                msg = ("%d result(s) for '%s', none better than your current copy — "
+                       "still watching for an upgrade" % (len(cands), name))
+                lt = 'info'
             else:
                 why = (cands[0].get('rejected') or 'none met your quality profile')
                 msg, lt = "%d result(s) for '%s', none accepted — %s" % (len(cands), name, why), 'info'

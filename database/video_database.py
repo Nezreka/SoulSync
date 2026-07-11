@@ -4009,21 +4009,32 @@ class VideoDatabase:
         return {"rows": list(by_tmdb.values()), "files": list(by_movie.values())}
 
     def repair_stale_wishlist(self) -> list:
-        """Wishlist rows whose target is ALREADY OWNED (the drain skips them
-        forever — they're clutter): movie rows with an owned library match and
-        episode rows whose episode has a file."""
+        """Wishlist rows whose target is ALREADY OWNED, annotated with the owned
+        files' resolutions — the audit job judges them against the cutoff:
+        owned-below-cutoff rows are LEGITIMATE (upgrade-until keeps them for a
+        better copy); owned-at-cutoff and quality-unreadable rows are clutter."""
         conn = self._get_connection()
         try:
             movies = conn.execute(
                 "SELECT w.id AS wishlist_id, 'movie' AS kind, w.tmdb_id, w.title, "
                 "w.poster_url, NULL AS season_number, NULL AS episode_number, "
                 "(SELECT m.id FROM movies m WHERE m.tmdb_id=w.tmdb_id AND m.has_file=1 LIMIT 1) "
-                "AS library_id FROM video_wishlist w WHERE w.kind='movie' "
+                "AS library_id, "
+                "(SELECT GROUP_CONCAT(f.resolution) FROM movies m "
+                "  JOIN media_files f ON f.movie_id=m.id "
+                "  WHERE m.tmdb_id=w.tmdb_id AND m.has_file=1) AS owned_resolutions "
+                "FROM video_wishlist w WHERE w.kind='movie' "
                 "AND w.tmdb_id IN (SELECT tmdb_id FROM movies WHERE has_file=1 "
                 "AND tmdb_id IS NOT NULL)").fetchall()
             eps = conn.execute(
                 "SELECT w.id AS wishlist_id, 'episode' AS kind, w.tmdb_id, w.title, "
-                "w.poster_url, w.season_number, w.episode_number, w.library_id "
+                "w.poster_url, w.season_number, w.episode_number, w.library_id, "
+                "(SELECT GROUP_CONCAT(f.resolution) FROM episodes e "
+                "  JOIN shows s ON e.show_id=s.id "
+                "  JOIN media_files f ON f.episode_id=e.id "
+                "  WHERE s.tmdb_id=w.tmdb_id AND e.season_number=w.season_number "
+                "  AND e.episode_number=w.episode_number AND e.has_file=1) "
+                "  AS owned_resolutions "
                 "FROM video_wishlist w WHERE w.kind='episode' "
                 "AND EXISTS (SELECT 1 FROM episodes e JOIN shows s ON e.show_id=s.id "
                 "  WHERE s.tmdb_id=w.tmdb_id AND e.season_number=w.season_number "
@@ -4372,34 +4383,48 @@ class VideoDatabase:
 
     def movie_wishlist_to_download(self) -> list:
         """Wished movies ready to grab: only ``status='wanted'`` (released) — skips
-        'monitored' (unreleased) and anything the engine already advanced
-        (searching/downloading/downloaded/failed). Newest year first."""
+        'monitored' (unreleased). OWNED titles are included, annotated with
+        ``owned`` + ``owned_resolutions`` (the library files' resolutions,
+        comma-joined) — the 'upgrade until cutoff' semantics: the drain skips
+        owned items that already meet the cutoff and only accepts strictly
+        better releases for the rest, which is what keeps the old
+        owned-re-download loop broken. Newest year first."""
         conn = self._get_connection()
         try:
             return [dict(r) for r in conn.execute(
-                "SELECT tmdb_id, title, year, poster_url FROM video_wishlist "
-                "WHERE kind='movie' AND status='wanted' AND tmdb_id IS NOT NULL "
-                # Don't re-grab a movie already in the library (owned via any path, or a
-                # prior grab that import_failed as 'not an upgrade') — that was a loop.
-                "AND tmdb_id NOT IN (SELECT tmdb_id FROM movies WHERE has_file=1 AND tmdb_id IS NOT NULL) "
-                "ORDER BY year DESC, id DESC")]
+                "SELECT w.tmdb_id, w.title, w.year, w.poster_url, "
+                "EXISTS (SELECT 1 FROM movies m WHERE m.tmdb_id=w.tmdb_id AND m.has_file=1) "
+                "  AS owned, "
+                "(SELECT GROUP_CONCAT(f.resolution) FROM movies m "
+                "  JOIN media_files f ON f.movie_id=m.id "
+                "  WHERE m.tmdb_id=w.tmdb_id AND m.has_file=1) AS owned_resolutions "
+                "FROM video_wishlist w "
+                "WHERE w.kind='movie' AND w.status='wanted' AND w.tmdb_id IS NOT NULL "
+                "ORDER BY w.year DESC, w.id DESC")]
         finally:
             conn.close()
 
     def episode_wishlist_to_download(self) -> list:
         """Wished episodes ready to grab (all of them — the airing scan only wishlists
-        episodes that have aired). Newest air date first."""
+        episodes that have aired). OWNED episodes are included with the same
+        ``owned``/``owned_resolutions`` annotation as movies (upgrade-until
+        semantics; the drain does the cutoff/strictly-better judging). Newest
+        air date first."""
         conn = self._get_connection()
         try:
             return [dict(r) for r in conn.execute(
                 "SELECT w.tmdb_id AS show_tmdb_id, w.title AS show_title, w.season_number, "
-                "w.episode_number, w.episode_title, w.air_date, w.poster_url, w.library_id "
-                "FROM video_wishlist w WHERE w.kind='episode' AND w.tmdb_id IS NOT NULL "
-                # Don't re-grab an episode already owned (has_file) — matched show tmdb +
-                # SxE against the library. Breaks the import_failed-owned re-download loop.
-                "AND NOT EXISTS (SELECT 1 FROM episodes e JOIN shows s ON e.show_id = s.id "
+                "w.episode_number, w.episode_title, w.air_date, w.poster_url, w.library_id, "
+                "EXISTS (SELECT 1 FROM episodes e JOIN shows s ON e.show_id = s.id "
+                "  WHERE s.tmdb_id = w.tmdb_id AND e.season_number = w.season_number "
+                "  AND e.episode_number = w.episode_number AND e.has_file = 1) AS owned, "
+                "(SELECT GROUP_CONCAT(f.resolution) FROM episodes e "
+                "  JOIN shows s ON e.show_id = s.id "
+                "  JOIN media_files f ON f.episode_id = e.id "
                 "  WHERE s.tmdb_id = w.tmdb_id AND e.season_number = w.season_number "
                 "  AND e.episode_number = w.episode_number AND e.has_file = 1) "
+                "  AS owned_resolutions "
+                "FROM video_wishlist w WHERE w.kind='episode' AND w.tmdb_id IS NOT NULL "
                 "ORDER BY w.air_date DESC, w.id DESC")]
         finally:
             conn.close()

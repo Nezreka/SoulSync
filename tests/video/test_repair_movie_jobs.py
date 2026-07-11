@@ -240,8 +240,26 @@ def test_grab_movie_contract(monkeypatch):
 
 
 # ── Wishlist Audit ───────────────────────────────────────────────────────────
+def test_wishlist_audit_respects_upgrade_watches(db, worker, monkeypatch):
+    """Upgrade-until: owned-below-cutoff rows are LIVE watches (not flagged);
+    owned-at-cutoff rows are done (flagged)."""
+    low = _seed_movie(db, sid="m1", tmdb=20, title="Low Copy")
+    _add_file(db, low, path="/low.mkv", resolution="720p")
+    done = _seed_movie(db, sid="m2", tmdb=21, title="Done Copy")
+    _add_file(db, done, path="/done.mkv", resolution="1080p")
+    db.add_movie_to_wishlist(20, "Low Copy", year=2010)
+    db.add_movie_to_wishlist(21, "Done Copy", year=2010)
+    monkeypatch.setattr("core.video.quality_profile.load",
+                        lambda _db: {"cutoff_resolution": "1080p"})
+    worker._run_job("wishlist_audit", forced=True)
+    pend = _pending(db)
+    assert len(pend) == 1
+    assert pend[0]["details"]["tmdb_id"] == 21
+    assert "already at your quality cutoff" in pend[0]["title"]
+
+
 def test_wishlist_audit_finds_and_removes_owned_rows(db, worker):
-    _seed_movie(db, sid="m1", tmdb=9, title="Owned Film")
+    _seed_movie(db, sid="m1", tmdb=9, title="Owned Film")   # no media_files → unreadable
     db.add_movie_to_wishlist(9, "Owned Film", year=2010)
     db.add_movie_to_wishlist(10, "Still Wanted", year=2012)
     db.upsert_show_tree("plex", {"server_id": "s1", "title": "Show", "tmdb_id": 77, "seasons": [

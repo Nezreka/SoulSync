@@ -305,14 +305,32 @@ def _wishlist_failed(db, dl) -> None:
         logger.exception("video download %s: wishlist-on-fail failed", dl.get("id"))
 
 
-def _wishlist_obtained(db, dl) -> None:
-    """A wished item downloaded + imported — remove it from the wishlist so it isn't
-    re-grabbed every run (the movie/TV mirror of the YouTube clear-on-complete). The
-    absence of this was a real re-download loop on every hourly tick. Best-effort."""
+def _wishlist_obtained(db, dl, upd=None) -> None:
+    """A wished item downloaded + imported — decide what happens to its wishlist row.
+
+    UPGRADE-UNTIL-CUTOFF: the row is removed only when the landed file MEETS the
+    quality profile's cutoff ('upgrade until'). A below-cutoff grab (720p when the
+    cutoff is 1080p) keeps its row, so the hourly drain keeps watching for a
+    strictly better copy. The judgment reads the completed patch's quality_label —
+    ffprobe-derived when verification is on, so it reflects the file's REAL
+    resolution. Unreadable quality → remove (the old behavior; never wedge a row
+    open on a label we can't parse). An empty cutoff ('always chase the best')
+    never removes — those rows stay upgrade-eligible forever. Best-effort."""
     try:
         kind, tmdb_id, sn, en, _ctx = _wishlist_ids(db, dl)
         if not tmdb_id:
             return
+        try:
+            from core.video.quality_eval import meets_cutoff, resolution_rank
+            from core.video.quality_profile import load as load_profile
+            label = (upd or {}).get("quality_label") or dl.get("quality_label") or ""
+            profile = load_profile(db)
+            if resolution_rank(label) and not meets_cutoff(label, profile):
+                logger.info("video download %s: '%s' landed below the cutoff — kept on the "
+                            "wishlist for a future upgrade", dl.get("id"), label)
+                return
+        except Exception:   # noqa: BLE001 - judgment failure → classic remove-on-obtain
+            logger.debug("wishlist cutoff judgment failed; removing row", exc_info=True)
         if kind == "movie":
             db.remove_from_wishlist("movie", tmdb_id=int(tmdb_id))
         elif sn is not None and en is not None:
@@ -521,10 +539,10 @@ def _tick(db) -> None:
             upd.setdefault("completed_at", _now())
         try:
             db.update_video_download(dl["id"], **upd)
-            # A wished item that just landed is done — drop it from the wishlist so the
-            # hourly processor doesn't re-grab it forever (mirrors the YouTube path).
+            # A wished item that just landed: remove its row when it MEETS the
+            # quality cutoff, keep it when below (upgrade-until semantics).
             if upd.get("status") == "completed":
-                _wishlist_obtained(db, dl)
+                _wishlist_obtained(db, dl, upd)
             # Snapshot terminal outcomes into the permanent history (survives the
             # queue cleanup; powers the History modal + smart post-download scan).
             if upd.get("status") in ("completed", "cancelled", "import_failed"):
