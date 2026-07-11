@@ -146,6 +146,50 @@ def test_payload_change_and_entity_cleanup_are_explicit():
     ) is None
 
 
+def test_entity_delete_triggers_prune_polymorphic_snapshots():
+    conn = _connection()
+    artist_id = conn.execute(
+        "INSERT INTO lib2_artists(name) VALUES('Snapshot Artist')"
+    ).lastrowid
+    album_id = conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title) VALUES(?, 'Snapshot Album')",
+        (artist_id,),
+    ).lastrowid
+    track_id = conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title) VALUES(?, 'Snapshot Track')",
+        (album_id,),
+    ).lastrowid
+    edition_id = conn.execute(
+        "INSERT INTO lib2_release_editions(release_group_id, is_default) VALUES(?, 1)",
+        (album_id,),
+    ).lastrowid
+    for entity_type, entity_id in (
+        ("artist", artist_id),
+        ("album", album_id),
+        ("track", track_id),
+        ("release_edition", edition_id),
+    ):
+        record_provider_snapshot(
+            conn,
+            provider="test",
+            entity_type=entity_type,
+            entity_id=entity_id,
+            scope="metadata",
+            parser_version="test/1",
+            payload={"id": entity_id},
+            is_complete=True,
+        )
+
+    conn.execute("DELETE FROM lib2_tracks WHERE id=?", (track_id,))
+    conn.execute("DELETE FROM lib2_release_editions WHERE id=?", (edition_id,))
+    conn.execute("DELETE FROM lib2_albums WHERE id=?", (album_id,))
+    conn.execute("DELETE FROM lib2_artists WHERE id=?", (artist_id,))
+
+    assert conn.execute(
+        "SELECT COUNT(*) FROM library_provider_snapshots"
+    ).fetchone()[0] == 0
+
+
 @pytest.mark.parametrize(
     ("kwargs", "message"),
     [

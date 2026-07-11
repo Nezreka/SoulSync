@@ -53,6 +53,13 @@ _INDEXES = (
     "ON library_provider_snapshots(provider, fetched_at)",
 )
 
+_ENTITY_TABLES = {
+    "artist": "lib2_artists",
+    "album": "lib2_albums",
+    "track": "lib2_tracks",
+    "release_edition": "lib2_release_editions",
+}
+
 
 @dataclass(frozen=True)
 class ProviderSnapshot:
@@ -85,6 +92,23 @@ def ensure_provider_snapshot_schema(cursor: Any) -> None:
     cursor.execute(LIBRARY_PROVIDER_SNAPSHOTS_DDL)
     for index_sql in _INDEXES:
         cursor.execute(index_sql)
+    for entity_type, table in _ENTITY_TABLES.items():
+        exists = cursor.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
+        ).fetchone()
+        if not exists:
+            continue
+        trigger = f"trg_{table}_provider_snapshots_delete"
+        cursor.execute(f"DROP TRIGGER IF EXISTS {trigger}")
+        cursor.execute(f"""
+            CREATE TRIGGER {trigger}
+            AFTER DELETE ON {table}
+            FOR EACH ROW
+            BEGIN
+                DELETE FROM library_provider_snapshots
+                 WHERE entity_type='{entity_type}' AND entity_id=OLD.id;
+            END
+        """)
 
 
 def _required_text(value: Any, field: str, *, lowercase: bool = False) -> str:

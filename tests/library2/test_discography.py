@@ -103,6 +103,50 @@ def test_expand_records_normalized_provider_snapshot(
     assert repeated["snapshot_changed"] is False
 
 
+def test_provider_id_matching_is_exact_not_json_substring():
+    wrong = {
+        "id": 1, "title": "Wrong Release", "album_type": "album",
+        "spotify_id": None, "external_ids": json.dumps({"deezer": "1234"}),
+    }
+    right = {
+        "id": 2, "title": "Right Release", "album_type": "album",
+        "spotify_id": None, "external_ids": "{}",
+    }
+    index = {"wrong release": [wrong], "right release": [right]}
+
+    matched = D._match_existing(
+        index,
+        title="Right Release",
+        album_type="album",
+        provider_id="123",
+        source="deezer",
+    )
+
+    assert matched["id"] == 2
+
+
+def test_discography_enrichment_merges_external_ids(
+        legacy_db, imported_conn, fake_discography):
+    aid = _artist_id(imported_conn)
+    views_id = imported_conn.execute(
+        "SELECT id FROM lib2_albums WHERE title='Views'"
+    ).fetchone()[0]
+    conn = legacy_db._get_connection()
+    conn.execute(
+        "UPDATE lib2_albums SET external_ids=? WHERE id=?",
+        (json.dumps({"musicbrainz": "mb-release"}), views_id),
+    )
+    conn.commit()
+    conn.close()
+
+    D.expand_artist_discography(legacy_db, aid)
+
+    values = json.loads(imported_conn.execute(
+        "SELECT external_ids FROM lib2_albums WHERE id=?", (views_id,)
+    ).fetchone()["external_ids"])
+    assert values == {"musicbrainz": "mb-release", "spotify": "sp-views"}
+
+
 def test_expand_prunes_vanished_pristine_rows(legacy_db, imported_conn, fake_discography, monkeypatch):
     aid = _artist_id(imported_conn)
     D.expand_artist_discography(legacy_db, aid)

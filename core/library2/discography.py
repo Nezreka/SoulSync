@@ -68,6 +68,31 @@ def _existing_release_index(conn, artist_id: int) -> Dict[str, List[Dict[str, An
     return index
 
 
+def _external_ids(raw: Any) -> Dict[str, str]:
+    import json
+
+    try:
+        value = json.loads(raw or "{}")
+    except (TypeError, ValueError):
+        return {}
+    if not isinstance(value, dict):
+        return {}
+    return {
+        str(source).strip().lower(): str(provider_id).strip()
+        for source, provider_id in value.items()
+        if str(source).strip() and str(provider_id).strip()
+    }
+
+
+def _merge_external_id(raw: Any, source: Optional[str], provider_id: str) -> str:
+    import json
+
+    values = _external_ids(raw)
+    if source and provider_id:
+        values[str(source).strip().lower()] = str(provider_id).strip()
+    return json.dumps(values, sort_keys=True, separators=(",", ":"))
+
+
 def _match_existing(index: Dict[str, List[Dict[str, Any]]], *, title: str,
                     album_type: str, provider_id: str, source: Optional[str]) -> Optional[Dict[str, Any]]:
     """Find the library row a provider release corresponds to, if any."""
@@ -77,8 +102,8 @@ def _match_existing(index: Dict[str, List[Dict[str, Any]]], *, title: str,
             for row in candidates:
                 if source == "spotify" and row["spotify_id"] == provider_id:
                     return row
-                ext = row["external_ids"] or ""
-                if provider_id and f'"{provider_id}"' in ext:
+                external_ids = _external_ids(row["external_ids"])
+                if source and external_ids.get(source.lower()) == provider_id:
                     return row
     # 2) Normalized-title match, preferring the same single-vs-release bucket
     #    (legacy imports classify by track count, so ep<->album mismatches are
@@ -208,6 +233,8 @@ def expand_artist_discography(database, artist_id: int) -> Dict[str, Any]:
                                        provider_id=provider_id, source=source)
             if existing:
                 seen_ids.add(existing["id"])
+                merged_external_ids = _merge_external_id(
+                    existing["external_ids"], source, provider_id)
                 cursor.execute(
                     """UPDATE lib2_albums SET
                            spotify_id = COALESCE(spotify_id, ?),
@@ -215,13 +242,13 @@ def expand_artist_discography(database, artist_id: int) -> Dict[str, Any]:
                            release_date = COALESCE(release_date, ?),
                            year = COALESCE(year, ?),
                            expected_track_count = COALESCE(expected_track_count, ?),
-                           external_ids = CASE WHEN external_ids IN ('', '{}')
-                                               THEN ? ELSE external_ids END,
+                           external_ids = ?,
                            updated_at = CURRENT_TIMESTAMP
                        WHERE id = ?""",
                     (spotify_id, image_url, release_date, year, track_count,
-                     external_ids, existing["id"]),
+                     merged_external_ids, existing["id"]),
                 )
+                existing["external_ids"] = merged_external_ids
                 stats["enriched"] += 1
                 continue
 
