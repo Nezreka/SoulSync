@@ -202,10 +202,13 @@ def render_collage(member_posters: List[bytes], title: str) -> bytes:
     return out.getvalue()
 
 
-def render_season_poster(avatar_bytes: bytes, year: str, channel: str = "") -> Optional[bytes]:
+def render_season_poster(avatar_bytes: bytes, year: str, channel: str = "",
+                         backdrop_bytes: Optional[bytes] = None) -> Optional[bytes]:
     """A DISTINCT poster for a YouTube channel's year-season (Boulder: the plain
-    avatar copy made every season look identical to the channel). Blurred,
-    darkened avatar as the backdrop, the avatar again as a centered circle, the
+    avatar copy made every season look identical to the channel). Backdrop =
+    a REAL video thumbnail from that year when provided (matching the in-app
+    channel page, whose season visuals are video thumbs), else the avatar —
+    blurred + darkened either way, with the avatar as a centered circle, the
     YEAR big underneath, channel name small. 2:3 like every other poster here.
     None when Pillow/decoding fails — the caller falls back to the avatar copy."""
     try:
@@ -215,8 +218,13 @@ def render_season_poster(avatar_bytes: bytes, year: str, channel: str = "") -> O
         if not imgs:
             return None
         av = imgs[0].convert("RGB")
+        back = av
+        if backdrop_bytes:
+            bimgs = _decode([backdrop_bytes])
+            if bimgs:
+                back = bimgs[0].convert("RGB")
 
-        canvas = _cover(av, _W, _H).filter(ImageFilter.GaussianBlur(70))
+        canvas = _cover(back, _W, _H).filter(ImageFilter.GaussianBlur(70))
         canvas = Image.blend(canvas, Image.new("RGB", (_W, _H), (8, 9, 14)), 0.55)
 
         size = 600

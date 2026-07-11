@@ -516,8 +516,14 @@ def test_season_poster_is_a_composed_year_card_not_an_avatar_copy(tmp_path, monk
     Image.new("RGB", (400, 400), (200, 40, 40)).save(buf, "PNG")
     (tmp_path / "yt" / "Chan" / "poster.jpg").write_bytes(buf.getvalue())
 
+    # the video's own thumbnail becomes the backdrop (fetched in-memory)
+    tbuf = _io.BytesIO()
+    Image.new("RGB", (640, 360), (20, 160, 90)).save(tbuf, "PNG")
+    monkeypatch.setattr(ytd, "_fetch_bytes", lambda url, timeout=15: tbuf.getvalue())
+
     fields = {"title": "Vid", "channel": "Chan", "channel_id": "UC1",
-              "published_at": "2026-07-11", "youtube_id": "v1"}
+              "published_at": "2026-07-11", "youtube_id": "v1",
+              "poster_url": "https://i.ytimg.com/vi/v1/maxresdefault.jpg"}
     lookup = lambda cid: {"avatar_url": "http://a/av.jpg"}
     ytd._ensure_channel_assets(str(lib / "Chan - s2026e0711 - Vid.mp4"),
                                fields, {"save_artwork": True}, lookup)

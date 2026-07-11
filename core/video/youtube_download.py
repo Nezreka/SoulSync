@@ -286,6 +286,21 @@ def _default_sidecars(staged_video: str, final_video: str, fields: Dict[str, Any
         logger.exception("youtube sidecars failed for %s", final_video)
 
 
+def _fetch_bytes(url: Any, timeout: int = 15) -> Optional[bytes]:
+    """Best-effort in-memory fetch of an ABSOLUTE http(s) url (video thumbs for
+    the season-poster backdrop). None on anything less than a clean 2xx read."""
+    u = str(url or "")
+    if not (u.startswith("http://") or u.startswith("https://")):
+        return None
+    try:
+        import urllib.request
+        req = urllib.request.Request(u, headers={"User-Agent": "SoulSync"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.read()
+    except Exception:   # noqa: BLE001 - a missing thumb just means the avatar backdrop
+        return None
+
+
 def _channel_dir_of(final_video: str, channel: Any) -> Optional[str]:
     """The ancestor directory named after the channel — template-agnostic (works for
     the default channel/Season YYYY/ layout AND custom depths). None when the user's
@@ -360,8 +375,15 @@ def _ensure_channel_assets(final_video: str, fields: Dict[str, Any], settings: D
                 if year.isdigit() and os.path.isfile(chan_poster):
                     try:
                         from core.video.collections.poster_gen import render_season_poster
+                        # backdrop = THIS video's thumbnail (a real frame from the
+                        # year — matching the in-app channel page, whose season
+                        # visuals are video thumbs). The row's poster_url is the
+                        # video thumb on every enqueue path.
+                        backdrop = _fetch_bytes(fields.get("poster_url"))
                         with open(chan_poster, "rb") as f:
-                            data = render_season_poster(f.read(), year, str(fields.get("channel") or ""))
+                            data = render_season_poster(f.read(), year,
+                                                        str(fields.get("channel") or ""),
+                                                        backdrop_bytes=backdrop)
                     except Exception:   # noqa: BLE001 - fall back to the avatar copy
                         data = None
                 if data:
