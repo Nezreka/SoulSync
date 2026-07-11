@@ -31,7 +31,7 @@ logger = get_logger("video_database")
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 30
+SCHEMA_VERSION = 31
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -281,6 +281,10 @@ _COLUMN_MIGRATIONS = [
     # A locked field is owned by the user: scan upserts and enrichment skip it.
     ("movies", "locked_fields", "TEXT"),
     ("shows", "locked_fields", "TEXT"),
+    # 'Cleared' download-history rows: hidden from the History modal but KEPT —
+    # YouTube completed rows are the ownership ledger (scan dedup, retention,
+    # Channels tab); a user clear must never delete the facts.
+    ("video_download_history", "cleared_at", "TEXT"),
 ]
 
 
@@ -1757,6 +1761,11 @@ class VideoDatabase:
                  row.get("media_id"), row.get("media_source"), row.get("poster_url"),
                  outcome, row.get("error"), row.get("created_at"),
                  row.get("completed_at"), channel_id, published_at))
+            # Opportunistic LOG trim (the user-visible diary keeps a rolling year;
+            # the YouTube ownership ledger is exempt and lives forever).
+            conn.execute(
+                f"DELETE FROM video_download_history WHERE NOT {self._YT_LEDGER} "
+                "AND COALESCE(completed_at, grabbed_at) < datetime('now', '-365 days')")
             conn.commit()
             return cur.lastrowid or 0
         except Exception:
@@ -1774,7 +1783,8 @@ class VideoDatabase:
             page = max(1, int(page or 1)); limit = max(1, min(200, int(limit or 40)))
         except (TypeError, ValueError):
             page, limit = 1, 40
-        where, args = ["1=1"], []
+        # Cleared ledger rows are hidden from the modal (the facts live on).
+        where, args = ["cleared_at IS NULL"], []
         if kind in ("movie", "show"):
             where.append("kind = ?"); args.append(kind)
         if outcome:
@@ -1813,7 +1823,7 @@ class VideoDatabase:
         try:
             rows = conn.execute(
                 "SELECT kind, COUNT(*) c FROM video_download_history "
-                "WHERE outcome='completed' GROUP BY kind").fetchall()
+                "WHERE outcome='completed' AND cleared_at IS NULL GROUP BY kind").fetchall()
             by = {r["kind"]: r["c"] for r in rows}
             movie, show = by.get("movie", 0), by.get("show", 0)
             return {"movie": movie, "show": show, "total": movie + show}
@@ -1833,17 +1843,31 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    # The YouTube OWNERSHIP LEDGER: completed grabs (incl. retention-pruned ones).
+    # Four subsystems depend on these rows never disappearing — scan dedup,
+    # retention, the Channels tab, the downloaded badges.
+    _YT_LEDGER = "(source='youtube' AND outcome='completed')"
+
     def clear_download_history(self, kind=None) -> int:
-        """Clear the permanent history — all of it, or just one kind ('movie'|'show'|
-        'youtube'). Returns the number of rows removed."""
+        """The user-facing 'clear': the LOG deletes, the LEDGER only hides.
+        YouTube completed rows are stamped ``cleared_at`` — they leave the
+        History modal but keep every ownership fact (the user can clear all
+        they want; the real history survives). Everything else — failures,
+        cancellations, movie/TV rows (re-derivable from the server scan) —
+        truly deletes. The per-row delete_download_history stays a REAL forget:
+        that's the deliberate 'Re-download' action. Returns rows affected."""
         conn = self._get_connection()
         try:
-            if kind in ("movie", "show", "youtube"):
-                cur = conn.execute("DELETE FROM video_download_history WHERE kind=?", (kind,))
-            else:
-                cur = conn.execute("DELETE FROM video_download_history")
+            kf, args = ("", []) if kind not in ("movie", "show", "youtube") else \
+                (" AND kind=?", [kind])
+            hid = conn.execute(
+                f"UPDATE video_download_history SET cleared_at=datetime('now') "
+                f"WHERE {self._YT_LEDGER} AND cleared_at IS NULL{kf}", args).rowcount
+            gone = conn.execute(
+                f"DELETE FROM video_download_history WHERE NOT {self._YT_LEDGER}{kf}",
+                args).rowcount
             conn.commit()
-            return cur.rowcount
+            return hid + gone
         finally:
             conn.close()
 
