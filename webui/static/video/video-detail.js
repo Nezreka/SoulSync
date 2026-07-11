@@ -1125,7 +1125,15 @@
             (meta.length ? '<span class="vd-ep-rt">' + esc(meta.join(' · ')) + '</span>' : '') + '</div>' +
             (ep.overview ? '<p class="vd-ep-desc">' + esc(ep.overview) + '</p>' : '') + '</div>' +
             (ep.owned ? '<div class="vd-ep-badge">Downloaded</div>'
-                      : ytWishBtn(ep.youtube_id, wished, false)) +
+                      : '<div class="vd-ep-get" data-vd-ep-get="' + esc(ep.youtube_id) + '">' +
+                            '<span class="vd-ep-dl" data-vd-ep-dl></span>' +
+                            '<button class="vd-ep-getbtn vd-ep-grab" type="button" data-vd-yt-grab="' + esc(ep.youtube_id) +
+                                '" title="Download this video now" aria-label="Download video">⭳</button>' +
+                            '<button class="vd-ep-getbtn vd-ep-wish' + (wished ? ' vd-ep-wish--done' : '') +
+                                '" type="button" data-vd-yt-wish="' + esc(ep.youtube_id) +
+                                '" title="' + (wished ? 'Remove from wishlist' : 'Add this video to the wishlist') +
+                                '" aria-label="Wishlist video">' + (wished ? '✓' : '＋') + '</button>' +
+                        '</div>') +
             '<span class="vd-ep-chev" aria-hidden="true">⌄</span></div>' +
             '<div class="vd-ep-extra" data-vd-ep-panel="' + key + '" hidden></div>';
     }
@@ -1271,23 +1279,28 @@
             ? (ytFilter.q ? 'No videos match “' + esc(ytFilter.q) + '”.' : 'No videos here.')
             : 'No ' + (missingOnly ? 'missing ' : '') + 'episodes here. 🎉';
         // Season-level acquisition bar — grab / wishlist every missing episode in
-        // one click (TV shows only, when something is actually missing).
-        var seasonMissing = (data && data.source !== 'youtube')
-            ? season.episodes.filter(function (e) { return !e.owned; }) : [];
-        var seasonBar = (seasonMissing.length && window.VideoGrab)
+        // one click. Channels get the SAME bar (TV parity), minus manual search:
+        // there's no release to pick on YouTube, the video is the release.
+        var isYt = !!(data && data.source === 'youtube');
+        var seasonMissing = season.episodes.filter(function (e) { return !e.owned; });
+        if (isYt && ytFilter.q) seasonMissing = [];   // a filtered view isn't "the season"
+        var seasonBar = (seasonMissing.length && (isYt || window.VideoGrab))
             ? '<div class="vd-season-actions">' +
                 '<span class="vd-season-actions-count">' + seasonMissing.length + ' missing</span>' +
                 '<button class="discog-download-btn discog-btn-compact" type="button" data-vd-season-grab ' +
-                    'title="Auto-search &amp; download every missing episode in this season">' +
-                    '<span class="discog-btn-icon">⭳</span><span class="discog-btn-text">Grab season</span>' +
+                    'title="' + (isYt ? 'Download every missing video in this year'
+                                      : 'Auto-search &amp; download every missing episode in this season') + '">' +
+                    '<span class="discog-btn-icon">⭳</span><span class="discog-btn-text">Grab ' + (isYt ? 'year' : 'season') + '</span>' +
                     '<span class="discog-btn-shimmer"></span></button>' +
+                (isYt ? '' :
                 '<button class="discog-download-btn discog-btn-compact" type="button" data-vd-season-search ' +
                     'title="Manual search — pick releases for this season">' +
                     '<span class="discog-btn-icon">⌕</span><span class="discog-btn-text">Manual search</span>' +
-                    '<span class="discog-btn-shimmer"></span></button>' +
+                    '<span class="discog-btn-shimmer"></span></button>') +
                 '<button class="discog-download-btn discog-btn-compact" type="button" data-vd-season-wish ' +
-                    'title="Add every missing episode in this season to the wishlist">' +
-                    '<span class="discog-btn-icon">＋</span><span class="discog-btn-text">Wishlist season</span>' +
+                    'title="' + (isYt ? 'Add every missing video in this year to the wishlist'
+                                      : 'Add every missing episode in this season to the wishlist') + '">' +
+                    '<span class="discog-btn-icon">＋</span><span class="discog-btn-text">Wishlist ' + (isYt ? 'year' : 'season') + '</span>' +
                     '<span class="discog-btn-shimmer"></span></button>' +
               '</div>'
             : '';
@@ -1865,16 +1878,27 @@
     function toggleYtWish(btn) {
         var yc = window.VideoYoutube; if (!yc) return;
         var id = btn.getAttribute('data-vd-yt-wish');
-        var on = btn.classList.contains('vd-yt-wish--on');
+        // wished-state rides 'watching' on the pill buttons and 'vd-ep-wish--done'
+        // on the episode-row buttons (the old 'vd-yt-wish--on' check matched
+        // NEITHER — unwishing from a row silently re-added instead)
+        var on = btn.classList.contains('watching') || btn.classList.contains('vd-ep-wish--done');
         btn.disabled = true;
         var setOn = function (val) {
             btn.disabled = false;
             if (ytVideoMap[id]) ytVideoMap[id].wished = val;
             var r0 = root(), btns = r0 ? r0.querySelectorAll('[data-vd-yt-wish="' + id + '"]') : [];
             for (var i = 0; i < btns.length; i++) {
-                btns[i].classList.toggle('watching', val);
-                var ic = btns[i].querySelector('.watchlist-icon'); if (ic) ic.textContent = val ? '✓' : '＋';
-                var tx = btns[i].querySelector('.watchlist-text'); if (tx) tx.textContent = val ? 'In Wishlist' : 'Wishlist';
+                var ic = btns[i].querySelector('.watchlist-icon');
+                var tx = btns[i].querySelector('.watchlist-text');
+                if (ic || tx) {   // pill chrome (hero / playlist cards)
+                    btns[i].classList.toggle('watching', val);
+                    if (ic) ic.textContent = val ? '✓' : '＋';
+                    if (tx) tx.textContent = val ? 'In Wishlist' : 'Wishlist';
+                } else {          // episode-row getbtn chrome (TV parity)
+                    btns[i].classList.toggle('vd-ep-wish--done', val);
+                    btns[i].textContent = val ? '✓' : '＋';
+                    btns[i].title = val ? 'Remove from wishlist' : 'Add this video to the wishlist';
+                }
             }
             // No rail re-render: wished no longer drives the owned counts (real
             // downloads do), and the buttons above were already patched in place —
@@ -2095,6 +2119,8 @@
         if (ytPl && r.contains(ytPl)) { toggleYtPlaylist(ytPl); return; }
         // Inline acquisition — must win over the row-expand handler below since the
         // grab/wishlist buttons live inside the episode row.
+        var ytGrab = e.target.closest('[data-vd-yt-grab]');
+        if (ytGrab && r.contains(ytGrab)) { e.preventDefault(); ytGrabVideoInline(ytGrab); return; }
         var epGrab = e.target.closest('[data-vd-ep-grab]');
         if (epGrab && r.contains(epGrab)) { e.preventDefault(); e.stopPropagation(); grabEpisodeInline(epGrab); return; }
         var epSearch = e.target.closest('[data-vd-ep-search]');
@@ -2102,11 +2128,19 @@
         var epWish = e.target.closest('[data-vd-ep-wish]');
         if (epWish && r.contains(epWish)) { e.preventDefault(); e.stopPropagation(); wishEpisodeInline(epWish); return; }
         var seasonGrab = e.target.closest('[data-vd-season-grab]');
-        if (seasonGrab && r.contains(seasonGrab)) { e.preventDefault(); grabSeasonInline(seasonGrab); return; }
+        if (seasonGrab && r.contains(seasonGrab)) {
+            e.preventDefault();
+            if (data && data.source === 'youtube') ytGrabSeasonInline(seasonGrab); else grabSeasonInline(seasonGrab);
+            return;
+        }
         var seasonSearch = e.target.closest('[data-vd-season-search]');
         if (seasonSearch && r.contains(seasonSearch)) { e.preventDefault(); manualSearchSeason(); return; }
         var seasonWish = e.target.closest('[data-vd-season-wish]');
-        if (seasonWish && r.contains(seasonWish)) { e.preventDefault(); wishSeasonInline(seasonWish); return; }
+        if (seasonWish && r.contains(seasonWish)) {
+            e.preventDefault();
+            if (data && data.source === 'youtube') ytWishSeasonInline(seasonWish); else wishSeasonInline(seasonWish);
+            return;
+        }
         var epRow = e.target.closest('[data-vd-ep-key]');
         if (epRow && r.contains(epRow)) { toggleEpisode(epRow); return; }
         var seasonBtn = e.target.closest('[data-vd-season]');
@@ -2176,7 +2210,8 @@
     // Optimistic per-episode state for the search phase — the grab has no row in
     // /downloads/active yet. The live tracker takes over once it appears.
     function _setEpSynthetic(en, state) {
-        var key = selectedSeason + '_' + en;
+        // TV keys are 'season_episode'; YouTube keys are the video id itself
+        var key = (data && data.source === 'youtube') ? String(en) : selectedSeason + '_' + en;
         if (state === 'none') delete _dlActive[key];
         else if (!_dlDone[key]) _dlActive[key] = { status: state === 'grabbing' ? 'queued' : 'searching', progress: 0 };
         applyDlStates();
@@ -2207,6 +2242,76 @@
             else { btn.disabled = false; toast('Could not add to wishlist', 'error'); }
         });
     }
+    // ── YouTube: direct download (TV-parity grab — no search, the video IS the release) ──
+    function _ytGrabBody(id) {
+        var ep = ytFindEp(id) || ytVideoMap[id] || {};
+        var ch = (data && data._channel) || {};
+        return { video_id: id, channel_id: ch.youtube_id, channel_title: ch.title,
+                 video_title: ep.title, published_at: ep.air_date || ep.published_at,
+                 thumbnail_url: ep.still_url || ep.thumbnail_url };
+    }
+    function _ytStartGrab(id) {
+        return fetch('/api/video/youtube/download', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify(_ytGrabBody(id)),
+        }).then(function (r) { return r.json().catch(function () { return null; }); });
+    }
+    function ytGrabVideoInline(btn) {
+        var id = btn.getAttribute('data-vd-yt-grab');
+        btn.disabled = true; _setEpSynthetic(id, 'grabbing'); startDlTracking();
+        _ytStartGrab(id).then(function (d) {
+            if (d && d.success) {
+                toast(d.already ? 'Already downloading' : 'Download queued', 'success');
+                document.dispatchEvent(new CustomEvent('soulsync:video-download-started'));
+            } else {
+                _setEpSynthetic(id, 'none'); btn.disabled = false;
+                toast((d && d.error) || 'Could not start the download', 'error');
+            }
+        }).catch(function () { _setEpSynthetic(id, 'none'); btn.disabled = false; toast('Could not start the download', 'error'); });
+    }
+    function ytGrabSeasonInline(btn) {
+        var missing = _seasonMissing();
+        if (!missing.length) { toast('Nothing missing here', 'info'); return; }
+        btn.disabled = true; _btnLabel(btn, 'Queueing…'); startDlTracking();
+        var done = 0;
+        var next = function (i) {
+            if (i >= missing.length) {
+                btn.disabled = false; _btnLabel(btn, 'Grab year');
+                toast('Queued ' + done + ' of ' + missing.length + ' video' + (missing.length === 1 ? '' : 's'), done ? 'success' : 'info');
+                if (done) document.dispatchEvent(new CustomEvent('soulsync:video-download-started'));
+                startDlTracking();
+                return;
+            }
+            var id = missing[i].youtube_id;
+            _setEpSynthetic(id, 'grabbing');
+            _ytStartGrab(id).then(function (d) {
+                if (d && d.success) done++; else _setEpSynthetic(id, 'none');
+                next(i + 1);
+            }).catch(function () { _setEpSynthetic(id, 'none'); next(i + 1); });
+        };
+        next(0);
+    }
+    function ytWishSeasonInline(btn) {
+        var yc = window.VideoYoutube; if (!yc) return;
+        var missing = _seasonMissing().filter(function (e) { return !e.wished; });
+        if (!missing.length) { toast('Everything here is already wishlisted or owned', 'info'); return; }
+        var ch = (data && data._channel) || {};
+        btn.disabled = true; _btnLabel(btn, 'Wishlisting…');
+        yc.addVideos({ youtube_id: ch.youtube_id, title: ch.title, avatar_url: ch.avatar_url },
+            missing.map(function (e) { return ytVideoMap[e.youtube_id] || { youtube_id: e.youtube_id, title: e.title }; }))
+            .then(function (d) {
+                var ok = !!(d && d.success);
+                btn.disabled = false; _btnLabel(btn, 'Wishlist year');
+                if (ok) {
+                    missing.forEach(function (e) { e.wished = true; var v = ytFindEp(e.youtube_id); if (v) v.wished = true; });
+                    renderEpisodes();
+                    toast('Added ' + missing.length + ' video' + (missing.length === 1 ? '' : 's') + ' to wishlist', 'success');
+                    document.dispatchEvent(new CustomEvent('soulsync:video-wishlist-changed'));
+                } else { toast((d && d.error) || 'Could not add to wishlist', 'error'); }
+            })
+            .catch(function () { btn.disabled = false; _btnLabel(btn, 'Wishlist year'); toast('Could not add to wishlist', 'error'); });
+    }
+
     function grabSeasonInline(btn) {
         if (!window.VideoGrab || !data) return;
         var missing = _seasonMissing();
@@ -2253,26 +2358,36 @@
     function _djson(u) { return fetch(u).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }); }
     var _dlTimer = null, _dlActive = {}, _dlDone = {}, _dlPrev = {};
     function _dlReset() { _dlActive = {}; _dlDone = {}; _dlPrev = {}; }
+    function _dlTrackable() { return !!(data && (data.kind === 'show' || data.kind === 'channel')); }
     function startDlTracking() {
         stopDlTracking();
-        if (!data || data.kind !== 'show') return;
+        if (!_dlTrackable()) return;
         pollDl();
         _dlTimer = setInterval(pollDl, 2500);
     }
     function stopDlTracking() { if (_dlTimer) { clearInterval(_dlTimer); _dlTimer = null; } }
     function pollDl() {
-        if (!data || data.kind !== 'show' || !root()) { stopDlTracking(); return; }
+        if (!_dlTrackable() || !root()) { stopDlTracking(); return; }
         var showTitle = data.title;
+        var isYt = data.source === 'youtube';
         _djson('/api/video/downloads/active').then(function (d) {
-            if (!data || data.kind !== 'show' || data.title !== showTitle) return;
+            if (!_dlTrackable() || data.title !== showTitle) return;
             var cur = {};
             ((d && d.downloads) || []).forEach(function (dl) {
+                var key;
                 var ctx = dl.search_ctx;
                 if (typeof ctx === 'string') { try { ctx = JSON.parse(ctx); } catch (e) { ctx = null; } }
                 ctx = ctx || {};
-                if (String(ctx.title || dl.title) !== String(showTitle)) return;
-                if (ctx.season == null || ctx.episode == null) return;
-                var key = ctx.season + '_' + ctx.episode;
+                if (isYt) {
+                    // channel page: match this channel's video downloads by VIDEO ID
+                    if (dl.kind !== 'youtube' || !dl.media_id) return;
+                    if (!ytVideoMap[dl.media_id] && !ytFindEp(dl.media_id)) return;
+                    key = String(dl.media_id);
+                } else {
+                    if (String(ctx.title || dl.title) !== String(showTitle)) return;
+                    if (ctx.season == null || ctx.episode == null) return;
+                    key = ctx.season + '_' + ctx.episode;
+                }
                 cur[key] = dl;
                 if (dl.status === 'completed') { _dlDone[key] = 1; delete _dlActive[key]; }
                 else if (dl.status === 'failed' || dl.status === 'cancelled') { delete _dlActive[key]; }
@@ -2290,10 +2405,12 @@
     }
     function applyDlStates() {
         var host = q('[data-vd-episodes]'); if (!host) return;
+        var isYt = !!(data && data.source === 'youtube');
         var boxes = host.querySelectorAll('[data-vd-ep-get]');
         for (var i = 0; i < boxes.length; i++) {
             var box = boxes[i];
-            var key = selectedSeason + '_' + box.getAttribute('data-vd-ep-get');
+            var key = isYt ? box.getAttribute('data-vd-ep-get')
+                           : selectedSeason + '_' + box.getAttribute('data-vd-ep-get');
             var stEl = box.querySelector('[data-vd-ep-dl]');
             box.classList.remove('vd-ep-get--busy', 'vd-ep-get--done');
             if (_dlDone[key]) {

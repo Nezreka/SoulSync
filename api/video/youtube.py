@@ -355,6 +355,55 @@ def register_routes(bp):
             logger.exception("youtube channel videos batch failed for %r", channel_id)
             return jsonify({"success": False, "videos": [], "continuation": None}), 200
 
+    @bp.route("/youtube/download", methods=["POST"])
+    def video_youtube_download_now():
+        """Direct-download one YouTube video NOW (#TV-parity: the episode row's
+        auto-download button — YouTube's equivalent of grab, minus the search:
+        the video IS the release). Reuses the wishlist drain's enqueue (same row
+        shape, per-channel name/quality overrides) and its concurrency model:
+        the row starts immediately when a slot is free, else queues and drains
+        one-out-one-in behind the active fetches.
+
+        Body: {video_id, channel_id?, channel_title?, video_title?,
+        published_at?, thumbnail_url?}. Idempotent per video: an already
+        active/queued grab returns ok+already instead of a duplicate."""
+        from . import get_video_db
+        from core.automation.handlers.video_process_youtube_wishlist import _default_enqueue
+        from core.video.youtube_download import start_next_queued
+
+        body = request.get_json(silent=True) or {}
+        video_id = str(body.get("video_id") or "").strip()
+        if not video_id:
+            return jsonify({"success": False, "error": "video_id required"}), 400
+
+        db = get_video_db()
+        root = db.get_setting("youtube_path") or ""
+        if not root:
+            return jsonify({"success": False,
+                            "error": "Set the YouTube library folder on Settings → Downloads first."}), 400
+
+        # already queued / downloading → point at it instead of double-grabbing
+        for d in db.get_active_video_downloads():
+            if d.get("source") == "youtube" and str(d.get("media_id")) == video_id:
+                return jsonify({"success": True, "already": True, "id": d.get("id")})
+
+        row_id = _default_enqueue({
+            "video_id": video_id,
+            "channel_id": body.get("channel_id"),
+            "channel_title": body.get("channel_title"),
+            "video_title": body.get("video_title"),
+            "published_at": body.get("published_at"),
+            "thumbnail_url": body.get("thumbnail_url"),
+        }, root)
+        if row_id is None:
+            return jsonify({"success": False, "error": "Couldn't queue the download."}), 500
+
+        # fill a slot if one's free (same cap as the automation's default)
+        started = False
+        if db.count_active_youtube_downloads() < 3:
+            started = start_next_queued(get_video_db) is not None
+        return jsonify({"success": True, "id": row_id, "started": started})
+
     @bp.route("/youtube/video/<video_id>", methods=["GET"])
     def video_youtube_video_detail(video_id):
         """Full metadata for one video (description, views, likes, duration, tags) —
