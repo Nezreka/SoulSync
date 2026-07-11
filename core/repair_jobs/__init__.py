@@ -57,6 +57,7 @@ _JOB_MODULES = [
     'core.repair_jobs.lib2_upgrade_scan',
     'core.repair_jobs.lib2_skips_cleanup',
     'core.repair_jobs.lib2_discography_refresh',
+    'core.repair_jobs.lib2_mirror_reconcile',
 ]
 
 
