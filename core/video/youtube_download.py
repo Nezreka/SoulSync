@@ -127,7 +127,10 @@ def _stem_and_container(dest: Dict[str, str], container: str) -> tuple:
 def download_one(video_id: Any, dest_dir: str, dest_stem: str, profile: Any, container: str,
                  *, ydl_factory=None, progress_hook=None, postprocess_hook=None, cookie_opts=None) -> Dict[str, Any]:
     """Run yt-dlp for ONE video into ``dest_dir/dest_stem.ext``. Returns
-    ``{ok, dest_path|None, error|None}``. The yt-dlp class is injectable for tests."""
+    ``{ok, dest_path|None, error|None, title|None, published_at|None}`` — the
+    extractor's own title/date ride along because they're AUTHORITATIVE (an
+    enqueue-time context can lose the title; the extractor never does). The
+    yt-dlp class is injectable for tests."""
     vid = str(video_id or "").strip()
     if not vid:
         return {"ok": False, "dest_path": None, "error": "No video id"}
@@ -137,14 +140,44 @@ def download_one(video_id: Any, dest_dir: str, dest_stem: str, profile: Any, con
     opts = ydl_download_opts(profile, dest_dir, dest_stem, progress_hook=progress_hook,
                              postprocess_hook=postprocess_hook, cookie_opts=cookie_opts)
     url = vid if vid.startswith("http") else "https://www.youtube.com/watch?v=" + vid
+    info = {}
     try:
         with factory(opts) as ydl:
-            ydl.download([url])
+            info = ydl.extract_info(url, download=True) or {}
     except Exception as e:   # noqa: BLE001 - any yt-dlp failure → a failed download, not a crash
         logger.info("youtube download failed for %s: %s", vid, e)
         return {"ok": False, "dest_path": None, "error": str(e)}
     dest_path = os.path.join(str(dest_dir or ""), dest_stem + "." + str(container or "mp4").lstrip("."))
-    return {"ok": True, "dest_path": dest_path, "error": None}
+    up = str(info.get("upload_date") or "")          # yt-dlp: YYYYMMDD
+    published = f"{up[0:4]}-{up[4:6]}-{up[6:8]}" if len(up) == 8 and up.isdigit() else None
+    return {"ok": True, "dest_path": dest_path, "error": None,
+            "title": info.get("title"), "published_at": published}
+
+
+def authoritative_download_fields(dl: Dict[str, Any], res: Dict[str, Any]) -> Dict[str, Any]:
+    """Fold yt-dlp's extracted title/date back into a row whose enqueue-time
+    context LOST them (an upstream title-parser change can blank every scanned
+    title — files then land as '$channel - $date -'). The extractor is the last
+    word: when the context already carries a real video title the row returns
+    unchanged; otherwise the returned copy carries the real title (+ date when
+    missing) in both the row and its search_ctx, so the organised path, the
+    sidecars, AND the history snapshot all get it. Pure."""
+    title = (res or {}).get("title")
+    if not title:
+        return dl
+    ctx = dl.get("search_ctx")
+    if isinstance(ctx, str):
+        try:
+            ctx = json.loads(ctx)
+        except (ValueError, TypeError):
+            ctx = {}
+    ctx = dict(ctx) if isinstance(ctx, dict) else {}
+    if str(ctx.get("video_title") or "").strip():
+        return dl
+    ctx["video_title"] = title
+    if not ctx.get("published_at") and (res or {}).get("published_at"):
+        ctx["published_at"] = res["published_at"]
+    return dict(dl, title=title, search_ctx=json.dumps(ctx))
 
 
 def _default_move(src: str, dest: str) -> None:
@@ -281,11 +314,21 @@ def process_youtube_download(
         archive(dl, {"status": "failed", "error": err, "completed_at": completed})
         return {"status": "failed", "error": err}
 
+    # The extractor's metadata is authoritative: a titleless row re-plans its
+    # destination with the REAL title so files never land as '$channel - $date -'.
+    fixed = authoritative_download_fields(dl, res)
+    replanned = fixed is not dl
+    if replanned:
+        dl = fixed
+        dest = plan_destination(dl, settings, container)
+
     staged_path = res.get("dest_path") or os.path.join(dl_dir or "", stem + "." + cont)
     final_path = dest.get("path") or staged_path
 
-    # Staged build → post-process into the library (the visible 'importing' phase).
-    if stage_dir and staged_path and staged_path != final_path:
+    # Staged build → post-process into the library (the visible 'importing'
+    # phase). An UNSTAGED download moves only when the title fix re-planned its
+    # name — the file on disk still wears the titleless stem and needs the rename.
+    if staged_path and final_path and staged_path != final_path and (stage_dir or replanned):
         update_row(dl.get("id"), status="importing", progress=100, filename=dest.get("filename"))
         try:
             move(staged_path, final_path)
@@ -306,7 +349,8 @@ def process_youtube_download(
 
     completed = now()
     update_row(dl.get("id"), status="completed", progress=100,
-               dest_path=dest_path, completed_at=completed)
+               dest_path=dest_path, completed_at=completed,
+               filename=dest.get("filename"), title=dl.get("title"))
     archive(dl, {"status": "completed", "dest_path": dest_path, "completed_at": completed})
     try:
         clear_wishlist(dl.get("media_id"))

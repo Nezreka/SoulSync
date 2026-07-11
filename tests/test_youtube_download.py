@@ -70,12 +70,13 @@ class _FakeYDL:
     def __exit__(self, *a):
         return False
 
-    def download(self, urls):
-        self.urls = urls
+    def extract_info(self, url, download=True):
+        self.urls = [url]
+        return {"title": "Real Title", "upload_date": "20240315"}
 
 
 class _BoomYDL(_FakeYDL):
-    def download(self, urls):
+    def extract_info(self, url, download=True):
         raise RuntimeError("403 blocked")
 
 
@@ -85,6 +86,20 @@ def test_download_one_success_returns_built_dest_path():
     assert res["ok"] is True
     assert res["dest_path"] == os.path.join("/yt/Chan/Season 2024", "Chan - 2024-03-15 - T.mp4")
     assert _FakeYDL.last.urls == ["https://www.youtube.com/watch?v=vid1"]
+    # The extractor's own metadata rides along (it's authoritative for titles).
+    assert res["title"] == "Real Title" and res["published_at"] == "2024-03-15"
+
+
+def test_authoritative_fields_fill_a_titleless_row_only():
+    good = {"id": 1, "title": "T", "search_ctx": json.dumps({"video_title": "T"})}
+    assert ytd.authoritative_download_fields(good, {"title": "Real"}) is good   # untouched
+    bare = {"id": 2, "title": "Chan", "search_ctx": json.dumps({"channel": "Chan"})}
+    fixed = ytd.authoritative_download_fields(bare, {"title": "Real Title",
+                                                     "published_at": "2024-03-15"})
+    assert fixed is not bare and fixed["title"] == "Real Title"
+    ctx = json.loads(fixed["search_ctx"])
+    assert ctx["video_title"] == "Real Title" and ctx["published_at"] == "2024-03-15"
+    assert ytd.authoritative_download_fields(bare, {}) is bare                  # no title → no-op
 
 
 def test_download_one_failure_is_captured_not_raised():
@@ -132,6 +147,29 @@ def test_process_completion_archives_and_unwishes():
     assert "downloading" in statuses and statuses[-1] == "completed"
     assert calls["archive"][-1]["status"] == "completed"
     assert calls["unwish"] == ["vid1"]
+
+
+def test_process_replans_titleless_download_with_extractor_title():
+    """The $title bug: a wishlist row that lost its video title used to file as
+    '$channel - $date - $channel'. The extractor's title now re-plans the path
+    and the file is renamed into it — the row learns the real title too."""
+    calls, update_row, archive, clear = _recorder()
+    moves = []
+    titleless = {"id": 7, "media_id": "vid1", "target_dir": "/yt", "title": "Chan",
+                 "year": "2024-03-15",
+                 "search_ctx": json.dumps({"channel": "Chan", "published_at": "2024-03-15"})}
+    res = ytd.process_youtube_download(
+        titleless, profile=default_profile(), settings={},
+        download=lambda *a, **k: {"ok": True, "title": "Real Title",
+                                  "published_at": "2024-03-15",
+                                  "dest_path": "/yt/Chan/Season 2024/Chan - 2024-03-15 - Chan.mp4"},
+        update_row=update_row, archive=archive, clear_wishlist=clear,
+        move=lambda s, d: moves.append((s, d)), now=lambda: "t")
+    assert res["status"] == "completed"
+    assert res["dest_path"].endswith("Chan - 2024-03-15 - Real Title.mp4")
+    assert moves == [("/yt/Chan/Season 2024/Chan - 2024-03-15 - Chan.mp4",
+                      res["dest_path"])]                    # renamed into the titled path
+    assert calls["rows"][-1][1]["title"] == "Real Title"    # the row learns the title too
 
 
 def test_process_failure_archives_but_keeps_the_wish():
