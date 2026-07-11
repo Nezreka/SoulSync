@@ -195,10 +195,15 @@ def try_dispatch(
         except Exception as exc:
             logger.debug("[Album Bundle] emit failed: %s", exc)
 
+    source_plugin_kwargs = dict(plugin_kwargs or {})
+    requested_expected_count = _coerce_positive_int(source_plugin_kwargs.pop('expected_track_count', None))
+    if requested_expected_count is None:
+        requested_expected_count = _coerce_positive_int((album_context or {}).get('total_tracks'))
+
     try:
         outcome = plugin.download_album_to_staging(
             album_name, artist_name, staging_dir, _emit,
-            **(plugin_kwargs or {}),
+            **source_plugin_kwargs,
         )
     except Exception as exc:
         logger.exception("[Album Bundle] %s plugin raised: %s", mode, exc)
@@ -246,7 +251,11 @@ def try_dispatch(
         state.mark_failed(batch_id, err)
         return True
 
-    expected_count = _coerce_positive_int(outcome.get('expected_count'))
+    source_expected_count = _coerce_positive_int(outcome.get('expected_count'))
+    expected_count = max(
+        count for count in (source_expected_count, requested_expected_count)
+        if count is not None
+    ) if (source_expected_count is not None or requested_expected_count is not None) else None
     completed_count = _coerce_positive_int(
         outcome.get('completed_count', len(outcome.get('files', [])))
     )

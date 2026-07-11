@@ -981,6 +981,21 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
         _bundle_state = _BatchStateAccessImpl()
         _album_bundle_source = _resolve_album_bundle_source(deps.config_manager)
         if _album_bundle_source == 'soulseek':
+            _expected_album_track_count = 0
+            try:
+                _expected_album_track_count = int((batch_album_context or {}).get('total_tracks') or 0)
+            except (TypeError, ValueError):
+                _expected_album_track_count = 0
+            if _expected_album_track_count <= 0:
+                _expected_album_track_count = len(tracks_json or [])
+            _soulseek_plugin_kwargs = {
+                'expected_track_count': _expected_album_track_count,
+            }
+            if preflight_source and preflight_tracks:
+                _soulseek_plugin_kwargs.update({
+                    'preferred_source': preflight_source,
+                    'preferred_tracks': preflight_tracks,
+                })
             if _album_bundle_dispatch.try_dispatch(
                 batch_id=batch_id,
                 is_album=batch_is_album,
@@ -990,10 +1005,7 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                 plugin_resolver=deps.download_orchestrator.client,
                 state=_bundle_state,
                 source_override=_album_bundle_source,
-                plugin_kwargs={
-                    'preferred_source': preflight_source,
-                    'preferred_tracks': preflight_tracks,
-                } if preflight_source and preflight_tracks else None,
+                plugin_kwargs=_soulseek_plugin_kwargs,
             ):
                 return
 
