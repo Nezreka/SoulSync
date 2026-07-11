@@ -367,6 +367,9 @@ def _ensure_channel_assets(final_video: str, fields: Dict[str, Any], settings: D
         try:
             fs.makedirs(season_dir)   # pre-move seeding: the dir may not exist yet
             existing = {str(n).lower() for n in (fs.list_dir(season_dir) or [])}
+            if "poster.jpg" in existing:
+                logger.info("season poster: keeping existing %s (delete it to regenerate)",
+                            os.path.join(season_dir, "poster.jpg"))
             if "poster.jpg" not in existing:
                 target = os.path.join(season_dir, "poster.jpg")
                 data = None
@@ -389,8 +392,11 @@ def _ensure_channel_assets(final_video: str, fields: Dict[str, Any], settings: D
                 if data:
                     with open(target, "wb") as f:
                         f.write(data)
+                    logger.info("season poster: composed %s (backdrop=%s)", target,
+                                "video-thumb" if backdrop else "avatar")
                 else:
                     fs.save_url(meta["poster_url"], target)
+                    logger.info("season poster: render unavailable — plain avatar copy at %s", target)
         except Exception:   # noqa: BLE001 - season art is a nicety
             pass
 
