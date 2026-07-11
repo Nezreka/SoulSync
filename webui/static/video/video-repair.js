@@ -159,13 +159,13 @@
         // even a job with no settings of its own needs the gear.
         var settingKeys = Object.keys(job.settings || {});
         var settingsRows = settingKeys.map(function (key) {
-                var val = job.settings[key];
-                var label = pretty(key);
-                var opts = job.setting_options && job.setting_options[key];
-                if (Array.isArray(opts) && opts.length) {
-                    var optionsHtml = opts.map(function (o) {
-                        return '<option value="' + esc(o) + '"' + (o === val ? ' selected' : '') + '>' +
-                            esc(pretty(String(o))) + '</option>';
+            var val = job.settings[key];
+            var label = pretty(key);
+            var opts = job.setting_options && job.setting_options[key];
+            if (Array.isArray(opts) && opts.length) {
+                var optionsHtml = opts.map(function (o) {
+                    return '<option value="' + esc(o) + '"' + (o === val ? ' selected' : '') + '>' +
+                        esc(pretty(String(o))) + '</option>';
                     }).join('');
                     return '<div class="repair-setting-row"><label>' + esc(label) + '</label>' +
                         '<select class="repair-setting-input" data-job="' + esc(job.job_id) +
@@ -179,17 +179,17 @@
                     '<input type="' + inputType + '" class="repair-setting-input" data-job="' +
                     esc(job.job_id) + '" data-key="' + esc(key) + '"' + inputVal +
                     (inputType === 'number' ? ' step="0.01" min="0"' : '') + '></div>';
-            }).join('');
-            settingsHtml =
-                '<div class="repair-job-settings" id="video-repair-settings-' + esc(job.job_id) +
-                    '" style="display:none;">' +
-                    '<div class="repair-setting-row"><label>Interval (hours)</label>' +
-                        '<input type="number" class="repair-setting-input" data-job="' + esc(job.job_id) +
-                        '" data-key="_interval_hours" value="' + job.interval_hours + '" min="1" step="1"></div>' +
-                    settingsRows +
-                    '<button class="repair-save-settings-btn" type="button" data-vjr-save="' +
-                        esc(job.job_id) + '">Save Settings</button>' +
-                '</div>';
+        }).join('');
+        var settingsHtml =
+            '<div class="repair-job-settings" id="video-repair-settings-' + esc(job.job_id) +
+                '" style="display:none;">' +
+                '<div class="repair-setting-row"><label>Interval (hours)</label>' +
+                    '<input type="number" class="repair-setting-input" data-job="' + esc(job.job_id) +
+                    '" data-key="_interval_hours" value="' + job.interval_hours + '" min="1" step="1"></div>' +
+                settingsRows +
+                '<button class="repair-save-settings-btn" type="button" data-vjr-save="' +
+                    esc(job.job_id) + '">Save Settings</button>' +
+            '</div>';
 
         return '<div class="repair-job-card ' + cardClass + '" data-job-id="' + esc(job.job_id) + '">' +
             '<div class="repair-job-main">' +
