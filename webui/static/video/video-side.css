@@ -4746,3 +4746,13 @@ body[data-side="video"] #gsearch-aura {
     border-color: rgba(var(--accent-rgb, 88 101 242), 0.55); color: #fff;
 }
 .vmg-report { margin-top: 4px; align-self: flex-start; }
+
+/* ── Settings → Server Connection (video): tame the picker ─────────────────
+   The shared .server-logo is width:100% with flex:1 buttons and no size cap —
+   fine in music's narrow column, gigantic in this wide settings group. */
+[data-video-only] .server-toggle-container { max-width: 420px; }
+[data-video-only] .server-toggle-btn { padding: 12px 16px; }
+[data-video-only] .server-logo {
+    width: auto; max-width: 120px; max-height: 32px; object-fit: contain;
+}
+[data-video-only] .server-config-container { max-width: 560px; }
