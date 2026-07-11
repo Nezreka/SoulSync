@@ -458,6 +458,7 @@
                 <a class="nav-button" data-video-page="video-issues" href="/video-issues">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></span>
                     <span class="nav-text">Issues</span>
+                    <span class="issues-nav-badge hidden" id="video-issues-nav-badge">0</span>
                 </a>
                 <a class="nav-button" data-video-page="video-help" href="/video-help">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></span>
@@ -1895,6 +1896,34 @@
                      Bio + filmography, every credit links back into SoulSync. Built
                      by video/video-person.js, styled by .vp-* in video-side.css. -->
 
+                <!-- Issues — user-reported problems on library items (the music Issues
+                     standard, video-scoped). Driven by video/video-issues.js. -->
+                <section class="video-subpage" data-video-subpage="video-issues" hidden>
+                    <div class="page-shell">
+                        <div class="dashboard-header"><div class="dashboard-header-sweep" aria-hidden="true"><span></span></div>
+                            <div class="header-text">
+                                <h2 class="header-title"><img src="/static/dashboard.png" class="page-header-icon" alt=""><span>Issues</span></h2>
+                                <p class="header-subtitle" data-vi-subtitle>Problems reported on library items</p>
+                            </div>
+                        </div>
+                        <div class="vi-toolbar">
+                            <select class="library-source-filter-select" data-vi-filter-status>
+                                <option value="open">Open</option>
+                                <option value="all">All Status</option>
+                                <option value="in_progress">In Progress</option>
+                                <option value="resolved">Resolved</option>
+                                <option value="dismissed">Dismissed</option>
+                            </select>
+                            <select class="library-source-filter-select" data-vi-filter-category>
+                                <option value="all">All Categories</option>
+                            </select>
+                        </div>
+                        <div class="vi-stats" data-vi-stats></div>
+                        <div class="vi-list" data-vi-list>
+                            <div class="repair-loading">Loading issues…</div>
+                        </div>
+                    </div>
+                </section>
                 <section class="video-subpage" data-video-subpage="video-person-detail" hidden>
                     <div class="vp-page" data-video-person data-has-bg="0">
                         <div class="vp-ambient" data-vp-ambient aria-hidden="true"></div>
@@ -11338,6 +11367,8 @@
     <script src="{{ url_for('static', filename='video/video-manage-panel.js', v=static_v) }}"></script>
     <!-- Library Maintenance (jobs & findings on the video Tools page) -->
     <script src="{{ url_for('static', filename='video/video-repair.js', v=static_v) }}"></script>
+    <!-- Issues (report on items via the Manage sidebar; triage on the Issues page) -->
+    <script src="{{ url_for('static', filename='video/video-issues.js', v=static_v) }}"></script>
     <!-- Overlay Studio (full-bleed visual editor for poster-overlay templates; Artwork Studio) -->
     <script src="{{ url_for('static', filename='video/video-overlay-editor.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='video/video-collection-editor.js', v=static_v) }}"></script>
