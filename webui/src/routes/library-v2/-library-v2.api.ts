@@ -109,10 +109,7 @@ export async function setLibraryV2QualityProfile(
   if (!payload.success) throw new Error(payload.error || 'Failed to update quality profile');
 }
 
-export async function refreshLibraryV2(
-  entity: 'artists' | 'albums',
-  id: number,
-): Promise<void> {
+export async function refreshLibraryV2(entity: 'artists' | 'albums', id: number): Promise<void> {
   const payload = await readJson<{ success: boolean; error?: string }>(
     apiClient.post(`library/v2/${entity}/${id}/refresh`, { json: {} }),
   );
@@ -141,9 +138,7 @@ export async function fetchLibraryV2Album(
 export async function refreshLibraryV2Discography(
   artistId: number,
 ): Promise<LibraryV2DiscographyStats> {
-  const payload = await readJson<
-    { success: boolean; error?: string } & LibraryV2DiscographyStats
-  >(
+  const payload = await readJson<{ success: boolean; error?: string } & LibraryV2DiscographyStats>(
     apiClient.post(`library/v2/artists/${artistId}/discography/refresh`, {
       json: {},
       timeout: 60_000, // provider discography lookup can take a few seconds

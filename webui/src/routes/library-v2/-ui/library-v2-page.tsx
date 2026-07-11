@@ -4,6 +4,12 @@ import { type ReactNode, useRef, useState } from 'react';
 
 import { useReactPageShell } from '@/platform/shell/route-controllers';
 
+import type {
+  LibraryV2AlbumSummary,
+  LibraryV2ArtistSummary,
+  LibraryV2Track,
+} from '../-library-v2.types';
+
 import {
   autoGrabBest,
   bulkMonitorLibraryV2Releases,
@@ -35,16 +41,11 @@ import {
   type Lib2EntityRef,
   type LibraryV2AlbumType,
 } from '../-library-v2.api';
-import type {
-  LibraryV2AlbumSummary,
-  LibraryV2ArtistSummary,
-  LibraryV2Track,
-} from '../-library-v2.types';
 import { Route } from '../route';
 import { InteractiveSearchModal } from './interactive-search';
+import styles from './library-v2-page.module.css';
 import { QualityProfileModal } from './quality-profile-modal';
 import { RetagModal } from './retag-modal';
-import styles from './library-v2-page.module.css';
 
 interface QpTarget {
   entity: 'artists' | 'albums';
@@ -87,7 +88,11 @@ function buildSearchQuery(artistName: string, action: string): string {
 function qualityText(file: LibraryV2Track['file']): string {
   if (!file) return '-';
   const fmt = (file.format ?? '').toUpperCase();
-  const kbps = file.bitrate ? (file.bitrate > 5000 ? Math.round(file.bitrate / 1000) : file.bitrate) : null;
+  const kbps = file.bitrate
+    ? file.bitrate > 5000
+      ? Math.round(file.bitrate / 1000)
+      : file.bitrate
+    : null;
   return [fmt, kbps ? `${kbps} kbps` : null].filter(Boolean).join(' / ') || '-';
 }
 
@@ -133,13 +138,20 @@ function SvgIcon({ name, filled }: { name: IconName; filled?: boolean }) {
 function detailedQualityText(file: LibraryV2Track['file']): string {
   if (!file) return qualityText(file);
   const fmt = (file.format ?? '').toUpperCase();
-  const kbps = file.bitrate ? (file.bitrate > 5000 ? Math.round(file.bitrate / 1000) : file.bitrate) : null;
+  const kbps = file.bitrate
+    ? file.bitrate > 5000
+      ? Math.round(file.bitrate / 1000)
+      : file.bitrate
+    : null;
   const bitDepth = file.bit_depth ? `${file.bit_depth}-bit` : null;
   const sampleRate = file.sample_rate
     ? `${Number((file.sample_rate / 1000).toFixed(file.sample_rate % 1000 === 0 ? 0 : 1))} kHz`
     : null;
   const resolution = [bitDepth, sampleRate].filter(Boolean).join('/');
-  return [fmt, resolution || null, kbps ? `${kbps} kbps` : null].filter(Boolean).join(' / ') || qualityText(file);
+  return (
+    [fmt, resolution || null, kbps ? `${kbps} kbps` : null].filter(Boolean).join(' / ') ||
+    qualityText(file)
+  );
 }
 
 // --- shared building blocks --------------------------------------------------
@@ -415,7 +427,9 @@ function HistoryModal({ artistId, onClose }: { artistId: number; onClose: () => 
             <tbody>
               {rows.map((h, i) => (
                 <tr key={i}>
-                  <td className={styles.muted}>{h.date ? h.date.slice(0, 16).replace('T', ' ') : '—'}</td>
+                  <td className={styles.muted}>
+                    {h.date ? h.date.slice(0, 16).replace('T', ' ') : '—'}
+                  </td>
                   <td title={h.file_path ?? undefined}>{h.title ?? '—'}</td>
                   <td>{h.album ?? '—'}</td>
                   <td>
@@ -469,8 +483,8 @@ function DeleteConfirmModal({
   return (
     <ModalShell title={`Delete ${entity === 'artists' ? 'Artist' : 'Album'}`} onClose={onClose}>
       <p>
-        Remove <strong>{title}</strong> from the library? Monitoring stops and wishlist entries
-        are withdrawn. <strong>Files on disk are not deleted.</strong>
+        Remove <strong>{title}</strong> from the library? Monitoring stops and wishlist entries are
+        withdrawn. <strong>Files on disk are not deleted.</strong>
       </p>
       {entity === 'artists' && preview.data ? (
         <p className={styles.muted}>
@@ -515,13 +529,7 @@ function DeleteConfirmModal({
 /** Edit a release: re-file it under the correct type. The legacy import
  *  classifies by track count, so 1-track EPs land under Singles etc. —
  *  correcting the type moves the release between the page's sections. */
-function EditAlbumModal({
-  album,
-  onClose,
-}: {
-  album: LibraryV2AlbumSummary;
-  onClose: () => void;
-}) {
+function EditAlbumModal({ album, onClose }: { album: LibraryV2AlbumSummary; onClose: () => void }) {
   const queryClient = useQueryClient();
   const [albumType, setAlbumType] = useState<LibraryV2AlbumType>(
     (LIBRARY_V2_ALBUM_TYPES as readonly string[]).includes(album.album_type)
@@ -621,20 +629,14 @@ const MAINTENANCE_JOBS: Array<{ id: string; label: string; desc: string; scoped?
   },
 ];
 
-function MaintenanceModal({
-  artistName,
-  onClose,
-}: {
-  artistName: string;
-  onClose: () => void;
-}) {
+function MaintenanceModal({ artistName, onClose }: { artistName: string; onClose: () => void }) {
   const [state, setState] = useState<Record<string, 'queued' | 'error'>>({});
   return (
     <ModalShell title="Maintenance" onClose={onClose}>
       <p className={styles.qpSubtitle}>
         Jobs marked <span className={styles.qpCurrent}>this artist</span> run scoped to{' '}
-        <strong>{artistName}</strong>; the rest scan the whole library. Progress under
-        Stats → Repair jobs.
+        <strong>{artistName}</strong>; the rest scan the whole library. Progress under Stats →
+        Repair jobs.
       </p>
       <div className={styles.qpList}>
         {MAINTENANCE_JOBS.map((job) => (
@@ -716,10 +718,10 @@ function ManageTracksModal({ artistId, onClose }: { artistId: number; onClose: (
   return (
     <ModalShell title="Manage Tracks — single ↔ album duplicates" wide onClose={onClose}>
       <p className={styles.qpSubtitle}>
-        The same recording released as a single and on an album. Unmonitor the version you
-        don't want kept up to date; <strong>Move file</strong> re-homes the only existing
-        file onto the other version (disk untouched — run Rename/Reorganize after);
-        removing duplicate <em>files</em> is the "Single/Album Dedup" job under Maintenance.
+        The same recording released as a single and on an album. Unmonitor the version you don't
+        want kept up to date; <strong>Move file</strong> re-homes the only existing file onto the
+        other version (disk untouched — run Rename/Reorganize after); removing duplicate{' '}
+        <em>files</em> is the "Single/Album Dedup" job under Maintenance.
       </p>
       {rowError ? <div className={styles.searchError}>{rowError}</div> : null}
       <div className={styles.resultsWrap}>
@@ -1016,7 +1018,12 @@ function ArtistCards({ artists }: { artists: LibraryV2ArtistSummary[] }) {
           onClick={() => void navigate({ search: (p) => ({ ...p, artist: artist.id }) })}
         >
           <div className={styles.artistThumbWrap}>
-            <Artwork src={artist.image_url ?? ''} alt={artist.name} className={styles.artistThumb} thumb />
+            <Artwork
+              src={artist.image_url ?? ''}
+              alt={artist.name}
+              className={styles.artistThumb}
+              thumb
+            />
             <span className={styles.cardMonitor}>
               <MonitorToggle entity="artists" id={artist.id} monitored={artist.monitored} />
             </span>
@@ -1065,7 +1072,12 @@ function ArtistTable({ artists }: { artists: LibraryV2ArtistSummary[] }) {
             </td>
             <td>
               <span className={styles.cellArtist}>
-                <Artwork src={artist.image_url ?? ''} alt={artist.name} className={styles.rowThumb} thumb />
+                <Artwork
+                  src={artist.image_url ?? ''}
+                  alt={artist.name}
+                  className={styles.rowThumb}
+                  thumb
+                />
                 <span>{artist.name}</span>
               </span>
             </td>
@@ -1074,7 +1086,9 @@ function ArtistTable({ artists }: { artists: LibraryV2ArtistSummary[] }) {
             <td className={styles.colNum}>
               {trackProgress(artist.tracks_present, artist.track_count)}
             </td>
-            <td className={styles.colNum}>{artist.tracks_missing > 0 ? artist.tracks_missing : '—'}</td>
+            <td className={styles.colNum}>
+              {artist.tracks_missing > 0 ? artist.tracks_missing : '—'}
+            </td>
           </tr>
         ))}
       </tbody>
@@ -1122,9 +1136,10 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
     id: number;
     title: string;
   } | null>(null);
-  const [grabBanner, setGrabBanner] = useState<{ tone: 'busy' | 'ok' | 'err'; text: string } | null>(
-    null,
-  );
+  const [grabBanner, setGrabBanner] = useState<{
+    tone: 'busy' | 'ok' | 'err';
+    text: string;
+  } | null>(null);
   const [qpTarget, setQpTarget] = useState<QpTarget | null>(null);
   const queryClient = useQueryClient();
   const artistName = artist?.name ?? '';
@@ -1138,7 +1153,10 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
       setGrabBanner(
         error
           ? { tone: 'err', text: `Upgrade scan failed: ${error}` }
-          : { tone: 'ok', text: 'Upgrade scan finished — genuine upgrade candidates were queued to the wishlist.' },
+          : {
+              tone: 'ok',
+              text: 'Upgrade scan finished — genuine upgrade candidates were queued to the wishlist.',
+            },
       );
     } catch (e) {
       setGrabBanner({ tone: 'err', text: e instanceof Error ? e.message : 'Upgrade scan failed' });
@@ -1239,7 +1257,9 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             setGrabBanner({ tone: 'ok', text: `Grabbing "${t}" from ${best.username}.` });
           }
         })
-        .catch((e) => setGrabBanner({ tone: 'err', text: e instanceof Error ? e.message : 'Search failed' }));
+        .catch((e) =>
+          setGrabBanner({ tone: 'err', text: e instanceof Error ? e.message : 'Search failed' }),
+        );
     }
   }
 
@@ -1329,7 +1349,11 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 title="Apply a monitoring strategy across this artist's releases"
                 onClick={() => setShowMonitoring(true)}
               />
-              <ActionButton icon="profile" label="Quality Profile" onClick={() => handleAction('Quality Profile')} />
+              <ActionButton
+                icon="profile"
+                label="Quality Profile"
+                onClick={() => handleAction('Quality Profile')}
+              />
               <ActionButton
                 icon="delete"
                 label="Delete"
@@ -1345,14 +1369,22 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
           {grabBanner ? (
             <div className={`${styles.grabBanner} ${styles[`grab_${grabBanner.tone}`]}`}>
               <span>{grabBanner.text}</span>
-              <button type="button" className={styles.grabBannerClose} onClick={() => setGrabBanner(null)}>
+              <button
+                type="button"
+                className={styles.grabBannerClose}
+                onClick={() => setGrabBanner(null)}
+              >
                 ✕
               </button>
             </div>
           ) : null}
 
           <header className={styles.detailHeader}>
-            <Artwork src={artist.image_url ?? ''} alt={artist.name} className={styles.detailThumb} />
+            <Artwork
+              src={artist.image_url ?? ''}
+              alt={artist.name}
+              className={styles.detailThumb}
+            />
             <div className={styles.detailMeta}>
               <div className={styles.detailTitleRow}>
                 <MonitorToggle entity="artists" id={artist.id} monitored={artist.monitored} />
@@ -1373,7 +1405,8 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 </span>
                 <span className={styles.detailLabel}>
                   <SvgIcon name="tracks" />
-                  {artist.albums.length + (artist.eps?.length ?? 0) + artist.singles.length} releases
+                  {artist.albums.length + (artist.eps?.length ?? 0) + artist.singles.length}{' '}
+                  releases
                 </span>
               </div>
               {artist.genres.length > 0 ? (
@@ -1469,7 +1502,9 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               onClose={() => setShowMonitoring(false)}
             />
           ) : null}
-          {showHistory ? <HistoryModal artistId={artistId} onClose={() => setShowHistory(false)} /> : null}
+          {showHistory ? (
+            <HistoryModal artistId={artistId} onClose={() => setShowHistory(false)} />
+          ) : null}
           {showMaintenance ? (
             <MaintenanceModal artistName={artist.name} onClose={() => setShowMaintenance(false)} />
           ) : null}
@@ -1517,7 +1552,9 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
 }
 
 /** Poll the background bulk-job status until it settles, then refresh. */
-async function awaitBulkJob(queryClient: ReturnType<typeof useQueryClient>): Promise<string | null> {
+async function awaitBulkJob(
+  queryClient: ReturnType<typeof useQueryClient>,
+): Promise<string | null> {
   for (let i = 0; i < 300; i += 1) {
     const state = await fetchLibraryV2JobStatus();
     if (!state.running) {
@@ -1630,7 +1667,12 @@ function AlbumBlock({
       <div className={styles.albumHead} onClick={() => setOpen(!open)}>
         <span className={`${styles.chevron} ${open ? styles.chevronOpen : ''}`}>›</span>
         <MonitorToggle entity="albums" id={album.id} monitored={album.monitored} />
-        <Artwork src={album.image_url ?? ''} alt={album.title} className={styles.albumHeadThumb} thumb />
+        <Artwork
+          src={album.image_url ?? ''}
+          alt={album.title}
+          className={styles.albumHeadThumb}
+          thumb
+        />
         <div className={styles.albumHeadMeta}>
           <span className={styles.albumHeadTitle}>{album.title}</span>
           <span className={styles.albumHeadSub}>
@@ -1659,7 +1701,11 @@ function AlbumBlock({
           </span>
         )}
         <span className={styles.albumActions}>
-          <IconActionButton icon="search" title="Search Monitored" onClick={() => onAction(`Search Monitored: ${album.title}`)} />
+          <IconActionButton
+            icon="search"
+            title="Search Monitored"
+            onClick={() => onAction(`Search Monitored: ${album.title}`)}
+          />
           <IconActionButton
             icon="interactive"
             title="Interactive Search"
@@ -1682,11 +1728,7 @@ function AlbumBlock({
               })
             }
           />
-          <IconActionButton
-            icon="retag"
-            title="Preview Retag"
-            onClick={() => onRetag(album)}
-          />
+          <IconActionButton icon="retag" title="Preview Retag" onClick={() => onRetag(album)} />
           <IconActionButton
             icon="edit"
             title="Edit release (correct the album/EP/single type)"
@@ -1700,9 +1742,7 @@ function AlbumBlock({
           />
         </span>
       </div>
-      {open ? (
-        <AlbumTrackTable albumId={album.id} resolve={unowned} onAction={onAction} />
-      ) : null}
+      {open ? <AlbumTrackTable albumId={album.id} resolve={unowned} onAction={onAction} /> : null}
     </div>
   );
 }

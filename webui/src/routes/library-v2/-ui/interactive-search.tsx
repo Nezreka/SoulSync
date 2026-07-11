@@ -1,6 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 
+import type { LibraryV2QualityProfile, LibraryV2RankedTarget } from '../-library-v2.types';
+
 import {
   libraryV2QualityProfilesQueryOptions,
   searchSources,
@@ -8,7 +10,6 @@ import {
   type Lib2EntityRef,
   type SourceSearchResult,
 } from '../-library-v2.api';
-import type { LibraryV2QualityProfile, LibraryV2RankedTarget } from '../-library-v2.types';
 import styles from './library-v2-page.module.css';
 
 /** Extract the numeric quality facts a result exposes (source-aware: many
@@ -34,10 +35,7 @@ function resultFacts(r: SourceSearchResult): {
  *  the index of the best ranked target it plausibly satisfies, or null when
  *  the source doesn't expose enough facts to judge (never falsely reject).
  *  The authoritative check still runs in the import pipeline. */
-function profileTargetRank(
-  r: SourceSearchResult,
-  targets: LibraryV2RankedTarget[],
-): number | null {
+function profileTargetRank(r: SourceSearchResult, targets: LibraryV2RankedTarget[]): number | null {
   if (targets.length === 0) return null;
   const { fmt, kbps, sampleRate, bitDepth } = resultFacts(r);
   if (!fmt) return null; // source exposes no quality info — don't judge
@@ -135,7 +133,10 @@ function resultSize(r: SourceSearchResult): number | null | undefined {
   return r.result_type === 'album' ? r.total_size : r.size;
 }
 
-function firstTrackNumber(r: SourceSearchResult, key: 'bit_depth' | 'sample_rate' | 'bitrate'): number | null {
+function firstTrackNumber(
+  r: SourceSearchResult,
+  key: 'bit_depth' | 'sample_rate' | 'bitrate',
+): number | null {
   for (const track of r.tracks ?? []) {
     const value = track[key];
     if (typeof value === 'number' && value > 0) return value;
@@ -190,7 +191,9 @@ function sourceTone(r: SourceSearchResult): 'usenet' | 'torrent' | 'stream' | 'p
 /** Source metadata (indexer/grabs) — album results carry it on their first track. */
 function effMeta(r: SourceSearchResult): NonNullable<SourceSearchResult['_source_metadata']> {
   if (r._source_metadata) return r._source_metadata;
-  const t0 = r.tracks?.[0] as { _source_metadata?: SourceSearchResult['_source_metadata'] } | undefined;
+  const t0 = r.tracks?.[0] as
+    | { _source_metadata?: SourceSearchResult['_source_metadata'] }
+    | undefined;
   return t0?._source_metadata ?? {};
 }
 
@@ -237,7 +240,10 @@ function ProfileBadge({
   const targets = profile.ranked_targets;
   if (rank >= targets.length) {
     return (
-      <span className={styles.qBelow} title={`Matches none of "${profile.name}"'s targets — the pipeline will likely reject or quarantine it`}>
+      <span
+        className={styles.qBelow}
+        title={`Matches none of "${profile.name}"'s targets — the pipeline will likely reject or quarantine it`}
+      >
         below profile
       </span>
     );
@@ -252,7 +258,10 @@ function ProfileBadge({
     );
   }
   return (
-    <span className={styles.qAcceptable} title={`Matches "${label}" — acceptable, but below the upgrade cutoff`}>
+    <span
+      className={styles.qAcceptable}
+      title={`Matches "${label}" — acceptable, but below the upgrade cutoff`}
+    >
       acceptable
     </span>
   );
@@ -316,15 +325,7 @@ export function InteractiveSearchModal({
     setSort((s) => (s.key === key ? { key, dir: s.dir === 1 ? -1 : 1 } : { key, dir: -1 }));
   }
 
-  function SortTh({
-    label,
-    k,
-    className,
-  }: {
-    label: string;
-    k: SortKey;
-    className?: string;
-  }) {
+  function SortTh({ label, k, className }: { label: string; k: SortKey; className?: string }) {
     const active = sort.key === k;
     return (
       <th

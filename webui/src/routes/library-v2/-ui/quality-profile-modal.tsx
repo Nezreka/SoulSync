@@ -1,12 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
+import type { LibraryV2QualityProfile } from '../-library-v2.types';
+
 import {
   LIBRARY_V2_QUERY_KEY,
   libraryV2QualityProfilesQueryOptions,
   setLibraryV2QualityProfile,
 } from '../-library-v2.api';
-import type { LibraryV2QualityProfile } from '../-library-v2.types';
 import styles from './library-v2-page.module.css';
 
 function policyLabel(p: LibraryV2QualityProfile): string {
@@ -52,7 +53,12 @@ export function QualityProfileModal({
 
   return (
     <div className={styles.modalBackdrop} role="presentation" onClick={onClose}>
-      <div className={styles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+      <div
+        className={styles.modal}
+        role="dialog"
+        aria-modal="true"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className={styles.modalHeader}>
           <h3>Quality Profile</h3>
           <button type="button" className={styles.iconAction} title="Close" onClick={onClose}>

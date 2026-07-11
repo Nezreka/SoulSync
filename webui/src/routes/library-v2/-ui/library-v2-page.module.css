@@ -466,7 +466,9 @@
   text-align: left;
   color: #f3f3f3; /* buttons don't inherit page color → set explicitly */
   font: inherit;
-  transition: transform 0.15s ease, border-color 0.15s ease;
+  transition:
+    transform 0.15s ease,
+    border-color 0.15s ease;
 }
 
 .artistCard:hover {

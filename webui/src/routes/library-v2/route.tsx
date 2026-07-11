@@ -15,7 +15,9 @@ export const Route = createFileRoute('/library-v2')({
   loader: async ({ context, deps }) => {
     // Warm the feature-flag check + first page of artists; never block on a
     // transient fetch failure — the page owns its own empty/error/disabled state.
-    await context.queryClient.ensureQueryData(libraryV2EnabledQueryOptions()).catch(() => undefined);
+    await context.queryClient
+      .ensureQueryData(libraryV2EnabledQueryOptions())
+      .catch(() => undefined);
     void context.queryClient.prefetchQuery(libraryV2ArtistsQueryOptions(deps));
   },
   component: LibraryV2Page,
