@@ -20927,22 +20927,22 @@ def get_server_playlist_tracks(playlist_id):
         # exact/fuzzy passes entirely. Stale-cache safe — if the cached
         # server track no longer exists, the override is silently
         # skipped and normal matching runs.
-        from core.sync.match_overrides import resolve_override_server_id, resolve_match_overrides
+        from core.sync.match_overrides import build_bulk_override_lookup, resolve_match_overrides
         _db_for_overrides = get_database()
         # Set of server track ids currently in this playlist — used to validate
         # a cached/durable match actually exists in this playlist before pairing it.
         _server_ids = {str(t.get('id')) for t in server_tracks if isinstance(t, dict) and t.get('id') is not None}
         _ov_profile = get_current_profile_id()
 
-        def _override_lookup(src_id):
-            # Validated fast-cache hit, else durable manual match (#787) which
-            # self-heals a stale library id via the stored file path. A cache hit
-            # that no longer points into THIS playlist must not short-circuit the
-            # durable path, or the manual match silently never applies (wolf39us).
-            return resolve_override_server_id(
-                _db_for_overrides, _ov_profile, src_id, active_server, _server_ids,
-                _db_for_overrides.read_sync_match_cache,
-            )
+        # Validated fast-cache hit, else durable manual match (#787) which
+        # self-heals a stale library id via the stored file path. A cache hit
+        # that no longer points into THIS playlist must not short-circuit the
+        # durable path, or the manual match silently never applies (wolf39us).
+        # Bulk-backed (#1005): the per-track resolver opened 2-3 fresh SQLite
+        # connections (and committed per cache hit) for EVERY source track —
+        # ~15s of pass-0 churn on a 1500-track playlist.
+        _override_lookup = build_bulk_override_lookup(
+            _db_for_overrides, _ov_profile, active_server, _server_ids, source_tracks)
 
         _override_pairs = resolve_match_overrides(source_tracks, server_tracks, _override_lookup)
 

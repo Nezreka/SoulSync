@@ -162,6 +162,76 @@ def resolve_override_server_id(
     )
 
 
+def build_bulk_override_lookup(
+    db: Any,
+    profile_id: int,
+    server_source: str,
+    valid_server_ids: set,
+    source_tracks: List[Dict[str, Any]],
+) -> Callable[[str], Optional[Any]]:
+    """A ``cache_lookup`` callable for :func:`resolve_match_overrides` backed by
+    TWO bulk reads instead of 2-3 fresh-connection queries (plus a COMMIT per
+    cache hit) for every source track — #1005: pass 0 alone took ~15s on a
+    1500-track playlist before the columns could even render.
+
+    Per-id semantics are IDENTICAL to :func:`resolve_override_server_id`:
+    a cache hit is only trusted while it points into THIS playlist, else the
+    durable manual match applies, with the per-row file-path self-heal kept
+    for the (rare) stale rows. Falls back to the per-row resolver when the DB
+    doesn't offer the bulk readers (stub DBs)."""
+    if not (hasattr(db, "read_sync_match_cache_bulk")
+            and hasattr(db, "find_manual_library_matches_bulk")):
+        def _per_row(src_id):
+            return resolve_override_server_id(
+                db, profile_id, src_id, server_source, valid_server_ids,
+                getattr(db, "read_sync_match_cache", lambda *_a: None))
+        return _per_row
+
+    ids = [str(s.get("source_track_id")) for s in (source_tracks or [])
+           if isinstance(s, dict) and s.get("source_track_id")]
+    try:
+        cache_map = db.read_sync_match_cache_bulk(ids, server_source) or {}
+    except Exception:
+        cache_map = {}
+    try:
+        durable_map = db.find_manual_library_matches_bulk(profile_id, ids, server_source) or {}
+    except Exception:
+        durable_map = {}
+
+    def _lookup(source_track_id):
+        sid = str(source_track_id)
+        cached = cache_map.get(sid) or {}
+        cached_id = cached.get("server_track_id")
+        if cached_id is not None:
+            if str(cached_id) in valid_server_ids:
+                return cached_id
+            logger.warning(
+                "Stale match-cache for source %s (%s): cached server track %s is no "
+                "longer in this playlist — falling back to the durable manual match.",
+                sid, server_source, cached_id,
+            )
+        match = durable_map.get(sid)
+        if not match:
+            return None
+        lib_id = match.get("library_track_id")
+        if lib_id is not None and str(lib_id) in valid_server_ids:
+            return str(lib_id)
+        # Stale pointer — re-resolve via the stored file path and self-heal.
+        file_path = match.get("library_file_path")
+        resolver = getattr(db, "find_track_id_by_file_path", None)
+        if file_path and resolver is not None:
+            try:
+                new_id = resolver(file_path)
+            except Exception:
+                new_id = None
+            if new_id and str(new_id) in valid_server_ids:
+                _self_heal_match_id(db, match, str(new_id))
+                return str(new_id)
+        return None
+
+    return _lookup
+
+
 def resolve_durable_match_server_id(
     db: Any,
     profile_id: int,
