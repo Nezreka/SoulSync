@@ -477,8 +477,14 @@ def register_routes(bp):
             return jsonify({"success": False, "error": "channel and videos required"}), 400
         try:
             db = get_video_db()
-            n = db.add_videos_to_wishlist(channel, videos, server_source=_server())
-            return jsonify({"success": n > 0, "added": n, "counts": db.youtube_wishlist_counts()})
+            # A manual add is deliberate — it may re-wish an already-downloaded
+            # video (the user can see the ✓ downloaded marker; they want it again).
+            n = db.add_videos_to_wishlist(channel, videos, server_source=_server(),
+                                          allow_downloaded=True)
+            if not n:
+                return jsonify({"success": False, "added": 0,
+                                "error": "Couldn't add — the video may be missing its id"})
+            return jsonify({"success": True, "added": n, "counts": db.youtube_wishlist_counts()})
         except Exception:
             logger.exception("youtube wishlist add failed")
             return jsonify({"success": False, "error": "Failed"}), 500

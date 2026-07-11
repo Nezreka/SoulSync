@@ -4938,7 +4938,8 @@ class VideoDatabase:
         finally:
             conn.close()
 
-    def add_videos_to_wishlist(self, channel: dict, videos: list, *, server_source=None) -> int:
+    def add_videos_to_wishlist(self, channel: dict, videos: list, *, server_source=None,
+                               allow_downloaded: bool = False) -> int:
         """Wish for a channel's videos. ``channel`` = {youtube_id, title, avatar_url?};
         ``videos`` = [{youtube_id, title, published_at?, thumbnail_url?, description?}, …].
         Idempotent per video id. Returns the count written."""
@@ -4951,10 +4952,12 @@ class VideoDatabase:
         conn = self._get_connection()
         n = 0
         try:
-            # Don't re-wish videos already downloaded. The channel SCAN pre-filters these,
-            # but the manual follow / wishlist-add API doesn't — re-following a channel
-            # would otherwise re-queue everything you already have.
-            downloaded = {r["media_id"] for r in conn.execute(
+            # Don't re-wish videos already downloaded — re-following a channel must
+            # never re-queue everything you already have. ``allow_downloaded`` is
+            # the DELIBERATE-single-click exception: with the ✓ downloaded marker
+            # visible, a manual wish on an owned video means "get it again"
+            # (silently no-oping that click was a dead button).
+            downloaded = set() if allow_downloaded else {r["media_id"] for r in conn.execute(
                 "SELECT DISTINCT media_id FROM video_download_history "
                 "WHERE source='youtube' AND outcome='completed' AND media_id IS NOT NULL")}
             for v in videos:

@@ -77,6 +77,36 @@ def test_library_api_channels_kind(tmp_path):
         videoapi._video_db = None
 
 
+# ── manual wish of a downloaded video (the dead-button bug) ──────────────────
+def test_manual_wish_readds_a_downloaded_video(tmp_path):
+    """add_videos_to_wishlist silently skips downloaded videos (right for bulk
+    re-follows, a dead button for a deliberate click). The manual endpoint now
+    passes allow_downloaded=True and reports honest success."""
+    import api.video as videoapi
+    videoapi._video_db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
+    db = videoapi._video_db
+    _downloaded(db, "UC1", "vGot", 1)
+    ch = {"youtube_id": "UC1", "title": "Kurzgesagt"}
+    vid = [{"youtube_id": "vGot", "title": "Get it again"}]
+    # Bulk semantics unchanged: the default still refuses a downloaded video.
+    assert db.add_videos_to_wishlist(ch, vid) == 0
+    assert db.add_videos_to_wishlist(ch, vid, allow_downloaded=True) == 1
+    db.remove_youtube_from_wishlist("video", "vGot")
+    app = Flask(__name__)
+    app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
+    try:
+        r = app.test_client().post("/api/video/youtube/wishlist/add",
+                                   json={"channel": ch, "videos": vid})
+        body = r.get_json()
+        assert body["success"] is True and body["added"] == 1
+        # And a genuinely bad payload reports failure instead of a silent 200.
+        r = app.test_client().post("/api/video/youtube/wishlist/add",
+                                   json={"channel": ch, "videos": [{"title": "no id"}]})
+        assert r.get_json()["success"] is False
+    finally:
+        videoapi._video_db = None
+
+
 # ── channel detail: true downloaded flags (cache-hit path, no network) ───────
 def test_channel_detail_marks_downloaded_vs_wished(tmp_path, monkeypatch):
     import api.video as videoapi
