@@ -1889,7 +1889,15 @@
             }
             yc.addVideos({ youtube_id: ch.youtube_id, title: ch.title, avatar_url: ch.avatar_url },
                 [ytVideoMap[id] || { youtube_id: id, title: '' }])
-                .then(function (d) { setOn(!!(d && d.success)); if (d && d.success && typeof showToast === 'function') showToast('Added to wishlist', 'success'); })
+                .then(function (d) {
+                    var ok = !!(d && d.success);
+                    setOn(ok);
+                    // A failed add must SAY so — the silent version read as a dead button.
+                    if (typeof showToast === 'function') {
+                        if (ok) showToast('Added to wishlist', 'success');
+                        else showToast((d && d.error) || 'Couldn’t add to wishlist', 'error');
+                    }
+                })
                 .catch(function () { btn.disabled = false; });
         }
     }
