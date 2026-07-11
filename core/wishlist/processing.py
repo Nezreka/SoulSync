@@ -30,6 +30,25 @@ logger = module_logger
 _DEFAULT_ALBUM_BUNDLE_MIN_TRACKS = 2
 
 
+def _coerce_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {'1', 'true', 'yes', 'on'}
+    return bool(value)
+
+
+def _atomic_album_publish_enabled() -> bool:
+    """Return whether album batches should stay private until complete."""
+    try:
+        from config.settings import config_manager
+        return _coerce_bool(config_manager.get('album_downloads.atomic_publish', False))
+    except Exception:  # noqa: S110 - config may be unavailable in tests/import tools
+        return False
+
+
 def _resolve_album_bundle_threshold() -> int:
     """Return the configured min-tracks-per-album threshold for the
     wishlist album-bundle grouper. Falls back to the default when the
@@ -257,6 +276,12 @@ def _run_wishlist_cycle(
         )
 
     residual_tracks = grouping.residual_tracks if grouping is not None else tracks
+    if residual_tracks and cycle == 'albums' and _atomic_album_publish_enabled():
+        logger.info(
+            f"[Wishlist Processing] Skipping {len(residual_tracks)} album-cycle residual tracks because "
+            "album_downloads.atomic_publish is enabled"
+        )
+        residual_tracks = []
     residual_count = len(residual_tracks) if residual_tracks else 0
     if residual_tracks:
         residual_batch_id = _alloc_id()
