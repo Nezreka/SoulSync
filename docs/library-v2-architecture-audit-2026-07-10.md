@@ -401,6 +401,14 @@ oder fachlich falsche Fallbacks.
 Insert auflösen; FK hinzufügen; Profil-Löschen muss Referenzen transaktional auf ein
 gewähltes Ersatzprofil umstellen oder blockieren.
 
+**Status 2026-07-11: behoben.** Profil-Löschung remappt alle nicht-nullbaren
+Lib2-Referenzen transaktional auf das überlebende Default-Profil (`df285b9`). Alle
+produktiven Lib2-Inserts schreiben das live aufgelöste Default-Profil explizit
+(`31a1fb1`). Frische und historische Tabellen besitzen keinen numerischen
+`DEFAULT 1` mehr, werden auf echte `quality_profiles`-Foreign-Keys migriert und durch
+dynamische Default- und Integritätstrigger abgesichert; dangling IDs werden beim
+Upgrade repariert (`9e716ab`).
+
 ### P1-02: Legacy-Import reconciliert Löschungen und Pfadänderungen nicht
 
 **Beleg:** `core/library2/importer.py`, Zeilen 281-442.
@@ -858,6 +866,12 @@ gesucht wird. Ein temporärer Providerausfall erzeugt einen dauerhaften stillen 
 speichern und mit Backoff wiederholen. Effective Wanted darf erst als vollständig
 projiziert gelten, wenn die Tracklist vorhanden ist oder ein sichtbarer Fehlerzustand
 besteht.
+
+**Status 2026-07-11: behoben.** Auto-monitorierte Releases speichern
+`pending|failed|ready`, Versuchszähler, Fehler und `retry_at`. Fällige Fehler sowie
+vorher gestrandete monitored Discography-Releases werden unabhängig vom
+New-Release-Flag erneut eingeplant. Erfolg setzt den Zustand vollständig zurück;
+Albumdetails liefern den Tracklist-Sync-Zustand an die API (`d9019ec`).
 
 ### P2-01: Scan und Retag halten SQLite zu lange während Dateisystem-I/O
 
@@ -1883,8 +1897,9 @@ nicht mehr still Daten oder Secrets gefährden.
 
 - [x] Produktentscheidung Multi-Profil versus Admin-only treffen. *(ADR-01,
   technisch erzwungen durch `10bfdd6`, nachgehärtet durch `6ab520f`)*
-- [ ] Numerische Default-1-Werte aus Lib2-Inserts entfernen.
-- [ ] FK-/Replacement-Strategie für Quality Profiles migrieren.
+- [x] Numerische Default-1-Werte aus Lib2-Inserts entfernen. *(`31a1fb1`)*
+- [x] FK-/Replacement-Strategie für Quality Profiles migrieren. *(`df285b9`,
+  `9e716ab`)*
 - [ ] `monitor_rules` und Wanted-Projektion minimal einführen.
 - [ ] bestehende Flags als Legacy-Projektion behandeln.
 - [ ] Monitor-Provenance für Track/Album/Artist/New Release definieren.
@@ -1898,7 +1913,8 @@ nicht mehr still Daten oder Secrets gefährden.
 - [ ] stabile providerlose IDs ergänzen.
 - [x] Transactional Outbox für Watchlist/Wishlist einführen. *(LIB2-009,
   `bdc95b2`; strikte Fehlerweitergabe `895d27e`)*
-- [ ] Reconciliation-Job und UI-Status für Mirrorfehler ergänzen.
+- [x] Reconciliation-Job und UI-Status für Mirrorfehler ergänzen. *(Outbox/API/UI
+  `bdc95b2`; periodischer Reconciler `3ca3000`)*
 - [ ] periodische Jobs profilbewusst machen oder Admin-only erzwingen.
 
 #### Testgate
@@ -2176,10 +2192,15 @@ ADR-Log in §25a.
 | Grab-Härtung | Der serverseitig aufgelöste `quality_profile_id` landet tatsächlich in `track_info` und damit in der Quality-Pipeline. Nicht-Admins können auch über `/api/download` keinen Lib2-Kontext anhängen; fehlende Downloadparameter liefern 400 statt 500. | `a7b08a8` |
 | Import-Härtung | `profile_id=None` bedeutet im öffentlichen Import und in den exportierten Monitoring-Helfern immer Admin-Profil 1, niemals alle Profile. Fremdprofile werden hart abgelehnt. | `6ab520f` |
 | P1-30 | Wishlist-only-Tracks übernehmen ihr validiertes Quality-Profil. Fehlende/dangling IDs fallen auf das aktuelle Default-Profil zurück; Album/Artist werden nicht aus einem Einzeltrack überschrieben und Konflikte werden geloggt. | `33aeaf0` |
+| P1-01 Replacement | Beim Löschen eines Quality-Profils werden alle nicht-nullbaren Lib2-Referenzen in derselben Transaktion auf das überlebende Default-Profil umgestellt; nullable Legacy-/Wishlist-Referenzen werden weiterhin geleert. | `df285b9` |
+| P1-01 Inserts | Importer, Wishlist-only-Import und Autolink lösen das aktuelle Default-Profil zur Laufzeit auf und schreiben es explizit; Profil-ID 1 ist keine Laufzeitannahme mehr. | `31a1fb1` |
+| P1-01 Schema/FK | Frische und historische Lib2-Tabellen verwenden echte `quality_profiles`-Foreign-Keys ohne numerischen `DEFAULT 1`. Die Migration repariert ungültige IDs und Trigger sichern dynamische Defaults sowie direkte Schreibzugriffe ab. | `9e716ab` |
+| P1-31 | Tracklist-Materialisierung besitzt persistente Zustände, Versuchszähler, Fehlertext und exponentiellen Backoff. Fällige Fehler und alte monitored Releases ohne Tracks werden erneut eingeplant; Erfolg setzt den Zustand zurück. | `d9019ec` |
+| Mirror-Reconciler | Ein stündlicher, feature-gateter Repair-Job verarbeitet pro Lauf einen begrenzten Batch pending Outbox-Einträge, respektiert terminale Fehler und bereinigt alte erfolgreiche Einträge. | `3ca3000` |
 
 #### Verifizierter Teststand
 
-- Relevante Backend-Regressionssuite: **211 Tests bestanden**.
+- Relevante Backend-Regressionssuite: **232 Tests bestanden**.
 - Frontend-Typecheck mit `oxlint --type-check`: **0 Warnungen, 0 Fehler**.
 - Library-v2-spezifische Import-, API-, Outbox-, Profil-, Candidate- und
   Wishlist-Tests sind in den oben genannten Commits enthalten.
@@ -2190,12 +2211,6 @@ ADR-Log in §25a.
 
 #### Bewusst noch offen
 
-- [ ] P1-01: numerische `DEFAULT 1`-Fallbacks entfernen und belastbare
-  FK-/Replacement-Strategie für Quality Profiles migrieren.
-- [ ] P1-31: fehlgeschlagene Tracklist-Auflösung mit persistentem Retry-/Fehlerstatus
-  versehen, damit auto-monitorierte Releases nicht dauerhaft leer bleiben.
-- [ ] Periodischen Outbox-Reconciler und einen vollständigen Operator-/UI-Status für
-  dauerhaft fehlgeschlagene Mirrors ergänzen.
 - [ ] Candidate-Tokens zusätzlich an Profil/User und Lib2-Entity binden sowie vor
   einem Multi-Worker-Rollout in einen gemeinsam sichtbaren Store verschieben.
 - [ ] Stabile providerlose IDs, Monitor-Provenance und die verbleibende
@@ -2205,14 +2220,14 @@ ADR-Log in §25a.
 - [ ] Release Group/Edition, Multi-File-Primary-Modell und persistente
   Acquisition-Korrelation gemäß ADR-03/04/07 implementieren.
 
-Damit sind P0-01, P0-02, der akute URL-/Secret-Leak aus P0-03, der atomare
-Outbox-Kern aus P0-04, P1-08, P1-09, P1-10, P1-11, P1-15, P1-16, P1-17, P1-29,
-P1-30 sowie Teile von P1-18 geschlossen. Die verbleibende Candidate-Bindung und der
-periodische Outbox-Reconciler stehen bewusst in der offenen Liste. P0-04 wurde mit
-strikter Fehlerweitergabe im Outbox-Worker nachgehärtet (`895d27e`); der manuelle
+Damit sind P0-01, P0-02, der akute URL-/Secret-Leak aus P0-03, P0-04, P1-01, P1-08,
+P1-09, P1-10, P1-11, P1-15, P1-16, P1-17, P1-29, P1-30, P1-31 sowie Teile von
+P1-18 geschlossen. Die verbleibende Candidate-Bindung steht bewusst in der offenen
+Liste. P0-04 wurde mit strikter Fehlerweitergabe im Outbox-Worker nachgehärtet
+(`895d27e`) und durch den periodischen Reconciler (`3ca3000`) ergänzt; der manuelle
 Grab-Pfad übergibt das serverseitige Profil nun nachweislich an die Pipeline und ist
-für Nicht-Admins gesperrt (`a7b08a8`). Erst danach sollten
-ReleaseEdition/Recording und der größere Acquisition-Layer beginnen.
+für Nicht-Admins gesperrt (`a7b08a8`). Erst danach sollten ReleaseEdition/Recording
+und der größere Acquisition-Layer beginnen.
 
 ## 17. Teststrategie
 
@@ -2576,10 +2591,10 @@ Pipeline einfließt, nicht durch ein zweites Profil unterlaufen werden können.
 - API-Endpunkte für Quality-Profile-Zuweisung (`quality_profile_id`-Writes)
   brauchen eine Autorisierungsprüfung auf `is_admin=1` des aufrufenden Profils,
   nicht nur eine UI-seitige Ausblendung.
-- P1-01 (Default-1-Fallback/FK-Strategie) bleibt unverändert relevant. P1-30
-  (Wishlist-Import übernimmt Quality-Profile) ist mit `33aeaf0` behoben. Die
-  Admin-only-Entscheidung ändert nur *wer* zuweisen darf, nicht *wie* robust die
-  Zuweisung gespeichert wird.
+- P1-01 (Default-1-Fallback/FK-Strategie) ist mit `df285b9`, `31a1fb1` und
+  `9e716ab` behoben. P1-30 (Wishlist-Import übernimmt Quality-Profile) ist mit
+  `33aeaf0` behoben. Die Admin-only-Entscheidung ändert nur *wer* zuweisen darf,
+  nicht *wie* robust die Zuweisung gespeichert wird.
 
 ### ADR-02: Source of Truth für "Wanted"/Monitoring — **Entschieden: gestuft, Option 3 jetzt → Option 1 langfristiges Ziel**
 
