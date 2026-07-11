@@ -47,9 +47,28 @@
     var SEVERITY_ICONS = { info: 'ℹ️', warning: '⚠️', critical: '🔴' };
     // Per-finding-type presentation — the video siblings of the music
     // typeLabels / fixableTypes / actionLabels maps (keep in sync with jobs).
-    var TYPE_LABELS = { missing_episodes: 'Missing Episodes' };
-    var FIXABLE_TYPES = { missing_episodes: 'Send to Wishlist' };
-    var ACTION_LABELS = { wishlisted: 'Wishlisted', resolved: 'Resolved' };
+    var TYPE_LABELS = {
+        missing_episodes: 'Missing Episodes',
+        incomplete_collection: 'Incomplete Collection',
+        quality_upgrade: 'Quality Upgrade',
+        broken_file: 'Broken File',
+        metadata_gap: 'Metadata Gap',
+        duplicate_movie: 'Duplicate',
+        stale_wishlist: 'Stale Wishlist',
+    };
+    // Types absent here are report-only: no approve button, dismiss + details only.
+    var FIXABLE_TYPES = {
+        missing_episodes: 'Send to Wishlist',
+        incomplete_collection: 'Add to Wishlist',
+        quality_upgrade: 'Grab Upgrade',
+        broken_file: 'Re-download',
+        metadata_gap: 'Re-enrich',
+        stale_wishlist: 'Remove',
+    };
+    var ACTION_LABELS = { wishlisted: 'Wishlisted', grabbed: 'Grabbed', refreshed: 'Refreshed',
+        removed: 'Removed', resolved: 'Resolved' };
+    var GAP_LABELS = { unmatched: 'not TMDB-matched', overview: 'no summary',
+        genres: 'no genres', poster: 'no poster', backdrop: 'no backdrop' };
 
     // ── status + master toggle ───────────────────────────────────────────────
     function loadStatus() {
@@ -401,15 +420,114 @@
         '</div>';
     }
 
+    var LAZY_TYPES = { missing_episodes: 1, quality_upgrade: 1, broken_file: 1, metadata_gap: 1 };
+
     function detailHTML(f) {
         var d = f.details || {};
-        if (f.finding_type === 'missing_episodes' && d.episodes) {
-            // Rich panel loads lazily on first expand (show + season + episode
-            // art pulled live from /api/video/detail/show — always current).
+        // Lazy types fetch live library data (art, overview) on first expand.
+        if (LAZY_TYPES[f.finding_type]) {
             return '<div class="vrf-detail" data-vrf-fid="' + f.id + '">' +
                 '<div class="repair-loading">Loading details…</div></div>';
         }
+        if (f.finding_type === 'incomplete_collection') return collectionDetailHTML(d);
+        if (f.finding_type === 'duplicate_movie') return duplicateDetailHTML(d);
+        if (f.finding_type === 'stale_wishlist') return staleDetailHTML(d);
         return '<pre class="repair-finding-json">' + esc(JSON.stringify(d, null, 2)) + '</pre>';
+    }
+
+    function tmdbImg(p) {
+        if (!p) return '';
+        if (p.indexOf('http') === 0 || p.indexOf('/api/') === 0) return p;
+        return 'https://image.tmdb.org/t/p/w342' + p;
+    }
+
+    function gb(bytes) { return ((bytes || 0) / 1073741824).toFixed(1) + ' GB'; }
+
+    function miniCard(posterUrl, title, year, extraClass, chip) {
+        var img = posterUrl
+            ? '<img class="vrf-mini-poster" src="' + esc(posterUrl) +
+              '" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
+            : '<div class="vrf-mini-poster vrf-poster--empty">🎬</div>';
+        return '<div class="vrf-mini' + (extraClass ? ' ' + extraClass : '') + '">' + img +
+            (chip || '') +
+            '<div class="vrf-mini-title" title="' + esc(title) + '">' + esc(title) + '</div>' +
+            (year ? '<div class="vrf-mini-year">' + year + '</div>' : '') +
+        '</div>';
+    }
+
+    // ── Incomplete Collection: missing vs owned poster rails ─────────────────
+    function collectionDetailHTML(d) {
+        var missing = (d.missing || []).map(function (m) {
+            return miniCard(tmdbImg(m.poster_url), m.title || '?', m.year, 'vrf-mini--want',
+                '<span class="vrf-mini-chip">missing</span>');
+        }).join('');
+        var owned = (d.owned || []).map(function (m) {
+            return miniCard(m.library_id != null ? '/api/video/poster/movie/' + m.library_id : '',
+                m.title || '?', m.year, 'vrf-mini--dim',
+                '<span class="vrf-mini-chip vrf-mini-chip--got">✓</span>');
+        }).join('');
+        return '<div class="vrf-chips">' +
+                '<span class="vrf-chip vrf-chip--miss">' + (d.count || (d.missing || []).length) +
+                    ' missing</span>' +
+                '<span class="vrf-chip">' + (d.owned || []).length + ' / ' + (d.total || '?') +
+                    ' owned</span></div>' +
+            '<div class="vrf-rail">' + missing + owned + '</div>' +
+            '<p class="repair-finding-hint">Approving sends the missing films to the wishlist — ' +
+                'the auto-downloader takes it from there.</p>';
+    }
+
+    // ── Duplicate Movies: every copy side by side ────────────────────────────
+    function duplicateDetailHTML(d) {
+        var cards;
+        if (d.kind === 'rows') {
+            cards = (d.rows || []).map(function (r) {
+                return '<div class="vrf-file">' +
+                    '<div class="vrf-file-head">Library entry #' + r.id +
+                        (r.server_source ? ' · ' + esc(r.server_source) : '') + '</div>' +
+                    (r.path ? '<div class="vrf-file-path">' + esc(r.path) + '</div>' : '') +
+                    '<button class="vrf-btn" type="button" data-vjr-open-movie="' + r.id +
+                        '">View entry →</button>' +
+                '</div>';
+            }).join('');
+        } else {
+            cards = (d.files || []).map(function (fl) {
+                return '<div class="vrf-file">' +
+                    '<div class="vrf-file-head">' + esc(fl.resolution || '?') +
+                        (fl.video_codec ? ' · ' + esc(fl.video_codec) : '') +
+                        ' · ' + gb(fl.size_bytes) + '</div>' +
+                    (fl.relative_path ? '<div class="vrf-file-path">' + esc(fl.relative_path) + '</div>' : '') +
+                '</div>';
+            }).join('') +
+            (d.movie_id != null
+                ? '<button class="vrf-btn" type="button" data-vjr-open-movie="' + d.movie_id +
+                  '">View movie →</button>' : '');
+        }
+        return '<div class="vrf-files">' + cards + '</div>' +
+            '<p class="repair-finding-hint">Report-only — nothing is deleted from here. Dismiss ' +
+                'the copies you keep on purpose; they won’t come back.</p>';
+    }
+
+    // ── Stale Wishlist ───────────────────────────────────────────────────────
+    function staleDetailHTML(d) {
+        var poster = d.poster_url
+            ? '<img class="vrf-poster" src="' + esc(tmdbImg(d.poster_url)) +
+              '" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
+            : '<div class="vrf-poster vrf-poster--empty">🧹</div>';
+        var view = '';
+        if (d.library_id != null) {
+            view = d.kind === 'episode'
+                ? '<button class="vrf-btn" type="button" data-vjr-open-show="' + d.library_id + '">View show →</button>'
+                : '<button class="vrf-btn" type="button" data-vjr-open-movie="' + d.library_id + '">View movie →</button>';
+        }
+        return '<div class="vrf-show">' + poster +
+            '<div class="vrf-show-info">' +
+                '<div class="vrf-show-title">' + esc(d.title || '?') + '</div>' +
+                '<div class="vrf-chips"><span class="vrf-chip vrf-chip--got">✓ already owned</span>' +
+                    '<span class="vrf-chip">' + esc(d.kind || 'movie') + '</span></div>' +
+                '<p class="vrf-show-overview">The download engine never re-grabs owned items, so this ' +
+                    'wishlist row will sit forever. Approving removes the row only — files are untouched.</p>' +
+                '<div class="vrf-actions">' + view + '</div>' +
+            '</div></div>';
     }
 
     function simpleEpisodeList(d) {
@@ -425,19 +543,95 @@
             'auto-downloader takes it from there.</p>';
     }
 
-    // ── rich missing-episodes detail (lazy; live library data + art) ─────────
+    // ── lazy rich details (live library data + art on first expand) ──────────
     function buildRichDetail(fid) {
         var f = (state.findingsById || {})[fid];
         var host = document.querySelector('#video-repair-detail-' + fid + ' .vrf-detail');
         if (!f || !host || host.getAttribute('data-loaded')) return;
         host.setAttribute('data-loaded', '1');
         var d = f.details || {};
-        if (d.show_id == null) { host.innerHTML = simpleEpisodeList(d); return; }
-        jget('/api/video/detail/show/' + d.show_id)
-            .then(function (show) {
-                host.innerHTML = show ? richDetailHTML(f, d, show) : simpleEpisodeList(d);
+        if (f.finding_type === 'missing_episodes') {
+            if (d.show_id == null) { host.innerHTML = simpleEpisodeList(d); return; }
+            jget('/api/video/detail/show/' + d.show_id)
+                .then(function (show) {
+                    host.innerHTML = show ? richDetailHTML(f, d, show) : simpleEpisodeList(d);
+                })
+                .catch(function () { host.innerHTML = simpleEpisodeList(d); });
+            return;
+        }
+        // quality_upgrade / broken_file / metadata_gap — one shared movie panel.
+        var fallback = '<pre class="repair-finding-json">' +
+            esc(JSON.stringify(d, null, 2)) + '</pre>';
+        if (d.movie_id == null) { host.innerHTML = fallback; return; }
+        jget('/api/video/detail/movie/' + d.movie_id)
+            .then(function (movie) {
+                host.innerHTML = movie ? moviePanelHTML(f, d, movie) : fallback;
             })
-            .catch(function () { host.innerHTML = simpleEpisodeList(d); });
+            .catch(function () { host.innerHTML = fallback; });
+    }
+
+    // Shared movie header + per-type body for the movie-side findings.
+    function moviePanelHTML(f, d, movie) {
+        var poster = movie.has_poster
+            ? '<img class="vrf-poster" src="/api/video/poster/movie/' + movie.id +
+              '" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
+            : '<div class="vrf-poster vrf-poster--empty">🎬</div>';
+        var subBits = [];
+        if (movie.studio) subBits.push(esc(movie.studio));
+        if (movie.content_rating) subBits.push(esc(movie.content_rating));
+        if (movie.runtime_minutes) subBits.push(movie.runtime_minutes + ' min');
+
+        var chips = [], body = '';
+        if (f.finding_type === 'quality_upgrade') {
+            var fl = d.file || {};
+            chips.push('<span class="vrf-chip vrf-chip--miss">now: ' +
+                esc(fl.resolution || '?') + '</span>');
+            chips.push('<span class="vrf-chip">cutoff: ' + esc(d.cutoff || '?') + '</span>');
+            body = fileCardHTML(fl);
+        } else if (f.finding_type === 'broken_file') {
+            chips.push('<span class="vrf-chip vrf-chip--miss">' + esc(d.reason || 'suspect') + '</span>');
+            if (d.expected_seconds) {
+                var pct = d.expected_seconds
+                    ? Math.min(100, Math.round(100 * (d.actual_seconds || 0) / d.expected_seconds)) : 0;
+                body = '<div class="vrf-runtime"><div class="vrf-runtime-fill" style="width:' +
+                    pct + '%"></div></div>' +
+                    '<div class="vrf-runtime-label">file runs ' +
+                        Math.round((d.actual_seconds || 0) / 60) + ' of ' +
+                        Math.round(d.expected_seconds / 60) + ' minutes</div>' +
+                    fileCardHTML(d.file || {});
+            } else {
+                body = fileCardHTML(d.file || {});
+            }
+        } else if (f.finding_type === 'metadata_gap') {
+            (d.gaps || []).forEach(function (g) {
+                chips.push('<span class="vrf-chip vrf-chip--miss">' +
+                    esc(GAP_LABELS[g] || g) + '</span>');
+            });
+        }
+        return '<div class="vrf-show">' + poster +
+            '<div class="vrf-show-info">' +
+                '<div class="vrf-show-title">' + esc(movie.title) +
+                    (movie.year ? ' <span class="vrf-show-year">(' + movie.year + ')</span>' : '') + '</div>' +
+                (subBits.length ? '<div class="vrf-show-sub">' + subBits.join(' · ') + '</div>' : '') +
+                '<div class="vrf-chips">' + chips.join('') + '</div>' +
+                (movie.overview ? '<p class="vrf-show-overview">' + esc(movie.overview) + '</p>' : '') +
+                '<div class="vrf-actions"><button class="vrf-btn" type="button" ' +
+                    'data-vjr-open-movie="' + movie.id + '">View movie →</button></div>' +
+            '</div></div>' + body;
+    }
+
+    function fileCardHTML(fl) {
+        if (!fl || (!fl.relative_path && !fl.size_bytes)) return '';
+        var bits = [];
+        if (fl.resolution) bits.push(esc(fl.resolution));
+        if (fl.video_codec) bits.push(esc(fl.video_codec));
+        if (fl.audio_codec) bits.push(esc(fl.audio_codec));
+        if (fl.release_source) bits.push(esc(fl.release_source));
+        if (fl.size_bytes) bits.push(gb(fl.size_bytes));
+        return '<div class="vrf-file">' +
+            '<div class="vrf-file-head">' + bits.join(' · ') + '</div>' +
+            (fl.relative_path ? '<div class="vrf-file-path">' + esc(fl.relative_path) + '</div>' : '') +
+        '</div>';
     }
 
     function richDetailHTML(f, d, show) {
@@ -705,6 +899,15 @@
                     document.dispatchEvent(new CustomEvent('soulsync:video-open-detail', {
                         detail: { kind: 'show',
                                   id: parseInt(openShow.getAttribute('data-vjr-open-show'), 10),
+                                  source: 'library' },
+                    }));
+                    return;
+                }
+                var openMovie = e.target.closest('[data-vjr-open-movie]');
+                if (openMovie) {
+                    document.dispatchEvent(new CustomEvent('soulsync:video-open-detail', {
+                        detail: { kind: 'movie',
+                                  id: parseInt(openMovie.getAttribute('data-vjr-open-movie'), 10),
                                   source: 'library' },
                     }));
                     return;

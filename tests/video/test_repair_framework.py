@@ -114,8 +114,12 @@ def test_worker_config_roundtrip(worker):
                           settings={"include_specials": True})
     cfg = worker.job_config("missing_episodes")
     assert cfg["enabled"] and cfg["interval_hours"] == 6 and cfg["settings"]["include_specials"]
-    info = worker.get_all_job_info()
-    assert info and info[0]["job_id"] == "missing_episodes" and info[0]["enabled"]
+    info = {j["job_id"]: j for j in worker.get_all_job_info()}
+    assert info["missing_episodes"]["enabled"]
+    # All seven jobs registered and reporting.
+    assert set(info) >= {"missing_episodes", "movie_collections", "quality_upgrade",
+                         "broken_files", "metadata_gaps", "duplicate_movies",
+                         "wishlist_audit"}
 
 
 # ── the job: scan → findings (with supersede) ────────────────────────────────
