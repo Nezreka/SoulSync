@@ -42,3 +42,6 @@ docker-compose.local-image.yml
 *-container-inspect.json
 # Any hidden folders
 **/.*/
+# …except GitHub Actions: CI gates (route-tree drift, tests) only run if
+# the workflows are actually committed.
+!.github/
