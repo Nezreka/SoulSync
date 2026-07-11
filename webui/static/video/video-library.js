@@ -77,7 +77,8 @@
                   '" alt="" loading="lazy" onerror="this.parentNode.innerHTML=\'<div class=&quot;library-artist-image-fallback&quot;>📺</div>\'"></div>'
                 : '<div class="library-artist-image"><div class="library-artist-image-fallback">📺</div></div>';
             var cstats = (it.owned_count || 0) + ' downloaded' +
-                (it.video_count ? ' · ' + it.video_count + ' known' : '');
+                (it.video_count ? ' · ' + it.video_count + ' known' : '') +
+                (it.followed ? '' : ' · not following');
             return '<a class="library-artist-card video-card--clickable" href="#" ' +
                 'data-video-card-open="channel" data-video-card-id="' + esc(it.id) + '">' + cimg +
                 '<div class="library-artist-info">' +
