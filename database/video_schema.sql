@@ -742,3 +742,31 @@ CREATE TABLE IF NOT EXISTS video_repair_job_runs (
     status            TEXT NOT NULL DEFAULT 'running'   -- running | completed
 );
 CREATE INDEX IF NOT EXISTS idx_vrjr_job ON video_repair_job_runs(job_id);
+
+-- ── Issues: user-reported problems on library items (the music standard) ─────
+-- Any profile reports; admins triage. entity = movie | show | episode with the
+-- library row id; snapshot_data denormalizes the item's state at report time
+-- so the report stays meaningful even if the item changes/vanishes. Reporter
+-- name is captured at create (profiles live in the music DB — isolation).
+CREATE TABLE IF NOT EXISTS video_issues (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_id     INTEGER NOT NULL DEFAULT 1,
+    reporter_name  TEXT,
+    entity_type    TEXT NOT NULL,                  -- movie | show | episode
+    entity_id      TEXT NOT NULL,                  -- library row id (string)
+    category       TEXT NOT NULL,
+    title          TEXT NOT NULL,
+    description    TEXT,
+    snapshot_data  TEXT DEFAULT '{}',
+    status         TEXT NOT NULL DEFAULT 'open',   -- open | in_progress | resolved | dismissed
+    priority       TEXT NOT NULL DEFAULT 'normal', -- low | normal | high
+    admin_response TEXT,
+    resolved_by    INTEGER,
+    resolved_at    TIMESTAMP,
+    created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_vissues_profile ON video_issues(profile_id);
+CREATE INDEX IF NOT EXISTS idx_vissues_status  ON video_issues(status);
+CREATE INDEX IF NOT EXISTS idx_vissues_entity  ON video_issues(entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_vissues_created ON video_issues(created_at);

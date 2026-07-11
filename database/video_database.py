@@ -31,7 +31,7 @@ logger = get_logger("video_database")
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 31
+SCHEMA_VERSION = 32
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -4166,6 +4166,112 @@ class VideoDatabase:
                     "SELECT * FROM video_repair_job_runs ORDER BY started_at DESC, id DESC "
                     "LIMIT ?", (int(limit),)).fetchall()
             return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    # ── Issues: user-reported problems on library items (music standard) ──────
+    # Lifecycle open → in_progress → resolved | dismissed (reopenable). Resolved
+    # issues are RETAINED. Non-admin reads are force-scoped to the caller.
+
+    _ISSUE_UPDATABLE = {"status", "priority", "admin_response", "resolved_by",
+                        "resolved_at", "title", "description", "category"}
+
+    def create_issue(self, profile_id: int, entity_type: str, entity_id, category: str,
+                     title: str, description: str = "", snapshot_data=None,
+                     priority: str = "normal", reporter_name=None) -> int:
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                "INSERT INTO video_issues (profile_id, reporter_name, entity_type, entity_id, "
+                "category, title, description, snapshot_data, priority) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
+                (int(profile_id), reporter_name, entity_type, str(entity_id), category,
+                 title, description or "", json.dumps(snapshot_data or {}),
+                 priority if priority in ("low", "normal", "high") else "normal"))
+            conn.commit()
+            return cur.lastrowid
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _issue_row(r) -> dict:
+        d = dict(r)
+        try:
+            d["snapshot_data"] = json.loads(d.get("snapshot_data") or "{}")
+        except (ValueError, TypeError):
+            d["snapshot_data"] = {}
+        return d
+
+    def get_issues(self, profile_id: int, status=None, category=None, entity_type=None,
+                   limit: int = 100, offset: int = 0, is_admin: bool = False) -> list:
+        """Open/urgent first (music ordering): open, in_progress, then the rest;
+        high priority first inside each; newest first. Non-admin sees own only."""
+        where, params = ["1=1"], []
+        if not is_admin:
+            where.append("profile_id=?")
+            params.append(int(profile_id))
+        for col, val in (("status", status), ("category", category),
+                         ("entity_type", entity_type)):
+            if val and val != "all":
+                where.append(f"{col}=?")
+                params.append(val)
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM video_issues WHERE " + " AND ".join(where) +
+                " ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'in_progress' THEN 1 ELSE 2 END, "
+                "CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, "
+                "created_at DESC LIMIT ? OFFSET ?",
+                (*params, max(1, min(200, int(limit or 100))), max(0, int(offset or 0)))
+            ).fetchall()
+            return [self._issue_row(r) for r in rows]
+        finally:
+            conn.close()
+
+    def get_issue(self, issue_id: int):
+        conn = self._get_connection()
+        try:
+            r = conn.execute("SELECT * FROM video_issues WHERE id=?",
+                             (int(issue_id),)).fetchone()
+            return self._issue_row(r) if r else None
+        finally:
+            conn.close()
+
+    def update_issue(self, issue_id: int, updates: dict) -> bool:
+        fields = {k: v for k, v in (updates or {}).items() if k in self._ISSUE_UPDATABLE}
+        if not fields:
+            return False
+        sets = ", ".join(f"{k}=?" for k in fields)
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                f"UPDATE video_issues SET {sets}, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (*fields.values(), int(issue_id)))
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def delete_issue(self, issue_id: int) -> bool:
+        conn = self._get_connection()
+        try:
+            cur = conn.execute("DELETE FROM video_issues WHERE id=?", (int(issue_id),))
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def get_issue_counts(self, is_admin: bool = False, profile_id: int = 1) -> dict:
+        w, params = ("", []) if is_admin else (" WHERE profile_id=?", [int(profile_id)])
+        conn = self._get_connection()
+        try:
+            out = {"open": 0, "in_progress": 0, "resolved": 0, "dismissed": 0, "total": 0}
+            for r in conn.execute(
+                    f"SELECT status, COUNT(*) n FROM video_issues{w} GROUP BY status", params):
+                if r["status"] in out:
+                    out[r["status"]] = r["n"]
+                out["total"] += r["n"]
+            return out
         finally:
             conn.close()
 
