@@ -37,9 +37,10 @@
         'video_process_movie_wishlist', 'video_process_episode_wishlist', 'video_process_youtube_wishlist',
         'video_clean_youtube_episodes',
         // Library scan / sync
-        'video_scan_server', 'video_update_database', 'video_update_database_hourly', 'video_deep_scan_tv', 'video_deep_scan_movies',
+        'video_scan_server', 'video_scan_library', 'video_update_database',
+        'video_update_database_hourly', 'video_deep_scan_tv', 'video_deep_scan_movies',
         // Presentation
-        'video_apply_overlays',
+        'video_apply_overlays', 'video_sync_collections',
         // Maintenance
         'video_clean_plex_images',
         'video_clean_search_history', 'video_clean_completed_downloads', 'video_full_cleanup', 'video_backup_database',
