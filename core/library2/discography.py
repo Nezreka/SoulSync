@@ -26,7 +26,7 @@ Persistence rules:
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from utils.logging_config import get_logger
 
@@ -50,24 +50,6 @@ def _normalize_type(raw: Any) -> str:
     if value in {"appears_on", "appears-on"}:
         return "compilation"
     return "album"
-
-
-def _fetch_discography_cards(artist_name: str, spotify_id: Optional[str]) -> Tuple[List[Dict[str, Any]], Optional[str]]:
-    """All release cards (albums+eps+singles) via the source-priority lookup."""
-    from core.metadata.discography import get_artist_detail_discography
-    from core.metadata.lookup import MetadataLookupOptions
-
-    result = get_artist_detail_discography(
-        spotify_id or "",
-        artist_name=artist_name,
-        options=MetadataLookupOptions(limit=200),
-    )
-    if not result.get("success"):
-        return [], result.get("source")
-    cards: List[Dict[str, Any]] = []
-    for group in ("albums", "eps", "singles"):
-        cards.extend(result.get(group) or [])
-    return cards, result.get("source")
 
 
 def _existing_release_index(conn, artist_id: int) -> Dict[str, List[Dict[str, Any]]]:
@@ -117,12 +99,15 @@ def expand_artist_discography(database, artist_id: int) -> Dict[str, Any]:
     """
     import json
 
-    stats: Dict[str, Any] = {"added": 0, "enriched": 0, "removed": 0, "total": 0,
-                             "source": None, "auto_monitor_album_ids": []}
+    stats: Dict[str, Any] = {
+        "added": 0, "enriched": 0, "removed": 0, "total": 0,
+        "source": None, "is_complete": None, "snapshot_changed": None,
+        "prune_skipped": False, "auto_monitor_album_ids": [],
+    }
     conn = database._get_connection()
     try:
         artist = conn.execute(
-            "SELECT id, name, spotify_id, quality_profile_id, monitored, monitor_new_items, "
+            "SELECT id, name, spotify_id, external_ids, quality_profile_id, monitored, monitor_new_items, "
             "discography_synced_at FROM lib2_artists WHERE id=?",
             (artist_id,),
         ).fetchone()
@@ -151,11 +136,41 @@ def expand_artist_discography(database, artist_id: int) -> Dict[str, Any]:
         ).fetchall()
         stats["auto_monitor_album_ids"] = [row["id"] for row in retry_rows]
 
-        cards, source = _fetch_discography_cards(artist["name"], artist["spotify_id"])
-        stats["source"] = source
-        stats["total"] = len(cards)
-        if not cards:
+        source_artist_ids = {}
+        try:
+            source_artist_ids.update(json.loads(artist["external_ids"] or "{}"))
+        except (TypeError, ValueError):
+            logger.warning("Artist %s has invalid external_ids JSON", artist_id)
+        if artist["spotify_id"]:
+            source_artist_ids["spotify"] = artist["spotify_id"]
+
+        from core.library2.provider_adapters import fetch_artist_discography
+        provider_result = fetch_artist_discography(
+            artist["name"], source_artist_ids=source_artist_ids)
+        if provider_result is None:
             return stats
+        source = provider_result.provider
+        stats["source"] = source
+        stats["total"] = len(provider_result.releases)
+        stats["is_complete"] = provider_result.is_complete
+
+        from core.library2.provider_snapshots import record_provider_snapshot
+        snapshot_write = record_provider_snapshot(
+            conn,
+            provider=source,
+            entity_type="artist",
+            entity_id=artist_id,
+            scope="discography",
+            provider_entity_id=provider_result.provider_entity_id,
+            etag=provider_result.etag,
+            provider_version=provider_result.provider_version,
+            parser_version=provider_result.parser_version,
+            payload=provider_result.snapshot_payload(),
+            is_complete=provider_result.is_complete,
+            cursor=provider_result.cursor,
+            page_count=provider_result.page_count,
+        )
+        stats["snapshot_changed"] = snapshot_write.payload_changed
 
         index = _existing_release_index(conn, artist_id)
         # "Monitor new items" applies to releases DISCOVERED after the catalog
@@ -178,21 +193,14 @@ def expand_artist_discography(database, artist_id: int) -> Dict[str, Any]:
         seen_ids: set = set()
         cursor = conn.cursor()
 
-        for card in cards:
-            title = str(card.get("title") or card.get("name") or "").strip()
-            if not title:
-                continue
-            provider_id = str(card.get("id") or "").strip()
-            album_type = _normalize_type(card.get("album_type"))
-            release_date = card.get("release_date")
-            year = None
-            if card.get("year"):
-                try:
-                    year = int(str(card["year"])[:4])
-                except (TypeError, ValueError):
-                    year = None
-            track_count = card.get("track_count") or None
-            image_url = card.get("image_url")
+        for release in provider_result.releases:
+            title = release.title
+            provider_id = release.provider_id
+            album_type = _normalize_type(release.album_type)
+            release_date = release.release_date
+            year = release.year
+            track_count = release.track_count or None
+            image_url = release.image_url
             spotify_id = provider_id if source == "spotify" else None
             external_ids = json.dumps({source: provider_id}) if (source and provider_id) else "{}"
 
@@ -253,20 +261,26 @@ def expand_artist_discography(database, artist_id: int) -> Dict[str, Any]:
 
         # Prune provider-only rows that vanished from the provider — but never
         # rows the user monitored or that grew tracks/files since.
-        stale = conn.execute(
-            """SELECT al.id FROM lib2_album_artists aa
-               JOIN lib2_albums al ON al.id = aa.album_id
-              WHERE aa.artist_id = ? AND al.origin = 'discography'
-                AND al.monitored = 0
-                AND NOT EXISTS (SELECT 1 FROM lib2_tracks t WHERE t.album_id = al.id)""",
-            (artist_id,),
-        ).fetchall()
-        for row in stale:
-            if row["id"] in seen_ids:
-                continue
-            cursor.execute("DELETE FROM lib2_album_artists WHERE album_id=?", (row["id"],))
-            cursor.execute("DELETE FROM lib2_albums WHERE id=?", (row["id"],))
-            stats["removed"] += 1
+        if provider_result.is_complete:
+            stale = conn.execute(
+                """SELECT al.id FROM lib2_album_artists aa
+                   JOIN lib2_albums al ON al.id = aa.album_id
+                  WHERE aa.artist_id = ? AND al.origin = 'discography'
+                    AND al.monitored = 0
+                    AND NOT EXISTS (SELECT 1 FROM lib2_tracks t WHERE t.album_id = al.id)""",
+                (artist_id,),
+            ).fetchall()
+            for row in stale:
+                if row["id"] in seen_ids:
+                    continue
+                cursor.execute("DELETE FROM lib2_album_artists WHERE album_id=?", (row["id"],))
+                cursor.execute("DELETE FROM lib2_albums WHERE id=?", (row["id"],))
+                stats["removed"] += 1
+        else:
+            stats["prune_skipped"] = True
+            logger.warning(
+                "Discography snapshot for artist %s from %s is partial; "
+                "stale-release pruning suppressed", artist_id, source)
 
         cursor.execute(
             "UPDATE lib2_artists SET discography_synced_at=CURRENT_TIMESTAMP WHERE id=?",

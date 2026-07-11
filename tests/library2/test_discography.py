@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 
 import pytest
@@ -75,6 +76,33 @@ def test_expand_is_idempotent(legacy_db, imported_conn, fake_discography):
     assert count == 1
 
 
+def test_expand_records_normalized_provider_snapshot(
+        legacy_db, imported_conn, fake_discography):
+    aid = _artist_id(imported_conn)
+
+    stats = D.expand_artist_discography(legacy_db, aid)
+
+    snapshot = imported_conn.execute(
+        """SELECT provider, entity_type, entity_id, scope, is_complete,
+                  parser_version, payload_json
+             FROM library_provider_snapshots
+            WHERE entity_type='artist' AND entity_id=? AND scope='discography'""",
+        (aid,),
+    ).fetchone()
+    payload = json.loads(snapshot["payload_json"])
+    assert stats["snapshot_changed"] is True
+    assert stats["is_complete"] is True
+    assert snapshot["provider"] == "spotify"
+    assert snapshot["is_complete"] == 1
+    assert snapshot["parser_version"] == "library2-discography/1"
+    assert {release["title"] for release in payload["releases"]} == {
+        "Views", "Scorpion", "One Dance",
+    }
+
+    repeated = D.expand_artist_discography(legacy_db, aid)
+    assert repeated["snapshot_changed"] is False
+
+
 def test_expand_prunes_vanished_pristine_rows(legacy_db, imported_conn, fake_discography, monkeypatch):
     aid = _artist_id(imported_conn)
     D.expand_artist_discography(legacy_db, aid)
@@ -94,6 +122,44 @@ def test_expand_prunes_vanished_pristine_rows(legacy_db, imported_conn, fake_dis
     assert stats["removed"] == 1
     assert imported_conn.execute(
         "SELECT COUNT(*) c FROM lib2_albums WHERE title='Scorpion'").fetchone()["c"] == 0
+
+
+def test_partial_discography_snapshot_never_prunes(
+        legacy_db, imported_conn, fake_discography, monkeypatch):
+    aid = _artist_id(imported_conn)
+    D.expand_artist_discography(legacy_db, aid)
+
+    partial = _cards(
+        ("albums", {"id": "sp-views", "title": "Views", "album_type": "album",
+                    "track_count": 20}),
+        ("singles", {"id": "sp-onedance", "title": "One Dance",
+                     "album_type": "single", "track_count": 1}),
+    )
+    partial.update({"is_complete": False, "cursor": "next-page", "page_count": 1})
+    monkeypatch.setattr(
+        "core.metadata.discography.get_artist_detail_discography",
+        lambda artist_id, artist_name="", options=None: partial,
+    )
+
+    stats = D.expand_artist_discography(legacy_db, aid)
+
+    assert stats["removed"] == 0
+    assert stats["prune_skipped"] is True
+    assert imported_conn.execute(
+        "SELECT COUNT(*) c FROM lib2_albums WHERE title='Scorpion'"
+    ).fetchone()["c"] == 1
+    snapshot = imported_conn.execute(
+        """SELECT is_complete, cursor, page_count
+             FROM library_provider_snapshots
+            WHERE provider='spotify' AND entity_type='artist'
+              AND entity_id=? AND scope='discography'""",
+        (aid,),
+    ).fetchone()
+    assert dict(snapshot) == {
+        "is_complete": 0,
+        "cursor": "next-page",
+        "page_count": 1,
+    }
 
 
 def test_monitored_discography_row_survives_prune(legacy_db, imported_conn, fake_discography, monkeypatch):
@@ -267,7 +333,10 @@ def test_failed_auto_monitor_tracklist_is_persisted_and_retried(
     assert failed["error"] == "No metadata provider returned a tracklist"
     assert failed["retry_at"] is not None
 
-    monkeypatch.setattr(D, "_fetch_discography_cards", lambda *_args: ([], "test"))
+    monkeypatch.setattr(
+        "core.library2.provider_adapters.fetch_artist_discography",
+        lambda *_args, **_kwargs: None,
+    )
     assert D.expand_artist_discography(
         legacy_db, artist_id)["auto_monitor_album_ids"] == []
 
