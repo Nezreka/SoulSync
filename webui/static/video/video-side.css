@@ -3844,6 +3844,13 @@ body[data-side="video"] #soulsync-toggle { display: none; }
     background: rgba(var(--accent-rgb), 0.16); border: 1px solid rgba(var(--accent-rgb), 0.32); }
 .vdpg-mctx { vertical-align: middle; }
 .vdpg-dest { color: #8fe7af; font-family: 'JetBrains Mono', ui-monospace, monospace; }
+/* channel name prefix on collapsed YouTube rows */
+.vdpg-mchan { vertical-align: middle; margin-right: 8px; padding-right: 8px; font-weight: 600;
+    color: rgba(255, 255, 255, 0.62); border-right: 1px solid rgba(255, 255, 255, 0.16); }
+/* completed-but-below-cutoff: still on the wishlist, hunting a better copy */
+.vdpg-upchip { display: inline-block; font-size: 9.5px; font-weight: 800; letter-spacing: 0.02em; text-transform: uppercase;
+    padding: 2px 7px; border-radius: 5px; vertical-align: middle; margin-right: 8px; cursor: help;
+    color: #fbbf24; background: rgba(251, 191, 36, 0.12); border: 1px solid rgba(251, 191, 36, 0.32); }
 /* open the movie/show page */
 .vdpg-open { flex-shrink: 0; width: 30px; height: 30px; display: inline-grid; place-items: center;
     border-radius: 8px; cursor: pointer; background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.14);
@@ -3860,6 +3867,29 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vdpg-row-retry:hover { transform: translateX(0) scale(1.12) rotate(-40deg); }
 .vdpg-row-retry:disabled { opacity: 0.5 !important; pointer-events: none; }
 @media (hover: none) { .vdpg-row-retry { opacity: 1; pointer-events: auto; transform: none; } }
+/* Manual Import (import_failed rows) — same hover-reveal, green so it reads as "file it" not "retry" */
+.vdpg-row-import { background: linear-gradient(135deg, rgba(34, 197, 94, 0.85), rgba(34, 197, 94, 0.65));
+    border-color: rgba(34, 197, 94, 0.55); box-shadow: 0 0 10px rgba(34, 197, 94, 0.25); }
+.vdpg-row-import:hover { transform: translateX(0) scale(1.12); }
+
+/* first-visit loading skeleton (removed on the first render) */
+.vdpg-skel-row { display: flex; align-items: center; gap: 14px; padding: 14px 16px; margin-bottom: 10px;
+    border-radius: 12px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.06); }
+.vdpg-skel-art { flex-shrink: 0; width: 50px; height: 74px; border-radius: 8px; }
+.vdpg-skel-lines { flex: 1; display: flex; flex-direction: column; gap: 9px; }
+.vdpg-skel-line { height: 12px; border-radius: 6px; width: 46%; }
+.vdpg-skel-line--short { width: 28%; height: 10px; }
+.vdpg-skel-art, .vdpg-skel-line { background: linear-gradient(90deg, rgba(255,255,255,0.05) 25%, rgba(255,255,255,0.11) 50%, rgba(255,255,255,0.05) 75%);
+    background-size: 200% 100%; animation: vdpg-skel-sheen 1.4s ease-in-out infinite; }
+@keyframes vdpg-skel-sheen { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .vdpg-skel-art, .vdpg-skel-line { animation: none; } }
+
+/* rich empty state (JS fills icon/title/sub) */
+.vdpg-empty.adl-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 56px 20px; }
+.vdpg-empty-ic { font-size: 34px; line-height: 1; filter: saturate(0.8); opacity: 0.9; }
+.vdpg-empty-t { font-size: 1.02rem; font-weight: 700; color: rgba(255, 255, 255, 0.85); }
+.vdpg-empty-s { font-size: 0.85rem; color: rgba(255, 255, 255, 0.5); max-width: 46ch; text-align: center; line-height: 1.5; }
+.vdpg-empty-s strong { color: rgba(255, 255, 255, 0.75); }
 
 /* ───────────────────────── Downloads — Cinema per-type theming ───────────────────
    movie = azure · TV = violet · youtube = red. --vt is the type's RGB triplet, used for
