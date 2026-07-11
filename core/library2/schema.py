@@ -90,6 +90,10 @@ CREATE TABLE IF NOT EXISTS lib2_albums (
     track_count INTEGER,
     expected_track_count INTEGER,                      -- true total from metadata (for have/missing)
     tracklist_json TEXT,                               -- cached canonical tracklist (missing-track titles)
+    tracklist_status TEXT NOT NULL DEFAULT 'idle',     -- idle | pending | failed | ready
+    tracklist_attempts INTEGER NOT NULL DEFAULT 0,
+    tracklist_error TEXT,
+    tracklist_retry_at TIMESTAMP,
     origin TEXT NOT NULL DEFAULT 'library',            -- 'library' (has/had files) | 'discography' (provider-only)
     monitored INTEGER NOT NULL DEFAULT 1,
     quality_profile_id INTEGER REFERENCES quality_profiles(id) ON DELETE RESTRICT,
@@ -266,6 +270,14 @@ _ADDED_COLUMNS = (
      "ALTER TABLE lib2_albums ADD COLUMN expected_track_count INTEGER"),
     ("lib2_albums", "tracklist_json",
      "ALTER TABLE lib2_albums ADD COLUMN tracklist_json TEXT"),
+    ("lib2_albums", "tracklist_status",
+     "ALTER TABLE lib2_albums ADD COLUMN tracklist_status TEXT NOT NULL DEFAULT 'idle'"),
+    ("lib2_albums", "tracklist_attempts",
+     "ALTER TABLE lib2_albums ADD COLUMN tracklist_attempts INTEGER NOT NULL DEFAULT 0"),
+    ("lib2_albums", "tracklist_error",
+     "ALTER TABLE lib2_albums ADD COLUMN tracklist_error TEXT"),
+    ("lib2_albums", "tracklist_retry_at",
+     "ALTER TABLE lib2_albums ADD COLUMN tracklist_retry_at TIMESTAMP"),
     ("lib2_artists", "quality_profile_id",
      "ALTER TABLE lib2_artists ADD COLUMN quality_profile_id INTEGER"),
     ("lib2_albums", "quality_profile_id",

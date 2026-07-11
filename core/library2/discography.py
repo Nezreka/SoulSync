@@ -25,6 +25,7 @@ Persistence rules:
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from utils.logging_config import get_logger
@@ -128,6 +129,28 @@ def expand_artist_discography(database, artist_id: int) -> Dict[str, Any]:
         if not artist:
             raise ValueError(f"Artist {artist_id} not found")
 
+        # Retry interrupted/failed auto-monitor materialization independently
+        # of whether the provider catalog still considers the release "new".
+        # ``idle`` + no rows also recovers albums stranded by pre-marker builds.
+        retry_rows = conn.execute(
+            """SELECT al.id FROM lib2_albums al
+                WHERE al.primary_artist_id=? AND al.origin='discography'
+                  AND al.monitored=1
+                  AND (
+                      al.tracklist_status='pending'
+                      OR (al.tracklist_status='failed' AND (
+                          al.tracklist_retry_at IS NULL
+                          OR al.tracklist_retry_at <= CURRENT_TIMESTAMP
+                      ))
+                      OR (al.tracklist_status='idle' AND NOT EXISTS (
+                          SELECT 1 FROM lib2_tracks t WHERE t.album_id=al.id
+                      ))
+                  )
+                ORDER BY al.id""",
+            (artist_id,),
+        ).fetchall()
+        stats["auto_monitor_album_ids"] = [row["id"] for row in retry_rows]
+
         cards, source = _fetch_discography_cards(artist["name"], artist["spotify_id"])
         stats["source"] = source
         stats["total"] = len(cards)
@@ -208,6 +231,11 @@ def expand_artist_discography(database, artist_id: int) -> Dict[str, Any]:
             new_id = cursor.lastrowid
             seen_ids.add(new_id)
             if auto_monitor_new:
+                cursor.execute(
+                    "UPDATE lib2_albums SET tracklist_status='pending', "
+                    "tracklist_error=NULL, tracklist_retry_at=NULL WHERE id=?",
+                    (new_id,),
+                )
                 stats["auto_monitor_album_ids"].append(new_id)
             cursor.execute(
                 "INSERT OR IGNORE INTO lib2_album_artists(album_id, artist_id, role) "
@@ -269,10 +297,50 @@ def auto_monitor_releases(db, config_manager, album_ids: List[int],
     conn = db._get_connection()
     try:
         for album_id in album_ids:
+            error = None
             try:
-                resolve_tracklist(config_manager, conn, album_id)
+                tracks = resolve_tracklist(config_manager, conn, album_id)
             except Exception as e:  # noqa: BLE001
-                logger.debug("auto-monitor tracklist resolve failed (%s): %s", album_id, e)
+                tracks = None
+                error = str(e) or e.__class__.__name__
+            if not tracks:
+                row = conn.execute(
+                    "SELECT tracklist_attempts FROM lib2_albums WHERE id=?",
+                    (album_id,),
+                ).fetchone()
+                if row is None:
+                    continue
+                attempts = int(row["tracklist_attempts"] or 0) + 1
+                delay_minutes = min(
+                    5 * (2 ** min(attempts - 1, 9)),
+                    24 * 60,
+                )
+                retry_at = (
+                    datetime.now(timezone.utc) + timedelta(minutes=delay_minutes)
+                ).strftime("%Y-%m-%d %H:%M:%S")
+                message = (error or "No metadata provider returned a tracklist")[:1000]
+                conn.execute(
+                    """UPDATE lib2_albums
+                          SET tracklist_status='failed', tracklist_attempts=?,
+                              tracklist_error=?, tracklist_retry_at=?,
+                              updated_at=CURRENT_TIMESTAMP
+                        WHERE id=?""",
+                    (attempts, message, retry_at, album_id),
+                )
+                conn.commit()
+                logger.warning(
+                    "auto-monitor tracklist unavailable for album %s; retry %s at %s: %s",
+                    album_id, attempts, retry_at, message,
+                )
+                continue
+            conn.execute(
+                """UPDATE lib2_albums
+                      SET tracklist_status='ready', tracklist_attempts=0,
+                          tracklist_error=NULL, tracklist_retry_at=NULL,
+                          updated_at=CURRENT_TIMESTAMP
+                    WHERE id=?""",
+                (album_id,),
+            )
             conn.execute("UPDATE lib2_tracks SET monitored=1 WHERE album_id=?", (album_id,))
             # Commit before mirroring: add_to_wishlist opens its own connection.
             conn.commit()

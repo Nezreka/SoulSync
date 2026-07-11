@@ -541,6 +541,12 @@ def get_album(conn, album_id: int) -> Optional[Dict[str, Any]]:
         "tracks_present": present_count,
         "tracks_missing": max(0, total - present_count),
         "upgrades_available": upgrades_available,
+        "tracklist_sync": {
+            "status": al["tracklist_status"],
+            "attempts": al["tracklist_attempts"],
+            "error": al["tracklist_error"],
+            "retry_at": al["tracklist_retry_at"],
+        },
     }
 
 

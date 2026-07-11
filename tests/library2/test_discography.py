@@ -197,7 +197,13 @@ def test_reexpansion_auto_monitors_even_after_all_rows_claimed(
         lambda artist_id, artist_name="", options=None: grown,
     )
     stats = D.expand_artist_discography(legacy_db, aid)
-    assert len(stats["auto_monitor_album_ids"]) == 1
+    retried_titles = {
+        row["title"] for row in imported_conn.execute(
+            "SELECT title FROM lib2_albums WHERE id IN (?, ?)",
+            stats["auto_monitor_album_ids"],
+        )
+    }
+    assert retried_titles == {"Scorpion", "For All The Dogs"}
     assert imported_conn.execute(
         "SELECT monitored FROM lib2_albums WHERE title='For All The Dogs'"
     ).fetchone()["monitored"] == 1
@@ -227,6 +233,75 @@ def test_reexpansion_respects_monitor_new_items_none(legacy_db, imported_conn, f
     assert stats["auto_monitor_album_ids"] == []
     assert imported_conn.execute(
         "SELECT monitored FROM lib2_albums WHERE title='For All The Dogs'").fetchone()["monitored"] == 0
+
+
+def test_failed_auto_monitor_tracklist_is_persisted_and_retried(
+        legacy_db, imported_conn, monkeypatch):
+    from core.library2 import queries as Q
+
+    artist_id = _artist_id(imported_conn)
+    conn = legacy_db._get_connection()
+    album_id = conn.execute(
+        """INSERT INTO lib2_albums(
+               primary_artist_id, title, origin, monitored, tracklist_status)
+           VALUES(?, 'Retry Release', 'discography', 1, 'pending')""",
+        (artist_id,),
+    ).lastrowid
+    conn.execute(
+        "INSERT INTO lib2_album_artists(album_id, artist_id, role) "
+        "VALUES(?, ?, 'primary')",
+        (album_id, artist_id),
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(
+        "core.library2.completeness.resolve_tracklist",
+        lambda _config, _conn, _album_id: None,
+    )
+    assert D.auto_monitor_releases(legacy_db, None, [album_id]) == 0
+
+    failed = Q.get_album(imported_conn, album_id)["tracklist_sync"]
+    assert failed["status"] == "failed"
+    assert failed["attempts"] == 1
+    assert failed["error"] == "No metadata provider returned a tracklist"
+    assert failed["retry_at"] is not None
+
+    monkeypatch.setattr(D, "_fetch_discography_cards", lambda *_args: ([], "test"))
+    assert D.expand_artist_discography(
+        legacy_db, artist_id)["auto_monitor_album_ids"] == []
+
+    conn = legacy_db._get_connection()
+    conn.execute(
+        "UPDATE lib2_albums SET tracklist_retry_at='2000-01-01 00:00:00' WHERE id=?",
+        (album_id,),
+    )
+    conn.commit()
+    conn.close()
+    assert D.expand_artist_discography(
+        legacy_db, artist_id)["auto_monitor_album_ids"] == [album_id]
+
+    def materialize(_config, conn, target_album_id):
+        conn.execute(
+            "INSERT INTO lib2_tracks(album_id, title, monitored) VALUES(?, 'Recovered', 0)",
+            (target_album_id,),
+        )
+        return [{"title": "Recovered", "track_number": 1}]
+
+    monkeypatch.setattr("core.library2.completeness.resolve_tracklist", materialize)
+    monkeypatch.setattr(
+        "core.library2.wishlist_mirror.mirror_tracks_wishlist",
+        lambda _db, _conn, track_ids, _monitored, **_kwargs: len(track_ids),
+    )
+    assert D.auto_monitor_releases(legacy_db, None, [album_id]) == 1
+
+    recovered = Q.get_album(imported_conn, album_id)
+    assert recovered["tracklist_sync"] == {
+        "status": "ready", "attempts": 0, "error": None, "retry_at": None,
+    }
+    assert recovered["tracks"][0]["monitored"] is True
+    assert D.expand_artist_discography(
+        legacy_db, artist_id)["auto_monitor_album_ids"] == []
 
 
 def test_reimport_claims_discography_row(legacy_db, imported_conn, fake_discography):

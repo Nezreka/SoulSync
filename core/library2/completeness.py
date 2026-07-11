@@ -199,8 +199,15 @@ def resolve_tracklist(config_manager, conn, album_id: int) -> Optional[List[dict
         try:
             cached = json.loads(al["tracklist_json"])
             if cached:
-                if _persist_tracklist_tracks(conn, album_id, cached):
-                    conn.commit()
+                _persist_tracklist_tracks(conn, album_id, cached)
+                conn.execute(
+                    """UPDATE lib2_albums
+                          SET tracklist_status='ready', tracklist_attempts=0,
+                              tracklist_error=NULL, tracklist_retry_at=NULL
+                        WHERE id=?""",
+                    (album_id,),
+                )
+                conn.commit()
                 return cached
         except (ValueError, TypeError):
             pass
@@ -237,7 +244,11 @@ def resolve_tracklist(config_manager, conn, album_id: int) -> Optional[List[dict
     if tracks:
         try:
             conn.execute(
-                "UPDATE lib2_albums SET tracklist_json=? WHERE id=?",
+                """UPDATE lib2_albums
+                      SET tracklist_json=?, tracklist_status='ready',
+                          tracklist_attempts=0, tracklist_error=NULL,
+                          tracklist_retry_at=NULL
+                    WHERE id=?""",
                 (json.dumps(tracks), album_id),
             )
             _persist_tracklist_tracks(conn, album_id, tracks)
