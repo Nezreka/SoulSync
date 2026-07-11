@@ -107,6 +107,11 @@ def test_library_v2_profile_reaches_download_pipeline(client, monkeypatch):
     conn = database._get_connection()
     ensure_library_v2_schema(conn)
     cur = conn.cursor()
+    # The lib2 FK triggers (audit P1-01) reject quality_profile_ids that
+    # don't exist in the app-wide quality_profiles table — create the row
+    # this test assigns instead of assuming bare ids pass.
+    cur.execute(
+        "INSERT OR IGNORE INTO quality_profiles(id, name) VALUES(7, 'Route Profile')")
     cur.execute("INSERT INTO lib2_artists(name) VALUES('Route Artist')")
     artist_id = cur.lastrowid
     cur.execute(
