@@ -369,7 +369,8 @@ describe('import route', () => {
         return HttpResponse.json(
           {
             success: false,
-            error: "Plex isn't connected, so importing now would copy files into place without adding them to your Library. Connect Plex in Settings, or switch to Standalone mode, then try again.",
+            error:
+              "Plex isn't connected, so importing now would copy files into place without adding them to your Library. Connect Plex in Settings, or switch to Standalone mode, then try again.",
             error_code: 'media_server_not_connected',
           },
           { status: 503 },

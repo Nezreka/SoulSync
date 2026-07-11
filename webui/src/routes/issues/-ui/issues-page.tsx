@@ -271,11 +271,7 @@ function IssueBoardList({
     }
 
     return issues.map((issue) => (
-      <IssueBoardCard
-        key={issue.id}
-        issue={issue}
-        showReporterName={showReporterName}
-      />
+      <IssueBoardCard key={issue.id} issue={issue} showReporterName={showReporterName} />
     ));
   }
 }

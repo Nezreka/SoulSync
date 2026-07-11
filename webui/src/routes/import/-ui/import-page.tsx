@@ -61,7 +61,6 @@ function formatShortTime(timestamp: number) {
   });
 }
 
-
 function ImportHeader({
   error,
   fileCountText,
