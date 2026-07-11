@@ -462,6 +462,11 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
         # (audit P1-12) — the schema-ensure backfill ran before the inserts.
         from core.library2.stable_ids import backfill_stable_ids
         backfill_stable_ids(cursor)
+        # Import-derived monitored flags are provenance 'legacy_import', never
+        # mistaken for deliberate user choices (audit P1-13/P1-14). Recorded
+        # intent (re-import over an existing library) is never downgraded.
+        from core.library2.monitor_rules import seed_legacy_rules
+        seed_legacy_rules(cursor)
         conn.commit()
         logger.info("Library v2 import complete: %s", stats)
     finally:

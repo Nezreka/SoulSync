@@ -236,6 +236,9 @@ def expand_artist_discography(database, artist_id: int) -> Dict[str, Any]:
                     "tracklist_error=NULL, tracklist_retry_at=NULL WHERE id=?",
                     (new_id,),
                 )
+                from core.library2.monitor_rules import (
+                    PROVENANCE_NEW_RELEASE, record_rule)
+                record_rule(conn, "album", new_id, True, PROVENANCE_NEW_RELEASE)
                 stats["auto_monitor_album_ids"].append(new_id)
             cursor.execute(
                 "INSERT OR IGNORE INTO lib2_album_artists(album_id, artist_id, role) "
@@ -342,6 +345,12 @@ def auto_monitor_releases(db, config_manager, album_ids: List[int],
                 (album_id,),
             )
             conn.execute("UPDATE lib2_tracks SET monitored=1 WHERE album_id=?", (album_id,))
+            # Monitor provenance (audit P1-13): this album became wanted via
+            # the "monitor new items" enforcement, not a user click. The track
+            # flips are its cascade projection and stay rule-less.
+            from core.library2.monitor_rules import PROVENANCE_NEW_RELEASE, record_rule
+            record_rule(conn, "album", album_id, True, PROVENANCE_NEW_RELEASE,
+                        profile_id=wishlist_profile_id)
             # Commit before mirroring: add_to_wishlist opens its own connection.
             conn.commit()
             track_ids = [r[0] for r in conn.execute(

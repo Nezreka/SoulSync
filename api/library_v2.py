@@ -402,12 +402,40 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             cur.execute(f"UPDATE {table} SET monitored=? WHERE id=?", (1 if monitored else 0, eid))
             if not cur.rowcount:
                 return jsonify({"success": False, "error": "Not found"}), 404
+            # Monitor provenance (audit P1-13/P1-14): this endpoint is a direct
+            # user action on exactly this entity — record the intent so later
+            # cascades know it was deliberate.
+            from core.library2.monitor_rules import (
+                PROVENANCE_USER,
+                explicit_track_rules_for_album,
+                record_rule,
+            )
+            record_rule(conn, {"artists": "artist", "albums": "album",
+                               "tracks": "track"}[entity], eid, monitored,
+                        PROVENANCE_USER, profile_id=_profile())
             track_ids: List[int] = []
+            preserved_track_ids: List[int] = []
             if entity == "albums":
-                track_ids = [r["id"] for r in conn.execute(
+                # P1-14: an album toggle is a cascade — it re-projects only
+                # tracks WITHOUT an explicit per-track choice. A track the
+                # user deliberately (un)monitored keeps its state; re-deciding
+                # it takes another direct action on the track itself.
+                explicit = explicit_track_rules_for_album(conn, eid,
+                                                          profile_id=_profile())
+                all_ids = [r["id"] for r in conn.execute(
                     "SELECT id FROM lib2_tracks WHERE album_id=?", (eid,))]
-                cur.execute("UPDATE lib2_tracks SET monitored=? WHERE album_id=?",
-                            (1 if monitored else 0, eid))
+                preserved_track_ids = [t for t in all_ids
+                                       if t in explicit and explicit[t] != monitored]
+                track_ids = [t for t in all_ids if t not in preserved_track_ids]
+                if preserved_track_ids:
+                    keep = ",".join("?" for _ in preserved_track_ids)
+                    cur.execute(
+                        f"UPDATE lib2_tracks SET monitored=? "
+                        f"WHERE album_id=? AND id NOT IN ({keep})",
+                        (1 if monitored else 0, eid, *preserved_track_ids))
+                else:
+                    cur.execute("UPDATE lib2_tracks SET monitored=? WHERE album_id=?",
+                                (1 if monitored else 0, eid))
             elif entity == "tracks":
                 track_ids = [eid]
             # Transactional outbox (audit P0-04): the mirror intents commit in
@@ -443,7 +471,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         finally:
             conn.close()
         return jsonify({"success": True, "monitored": monitored,
-                        "mirrored": mirrored, "mirror_pending": mirror_pending})
+                        "mirrored": mirrored, "mirror_pending": mirror_pending,
+                        "preserved_tracks": len(preserved_track_ids)})
 
     @app.route("/api/library/v2/<entity>/<int:eid>/quality-profile", methods=["POST"])
     def lib2_set_quality_profile(entity, eid):
@@ -515,6 +544,20 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     )]
                 elif entity == "tracks":
                     auto_monitor_track_ids = [eid]
+                # Monitor provenance (audit P1-14): the bulk opt-in is a
+                # cascade — it must not overturn a track the user explicitly
+                # unmonitored. A single-track assignment IS a direct action.
+                from core.library2.monitor_rules import (
+                    PROVENANCE_CASCADE,
+                    PROVENANCE_USER,
+                    explicitly_unmonitored_track_ids,
+                    record_rules,
+                )
+                if entity != "tracks" and auto_monitor_track_ids:
+                    vetoed = explicitly_unmonitored_track_ids(
+                        conn, auto_monitor_track_ids, profile_id=_profile())
+                    auto_monitor_track_ids = [
+                        t for t in auto_monitor_track_ids if t not in vetoed]
                 if auto_monitor_track_ids:
                     marks = ",".join("?" for _ in auto_monitor_track_ids)
                     cur.execute(
@@ -522,6 +565,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                         auto_monitor_track_ids,
                     )
                     auto_monitored = cur.rowcount
+                    record_rules(
+                        conn, "track", auto_monitor_track_ids, True,
+                        PROVENANCE_USER if entity == "tracks" else PROVENANCE_CASCADE,
+                        profile_id=_profile())
             conn.commit()
             mirrored = 0
             if auto_monitor_track_ids:

@@ -252,6 +252,25 @@ CREATE TABLE IF NOT EXISTS lib2_mirror_outbox (
 )
 """
 
+# --- Monitor rules (audit P1-13/P1-14) ---------------------------------------
+# WHY an entity is (un)monitored, per user profile. The ``monitored`` columns
+# on lib2 rows stay the effective projection; this table records the intent so
+# cascades can preserve explicit per-track choices and imports are
+# distinguishable from user decisions. See core/library2/monitor_rules.py.
+LIB2_MONITOR_RULES_DDL = """
+CREATE TABLE IF NOT EXISTS lib2_monitor_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_type TEXT NOT NULL,            -- 'artist'|'album'|'track'
+    entity_id INTEGER NOT NULL,
+    profile_id INTEGER NOT NULL DEFAULT 1,
+    monitored INTEGER NOT NULL,
+    provenance TEXT NOT NULL,             -- 'user_explicit'|'cascade'|'new_release'|'legacy_import'
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(entity_type, entity_id, profile_id)
+)
+"""
+
 _ALL_DDL = (
     LIB2_ARTISTS_DDL,
     LIB2_ALBUMS_DDL,
@@ -541,6 +560,26 @@ def ensure_library_v2_schema(connection: Any) -> None:
         backfill_stable_ids(cursor)
     except Exception as e:  # noqa: BLE001
         logger.error("stable_id backfill failed (will retry next start): %s", e)
+    # Monitor rules with provenance (audit P1-13/P1-14). Seeding runs only on
+    # the migration that CREATES the table: pre-existing flags get a truthful
+    # 'legacy_import' provenance exactly once; afterwards rules exist only
+    # where an action recorded intent.
+    try:
+        cursor.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='lib2_monitor_rules'")
+        rules_table_is_fresh = cursor.fetchone() is None
+        cursor.execute(LIB2_MONITOR_RULES_DDL)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_lib2_monitor_rules_entity "
+            "ON lib2_monitor_rules(entity_type, entity_id)")
+        from core.library2.monitor_rules import prune_orphaned_rules, seed_legacy_rules
+        if rules_table_is_fresh:
+            seeded = seed_legacy_rules(cursor)
+            if seeded:
+                logger.info("Seeded %d legacy_import monitor rules", seeded)
+        prune_orphaned_rules(cursor)
+    except Exception as e:  # noqa: BLE001
+        logger.error("monitor-rules migration failed (will retry next start): %s", e)
     # The read API falls back to download provenance (track_downloads) for
     # files the importer knew no quality data for — index the lookup column so
     # album views don't table-scan a large history per track. Guarded: the

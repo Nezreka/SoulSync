@@ -11,7 +11,7 @@ from core.library2.schema import ensure_library_v2_schema
 _EXPECTED_TABLES = {
     "lib2_artists", "lib2_albums", "lib2_album_artists",
     "lib2_tracks", "lib2_track_artists", "lib2_track_files",
-    "lib2_manual_skips", "lib2_mirror_outbox",
+    "lib2_manual_skips", "lib2_mirror_outbox", "lib2_monitor_rules",
 }
 
 

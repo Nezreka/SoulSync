@@ -181,6 +181,86 @@ def test_track_toggle_is_user_initiated_album_toggle_is_not(api):
     assert db.wishlist_adds and not any(a["user_initiated"] for a in db.wishlist_adds)
 
 
+def test_album_unmonitor_preserves_explicit_track_intent(api):
+    """Audit P1-14: an album toggle is a cascade — it must not destroy a
+    deliberate per-track choice. A track the user explicitly monitored stays
+    monitored (and is NOT withdrawn from the wishlist) when its album is
+    unmonitored; rule-less siblings follow the cascade."""
+    client, db, ids = api
+    # Direct user action on the track: explicit intent.
+    assert client.post(f"/api/library/v2/tracks/{ids['ep_track']}/monitor",
+                       json={"monitored": True}).get_json()["success"] is True
+    # Album ON then OFF — the cascade projects the sibling-less album; the
+    # explicit track must survive the OFF.
+    assert client.post(f"/api/library/v2/albums/{ids['ep']}/monitor",
+                       json={"monitored": True}).get_json()["success"] is True
+    db.wishlist_removes.clear()
+    resp = client.post(f"/api/library/v2/albums/{ids['ep']}/monitor",
+                       json={"monitored": False}).get_json()
+    assert resp["success"] is True
+    assert resp["preserved_tracks"] == 1
+    with _conn(db) as conn:
+        assert conn.execute("SELECT monitored FROM lib2_albums WHERE id=?",
+                            (ids["ep"],)).fetchone()[0] == 0
+        assert conn.execute("SELECT monitored FROM lib2_tracks WHERE id=?",
+                            (ids["ep_track"],)).fetchone()[0] == 1
+    assert all(r["id"] != "sp-t2" for r in db.wishlist_removes), (
+        "the explicitly monitored track must not be withdrawn from the wishlist")
+
+
+def test_album_cascade_still_projects_ruleless_tracks(api):
+    """Without explicit per-track intent the album toggle behaves exactly as
+    before: every child follows the cascade."""
+    client, db, ids = api
+    assert client.post(f"/api/library/v2/albums/{ids['views']}/monitor",
+                       json={"monitored": True}).get_json()["preserved_tracks"] == 0
+    with _conn(db) as conn:
+        assert conn.execute("SELECT monitored FROM lib2_tracks WHERE id=?",
+                            (ids["album_track"],)).fetchone()[0] == 1
+    resp = client.post(f"/api/library/v2/albums/{ids['views']}/monitor",
+                       json={"monitored": False}).get_json()
+    assert resp["preserved_tracks"] == 0
+    with _conn(db) as conn:
+        assert conn.execute("SELECT monitored FROM lib2_tracks WHERE id=?",
+                            (ids["album_track"],)).fetchone()[0] == 0
+
+
+def test_monitor_actions_record_provenance(api):
+    client, db, ids = api
+    client.post(f"/api/library/v2/tracks/{ids['ep_track']}/monitor",
+                json={"monitored": True})
+    client.post(f"/api/library/v2/albums/{ids['ep']}/monitor",
+                json={"monitored": True})
+    client.post(f"/api/library/v2/artists/{ids['artist']}/monitor",
+                json={"monitored": True})
+    with _conn(db) as conn:
+        rows = {(r["entity_type"], r["entity_id"]): r["provenance"]
+                for r in conn.execute(
+                    "SELECT entity_type, entity_id, provenance FROM lib2_monitor_rules")}
+    assert rows[("track", ids["ep_track"])] == "user_explicit"
+    assert rows[("album", ids["ep"])] == "user_explicit"
+    assert rows[("artist", ids["artist"])] == "user_explicit"
+
+
+def test_profile_assign_respects_explicit_track_unmonitor(api):
+    """The monitor_existing opt-in is a bulk cascade — it must not overturn a
+    track the user explicitly unmonitored."""
+    client, db, ids = api
+    # Explicit user decision: this track stays off.
+    assert client.post(f"/api/library/v2/tracks/{ids['ep_track']}/monitor",
+                       json={"monitored": False}).get_json()["success"] is True
+    resp = client.post(
+        f"/api/library/v2/artists/{ids['artist']}/quality-profile",
+        json={"quality_profile_id": 2, "monitor_existing": True},
+    ).get_json()
+    assert resp["success"] is True
+    with _conn(db) as conn:
+        assert conn.execute("SELECT monitored FROM lib2_tracks WHERE id=?",
+                            (ids["ep_track"],)).fetchone()[0] == 0
+        assert conn.execute("SELECT monitored FROM lib2_tracks WHERE id=?",
+                            (ids["album_track"],)).fetchone()[0] == 1
+
+
 def test_profile_assign_does_not_touch_monitoring_by_default(api):
     """Audit P1-15: assigning a quality profile is a quality decision, not a
     wanted-action. Without the explicit opt-in it must neither flip monitored
