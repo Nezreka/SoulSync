@@ -603,6 +603,15 @@ def ensure_library_v2_schema(connection: Any) -> None:
         prune_orphaned_rules(cursor)
     except Exception as e:  # noqa: BLE001
         logger.error("monitor-rules migration failed (will retry next start): %s", e)
+    # Materialized wanted projection (audit §11.2 / ADR-02 Stufe 2): the
+    # effective per-track wanted state computed from the monitor rules, with
+    # the deciding rule level recorded. Rebuilds itself when fresh or when
+    # the priority version changed.
+    try:
+        from core.library2.wanted import ensure_wanted_projection
+        ensure_wanted_projection(cursor)
+    except Exception as e:  # noqa: BLE001
+        logger.error("wanted-projection migration failed (will retry next start): %s", e)
     # Release editions + recordings (audit P1-04 / ADR-04, §14.2 Schritt 3):
     # additive shadow model — one default edition per album, one recording +
     # release track per track; recordings merge on hard IDs only.

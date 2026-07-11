@@ -406,9 +406,11 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # user action on exactly this entity — record the intent so later
             # cascades know it was deliberate.
             from core.library2.monitor_rules import (
+                PROVENANCE_CASCADE,
                 PROVENANCE_USER,
                 explicit_track_rules_for_album,
                 record_rule,
+                record_rules,
             )
             record_rule(conn, {"artists": "artist", "albums": "album",
                                "tracks": "track"}[entity], eid, monitored,
@@ -436,6 +438,15 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 else:
                     cur.execute("UPDATE lib2_tracks SET monitored=? WHERE album_id=?",
                                 (1 if monitored else 0, eid))
+                # The re-projected tracks carry the cascade as their own rule
+                # so the wanted projection sees the current per-track intent.
+                # EVERY explicitly-ruled track keeps its user_explicit rule —
+                # also when its value happens to match the cascade; a
+                # deliberate choice must never be downgraded to 'cascade'.
+                record_rules(conn, "track",
+                             [t for t in track_ids if t not in explicit],
+                             monitored, PROVENANCE_CASCADE,
+                             profile_id=_profile())
             elif entity == "tracks":
                 track_ids = [eid]
             # Transactional outbox (audit P0-04): the mirror intents commit in
@@ -459,6 +470,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 outbox_ids = enqueue_tracks(conn, track_ids, monitored,
                                             profile_id=_profile(),
                                             user_initiated=(entity == "tracks"))
+            # Keep the materialized wanted projection in step with the rules
+            # (same transaction as flags + rules + outbox — audit §11.2).
+            from core.library2.wanted import recompute_wanted_for_entity
+            recompute_wanted_for_entity(conn, entity, eid, profile_id=_profile())
             conn.commit()
             mirrored = mirror_pending = 0
             if outbox_ids:
@@ -569,6 +584,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                         conn, "track", auto_monitor_track_ids, True,
                         PROVENANCE_USER if entity == "tracks" else PROVENANCE_CASCADE,
                         profile_id=_profile())
+                    from core.library2.wanted import recompute_wanted
+                    recompute_wanted(conn, profile_id=_profile(),
+                                     track_ids=auto_monitor_track_ids)
             conn.commit()
             mirrored = 0
             if auto_monitor_track_ids:
@@ -821,6 +839,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 "(SELECT id FROM lib2_tracks WHERE album_id=?)", (aid_,))
             conn.execute(
                 "DELETE FROM lib2_track_files WHERE track_id IN "
+                "(SELECT id FROM lib2_tracks WHERE album_id=?)", (aid_,))
+            conn.execute(
+                "DELETE FROM lib2_wanted_tracks WHERE track_id IN "
                 "(SELECT id FROM lib2_tracks WHERE album_id=?)", (aid_,))
             conn.execute("DELETE FROM lib2_tracks WHERE album_id=?", (aid_,))
             conn.execute("DELETE FROM lib2_albums WHERE id=?", (aid_,))

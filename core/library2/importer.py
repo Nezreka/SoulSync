@@ -472,6 +472,10 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
         # before the inserts, so it has to run again here.
         from core.library2.editions import backfill_editions
         stats["editions"] = backfill_editions(cursor)
+        # Rebuild the wanted projection over the imported rules (§11.2).
+        from core.library2.wanted import ensure_wanted_schema, recompute_wanted
+        ensure_wanted_schema(cursor)
+        stats["wanted"] = recompute_wanted(cursor, profile_id=profile_id or 1)
         conn.commit()
         logger.info("Library v2 import complete: %s", stats)
     finally:

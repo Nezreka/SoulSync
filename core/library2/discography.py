@@ -351,6 +351,11 @@ def auto_monitor_releases(db, config_manager, album_ids: List[int],
             from core.library2.monitor_rules import PROVENANCE_NEW_RELEASE, record_rule
             record_rule(conn, "album", album_id, True, PROVENANCE_NEW_RELEASE,
                         profile_id=wishlist_profile_id)
+            # The freshly materialized tracks inherit the album's new_release
+            # rule through the projection's album tier (audit §11.2).
+            from core.library2.wanted import recompute_wanted_for_entity
+            recompute_wanted_for_entity(conn, "album", album_id,
+                                        profile_id=wishlist_profile_id)
             # Commit before mirroring: add_to_wishlist opens its own connection.
             conn.commit()
             track_ids = [r[0] for r in conn.execute(
