@@ -911,6 +911,18 @@ class MusicMatchingEngine:
                 'patterns': [r'\bradio\s*edit\b', r'\bradio\s*version\b', r'\bclean\s*edit\b'],
                 'penalty': 0.08  # -8% penalty for radio edits (minor difference)
             },
+            'clean': {
+                # #923: bare clean/censored markers used to be invisible (only
+                # "clean edit"/"radio edit" were detected), so a "(Clean)" rip
+                # scored like the original. Bracket/dash-bound + explicit
+                # phrases ONLY — a song title like "Mr. Clean" must never
+                # match. No \bedit\b in here (that word belongs to the remix
+                # patterns above and would reclassify).
+                'patterns': [r'\(clean\)', r'\[clean\]', r'[-–—]\s*clean\b',
+                             r'\bclean\s+version\b', r'\bcensored\b',
+                             r'\bedited\s+version\b'],
+                'penalty': 0.08  # same weight as radio edits (minor difference)
+            },
             'extended': {
                 'patterns': [r'\bextended\b', r'\bfull\s*version\b', r'\blong\s*version\b'],
                 'penalty': 0.05  # -5% penalty for extended (close to original)
@@ -1020,7 +1032,20 @@ class MusicMatchingEngine:
 
         # Apply version penalty (for matching versions, slight penalty for quality differences)
         if version_type != 'original':
-            adjusted_confidence = max(0.0, base_confidence - (penalty * 0.5))  # Reduced penalty since it's a match
+            effective_penalty = penalty * 0.5  # Reduced penalty since it's a match
+            # #923 "Prefer explicit versions": reshape ONLY the explicit/clean
+            # axis. Explicit-marked files get a boost instead of their little
+            # penalty; clean / censored / radio-edit files sink further. With
+            # candidates ordered by confidence this yields the requested
+            # fallback ladder — explicit, then unmarked, then clean — purely
+            # through ranking: a clean edit still matches (never skipped)
+            # when it's all that's on offer.
+            if self._prefer_explicit_enabled():
+                if version_type == 'explicit':
+                    effective_penalty = -0.05
+                elif version_type in ('clean', 'radio'):
+                    effective_penalty += 0.10
+            adjusted_confidence = max(0.0, min(1.0, base_confidence - effective_penalty))
             # Store version info on the track object for UI display
             slskd_track.version_type = version_type
             slskd_track.version_penalty = penalty
@@ -1030,6 +1055,18 @@ class MusicMatchingEngine:
             slskd_track.version_penalty = 0.0
 
         return adjusted_confidence, version_type
+
+    @staticmethod
+    def _prefer_explicit_enabled() -> bool:
+        """The 'Prefer explicit versions' sub-setting (#923). Only meaningful
+        while explicit content is allowed at all — with the content filter
+        blocking explicit, preferring it would be a contradiction, so the
+        parent toggle wins. Never raises (config trouble = feature off)."""
+        try:
+            return bool(config_manager.get('content_filter.prefer_explicit', False)) and \
+                bool(config_manager.get('content_filter.allow_explicit', True))
+        except Exception:
+            return False
     
     def find_best_slskd_matches_enhanced(self, spotify_track: SpotifyTrack, slskd_results: List[TrackResult],
                                           max_peer_queue: int = 0) -> List[TrackResult]:
