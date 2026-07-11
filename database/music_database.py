@@ -9539,11 +9539,11 @@ class MusicDatabase:
           default first, so deleting your active profile never leaves the
           app without one.
 
-        References to the deleted id are cleaned up in the same transaction
-        (wishlist rows AND library tracks are re-pointed to NULL = "use the
-        default", and a matching Auto-Import override is cleared) — and even
-        a reference missed by that (or written concurrently) safely falls
-        back to the default via `core/quality/selection.py::load_profile_by_id`.
+        References to the deleted id are cleaned up in the same transaction.
+        Nullable wishlist/library-track references become NULL ("use the
+        default"); non-null Library-v2 artist/album/track references are moved
+        to the surviving default profile. A matching Auto-Import override is
+        cleared after the DB transaction commits.
 
         Returns ``(success, reason)`` — ``reason`` is empty on success.
         """
@@ -9557,13 +9557,24 @@ class MusicDatabase:
             target = next((r for r in rows if r["id"] == profile_id), None)
             if target is None:
                 return False, "Profile not found"
+            remaining = [r for r in rows if r["id"] != profile_id]
             if target["is_default"]:
-                promote_id = next(r["id"] for r in rows if r["id"] != profile_id)
+                promote_id = remaining[0]["id"]
                 conn.execute("UPDATE quality_profiles SET is_default=0 WHERE is_default=1")
                 conn.execute(
                     "UPDATE quality_profiles SET is_default=1, updated_at=CURRENT_TIMESTAMP WHERE id=?",
                     (promote_id,),
                 )
+                replacement_id = promote_id
+            else:
+                current_default = next((r for r in remaining if r["is_default"]), None)
+                replacement_id = (current_default or remaining[0])["id"]
+                if current_default is None:
+                    conn.execute(
+                        "UPDATE quality_profiles SET is_default=1, "
+                        "updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                        (replacement_id,),
+                    )
             conn.execute(
                 "UPDATE wishlist_tracks SET quality_profile_id=NULL WHERE quality_profile_id=?",
                 (profile_id,),
@@ -9572,6 +9583,17 @@ class MusicDatabase:
                 "UPDATE tracks SET quality_profile_id=NULL WHERE quality_profile_id=?",
                 (profile_id,),
             )
+            for table in ("lib2_artists", "lib2_albums", "lib2_tracks"):
+                exists = conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                    (table,),
+                ).fetchone()
+                if exists is not None:
+                    conn.execute(
+                        f"UPDATE {table} SET quality_profile_id=? "
+                        "WHERE quality_profile_id=?",
+                        (replacement_id, profile_id),
+                    )
             cur = conn.execute("DELETE FROM quality_profiles WHERE id=?", (profile_id,))
             conn.commit()
             if cur.rowcount == 0:

@@ -189,6 +189,73 @@ def test_delete_repoints_library_track_references_to_null(db):
     assert row["quality_profile_id"] is None
 
 
+def _seed_lib2_quality_references(db, profile_id):
+    conn = db._get_connection()
+    try:
+        artist_id = conn.execute(
+            "INSERT INTO lib2_artists(name, quality_profile_id) VALUES(?, ?)",
+            (f"Artist {profile_id}", profile_id),
+        ).lastrowid
+        album_id = conn.execute(
+            "INSERT INTO lib2_albums(primary_artist_id, title, quality_profile_id) "
+            "VALUES(?, ?, ?)",
+            (artist_id, f"Album {profile_id}", profile_id),
+        ).lastrowid
+        track_id = conn.execute(
+            "INSERT INTO lib2_tracks(album_id, title, quality_profile_id) "
+            "VALUES(?, ?, ?)",
+            (album_id, f"Track {profile_id}", profile_id),
+        ).lastrowid
+        conn.commit()
+        return artist_id, album_id, track_id
+    finally:
+        conn.close()
+
+
+def _lib2_quality_references(db, ids):
+    artist_id, album_id, track_id = ids
+    conn = db._get_connection()
+    try:
+        return (
+            conn.execute(
+                "SELECT quality_profile_id FROM lib2_artists WHERE id=?",
+                (artist_id,),
+            ).fetchone()[0],
+            conn.execute(
+                "SELECT quality_profile_id FROM lib2_albums WHERE id=?",
+                (album_id,),
+            ).fetchone()[0],
+            conn.execute(
+                "SELECT quality_profile_id FROM lib2_tracks WHERE id=?",
+                (track_id,),
+            ).fetchone()[0],
+        )
+    finally:
+        conn.close()
+
+
+def test_delete_repoints_lib2_references_to_current_default(db):
+    pid = db.create_quality_profile("Doomed Lib2", {"ranked_targets": []})
+    ids = _seed_lib2_quality_references(db, pid)
+    default_id = next(p["id"] for p in db.list_quality_profiles() if p["is_default"])
+
+    ok, reason = db.delete_quality_profile(pid)
+
+    assert ok is True and reason == ""
+    assert _lib2_quality_references(db, ids) == (default_id, default_id, default_id)
+
+
+def test_delete_default_repoints_lib2_references_to_promoted_profile(db):
+    ids = _seed_lib2_quality_references(db, 1)
+
+    ok, reason = db.delete_quality_profile(1)
+
+    assert ok is True and reason == ""
+    promoted_id = next(p["id"] for p in db.list_quality_profiles() if p["is_default"])
+    assert promoted_id != 1
+    assert _lib2_quality_references(db, ids) == (promoted_id, promoted_id, promoted_id)
+
+
 def test_delete_clears_matching_auto_import_override(db, monkeypatch):
     calls = {}
 
