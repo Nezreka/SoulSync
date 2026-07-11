@@ -446,3 +446,52 @@ def test_channel_assets_skipped_for_flat_templates(tmp_path, monkeypatch):
     ytd._ensure_channel_assets(str(final), {"title": "Vid", "channel": "Chan"},
                                {"save_artwork": True, "write_nfo": True}, None)
     assert not (tmp_path / "tvshow.nfo").exists()
+
+
+def test_channel_art_lands_BEFORE_the_video_moves_in(tmp_path, monkeypatch):
+    """Plex reads show-level art at SHOW CREATION, and its folder watch ingests
+    the mp4 the instant it appears — so the poster must already be on disk when
+    the video arrives (art written after the move is invisible until a manual
+    refresh; ytdl-sub works because its prepared output moves in art-first)."""
+    import core.video.importer as imp
+    fs = _FakeFS()
+    monkeypatch.setattr(imp, "real_fs", lambda: fs)
+
+    stage = tmp_path / "downloads" / "youtube"
+    stage.mkdir(parents=True)
+    lib = tmp_path / "yt"
+    lib.mkdir()
+    dl = {"id": 1, "media_id": "v1", "target_dir": str(lib),
+          "search_ctx": json.dumps({"channel": "Chan", "channel_id": "UC1",
+                                    "video_title": "T", "published_at": "2026-07-11"})}
+
+    def fake_download(vid, dest_dir, stem, profile, cont, **_kw):
+        pathlib_p = os.path.join(dest_dir, stem + "." + cont)
+        with open(pathlib_p, "w") as f:
+            f.write("v")
+        return {"ok": True, "dest_path": pathlib_p}
+
+    seen = {}
+    def move(src, dst):
+        # the assertion that matters: poster is there before the video is
+        seen["poster_at_move"] = (lib / "Chan" / "poster.jpg").exists()
+        seen["season_at_move"] = (lib / "Chan" / "Season 2026" / "poster.jpg").exists()
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        os.replace(src, dst)
+
+    from core.video.youtube_download import _ensure_channel_assets as eca
+    res = ytd.process_youtube_download(
+        dl, profile=default_profile(),
+        settings={"save_artwork": True, "write_nfo": True},
+        download=fake_download,
+        update_row=lambda *a, **k: None,
+        archive=lambda *a, **k: None,
+        clear_wishlist=lambda *a: None,
+        stage_dir=str(stage), move=move,
+        sidecars=lambda *a, **k: None,
+        channel_assets=lambda fin, flds, stg: eca(
+            fin, flds, stg, lambda cid: {"avatar_url": "http://a/av.jpg"}),
+        now=lambda: "t")
+    assert res["status"] == "completed"
+    assert seen["poster_at_move"] is True
+    assert seen["season_at_move"] is True
