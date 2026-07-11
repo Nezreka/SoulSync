@@ -341,10 +341,18 @@ def _ensure_channel_assets(final_video: str, fields: Dict[str, Any], settings: D
     from core.video.importer import real_fs
     fs = real_fs()
     _sidecars.write(channel_dir, "youtube_channel", meta, settings, fs)
-    # NO season poster on purpose (Boulder, after seeing avatar==season art):
-    # a YouTube "season" is just a year — there's no per-year artwork to give
-    # it, and Plex/Jellyfin fall back to the show poster on season cards
-    # anyway. ytdl-sub writes none either; a duplicate avatar adds nothing.
+    # season folder poster (the year folder between channel and file, when the
+    # template has one): the avatar again — Plex/Jellyfin read poster.jpg inside
+    # a season directory, and a bare 'Season 2026' card looks broken.
+    season_dir = os.path.dirname(os.path.abspath(final_video))
+    if settings.get("save_artwork") and meta.get("poster_url") and             os.path.normpath(season_dir) != os.path.normpath(channel_dir):
+        try:
+            fs.makedirs(season_dir)   # pre-move seeding: the dir may not exist yet
+            existing = {str(n).lower() for n in (fs.list_dir(season_dir) or [])}
+            if "poster.jpg" not in existing:
+                fs.save_url(meta["poster_url"], os.path.join(season_dir, "poster.jpg"))
+        except Exception:   # noqa: BLE001 - season art is a nicety
+            pass
 
 
 def process_youtube_download(
