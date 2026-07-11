@@ -12,9 +12,9 @@
  * 'soulsync:video-page-shown' event that video-side.js dispatches (so the two
  * modules stay decoupled — no direct calls between them).
  *
- * TODO(video.db): STUB_STATS below is a placeholder. Once the video database +
- * its /api/video/dashboard endpoint exist, replace loadStats() with a fetch and
- * feed the same shape through applyStats(). Nothing else here needs to change.
+ * Stats come from /api/video/dashboard (FALLBACK_STATS only covers a failed
+ * fetch); the attention badges (open issues / pending maintenance findings)
+ * ride their own endpoints so every subsystem surfaces on the landing page.
  */
 (function () {
     'use strict';
@@ -95,6 +95,54 @@
             return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
         });
     }
+    // 'added 2h ago' style label from an ISO/SQL timestamp (UTC); '' when unknown.
+    function _ago(ts) {
+        if (!ts) return '';
+        var t = Date.parse(String(ts).replace(' ', 'T') + (String(ts).indexOf('Z') === -1 ? 'Z' : ''));
+        if (isNaN(t)) return '';
+        var s = Math.max(0, (Date.now() - t) / 1000);
+        if (s < 3600) return Math.max(1, Math.round(s / 60)) + 'm ago';
+        if (s < 86400) return Math.round(s / 3600) + 'h ago';
+        if (s < 86400 * 30) return Math.round(s / 86400) + 'd ago';
+        return '';
+    }
+    function _recentSub(it) {
+        var bits = [];
+        if (it.year) bits.push(String(it.year));
+        var ago = _ago(it.added_at);
+        if (ago) bits.push(ago);
+        return bits.length ? '<div class="video-recent-year">' + _esc(bits.join(' · ')) + '</div>' : '';
+    }
+
+    // Attention badges: open issues (everyone) + pending maintenance findings
+    // (admins — the repair API is admin-gated; a 403 just leaves it hidden).
+    function loadAttention() {
+        fetch('/api/video/issues/counts', { headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (d && d.counts) applyBadges({ issues_open: d.counts.open || 0 });
+            }).catch(function () { /* badge stays */ });
+        fetch('/api/video/repair/findings/counts', { headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d) return;
+                var btn = document.querySelector('[data-video-maint-btn]');
+                if (btn) btn.style.display = '';
+                applyBadges({ findings_pending: d.pending || 0 });
+            }).catch(function () { /* non-admin / unavailable → button stays hidden */ });
+    }
+
+    // The Studios are admin-only — non-admins got two prominent cards whose
+    // buttons silently did nothing. Hide the cards outright for them.
+    function gateStudioCards() {
+        if (typeof currentProfile !== 'undefined' && currentProfile && !currentProfile.is_admin) {
+            ['overlay-studio', 'collection-studio'].forEach(function (k) {
+                var card = document.querySelector('.dash-card[data-card="' + k + '"]');
+                if (card) card.style.display = 'none';
+            });
+        }
+    }
+
     // Render the "Recently Added" tiles (poster + title), newest first, each linking
     // to its detail page.
     function applyRecent(items) {
@@ -113,7 +161,7 @@
                 '<div class="video-recent-poster"><img src="' + poster + '" alt="" loading="lazy" ' +
                 'onerror="this.closest(\'.video-recent-poster\').classList.add(\'is-empty\')"></div>' +
                 '<div class="video-recent-title">' + _esc(it.title) + '</div>' +
-                (it.year ? '<div class="video-recent-year">' + _esc(it.year) + '</div>' : '') +
+                _recentSub(it) +
                 '</a>';
         }).join('');
     }
@@ -150,16 +198,20 @@
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
                 if (!d || d.error) { host.innerHTML = '<p class="video-empty-note">Couldn\'t load the calendar.</p>'; return; }
-                // Only what's released today (now → end of day), soonest first, 10 max.
-                var eps = (d.episodes || []).filter(function (ep) { return ep.air_date === d.today; })
+                // The whole fetched window (today + tomorrow) — an empty today no
+                // longer hides episodes sitting a day out. Soonest first, 10 max.
+                var eps = (d.episodes || []).slice()
                     .sort(function (a, b) {
+                        if ((a.air_date || '') !== (b.air_date || '')) {
+                            return (a.air_date || '') < (b.air_date || '') ? -1 : 1;
+                        }
                         var ta = _airMins(a.airs_time), tb = _airMins(b.airs_time);
                         if (ta == null) ta = 1e9;   // unknown air time sorts last
                         if (tb == null) tb = 1e9;
                         if (ta !== tb) return ta - tb;
                         return (a.show_title || '') < (b.show_title || '') ? -1 : 1;
                     }).slice(0, 10);
-                if (!eps.length) { host.innerHTML = '<p class="video-empty-note">Nothing airing today — check the calendar for what\'s coming up.</p>'; return; }
+                if (!eps.length) { host.innerHTML = '<p class="video-empty-note">Nothing airing in the next couple of days — check the calendar for what\'s coming up.</p>'; return; }
                 _upcomingEps = {};
                 var hueOf = (window.VideoCalendar && window.VideoCalendar.showHue) || function () { return 230; };
                 host.innerHTML = eps.map(function (ep) {
@@ -176,7 +228,8 @@
                         (bg ? '<div class="vup-bg" style="background-image:url(\'' + bg + '\')"></div>' : '') +
                         '<div class="vup-scrim"></div>' +
                         '<div class="vup-content">' +
-                            '<div class="vup-when"><span class="vup-dot"></span>' + _esc(_whenLabel(ep)) + owned + '</div>' +
+                            '<div class="vup-when"><span class="vup-dot"></span>' +
+                            (ep.air_date !== d.today ? 'Tomorrow · ' : '') + _esc(_whenLabel(ep)) + owned + '</div>' +
                             '<div class="vup-title">' + _esc(ep.show_title) + '</div>' +
                             '<div class="vup-sub">' + se + (ep.title ? ' · ' + _esc(ep.title) : '') + '</div>' +
                         '</div></a>';
@@ -237,6 +290,8 @@
         if (!e || e.detail !== DASHBOARD_ID) return;
         loadStats();
         loadUpcoming();
+        loadAttention();            // open issues + pending maintenance findings
+        gateStudioCards();
         loadSystemStats();          // immediate fill (memory/uptime)
         startSystemStatsPolling();  // then keep it live
     }
