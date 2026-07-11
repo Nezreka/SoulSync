@@ -56,6 +56,29 @@ from utils.logging_config import get_logger
 logger = get_logger("download_plugins.usenet")
 
 
+def _grabs_conn():
+    """Best-effort connection to the app DB for grab correlation (ADR-07).
+
+    Persistence must never break the download path: when no database
+    instance exists yet (unit tests, early boot), correlation is simply
+    skipped — the download still works, it just isn't restart-safe.
+    Reuses an already-initialized instance (``_get_connection`` hands out a
+    fresh connection per call and is thread-safe) instead of constructing a
+    new ``MusicDatabase`` — poll threads must not re-run migrations.
+    """
+    try:
+        from database import music_database
+        instances = music_database._database_instances
+        db = instances.get(threading.get_ident()) \
+            or next(iter(instances.values()), None)
+        if db is None:
+            return None
+        return db._get_connection()
+    except Exception as e:  # noqa: BLE001
+        logger.debug("grab store unavailable: %s", e)
+        return None
+
+
 class UsenetDownloadPlugin(DownloadSourcePlugin):
     """Usenet download source backed by Prowlarr + an active usenet
     client adapter (SABnzbd or NZBGet)."""
@@ -65,6 +88,132 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
         self.active_downloads: Dict[str, Dict[str, Any]] = {}
         self._lock = threading.Lock()
         self.shutdown_check = None
+        self._grabs_restored = False
+
+    # ------------------------------------------------------------------
+    # Grab correlation (ADR-07): the client is the live queue; SoulSync
+    # persists only business transitions + the external job id, so a
+    # restart can re-attach to jobs the client kept running.
+    # ------------------------------------------------------------------
+
+    def _record_grab(self, download_id: str, title: Optional[str],
+                     context: Dict[str, Any]) -> None:
+        conn = _grabs_conn()
+        if conn is None:
+            return
+        try:
+            from core.acquisition.grabs import ensure_acquisition_grabs_schema, record_grab
+            ensure_acquisition_grabs_schema(conn)
+            record_grab(conn, download_id, "usenet", title=title, context=context)
+            conn.commit()
+        except Exception as e:  # noqa: BLE001
+            logger.debug("grab record failed (%s): %s", download_id[:8], e)
+        finally:
+            conn.close()
+
+    def _update_grab(self, download_id: str, **fields: Any) -> None:
+        conn = _grabs_conn()
+        if conn is None:
+            return
+        try:
+            from core.acquisition.grabs import ensure_acquisition_grabs_schema, update_grab
+            ensure_acquisition_grabs_schema(conn)
+            update_grab(conn, download_id, **fields)
+            conn.commit()
+        except Exception as e:  # noqa: BLE001
+            logger.debug("grab update failed (%s): %s", download_id[:8], e)
+        finally:
+            conn.close()
+
+    def _restore_grabs_once(self) -> None:
+        """Re-attach to client jobs that survived a SoulSync restart.
+
+        Open grabs WITH an external job id are adopted: the in-memory row is
+        recreated and a poll thread picks the job up again (the client kept
+        downloading the whole time — P1-20). ``submitting`` rows never
+        reached the client and their NZB URL is gone with the process, so
+        they become ``failed``. Album-bundle grabs stay untouched — their
+        synchronous worker is gone; the row itself remains as history.
+        """
+        with self._lock:
+            if self._grabs_restored:
+                return
+            self._grabs_restored = True
+        conn = _grabs_conn()
+        if conn is None:
+            return
+        try:
+            from core.acquisition.grabs import (
+                STATUS_CANCEL_PENDING,
+                STATUS_FAILED,
+                ensure_acquisition_grabs_schema,
+                open_grabs,
+                update_grab,
+            )
+            ensure_acquisition_grabs_schema(conn)
+            grabs = open_grabs(conn, "usenet")
+            for grab in grabs:
+                if (grab.get("context") or {}).get("flow") == "album_bundle":
+                    continue
+                download_id = grab["download_id"]
+                job_id = grab.get("external_job_id")
+                if not job_id:
+                    update_grab(conn, download_id, status=STATUS_FAILED,
+                                error="Lost before client submission (restart)")
+                    continue
+                with self._lock:
+                    if download_id in self.active_downloads:
+                        continue
+                    self.active_downloads[download_id] = {
+                        'id': download_id,
+                        'filename': grab.get("title") or job_id,
+                        'username': 'usenet',
+                        'display_name': grab.get("title") or job_id,
+                        'state': 'InProgress, Downloading',
+                        'progress': 0.0,
+                        'size': 0,
+                        'transferred': 0,
+                        'speed': 0,
+                        'file_path': None,
+                        'audio_files': [],
+                        'job_id': job_id,
+                        'error': None,
+                    }
+                update_grab(conn, download_id, adopted=True)
+                if grab["status"] == STATUS_CANCEL_PENDING:
+                    target, name = self._finish_cancel, f'usenet-cancel-{download_id[:8]}'
+                else:
+                    target, name = self._poll_job, f'usenet-adopt-{download_id[:8]}'
+                threading.Thread(target=target, args=(download_id, job_id),
+                                 daemon=True, name=name).start()
+            conn.commit()
+            if grabs:
+                logger.info("Usenet grab restore: %d open grab(s) reconciled",
+                            len(grabs))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Usenet grab restore failed: %s", e)
+        finally:
+            conn.close()
+
+    def _finish_cancel(self, download_id: str, job_id: str) -> None:
+        """Idempotent client-side remove for an adopted ``cancel_pending``
+        grab (P1-21): cancel counts as done only once the client remove
+        succeeded; until then the grab stays visibly cancel_pending."""
+        adapter = get_active_usenet_adapter()
+        if adapter is None or not adapter.is_configured():
+            return
+        try:
+            run_async(adapter.remove(job_id, delete_files=False))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Adopted cancel for %s failed (stays pending): %s",
+                           job_id, e)
+            return
+        from core.acquisition.grabs import STATUS_CANCELLED
+        self._update_grab(download_id, status=STATUS_CANCELLED)
+        with self._lock:
+            row = self.active_downloads.get(download_id)
+            if row is not None:
+                row['state'] = 'Cancelled'
 
     def set_shutdown_check(self, check_callable):
         self.shutdown_check = check_callable
@@ -182,6 +331,7 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
     ) -> Optional[str]:
         if not self.is_configured():
             return None
+        self._restore_grabs_once()
         token, display_name = _decode_filename(filename)
         if not token:
             logger.error("Usenet download missing candidate token in filename: %r", filename)
@@ -211,6 +361,9 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
                 'job_id': None,
                 'error': None,
             }
+        self._record_grab(download_id, display_name,
+                          {'flow': 'track', 'requested_by': username,
+                           'file_size': file_size})
 
         thread = threading.Thread(
             target=self._download_thread,
@@ -241,7 +394,21 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
             if row is not None:
                 row['job_id'] = job_id
                 row['state'] = 'InProgress, Downloading'
+        from core.acquisition.grabs import STATUS_QUEUED
+        self._update_grab(download_id, status=STATUS_QUEUED,
+                          external_job_id=job_id,
+                          client=adapter.__class__.__name__)
+        self._poll_job(download_id, job_id)
 
+    def _poll_job(self, download_id: str, job_id: str) -> None:
+        """Poll one client job to a business outcome. The client stays the
+        live truth (ADR-07) — only business transitions are persisted."""
+        adapter = get_active_usenet_adapter()
+        if adapter is None or not adapter.is_configured():
+            self._mark_error(download_id, "No usenet client configured")
+            return
+
+        wrote_downloading = False
         deadline = time.monotonic() + _POLL_TIMEOUT_SECONDS
         last_save_path: Optional[str] = None
         last_incomplete_path: Optional[str] = None
@@ -281,6 +448,13 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
 
             if status.state != 'error':
                 misses.reset()
+
+            if not wrote_downloading and status.state not in _COMPLETE_STATES \
+                    and status.state not in ('failed', 'error'):
+                from core.acquisition.grabs import STATUS_DOWNLOADING
+                self._update_grab(download_id, status=STATUS_DOWNLOADING,
+                                  last_client_state=status.state)
+                wrote_downloading = True
 
             with self._lock:
                 row = self.active_downloads.get(download_id)
@@ -375,6 +549,9 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
                 row['progress'] = 100.0
                 row['file_path'] = str(primary)
                 row['audio_files'] = [str(path) for path in audio_files]
+        from core.acquisition.grabs import STATUS_COMPLETED
+        self._update_grab(download_id, status=STATUS_COMPLETED,
+                          output_path=str(local_path))
         logger.info("Usenet download complete: %s -> %s (%d audio files)",
                     download_id[:8], primary.name, len(audio_files))
 
@@ -385,17 +562,21 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
             if row is not None:
                 row['state'] = 'Completed, Errored'
                 row['error'] = message
+        from core.acquisition.grabs import STATUS_FAILED
+        self._update_grab(download_id, status=STATUS_FAILED, error=message)
 
     # ------------------------------------------------------------------
     # Status / lifecycle
     # ------------------------------------------------------------------
 
     async def get_all_downloads(self) -> List[DownloadStatus]:
+        self._restore_grabs_once()
         with self._lock:
             rows = list(self.active_downloads.values())
         return [_row_to_status(r) for r in rows]
 
     async def get_download_status(self, download_id: str) -> Optional[DownloadStatus]:
+        self._restore_grabs_once()
         with self._lock:
             row = self.active_downloads.get(download_id)
             if row is None:
@@ -412,11 +593,20 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
         with self._lock:
             row = self.active_downloads.get(download_id)
             job_id = row.get('job_id') if row else None
+        # Cancel is a two-step state machine (P1-21): persist the intent
+        # first, count it done only after the client remove succeeded. A
+        # restart mid-cancel adopts the pending intent and retries.
+        from core.acquisition.grabs import STATUS_CANCELLED, STATUS_CANCEL_PENDING
+        cancel_confirmed = True
         if adapter and job_id:
+            self._update_grab(download_id, status=STATUS_CANCEL_PENDING)
             try:
                 await adapter.remove(job_id, delete_files=remove)
             except Exception as e:
+                cancel_confirmed = False
                 logger.warning("Usenet cancel via adapter failed: %s", e)
+        if cancel_confirmed:
+            self._update_grab(download_id, status=STATUS_CANCELLED)
         with self._lock:
             if remove:
                 self.active_downloads.pop(download_id, None)
@@ -509,6 +699,17 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
             result['error'] = 'Usenet client refused the NZB'
             return result
 
+        # Persistent correlation (ADR-07): the bundle worker itself is not
+        # restart-safe (P1-27), but the grab row keeps client + job id +
+        # outcome, so nothing about the external job is ever untraceable.
+        from core.acquisition.grabs import STATUS_COMPLETED, STATUS_FAILED, STATUS_QUEUED
+        grab_id = str(uuid.uuid4())
+        self._record_grab(grab_id, picked.title,
+                          {'flow': 'album_bundle', 'album': album_name,
+                           'artist': artist_name})
+        self._update_grab(grab_id, status=STATUS_QUEUED, external_job_id=job_id,
+                          client=adapter.__class__.__name__)
+
         _emit('downloading', release=picked.title)
         save_path = poll_album_download(
             get_status=lambda: run_async(adapter.get_status(job_id)),
@@ -526,6 +727,7 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
             # state on every failure path (timeout / disappeared /
             # explicit failure / unmapped). UI is unstuck either way.
             result['error'] = 'Usenet download failed or timed out'
+            self._update_grab(grab_id, status=STATUS_FAILED, error=result['error'])
             return result
 
         _emit('staging', release=picked.title)
@@ -538,18 +740,22 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
             audio_files = collect_audio_after_extraction(Path(local_path))
         except Exception as e:
             result['error'] = f'Failed to walk audio files: {e}'
+            self._update_grab(grab_id, status=STATUS_FAILED, error=result['error'])
             return result
         if not audio_files:
             suffix = f' (resolved: {local_path})' if local_path != save_path else ''
             result['error'] = f'No audio files found in {save_path}{suffix}'
+            self._update_grab(grab_id, status=STATUS_FAILED, error=result['error'])
             return result
 
         copied = copy_audio_files_atomically(audio_files, Path(staging_dir))
         if not copied:
             result['error'] = 'No audio files copied to staging'
+            self._update_grab(grab_id, status=STATUS_FAILED, error=result['error'])
             return result
         logger.info("[Usenet album] Staged %d audio files for '%s'", len(copied), album_name)
         _emit('staged', count=len(copied))
+        self._update_grab(grab_id, status=STATUS_COMPLETED, output_path=str(local_path))
         result['success'] = True
         result['files'] = copied
         return result
