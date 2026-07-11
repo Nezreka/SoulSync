@@ -1860,7 +1860,8 @@ nicht mehr still Daten oder Secrets gefährden.
 - [x] Library-v2-Typecheck auf null Fehler bringen; redundante Uniontypen bereinigen. *(LIB2-001)*
 - [x] Frontendtest-Locale festsetzen oder locale-unabhängig testen. *(LIB2-001)*
 - [x] Import-Routen-Test stabilisieren. *(LIB2-003: Retry-Backoff-Race behoben)*
-- [ ] CI-Gate: Generatorlauf darf keinen Git-Diff hinterlassen.
+- [x] CI-Gate: Generatorlauf darf keinen Git-Diff hinterlassen. *(`b498b66`:
+  webui-CI-Job mit RouteTree-Drift-Gate; Vitest im Job seit `b53ce43`)*
 - [x] Artist-Delete auf Primary-Artist-Alben begrenzen. *(LIB2-003)*
 - [x] Delete-Impact-Preview und Tests für Featured Artists ergänzen. *(LIB2-003)*
 - [x] Refresh-Scope `None` versus `[]` korrigieren; 404-Validierung. *(LIB2-002)*
@@ -1900,9 +1901,13 @@ nicht mehr still Daten oder Secrets gefährden.
 - [x] Numerische Default-1-Werte aus Lib2-Inserts entfernen. *(`31a1fb1`)*
 - [x] FK-/Replacement-Strategie für Quality Profiles migrieren. *(`df285b9`,
   `9e716ab`)*
-- [ ] `monitor_rules` und Wanted-Projektion minimal einführen.
-- [ ] bestehende Flags als Legacy-Projektion behandeln.
-- [ ] Monitor-Provenance für Track/Album/Artist/New Release definieren.
+- [x] `monitor_rules` und Wanted-Projektion minimal einführen. *(`705beb4`:
+  `lib2_monitor_rules`; Flags bleiben die effektive Projektion)*
+- [x] bestehende Flags als Legacy-Projektion behandeln. *(`705beb4`: einmaliges
+  `legacy_import`-Seeding, Importer labelt seine Flags gleich)*
+- [x] Monitor-Provenance für Track/Album/Artist/New Release definieren.
+  *(`705beb4`: `user_explicit`/`cascade`/`new_release`/`legacy_import`;
+  Kaskaden erhalten explizite Track-Intents — P1-14)*
 - [x] Profilzuweisung von Monitoring entkoppeln. *(LIB2-008, `bb7c815`)*
 - [x] `user_initiated` nur bei echter UI-Aktion setzen. *(LIB2-005, `a531111`)*
 - [x] Wishlist-Upsert strukturell idempotent machen. *(LIB2-004, `ebdd8a0`)*
@@ -1910,12 +1915,15 @@ nicht mehr still Daten oder Secrets gefährden.
   *(LIB2-004, `ebdd8a0`)*
 - [x] Wishlist-only-Import übernimmt das validierte Track-Quality-Profil, ohne
   Album/Artist implizit zu ändern. *(P1-30, `33aeaf0`)*
-- [ ] stabile providerlose IDs ergänzen.
+- [x] stabile providerlose IDs ergänzen. *(P1-12, `52b0e51`: persistierte
+  `stable_id` aus natürlicher Identität; Reset/Reimport-stabil)*
 - [x] Transactional Outbox für Watchlist/Wishlist einführen. *(LIB2-009,
   `bdc95b2`; strikte Fehlerweitergabe `895d27e`)*
 - [x] Reconciliation-Job und UI-Status für Mirrorfehler ergänzen. *(Outbox/API/UI
   `bdc95b2`; periodischer Reconciler `3ca3000`)*
-- [ ] periodische Jobs profilbewusst machen oder Admin-only erzwingen.
+- [x] periodische Jobs profilbewusst machen oder Admin-only erzwingen.
+  *(`a38bf41`: Upgrade-Scan explizit auf `ADMIN_PROFILE_ID` gepinnt;
+  Discography-Refresh war bereits explizit, Outbox-Rows tragen ihr Profil selbst)*
 
 #### Testgate
 
@@ -2183,7 +2191,7 @@ ADR-Log in §25a.
 | LIB2-003 | Artist-Delete unterscheidet Primary- von Featured-Zuordnung. Das Löschen eines Featured Artists entfernt keine fremden Releases; die UI kann die Auswirkung vorab anzeigen. | `1efa72d` |
 | LIB2-004 | Wishlist-Upserts verwenden profil-/track-/albumbezogene Composite-Identität, sind bei Wiederholung idempotent und aktualisieren Source-/Quality-Kontext bestehender Rows. | `ebdd8a0` |
 | LIB2-005 | Nur eine direkte Track-Aktion setzt `user_initiated=true`. Album-/Artist-Kaskaden und geplante Mirrors respektieren die Ignore-Liste. | `a531111` |
-| LIB2-006 | Torrent-/Usenet-Candidate-URLs bleiben serverseitig in einem TTL-Store. Der Browser erhält nur eine opaque Candidate-ID; unbekannte oder abgelaufene IDs werden abgelehnt. Eine Profil-/Entity-Bindung des Tokens ist noch offen. | `0168aa0` |
+| LIB2-006 | Torrent-/Usenet-Candidate-URLs bleiben serverseitig in einem TTL-Store. Der Browser erhält nur eine opaque Candidate-ID; unbekannte oder abgelaufene IDs werden abgelehnt. Profil-/Entity-Bindung und Shared Store: siehe „Candidate-Bindung" (`bbf5f6c`). | `0168aa0` |
 | LIB2-007 | Manuelle Grabs tragen Lib2-Track-/Album-ID bis zum Post-Processing; der Server validiert die Entity-Zugehörigkeit und löst das zugewiesene Quality-Profil selbst auf, Autolink kann die exakte Ziel-Entity verwenden. | `195e5c6` |
 | LIB2-008 | Quality-Profil-Zuweisung und Monitoring sind getrennte Commands. Eine Profiländerung setzt einen bewusst unmonitorten Track nicht mehr automatisch auf monitored. | `bb7c815` |
 | LIB2-009 | Lib2-Write und Mirror-Outbox-Row entstehen in derselben SQLite-Transaktion. Drain, Retry, Fehlerstatus und API-/UI-Status sind vorhanden; Mirroroperationen sind wiederholbar. | `bdc95b2` |
@@ -2197,37 +2205,43 @@ ADR-Log in §25a.
 | P1-01 Schema/FK | Frische und historische Lib2-Tabellen verwenden echte `quality_profiles`-Foreign-Keys ohne numerischen `DEFAULT 1`. Die Migration repariert ungültige IDs und Trigger sichern dynamische Defaults sowie direkte Schreibzugriffe ab. | `9e716ab` |
 | P1-31 | Tracklist-Materialisierung besitzt persistente Zustände, Versuchszähler, Fehlertext und exponentiellen Backoff. Fällige Fehler und alte monitored Releases ohne Tracks werden erneut eingeplant; Erfolg setzt den Zustand zurück. | `d9019ec` |
 | Mirror-Reconciler | Ein stündlicher, feature-gateter Repair-Job verarbeitet pro Lauf einen begrenzten Batch pending Outbox-Einträge, respektiert terminale Fehler und bereinigt alte erfolgreiche Einträge. | `3ca3000` |
+| Candidate-Bindung | Candidate-Tokens sind an das suchende Profil und optional an die Lib2-Entity gebunden (Contextvar am API-Rand; Plugin-Signaturen unverändert). `resolve()` revalidiert die Bindung: fremdes Profil und fremde Entity werden abgelehnt. Der Store liegt in einer eigenen SQLite-Datei (WAL) neben der Hauptdatenbank — multi-worker-sichtbar und restart-fest; TTL/Size-Cap unverändert. | `bbf5f6c` |
+| CI-Gates | Neuer webui-CI-Job (`npm ci`, oxfmt/oxlint-Check, Vitest, Vite-Build) mit Gate: ein Git-Diff auf `webui/src/routeTree.gen.ts` nach dem Build schlägt fehl. `.github/` ist von der Hidden-Folder-Ignore-Regel ausgenommen. Formatdrift aus früheren Commits wurde mit dem Projektformatter normalisiert. | `b498b66`, `b53ce43`, `4845c9f` |
+| P1-12 | Providerlose Wishlist-IDs verwenden eine persistierte `stable_id` (deterministischer Hash der natürlichen Identität) statt der Rowid. Reset+Reimport reproduziert dieselbe ID; Metadaten-Edits ändern eine einmal geprägte ID nicht. Schema-Backfill + Importer-Backfill + Lazy-Fill. | `52b0e51` |
+| P1-13/P1-14 | `lib2_monitor_rules` erfasst Monitor-Intent mit Provenance (`user_explicit`/`cascade`/`new_release`/`legacy_import`); die `monitored`-Flags bleiben die effektive Projektion. Album-Kaskaden und der Profile-Assign-Opt-in überschreiben explizite Track-Entscheidungen nicht mehr; Bestandsflags und Import-Flags sind einmalig als `legacy_import` gelabelt; verwaiste Regeln werden gepruned. | `705beb4` |
+| Job-Profilscope | Der periodische Upgrade-Scan mirrort explizit als Admin-Profil statt über den Parameterdefault; Discography-Refresh war bereits explizit, Reconciler-Outbox-Rows tragen ihr Profil selbst. | `a38bf41` |
 
-#### Verifizierter Teststand
+#### Verifizierter Teststand (2026-07-11)
 
-- Relevante Backend-Regressionssuite: **232 Tests bestanden**.
-- Frontend-Typecheck mit `oxlint --type-check`: **0 Warnungen, 0 Fehler**.
-- Library-v2-spezifische Import-, API-, Outbox-, Profil-, Candidate- und
-  Wishlist-Tests sind in den oben genannten Commits enthalten.
-- Die zuletzt erfasste vollständige Vitest-Baseline hat weiterhin **7
-  vorbestehende Fehler** in Form-Slider-, Import- und Issues-Tests. Diese Fehler
-  wurden durch den Library-v2-Block nicht verursacht und sind nicht als erledigt
-  markiert.
+- Vollständige Backend-Suite (`pytest tests`): **7765 bestanden, 7 übersprungen,
+  0 Fehler** (2026-07-11, Stand nach den Commits oben; die Library-v2-relevanten
+  Subsets liefen zusätzlich einzeln).
+- Frontend: `oxfmt --check` und `oxlint --type-check`: **0 Warnungen,
+  0 Fehler**; Vitest: **96/96 bestanden**.
+- Die früher dokumentierten **7 vorbestehenden Vitest-Fehler** (Form-Slider,
+  Import, Issues) reproduzieren nicht mehr; die Suite läuft seit `b53ce43`
+  verpflichtend im CI-Job.
+- Library-v2-spezifische Import-, API-, Outbox-, Profil-, Candidate-,
+  Stable-ID-, Monitor-Rules- und Wishlist-Tests sind in den oben genannten
+  Commits enthalten.
 
 #### Bewusst noch offen
 
-- [ ] Candidate-Tokens zusätzlich an Profil/User und Lib2-Entity binden sowie vor
-  einem Multi-Worker-Rollout in einen gemeinsam sichtbaren Store verschieben.
-- [ ] Stabile providerlose IDs, Monitor-Provenance und die verbleibende
-  Legacy-Flag-Projektion umsetzen.
-- [ ] CI-Gate ergänzen, das nach RouteTree-Generierung einen Git-Diff verbietet.
-- [ ] Die sieben bekannten allgemeinen Frontend-Testfehler separat stabilisieren.
 - [ ] Release Group/Edition, Multi-File-Primary-Modell und persistente
-  Acquisition-Korrelation gemäß ADR-03/04/07 implementieren.
+  Acquisition-Korrelation gemäß ADR-03/04/07 implementieren (Phase 3/4).
+- [ ] Wanted-Projektion über die Monitor-Rules hinaus ausbauen (effektiver
+  Zustand als Projektion aus Track-/Release-/Artist-/New-Release-Regeln;
+  aktuell: Rules + Provenance + kaskadenfeste explizite Track-Intents).
 
-Damit sind P0-01, P0-02, der akute URL-/Secret-Leak aus P0-03, P0-04, P1-01, P1-08,
-P1-09, P1-10, P1-11, P1-15, P1-16, P1-17, P1-29, P1-30, P1-31 sowie Teile von
-P1-18 geschlossen. Die verbleibende Candidate-Bindung steht bewusst in der offenen
-Liste. P0-04 wurde mit strikter Fehlerweitergabe im Outbox-Worker nachgehärtet
+Damit sind P0-01, P0-02, der akute URL-/Secret-Leak aus P0-03 samt
+Profil-/Entity-Bindung und Shared Store, P0-04, P1-01, P1-08, P1-09, P1-10,
+P1-11, P1-12, P1-14, P1-15, P1-16, P1-17, P1-29, P1-30, P1-31 sowie Teile von
+P1-13 (Provenance/Labeling; Reconciler aus `3ca3000`) und P1-18 geschlossen.
+P0-04 wurde mit strikter Fehlerweitergabe im Outbox-Worker nachgehärtet
 (`895d27e`) und durch den periodischen Reconciler (`3ca3000`) ergänzt; der manuelle
 Grab-Pfad übergibt das serverseitige Profil nun nachweislich an die Pipeline und ist
-für Nicht-Admins gesperrt (`a7b08a8`). Erst danach sollten ReleaseEdition/Recording
-und der größere Acquisition-Layer beginnen.
+für Nicht-Admins gesperrt (`a7b08a8`). Als Nächstes können ReleaseEdition/Recording
+und der größere Acquisition-Layer (Phase 3/4) beginnen.
 
 ## 17. Teststrategie
 
