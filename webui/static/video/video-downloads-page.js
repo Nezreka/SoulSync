@@ -13,7 +13,7 @@
     var URL_CLEAR = '/api/video/downloads/clear';
     var URL_CANCEL = '/api/video/downloads/cancel';
     var URL_RETRY = '/api/video/downloads/retry';
-    var _timer = null, _wired = false, _filter = 'all';
+    var _timer = null, _wired = false, _filter = 'all', _loaded = false;
     var _cards = {};
     var _expanded = {};   // id -> true while a card's detail drawer is open (survives re-patches)
     var _groups = {};     // group key -> parent element (same-show+season episode batches)
@@ -69,6 +69,13 @@
     }
 
     var X_SVG = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+    var IMP_SVG = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+    // the Import page is an admin tool (videoPageAllowed in video-side.js) — same gate here
+    // so non-admins never see a button that would just bounce them to the dashboard.
+    function canImport() {
+        var cp = (typeof currentProfile !== 'undefined') ? currentProfile : null;
+        return !cp || !!cp.is_admin || cp.id === 1;
+    }
     var R_SVG = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>';
     var OPEN_SVG = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>';
 
@@ -197,8 +204,17 @@
         else if (d.status === 'queued') ctx = 'Waiting for a free slot…';
         else if (showBar) ctx = [fmtSize(d.size_bytes), d.username ? ('👤 ' + d.username) : '', Math.round(pct) + '%'].filter(Boolean).join('  ·  ');
         else ctx = (d.release_title && d.release_title !== (d.title || '')) ? d.release_title : fmtSize(d.size_bytes);
+        // YouTube rows all read as bare video titles — say whose channel it is right
+        // on the collapsed row (the drawer already knows, but you shouldn't have to open it).
+        var ytChName = dlType(d.kind) === 'youtube' ? (_nctx.channel || _nctx.channel_title) : null;
         var chip = d.quality_label ? '<span class="vdpg-qchip">' + esc(d.quality_label) + '</span>' : '';
-        var metaHTML = chip + '<span class="vdpg-mctx' + (d.status === 'completed' && d.dest_path ? ' vdpg-dest' : '') + '">' + esc(ctx) + '</span>';
+        // completed-but-below-cutoff grabs keep their wishlist row (upgrade-until-cutoff)
+        // — surface that state so "done" and "done, still hunting a better copy" differ.
+        var upchip = (d.status === 'completed' && d.upgrade_watch)
+            ? '<span class="vdpg-upchip" title="Below your quality cutoff — still watching for a better copy">⇪ upgrade watch</span>' : '';
+        var metaHTML = chip + upchip +
+            (ytChName ? '<span class="vdpg-mchan">' + esc(ytChName) + '</span>' : '') +
+            '<span class="vdpg-mctx' + (d.status === 'completed' && d.dest_path ? ' vdpg-dest' : '') + '">' + esc(ctx) + '</span>';
         var mt = q('meta'); if (mt.innerHTML !== metaHTML) mt.innerHTML = metaHTML;
 
         var err = q('error');
@@ -239,7 +255,12 @@
             : isFail(d.status)
                 ? '<button class="vdpg-row-retry" type="button" data-vdpg-retry="' + d.id + '" title="Retry">' + R_SVG + '</button>'
                 : '';
-        var actHTML = openBtn + stateBtn;
+        // the file downloaded fine but couldn't be placed — retrying the grab won't
+        // help; hand it to the Import page where it can be filed by hand (admin tool).
+        var importBtn = (d.status === 'import_failed' && canImport())
+            ? '<button class="vdpg-row-retry vdpg-row-import" type="button" data-vdpg-import title="Manual Import — file it by hand on the Import page">' + IMP_SVG + '</button>'
+            : '';
+        var actHTML = openBtn + importBtn + stateBtn;
         if (act.innerHTML !== actHTML) act.innerHTML = actHTML;
 
         renderDrawer(el, d);   // keep the expand drawer in sync (and open across re-patches)
@@ -359,6 +380,7 @@
         }
         facts += fact('Size', d.size_bytes ? fmtSize(d.size_bytes) : '');
         facts += fact('Attempts', d.attempts > 1 ? (d.attempts + 'x') : '');
+        if (d.status === 'completed' && d.upgrade_watch) facts += fact('Upgrade', 'Below cutoff — still on the wishlist, watching for a better copy');
         if (d.dest_path) facts += '<div class="vdpg-f vdpg-f-wide"><span class="vdpg-fk">Path</span>' +
             '<span class="vdpg-fv vdpg-mono">' + esc(d.dest_path) + '</span>' +
             '<button class="vdpg-copy" type="button" data-vdpg-copy="' + esc(d.dest_path) + '" title="Copy path">⧉</button></div>';
@@ -371,7 +393,10 @@
         if (isYt && ytCh) btns.push('<button class="vdpg-dr-btn" type="button" data-vdpg-open-channel="' + esc(ytCh) + '">Open channel</button>');
         if (isYt && d.media_id) btns.push('<a class="vdpg-dr-btn" href="https://www.youtube.com/watch?v=' + encodeURIComponent(d.media_id) + '" target="_blank" rel="noopener">Open on YouTube</a>');
         if (isActive(d.status)) btns.push('<button class="vdpg-dr-btn vdpg-dr-danger" type="button" data-vdpg-cancel="' + d.id + '">Cancel</button>');
-        else if (isFail(d.status)) btns.push('<button class="vdpg-dr-btn vdpg-dr-accent" type="button" data-vdpg-retry="' + d.id + '">Retry</button>');
+        else if (isFail(d.status)) {
+            if (d.status === 'import_failed' && canImport()) btns.push('<button class="vdpg-dr-btn vdpg-dr-accent" type="button" data-vdpg-import>Manual Import</button>');
+            btns.push('<button class="vdpg-dr-btn vdpg-dr-accent" type="button" data-vdpg-retry="' + d.id + '">Retry</button>');
+        }
         var actions = btns.length ? '<div class="vdpg-dr-actions">' + btns.join('') + '</div>' : '';
 
         return back + '<div class="vdpg-dr-body">' + head + lead + extra +
@@ -415,16 +440,25 @@
     function render(list) {
         var host = document.querySelector('[data-vdpg-list]'); if (!host) return;
         list = list || [];
+        _loaded = true;
+        var skel = host.querySelector('[data-vdpg-skel]'); if (skel) skel.remove();
         var empty = host.querySelector('[data-vdpg-empty]');
 
-        var counts = { all: list.length, active: 0, completed: 0, failed: 0 };
+        var counts = { all: list.length, active: 0, completed: 0, failed: 0, retryable: 0 };
         list.forEach(function (d) {
             if (isActive(d.status)) counts.active++;
             else if (d.status === 'completed') counts.completed++;
-            else counts.failed++;
+            else {
+                counts.failed++;
+                // only real grab failures with a known release can be re-grabbed
+                // (cancelled = deliberate; import_failed = Manual Import; YT rows have no slskd source)
+                if (d.status === 'failed' && d.username && d.filename) counts.retryable++;
+            }
         });
         setDownloadsBadge(counts.active);   // sidebar live count (this page's poll keeps it fresh)
         var cancelAll = document.querySelector('[data-vdpg-cancel-all]'); if (cancelAll) cancelAll.style.display = counts.active ? '' : 'none';
+        var retryAll = document.querySelector('[data-vdpg-retry-all]');
+        if (retryAll) retryAll.style.display = counts.retryable >= 2 ? '' : 'none';
         var clearBtn = document.querySelector('[data-vdpg-clear]'); if (clearBtn) clearBtn.style.display = (counts.completed + counts.failed) ? '' : 'none';
         var sub = document.querySelector('[data-vdpg-sub]');
         if (sub) {
@@ -484,8 +518,13 @@
         if (empty) {
             host.appendChild(empty);   // keep the empty element last
             empty.style.display = shown === 0 ? '' : 'none';
-            empty.textContent = !list.length ? "No downloads yet. Hit Grab on a search result and it'll show up here."
-                : 'Nothing ' + (_filter === 'all' ? 'here' : _filter) + ' right now.';
+            empty.innerHTML = !list.length
+                ? '<div class="vdpg-empty-ic">📥</div>' +
+                  '<div class="vdpg-empty-t">No downloads yet</div>' +
+                  '<div class="vdpg-empty-s">Hit <strong>Grab</strong> on a search result — or add something to the wishlist and let the automations fetch it — and it\'ll show up here.</div>'
+                : '<div class="vdpg-empty-ic">' + (_filter === 'failed' ? '🎉' : '📂') + '</div>' +
+                  '<div class="vdpg-empty-t">Nothing ' + (_filter === 'all' ? 'here' : esc(_filter)) + ' right now</div>' +
+                  '<div class="vdpg-empty-s">' + (_filter === 'failed' ? 'No failures — everything went through clean.' : 'Switch filters to see the rest of the queue.') + '</div>';
         }
     }
 
@@ -510,7 +549,20 @@
         getJSON(URL_ACTIVE).then(function (d) { if (d) render(d.downloads || []); schedule(); });
     }
     function schedule() { if (_timer) clearTimeout(_timer); _timer = setTimeout(poll, anyActive() ? 2000 : 6000); }
-    function start() { wire(); if (_timer) clearTimeout(_timer); poll(); }
+    // First visit paints shimmer placeholder rows until the first poll answers —
+    // no flash of "No downloads yet" while the request is in flight.
+    function showSkeleton() {
+        var host = document.querySelector('[data-vdpg-list]');
+        if (!host || _loaded || host.querySelector('[data-vdpg-skel]')) return;
+        var empty = host.querySelector('[data-vdpg-empty]'); if (empty) empty.style.display = 'none';
+        var sk = document.createElement('div');
+        sk.setAttribute('data-vdpg-skel', '');
+        sk.innerHTML = new Array(4).join(
+            '<div class="vdpg-skel-row"><div class="vdpg-skel-art"></div>' +
+            '<div class="vdpg-skel-lines"><div class="vdpg-skel-line"></div><div class="vdpg-skel-line vdpg-skel-line--short"></div></div></div>');
+        host.appendChild(sk);
+    }
+    function start() { wire(); showSkeleton(); if (_timer) clearTimeout(_timer); poll(); }
     function stop() { if (_timer) { clearTimeout(_timer); _timer = null; } }
 
     function wire() {
@@ -525,6 +577,22 @@
                 var ids = ((d && d.downloads) || []).filter(function (x) { return isActive(x.status); }).map(function (x) { return x.id; });
                 Promise.all(ids.map(function (id) { return postJSON(URL_CANCEL, { id: id }); }))
                     .then(function () { toast('Cancelled ' + ids.length + ' download' + (ids.length === 1 ? '' : 's'), 'info'); poll(); });
+            });
+        });
+        var retryAll = document.querySelector('[data-vdpg-retry-all]');
+        if (retryAll) retryAll.addEventListener('click', function () {
+            retryAll.disabled = true;
+            getJSON(URL_ACTIVE).then(function (d) {
+                // same rule as the count in render(): real grab failures with a known release
+                var ids = ((d && d.downloads) || []).filter(function (x) {
+                    return x.status === 'failed' && x.username && x.filename;
+                }).map(function (x) { return x.id; });
+                Promise.all(ids.map(function (id) { return postJSON(URL_RETRY, { id: id }); }))
+                    .then(function (rs) {
+                        var ok = rs.filter(function (r) { return r && r.ok; }).length;
+                        toast(ok ? ('Retrying ' + ok + ' download' + (ok === 1 ? '' : 's')) : 'Nothing could be retried', ok ? 'info' : 'error');
+                        retryAll.disabled = false; poll();
+                    });
             });
         });
         var pills = document.querySelector('[data-vdpg-pills]');
@@ -571,6 +639,10 @@
                 document.dispatchEvent(new CustomEvent('soulsync:video-open-detail', {
                     detail: { kind: 'channel', source: 'youtube', id: och.getAttribute('data-vdpg-open-channel') }
                 }));
+                return;
+            }
+            if (e.target.closest('[data-vdpg-import]')) {
+                document.dispatchEvent(new CustomEvent('soulsync:video-navigate', { detail: 'video-import' }));
                 return;
             }
             var cp = e.target.closest('[data-vdpg-copy]');

@@ -617,6 +617,52 @@ def test_downloads_grab_and_active(tmp_path, monkeypatch):
         videoapi._video_db = None
 
 
+def test_downloads_active_flags_upgrade_watches(tmp_path, monkeypatch):
+    """Completed rows whose title is STILL on the wishlist (below-cutoff grab kept
+    for upgrade-until-cutoff) are annotated upgrade_watch=True so the Downloads
+    page can show the watch; final grabs say False and in-flight rows are untouched."""
+    import api.video as videoapi
+    import core.video.download_monitor as mon
+    import core.video.slskd_download as slskd
+    from database.video_database import VideoDatabase
+
+    monkeypatch.setattr(slskd, "start_download", lambda *a, **k: {"ok": True})
+    monkeypatch.setattr(mon, "ensure_started", lambda *a, **k: None)
+
+    db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
+    db.set_setting("movies_path", "/media/movies")
+    db.set_setting("tv_path", "/media/tv")
+    videoapi._video_db = db
+    app = Flask(__name__)
+    app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
+    client = app.test_client()
+    try:
+        def grab(**extra):
+            body = {"source": "soulseek", "username": "u", "filename": extra.pop("filename", "f.mkv"),
+                    "size_bytes": 8, "quality_label": "720p"}
+            body.update(extra)
+            return client.post("/api/video/downloads/grab", json=body).get_json()["id"]
+
+        watched = grab(kind="movie", title="The Matrix", media_id=603, media_source="tmdb")
+        final = grab(kind="movie", title="Heat", media_id=949, media_source="tmdb", filename="h.mkv")
+        ep = grab(kind="show", title="The Wire", media_id=1438, media_source="tmdb", filename="e.mkv",
+                  search_ctx={"scope": "episode", "season": 2, "episode": 3})
+        inflight = grab(kind="movie", title="Alien", media_id=348, media_source="tmdb", filename="a.mkv")
+        for did in (watched, final, ep):
+            db.update_video_download(did, status="completed")
+        # the below-cutoff grabs kept their wishlist rows; Heat's was removed (met cutoff)
+        db.add_movie_to_wishlist(603, "The Matrix")
+        db.add_episodes_to_wishlist(1438, "The Wire", [{"season_number": 2, "episode_number": 3}])
+
+        act = {d["id"]: d for d in client.get("/api/video/downloads/active").get_json()["downloads"]}
+        assert act[watched]["upgrade_watch"] is True
+        assert act[final]["upgrade_watch"] is False
+        assert act[ep]["upgrade_watch"] is True
+        assert "upgrade_watch" not in act[inflight]          # only completed rows judged
+    finally:
+        videoapi._video_db = None
+
+
 def test_downloads_status_lookup_by_id_and_media(tmp_path, monkeypatch):
     """The live-tracking endpoint: the modal result card looks up by download id,
     a movie detail page looks up by media_id+media_source. Powers both progress UIs."""

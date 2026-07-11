@@ -78,3 +78,40 @@ def test_download_meta_routes_are_registered():
     assert "/api/video/downloads/meta/<kind>/<int:tmdb_id>" in rules
     assert "/api/video/downloads/yt-meta/<video_id>" in rules
 
+
+
+# --- overnight polish pass (upgrade watch · retry-all · manual import · skeleton) ---
+
+def test_completed_rows_can_show_an_upgrade_watch_chip():
+    # backend annotates completed rows still on the wishlist (below-cutoff grabs)…
+    assert "d.upgrade_watch" in _JS
+    assert "vdpg-upchip" in _JS and ".vdpg-upchip" in _CSS
+    # …and the drawer explains what the chip means
+    assert "watching for a better copy" in _JS
+
+
+def test_youtube_rows_name_their_channel_on_the_collapsed_row():
+    assert "vdpg-mchan" in _JS and ".vdpg-mchan" in _CSS
+    assert "_nctx.channel || _nctx.channel_title" in _JS
+
+
+def test_import_failed_rows_offer_manual_import():
+    assert "data-vdpg-import" in _JS
+    assert "'video-import'" in _JS                    # navigates to the Import page
+    assert "function canImport(" in _JS               # admin-gated, same rule as video-side.js
+    assert "Manual Import" in _JS                     # drawer button label
+    assert ".vdpg-row-import" in _CSS
+
+
+def test_failed_rows_get_a_retry_all_button():
+    assert "data-vdpg-retry-all" in _INDEX
+    assert "data-vdpg-retry-all" in _JS
+    # only real grab failures with a known release count as retryable
+    assert "x.status === 'failed' && x.username && x.filename" in _JS
+
+
+def test_first_visit_paints_a_loading_skeleton_and_rich_empty_state():
+    assert "function showSkeleton(" in _JS
+    assert "data-vdpg-skel" in _JS and ".vdpg-skel-row" in _CSS
+    assert "vdpg-empty-t" in _JS and ".vdpg-empty-t" in _CSS
+    assert "No downloads yet" in _JS

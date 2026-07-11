@@ -513,13 +513,46 @@ def register_routes(bp):
             ensure_started(get_video_db)
         return jsonify({"ok": started > 0, "started": started, "skipped": skipped, "ids": ids})
 
+    def _annotate_upgrade_watches(db, rows) -> None:
+        """Mark COMPLETED movie/episode rows that still hold a wishlist row —
+        the upgrade-until-cutoff watches. Without this, a below-cutoff grab
+        looks identical to a final one on the Downloads page. Identity comes
+        from the same resolver the monitor uses; two set queries total."""
+        try:
+            from core.video.download_monitor import _as_int, _wishlist_ids
+            completed = [r for r in rows if r.get("status") == "completed"
+                         and str(r.get("kind") or "") in ("movie", "show")]
+            if not completed:
+                return
+            conn = db._get_connection()
+            try:
+                movie_watches = {r[0] for r in conn.execute(
+                    "SELECT tmdb_id FROM video_wishlist WHERE kind='movie'")}
+                ep_watches = {(r[0], r[1], r[2]) for r in conn.execute(
+                    "SELECT tmdb_id, season_number, episode_number "
+                    "FROM video_wishlist WHERE kind='episode'")}
+            finally:
+                conn.close()
+            for r in completed:
+                kind, tmdb, sn, en, _ctx = _wishlist_ids(db, r)
+                if not tmdb:
+                    continue
+                if kind == "movie":
+                    r["upgrade_watch"] = int(tmdb) in movie_watches
+                else:
+                    r["upgrade_watch"] = (int(tmdb), _as_int(sn), _as_int(en)) in ep_watches
+        except Exception:   # noqa: BLE001 — an annotation, never a 500
+            logger.debug("upgrade-watch annotation failed", exc_info=True)
+
     @bp.route("/downloads/active", methods=["GET"])
     def video_downloads_active():
         from . import get_video_db
         from core.video.download_monitor import ensure_started
         db = get_video_db()
         ensure_started(get_video_db)   # also (re)start the monitor when the page is open
-        return jsonify({"downloads": db.list_video_downloads()})
+        rows = db.list_video_downloads()
+        _annotate_upgrade_watches(db, rows)
+        return jsonify({"downloads": rows})
 
     @bp.route("/downloads/status", methods=["GET"])
     def video_downloads_status():
