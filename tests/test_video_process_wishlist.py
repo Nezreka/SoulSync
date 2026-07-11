@@ -11,6 +11,7 @@ import pytest
 
 from core.automation.handlers.video_process_wishlist import (
     active_download_keys,
+    annotate_upgrades,
     auto_video_process_wishlist,
     build_download_record,
     item_key,
@@ -209,17 +210,28 @@ def test_episode_wishlist_to_download_shape(db):
     assert top["season_number"] == 1 and top["episode_number"] == 2   # newest air date first
 
 
-def test_movie_wishlist_skips_owned(db):
-    """Bug 3: a wished movie already in the library is not re-grabbed."""
+def _set_resolution(db, path, resolution):
+    conn = db._get_connection()
+    conn.execute("UPDATE media_files SET resolution=? WHERE relative_path=?",
+                 (resolution, path))
+    conn.commit(); conn.close()
+
+
+def test_movie_wishlist_annotates_owned(db):
+    """Upgrade-until: owned titles are RETURNED, annotated with owned +
+    owned_resolutions — the drain does the cutoff judging (annotate_upgrades)."""
     db.add_movie_to_wishlist(1, "Owned", year="2020", status="wanted")
     db.add_movie_to_wishlist(2, "Missing", year="2020", status="wanted")
     db.upsert_movie("plex", {"server_id": "m1", "tmdb_id": 1, "title": "Owned",
                              "file": {"relative_path": "owned.mkv", "size_bytes": 5}})
-    assert [r["tmdb_id"] for r in db.movie_wishlist_to_download()] == [2]   # owned excluded
+    _set_resolution(db, "owned.mkv", "720p")
+    rows = {r["tmdb_id"]: r for r in db.movie_wishlist_to_download()}
+    assert set(rows) == {1, 2}
+    assert rows[1]["owned"] == 1 and rows[1]["owned_resolutions"] == "720p"
+    assert rows[2]["owned"] == 0 and rows[2]["owned_resolutions"] is None
 
 
-def test_episode_wishlist_skips_owned(db):
-    """Bug 3: a wished episode already owned (has_file) is not re-grabbed."""
+def test_episode_wishlist_annotates_owned(db):
     db.add_episodes_to_wishlist(9, "Show", [
         {"season_number": 1, "episode_number": 1, "air_date": "2020-01-01"},
         {"season_number": 1, "episode_number": 2, "air_date": "2020-01-08"}])
@@ -227,5 +239,52 @@ def test_episode_wishlist_skips_owned(db):
         {"season_number": 1, "episodes": [
             {"server_id": "e1", "episode_number": 1, "title": "E1",
              "file": {"relative_path": "e1.mkv", "size_bytes": 5}}]}]})
-    keys = {(r["season_number"], r["episode_number"]) for r in db.episode_wishlist_to_download()}
-    assert keys == {(1, 2)}   # owned S1E1 excluded; missing S1E2 kept
+    _set_resolution(db, "e1.mkv", "720p")
+    rows = {(r["season_number"], r["episode_number"]): r
+            for r in db.episode_wishlist_to_download()}
+    assert set(rows) == {(1, 1), (1, 2)}
+    assert rows[(1, 1)]["owned"] == 1 and rows[(1, 1)]["owned_resolutions"] == "720p"
+    assert rows[(1, 2)]["owned"] == 0
+
+
+# ── upgrade-until-cutoff (pure) ───────────────────────────────────────────────
+def test_pick_best_upgrade_requires_strictly_better():
+    cands = [dict(_cand("a"), resolution="720p"),
+             dict(_cand("b"), resolution="1080p"),
+             dict(_cand("c"), resolution=None)]
+    assert pick_best(cands)["filename"] == "a"                       # no floor: first accepted
+    assert pick_best(cands, min_rank=2)["filename"] == "b"           # own 720p → only 1080p+
+    assert pick_best(cands, min_rank=3) is None                      # own 1080p → nothing better
+    assert pick_best([dict(_cand("c"), resolution=None)], min_rank=1) is None   # unknown ≠ upgrade
+
+
+def test_annotate_upgrades_eligibility():
+    items = [
+        {"tmdb_id": 1, "owned": 0},                                          # new want
+        {"tmdb_id": 2, "owned": 1, "owned_resolutions": "720p"},             # upgradeable
+        {"tmdb_id": 3, "owned": 1, "owned_resolutions": "1080p,720p"},       # best meets cutoff
+        {"tmdb_id": 4, "owned": 1, "owned_resolutions": None},               # unreadable
+    ]
+    out = {it["tmdb_id"]: it for it in annotate_upgrades(items, cutoff_rank=3)}   # 1080p cutoff
+    assert set(out) == {1, 2}
+    assert "_min_rank" not in out[1]
+    assert out[2]["_min_rank"] == 2                                  # strictly-better floor
+    # Empty cutoff ('always best'): owned items are never done.
+    out = {it["tmdb_id"]: it for it in annotate_upgrades(items, cutoff_rank=0)}
+    assert set(out) == {1, 2, 3} and out[3]["_min_rank"] == 3
+
+
+# ── obtain-time gate: keep the row below cutoff, remove at/above ─────────────
+def test_wishlist_obtained_gates_on_cutoff(db, monkeypatch):
+    from core.video import download_monitor as dm
+    db.add_movie_to_wishlist(1, "Low", year="2020", status="wanted")
+    db.add_movie_to_wishlist(2, "Done", year="2020", status="wanted")
+    db.add_movie_to_wishlist(3, "Mystery", year="2020", status="wanted")
+    monkeypatch.setattr("core.video.quality_profile.load",
+                        lambda _db: {"cutoff_resolution": "1080p"})
+    dl = {"id": 7, "kind": "movie", "media_source": "tmdb", "media_id": "1"}
+    dm._wishlist_obtained(db, dl, {"quality_label": "WEBDL-720p"})
+    dm._wishlist_obtained(db, dict(dl, media_id="2"), {"quality_label": "BluRay-2160p"})
+    dm._wishlist_obtained(db, dict(dl, media_id="3"), {"quality_label": "who knows"})
+    left = {r["tmdb_id"] for r in db.movie_wishlist_to_download()}
+    assert left == {1}         # below cutoff kept; met removed; unreadable removed (classic)
