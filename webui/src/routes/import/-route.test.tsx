@@ -2,9 +2,9 @@ import { createMemoryHistory } from '@tanstack/react-router';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createAppQueryClient } from '@/app/query-client';
 import { AppRouterProvider, createAppRouter } from '@/app/router';
 import { HttpResponse, http, server } from '@/test/msw';
+import { createTestQueryClient } from '@/test/query-client';
 import { createShellBridge } from '@/test/shell-bridge';
 
 import type { ImportStagingFile } from './-import.types';
@@ -13,7 +13,7 @@ import { autoImportResultsQueryOptions, autoImportStatusQueryOptions } from './-
 import { resetImportWorkflowStore } from './-import.store';
 
 function renderImportRoute(initialEntries = ['/import']) {
-  const queryClient = createAppQueryClient();
+  const queryClient = createTestQueryClient();
   const history = createMemoryHistory({ initialEntries });
   const router = createAppRouter({ history, queryClient });
 
