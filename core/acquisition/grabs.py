@@ -147,7 +147,7 @@ def get_grab(conn: Any, download_id: str) -> Optional[Dict[str, Any]]:
         (download_id,)).fetchone()
     if row is None:
         return None
-    grab = dict(zip(_COLUMNS, row))
+    grab = dict(zip(_COLUMNS, row, strict=True))
     try:
         grab["context"] = json.loads(grab.get("context_json") or "{}")
     except (TypeError, ValueError):
