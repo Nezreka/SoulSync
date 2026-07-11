@@ -1827,6 +1827,10 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vcm-btn--ghost:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
 .vcm-btn--primary { background: hsl(var(--vcm-h), 68%, 52%); color: #fff; box-shadow: 0 8px 24px hsla(var(--vcm-h), 70%, 45%, 0.4); }
 .vcm-btn--primary:hover { filter: brightness(1.08); transform: translateY(-1px); }
+/* wishlist-this-episode (aired + missing only); reads green once queued/added */
+.vcm-btn--wish { color: #2bd17e; border-color: rgba(34, 197, 94, 0.35); background: rgba(34, 197, 94, 0.1); }
+.vcm-btn--wish:hover:not(:disabled) { background: rgba(34, 197, 94, 0.2); color: #4ade80; }
+.vcm-btn--wish:disabled { opacity: 0.6; cursor: default; }
 
 @media (max-width: 560px) {
     .vcm-ep { grid-template-columns: 1fr; }

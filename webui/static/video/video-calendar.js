@@ -511,6 +511,13 @@
         if (ep.rating) tags.push('<span class="vcm-tag vcm-tag--star">★ ' + (Math.round(ep.rating * 10) / 10) + '</span>');
         var eyebrow = [ep.network, ep.show_year, ep.show_status].filter(Boolean).map(esc).join(' · ');
 
+        // Aired-and-missing episodes get their own wishlist action — same rule as
+        // the bulk catch-up button: upcoming episodes are left to the auto-promoter
+        // (wishing an unaired episode would send the drain hunting for a release
+        // that can't exist yet).
+        var wishable = !ep.has_file && ep.show_tmdb_id &&
+            ep.air_date && state.data && ep.air_date < state.data.today;
+
         var ov = document.createElement('div');
         ov.className = 'vcm-overlay'; ov.setAttribute('data-vcm', '');
         ov.style.setProperty('--vcm-h', hue);
@@ -548,6 +555,7 @@
                 '</div>' +
                 '<div class="vcm-actions">' +
                     '<button class="vcm-btn vcm-btn--ghost" type="button" data-vcm-close>Close</button>' +
+                    (wishable ? '<button class="vcm-btn vcm-btn--ghost vcm-btn--wish" type="button" data-vcm-wish disabled>＋ Wishlist episode</button>' : '') +
                     '<button class="vcm-btn vcm-btn--primary" type="button" data-vcm-open>Open full show page →</button>' +
                 '</div>' +
             '</div>';
@@ -557,8 +565,50 @@
         modalEl = ov;
         requestAnimationFrame(function () { ov.classList.add('vcm-open'); });
 
+        // Enable the wish button only once we know it isn't already queued.
+        if (wishable) {
+            fetch('/api/video/wishlist/check', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ shows: [ep.show_tmdb_id] }) })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (res) {
+                    var btn = ov.querySelector('[data-vcm-wish]'); if (!btn) return;
+                    var have = ((res && res.by_show) || {})[String(ep.show_tmdb_id)] || [];
+                    if (have.indexOf(ep.season_number + '_' + ep.episode_number) > -1) {
+                        btn.textContent = '✓ On wishlist';
+                    } else { btn.disabled = false; }
+                })
+                .catch(function () { /* stays disabled */ });
+        }
+
+        function wishThis(btn) {
+            btn.disabled = true;
+            // identical payload shape to addMissing() — the write-parity contract
+            // (library_id + poster proxy path) keeps the wishlist row fully art'd
+            fetch('/api/video/wishlist/add', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ show: { tmdb_id: ep.show_tmdb_id, title: ep.show_title,
+                    poster_url: ep.show_has_poster ? ('/api/video/poster/show/' + ep.show_id) : null,
+                    library_id: ep.show_id },
+                    episodes: [{ season_number: ep.season_number, episode_number: ep.episode_number,
+                        title: ep.title, air_date: ep.air_date }] }) })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (res) {
+                    if (!res || res.error) {
+                        btn.disabled = false;
+                        if (typeof showToast === 'function') showToast((res && res.error) || 'Could not add to wishlist', 'error');
+                        return;
+                    }
+                    btn.textContent = '✓ On wishlist';
+                    if (typeof showToast === 'function') showToast('Added S' + ep.season_number + 'E' + ep.episode_number + ' to wishlist', 'success');
+                    document.dispatchEvent(new CustomEvent('soulsync:video-wishlist-changed'));
+                    refreshAddMissing();   // the bulk catch-up count just changed
+                })
+                .catch(function () { btn.disabled = false; if (typeof showToast === 'function') showToast('Could not add to wishlist', 'error'); });
+        }
+
         ov.addEventListener('click', function (e) {
             if (e.target === ov || e.target.closest('[data-vcm-close]')) { closeModal(); return; }
+            var wbtn = e.target.closest('[data-vcm-wish]');
+            if (wbtn) { if (!wbtn.disabled) wishThis(wbtn); return; }
             if (e.target.closest('[data-vcm-open]')) {
                 closeModal();
                 document.dispatchEvent(new CustomEvent('soulsync:video-open-detail', {
