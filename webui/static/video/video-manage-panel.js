@@ -182,7 +182,10 @@
                     'aria-checked="' + (d.watched ? 'true' : 'false') + '" tabindex="0"><span>Watched</span><span class="vmg-sw"></span></div>' +
                 '<div class="vmg-toggle' + (d.monitored ? ' vmg-toggle--on' : '') + '" data-vmg-monitored role="switch" ' +
                     'aria-checked="' + (d.monitored ? 'true' : 'false') + '" tabindex="0"><span>Monitored</span><span class="vmg-sw"></span></div>' +
-            '</div>'
+            '</div>' +
+            (window.VideoIssues
+                ? '<button class="vmg-btn-ghost vmg-report" type="button" data-vmg-report>⚑ Report an issue</button>'
+                : '')
         );
     }
 
@@ -387,6 +390,14 @@
             if (rm) {
                 state.genres.splice(parseInt(rm.getAttribute('data-vmg-chip-rm'), 10), 1);
                 renderChips(); markDirty(); return;
+            }
+            if (e.target.closest('[data-vmg-report]')) {
+                if (window.VideoIssues) {
+                    VideoIssues.openReport({ entityType: state.kind, entityId: state.id,
+                        name: state.data.title || '',
+                        meta: state.data.year ? String(state.data.year) : '' });
+                }
+                return;
             }
             if (e.target.closest('[data-vmg-poster]')) {
                 if (window.VideoPoster) {

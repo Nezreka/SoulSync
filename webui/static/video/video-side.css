@@ -4622,3 +4622,127 @@ body[data-side="video"] #gsearch-aura {
 }
 .vrf-runtime-label { font-size: 11.5px; color: rgba(255,255,255,0.5); margin-top: 5px; }
 
+
+/* ── Issues page + report/detail modals (the music Issues standard) ────────── */
+.vi-toolbar { display: flex; gap: 10px; margin-bottom: 16px; }
+.vi-stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 18px; }
+.vi-stat {
+    padding: 14px; border-radius: 12px; background: rgba(255,255,255,0.035);
+    border: 1px solid rgba(255,255,255,0.07); text-align: center;
+}
+.vi-stat-n { font-size: 22px; font-weight: 900; color: #fff; }
+.vi-stat-l { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: rgba(255,255,255,0.45); margin-top: 3px; }
+.vi-stat--open .vi-stat-n { color: rgb(var(--accent-rgb, 88 101 242)); }
+.vi-stat--in_progress .vi-stat-n { color: #e0a34a; }
+.vi-stat--resolved .vi-stat-n { color: #6fdb96; }
+.vi-stat--dismissed .vi-stat-n { color: rgba(255,255,255,0.45); }
+.vi-list { display: flex; flex-direction: column; gap: 10px; }
+.vi-card {
+    display: flex; gap: 14px; align-items: center; padding: 12px 14px; cursor: pointer;
+    border-radius: 12px; background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.07); transition: border .13s, background .13s;
+}
+.vi-card:hover { background: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.14); }
+.vi-card-thumb {
+    width: 46px; aspect-ratio: 2/3; border-radius: 7px; object-fit: cover;
+    background: #1b1b22; flex: 0 0 auto;
+}
+.vi-card-thumb--ph { display: flex; align-items: center; justify-content: center; font-size: 18px; }
+.vi-card-mid { flex: 1; min-width: 0; }
+.vi-card-title { font-size: 13.5px; font-weight: 800; color: #fff; }
+.vi-card-entity { font-size: 12px; color: rgba(255,255,255,0.55); margin-top: 2px; }
+.vi-card-desc {
+    font-size: 12px; color: rgba(255,255,255,0.45); margin-top: 3px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.vi-card-foot { font-size: 11px; color: rgba(255,255,255,0.35); margin-top: 4px; }
+.vi-card-right { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+.vi-st {
+    padding: 3px 11px; border-radius: 999px; font-size: 10.5px; font-weight: 800;
+    text-transform: uppercase; letter-spacing: 0.05em;
+    background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.6);
+}
+.vi-st--open { background: rgba(var(--accent-rgb, 88 101 242), 0.18); color: rgb(var(--accent-rgb, 88 101 242)); }
+.vi-st--progress { background: rgba(224,163,74,0.16); color: #e0a34a; }
+.vi-st--resolved { background: rgba(80,200,120,0.14); color: #6fdb96; }
+.vi-prio { width: 9px; height: 9px; border-radius: 50%; background: rgba(255,255,255,0.3); flex: 0 0 auto; }
+.vi-prio--high { background: #e0564a; box-shadow: 0 0 8px rgba(224,86,74,0.6); }
+.vi-prio--low { background: rgba(255,255,255,0.18); }
+
+/* modals (report + detail) */
+.vi-overlay {
+    position: fixed; inset: 0; z-index: 9300; display: flex; align-items: center;
+    justify-content: center; padding: 24px; background: rgba(5,5,8,0.72); backdrop-filter: blur(8px);
+}
+.vi-modal {
+    width: min(620px, 96vw); max-height: 90vh; display: flex; flex-direction: column;
+    background: #101015; border: 1px solid rgba(255,255,255,0.09); border-radius: 18px;
+    box-shadow: 0 40px 110px rgba(0,0,0,0.7); overflow: hidden;
+}
+.vi-modal-head {
+    padding: 16px 20px; font-size: 15px; font-weight: 900; color: #fff;
+    border-bottom: 1px solid rgba(255,255,255,0.07); position: relative;
+}
+.vi-modal-head .vmg-close { top: 11px; right: 14px; }
+.vi-modal-body { padding: 16px 20px; overflow-y: auto; }
+.vi-modal-body::-webkit-scrollbar { width: 8px; }
+.vi-modal-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 4px; }
+.vi-modal-foot {
+    padding: 12px 20px 16px; border-top: 1px solid rgba(255,255,255,0.07);
+    display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+}
+.vi-hero { display: flex; gap: 14px; margin-bottom: 14px; }
+.vi-hero-art { width: 74px; aspect-ratio: 2/3; border-radius: 9px; object-fit: cover; background: #1b1b22; flex: 0 0 auto; }
+.vi-hero-title { font-size: 16px; font-weight: 900; color: #fff; }
+.vi-hero-year { font-weight: 600; color: rgba(255,255,255,0.45); }
+.vi-hero-sub { font-size: 12px; color: rgba(255,255,255,0.5); margin-top: 3px; }
+.vi-hero-tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.vi-tag {
+    padding: 2px 9px; border-radius: 999px; font-size: 10.5px; font-weight: 700;
+    background: rgba(255,255,255,0.07); color: rgba(255,255,255,0.6);
+}
+.vi-infobar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 12px;
+    border-radius: 10px; background: rgba(255,255,255,0.035); margin-bottom: 14px;
+    font-size: 12px; color: rgba(255,255,255,0.55);
+}
+.vi-infodates { margin-left: auto; }
+.vi-sect { margin-bottom: 14px; }
+.vi-sect-h {
+    font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em;
+    color: rgba(255,255,255,0.42); margin-bottom: 7px;
+}
+.vi-issue-title { font-size: 14px; font-weight: 800; color: #fff; }
+.vi-issue-desc { font-size: 13px; color: rgba(255,255,255,0.65); line-height: 1.55; margin: 6px 0 0; white-space: pre-wrap; }
+.vi-file { font-size: 12.5px; color: rgba(255,255,255,0.6); padding: 4px 0; }
+.vi-response {
+    width: 100%; box-sizing: border-box; min-height: 84px; padding: 10px 12px;
+    border-radius: 10px; font-size: 13px; font-family: inherit; resize: vertical;
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+    color: #eef1f7; outline: none;
+}
+.vi-response:focus { border-color: rgba(var(--accent-rgb, 88 101 242), 0.6); }
+.vi-response-ro {
+    padding: 10px 12px; border-radius: 10px; font-size: 13px; line-height: 1.5;
+    background: rgba(var(--accent-rgb, 88 101 242), 0.08);
+    border: 1px solid rgba(var(--accent-rgb, 88 101 242), 0.25); color: rgba(255,255,255,0.75);
+}
+.vi-btn-primary {
+    padding: 9px 18px; border-radius: 10px; font-size: 13px; font-weight: 800; cursor: pointer;
+    border: none; background: rgb(var(--accent-rgb, 88 101 242)); color: #fff;
+}
+.vi-btn-primary:disabled { opacity: 0.4; cursor: default; }
+.vi-btn-danger { color: #ff7b70; }
+.vi-report-entity { font-size: 14px; font-weight: 800; color: #fff; margin-bottom: 12px; }
+.vi-cats, .vi-prios { display: flex; gap: 8px; flex-wrap: wrap; }
+.vi-cat {
+    padding: 8px 13px; border-radius: 10px; font-size: 12.5px; font-weight: 700; cursor: pointer;
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.11);
+    color: rgba(255,255,255,0.75); transition: all .12s;
+}
+.vi-cat:hover { background: rgba(255,255,255,0.1); color: #fff; }
+.vi-cat--on {
+    background: rgba(var(--accent-rgb, 88 101 242), 0.2);
+    border-color: rgba(var(--accent-rgb, 88 101 242), 0.55); color: #fff;
+}
+.vmg-report { margin-top: 4px; align-self: flex-start; }
