@@ -1975,23 +1975,30 @@ class VideoDatabase:
     # The scanner passes normalized, server-agnostic dicts (a Plex/Jellyfin
     # adapter produces them) so this layer never touches a media-server SDK.
     @staticmethod
-    def _set_media_file(conn, owner_col: str, owner_id: int, file: dict | None) -> None:
-        """Replace the media_files row(s) for one owner. owner_col is internal
+    def _set_media_file(conn, owner_col: str, owner_id: int, files) -> None:
+        """Replace the media_files row(s) for one owner — EVERY version the
+        server reported (multiple copies/editions each get a row). Accepts a
+        single file dict (legacy callers) or a list. owner_col is internal
         ('movie_id'|'episode_id'|'video_id'), never user input."""
         conn.execute(f"DELETE FROM media_files WHERE {owner_col} = ?", (owner_id,))
-        if not file:
+        if not files:
             return
+        if isinstance(files, dict):
+            files = [files]
         from core.video.mediainfo import canonical_aspect
-        conn.execute(
-            f"INSERT INTO media_files ({owner_col}, relative_path, size_bytes, resolution, "
-            "video_codec, audio_codec, release_source, quality, runtime_seconds, aspect) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (owner_id,
-             file.get("relative_path") or file.get("path") or "",
-             file.get("size_bytes"), file.get("resolution"), file.get("video_codec"),
-             file.get("audio_codec"), file.get("release_source"), file.get("quality"),
-             file.get("runtime_seconds"), canonical_aspect(file.get("aspect"))),
-        )
+        for file in files:
+            if not file:
+                continue
+            conn.execute(
+                f"INSERT INTO media_files ({owner_col}, relative_path, size_bytes, resolution, "
+                "video_codec, audio_codec, release_source, quality, runtime_seconds, aspect) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (owner_id,
+                 file.get("relative_path") or file.get("path") or "",
+                 file.get("size_bytes"), file.get("resolution"), file.get("video_codec"),
+                 file.get("audio_codec"), file.get("release_source"), file.get("quality"),
+                 file.get("runtime_seconds"), canonical_aspect(file.get("aspect"))),
+            )
 
     @staticmethod
     def _parse_locked(raw) -> set:
@@ -2132,14 +2139,16 @@ class VideoDatabase:
                 "studio": item.get("studio"), "tagline": item.get("tagline"),
                 "rating": item.get("rating"), "rating_critic": item.get("rating_critic"),
                 "play_count": item.get("play_count"),
-                "poster_url": item.get("poster_url"), "has_file": 1 if item.get("file") else 0,
+                "poster_url": item.get("poster_url"),
+                "has_file": 1 if (item.get("files") or item.get("file")) else 0,
             }, {"tmdb_id": item.get("tmdb_id"), "imdb_id": item.get("imdb_id")},
                 preserve_enrichment=preserve_enrichment)
             movie_id = conn.execute(
                 "SELECT id FROM movies WHERE server_source=? AND server_id=?",
                 (server_source, item["server_id"]),
             ).fetchone()["id"]
-            self._set_media_file(conn, "movie_id", movie_id, item.get("file"))
+            self._set_media_file(conn, "movie_id", movie_id,
+                                 item.get("files") or item.get("file"))
             if "genres" not in self._locked_fields_set(conn, "movies", movie_id):
                 self._set_genres(conn, "movie_genres", "movie_id", movie_id, item.get("genres"))
             conn.commit()
@@ -2211,13 +2220,14 @@ class VideoDatabase:
                         (show_id, season_id, server_source, ep.get("server_id"), snum, enum,
                          ep.get("title"), ep.get("overview"), ep.get("air_date"),
                          ep.get("runtime_minutes"), ep.get("still_url"), ep.get("rating"),
-                         ep.get("tvdb_id"), 1 if ep.get("file") else 0),
+                         ep.get("tvdb_id"), 1 if (ep.get("files") or ep.get("file")) else 0),
                     )
                     ep_id = conn.execute(
                         "SELECT id FROM episodes WHERE show_id=? AND season_number=? AND episode_number=?",
                         (show_id, snum, enum),
                     ).fetchone()["id"]
-                    self._set_media_file(conn, "episode_id", ep_id, ep.get("file"))
+                    self._set_media_file(conn, "episode_id", ep_id,
+                                         ep.get("files") or ep.get("file"))
 
             # Prune only SERVER-originated rows that vanished (server_id set) — the
             # full episode/season list now includes enrichment-added MISSING items
@@ -3506,7 +3516,12 @@ class VideoDatabase:
             eps = conn.execute(
                 "SELECT id, season_number, episode_number, title, overview, air_date, "
                 "runtime_minutes, rating, monitored, has_file, "
-                "(still_url IS NOT NULL AND still_url<>'') AS has_still FROM episodes WHERE show_id=? "
+                "(still_url IS NOT NULL AND still_url<>'') AS has_still, "
+                # A server may hold several COPIES of one episode — surface them.
+                "(SELECT COUNT(*) FROM media_files f WHERE f.episode_id=episodes.id) AS versions, "
+                "(SELECT f.resolution FROM media_files f WHERE f.episode_id=episodes.id "
+                "  ORDER BY f.size_bytes DESC LIMIT 1) AS resolution "
+                "FROM episodes WHERE show_id=? "
                 "ORDER BY season_number, episode_number", (show_id,)).fetchall()
         finally:
             conn.close()
@@ -3519,6 +3534,7 @@ class VideoDatabase:
                 "runtime_minutes": e["runtime_minutes"], "rating": e["rating"],
                 "has_still": bool(e["has_still"]),
                 "monitored": bool(e["monitored"]), "owned": bool(e["has_file"]),
+                "versions": e["versions"], "resolution": e["resolution"],
             })
 
         # Seasons declared in the seasons table, plus any season numbers that only

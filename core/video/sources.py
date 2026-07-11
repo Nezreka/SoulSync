@@ -780,21 +780,34 @@ class PlexVideoSource:
         return False
 
     @staticmethod
-    def _part_file(obj):
-        try:
-            media = obj.media[0]
-            part = media.parts[0]
-            return {
-                "relative_path": part.file,
-                "size_bytes": getattr(part, "size", None),
-                "resolution": getattr(media, "videoResolution", None),
-                "aspect": getattr(media, "aspectRatio", None),
-                "video_codec": getattr(media, "videoCodec", None),
-                "audio_codec": getattr(media, "audioCodec", None),
-                "runtime_seconds": int(obj.duration / 1000) if getattr(obj, "duration", None) else None,
-            }
-        except Exception:
-            return None
+    def _part_files(obj):
+        """EVERY version of an item (Plex ``media`` = one entry per copy/edition;
+        ``parts`` = the pieces of one copy). Best-first isn't guaranteed here —
+        the DB read orders by size. [] when the item has no playable media."""
+        out = []
+        runtime = int(obj.duration / 1000) if getattr(obj, "duration", None) else None
+        for media in (getattr(obj, "media", None) or []):
+            try:
+                parts = media.parts or []
+                if not parts:
+                    continue
+                out.append({
+                    "relative_path": parts[0].file,
+                    "size_bytes": sum(int(getattr(p, "size", 0) or 0) for p in parts) or None,
+                    "resolution": getattr(media, "videoResolution", None),
+                    "aspect": getattr(media, "aspectRatio", None),
+                    "video_codec": getattr(media, "videoCodec", None),
+                    "audio_codec": getattr(media, "audioCodec", None),
+                    "runtime_seconds": runtime,
+                })
+            except Exception:   # noqa: BLE001 - one unreadable version never hides the rest
+                continue
+        return out
+
+    @classmethod
+    def _part_file(cls, obj):
+        files = cls._part_files(obj)
+        return files[0] if files else None
 
     @staticmethod
     def _tags(seq) -> list:
@@ -829,8 +842,9 @@ class PlexVideoSource:
             "play_count": int(getattr(m, "viewCount", 0) or 0),
             "genres": self._tags(getattr(m, "genres", None)),
             "runtime_minutes": int(dur / 60000) if dur else None,
-            "file": self._part_file(m),
+            "files": self._part_files(m),
         }
+        d["file"] = (d["files"] or [None])[0]
         d.update(_parse_plex_guids(m))
         return d
 
@@ -848,6 +862,7 @@ class PlexVideoSource:
             "still_url": getattr(ep, "thumb", None),
             "rating": getattr(ep, "audienceRating", None),
             "tvdb_id": _parse_plex_guids(ep).get("tvdb_id"),
+            "files": self._part_files(ep),
             "file": self._part_file(ep),
         }
 
@@ -1290,25 +1305,34 @@ class JellyfinVideoSource:
         return int(ticks / 10_000_000) if ticks else None
 
     @staticmethod
-    def _file(item):
+    def _files(item):
+        """EVERY version (Jellyfin MediaSources = one entry per copy). [] when
+        the item carries no source; a bare Path yields a minimal single entry."""
         sources = item.get("MediaSources") or []
         if not sources:
             path = item.get("Path")
-            return {"relative_path": path} if path else None
-        src = sources[0]
-        streams = src.get("MediaStreams") or []
-        vid = next((s for s in streams if s.get("Type") == "Video"), {})
-        aud = next((s for s in streams if s.get("Type") == "Audio"), {})
-        return {
-            "relative_path": src.get("Path") or item.get("Path") or "",
-            "size_bytes": src.get("Size"),
-            "resolution": (str(vid.get("Height")) + "p") if vid.get("Height") else None,
-            "aspect": vid.get("AspectRatio") or (
-                (vid.get("Width") / vid.get("Height")) if vid.get("Width") and vid.get("Height") else None),
-            "video_codec": vid.get("Codec"),
-            "audio_codec": aud.get("Codec"),
-            "runtime_seconds": JellyfinVideoSource._ticks_to_seconds(item.get("RunTimeTicks")),
-        }
+            return [{"relative_path": path}] if path else []
+        out = []
+        for src in sources:
+            streams = src.get("MediaStreams") or []
+            vid = next((s for s in streams if s.get("Type") == "Video"), {})
+            aud = next((s for s in streams if s.get("Type") == "Audio"), {})
+            out.append({
+                "relative_path": src.get("Path") or item.get("Path") or "",
+                "size_bytes": src.get("Size"),
+                "resolution": (str(vid.get("Height")) + "p") if vid.get("Height") else None,
+                "aspect": vid.get("AspectRatio") or (
+                    (vid.get("Width") / vid.get("Height")) if vid.get("Width") and vid.get("Height") else None),
+                "video_codec": vid.get("Codec"),
+                "audio_codec": aud.get("Codec"),
+                "runtime_seconds": JellyfinVideoSource._ticks_to_seconds(item.get("RunTimeTicks")),
+            })
+        return out
+
+    @classmethod
+    def _file(cls, item):
+        files = cls._files(item)
+        return files[0] if files else None
 
     def iter_movies(self, incremental=False, since=None):
         path = f"/Users/{self.uid}/Items"
@@ -1355,6 +1379,7 @@ class JellyfinVideoSource:
                               or (1 if (it.get("UserData") or {}).get("Played") else 0)),
             "genres": it.get("Genres") or [],
             "runtime_minutes": int(ticks / 600_000_000) if ticks else None,
+            "files": self._files(it),
             "file": self._file(it),
         }
         d.update(_parse_jf_providers(it))
@@ -1409,6 +1434,7 @@ class JellyfinVideoSource:
                     "still_url": (ep.get("ImageTags") or {}).get("Primary"),
                     "rating": ep.get("CommunityRating"),
                     "tvdb_id": _parse_jf_providers(ep).get("tvdb_id"),
+                    "files": self._files(ep),
                     "file": self._file(ep),
                 })
             # Season metadata (poster/title/overview) — one extra call per show.
