@@ -603,6 +603,15 @@ def ensure_library_v2_schema(connection: Any) -> None:
         prune_orphaned_rules(cursor)
     except Exception as e:  # noqa: BLE001
         logger.error("monitor-rules migration failed (will retry next start): %s", e)
+    # Release editions + recordings (audit P1-04 / ADR-04, §14.2 Schritt 3):
+    # additive shadow model — one default edition per album, one recording +
+    # release track per track; recordings merge on hard IDs only.
+    try:
+        from core.library2.editions import backfill_editions, ensure_editions_schema
+        ensure_editions_schema(cursor)
+        backfill_editions(cursor)
+    except Exception as e:  # noqa: BLE001
+        logger.error("edition/recording migration failed (will retry next start): %s", e)
     # The read API falls back to download provenance (track_downloads) for
     # files the importer knew no quality data for — index the lookup column so
     # album views don't table-scan a large history per track. Guarded: the

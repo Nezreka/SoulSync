@@ -467,6 +467,11 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
         # intent (re-import over an existing library) is never downgraded.
         from core.library2.monitor_rules import seed_legacy_rules
         seed_legacy_rules(cursor)
+        # Materialize the edition/recording shadow model for everything this
+        # run inserted (audit P1-04 / ADR-04) — the schema-ensure backfill ran
+        # before the inserts, so it has to run again here.
+        from core.library2.editions import backfill_editions
+        stats["editions"] = backfill_editions(cursor)
         conn.commit()
         logger.info("Library v2 import complete: %s", stats)
     finally:
