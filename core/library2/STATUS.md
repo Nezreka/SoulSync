@@ -87,6 +87,18 @@ tests `tests/library2/`.
   (`resolve_tracklist`) so real, monitorable track rows mirror into the Wishlist;
   expanding one does the same via `GET /albums/<id>?resolve=1`.
 
+### Provider snapshots and typed refresh boundary (Phase 3)
+- `library_provider_snapshots` stores normalized provider payloads per entity/scope
+  with completeness, cursor/page count, parser version, ETag/version and a stable
+  hash. Entity-delete triggers prevent orphan snapshots.
+- Discography and Spotify/Deezer tracklists cross a typed adapter boundary before
+  Library-v2 persistence. Provider IDs are matched exactly and merged structurally;
+  partial discography snapshots never prune releases.
+- Tracklist snapshots are bound to the selected default ReleaseEdition and its
+  external IDs. An edition/provider change invalidates the old cache even when the
+  replacement provider is temporarily unavailable; legacy caches are marked once
+  with explicit `legacy-cache` provenance.
+
 ### Refresh & Scan reads real file tags
 - `scan.py`: `rescan_files` probes files with `core/imports/file_ops.probe_audio_quality`
   (mutagen ground truth) → `lib2_track_files.sample_rate/bit_depth/bitrate/format/size` +
@@ -230,14 +242,16 @@ All findings of the deep branch review were fixed in one pass:
   refresh thumb busting).
 
 ## TODO (next)
-1. **Explicit monitor provenance**: if album-level monitoring must survive re-imports
-   independently from track-level wishlist monitoring, add provenance/mode columns
-   instead of deriving parent release flags from child tracks.
-2. Artist scope for more repair jobs (reorganize/dedup walk the transfer folder, so
+1. Finish Phase 3 identity/provenance: dedicated external-/old-ID history,
+   merge/move history, field-level user overrides and read projection. Extend typed
+   adapters beyond Discography/Tracklist.
+2. Finish the staged Wanted cutover: consumers still using `monitored` flags must
+   move to `lib2_wanted_tracks` after drift metrics prove parity.
+3. Artist scope for more repair jobs (reorganize/dedup walk the transfer folder, so
    they need path-level scoping, not a SQL filter).
-3. Broader metadata editing (titles/years/artists) beyond the release-type edit;
+4. Broader metadata editing (titles/years/artists) beyond the release-type edit;
    deep-linkable album detail view; Playlists (Phase E, last).
-4. Job registry (parallel background jobs + per-job polling) before multi-user use —
+5. Job registry (parallel background jobs + per-job polling) before multi-user use —
    today one global bulk-job slot is shared by monitor/retag/upgrade scans.
 
 ## Run / verify (no Node/Flask locally — use Docker)

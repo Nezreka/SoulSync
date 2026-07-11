@@ -1983,12 +1983,16 @@ Dateisystem-I/O.
 
 - [ ] versionierte Migration Engine einführen.
 - [ ] Stable IDs und `library_external_ids`.
-- [ ] Release Group, Release Edition, Recording, Release Track Tabellen.
+- [x] Release Group, Release Edition, Recording, Release Track Tabellen.
+  *(`7743641`)*
 - [ ] Artist-/Track-Credit-Junctions auf neue Entities.
-- [ ] Default-Edition-/Recording-Backfill.
-- [ ] unsichere Canonical-Links in Review Queue statt still mergen.
-- [ ] ProviderSnapshot-Vertrag mit `is_complete`, Cursor und Parser-Version.
-- [ ] typisierte Provideradapter für Discography und Tracklist.
+- [x] Default-Edition-/Recording-Backfill. *(`7743641`)*
+- [x] unsichere Canonical-Links in Review Queue statt still mergen.
+  *(`7743641`)*
+- [x] ProviderSnapshot-Vertrag mit `is_complete`, Cursor und Parser-Version.
+  *(`c396a4f`, Lifecycle-Härtung `5c1ab62`)*
+- [x] typisierte Provideradapter für Discography und Tracklist.
+  *(`bd5d29d`, `16210f5`)*
 - [ ] Refresh nach Foreign/Old IDs; Title nur als Kandidatensuche.
 - [ ] Merge-/Move-History und User Overrides.
 - [ ] `all` versus `new` korrekt implementieren.
@@ -2175,7 +2179,7 @@ werden, aber die gefährlichsten Grundlagen schließen:
 10. **LIB2-010:** Entscheidung Multi-Profil und Source of Truth als ADR festhalten.
     ✅ *(2026-07-10, ADRs in §25a; Admin-only technisch erzwungen: API-Write-Guard + Import-Guard)*
 
-### 16.1 Konsolidierter Implementierungsstand (Stand 2026-07-11)
+### 16.1 Konsolidierter Implementierungsstand (Stand 2026-07-12)
 
 Dieser Abschnitt ist die kompakte operative Übersicht über den tatsächlich
 implementierten Stand. Ein Eintrag gilt nur dann als erledigt, wenn Code und
@@ -2214,15 +2218,19 @@ ADR-Log in §25a.
 | ADR-04 / P1-04 | Additives Shadow-Modell: `lib2_albums` bleibt die Release Group; neu sind `lib2_release_editions` (eine Default-Edition je Album, partieller Unique-Index erzwingt genau eine Default-Edition pro Gruppe), `lib2_recordings` (harte IDs per partiellem Unique-Index) und `lib2_release_tracks` (Kompat-Link auf `lib2_tracks`). Recordings mergen ausschließlich über ISRC/MB-Recording-ID/Spotify-ID — Titel mergen nie (Live/Remaster bleiben getrennt); unverifizierte Canonical-Links werden als `lib2_recording_review`-Findings erfasst statt still gemergt. Backfill läuft idempotent aus Schema-Ensure und Importer. | `7743641` |
 | ADR-07 / P1-20/21 (Korrelation) | `acquisition_grabs` persistiert die fachliche Korrelation zu externen Downloadclients: externe Job-ID, Business-Status (`submitting/queued/downloading/completed/failed/cancel_pending/cancelled`), letzter beobachteter Clientstatus, Output-Path — nie Prozentfortschritt. Das Usenet-Plugin schreibt jede Transition, adoptiert nach Neustart noch laufende Client-Jobs (Poll-Thread wird wieder angehängt, `adopted`-Flag), markiert nie submittete Grabs sichtbar als failed und cancelt zweistufig: `cancel_pending` → `cancelled` erst nach erfolgreichem, idempotentem Client-Remove. Terminale Status können von späten Poll-Threads nicht überschrieben werden. | `83ebc1c` |
 | Wanted-Projektion | `lib2_wanted_tracks` materialisiert den effektiven Wanted-Zustand pro Track aus den Monitor-Rules mit testfixierter Priorität: expliziter Track > projizierter Track (`cascade`/`new_release`) > Album-Regel > Artist-Regel > `legacy_import` > Default unmonitored. Album-Toggles projizieren Cascade-Rules auf die reprojizieren Tracks (explizite Regeln werden nie downgegradet, auch nicht bei gleichem Wert); Monitor-Endpoint, Profil-Opt-in, Discography-Auto-Monitor und Importer halten die Projektion in derselben Transaktion aktuell, Deletes prunen sie, ein Versionsfeld erzwingt Rebuilds bei Prioritätsänderungen. Divergenz zu den `monitored`-Flags wird gezählt und geloggt, aber nicht angewendet (ADR-02: Flags bleiben operativ bis zum Cutover). | `45fc67a` |
+| ProviderSnapshot-Fundament | `library_provider_snapshots` persistiert normalisierte Payloads pro Provider/Entity/Scope mit ETag/Version, Fetched-At, `is_complete`, Cursor/Page-Count, Parser-Version und kanonischem SHA-256. Upserts melden No-op-Payloads; Delete-Trigger entfernen Snapshots für Artist, Album, Track und ReleaseEdition. | `c396a4f`, `5c1ab62` |
+| Typisierte Discography | Die Library-v2-Grenze normalisiert Discography-Cards einmalig in typisierte Releases, fordert vollständige Pagination an und speichert den Snapshot in derselben Transaktion. Partielle Antworten dürfen anreichern, unterdrücken aber jedes Stale-Pruning. Provider-IDs werden exakt aus JSON gelesen und beim Refresh strukturiert gemergt statt per Teilstring gesucht. | `bd5d29d`, `5c1ab62` |
+| Edition-gebundene Tracklists | Spotify-/Deezer-Tracklisten werden typisiert normalisiert und als vollständige Album-Snapshots gespeichert. Cache und Snapshot sind an die aktuelle Default-Edition samt External IDs und Parser-Version gebunden; Edition-/Providerwechsel invalidieren dauerhaft, bestehende Alt-Caches erhalten einmalig `legacy-cache`-Provenance. | `16210f5` |
 
 #### Verifizierter Teststand (2026-07-12)
 
-- Vollständige Backend-Suite (`pytest tests`): **7807 bestanden, 7 übersprungen,
+- Vollständige Backend-Suite (`pytest tests`): **7824 bestanden, 7 übersprungen,
   2 deselektiert, 0 Fehler** (2026-07-12, Stand nach den ADR-03/04/07- und
-  Wanted-Projektions-Commits unten; Laufzeit ~18:26 min. Die neuen Library-v2-
-  und Acquisition-Subsets liefen zusätzlich einzeln vorab grün).
+  ProviderSnapshot-/Wanted-Projektions-Commits; Laufzeit ~7:10 min. Zwei
+  RuntimeWarnings aus Automation-Mocktests, keine Testfehler).
 - Frontend: `oxfmt --check` und `oxlint --type-check`: **0 Warnungen,
-  0 Fehler**; Vitest: **96/96 bestanden**.
+  0 Fehler**; Vitest: **96/96 bestanden**; Vite-Produktionsbuild erfolgreich.
+  Der Build weist weiterhin auf den großen Hauptchunk (~1,09 MB) hin.
 - Die früher dokumentierten **7 vorbestehenden Vitest-Fehler** (Form-Slider,
   Import, Issues) reproduzieren nicht mehr; die Suite läuft seit `b53ce43`
   verpflichtend im CI-Job.
@@ -2233,10 +2241,11 @@ ADR-Log in §25a.
 
 #### Bewusst noch offen
 
-- [ ] Phase 3, Rest: typisierte Provideradapter, `library_provider_snapshots`
-  (Provenance-Vertrag, ADR-06), Refresh nach Foreign/Old IDs, Merge-/Move-
-  History; das Edition/Recording-Modell ist bisher ein Shadow-Modell —
-  Discography-Matching und Duplicate-Linking lesen noch nicht daraus.
+- [ ] Phase 3, Rest: dedizierte `library_external_ids` samt Foreign-/Old-ID-
+  History, Merge-/Move-History und Field-Level-User-Overrides. Das Edition/
+  Recording-Modell ist bisher ein Shadow-Modell; Discography-Matching und
+  Duplicate-Linking lesen noch nicht vollständig daraus. Weitere Metadaten-
+  Verbraucher außerhalb Discography/Tracklist sind noch untypisiert.
 - [ ] Phase 4, Rest: `acquisition_requests` + Idempotency-Key,
   `release_candidates`/`candidate_decisions`, Spezifikationspipeline
   (Kap. 12), Wishlist-Adapter auf AcquisitionRequests; `acquisition_grabs`
@@ -2261,8 +2270,8 @@ fehlt noch) geschlossen. P0-04 wurde mit strikter Fehlerweitergabe im
 Outbox-Worker nachgehärtet (`895d27e`) und durch den periodischen Reconciler
 (`3ca3000`) ergänzt; der manuelle Grab-Pfad übergibt das serverseitige Profil
 nachweislich an die Pipeline und ist für Nicht-Admins gesperrt (`a7b08a8`).
-Als Nächstes: Phase-3-Rest (Provider-Snapshots/typisierte Adapter) oder
-Phase-4-Kern (`acquisition_requests` + Decision Engine).
+Als Nächstes: Phase-3-Rest (External-/Old-ID-History und Field-Level-Overrides)
+oder Phase-4-Kern (`acquisition_requests` + Decision Engine).
 
 ## 17. Teststrategie
 
@@ -2839,6 +2848,15 @@ dauerhaft eingefroren (aktuelles Verhalten, P1-25).
 - P3-01 (breites Metadata-Edit, aktuell nur teilweise möglich) baut direkt auf
   diesem Override-Modell auf: "getrennte Providerwerte und User Overrides, Clear
   Override, Validierung und Audit-History" wird durch diese ADR erst möglich.
+
+**Status 2026-07-12: Infrastruktur umgesetzt, Field-Level-Overrides noch offen.**
+`library_provider_snapshots` erfüllt den Provenance-/Completeness-/Hash-Vertrag
+(`c396a4f`), Discography und Tracklist besitzen typisierte Adapter und persistieren
+normalisierte Snapshots (`bd5d29d`, `16210f5`). Tracklist-Caches werden bei einem
+Edition-/Providerwechsel gezielt invalidiert; partielle Discography-Snapshots löschen
+nichts. Exakte External-ID-Merges und Snapshot-Delete-Trigger wurden nachgehärtet
+(`5c1ab62`). Die getrennte Speicherung und Read-Projektion einzelner User-Overrides
+sowie das Ersetzen der verbleibenden Feld-`COALESCE`-Anreicherung bleiben offen.
 
 ### ADR-07: Interne Queue vs. Client-Queue — **Entschieden: Client ist Live-Queue**
 
