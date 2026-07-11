@@ -224,3 +224,71 @@ def test_fewer_than_two_matches_never_out_of_order():
     assert compute_order_status([])["out_of_order"] is False
     one = reconcile_playlist([_src("a", "A", "s0")], [_svr("a", "A", "nv0")])
     assert compute_order_status(one)["out_of_order"] is False
+
+
+# ── #1005: the fuzzy pass got fast — the scores must not have changed ────────
+
+def test_fast_fuzzy_pass_scores_identically_to_the_naive_matcher():
+    """The optimized pass 2 (prebuilt matchers + quick_ratio upper-bound gates)
+    must pair EXACTLY like the old per-pair SequenceMatcher loop. Brute-force
+    reference computed here; any gate that could drop a >=threshold pair fails."""
+    import random
+    from difflib import SequenceMatcher
+
+    from core.sync.playlist_reconcile import (
+        _FUZZY_THRESHOLD, canonical_source_track, norm_title, reconcile_playlist,
+    )
+
+    rng = random.Random(1005)
+    words = ['love', 'night', 'fire', 'rain', 'gold', 'heart', 'run', 'blue',
+             'star', 'wild', 'echo', 'ghost', 'city', 'road', 'home', 'light']
+    def title():
+        return ' '.join(rng.sample(words, rng.randint(2, 4))).title()
+
+    sources, servers = [], []
+    for i in range(120):
+        t, a = title(), f'Artist {rng.randint(1, 30)}'
+        sources.append({'name': t, 'artist': a, 'source_track_id': f's{i}'})
+        r = rng.random()
+        if r < 0.5:
+            servers.append({'id': f'v{i}', 'title': t, 'artist': a})               # exact
+        elif r < 0.75:
+            servers.append({'id': f'v{i}', 'title': t + ' x', 'artist': a})        # fuzzy-ish
+        # else: missing on server
+    for j in range(20):
+        servers.append({'id': f'x{j}', 'title': title(), 'artist': 'Other'})       # extras
+    rng.shuffle(servers)
+
+    combined = reconcile_playlist(sources, servers)
+
+    # brute-force reference for pass 2 decisions, replayed over the SAME greedy state
+    def naive_best(src_entry, canon_artist, used):
+        canon_t, _ = canonical_source_track(src_entry['name'], src_entry['artist'])
+        src_key = f"{canon_artist} {norm_title(canon_t)}".strip().lower()
+        best, best_j = 0.0, -1
+        for j, svr in enumerate(servers):
+            if j in used:
+                continue
+            svr_key = f"{svr.get('artist', '')} {norm_title(svr.get('title', ''))}".strip().lower()
+            score = SequenceMatcher(None, src_key, svr_key).ratio()
+            if score > best and score >= _FUZZY_THRESHOLD:
+                best, best_j = score, j
+        return best, best_j
+
+    # replay: walk the combined output and verify every fuzzy pairing (confidence
+    # < 1.0) and every miss agrees with the naive matcher given the same used-set
+    used = {e['server_index'] for e in combined
+            if e['match_status'] == 'matched' and e['confidence'] >= 1.0}
+    fuzzy_rows = [e for e in combined
+                  if e['source_track'] and e['confidence'] < 1.0]
+    assert fuzzy_rows, "test data produced no fuzzy candidates — regenerate"
+    for e in sorted(fuzzy_rows, key=lambda x: x['source_track']['position']):
+        canon_t, canon_a = canonical_source_track(
+            e['source_track']['name'], e['source_track']['artist'])
+        score, j = naive_best(e['source_track'], canon_a or e['source_track']['artist'], used)
+        if e['match_status'] == 'matched':
+            assert j == e['server_index'], (e['source_track']['name'], j, e['server_index'])
+            assert abs(score - e['confidence']) < 5e-4
+            used.add(j)
+        else:
+            assert j == -1, f"optimized pass missed a naive match: {e['source_track']['name']} -> {j}"

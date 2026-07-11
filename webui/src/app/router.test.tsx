@@ -8,9 +8,9 @@ import {
   type ShellPageId,
 } from '@/platform/shell/bridge';
 import { HttpResponse, http, server } from '@/test/msw';
+import { createTestQueryClient } from '@/test/query-client';
 import { createShellBridge } from '@/test/shell-bridge';
 
-import { createAppQueryClient } from './query-client';
 import { AppRouterProvider, createAppRouter } from './router';
 
 describe('createAppRouter', () => {
@@ -51,7 +51,7 @@ describe('createAppRouter', () => {
   });
 
   it('creates one shared query client and applies router defaults', () => {
-    const queryClient = createAppQueryClient();
+    const queryClient = createTestQueryClient();
     const router = createAppRouter({ queryClient });
 
     expect(router.options.context?.queryClient).toBe(queryClient);
@@ -65,7 +65,7 @@ describe('createAppRouter', () => {
   it('renders migrated React routes directly and updates shell chrome', async () => {
     window.SoulSyncWebShellBridge = createShellBridge();
 
-    const queryClient = createAppQueryClient();
+    const queryClient = createTestQueryClient();
     const history = createMemoryHistory({ initialEntries: ['/issues'] });
     const router = createAppRouter({ history, queryClient });
 
@@ -83,7 +83,7 @@ describe('createAppRouter', () => {
   it('routes non-migrated paths through the legacy fallback handler', async () => {
     window.SoulSyncWebShellBridge = createShellBridge();
 
-    const queryClient = createAppQueryClient();
+    const queryClient = createTestQueryClient();
     const history = createMemoryHistory({ initialEntries: ['/search'] });
     const router = createAppRouter({ history, queryClient });
 
@@ -99,7 +99,7 @@ describe('createAppRouter', () => {
       isPageAllowed: vi.fn((pageId) => pageId !== 'issues'),
     });
 
-    const queryClient = createAppQueryClient();
+    const queryClient = createTestQueryClient();
     const history = createMemoryHistory({ initialEntries: ['/issues'] });
     const router = createAppRouter({ history, queryClient });
 
@@ -116,7 +116,7 @@ describe('createAppRouter', () => {
       getCurrentProfileContext,
     });
 
-    const queryClient = createAppQueryClient();
+    const queryClient = createTestQueryClient();
     const history = createMemoryHistory({ initialEntries: ['/issues'] });
     const router = createAppRouter({ history, queryClient });
 
@@ -137,7 +137,7 @@ describe('createAppRouter', () => {
       getProfileHomePage: vi.fn<() => ShellPageId>(() => 'search'),
     });
 
-    const queryClient = createAppQueryClient();
+    const queryClient = createTestQueryClient();
     const history = createMemoryHistory({ initialEntries: ['/'] });
     const router = createAppRouter({ history, queryClient });
 

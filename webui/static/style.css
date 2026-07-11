@@ -6425,6 +6425,20 @@ body.np-modal-open #helper-float-btn {
     display: none !important;
 }
 
+/* Same problem for the full-screen "download missing / add to wishlist"
+   modal (z-index 9000): the floating bottom-right chrome (z-index 999999)
+   would otherwise sit on top of the modal's footer actions — on a phone
+   the notification bell and helper FAB cover the "Add to Wishlist" / "Close"
+   buttons and make them untappable. That modal is created/removed from the
+   DOM and toggled via inline display, so key off the *visible* instance
+   (base CSS is display:none; it is revealed with style.display='flex'). */
+body:has(.download-missing-modal[style*="display: flex"]) #gsearch-bar,
+body:has(.download-missing-modal[style*="display: flex"]) #gsearch-aura,
+body:has(.download-missing-modal[style*="display: flex"]) #notif-bell-btn,
+body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
+    display: none !important;
+}
+
 .gsearch-bar {
     position: fixed;
     bottom: 24px;
