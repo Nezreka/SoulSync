@@ -621,6 +621,14 @@ def ensure_library_v2_schema(connection: Any) -> None:
         backfill_editions(cursor)
     except Exception as e:  # noqa: BLE001
         logger.error("edition/recording migration failed (will retry next start): %s", e)
+    # Typed provider provenance (audit ADR-06): normalized payload snapshots
+    # carry completeness, parser version and a stable hash. Refresh paths use
+    # this contract to distinguish a complete catalog from partial pagination.
+    try:
+        from core.library2.provider_snapshots import ensure_provider_snapshot_schema
+        ensure_provider_snapshot_schema(cursor)
+    except Exception as e:  # noqa: BLE001
+        logger.error("provider-snapshot migration failed (will retry next start): %s", e)
     # The read API falls back to download provenance (track_downloads) for
     # files the importer knew no quality data for — index the lookup column so
     # album views don't table-scan a large history per track. Guarded: the
