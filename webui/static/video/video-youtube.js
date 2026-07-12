@@ -185,16 +185,22 @@
             .then(function (r) { return r.ok ? r.json() : null; });
     }
 
-    // A compact channel card for the search results grid (→ opens the channel page).
+    // A channel card for the search results grid — the SAME .vsr-card poster tile
+    // the movie/TV results use (shared .vsr-grid, hover-lift, peek "i"), so it
+    // sits native alongside them. A channel has only a square avatar (no 2:3
+    // poster), so the tile shows it centered on a YouTube-branded ground with a
+    // 'YouTube' ribbon in the same slot as the In Library / Preview ribbons.
     function channelResultCard(ch) {
-        var sub = ch.subscriber_count ? compactCount(ch.subscriber_count) + ' subscribers' : (ch.handle ? esc(ch.handle) : '');
-        return '<a class="vyt-result" href="#" data-vyt-open-channel="' + esc(ch.youtube_id) + '">' +
-            '<span class="vyt-result-art">' + avatar(ch, 'vyt-result-avatar') + '</span>' +
-            '<span class="vyt-result-info">' +
-                '<span class="vyt-result-badge">YouTube</span>' +
-                '<span class="vyt-result-title" title="' + esc(ch.title) + '">' + esc(ch.title) + '</span>' +
-                (sub ? '<span class="vyt-result-sub">' + sub + '</span>' : '') +
-            '</span></a>';
+        var sub = ch.subscriber_count ? compactCount(ch.subscriber_count) + ' subscribers'
+            : (ch.handle ? esc(ch.handle) : '');
+        return '<a class="vsr-card vsr-card--yt" href="#" data-vyt-open-channel="' + esc(ch.youtube_id) + '">' +
+            '<div class="vsr-poster vsr-poster--yt">' +
+                '<span class="vsr-yt-av">' + avatar(ch, 'vsr-yt-avatar') + '</span>' +
+                '<span class="vsr-ribbon vsr-ribbon--yt">YouTube</span>' +
+                '<span class="vsr-peek" aria-hidden="true">i</span>' +
+            '</div>' +
+            '<div class="vsr-info"><span class="vsr-name" title="' + esc(ch.title) + '">' + esc(ch.title) +
+            '</span>' + (sub ? '<span class="vsr-sub">' + sub + '</span>' : '') + '</div></a>';
     }
 
     function resolve(ref) {
