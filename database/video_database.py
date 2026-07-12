@@ -43,7 +43,7 @@ def _publish_video_event(event_type: str, data: dict) -> None:
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 34   # v34: movies.last_viewed_at (watched-cleanup); v33: video_blocklist
+SCHEMA_VERSION = 35   # v35: studios/networks link tables (multi-company); v34: movies.last_viewed_at
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -373,6 +373,7 @@ class VideoDatabase:
             conn.executescript(schema)
             self._ensure_columns(conn)
             self._ensure_indexes(conn)
+            self._seed_named_links_from_scalar(conn)
             conn.execute(f"PRAGMA user_version = {int(SCHEMA_VERSION)}")
             conn.commit()
             logger.info(
@@ -2153,6 +2154,52 @@ class VideoDatabase:
                          (owner_id, gid))
 
     @staticmethod
+    def _set_named_links(conn, link_table: str, owner_col: str, ref_table: str, ref_fk: str,
+                         owner_id: int, names) -> None:
+        """Replace the studios/networks links for one owner (normalised; dedup names in
+        the shared ref table). Same shape as _set_genres, generalised for the multi-valued
+        studio/network facets. Table/column names are internal, never user input."""
+        conn.execute(f"DELETE FROM {link_table} WHERE {owner_col}=?", (owner_id,))
+        seen = set()
+        for raw in (names or []):
+            name = (raw or "").strip()
+            if not name or name.casefold() in seen:
+                continue
+            seen.add(name.casefold())
+            conn.execute(f"INSERT OR IGNORE INTO {ref_table} (name) VALUES (?)", (name,))
+            rid = conn.execute(f"SELECT id FROM {ref_table} WHERE name=? COLLATE NOCASE", (name,)).fetchone()["id"]
+            conn.execute(f"INSERT OR IGNORE INTO {link_table} ({owner_col}, {ref_fk}) VALUES (?, ?)",
+                         (owner_id, rid))
+
+    @staticmethod
+    def _seed_named_links_from_scalar(conn) -> None:
+        """One-time backfill: seed the studios/networks link tables from the LEGACY single
+        studio/network columns, so existing collections match IDENTICALLY the moment the
+        smart filters switch to the link tables — no regression. Full multi-company data
+        then fills in as titles re-enrich (the setter replaces the seeded single value with
+        the whole list). Guarded by a marker so it runs exactly once."""
+        try:
+            row = conn.execute(
+                "SELECT value FROM video_settings WHERE key='studio_network_links_seeded'").fetchone()
+            if row and str(row[0]) == '1':
+                return
+            conn.execute("INSERT OR IGNORE INTO studios(name) SELECT DISTINCT studio FROM movies "
+                         "WHERE studio IS NOT NULL AND TRIM(studio) != ''")
+            conn.execute("INSERT OR IGNORE INTO movie_studios(movie_id, studio_id) "
+                         "SELECT m.id, s.id FROM movies m JOIN studios s ON s.name = m.studio COLLATE NOCASE "
+                         "WHERE m.studio IS NOT NULL AND TRIM(m.studio) != ''")
+            conn.execute("INSERT OR IGNORE INTO networks(name) SELECT DISTINCT network FROM shows "
+                         "WHERE network IS NOT NULL AND TRIM(network) != ''")
+            conn.execute("INSERT OR IGNORE INTO show_networks(show_id, network_id) "
+                         "SELECT sh.id, n.id FROM shows sh JOIN networks n ON n.name = sh.network COLLATE NOCASE "
+                         "WHERE sh.network IS NOT NULL AND TRIM(sh.network) != ''")
+            conn.execute("INSERT INTO video_settings(key, value, updated_at) "
+                         "VALUES('studio_network_links_seeded', '1', CURRENT_TIMESTAMP) "
+                         "ON CONFLICT(key) DO UPDATE SET value='1', updated_at=CURRENT_TIMESTAMP")
+        except sqlite3.Error:
+            logger.exception("studio/network link seed failed (non-fatal)")
+
+    @staticmethod
     def _resilient_upsert(conn, table: str, base: dict, id_cols: dict,
                           preserve_enrichment: bool = True) -> None:
         """INSERT…ON CONFLICT(server_source, server_id) for a movie/show row.
@@ -2273,6 +2320,12 @@ class VideoDatabase:
                                  item.get("files") or item.get("file"))
             if "genres" not in self._locked_fields_set(conn, "movies", movie_id):
                 self._set_genres(conn, "movie_genres", "movie_id", movie_id, item.get("genres"))
+            if "studio" not in self._locked_fields_set(conn, "movies", movie_id):
+                # ALL production companies (falls back to the single scalar so a scan/enrichment
+                # that only has one still links it — keeps parity with the old behaviour).
+                studios = item.get("studios") or ([item["studio"]] if item.get("studio") else [])
+                self._set_named_links(conn, "movie_studios", "movie_id", "studios", "studio_id",
+                                      movie_id, studios)
             conn.commit()
             return movie_id
         finally:
@@ -2304,6 +2357,10 @@ class VideoDatabase:
             ).fetchone()["id"]
             if "genres" not in self._locked_fields_set(conn, "shows", show_id):
                 self._set_genres(conn, "show_genres", "show_id", show_id, item.get("genres"))
+            if "network" not in self._locked_fields_set(conn, "shows", show_id):
+                networks = item.get("networks") or ([item["network"]] if item.get("network") else [])
+                self._set_named_links(conn, "show_networks", "show_id", "networks", "network_id",
+                                      show_id, networks)
 
             seen_seasons: set[int] = set()
             seen_eps: set[tuple[int, int]] = set()
@@ -3057,13 +3114,17 @@ class VideoDatabase:
             conn.close()
 
     def owned_studio_counts(self, limit: int = 40) -> list:
-        """Movie studios with owned counts, busiest first — [{value, count}]."""
+        """Movie studios with owned counts, busiest first — [{value, count}]. Counts over
+        the studios link table (ALL production companies per movie), so a movie counts for
+        every company it was made by, not just its primary one."""
         conn = self._get_connection()
         try:
             rows = conn.execute(
-                f"SELECT studio AS v, COUNT(*) AS c FROM movies "
-                f"WHERE {self._ON_SERVER} AND studio IS NOT NULL AND TRIM(studio) != '' "
-                f"GROUP BY studio ORDER BY c DESC, studio LIMIT ?", (int(limit),)).fetchall()
+                "SELECT s.name AS v, COUNT(*) AS c FROM movie_studios ms "
+                "JOIN studios s ON s.id = ms.studio_id "
+                "JOIN movies m ON m.id = ms.movie_id "
+                "WHERE m.server_id IS NOT NULL AND TRIM(m.server_id) != '' "
+                "GROUP BY s.name ORDER BY c DESC, s.name LIMIT ?", (int(limit),)).fetchall()
             return [{"value": r["v"], "count": r["c"]} for r in rows]
         except sqlite3.Error:
             return []
@@ -3071,13 +3132,16 @@ class VideoDatabase:
             conn.close()
 
     def owned_network_counts(self, limit: int = 40) -> list:
-        """Show networks with owned counts, busiest first — [{value, count}]."""
+        """Show networks with owned counts, busiest first — [{value, count}]. Counts over the
+        networks link table (ALL networks per show)."""
         conn = self._get_connection()
         try:
             rows = conn.execute(
-                f"SELECT network AS v, COUNT(*) AS c FROM shows "
-                f"WHERE {self._ON_SERVER} AND network IS NOT NULL AND TRIM(network) != '' "
-                f"GROUP BY network ORDER BY c DESC, network LIMIT ?", (int(limit),)).fetchall()
+                "SELECT n.name AS v, COUNT(*) AS c FROM show_networks sn "
+                "JOIN networks n ON n.id = sn.network_id "
+                "JOIN shows sh ON sh.id = sn.show_id "
+                "WHERE sh.server_id IS NOT NULL AND TRIM(sh.server_id) != '' "
+                "GROUP BY n.name ORDER BY c DESC, n.name LIMIT ?", (int(limit),)).fetchall()
             return [{"value": r["v"], "count": r["c"]} for r in rows]
         except sqlite3.Error:
             return []

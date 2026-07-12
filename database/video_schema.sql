@@ -209,6 +209,32 @@ CREATE TABLE IF NOT EXISTS show_genres (
 CREATE INDEX IF NOT EXISTS idx_movie_genres_genre ON movie_genres(genre_id);
 CREATE INDEX IF NOT EXISTS idx_show_genres_genre  ON show_genres(genre_id);
 
+-- ── Studios / Networks (normalised many-to-many) ────────────────────────────
+-- TMDB lists SEVERAL production companies per movie / networks per show; the old
+-- single studio/network scalar columns kept only the first, so studio/network
+-- collections only matched a title's primary company. These link tables hold ALL
+-- of them (same shape as genres above); the scalar columns stay for display.
+CREATE TABLE IF NOT EXISTS studios (
+    id   INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE COLLATE NOCASE
+);
+CREATE TABLE IF NOT EXISTS movie_studios (
+    movie_id  INTEGER NOT NULL REFERENCES movies(id)  ON DELETE CASCADE,
+    studio_id INTEGER NOT NULL REFERENCES studios(id) ON DELETE CASCADE,
+    PRIMARY KEY (movie_id, studio_id)
+);
+CREATE TABLE IF NOT EXISTS networks (
+    id   INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE COLLATE NOCASE
+);
+CREATE TABLE IF NOT EXISTS show_networks (
+    show_id    INTEGER NOT NULL REFERENCES shows(id)    ON DELETE CASCADE,
+    network_id INTEGER NOT NULL REFERENCES networks(id) ON DELETE CASCADE,
+    PRIMARY KEY (show_id, network_id)
+);
+CREATE INDEX IF NOT EXISTS idx_movie_studios_studio  ON movie_studios(studio_id);
+CREATE INDEX IF NOT EXISTS idx_show_networks_network ON show_networks(network_id);
+
 -- ── People + credits (cast & crew; normalised, no blob) ─────────────────────
 -- A person appears in many titles; deduped by their provider id. Each credit
 -- belongs to exactly one movie OR show (separate nullable FKs + CHECK, no

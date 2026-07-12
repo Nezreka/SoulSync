@@ -53,7 +53,9 @@ def test_show_uses_show_tables_and_network():
             {"field": "network", "op": "is", "value": "HBO"},
             {"field": "genre", "op": "in", "value": ["Drama"]},
         ]}, "show")
-    assert "shows.network" in sql
+    # network now resolves through the show_networks link table (multi-valued), not a column
+    assert "show_networks" in sql and "networks" in sql
+    assert "shows.network" not in sql
     assert "show_genres" in sql and "movie_genres" not in sql
 
 
