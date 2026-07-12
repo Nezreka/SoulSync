@@ -57952,6 +57952,33 @@ tr.tag-diff-same {
     color: rgba(255, 255, 255, 0.95);
 }
 
+/* "Required" pill on the TMDB/TVDB service headers + the required-keys callout. */
+#settings-page .stg-service .stg-req-pill {
+    flex: 0 0 auto;
+    margin-left: 8px;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #ffb020;
+    background: rgba(255, 176, 32, 0.14);
+    border: 1px solid rgba(255, 176, 32, 0.4);
+    border-radius: 4px;
+    padding: 2px 6px;
+    line-height: 1;
+}
+#settings-page .stg-required-note {
+    margin: 6px 0 14px;
+    padding: 10px 12px;
+    border-left: 3px solid #ffb020;
+    background: rgba(255, 176, 32, 0.08);
+    border-radius: 6px;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.78);
+}
+#settings-page .stg-required-note strong { color: #ffdca0; }
+
 /* Brand color dot — always glows, glow intensifies on hover/expand */
 #settings-page .stg-service-dot {
     width: 8px;
