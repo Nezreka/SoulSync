@@ -85,6 +85,21 @@ def _plex_server(db=None):
 
 # ── normalization (pure — unit-tested with fakes) ────────────────────────────
 
+def _plex_tmdb(item: Any) -> str:
+    """The TMDB id from a Plex item's guids — parsed from the session XML that's
+    already loaded (the Guid children), so NO network reload (unlike ``.user``)."""
+    try:
+        for g in (_g(item, "guids", []) or []):
+            gid = str(_g(g, "id", "") or "")
+            if gid.startswith("tmdb://"):
+                num = gid[len("tmdb://"):].split("?")[0].strip()
+                if num.isdigit():
+                    return num
+    except Exception:   # noqa: BLE001, S110 - best-effort id parse, missing tmdb is fine
+        pass
+    return ""
+
+
 def _pct(offset: Any, duration: Any) -> int:
     try:
         o, d = float(offset or 0), float(duration or 0)
@@ -167,15 +182,18 @@ def normalize_session(item: Any) -> Dict[str, Any]:
     if mtype == "movie":
         link_sid, link_title, link_year = str(_g(item, "ratingKey", "") or ""), \
             str(_g(item, "title", "") or ""), _g(item, "year")
+        link_tmdb = _plex_tmdb(item)     # for the not-in-library preview fallback
     elif mtype == "episode":
         link_sid, link_title, link_year = str(_g(item, "grandparentRatingKey", "") or ""), \
             str(_g(item, "grandparentTitle", "") or ""), None
+        link_tmdb = ""                   # the episode's guid isn't the show's tmdb
     else:
-        link_sid, link_title, link_year = "", "", None
+        link_sid, link_title, link_year, link_tmdb = "", "", None, ""
 
     return {
         "session_key": str(_g(item, "sessionKey", "") or _g(sess, "id", "") or ""),
-        "_link_sid": link_sid, "_link_title": link_title, "_link_year": link_year, "link": None,
+        "_link_sid": link_sid, "_link_title": link_title, "_link_year": link_year,
+        "_link_tmdb": link_tmdb, "link": None,
         "media_type": mtype,
         "title": names["title"],
         "subtitle": names["subtitle"],
@@ -250,15 +268,20 @@ def normalize_jellyfin(s: Dict[str, Any], npi: Dict[str, Any]) -> Dict[str, Any]
     item_id = str(npi.get("Id") or "")
     thumb = ("jf:" + item_id) if item_id else ""
     br = int(ti.get("Bitrate") or 0) // 1000
+    prov = (npi.get("ProviderIds") or {})
+    jf_tmdb = str(prov.get("Tmdb") or prov.get("tmdb") or "")
     if mtype == "movie":
         link_sid, link_title, link_year = item_id, str(npi.get("Name") or ""), npi.get("ProductionYear")
+        link_tmdb = jf_tmdb if jf_tmdb.isdigit() else ""
     elif mtype == "episode":
         link_sid, link_title, link_year = str(npi.get("SeriesId") or ""), str(npi.get("SeriesName") or ""), None
+        link_tmdb = ""
     else:
-        link_sid, link_title, link_year = "", "", None
+        link_sid, link_title, link_year, link_tmdb = "", "", None, ""
     return {
         "session_key": "",   # no stop button — our terminate path is Plex-only
-        "_link_sid": link_sid, "_link_title": link_title, "_link_year": link_year, "link": None,
+        "_link_sid": link_sid, "_link_title": link_title, "_link_year": link_year,
+        "_link_tmdb": link_tmdb, "link": None,
         "media_type": mtype, "title": str(npi.get("Name") or ""),
         "subtitle": subtitle, "grandparent": gp, "thumb": thumb, "art": thumb,
         "duration_ms": dur, "offset_ms": off,
@@ -359,8 +382,20 @@ def _resolve_library_links(sessions: List[Dict[str, Any]], db=None) -> None:
                     rid = None
                 if rid:
                     s["link"] = {"kind": want, "id": rid, "source": "library"}
+
+    # Pass 3 — NOT in the library: link to the TMDB-backed page (the same preview
+    # the search opens for un-owned titles) so anything on the server is clickable.
     for s in sessions:
-        s.pop("_link_sid", None); s.pop("_link_title", None); s.pop("_link_year", None)
+        if s.get("link"):
+            continue
+        want = "movie" if s["media_type"] == "movie" else ("show" if s["media_type"] == "episode" else None)
+        tmdb = s.get("_link_tmdb")
+        if want and tmdb:
+            s["link"] = {"kind": want, "id": tmdb, "source": "tmdb"}
+
+    for s in sessions:
+        for k in ("_link_sid", "_link_title", "_link_year", "_link_tmdb"):
+            s.pop(k, None)
 
 
 def get_activity(db=None) -> Dict[str, Any]:

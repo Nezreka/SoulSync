@@ -415,6 +415,23 @@ def test_resolve_falls_back_to_title_year_when_id_misses(monkeypatch):
     assert sessions[0]["link"] == {"kind": "movie", "id": 42, "source": "library"}
 
 
+def test_normalize_captures_tmdb_from_guids():
+    guids = [NS(id="imdb://tt123"), NS(id="tmdb://949?lang=en"), NS(id="tvdb://5")]
+    m = normalize_session(_movie(guids=guids))
+    assert m["_link_tmdb"] == "949"
+
+
+def test_resolve_falls_back_to_tmdb_when_not_owned(monkeypatch):
+    """Not in the SoulSync library → link to the TMDB preview page so anything on
+    the server is still clickable (works even with no video library at all)."""
+    import core.server_activity as sa
+    monkeypatch.setattr("api.video.get_video_db", lambda: _EmptyVDB())    # nothing owned
+    sessions = [{"media_type": "movie", "_link_sid": "x", "_link_title": "Heat",
+                 "_link_year": 1995, "_link_tmdb": "949", "link": None}]
+    sa._resolve_library_links(sessions)
+    assert sessions[0]["link"] == {"kind": "movie", "id": "949", "source": "tmdb"}
+
+
 def test_resolve_links_kind_mismatch_is_ignored(monkeypatch):
     import core.server_activity as sa
     # a movie ratingKey that (bizarrely) matches a show row must NOT link
