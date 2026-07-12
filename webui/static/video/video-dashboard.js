@@ -296,8 +296,31 @@
         }, 10000);
     }
 
+    // ── System health strip (roots/disk/recycle/maintenance/monitor) ────────
+    function esc(t) {
+        return String(t == null ? '' : t)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+    function loadHealth() {
+        var host = document.querySelector('[data-vdash-health]');
+        if (!host) return;
+        fetch('/api/video/health', { headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (h) {
+                if (!h || !(h.checks || []).length) { host.hidden = true; host.innerHTML = ''; return; }
+                var icons = { error: '🔴', warning: '⚠️' };
+                host.innerHTML = h.checks.map(function (c) {
+                    return '<div class="vdash-health-chip vdash-health-chip--' + c.status + '">' +
+                        (icons[c.status] || 'ℹ️') + ' <strong>' + esc(c.label) + ':</strong> ' +
+                        esc(c.detail) + '</div>';
+                }).join('');
+                host.hidden = false;
+            }).catch(function () { host.hidden = true; });
+    }
+
     function onPageShown(e) {
         if (!e || e.detail !== DASHBOARD_ID) return;
+        loadHealth();
         loadStats();
         loadUpcoming();
         loadAttention();            // open issues + pending maintenance findings
