@@ -4,18 +4,24 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
+import threading
 
 import pytest
 
 from core.acquisition import ensure_acquisition_schema
 from core.acquisition.candidates import register_candidate
 from core.acquisition.client_monitor import (
+    MonitorRunResult,
+    UsenetAcquisitionMonitor,
     UsenetClientSnapshot,
     UsenetJobSnapshot,
     collect_usenet_snapshot,
+    fail_stale_local_submissions,
     reconcile_usenet_snapshot,
 )
 from core.acquisition.grabs import (
+    STATUS_CANCELLED,
+    STATUS_CANCEL_PENDING,
     STATUS_COMPLETED,
     STATUS_DOWNLOADING,
     STATUS_QUEUED,
@@ -116,15 +122,20 @@ def _job(
 
 
 class FakeUsenetAdapter:
-    def __init__(self, statuses, targeted=None):
+    def __init__(self, statuses, targeted=None, *, on_get_all=None, remove_result=True):
         self.statuses = list(statuses)
         self.targeted = dict(targeted or {})
         self.lookups = []
+        self.removals = []
+        self.on_get_all = on_get_all
+        self.remove_result = remove_result
 
     def is_configured(self):
         return True
 
     async def get_all(self):
+        if self.on_get_all:
+            self.on_get_all()
         return list(self.statuses)
 
     async def get_status(self, job_id):
@@ -133,6 +144,12 @@ class FakeUsenetAdapter:
         if isinstance(value, Exception):
             raise value
         return value
+
+    async def remove(self, job_id, delete_files=False):
+        self.removals.append((job_id, delete_files))
+        if isinstance(self.remove_result, Exception):
+            raise self.remove_result
+        return self.remove_result
 
 
 def _status(job_id, *, category="soulsync", progress=0.5):
@@ -347,3 +364,210 @@ def test_record_download_completed_is_idempotent_but_rejects_path_change(conn):
         record_download_completed(
             conn, "dl-idempotent", output_path="/downloads/other",
         )
+
+
+def _runtime_database(tmp_path):
+    path = str(tmp_path / "acquisition-monitor.db")
+    seed = sqlite3.connect(path)
+    seed.row_factory = sqlite3.Row
+    seed.execute("PRAGMA foreign_keys=ON")
+    ensure_acquisition_schema(seed)
+
+    def factory():
+        connection = sqlite3.connect(path)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys=ON")
+        return connection
+
+    return seed, factory
+
+
+def test_runtime_monitor_does_not_hold_db_connection_during_client_io(tmp_path):
+    seed, raw_factory = _runtime_database(tmp_path)
+    _linked_grab(seed, "dl-runtime", external_job_id="job-runtime")
+    seed.commit()
+    seed.close()
+    tracker = {"open": 0}
+
+    class TrackedConnection:
+        def __init__(self, connection):
+            self._connection = connection
+            tracker["open"] += 1
+
+        def __getattr__(self, name):
+            return getattr(self._connection, name)
+
+        def close(self):
+            self._connection.close()
+            tracker["open"] -= 1
+
+    def tracked_factory():
+        return TrackedConnection(raw_factory())
+
+    adapter = FakeUsenetAdapter(
+        [_status("job-runtime")],
+        on_get_all=lambda: tracker["open"] == 0 or pytest.fail(
+            "client I/O ran while a DB connection was open"),
+    )
+    monitor = UsenetAcquisitionMonitor(
+        tracked_factory,
+        adapter_getter=lambda: adapter,
+        category_getter=lambda: "soulsync",
+        process_started_at="2000-01-01 00:00:00",
+    )
+
+    result = monitor.run_once()
+
+    assert result.reconciliation.observed == ("dl-runtime",)
+    assert tracker["open"] == 0
+    verify = raw_factory()
+    assert get_grab(verify, "dl-runtime")["status"] == STATUS_DOWNLOADING
+    verify.close()
+
+
+def test_runtime_fails_only_certain_pre_restart_local_submission(tmp_path):
+    seed, factory = _runtime_database(tmp_path)
+    certain_request, _ = _linked_grab(seed, "dl-certain")
+    uncertain_request, _ = _linked_grab(
+        seed,
+        "dl-uncertain",
+        last_client_state="submission_unknown",
+    )
+    seed.commit()
+    seed.close()
+    monitor = UsenetAcquisitionMonitor(
+        factory,
+        adapter_getter=lambda: None,
+        process_started_at="9999-12-31 23:59:59",
+    )
+
+    result = monitor.run_once()
+
+    assert result.stale_submissions_failed == ("dl-certain",)
+    assert result.skipped_reason == "client_unconfigured"
+    verify = factory()
+    assert get_request(verify, certain_request.id).status == "failed"
+    assert get_request(verify, uncertain_request.id).status == "grabbing"
+    assert get_grab(verify, "dl-uncertain")["status"] == "submitting"
+    assert verify.execute("SELECT COUNT(*) FROM release_blocklist").fetchone()[0] == 0
+    verify.close()
+
+
+def test_stale_cleanup_does_not_claim_same_second_live_submission(conn):
+    request, _ = _linked_grab(conn, "dl-same-second")
+    created_at = get_grab(conn, "dl-same-second")["created_at"]
+
+    failed = fail_stale_local_submissions(
+        conn,
+        created_before=created_at,
+    )
+
+    assert failed == ()
+    assert get_request(conn, request.id).status == "grabbing"
+
+
+def test_runtime_confirms_cancel_only_after_client_remove(tmp_path):
+    seed, factory = _runtime_database(tmp_path)
+    request, _ = _linked_grab(seed, "dl-cancel", external_job_id="job-cancel")
+    update_grab(seed, "dl-cancel", status=STATUS_CANCEL_PENDING)
+    seed.commit()
+    seed.close()
+    adapter = FakeUsenetAdapter([_status("job-cancel")])
+    monitor = UsenetAcquisitionMonitor(
+        factory,
+        adapter_getter=lambda: adapter,
+        category_getter=lambda: "soulsync",
+        process_started_at="2000-01-01 00:00:00",
+    )
+
+    result = monitor.run_once()
+
+    assert result.cancelled == ("dl-cancel",)
+    assert adapter.removals == [("job-cancel", False)]
+    verify = factory()
+    assert get_grab(verify, "dl-cancel")["status"] == STATUS_CANCELLED
+    assert get_request(verify, request.id).status == "cancelled"
+    event = list_history_events(verify, download_id="dl-cancel")[-1]
+    assert event.event_type == "cancelled"
+    assert event.payload == {"delete_files": False}
+    verify.close()
+
+
+def test_runtime_treats_confirmed_absence_as_completed_cancel(tmp_path):
+    seed, factory = _runtime_database(tmp_path)
+    _linked_grab(seed, "dl-absent", external_job_id="job-absent")
+    update_grab(seed, "dl-absent", status=STATUS_CANCEL_PENDING)
+    seed.commit()
+    seed.close()
+    adapter = FakeUsenetAdapter([])
+    monitor = UsenetAcquisitionMonitor(
+        factory,
+        adapter_getter=lambda: adapter,
+        category_getter=lambda: "soulsync",
+        process_started_at="2000-01-01 00:00:00",
+    )
+
+    first = monitor.run_once()
+    second = monitor.run_once()
+    result = monitor.run_once()
+
+    assert first.cancelled == ()
+    assert second.cancelled == ()
+    assert result.cancelled == ("dl-absent",)
+    assert adapter.lookups == ["job-absent"] * 3
+    assert adapter.removals == []
+    verify = factory()
+    assert get_grab(verify, "dl-absent")["status"] == STATUS_CANCELLED
+    verify.close()
+
+
+def test_runtime_keeps_cancel_pending_when_client_remove_fails(tmp_path):
+    seed, factory = _runtime_database(tmp_path)
+    _linked_grab(seed, "dl-pending", external_job_id="job-pending")
+    update_grab(seed, "dl-pending", status=STATUS_CANCEL_PENDING)
+    seed.commit()
+    seed.close()
+    adapter = FakeUsenetAdapter([_status("job-pending")], remove_result=False)
+    monitor = UsenetAcquisitionMonitor(
+        factory,
+        adapter_getter=lambda: adapter,
+        category_getter=lambda: "soulsync",
+        process_started_at="2000-01-01 00:00:00",
+    )
+
+    result = monitor.run_once()
+
+    assert result.cancelled == ()
+    assert result.cancel_failed == ("dl-pending",)
+    verify = factory()
+    assert get_grab(verify, "dl-pending")["status"] == STATUS_CANCEL_PENDING
+    verify.close()
+
+
+def test_runtime_monitor_wakes_immediately_after_submission():
+    monitor = UsenetAcquisitionMonitor(
+        lambda: None,
+        interval_getter=lambda: 60,
+    )
+    cycle_finished = threading.Event()
+    calls = []
+
+    def fake_run_once():
+        calls.append(len(calls) + 1)
+        cycle_finished.set()
+        return MonitorRunResult(open_grabs=0, skipped_reason="test")
+
+    monitor.run_once = fake_run_once
+    monitor.start()
+    assert cycle_finished.wait(1)
+    first_thread = monitor._thread
+    monitor.start()
+    assert monitor._thread is first_thread
+
+    cycle_finished.clear()
+    monitor.notify_submission(None, None)
+    assert cycle_finished.wait(1)
+    monitor.stop()
+
+    assert calls == [1, 2]
+    assert monitor.status()["running"] is False

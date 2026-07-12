@@ -249,6 +249,10 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
             ensure_acquisition_grabs_schema(conn)
             grabs = open_grabs(conn, "usenet")
             for grab in grabs:
+                # Library-v2 acquisitions belong to the central Phase-5
+                # monitor. Keep this plugin poller only for legacy downloads.
+                if grab.get("acquisition_request_id"):
+                    continue
                 if (grab.get("context") or {}).get("flow") == "album_bundle":
                     continue
                 download_id = grab["download_id"]

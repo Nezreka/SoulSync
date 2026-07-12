@@ -231,6 +231,34 @@ def test_restore_runs_only_once(grab_db):
     assert "dl-late" not in plugin.active_downloads
 
 
+def test_plugin_restore_leaves_request_bound_grabs_to_central_monitor(grab_db):
+    from core.download_plugins.usenet import UsenetDownloadPlugin
+
+    conn = grab_db()
+    record_grab(
+        conn,
+        "dl-central",
+        "usenet",
+        acquisition_request_id="request-central",
+        context={"flow": "track"},
+    )
+    update_grab(
+        conn,
+        "dl-central",
+        status=STATUS_DOWNLOADING,
+        external_job_id="nzo-central",
+    )
+    conn.commit()
+    conn.close()
+
+    plugin = UsenetDownloadPlugin()
+    with patch("core.download_plugins.usenet.threading.Thread") as thread_cls:
+        plugin._restore_grabs_once()
+
+    assert "dl-central" not in plugin.active_downloads
+    thread_cls.assert_not_called()
+
+
 def test_cancel_persists_two_step_state_machine(grab_db):
     """Cancel intent lands as cancel_pending before the client remove and
     becomes cancelled only after it succeeded (P1-21)."""

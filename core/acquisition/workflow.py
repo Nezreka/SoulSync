@@ -21,6 +21,8 @@ from core.acquisition.decision_engine import (
 )
 from core.acquisition.decisions import PersistedDecisionRun, record_decision
 from core.acquisition.grabs import (
+    STATUS_CANCELLED,
+    STATUS_CANCEL_PENDING,
     STATUS_COMPLETED,
     STATUS_FAILED,
     STATUS_SUBMITTING,
@@ -326,6 +328,56 @@ def record_grab_outcome(
     return request
 
 
+def record_grab_cancelled(
+    conn: Any,
+    download_id: str,
+    *,
+    client_state: str = "removed",
+) -> AcquisitionRequest:
+    """Confirm cancellation only after the external job is absent.
+
+    Physical file deletion is intentionally separate. The caller must remove
+    the client job with ``delete_files=False`` or establish that it is already
+    absent before entering this transaction.
+    """
+    grab = get_grab(conn, download_id)
+    if grab is None or not grab.get("acquisition_request_id"):
+        raise ValueError("download is not linked to an acquisition request")
+    request = get_request(conn, grab["acquisition_request_id"])
+    if request is None:
+        raise ValueError("acquisition request no longer exists")
+    if grab["status"] == STATUS_CANCELLED:
+        return request
+    if grab["status"] != STATUS_CANCEL_PENDING:
+        raise ValueError(f"grab cannot confirm cancellation while {grab['status']}")
+    if request.status != "grabbing":
+        raise ValueError(f"request cannot confirm cancellation while {request.status}")
+
+    update_grab(
+        conn,
+        download_id,
+        status=STATUS_CANCELLED,
+        last_client_state=str(client_state or "removed"),
+        clear_error=True,
+    )
+    request = transition_request(
+        conn,
+        request.id,
+        "cancelled",
+        expected_status="grabbing",
+    )
+    record_history_event(
+        conn,
+        "cancelled",
+        request_id=request.id,
+        candidate_id=grab.get("release_candidate_id"),
+        download_id=download_id,
+        reason_code="client_job_removed",
+        payload={"delete_files": False},
+    )
+    return request
+
+
 def retry_acquisition_request(conn: Any, request_id: str) -> AcquisitionRequest:
     """Begin another search attempt for a retryable terminal search outcome."""
     current = get_request(conn, request_id)
@@ -361,6 +413,7 @@ __all__ = [
     "SearchEvaluation",
     "evaluate_request_candidates",
     "prepare_candidate_grab",
+    "record_grab_cancelled",
     "record_grab_outcome",
     "retry_acquisition_request",
 ]

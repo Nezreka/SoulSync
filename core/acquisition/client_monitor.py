@@ -7,9 +7,11 @@ progress, speed, ETA and byte counters remain owned by SABnzbd/NZBGet.
 
 from __future__ import annotations
 
+import threading
 import unicodedata
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, Optional, Tuple
+from datetime import datetime, timezone
+from typing import Any, Callable, Dict, Iterable, Optional, Tuple
 
 from core.acquisition.candidates import redact_sensitive_text
 from core.acquisition.grabs import (
@@ -22,8 +24,13 @@ from core.acquisition.grabs import (
 )
 from core.acquisition.history import record_history_event
 from core.acquisition.imports import record_download_completed
-from core.acquisition.workflow import record_grab_outcome
+from core.acquisition.workflow import record_grab_cancelled, record_grab_outcome
 from core.usenet_clients.base import UsenetClientAdapter, UsenetStatus
+from utils.async_helpers import run_async
+from utils.logging_config import get_logger
+
+
+logger = get_logger("acquisition.client_monitor")
 
 
 _ACTIVE_STATE_TO_STATUS = {
@@ -91,6 +98,16 @@ class ReconciliationResult:
     completed_without_path: Tuple[str, ...]
     ambiguous: Tuple[str, ...]
     unmatched_job_ids: Tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class MonitorRunResult:
+    open_grabs: int
+    stale_submissions_failed: Tuple[str, ...] = ()
+    reconciliation: Optional[ReconciliationResult] = None
+    cancelled: Tuple[str, ...] = ()
+    cancel_failed: Tuple[str, ...] = ()
+    skipped_reason: Optional[str] = None
 
 
 async def collect_usenet_snapshot(
@@ -271,19 +288,25 @@ def reconcile_usenet_snapshot(
         if grab.get("client") and grab["client"] != snapshot.client:
             conflicts.append(download_id)
             continue
+        if grab["status"] == STATUS_CANCEL_PENDING:
+            cancel_pending.append(download_id)
+            job = jobs.get(job_id)
+            if job is None:
+                if job_id not in snapshot.lookup_errors:
+                    missing.append(download_id)
+                continue
+            observed.append(download_id)
+            if grab.get("last_client_state") != job.state:
+                update_grab(conn, download_id, last_client_state=job.state)
+                updated.append(download_id)
+            continue
+
         job = jobs.get(job_id)
         if job is None:
             if job_id not in snapshot.lookup_errors:
                 missing.append(download_id)
             continue
         observed.append(download_id)
-
-        if grab["status"] == STATUS_CANCEL_PENDING:
-            cancel_pending.append(download_id)
-            if grab.get("last_client_state") != job.state:
-                update_grab(conn, download_id, last_client_state=job.state)
-                updated.append(download_id)
-            continue
 
         business_status = _ACTIVE_STATE_TO_STATUS.get(job.state)
         if business_status is not None:
@@ -351,10 +374,330 @@ def reconcile_usenet_snapshot(
     )
 
 
+def fail_stale_local_submissions(
+    conn: Any,
+    *,
+    created_before: str,
+) -> Tuple[str, ...]:
+    """Fail pre-process grabs that never reached the external client.
+
+    ``submission_unknown`` rows are excluded because the client may have
+    accepted them. Rows created by the current process are excluded by the
+    process-start timestamp, so a slow live ``add_nzb`` call cannot race this
+    cleanup.
+    """
+    failed = []
+    for grab in open_grabs(conn, "usenet"):
+        if (
+            grab.get("acquisition_request_id")
+            and grab["status"] == "submitting"
+            and not grab.get("external_job_id")
+            and grab.get("last_client_state") != "submission_unknown"
+            and str(grab.get("created_at") or "") < str(created_before)
+        ):
+            record_grab_outcome(
+                conn,
+                grab["download_id"],
+                completed=False,
+                error="Lost before client submission during process restart",
+                failure_kind="runtime",
+            )
+            failed.append(str(grab["download_id"]))
+    return tuple(sorted(failed))
+
+
+class UsenetAcquisitionMonitor:
+    """Restart-safe periodic owner of request-bound Usenet client state."""
+
+    def __init__(
+        self,
+        connection_factory: Callable[[], Any],
+        *,
+        adapter_getter: Optional[Callable[[], Optional[UsenetClientAdapter]]] = None,
+        category_getter: Optional[Callable[[], Any]] = None,
+        interval_getter: Optional[Callable[[], Any]] = None,
+        process_started_at: Optional[str] = None,
+    ) -> None:
+        self._connection_factory = connection_factory
+        self._adapter_getter = adapter_getter or self._default_adapter
+        self._category_getter = category_getter or self._default_category
+        self._interval_getter = interval_getter or (lambda: 15.0)
+        self._process_started_at = process_started_at or datetime.now(
+            timezone.utc,
+        ).strftime("%Y-%m-%d %H:%M:%S")
+        self._stop_event = threading.Event()
+        self._wake_event = threading.Event()
+        self._cycle_lock = threading.Lock()
+        self._state_lock = threading.Lock()
+        self._thread: Optional[threading.Thread] = None
+        self._running = False
+        self._last_result: Optional[MonitorRunResult] = None
+        self._last_error: Optional[str] = None
+        self._last_logged_error: Optional[str] = None
+        self._cancel_missing_counts: Dict[str, int] = {}
+
+    @staticmethod
+    def _default_adapter() -> Optional[UsenetClientAdapter]:
+        from core.usenet_clients import get_active_adapter
+        return get_active_adapter()
+
+    @staticmethod
+    def _default_category() -> str:
+        from config.settings import config_manager
+        return str(config_manager.get(
+            "usenet_client.category", "soulsync") or "soulsync")
+
+    def _interval(self) -> float:
+        try:
+            return max(0.05, float(self._interval_getter()))
+        except (TypeError, ValueError):
+            return 15.0
+
+    def _read_open_grabs(self) -> Tuple[Tuple[dict, ...], Tuple[str, ...]]:
+        conn = self._connection_factory()
+        try:
+            ensure_acquisition_grabs_schema(conn)
+            stale = fail_stale_local_submissions(
+                conn,
+                created_before=self._process_started_at,
+            )
+            grabs = tuple(
+                grab for grab in open_grabs(conn, "usenet")
+                if grab.get("acquisition_request_id")
+            )
+            conn.commit()
+            return grabs, stale
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def _apply_snapshot(
+        self, snapshot: UsenetClientSnapshot,
+    ) -> ReconciliationResult:
+        conn = self._connection_factory()
+        try:
+            result = reconcile_usenet_snapshot(conn, snapshot)
+            conn.commit()
+            return result
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def _load_cancel_targets(
+        self, download_ids: Iterable[str],
+    ) -> Dict[str, str]:
+        conn = self._connection_factory()
+        try:
+            from core.acquisition.grabs import get_grab
+            targets = {}
+            for download_id in download_ids:
+                grab = get_grab(conn, download_id)
+                if grab and grab.get("external_job_id"):
+                    targets[str(download_id)] = str(grab["external_job_id"])
+            return targets
+        finally:
+            conn.close()
+
+    def _persist_cancelled(self, download_ids: Iterable[str]) -> Tuple[str, ...]:
+        ids = tuple(sorted(set(str(item) for item in download_ids)))
+        if not ids:
+            return ()
+        conn = self._connection_factory()
+        try:
+            for download_id in ids:
+                record_grab_cancelled(conn, download_id)
+            conn.commit()
+            return ids
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def _finish_cancellations(
+        self,
+        adapter: UsenetClientAdapter,
+        result: ReconciliationResult,
+    ) -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
+        targets = self._load_cancel_targets(result.cancel_pending)
+        pending_ids = set(result.cancel_pending)
+        missing_ids = pending_ids & set(result.missing)
+        for download_id in set(self._cancel_missing_counts) - pending_ids:
+            self._cancel_missing_counts.pop(download_id, None)
+        confirmed = set()
+        failed = set()
+        for download_id in result.cancel_pending:
+            if download_id in missing_ids:
+                misses = self._cancel_missing_counts.get(download_id, 0) + 1
+                self._cancel_missing_counts[download_id] = misses
+                if misses >= 3:
+                    confirmed.add(download_id)
+                continue
+            self._cancel_missing_counts.pop(download_id, None)
+            job_id = targets.get(download_id)
+            if not job_id:
+                failed.add(download_id)
+                continue
+            try:
+                removed = bool(run_async(
+                    adapter.remove(job_id, delete_files=False)))
+            except Exception as exc:  # noqa: BLE001 - external client boundary
+                logger.warning(
+                    "Usenet acquisition cancel remains pending for %s: %s",
+                    download_id,
+                    redact_sensitive_text(exc),
+                )
+                removed = False
+            if removed:
+                confirmed.add(download_id)
+            else:
+                failed.add(download_id)
+        persisted = self._persist_cancelled(confirmed)
+        for download_id in persisted:
+            self._cancel_missing_counts.pop(download_id, None)
+        return persisted, tuple(sorted(failed))
+
+    def run_once(self) -> MonitorRunResult:
+        """Run one complete read/network/reconcile cycle synchronously."""
+        if not self._cycle_lock.acquire(blocking=False):
+            return MonitorRunResult(
+                open_grabs=0,
+                skipped_reason="cycle_in_progress",
+            )
+        try:
+            grabs, stale = self._read_open_grabs()
+            if not grabs:
+                result = MonitorRunResult(
+                    open_grabs=0,
+                    stale_submissions_failed=stale,
+                    skipped_reason="no_open_grabs",
+                )
+                self._record_success(result)
+                return result
+
+            adapter = self._adapter_getter()
+            if adapter is None or not adapter.is_configured():
+                result = MonitorRunResult(
+                    open_grabs=len(grabs),
+                    stale_submissions_failed=stale,
+                    skipped_reason="client_unconfigured",
+                )
+                self._record_success(result)
+                return result
+
+            category = str(
+                self._category_getter() or "soulsync",
+            ).strip() or "soulsync"
+            known_ids = tuple(
+                str(grab["external_job_id"])
+                for grab in grabs if grab.get("external_job_id")
+            )
+            snapshot = run_async(collect_usenet_snapshot(
+                adapter,
+                category,
+                known_job_ids=known_ids,
+            ))
+            reconciliation = self._apply_snapshot(snapshot)
+            cancelled, cancel_failed = self._finish_cancellations(
+                adapter, reconciliation)
+            result = MonitorRunResult(
+                open_grabs=len(grabs),
+                stale_submissions_failed=stale,
+                reconciliation=reconciliation,
+                cancelled=cancelled,
+                cancel_failed=cancel_failed,
+            )
+            self._record_success(result)
+            if reconciliation.ambiguous:
+                logger.warning(
+                    "Usenet acquisition adoption is ambiguous for %d grab(s)",
+                    len(reconciliation.ambiguous),
+                )
+            return result
+        except Exception as exc:
+            safe_error = redact_sensitive_text(exc)
+            with self._state_lock:
+                self._last_error = safe_error
+            if safe_error != self._last_logged_error:
+                logger.warning(
+                    "Usenet acquisition monitor cycle failed: %s", safe_error)
+                self._last_logged_error = safe_error
+            raise
+        finally:
+            self._cycle_lock.release()
+
+    def _record_success(self, result: MonitorRunResult) -> None:
+        with self._state_lock:
+            self._last_result = result
+            self._last_error = None
+        self._last_logged_error = None
+
+    def _run(self) -> None:
+        while not self._stop_event.is_set():
+            try:
+                self.run_once()
+            except Exception:  # noqa: BLE001 - run_once logs sanitized detail
+                logger.debug("Usenet acquisition cycle will retry after its interval")
+            self._wake_event.wait(self._interval())
+            self._wake_event.clear()
+        with self._state_lock:
+            self._running = False
+
+    def start(self) -> None:
+        with self._state_lock:
+            if self._running:
+                return
+            self._stop_event.clear()
+            self._wake_event.clear()
+            self._running = True
+            self._thread = threading.Thread(
+                target=self._run,
+                daemon=True,
+                name="UsenetAcquisitionMonitor",
+            )
+            self._thread.start()
+        logger.info("Usenet acquisition monitor started")
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        self._wake_event.set()
+        thread = self._thread
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=5)
+        still_alive = bool(thread is not None and thread.is_alive())
+        with self._state_lock:
+            self._running = still_alive
+            self._thread = thread if still_alive else None
+        if still_alive:
+            logger.warning(
+                "Usenet acquisition monitor is still leaving client I/O")
+        else:
+            logger.info("Usenet acquisition monitor stopped")
+
+    def notify_submission(self, *_args: Any) -> None:
+        """Wake the monitor after a durable external submission."""
+        self._wake_event.set()
+
+    def status(self) -> Dict[str, Any]:
+        with self._state_lock:
+            return {
+                "running": self._running,
+                "last_error": self._last_error,
+                "last_result": self._last_result,
+            }
+
+
 __all__ = [
+    "MonitorRunResult",
     "ReconciliationResult",
+    "UsenetAcquisitionMonitor",
     "UsenetClientSnapshot",
     "UsenetJobSnapshot",
     "collect_usenet_snapshot",
+    "fail_stale_local_submissions",
     "reconcile_usenet_snapshot",
 ]

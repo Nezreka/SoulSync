@@ -954,6 +954,7 @@ IS_SHUTTING_DOWN = False
 # Previously, a single exception set ALL clients to None, breaking the entire app.
 logger.info("Initializing SoulSync services for Web UI...")
 spotify_client = download_orchestrator = tidal_client = matching_engine = sync_service = web_scan_manager = media_server_engine = None
+usenet_acquisition_monitor = None
 
 try:
     spotify_client = get_spotify_client()
@@ -1028,6 +1029,19 @@ try:
     logger.info("  Download orchestrator initialized")
 except Exception as e:
     logger.error(f"  Download orchestrator failed to initialize: {e}")
+
+try:
+    from core.acquisition.client_monitor import UsenetAcquisitionMonitor
+    usenet_acquisition_monitor = UsenetAcquisitionMonitor(
+        get_database()._get_connection,
+        category_getter=lambda: config_manager.get(
+            "usenet_client.category", "soulsync"),
+        interval_getter=lambda: config_manager.get(
+            "usenet_client.acquisition_monitor_interval_seconds", 15),
+    )
+    logger.info("  Usenet acquisition monitor initialized")
+except Exception as e:
+    logger.error(f"  Usenet acquisition monitor failed to initialize: {e}")
 
 try:
     tidal_client = TidalClient()
@@ -2034,6 +2048,7 @@ def _shutdown_runtime_components():
     # Stop long-lived worker components in parallel so shutdown waits for the
     # slowest worker instead of serially burning the timeout for each one.
     _stop_components_parallel([
+        (usenet_acquisition_monitor, "usenet acquisition monitor"),
         (mb_worker, "musicbrainz worker"),
         (audiodb_worker, "audiodb worker"),
         (discogs_worker, "discogs worker"),
@@ -40649,7 +40664,10 @@ def _library_v2_submission_adapter(source):
         return None
     from core.acquisition.submission import UsenetSubmissionAdapter
     return UsenetSubmissionAdapter(
-        monitor_callback=plugin.monitor_acquisition_submission)
+        monitor_callback=(
+            usenet_acquisition_monitor.notify_submission
+            if usenet_acquisition_monitor is not None else None
+        ))
 
 
 _register_library_v2_routes(
@@ -41282,6 +41300,9 @@ def start_runtime_services():
         logger.info("Starting simple background monitor...")
         start_simple_background_monitor()
         logger.info("Simple background monitor started (includes automatic search cleanup)")
+
+        if usenet_acquisition_monitor is not None:
+            usenet_acquisition_monitor.start()
 
         # Wishlist/watchlist timers are now managed by AutomationEngine system automations
 
