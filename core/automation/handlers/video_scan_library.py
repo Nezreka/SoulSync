@@ -28,6 +28,10 @@ from __future__ import annotations
 import time
 from typing import Any, Callable, Dict, Optional
 
+from utils.logging_config import get_logger
+
+logger = get_logger("automation.video_scan_library")
+
 from core.automation.deps import AutomationDeps
 
 
@@ -417,6 +421,12 @@ def auto_video_update_database(
             summary = f'Video database updated: {movies} movies, {shows} shows, {episodes} episodes'
         deps.update_progress(automation_id, status='finished', progress=100, phase='Complete',
                              log_line=summary, log_type='success')
+        try:      # 'Video Database Updated' event trigger (chain: → overlays/collections)
+            deps.engine.emit('video_database_update_completed',
+                             {'media_type': media_type, 'mode': mode,
+                              'movies': movies, 'shows': shows, 'episodes': episodes})
+        except Exception:   # noqa: BLE001 - the event is a nicety
+            logger.exception('video update-completed emit failed')
         return {'status': 'completed', '_manages_own_progress': True,
                 'movies': movies, 'shows': shows, 'episodes': episodes}
     except Exception as e:  # noqa: BLE001

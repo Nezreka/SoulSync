@@ -367,6 +367,40 @@ def _wishlist_obtained(db, dl, upd=None) -> None:
         logger.exception("video download %s: wishlist-on-obtain failed", dl.get("id"))
 
 
+def _event_payload(dl, upd=None) -> dict:
+    """The event-bus variables for one download — shared by every terminal
+    outcome so trigger conditions/templates see one consistent shape."""
+    upd = upd or {}
+    ctx = {}
+    try:
+        ctx = json.loads(dl.get("search_ctx") or "{}") or {}
+    except (ValueError, TypeError):
+        ctx = {}
+    return {"kind": dl.get("kind") or "", "title": dl.get("title") or "",
+            "year": dl.get("year") or "", "season": ctx.get("season") or "",
+            "episode": ctx.get("episode") or "", "channel": ctx.get("channel") or "",
+            "quality": upd.get("quality_label") or dl.get("quality_label") or "",
+            "source": dl.get("source") or "", "dest_path": upd.get("dest_path") or ""}
+
+
+def _publish_terminal(dl, upd) -> None:
+    """Relay a terminal outcome to the automation event bus (best-effort).
+    completed → 'video_download_completed' (+ 'video_upgrade_completed' when the
+    import REPLACED a library copy); import_failed → 'video_import_failed'."""
+    try:
+        from core.video.download_events import publish
+        st = upd.get("status")
+        if st == "completed":
+            publish("video_download_completed", _event_payload(dl, upd))
+            if upd.get("_upgraded"):
+                publish("video_upgrade_completed", _event_payload(dl, upd))
+        elif st == "import_failed":
+            publish("video_import_failed",
+                    {**_event_payload(dl, upd), "error": upd.get("error") or ""})
+    except Exception:
+        logger.exception("video download %s: event publish failed", dl.get("id"))
+
+
 def _fail_or_retry(db, dl, error_msg) -> None:
     """A download just failed/disappeared. Try the next candidate inline; if none,
     hand off to a requery thread; if nothing left, mark it failed for real — and
@@ -384,6 +418,11 @@ def _fail_or_retry(db, dl, error_msg) -> None:
     db.update_video_download(dl["id"], status="failed", error=err, completed_at=completed)
     _wishlist_failed(db, dl)
     _archive_history(db, dl, {"status": "failed", "error": err, "completed_at": completed})
+    try:
+        from core.video.download_events import publish
+        publish("video_download_failed", {**_event_payload(dl), "error": err})
+    except Exception:
+        logger.exception("video download %s: failed-event publish failed", dl.get("id"))
 
 
 def _search_for_retry(query, max_seconds=55):
@@ -575,6 +614,7 @@ def _tick(db) -> None:
             # queue cleanup; powers the History modal + smart post-download scan).
             if upd.get("status") in ("completed", "cancelled", "import_failed"):
                 _archive_history(db, dl, upd)
+                _publish_terminal(dl, upd)     # event triggers (completed/upgrade/import-failed)
         except Exception:
             logger.exception("video download %s: failed to persist update", dl.get("id"))
     for k in [k for k in _misses if k not in live_ids]:

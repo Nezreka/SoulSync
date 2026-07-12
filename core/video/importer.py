@@ -345,7 +345,10 @@ def run_import(dl: dict, src_path: str, *, fs: Any, prober: Callable | None = No
                 "dest_path": src_path}
 
     return {"status": "completed", "progress": 100.0, "dest_path": dest["path"],
-            "quality_label": plan.get("quality_label") or dl.get("quality_label")}
+            "quality_label": plan.get("quality_label") or dl.get("quality_label"),
+            # transient (underscore = stripped by update_video_download): lets the
+            # monitor fire the 'Quality Upgrade Landed' event trigger
+            "_upgraded": plan["action"] == "upgrade"}
 
 
 class _RealFS:

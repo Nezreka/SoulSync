@@ -133,7 +133,7 @@ def test_hourly_db_update_is_a_scheduled_safety_net():
 def test_video_system_automations_are_sorted_by_pipeline_order():
     # The API returns newest-created-first (jumbled); the page re-sorts by an
     # explicit order so it reads scans → processors → library → maintenance.
-    assert 'sortSystem(all.filter(isVideoAutomation))' in _VAUTO
+    assert "sortSystem(mine.filter(function (a) { return a.is_system; }))" in _VAUTO
     assert '_SYS_ORDER' in _VAUTO
     # the order must put the watchlist SCANS before the wishlist PROCESSORS
     scan = _VAUTO.index("'video_scan_watchlist_people'")

@@ -150,7 +150,13 @@ def register_routes(bp):
                 except Exception:
                     logger.exception("manual place: subtitle fetch failed for %s", dl_id)
             try:
-                from core.video.download_events import notify_batch_complete
+                from core.video.download_events import notify_batch_complete, publish
+                publish("video_download_completed", {
+                    "kind": _KIND_FOR_SCOPE[scope], "title": body.get("title") or row.get("title") or "",
+                    "year": body.get("year") or "", "season": body.get("season") or "",
+                    "episode": body.get("episode") or "", "channel": "",
+                    "quality": patch.get("quality_label") or "", "source": row.get("source") or "",
+                    "dest_path": patch.get("dest_path") or ""})
                 notify_batch_complete({"completed": 1, "manual": True})
             except Exception:
                 logger.exception("manual place: batch-complete notify failed for %s", dl_id)

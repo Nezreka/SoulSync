@@ -29,6 +29,18 @@ from utils.logging_config import get_logger
 
 logger = get_logger("video_database")
 
+
+def _publish_video_event(event_type: str, data: dict) -> None:
+    """Relay a library change to the video automation event bus. The DB layer is
+    the one spine every wishlist/watchlist write flows through, so publishing
+    here means no caller can forget. Lazy import; a missing forwarder (tests,
+    early startup) makes it a no-op — never disturbs the write itself."""
+    try:
+        from core.video.download_events import publish
+        publish(event_type, data)
+    except Exception:   # noqa: BLE001
+        logger.debug("video event publish failed for %s", event_type, exc_info=True)
+
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
 SCHEMA_VERSION = 32
@@ -1711,7 +1723,10 @@ class VideoDatabase:
             conn.close()
 
     def update_video_download(self, dl_id: int, **fields) -> None:
-        """Patch a download row; ``updated_at`` is always bumped."""
+        """Patch a download row; ``updated_at`` is always bumped. Underscore-
+        prefixed keys are transient patch metadata (e.g. ``_upgraded`` for the
+        event bus), not columns — stripped here so producers can ride the patch."""
+        fields = {k: v for k, v in fields.items() if not k.startswith("_")}
         if not fields:
             return
         keys = list(fields.keys())
@@ -4329,6 +4344,8 @@ class VideoDatabase:
             return False
         conn = self._get_connection()
         try:
+            was = conn.execute("SELECT state FROM video_watchlist WHERE kind=? AND tmdb_id=?",
+                               (kind, int(tmdb_id))).fetchone()
             conn.execute(
                 """INSERT INTO video_watchlist (kind, tmdb_id, title, poster_url, library_id, state)
                    VALUES (?, ?, ?, ?, ?, 'follow')
@@ -4338,6 +4355,9 @@ class VideoDatabase:
                        library_id=COALESCE(excluded.library_id, video_watchlist.library_id)""",
                 (kind, int(tmdb_id), title, poster_url, library_id))
             conn.commit()
+            # A refresh-upsert of an existing follow is not a new follow.
+            if not (was and was["state"] == "follow"):
+                _publish_video_event("video_watchlist_added", {"kind": kind, "title": title})
             return True
         except Exception:
             logger.exception("add_to_watchlist failed (%s %s)", kind, tmdb_id)
@@ -4390,12 +4410,19 @@ class VideoDatabase:
             return False
         conn = self._get_connection()
         try:
+            was = conn.execute("SELECT state, title FROM video_watchlist WHERE kind=? AND tmdb_id=?",
+                               (kind, int(tmdb_id))).fetchone()
             conn.execute(
                 """INSERT INTO video_watchlist (kind, tmdb_id, title, state)
                    VALUES (?, ?, '', 'mute')
                    ON CONFLICT(kind, tmdb_id) DO UPDATE SET state='mute'""",
                 (kind, int(tmdb_id)))
             conn.commit()
+            # Only an actual follow → mute transition is an unfollow event
+            # (muting something never followed is just a tombstone write).
+            if was and was["state"] == "follow":
+                _publish_video_event("video_watchlist_removed",
+                                     {"kind": kind, "title": was["title"] or ""})
             return True
         finally:
             conn.close()
@@ -4547,6 +4574,9 @@ class VideoDatabase:
             detail_json = _json.dumps(detail_json)
         conn = self._get_connection()
         try:
+            existed = conn.execute(
+                "SELECT 1 FROM video_wishlist WHERE kind='movie' AND tmdb_id=?",
+                (int(tmdb_id),)).fetchone()
             conn.execute(
                 """INSERT INTO video_wishlist (kind, tmdb_id, title, poster_url, year, library_id, server_source, status, detail_json)
                    VALUES ('movie', ?, ?, ?, ?, ?, ?, ?, ?)
@@ -4560,6 +4590,9 @@ class VideoDatabase:
                                    THEN 'wanted' ELSE video_wishlist.status END""",
                 (int(tmdb_id), title, poster_url, year, library_id, server_source, status, detail_json))
             conn.commit()
+            if not existed:   # a refresh-upsert is not a new wish
+                _publish_video_event("video_wishlist_item_added",
+                                     {"kind": "movie", "title": title, "count": 1})
             return True
         except Exception:
             logger.exception("add_movie_to_wishlist failed (%s)", tmdb_id)
@@ -4654,6 +4687,9 @@ class VideoDatabase:
         conn = self._get_connection()
         n = 0
         try:
+            before_count = conn.execute(
+                "SELECT COUNT(*) FROM video_wishlist WHERE kind='episode' AND tmdb_id=?",
+                (int(show_tmdb_id),)).fetchone()[0]
             for e in episodes:
                 sn, en = e.get("season_number"), e.get("episode_number")
                 if sn is None or en is None:
@@ -4677,7 +4713,13 @@ class VideoDatabase:
                      e.get("title"), e.get("still_url"), e.get("overview"), e.get("season_poster_url"),
                      e.get("air_date"), library_id, server_source))
                 n += 1
+            new_rows = conn.execute(
+                "SELECT COUNT(*) FROM video_wishlist WHERE kind='episode' AND tmdb_id=?",
+                (int(show_tmdb_id),)).fetchone()[0] - before_count
             conn.commit()
+            if new_rows > 0:   # refresh-upserts of already-wished episodes don't fire
+                _publish_video_event("video_wishlist_item_added",
+                                     {"kind": "episode", "title": show_title, "count": new_rows})
             return n
         except Exception:
             logger.exception("add_episodes_to_wishlist failed (%s)", show_tmdb_id)
@@ -4932,6 +4974,9 @@ class VideoDatabase:
             return False
         conn = self._get_connection()
         try:
+            was = conn.execute(
+                "SELECT state FROM video_watchlist WHERE kind='channel' AND source_id=?",
+                (cid,)).fetchone()
             conn.execute(
                 """INSERT INTO video_watchlist (kind, tmdb_id, title, poster_url, source, source_id, state)
                    VALUES ('channel', ?, ?, ?, 'youtube', ?, 'follow')
@@ -4941,6 +4986,8 @@ class VideoDatabase:
                        source='youtube', source_id=excluded.source_id""",
                 (youtube_surrogate_id(cid), title, channel.get("avatar_url"), cid))
             conn.commit()
+            if not (was and was["state"] == "follow"):
+                _publish_video_event("video_watchlist_added", {"kind": "channel", "title": title})
             return True
         except Exception:
             logger.exception("add_channel_to_watchlist failed (%s)", cid)
@@ -4955,8 +5002,14 @@ class VideoDatabase:
             return False
         conn = self._get_connection()
         try:
-            conn.execute("DELETE FROM video_watchlist WHERE kind='channel' AND source_id=?", (youtube_id,))
+            was = conn.execute(
+                "SELECT title FROM video_watchlist WHERE kind='channel' AND source_id=? AND state='follow'",
+                (youtube_id,)).fetchone()
+            cur = conn.execute("DELETE FROM video_watchlist WHERE kind='channel' AND source_id=?", (youtube_id,))
             conn.commit()
+            if was and cur.rowcount:
+                _publish_video_event("video_watchlist_removed",
+                                     {"kind": "channel", "title": was["title"] or ""})
             return True
         finally:
             conn.close()
@@ -5079,6 +5132,9 @@ class VideoDatabase:
             return False
         conn = self._get_connection()
         try:
+            was = conn.execute(
+                "SELECT state FROM video_watchlist WHERE kind='playlist' AND source_id=?",
+                (pid,)).fetchone()
             conn.execute(
                 """INSERT INTO video_watchlist (kind, tmdb_id, title, poster_url, source, source_id, state)
                    VALUES ('playlist', ?, ?, ?, 'youtube', ?, 'follow')
@@ -5088,6 +5144,8 @@ class VideoDatabase:
                        source='youtube', source_id=excluded.source_id""",
                 (youtube_surrogate_id(pid), title, (playlist or {}).get("thumbnail_url"), pid))
             conn.commit()
+            if not (was and was["state"] == "follow"):
+                _publish_video_event("video_watchlist_added", {"kind": "playlist", "title": title})
             return True
         except Exception:
             logger.exception("add_playlist_to_watchlist failed (%s)", pid)
@@ -5100,8 +5158,14 @@ class VideoDatabase:
             return False
         conn = self._get_connection()
         try:
-            conn.execute("DELETE FROM video_watchlist WHERE kind='playlist' AND source_id=?", (playlist_id,))
+            was = conn.execute(
+                "SELECT title FROM video_watchlist WHERE kind='playlist' AND source_id=? AND state='follow'",
+                (playlist_id,)).fetchone()
+            cur = conn.execute("DELETE FROM video_watchlist WHERE kind='playlist' AND source_id=?", (playlist_id,))
             conn.commit()
+            if was and cur.rowcount:
+                _publish_video_event("video_watchlist_removed",
+                                     {"kind": "playlist", "title": was["title"] or ""})
             return True
         finally:
             conn.close()
@@ -5163,6 +5227,9 @@ class VideoDatabase:
             downloaded = set() if allow_downloaded else {r["media_id"] for r in conn.execute(
                 "SELECT DISTINCT media_id FROM video_download_history "
                 "WHERE source='youtube' AND outcome='completed' AND media_id IS NOT NULL")}
+            before_count = conn.execute(
+                "SELECT COUNT(*) FROM video_wishlist WHERE kind='video' AND parent_source_id=?",
+                (cid,)).fetchone()[0]
             for v in videos:
                 vid = v.get("youtube_id")
                 if not vid or vid in downloaded:
@@ -5182,7 +5249,13 @@ class VideoDatabase:
                     (surrogate, ctitle, avatar, v.get("title"), v.get("thumbnail_url"),
                      v.get("description"), v.get("published_at"), vid, cid, server_source))
                 n += 1
+            new_rows = conn.execute(
+                "SELECT COUNT(*) FROM video_wishlist WHERE kind='video' AND parent_source_id=?",
+                (cid,)).fetchone()[0] - before_count
             conn.commit()
+            if new_rows > 0:   # refresh-upserts of already-wished videos don't fire
+                _publish_video_event("video_wishlist_item_added",
+                                     {"kind": "youtube", "title": ctitle, "count": new_rows})
             return n
         except Exception:
             logger.exception("add_videos_to_wishlist failed (%s)", cid)

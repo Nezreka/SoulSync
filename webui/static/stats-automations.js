@@ -2268,6 +2268,16 @@ const _autoIcons = {
     video_full_cleanup: '\uD83E\uDDF9', video_backup_database: '\uD83D\uDCBE',
     video_apply_overlays: '\uD83C\uDFA8', video_clean_plex_images: '\uD83D\uDDBC\uFE0F',
     video_sync_collections: '\uD83D\uDDC2\uFE0F',
+    // Video event triggers + maintenance action
+    monthly_time: '\uD83D\uDCC5',
+    video_batch_complete: '\u2705', video_library_scan_completed: '\uD83D\uDCE1',
+    video_download_completed: '\u2B07\uFE0F', video_download_failed: '\u274C',
+    video_import_failed: '\u26A0\uFE0F', video_upgrade_completed: '\uD83D\uDCC8',
+    video_repair_finding_created: '\uD83D\uDD27', video_repair_scan_completed: '\uD83D\uDD27',
+    video_wishlist_item_added: '\u2795', video_watchlist_added: '\uD83D\uDC41\uFE0F',
+    video_watchlist_removed: '\uD83D\uDEAB', video_collections_synced: '\uD83D\uDDC2\uFE0F',
+    video_overlays_applied: '\uD83C\uDFA8', video_database_update_completed: '\uD83D\uDDC4\uFE0F',
+    video_run_repair_job: '\uD83D\uDD27',
 };
 
 // --- Inspiration Templates ---

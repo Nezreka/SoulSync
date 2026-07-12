@@ -198,6 +198,14 @@ class VideoRepairWorker:
             if ok:
                 result.findings_created += 1
                 self._log(state, "found", kw.get("title") or "")
+                try:      # 'Maintenance Finding Raised' automation trigger
+                    from core.video.download_events import publish
+                    publish("video_repair_finding_created", {
+                        "job_id": job_id, "finding_type": kw.get("finding_type") or "",
+                        "severity": kw.get("severity") or "info",
+                        "title": kw.get("title") or ""})
+                except Exception:   # noqa: BLE001 - events never disturb the scan
+                    logger.exception("repair finding event publish failed")
             else:
                 result.findings_skipped_dedup += 1
             return ok
@@ -252,6 +260,15 @@ class VideoRepairWorker:
                 run_id, items_scanned=result.scanned,
                 findings_created=result.findings_created,
                 auto_fixed=result.auto_fixed, errors=result.errors)
+            try:      # 'Maintenance Scan Done' automation trigger
+                from core.video.download_events import publish
+                publish("video_repair_scan_completed", {
+                    "job_id": job_id, "job_name": cls.display_name,
+                    "status": state["status"], "scanned": result.scanned,
+                    "findings_created": result.findings_created,
+                    "errors": result.errors})
+            except Exception:   # noqa: BLE001 - events never disturb the scheduler
+                logger.exception("repair scan event publish failed")
             with self._lock:
                 self._current_job_id = None
             self._emit_progress(force=True)
