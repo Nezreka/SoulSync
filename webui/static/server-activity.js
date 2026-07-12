@@ -80,7 +80,11 @@
             ? '<span class="sact-eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span>' : '';
         var pct = s.progress_pct || 0;
         var remain = s.duration_ms ? ('-' + fmtTime(Math.max(0, s.duration_ms - s.offset_ms))) : '';
-        return '<div class="sact-card sact-st-' + esc(s.state) + '" data-key="' + esc(actKey(s)) + '">' +
+        var lc = s.link ? ' sact-card--link' : '';
+        var la = s.link ? ' data-link-kind="' + esc(s.link.kind) + '" data-link-id="' + esc(s.link.id) +
+            '" data-link-source="' + esc(s.link.source) + '"' : '';
+        var openIc = s.link ? '<span class="sact-open" title="Open in SoulSync">↗</span>' : '';
+        return '<div class="sact-card sact-st-' + esc(s.state) + lc + '" data-key="' + esc(actKey(s)) + '"' + la + '>' +
             (artUrl ? '<div class="sact-art" style="background-image:url(\'' + artUrl + '\')"></div>' : '') +
             '<div class="sact-scrim"></div>' + stop +
             '<div class="sact-row">' +
@@ -88,7 +92,7 @@
                     ? '<div class="sact-poster"><img src="' + poster + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">' + eq + '</div>'
                     : '<div class="sact-poster sact-poster--none">' + (TYPE_IC[s.media_type] || '🎬') + eq + '</div>') +
                 '<div class="sact-info">' +
-                    '<div class="sact-title" title="' + esc(s.title) + '">' + esc(s.title) + '</div>' +
+                    '<div class="sact-title" title="' + esc(s.title) + '">' + esc(s.title) + openIc + '</div>' +
                     (s.subtitle ? '<div class="sact-sub">' + esc(s.subtitle) + '</div>' : '') +
                     '<div class="sact-meta"><span class="sact-ava">' + esc(initials(s.user)) + '</span>' +
                         '<span class="sact-uname">' + esc(s.user) + '</span>' +
@@ -337,6 +341,16 @@
             if (tb) { setTab(tb.getAttribute('data-sact-tab')); return; }
             var sb = e.target.closest('[data-sact-stop]');
             if (sb) { openStop(sb.getAttribute('data-sact-stop'), sb.getAttribute('data-sact-title')); return; }
+            // Click a card → jump to that movie/show's page inside SoulSync.
+            var lk = e.target.closest('.sact-card--link');
+            if (lk) {
+                var id = lk.getAttribute('data-link-id');
+                close();
+                if (window.SoulSyncVideo && window.SoulSyncVideo.openDetail)
+                    window.SoulSyncVideo.openDetail({ kind: lk.getAttribute('data-link-kind'),
+                        id: parseInt(id, 10) || id, source: lk.getAttribute('data-link-source') || 'library' });
+                return;
+            }
         });
         document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && isOpen) close(); });
     }

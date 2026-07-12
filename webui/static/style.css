@@ -71208,3 +71208,11 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
     .sact-list.sact-enter > .sact-card, .sact-eq i { animation: none; }
     .sact-prog-fill { transition: none; }
 }
+
+/* Server Activity — click-through to the SoulSync detail page */
+.sact-card--link { cursor: pointer; }
+.sact-card--link:hover .sact-title { color: rgb(var(--vd-accent-rgb, 88 101 242)); }
+.sact-open { display: inline-block; margin-left: 6px; font-size: 12px; font-weight: 800;
+    color: rgb(var(--vd-accent-rgb, 88 101 242)); opacity: 0; transform: translateX(-3px);
+    transition: opacity 0.15s ease, transform 0.15s ease; vertical-align: 1px; }
+.sact-card--link:hover .sact-open { opacity: 1; transform: none; }
