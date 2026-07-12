@@ -11,10 +11,11 @@ Schedule trigger; 3h is fine too, the scan is cheap). It's forward-looking and d
   * **Baseline = follow time.** What the user had before following isn't our concern — only
     uploads published on/after they followed the channel (the watchlist row's ``date_added``)
     are "new" and get wishlisted, forever forward.
-  * **Last-N safety net.** A per-channel default (10) reaches a little BEFORE the baseline so
-    the user is always kept current on the most recent videos even right after following / if
-    a scan was missed. Global setting now; per-channel override (the hover settings modal,
-    like watchlist-artist settings) comes later.
+  * **Last-N safety net.** Reaches a little BEFORE the baseline so the user is always kept
+    current on the most recent videos even right after following / if a scan was missed. The
+    count is the global "videos to grab" setting (Settings → Library, default 5) — shared with
+    the follow backfill so they stay consistent; a per-automation ``backfill_count`` still
+    overrides it if set.
   * **Long-form only.** Shorts are excluded (the channel's Videos tab + a duration floor);
     livestreams/premieres that haven't aired are skipped (future-dated).
   * **Never duplicates.** Each candidate is diffed against what's already wishlisted, what's
@@ -214,6 +215,17 @@ def _default_add_videos(channel: Dict[str, Any], videos: List[Dict[str, Any]]) -
     return get_video_db().add_videos_to_wishlist(channel, videos, server_source=resolve_video_server())
 
 
+def _default_backfill_count() -> int:
+    """The rolling last-N net = the global 'videos to grab' setting (Settings → Library),
+    so the scan net and the follow backfill stay consistent. Defaults to 5."""
+    try:
+        from api.video import get_video_db
+        from core.video import organization as org
+        return max(0, min(100, int(org.load(get_video_db()).get("youtube_follow_count", 5))))
+    except Exception:   # noqa: BLE001 - missing db/setting → the default
+        return 5
+
+
 def auto_video_scan_watchlist_channels(
     config: Dict[str, Any],
     deps: AutomationDeps,
@@ -226,6 +238,7 @@ def auto_video_scan_watchlist_channels(
     downloaded_ids: Optional[Callable[[Any], Iterable]] = None,
     add_videos: Optional[Callable[[Dict[str, Any], List[Dict[str, Any]]], int]] = None,
     today_fn: Optional[Callable[[], str]] = None,
+    backfill_fn: Optional[Callable[[], int]] = None,
 ) -> Dict[str, Any]:
     """Scan every followed YouTube channel and wishlist its new long-form uploads.
 
@@ -239,7 +252,13 @@ def auto_video_scan_watchlist_channels(
     add_videos = add_videos or _default_add_videos
     today_fn = today_fn or (lambda: date.today().isoformat())
     automation_id = config.get('_automation_id')
-    backfill = max(0, int(config.get('backfill_count', 10) or 0))
+    # The last-N net: an explicit per-automation override wins; otherwise inherit the
+    # global "videos to grab" setting (Settings → Library) so both knobs agree.
+    _bc = config.get('backfill_count')
+    if _bc not in (None, ''):
+        backfill = max(0, int(_bc or 0))
+    else:
+        backfill = max(0, int((backfill_fn or _default_backfill_count)()))
     min_seconds = max(0, int(config.get('min_seconds', 60) or 0))
     limit = max(backfill, 30)
 

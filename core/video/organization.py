@@ -63,6 +63,11 @@ DEFAULTS = {
     "youtube_sponsorblock": "off",     # off | mark (chapters) | remove (cut segments)
     "youtube_embed_subs": False,       # embed subs (subtitle_langs) into the container
     "min_free_disk_gb": 0,             # refuse new grabs when the target drive has less (0 = off)
+    # How many recent videos following a YouTube channel backfills — and the rolling
+    # "keep the last N current" net the watchlist-channels scan uses. One knob for both
+    # so they stay consistent (Settings → Library). 0 = follow with no backfill (only
+    # new uploads after you follow).
+    "youtube_follow_count": 5,
 }
 
 _TRANSFER_MODES = ("copy", "move")
@@ -104,6 +109,11 @@ def normalize(raw: Any) -> dict:
     if "min_free_disk_gb" in raw:
         try:
             d["min_free_disk_gb"] = max(0, min(10000, float(raw.get("min_free_disk_gb") or 0)))
+        except (TypeError, ValueError):
+            pass
+    if "youtube_follow_count" in raw:
+        try:
+            d["youtube_follow_count"] = max(0, min(100, int(raw.get("youtube_follow_count"))))
         except (TypeError, ValueError):
             pass
     tm = str(raw.get("transfer_mode") or "").strip().lower()

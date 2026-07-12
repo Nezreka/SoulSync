@@ -6482,6 +6482,12 @@
                                 </div>
 
                                 <div class="form-group">
+                                    <label>YouTube: videos to grab when you follow a channel:</label>
+                                    <input type="number" id="vo-yt-follow-count" min="0" max="100" placeholder="5">
+                                    <small class="settings-hint">Following a channel backfills its most recent N videos, then watches for anything new posted after you follow. This is also the rolling "keep the last N current" net the channel scan uses. <strong>0</strong> = don't backfill anything, only grab new uploads going forward. It never pulls the whole back catalog.</small>
+                                </div>
+
+                                <div class="form-group">
                                     <label>When a file finishes:</label>
                                     <select id="vo-transfer-mode" class="form-select">
                                         <option value="copy">Copy in, then remove the source (kept for torrents)</option>
