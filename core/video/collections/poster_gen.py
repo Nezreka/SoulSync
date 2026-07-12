@@ -202,56 +202,47 @@ def render_collage(member_posters: List[bytes], title: str) -> bytes:
     return out.getvalue()
 
 
-def render_season_poster(avatar_bytes: bytes, year: str, channel: str = "",
-                         backdrop_bytes: Optional[bytes] = None) -> Optional[bytes]:
-    """A DISTINCT poster for a YouTube channel's year-season (Boulder: the plain
-    avatar copy made every season look identical to the channel). Backdrop =
-    a REAL video thumbnail from that year when provided (matching the in-app
-    channel page, whose season visuals are video thumbs), else the avatar —
-    blurred + darkened either way, with the avatar as a centered circle, the
-    YEAR big underneath, channel name small. 2:3 like every other poster here.
-    None when Pillow/decoding fails — the caller falls back to the avatar copy."""
+def render_season_poster(hero_bytes: bytes, year: str, channel: str = "") -> Optional[bytes]:
+    """A YouTube year-season poster from the season's HERO image — the same
+    image the in-app channel page shows for the year (its newest video's
+    thumbnail, maxres when available; Boulder: "we pull the season posters on
+    the video detail page — do the same for downloads"). Sharp full-bleed
+    cover crop to 2:3 + a bottom scrim + the YEAR + channel name. None when
+    Pillow/decoding fails — the caller falls back to the avatar copy."""
     try:
-        from PIL import Image, ImageDraw, ImageFilter
+        from PIL import Image, ImageDraw
 
-        imgs = _decode([avatar_bytes])
+        imgs = _decode([hero_bytes])
         if not imgs:
             return None
-        av = imgs[0].convert("RGB")
-        back = av
-        if backdrop_bytes:
-            bimgs = _decode([backdrop_bytes])
-            if bimgs:
-                back = bimgs[0].convert("RGB")
+        canvas = _cover(imgs[0].convert("RGB"), _W, _H)
 
-        # Blur/darken LIGHTLY — heavy treatment turned a colorful video thumb
-        # into generic murk (Boulder read it as the avatar fallback). The
-        # bottom gradient scrim below keeps the text legible instead.
-        canvas = _cover(back, _W, _H).filter(ImageFilter.GaussianBlur(30))
-        canvas = Image.blend(canvas, Image.new("RGB", (_W, _H), (8, 9, 14)), 0.28)
+        # bottom gradient scrim so the type reads on any frame — thumbnails are
+        # BUSY (faces, giant caption text), so it runs deep and near-opaque at
+        # the baseline, and the type gets a soft shadow pass on top of it
         scrim = Image.new("L", (1, _H), 0)
         spx = scrim.load()
         for y in range(_H):
-            t = max(0.0, (y / _H - 0.52)) / 0.48
-            spx[0, y] = int(210 * min(1.0, t * 1.25))
-        canvas.paste(Image.new("RGB", (_W, _H), (6, 7, 11)), (0, 0), scrim.resize((_W, _H)))
-
-        size = 600
-        circle = _cover(av, size, size)
-        mask = Image.new("L", (size, size), 0)
-        ImageDraw.Draw(mask).ellipse((0, 0, size, size), fill=255)
-        canvas.paste(circle, ((_W - size) // 2, 220), mask)
+            t = max(0.0, (y / _H - 0.42)) / 0.58
+            spx[0, y] = int(252 * min(1.0, t * 1.45))
+        canvas.paste(Image.new("RGB", (_W, _H), (5, 6, 10)), (0, 0), scrim.resize((_W, _H)))
 
         from core.video.overlays.compositor import _font
         d = ImageDraw.Draw(canvas)
+
+        def _shadowed(xy, text, f, fill):
+            for dx, dy in ((3, 4), (0, 2)):
+                d.text((xy[0] + dx, xy[1] + dy), text, font=f, fill=(0, 0, 0))
+            d.text(xy, text, font=f, fill=fill)
+
         year = str(year or "").strip()
-        yf = _font("Inter", 800, 220)
+        yf = _font("Inter", 800, 230)
         box = d.textbbox((0, 0), year, font=yf)
-        d.text(((_W - (box[2] - box[0])) // 2, 960), year, font=yf, fill=(255, 255, 255))
+        _shadowed(((_W - (box[2] - box[0])) // 2, 1020), year, yf, (255, 255, 255))
         if channel:
             cf = _font("Inter", 700, 54)
             box = d.textbbox((0, 0), channel, font=cf)
-            d.text(((_W - (box[2] - box[0])) // 2, 1250), channel, font=cf, fill=(226, 228, 235))
+            _shadowed(((_W - (box[2] - box[0])) // 2, 1320), channel, cf, (226, 228, 235))
 
         buf = io.BytesIO()
         canvas.save(buf, "JPEG", quality=88)
