@@ -54,17 +54,32 @@ _SLSKD_KEYS = {
 }
 
 
-def _evaluate_hits(raw, profile, scope, want_season, want_episode) -> list:
+def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None) -> list:
     """Parse → evaluate → rank a list of raw indexer hits against the quality profile.
-    Shared by the mock search and the live slskd start/poll endpoints."""
+    Shared by the mock search and the live slskd start/poll endpoints.
+
+    ``blocked`` = the release blocklist as {(username, filename)} (None = look it
+    up). Blocked releases stay VISIBLE in manual search (greyed, with the reason —
+    the Sonarr behaviour) but are never `accepted`, so every auto-picker skips
+    them; a manual grab of one is a deliberate user override."""
     from core.video.quality_eval import evaluate_release
     from core.video.release_parse import parse_release
+    if blocked is None:
+        try:
+            from . import get_video_db
+            blocked = get_video_db().video_blocklist_pairs()
+        except Exception:   # noqa: BLE001 - filtering is an assist, never a 500
+            blocked = frozenset()
     results = []
     for hit in raw:
         parsed = parse_release(hit.get("title"))
         size_gb = round((hit.get("size_bytes") or 0) / (1024 ** 3), 1)
         verdict = evaluate_release(parsed, profile, scope=scope, want_season=want_season,
                                    want_episode=want_episode, size_gb=size_gb)
+        is_blocked = (hit.get("username"), hit.get("filename")) in blocked
+        if is_blocked:
+            verdict = {**verdict, "accepted": False,
+                       "rejected": (verdict.get("rejected") or []) + ["Blocklisted release"]}
         # Availability = how downloadable the source is (slskd: free slot/queue/speed score
         # from group_video_files; torrents/mock: seeders/peers). Ranks within a quality tier
         # so we grab a free-slot/empty-queue release over one stuck behind a huge queue.
@@ -82,7 +97,7 @@ def _evaluate_hits(raw, profile, scope, want_season, want_episode) -> list:
             "files": hit.get("files") or [], "file_count": hit.get("file_count") or 0,
             "folder_size_bytes": hit.get("folder_size_bytes") or 0,
             "quality_label": verdict["quality_label"], "accepted": verdict["accepted"],
-            "rejected": verdict["rejected"], "score": verdict["score"],
+            "rejected": verdict["rejected"], "score": verdict["score"], "blocked": is_blocked,
             "resolution": parsed.get("resolution"), "source": parsed.get("source"),
             "codec": parsed.get("codec"), "hdr": parsed.get("hdr"),
             "audio": parsed.get("audio"), "group": parsed.get("group"),
@@ -155,6 +170,64 @@ def register_routes(bp):
             config_manager.set(_SHARED_DOWNLOAD_KEY, (str(body.get("download_path") or "")).strip())
         save_source(db, body)         # download_mode + hybrid_order (validated)
         return jsonify({"status": "saved"})
+
+    @bp.route("/downloads/blocklist", methods=["GET"])
+    def video_downloads_blocklist():
+        """The release blocklist — exact remote files that will never be re-picked."""
+        from . import get_video_db
+        return jsonify({"success": True, "items": get_video_db().list_video_blocklist()})
+
+    @bp.route("/downloads/blocklist", methods=["POST"])
+    def video_downloads_blocklist_add():
+        """Manually block a release. Body: {download_id} (a failed queue row),
+        {history_id} (a history row), or raw {username, filename, ...}."""
+        from . import get_video_db
+        db = get_video_db()
+        body = request.get_json(silent=True) or {}
+        row = None
+        if body.get("download_id"):
+            dl = db.get_video_download(body["download_id"])
+            if dl:
+                import json as _j
+                try:
+                    ctx = _j.loads(dl.get("search_ctx") or "{}") or {}
+                except (ValueError, TypeError):
+                    ctx = {}
+                row = {"kind": dl.get("kind"), "title": dl.get("title"),
+                       "media_id": dl.get("media_id"), "media_source": dl.get("media_source"),
+                       "season_number": ctx.get("season"), "episode_number": ctx.get("episode"),
+                       "username": dl.get("username"), "filename": dl.get("filename"),
+                       "release_title": dl.get("release_title"),
+                       "reason": body.get("reason") or dl.get("error") or "Blocked by user"}
+        elif body.get("history_id"):
+            h = db.download_history_detail(body["history_id"])
+            if h:
+                row = {"kind": h.get("kind"), "title": h.get("title"),
+                       "media_id": h.get("media_id"), "media_source": h.get("media_source"),
+                       "season_number": h.get("season_number"), "episode_number": h.get("episode_number"),
+                       "username": h.get("username"), "filename": h.get("filename"),
+                       "release_title": h.get("release_title"),
+                       "reason": body.get("reason") or h.get("error") or "Blocked by user"}
+        elif body.get("username") and body.get("filename"):
+            row = {k: body.get(k) for k in ("kind", "title", "media_id", "media_source",
+                                            "season_number", "episode_number", "username",
+                                            "filename", "release_title", "reason")}
+            row.setdefault("reason", "Blocked by user")
+        if not row or not row.get("username") or not row.get("filename"):
+            return jsonify({"success": False,
+                            "error": "That row has no release to block."}), 400
+        rid = db.add_video_blocklist(row)
+        return jsonify({"success": bool(rid), "id": rid})
+
+    @bp.route("/downloads/blocklist/<int:row_id>", methods=["DELETE"])
+    def video_downloads_blocklist_remove(row_id):
+        from . import get_video_db
+        return jsonify({"success": get_video_db().remove_video_blocklist(row_id)})
+
+    @bp.route("/downloads/blocklist/clear", methods=["POST"])
+    def video_downloads_blocklist_clear():
+        from . import get_video_db
+        return jsonify({"success": True, "removed": get_video_db().clear_video_blocklist()})
 
     @bp.route("/downloads/history", methods=["GET"])
     def video_downloads_history():

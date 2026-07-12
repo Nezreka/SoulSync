@@ -43,7 +43,7 @@ def _publish_video_event(event_type: str, data: dict) -> None:
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 32
+SCHEMA_VERSION = 33   # v33: video_blocklist (never re-grab a proven-bad release)
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -1875,6 +1875,73 @@ class VideoDatabase:
             by = {r["kind"]: r["c"] for r in rows}
             movie, show = by.get("movie", 0), by.get("show", 0)
             return {"movie": movie, "show": show, "total": movie + show}
+        finally:
+            conn.close()
+
+    # ── release blocklist (never re-grab a proven-bad release) ───────────────
+    def add_video_blocklist(self, row: dict) -> int:
+        """Block one exact release file. Idempotent on (username, filename).
+        Returns the row id (existing or new), 0 on bad input."""
+        username, filename = (row or {}).get("username"), (row or {}).get("filename")
+        if not username or not filename:
+            return 0
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                """INSERT INTO video_blocklist
+                       (kind, title, media_id, media_source, season_number, episode_number,
+                        username, filename, release_title, reason)
+                   VALUES (?,?,?,?,?,?,?,?,?,?)
+                   ON CONFLICT(username, filename) DO UPDATE SET
+                       reason=COALESCE(excluded.reason, video_blocklist.reason)""",
+                (row.get("kind"), row.get("title"), row.get("media_id"),
+                 row.get("media_source"), row.get("season_number"), row.get("episode_number"),
+                 username, filename, row.get("release_title"), row.get("reason")))
+            conn.commit()
+            r = conn.execute("SELECT id FROM video_blocklist WHERE username=? AND filename=?",
+                             (username, filename)).fetchone()
+            return r["id"] if r else 0
+        except sqlite3.Error:
+            logger.exception("add_video_blocklist failed")
+            return 0
+        finally:
+            conn.close()
+
+    def video_blocklist_pairs(self) -> set:
+        """{(username, filename)} for candidate filtering — cheap enough to read
+        per search/retry pass (the table stays small)."""
+        conn = self._get_connection()
+        try:
+            return {(r["username"], r["filename"]) for r in conn.execute(
+                "SELECT username, filename FROM video_blocklist")}
+        finally:
+            conn.close()
+
+    def list_video_blocklist(self) -> list:
+        conn = self._get_connection()
+        try:
+            return [dict(r) for r in conn.execute(
+                "SELECT * FROM video_blocklist ORDER BY created_at DESC, id DESC")]
+        finally:
+            conn.close()
+
+    def remove_video_blocklist(self, row_id) -> bool:
+        conn = self._get_connection()
+        try:
+            cur = conn.execute("DELETE FROM video_blocklist WHERE id=?", (int(row_id),))
+            conn.commit()
+            return cur.rowcount > 0
+        except (sqlite3.Error, TypeError, ValueError):
+            return False
+        finally:
+            conn.close()
+
+    def clear_video_blocklist(self) -> int:
+        conn = self._get_connection()
+        try:
+            cur = conn.execute("DELETE FROM video_blocklist")
+            conn.commit()
+            return cur.rowcount
         finally:
             conn.close()
 

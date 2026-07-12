@@ -572,6 +572,29 @@ CREATE TABLE IF NOT EXISTS video_downloads (
 );
 CREATE INDEX IF NOT EXISTS idx_video_downloads_status ON video_downloads(status);
 
+-- video_blocklist — releases (exact remote files) that must never be grabbed
+-- again (Sonarr-style). Auto-added when an imported file PROVES bad (sample /
+-- corrupt / fake), or by hand from a failed row. Identity = (username,
+-- filename): the slskd path is per-user, so this blocks the exact bad file
+-- without punishing other users' copies of the same release. Media fields are
+-- display-only context.
+CREATE TABLE IF NOT EXISTS video_blocklist (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind           TEXT,                          -- movie | show (what the grab was for)
+    title          TEXT,                          -- media title, for the management modal
+    media_id       TEXT,
+    media_source   TEXT,
+    season_number  INTEGER,
+    episode_number INTEGER,
+    username       TEXT NOT NULL,                 -- slskd uploader
+    filename       TEXT NOT NULL,                 -- full remote path = release identity
+    release_title  TEXT,
+    reason         TEXT,                          -- why it was blocked
+    created_at     TEXT DEFAULT (datetime('now')),
+    UNIQUE(username, filename)
+);
+CREATE INDEX IF NOT EXISTS idx_video_blocklist_file ON video_blocklist(filename);
+
 -- video_download_history — a PERMANENT record of every grab SoulSync completed
 -- (movies + episodes). video_downloads is the transient working queue (cleaned when
 -- finished); this is the archive that powers the Download History modal AND the

@@ -70,6 +70,8 @@
 
     var X_SVG = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
     var IMP_SVG = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+    var BAN_SVG = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="5.6" y1="5.6" x2="18.4" y2="18.4"/></svg>';
+    var URL_BLOCKLIST = '/api/video/downloads/blocklist';
     // the Import page is an admin tool (videoPageAllowed in video-side.js) — same gate here
     // so non-admins never see a button that would just bounce them to the dashboard.
     function canImport() {
@@ -260,7 +262,17 @@
         var importBtn = (d.status === 'import_failed' && canImport())
             ? '<button class="vdpg-row-retry vdpg-row-import" type="button" data-vdpg-import title="Manual Import — file it by hand on the Import page">' + IMP_SVG + '</button>'
             : '';
-        var actHTML = openBtn + importBtn + stateBtn;
+        // Block this exact release (slskd rows only — YT has no release identity).
+        // failed → block + auto-retry with another candidate; import_failed → block
+        // (the file itself may still be manually importable, so no auto-retry).
+        var blockBtn = ((d.status === 'failed' || d.status === 'import_failed') &&
+                        dlType(d.kind) !== 'youtube' && d.username && d.filename)
+            ? '<button class="vdpg-row-retry vdpg-row-block" type="button" data-vdpg-block="' + d.id +
+              '" data-was="' + esc(d.status) + '" title="' +
+              (d.status === 'failed' ? 'Block this release and retry with another' : 'Block this release') +
+              '">' + BAN_SVG + '</button>'
+            : '';
+        var actHTML = openBtn + importBtn + blockBtn + stateBtn;
         if (act.innerHTML !== actHTML) act.innerHTML = actHTML;
 
         renderDrawer(el, d);   // keep the expand drawer in sync (and open across re-patches)
@@ -652,6 +664,22 @@
                 else toast('Copy not supported here', 'info');
                 return;
             }
+            var bk = e.target.closest('[data-vdpg-block]');
+            if (bk) {
+                bk.disabled = true;
+                var bid = +bk.getAttribute('data-vdpg-block');
+                var wasFailed = bk.getAttribute('data-was') === 'failed';
+                postJSON(URL_BLOCKLIST, { download_id: bid }).then(function (res) {
+                    if (!(res && res.success)) { toast((res && res.error) || 'Could not block that release', 'error'); poll(); return; }
+                    if (wasFailed) {
+                        postJSON(URL_RETRY, { id: bid }).then(function (r2) {
+                            toast(r2 && r2.ok ? 'Release blocked — retrying with another' : 'Release blocked', 'success');
+                            poll();
+                        });
+                    } else { toast('Release blocked', 'success'); poll(); }
+                });
+                return;
+            }
             var c = e.target.closest('[data-vdpg-cancel]');
             if (c) { c.disabled = true; c.classList.add('adl-row-cancel-pending'); postJSON(URL_CANCEL, { id: +c.getAttribute('data-vdpg-cancel') }).then(function () { poll(); }); return; }
             var r = e.target.closest('[data-vdpg-retry]');
@@ -667,6 +695,80 @@
             }
         });
     }
+
+    // ── Blocklist modal (reuses the history modal's .vdh-* styling) ────────────
+    var _blkEl = null;
+    function blkClose() { if (_blkEl) { _blkEl.remove(); _blkEl = null; } }
+    function blkRow(it) {
+        var media = [it.title, it.season_number != null && it.episode_number != null
+            ? 'S' + String(it.season_number).padStart(2, '0') + 'E' + String(it.episode_number).padStart(2, '0') : '']
+            .filter(Boolean).join(' ');
+        return '<div class="vdh-row" data-id="' + esc(it.id) + '">' +
+            '<div class="vdh-row-main">' +
+                '<div class="vdh-row-info">' +
+                    '<div class="vdh-row-title">' + esc(it.release_title || it.filename || '?') + '</div>' +
+                    '<div class="vdh-row-sub">' + esc([media, it.username, it.reason].filter(Boolean).join('  ·  ')) + '</div>' +
+                '</div>' +
+                '<button class="vdh-redl" type="button" data-vblk-remove="' + esc(it.id) +
+                    '" title="Unblock — this release becomes pickable again">Unblock</button>' +
+            '</div></div>';
+    }
+    function blkLoad() {
+        if (!_blkEl) return;
+        var body = _blkEl.querySelector('[data-vblk-body]');
+        getJSON(URL_BLOCKLIST).then(function (d) {
+            var items = (d && d.items) || [];
+            var clr = _blkEl.querySelector('[data-vblk-clear]');
+            if (clr) clr.style.display = items.length ? '' : 'none';
+            var sub = _blkEl.querySelector('[data-vblk-sub]');
+            if (sub) sub.textContent = items.length ? items.length + ' blocked release' + (items.length === 1 ? '' : 's') : '';
+            body.innerHTML = items.length ? items.map(blkRow).join('') :
+                '<div class="vdh-empty">Nothing blocked. Releases land here automatically when a ' +
+                'downloaded file turns out to be a sample, corrupt or fake — and you can block one ' +
+                'yourself from any failed download. Blocked releases are never picked again.</div>';
+        });
+    }
+    function blkOpen() {
+        if (_blkEl) return;
+        _blkEl = document.createElement('div');
+        _blkEl.className = 'vdh-overlay';
+        _blkEl.innerHTML =
+            '<div class="vdh-modal" role="dialog" aria-modal="true" aria-label="Blocked releases">' +
+                '<div class="vdh-head">' +
+                    '<div class="vdh-head-titles">' +
+                        '<h2 class="vdh-title">Blocked Releases</h2>' +
+                        '<p class="vdh-sub" data-vblk-sub></p>' +
+                    '</div>' +
+                    '<button class="adl-clear-btn" type="button" data-vblk-clear style="display:none">Clear All</button>' +
+                    '<button class="vdh-close" type="button" data-vblk-close aria-label="Close">&times;</button>' +
+                '</div>' +
+                '<div class="vdh-list" data-vblk-body><div class="vdh-empty">Loading…</div></div>' +
+            '</div>';
+        document.body.appendChild(_blkEl);
+        _blkEl.addEventListener('click', function (e) {
+            if (e.target === _blkEl || e.target.closest('[data-vblk-close]')) { blkClose(); return; }
+            var rm = e.target.closest('[data-vblk-remove]');
+            if (rm) {
+                rm.disabled = true;
+                fetch(URL_BLOCKLIST + '/' + rm.getAttribute('data-vblk-remove'), { method: 'DELETE' })
+                    .then(function () { blkLoad(); });
+                return;
+            }
+            if (e.target.closest('[data-vblk-clear]')) {
+                var doClear = function () { postJSON(URL_BLOCKLIST + '/clear', {}).then(function () { blkLoad(); }); };
+                if (typeof showConfirmDialog === 'function') {
+                    showConfirmDialog({ title: 'Clear the blocklist?',
+                        message: 'Every blocked release becomes pickable again on future searches.',
+                        confirmText: 'Clear all', destructive: true }).then(function (ok) { if (ok) doClear(); });
+                } else doClear();
+                return;
+            }
+        });
+        blkLoad();
+    }
+    document.addEventListener('click', function (e) {
+        if (e.target.closest('[data-vblk-open]')) blkOpen();
+    });
 
     document.addEventListener('soulsync:video-page-shown', function (e) {
         if (e.detail === 'video-downloads') start(); else stop();
