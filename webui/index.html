@@ -11309,6 +11309,7 @@
     <script src="{{ url_for('static', filename='search.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-spotify.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='downloads.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='server-activity.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='track-detail.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='wishlist-tools.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='origin-history.js', v=static_v) }}"></script>
@@ -11420,6 +11421,10 @@
         <div class="no-track-message hidden" id="no-track-message"><span>Play a track to get started</span></div>
     </div>
 
+    <button class="activity-float-btn" id="activity-float-btn" onclick="ServerActivity.toggle()" title="Server Activity — live streams">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        <span class="activity-float-badge" id="activity-float-badge" style="display:none">0</span>
+    </button>
     <button class="notif-bell-btn" id="notif-bell-btn" onclick="toggleNotifPanel()" title="Notifications">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
         <span class="notif-bell-badge" id="notif-bell-badge" style="display:none">0</span>
