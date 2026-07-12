@@ -3151,6 +3151,38 @@ def get_system_stats():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/server-activity')
+def get_server_activity():
+    """Live Tautulli-style activity — every active Plex stream (music + video):
+    who's playing what, direct play vs transcode, bandwidth, progress. App-wide;
+    never raises (an unconfigured/down server is a normal state the UI shows)."""
+    try:
+        from core.server_activity import get_activity
+        return jsonify(get_activity())
+    except Exception:
+        logger.exception("server activity failed")
+        return jsonify({"ok": False, "reason": "error", "sessions": [],
+                        "summary": {"streams": 0}})
+
+
+@app.route('/api/server-activity/image')
+def get_server_activity_image():
+    """Proxy a Plex image (poster/art) for the activity view so the token never
+    reaches the browser. ?path=/library/metadata/.../thumb/..."""
+    from flask import Response
+    try:
+        from core.server_activity import fetch_image
+        got = fetch_image(request.args.get("path") or "")
+        if not got:
+            return ("", 404)
+        content, ctype = got
+        return Response(content, mimetype=ctype,
+                        headers={"Cache-Control": "public, max-age=300"})
+    except Exception:
+        logger.exception("server activity image proxy failed")
+        return ("", 404)
+
+
 from core.debug_info import (
     _safe_check,
     get_debug_info as _debug_info_get,

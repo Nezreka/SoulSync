@@ -1,0 +1,181 @@
+"""Live server activity — Plex session normalization (Tautulli-style).
+
+The raw plexapi session objects → clean activity payload is pure + defensive:
+tested here with fakes shaped like plexapi's Video/Track/Player/Session/
+TranscodeSession, so the transcode-decision logic, per-type titles, progress,
+and summary roll-up are all covered without a live Plex.
+"""
+
+from __future__ import annotations
+
+from types import SimpleNamespace as NS
+
+from core.server_activity import get_activity, normalize_session
+
+
+def _media(res="1080", vcodec="hevc", acodec="eac3", bitrate=12000, container="mkv"):
+    return NS(videoResolution=res, videoCodec=vcodec, audioCodec=acodec,
+              bitrate=bitrate, container=container)
+
+
+def _player(state="playing", product="Plex Web", device="Chrome", platform="Chrome", title="Living Room"):
+    return NS(state=state, product=product, device=device, platform=platform, title=title)
+
+
+
+
+def _sess(bandwidth=12000, location="lan", sid="s1"):
+    return NS(bandwidth=bandwidth, location=location, id=sid)
+
+
+def _movie(**kw):
+    # usernames (+ _username) is the LOCAL list; never set `.user`/`.users` — those
+    # would trigger a plex.tv network call in real plexapi, which the code avoids.
+    base = dict(type="movie", sessionKey="10", title="Heat", year=1995, duration=600000,
+                viewOffset=150000, thumb="/t/heat", art="/a/heat",
+                media=[_media()], players=[_player()], usernames=["boulder"], _username="boulder",
+                session=_sess(), transcodeSessions=[])
+    base.update(kw)
+    return NS(**base)
+
+
+def _transcode(vdec="transcode", adec="copy", vcodec="h264", progress=44.0, hw=True):
+    return NS(videoDecision=vdec, audioDecision=adec, videoCodec=vcodec, audioCodec="aac",
+              progress=progress, throttled=False, transcodeHwEncoding=hw,
+              transcodeHwRequested=hw, container="mp4")
+
+
+# ── per-type titles + progress ───────────────────────────────────────────────
+def test_movie_direct_play():
+    s = normalize_session(_movie())
+    assert s["media_type"] == "movie" and s["title"] == "Heat" and s["subtitle"] == "1995"
+    assert s["progress_pct"] == 25              # 150000 / 600000
+    assert s["stream"]["method"] == "Direct Play"
+    assert s["stream"]["video"] == "HEVC" and s["stream"]["resolution"] == "1080P"
+    assert s["user"] == "boulder" and s["player"]["device"] == "Chrome"
+    assert s["bandwidth_kbps"] == 12000 and s["location"] == "lan"
+
+
+def test_episode_transcode_line():
+    ep = _movie(type="episode", title="Ozymandias", grandparentTitle="Breaking Bad",
+                parentIndex=5, index=14, transcodeSessions=[_transcode()])
+    s = normalize_session(ep)
+    assert s["media_type"] == "episode"
+    assert s["subtitle"] == "Breaking Bad · S05E14"
+    assert s["grandparent"] == "Breaking Bad"
+    assert s["stream"]["method"] == "Transcode"
+    assert s["stream"]["video"] == "HEVC → H264"   # source → target on video transcode
+    assert s["stream"]["audio"] == "EAC3"          # audio is 'copy' → no arrow
+    assert s["stream"]["hw"] is True and s["stream"]["transcode_progress"] == 44
+
+
+def test_track_titles_artist_and_album():
+    tr = _movie(type="track", title="Teardrop", grandparentTitle="Massive Attack",
+                parentTitle="Mezzanine", year=None)
+    s = normalize_session(tr)
+    assert s["media_type"] == "track"
+    assert s["subtitle"] == "Massive Attack · Mezzanine"
+
+
+def test_direct_stream_when_only_audio_copies_but_no_video_transcode():
+    # both decisions 'copy' → Direct Stream (remux, not transcode)
+    ep = _movie(transcodeSessions=[_transcode(vdec="copy", adec="copy")])
+    s = normalize_session(ep)
+    assert s["stream"]["method"] == "Direct Stream"
+    assert "→" not in s["stream"]["video"]         # nothing transcoded
+
+
+def test_paused_and_buffering_states_survive():
+    assert normalize_session(_movie(players=[_player(state="paused")]))["state"] == "paused"
+    assert normalize_session(_movie(players=[_player(state="buffering")]))["state"] == "buffering"
+    assert normalize_session(_movie(players=[_player(state="weird")]))["state"] == "playing"
+
+
+def test_missing_attributes_never_raise():
+    # a bare object with almost nothing set
+    s = normalize_session(NS(type="clip"))
+    assert s["title"] == "" and s["user"] == "Someone" and s["progress_pct"] == 0
+    assert s["stream"]["method"] == "Direct Play"
+
+
+# ── the full payload + summary ───────────────────────────────────────────────
+class _FakePlex:
+    friendlyName = "Broque's Plex"
+    version = "1.40.0"
+
+    def __init__(self, sessions):
+        self._s = sessions
+
+    def sessions(self):
+        return self._s
+
+
+def test_get_activity_summarizes(monkeypatch):
+    import core.server_activity as sa
+    plex = _FakePlex([_movie(), _movie(type="episode", transcodeSessions=[_transcode()]),
+                      _movie(session=_sess(location="wan", bandwidth=3000))])
+    monkeypatch.setattr(sa, "_plex_server", lambda db=None: plex)
+    out = get_activity()
+    assert out["ok"] is True
+    assert out["server"]["name"] == "Broque's Plex"
+    sm = out["summary"]
+    assert sm["streams"] == 3 and sm["transcodes"] == 1 and sm["direct_play"] == 2
+    assert sm["total_bandwidth_kbps"] == 12000 + 12000 + 3000
+    assert sm["lan"] == 2 and sm["wan"] == 1
+
+
+def test_get_activity_no_server_is_a_state_not_an_error(monkeypatch):
+    import core.server_activity as sa
+    monkeypatch.setattr(sa, "_plex_server", lambda db=None: None)
+    out = get_activity()
+    assert out["ok"] is False and out["reason"] == "no_server"
+    assert out["sessions"] == [] and out["summary"]["streams"] == 0
+
+
+def test_get_activity_survives_a_bad_session(monkeypatch):
+    import core.server_activity as sa
+
+    class _Boom:
+        friendlyName = "P"
+        version = "1"
+        def sessions(self):
+            good = _movie()
+            bad = property(lambda self: (_ for _ in ()).throw(RuntimeError()))  # noqa
+            return [good, NS(type="movie", media=_BadMedia())]
+
+    monkeypatch.setattr(sa, "_plex_server", lambda db=None: _Boom())
+    out = sa.get_activity()
+    assert out["ok"] is True and out["summary"]["streams"] >= 1   # good one survives
+
+
+class _BadMedia:
+    def __getitem__(self, i):
+        raise RuntimeError("boom")
+
+
+# ── frontend wiring ──────────────────────────────────────────────────────────
+def test_ui_is_wired():
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    idx = (root / "webui" / "index.html").read_text(encoding="utf-8")
+    js = (root / "webui" / "static" / "server-activity.js").read_text(encoding="utf-8")
+    css = (root / "webui" / "static" / "style.css").read_text(encoding="utf-8")
+    # app-wide floating button next to the notif bell + the script include
+    assert 'id="activity-float-btn"' in idx and "ServerActivity.toggle()" in idx
+    assert "server-activity.js" in idx
+    # the drawer + poll + endpoints
+    assert "/api/server-activity" in js and "/api/server-activity/image" in js
+    assert "function card" in js and "function refresh" in js
+    assert "setInterval(refresh, 3000)" in js         # live cadence while open
+    assert "startBadgePoll" in js                     # ambient badge from any page
+    # never touches the network-triggering user thumb — initials avatar instead
+    assert "function initials" in js
+    # the elegant bits exist in CSS
+    assert ".sact-drawer" in css and ".sact-badge--tc" in css and ".activity-live" in css
+
+
+def test_web_server_registers_the_routes():
+    from pathlib import Path
+    ws = (Path(__file__).resolve().parent.parent / "web_server.py").read_text(encoding="utf-8")
+    assert "@app.route('/api/server-activity')" in ws
+    assert "@app.route('/api/server-activity/image')" in ws

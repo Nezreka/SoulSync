@@ -70984,3 +70984,100 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
 /* Collapsed: chevron points right (closed). Expanded: points down (default, open). */
 .nav-section-label.collapsed .nav-section-chevron { transform: rotate(-90deg); }
 .nav-item-hidden { display: none !important; }
+
+/* ══ Live Server Activity (app-wide Tautulli-style view) ══════════════════ */
+.activity-float-btn {
+    position: fixed; bottom: 24px; right: 136px; width: 44px; height: 44px; border-radius: 50%;
+    background: rgba(20, 20, 28, 0.85); backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.08); color: rgba(255, 255, 255, 0.5);
+    cursor: pointer; z-index: 999999; display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4); transition: all 0.2s;
+}
+.activity-float-btn:hover { background: rgba(30, 30, 40, 0.95); color: rgba(255, 255, 255, 0.85);
+    border-color: rgba(255, 255, 255, 0.15); transform: scale(1.05); }
+.activity-float-btn.activity-live { color: #4ade80; border-color: rgba(74, 222, 128, 0.4);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(74, 222, 128, 0.25),
+                0 0 22px rgba(74, 222, 128, 0.28); animation: sactPulse 2.4s ease-in-out infinite; }
+@keyframes sactPulse { 0%, 100% { box-shadow: 0 4px 16px rgba(0,0,0,0.4), 0 0 18px rgba(74,222,128,0.18); }
+    50% { box-shadow: 0 4px 16px rgba(0,0,0,0.4), 0 0 30px rgba(74,222,128,0.42); } }
+.activity-float-badge {
+    position: absolute; top: -2px; right: -2px; min-width: 18px; height: 18px; border-radius: 9px;
+    background: #22c55e; color: #04120a; font-size: 10px; font-weight: 900; display: flex;
+    align-items: center; justify-content: center; padding: 0 4px; line-height: 1;
+    border: 2px solid rgba(16, 16, 16, 0.95);
+}
+
+.sact-scrim-bg { position: fixed; inset: 0; z-index: 999997; background: rgba(0, 0, 0, 0.5);
+    opacity: 0; pointer-events: none; transition: opacity 0.28s ease; }
+.sact-scrim-bg.visible { opacity: 1; pointer-events: auto; }
+
+.sact-drawer {
+    position: fixed; top: 0; right: 0; height: 100vh; width: 452px; max-width: 96vw; z-index: 999998;
+    background: linear-gradient(180deg, #101017, #0b0b10); border-left: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: -24px 0 60px rgba(0, 0, 0, 0.55); display: flex; flex-direction: column;
+    transform: translateX(100%); transition: transform 0.32s cubic-bezier(0.2, 0.8, 0.2, 1); color: #eef1f7;
+}
+.sact-drawer.visible { transform: translateX(0); }
+.sact-head { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 20px 22px 14px; border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
+.sact-head-t { display: flex; align-items: center; gap: 9px; font-size: 17px; font-weight: 800; flex-wrap: wrap; }
+.sact-live-dot { width: 9px; height: 9px; border-radius: 50%; background: #22c55e; flex: 0 0 auto;
+    box-shadow: 0 0 10px rgba(34, 197, 94, 0.8); animation: sactPulse 2.4s ease-in-out infinite; }
+.sact-server { flex-basis: 100%; font-size: 11.5px; font-weight: 600; color: rgba(255, 255, 255, 0.4); }
+.sact-x { background: none; border: 0; color: rgba(255, 255, 255, 0.5); font-size: 27px; line-height: 1; cursor: pointer; }
+.sact-x:hover { color: #fff; }
+.sact-body { flex: 1; overflow-y: auto; padding: 14px 18px 24px; }
+.sact-summary { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.sact-chip { font-size: 12px; font-weight: 700; padding: 5px 11px; border-radius: 9px;
+    background: rgba(255, 255, 255, 0.07); color: rgba(255, 255, 255, 0.72); }
+.sact-chip strong { color: #fff; }
+.sact-chip--hero { background: rgba(74, 222, 128, 0.14); color: #7ee0a0; }
+.sact-chip--tc { background: rgba(245, 158, 11, 0.16); color: #f7c265; }
+
+.sact-list { display: flex; flex-direction: column; gap: 14px; }
+.sact-card { position: relative; border-radius: 14px; overflow: hidden; background: #15151d;
+    border: 1px solid rgba(255, 255, 255, 0.06); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4); }
+.sact-art { position: absolute; inset: 0; background-size: cover; background-position: center;
+    filter: blur(2px) saturate(1.05); transform: scale(1.08); opacity: 0.5; }
+.sact-scrim { position: absolute; inset: 0; background: linear-gradient(115deg, rgba(12,12,18,0.94) 42%, rgba(12,12,18,0.62) 100%); }
+.sact-row { position: relative; display: flex; gap: 13px; padding: 13px 14px 12px; }
+.sact-poster { flex: 0 0 62px; width: 62px; aspect-ratio: 2 / 3; border-radius: 9px; overflow: hidden;
+    background: #0c0c12; border: 1px solid rgba(255, 255, 255, 0.1); box-shadow: 0 4px 14px rgba(0,0,0,0.5); }
+.sact-poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sact-poster--none { display: flex; align-items: center; justify-content: center; font-size: 24px; }
+.sact-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.sact-title { font-size: 14.5px; font-weight: 800; color: #fff; line-height: 1.25;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sact-sub { font-size: 12px; color: rgba(255, 255, 255, 0.6); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sact-meta { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: rgba(255,255,255,0.55); margin-top: 1px; }
+.sact-ava { flex: 0 0 auto; width: 20px; height: 20px; border-radius: 50%; display: inline-flex;
+    align-items: center; justify-content: center; font-size: 9px; font-weight: 800; color: #cfe;
+    background: linear-gradient(135deg, rgba(99,102,241,0.55), rgba(56,189,248,0.45)); }
+.sact-uname { font-weight: 700; color: rgba(255,255,255,0.78); }
+.sact-dot { opacity: 0.4; }
+.sact-dev { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sact-badges { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+.sact-badge { font-size: 10px; font-weight: 800; letter-spacing: 0.03em; padding: 3px 8px; border-radius: 6px; text-transform: uppercase; }
+.sact-badge--ok { background: rgba(34, 197, 94, 0.18); color: #7ee0a0; }
+.sact-badge--ds { background: rgba(56, 189, 248, 0.18); color: #7dd3fc; }
+.sact-badge--tc { background: rgba(245, 158, 11, 0.2); color: #fbbf24; }
+.sact-tag { font-size: 10px; font-weight: 700; padding: 3px 7px; border-radius: 6px;
+    background: rgba(255, 255, 255, 0.08); color: rgba(255, 255, 255, 0.6); }
+.sact-tag--wan { background: rgba(245, 158, 11, 0.15); color: #f7c265; }
+.sact-tag--lan { background: rgba(255, 255, 255, 0.07); color: rgba(255,255,255,0.5); }
+.sact-xline { font-size: 10.5px; color: rgba(255, 255, 255, 0.45); margin-top: 5px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sact-prog { position: relative; height: 4px; background: rgba(255, 255, 255, 0.1); }
+.sact-prog-fill { height: 100%; background: linear-gradient(90deg, #22c55e, #4ade80); transition: width 0.6s ease; }
+.sact-st-paused .sact-prog-fill { background: rgba(255,255,255,0.4); }
+.sact-st-buffering .sact-prog-fill { background: linear-gradient(90deg, #f59e0b, #fbbf24); animation: sactBuf 1s ease-in-out infinite; }
+@keyframes sactBuf { 0%,100% { opacity: 0.6; } 50% { opacity: 1; } }
+.sact-time { position: relative; display: flex; justify-content: space-between; padding: 7px 14px 9px;
+    font-size: 11px; font-weight: 600; color: rgba(255, 255, 255, 0.55); font-variant-numeric: tabular-nums; }
+
+.sact-empty { text-align: center; padding: 48px 20px; color: rgba(255, 255, 255, 0.6); }
+.sact-empty-ic { font-size: 40px; margin-bottom: 12px; }
+.sact-empty-t { font-size: 15px; font-weight: 700; color: rgba(255,255,255,0.8); }
+.sact-empty-s { font-size: 12.5px; margin-top: 6px; color: rgba(255,255,255,0.45); line-height: 1.5; }
+@media (max-width: 560px) { .sact-drawer { width: 100vw; } .activity-float-btn { right: 136px; } }
+@media (prefers-reduced-motion: reduce) { .activity-float-btn.activity-live, .sact-live-dot, .sact-st-buffering .sact-prog-fill { animation: none; } }
