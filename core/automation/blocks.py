@@ -402,7 +402,8 @@ ACTIONS: list[dict] = [
                       {"value": "metadata_gaps", "label": "Metadata Gaps"},
                       {"value": "duplicate_movies", "label": "Duplicates"},
                       {"value": "wishlist_audit", "label": "Wishlist Audit"},
-                      {"value": "youtube_ghosts", "label": "YouTube Ghost Files"}],
+                      {"value": "youtube_ghosts", "label": "YouTube Ghost Files"},
+                      {"value": "watched_cleanup", "label": "Watched Cleanup"}],
           "default": "all"}
      ]},
 ]

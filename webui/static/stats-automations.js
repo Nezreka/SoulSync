@@ -2322,6 +2322,11 @@ const VIDEO_HUB_RECIPES = [
         category: 'Discovery', difficulty: 'beginner', when: { type: 'video_upgrade_completed', config: {} }, do: { type: 'notify_only', config: {} }, then: []
     },
     {
+        id: 'v-watched-cleanup', icon: '🍿', name: 'Weekly Watched Cleanup', desc: 'Every Sunday, flag movies you watched 30+ days ago for cleanup — approve on the Tools page and the files move to the recycle bin.',
+        category: 'Maintenance', difficulty: 'beginner', when: { type: 'weekly_time', config: { days: ['sunday'], time: '06:00' } }, do: { type: 'video_run_repair_job', config: { job_id: 'watched_cleanup' } }, then: [],
+        note: 'Tune the "watched N days ago" threshold on the job\'s cog (Tools → Library Maintenance).'
+    },
+    {
         id: 'v-maintenance-digest', icon: '🔧', name: 'Maintenance Scan Digest', desc: 'One message per maintenance scan with how many findings it raised — the calm alternative to per-finding alerts.',
         category: 'Maintenance', difficulty: 'beginner', when: { type: 'video_repair_scan_completed', config: {} }, do: { type: 'notify_only', config: {} }, then: []
     },
