@@ -19,6 +19,9 @@ class _EmptyVDB:
     def items_by_server_ids(self, ids, server_source=None):
         return []
 
+    def find_library_ref_by_title(self, kind, title, year=None):
+        return None
+
 
 @pytest.fixture(autouse=True)
 def _isolate(monkeypatch):
@@ -390,7 +393,26 @@ def test_resolve_library_links(monkeypatch):
     assert sessions[0]["link"] == {"kind": "movie", "id": 7, "source": "library"}
     assert sessions[1]["link"] == {"kind": "show", "id": 9, "source": "library"}
     assert sessions[2]["link"] is None                # not in library → not clickable
-    assert all("_link_sid" not in s for s in sessions)   # internal field cleaned up
+    assert all("_link_sid" not in s for s in sessions)   # internal fields cleaned up
+    assert all("_link_title" not in s for s in sessions)
+
+
+def test_resolve_falls_back_to_title_year_when_id_misses(monkeypatch):
+    import core.server_activity as sa
+
+    class _VDB:
+        def items_by_server_ids(self, ids, server_source=None):
+            return []   # id doesn't line up (re-scan / different server_source)
+
+        def find_library_ref_by_title(self, kind, title, year=None):
+            if kind == "movie" and title == "Heat" and year == 1995:
+                return 42
+            return None
+    monkeypatch.setattr("api.video.get_video_db", lambda: _VDB())
+    sessions = [{"media_type": "movie", "_link_sid": "nope", "_link_title": "Heat",
+                 "_link_year": 1995, "link": None}]
+    sa._resolve_library_links(sessions)
+    assert sessions[0]["link"] == {"kind": "movie", "id": 42, "source": "library"}
 
 
 def test_resolve_links_kind_mismatch_is_ignored(monkeypatch):

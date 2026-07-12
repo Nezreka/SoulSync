@@ -71211,8 +71211,12 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
 
 /* Server Activity — click-through to the SoulSync detail page */
 .sact-card--link { cursor: pointer; }
-.sact-card--link:hover .sact-title { color: rgb(var(--vd-accent-rgb, 88 101 242)); }
-.sact-open { display: inline-block; margin-left: 6px; font-size: 12px; font-weight: 800;
-    color: rgb(var(--vd-accent-rgb, 88 101 242)); opacity: 0; transform: translateX(-3px);
-    transition: opacity 0.15s ease, transform 0.15s ease; vertical-align: 1px; }
-.sact-card--link:hover .sact-open { opacity: 1; transform: none; }
+.sact-card--link .sact-title { color: rgb(var(--vd-accent-rgb, 88 101 242)); }
+.sact-card--link:hover .sact-title { filter: brightness(1.25); }
+/* a PERSISTENT 'Open' pill so it's obviously clickable (was hover-only, easy to miss) */
+.sact-open { display: inline-flex; align-items: center; margin-left: 8px; font-size: 9.5px; font-weight: 800;
+    letter-spacing: 0.04em; text-transform: uppercase; color: rgb(var(--vd-accent-rgb, 88 101 242));
+    background: rgba(var(--vd-accent-rgb, 88 101 242), 0.16); padding: 2px 7px; border-radius: 6px;
+    vertical-align: 2px; transition: all 0.15s ease; }
+.sact-open::after { content: 'Open ↗'; }
+.sact-card--link:hover .sact-open { background: rgba(var(--vd-accent-rgb, 88 101 242), 0.3); }

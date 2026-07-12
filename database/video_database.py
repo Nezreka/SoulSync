@@ -3122,6 +3122,28 @@ class VideoDatabase:
         return [{"tmdb_id": r.get("tmdb_id"), "title": r.get("title"), "year": r.get("year")}
                 for r in rows]
 
+    def find_library_ref_by_title(self, kind, title, year=None):
+        """A library movie/show id matched by title (+ year for movies) — the
+        fallback the live-activity click-through uses when the native server id
+        doesn't line up. None when not owned."""
+        if not title:
+            return None
+        table = "movies" if str(kind) == "movie" else "shows"
+        conn = self._get_connection()
+        try:
+            if year:
+                r = conn.execute(f"SELECT id FROM {table} WHERE title=? COLLATE NOCASE "
+                                 "AND year=? LIMIT 1", (str(title), year)).fetchone()
+                if r:
+                    return r["id"]
+            r = conn.execute(f"SELECT id FROM {table} WHERE title=? COLLATE NOCASE LIMIT 1",
+                             (str(title),)).fetchone()
+            return r["id"] if r else None
+        except sqlite3.Error:
+            return None
+        finally:
+            conn.close()
+
     def items_by_server_ids(self, server_ids, server_source=None) -> list:
         """Library items (movies + shows) matching the given native server ids —
         maps a server collection's membership back to our rows for adoption.
