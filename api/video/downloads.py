@@ -488,11 +488,13 @@ def register_routes(bp):
 
         body = request.get_json(silent=True) or {}
         source = str(body.get("source") or "soulseek").lower()
-        if source != "soulseek":
-            return jsonify({"ok": False, "error": "Only Soulseek grabs are wired up so far."}), 400
+        if source not in ("soulseek", "torrent", "usenet"):
+            return jsonify({"ok": False, "error": "Unsupported download source."}), 400
         username, filename = body.get("username"), body.get("filename")
-        if not username or not filename:
+        if source == "soulseek" and (not username or not filename):
             return jsonify({"ok": False, "error": "Missing the release's source info."}), 400
+        if source in ("torrent", "usenet") and not body.get("download_url"):
+            return jsonify({"ok": False, "error": "Missing the release's download URL."}), 400
 
         db = get_video_db()
         paths = {k: db.get_setting(k) or "" for k in ("movies_path", "tv_path", "youtube_path")}
@@ -515,31 +517,44 @@ def register_routes(bp):
                 and (_ctx["season"], _ctx["episode"]) in _active_episode_keys(db, body.get("title") or "")):
             return jsonify({"ok": True, "already": True})
 
-        started = start_download(username, filename, body.get("size_bytes") or 0)
-        if not started.get("ok"):
-            return jsonify({"ok": False, "error": started.get("error") or "slskd refused the download."}), 502
-
         import json as _json
         from core.video.slskd_search import build_query
-        # The OTHER accepted results become the retry pool; the search context drives
-        # the alternate-query requery when the pool runs dry.
         ctx = body.get("search_ctx") if isinstance(body.get("search_ctx"), dict) else {}
-        candidates = [c for c in (body.get("candidates") or []) if isinstance(c, dict) and c.get("filename") != filename]
-        first_query = build_query(ctx.get("scope") or body.get("kind") or "movie", ctx.get("title") or body.get("title"),
-                                  year=ctx.get("year"), season=ctx.get("season"), episode=ctx.get("episode"))
-        dl_id = db.add_video_download({
+        common = {
             "kind": str(body.get("kind") or "movie"), "title": body.get("title"),
-            "release_title": body.get("release_title") or body.get("filename"),
-            "source": "soulseek", "username": username, "filename": filename,
+            "release_title": body.get("release_title") or body.get("filename") or body.get("title"),
             "size_bytes": int(body.get("size_bytes") or 0), "quality_label": body.get("quality_label"),
             "target_dir": target, "status": "downloading",
             "media_id": (str(body.get("media_id")) if body.get("media_id") is not None else None),
             "media_source": body.get("media_source"), "year": body.get("year"),
-            "poster_url": body.get("poster_url"),
-            "candidates": _json.dumps(candidates), "search_ctx": _json.dumps(ctx),
-            "tried_queries": _json.dumps([first_query] if first_query else []),
-            "tried_files": _json.dumps([filename]), "attempts": 0,
-        })
+            "poster_url": body.get("poster_url"), "search_ctx": _json.dumps(ctx), "attempts": 0,
+        }
+        if source == "soulseek":
+            started = start_download(username, filename, body.get("size_bytes") or 0)
+            if not started.get("ok"):
+                return jsonify({"ok": False, "error": started.get("error") or "slskd refused the download."}), 502
+            # The OTHER accepted results become the retry pool; the search context drives
+            # the alternate-query requery when the pool runs dry.
+            candidates = [c for c in (body.get("candidates") or []) if isinstance(c, dict) and c.get("filename") != filename]
+            first_query = build_query(ctx.get("scope") or body.get("kind") or "movie", ctx.get("title") or body.get("title"),
+                                      year=ctx.get("year"), season=ctx.get("season"), episode=ctx.get("episode"))
+            dl_id = db.add_video_download({**common, "source": "soulseek", "username": username, "filename": filename,
+                                           "candidates": _json.dumps(candidates),
+                                           "tried_queries": _json.dumps([first_query] if first_query else []),
+                                           "tried_files": _json.dumps([filename])})
+        else:
+            # torrent / usenet — hand the magnet/NZB to the SHARED download client; the monitor
+            # tracks progress + completion by client_ref. No Soulseek-style alternate requery.
+            from core.video.client_grab import grab
+            res = grab(source, body.get("download_url"))
+            if not res.get("ok"):
+                return jsonify({"ok": False, "error": res.get("error") or "The download client refused it."}), 502
+            dl_id = db.add_video_download({**common, "source": source,
+                                           "username": body.get("username"),   # indexer name (display only)
+                                           "filename": body.get("release_title") or body.get("title"),
+                                           "client_ref": res["ref"],
+                                           "candidates": _json.dumps([]), "tried_queries": _json.dumps([]),
+                                           "tried_files": _json.dumps([])})
         ensure_started(get_video_db)
         return jsonify({"ok": True, "id": dl_id})
 

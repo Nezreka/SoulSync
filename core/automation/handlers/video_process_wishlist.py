@@ -141,20 +141,26 @@ def build_download_record(item: Dict[str, Any], best: Dict[str, Any], candidates
     peer = {k: best.get(k) for k in ("slots", "queue", "speed", "availability") if best.get(k) is not None}
     if peer:
         ctx = {**ctx, "peer": peer}
-    rest = [c for c in (candidates or []) if c.get("filename") != best.get("filename")]
     media_id = str(item.get("tmdb_id") if media_type == "movie" else item.get("show_tmdb_id"))
-    return {
+    source = str(best.get("source") or "soulseek").lower()
+    common = {
         "kind": media_type, "title": ctx["title"],
         "release_title": best.get("title") or best.get("filename"),
-        "source": "soulseek", "username": best.get("username"), "filename": best.get("filename"),
         "size_bytes": int(best.get("size_bytes") or 0), "quality_label": best.get("quality_label"),
         "target_dir": target_dir, "status": "downloading",
         "media_id": media_id, "media_source": "tmdb", "year": ctx.get("year"),
-        "poster_url": item.get("poster_url"),
-        "candidates": json.dumps(rest), "search_ctx": json.dumps(ctx),
-        "tried_queries": json.dumps([query] if query else []),
-        "tried_files": json.dumps([best.get("filename")]), "attempts": 0,
+        "poster_url": item.get("poster_url"), "search_ctx": json.dumps(ctx), "attempts": 0,
     }
+    if source == "soulseek":
+        rest = [c for c in (candidates or []) if c.get("filename") != best.get("filename")]
+        return {**common, "source": "soulseek", "username": best.get("username"),
+                "filename": best.get("filename"), "candidates": json.dumps(rest),
+                "tried_queries": json.dumps([query] if query else []),
+                "tried_files": json.dumps([best.get("filename")])}
+    # torrent / usenet — tracked by the client ref the grab returned; no Soulseek requery pool.
+    return {**common, "source": source, "username": best.get("username"),   # indexer (display)
+            "filename": best.get("title") or best.get("filename"), "client_ref": best.get("_client_ref"),
+            "candidates": json.dumps([]), "tried_queries": json.dumps([]), "tried_files": json.dumps([])}
 
 
 # ── production seams ──────────────────────────────────────────────────────────
@@ -177,24 +183,66 @@ def _default_target_dir(media_type: str) -> str:
     return db.get_setting("tv_path") or ""
 
 
-def _default_search(item: Dict[str, Any], media_type: str):
-    """A bounded blocking Soulseek search → ranked candidates (same path the retry worker +
-    manual search use). Returns [] for a real empty result, or **None** if the search never
-    ran (slskd not configured / errored / rate-limited) so the caller can say so."""
-    from api.video.downloads import _evaluate_hits
-    from core.video.download_monitor import _search_for_retry
-    from core.video.quality_profile import load as load_profile
-    from core.video.slskd_search import build_query
+def _search_one_source(source: str, item: Dict[str, Any], media_type: str):
+    """Search ONE source → (ranked candidates tagged with source, error). soulseek via slskd,
+    torrent/usenet via Prowlarr. Returns (None, error) when the search couldn't run."""
     from api.video import get_video_db
+    from api.video.downloads import _evaluate_hits
+    from core.video.quality_profile import load as load_profile
     ctx = search_context(item, media_type)
-    query = build_query(ctx["scope"], ctx["title"], year=ctx.get("year"),
-                        season=ctx.get("season"), episode=ctx.get("episode"))
-    res = _search_for_retry(query) or {}
-    if res.get("started") is False:
-        return None, res.get("error")       # slskd didn't accept the search — pass the reason
     profile = load_profile(get_video_db())
-    return _evaluate_hits(res.get("hits") or [], profile, ctx["scope"],
-                          ctx.get("season"), ctx.get("episode")), None
+    if source == "soulseek":
+        from core.video.download_monitor import _search_for_retry
+        from core.video.slskd_search import build_query
+        query = build_query(ctx["scope"], ctx["title"], year=ctx.get("year"),
+                            season=ctx.get("season"), episode=ctx.get("episode"))
+        res = _search_for_retry(query) or {}
+        if res.get("started") is False:
+            return None, res.get("error")
+        hits = res.get("hits") or []
+    elif source in ("torrent", "usenet"):
+        from core.video.prowlarr_search import prowlarr_search
+        pres = prowlarr_search(ctx["scope"], ctx["title"], year=ctx.get("year"),
+                               season=ctx.get("season"), episode=ctx.get("episode"), source=source)
+        if not pres.get("configured"):
+            return None, "Prowlarr not configured"
+        if pres.get("error"):
+            return None, pres["error"]
+        hits = pres["hits"]
+    else:
+        return None, "unsupported source %r" % source
+    cands = _evaluate_hits(hits, profile, ctx["scope"], ctx.get("season"), ctx.get("episode"))
+    for c in cands:
+        c["source"] = source
+    return cands, None
+
+
+def _default_search(item: Dict[str, Any], media_type: str):
+    """Ranked candidates for a wished item, honoring the download mode/order. In hybrid mode the
+    sources are tried IN ORDER — the first that yields an ACCEPTED release wins (mirrors the
+    music per-item quality-fallback). Returns [] for a real empty result across all sources, or
+    **None** (with the error) if no source's search could even run."""
+    from core.video import download_config
+    from api.video import get_video_db
+    cfg = download_config.load(get_video_db())
+    mode = str(cfg.get("download_mode") or "soulseek")
+    chain = (cfg.get("hybrid_order") or ["soulseek"]) if mode == "hybrid" else [mode]
+    last_err = None
+    fallback = None      # hits that didn't pass the profile — kept so the caller can say 'rejected'
+    for src in chain:
+        cands, err = _search_one_source(src, item, media_type)
+        if cands is None:
+            last_err = err
+            continue
+        if any(c.get("accepted") for c in cands):
+            return cands, None                       # first source with a usable release wins
+        if cands:
+            fallback = cands
+    if fallback is not None:
+        return fallback, None                        # → 'rejected' (hits, none accepted)
+    if last_err is not None:
+        return None, last_err                        # → 'search didn't run'
+    return [], None                                  # → 'source empty'
 
 
 def _default_enqueue(item: Dict[str, Any], best: Dict[str, Any], candidates: List[Dict[str, Any]],
@@ -204,16 +252,26 @@ def _default_enqueue(item: Dict[str, Any], best: Dict[str, Any], candidates: Lis
     from api.video import get_video_db
     from core.video import disk_guard, organization
     from core.video.download_monitor import ensure_started
-    from core.video.slskd_download import start_download
     from core.video.slskd_search import build_query
     ok_room, free = disk_guard.has_room(target_dir, organization.load(get_video_db()))
     if not ok_room:
         logger.warning("disk guard: %.1f GB free on %s — skipping grab of %s",
                        free or 0, target_dir, item.get("title"))
         return False
-    started = start_download(best.get("username"), best.get("filename"), best.get("size_bytes") or 0)
-    if not started.get("ok"):
-        return False
+    source = str(best.get("source") or "soulseek").lower()
+    if source == "soulseek":
+        from core.video.slskd_download import start_download
+        started = start_download(best.get("username"), best.get("filename"), best.get("size_bytes") or 0)
+        if not started.get("ok"):
+            return False
+    else:
+        # torrent / usenet — hand off to the shared client; carry the returned ref into the row.
+        from core.video.client_grab import grab
+        res = grab(source, best.get("download_url"))
+        if not res.get("ok"):
+            logger.warning("video hybrid: %s grab refused for %s: %s", source, item.get("title"), res.get("error"))
+            return False
+        best = {**best, "_client_ref": res["ref"]}
     ctx = search_context(item, media_type)
     query = build_query(ctx["scope"], ctx["title"], year=ctx.get("year"),
                         season=ctx.get("season"), episode=ctx.get("episode"))
