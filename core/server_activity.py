@@ -233,6 +233,77 @@ def get_activity(db=None) -> Dict[str, Any]:
                       str(_g(srv, "version", "") or ""))
 
 
+# ── history (Phase 2) ────────────────────────────────────────────────────────
+
+_lookup_cache: Dict[str, Any] = {"accounts": {}, "devices": {}, "at": 0.0, "key": ""}
+
+
+def _lookups(srv, key: str) -> tuple:
+    """(accountID→name, deviceID→name). Accounts/devices change rarely, so this
+    is cached ~5min — history rows resolve their user/device without a per-row
+    network call."""
+    now = time.time()
+    if _lookup_cache["key"] == key and now - _lookup_cache["at"] < 300 and _lookup_cache["accounts"]:
+        return _lookup_cache["accounts"], _lookup_cache["devices"]
+    accounts, devices = {}, {}
+    try:
+        for a in srv.systemAccounts():
+            accounts[_g(a, "id")] = str(_g(a, "name", "") or _g(a, "title", "") or "")
+    except Exception:   # noqa: BLE001
+        logger.debug("systemAccounts failed", exc_info=True)
+    try:
+        for d in srv.systemDevices():
+            devices[_g(d, "id")] = str(_g(d, "name", "") or _g(d, "clientIdentifier", "") or "")
+    except Exception:   # noqa: BLE001
+        logger.debug("systemDevices failed", exc_info=True)
+    _lookup_cache.update(accounts=accounts, devices=devices, at=now, key=key)
+    return accounts, devices
+
+
+def normalize_history(item: Any, accounts: Dict, devices: Dict) -> Dict[str, Any]:
+    """One raw plexapi history item → a clean history row. Defensive."""
+    mtype = str(_g(item, "type", "") or "").lower()
+    names = _title_of(item, mtype)
+    viewed = _g(item, "viewedAt")
+    epoch = 0
+    try:
+        epoch = int(viewed.timestamp()) if viewed else 0
+    except Exception:   # noqa: BLE001
+        epoch = 0
+    return {
+        "title": names["title"],
+        "subtitle": names["subtitle"],
+        "media_type": mtype,
+        "user": accounts.get(_g(item, "accountID"), "") or "Someone",
+        "device": devices.get(_g(item, "deviceID"), "") or "",
+        "thumb": str(_g(item, "grandparentThumb") or _g(item, "parentThumb") or _g(item, "thumb") or ""),
+        "viewed_epoch": epoch,
+    }
+
+
+def get_history(db=None, limit: int = 40) -> Dict[str, Any]:
+    """Recent watch/listen history (Tautulli's History). Never raises."""
+    srv = _plex_server(db)
+    if srv is None:
+        return {"ok": False, "reason": "no_server", "history": []}
+    try:
+        limit = max(1, min(200, int(limit)))
+        items = srv.history(maxresults=limit)
+    except Exception:   # noqa: BLE001
+        logger.debug("plex history() failed", exc_info=True)
+        return {"ok": False, "reason": "unreachable", "history": []}
+    key = str(_g(srv, "machineIdentifier", "") or "plex")
+    accounts, devices = _lookups(srv, key)
+    rows = []
+    for item in items or []:
+        try:
+            rows.append(normalize_history(item, accounts, devices))
+        except Exception:   # noqa: BLE001
+            logger.debug("history normalize failed", exc_info=True)
+    rows.sort(key=lambda r: r["viewed_epoch"], reverse=True)   # newest first
+    return {"ok": True, "history": rows}
+
+
 def fetch_image(path: str, db=None) -> Optional[tuple]:
     """(bytes, content_type) for a Plex image path — proxied server-side so the
     token never reaches the browser. None on any failure."""

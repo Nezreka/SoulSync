@@ -71081,3 +71081,25 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
 .sact-empty-s { font-size: 12.5px; margin-top: 6px; color: rgba(255,255,255,0.45); line-height: 1.5; }
 @media (max-width: 560px) { .sact-drawer { width: 100vw; } .activity-float-btn { right: 136px; } }
 @media (prefers-reduced-motion: reduce) { .activity-float-btn.activity-live, .sact-live-dot, .sact-st-buffering .sact-prog-fill { animation: none; } }
+
+/* Server Activity — tabs + history rows (Phase 2) */
+.sact-tabs { display: flex; gap: 4px; padding: 10px 18px 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
+.sact-tab { flex: 0 0 auto; padding: 9px 16px; background: none; border: 0; cursor: pointer;
+    font-size: 13px; font-weight: 700; color: rgba(255,255,255,0.5); border-bottom: 2px solid transparent;
+    transition: color 0.15s ease, border-color 0.15s ease; }
+.sact-tab:hover { color: rgba(255,255,255,0.8); }
+.sact-tab--on { color: #fff; border-bottom-color: #22c55e; }
+.sact-hlist { display: flex; flex-direction: column; }
+.sact-hrow { display: flex; align-items: center; gap: 12px; padding: 11px 4px;
+    border-bottom: 1px solid rgba(255,255,255,0.05); }
+.sact-hrow:last-child { border-bottom: 0; }
+.sact-hthumb { flex: 0 0 44px; width: 44px; aspect-ratio: 2/3; border-radius: 7px; overflow: hidden;
+    background: #0c0c12; border: 1px solid rgba(255,255,255,0.08); }
+.sact-hthumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sact-hthumb--none { display: flex; align-items: center; justify-content: center; font-size: 18px; }
+.sact-hinfo { flex: 1; min-width: 0; }
+.sact-htitle { font-size: 13.5px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sact-hsub { font-size: 11.5px; color: rgba(255,255,255,0.5); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+.sact-hmeta { display: flex; align-items: center; gap: 6px; font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 4px; }
+.sact-hwhen { flex: 0 0 auto; font-size: 11px; font-weight: 600; color: rgba(255,255,255,0.4);
+    font-variant-numeric: tabular-nums; white-space: nowrap; }

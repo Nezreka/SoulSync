@@ -153,6 +153,63 @@ class _BadMedia:
         raise RuntimeError("boom")
 
 
+# ── history (Phase 2) ────────────────────────────────────────────────────────
+from datetime import datetime  # noqa: E402
+
+from core.server_activity import get_history, normalize_history  # noqa: E402
+
+
+def _hist(**kw):
+    base = dict(type="episode", title="Ozymandias", grandparentTitle="Breaking Bad",
+                parentIndex=5, index=14, thumb="/t", grandparentThumb="/gt",
+                accountID=2, deviceID=7, viewedAt=datetime(2026, 7, 12, 3, 0, 0))
+    base.update(kw)
+    return NS(**base)
+
+
+def test_history_row_resolves_user_and_device():
+    accounts, devices = {2: "boulder"}, {7: "Apple TV"}
+    r = normalize_history(_hist(), accounts, devices)
+    assert r["title"] == "Ozymandias" and r["subtitle"] == "Breaking Bad · S05E14"
+    assert r["user"] == "boulder" and r["device"] == "Apple TV"
+    assert r["viewed_epoch"] > 0
+
+
+def test_history_unknown_account_falls_back():
+    r = normalize_history(_hist(accountID=999), {2: "boulder"}, {})
+    assert r["user"] == "Someone" and r["device"] == ""
+
+
+class _HistPlex:
+    machineIdentifier = "abc"
+
+    def history(self, maxresults=None):
+        return [_hist(viewedAt=datetime(2026, 7, 12, 1, 0, 0)),
+                _hist(title="Newer", viewedAt=datetime(2026, 7, 12, 9, 0, 0))]
+
+    def systemAccounts(self):
+        return [NS(id=2, name="boulder")]
+
+    def systemDevices(self):
+        return [NS(id=7, name="Apple TV")]
+
+
+def test_get_history_sorts_newest_first(monkeypatch):
+    import core.server_activity as sa
+    sa._lookup_cache.update(accounts={}, devices={}, at=0.0, key="")   # clear cache
+    monkeypatch.setattr(sa, "_plex_server", lambda db=None: _HistPlex())
+    out = get_history()
+    assert out["ok"] is True and len(out["history"]) == 2
+    assert out["history"][0]["title"] == "Newer"          # newest first
+    assert out["history"][0]["user"] == "boulder"
+
+
+def test_get_history_no_server(monkeypatch):
+    import core.server_activity as sa
+    monkeypatch.setattr(sa, "_plex_server", lambda db=None: None)
+    assert get_history()["ok"] is False
+
+
 # ── frontend wiring ──────────────────────────────────────────────────────────
 def test_ui_is_wired():
     from pathlib import Path
@@ -170,8 +227,13 @@ def test_ui_is_wired():
     assert "startBadgePoll" in js                     # ambient badge from any page
     # never touches the network-triggering user thumb — initials avatar instead
     assert "function initials" in js
+    # tabbed: Activity + History (Phase 2)
+    assert 'data-sact-tab="activity"' in js and 'data-sact-tab="history"' in js
+    assert "function historyRow" in js and "function ago" in js
+    assert "/api/server-activity/history" in js
     # the elegant bits exist in CSS
     assert ".sact-drawer" in css and ".sact-badge--tc" in css and ".activity-live" in css
+    assert ".sact-tab--on" in css and ".sact-hrow" in css
 
 
 def test_web_server_registers_the_routes():
@@ -179,3 +241,4 @@ def test_web_server_registers_the_routes():
     ws = (Path(__file__).resolve().parent.parent / "web_server.py").read_text(encoding="utf-8")
     assert "@app.route('/api/server-activity')" in ws
     assert "@app.route('/api/server-activity/image')" in ws
+    assert "@app.route('/api/server-activity/history')" in ws
