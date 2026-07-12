@@ -62,6 +62,7 @@ DEFAULTS = {
     # embedded subtitles, baked into the file at download time.
     "youtube_sponsorblock": "off",     # off | mark (chapters) | remove (cut segments)
     "youtube_embed_subs": False,       # embed subs (subtitle_langs) into the container
+    "min_free_disk_gb": 0,             # refuse new grabs when the target drive has less (0 = off)
 }
 
 _TRANSFER_MODES = ("copy", "move")
@@ -100,6 +101,11 @@ def normalize(raw: Any) -> dict:
             pass
     if "recycle_path" in raw:
         d["recycle_path"] = str(raw.get("recycle_path") or "").strip()
+    if "min_free_disk_gb" in raw:
+        try:
+            d["min_free_disk_gb"] = max(0, min(10000, float(raw.get("min_free_disk_gb") or 0)))
+        except (TypeError, ValueError):
+            pass
     tm = str(raw.get("transfer_mode") or "").strip().lower()
     if tm in _TRANSFER_MODES:
         d["transfer_mode"] = tm

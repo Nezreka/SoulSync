@@ -473,6 +473,11 @@ def register_routes(bp):
         if not paths["movies_path"]:
             paths["movies_path"] = db.get_setting("transfer_path") or ""
         target = target_dir_for(body.get("kind"), paths)
+        from core.video import disk_guard, organization
+        ok_room, free = disk_guard.has_room(target, organization.load(get_video_db()))
+        if not ok_room:
+            return jsonify({"ok": False, "error": "Drive is nearly full (%.1f GB free) — "
+                            "below your minimum free space setting." % (free or 0)}), 507
         if not target:
             return jsonify({"ok": False, "error": "Set the library folder for this type on Settings → Downloads."}), 400
 
@@ -537,6 +542,11 @@ def register_routes(bp):
         db = get_video_db()
         paths = {k: db.get_setting(k) or "" for k in ("movies_path", "tv_path", "youtube_path")}
         target = target_dir_for("show", paths)
+        from core.video import disk_guard, organization
+        ok_room, free = disk_guard.has_room(target, organization.load(get_video_db()))
+        if not ok_room:
+            return jsonify({"ok": False, "error": "Drive is nearly full (%.1f GB free) — "
+                            "below your minimum free space setting." % (free or 0)}), 507
         if not target:
             return jsonify({"ok": False, "error": "Set the TV library folder on Settings → Downloads."}), 400
 

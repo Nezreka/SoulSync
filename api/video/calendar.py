@@ -77,3 +77,49 @@ def register_routes(bp):
         except Exception:
             logger.exception("video calendar failed")
             return jsonify({"error": "calendar failed"}), 500
+
+    @bp.route("/calendar.ics", methods=["GET"])
+    def video_calendar_ics():
+        """iCal feed of upcoming episodes (Sonarr parity) — subscribe from any
+        calendar app. ?days= (default 14, max 60) and ?scope=watchlist|all."""
+        from . import get_video_db
+
+        def _ics_escape(t):
+            return (str(t or "").replace("\\", "\\\\").replace(";", "\\;")
+                    .replace(",", "\\,").replace("\n", "\\n"))
+
+        try:
+            days = max(1, min(request.args.get("days", default=14, type=int) or 14, 60))
+            scope = (request.args.get("scope") or "watchlist").lower()
+            start = date.today()
+            end = start + timedelta(days=days - 1)
+            from core.video.sources import resolve_video_server
+            eps = get_video_db().calendar_upcoming(
+                start.isoformat(), end.isoformat(),
+                server_source=resolve_video_server(), watchlist_only=(scope != "all"))
+            lines = ["BEGIN:VCALENDAR", "VERSION:2.0",
+                     "PRODID:-//SoulSync//Video Calendar//EN",
+                     "X-WR-CALNAME:SoulSync Airings", "CALSCALE:GREGORIAN"]
+            for e in eps:
+                day = str(e.get("air_date") or "")[:10].replace("-", "")
+                if len(day) != 8:
+                    continue
+                code = "S%02dE%02d" % (e.get("season_number") or 0, e.get("episode_number") or 0)
+                summary = "%s %s" % (e.get("show_title") or "?", code)
+                if e.get("title"):
+                    summary += " — " + e["title"]
+                lines += ["BEGIN:VEVENT",
+                          "UID:ss-%s-%s-%s@soulsync" % (e.get("show_tmdb_id") or e.get("show_id"),
+                                                        e.get("season_number"), e.get("episode_number")),
+                          "DTSTART;VALUE=DATE:" + day,
+                          "SUMMARY:" + _ics_escape(summary),
+                          "DESCRIPTION:" + _ics_escape(e.get("overview") or ""),
+                          "STATUS:CONFIRMED", "END:VEVENT"]
+            lines.append("END:VCALENDAR")
+            body = "\r\n".join(lines) + "\r\n"
+            from flask import Response
+            return Response(body, mimetype="text/calendar",
+                            headers={"Content-Disposition": "inline; filename=soulsync.ics"})
+        except Exception:
+            logger.exception("video calendar.ics failed")
+            return jsonify({"error": "calendar feed failed"}), 500

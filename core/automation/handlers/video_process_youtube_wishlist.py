@@ -25,6 +25,9 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from core.automation.deps import AutomationDeps
+from utils.logging_config import get_logger
+
+logger = get_logger("automation.video_process_youtube_wishlist")
 
 
 YT_MAX_FAIL = 3   # give up re-grabbing a video after this many failed attempts
@@ -101,8 +104,14 @@ def _default_enqueue(video: Dict[str, Any], root: str) -> Any:
     the row id."""
     import json
     from api.video import get_video_db
+    from core.video import disk_guard, organization
     from core.video.sources import resolve_video_server
     db = get_video_db()
+    ok_room, free = disk_guard.has_room(root, organization.load(db))
+    if not ok_room:
+        logger.warning("disk guard: %.1f GB free on %s — not queuing %s",
+                       free or 0, root, video.get("video_title"))
+        return None
     ctx = enqueue_ctx(video, db.get_channel_settings(video.get("channel_id")))
     ctx["server_source"] = resolve_video_server()
     return db.add_video_download({

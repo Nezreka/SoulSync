@@ -6560,6 +6560,12 @@
                                 </div>
 
                                 <div class="form-group">
+                                    <label>Minimum free disk space (GB):</label>
+                                    <input type="number" id="vo-min-free" min="0" step="1" placeholder="0 = off">
+                                    <small class="settings-hint">New grabs are refused (and the wishlist drains pause) when the target drive has less free space than this &mdash; so a download can never fill the disk. 0 disables the check.</small>
+                                </div>
+
+                                <div class="form-group">
                                     <label>YouTube: SponsorBlock</label>
                                     <select id="vo-sponsorblock">
                                         <option value="off">Off</option>

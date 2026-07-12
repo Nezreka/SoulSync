@@ -27,6 +27,9 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from core.automation.deps import AutomationDeps
+from utils.logging_config import get_logger
+
+logger = get_logger("automation.video_process_wishlist")
 
 
 # ── pure helpers ──────────────────────────────────────────────────────────────
@@ -199,9 +202,15 @@ def _default_enqueue(item: Dict[str, Any], best: Dict[str, Any], candidates: Lis
     """Start the slskd transfer + write the download row (exactly like the manual flow),
     then ensure the monitor is running. Returns True if slskd accepted it."""
     from api.video import get_video_db
+    from core.video import disk_guard, organization
     from core.video.download_monitor import ensure_started
     from core.video.slskd_download import start_download
     from core.video.slskd_search import build_query
+    ok_room, free = disk_guard.has_room(target_dir, organization.load(get_video_db()))
+    if not ok_room:
+        logger.warning("disk guard: %.1f GB free on %s — skipping grab of %s",
+                       free or 0, target_dir, item.get("title"))
+        return False
     started = start_download(best.get("username"), best.get("filename"), best.get("size_bytes") or 0)
     if not started.get("ok"):
         return False

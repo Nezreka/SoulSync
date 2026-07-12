@@ -745,6 +745,7 @@
         chk('vo-recycle', _videoOrg.recycle_deletes);
         set('vo-recycle-days', _videoOrg.recycle_keep_days || 7);
         set('vo-recycle-path', _videoOrg.recycle_path || '');
+        set('vo-min-free', _videoOrg.min_free_disk_gb || 0);
         set('vo-sponsorblock', _videoOrg.youtube_sponsorblock || 'off');
         chk('vo-yt-subs', _videoOrg.youtube_embed_subs);
         renderOrgPreview();
@@ -773,6 +774,7 @@
             recycle_deletes: on('vo-recycle'),
             recycle_keep_days: val('vo-recycle-days'),
             recycle_path: val('vo-recycle-path'),
+            min_free_disk_gb: val('vo-min-free'),
             youtube_sponsorblock: val('vo-sponsorblock'),
             youtube_embed_subs: on('vo-yt-subs')
         };
@@ -799,7 +801,7 @@
         });
         ['vo-transfer-mode', 'vo-verify', 'vo-replace', 'vo-subs', 'vo-artwork', 'vo-nfo',
             'vo-subs-dl', 'vo-sub-langs', 'vo-recycle', 'vo-recycle-days', 'vo-recycle-path',
-            'vo-sponsorblock', 'vo-yt-subs'].forEach(function (id) {
+            'vo-sponsorblock', 'vo-yt-subs', 'vo-min-free'].forEach(function (id) {
             var el = document.getElementById(id);
             if (el) el.addEventListener('change', function () { saveOrganization(false); });
         });
@@ -814,7 +816,7 @@
                     carry_subtitles: true, save_artwork: false, write_nfo: false,
                     download_subtitles: false, subtitle_langs: 'en',
                     recycle_deletes: true, recycle_keep_days: 7, recycle_path: '',
-                    youtube_sponsorblock: 'off', youtube_embed_subs: false })
+                    youtube_sponsorblock: 'off', youtube_embed_subs: false, min_free_disk_gb: 0 })
             }).then(function (r) { return r.ok ? r.json() : null; })
               .then(function (d) { if (d) { _videoOrg = d; fillOrg(); toast('Reset to the standard layout', 'success'); } });
         });
