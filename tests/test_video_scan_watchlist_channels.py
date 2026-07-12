@@ -114,6 +114,31 @@ def _handler(channels, uploads_by_channel, *, wished=None, downloaded=None, dism
     return res, adds, deps
 
 
+def test_backfill_inherits_global_setting_when_config_omits_it():
+    # No backfill_count in config → the handler falls back to the injected global
+    # ("videos to grab", Settings → Library). Here the global is 3.
+    channels = [{"youtube_id": "UC1", "title": "Chan", "date_added": "2026-06-25"}]
+    ups = [_vid("v%d" % i, date="2026-06-%02d" % (17 - i)) for i in range(8)]   # all BEFORE baseline
+    deps = _Deps()
+    adds = []
+    res = auto_video_scan_watchlist_channels(
+        {"_automation_id": "a"}, deps,
+        fetch_channels=lambda: channels, fetch_uploads=lambda cid, limit: ups,
+        wishlisted_ids=lambda cid: [], downloaded_ids=lambda cid: [],
+        dismissed_ids=lambda cid: [], add_videos=lambda ch, v: (adds.extend(v), len(v))[1],
+        today_fn=lambda: "2026-06-25", backfill_fn=lambda: 3)
+    assert res["videos_added"] == 3                     # only the last-3 net; nothing new after baseline
+    assert len(adds) == 3
+
+
+def test_explicit_config_backfill_overrides_the_global():
+    channels = [{"youtube_id": "UC1", "title": "Chan", "date_added": "2026-06-25"}]
+    ups = [_vid("v%d" % i, date="2026-06-%02d" % (17 - i)) for i in range(8)]
+    # config sets 2 → wins over the global (would be 3)
+    res, adds, _ = _handler(channels, {"UC1": ups}, config={"backfill_count": 2})
+    assert res["videos_added"] == 2
+
+
 def test_first_run_backlogs_last_n_then_steady_state_is_incremental():
     channels = [{"youtube_id": "UC1", "title": "Cool Channel",
                  "poster_url": "/avatar.jpg", "date_added": "2026-06-25 09:00:00"}]

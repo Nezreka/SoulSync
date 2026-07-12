@@ -951,6 +951,32 @@ def test_youtube_resolve_rejects_non_channel(tmp_path, monkeypatch):
     assert r.status_code == 404 and r.get_json()["success"] is False
 
 
+def test_youtube_follow_respects_the_configured_count(tmp_path):
+    client, videoapi = _make_client(tmp_path)
+    from core.video import organization
+    organization.save(videoapi._video_db, {"youtube_follow_count": 1})   # Settings → Library
+    r = client.post("/api/video/youtube/follow", json={"channel": _CHANNEL})
+    data = r.get_json()
+    assert data["success"] is True and data["following"] is True
+    assert data["added_videos"] == 1                       # only the most-recent, not both
+    assert data["counts"] == {"channel": 1, "video": 1}
+
+
+def test_youtube_follow_count_zero_wishes_nothing(tmp_path):
+    client, videoapi = _make_client(tmp_path)
+    from core.video import organization
+    organization.save(videoapi._video_db, {"youtube_follow_count": 0})   # follow but don't backfill
+    r = client.post("/api/video/youtube/follow", json={"channel": _CHANNEL})
+    data = r.get_json()
+    assert data["success"] is True and data["following"] is True
+    assert data["added_videos"] == 0
+    assert data["counts"] == {"channel": 0, "video": 0}    # nothing wished (counts are wishlist-scoped)
+    # but the channel IS followed — it shows up on the watchlist with 0 wished videos
+    chans = client.get("/api/video/youtube/channels").get_json()
+    assert chans["channels"][0]["youtube_id"] == "UCPlay"
+    assert chans["channels"][0]["wished_count"] == 0
+
+
 def test_youtube_follow_then_channels_and_wishlist(tmp_path):
     client, _ = _make_client(tmp_path)
     # pre-resolved channel in the body → no network/yt-dlp needed

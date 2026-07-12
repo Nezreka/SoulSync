@@ -21,10 +21,20 @@ from utils.logging_config import get_logger
 
 logger = get_logger("video_api.youtube")
 
-# Cap how many recent uploads a follow pulls into the wishlist. Channels can have
-# thousands of videos; flat listing is cheap but we don't want to wish them all.
-_FOLLOW_LIMIT = 30
+# How many recent uploads following a channel pulls into the wishlist. User-configurable
+# on Settings → Library (the "organization" blob); defaults to 5. Channels can have
+# thousands of videos, so this is always a small recent slice, never the whole catalog.
+_FOLLOW_COUNT_DEFAULT = 5
 _RESOLVE_LIMIT = 24
+
+
+def _follow_count(db) -> int:
+    """The configured number of recent videos a follow backfills (Settings → Library)."""
+    try:
+        from core.video import organization as org
+        return max(0, min(100, int(org.load(db).get("youtube_follow_count", _FOLLOW_COUNT_DEFAULT))))
+    except Exception:   # noqa: BLE001 - a bad/missing setting falls back to the default
+        return _FOLLOW_COUNT_DEFAULT
 
 
 def _server():
@@ -84,18 +94,21 @@ def register_routes(bp):
         from core.video import youtube as yt
         body = request.get_json(silent=True) or {}
         db = get_video_db()
+        count = _follow_count(db)
         try:
             channel = body.get("channel")
             if not channel:
                 url = (body.get("url") or "").strip()
                 if not url:
                     return jsonify({"success": False, "error": "url or channel required"}), 400
-                channel = yt.resolve_channel(url, limit=_FOLLOW_LIMIT)
+                channel = yt.resolve_channel(url, limit=max(1, count))
             if not channel or not channel.get("youtube_id"):
                 return jsonify({"success": False, "error": "Could not resolve channel"}), 404
 
             followed = db.add_channel_to_watchlist(channel)
-            added = db.add_videos_to_wishlist(channel, channel.get("videos") or [], server_source=_server())
+            # Wishlist only the configured recent slice (the resolve/preview may carry more).
+            recent = (channel.get("videos") or [])[:count]
+            added = db.add_videos_to_wishlist(channel, recent, server_source=_server())
             if followed:   # followed channels get their full upload-date catalog in the background
                 try:
                     from core.video.youtube_enrichment import get_youtube_date_enricher
@@ -132,6 +145,7 @@ def register_routes(bp):
         subs = parse_subscriptions(text)
         if not subs:
             return jsonify({"success": False, "error": "No subscriptions found in that file"}), 400
+        count = _follow_count(db)
 
         def _follow_channel(ch):
             # Already following (manually or a prior import)? Leave it untouched —
@@ -139,7 +153,7 @@ def register_routes(bp):
             if db.channel_watch_state([ch["youtube_id"]]):
                 return False          # → counted as 'skipped'
             db.add_channel_to_watchlist(ch)
-            db.add_videos_to_wishlist(ch, ch.get("videos") or [], server_source=_server())
+            db.add_videos_to_wishlist(ch, (ch.get("videos") or [])[:count], server_source=_server())
             try:
                 from core.video.youtube_enrichment import get_youtube_date_enricher
                 get_youtube_date_enricher().enqueue(ch.get("youtube_id"), ch.get("title"))
@@ -163,7 +177,7 @@ def register_routes(bp):
             db.set_channel_settings(cid, merged)
 
         seams = {
-            "resolve_channel": lambda u: yt.resolve_channel(u, limit=_FOLLOW_LIMIT),
+            "resolve_channel": lambda u: yt.resolve_channel(u, limit=max(1, count)),
             "resolve_playlist": lambda u: yt.resolve_playlist(u),
             "is_playlist": lambda u: bool(yt.parse_playlist_id(u)),
             "follow_channel": _follow_channel,

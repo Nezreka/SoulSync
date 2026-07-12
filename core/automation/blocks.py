@@ -345,7 +345,8 @@ ACTIONS: list[dict] = [
     {"type": "video_scan_watchlist_channels", "label": "Scan Watchlist Channels", "icon": "youtube", "scope": "video",
      "description": "For every YouTube channel you follow, wishlist its new long-form uploads (Shorts excluded). Forward-looking from when you followed, plus a safety net that always keeps the last N videos. Pair with a 6-hourly Schedule trigger — channels post at all hours.", "available": True,
      "config_fields": [
-         {"key": "backfill_count", "type": "number", "label": "Always keep the last N videos from each channel", "default": 10, "min": 0}
+         {"key": "backfill_count", "type": "number", "min": 0,
+          "label": "Keep the last N videos from each channel (blank = use the Library setting)"}
      ]},
     {"type": "video_scan_watchlist_playlists", "label": "Scan Watchlist Playlists", "icon": "list", "scope": "video",
      "description": "For every YouTube playlist you follow, wishlist its videos you don't have yet (and anything later added to it) — mirrors the whole list. Each playlist becomes its own show in the library (playlist-as-show). Shorts excluded. Pair with a schedule.", "available": True},

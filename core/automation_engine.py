@@ -310,7 +310,7 @@ SYSTEM_AUTOMATIONS = [
         'trigger_type': 'schedule',
         'trigger_config': {'interval': 6, 'unit': 'hours'},   # YouTube posts at all hours
         'action_type': 'video_scan_watchlist_channels',
-        'action_config': {'backfill_count': 10},
+        # backfill_count omitted → inherits the global "videos to grab" setting (Settings → Library)
         'initial_delay': 1200,
         'owned_by': 'video',
     },

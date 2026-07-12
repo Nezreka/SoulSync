@@ -33,6 +33,13 @@ def test_normalize_fills_and_validates():
     assert organization.default_settings()["youtube_template"] == organization.DEFAULTS["youtube_template"]
     assert organization.normalize({"youtube_template": "$channel/$title"})["youtube_template"] == "$channel/$title"
     assert organization.normalize({"youtube_template": "   "})["youtube_template"] == organization.DEFAULTS["youtube_template"]
+    # youtube follow/backfill count: defaults to 5, clamped 0..100, garbage → default
+    assert organization.default_settings()["youtube_follow_count"] == 5
+    assert organization.normalize({"youtube_follow_count": 12})["youtube_follow_count"] == 12
+    assert organization.normalize({"youtube_follow_count": 0})["youtube_follow_count"] == 0        # no backfill
+    assert organization.normalize({"youtube_follow_count": 999})["youtube_follow_count"] == 100    # clamp
+    assert organization.normalize({"youtube_follow_count": -3})["youtube_follow_count"] == 0        # clamp
+    assert organization.normalize({"youtube_follow_count": "nope"})["youtube_follow_count"] == 5    # garbage → default
 
 
 def test_load_save_roundtrip():

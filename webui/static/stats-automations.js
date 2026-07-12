@@ -5128,7 +5128,7 @@ function _readGenericConfigField(slotKey, f) {
     const el = document.getElementById('cfg-' + slotKey + '-' + f.key);
     if (!el) return (f.default !== undefined) ? f.default : '';
     if (f.type === 'checkbox') return el.checked;
-    if (f.type === 'number') { const n = parseFloat(el.value); return isNaN(n) ? (f.default != null ? f.default : 0) : n; }
+    if (f.type === 'number') { const n = parseFloat(el.value); return isNaN(n) ? (f.default != null ? f.default : '') : n; }
     return el.value;
 }
 
