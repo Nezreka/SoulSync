@@ -34,17 +34,20 @@ BADGE_TPL = {"id": 7, "definition": {"layers": [
 
 class _Harness:
     def __init__(self, db, store):
-        self.pushes = []          # (kind, id, bytes)
+        self.pushes = []          # (kind, id, bytes, delete_key)
         self.fetches = 0
+        self._n = 0
         self.applier = OverlayApplier(db, store, fetch_base=self._fetch, push_poster=self._push)
 
     def _fetch(self, kind, item_id):
         self.fetches += 1
         return _poster((40, 40, 40))
 
-    def _push(self, kind, item_id, jpeg):
-        self.pushes.append((kind, item_id, jpeg))
-        return True
+    def _push(self, kind, item_id, jpeg, delete_key=None):
+        # Simulate Plex handing back a fresh poster key on each upload.
+        self.pushes.append((kind, item_id, jpeg, delete_key))
+        self._n += 1
+        return "upload://k%d" % self._n
 
 
 def test_first_apply_stashes_base_and_backup_then_pushes(db, tmp_path):
@@ -90,9 +93,36 @@ def test_force_reapplies_even_when_unchanged(db, tmp_path):
     assert "skipped" not in res and len(h.pushes) == 2
 
 
+def test_first_apply_keeps_original_and_stores_the_new_key(db, tmp_path):
+    store = AssetStore(tmp_path / "a")
+    h = _Harness(db, store)
+    h.applier.apply_item("movie", 5, BADGE_TPL, {"resolution": "2160p"})
+    assert h.pushes[0][3] is None                     # first touch: no delete → original kept in Plex
+    assert db.get_overlay_apply("movie", 5)["plex_poster_key"] == "upload://k1"
+
+
+def test_reapply_deletes_the_previous_overlay_before_uploading(db, tmp_path):
+    store = AssetStore(tmp_path / "a")
+    h = _Harness(db, store)
+    h.applier.apply_item("movie", 5, BADGE_TPL, {"resolution": "2160p"})     # → key k1
+    h.applier.apply_item("movie", 5, BADGE_TPL, {"resolution": "1080p"})     # data changed → re-apply
+    assert h.pushes[1][3] == "upload://k1"            # hands the prev overlay's key to delete it
+    assert db.get_overlay_apply("movie", 5)["plex_poster_key"] == "upload://k2"   # newest stored
+
+
+def test_remove_hands_the_overlay_key_so_it_gets_deleted(db, tmp_path):
+    store = AssetStore(tmp_path / "a")
+    h = _Harness(db, store)
+    h.applier.apply_item("movie", 5, BADGE_TPL, {"resolution": "2160p"})
+    h.applier.remove_item("movie", 5)
+    assert h.pushes[-1][3] == "upload://k1"            # restore push drops the overlay upload
+    assert db.get_overlay_apply("movie", 5) is None    # ledger cleared
+
+
 def test_no_base_art_is_an_error(db, tmp_path):
     store = AssetStore(tmp_path / "a")
-    applier = OverlayApplier(db, store, fetch_base=lambda k, i: None, push_poster=lambda k, i, b: True)
+    applier = OverlayApplier(db, store, fetch_base=lambda k, i: None,
+                             push_poster=lambda k, i, b, dk=None: "upload://x")
     res = applier.apply_item("movie", 5, BADGE_TPL, {"resolution": "2160p"})
     assert res["ok"] is False and "base" in res["error"]
 
@@ -104,7 +134,7 @@ def test_remove_restores_backup_and_clears_ledger(db, tmp_path):
     backup = store.read_backup("movie", 5)
     res = h.applier.remove_item("movie", 5)
     assert res["ok"] and res["restored"]
-    assert h.pushes[-1] == ("movie", 5, backup)     # original art pushed back
+    assert h.pushes[-1] == ("movie", 5, backup, "upload://k1")   # original back + drops the overlay
     assert db.get_overlay_apply("movie", 5) is None
 
 

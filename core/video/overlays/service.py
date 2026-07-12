@@ -201,17 +201,23 @@ def prerender_thumb_async(db, template_id) -> None:
     threading.Thread(target=_work, daemon=True).start()
 
 
-def push_poster_bytes(db, kind: str, item_id: int, jpeg: bytes) -> bool:
-    """Push composited art to the server for an item (best-effort)."""
+def push_poster_bytes(db, kind: str, item_id: int, jpeg: bytes, delete_key=None):
+    """Push composited art to the server for an item (best-effort). ``delete_key`` (an overlay
+    re-apply) drops the previous Plex overlay upload first. Returns the new poster key (str)
+    on success — a Plex ratingKey, or the sentinel 'ok' for Jellyfin (no key needed) — or None
+    on failure, so the caller can store it and treat it as the pushed flag."""
     from core.video.sources import set_video_poster
     tgt = db.poster_set_target(kind, item_id)
     if not tgt or not tgt.get("server_id"):
-        return False
+        return None
     try:
-        return bool(set_video_poster(tgt["server_id"], image_bytes=jpeg, kind=kind).get("ok"))
+        res = set_video_poster(tgt["server_id"], image_bytes=jpeg, kind=kind, delete_key=delete_key)
+        if not res.get("ok"):
+            return None
+        return res.get("poster_key") or "ok"   # always truthy on success (Jellyfin has no key)
     except Exception:
         logger.warning("push_poster_bytes failed for %s %s", kind, item_id, exc_info=True)
-        return False
+        return None
 
 
 class OverlayApplyService:
@@ -223,7 +229,7 @@ class OverlayApplyService:
         return OverlayApplier(
             self.db, self.store,
             fetch_base=lambda k, i: fetch_clean_base(self.db, k, i),
-            push_poster=lambda k, i, b: push_poster_bytes(self.db, k, i, b))
+            push_poster=lambda k, i, b, dk=None: push_poster_bytes(self.db, k, i, b, dk))
 
     def build_jobs(self, scopes, force=False) -> list:
         assigns = self.db.get_overlay_assignments()
@@ -318,7 +324,7 @@ def reset_item_poster(db, kind, item_id, store=None) -> dict:
     and drop our own overlay ledger + base so a later apply starts fresh."""
     store = store or AssetStore.default()
     clean = fetch_clean_base(db, kind, item_id)
-    pushed = bool(clean) and push_poster_bytes(db, kind, item_id, clean)
+    pushed = bool(clean) and bool(push_poster_bytes(db, kind, item_id, clean))
     db.delete_overlay_apply(kind, item_id)
     store.clear(kind, item_id)
     return {"ok": bool(clean), "pushed": pushed}

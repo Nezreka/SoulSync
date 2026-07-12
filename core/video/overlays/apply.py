@@ -102,22 +102,32 @@ class OverlayApplier:
         except Exception as e:
             logger.exception("overlay render failed for %s %s", kind, item_id)
             return {"ok": False, "error": "render failed: %s" % e}
-        pushed = False
+        # On a RE-apply, hand the previous overlay's poster key so the push deletes it before
+        # uploading the new render (Plex piles up uploads otherwise). None on first touch → the
+        # user's original poster is left in the pool untouched.
+        delete_key = (prev or {}).get("plex_poster_key")
+        new_key = None
         try:
-            pushed = bool(self.push_poster(kind, item_id, rendered))
+            new_key = self.push_poster(kind, item_id, rendered, delete_key)
         except Exception:
             logger.warning("overlay push failed for %s %s", kind, item_id, exc_info=True)
-        self.db.record_overlay_apply(kind, item_id, tid, base_sha, vsig)
+        pushed = bool(new_key)
+        # Remember the new poster's key so the NEXT re-apply can delete it (only when we got one
+        # back — never null out a good key on a transient push failure).
+        self.db.record_overlay_apply(kind, item_id, tid, base_sha, vsig,
+                                     plex_poster_key=(new_key if pushed else delete_key))
         return {"ok": True, "pushed": pushed, "bytes": len(rendered)}
 
     def remove_item(self, kind, item_id) -> dict:
         """Undo overlays for an item: restore the first-touch backup to the server
         (best-effort) and drop the ledger row."""
         backup = self.store.read_backup(kind, item_id)
+        prev = self.db.get_overlay_apply(kind, item_id)
+        delete_key = (prev or {}).get("plex_poster_key")   # drop the overlay upload as we restore
         restored = False
         if backup:
             try:
-                restored = bool(self.push_poster(kind, item_id, backup))
+                restored = bool(self.push_poster(kind, item_id, backup, delete_key))
             except Exception:
                 logger.warning("overlay restore failed for %s %s", kind, item_id, exc_info=True)
         self.db.delete_overlay_apply(kind, item_id)
