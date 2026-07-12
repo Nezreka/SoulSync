@@ -2398,7 +2398,15 @@
                     key = ctx.season + '_' + ctx.episode;
                 }
                 cur[key] = dl;
-                if (dl.status === 'completed') { _dlDone[key] = 1; delete _dlActive[key]; }
+                if (dl.status === 'completed') {
+                    // YouTube: /downloads/active includes ~100 HISTORIC completed
+                    // rows — marking those 'done' hid the re-grab button on every
+                    // recently-downloaded episode (the done-state CSS hides the
+                    // getbtns). Only a grab we actually watched run this session
+                    // paints ✓ Downloaded; history speaks through ep.owned instead.
+                    if (!isYt || _dlActive[key]) _dlDone[key] = 1;
+                    delete _dlActive[key];
+                }
                 else if (dl.status === 'failed' || dl.status === 'cancelled') { delete _dlActive[key]; }
                 else { _dlActive[key] = dl; }
             });

@@ -106,6 +106,15 @@ def test_channel_season_bar_matches_tv_minus_manual_search():
     assert "ytFilter.q" in bar                         # a filtered view isn't "the season"
 
 
+def test_historic_completed_rows_do_not_hide_the_regrab_button():
+    """/downloads/active returns ~100 completed rows; painting those as 'done'
+    added the CSS state that hides the getbtns — every recently-downloaded
+    episode lost its re-grab ⭳ (Boulder, 'previous seasons'). Only a grab
+    watched running THIS session may paint ✓ Downloaded on channel pages."""
+    poll = _DETAIL_JS.split("function pollDl")[1].split("function applyDlStates")[0]
+    assert "if (!isYt || _dlActive[key]) _dlDone[key] = 1;" in poll
+
+
 def test_yt_download_tracking_keys_by_video_id():
     assert "data.source === 'youtube') ? String(en)" in _DETAIL_JS   # synthetic keys
     poll = _DETAIL_JS.split("function pollDl")[1].split("function applyDlStates")[0]
