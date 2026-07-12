@@ -103,6 +103,26 @@
                     }).catch(function () { redl.disabled = false; });
                 return;
             }
+            // Block release: this exact remote file is never picked again.
+            var blk = e.target.closest('[data-vdh-block]');
+            if (blk) {
+                e.stopPropagation();
+                blk.disabled = true;
+                fetch('/api/video/downloads/blocklist',
+                    { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                      body: JSON.stringify({ history_id: +blk.getAttribute('data-vdh-block') }) })
+                    .then(function (r) { return r.json(); })
+                    .then(function (d) {
+                        if (d && d.success) {
+                            if (typeof showToast === 'function') showToast('Release blocked — it will never be picked again', 'success');
+                            blk.textContent = 'Blocked';
+                        } else {
+                            blk.disabled = false;
+                            if (typeof showToast === 'function') showToast((d && d.error) || 'Could not block that release', 'error');
+                        }
+                    }).catch(function () { blk.disabled = false; });
+                return;
+            }
             // Clear all history (guarded — it's permanent).
             if (e.target.closest('[data-vdh-clear]')) {
                 var go = function () {
@@ -169,6 +189,10 @@
                 '<div class="vdh-detail-act">' +
                     '<button class="vdh-redl" type="button" data-vdh-redl="' + esc(it.id) +
                         '" title="Forget this grab so it re-downloads on the next scan">&#8635; Re-download</button>' +
+                    ((it.outcome === 'failed' || it.outcome === 'import_failed') && it.username && it.filename && it.source !== 'youtube'
+                        ? '<button class="vdh-redl vdh-block" type="button" data-vdh-block="' + esc(it.id) +
+                          '" title="Never pick this exact release again">&#8856; Block release</button>'
+                        : '') +
                 '</div>' +
             '</div>';
 

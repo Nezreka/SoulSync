@@ -367,6 +367,26 @@ def _wishlist_obtained(db, dl, upd=None) -> None:
         logger.exception("video download %s: wishlist-on-obtain failed", dl.get("id"))
 
 
+def _blocklist_release(db, dl, reason) -> None:
+    """Record one proven-bad release in the permanent blocklist (best-effort)."""
+    try:
+        ctx = {}
+        try:
+            ctx = json.loads(dl.get("search_ctx") or "{}") or {}
+        except (ValueError, TypeError):
+            ctx = {}
+        db.add_video_blocklist({
+            "kind": dl.get("kind"), "title": dl.get("title"),
+            "media_id": dl.get("media_id"), "media_source": dl.get("media_source"),
+            "season_number": ctx.get("season"), "episode_number": ctx.get("episode"),
+            "username": dl.get("username"), "filename": dl.get("filename"),
+            "release_title": dl.get("release_title"), "reason": reason})
+        logger.info("blocklisted release for %s: %s (%s)",
+                    dl.get("title"), dl.get("release_title") or dl.get("filename"), reason)
+    except Exception:   # noqa: BLE001 - the blocklist is an assist, never a blocker
+        logger.exception("video download %s: blocklist write failed", dl.get("id"))
+
+
 def _event_payload(dl, upd=None) -> dict:
     """The event-bus variables for one download — shared by every terminal
     outcome so trigger conditions/templates see one consistent shape."""
@@ -401,12 +421,22 @@ def _publish_terminal(dl, upd) -> None:
         logger.exception("video download %s: event publish failed", dl.get("id"))
 
 
+def _blocked_pairs(db):
+    """The release blocklist as {(username, filename)} — never re-pick those.
+    Best-effort: a read failure means 'no filter', not a dead retry path."""
+    try:
+        return db.video_blocklist_pairs()
+    except Exception:   # noqa: BLE001
+        logger.exception("video blocklist read failed")
+        return frozenset()
+
+
 def _fail_or_retry(db, dl, error_msg) -> None:
     """A download just failed/disappeared. Try the next candidate inline; if none,
     hand off to a requery thread; if nothing left, mark it failed for real — and
     put it back on the wishlist so it isn't silently lost."""
     from core.video.retry import plan_retry
-    plan = plan_retry(dl)
+    plan = plan_retry(dl, blocked=_blocked_pairs(db))
     if plan["action"] == "candidate" and _apply_candidate(db, dl["id"], dl, plan["candidate"], plan["rest"]):
         return
     if plan["action"] in ("candidate", "requery"):
@@ -479,7 +509,7 @@ def _requery_worker(dl_id) -> None:
             row = db.get_video_download(dl_id)
             if not row or row.get("status") != "searching":
                 return
-            plan = plan_retry(row)
+            plan = plan_retry(row, blocked=_blocked_pairs(db))
             if plan["action"] == "candidate":
                 if _apply_candidate(db, dl_id, row, plan["candidate"], plan["rest"]):
                     return
@@ -512,7 +542,7 @@ def _requery_worker(dl_id) -> None:
                 tried_files = json.loads(row2.get("tried_files") or "[]")
             except (ValueError, TypeError):
                 tried_files = []
-            fresh = merge_candidates(accepted, tried_files)
+            fresh = merge_candidates(accepted, tried_files, blocked=_blocked_pairs(db))
             if fresh and _apply_candidate(db, dl_id, row2, fresh[0], fresh[1:]):
                 return
             # this query gave nothing usable → loop tries the next query (or fails)
@@ -615,6 +645,11 @@ def _tick(db) -> None:
             if upd.get("status") in ("completed", "cancelled", "import_failed"):
                 _archive_history(db, dl, upd)
                 _publish_terminal(dl, upd)     # event triggers (completed/upgrade/import-failed)
+                # The importer proved the FILE ITSELF is junk (sample/corrupt/fake):
+                # blocklist the exact release so no search ever re-picks it. Context
+                # rejects (pack / wrong episode / not-an-upgrade) are NOT tagged.
+                if upd.get("_bad_release") and dl.get("username") and dl.get("filename"):
+                    _blocklist_release(db, dl, upd.get("error") or "Bad release")
         except Exception:
             logger.exception("video download %s: failed to persist update", dl.get("id"))
     for k in [k for k in _misses if k not in live_ids]:

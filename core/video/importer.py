@@ -109,8 +109,12 @@ def _ctx(dl: dict) -> dict:
     }
 
 
-def _reject(reason: str) -> dict:
-    return {"action": "reject", "reason": reason, "manual": True}
+def _reject(reason: str, bad_release: bool = False) -> dict:
+    """``bad_release=True`` marks rejects where the FILE ITSELF is junk (sample /
+    corrupt / fake / not a video) — the monitor auto-blocklists those releases so
+    the next search never re-picks them. Context rejects (pack, wrong episode,
+    not-an-upgrade, already owned) stay untagged: the release is fine."""
+    return {"action": "reject", "reason": reason, "manual": True, "bad_release": bad_release}
 
 
 def _existing_match(scope: str, dest_dir: str, ctx: dict, list_dir: Callable) -> str | None:
@@ -171,10 +175,10 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
                 ctx[k] = override.get(k)
 
     if not is_video(src_path):   # can't place a non-video, even on a forced import
-        return _reject("Not a video file (%s)" % (ext or "no extension"))
+        return _reject("Not a video file (%s)" % (ext or "no extension"), bad_release=True)
     if not force:
         if is_sample(name, dl.get("size_bytes")):
-            return _reject("Looks like a sample, not the feature")
+            return _reject("Looks like a sample, not the feature", bad_release=True)
         if scope not in ("movie", "episode"):
             return _reject("Season/complete packs need manual import")
         if scope == "episode":
@@ -197,12 +201,12 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
     if probe is not None:
         if not force:
             if not probe.get("ok"):
-                return _reject("No readable video stream — corrupt or fake file")
+                return _reject("No readable video stream — corrupt or fake file", bad_release=True)
             dur = probe.get("duration_sec") or 0
             floor = _RUNTIME_FLOOR.get(scope)
             if floor and 0 < dur < floor:
                 return _reject("Runtime is only %d min — looks like a sample/clip, not the %s"
-                               % (int(dur // 60), scope))
+                               % (int(dur // 60), scope), bad_release=True)
         # Trust the FILE over the (often lying) scene name: real resolution always,
         # real codec only when the name didn't carry one.
         parsed = dict(parsed)
@@ -311,8 +315,10 @@ def run_import(dl: dict, src_path: str, *, fs: Any, prober: Callable | None = No
                        library_dir=library_dir)
     if plan["action"] == "reject":
         # Leave the file where it is; remember WHERE so manual import can find it.
+        # _bad_release is transient (stripped by update_video_download): it tells
+        # the monitor to blocklist this exact release so it's never re-picked.
         return {"status": "import_failed", "progress": 100.0, "error": plan["reason"],
-                "dest_path": src_path}
+                "dest_path": src_path, "_bad_release": bool(plan.get("bad_release"))}
 
     dest = plan["dest"]
     move_mode = settings.get("transfer_mode") == "move"

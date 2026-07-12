@@ -54,16 +54,22 @@ def _loads(s, default):
         return default
 
 
-def plan_retry(row: dict, max_attempts: int = MAX_ATTEMPTS) -> dict:
+def plan_retry(row: dict, max_attempts: int = MAX_ATTEMPTS, blocked=frozenset()) -> dict:
     """Decide what to do for a failed download row. Returns one of:
       {action: 'candidate', candidate: {...}, rest: [...]}  — try the next stored hit
       {action: 'requery', query: str, ctx: {...}}           — re-search a new query
       {action: 'fail', reason: str}                         — genuinely out of options
-    Pure: reads the row's JSON columns (candidates / tried_files / search_ctx / tried_queries)."""
+    Pure: reads the row's JSON columns (candidates / tried_files / search_ctx / tried_queries).
+
+    ``blocked`` = {(username, filename)} from the release blocklist. Composes with
+    tried_files, not folded into it: tried is per-row ("this attempt sequence"),
+    blocked is global + permanent ("never pick this release for anything")."""
     if int(row.get("attempts") or 0) >= max_attempts:
         return {"action": "fail", "reason": "retry budget reached"}
     tried_files = set(_loads(row.get("tried_files"), []))
-    fresh = [c for c in _loads(row.get("candidates"), []) if c.get("filename") not in tried_files]
+    fresh = [c for c in _loads(row.get("candidates"), [])
+             if c.get("filename") not in tried_files
+             and (c.get("username"), c.get("filename")) not in blocked]
     if fresh:
         return {"action": "candidate", "candidate": fresh[0], "rest": fresh[1:]}
     ctx = _loads(row.get("search_ctx"), {})
@@ -73,14 +79,15 @@ def plan_retry(row: dict, max_attempts: int = MAX_ATTEMPTS) -> dict:
     return {"action": "fail", "reason": "no candidates or queries left"}
 
 
-def merge_candidates(new_accepted: Any, tried_files: Any) -> list:
+def merge_candidates(new_accepted: Any, tried_files: Any, blocked=frozenset()) -> list:
     """Turn fresh accepted search results into candidate dicts, dropping anything
-    already attempted (so a requery never re-tries the same failing release)."""
+    already attempted (so a requery never re-tries the same failing release) and
+    anything on the release blocklist."""
     seen = set(tried_files or [])
     out = []
     for r in (new_accepted or []):
         fn = r.get("filename")
-        if not fn or fn in seen:
+        if not fn or fn in seen or (r.get("username"), fn) in blocked:
             continue
         seen.add(fn)
         out.append({"username": r.get("username"), "filename": fn, "size_bytes": r.get("size_bytes"),
