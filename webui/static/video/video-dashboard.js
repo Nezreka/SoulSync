@@ -281,7 +281,9 @@
                 if (!d) return;
                 applyStats({
                     'uptime': d.uptime != null ? String(d.uptime) : '--',
-                    'memory': d.memory_usage != null ? String(d.memory_usage) : '--'
+                    'memory': d.memory_usage != null ? String(d.memory_usage) : '--',
+                    // Parity with the music dashboard: show SoulSync's own RSS in the subtitle.
+                    'memory_note': d.process_memory ? ('SoulSync · ' + d.process_memory) : 'Current usage'
                 });
             })
             .catch(function () { /* keep last-known values on a transient failure */ });
