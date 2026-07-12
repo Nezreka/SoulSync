@@ -31,6 +31,7 @@ from core.personalized.types import PlaylistRecord, Track
 
 
 def _record_to_dict(record: PlaylistRecord) -> Dict[str, Any]:
+    extra = record.config.extra or {}
     return {
         'id': record.id,
         'profile_id': record.profile_id,
@@ -43,6 +44,9 @@ def _record_to_dict(record: PlaylistRecord) -> Dict[str, Any]:
         'last_synced_at': record.last_synced_at,
         'last_generation_source': record.last_generation_source,
         'last_generation_error': record.last_generation_error,
+        'is_stale': record.is_stale,
+        'auto_refresh': bool(extra.get('auto_refresh', False)),
+        'refresh_interval_hours': int(extra.get('refresh_interval_hours', 24)),
     }
 
 
@@ -154,10 +158,67 @@ def update_config(
     }
 
 
+def activate_playlist(
+    manager: PersonalizedPlaylistManager,
+    kind: str,
+    variant: str,
+    profile_id: int,
+    refresh_interval_hours: int = 24,
+) -> Dict[str, Any]:
+    """Activate a playlist: ensure it exists, enable auto-refresh, and refresh it."""
+    extra_update = {
+        'auto_refresh': True,
+        'refresh_interval_hours': refresh_interval_hours,
+    }
+    record = manager.ensure_playlist(kind, variant, profile_id)
+    record = manager.update_config(kind, variant, profile_id, {'extra': extra_update})
+    try:
+        record = manager.refresh_playlist(kind, variant, profile_id)
+    except Exception:
+        manager.update_config(kind, variant, profile_id, {'extra': {'auto_refresh': False}})
+        raise
+    tracks = manager.get_playlist_tracks(record.id)
+    return {
+        'success': True,
+        'playlist': _record_to_dict(record),
+        'tracks': [_track_to_dict(t) for t in tracks],
+    }
+
+
+def toggle_auto_refresh(
+    manager: PersonalizedPlaylistManager,
+    kind: str,
+    variant: str,
+    profile_id: int,
+    auto_refresh: Optional[bool] = None,
+    refresh_interval_hours: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Toggle auto-refresh or change the refresh interval for a playlist."""
+    record = manager.get_playlist(kind, variant, profile_id)
+    if record is None:
+        record = manager.ensure_playlist(kind, variant, profile_id)
+
+    extra_update = {}
+    if auto_refresh is not None:
+        extra_update['auto_refresh'] = bool(auto_refresh)
+    if refresh_interval_hours is not None:
+        extra_update['refresh_interval_hours'] = max(1, int(refresh_interval_hours))
+
+    if extra_update:
+        record = manager.update_config(kind, variant, profile_id, {'extra': extra_update})
+
+    return {
+        'success': True,
+        'playlist': _record_to_dict(record),
+    }
+
+
 __all__ = [
     'list_kinds',
     'list_playlists',
     'get_playlist_with_tracks',
     'refresh_playlist',
     'update_config',
+    'activate_playlist',
+    'toggle_auto_refresh',
 ]

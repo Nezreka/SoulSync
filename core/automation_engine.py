@@ -145,6 +145,14 @@ SYSTEM_AUTOMATIONS = [
         'action_type': 'full_cleanup',
         'initial_delay': 900,  # 15 min after startup
     },
+    {
+        'name': 'Auto-Playlist Refresh',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 1, 'unit': 'hours'},
+        'action_type': 'personalized_pipeline',
+        'action_config': {'discover_due': True},
+        'initial_delay': 600,
+    },
 ]
 
 
@@ -237,13 +245,31 @@ class AutomationEngine:
                     trigger_type=spec['trigger_type'],
                     trigger_config=json.dumps(spec['trigger_config']),
                     action_type=spec['action_type'],
-                    action_config='{}',
+                    action_config=json.dumps(spec.get('action_config', {})),
                     profile_id=1,
                 )
                 if aid:
                     self.db.update_automation(aid, is_system=1)
                     logger.info(f"Created system automation: {spec['name']} (id={aid})")
                 existing = self.db.get_system_automation_by_action(spec['action_type'])
+
+            # Migrate legacy per-playlist personalized_pipeline entries
+            if existing and spec['action_type'] == 'personalized_pipeline':
+                old_config = json.loads(existing.get('action_config') or '{}')
+                if 'kinds' in old_config and not old_config.get('discover_due'):
+                    new_action_config = json.dumps({'discover_due': True})
+                    self.db.update_automation(existing['id'], name=spec['name'], action_config=new_action_config)
+                    logger.info(f"Migrated personalized_pipeline automation '{spec['name']}' to discover_due mode")
+
+            # Clean up orphaned per-playlist personalized_pipeline automations
+            if spec['action_type'] == 'personalized_pipeline':
+                all_pipeline = self.db.get_automations_by_action('personalized_pipeline')
+                for old_auto in (all_pipeline or []):
+                    if old_auto['id'] != (existing or {}).get('id') and not old_auto.get('is_system'):
+                        old_config = json.loads(old_auto.get('action_config') or '{}')
+                        if 'kinds' in old_config and not old_config.get('discover_due'):
+                            self.db.update_automation(old_auto['id'], enabled=0)
+                            logger.info(f"Disabled legacy per-playlist automation: {old_auto.get('name')} (id={old_auto['id']})")
 
             if existing:
                 if spec.get('initial_delay') is not None:
