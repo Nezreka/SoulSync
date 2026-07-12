@@ -71,7 +71,7 @@ def test_place_triggers_a_library_refresh(env):
     # uses, so the title shows up without waiting for a scheduled scan.
     from core.video import download_events
     fired = []
-    download_events.register_batch_complete_callback(lambda d: fired.append(d))
+    download_events.register_event_forwarder(lambda t, d: fired.append(d))
     try:
         env["client"].post("/api/video/import/%d/place" % env["dl_id"],
                            json={"scope": "movie", "title": "The Matrix", "year": 1999})
@@ -99,7 +99,7 @@ def test_media_ids_resolves_tmdb_and_library_regrabs():
 def test_dismiss_does_not_trigger_a_refresh(env):
     from core.video import download_events
     fired = []
-    download_events.register_batch_complete_callback(lambda d: fired.append(d))
+    download_events.register_event_forwarder(lambda t, d: fired.append(d))
     try:
         env["client"].post("/api/video/import/%d/dismiss" % env["dl_id"], json={})
         assert fired == []                             # nothing landed → no scan
