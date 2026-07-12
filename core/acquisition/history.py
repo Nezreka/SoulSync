@@ -31,6 +31,7 @@ EVENT_TYPES = frozenset({
     "retry_started",
     "cancelled",
     "import_started",
+    "import_needs_review",
     "import_completed",
     "import_failed",
 })

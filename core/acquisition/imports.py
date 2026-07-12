@@ -385,6 +385,66 @@ def record_inventory_result(
     return _reload_import(conn, import_id)
 
 
+def record_matching_result(
+    conn: Any,
+    import_id: str,
+    matches: Any,
+    rejections: Any,
+    *,
+    decision: str,
+) -> AcquisitionImport:
+    """Persist one matching outcome and route the import accordingly.
+
+    ``import_ready`` advances to ``importing``; anything ambiguous parks in
+    ``needs_review`` with its structured rejections and a visible history
+    event — an ambiguous bundle is a user decision, never a partial import.
+    """
+    decision = str(decision or "").strip().lower()
+    if decision not in {"import_ready", "needs_review"}:
+        raise ValueError(
+            "matching decisions must be import_ready|needs_review")
+    record = _open_import(conn, import_id)
+    if record.status != "matching":
+        raise ValueError(
+            f"matching results require a matching import, not {record.status}")
+    matches_json = _encode_items(matches, "matches")
+    rejections_json = _encode_items(rejections, "rejections")
+    if decision == "import_ready":
+        if matches_json == "[]":
+            raise ValueError("import_ready requires at least one track match")
+        if rejections_json != "[]":
+            raise ValueError("import_ready cannot carry rejections")
+        status = "importing"
+    else:
+        status = "needs_review"
+    _require_transition(record.status, status)
+    conn.execute(
+        """UPDATE acquisition_imports
+              SET status=?, matches_json=?, rejections_json=?,
+                  error=NULL, updated_at=CURRENT_TIMESTAMP
+            WHERE id=?""",
+        (status, matches_json, rejections_json, record.id),
+    )
+    if status == "needs_review":
+        rejection_codes: Dict[str, int] = {}
+        for item in json.loads(rejections_json):
+            code = str(item.get("code") or "unknown")
+            rejection_codes[code] = rejection_codes.get(code, 0) + 1
+        record_history_event(
+            conn,
+            "import_needs_review",
+            request_id=record.request_id,
+            candidate_id=record.candidate_id,
+            download_id=record.download_id,
+            reason_code=next(iter(sorted(rejection_codes)), None),
+            payload={
+                "match_count": len(json.loads(matches_json)),
+                "rejection_codes": rejection_codes,
+            },
+        )
+    return _reload_import(conn, import_id)
+
+
 def record_import_deferred(
     conn: Any,
     import_id: str,
@@ -482,4 +542,5 @@ __all__ = [
     "record_import_deferred",
     "record_import_failure",
     "record_inventory_result",
+    "record_matching_result",
 ]
