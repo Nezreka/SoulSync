@@ -175,10 +175,9 @@ body[data-side="video"] .page.video-page {
     display: block;
 }
 
-/* ── Service status: not needed on the video side (for now) ─────────────── */
-body[data-side="video"] .status-section {
-    display: none;
-}
+/* ── Service status: two sections now — the music one carries data-music-only
+   (hidden on video by the rule below) and the video one carries data-video-only
+   (hidden on music). No blanket .status-section hide, so the video section shows. ── */
 
 /* ── Shared pages: show the REAL music page on the video side ───────────── */
 /* The shared Settings page is filtered per side: video-only groups/sections carry

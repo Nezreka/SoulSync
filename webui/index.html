@@ -479,8 +479,8 @@
                 <button class="version-button" onclick="showVersionInfo()">v{{ soulsync_base_version }}</button>
             </div>
 
-            <!-- Status Section -->
-            <div class="status-section status-section--clickable" onclick="openServiceSwitchModal('metadata')" title="Change active sources for your profile" role="button" tabindex="0">
+            <!-- Status Section (music side) -->
+            <div class="status-section status-section--clickable" data-music-only onclick="openServiceSwitchModal('metadata')" title="Change active sources for your profile" role="button" tabindex="0">
                 <h4 class="status-title">Service Status</h4>
                 <div class="status-indicator" id="metadata-source-indicator" data-status-ready="false" onclick="event.stopPropagation(); openServiceSwitchModal('metadata')">
                     <span class="status-dot disconnected"></span>
@@ -493,6 +493,24 @@
                 <div class="status-indicator" id="soulseek-indicator" data-status-ready="false" onclick="event.stopPropagation(); openServiceSwitchModal('download')">
                     <span class="status-dot disconnected"></span>
                     <span class="status-name" id="download-source-name">Download Source</span>
+                </div>
+            </div>
+            <!-- Status Section (video side) — its own sources: TMDB/TVDB metadata, video server,
+                 video download preference. Fed by /api/video/service-status; the modal changes
+                 the server + download order (metadata is required, shown status-only). -->
+            <div class="status-section status-section--clickable" data-video-only onclick="openVideoServiceSwitchModal('server')" title="Change your video server &amp; download sources" role="button" tabindex="0">
+                <h4 class="status-title">Service Status</h4>
+                <div class="status-indicator" id="video-metadata-indicator" data-status-ready="false" onclick="event.stopPropagation(); openVideoServiceSwitchModal('metadata')">
+                    <span class="status-dot disconnected"></span>
+                    <span class="status-name" id="video-metadata-name">Metadata (TMDB/TVDB)</span>
+                </div>
+                <div class="status-indicator" id="video-server-indicator" data-status-ready="false" onclick="event.stopPropagation(); openVideoServiceSwitchModal('server')">
+                    <span class="status-dot disconnected"></span>
+                    <span class="status-name" id="video-server-name">Media Server</span>
+                </div>
+                <div class="status-indicator" id="video-download-indicator" data-status-ready="false" onclick="event.stopPropagation(); openVideoServiceSwitchModal('download')">
+                    <span class="status-dot disconnected"></span>
+                    <span class="status-name" id="video-download-name">Download Source</span>
                 </div>
             </div>
         </div>
@@ -11463,6 +11481,8 @@
     <script src="{{ url_for('static', filename='video/video-enrichment-manager.js', v=static_v) }}"></script>
     <!-- Video dashboard data layer (isolated; populates the dashboard from the video DB) -->
     <script src="{{ url_for('static', filename='video/video-dashboard.js', v=static_v) }}"></script>
+    <!-- Video-side sidebar service status: dots + the server/download switch modal -->
+    <script src="{{ url_for('static', filename='video/video-service-status.js', v=static_v) }}"></script>
     <!-- Video watchlist button (shared; the add-to-watchlist control used by every
          show-poster + person card — must load before the card renderers) -->
     <script src="{{ url_for('static', filename='video/video-watchlist-btn.js', v=static_v) }}"></script>

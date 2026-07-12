@@ -37,6 +37,7 @@ def test_blueprint_exposes_dashboard_route():
     assert "/api/video/library" in rules
     assert "/api/video/libraries" in rules
     assert "/api/video/server" in rules
+    assert "/api/video/service-status" in rules
     assert any(r.startswith("/api/video/poster/") for r in rules)
     assert "/api/video/enrichment/services" in rules
     assert "/api/video/enrichment/<service>/status" in rules
@@ -1029,6 +1030,26 @@ def test_youtube_unfollow_and_remove_scopes(tmp_path):
     # remove the whole channel's videos
     r = client.post("/api/video/youtube/wishlist/remove", json={"scope": "channel", "source_id": "UCPlay"})
     assert r.get_json()["counts"] == {"channel": 0, "video": 0}
+
+
+def test_service_status_reflects_video_config(tmp_path):
+    import json
+    client, videoapi = _make_client(tmp_path)
+    db = videoapi._video_db
+    # fresh: no TMDB/TVDB keys, default single-soulseek download
+    r = client.get("/api/video/service-status").get_json()
+    assert r["metadata"]["configured"] is False               # keys missing
+    assert "configured" in r["server"]                        # shape present (value is env-dependent)
+    assert r["download"]["name"] == "Soulseek"                # default single source
+
+    db.set_setting("tmdb_api_key", "k1")
+    db.set_setting("tvdb_api_key", "k2")
+    db.set_setting("download_mode", "hybrid")
+    db.set_setting("hybrid_order", json.dumps(["torrent", "soulseek"]))
+    r = client.get("/api/video/service-status").get_json()
+    assert r["metadata"]["configured"] is True and r["metadata"]["tmdb"] and r["metadata"]["tvdb"]
+    assert r["download"]["mode"] == "hybrid"
+    assert r["download"]["name"] == "Torrent → Soulseek"  # ordered chain, arrow-joined
 
 
 def test_youtube_follow_requires_url_or_channel(tmp_path):
