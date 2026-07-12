@@ -22,6 +22,7 @@ from core.acquisition.bundle_matching import (
     DECISION_IMPORT_READY,
     DECISION_NEEDS_REVIEW,
     ExpectedTrack,
+    build_manual_matches,
     load_expected_tracks,
     match_bundle,
     normalize_title,
@@ -128,6 +129,40 @@ def _file(
         "duration_seconds": duration,
         "tags_available": title is not None,
     }
+
+
+def test_manual_matches_validate_bundle_and_expected_tracks(conn):
+    pending, _request, _candidate = _pending_import(conn)
+    record_inventory_result(
+        conn,
+        pending.id,
+        [{"relative_path": "Disc 1/01.flac"}],
+        resolved_path="/local",
+    )
+    record_matching_result(
+        conn,
+        pending.id,
+        [],
+        [{"code": "ambiguous_match"}],
+        decision="needs_review",
+    )
+    record = get_import(conn, pending.id)
+    expected = [_expected("Song", number=1, track_id=42)]
+
+    matches = build_manual_matches(
+        record,
+        expected,
+        [{"relative_path": "Disc 1/01.flac", "track_id": 42}],
+    )
+
+    assert matches[0]["strategy"] == "manual"
+    assert matches[0]["track_id"] == 42
+    with pytest.raises(ValueError, match="outside the bundle"):
+        build_manual_matches(
+            record,
+            expected,
+            [{"relative_path": "other.flac", "track_id": 42}],
+        )
 
 
 # ---------------------------------------------------------------------------

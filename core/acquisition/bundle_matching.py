@@ -565,6 +565,53 @@ def match_bundle(
     )
 
 
+def build_manual_matches(
+    record: Any,
+    expected_tracks: Sequence[ExpectedTrack],
+    assignments: Sequence[Mapping[str, Any]],
+) -> Tuple[Dict[str, Any], ...]:
+    """Validate explicit file-to-track assignments for a review import."""
+    if not assignments:
+        raise ValueError("manual import requires at least one assignment")
+    inventory_paths = {
+        str(item.get("relative_path") or "") for item in record.inventory
+    }
+    expected = {
+        int(track.track_id): track
+        for track in expected_tracks
+        if track.track_id is not None
+    }
+    seen_paths = set()
+    seen_tracks = set()
+    matches = []
+    for assignment in assignments:
+        if not isinstance(assignment, Mapping):
+            raise ValueError("manual import assignments must be objects")
+        relative = str(assignment.get("relative_path") or "").strip()
+        try:
+            track_id = int(assignment.get("track_id"))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("manual import assignments require an integer track_id") from exc
+        if relative not in inventory_paths:
+            raise ValueError("manual import assignment references a file outside the bundle")
+        if track_id not in expected:
+            raise ValueError("manual import assignment references an unexpected track")
+        if relative in seen_paths:
+            raise ValueError("manual import file is assigned more than once")
+        if track_id in seen_tracks:
+            raise ValueError("manual import track is assigned more than once")
+        seen_paths.add(relative)
+        seen_tracks.add(track_id)
+        matches.append({
+            **expected[track_id].to_dict(),
+            "relative_path": relative,
+            "confidence": 1.0,
+            "strategy": "manual",
+            "warnings": [],
+        })
+    return tuple(matches)
+
+
 __all__ = [
     "AUTO_IMPORT_MIN_CONFIDENCE",
     "CONFIDENCE_POSITION_AND_TITLE",
@@ -581,6 +628,7 @@ __all__ = [
     "TrackMatch",
     "load_expected_tracks",
     "match_bundle",
+    "build_manual_matches",
     "normalize_title",
     "title_similarity",
 ]

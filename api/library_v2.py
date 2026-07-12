@@ -601,6 +601,148 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         finally:
             conn.close()
 
+    # -- acquisition import review; filesystem paths remain server-only -----
+
+    def _owned_import(conn, import_id):
+        from core.acquisition.imports import get_import
+        from core.acquisition.requests import get_request
+        record = get_import(conn, import_id)
+        if record is None:
+            return None, None
+        owner = get_request(conn, record.request_id)
+        if owner is None or owner.profile_id != ADMIN_PROFILE_ID:
+            return None, None
+        return record, owner
+
+    def _public_import_detail(record):
+        return {
+            **record.to_public_dict(),
+            "inventory": [dict(item) for item in record.inventory],
+            "matches": [dict(item) for item in record.matches],
+            "rejections": [dict(item) for item in record.rejections],
+            "processed_count": len(record.result.get("processed", [])),
+        }
+
+    @app.route("/api/library/v2/acquisition/imports")
+    def lib2_list_acquisition_imports():
+        guard = _guard()
+        if guard:
+            return guard
+        conn = _conn()
+        try:
+            from core.acquisition.imports import list_open_imports
+            records = list_open_imports(conn)
+            return jsonify({
+                "success": True,
+                "imports": [record.to_public_dict() for record in records],
+            })
+        finally:
+            conn.close()
+
+    @app.route("/api/library/v2/acquisition/imports/<import_id>")
+    def lib2_get_acquisition_import(import_id):
+        guard = _guard()
+        if guard:
+            return guard
+        conn = _conn()
+        try:
+            record, _owner = _owned_import(conn, import_id)
+            if record is None:
+                return jsonify({"success": False, "error": "Import not found"}), 404
+            return jsonify({"success": True, "import": _public_import_detail(record)})
+        finally:
+            conn.close()
+
+    @app.route(
+        "/api/library/v2/acquisition/imports/<import_id>/resolve",
+        methods=["POST"],
+    )
+    def lib2_resolve_acquisition_import(import_id):
+        guard = _guard()
+        if guard:
+            return guard
+        assignments = (request.get_json(silent=True) or {}).get("assignments")
+        if not isinstance(assignments, list):
+            return jsonify({
+                "success": False,
+                "error": "assignments must be a list",
+            }), 400
+        conn = _conn()
+        try:
+            from core.acquisition.bundle_matching import (
+                build_manual_matches,
+                load_expected_tracks,
+            )
+            from core.acquisition.imports import record_manual_resolution
+            record, owner = _owned_import(conn, import_id)
+            if record is None:
+                return jsonify({"success": False, "error": "Import not found"}), 404
+            expected = load_expected_tracks(
+                conn,
+                record.expected_scope,
+                record.expected_entity_id,
+                search_options=owner.search_options,
+            )
+            matches = build_manual_matches(record, expected, assignments)
+            updated = record_manual_resolution(conn, record.id, matches)
+            conn.commit()
+            return jsonify({"success": True, "import": _public_import_detail(updated)})
+        except ValueError as exc:
+            conn.rollback()
+            return jsonify({"success": False, "error": str(exc)}), 400
+        finally:
+            conn.close()
+
+    @app.route(
+        "/api/library/v2/acquisition/imports/<import_id>/rescan",
+        methods=["POST"],
+    )
+    def lib2_rescan_acquisition_import(import_id):
+        guard = _guard()
+        if guard:
+            return guard
+        conn = _conn()
+        try:
+            record, _owner = _owned_import(conn, import_id)
+            if record is None:
+                return jsonify({"success": False, "error": "Import not found"}), 404
+            if record.status not in {"pending", "matching", "needs_review"}:
+                return jsonify({
+                    "success": False,
+                    "error": f"Import cannot be rescanned while {record.status}",
+                }), 409
+            output_path = record.output_path
+        finally:
+            conn.close()
+
+        from core.acquisition.bundle_inventory import collect_bundle_inventory
+        inventory = collect_bundle_inventory(output_path, config_get=config_get)
+        if not inventory.ok:
+            return jsonify({
+                "success": False,
+                "error": inventory.error or "Bundle is not readable",
+                "status": inventory.status,
+            }), 409
+        conn = _conn()
+        try:
+            from core.acquisition.imports import record_inventory_result
+            record, _owner = _owned_import(conn, import_id)
+            if record is None:
+                return jsonify({"success": False, "error": "Import not found"}), 404
+            updated = record_inventory_result(
+                conn,
+                record.id,
+                [item.to_dict() for item in inventory.files],
+                resolved_path=inventory.resolved_path,
+            )
+            conn.commit()
+            return jsonify({"success": True, "import": _public_import_detail(updated)})
+        except ValueError as exc:
+            conn.rollback()
+            return jsonify({"success": False, "error": str(exc)}), 400
+        finally:
+            conn.close()
+
     @app.route(
         "/api/library/v2/acquisition/requests/<request_id>/search",
         methods=["POST"],

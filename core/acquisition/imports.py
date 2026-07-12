@@ -541,6 +541,37 @@ def record_pipeline_file_completed(
     return _reload_import(conn, import_id)
 
 
+def record_manual_resolution(
+    conn: Any,
+    import_id: str,
+    matches: Any,
+) -> AcquisitionImport:
+    """Persist a reviewed assignment and hand it to the shared pipeline."""
+    record = _open_import(conn, import_id)
+    if record.status != "needs_review":
+        raise ValueError(
+            f"manual resolution requires needs_review, not {record.status}")
+    matches_json = _encode_items(matches, "matches")
+    if matches_json == "[]":
+        raise ValueError("manual resolution requires at least one match")
+    conn.execute(
+        """UPDATE acquisition_imports
+              SET status='importing', matches_json=?, rejections_json='[]',
+                  error=NULL, updated_at=CURRENT_TIMESTAMP
+            WHERE id=?""",
+        (matches_json, record.id),
+    )
+    record_history_event(
+        conn,
+        "import_resolved_manually",
+        request_id=record.request_id,
+        candidate_id=record.candidate_id,
+        download_id=record.download_id,
+        payload={"match_count": len(json.loads(matches_json))},
+    )
+    return _reload_import(conn, import_id)
+
+
 def record_import_deferred(
     conn: Any,
     import_id: str,
@@ -639,5 +670,6 @@ __all__ = [
     "record_import_failure",
     "record_inventory_result",
     "record_matching_result",
+    "record_manual_resolution",
     "record_pipeline_file_completed",
 ]

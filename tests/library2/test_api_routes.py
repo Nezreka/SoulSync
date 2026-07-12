@@ -435,6 +435,38 @@ def test_acquisition_search_operational_failure_is_retryable_not_no_candidate(ap
         "request_created", "search_failed", "retry_started"]
 
 
+def test_acquisition_import_detail_never_exposes_server_paths(api):
+    client, db, _ids = api
+    conn = _conn(db)
+    from core.acquisition import ensure_acquisition_schema
+    from tests.acquisition.test_bundle_inventory import _pending_import
+    from core.acquisition.imports import record_inventory_result
+    ensure_acquisition_schema(conn)
+    pending, _request, _candidate = _pending_import(
+        conn,
+        download_id="api-import-path-redaction",
+        output_path="C:/sab/secret/album",
+    )
+    record_inventory_result(
+        conn,
+        pending.id,
+        [{"relative_path": "Disc 1/01.flac", "size_bytes": 10}],
+        resolved_path="D:/mounted/secret/album",
+    )
+    conn.commit()
+    conn.close()
+
+    response = client.get(
+        f"/api/library/v2/acquisition/imports/{pending.id}")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["import"]["inventory"][0]["relative_path"] == "Disc 1/01.flac"
+    rendered = str(payload)
+    assert "C:/sab" not in rendered
+    assert "D:/mounted" not in rendered
+
+
 def test_acquisition_blocklist_can_be_read_and_manually_unblocked(api):
     client, db, ids = api
     created = client.post("/api/library/v2/acquisition/requests", json={
