@@ -49,12 +49,13 @@
     }
 
     // ── one activity card ─────────────────────────────────────────────────────
+    function actKey(s) { return s.session_key || (s.user + '|' + s.title); }
+    function stateIcon(state) { return state === 'paused' ? '❚❚' : (state === 'buffering' ? '◌' : '▶'); }
     function card(s) {
         var st = s.stream || {}, method = st.method || 'Direct Play';
         var mCls = method === 'Transcode' ? 'tc' : (method === 'Direct Stream' ? 'ds' : 'ok');
         var artUrl = img(s.art || s.thumb);
         var poster = s.thumb ? img(s.thumb) : '';
-        var stateIc = s.state === 'paused' ? '❚❚' : (s.state === 'buffering' ? '◌' : '▶');
         // transcode codec detail line (Tautulli signature)
         var xline = '';
         if (method !== 'Direct Play') {
@@ -74,13 +75,18 @@
               '" data-sact-title="' + esc(s.title) + '" title="Stop this stream">' +
               '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2.5"/></svg></button>'
             : '';
-        return '<div class="sact-card sact-st-' + esc(s.state) + '">' +
+        // a live equalizer glyph for music (CSS-animated; paused via the card state)
+        var eq = (s.media_type === 'track')
+            ? '<span class="sact-eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span>' : '';
+        var pct = s.progress_pct || 0;
+        var remain = s.duration_ms ? ('-' + fmtTime(Math.max(0, s.duration_ms - s.offset_ms))) : '';
+        return '<div class="sact-card sact-st-' + esc(s.state) + '" data-key="' + esc(actKey(s)) + '">' +
             (artUrl ? '<div class="sact-art" style="background-image:url(\'' + artUrl + '\')"></div>' : '') +
             '<div class="sact-scrim"></div>' + stop +
             '<div class="sact-row">' +
                 (poster
-                    ? '<div class="sact-poster"><img src="' + poster + '" alt="" loading="lazy" onerror="this.style.display=\'none\'"></div>'
-                    : '<div class="sact-poster sact-poster--none">' + (TYPE_IC[s.media_type] || '🎬') + '</div>') +
+                    ? '<div class="sact-poster"><img src="' + poster + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">' + eq + '</div>'
+                    : '<div class="sact-poster sact-poster--none">' + (TYPE_IC[s.media_type] || '🎬') + eq + '</div>') +
                 '<div class="sact-info">' +
                     '<div class="sact-title" title="' + esc(s.title) + '">' + esc(s.title) + '</div>' +
                     (s.subtitle ? '<div class="sact-sub">' + esc(s.subtitle) + '</div>' : '') +
@@ -93,9 +99,9 @@
                     xline +
                 '</div>' +
             '</div>' +
-            '<div class="sact-prog"><div class="sact-prog-fill" style="width:' + (s.progress_pct || 0) + '%"></div></div>' +
-            '<div class="sact-time"><span>' + stateIc + ' ' + fmtTime(s.offset_ms) + '</span>' +
-                '<span>' + fmtTime(s.duration_ms) + '</span></div>' +
+            '<div class="sact-prog"><div class="sact-prog-fill" data-sact-fill style="width:' + pct + '%"><span class="sact-head-dot"></span></div></div>' +
+            '<div class="sact-time"><span class="sact-elapsed" data-sact-elapsed>' + stateIcon(s.state) + ' ' + fmtTime(s.offset_ms) + '</span>' +
+                '<span class="sact-remain" data-sact-remain>' + remain + '</span></div>' +
         '</div>';
     }
 
@@ -116,19 +122,67 @@
             '<div class="sact-empty-s">Set your Plex server in Settings to see live activity.</div></div>';
     }
 
+    var _actData = null, _polledAt = 0, _actKeys = '';
+    function _cardMap() {
+        var m = {}, list = drawer && drawer.querySelector('[data-sact-list]');
+        if (list) Array.prototype.forEach.call(list.querySelectorAll('.sact-card'), function (el) {
+            m[el.getAttribute('data-key')] = el;
+        });
+        return m;
+    }
     function renderActivity(d) {
         var body = _body(); if (!body) return;
-        if (!d || d.ok === false) { body.innerHTML = _noServer(d); return; }
+        if (!d || d.ok === false) { body.innerHTML = _noServer(d); _actData = null; _actKeys = ''; return; }
         var sub = drawer.querySelector('[data-sact-server]');
         if (sub) sub.textContent = (d.server && d.server.name)
             ? (d.server.name + (d.server.version ? ' · ' + d.server.version : '')) : '';
-        if (!(d.sessions && d.sessions.length)) {
+        var sessions = d.sessions || [];
+        _actData = d; _polledAt = Date.now();
+        if (!sessions.length) {
+            _actKeys = '';
             body.innerHTML = summaryBar(d) + '<div class="sact-empty"><div class="sact-empty-ic">🌙</div>' +
                 '<div class="sact-empty-t">Nothing playing right now</div>' +
                 '<div class="sact-empty-s">Active streams show up here the moment someone hits play.</div></div>';
             return;
         }
-        body.innerHTML = summaryBar(d) + '<div class="sact-list">' + d.sessions.map(card).join('') + '</div>';
+        var keys = sessions.map(actKey).join('§');
+        // Same streams as last poll → DON'T rebuild the DOM (no art re-decode / flicker);
+        // just refresh the summary + per-card state, and let the ticker glide the bars.
+        if (keys === _actKeys && drawer.querySelector('[data-sact-list]')) {
+            var sm = body.querySelector('[data-sact-summary]'); if (sm) sm.innerHTML = summaryBar(d);
+            var map = _cardMap();
+            sessions.forEach(function (s) {
+                var el = map[actKey(s)]; if (!el) return;
+                el.className = 'sact-card sact-st-' + s.state;
+                var mb = el.querySelector('.sact-badge');
+                if (mb) { var m = (s.stream || {}).method || 'Direct Play';
+                    mb.className = 'sact-badge sact-badge--' + (m === 'Transcode' ? 'tc' : (m === 'Direct Stream' ? 'ds' : 'ok'));
+                    mb.textContent = m; }
+            });
+            liveTick();
+            return;
+        }
+        _actKeys = keys;
+        body.innerHTML = '<div data-sact-summary>' + summaryBar(d) + '</div>' +
+            '<div class="sact-list sact-enter" data-sact-list>' + sessions.map(card).join('') + '</div>';
+        liveTick();
+    }
+
+    // Smoothly advance the progress bar + times between the 3s polls, from the
+    // last poll's offset + wall-clock elapsed (playing only). This is what makes
+    // it feel LIVE instead of stepping every few seconds.
+    function liveTick() {
+        if (!isOpen || tab !== 'activity' || !_actData) return;
+        var now = Date.now(), map = _cardMap();
+        (_actData.sessions || []).forEach(function (s) {
+            var el = map[actKey(s)]; if (!el || !s.duration_ms) return;
+            var live = s.offset_ms + (s.state === 'playing' ? (now - _polledAt) : 0);
+            if (live > s.duration_ms) live = s.duration_ms;
+            var pct = 100 * live / s.duration_ms;
+            var fill = el.querySelector('[data-sact-fill]'); if (fill) fill.style.width = pct.toFixed(2) + '%';
+            var ee = el.querySelector('[data-sact-elapsed]'); if (ee) ee.textContent = stateIcon(s.state) + ' ' + fmtTime(live);
+            var rr = el.querySelector('[data-sact-remain]'); if (rr) rr.textContent = '-' + fmtTime(Math.max(0, s.duration_ms - live));
+        });
     }
 
     // ── history tab ───────────────────────────────────────────────────────────
@@ -169,17 +223,22 @@
     function graph(series) {
         var s = series || [];
         var max = Math.max.apply(null, s.map(function (p) { return p.plays; }).concat([1]));
-        var W = 416, H = 76, n = s.length || 1, gap = 3, bw = (W - (n - 1) * gap) / n;
+        var W = 416, H = 82, n = s.length || 1, gap = 4, bw = (W - (n - 1) * gap) / n;
         var bars = s.map(function (p, i) {
-            var h = Math.max(p.plays ? 3 : 0, Math.round((p.plays / max) * (H - 8)));
+            var h = Math.max(p.plays ? 4 : 2, Math.round((p.plays / max) * (H - 10)));
             var x = i * (bw + gap), y = H - h;
             var day = p.date.slice(5);
+            var peak = (p.plays === max && p.plays > 0) ? ' sact-bar--peak' : '';
+            var empty = p.plays ? '' : ' sact-bar--empty';
             return '<rect x="' + x.toFixed(1) + '" y="' + y + '" width="' + bw.toFixed(1) + '" height="' + h +
-                '" rx="2" class="sact-bar"><title>' + esc(day) + ': ' + p.plays + ' plays</title></rect>';
+                '" rx="2.5" class="sact-bar' + peak + empty + '"><title>' + esc(day) + ': ' + p.plays + ' plays</title></rect>';
         }).join('');
         var first = (s[0] && s[0].date.slice(5)) || '', last = (s[n - 1] && s[n - 1].date.slice(5)) || '';
-        return '<svg class="sact-graph" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none">' + bars + '</svg>' +
-            '<div class="sact-graph-x"><span>' + esc(first) + '</span><span>' + esc(last) + '</span></div>';
+        return '<svg class="sact-graph" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none">' +
+                '<defs><linearGradient id="sactBar" x1="0" y1="0" x2="0" y2="1">' +
+                    '<stop offset="0" stop-color="#4ade80"/><stop offset="1" stop-color="#22c55e" stop-opacity="0.45"/>' +
+                '</linearGradient></defs>' + bars + '</svg>' +
+            '<div class="sact-graph-x"><span>' + esc(first) + '</span><span>peak ' + max + '</span><span>' + esc(last) + '</span></div>';
     }
     function rankList(items, nameKey, cls) {
         var max = Math.max.apply(null, items.map(function (i) { return i.plays; }).concat([1]));
@@ -282,18 +341,22 @@
         document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && isOpen) close(); });
     }
 
+    var ticker = null;
     function open() {
         if (!drawer) build();
         isOpen = true;
         if (_scrim()) _scrim().classList.add('visible');
         requestAnimationFrame(function () { drawer.classList.add('visible'); });
         setTab('activity');
+        if (ticker) clearInterval(ticker);
+        ticker = setInterval(liveTick, 500);   // glide the progress bars between polls
     }
     function close() {
         isOpen = false;
         if (drawer) drawer.classList.remove('visible');
         if (_scrim()) _scrim().classList.remove('visible');
         stopPoll();
+        if (ticker) { clearInterval(ticker); ticker = null; }
     }
     function toggle() { isOpen ? close() : open(); }
 
