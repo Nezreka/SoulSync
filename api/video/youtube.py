@@ -109,6 +109,74 @@ def register_routes(bp):
             logger.exception("youtube follow failed")
             return jsonify({"success": False, "error": "Failed to follow channel"}), 500
 
+    @bp.route("/youtube/subscriptions/preview", methods=["POST"])
+    def video_youtube_subscriptions_preview():
+        """Parse an uploaded ytdl-sub / Kometa subscription file WITHOUT resolving
+        anything (instant). Body: {text}. Returns the subscriptions found so the
+        UI can show 'N found' + the list before committing to the slow import."""
+        from core.video.subscriptions import parse_subscriptions
+        text = (request.get_json(silent=True) or {}).get("text") or ""
+        subs = parse_subscriptions(text)
+        return jsonify({"success": True, "count": len(subs), "subscriptions": subs})
+
+    @bp.route("/youtube/subscriptions/import", methods=["POST"])
+    def video_youtube_subscriptions_import():
+        """Start the background import: resolve each subscription URL, follow the
+        channel/playlist, apply the show name (+ best-quality) per channel. Body:
+        {text}. Returns immediately; poll /subscriptions/import/status."""
+        from . import get_video_db
+        from core.video import youtube as yt
+        from core.video.subscriptions import parse_subscriptions, start_import_job
+        db = get_video_db()
+        text = (request.get_json(silent=True) or {}).get("text") or ""
+        subs = parse_subscriptions(text)
+        if not subs:
+            return jsonify({"success": False, "error": "No subscriptions found in that file"}), 400
+
+        def _follow_channel(ch):
+            already = bool(db.channel_watch_state([ch["youtube_id"]]))
+            db.add_channel_to_watchlist(ch)
+            db.add_videos_to_wishlist(ch, ch.get("videos") or [], server_source=_server())
+            if not already:
+                try:
+                    from core.video.youtube_enrichment import get_youtube_date_enricher
+                    get_youtube_date_enricher().enqueue(ch.get("youtube_id"), ch.get("title"))
+                except Exception:   # noqa: BLE001
+                    pass
+            return not already        # False = was already following → 'skipped'
+
+        def _follow_playlist(pl):
+            already = bool(db.playlist_watch_state([pl["playlist_id"]]))
+            db.add_playlist_to_watchlist(pl)
+            if pl.get("videos"):
+                try:
+                    db.cache_channel_videos(pl["playlist_id"], pl["videos"])
+                except Exception:   # noqa: BLE001
+                    pass
+            return not already
+
+        def _apply_settings(cid, cs):
+            merged = {**(db.get_channel_settings(cid) or {}), **cs}
+            db.set_channel_settings(cid, merged)
+
+        seams = {
+            "resolve_channel": lambda u: yt.resolve_channel(u, limit=_FOLLOW_LIMIT),
+            "resolve_playlist": lambda u: yt.resolve_playlist(u),
+            "is_playlist": lambda u: bool(yt.parse_playlist_id(u)),
+            "follow_channel": _follow_channel,
+            "follow_playlist": _follow_playlist,
+            "apply_channel_settings": _apply_settings,
+        }
+        started = start_import_job(subs, seams)
+        if not started:
+            return jsonify({"success": False, "error": "An import is already running"}), 409
+        return jsonify({"success": True, "started": True, "total": len(subs)})
+
+    @bp.route("/youtube/subscriptions/import/status", methods=["GET"])
+    def video_youtube_subscriptions_import_status():
+        from core.video.subscriptions import import_status
+        return jsonify({"success": True, **import_status()})
+
     @bp.route("/youtube/unfollow", methods=["POST"])
     def video_youtube_unfollow():
         """Un-follow a channel. Body: {youtube_id}. Wished videos are left in place."""

@@ -1346,6 +1346,10 @@
                                 <option value="title">A&ndash;Z</option>
                                 <option value="added">Recently added</option>
                             </select>
+                            <button class="vwlp-import-btn" type="button" data-vwlp-import hidden title="Import a ytdl-sub / Kometa subscriptions file">
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                Import subscriptions
+                            </button>
                         </div>
                         <div class="vwlp-body">
                             <div class="vwlp-loading hidden" data-vwlp-loading>
@@ -11484,6 +11488,7 @@
     <script src="{{ url_for('static', filename='video/video-person.js', v=static_v) }}"></script>
     <!-- Video watchlist page (isolated; tabbed shows / people you follow) -->
     <script src="{{ url_for('static', filename='video/video-watchlist.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='video/video-subscriptions.js', v=static_v) }}"></script>
     <!-- Video wishlist page (isolated; tabbed movies / TV, grouped show tree) -->
     <script src="{{ url_for('static', filename='video/video-wishlist.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='video/video-import.js', v=static_v) }}"></script>

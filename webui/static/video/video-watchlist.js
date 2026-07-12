@@ -199,6 +199,9 @@
         var tabs = document.querySelectorAll('[data-vwlp-tab]');
         for (var i = 0; i < tabs.length; i++)
             tabs[i].classList.toggle('vwlp-tab--on', tabs[i].getAttribute('data-vwlp-tab') === tab);
+        // the subscription-import button is channel-specific (follows are channels/playlists)
+        var imp = document.querySelector('[data-vwlp-import]');
+        if (imp) imp.hidden = tab !== 'channel';
         load();
     }
 

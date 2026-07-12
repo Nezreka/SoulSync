@@ -4892,3 +4892,70 @@ body[data-side="video"] #gsearch-aura {
 .vdash-health-chip--error {
     background: rgba(239, 68, 68, 0.08); border-color: rgba(239, 68, 68, 0.3); color: #f5b5b5;
 }
+
+/* ── Import subscriptions (ytdl-sub / Kometa) ─────────────────────────────── */
+.vwlp-import-btn {
+    display: inline-flex; align-items: center; gap: 7px; flex: 0 0 auto;
+    padding: 9px 15px; border-radius: 10px; font-size: 13px; font-weight: 700; cursor: pointer;
+    color: #eef1f7; background: rgba(255, 59, 59, 0.14); border: 1px solid rgba(255, 59, 59, 0.34);
+    transition: background 0.15s ease, transform 0.15s ease;
+}
+.vwlp-import-btn:hover { background: rgba(255, 59, 59, 0.24); transform: translateY(-1px); }
+.vsub-overlay {
+    position: fixed; inset: 0; z-index: 10050; display: flex; align-items: center; justify-content: center;
+    background: rgba(0, 0, 0, 0.72); backdrop-filter: blur(4px); padding: 20px;
+}
+.vsub-modal {
+    width: min(560px, 96vw); max-height: 88vh; overflow: auto; border-radius: 18px;
+    background: #0e0e14; border: 1px solid rgba(255, 255, 255, 0.09);
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6); color: #eef1f7;
+}
+.vsub-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+    padding: 22px 24px 14px; }
+.vsub-title { margin: 0; font-size: 19px; font-weight: 800; }
+.vsub-sub { margin: 4px 0 0; font-size: 12.5px; color: rgba(255, 255, 255, 0.5); }
+.vsub-x { background: none; border: 0; color: rgba(255, 255, 255, 0.5); font-size: 26px; line-height: 1; cursor: pointer; }
+.vsub-x:hover { color: #fff; }
+.vsub-body { padding: 6px 24px 24px; }
+.vsub-drop {
+    border: 2px dashed rgba(255, 255, 255, 0.16); border-radius: 14px; padding: 26px 16px; text-align: center;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+.vsub-drop--on { border-color: rgba(255, 59, 59, 0.6); background: rgba(255, 59, 59, 0.06); }
+.vsub-drop-ic { font-size: 34px; }
+.vsub-drop-t { font-size: 14px; font-weight: 700; margin: 8px 0 12px; }
+.vsub-drop-hint { font-size: 11.5px; color: rgba(255, 255, 255, 0.4); margin-top: 12px; }
+.vsub-paste {
+    width: 100%; margin-top: 14px; border-radius: 10px; padding: 10px 12px; resize: vertical;
+    background: #07070b; border: 1px solid rgba(255, 255, 255, 0.1); color: #dfe3ea;
+    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; line-height: 1.5;
+}
+.vsub-btn {
+    padding: 9px 16px; border-radius: 10px; font-size: 13px; font-weight: 700; cursor: pointer;
+    background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.16); color: #eef1f7;
+}
+.vsub-btn:hover { background: rgba(255, 255, 255, 0.14); }
+.vsub-btn--go { background: #ff3b3b; border-color: #ff3b3b; color: #fff; }
+.vsub-btn--go:hover:not(:disabled) { background: #ff5252; }
+.vsub-btn--go:disabled { opacity: 0.55; cursor: default; }
+.vsub-btn--ghost { background: none; }
+.vsub-count { font-size: 14px; margin: 6px 0 12px; }
+.vsub-count strong { color: #ff8a8a; font-size: 17px; }
+.vsub-list { max-height: 320px; overflow: auto; display: flex; flex-direction: column; gap: 4px; }
+.vsub-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 9px;
+    background: rgba(255, 255, 255, 0.03); }
+.vsub-row-ic { flex: 0 0 auto; }
+.vsub-row-name { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vsub-row-kind { flex: 0 0 auto; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+    color: rgba(255, 255, 255, 0.4); }
+.vsub-foot { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; align-items: center; }
+.vsub-note { flex: 1; font-size: 12px; color: #f5b5b5; }
+.vsub-fineprint { font-size: 11px; color: rgba(255, 255, 255, 0.38); margin: 12px 0 0; line-height: 1.5; }
+.vsub-prog-bar { height: 10px; border-radius: 6px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.vsub-prog-bar span { display: block; height: 100%; background: linear-gradient(90deg, #ff3b3b, #ff7676); transition: width 0.4s ease; }
+.vsub-prog-line { display: flex; justify-content: space-between; margin-top: 8px; font-size: 12.5px; color: rgba(255, 255, 255, 0.6); }
+.vsub-tally { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+.vsub-chip { font-size: 11.5px; font-weight: 700; padding: 4px 10px; border-radius: 8px;
+    background: rgba(255, 255, 255, 0.07); color: rgba(255, 255, 255, 0.7); }
+.vsub-chip--ok { background: rgba(34, 197, 94, 0.16); color: #7ee0a0; }
+.vsub-chip--bad { background: rgba(239, 68, 68, 0.16); color: #f3a1a1; }
