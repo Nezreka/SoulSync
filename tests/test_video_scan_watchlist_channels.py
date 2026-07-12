@@ -132,6 +132,66 @@ def test_a_stale_config_backfill_is_ignored_global_wins():
     assert res["videos_added"] == 0                     # global 0 wins; the stale 10 is dead data
 
 
+def test_gap_fill_pages_past_a_full_window_to_the_follow_date():
+    # 30 recent uploads ALL newer than the follow date → the window overflowed. The gap-fill
+    # pages deeper and catches the videos between #30 and the follow date, stopping once a
+    # page crosses the baseline.
+    baseline = "2026-01-01"
+    recent = [_vid("r%02d" % i, date="2026-06-%02d" % (30 - i)) for i in range(30)]   # June, all >= baseline
+    page2 = [_vid("d%02d" % i, date="2026-03-%02d" % (28 - i)) for i in range(10)]     # March, still >= baseline
+    page3 = [_vid("old1", date="2025-12-20")]                                          # < baseline → stop
+    pages = iter([{"videos": page2, "continuation": "t2"}, {"videos": page3, "continuation": "t3"}])
+    adds = []
+    res = auto_video_scan_watchlist_channels(
+        {"_automation_id": "a"}, _Deps(),
+        fetch_channels=lambda: [{"youtube_id": "UC1", "title": "Firehose", "date_added": baseline}],
+        fetch_uploads=lambda cid, limit: recent,
+        wishlisted_ids=lambda cid: [], downloaded_ids=lambda cid: [], dismissed_ids=lambda cid: [],
+        add_videos=lambda ch, v: (adds.extend(v), len(v))[1],
+        today_fn=lambda: "2026-07-01", backfill_fn=lambda: 5,
+        fetch_upload_page=lambda cid, token: next(pages, {"videos": [], "continuation": None}),
+        page_sleep=lambda s: None)
+    ids = {v["youtube_id"] for v in adds}
+    assert res["videos_added"] == 40                     # 30 recent + 10 overflow, all >= baseline
+    assert len([i for i in ids if i.startswith("d")]) == 10   # the overflow page WAS caught
+    assert "old1" not in ids                             # the pre-follow video is left alone
+
+
+def test_gap_fill_does_not_fire_when_window_is_not_full():
+    # Fewer than `limit` recent uploads → we already hold the whole recent history → the deep
+    # pager is never even called (steady state stays cheap).
+    called = []
+    res = auto_video_scan_watchlist_channels(
+        {"_automation_id": "a"}, _Deps(),
+        fetch_channels=lambda: [{"youtube_id": "UC1", "title": "Ch", "date_added": "2026-01-01"}],
+        fetch_uploads=lambda cid, limit: [_vid("r1", date="2026-06-01")],   # 1 << 30
+        wishlisted_ids=lambda cid: [], downloaded_ids=lambda cid: [], dismissed_ids=lambda cid: [],
+        add_videos=lambda ch, v: len(v), today_fn=lambda: "2026-07-01", backfill_fn=lambda: 5,
+        fetch_upload_page=lambda cid, token: called.append(token) or {"videos": [], "continuation": None},
+        page_sleep=lambda s: None)
+    assert called == []                                  # pager never invoked
+
+
+def test_gap_fill_stops_on_an_already_known_page():
+    # A full window still newer than baseline triggers the pager, but the first deeper page is
+    # entirely already-wishlisted → break-on-existing stops immediately (no paging to the cap).
+    baseline = "2026-01-01"
+    recent = [_vid("r%02d" % i, date="2026-06-%02d" % (30 - i)) for i in range(30)]
+    page2 = [_vid("k%02d" % i, date="2026-05-%02d" % (28 - i)) for i in range(10)]     # >= baseline, all known
+    known = [v["youtube_id"] for v in page2]
+    calls = []
+    res = auto_video_scan_watchlist_channels(
+        {"_automation_id": "a"}, _Deps(),
+        fetch_channels=lambda: [{"youtube_id": "UC1", "title": "Ch", "date_added": baseline}],
+        fetch_uploads=lambda cid, limit: recent,
+        wishlisted_ids=lambda cid: known, downloaded_ids=lambda cid: [], dismissed_ids=lambda cid: [],
+        add_videos=lambda ch, v: len(v), today_fn=lambda: "2026-07-01", backfill_fn=lambda: 5,
+        fetch_upload_page=lambda cid, token: calls.append(token) or {"videos": page2, "continuation": "more"},
+        page_sleep=lambda s: None)
+    assert len(calls) == 1                               # stopped after the first all-known page
+    assert res["videos_added"] == 30                     # only the 30 recent; the known page is excluded
+
+
 def test_first_run_backlogs_last_n_then_steady_state_is_incremental():
     channels = [{"youtube_id": "UC1", "title": "Cool Channel",
                  "poster_url": "/avatar.jpg", "date_added": "2026-06-25 09:00:00"}]

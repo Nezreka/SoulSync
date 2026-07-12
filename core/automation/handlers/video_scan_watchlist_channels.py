@@ -10,7 +10,11 @@ Schedule trigger; 3h is fine too, the scan is cheap). It's forward-looking and d
 
   * **Baseline = follow time.** What the user had before following isn't our concern — only
     uploads published on/after they followed the channel (the watchlist row's ``date_added``)
-    are "new" and get wishlisted, forever forward.
+    are "new" and get wishlisted, forever forward. When the recent window overflows (a channel
+    posts more since you followed than the window holds — a firehose week or a long scan
+    outage), the scan pages deeper toward the follow date so nothing since follow is dropped;
+    it stops the moment it crosses the baseline or hits videos it already has (break-on-
+    existing), bounded by a page cap — so catch-up is complete but steady state stays cheap.
   * **Last-N safety net.** Reaches a little BEFORE the baseline so the user is always kept
     current on the most recent videos even right after following / if a scan was missed. The
     count is the global "videos to grab" setting (Settings → Library, default 5) — the SAME
@@ -36,6 +40,7 @@ is a real download queue) closes that loop. Tracked, out of scope for this scan-
 from __future__ import annotations
 
 import re
+import time
 from datetime import date
 
 from utils.logging_config import get_logger
@@ -225,6 +230,97 @@ def _default_backfill_count() -> int:
         return 5
 
 
+# Deep catch-up cap: the most extra InnerTube pages the gap-fill may pull per channel per
+# scan. break-on-existing + cross-baseline normally stop far sooner; this is the backstop so
+# a channel followed long ago can never page its whole catalog on a scan.
+_CATCHUP_MAX_PAGES = 8
+_PAGE_DELAY = 0.6                                       # politeness pause between deep pages
+
+
+def _default_fetch_upload_page(channel_id: Any, continuation: Any) -> Dict[str, Any]:
+    """One more InnerTube page of a channel's Videos tab (dated), for the gap-fill pager:
+    {"videos": [...newest-first...], "continuation": token|None}."""
+    from core.video import youtube as yt
+    return yt.innertube_channel_videos_page(channel_id, continuation=continuation)
+
+
+def _extend_to_baseline(
+    channel_id: Any,
+    uploads: List[Dict[str, Any]],
+    *,
+    baseline_date: Optional[str],
+    limit: int,
+    excluded: Iterable = (),
+    page_fn: Callable[[Any, Any], Dict[str, Any]],
+    page_sleep: Optional[Callable[[float], None]] = None,
+    max_pages: int = _CATCHUP_MAX_PAGES,
+) -> List[Dict[str, Any]]:
+    """Fill the gap between the recent window and the follow date.
+
+    The recent-window fetch returns only the newest ``limit`` uploads. If a channel posted
+    MORE than that since you followed (a firehose week, or a long scan outage), the overflow
+    is older than the window yet still newer than your follow date — it'd be silently missed.
+
+    Pages the channel's Videos tab (newest→older) ONLY when that overflow is actually possible
+    — the window came back FULL and its oldest dated upload is still on/after the baseline —
+    and stops as soon as it crosses the baseline OR reaches a page of already-known videos
+    (break-on-existing, so steady-state costs ~1 extra page), capped at ``max_pages``.
+    Best-effort: any failure returns the uploads unchanged, so the normal path never breaks.
+
+    Returns the (possibly extended) uploads, newest-first, de-duplicated by id."""
+    by_id: Dict[str, Dict[str, Any]] = {}
+    dated: List[str] = []
+    for v in uploads:
+        vid = v.get("youtube_id")
+        if vid and vid not in by_id:
+            by_id[vid] = v
+            d = _day(v.get("published_at"))
+            if d:
+                dated.append(d)
+    # Trigger only when overflow is possible: a full window whose oldest dated upload is still
+    # >= the follow date. A short window means we already hold the whole recent history; a
+    # window that reaches past the baseline means nothing between it and the follow date was
+    # dropped. Either way there is nothing deeper worth paging for.
+    if len(uploads) < max(1, int(limit)) or not baseline_date:
+        return uploads
+    oldest = min(dated) if dated else None
+    if not oldest or oldest < baseline_date:
+        return uploads
+
+    known = set(excluded or ())
+    sleep = page_sleep or time.sleep
+    token = None
+    pages = 0
+    try:
+        while pages < max_pages:
+            if pages:
+                sleep(_PAGE_DELAY)                     # politeness between network pages
+            page = page_fn(channel_id, token) or {}
+            vids = page.get("videos") or []
+            page_ids = [v.get("youtube_id") for v in vids if v.get("youtube_id")]
+            for v in vids:
+                vid = v.get("youtube_id")
+                if vid and vid not in by_id:
+                    by_id[vid] = v
+            pages += 1
+            token = page.get("continuation")
+            page_dates = [d for d in (_day(v.get("published_at")) for v in vids) if d]
+            if page_dates and min(page_dates) < baseline_date:
+                break                                  # paged past the follow date — done
+            if not token:
+                break                                  # channel exhausted
+            if page_ids and all(pid in known for pid in page_ids):
+                break                                  # hit already-handled videos — done
+        else:
+            # Hit the cap before reaching the follow date — log it, never pretend it's complete.
+            logger.info("catch-up: %s hit the %d-page cap before the follow date (%s); some "
+                        "uploads since follow may wait for the next pass", channel_id, max_pages,
+                        baseline_date)
+    except Exception:   # noqa: BLE001 - the gap-fill is a safety net; never break the scan
+        logger.debug("catch-up paging failed for %s", channel_id, exc_info=True)
+    return list(by_id.values())
+
+
 def auto_video_scan_watchlist_channels(
     config: Dict[str, Any],
     deps: AutomationDeps,
@@ -238,6 +334,8 @@ def auto_video_scan_watchlist_channels(
     add_videos: Optional[Callable[[Dict[str, Any], List[Dict[str, Any]]], int]] = None,
     today_fn: Optional[Callable[[], str]] = None,
     backfill_fn: Optional[Callable[[], int]] = None,
+    fetch_upload_page: Optional[Callable[[Any, Any], Dict[str, Any]]] = None,
+    page_sleep: Optional[Callable[[float], None]] = None,
 ) -> Dict[str, Any]:
     """Scan every followed YouTube channel and wishlist its new long-form uploads.
 
@@ -250,6 +348,7 @@ def auto_video_scan_watchlist_channels(
     downloaded_ids = downloaded_ids or _default_downloaded_ids
     add_videos = add_videos or _default_add_videos
     today_fn = today_fn or (lambda: date.today().isoformat())
+    fetch_upload_page = fetch_upload_page or _default_fetch_upload_page
     automation_id = config.get('_automation_id')
     # The last-N net is the SINGLE global "videos to grab" setting (Settings → Library),
     # shared with the follow backfill. No per-automation override — one knob, no surprises
@@ -286,15 +385,27 @@ def auto_video_scan_watchlist_channels(
                                      log_type='warning')
                 continue
 
+            baseline = _day(ch.get('date_added')) or today
+            # Read the dedup sets once — used by both the gap-fill (break-on-existing) and
+            # the final selection, so we never call the seams twice per channel.
+            wl = list(wishlisted_ids(cid) or [])
+            dl = list(downloaded_ids(cid) or [])
+            di = list(dismissed_ids(cid) or [])
+            # Gap-fill: when the recent window overflowed (a firehose week / a long outage),
+            # page deeper toward the follow date so nothing since you followed is dropped.
+            # Best-effort + bounded; a no-op when the window already reaches past the baseline.
+            uploads = _extend_to_baseline(
+                cid, uploads, baseline_date=baseline, limit=limit,
+                excluded=set(wl) | set(dl) | set(di),
+                page_fn=fetch_upload_page, page_sleep=page_sleep)
             try:
                 uploads = apply_channel_filters(uploads, channel_settings(cid))
             except Exception:   # noqa: BLE001 - filters are an assist, never abort a channel
                 logger.exception("channel filters failed for %s", cid)
-            baseline = _day(ch.get('date_added')) or today
             gaps = select_channel_video_gaps(
                 uploads, baseline_date=baseline, backfill_count=backfill,
-                wishlisted_ids=wishlisted_ids(cid), dismissed_ids=dismissed_ids(cid),
-                downloaded_ids=downloaded_ids(cid), today=today, min_seconds=min_seconds)
+                wishlisted_ids=wl, dismissed_ids=di,
+                downloaded_ids=dl, today=today, min_seconds=min_seconds)
             if gaps:
                 n = int(add_videos({'youtube_id': cid, 'title': ctitle,
                                     'avatar_url': ch.get('poster_url')}, gaps) or 0)
