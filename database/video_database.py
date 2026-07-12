@@ -5561,6 +5561,32 @@ class VideoDatabase:
         self.set_setting("youtube_channel_settings:" + str(channel_id), json.dumps(clean))
         return True
 
+    def get_playlist_seen(self, playlist_id) -> list:
+        """The video ids already accounted for in a followed playlist — the membership
+        baseline captured on the first scan (+ additions since). A current member NOT in
+        this set is a genuine new addition. Empty until the first scan baselines it."""
+        raw = self.get_setting("youtube_playlist_seen:" + str(playlist_id or ""))
+        if not raw:
+            return []
+        try:
+            import json
+            d = json.loads(raw)
+            return [str(x) for x in d] if isinstance(d, list) else []
+        except (ValueError, TypeError):
+            return []
+
+    def add_playlist_seen(self, playlist_id, video_ids) -> None:
+        """Fold ids into a playlist's seen-baseline (union; never shrinks) so later scans
+        only surface members added after this point."""
+        pid = str(playlist_id or "")
+        add = [str(v) for v in (video_ids or []) if v]
+        if not pid or not add:
+            return
+        import json
+        merged = set(self.get_playlist_seen(pid))
+        merged.update(add)
+        self.set_setting("youtube_playlist_seen:" + pid, json.dumps(sorted(merged)))
+
     def wishlisted_video_ids_for_channel(self, channel_id) -> list:
         """The youtube video ids wished under a channel (the per-video date fallback set)."""
         if not channel_id:
