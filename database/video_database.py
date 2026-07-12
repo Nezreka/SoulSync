@@ -43,7 +43,7 @@ def _publish_video_event(event_type: str, data: dict) -> None:
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 35   # v35: studios/networks link tables (multi-company); v34: movies.last_viewed_at
+SCHEMA_VERSION = 36   # v36: overlay_apply.plex_poster_key (delete prev overlay); v35: studios/networks links
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -172,6 +172,9 @@ _COLUMN_MIGRATIONS = [
     # instead of a blank 100% spinner during post-download processing.
     ("video_downloads", "import_phase", "TEXT"),
     ("video_downloads", "import_progress", "REAL DEFAULT 0"),
+    # the ratingKey of the overlay poster we last uploaded to Plex, so a re-apply can delete
+    # THAT one before uploading the new render (Plex accumulates uploads otherwise).
+    ("overlay_apply", "plex_poster_key", "TEXT"),
     ("movies", "tmdb_match_status", "TEXT"),
     ("movies", "tmdb_last_attempted", "TEXT"),
     ("shows", "tmdb_match_status", "TEXT"),
@@ -3606,15 +3609,17 @@ class VideoDatabase:
             conn.close()
 
     def record_overlay_apply(self, kind: str, item_id: int, template_id,
-                             base_sha=None, values_sig=None) -> None:
+                             base_sha=None, values_sig=None, plex_poster_key=None) -> None:
         conn = self._get_connection()
         try:
             conn.execute(
-                "INSERT INTO overlay_apply (kind, item_id, template_id, base_sha, values_sig, applied_at) "
-                "VALUES (?,?,?,?,?,datetime('now')) ON CONFLICT(kind, item_id) DO UPDATE SET "
+                "INSERT INTO overlay_apply (kind, item_id, template_id, base_sha, values_sig, "
+                "plex_poster_key, applied_at) "
+                "VALUES (?,?,?,?,?,?,datetime('now')) ON CONFLICT(kind, item_id) DO UPDATE SET "
                 "template_id=excluded.template_id, base_sha=excluded.base_sha, "
-                "values_sig=excluded.values_sig, applied_at=datetime('now')",
-                (kind, int(item_id), template_id, base_sha, values_sig))
+                "values_sig=excluded.values_sig, plex_poster_key=excluded.plex_poster_key, "
+                "applied_at=datetime('now')",
+                (kind, int(item_id), template_id, base_sha, values_sig, plex_poster_key))
             conn.commit()
         except sqlite3.Error:
             logger.exception("record_overlay_apply failed for %s %s", kind, item_id)
@@ -3625,7 +3630,7 @@ class VideoDatabase:
         conn = self._get_connection()
         try:
             r = conn.execute(
-                "SELECT kind, item_id, template_id, base_sha, values_sig, applied_at "
+                "SELECT kind, item_id, template_id, base_sha, values_sig, plex_poster_key, applied_at "
                 "FROM overlay_apply WHERE kind=? AND item_id=?", (kind, int(item_id))).fetchone()
             return dict(r) if r else None
         finally:

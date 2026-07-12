@@ -309,15 +309,19 @@ def refresh_video_server_sections(media_type="all"):
         return {"ok": False, "error": str(e)}
 
 
-def set_video_poster(server_id, *, image_url=None, image_bytes=None, kind="movie") -> dict:
-    """Push a poster to the active media server (Plex/Jellyfin) for the given item."""
+def set_video_poster(server_id, *, image_url=None, image_bytes=None, kind="movie",
+                     delete_key=None) -> dict:
+    """Push a poster to the active media server (Plex/Jellyfin) for the given item.
+    ``delete_key`` lets an overlay re-apply drop its previous Plex upload first (ignored by
+    Jellyfin, which replaces in place)."""
     src = get_active_video_source()
     if src is None:
         return {"ok": False, "error": "No video server configured"}
     if not hasattr(src, "set_poster"):
         return {"ok": False, "error": "This server doesn't support setting a poster"}
     try:
-        return src.set_poster(server_id, image_url=image_url, image_bytes=image_bytes, kind=kind)
+        return src.set_poster(server_id, image_url=image_url, image_bytes=image_bytes, kind=kind,
+                              delete_key=delete_key)
     except Exception as e:   # noqa: BLE001 - surface any server error to the caller
         logger.exception("video sources: set_poster failed")
         return {"ok": False, "error": str(e)}
@@ -471,11 +475,26 @@ class PlexVideoSource:
                     logger.exception("Plex: refresh failed for section %s", getattr(s, "title", "?"))
         return {"ok": n > 0, "sections": n}
 
-    def set_poster(self, server_id, *, image_url=None, image_bytes=None, kind="movie") -> dict:
+    def set_poster(self, server_id, *, image_url=None, image_bytes=None, kind="movie",
+                   delete_key=None) -> dict:
         """Set the poster on a Plex item (by ratingKey). Plex fetches a URL itself;
-        raw bytes upload via a temp file. Returns {ok[, error]}."""
+        raw bytes upload via a temp file. Returns {ok, poster_key[, error]}.
+
+        ``delete_key`` (an overlay re-apply): if the CURRENTLY-selected poster is the one we
+        uploaded last time (its ratingKey matches), delete it BEFORE uploading the new render —
+        Plex keeps every uploaded poster otherwise, so overlays would pile up. We only ever
+        delete a poster we know is ours; a poster the user picked by hand is left untouched.
+        ``poster_key`` in the result is the newly-uploaded poster's ratingKey, to store for the
+        next re-apply."""
         try:
             item = self._server.fetchItem(int(server_id))
+            if delete_key:
+                try:
+                    cur = next((p for p in item.posters() if getattr(p, "selected", False)), None)
+                    if cur is not None and str(getattr(cur, "ratingKey", "")) == str(delete_key):
+                        item.deletePoster()   # deletes the current /thumb = our previous overlay
+                except Exception:   # noqa: BLE001 - cleanup is best-effort; never block the upload
+                    logger.debug("Plex: pre-upload poster delete skipped for %s", server_id, exc_info=True)
             if image_url:
                 item.uploadPoster(url=image_url)
             elif image_bytes:
@@ -493,7 +512,14 @@ class PlexVideoSource:
                         pass
             else:
                 return {"ok": False, "error": "No image provided"}
-            return {"ok": True}
+            # The key of the poster now selected (the one we just uploaded) — for next time.
+            poster_key = None
+            try:
+                sel = next((p for p in item.posters() if getattr(p, "selected", False)), None)
+                poster_key = str(getattr(sel, "ratingKey", "")) or None
+            except Exception:   # noqa: BLE001 - key read is best-effort
+                logger.debug("Plex: could not read new poster key for %s", server_id, exc_info=True)
+            return {"ok": True, "poster_key": poster_key}
         except Exception as e:   # noqa: BLE001 - surface any Plex/network error
             logger.exception("Plex: set_poster failed for %s", server_id)
             return {"ok": False, "error": str(e)}
@@ -1018,10 +1044,14 @@ class JellyfinVideoSource:
                 logger.exception("Jellyfin: refresh failed for view %s", vid)
         return {"ok": n > 0, "sections": n}
 
-    def set_poster(self, server_id, *, image_url=None, image_bytes=None, kind="movie") -> dict:
+    def set_poster(self, server_id, *, image_url=None, image_bytes=None, kind="movie",
+                   delete_key=None) -> dict:
         """Upload a Primary image to a Jellyfin item — the raw image, base64-encoded in
         the body with the image content-type (Jellyfin's image-upload contract). Fetches
-        the URL's bytes when only a URL is given. Returns {ok[, error]}."""
+        the URL's bytes when only a URL is given. Returns {ok[, error]}.
+
+        ``delete_key`` is accepted for a uniform signature but ignored: Jellyfin's Primary
+        image is a single slot that this upload REPLACES, so it never accumulates like Plex."""
         import base64 as _b64
         import requests as _rq
         try:
