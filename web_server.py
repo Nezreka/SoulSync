@@ -1436,15 +1436,16 @@ def _register_automation_handlers():
 
     # Bridge the isolated video download monitor's batch-complete signal into the
     # automation engine (core/video can't import the engine). Mirrors how the music
-    # web_scan_manager forwards library_scan_completed. Fires the 'Auto-Scan Video
-    # After Downloads' automation when a batch of video downloads finishes.
+    # web_scan_manager forwards library_scan_completed. ONE forwarder relays EVERY
+    # published video event (batch complete, download completed/failed, repair
+    # findings, wishlist/watchlist changes, ...) to its same-named event trigger.
     if automation_engine is not None:
         try:
-            from core.video.download_events import register_batch_complete_callback
-            register_batch_complete_callback(
-                lambda data: automation_engine.emit('video_batch_complete', data or {}))
+            from core.video.download_events import register_event_forwarder
+            register_event_forwarder(
+                lambda etype, data: automation_engine.emit(etype, data or {}))
         except Exception:
-            logger.exception("Could not wire video batch-complete -> automation engine")
+            logger.exception("Could not wire video events -> automation engine")
 
     logger.info("Automation action handlers registered")
 

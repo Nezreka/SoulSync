@@ -47,6 +47,7 @@ from core.automation.handlers.video_process_wishlist import auto_video_process_w
 from core.automation.handlers.video_apply_overlays import auto_video_apply_overlays
 from core.automation.handlers.video_clean_plex_images import auto_video_clean_plex_images
 from core.automation.handlers.video_sync_collections import auto_video_sync_collections
+from core.automation.handlers.video_run_repair import auto_video_run_repair_job
 from core.automation.handlers.video_scan_library import (
     auto_video_scan_library, auto_video_scan_server, auto_video_update_database,
 )
@@ -309,6 +310,12 @@ def register_all(deps: AutomationDeps) -> None:
     engine.register_action_handler(
         'video_sync_collections',
         lambda config: auto_video_sync_collections(config, deps),
+    )
+    # Library Maintenance from an automation — queues onto the repair worker's
+    # force-run queue (one job at a time; overlap-safe by construction).
+    engine.register_action_handler(
+        'video_run_repair_job',
+        lambda config: auto_video_run_repair_job(config, deps),
     )
 
     # Progress + history callbacks: the engine invokes these around

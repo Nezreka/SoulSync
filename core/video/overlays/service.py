@@ -400,6 +400,12 @@ def _run(db, scopes, force, remove, reset=False):
         run_apply(svc.applier(), jobs, on_progress=_prog, remove=remove)
         _apply_restores(db, svc, restores, offset=len(jobs))
         _JOB["phase"] = "done"
+        try:      # 'Overlays Applied' automation trigger
+            from core.video.download_events import publish
+            publish("video_overlays_applied",
+                    {"applied": _JOB.get("applied", 0), "errors": _JOB.get("failed", 0)})
+        except Exception:   # noqa: BLE001 - events never disturb the run
+            logger.exception("overlay apply event publish failed")
     except Exception as e:
         logger.exception("overlay apply run failed")
         _JOB.update(phase="error", error=str(e))

@@ -40,6 +40,14 @@ TRIGGERS: list[dict] = [
           "options": [{"value": "mon", "label": "Mon"}, {"value": "tue", "label": "Tue"}, {"value": "wed", "label": "Wed"},
                       {"value": "thu", "label": "Thu"}, {"value": "fri", "label": "Fri"}, {"value": "sat", "label": "Sat"}, {"value": "sun", "label": "Sun"}]}
      ]},
+    # monthly_time was always supported by the engine (schedule.py) but never
+    # had a builder block — unlocked so users can build monthly maintenance.
+    {"type": "monthly_time", "label": "Monthly Schedule", "icon": "calendar", "scope": "both",
+     "description": "Run once a month on a chosen day", "available": True,
+     "config_fields": [
+         {"key": "time", "type": "time", "label": "Time", "default": "03:00"},
+         {"key": "day_of_month", "type": "number", "label": "Day of month", "default": 1, "min": 1, "max": 31}
+     ]},
     {"type": "app_started", "label": "App Started", "icon": "power", "scope": "both", "description": "When SoulSync starts up", "available": True},
     {"type": "track_downloaded", "label": "Track Downloaded", "icon": "download", "description": "When a track finishes downloading", "available": True,
      "has_conditions": True,
@@ -131,6 +139,65 @@ TRIGGERS: list[dict] = [
     {"type": "video_library_scan_completed", "label": "Video Library Scan Done", "icon": "hard-drive", "scope": "video",
      "description": "When the media server finishes rescanning your video sections", "available": True,
      "variables": ["server"]},
+    # Per-item download lifecycle (movies, episodes AND YouTube — filter with
+    # conditions on `kind`: movie / show / youtube).
+    {"type": "video_download_completed", "label": "Video Downloaded", "icon": "download", "scope": "video",
+     "description": "When one movie, episode or YouTube video finishes downloading and lands in the library", "available": True,
+     "has_conditions": True,
+     "condition_fields": ["title", "kind", "channel", "quality"],
+     "variables": ["kind", "title", "year", "season", "episode", "channel", "quality", "source", "dest_path"]},
+    {"type": "video_download_failed", "label": "Video Download Failed", "icon": "alert-triangle", "scope": "video",
+     "description": "When a download gives up for good (after retries) — the item goes back on the wishlist", "available": True,
+     "has_conditions": True,
+     "condition_fields": ["title", "kind", "error"],
+     "variables": ["kind", "title", "error", "source"]},
+    {"type": "video_import_failed", "label": "Video Import Failed", "icon": "alert-circle", "scope": "video",
+     "description": "When a file downloads fine but can't be placed (sample, wrong episode, not an upgrade) and needs manual import", "available": True,
+     "has_conditions": True,
+     "condition_fields": ["title", "kind", "error"],
+     "variables": ["kind", "title", "error", "dest_path"]},
+    {"type": "video_upgrade_completed", "label": "Quality Upgrade Landed", "icon": "trending-up", "scope": "video",
+     "description": "When a download REPLACED an existing library copy with a better one", "available": True,
+     "has_conditions": True,
+     "condition_fields": ["title", "kind"],
+     "variables": ["kind", "title", "quality", "dest_path"]},
+    # Library maintenance (Tools page repair jobs).
+    {"type": "video_repair_finding_created", "label": "Maintenance Finding Raised", "icon": "tool", "scope": "video",
+     "description": "When a Library Maintenance job raises a NEW finding (missing episodes, broken file, ghost, ...) — condition on severity 'critical' for outage alerts", "available": True,
+     "has_conditions": True,
+     "condition_fields": ["job_id", "finding_type", "severity", "title"],
+     "variables": ["job_id", "finding_type", "severity", "title"]},
+    {"type": "video_repair_scan_completed", "label": "Maintenance Scan Done", "icon": "tool", "scope": "video",
+     "description": "When a Library Maintenance job finishes a scan", "available": True,
+     "has_conditions": True,
+     "condition_fields": ["job_id", "status"],
+     "variables": ["job_id", "job_name", "status", "scanned", "findings_created", "errors"]},
+    # Wishlist / watchlist activity.
+    {"type": "video_wishlist_item_added", "label": "Video Wishlist Item Added", "icon": "plus-circle", "scope": "video",
+     "description": "When something is added to the video wishlist (a movie, one or more episodes, or YouTube videos)", "available": True,
+     "has_conditions": True,
+     "condition_fields": ["title", "kind"],
+     "variables": ["kind", "title", "count"]},
+    {"type": "video_watchlist_added", "label": "Video Watchlist Follow", "icon": "eye", "scope": "video",
+     "description": "When a show, person, channel or playlist is followed on the watchlist", "available": True,
+     "has_conditions": True,
+     "condition_fields": ["title", "kind"],
+     "variables": ["kind", "title"]},
+    {"type": "video_watchlist_removed", "label": "Video Watchlist Unfollow", "icon": "eye-off", "scope": "video",
+     "description": "When a show, person, channel or playlist is unfollowed", "available": True,
+     "has_conditions": True,
+     "condition_fields": ["title", "kind"],
+     "variables": ["kind", "title"]},
+    # Studio pipelines.
+    {"type": "video_collections_synced", "label": "Collections Synced", "icon": "layers", "scope": "video",
+     "description": "When a collections sync pass finishes (manual or the nightly automation)", "available": True,
+     "variables": ["synced", "errors"]},
+    {"type": "video_overlays_applied", "label": "Overlays Applied", "icon": "image", "scope": "video",
+     "description": "When an overlay apply pass finishes", "available": True,
+     "variables": ["applied", "errors"]},
+    {"type": "video_database_update_completed", "label": "Video Database Updated", "icon": "database", "scope": "video",
+     "description": "When SoulSync finishes reading the server's library into its database", "available": True,
+     "variables": ["media_type", "mode"]},
 ]
 
 
@@ -312,6 +379,32 @@ ACTIONS: list[dict] = [
     # Custom (NOT a shared handler): backs up video_library.db, not the music DB.
     {"type": "video_backup_database", "label": "Backup Database", "icon": "save", "scope": "video",
      "description": "Create a timestamped backup of the video library database", "available": True},
+    # Studio pipelines — previously system-seeded ONLY (handlers existed with no
+    # block). Unlocked so users can chain them (e.g. Video Database Updated →
+    # Apply Overlays → Discord).
+    {"type": "video_apply_overlays", "label": "Apply Overlays", "icon": "image", "scope": "video",
+     "description": "Render + push your enabled overlay templates onto server artwork (the same pass the nightly 'Auto-Update Overlays' runs)", "available": True},
+    {"type": "video_sync_collections", "label": "Sync Collections", "icon": "layers", "scope": "video",
+     "description": "Resolve + push every enabled collection to the server (the same pass the nightly 'Sync Collections' runs)", "available": True},
+    {"type": "video_clean_plex_images", "label": "Clean Up Plex Images", "icon": "trash-2", "scope": "video",
+     "description": "Clear Plex's stale cached artwork so replaced posters/overlays actually show", "available": True},
+    # Library Maintenance from an automation — chain repair after scans, or put
+    # a job on a custom cadence beyond the Tools-page interval.
+    {"type": "video_run_repair_job", "label": "Run Maintenance Job", "icon": "tool", "scope": "video",
+     "description": "Force-run one Library Maintenance job (or every enabled job that's due). Findings appear on the Tools page; pair with the 'Maintenance Finding Raised' trigger for alerts.", "available": True,
+     "config_fields": [
+         {"key": "job_id", "type": "select", "label": "Job",
+          "options": [{"value": "all", "label": "All enabled jobs"},
+                      {"value": "missing_episodes", "label": "Missing Episodes"},
+                      {"value": "movie_collections", "label": "Complete the Collection"},
+                      {"value": "quality_upgrade", "label": "Quality Upgrade"},
+                      {"value": "broken_files", "label": "Broken Files"},
+                      {"value": "metadata_gaps", "label": "Metadata Gaps"},
+                      {"value": "duplicate_movies", "label": "Duplicates"},
+                      {"value": "wishlist_audit", "label": "Wishlist Audit"},
+                      {"value": "youtube_ghosts", "label": "YouTube Ghost Files"}],
+          "default": "all"}
+     ]},
 ]
 
 

@@ -451,6 +451,26 @@ def _ensure_channel_assets(final_video: str, fields: Dict[str, Any], settings: D
             pass
 
 
+def _publish_event(event_type: str, dl: Dict[str, Any], error: Any = None,
+                   dest_path: Any = None) -> None:
+    """Relay a terminal YouTube outcome to the automation event bus — same
+    variable shape as the movie/TV monitor's payload (best-effort)."""
+    try:
+        from core.video.download_events import publish
+        f = youtube_fields_from_download(dl)
+        data = {"kind": "youtube", "title": f.get("title") or dl.get("title") or "",
+                "year": str(f.get("published_at") or "")[:4],
+                "season": "", "episode": "",
+                "channel": f.get("channel") or "",
+                "quality": dl.get("quality_label") or "",
+                "source": "youtube", "dest_path": dest_path or ""}
+        if error is not None:
+            data["error"] = str(error)
+        publish(event_type, data)
+    except Exception:   # noqa: BLE001 - events must never disturb the pipeline
+        logger.exception("youtube download %s: event publish failed", dl.get("id"))
+
+
 def process_youtube_download(
     dl: Dict[str, Any],
     *,
@@ -500,6 +520,7 @@ def process_youtube_download(
         completed = now()
         update_row(dl.get("id"), status="failed", error=err, completed_at=completed)
         archive(dl, {"status": "failed", "error": err, "completed_at": completed})
+        _publish_event("video_download_failed", dl, error=err)
         return {"status": "failed", "error": err}
 
     # The extractor's metadata is authoritative: a titleless row re-plans its
@@ -534,6 +555,7 @@ def process_youtube_download(
             completed = now()
             update_row(dl.get("id"), status="import_failed", error=err, completed_at=completed)
             archive(dl, {"status": "import_failed", "error": err, "completed_at": completed})
+            _publish_event("video_import_failed", dl, error=err, dest_path=staged_path)
             logger.exception("youtube download %s: import move failed", dl.get("id"))
             return {"status": "import_failed", "error": err}
         dest_path = final_path
@@ -549,6 +571,7 @@ def process_youtube_download(
                dest_path=dest_path, completed_at=completed,
                filename=dest.get("filename"), title=dl.get("title"))
     archive(dl, {"status": "completed", "dest_path": dest_path, "completed_at": completed})
+    _publish_event("video_download_completed", dl, dest_path=dest_path)
     try:
         clear_wishlist(dl.get("media_id"))
     except Exception:   # noqa: BLE001 - unwish is best-effort; the file is already in place

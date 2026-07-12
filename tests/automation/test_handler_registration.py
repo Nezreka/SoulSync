@@ -76,6 +76,7 @@ EXPECTED_ACTION_NAMES = frozenset({
     'video_apply_overlays',
     'video_clean_plex_images',
     'video_sync_collections',
+    'video_run_repair_job',
 })
 
 # Action names that MUST register a guard (duplicate-run prevention).

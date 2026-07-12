@@ -53,16 +53,15 @@
         return list.slice().sort(function (a, b) { return _sysOrderIndex(a) - _sysOrderIndex(b); });
     }
 
-    function renderSystem(sys) {
+    function renderSystem(sys, anyAtAll) {
         var host = document.querySelector('[data-vauto-list]'); if (!host) return;
         var emptyEl = document.querySelector('[data-vauto-empty]');
+        if (emptyEl) emptyEl.style.display = anyAtAll ? 'none' : '';
         var existing = host.querySelector('#vauto-section-system');
         if (!sys.length) {
             if (existing) existing.remove();
-            if (emptyEl) emptyEl.style.display = '';
             return;
         }
-        if (emptyEl) emptyEl.style.display = 'none';
         if (typeof window._buildAutomationSection !== 'function') return;
         // exact same section the music page builds for its System group (unique id so
         // it never clashes with the real music page's #auto-section-system).
@@ -110,32 +109,66 @@
         host.appendChild(hub);
     }
 
-    function renderStats(sys) {
+    // User-built video automations — same grouped sections the music page renders
+    // (folders + "My Automations"), built with the shared _buildAutomationSection so
+    // edit/duplicate/delete/group card actions all work. Rebuilt on structural change.
+    function renderUser(user) {
+        var host = document.querySelector('[data-vauto-list]'); if (!host) return;
+        host.querySelectorAll('[data-vauto-user-section]').forEach(function (el) { el.remove(); });
+        if (!user.length || typeof window._buildAutomationSection !== 'function') return;
+        var groups = [];
+        user.forEach(function (a) {
+            if (a.group_name && groups.indexOf(a.group_name) === -1) groups.push(a.group_name);
+        });
+        groups.sort();
+        var frag = document.createDocumentFragment();
+        groups.forEach(function (g) {
+            var autos = user.filter(function (a) { return a.group_name === g; });
+            var s = window._buildAutomationSection(
+                'vauto-section-group-' + g.replace(/\W+/g, '_'), '📁 ' + g, autos, true, { groupName: g });
+            s.setAttribute('data-vauto-user-section', '');
+            frag.appendChild(s);
+        });
+        var ungrouped = user.filter(function (a) { return !a.group_name; });
+        if (ungrouped.length) {
+            var s2 = window._buildAutomationSection('vauto-section-custom', 'My Automations', ungrouped, true);
+            s2.setAttribute('data-vauto-user-section', '');
+            frag.appendChild(s2);
+        }
+        host.appendChild(frag);
+    }
+
+    function renderStats(sys, user) {
         var el = document.querySelector('[data-vauto-stats]'); if (!el) return;
-        if (!sys.length) { el.innerHTML = ''; return; }
-        var active = sys.filter(function (a) { return a.enabled; }).length;
+        var all = sys.concat(user || []);
+        if (!all.length) { el.innerHTML = ''; return; }
+        var active = all.filter(function (a) { return a.enabled; }).length;
         el.innerHTML = '<span class="auto-stat"><strong>' + active + '</strong> Active</span>' +
-            '<span class="auto-stat"><strong>' + sys.length + '</strong> System</span>';
+            '<span class="auto-stat"><strong>' + sys.length + '</strong> System</span>' +
+            '<span class="auto-stat"><strong>' + (user || []).length + '</strong> Custom</span>';
     }
 
     var _lastSig = null;
     function load() {
         return getJSON('/api/automations').then(function (d) {
             var all = Array.isArray(d) ? d : (d && d.automations) || [];
-            var sys = sortSystem(all.filter(isVideoAutomation));
+            var mine = all.filter(isVideoAutomation);
+            var sys = sortSystem(mine.filter(function (a) { return a.is_system; }));
+            var user = mine.filter(function (a) { return !a.is_system; });
             // Re-rendering the whole System section every 8s poll destroys + recreates every
             // card — that's the blink, and it wipes the live progress the socket patches in.
             // Only rebuild when something STRUCTURAL changed (added/removed/toggled/ran);
             // live progress arrives via socket, the "Next: in Xm" countdown ticks locally.
-            var sig = JSON.stringify(sys.map(function (a) {
-                return [a.id, a.enabled, a.name, a.trigger_type, a.action_type,
+            var sig = JSON.stringify(sys.concat(user).map(function (a) {
+                return [a.id, a.enabled, a.name, a.trigger_type, a.action_type, a.group_name,
                         a.last_run, a.next_run, a.run_count, a.last_result];
             }));
             if (sig === _lastSig) return;
             _lastSig = sig;
-            renderStats(sys);
-            renderSystem(sys);
+            renderStats(sys, user);
+            renderSystem(sys, mine.length > 0);
             renderHubOnce();
+            renderUser(user);
         });
     }
 

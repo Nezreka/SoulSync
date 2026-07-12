@@ -64,6 +64,12 @@ def _execute(db, *, force: bool, on_progress: Optional[Callable]) -> dict:
                         synced=res.get("synced", 0), failed=res.get("failed", 0),
                         added=res.get("added", 0), removed=res.get("removed", 0),
                         wishlisted=res.get("wishlisted", 0))
+            try:      # 'Collections Synced' automation trigger
+                from core.video.download_events import publish
+                publish("video_collections_synced",
+                        {"synced": res.get("synced", 0), "errors": res.get("failed", 0)})
+            except Exception:   # noqa: BLE001 - events never disturb the sync
+                logger.exception("collections sync event publish failed")
         else:
             _JOB.update(phase="error", error=res.get("error") or "sync failed")
         return res
