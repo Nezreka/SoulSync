@@ -183,12 +183,52 @@ def _media_files_exists(mt: str, column: str, op: str, value: Any) -> Tuple[str,
     return frag, vals
 
 
+def _named_link_exists(mt: str, field: str, op: str, value: Any) -> Tuple[str, list]:
+    """EXISTS over a normalised name-link table (studios / networks) — the multi-valued
+    replacement for the old single studio/network column, so a title matches EVERY company
+    it was made by. Supports the same ops the text column did (is/is_not/in/not_in/contains)."""
+    if field == "studio":
+        if mt != "movie":
+            raise SmartFilterError("field 'studio' does not apply to shows")
+        link, owner, ref, fk = "movie_studios", "movie_id", "studios", "studio_id"
+    else:  # network
+        if mt != "show":
+            raise SmartFilterError("field 'network' does not apply to movies")
+        link, owner, ref, fk = "show_networks", "show_id", "networks", "network_id"
+    base = (f"SELECT 1 FROM {link} lt JOIN {ref} r ON r.id = lt.{fk} "
+            f"WHERE lt.{owner} = {_TABLE[mt]}.id")
+    if op in ("in", "not_in"):
+        vals = [str(v) for v in _as_list(value) if str(v).strip()]
+        if not vals:
+            raise SmartFilterError(f"{field!r} needs at least one value")
+        ph = ", ".join("LOWER(?)" for _ in vals)
+        frag = f"EXISTS ({base} AND LOWER(r.name) IN ({ph}))"
+        return (f"NOT {frag}" if op == "not_in" else frag), vals
+    if op in ("is", "is_not"):
+        frag = f"EXISTS ({base} AND LOWER(r.name) = LOWER(?))"
+        return (f"NOT {frag}" if op == "is_not" else frag), [str(value)]
+    if op == "contains":
+        frag = f"EXISTS ({base} AND LOWER(r.name) LIKE LOWER(?) ESCAPE '\\')"
+        return frag, ["%" + _like_escape(str(value)) + "%"]
+    raise SmartFilterError(f"operator {op!r} is not valid for {field!r}")
+
+
 def _build_rule(rule: Dict[str, Any], mt: str) -> Tuple[str, list]:
     field = rule.get("field")
     op = rule.get("op")
     value = rule.get("value")
     if not field or not op:
         raise SmartFilterError(f"rule missing field/op: {rule!r}")
+
+    # studio/network are still listed in _COLUMN_FIELDS (for the field-picker schema + op
+    # validation) but resolve through their link tables now, not the legacy scalar column.
+    if field in ("studio", "network"):
+        spec = _COLUMN_FIELDS[field]
+        if mt not in spec["media"]:
+            raise SmartFilterError(f"field {field!r} does not apply to {mt}s")
+        if op not in _OPS_BY_TYPE[_TXT]:
+            raise SmartFilterError(f"operator {op!r} is not valid for {field!r}")
+        return _named_link_exists(mt, field, op, value)
 
     if field in _COLUMN_FIELDS:
         spec = _COLUMN_FIELDS[field]

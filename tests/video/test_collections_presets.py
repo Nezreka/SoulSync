@@ -19,13 +19,20 @@ def _add_movie(db, mid, title, *, year=2000, rating=7.0, studio=None, franchise=
                franchise_name=None, genres=(), director=None, resolution=None,
                server_id="auto"):
     sid = f"srv{mid}" if server_id == "auto" else server_id
+    studio_list = [studio] if isinstance(studio, str) else list(studio or [])
+    studio_scalar = studio_list[0] if studio_list else None
     conn = db._get_connection()
     try:
         conn.execute(
             "INSERT INTO movies (id, server_source, server_id, tmdb_id, title, year, rating, "
             "studio, tmdb_collection_id, tmdb_collection_name, has_file) "
             "VALUES (?,?,?,?,?,?,?,?,?,?,1)",
-            (mid, "plex", sid, 1000 + mid, title, year, rating, studio, franchise, franchise_name))
+            (mid, "plex", sid, 1000 + mid, title, year, rating, studio_scalar, franchise, franchise_name))
+        for s in studio_list:   # ALL production companies → the studios link table (as the scan does)
+            conn.execute("INSERT OR IGNORE INTO studios (name) VALUES (?)", (s,))
+            stid = conn.execute("SELECT id FROM studios WHERE name=?", (s,)).fetchone()[0]
+            conn.execute("INSERT OR IGNORE INTO movie_studios (movie_id, studio_id) VALUES (?,?)",
+                         (mid, stid))
         for g in genres:
             conn.execute("INSERT OR IGNORE INTO genres (name) VALUES (?)", (g,))
             gid = conn.execute("SELECT id FROM genres WHERE name=?", (g,)).fetchone()[0]
@@ -48,11 +55,18 @@ def _add_movie(db, mid, title, *, year=2000, rating=7.0, studio=None, franchise=
 
 
 def _add_show(db, sid_num, title, *, year=2010, network=None, genres=()):
+    net_list = [network] if isinstance(network, str) else list(network or [])
+    net_scalar = net_list[0] if net_list else None
     conn = db._get_connection()
     try:
         conn.execute(
             "INSERT INTO shows (id, server_source, server_id, title, year, network) "
-            "VALUES (?,?,?,?,?,?)", (sid_num, "plex", f"shsrv{sid_num}", title, year, network))
+            "VALUES (?,?,?,?,?,?)", (sid_num, "plex", f"shsrv{sid_num}", title, year, net_scalar))
+        for n in net_list:      # ALL networks → the networks link table (as the scan does)
+            conn.execute("INSERT OR IGNORE INTO networks (name) VALUES (?)", (n,))
+            nid = conn.execute("SELECT id FROM networks WHERE name=?", (n,)).fetchone()[0]
+            conn.execute("INSERT OR IGNORE INTO show_networks (show_id, network_id) VALUES (?,?)",
+                         (sid_num, nid))
         for g in genres:
             conn.execute("INSERT OR IGNORE INTO genres (name) VALUES (?)", (g,))
             gid = conn.execute("SELECT id FROM genres WHERE name=?", (g,)).fetchone()[0]
@@ -75,6 +89,60 @@ def _seed_movies(db):
                franchise=131292, franchise_name="Iron Man Collection", rating=7.0)
     # Not on a server → must not count anywhere.
     _add_movie(db, 6, "Orphan", year=1988, genres=("Action",), server_id=None)
+
+
+# ── multi-company studios (the fix): a movie counts under EVERY company ──────
+def test_studio_counts_every_production_company(db):
+    # Barbie was made by three companies — it belongs in all three studio collections,
+    # not just its primary one (the old single-column behaviour).
+    _add_movie(db, 40, "Barbie", studio=["Warner Bros.", "Mattel Films", "LuckyChap"])
+    _add_movie(db, 41, "Oppenheimer", studio=["Universal", "Atlas Entertainment"])
+    counts = {e["name"]: e["count"] for e in expand_pack(db, "studios", "movie")}
+    assert counts["Warner Bros."] == 1 and counts["Mattel Films"] == 1
+    assert counts["LuckyChap"] == 1 and counts["Universal"] == 1
+    # a smart filter on a SECONDARY company still matches the movie — the whole point
+    got = db.resolve_smart_members(
+        "movie", {"rules": [{"field": "studio", "op": "in", "value": ["Mattel Films"]}]})
+    assert [m["title"] for m in got] == ["Barbie"]
+
+
+def test_seed_backfills_link_tables_from_legacy_scalar(db):
+    # A pre-migration movie: scalar `studio` set, but no link-table row. The one-time seed
+    # must populate the link table so existing studio collections keep matching (no regression).
+    conn = db._get_connection()
+    conn.execute("INSERT INTO movies (id, server_source, server_id, tmdb_id, title, studio, has_file) "
+                 "VALUES (99, 'plex', 'x99', 9099, 'Legacy Film', 'Legacy Studio', 1)")
+    conn.execute("DELETE FROM video_settings WHERE key='studio_network_links_seeded'")
+    conn.commit()
+    assert conn.execute("SELECT COUNT(*) FROM movie_studios WHERE movie_id=99").fetchone()[0] == 0
+    db._seed_named_links_from_scalar(conn)
+    conn.commit()
+    assert conn.execute("SELECT COUNT(*) FROM movie_studios WHERE movie_id=99").fetchone()[0] == 1
+    # the marker prevents a second seed from re-running
+    db._seed_named_links_from_scalar(conn)
+    conn.commit()
+    conn.close()
+    got = db.resolve_smart_members(
+        "movie", {"rules": [{"field": "studio", "op": "in", "value": ["Legacy Studio"]}]})
+    assert [m["title"] for m in got] == ["Legacy Film"]
+
+
+def test_network_counts_every_network_without_double_counting(db):
+    # HBO + HBO Max group together as one brand; a show on both must count ONCE, not 2.
+    _add_show(db, 70, "Show A", network=["HBO", "HBO Max"])
+    for e in expand_pack(db, "networks", "show"):
+        assert e["count"] == 1                        # distinct titles, never the summed 2
+    for net in ("HBO", "HBO Max"):                    # and the show matches EITHER network filter
+        got = db.resolve_smart_members(
+            "show", {"rules": [{"field": "network", "op": "in", "value": [net]}]})
+        assert [m["title"] for m in got] == ["Show A"]
+
+
+def test_studio_variants_in_one_title_count_once(db):
+    # A movie credited to two variants of the SAME grouped studio counts once (distinct).
+    _add_movie(db, 60, "WB Film", studio=["Warner Bros.", "Warner Bros. Pictures"])
+    for e in expand_pack(db, "studios", "movie"):
+        assert e["count"] == 1
 
 
 # ── aggregates feed expansion with true owned counts ────────────────────────

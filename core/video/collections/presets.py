@@ -244,16 +244,24 @@ def _group_brands(rows) -> List[dict]:
 
 
 def _expand_brand_pack(db, rows, *, pack: str, field: str, noun: str) -> List[Dict[str, Any]]:
+    mt = "movie" if field == "studio" else "show"
     grouped = _group_brands([(str(r.get("value") or "").strip(), int(r.get("count") or 0))
                              for r in rows if str(r.get("value") or "").strip()])
     out = []
     for g in grouped:
+        definition = _smart([{"field": field, "op": "in", "value": g["names"]}])
+        # Count DISTINCT owned titles for the group — a title made by several of the group's
+        # companies (now that we store all of them) must count once, matching what the
+        # collection actually syncs. Falls back to the summed estimate if the count errors.
+        try:
+            count = db.count_smart_members(mt, definition)
+        except Exception:   # noqa: BLE001
+            count = g["total"]
         out.append(_entry(
-            f"{field}:" + g["key"], g["label"], g["total"],
+            f"{field}:" + g["key"], g["label"], count,
             f"{noun} from {g['label']}." +
             (f" Covers {len(g['names'])} label variants." if len(g["names"]) > 1 else ""),
-            definition=_smart([{"field": field, "op": "in", "value": g["names"]}]),
-            pack=pack))
+            definition=definition, pack=pack))
     out.sort(key=lambda e: -e["count"])
     return out
 

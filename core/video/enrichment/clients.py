@@ -105,6 +105,12 @@ class TMDBClient:
             if kind == "movie":
                 meta["release_date"] = dr.get("release_date")
                 meta["runtime_minutes"] = dr.get("runtime")
+                # ALL production companies → studio collections match every company (link table);
+                # keep the scalar `studio` = the first, for display.
+                comps = [c.get("name") for c in (dr.get("production_companies") or []) if c.get("name")]
+                if comps:
+                    meta["studios"] = comps
+                    meta["studio"] = comps[0]
                 # Franchise/collection (belongs_to_collection is a standard movie-detail
                 # field) — persisted so "complete your collections" gaps can diff it (#discover).
                 bc = dr.get("belongs_to_collection")
@@ -114,9 +120,10 @@ class TMDBClient:
             else:
                 meta["first_air_date"] = dr.get("first_air_date")
                 meta["last_air_date"] = dr.get("last_air_date")
-                nets = dr.get("networks") or []
+                nets = [n.get("name") for n in (dr.get("networks") or []) if n.get("name")]
                 if nets:
-                    meta["network"] = nets[0].get("name")
+                    meta["networks"] = nets
+                    meta["network"] = nets[0]
                 ert = dr.get("episode_run_time") or []
                 if ert:
                     meta["runtime_minutes"] = ert[0]
@@ -810,14 +817,20 @@ class TMDBClient:
             out["year"] = (dr.get("release_date") or "")[:4] or None
             out["release_date"] = dr.get("release_date") or None
             out["runtime_minutes"] = dr.get("runtime")
-            out["studio"] = next((c.get("name") for c in (dr.get("production_companies") or [])), None)
+            # ALL production companies (studio collections match every company a movie was made
+            # by). Keep the scalar `studio` = the first, for display + legacy.
+            companies = [c.get("name") for c in (dr.get("production_companies") or []) if c.get("name")]
+            out["studios"] = companies
+            out["studio"] = companies[0] if companies else None
         else:
             out["year"] = (dr.get("first_air_date") or "")[:4] or None
             out["first_air_date"] = dr.get("first_air_date") or None
             out["last_air_date"] = dr.get("last_air_date") or None
             ert = dr.get("episode_run_time") or []
             out["runtime_minutes"] = ert[0] if ert else None
-            out["network"] = next((n.get("name") for n in (dr.get("networks") or [])), None)
+            nets = [n.get("name") for n in (dr.get("networks") or []) if n.get("name")]
+            out["networks"] = nets
+            out["network"] = nets[0] if nets else None
             out["tvdb_id"] = _int(ext.get("tvdb_id"))
             seasons = []
             for s in (dr.get("seasons") or []):
