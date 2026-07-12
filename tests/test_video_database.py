@@ -533,6 +533,41 @@ def test_enrichment_apply_matched_sets_id_status_and_metadata(db):
     assert (row["overview"], row["backdrop_url"], row["imdb_id"]) == ("O", "/b.jpg", "tt1")
 
 
+def test_enrichment_apply_populates_studio_network_links_replacing_scalar(db):
+    # The scan gave one studio; TMDB enrichment brings the FULL company list → REPLACE.
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "Barbie", "studio": "Warner Bros."})
+    db.enrichment_apply("tmdb", "movie", mid, matched=True, external_id=1,
+                        metadata={"studios": ["Warner Bros.", "Mattel Films", "LuckyChap"]})
+    with db.connect() as c:
+        n = c.execute("SELECT COUNT(*) FROM movie_studios WHERE movie_id=?", (mid,)).fetchone()[0]
+    assert n == 3                                        # all three, not just the seeded one
+    got = db.resolve_smart_members(
+        "movie", {"rules": [{"field": "studio", "op": "in", "value": ["Mattel Films"]}]})
+    assert [m["title"] for m in got] == ["Barbie"]       # a SECONDARY company now matches
+
+    sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "Show", "network": "HBO"})
+    db.enrichment_apply("tmdb", "show", sid, matched=True, external_id=2,
+                        metadata={"networks": ["HBO", "HBO Max"]})
+    got = db.resolve_smart_members(
+        "show", {"rules": [{"field": "network", "op": "in", "value": ["HBO Max"]}]})
+    assert [m["title"] for m in got] == ["Show"]
+
+
+def test_enrichment_apply_respects_studio_lock(db):
+    # A user-locked studio must not be touched by enrichment.
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "X", "studio": "Indie Co"})
+    with db.connect() as c:
+        c.execute("UPDATE movies SET locked_fields=? WHERE id=?", ('["studio"]', mid))
+        c.commit()
+    db.enrichment_apply("tmdb", "movie", mid, matched=True, external_id=1,
+                        metadata={"studios": ["Universal", "Legendary"]})
+    with db.connect() as c:
+        names = [r[0] for r in c.execute(
+            "SELECT s.name FROM movie_studios ms JOIN studios s ON s.id=ms.studio_id "
+            "WHERE ms.movie_id=?", (mid,))]
+    assert names == ["Indie Co"]                         # lock held; enrichment left it alone
+
+
 def test_enrichment_apply_survives_legacy_unique(db):
     # Simulate a pre-existing DB where tvdb_id still carries a UNIQUE index.
     with db.connect() as c:

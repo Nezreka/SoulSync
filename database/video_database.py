@@ -516,6 +516,20 @@ class VideoDatabase:
                 has = conn.execute(f"SELECT 1 FROM {lt} WHERE {oc}=? LIMIT 1", (item_id,)).fetchone()
                 if not has:
                     self._set_genres(conn, lt, oc, item_id, genres)
+            # Studios / networks — TMDB is the authority for the FULL company list (the media
+            # server only exposes one), so REPLACE the link table on every match rather than
+            # gap-fill. This is what makes studio/network collections complete (a title made by
+            # several companies lands in every one). The scalar studio/network column is left as
+            # the server/first value for display.
+            if matched:
+                studios = (metadata or {}).get("studios")
+                if tbl == "movies" and studios and "studio" not in locked:
+                    self._set_named_links(conn, "movie_studios", "movie_id", "studios", "studio_id",
+                                          item_id, studios)
+                networks = (metadata or {}).get("networks")
+                if tbl == "shows" and networks and "network" not in locked:
+                    self._set_named_links(conn, "show_networks", "show_id", "networks", "network_id",
+                                          item_id, networks)
             # Cast/crew backfill — only when the item has none yet (gap-fill).
             cast = (metadata or {}).get("cast")
             crew = (metadata or {}).get("crew")
