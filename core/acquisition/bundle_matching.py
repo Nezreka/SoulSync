@@ -549,6 +549,14 @@ def match_bundle(
                 "expected_key": match.expected.key,
                 "confidence": match.confidence,
             })
+        # The import executor writes lib2_track_files rows; an expected track
+        # without a concrete lib2 track cannot be imported unattended.
+        if match.expected.track_id is None:
+            rejections.append({
+                "code": "missing_track_link",
+                "expected_key": match.expected.key,
+                "expected_title": match.expected.title,
+            })
 
     matches.sort(key=lambda match: (
         match.expected.disc_number,

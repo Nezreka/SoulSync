@@ -99,7 +99,7 @@ def _expected(
     duration=None,
     release_track_id=None,
     recording_id=None,
-    track_id=None,
+    track_id=777,
 ):
     return ExpectedTrack(
         release_track_id=release_track_id,
@@ -397,6 +397,17 @@ def test_empty_tracklist_needs_review():
     report = match_bundle((), [_file("01 - Song.flac", title="Song")])
     assert report.decision == DECISION_NEEDS_REVIEW
     assert report.rejections == ({"code": "no_expected_tracklist"},)
+
+
+def test_matched_track_without_lib2_link_needs_review():
+    expected = [
+        _expected("Song", number=1, release_track_id=1, track_id=None)]
+    report = match_bundle(
+        expected, [_file("01 - Song.flac", title="Song", track=1)])
+    assert report.decision == DECISION_NEEDS_REVIEW
+    assert len(report.matches) == 1
+    codes = {item["code"] for item in report.rejections}
+    assert codes == {"missing_track_link"}
 
 
 # ---------------------------------------------------------------------------

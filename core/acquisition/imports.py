@@ -445,6 +445,64 @@ def record_matching_result(
     return _reload_import(conn, import_id)
 
 
+def record_import_completed(
+    conn: Any,
+    import_id: str,
+    *,
+    result: Mapping[str, Any],
+) -> AcquisitionImport:
+    """Complete an importing row and its owning request in one transaction.
+
+    ``result`` is the durable file journal (audit §14.3): which source file
+    became which library file. The caller has already performed the file
+    operations; this transaction is the single point where the request
+    becomes ``completed``.
+    """
+    record = _open_import(conn, import_id)
+    _require_transition(record.status, "completed")
+    if not isinstance(result, Mapping):
+        raise ValueError("import completion requires a result object")
+    imported = result.get("imported")
+    if not isinstance(imported, (list, tuple)) or not imported:
+        raise ValueError("import completion requires imported file entries")
+    try:
+        result_json = json.dumps(
+            dict(result),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "acquisition import result must be JSON serializable") from exc
+    conn.execute(
+        """UPDATE acquisition_imports
+              SET status='completed', result_json=?, error=NULL,
+                  updated_at=CURRENT_TIMESTAMP, completed_at=CURRENT_TIMESTAMP
+            WHERE id=?""",
+        (result_json, record.id),
+    )
+    transition_request(
+        conn,
+        record.request_id,
+        "completed",
+        expected_status="grabbing",
+    )
+    record_history_event(
+        conn,
+        "import_completed",
+        request_id=record.request_id,
+        candidate_id=record.candidate_id,
+        download_id=record.download_id,
+        payload={
+            "file_count": len(imported),
+            "attempts": record.attempts,
+        },
+    )
+    return _reload_import(conn, import_id)
+
+
 def record_import_deferred(
     conn: Any,
     import_id: str,
@@ -539,6 +597,7 @@ __all__ = [
     "get_import_by_download",
     "list_open_imports",
     "record_download_completed",
+    "record_import_completed",
     "record_import_deferred",
     "record_import_failure",
     "record_inventory_result",
