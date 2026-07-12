@@ -168,6 +168,10 @@ _COLUMN_MIGRATIONS = [
     ("video_downloads", "tried_queries", "TEXT"),
     ("video_downloads", "tried_files", "TEXT"),
     ("video_downloads", "attempts", "INTEGER"),
+    # live import sub-phase + progress so the card shows 'Merging…' then 'Moving X%'
+    # instead of a blank 100% spinner during post-download processing.
+    ("video_downloads", "import_phase", "TEXT"),
+    ("video_downloads", "import_progress", "REAL DEFAULT 0"),
     ("movies", "tmdb_match_status", "TEXT"),
     ("movies", "tmdb_last_attempted", "TEXT"),
     ("shows", "tmdb_match_status", "TEXT"),

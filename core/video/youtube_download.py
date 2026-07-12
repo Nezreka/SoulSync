@@ -22,6 +22,7 @@ Isolated: imports only sibling ``core.video`` modules; nothing from the music si
 
 from __future__ import annotations
 
+import errno
 import json
 import logging
 import os
@@ -232,10 +233,55 @@ def authoritative_download_fields(dl: Dict[str, Any], res: Dict[str, Any]) -> Di
     return dict(dl, title=title, search_ctx=json.dumps(ctx))
 
 
-def _default_move(src: str, dest: str) -> None:
-    """Move a finished staged file into the library, creating the target folders."""
+_MOVE_CHUNK = 8 * 1024 * 1024   # 8 MiB — smooth progress without syscall spam
+
+
+def _default_move(src: str, dest: str, on_progress: Optional[Callable[[int], None]] = None) -> None:
+    """Move a finished staged file into the library, creating the target folders.
+
+    Same-filesystem is an instant atomic rename (``on_progress`` jumps straight to 100).
+    Across filesystems (a separate download drive vs library drive) it's a real multi-GB
+    copy — done in chunks, reporting percent through ``on_progress`` so the card can show a
+    live 'Moving X%' bar. The copy lands on a ``.part`` sidecar and is atomically renamed into
+    place, so Plex/Jellyfin never ingest a half-written file, then the staged source is removed."""
     os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
-    shutil.move(src, dest)
+    try:
+        os.replace(src, dest)                       # atomic + instant when src/dest share a filesystem
+        if on_progress:
+            on_progress(100)
+        return
+    except OSError as e:
+        if getattr(e, "errno", None) != errno.EXDEV:
+            raise                                   # a real error (perms/space/missing) — not cross-device
+    # Cross-device: chunked copy → .part → atomic rename → drop the source.
+    try:
+        total = os.path.getsize(src)
+    except OSError:
+        total = 0
+    tmp = dest + ".part"
+    copied = 0
+    try:
+        with open(src, "rb") as fsrc, open(tmp, "wb") as fdst:
+            while True:
+                chunk = fsrc.read(_MOVE_CHUNK)
+                if not chunk:
+                    break
+                fdst.write(chunk)
+                copied += len(chunk)
+                if on_progress and total:
+                    on_progress(min(99, int(copied * 100 / total)))   # 100 only once it's in place
+        shutil.copystat(src, tmp)                   # preserve mtime, like shutil.move/copy2
+        os.replace(tmp, dest)                       # atomic rename into the library (same fs now)
+    except BaseException:
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)                      # never leave a half-written .part behind
+        except OSError:
+            pass
+        raise
+    os.remove(src)                                  # copy verified in place — remove the staged original
+    if on_progress:
+        on_progress(100)
 
 
 def build_episode_nfo(fields: Dict[str, Any], *, description: Any = None, runtime: Any = None) -> str:
@@ -520,7 +566,7 @@ def process_youtube_download(
     archive: Callable[[Dict[str, Any], Dict[str, Any]], Any],
     clear_wishlist: Callable[[Any], Any],
     stage_dir: Optional[str] = None,
-    move: Callable[[str, str], Any] = _default_move,
+    move: Callable[..., Any] = _default_move,
     sidecars: Callable[[str, str, Dict[str, Any], Dict[str, Any]], Any] = _default_sidecars,
     channel_assets: Callable[..., Any] = _ensure_channel_assets,
     progress_hook: Optional[Callable] = None,
@@ -578,7 +624,9 @@ def process_youtube_download(
     # phase). An UNSTAGED download moves only when the title fix re-planned its
     # name — the file on disk still wears the titleless stem and needs the rename.
     if staged_path and final_path and staged_path != final_path and (stage_dir or replanned):
-        update_row(dl.get("id"), status="importing", progress=100, filename=dest.get("filename"))
+        dl_id = dl.get("id")
+        update_row(dl_id, status="importing", import_phase="moving", import_progress=0,
+                   progress=100, filename=dest.get("filename"))
         # Show/season art must EXIST before the video lands: Plex's folder watch
         # ingests the mp4 the instant it appears and reads show-level art at SHOW
         # CREATION — art written after the move stays invisible until a manual
@@ -588,8 +636,15 @@ def process_youtube_download(
             channel_assets(final_path, youtube_fields_from_download(dl), settings)
         except Exception:   # noqa: BLE001
             logger.exception("youtube channel assets (pre-move) failed for %s", final_path)
+
+        def _on_move_progress(pct):
+            # live 'Moving X%' during a cross-drive copy; a no-op refresh on a same-fs rename
+            try:
+                update_row(dl_id, import_progress=int(pct))
+            except Exception:   # noqa: BLE001, S110 - progress is cosmetic; never abort the import
+                pass
         try:
-            move(staged_path, final_path)
+            move(staged_path, final_path, on_progress=_on_move_progress)
         except Exception as e:   # noqa: BLE001 - downloaded fine but couldn't be placed
             err = "Import failed: " + str(e)
             completed = now()
@@ -709,11 +764,12 @@ def run_youtube_download(dl_id: Any, db_provider: Callable) -> None:
 
     def _postprocess(d):
         # yt-dlp finished the bytes and is now merging audio+video / converting (ffmpeg) — flip
-        # to 'importing' so the card stops sitting on a stuck-looking 100% 'Downloading' until
-        # it (and the library move that follows) are done. Best-effort.
+        # to 'importing' + phase 'merging' so the card shows "Merging video + audio…" instead of a
+        # stuck-looking 100% 'Downloading' until it (and the library move that follows) are done.
         try:
             if d.get("status") in ("started", "processing"):
-                db.update_video_download(dl_id, status="importing", progress=100)
+                db.update_video_download(dl_id, status="importing", import_phase="merging",
+                                         import_progress=0, progress=100)
         except Exception:   # noqa: BLE001, S110 - a hook glitch must not abort the download
             pass
 
