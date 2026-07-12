@@ -43,7 +43,7 @@ def _publish_video_event(event_type: str, data: dict) -> None:
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 36   # v36: overlay_apply.plex_poster_key (delete prev overlay); v35: studios/networks links
+SCHEMA_VERSION = 37   # v37: video_downloads.client_ref (torrent/usenet grab tracking); v36: overlay_apply.plex_poster_key
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -172,6 +172,9 @@ _COLUMN_MIGRATIONS = [
     # instead of a blank 100% spinner during post-download processing.
     ("video_downloads", "import_phase", "TEXT"),
     ("video_downloads", "import_progress", "REAL DEFAULT 0"),
+    # torrent/usenet client tracking id (qBittorrent hash / SAB nzo_id) so the monitor can
+    # poll the shared torrent/usenet client for a non-Soulseek grab's progress + completion.
+    ("video_downloads", "client_ref", "TEXT"),
     # the ratingKey of the overlay poster we last uploaded to Plex, so a re-apply can delete
     # THAT one before uploading the new render (Plex accumulates uploads otherwise).
     ("overlay_apply", "plex_poster_key", "TEXT"),
@@ -1551,7 +1554,8 @@ class VideoDatabase:
     _DL_FIELDS = ("kind", "title", "release_title", "source", "username", "filename",
                   "size_bytes", "quality_label", "target_dir", "status",
                   "media_id", "media_source", "year", "poster_url",
-                  "candidates", "search_ctx", "tried_queries", "tried_files", "attempts")
+                  "candidates", "search_ctx", "tried_queries", "tried_files", "attempts",
+                  "client_ref")   # torrent/usenet client tracking id
 
     def add_video_download(self, rec: dict) -> int:
         """Insert a download row (status defaults to 'downloading'); returns its id."""

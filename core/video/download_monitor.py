@@ -597,10 +597,15 @@ def _tick(db) -> None:
     organizer = _make_organizer(db)
     live_ids = set()
     completed_now = 0
+    from core.video.client_download import process_active_client_download
     for dl in active:
         live_ids.add(dl["id"])
-        upd = process_download(dl, transfers, download_dir, lister=_walk, mover=_move,
-                               organizer=organizer)
+        if dl.get("source") in ("torrent", "usenet"):
+            # torrent/usenet grabs are tracked via the shared client (by client_ref), not slskd.
+            upd = process_active_client_download(dl, organizer=organizer)
+        else:
+            upd = process_download(dl, transfers, download_dir, lister=_walk, mover=_move,
+                                   organizer=organizer)
         if not upd:
             continue
         if upd.get("status") == "completed":
