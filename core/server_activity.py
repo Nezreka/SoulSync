@@ -233,6 +233,28 @@ def get_activity(db=None) -> Dict[str, Any]:
                       str(_g(srv, "version", "") or ""))
 
 
+# ── stream termination (Tautulli's kill-with-message) ────────────────────────
+
+def stop_session(session_key: str, message: str = "", db=None) -> Dict[str, Any]:
+    """End an active stream by its session key, with an optional message shown
+    to the viewer (Plex supports this). Returns {ok, error?}."""
+    if not session_key:
+        return {"ok": False, "error": "no session"}
+    srv = _plex_server(db)
+    if srv is None:
+        return {"ok": False, "error": "server unavailable"}
+    reason = str(message or "").strip() or "The server administrator ended this stream."
+    try:
+        for item in srv.sessions() or []:
+            if str(_g(item, "sessionKey", "")) == str(session_key):
+                item.stop(reason=reason)
+                return {"ok": True}
+        return {"ok": False, "error": "that stream is no longer active"}
+    except Exception as e:   # noqa: BLE001
+        logger.debug("stop_session failed", exc_info=True)
+        return {"ok": False, "error": str(e) or "couldn't stop the stream"}
+
+
 # ── history (Phase 2) ────────────────────────────────────────────────────────
 
 _lookup_cache: Dict[str, Any] = {"accounts": {}, "devices": {}, "at": 0.0, "key": ""}

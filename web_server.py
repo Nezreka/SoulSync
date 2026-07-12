@@ -3177,6 +3177,22 @@ def get_server_activity_history():
         return jsonify({"ok": False, "reason": "error", "history": []})
 
 
+@app.route('/api/server-activity/stop', methods=['POST'])
+def stop_server_activity_stream():
+    """Terminate an active stream with a message (Tautulli's kill move).
+    Admin-only — a shared server shouldn't let anyone end others' streams."""
+    try:
+        if not getattr(g, 'is_admin', False):
+            return jsonify({"ok": False, "error": "Admin only."}), 403
+        body = request.get_json(silent=True) or {}
+        from core.server_activity import stop_session
+        res = stop_session(str(body.get("session_key") or ""), str(body.get("message") or ""))
+        return jsonify(res), (200 if res.get("ok") else 400)
+    except Exception:
+        logger.exception("stop stream failed")
+        return jsonify({"ok": False, "error": "Failed to stop the stream."}), 500
+
+
 @app.route('/api/server-activity/image')
 def get_server_activity_image():
     """Proxy a Plex image (poster/art) for the activity view so the token never
