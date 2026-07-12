@@ -12,7 +12,6 @@ from core.acquisition.main_pipeline_bridge import dispatch_import_to_main_pipeli
 from core.runtime_state import download_tasks, tasks_lock
 from tests.acquisition.test_bundle_inventory import _pending_import
 
-
 def _connection_factory(path: Path):
     def connect():
         conn = sqlite3.connect(path)

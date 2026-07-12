@@ -7,6 +7,10 @@ from core.acquisition.imports import (
     record_inventory_result,
     record_matching_result,
     record_pipeline_file_completed,
+    record_pipeline_file_quarantined,
+)
+from core.acquisition.pipeline_callback import (
+    notify_pipeline_import_quarantined,
 )
 from core.acquisition.requests import get_request
 from core.imports.quarantine import serialize_quarantine_context
@@ -94,6 +98,83 @@ def test_pipeline_completion_rejects_a_file_outside_persisted_matches():
     else:  # pragma: no cover
         raise AssertionError("unexpected completion was accepted")
     assert get_import(conn, importing.id).status == "importing"
+    conn.close()
+
+
+def test_quarantine_is_persisted_and_cleared_by_later_success():
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys=ON")
+    ensure_acquisition_schema(conn)
+    importing, request = _importing_record(conn)
+
+    quarantined = record_pipeline_file_quarantined(
+        conn,
+        importing.id,
+        relative_path="01.flac",
+        track_id=101,
+        trigger="acoustid",
+        reason="Fingerprint mismatch",
+    )
+
+    assert quarantined.status == "importing"
+    assert quarantined.result["quarantined"] == [{
+        "reason": "Fingerprint mismatch",
+        "relative_path": "01.flac",
+        "track_id": 101,
+        "trigger": "acoustid",
+    }]
+    assert get_request(conn, request.id).status == "grabbing"
+    events = list_history_events(conn, request_id=request.id)
+    assert events[-1].event_type == "import_file_quarantined"
+
+    partial = record_pipeline_file_completed(
+        conn,
+        importing.id,
+        relative_path="01.flac",
+        final_path="/library/01.flac",
+        track_id=101,
+    )
+    assert partial.status == "importing"
+    assert partial.result["quarantined"] == []
+    conn.close()
+
+
+def test_quarantine_callback_ignores_legacy_imports_and_uses_markers(tmp_path):
+    database_path = tmp_path / "callback.sqlite"
+
+    def factory():
+        conn = sqlite3.connect(database_path)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys=ON")
+        return conn
+
+    conn = factory()
+    ensure_acquisition_schema(conn)
+    importing, _request = _importing_record(conn)
+    conn.commit()
+    conn.close()
+
+    assert notify_pipeline_import_quarantined(
+        {"track_info": {"name": "Legacy"}},
+        trigger="quality",
+        reason="ignored",
+        connection_factory=factory,
+    ) is False
+    assert notify_pipeline_import_quarantined(
+        {
+            "_acquisition_import_id": importing.id,
+            "_acquisition_relative_path": "02.flac",
+            "_acquisition_track_id": 102,
+        },
+        trigger="quality",
+        reason="Below profile target",
+        connection_factory=factory,
+    ) is True
+
+    conn = factory()
+    record = get_import(conn, importing.id)
+    assert record.result["quarantined"][0]["track_id"] == 102
     conn.close()
 
 

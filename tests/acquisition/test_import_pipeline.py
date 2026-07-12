@@ -6,7 +6,10 @@ from core.acquisition.import_pipeline import (
     retry_backoff_seconds,
 )
 from core.acquisition.main_pipeline_bridge import BridgeDispatchResult
-from core.acquisition.imports import get_import
+from core.acquisition.imports import (
+    get_import,
+    record_pipeline_file_quarantined,
+)
 from tests.acquisition.test_main_pipeline_bridge import _seed_import
 
 
@@ -44,3 +47,32 @@ def test_retry_backoff_is_capped():
     assert retry_backoff_seconds(1) == 60
     assert retry_backoff_seconds(2) == 120
     assert retry_backoff_seconds(100) == 3600
+
+
+def test_quarantined_import_is_not_blindly_redispatched_after_restart(tmp_path):
+    source_root = tmp_path / "client"
+    source_root.mkdir()
+    (source_root / "01.flac").write_bytes(b"audio")
+    factory, importing, _request = _seed_import(
+        tmp_path / "db.sqlite", source_root)
+    conn = factory()
+    record_pipeline_file_quarantined(
+        conn,
+        importing.id,
+        relative_path="01.flac",
+        track_id=101,
+        trigger="integrity",
+        reason="Duration mismatch",
+    )
+    conn.commit()
+    conn.close()
+    calls = []
+
+    result = advance_open_imports(
+        factory,
+        dispatcher=lambda *_args, **_kwargs: calls.append(True),
+        now=datetime.now(timezone.utc).timestamp() + 7200,
+    )
+
+    assert result.processed == ()
+    assert calls == []

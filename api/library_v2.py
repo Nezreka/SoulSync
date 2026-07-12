@@ -615,12 +615,24 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         return record, owner
 
     def _public_import_detail(record):
+        quarantined = [
+            {
+                "relative_path": item.get("relative_path"),
+                "track_id": item.get("track_id"),
+                "trigger": item.get("trigger"),
+                "reason": item.get("reason"),
+            }
+            for item in record.result.get("quarantined", [])
+            if isinstance(item, dict)
+        ]
         return {
             **record.to_public_dict(),
             "inventory": [dict(item) for item in record.inventory],
             "matches": [dict(item) for item in record.matches],
             "rejections": [dict(item) for item in record.rejections],
             "processed_count": len(record.result.get("processed", [])),
+            "quarantined_count": len(quarantined),
+            "quarantined": quarantined,
         }
 
     @app.route("/api/library/v2/acquisition/imports")

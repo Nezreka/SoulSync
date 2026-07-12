@@ -127,6 +127,10 @@ class AcquisitionImport:
             "inventory_count": len(self.inventory),
             "match_count": len(self.matches),
             "rejection_count": len(self.rejections),
+            "quarantined_count": len([
+                item for item in self.result.get("quarantined", [])
+                if isinstance(item, Mapping)
+            ]),
             "has_output_path": bool(self.output_path),
             "has_resolved_path": bool(self.resolved_path),
             "attempts": self.attempts,
@@ -505,6 +509,14 @@ def record_pipeline_file_completed(
     }
     processed = [by_key[item] for item in sorted(by_key)]
     result["processed"] = processed
+    result["quarantined"] = [
+        dict(item) for item in result.get("quarantined", [])
+        if isinstance(item, Mapping)
+        and (
+            str(item.get("relative_path") or "").replace("\\", "/"),
+            int(item.get("track_id") or 0),
+        ) != key
+    ]
     result_json = json.dumps(
         result,
         ensure_ascii=False,
@@ -538,6 +550,82 @@ def record_pipeline_file_completed(
             download_id=record.download_id,
             payload={"file_count": len(processed), "pipeline": "main"},
         )
+    return _reload_import(conn, import_id)
+
+
+def record_pipeline_file_quarantined(
+    conn: Any,
+    import_id: str,
+    *,
+    relative_path: str,
+    track_id: int,
+    trigger: str,
+    reason: str,
+) -> AcquisitionImport:
+    """Persist a redacted quarantine verdict from the shared import pipeline."""
+    record = get_import(conn, import_id)
+    if record is None:
+        raise KeyError(f"acquisition import not found: {import_id}")
+    if record.status != "importing":
+        raise ValueError(
+            f"pipeline quarantine requires importing, not {record.status}")
+
+    relative = str(relative_path or "").strip().replace("\\", "/")
+    track_id = int(track_id)
+    expected = {
+        (str(item.get("relative_path") or "").replace("\\", "/"),
+         int(item.get("track_id") or 0))
+        for item in record.matches
+    }
+    key = (relative, track_id)
+    if key not in expected:
+        raise ValueError("pipeline quarantine does not match the persisted import plan")
+
+    safe_trigger = redact_sensitive_text(trigger, max_length=100) or "unknown"
+    safe_reason = redact_sensitive_text(reason) or "Shared pipeline quarantine"
+    result = dict(record.result)
+    quarantined = {
+        (str(item.get("relative_path") or "").replace("\\", "/"),
+         int(item.get("track_id") or 0)): dict(item)
+        for item in result.get("quarantined", [])
+        if isinstance(item, Mapping)
+    }
+    verdict = {
+        "relative_path": relative,
+        "track_id": track_id,
+        "trigger": safe_trigger,
+        "reason": safe_reason,
+    }
+    if quarantined.get(key) == verdict:
+        return record
+    quarantined[key] = verdict
+    result["quarantined"] = [quarantined[item] for item in sorted(quarantined)]
+    conn.execute(
+        """UPDATE acquisition_imports
+              SET result_json=?, error=NULL, updated_at=CURRENT_TIMESTAMP
+            WHERE id=?""",
+        (json.dumps(
+            result,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ), record.id),
+    )
+    record_history_event(
+        conn,
+        "import_file_quarantined",
+        request_id=record.request_id,
+        candidate_id=record.candidate_id,
+        download_id=record.download_id,
+        reason_code=safe_trigger,
+        payload={
+            "relative_path": relative,
+            "track_id": track_id,
+            "trigger": safe_trigger,
+            "reason": safe_reason,
+        },
+    )
     return _reload_import(conn, import_id)
 
 
@@ -672,4 +760,5 @@ __all__ = [
     "record_matching_result",
     "record_manual_resolution",
     "record_pipeline_file_completed",
+    "record_pipeline_file_quarantined",
 ]

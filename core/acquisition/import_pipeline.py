@@ -60,6 +60,11 @@ def _timestamp(raw: Any) -> Optional[float]:
 
 
 def is_due(record: Any, *, now: float) -> bool:
+    if any(
+        isinstance(item, dict)
+        for item in record.result.get("quarantined", [])
+    ):
+        return False
     if record.attempts <= 0 or not record.error:
         return True
     updated = _timestamp(record.updated_at)
@@ -104,6 +109,8 @@ def advance_import(
             return "needs_review"
         if record.status in {"completed", "failed"}:
             return record.status
+        if record.result.get("quarantined"):
+            return "quarantined"
         if not is_due(record, now=timestamp):
             return "backoff"
 
