@@ -254,6 +254,58 @@ def test_stop_session_no_server(monkeypatch):
     assert sa.stop_session("1")["ok"] is False
 
 
+# ── stats (Phase 3) ──────────────────────────────────────────────────────────
+from core.server_activity import compute_stats  # noqa: E402
+
+
+def _hitem(mtype, title, gp, acct, dev, when):
+    return NS(type=mtype, title=title, grandparentTitle=gp, thumb="/t", grandparentThumb="/gt",
+              accountID=acct, deviceID=dev, viewedAt=when)
+
+
+def test_compute_stats_rolls_up_content_users_devices():
+    accts, devs = {1: "boulder", 2: "guest"}, {9: "Apple TV", 8: "Chrome"}
+    now = datetime(2026, 7, 12, 12, 0, 0)
+    items = [
+        _hitem("episode", "Ep1", "Breaking Bad", 1, 9, now),
+        _hitem("episode", "Ep2", "Breaking Bad", 1, 9, now),     # same show → grouped
+        _hitem("movie", "Heat", "", 2, 8, now),
+        _hitem("track", "Teardrop", "Massive Attack", 1, 9, now),
+    ]
+    d = compute_stats(items, accts, devs, 30)
+    assert d["total_plays"] == 4 and d["unique_users"] == 2
+    top = {c["title"]: c["plays"] for c in d["top_content"]}
+    assert top["Breaking Bad"] == 2 and top["Heat"] == 1 and top["Massive Attack"] == 1
+    assert d["top_users"][0] == {"user": "boulder", "plays": 3}   # most active first
+    assert d["top_devices"][0]["device"] == "Apple TV" and d["top_devices"][0]["plays"] == 3
+    # series is always 14 ordered day-buckets
+    assert len(d["series"]) == 14 and all("date" in p and "plays" in p for p in d["series"])
+
+
+def test_compute_stats_empty():
+    d = compute_stats([], {}, {}, 30)
+    assert d["total_plays"] == 0 and d["top_content"] == [] and len(d["series"]) == 14
+
+
+def test_get_stats_caches(monkeypatch):
+    import core.server_activity as sa
+    calls = {"n": 0}
+
+    class _P:
+        machineIdentifier = "m1"
+        def history(self, maxresults=None, mindate=None):
+            calls["n"] += 1
+            return [_hitem("movie", "Heat", "", 1, 9, datetime.now())]
+        def systemAccounts(self): return [NS(id=1, name="boulder")]
+        def systemDevices(self): return [NS(id=9, name="TV")]
+    sa._stats_cache.update(data=None, at=0.0, key="")
+    sa._lookup_cache.update(accounts={}, devices={}, at=0.0, key="")
+    monkeypatch.setattr(sa, "_plex_server", lambda db=None: _P())
+    a = sa.get_stats(days=30)
+    b = sa.get_stats(days=30)
+    assert a["ok"] and a["total_plays"] == 1 and calls["n"] == 1   # second call served from cache
+
+
 # ── frontend wiring ──────────────────────────────────────────────────────────
 def test_ui_is_wired():
     from pathlib import Path
@@ -281,6 +333,10 @@ def test_ui_is_wired():
     # stream termination (Tautulli's kill move)
     assert "data-sact-stop" in js and "function openStop" in js
     assert "/api/server-activity/stop" in js and ".sact-stop-modal" in css
+    # stats tab: graph + rankings (Phase 3)
+    assert 'data-sact-tab="stats"' in js and "function renderStats" in js
+    assert "function graph" in js and "/api/server-activity/stats" in js
+    assert ".sact-graph" in css and ".sact-rank-bar" in css
 
 
 def test_web_server_registers_the_routes():
@@ -290,4 +346,5 @@ def test_web_server_registers_the_routes():
     assert "@app.route('/api/server-activity/image')" in ws
     assert "@app.route('/api/server-activity/history')" in ws
     assert "@app.route('/api/server-activity/stop', methods=['POST'])" in ws
+    assert "@app.route('/api/server-activity/stats')" in ws
     assert "is_admin" in ws.split("stop_server_activity_stream")[1][:400]   # admin-gated

@@ -71127,3 +71127,29 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
 .sact-stop-btn--go { background: #ef4444; border-color: #ef4444; color: #fff; }
 .sact-stop-btn--go:hover:not(:disabled) { background: #f05252; }
 .sact-stop-btn--go:disabled { opacity: 0.6; cursor: default; }
+
+/* Server Activity — Stats tab (Phase 3) */
+.sact-sec { margin-top: 20px; }
+.sact-sec-h { font-size: 12px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase;
+    color: rgba(255,255,255,0.42); margin-bottom: 10px; }
+.sact-graph { width: 100%; height: 76px; display: block; }
+.sact-bar { fill: rgba(34,197,94,0.55); transition: fill 0.15s ease; }
+.sact-bar:hover { fill: #4ade80; }
+.sact-graph-x { display: flex; justify-content: space-between; font-size: 10px; color: rgba(255,255,255,0.35); margin-top: 4px; font-variant-numeric: tabular-nums; }
+.sact-cwlist { display: flex; flex-direction: column; gap: 8px; }
+.sact-cw { display: flex; align-items: center; gap: 11px; }
+.sact-cw-th { flex: 0 0 34px; width: 34px; aspect-ratio: 2/3; border-radius: 6px; overflow: hidden;
+    background: #0c0c12; border: 1px solid rgba(255,255,255,0.08); }
+.sact-cw-th img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sact-cw-th--none { display: flex; align-items: center; justify-content: center; font-size: 15px; }
+.sact-cw-t { flex: 1; min-width: 0; font-size: 13px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sact-cw-n { flex: 0 0 auto; font-size: 12px; font-weight: 800; color: #7ee0a0;
+    background: rgba(34,197,94,0.14); padding: 2px 9px; border-radius: 7px; font-variant-numeric: tabular-nums; }
+.sact-rank { display: flex; flex-direction: column; gap: 9px; }
+.sact-rank-row { display: flex; align-items: center; gap: 9px; }
+.sact-rank-name { flex: 0 0 34%; min-width: 0; font-size: 12.5px; font-weight: 700; color: rgba(255,255,255,0.85);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sact-rank-bar { flex: 1; height: 7px; border-radius: 4px; background: rgba(255,255,255,0.08); overflow: hidden; }
+.sact-rank-bar span { display: block; height: 100%; background: linear-gradient(90deg, #38bdf8, #4ade80); }
+.sact-rank-n { flex: 0 0 auto; font-size: 11.5px; font-weight: 800; color: rgba(255,255,255,0.6); min-width: 22px; text-align: right; font-variant-numeric: tabular-nums; }
+.sact-rank-row .sact-ava { flex: 0 0 auto; }

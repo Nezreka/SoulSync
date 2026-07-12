@@ -326,6 +326,84 @@ def get_history(db=None, limit: int = 40) -> Dict[str, Any]:
     return {"ok": True, "history": rows}
 
 
+# ── statistics (Phase 3 — beat the Tautulli/Plex dashboard glance) ───────────
+
+_stats_cache: Dict[str, Any] = {"data": None, "at": 0.0, "key": ""}
+
+
+def _content_key(item: Any, mtype: str) -> tuple:
+    """(group key, display title, thumb) for the most-watched roll-up: movies by
+    their own title, episodes by SHOW, tracks by ARTIST."""
+    title = str(_g(item, "title", "") or "")
+    gp = str(_g(item, "grandparentTitle", "") or "")
+    if mtype == "movie" or not gp:
+        return (title, title, str(_g(item, "thumb", "") or ""))
+    return (gp, gp, str(_g(item, "grandparentThumb", "") or _g(item, "thumb", "") or ""))
+
+
+def compute_stats(items: List[Any], accounts: Dict, devices: Dict, days: int) -> Dict[str, Any]:
+    """Aggregate raw history into the dashboard stats. Pure — tested with fakes."""
+    from datetime import datetime, timedelta
+    content: Dict[str, Dict] = {}
+    users: Dict[str, int] = {}
+    device_counts: Dict[str, int] = {}
+    day_counts: Dict[str, int] = {}
+    total = 0
+    for it in items or []:
+        try:
+            mtype = str(_g(it, "type", "") or "").lower()
+            total += 1
+            ck, ctitle, cthumb = _content_key(it, mtype)
+            if ck:
+                c = content.setdefault(ck, {"title": ctitle, "plays": 0, "thumb": cthumb, "media_type": mtype})
+                c["plays"] += 1
+            uname = accounts.get(_g(it, "accountID")) or "Someone"
+            users[uname] = users.get(uname, 0) + 1
+            dname = devices.get(_g(it, "deviceID")) or "Unknown device"
+            device_counts[dname] = device_counts.get(dname, 0) + 1
+            viewed = _g(it, "viewedAt")
+            if viewed is not None:
+                day_counts[viewed.date().isoformat()] = day_counts.get(viewed.date().isoformat(), 0) + 1
+        except Exception:   # noqa: BLE001 - one odd row never skews the whole roll-up
+            continue
+    top_content = sorted(content.values(), key=lambda c: c["plays"], reverse=True)[:8]
+    top_users = [{"user": k, "plays": v} for k, v in
+                 sorted(users.items(), key=lambda kv: kv[1], reverse=True)[:6]]
+    top_devices = [{"device": k, "plays": v} for k, v in
+                   sorted(device_counts.items(), key=lambda kv: kv[1], reverse=True)[:6]]
+    # plays-over-time: an ordered bucket per day for the last 14 days (graph x-axis)
+    today = datetime.now().date()
+    series = []
+    for i in range(13, -1, -1):
+        d = (today - timedelta(days=i)).isoformat()
+        series.append({"date": d, "plays": day_counts.get(d, 0)})
+    return {"ok": True, "days": days, "total_plays": total, "unique_users": len(users),
+            "top_content": top_content, "top_users": top_users,
+            "top_devices": top_devices, "series": series}
+
+
+def get_stats(db=None, days: int = 30) -> Dict[str, Any]:
+    """The stats dashboard. Cached ~10min — the history fetch it aggregates is
+    the expensive call. Never raises."""
+    srv = _plex_server(db)
+    if srv is None:
+        return {"ok": False, "reason": "no_server"}
+    days = max(1, min(90, int(days)))
+    key = str(_g(srv, "machineIdentifier", "") or "plex") + ":" + str(days)
+    if _stats_cache["data"] is not None and _stats_cache["key"] == key and time.time() - _stats_cache["at"] < 600:
+        return _stats_cache["data"]
+    try:
+        from datetime import datetime, timedelta
+        items = srv.history(maxresults=1000, mindate=datetime.now() - timedelta(days=days))
+    except Exception:   # noqa: BLE001
+        logger.debug("plex history() for stats failed", exc_info=True)
+        return {"ok": False, "reason": "unreachable"}
+    accounts, devices = _lookups(srv, str(_g(srv, "machineIdentifier", "") or "plex"))
+    data = compute_stats(items or [], accounts, devices, days)
+    _stats_cache.update(data=data, at=time.time(), key=key)
+    return data
+
+
 def fetch_image(path: str, db=None) -> Optional[tuple]:
     """(bytes, content_type) for a Plex image path — proxied server-side so the
     token never reaches the browser. None on any failure."""
