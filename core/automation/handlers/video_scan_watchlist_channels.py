@@ -35,7 +35,12 @@ is a real download queue) closes that loop. Tracked, out of scope for this scan-
 
 from __future__ import annotations
 
+import re
 from datetime import date
+
+from utils.logging_config import get_logger
+
+logger = get_logger("automation.video_scan_watchlist_channels")
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from core.automation.deps import AutomationDeps
@@ -54,6 +59,55 @@ def long_form_uploads(uploads: Iterable, min_seconds: int) -> List[Dict[str, Any
     with no id."""
     return [v for v in (uploads or [])
             if isinstance(v, dict) and v.get("youtube_id") and not is_short(v, min_seconds)]
+
+
+def apply_channel_filters(uploads: Iterable, channel_settings: Any) -> List[Dict[str, Any]]:
+    """Per-channel content filters (ytdl-sub match_filters parity), applied before
+    gap selection. Settings keys (all optional, stored in the channel's cog):
+
+    - ``title_include``: only keep titles matching ANY pattern (comma-separated;
+      a ``/…/`` pattern is a regex, anything else a case-insensitive substring)
+    - ``title_exclude``: drop titles matching any pattern (same syntax)
+    - ``min_minutes``: drop videos with a KNOWN duration under this (unknown
+      durations pass — same discipline as the Shorts backstop)
+
+    Pure. A broken regex disables THAT pattern (fail-open, logged) — a typo in
+    one filter must not silently blank a channel's whole feed."""
+    cs = channel_settings if isinstance(channel_settings, dict) else {}
+    include = _patterns(cs.get("title_include"))
+    exclude = _patterns(cs.get("title_exclude"))
+    try:
+        min_secs = max(0.0, float(cs.get("min_minutes") or 0)) * 60
+    except (TypeError, ValueError):
+        min_secs = 0
+    if not include and not exclude and not min_secs:
+        return list(uploads or [])
+    out = []
+    for v in (uploads or []):
+        title = str((v or {}).get("title") or "")
+        if include and not any(_pat_match(p, title) for p in include):
+            continue
+        if exclude and any(_pat_match(p, title) for p in exclude):
+            continue
+        d = (v or {}).get("duration_seconds")
+        if min_secs and isinstance(d, (int, float)) and 0 < d < min_secs:
+            continue
+        out.append(v)
+    return out
+
+
+def _patterns(raw: Any) -> List[str]:
+    return [p.strip() for p in str(raw or "").split(",") if p.strip()]
+
+
+def _pat_match(pattern: str, title: str) -> bool:
+    if len(pattern) > 2 and pattern.startswith("/") and pattern.endswith("/"):
+        try:
+            return re.search(pattern[1:-1], title, re.IGNORECASE) is not None
+        except re.error:
+            logger.warning("channel filter: bad regex %s — ignoring the pattern", pattern)
+            return False
+    return pattern.lower() in title.lower()
 
 
 def _day(value: Any) -> Optional[str]:
@@ -131,6 +185,11 @@ def _default_fetch_uploads(channel_id: Any, limit: int) -> List[Dict[str, Any]]:
     return vids
 
 
+def _default_channel_settings(channel_id: Any) -> Dict[str, Any]:
+    from api.video import get_video_db
+    return get_video_db().get_channel_settings(channel_id)
+
+
 def _default_wishlisted_ids(channel_id: Any) -> List[Any]:
     from api.video import get_video_db
     return get_video_db().wishlisted_video_ids_for_channel(channel_id)
@@ -161,6 +220,7 @@ def auto_video_scan_watchlist_channels(
     *,
     fetch_channels: Optional[Callable[[], List[Dict[str, Any]]]] = None,
     fetch_uploads: Optional[Callable[[Any, int], List[Dict[str, Any]]]] = None,
+    channel_settings: Optional[Callable[[Any], Dict[str, Any]]] = None,
     wishlisted_ids: Optional[Callable[[Any], Iterable]] = None,
     dismissed_ids: Optional[Callable[[Any], Iterable]] = None,
     downloaded_ids: Optional[Callable[[Any], Iterable]] = None,
@@ -172,6 +232,7 @@ def auto_video_scan_watchlist_channels(
     Returns ``{'status': 'completed', 'channels': int, 'videos_added': int, ...}``."""
     fetch_channels = fetch_channels or _default_fetch_channels
     fetch_uploads = fetch_uploads or _default_fetch_uploads
+    channel_settings = channel_settings or _default_channel_settings
     wishlisted_ids = wishlisted_ids or _default_wishlisted_ids
     dismissed_ids = dismissed_ids or _default_dismissed_ids
     downloaded_ids = downloaded_ids or _default_downloaded_ids
@@ -210,6 +271,10 @@ def auto_video_scan_watchlist_channels(
                                      log_type='warning')
                 continue
 
+            try:
+                uploads = apply_channel_filters(uploads, channel_settings(cid))
+            except Exception:   # noqa: BLE001 - filters are an assist, never abort a channel
+                logger.exception("channel filters failed for %s", cid)
             baseline = _day(ch.get('date_added')) or today
             gaps = select_channel_video_gaps(
                 uploads, baseline_date=baseline, backfill_count=backfill,
