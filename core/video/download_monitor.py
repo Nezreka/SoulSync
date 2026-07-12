@@ -116,8 +116,10 @@ def _make_organizer(db):
             db.update_video_download(dl["id"], status="importing", progress=100)
         except Exception:   # noqa: BLE001, S110 - a status blip must never wedge the import
             pass
+        from core.video.recycle import discarder
         patch = run_import(dl, src, fs=fs, prober=prober, settings=settings,
-                           library_dir=_owned_library_dir(db, dl))
+                           library_dir=_owned_library_dir(db, dl),
+                           recycle=discarder(db, settings))
         if patch.get("status") == "completed" and patch.get("dest_path"):
             if settings.get("save_artwork") or settings.get("write_nfo"):
                 write_sidecars(db, dl, patch["dest_path"], settings, fs)

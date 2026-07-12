@@ -53,7 +53,9 @@ def _silent_remove(path: str) -> None:
 def _default_delete_files(ep: Dict[str, Any]):
     """Delete the episode's video + its sidecars. Returns (ok, freed_bytes). Only ever touches
     the exact recorded ``dest_path`` and its same-stem sidecars — never walks a folder. A file
-    already gone counts as success (mark it pruned); a real delete error does NOT (so it retries)."""
+    already gone counts as success (mark it pruned); a real delete error does NOT (so it retries).
+    The video routes through the recycle bin (trash + retention window); sidecars are
+    regenerable junk and are removed outright."""
     path = ep.get("dest_path")
     if not path:
         return False, 0
@@ -61,7 +63,12 @@ def _default_delete_files(ep: Dict[str, Any]):
     try:
         if os.path.exists(path):
             size = os.path.getsize(path)
-            os.remove(path)
+            from api.video import get_video_db
+            from core.video import organization, recycle
+            db = get_video_db()
+            if not recycle.discard(path, organization.load(db), db,
+                                   reason="youtube retention").get("ok"):
+                return False, 0
     except OSError:
         logger.exception("retention: could not delete %s", path)
         return False, 0

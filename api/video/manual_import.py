@@ -117,8 +117,9 @@ def register_routes(bp):
         }
         settings = organization.load(db)
         prober = probe if settings.get("verify_with_ffprobe", True) else None
+        from core.video.recycle import discarder
         patch = run_import(row, src, fs=real_fs(), prober=prober, settings=settings,
-                           force=True, override=override)
+                           force=True, override=override, recycle=discarder(db, settings))
         try:
             db.update_video_download(dl_id, **patch)
         except Exception:
@@ -176,9 +177,9 @@ def register_routes(bp):
         if body.get("delete_file"):
             src = row.get("dest_path")
             if src and os.path.exists(src):
-                try:
-                    os.remove(src)
-                except OSError:
+                from core.video import organization, recycle
+                res = recycle.discard(src, organization.load(db), db, reason="dismissed import")
+                if not res.get("ok"):
                     logger.warning("dismiss: could not delete %s", src)
         db.update_video_download(dl_id, status="cancelled",
                                  error="Dismissed from manual import")

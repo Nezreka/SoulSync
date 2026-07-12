@@ -292,12 +292,15 @@ def plan_subs(src_path: str, dest_path: str, list_dir: Callable) -> list:
 
 def run_import(dl: dict, src_path: str, *, fs: Any, prober: Callable | None = None,
                settings: dict | None = None, force: bool = False,
-               override: dict | None = None, library_dir: str | None = None) -> dict:
+               override: dict | None = None, library_dir: str | None = None,
+               recycle: Callable | None = None) -> dict:
     """Execute the import and return a DB patch dict for the download row.
 
     ``fs`` is an injected facade with: ``list_dir(dir)->iterable[name]``,
     ``makedirs(dir)``, ``copy(src, dst)``, ``move(src, dst)``, ``remove(path)``.
     ``prober(path)->mediainfo`` is an optional ffprobe hook (None = skip verification).
+    ``recycle(path)`` (optional) replaces the upgrade-delete of the old library
+    copy with a move-to-trash (core.video.recycle.discarder); None = hard remove.
     ``settings`` are the user's organisation settings (transfer mode, subtitle carry);
     None = defaults. ``force``/``override`` drive a MANUAL placement (see ``plan_import``).
     A reject becomes an ``import_failed`` row with ``dest_path`` pointing at the file's
@@ -336,7 +339,7 @@ def run_import(dl: dict, src_path: str, *, fs: Any, prober: Callable | None = No
                     pass
         if plan["action"] == "upgrade" and plan.get("replace_path"):
             try:
-                fs.remove(plan["replace_path"])
+                (recycle or fs.remove)(plan["replace_path"])
             except Exception:   # noqa: BLE001 - failing to delete the old file isn't fatal
                 pass
         # Copy mode reclaims the download copy UNLESS it's a torrent (keep seeding);
