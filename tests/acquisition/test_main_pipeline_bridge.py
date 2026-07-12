@@ -103,6 +103,7 @@ def test_dispatch_uses_main_pipeline_context_and_persistent_callback(tmp_path):
         "album_id": 201,
         "quality_profile_id": 2,
     }
+    assert captured["track_info"]["lib2_entity"] == captured["lib2_entity"]
     assert captured["_acquisition_import_id"] == importing.id
     conn = factory()
     assert get_import(conn, importing.id).status == "completed"

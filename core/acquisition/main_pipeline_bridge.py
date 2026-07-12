@@ -70,6 +70,11 @@ def _pipeline_context(
         raise ValueError("matched Library-v2 track or acquisition request disappeared")
     data = dict(row)
     relative = str(match.get("relative_path") or "").replace("\\", "/")
+    lib2_entity = {
+        "track_id": track_id,
+        "album_id": int(data["album_id"]),
+        "quality_profile_id": int(data["quality_profile_id"]),
+    }
     track_info = {
         "id": data.get("track_spotify_id") or f"lib2-track:{track_id}",
         "provider": "spotify" if data.get("track_spotify_id") else "library_v2",
@@ -86,6 +91,7 @@ def _pipeline_context(
         "disc_number": match.get("disc_number") or data.get("disc_number") or 1,
         "duration_ms": data.get("duration") or 0,
         "quality_profile_id": data["quality_profile_id"],
+        "lib2_entity": lib2_entity,
         "_acquisition_import_id": record.id,
         "_acquisition_relative_path": relative,
         "_acquisition_track_id": track_id,
@@ -101,11 +107,7 @@ def _pipeline_context(
     }
     return {
         "track_info": track_info,
-        "lib2_entity": {
-            "track_id": track_id,
-            "album_id": int(data["album_id"]),
-            "quality_profile_id": int(data["quality_profile_id"]),
-        },
+        "lib2_entity": lib2_entity,
         "spotify_artist": artist_context,
         "spotify_album": album_context,
         "original_search_result": {

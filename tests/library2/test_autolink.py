@@ -180,6 +180,37 @@ def test_direct_entity_link_beats_name_heuristics(lib2_enabled, imported_conn):
         "SELECT COUNT(*) c FROM lib2_albums WHERE title='Scorpion'").fetchone()["c"] == 0
 
 
+def test_retry_track_info_entity_beats_name_heuristics(lib2_enabled, imported_conn):
+    conn = lib2_enabled._get_connection()
+    artist_id = conn.execute(
+        "SELECT id FROM lib2_artists WHERE name='Drake'").fetchone()["id"]
+    conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title, album_type) "
+        "VALUES(?, 'Retry Target', 'album')", (artist_id,))
+    album_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    conn.execute(
+        "INSERT INTO lib2_album_artists(album_id, artist_id) VALUES(?,?)",
+        (album_id, artist_id))
+    conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title, track_number, monitored) "
+        "VALUES(?, 'Canonical Song', 1, 1)", (album_id,))
+    target_track = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    conn.commit()
+    conn.close()
+
+    context = _context()
+    context["track_info"]["lib2_entity"] = {
+        "track_id": target_track,
+        "album_id": album_id,
+        "quality_profile_id": 1,
+    }
+    file_id = A.link_download_into_library_v2(context)
+
+    row = imported_conn.execute(
+        "SELECT track_id FROM lib2_track_files WHERE id=?", (file_id,)).fetchone()
+    assert row["track_id"] == target_track
+
+
 def test_direct_album_link_creates_track_inside_that_album(lib2_enabled, imported_conn):
     conn = lib2_enabled._get_connection()
     artist_id = conn.execute("SELECT id FROM lib2_artists WHERE name='Drake'").fetchone()["id"]

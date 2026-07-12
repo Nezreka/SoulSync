@@ -156,11 +156,11 @@ def link_download_into_library_v2(context: Dict[str, Any]) -> Optional[int]:
         # A grab that started from Library v2 carries the server-resolved
         # entity (audit P1-16) — the file links to that exact row, no
         # heuristic re-matching. Without it, fall back to name matching.
-        lib2_ctx = context.get("lib2_entity") or {}
+        ti = context.get("track_info") or context.get("search_result") or {}
+        lib2_ctx = context.get("lib2_entity") or ti.get("lib2_entity") or {}
         direct_track_id = lib2_ctx.get("track_id")
         direct_album_id = lib2_ctx.get("album_id")
 
-        ti = context.get("track_info") or context.get("search_result") or {}
         title = _get(ti, "name", "title")
         artist_name = _primary_artist_name(ti)
         if not direct_track_id and not direct_album_id and (not title or not artist_name):

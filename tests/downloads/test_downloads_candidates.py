@@ -145,6 +145,30 @@ def test_first_candidate_starts_download_and_returns_true():
     assert "user1::best.flac" in matched_downloads_context
 
 
+def test_retry_context_preserves_exact_library_entity_from_track_info():
+    deps = _build_deps()
+    entity = {"track_id": 42, "album_id": 7, "quality_profile_id": 3}
+    _seed_task("t_lib2", track_info={
+        "name": "Song Title",
+        "artists": [{"name": "Artist Name"}],
+        "album": {"name": "Album Name"},
+        "lib2_entity": entity,
+        "_acquisition_import_id": "aim1-test",
+    })
+
+    result = dc.attempt_download_with_candidates(
+        "t_lib2",
+        [_Candidate(filename="retry.flac")],
+        _Track(),
+        deps=deps,
+    )
+
+    assert result is True
+    context = matched_downloads_context["user1::retry.flac"]
+    assert context["track_info"]["lib2_entity"] == entity
+    assert context["track_info"]["_acquisition_import_id"] == "aim1-test"
+
+
 def test_candidates_tried_in_confidence_order():
     """Multiple candidates → tried highest-confidence first."""
     deps = _build_deps()
