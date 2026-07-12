@@ -2217,6 +2217,27 @@ Relevante Korrektur-Commits: `e1272be`, `e6484cb`, `2917f3c`, `99ffd2c`,
 `7d80e96`, `e394e2d`, `39549f0`, `e27070f`, `3eb0e92`, `a7344e5`,
 `6bc4d01`, `b464543`, `903cbd3`.
 
+#### Follow-up: kurzlebige Retry-Persistenz
+
+Die aktuell noch offene Restart-Grenze betrifft den technischen Worker-Zustand,
+nicht den fachlichen Acquisition-Verlauf. Kandidaten-Snapshot, `used_sources`,
+erschöpfte Quellen und Retry-Zähler liegen im bestehenden Legacy-Worker noch im
+Speicher. Das muss für Library-Acquisition persistiert und beim Neustart wieder
+in denselben Worker rekonstruiert werden.
+
+Die Daten sind kein dauerhafter Bibliothekszustand. Vorgesehen ist ein
+kurzlebiger, redigierter Retry-Snapshot mit zunächst sieben Tagen Retention.
+Nach `completed`, `failed`, `cancelled` oder abgeschlossenem manuellen Approve
+wird er nur noch für Diagnose/History benötigt und darf durch einen Cleanup-Job
+entfernt werden. Dauerhaft bleiben ausschließlich die fachlichen Acquisition-
+und History-Ereignisse, nicht Provider- oder Downloaddetails.
+
+Der Folgejob darf keine neue Decision Engine bauen. Er muss den vorhandenen
+`task_worker`, `monitor`, Source-Policy-Resolver und die bestehenden
+Retry-Budgets wiederverwenden. Persistiert werden nur die Eingaben und der
+Fortschritt, damit der bestehende Code nach einem Neustart an derselben Stelle
+weiterarbeiten kann.
+
 #### Live-Abnahme
 
 - mindestens ein kleines Album und ein Multi-Disc-Album pro Client;

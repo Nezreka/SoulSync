@@ -502,3 +502,39 @@ music mounted (covers come from embedded art so the mount matters). After each p
 green + manual UI check + DB spot-checks (watchlist/wishlist rows appear on monitor toggle; artwork loads
 with no media server reachable; downloads import into `lib2`). Keep the old library + watchlist/wishlist
 pages working throughout.
+
+## Retry-Persistenz nach Quality-/Integrity-/AcoustID-Fehlern
+
+Dieser Punkt ist bewusst als eigener Folgejob offen und noch nicht implementiert.
+Der bestehende Worker besitzt Kandidatenliste, `used_sources`, erschöpfte Quellen
+und Retry-Zähler bisher nur im RAM. Für Library-Acquisition muss dieser Zustand
+nach einem Neustart wiederherstellbar werden, ohne die bestehende Auswahl- oder
+Retry-Logik zu duplizieren.
+
+Geplante Umsetzung:
+
+- Ein kurzlebiges Retry-Journal pro Acquisition-Task und Track speichern.
+- Nur redigierte Kandidatenfelder speichern: Quelle, Dateiname, Qualitätsdaten
+  und Reihenfolge; keine URLs, Magnet-Links, Tokens oder Provider-Geheimnisse.
+- `used_sources`, erschöpfte Source-Buckets, Source-spezifische Retry-Zähler,
+  Gesamtversuche, letzter Fehler und letzter Fortschritt persistieren.
+- Beim Start oder beim nächsten Acquisition-Worker-Lauf den bestehenden
+  Legacy-Task mit diesem Zustand wiederherstellen und anschließend ausschließlich
+  den vorhandenen `task_worker`/`monitor`-Retry ausführen.
+- Nach Erfolg, manuellem Approve oder endgültiger Erschöpfung den Zustand als
+  abgeschlossen markieren.
+- Detaillierte Retry-Zeilen nach einer kurzen Retention automatisch löschen
+  (vorgesehener Standard: sieben Tage); die dauerhafte Acquisition-History
+  behält nur das fachliche Ergebnis und den Grund.
+- Abbruch und Cancel müssen den Retry-Zustand beenden und dürfen keinen
+  automatischen Neustart auslösen.
+
+Abnahmekriterien:
+
+- Neustart nach Quality-Quarantäne setzt mit dem nächsten Kandidaten fort und
+  lädt nicht erneut dieselbe Quelle.
+- Source-Priority, `best_quality`, `hybrid_order`, Torrent-/Usenet-Budgets und
+  manuelle Kandidatenauswahl verhalten sich identisch zum Legacy-Pfad.
+- Approve überspringt weiterhin nur den bestätigten Check; die übrigen Checks
+  laufen erneut.
+- Terminale Requests hinterlassen keine unbegrenzt wachsenden Worker-Daten.
