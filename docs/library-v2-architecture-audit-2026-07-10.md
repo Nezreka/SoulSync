@@ -2099,6 +2099,13 @@ vollständige Bundles.
   Semantik duerfen nicht als zweiter eigener Importpfad implementiert werden.
   Legacy-gekoppelte Helfer werden dafuer in gemeinsame Services extrahiert
   oder ueber einen Adapter angebunden.
+- [ ] **LIB2-011: Pipeline-Paritaet herstellen.** Die bestehende Main-Pipeline
+  bleibt fuer Search Mode, `hybrid_order`, Source-Auswahl, Quality Profile,
+  Retry, Quarantaene, Approve und finalen Import die einzige fachliche
+  Entscheidungsquelle. Die neue Bundle-Schicht darf nur persistente
+  Korrelation, Bundle-/Edition-Kontext und atomare Lib2-Schreibvorgaenge
+  ergaenzen. Eine doppelte Decision Engine oder ein zweiter Quality-/Retry-
+  Pfad ist zu entfernen oder in einen gemeinsamen Service zu extrahieren.
 - [x] Failed Download Handling, exakte Source/Indexer/GUID-Blocklist und Re-Search
   im neuen Acquisition-Pfad.
 - [ ] Retention/Minimum Age/Indexer Priority/Quality/Custom Formats.
@@ -2123,6 +2130,15 @@ denselben Zustand fortsetzen koennen. Ein Upgrade darf ausserdem nur bis zum
 im Quality Profile definierten `upgrade-until`-Ziel laufen; `until_cutoff` und
 `until_top` muessen dabei mit der bestehenden Quality-Upgrade-Semantik
 uebereinstimmen.
+
+Weitere Paritaetstests: `best_quality` durchsucht alle konfigurierten Quellen
+und waehlt global nach der bestehenden Qualitaetslogik; Hybrid-/Source-Priority
+arbeitet die konfigurierte Source-Kette in ihrer Reihenfolge ab. Der
+`lib2_upgrade_scan` laeuft nur fuer Profile mit erlaubter Upgrade-Policy und
+uebergibt danach an denselben Acquisition-/Source-/Importpfad. Ein
+Quarantaene-Approve stellt denselben Kontext wieder her, ueberspringt nur den
+genehmigten Check und fuehrt alle anderen Checks erneut aus, bevor der Import
+als erfolgreich gilt.
 
 #### Live-Abnahme
 

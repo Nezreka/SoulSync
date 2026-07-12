@@ -261,6 +261,77 @@ Delete file / unlink (DB-recorded path → safe delete) — destructive actions 
   `/api/download-selected-candidate/<id>`.
 - Tagging/Repair: `core/tag_writer.py`, `core/repair_jobs/*`, `core/imports/pipeline.py`.
 
+## Architecture correction -- reuse the existing main pipeline
+
+The original Library-v2 goal is preserved: Library v2 must extend and connect
+to SoulSync's existing download pipeline, not replace its decision-making
+with a second implementation. The existing pipeline is the behavioral source
+of truth for search mode, source selection, quality policy, retries,
+post-processing, quarantine and approval.
+
+The new Library-v2 code may add only the missing Library concerns:
+
+- persistent Acquisition Request/Grab/History correlation;
+- release-bundle and Edition/Recording context;
+- restart-safe observation of an external client;
+- bundle inventory and Edition/Track matching;
+- atomic writes into `lib2_*` after the shared import pipeline succeeds.
+
+The following must be reused or extracted into shared services, never
+reimplemented in a second Decision Engine or Bundle Importer:
+
+- `download_source.mode`, including `best_quality` and hybrid behavior;
+- `download_source.hybrid_order` and the configured source priority chain;
+- source-by-source fallback and the existing next-candidate retry behavior;
+- the complete Quality Profile, including ranked targets, fallback,
+  `upgrade_policy` (`acceptable`, `until_cutoff`, `until_top`), cutoff and all
+  AcoustID/quality/import settings;
+- `core/download_orchestrator.py` and `core/downloads/task_worker.py` for
+  candidate ordering, source dispatch and retry semantics;
+- `core/imports/pipeline.py`, `file_integrity.py`, `guards.py` and
+  `quarantine.py` for stability, integrity, quality, AcoustID, quarantine,
+  approval and final processing.
+
+Library-v2 acquisition must be behaviorally indistinguishable from the old
+path for the same user settings. A monitor-triggered acquisition and a
+manually wishlisted acquisition may have different persistent context, but
+they must make the same source, quality, retry, quarantine and approval
+decisions.
+
+### Quality upgrade integration
+
+The existing Quality Upgrade jobs remain the canonical upgrade mechanism.
+`core/library2/quality_eval.py` determines whether an existing file is an
+upgrade candidate. The periodic `lib2_upgrade_scan` runs only for profiles
+whose `upgrade_policy` permits upgrades and respects `until_cutoff`/`until_top`.
+The existing `quality_upgrade` provider-search and finding logic must be
+reused. Its output must be adapted into the normal Library-v2 Acquisition
+Request when the target is a Library-v2 entity; it must not silently bypass
+the normal source-selection, Quality Profile, retry or import pipeline.
+
+### Quarantine and manual approval integration
+
+A Library-v2 download that fails integrity, quality, AcoustID or another
+enabled post-processing check must follow the existing quarantine lifecycle.
+The quarantine sidecar must preserve the Library-v2 acquisition and Edition
+context. Approving a quarantined file must restore it and re-dispatch the
+shared post-processing pipeline. Approval may bypass only the specific
+approved check (for example AcoustID); all other enabled checks must run
+again. The file must not be marked completed merely because it was approved,
+and the Library-v2 import/History state must advance only after final shared
+pipeline success. Legacy thin sidecars continue through the existing manual
+staging fallback.
+
+### New corrective job: LIB2-011 pipeline behavior parity
+
+Before Phase 5 is considered complete, add an adapter/extraction layer that
+connects persistent Library-v2 Acquisition state to the existing main
+pipeline. The job must remove duplicate decision logic from the new path,
+map legacy task/batch context to persistent Acquisition IDs, preserve source
+mode and priority semantics, and support retry, quarantine, approval and
+restart recovery. Its test matrix must compare equivalent old and Library-v2
+requests under every relevant source mode and Quality Profile setting.
+
 ## Verification (per phase, end-to-end in Docker)
 Build the local image (`docker build -t soulsync:dev .`), run with the user's real config+DB copy + the
 music mounted (covers come from embedded art so the mount matters). After each phase: `pytest tests/library2/`
