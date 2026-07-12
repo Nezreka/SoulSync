@@ -6208,11 +6208,17 @@
                                  music service frames above. -->
                             <div class="settings-group" data-stg="connections" data-video-only>
                                 <h3>API Configuration <button class="stg-accordion-toggle" onclick="toggleAllServiceAccordions(this)">Expand All</button></h3>
+                                <p class="stg-required-note">
+                                    <strong>TMDB &amp; TVDB are required.</strong> The video side matches, enriches and automates
+                                    everything from these &mdash; library matching, artwork, airing shows, collections &mdash; so nothing
+                                    works until both keys are set. Both are free. OMDb and fanart.tv below are optional extras.
+                                </p>
                                 <div class="api-service-frame stg-service" data-video-service="tmdb">
                                     <div class="stg-service-header" onclick="toggleStgService(this)">
                                         <span class="stg-service-dot" style="color: #01b4e4;"></span>
                                         <img class="video-svc-logo" src="https://www.themoviedb.org/assets/2/v4/logos/v2/blue_square_2-d537fb228cf3ded904ef09b136fe3fec72548ebc1fea3fbbd1ad9e36364db38b.svg" alt="">
                                         <h4 class="service-title">TMDB</h4>
+                                        <span class="stg-req-pill">Required</span>
                                         <span class="stg-service-chevron">›</span>
                                     </div>
                                     <div class="stg-service-body">
@@ -6221,8 +6227,8 @@
                                             <input type="password" id="tmdb-api-key" placeholder="The Movie Database API Key">
                                         </div>
                                         <div class="callback-info">
-                                            <div class="callback-help">Get your key from <a href="https://www.themoviedb.org/settings/api" target="_blank" style="color: #01b4e4;">TMDB API Settings</a></div>
-                                            <div class="callback-help">Primary movie &amp; TV metadata source.</div>
+                                            <div class="callback-help">Get your free key from <a href="https://www.themoviedb.org/settings/api" target="_blank" style="color: #01b4e4;">TMDB API Settings</a></div>
+                                            <div class="callback-help"><strong>Required.</strong> Primary movie &amp; TV metadata source &mdash; nothing on the video side works without it.</div>
                                         </div>
                                         <button class="test-button" type="button" data-video-test-service="tmdb">Test TMDB</button>
                                     </div>
@@ -6232,6 +6238,7 @@
                                         <span class="stg-service-dot" style="color: #6cd391;"></span>
                                         <img class="video-svc-logo video-svc-logo--tvdb" src="https://www.svgrepo.com/show/443500/brand-tvdb.svg" alt="">
                                         <h4 class="service-title">TVDB</h4>
+                                        <span class="stg-req-pill">Required</span>
                                         <span class="stg-service-chevron">›</span>
                                     </div>
                                     <div class="stg-service-body">
@@ -6241,7 +6248,7 @@
                                         </div>
                                         <div class="callback-info">
                                             <div class="callback-help">Get your key from <a href="https://thetvdb.com/dashboard/account/apikey" target="_blank" style="color: #6cd391;">TheTVDB API</a></div>
-                                            <div class="callback-help">TV series metadata source.</div>
+                                            <div class="callback-help"><strong>Required.</strong> TV series metadata &mdash; episodes &amp; air dates the airing automations rely on.</div>
                                         </div>
                                         <button class="test-button" type="button" data-video-test-service="tvdb">Test TVDB</button>
                                     </div>
