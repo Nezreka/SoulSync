@@ -29,9 +29,11 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 IGNORE_TTL_DAYS = 30
 
-# Recognised reasons (free-text tolerated; these are the canonical two).
+# Recognised reasons (free-text tolerated; these are the canonical values).
 REASON_REMOVED = "removed"
 REASON_CANCELLED = "cancelled"
+REASON_DELETED_FROM_LIBRARY = "deleted_from_library"
+PERMANENT_REASONS = {REASON_DELETED_FROM_LIBRARY}
 
 
 def normalize_ignore_id(track_id: Any) -> str:
@@ -94,7 +96,8 @@ def active_ignored_ids(
     out: Set[str] = set()
     for row in rows or []:
         tid = normalize_ignore_id(row.get("track_id"))
-        if tid and not is_expired(row.get("created_at"), now, ttl_days):
+        reason = str(row.get("reason") or "").strip()
+        if tid and (reason in PERMANENT_REASONS or not is_expired(row.get("created_at"), now, ttl_days)):
             out.add(tid)
     return out
 
