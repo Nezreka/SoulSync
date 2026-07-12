@@ -10,9 +10,11 @@ all seams injected so the flow tests without yt-dlp.
 from __future__ import annotations
 
 from core.video.subscriptions import (
+    channel_settings_from_presets,
     import_subscriptions,
     parse_subscriptions,
     wants_best_quality,
+    wants_recent_only,
 )
 
 # A slice of a real ytdl-sub file covering every URL/edge shape.
@@ -87,6 +89,26 @@ def test_commented_presets_are_not_active():
     assert "best_video_quality" not in d["phonicsman"]["presets"]     # #- commented
     assert wants_best_quality(d["music_videos"]["presets"]) is True
     assert wants_best_quality(d["phonicsman"]["presets"]) is False
+    # phonicsman has only_recent_videos (active); music_videos has it commented out
+    assert wants_recent_only(d["phonicsman"]["presets"]) is True
+    assert wants_recent_only(d["music_videos"]["presets"]) is False
+
+
+def test_presets_translate_to_channel_settings():
+    # best_video_quality → a full quality override the modal round-trips
+    q = channel_settings_from_presets(["best_video_quality"])
+    assert q["quality"]["max_resolution"] == "best"
+    assert set(q["quality"]) == {"max_resolution", "video_codec", "container",
+                                 "prefer_60fps", "allow_hdr"}
+    assert "retention" not in q
+    # only_recent_videos → 'keep recent' == last 3 months (days_90)
+    r = channel_settings_from_presets(["only_recent_videos"])
+    assert r == {"retention": "days_90"}
+    # both together
+    both = channel_settings_from_presets(["best_video_quality", "only_recent_videos"])
+    assert both["retention"] == "days_90" and both["quality"]["max_resolution"] == "best"
+    # neither → nothing set (keep-all default retention, global quality)
+    assert channel_settings_from_presets(["plex_tv_show_by_date"]) == {}
 
 
 def test_directory_override_is_ignored_not_mistaken_for_url():
@@ -144,11 +166,11 @@ def test_import_follows_channels_and_playlists_and_applies_names():
     assert kinds["phonicsman"] == "channel"
     # show name applied as custom_name only when it differs from the channel title
     ph = next(i for i in res["items"] if i["name"] == "phonicsman")
-    assert calls["settings"][ph["youtube_id"]]["custom_name"] == "Phonicsman"
-    # best_video_quality → a quality override (music_videos is a playlist, so its
-    # quality intent doesn't apply; use a channel one)
-    assert all("quality" not in cs or cs["quality"]["max_resolution"] == "best"
-               for cs in calls["settings"].values())
+    ph_cs = calls["settings"][ph["youtube_id"]]
+    assert ph_cs["custom_name"] == "Phonicsman"
+    # phonicsman has only_recent_videos → 'keep recent' retention
+    assert ph_cs["retention"] == "days_90"
+    assert "quality" not in ph_cs                    # best_video_quality is commented out for it
 
 
 def test_already_following_is_left_untouched_not_reconfigured():
