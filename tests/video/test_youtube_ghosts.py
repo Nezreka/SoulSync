@@ -158,15 +158,80 @@ def test_fix_refuses_when_the_file_is_back(db, worker, tmp_path):
 
 
 # ── safety guards ────────────────────────────────────────────────────────────
-def test_mass_missing_aborts_without_flagging(db, worker, tmp_path):
-    """>50% of >=5 checked files gone at once = an unmounted share, not cleanup."""
+def _by_type(db, t):
+    return [f for f in _pending(db) if f["finding_type"] == t]
+
+
+def test_mass_missing_becomes_one_critical_finding(db, worker, tmp_path):
+    """>50% of >=5 checked files gone at once: could be an unmounted share OR a
+    deliberate wipe / drive change (Boulder's case) — so it's ONE critical
+    finding asking the user, not a silent abort that wedges the job forever."""
     for i in range(6):
         _seed_grab(db, tmp_path, f"v{i}", on_disk=(i < 2))   # 4 of 6 missing
     worker._run_job("youtube_ghosts", forced=True)
-    assert _pending(db) == []
-    assert worker._states["youtube_ghosts"]["status"] == "error"
-    assert any("unreachable drive" in ln["text"]
-               for ln in worker._states["youtube_ghosts"]["log"])
+    assert worker._states["youtube_ghosts"]["status"] == "finished"
+    assert _by_type(db, "youtube_ghost") == []               # nothing auto-flagged
+    mass = _by_type(db, "youtube_mass_missing")
+    assert len(mass) == 1
+    f = mass[0]
+    assert f["severity"] == "critical" and "4 of 6" in f["title"]
+    d = f["details"]
+    assert d["missing_count"] == 4 and d["checked"] == 6
+    assert len(d["history_ids"]) == 4 and len(d["sample"]) == 4
+
+
+def test_approving_mass_finding_flags_individually(db, worker, tmp_path):
+    hids = {}
+    for i in range(6):
+        hid, path = _seed_grab(db, tmp_path, f"v{i}", on_disk=(i < 2))
+        hids[f"v{i}"] = (hid, path)
+    worker._run_job("youtube_ghosts", forced=True)
+    mass = _by_type(db, "youtube_mass_missing")[0]
+
+    # one file returns between scan and approve — the fix re-verifies NOW
+    Path(hids["v5"][1]).write_bytes(b"restored")
+    res = worker.fix_finding(mass["id"])
+    assert res["success"] and res["action"] == "flagged" and "3 missing" in res["message"]
+
+    ghosts = _by_type(db, "youtube_ghost")
+    assert {g["details"]["media_id"] for g in ghosts} == {"v2", "v3", "v4"}
+    assert db.repair_get_finding(mass["id"])["status"] == "resolved"
+    # the individual findings behave normally: approve one → pruned
+    res = worker.fix_finding(ghosts[0]["id"])
+    assert res["success"] and res["action"] == "marked_deleted"
+
+
+def test_mass_finding_supersedes_and_dedups(db, worker, tmp_path):
+    """A changed missing set retires the stale pending mass finding and raises a
+    fresh one; an unchanged set dedups (no daily spam)."""
+    seeds = [_seed_grab(db, tmp_path, f"v{i}", on_disk=(i < 2)) for i in range(6)]
+    worker._run_job("youtube_ghosts", forced=True)
+    first = _by_type(db, "youtube_mass_missing")[0]
+
+    worker._run_job("youtube_ghosts", forced=True)           # same state → dedup
+    assert [f["id"] for f in _by_type(db, "youtube_mass_missing")] == [first["id"]]
+
+    Path(seeds[1][1]).unlink()                                # now 5 of 6 missing
+    worker._run_job("youtube_ghosts", forced=True)
+    mass = _by_type(db, "youtube_mass_missing")
+    assert len(mass) == 1 and mass[0]["id"] != first["id"]
+    assert mass[0]["details"]["missing_count"] == 5
+    assert db.repair_get_finding(first["id"])["status"] == "dismissed"
+
+
+def test_pending_ghosts_survive_a_mass_event(db, worker, tmp_path):
+    """Individual findings raised earlier must not be retired by a later scan
+    that trips the mass tier — their rows are still missing."""
+    _seed_grab(db, tmp_path, "old", on_disk=False)
+    for i in range(4):
+        _seed_grab(db, tmp_path, f"v{i}")
+    worker._run_job("youtube_ghosts", forced=True)            # 1 of 5 → normal flag
+    assert len(_by_type(db, "youtube_ghost")) == 1
+    for i in range(4):                                        # wipe the rest
+        (tmp_path / "yt" / f"v{i}.mp4").unlink()
+    worker._run_job("youtube_ghosts", forced=True)            # 5 of 5 → mass tier
+    assert len(_by_type(db, "youtube_ghost")) == 1            # kept, not superseded
+    assert len(_by_type(db, "youtube_mass_missing")) == 1
 
 
 def test_small_libraries_are_exempt_from_the_guard(db, worker, tmp_path):
@@ -219,6 +284,10 @@ def test_repair_ui_knows_the_new_type():
     assert "marked_deleted: 'Marked Deleted'" in _REPAIR_JS
     assert "forgotten: 'Forgotten'" in _REPAIR_JS
     assert "function ghostDetailHTML" in _REPAIR_JS
+    assert "youtube_mass_missing: 'Mass Missing'" in _REPAIR_JS
+    assert "youtube_mass_missing: 'Flag Individually'" in _REPAIR_JS
+    assert "flagged: 'Flagged'" in _REPAIR_JS
+    assert "function massMissingDetailHTML" in _REPAIR_JS
 
 
 def test_repair_ui_sends_the_forget_action():
