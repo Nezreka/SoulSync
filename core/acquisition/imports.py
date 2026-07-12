@@ -13,6 +13,7 @@ import secrets
 from dataclasses import dataclass
 from typing import Any, Dict, Mapping, Optional, Tuple
 
+from core.acquisition.candidates import redact_sensitive_text
 from core.acquisition.grabs import (
     STATUS_COMPLETED,
     TERMINAL_STATUSES as TERMINAL_GRAB_STATUSES,
@@ -20,7 +21,7 @@ from core.acquisition.grabs import (
     update_grab,
 )
 from core.acquisition.history import record_history_event
-from core.acquisition.requests import get_request
+from core.acquisition.requests import get_request, transition_request
 
 
 IMPORT_ID_PREFIX = "aim1-"
@@ -36,6 +37,20 @@ OPEN_IMPORT_STATUSES = (
     "pending", "matching", "needs_review", "importing",
 )
 
+# needs_review may re-enter matching after the user fixed mappings or asked
+# for a re-scan; both terminal states are final — a failed import is retried
+# through a fresh acquisition request, never by reviving its row.
+_ALLOWED_TRANSITIONS = {
+    "pending": {"matching", "failed"},
+    "matching": {"needs_review", "importing", "failed"},
+    "needs_review": {"matching", "importing", "failed"},
+    "importing": {"completed", "failed"},
+    "completed": set(),
+    "failed": set(),
+}
+
+IMPORT_FAILURE_KINDS = frozenset({"candidate", "runtime"})
+
 ACQUISITION_IMPORTS_DDL = """
 CREATE TABLE IF NOT EXISTS acquisition_imports (
     id TEXT PRIMARY KEY,
@@ -44,12 +59,14 @@ CREATE TABLE IF NOT EXISTS acquisition_imports (
     candidate_id TEXT,
     status TEXT NOT NULL DEFAULT 'pending',
     output_path TEXT NOT NULL,
+    resolved_path TEXT,
     expected_scope TEXT NOT NULL,
     expected_entity_id INTEGER NOT NULL,
     inventory_json TEXT NOT NULL DEFAULT '[]',
     matches_json TEXT NOT NULL DEFAULT '[]',
     rejections_json TEXT NOT NULL DEFAULT '[]',
     result_json TEXT NOT NULL DEFAULT '{}',
+    attempts INTEGER NOT NULL DEFAULT 0,
     error TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -71,9 +88,9 @@ _INDEXES = (
 
 _COLUMNS = (
     "id", "download_id", "request_id", "candidate_id", "status",
-    "output_path", "expected_scope", "expected_entity_id",
+    "output_path", "resolved_path", "expected_scope", "expected_entity_id",
     "inventory_json", "matches_json", "rejections_json", "result_json",
-    "error", "created_at", "updated_at", "completed_at",
+    "attempts", "error", "created_at", "updated_at", "completed_at",
 )
 
 
@@ -85,12 +102,14 @@ class AcquisitionImport:
     candidate_id: Optional[str]
     status: str
     output_path: str
+    resolved_path: Optional[str]
     expected_scope: str
     expected_entity_id: int
     inventory: Tuple[Dict[str, Any], ...]
     matches: Tuple[Dict[str, Any], ...]
     rejections: Tuple[Dict[str, Any], ...]
     result: Dict[str, Any]
+    attempts: int
     error: Optional[str]
     created_at: str
     updated_at: str
@@ -109,6 +128,8 @@ class AcquisitionImport:
             "match_count": len(self.matches),
             "rejection_count": len(self.rejections),
             "has_output_path": bool(self.output_path),
+            "has_resolved_path": bool(self.resolved_path),
+            "attempts": self.attempts,
             "error": self.error,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
@@ -118,6 +139,17 @@ class AcquisitionImport:
 
 def ensure_acquisition_imports_schema(conn: Any) -> None:
     conn.execute(ACQUISITION_IMPORTS_DDL)
+    existing = {
+        str(row[1])
+        for row in conn.execute("PRAGMA table_info(acquisition_imports)").fetchall()
+    }
+    if "resolved_path" not in existing:
+        conn.execute(
+            "ALTER TABLE acquisition_imports ADD COLUMN resolved_path TEXT")
+    if "attempts" not in existing:
+        conn.execute(
+            "ALTER TABLE acquisition_imports "
+            "ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0")
     for sql in _INDEXES:
         conn.execute(sql)
 
@@ -149,12 +181,14 @@ def _from_row(row: Any) -> AcquisitionImport:
         candidate_id=data["candidate_id"],
         status=str(data["status"]),
         output_path=str(data["output_path"]),
+        resolved_path=data["resolved_path"],
         expected_scope=str(data["expected_scope"]),
         expected_entity_id=int(data["expected_entity_id"]),
         inventory=_decode_list(data["inventory_json"]),
         matches=_decode_list(data["matches_json"]),
         rejections=_decode_list(data["rejections_json"]),
         result=_decode_object(data["result_json"]),
+        attempts=int(data["attempts"] or 0),
         error=data["error"],
         created_at=str(data["created_at"]),
         updated_at=str(data["updated_at"]),
@@ -264,8 +298,178 @@ def record_download_completed(
     return created
 
 
+def _encode_items(items: Any, label: str) -> str:
+    encoded = []
+    for item in items or ():
+        if not isinstance(item, Mapping):
+            raise ValueError(f"acquisition import {label} entries must be objects")
+        encoded.append(dict(item))
+    try:
+        return json.dumps(
+            encoded,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"acquisition import {label} must be JSON serializable") from exc
+
+
+def _open_import(conn: Any, import_id: str) -> AcquisitionImport:
+    record = get_import(conn, import_id)
+    if record is None:
+        raise KeyError(f"acquisition import not found: {import_id}")
+    if record.status not in OPEN_IMPORT_STATUSES:
+        raise ValueError(
+            f"acquisition import is already terminal: {record.status}")
+    return record
+
+
+def _reload_import(conn: Any, import_id: str) -> AcquisitionImport:
+    record = get_import(conn, import_id)
+    if record is None:  # pragma: no cover - row updated in this transaction
+        raise RuntimeError("acquisition import disappeared mid-transaction")
+    return record
+
+
+def _require_transition(current: str, status: str) -> None:
+    if status not in _ALLOWED_TRANSITIONS[current]:
+        raise ValueError(
+            f"cannot transition acquisition import {current} -> {status}")
+
+
+def record_inventory_result(
+    conn: Any,
+    import_id: str,
+    files: Any,
+    *,
+    resolved_path: str,
+) -> AcquisitionImport:
+    """Persist one successful bundle inventory and enter ``matching``.
+
+    Repeatable: a pending import enters matching once (history event), while
+    matching/needs_review imports may refresh their inventory in place after
+    a mapping fix or manual re-scan.
+    """
+    record = _open_import(conn, import_id)
+    resolved = str(resolved_path or "").strip()
+    if not resolved:
+        raise ValueError("bundle inventory requires a resolved local path")
+    inventory_json = _encode_items(files, "inventory")
+    if inventory_json == "[]":
+        raise ValueError("bundle inventory requires at least one audio file")
+    if record.status != "matching":
+        _require_transition(record.status, "matching")
+    first_inventory = record.status == "pending"
+    conn.execute(
+        """UPDATE acquisition_imports
+              SET status='matching', inventory_json=?, resolved_path=?,
+                  error=NULL, updated_at=CURRENT_TIMESTAMP
+            WHERE id=?""",
+        (inventory_json, resolved, record.id),
+    )
+    if first_inventory:
+        record_history_event(
+            conn,
+            "import_started",
+            request_id=record.request_id,
+            candidate_id=record.candidate_id,
+            download_id=record.download_id,
+            payload={
+                "file_count": len(json.loads(inventory_json)),
+                "path_was_remapped": resolved != record.output_path,
+            },
+        )
+    return _reload_import(conn, import_id)
+
+
+def record_import_deferred(
+    conn: Any,
+    import_id: str,
+    *,
+    error: str,
+) -> AcquisitionImport:
+    """Count one transient import attempt without changing business state.
+
+    Used for unreadable paths (broken mount, missing remote path mapping):
+    the import stays open and visible with its error until a later cycle
+    succeeds or an operator fails it explicitly.
+    """
+    record = _open_import(conn, import_id)
+    safe_error = redact_sensitive_text(error) or "acquisition import deferred"
+    conn.execute(
+        """UPDATE acquisition_imports
+              SET attempts=attempts+1, error=?, updated_at=CURRENT_TIMESTAMP
+            WHERE id=?""",
+        (str(safe_error)[:2000], record.id),
+    )
+    return _reload_import(conn, import_id)
+
+
+def record_import_failure(
+    conn: Any,
+    import_id: str,
+    *,
+    error: str,
+    failure_kind: str,
+    reason_code: Optional[str] = None,
+) -> AcquisitionImport:
+    """Terminally fail an import and its owning request in one transaction.
+
+    ``candidate`` failures (broken bundle, wrong content) additionally
+    blocklist the exact release so a re-search cannot pick it again
+    (audit §13.5). ``runtime`` failures keep the candidate grabbable.
+    """
+    kind = str(failure_kind or "").strip().lower()
+    if kind not in IMPORT_FAILURE_KINDS:
+        raise ValueError("import failures require failure_kind candidate|runtime")
+    record = _open_import(conn, import_id)
+    _require_transition(record.status, "failed")
+    safe_error = redact_sensitive_text(error) or "acquisition import failed"
+    conn.execute(
+        """UPDATE acquisition_imports
+              SET status='failed', error=?, updated_at=CURRENT_TIMESTAMP,
+                  completed_at=CURRENT_TIMESTAMP
+            WHERE id=?""",
+        (str(safe_error)[:2000], record.id),
+    )
+    transition_request(
+        conn,
+        record.request_id,
+        "failed",
+        expected_status="grabbing",
+        error=safe_error,
+    )
+    record_history_event(
+        conn,
+        "import_failed",
+        request_id=record.request_id,
+        candidate_id=record.candidate_id,
+        download_id=record.download_id,
+        reason_code=str(reason_code or f"{kind}_failure"),
+        message=safe_error,
+        payload={"failure_kind": kind, "attempts": record.attempts},
+    )
+    if kind == "candidate":
+        if not record.candidate_id:
+            raise ValueError(
+                "candidate import failures require a release candidate")
+        from core.acquisition.blocklist import block_candidate
+        block_candidate(
+            conn,
+            record.candidate_id,
+            reason_code=str(reason_code or "import_failure"),
+            message=safe_error,
+            download_id=record.download_id,
+        )
+    return _reload_import(conn, import_id)
+
+
 __all__ = [
     "ACQUISITION_IMPORTS_DDL",
+    "IMPORT_FAILURE_KINDS",
     "IMPORT_ID_PREFIX",
     "IMPORT_STATUSES",
     "OPEN_IMPORT_STATUSES",
@@ -275,4 +479,7 @@ __all__ = [
     "get_import_by_download",
     "list_open_imports",
     "record_download_completed",
+    "record_import_deferred",
+    "record_import_failure",
+    "record_inventory_result",
 ]
