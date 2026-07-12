@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 import threading
 import time
@@ -237,7 +238,8 @@ def _silent_remove(path: str) -> None:
 
 def _default_sidecars(staged_video: str, final_video: str, fields: Dict[str, Any],
                       settings: Dict[str, Any],
-                      channel_meta_lookup: Optional[Callable[[str], Any]] = None) -> None:
+                      channel_meta_lookup: Optional[Callable[[str], Any]] = None,
+                      channel_videos_lookup: Optional[Callable[[str], Any]] = None) -> None:
     """Place the YouTube episode's sidecars next to the imported video — gated by the SAME
     post-processing toggles as the movie/TV side: ``save_artwork`` → episode art in BOTH
     server conventions (``<name>.jpg`` for Plex Local Media Assets, ``<name>-thumb.jpg``
@@ -283,9 +285,49 @@ def _default_sidecars(staged_video: str, final_video: str, fields: Dict[str, Any
             os.makedirs(dst_dir or ".", exist_ok=True)
             with open(os.path.join(dst_dir, dst_stem + ".nfo"), "w", encoding="utf-8") as f:
                 f.write(build_episode_nfo(fields, description=info.get("description"), runtime=info.get("duration")))
-        _ensure_channel_assets(final_video, fields, settings, channel_meta_lookup)
+        _ensure_channel_assets(final_video, fields, settings, channel_meta_lookup, channel_videos_lookup)
     except Exception:   # noqa: BLE001 - sidecars are a nice-to-have, never fatal to the grab
         logger.exception("youtube sidecars failed for %s", final_video)
+
+
+def _maxres_url(thumb_url: Any) -> Optional[str]:
+    """i.ytimg thumbnail → its maxresdefault variant (the UI's ytHiRes mirror)."""
+    m = re.search(r"/vi/([^/]+)/", str(thumb_url or ""))
+    return ("https://i.ytimg.com/vi/" + m.group(1) + "/maxresdefault.jpg") if m else None
+
+
+def _season_hero_bytes(fields: Dict[str, Any], year: str,
+                       channel_videos_lookup: Optional[Callable[[str], Any]] = None) -> Optional[bytes]:
+    """The image the in-app channel page shows for this year-season: the year's
+    NEWEST video's thumbnail, maxres first (exact ytGroupByYear rule). Fallbacks:
+    the raw thumb, then the imported video's own thumbnail."""
+    candidates = []
+    cid = str(fields.get("channel_id") or "").strip()
+    if cid and channel_videos_lookup is not None:
+        try:
+            vids = channel_videos_lookup(cid) or []
+        except Exception:   # noqa: BLE001 - the cache is a bonus
+            vids = []
+        for v in vids:      # newest-first from the cache, same as the UI
+            if not isinstance(v, dict) or not v.get("thumbnail_url"):
+                continue
+            if str(v.get("published_at") or "").startswith(year):
+                mx = _maxres_url(v["thumbnail_url"])
+                if mx:
+                    candidates.append(mx)
+                candidates.append(v["thumbnail_url"])
+                break
+    # last resort: the video being imported (a real frame from the year too)
+    mx = _maxres_url(fields.get("poster_url"))
+    if mx:
+        candidates.append(mx)
+    if fields.get("poster_url"):
+        candidates.append(fields["poster_url"])
+    for url in candidates:
+        data = _fetch_bytes(url)
+        if data:
+            return data
+    return None
 
 
 def _fetch_bytes(url: Any, timeout: int = 15) -> Optional[bytes]:
@@ -323,7 +365,8 @@ def _channel_dir_of(final_video: str, channel: Any) -> Optional[str]:
 
 
 def _ensure_channel_assets(final_video: str, fields: Dict[str, Any], settings: Dict[str, Any],
-                           channel_meta_lookup: Optional[Callable[[str], Any]] = None) -> None:
+                           channel_meta_lookup: Optional[Callable[[str], Any]] = None,
+                           channel_videos_lookup: Optional[Callable[[str], Any]] = None) -> None:
     """Seed the CHANNEL folder's show-level assets so servers index it like a real
     show: ``poster.jpg`` (channel avatar — rides the download row), ``fanart.jpg``
     (channel banner, via the remembered channel meta) and ``tvshow.nfo``. Reuses the
@@ -374,28 +417,26 @@ def _ensure_channel_assets(final_video: str, fields: Dict[str, Any], settings: D
                             os.path.join(season_dir, "poster.jpg"))
             if "poster.jpg" not in existing:
                 target = os.path.join(season_dir, "poster.jpg")
+                chan_poster = os.path.join(channel_dir, "poster.jpg")
                 data = None
                 year = str(fields.get("published_at") or "")[:4]
-                chan_poster = os.path.join(channel_dir, "poster.jpg")
-                if year.isdigit() and os.path.isfile(chan_poster):
+                if year.isdigit():
                     try:
                         from core.video.collections.poster_gen import render_season_poster
-                        # backdrop = THIS video's thumbnail (a real frame from the
-                        # year — matching the in-app channel page, whose season
-                        # visuals are video thumbs). The row's poster_url is the
-                        # video thumb on every enqueue path.
-                        backdrop = _fetch_bytes(fields.get("poster_url"))
-                        with open(chan_poster, "rb") as f:
-                            data = render_season_poster(f.read(), year,
-                                                        str(fields.get("channel") or ""),
-                                                        backdrop_bytes=backdrop)
+                        # hero = the SAME image the channel page shows for this
+                        # year (its newest video's thumb, maxres first)
+                        hero = _season_hero_bytes(fields, year, channel_videos_lookup)
+                        if hero is None and os.path.isfile(chan_poster):
+                            with open(chan_poster, "rb") as f:
+                                hero = f.read()
+                        if hero:
+                            data = render_season_poster(hero, year, str(fields.get("channel") or ""))
                     except Exception:   # noqa: BLE001 - fall back to the avatar copy
                         data = None
                 if data:
                     with open(target, "wb") as f:
                         f.write(data)
-                    logger.info("season poster: composed %s (backdrop=%s)", target,
-                                "video-thumb" if backdrop else "avatar")
+                    logger.info("season poster: composed %s (hero=year's newest thumb)", target)
                 else:
                     fs.save_url(meta["poster_url"], target)
                     logger.info("season poster: render unavailable — plain avatar copy at %s", target)
@@ -636,9 +677,10 @@ def run_youtube_download(dl_id: Any, db_provider: Callable) -> None:
             # default sidecars + the remembered-channel-meta lookup (banner/description
             # for the channel folder's fanart.jpg / tvshow.nfo)
             sidecars=lambda st, fin, flds, stg: _default_sidecars(
-                st, fin, flds, stg, channel_meta_lookup=db.get_channel_meta),
+                st, fin, flds, stg, channel_meta_lookup=db.get_channel_meta,
+                channel_videos_lookup=db.get_channel_videos),
             channel_assets=lambda fin, flds, stg: _ensure_channel_assets(
-                fin, flds, stg, db.get_channel_meta),
+                fin, flds, stg, db.get_channel_meta, db.get_channel_videos),
             progress_hook=_progress, postprocess_hook=_postprocess, cookie_opts=cookie_opts, now=_now)
     finally:
         _active_worker_ids.discard(dl_id)      # worker done — no longer protects this row

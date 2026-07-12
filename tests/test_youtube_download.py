@@ -538,3 +538,27 @@ def test_season_poster_is_a_composed_year_card_not_an_avatar_copy(tmp_path, monk
     assert p26 != p25                                 # distinct per year
     img = Image.open(_io.BytesIO(p26))
     assert img.size == (1000, 1500)                   # proper 2:3 poster
+
+
+def test_season_hero_follows_the_channel_page_rule(monkeypatch):
+    """Hero = the YEAR'S NEWEST video's thumbnail, maxres first — the exact
+    ytGroupByYear rule the in-app channel page uses for its season art."""
+    fetched = []
+    monkeypatch.setattr(ytd, "_fetch_bytes", lambda url, timeout=15: fetched.append(url) or b"img")
+    videos = [   # newest-first, as get_channel_videos returns them
+        {"youtube_id": "new26", "thumbnail_url": "https://i.ytimg.com/vi/new26/hqdefault.jpg",
+         "published_at": "2026-07-01"},
+        {"youtube_id": "old26", "thumbnail_url": "https://i.ytimg.com/vi/old26/hqdefault.jpg",
+         "published_at": "2026-01-05"},
+        {"youtube_id": "v25", "thumbnail_url": "https://i.ytimg.com/vi/v25/hqdefault.jpg",
+         "published_at": "2025-11-11"},
+    ]
+    fields = {"channel_id": "UC1", "poster_url": "https://i.ytimg.com/vi/imported/hqdefault.jpg"}
+    out = ytd._season_hero_bytes(fields, "2026", lambda cid: videos)
+    assert out == b"img"
+    assert fetched[0] == "https://i.ytimg.com/vi/new26/maxresdefault.jpg"   # newest of the year, maxres
+
+    # no cache for the year → the imported video's own thumb (maxres first)
+    fetched.clear()
+    out = ytd._season_hero_bytes(fields, "2024", lambda cid: videos)
+    assert fetched[0] == "https://i.ytimg.com/vi/imported/maxresdefault.jpg"
