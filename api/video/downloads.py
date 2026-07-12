@@ -102,6 +102,10 @@ def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None)
             "codec": parsed.get("codec"), "hdr": parsed.get("hdr"),
             "audio": parsed.get("audio"), "group": parsed.get("group"),
             "repack": parsed.get("repack") or parsed.get("proper"),
+            # torrent/usenet grab carriers (present only for Prowlarr hits) — the magnet/NZB
+            # URL + protocol the grab hands to the shared torrent/usenet client.
+            "download_url": hit.get("download_url"), "protocol": hit.get("protocol"),
+            "indexer_id": hit.get("indexer_id"), "guid": hit.get("guid"),
         })
     # accepted first, then quality-profile score, then availability, then bigger file.
     results.sort(key=lambda r: (r["accepted"], r["score"], r["_avail"], r["size_bytes"]), reverse=True)
@@ -394,6 +398,16 @@ def register_routes(bp):
             if sres.get("error"):
                 return jsonify({"scope": scope, "results": [], "error": "slskd: " + str(sres["error"])})
             raw, live = sres["hits"], True
+        elif source in ("torrent", "usenet"):
+            from core.video.prowlarr_search import prowlarr_search
+            pres = prowlarr_search(scope, title, year=body.get("year"),
+                                   season=want_season, episode=want_episode, source=source)
+            if not pres.get("configured"):
+                return jsonify({"scope": scope, "results": [],
+                                "error": "Prowlarr isn't configured — set its URL + key on Settings → Downloads."})
+            if pres.get("error"):
+                return jsonify({"scope": scope, "results": [], "error": "Prowlarr: " + str(pres["error"])})
+            raw, live = pres["hits"], True
         else:
             raw = mock_search(scope, title, year=body.get("year"), season=want_season,
                               episode=want_episode, season_end=season_end, source=source)
@@ -425,8 +439,20 @@ def register_routes(bp):
             # how long the client should keep polling (slskd keeps searching this long).
             return jsonify({"id": res["id"], "live": True, "complete": False,
                             "poll_ms": search_timeout_ms() + 8000})
-        # mock sources resolve in one shot
         profile = load_profile(get_video_db())
+        if source in ("torrent", "usenet"):
+            # Prowlarr is synchronous — like the old mock, results come back in one shot
+            # (no polling id), so the client renders immediately.
+            from core.video.prowlarr_search import prowlarr_search
+            pres = prowlarr_search(scope, title, year=body.get("year"),
+                                   season=want_season, episode=want_episode, source=source)
+            if not pres.get("configured"):
+                return jsonify({"error": "Prowlarr isn't configured — set its URL + key on Settings → Downloads."})
+            if pres.get("error"):
+                return jsonify({"error": "Prowlarr: " + str(pres["error"])})
+            return jsonify({"id": None, "live": True, "complete": True,
+                            "results": _evaluate_hits(pres["hits"], profile, scope, want_season, want_episode)})
+        # remaining mock sources (e.g. youtube placeholder) resolve in one shot
         raw = mock_search(scope, title, year=body.get("year"), season=want_season,
                           episode=want_episode, season_end=season_end, source=source)
         return jsonify({"id": None, "live": False, "complete": True,
