@@ -210,6 +210,50 @@ def test_get_history_no_server(monkeypatch):
     assert get_history()["ok"] is False
 
 
+# ── stream termination ───────────────────────────────────────────────────────
+def test_stop_session_calls_stop_with_message(monkeypatch):
+    import core.server_activity as sa
+    stopped = {}
+
+    class _Item:
+        sessionKey = 42
+        def stop(self, reason=None):
+            stopped["reason"] = reason
+
+    class _P:
+        def sessions(self):
+            return [_Item()]
+    monkeypatch.setattr(sa, "_plex_server", lambda db=None: _P())
+    res = sa.stop_session("42", "Go to bed")
+    assert res["ok"] is True and stopped["reason"] == "Go to bed"
+
+
+def test_stop_session_uses_default_message_when_blank(monkeypatch):
+    import core.server_activity as sa
+    seen = {}
+
+    class _Item:
+        sessionKey = 1
+        def stop(self, reason=None):
+            seen["r"] = reason
+
+    monkeypatch.setattr(sa, "_plex_server", lambda db=None: type("P", (), {"sessions": lambda s: [_Item()]})())
+    sa.stop_session("1", "   ")
+    assert "administrator" in seen["r"]
+
+
+def test_stop_session_unknown_key(monkeypatch):
+    import core.server_activity as sa
+    monkeypatch.setattr(sa, "_plex_server", lambda db=None: type("P", (), {"sessions": lambda s: []})())
+    assert sa.stop_session("99")["ok"] is False
+
+
+def test_stop_session_no_server(monkeypatch):
+    import core.server_activity as sa
+    monkeypatch.setattr(sa, "_plex_server", lambda db=None: None)
+    assert sa.stop_session("1")["ok"] is False
+
+
 # ── frontend wiring ──────────────────────────────────────────────────────────
 def test_ui_is_wired():
     from pathlib import Path
@@ -234,6 +278,9 @@ def test_ui_is_wired():
     # the elegant bits exist in CSS
     assert ".sact-drawer" in css and ".sact-badge--tc" in css and ".activity-live" in css
     assert ".sact-tab--on" in css and ".sact-hrow" in css
+    # stream termination (Tautulli's kill move)
+    assert "data-sact-stop" in js and "function openStop" in js
+    assert "/api/server-activity/stop" in js and ".sact-stop-modal" in css
 
 
 def test_web_server_registers_the_routes():
@@ -242,3 +289,5 @@ def test_web_server_registers_the_routes():
     assert "@app.route('/api/server-activity')" in ws
     assert "@app.route('/api/server-activity/image')" in ws
     assert "@app.route('/api/server-activity/history')" in ws
+    assert "@app.route('/api/server-activity/stop', methods=['POST'])" in ws
+    assert "is_admin" in ws.split("stop_server_activity_stream")[1][:400]   # admin-gated

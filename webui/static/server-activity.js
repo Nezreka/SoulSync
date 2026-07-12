@@ -69,9 +69,14 @@
         if (st.resolution) tags += '<span class="sact-tag">' + esc(st.resolution) + '</span>';
         if (s.bandwidth_kbps) tags += '<span class="sact-tag">' + mbps(s.bandwidth_kbps) + '</span>';
         if (s.location) tags += '<span class="sact-tag sact-tag--' + esc(s.location) + '">' + esc(s.location.toUpperCase()) + '</span>';
+        var stop = s.session_key
+            ? '<button class="sact-stop" type="button" data-sact-stop="' + esc(s.session_key) +
+              '" data-sact-title="' + esc(s.title) + '" title="Stop this stream">' +
+              '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2.5"/></svg></button>'
+            : '';
         return '<div class="sact-card sact-st-' + esc(s.state) + '">' +
             (artUrl ? '<div class="sact-art" style="background-image:url(\'' + artUrl + '\')"></div>' : '') +
-            '<div class="sact-scrim"></div>' +
+            '<div class="sact-scrim"></div>' + stop +
             '<div class="sact-row">' +
                 (poster
                     ? '<div class="sact-poster"><img src="' + poster + '" alt="" loading="lazy" onerror="this.style.display=\'none\'"></div>'
@@ -209,6 +214,8 @@
             if (e.target.closest('[data-sact-close]')) { close(); return; }
             var tb = e.target.closest('[data-sact-tab]');
             if (tb) { setTab(tb.getAttribute('data-sact-tab')); return; }
+            var sb = e.target.closest('[data-sact-stop]');
+            if (sb) { openStop(sb.getAttribute('data-sact-stop'), sb.getAttribute('data-sact-title')); return; }
         });
         document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && isOpen) close(); });
     }
@@ -227,6 +234,42 @@
         stopPoll();
     }
     function toggle() { isOpen ? close() : open(); }
+
+    // ── stop a stream (admin, with a message) ─────────────────────────────────
+    function toast(m, t) { if (typeof showToast === 'function') showToast(m, t); }
+    function openStop(key, title) {
+        var ov = document.createElement('div');
+        ov.className = 'sact-stop-ov';
+        ov.innerHTML =
+            '<div class="sact-stop-modal">' +
+                '<div class="sact-stop-h">Stop stream</div>' +
+                '<div class="sact-stop-sub">' + esc(title || 'this stream') + '</div>' +
+                '<label class="sact-stop-lbl">Message shown to the viewer</label>' +
+                '<textarea class="sact-stop-msg" rows="2">The server administrator ended this stream.</textarea>' +
+                '<div class="sact-stop-foot">' +
+                    '<button class="sact-stop-btn" type="button" data-stop-cancel>Cancel</button>' +
+                    '<button class="sact-stop-btn sact-stop-btn--go" type="button" data-stop-go>Stop stream</button>' +
+                '</div>' +
+            '</div>';
+        document.body.appendChild(ov);
+        function shut() { ov.remove(); }
+        ov.addEventListener('click', function (e) {
+            if (e.target === ov || e.target.closest('[data-stop-cancel]')) { shut(); return; }
+            if (e.target.closest('[data-stop-go]')) {
+                var msg = ov.querySelector('.sact-stop-msg').value;
+                var go = ov.querySelector('[data-stop-go]'); go.disabled = true; go.textContent = 'Stopping…';
+                fetch('/api/server-activity/stop', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                    body: JSON.stringify({ session_key: key, message: msg })
+                }).then(function (r) { return r.json().then(function (b) { return { ok: r.ok, b: b }; }); })
+                  .then(function (res) {
+                      shut();
+                      if (res.ok && res.b.ok) { toast('Stream stopped', 'success'); refresh(); }
+                      else { toast((res.b && res.b.error) || 'Could not stop the stream', 'error'); }
+                  }).catch(function () { shut(); toast('Could not stop the stream', 'error'); });
+            }
+        });
+    }
 
     var _sc = null;
     function _scrim() {
