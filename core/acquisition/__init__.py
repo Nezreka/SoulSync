@@ -12,6 +12,7 @@ def ensure_acquisition_schema(conn: Any) -> None:
     from core.acquisition.decisions import ensure_candidate_decisions_schema
     from core.acquisition.grabs import ensure_acquisition_grabs_schema
     from core.acquisition.history import ensure_acquisition_history_schema
+    from core.acquisition.imports import ensure_acquisition_imports_schema
     from core.acquisition.requests import ensure_acquisition_requests_schema
 
     ensure_acquisition_requests_schema(conn)
@@ -20,6 +21,7 @@ def ensure_acquisition_schema(conn: Any) -> None:
     ensure_acquisition_grabs_schema(conn)
     ensure_acquisition_history_schema(conn)
     ensure_release_blocklist_schema(conn)
+    ensure_acquisition_imports_schema(conn)
 
 
 __all__ = ["ensure_acquisition_schema"]

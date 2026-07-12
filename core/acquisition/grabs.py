@@ -143,6 +143,7 @@ def update_grab(conn: Any, download_id: str, *,
                 last_client_state: Optional[str] = None,
                 output_path: Optional[str] = None,
                 error: Optional[str] = None,
+                clear_error: bool = False,
                 adopted: Optional[bool] = None) -> bool:
     """Apply a business transition / enrich correlation fields.
 
@@ -163,6 +164,8 @@ def update_grab(conn: Any, download_id: str, *,
         if value is not None:
             sets.append(f"{column}=?")
             args.append(value)
+    if clear_error and error is None:
+        sets.append("error=NULL")
     if adopted is not None:
         sets.append("adopted=?")
         args.append(1 if adopted else 0)
