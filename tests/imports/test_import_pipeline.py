@@ -2,6 +2,8 @@ import logging
 import sys
 import types
 
+import pytest
+
 import core.imports.pipeline as import_pipeline
 import core.imports.paths as import_paths
 import core.runtime_state as runtime_state
@@ -598,6 +600,27 @@ def test_exhaustive_soulseek_peer_resolves_to_soulseek(monkeypatch):
 
     assert task["status"] == "searching"
     assert task["quarantine_retry_counts_by_source"] == {"soulseek": 1}
+
+
+@pytest.mark.parametrize("source", ["torrent", "usenet"])
+def test_exhaustive_release_source_keeps_its_own_budget(monkeypatch, source):
+    _wire_retry_engine(monkeypatch)
+    _patch_config(monkeypatch, {
+        "post_processing.retry_exhaustive": True,
+        "post_processing.retries_per_query": 5,
+    })
+
+    task, _completion, _ = _run_wrapper_with_quarantine(
+        monkeypatch,
+        _acoustid_quarantine,
+        task_extra={
+            "username": source,
+            "filename": "release-reference",
+            "query_count": 1,
+        },
+    )
+
+    assert task["quarantine_retry_counts_by_source"] == {source: 1}
 
 
 def test_exhaustive_budget_defaults_query_count_to_one(monkeypatch):
