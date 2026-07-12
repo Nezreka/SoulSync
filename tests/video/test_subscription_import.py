@@ -151,15 +151,18 @@ def test_import_follows_channels_and_playlists_and_applies_names():
                for cs in calls["settings"].values())
 
 
-def test_already_following_counts_as_skipped_not_followed():
-    subs = parse_subscriptions("x:\n  overrides:\n    tv_show_name: X\n    url: https://youtube.com/@x")
-    ch_id = "UC-tube/@x"[-9:]   # matches resolve_channel's id shape loosely
-    calls, seams = _seams()
-    # force "already following" by pre-computing the id resolve_channel will make
+def test_already_following_is_left_untouched_not_reconfigured():
+    """An import is additive: a channel you already follow is counted skipped and
+    its settings are NOT overwritten with the file's show name/quality (you may
+    have set a custom name by hand)."""
+    subs = parse_subscriptions(
+        "x:\n  preset:\n    - best_video_quality\n  overrides:\n"
+        "    tv_show_name: Renamed\n    url: https://youtube.com/@x")
     cid = "UC-" + "https://youtube.com/@x"[-6:]
-    _calls2, seams2 = _seams(existing_channels={cid})
-    res = import_subscriptions(subs, **seams2)
+    calls, seams = _seams(existing_channels={cid})
+    res = import_subscriptions(subs, **seams)
     assert res["followed"] == 0 and res["skipped"] == 1
+    assert calls["settings"] == {}          # existing config left exactly as-is
 
 
 def test_one_bad_subscription_never_aborts_the_batch():
@@ -249,6 +252,27 @@ def test_import_rejects_an_empty_file(client):
     assert r.status_code == 400
 
 
+def test_overlap_with_a_manually_added_channel_is_left_alone(client):
+    """End-to-end: a channel already followed with a hand-set custom name is
+    skipped by the import and its config survives (not clobbered by the file)."""
+    c, db = client
+    cid = "UC" + "https://youtube.com/@gn"[-5:]     # what the fake resolver will produce
+    db.add_channel_to_watchlist({"youtube_id": cid, "title": "Gamers Nexus"})
+    db.set_channel_settings(cid, {"custom_name": "My GN Name"})
+
+    c.post("/api/video/youtube/subscriptions/import", json={
+        "text": "gn:\n  preset:\n    - best_video_quality\n  overrides:\n"
+                "    tv_show_name: Imported Name\n    url: https://youtube.com/@gn"})
+    for _ in range(200):
+        st = c.get("/api/video/youtube/subscriptions/import/status").get_json()
+        if st["finished"]:
+            break
+        time.sleep(0.02)
+    assert st["skipped"] == 1 and st["followed"] == 0
+    assert db.get_channel_settings(cid).get("custom_name") == "My GN Name"   # untouched
+    assert len(db.list_watchlist_channels()) == 1                            # no duplicate
+
+
 # ── frontend wiring ──────────────────────────────────────────────────────────
 def test_ui_is_wired():
     from pathlib import Path
@@ -266,3 +290,7 @@ def test_ui_is_wired():
     assert "function preview" in js and "function startImport" in js and "function tick" in js
     assert "readAsText" in js               # file upload
     assert "soulsync:video-wishlist-changed" in js   # refreshes the watchlist on finish
+    # the button is truly hidden off the Channels tab (display:inline-flex would
+    # otherwise beat the [hidden] attribute — the health-strip trap)
+    css = (root / "webui" / "static" / "video" / "video-side.css").read_text(encoding="utf-8")
+    assert ".vwlp-import-btn[hidden] { display: none; }" in css

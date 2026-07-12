@@ -134,26 +134,29 @@ def register_routes(bp):
             return jsonify({"success": False, "error": "No subscriptions found in that file"}), 400
 
         def _follow_channel(ch):
-            already = bool(db.channel_watch_state([ch["youtube_id"]]))
+            # Already following (manually or a prior import)? Leave it untouched —
+            # the import is additive and must not re-wishlist or reconfigure it.
+            if db.channel_watch_state([ch["youtube_id"]]):
+                return False          # → counted as 'skipped'
             db.add_channel_to_watchlist(ch)
             db.add_videos_to_wishlist(ch, ch.get("videos") or [], server_source=_server())
-            if not already:
-                try:
-                    from core.video.youtube_enrichment import get_youtube_date_enricher
-                    get_youtube_date_enricher().enqueue(ch.get("youtube_id"), ch.get("title"))
-                except Exception:   # noqa: BLE001
-                    pass
-            return not already        # False = was already following → 'skipped'
+            try:
+                from core.video.youtube_enrichment import get_youtube_date_enricher
+                get_youtube_date_enricher().enqueue(ch.get("youtube_id"), ch.get("title"))
+            except Exception:   # noqa: BLE001
+                pass
+            return True
 
         def _follow_playlist(pl):
-            already = bool(db.playlist_watch_state([pl["playlist_id"]]))
+            if db.playlist_watch_state([pl["playlist_id"]]):
+                return False
             db.add_playlist_to_watchlist(pl)
             if pl.get("videos"):
                 try:
                     db.cache_channel_videos(pl["playlist_id"], pl["videos"])
                 except Exception:   # noqa: BLE001
                     pass
-            return not already
+            return True
 
         def _apply_settings(cid, cs):
             merged = {**(db.get_channel_settings(cid) or {}), **cs}

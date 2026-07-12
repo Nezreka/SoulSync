@@ -4901,6 +4901,9 @@ body[data-side="video"] #gsearch-aura {
     transition: background 0.15s ease, transform 0.15s ease;
 }
 .vwlp-import-btn:hover { background: rgba(255, 59, 59, 0.24); transform: translateY(-1px); }
+/* [hidden]'s UA display:none loses to the display:inline-flex above — restore it
+   so the button is truly hidden off the Channels tab (same trap as the health strip) */
+.vwlp-import-btn[hidden] { display: none; }
 .vsub-overlay {
     position: fixed; inset: 0; z-index: 10050; display: flex; align-items: center; justify-content: center;
     background: rgba(0, 0, 0, 0.72); backdrop-filter: blur(4px); padding: 20px;
