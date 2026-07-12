@@ -332,6 +332,126 @@ mode and priority semantics, and support retry, quarantine, approval and
 restart recovery. Its test matrix must compare equivalent old and Library-v2
 requests under every relevant source mode and Quality Profile setting.
 
+### Findings from the reuse audit (2026-07-12)
+
+The following findings must be treated as corrective work before more
+Library-v2 acquisition features are added. They describe the current branch,
+including the local Phase-5 commits and the uncommitted import-pipeline work.
+
+**LIB2-F01 -- duplicate acquisition decision path (P0).**
+
+`core/acquisition/search_service.py` searches all supplied adapters
+concurrently and `core/acquisition/decision_engine.py` ranks the resulting
+candidates. This is a new decision path. It is not the existing
+`DownloadOrchestrator` behavior and is not currently wired to the complete
+`download_source.mode`/`hybrid_order` contract. `EffectivePolicy.from_profile`
+also does not obtain the legacy source-mode settings from the configuration.
+The result can differ between a Library-v2 request and the same request made
+through Wishlist or Interactive Search.
+
+**Required correction:** use the existing orchestrator/worker selection
+semantics or extract their source-independent selection service. Explicitly
+support `best_quality` (search all configured sources and choose globally)
+and hybrid/source priority (walk the configured source chain in order).
+Do not reduce both modes to a numeric `source_priorities` sort key.
+
+**LIB2-F02 -- bundle import bypasses the main post-processing pipeline (P0).**
+
+`core/acquisition/bundle_import.py` stages files, probes basic quality facts
+and writes `lib2_track_files` directly. It does not delegate each file to the
+existing `core/imports/pipeline.py` path. Therefore the new path does not yet
+inherit the complete stability, integrity, quality, AcoustID, verification,
+quarantine, tagging, conversion and finalization behavior.
+
+**Required correction:** make the bundle layer an orchestrator only. It must
+provide release/Edition context to a shared file-processing service and let
+that service decide whether a file may proceed. Direct Lib2 completion is
+allowed only after the shared pipeline reports success.
+
+**LIB2-F03 -- Quality Profile enforcement is incomplete in the bundle path (P0).**
+
+The bundle importer calls `probe_audio_quality`, but a probe is not the same
+as the existing Quality Profile gate. It does not by itself enforce ranked
+targets, fallback, downsample/lossy-copy behavior, AcoustID requirements,
+deep verification or profile-specific import settings. The new path can
+therefore accept a file that the established import path would quarantine.
+
+**Required correction:** resolve the request's exact Quality Profile and
+reuse the existing profile-aware guards and post-processing context. The
+same settings must produce the same accept/reject result in both paths.
+
+**LIB2-F04 -- failed imports do not have the old automatic retry semantics (P0).**
+
+`record_import_failure` can blocklist a candidate, but it transitions the
+request directly to `failed`. The new import pipeline does not automatically
+select the next cached candidate, search the remaining source chain or
+continue with another source after a quality/integrity/AcoustID failure. The
+old pipeline does this through its worker retry state and
+`requeue_quarantined_task_for_retry` behavior.
+
+**Required correction:** after a candidate-level processing failure, persist
+the exact blocklist event, preserve the Acquisition Request as retryable,
+and invoke the existing candidate/source retry semantics through an adapter.
+Only exhausted candidates/sources may produce terminal request failure.
+
+**LIB2-F05 -- Quality Upgrade still enters the legacy Wishlist path (P1).**
+
+`core/repair_jobs/lib2_upgrade_scan.py` detects Library-v2 upgrade candidates,
+but calls `mirror_tracks_wishlist`. It therefore does not directly create a
+Library-v2 Acquisition Request. The existing `quality_upgrade` job is the
+canonical provider-search/finding implementation, but its output is also
+legacy-oriented.
+
+**Required correction:** keep the existing periodic jobs and their
+`upgrade_policy`/`upgrade_cutoff_index` semantics, but add an output adapter.
+For Library-v2 entities the adapter must create the normal Acquisition
+Request and then use the same main search/download/import pipeline. Wishlist
+mirroring remains only the compatibility path during the staged cutover.
+
+**LIB2-F06 -- quarantine and manual approval are not connected to Bundle Import (P0).**
+
+The existing quarantine implementation persists serialized context, restores
+approved files and re-dispatches processing while bypassing only the approved
+check. The new bundle importer has no equivalent quarantine sidecar flow and
+no Library-v2 approval/re-dispatch integration. A file rejected by AcoustID,
+quality or integrity cannot yet be guaranteed to behave like an old-path
+quarantine entry when the user presses Approve.
+
+**Required correction:** preserve Acquisition/Edition context in the
+quarantine sidecar, reuse `approve_quarantine_entry`, restore the file and
+re-enter the shared pipeline. Only the approved check may be bypassed; all
+other checks must execute again before Lib2 completion.
+
+**LIB2-F07 -- persistent state and legacy in-memory retry state are not bridged (P1).**
+
+The old retry path uses task/batch context such as cached candidates,
+used/exhausted sources and quarantine entry IDs. The new Acquisition tables
+store different identifiers and currently do not provide a complete durable
+equivalent. A restart can therefore lose the exact retry decision even though
+the new monitor/import rows survive.
+
+**Required correction:** define an explicit adapter mapping legacy task/batch
+context to Acquisition Request, Grab, Candidate, Import and History IDs, then
+persist every retry-relevant fact before external or filesystem work.
+
+**LIB2-F08 -- behavior parity is not yet proven by the test matrix (P1).**
+
+Current targeted tests cover many new state transitions, inventory and
+matching cases, but they do not yet prove parity for all relevant combinations
+of `best_quality`, hybrid/source order, Quality Profile upgrade policy,
+quality quarantine, AcoustID approval, next-candidate retry and restart.
+The documented full suite also predates the newest local Phase-5 work.
+
+**Required correction:** add contract tests that run equivalent legacy and
+Library-v2 scenarios and compare selected source, candidate order, rejection,
+quarantine, approval, retry and terminal state. Run the full suite only after
+this parity gate is complete.
+
+These findings supersede any earlier assumption that the new Decision Engine
+and Bundle Importer were acceptable as independent implementations. The next
+implementation phase is LIB2-011, not another feature on top of the current
+split behavior.
+
 ## Verification (per phase, end-to-end in Docker)
 Build the local image (`docker build -t soulsync:dev .`), run with the user's real config+DB copy + the
 music mounted (covers come from embedded art so the mount matters). After each phase: `pytest tests/library2/`

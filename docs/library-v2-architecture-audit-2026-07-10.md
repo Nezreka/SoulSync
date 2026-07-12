@@ -2140,6 +2140,57 @@ Quarantaene-Approve stellt denselben Kontext wieder her, ueberspringt nur den
 genehmigten Check und fuehrt alle anderen Checks erneut aus, bevor der Import
 als erfolgreich gilt.
 
+#### Korrigierender Findings-Block: aktuelle Abweichungen des Branches
+
+Die folgenden Findings wurden beim Vergleich der lokalen Phase-5-Commits und
+der uncommitted Import-Pipeline mit der bestehenden Main-Pipeline festgestellt.
+Sie sind vor weiterer Feature-Arbeit zu beheben.
+
+- **LIB2-F01 / P0: Doppelte Decision-Logik.** `search_service.py` sucht die
+  Adapter parallel und `decision_engine.py` rankt danach Kandidaten. Das ist
+  nicht automatisch die Semantik von `DownloadOrchestrator`,
+  `download_source.mode` und `hybrid_order`. `best_quality` und sequenzielle
+  Source-Priority duerfen nicht zu einem einfachen numerischen Priority-Sort
+  zusammenfallen.
+- **LIB2-F02 / P0: Bundle Import umgeht Post-Processing.**
+  `bundle_import.py` kopiert Dateien, misst Basisqualitaet und schreibt direkt
+  `lib2_track_files`; die bestehende `core/imports/pipeline.py` mit Stabilitaet,
+  Integritaet, Quality, AcoustID, Tagging, Quarantaene und Finalisierung wird
+  nicht vollstaendig durchlaufen.
+- **LIB2-F03 / P0: Quality-Gate unvollstaendig.** Ein `probe_audio_quality`
+  ersetzt nicht die bestehende profile-aware Quality-/Fallback-/Downsample-
+  /AcoustID-/Deep-Verify-Logik. Der neue Pfad kann dadurch Dateien akzeptieren,
+  die der alte Pfad quarantainisiert haette.
+- **LIB2-F04 / P0: Kein vollstaendiger Next-Candidate-Retry.**
+  `record_import_failure` blocklistet zwar optional den Release, setzt die
+  Request aber terminal auf `failed`. Die alte Auswahl des naechsten
+  Kandidaten, die Suche in der restlichen Source-Kette und der Retry nach
+  Quarantaene fehlen im neuen Pfad.
+- **LIB2-F05 / P1: Quality Upgrade bleibt Wishlist-gekoppelt.**
+  `lib2_upgrade_scan` erkennt Profile mit `until_cutoff`/`until_top`, schreibt
+  aber weiterhin ueber `mirror_tracks_wishlist`. Das muss als kompatibler
+  Adapter in die normale Acquisition Request ueberfuehrt werden, ohne die
+  bestehende Upgrade-Erkennung neu zu bauen.
+- **LIB2-F06 / P0: Quarantaene-Approve nicht angeschlossen.** Die alte
+  `approve_quarantine_entry`-Kette stellt Sidecar-Kontext wieder her,
+  ueberspringt nur den genehmigten Check und laesst alle anderen Checks erneut
+  laufen. Fuer Bundle-Imports ist dieser Ablauf noch nicht garantiert.
+- **LIB2-F07 / P1: Retry-Kontext nicht ueberbrueckt.** Der Legacy-Worker kennt
+  cached candidates, verwendete/erschoepfte Sources, Task-/Batch-IDs und
+  Quarantaene-IDs. Die persistenten Acquisition-Tabellen bilden diesen
+  Kontext noch nicht vollstaendig ab; Restart-Paritaet ist damit offen.
+- **LIB2-F08 / P1: Test-Paritaet fehlt.** Die neuen gezielten Tests beweisen
+  State-Machines, Inventar und Matching, aber noch nicht die Gleichheit von
+  Source-Modi, Quality Upgrade, Quarantaene-Approve, Next-Candidate-Retry und
+  Restart-Verhalten zwischen Legacy und Library v2. Die Full-Suite-Angabe in
+  der Dokumentation stammt ausserdem von vor den neuesten lokalen Commits.
+
+**Konsequenz:** Die neuen Acquisition-/Bundle-Module sind auf eine
+Orchestrierungsrolle zurueckzubauen. Fachliche Entscheidungen und bewertende
+Dateiverarbeitung werden aus der Main-Pipeline wiederverwendet oder als
+gemeinsame Services extrahiert. Erst danach darf die neue Phase-5-Funktion
+als fertig gelten.
+
 #### Live-Abnahme
 
 - mindestens ein kleines Album und ein Multi-Disc-Album pro Client;
