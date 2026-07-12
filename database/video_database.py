@@ -4999,9 +4999,12 @@ class VideoDatabase:
             "         1 AS followed, w.date_added AS added "
             "  FROM video_watchlist w WHERE w.kind='channel' AND w.state='follow' "
             "  UNION ALL "
+            # ownership = ON DISK (pruned excluded): an unfollowed channel whose
+            # every download was deleted/ghost-cleaned leaves the library tab.
             "  SELECT h.channel_id, NULL, NULL, 0, MAX(h.completed_at) "
             "  FROM video_download_history h "
             "  WHERE h.source='youtube' AND h.outcome='completed' AND h.channel_id IS NOT NULL "
+            "    AND h.pruned_at IS NULL "
             "    AND h.channel_id NOT IN (SELECT source_id FROM video_watchlist "
             "                             WHERE kind='channel' AND state='follow') "
             "  GROUP BY h.channel_id"

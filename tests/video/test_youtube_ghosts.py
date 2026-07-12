@@ -270,6 +270,23 @@ def test_channel_tab_owned_count_excludes_pruned(db, tmp_path):
     assert db.query_channel_library()["items"][0]["owned_count"] == 1
 
 
+def test_fully_pruned_unfollowed_channel_leaves_the_library_tab(db, tmp_path):
+    """Boulder's '0 / 2010 downloaded' ghosts: an UNFOLLOWED channel is only in
+    the library because you own files from it — once every download is pruned
+    it must drop off the tab. A FOLLOWED channel stays at 0 (the follow itself
+    is the membership)."""
+    db.cache_channel_meta("UC1", {"title": "Gamers Nexus"})
+    hid, _ = _seed_grab(db, tmp_path, "g1", channel_id="UC1")
+    assert [c["id"] for c in db.query_channel_library()["items"]] == ["UC1"]
+    db.mark_download_pruned(hid, "2026-07-11")
+    assert db.query_channel_library()["items"] == []
+
+    # follow it → back on the tab despite 0 owned
+    assert db.add_channel_to_watchlist({"youtube_id": "UC1", "title": "Gamers Nexus"})
+    items = db.query_channel_library()["items"]
+    assert [c["id"] for c in items] == ["UC1"] and items[0]["owned_count"] == 0
+
+
 def test_channel_page_annotation_uses_the_owned_variant():
     """All UI 'downloaded' badges read owned_youtube_video_ids; the inclusive
     dedup reader must not appear in the endpoint file at all."""
