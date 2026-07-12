@@ -2217,6 +2217,284 @@ const _AUTO_CTX_VIDEO = {
 };
 let _autoBuilderCtx = _AUTO_CTX_MUSIC;
 
+
+// ── Video Automation Hub content ─────────────────────────────────────────────
+// The video page reuses this hub builder; these are the video-side datasets.
+// IMPORTANT: video pipelines/recipes deliberately DON'T recreate what the
+// system automations already run (watchlist scans, wishlist processors,
+// nightly overlays/collections) — duplicating those would double-download.
+// They cover alerts, event-driven chains, and maintenance the system rows
+// don't schedule.
+const VIDEO_HUB_GROUPS = [
+    {
+        id: 'v-download-alerts', icon: '📥', name: 'Download Alerts',
+        desc: 'Know the moment anything lands, fails, or needs manual import — movies, episodes and YouTube alike.',
+        category: 'Alerts', badge: '3 automations', color: '#ef4444',
+        steps: [
+            { label: 'Landed', icon: '✅', type: 'notify' },
+            { label: 'Failed', icon: '❌', type: 'notify' },
+            { label: 'Manual Import', icon: '⚠️', type: 'notify' },
+        ],
+        automations: [
+            { name: 'Alert — Video Downloaded', trigger_type: 'video_download_completed', trigger_config: {}, action_type: 'notify_only', action_config: {}, then_actions: [], group_name: 'Download Alerts', needs_notify: true },
+            { name: 'Alert — Download Failed', trigger_type: 'video_download_failed', trigger_config: {}, action_type: 'notify_only', action_config: {}, then_actions: [], group_name: 'Download Alerts', needs_notify: true },
+            { name: 'Alert — Needs Manual Import', trigger_type: 'video_import_failed', trigger_config: {}, action_type: 'notify_only', action_config: {}, then_actions: [], group_name: 'Download Alerts', needs_notify: true },
+        ]
+    },
+    {
+        id: 'v-maintenance-guardian', icon: '🛡️', name: 'Maintenance Guardian',
+        desc: 'Weekly library health sweep: run every enabled maintenance job, get pinged only when something CRITICAL surfaces.',
+        category: 'Maintenance', badge: '2 automations', color: '#f59e0b',
+        steps: [
+            { label: 'Weekly Sweep', icon: '🔧', type: 'action' },
+            { label: 'Critical Alert', icon: '🔴', type: 'notify' },
+        ],
+        automations: [
+            { name: 'Guardian — Weekly Sweep', trigger_type: 'weekly_time', trigger_config: { days: ['sunday'], time: '05:00' }, action_type: 'video_run_repair_job', action_config: { job_id: 'all' }, then_actions: [], group_name: 'Maintenance Guardian' },
+            { name: 'Guardian — Critical Finding', trigger_type: 'video_repair_finding_created', trigger_config: { conditions: [{ field: 'severity', operator: 'equals', value: 'critical' }] }, action_type: 'notify_only', action_config: {}, then_actions: [], group_name: 'Maintenance Guardian', needs_notify: true },
+        ]
+    },
+    {
+        id: 'v-post-scan-studio', icon: '🎨', name: 'Post-Scan Studio Refresh',
+        desc: 'Event-driven presentation: the instant new media is read into SoulSync, re-apply overlays, then sync collections — no waiting for the nightly runs.',
+        category: 'Sync', badge: '2 automations', color: '#8b5cf6',
+        steps: [
+            { label: 'DB Updated', icon: '🗄️', type: 'action' },
+            { label: 'Overlays', icon: '🎨', type: 'action' },
+            { label: 'Collections', icon: '🗂️', type: 'action' },
+        ],
+        automations: [
+            { name: 'Studio — Overlays After Update', trigger_type: 'video_database_update_completed', trigger_config: {}, action_type: 'video_apply_overlays', action_config: {}, then_actions: [{ type: 'fire_signal', config: { signal_name: 'v_overlays_done' } }], group_name: 'Post-Scan Studio Refresh' },
+            { name: 'Studio — Collections After Overlays', trigger_type: 'signal_received', trigger_config: { signal_name: 'v_overlays_done' }, action_type: 'video_sync_collections', action_config: {}, then_actions: [], group_name: 'Post-Scan Studio Refresh' },
+        ]
+    },
+    {
+        id: 'v-upgrade-watch', icon: '📈', name: 'Upgrade Watch',
+        desc: 'Quality upgrades on autopilot: hunt below-cutoff copies weekly and get told whenever a better copy replaces an old one.',
+        category: 'Discovery', badge: '2 automations', color: '#22c55e',
+        steps: [
+            { label: 'Hunt Upgrades', icon: '🔍', type: 'action' },
+            { label: 'Replaced!', icon: '📈', type: 'notify' },
+        ],
+        automations: [
+            { name: 'Upgrade — Weekly Hunt', trigger_type: 'weekly_time', trigger_config: { days: ['wednesday'], time: '04:00' }, action_type: 'video_run_repair_job', action_config: { job_id: 'quality_upgrade' }, then_actions: [], group_name: 'Upgrade Watch' },
+            { name: 'Upgrade — Landed', trigger_type: 'video_upgrade_completed', trigger_config: {}, action_type: 'notify_only', action_config: {}, then_actions: [], group_name: 'Upgrade Watch', needs_notify: true },
+        ]
+    },
+];
+
+const VIDEO_HUB_RECIPES = [
+    {
+        id: 'v-channel-alert', icon: '📡', name: 'Channel Drop Alert', desc: 'Discord ping when a specific YouTube channel\'s video finishes downloading. Condition on the channel name.',
+        category: 'Alerts', difficulty: 'beginner', when: { type: 'video_download_completed', config: { conditions: [{ field: 'channel', operator: 'contains', value: '' }] } }, do: { type: 'notify_only', config: {} }, then: [{ type: 'discord_webhook', config: {} }],
+        note: 'Fill in the channel name in the WHEN condition (e.g. "Gamers Nexus").'
+    },
+    {
+        id: 'v-movie-landed', icon: '🎬', name: 'Movie Landed Notify', desc: 'Get notified when a MOVIE (not episodes/YouTube) finishes — condition kind equals movie.',
+        category: 'Alerts', difficulty: 'beginner', when: { type: 'video_download_completed', config: { conditions: [{ field: 'kind', operator: 'equals', value: 'movie' }] } }, do: { type: 'notify_only', config: {} }, then: []
+    },
+    {
+        id: 'v-import-failed-alert', icon: '⚠️', name: 'Manual Import Alert', desc: 'A file downloaded but couldn\'t be placed (sample, wrong episode, not an upgrade). Know immediately instead of finding it on the Import page a week later.',
+        category: 'Alerts', difficulty: 'beginner', when: { type: 'video_import_failed', config: {} }, do: { type: 'notify_only', config: {} }, then: []
+    },
+    {
+        id: 'v-critical-finding', icon: '🔴', name: 'Critical Maintenance Alert', desc: 'Page yourself when a maintenance job raises a CRITICAL finding (e.g. mass-missing YouTube files — a drive may be down).',
+        category: 'Maintenance', difficulty: 'beginner', when: { type: 'video_repair_finding_created', config: { conditions: [{ field: 'severity', operator: 'equals', value: 'critical' }] } }, do: { type: 'notify_only', config: {} }, then: []
+    },
+    {
+        id: 'v-monthly-ghosts', icon: '👻', name: 'Monthly Ghost Cleanup', desc: 'Run the YouTube Ghost Files check on the 1st of every month, even if the job\'s own daily toggle is off.',
+        category: 'Maintenance', difficulty: 'beginner', when: { type: 'monthly_time', config: { time: '05:00', day_of_month: 1 } }, do: { type: 'video_run_repair_job', config: { job_id: 'youtube_ghosts' } }, then: []
+    },
+    {
+        id: 'v-scan-chain', icon: '🎨', name: 'Overlays After Every Scan', desc: 'Skip the wait for the nightly run: re-apply overlays the moment the video database updates.',
+        category: 'Chains', difficulty: 'intermediate', when: { type: 'video_database_update_completed', config: {} }, do: { type: 'video_apply_overlays', config: {} }, then: []
+    },
+    {
+        id: 'v-wishlist-webhook', icon: '🌐', name: 'Wishlist Feed Webhook', desc: 'POST every wishlist addition to any URL — feed a dashboard, a bot, or your own scripts.',
+        category: 'Chains', difficulty: 'intermediate', when: { type: 'video_wishlist_item_added', config: {} }, do: { type: 'notify_only', config: {} }, then: [{ type: 'webhook', config: {} }]
+    },
+    {
+        id: 'v-follow-confirm', icon: '👁️', name: 'Follow Confirmation', desc: 'A Telegram nudge whenever a show/channel is followed — handy on shared servers to see what the household queues up.',
+        category: 'Discovery', difficulty: 'beginner', when: { type: 'video_watchlist_added', config: {} }, do: { type: 'notify_only', config: {} }, then: [{ type: 'telegram', config: {} }]
+    },
+    {
+        id: 'v-upgrade-notify', icon: '📈', name: 'Upgrade Landed Notify', desc: 'Every time a better copy replaces an old one, get told what upgraded and to what quality.',
+        category: 'Discovery', difficulty: 'beginner', when: { type: 'video_upgrade_completed', config: {} }, do: { type: 'notify_only', config: {} }, then: []
+    },
+    {
+        id: 'v-maintenance-digest', icon: '🔧', name: 'Maintenance Scan Digest', desc: 'One message per maintenance scan with how many findings it raised — the calm alternative to per-finding alerts.',
+        category: 'Maintenance', difficulty: 'beginner', when: { type: 'video_repair_scan_completed', config: {} }, do: { type: 'notify_only', config: {} }, then: []
+    },
+];
+
+const VIDEO_HUB_GUIDES = [
+    {
+        id: 'v-discord-setup', icon: '📢', title: 'Get Discord Alerts for Video Downloads', subtitle: 'Webhook notifications for anything that lands or fails.', difficulty: 'beginner',
+        steps: [
+            'In Discord, open your channel\'s settings → <strong>Integrations → Webhooks</strong>, create one and copy the URL.',
+            'Go to <strong>Automations → New Automation</strong> on the video side.',
+            'Set WHEN to <strong>Video Downloaded</strong> (or Download Failed / Import Failed).',
+            'Set DO to <strong>Notify Only</strong>, THEN to <strong>Discord Webhook</strong>, and paste the URL.',
+            'Use {title}, {kind}, {quality} and {channel} in the message template.',
+        ], relatedRecipes: ['v-channel-alert', 'v-movie-landed']
+    },
+    {
+        id: 'v-filter-events', icon: '🎯', title: 'Filter Events with Conditions', subtitle: 'One trigger, only the events you care about.', difficulty: 'beginner',
+        steps: [
+            'Per-item triggers (Video Downloaded, Finding Raised, Wishlist Added) support conditions.',
+            'Condition on <strong>kind</strong>: equals <code>movie</code>, <code>show</code> or <code>youtube</code> to scope the media type.',
+            'Condition on <strong>channel</strong> to watch one YouTube channel, or <strong>title</strong> for one show.',
+            'Condition on <strong>severity</strong> equals <code>critical</code> for maintenance alerts that matter.',
+            'No conditions = fire on everything. Start filtered — you can always loosen.',
+        ], relatedRecipes: ['v-channel-alert', 'v-critical-finding']
+    },
+    {
+        id: 'v-extend-system', icon: '⚙️', title: 'Extend the System Automations (Don\'t Duplicate Them)', subtitle: 'The scans and processors already run — hook onto them instead of re-creating them.', difficulty: 'intermediate',
+        steps: [
+            'The System section already scans watchlists and drains wishlists on schedules. <strong>Don\'t deploy copies</strong> — that double-downloads.',
+            'To get notified about them: edit the system automation and add a THEN notification directly.',
+            'To chain your own step after one: trigger on its completion event (e.g. <strong>Video Database Updated</strong>).',
+            'To change cadence: edit the system automation\'s interval — no new automation needed.',
+        ], relatedRecipes: ['v-scan-chain', 'v-maintenance-digest']
+    },
+    {
+        id: 'v-maintenance-autopilot', icon: '🔧', title: 'Library Maintenance on Autopilot', subtitle: 'Repair jobs + event alerts = a self-auditing library.', difficulty: 'intermediate',
+        steps: [
+            'Enable the maintenance jobs you want on <strong>Tools → Library Maintenance</strong> (each has its own interval).',
+            'Add a <strong>Maintenance Finding Raised</strong> automation with a severity condition for alerts.',
+            'Use the <strong>Run Maintenance Job</strong> action for extra cadences (e.g. monthly ghost cleanup) or event-driven runs.',
+            'Approve findings from the Tools page — automations only surface them, you stay in control.',
+        ], relatedRecipes: ['v-critical-finding', 'v-monthly-ghosts', 'v-maintenance-digest']
+    },
+    {
+        id: 'v-signals', icon: '⚡', title: 'Chain Video Automations with Signals', subtitle: 'fire_signal / signal_received work the same on the video side.', difficulty: 'advanced',
+        steps: [
+            'Add a THEN action → <strong>Fire Signal</strong> to the first automation (e.g. <code>v_overlays_done</code>).',
+            'Create a second automation with WHEN → <strong>Signal Received</strong> for that name.',
+            'Chains cap at 5 levels and cycles are auto-detected — same engine as music.',
+            'Event trigger → action → signal → action is the pattern behind the Post-Scan Studio Refresh pipeline.',
+        ], relatedRecipes: ['v-scan-chain']
+    },
+];
+
+const VIDEO_HUB_TIPS = [
+    { icon: '🎯', title: 'Scope with kind', body: 'Every download event carries <strong>kind</strong>: <code>movie</code>, <code>show</code> or <code>youtube</code>. One condition turns a firehose trigger into exactly the alerts you want.', tag: 'Filtering' },
+    { icon: '⚙️', title: 'Notify on System Runs Directly', body: 'Want a ping when the nightly overlay run finishes? Add a THEN notification to the system automation itself — you don\'t need a separate automation for it.', tag: 'Basics' },
+    { icon: '🔁', title: 'Scans Won\'t Spam You', body: 'Wishlist/watchlist events fire only for genuinely NEW items. The 6-hourly channel scan re-checking known videos stays silent — condition-free triggers are safe to alert on.', tag: 'Safety' },
+    { icon: '🔴', title: 'Critical Means Critical', body: 'Maintenance findings carry a severity. <code>critical</code> is reserved for things like mass-missing files (a drive may be down) — a severity condition gives you a quiet pager.', tag: 'Filtering' },
+    { icon: '📅', title: 'Monthly Schedules Exist', body: 'The Monthly Schedule trigger runs on a chosen day of the month — right for deep maintenance that\'s overkill weekly.', tag: 'Scheduling' },
+    { icon: '🚫', title: 'Don\'t Re-Deploy the Processors', body: 'The wishlist processors already run hourly as system automations. A second copy means double downloads — extend or re-schedule the system row instead.', tag: 'Safety' },
+    { icon: '🧪', title: 'Test with Notify Only', body: 'Point a new trigger at <strong>Notify Only</strong> first. You\'ll see exactly when it fires — then swap in the real action.', tag: 'Testing' },
+    { icon: '⚡', title: 'Events Beat Timers', body: 'Chaining on completion events (Video Database Updated → Apply Overlays) reacts in seconds and never runs pointlessly — prefer them over guessing with staggered clocks.', tag: 'Power' },
+];
+
+const VIDEO_HUB_REFERENCE = {
+    triggers: [
+        {
+            group: 'Time-Based', items: [
+                { type: 'schedule', label: 'Schedule', desc: 'Repeating interval (e.g., every 6 hours)' },
+                { type: 'daily_time', label: 'Daily Time', desc: 'Every day at a specific time' },
+                { type: 'weekly_time', label: 'Weekly Time', desc: 'Specific days + time' },
+                { type: 'monthly_time', label: 'Monthly Schedule', desc: 'Once a month on a chosen day' },
+            ]
+        },
+        {
+            group: 'Download Events', items: [
+                { type: 'video_download_completed', label: 'Video Downloaded', desc: 'A movie/episode/YouTube video landed in the library (kind/title/channel/quality conditions)' },
+                { type: 'video_download_failed', label: 'Video Download Failed', desc: 'A download gave up after retries (item returns to the wishlist)' },
+                { type: 'video_import_failed', label: 'Video Import Failed', desc: 'Downloaded fine but couldn\'t be placed — waiting on the Import page' },
+                { type: 'video_upgrade_completed', label: 'Quality Upgrade Landed', desc: 'A better copy REPLACED an existing library file' },
+                { type: 'video_batch_complete', label: 'Video Download Batch Done', desc: 'The download queue just drained' },
+            ]
+        },
+        {
+            group: 'Library Events', items: [
+                { type: 'video_library_scan_completed', label: 'Video Library Scan Done', desc: 'The media server finished rescanning' },
+                { type: 'video_database_update_completed', label: 'Video Database Updated', desc: 'SoulSync finished reading the server into its database' },
+                { type: 'video_collections_synced', label: 'Collections Synced', desc: 'A collections sync pass finished' },
+                { type: 'video_overlays_applied', label: 'Overlays Applied', desc: 'An overlay apply pass finished' },
+            ]
+        },
+        {
+            group: 'Maintenance Events', items: [
+                { type: 'video_repair_finding_created', label: 'Maintenance Finding Raised', desc: 'A repair job raised a NEW finding (job/type/severity/title conditions)' },
+                { type: 'video_repair_scan_completed', label: 'Maintenance Scan Done', desc: 'A repair job finished a scan (with finding counts)' },
+            ]
+        },
+        {
+            group: 'Watchlist & Wishlist', items: [
+                { type: 'video_wishlist_item_added', label: 'Video Wishlist Item Added', desc: 'Something new joined the wishlist (refresh re-adds stay silent)' },
+                { type: 'video_watchlist_added', label: 'Video Watchlist Follow', desc: 'A show/person/channel/playlist was followed' },
+                { type: 'video_watchlist_removed', label: 'Video Watchlist Unfollow', desc: 'A follow was removed' },
+            ]
+        },
+        {
+            group: 'Special', items: [
+                { type: 'app_started', label: 'App Started', desc: 'SoulSync just started up' },
+                { type: 'signal_received', label: 'Signal Received', desc: 'Another automation fired a named signal' },
+                { type: 'webhook_received', label: 'Webhook Received', desc: 'External POST to /api/v1/request' },
+            ]
+        },
+    ],
+    actions: [
+        {
+            group: 'Watchlist Scans (fill the wishlist)', items: [
+                { type: 'video_scan_watchlist_people', label: 'Scan Watchlist People', desc: 'Wishlist followed people\'s filmographies' },
+                { type: 'video_scan_watchlist_channels', label: 'Scan Watchlist Channels', desc: 'Wishlist new uploads from followed channels' },
+                { type: 'video_scan_watchlist_playlists', label: 'Scan Watchlist Playlists', desc: 'Mirror followed playlists into the wishlist' },
+                { type: 'video_add_airing_episodes', label: 'Wishlist Today\'s Airings', desc: 'Sonarr-style: queue every episode airing today' },
+                { type: 'video_refresh_airing_schedules', label: 'Refresh Airing Schedules', desc: 'Re-pull TMDB air dates for followed shows' },
+            ]
+        },
+        {
+            group: 'Wishlist Processors (drain it)', items: [
+                { type: 'video_process_movie_wishlist', label: 'Process Movie Wishlist', desc: 'Search + download wished movies' },
+                { type: 'video_process_episode_wishlist', label: 'Process Episode Wishlist', desc: 'Search + download wished episodes' },
+                { type: 'video_process_youtube_wishlist', label: 'Process YouTube Wishlist', desc: 'Download wished YouTube videos (yt-dlp)' },
+            ]
+        },
+        {
+            group: 'Library', items: [
+                { type: 'video_scan_server', label: 'Scan Video Server', desc: 'Ask the server to index new downloads, wait for it' },
+                { type: 'video_update_database', label: 'Update Video Database', desc: 'Read the server\'s library into SoulSync' },
+                { type: 'video_deep_scan_movies', label: 'Deep Scan Movies', desc: 'Full movie-library reconcile' },
+                { type: 'video_deep_scan_tv', label: 'Deep Scan TV', desc: 'Full TV-library reconcile' },
+            ]
+        },
+        {
+            group: 'Studio & Maintenance', items: [
+                { type: 'video_apply_overlays', label: 'Apply Overlays', desc: 'Render + push enabled overlay templates' },
+                { type: 'video_sync_collections', label: 'Sync Collections', desc: 'Resolve + push every enabled collection' },
+                { type: 'video_run_repair_job', label: 'Run Maintenance Job', desc: 'Force-run one (or all enabled) Library Maintenance jobs' },
+                { type: 'video_clean_plex_images', label: 'Clean Up Plex Images', desc: 'Clear stale cached artwork' },
+                { type: 'video_clean_youtube_episodes', label: 'Clean Old YouTube Episodes', desc: 'Per-channel retention windows' },
+                { type: 'video_full_cleanup', label: 'Full Cleanup', desc: 'Queue/import/search-history sweep' },
+                { type: 'video_backup_database', label: 'Backup Database', desc: 'Timestamped video_library.db backup' },
+            ]
+        },
+        {
+            group: 'Other', items: [
+                { type: 'notify_only', label: 'Notify Only', desc: 'No action — just trigger THEN notifications. Great for testing.' },
+            ]
+        },
+    ],
+    // filled by _hubReference() — AUTO_HUB_REFERENCE is defined further down
+    thenActions: null,
+};
+
+// Side-aware hub data: the video page reuses the same hub builder against its
+// own datasets. ONE switch — everything downstream reads through these.
+function _hubIsVideo() { return document.body.getAttribute('data-side') === 'video'; }
+function _hubGroups() { return _hubIsVideo() ? VIDEO_HUB_GROUPS : AUTO_HUB_GROUPS; }
+function _hubRecipes() { return _hubIsVideo() ? VIDEO_HUB_RECIPES : AUTO_HUB_RECIPES; }
+function _hubGuides() { return _hubIsVideo() ? VIDEO_HUB_GUIDES : AUTO_HUB_GUIDES; }
+function _hubTips() { return _hubIsVideo() ? VIDEO_HUB_TIPS : AUTO_HUB_TIPS; }
+function _hubReference() {
+    if (!_hubIsVideo()) return AUTO_HUB_REFERENCE;
+    // THEN actions are generic — share the music reference's list.
+    return { ...VIDEO_HUB_REFERENCE, thenActions: AUTO_HUB_REFERENCE.thenActions };
+}
+
 // Resolve a builder element through the active context (music vs video ids).
 function _bEl(key) { return document.getElementById(_autoBuilderCtx.ids[key]); }
 
@@ -3052,7 +3330,7 @@ function _buildAutomationHub() {
     header.innerHTML = `
         <span class="section-chevron">&#9660;</span>
         <span class="section-label">Automation Hub</span>
-        <span class="section-count">${AUTO_HUB_GROUPS.length} pipelines · ${AUTO_HUB_RECIPES.length} recipes</span>
+        <span class="section-count">${_hubGroups().length} pipelines · ${_hubRecipes().length} recipes</span>
         <span class="section-line"></span>
     `;
     header.onclick = () => {
@@ -3133,7 +3411,7 @@ function _buildHubPipelines() {
     const grid = document.createElement('div');
     grid.className = 'auto-hub-pipeline-grid';
 
-    AUTO_HUB_GROUPS.forEach(group => {
+    _hubGroups().forEach(group => {
         const card = document.createElement('div');
         card.className = 'auto-hub-pipeline-card';
         card.style.setProperty('--pipeline-color', group.color);
@@ -3176,7 +3454,7 @@ function _buildHubPipelines() {
 }
 
 function showPipelineDetail(groupId) {
-    const group = AUTO_HUB_GROUPS.find(g => g.id === groupId);
+    const group = _hubGroups().find(g => g.id === groupId);
     if (!group) return;
 
     // Build automation detail list
@@ -3288,7 +3566,7 @@ function _buildHubRecipes() {
     const grid = document.createElement('div');
     grid.className = 'auto-hub-recipes-grid';
 
-    AUTO_HUB_RECIPES.forEach(r => {
+    _hubRecipes().forEach(r => {
         const card = document.createElement('div');
         card.className = 'auto-hub-recipe-card';
         card.dataset.category = r.category;
@@ -3350,7 +3628,7 @@ function _buildHubGuides() {
     callout.innerHTML = '<span class="auto-hub-callout-icon">\uD83D\uDCA1</span><span>Click any guide to expand step-by-step instructions. Related recipes let you jump straight to a pre-filled template.</span>';
     pane.appendChild(callout);
 
-    AUTO_HUB_GUIDES.forEach(g => {
+    _hubGuides().forEach(g => {
         const card = document.createElement('div');
         card.className = 'auto-hub-guide-card';
 
@@ -3374,7 +3652,7 @@ function _buildHubGuides() {
                 <div class="auto-hub-guide-related">
                     <span class="auto-hub-guide-related-label">Related:</span>
                     ${g.relatedRecipes.map(rId => {
-            const recipe = AUTO_HUB_RECIPES.find(r => r.id === rId);
+            const recipe = _hubRecipes().find(r => r.id === rId);
             return recipe ? `<button class="auto-hub-guide-related-link" onclick="event.stopPropagation(); useHubRecipe('${rId}')">${recipe.icon} ${_esc(recipe.name)}</button>` : '';
         }).join('')}
                 </div>
@@ -3397,7 +3675,7 @@ function _buildHubTips() {
 
     const grid = document.createElement('div');
     grid.className = 'auto-hub-tips-grid';
-    AUTO_HUB_TIPS.forEach(t => {
+    _hubTips().forEach(t => {
         const card = document.createElement('div');
         card.className = 'auto-hub-tip-card';
         card.innerHTML = `
@@ -3417,9 +3695,9 @@ function _buildHubTips() {
 function _buildHubReference() {
     const pane = document.createElement('div');
     const sections = [
-        { label: 'Triggers (WHEN)', data: AUTO_HUB_REFERENCE.triggers },
-        { label: 'Actions (DO)', data: AUTO_HUB_REFERENCE.actions },
-        { label: 'Then Actions (THEN)', data: AUTO_HUB_REFERENCE.thenActions },
+        { label: 'Triggers (WHEN)', data: _hubReference().triggers },
+        { label: 'Actions (DO)', data: _hubReference().actions },
+        { label: 'Then Actions (THEN)', data: _hubReference().thenActions },
     ];
 
     sections.forEach(sec => {
@@ -3455,9 +3733,9 @@ function _buildHubReference() {
 }
 
 async function useHubRecipe(recipeId) {
-    const t = AUTO_HUB_RECIPES.find(r => r.id === recipeId);
+    const t = _hubRecipes().find(r => r.id === recipeId);
     if (!t) return;
-    await showAutomationBuilder();
+    await (_hubIsVideo() ? showVideoAutomationBuilder() : showAutomationBuilder());
     _bEl('name').value = t.name;
     _autoBuilder.when = { type: t.when.type, config: JSON.parse(JSON.stringify(t.when.config)) };
     _autoBuilder.do = { type: t.do.type, config: JSON.parse(JSON.stringify(t.do.config)) };
@@ -3470,7 +3748,7 @@ async function useHubRecipe(recipeId) {
 }
 
 async function deployHubGroup(groupId) {
-    const group = AUTO_HUB_GROUPS.find(g => g.id === groupId);
+    const group = _hubGroups().find(g => g.id === groupId);
     if (!group) return;
 
     // Check if any automations need notifications — prompt for config
@@ -3497,6 +3775,7 @@ async function deployHubGroup(groupId) {
                 group_name: auto.group_name,
                 enabled: true,
             };
+            if (_hubIsVideo()) payload.owned_by = 'video';
 
             // Inject notification config for automations that need it
             if (auto.needs_notify && notifyConfig) {
