@@ -33,7 +33,9 @@ from typing import Any, Callable, Dict, Optional
 from core.video import organization, youtube_quality
 from core.video.youtube_quality import format_selection
 
-logger = logging.getLogger(__name__)
+from utils.logging_config import get_logger
+
+logger = get_logger("video.youtube_download")   # NOT bare getLogger — that never reaches app.log
 
 try:
     import yt_dlp

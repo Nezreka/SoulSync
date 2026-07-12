@@ -224,8 +224,17 @@ def render_season_poster(avatar_bytes: bytes, year: str, channel: str = "",
             if bimgs:
                 back = bimgs[0].convert("RGB")
 
-        canvas = _cover(back, _W, _H).filter(ImageFilter.GaussianBlur(70))
-        canvas = Image.blend(canvas, Image.new("RGB", (_W, _H), (8, 9, 14)), 0.55)
+        # Blur/darken LIGHTLY — heavy treatment turned a colorful video thumb
+        # into generic murk (Boulder read it as the avatar fallback). The
+        # bottom gradient scrim below keeps the text legible instead.
+        canvas = _cover(back, _W, _H).filter(ImageFilter.GaussianBlur(30))
+        canvas = Image.blend(canvas, Image.new("RGB", (_W, _H), (8, 9, 14)), 0.28)
+        scrim = Image.new("L", (1, _H), 0)
+        spx = scrim.load()
+        for y in range(_H):
+            t = max(0.0, (y / _H - 0.52)) / 0.48
+            spx[0, y] = int(210 * min(1.0, t * 1.25))
+        canvas.paste(Image.new("RGB", (_W, _H), (6, 7, 11)), (0, 0), scrim.resize((_W, _H)))
 
         size = 600
         circle = _cover(av, size, size)
