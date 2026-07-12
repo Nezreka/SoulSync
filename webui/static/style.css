@@ -687,11 +687,11 @@ body.max-performance .nav-button.active:hover {
     );
 }
 
-/* ── Floating Mini Media Player — sits left of the bell/help buttons ────── */
+/* ── Floating Mini Media Player — sits left of the activity/bell/help buttons ─ */
 .media-player {
     position: fixed;
     bottom: 24px;
-    right: 132px;
+    right: 188px;   /* clears the 3-button row: help(24) · bell(80) · activity(136) */
     width: 340px;
     background: linear-gradient(180deg,
             rgba(24, 24, 24, 0.97) 0%,
