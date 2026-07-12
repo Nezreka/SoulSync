@@ -107,6 +107,7 @@ class MonitorRunResult:
     reconciliation: Optional[ReconciliationResult] = None
     cancelled: Tuple[str, ...] = ()
     cancel_failed: Tuple[str, ...] = ()
+    imports: Optional[Any] = None
     skipped_reason: Optional[str] = None
 
 
@@ -417,11 +418,14 @@ class UsenetAcquisitionMonitor:
         category_getter: Optional[Callable[[], Any]] = None,
         interval_getter: Optional[Callable[[], Any]] = None,
         process_started_at: Optional[str] = None,
+        import_pipeline_runner: Optional[Callable[[], Any]] = None,
     ) -> None:
         self._connection_factory = connection_factory
         self._adapter_getter = adapter_getter or self._default_adapter
         self._category_getter = category_getter or self._default_category
         self._interval_getter = interval_getter or (lambda: 15.0)
+        self._import_pipeline_runner = (
+            import_pipeline_runner or self._default_import_pipeline)
         self._process_started_at = process_started_at or datetime.now(
             timezone.utc,
         ).strftime("%Y-%m-%d %H:%M:%S")
@@ -440,6 +444,20 @@ class UsenetAcquisitionMonitor:
     def _default_adapter() -> Optional[UsenetClientAdapter]:
         from core.usenet_clients import get_active_adapter
         return get_active_adapter()
+
+    def _default_import_pipeline(self) -> Any:
+        from core.acquisition.import_pipeline import advance_open_imports
+        return advance_open_imports(self._connection_factory)
+
+    def _run_import_pipeline(self) -> Any:
+        try:
+            return self._import_pipeline_runner()
+        except Exception as exc:  # noqa: BLE001 - monitor must stay alive
+            logger.warning(
+                "Acquisition import pipeline cycle failed: %s",
+                redact_sensitive_text(exc),
+            )
+            return None
 
     @staticmethod
     def _default_category() -> str:
@@ -569,11 +587,13 @@ class UsenetAcquisitionMonitor:
                 skipped_reason="cycle_in_progress",
             )
         try:
+            imports_result = self._run_import_pipeline()
             grabs, stale = self._read_open_grabs()
             if not grabs:
                 result = MonitorRunResult(
                     open_grabs=0,
                     stale_submissions_failed=stale,
+                    imports=imports_result,
                     skipped_reason="no_open_grabs",
                 )
                 self._record_success(result)
@@ -584,6 +604,7 @@ class UsenetAcquisitionMonitor:
                 result = MonitorRunResult(
                     open_grabs=len(grabs),
                     stale_submissions_failed=stale,
+                    imports=imports_result,
                     skipped_reason="client_unconfigured",
                 )
                 self._record_success(result)
@@ -610,6 +631,7 @@ class UsenetAcquisitionMonitor:
                 reconciliation=reconciliation,
                 cancelled=cancelled,
                 cancel_failed=cancel_failed,
+                imports=imports_result,
             )
             self._record_success(result)
             if reconciliation.ambiguous:

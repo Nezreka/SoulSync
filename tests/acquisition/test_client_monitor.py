@@ -571,3 +571,20 @@ def test_runtime_monitor_wakes_immediately_after_submission():
 
     assert calls == [1, 2]
     assert monitor.status()["running"] is False
+
+
+def test_runtime_advances_imports_without_open_grabs(tmp_path):
+    seed, factory = _runtime_database(tmp_path)
+    seed.close()
+    calls = []
+    monitor = UsenetAcquisitionMonitor(
+        factory,
+        adapter_getter=lambda: None,
+        import_pipeline_runner=lambda: calls.append("imports") or {"ok": True},
+    )
+
+    result = monitor.run_once()
+
+    assert calls == ["imports"]
+    assert result.imports == {"ok": True}
+    assert result.skipped_reason == "no_open_grabs"
