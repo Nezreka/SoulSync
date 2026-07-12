@@ -188,6 +188,99 @@ def normalize_session(item: Any) -> Dict[str, Any]:
     }
 
 
+# ── Jellyfin activity (best-effort; UNVERIFIED against a live Jellyfin) ───────
+
+def _jellyfin_config(db=None) -> Dict[str, str]:
+    """Any working Jellyfin config — music first, then video's effective creds."""
+    try:
+        from config.settings import config_manager
+        cfg = config_manager.get_jellyfin_config() or {}
+        if cfg.get("base_url") and cfg.get("api_key"):
+            return {"base_url": cfg["base_url"], "api_key": cfg["api_key"]}
+    except Exception:   # noqa: BLE001, S110
+        pass
+    try:
+        from core.video.sources import video_jellyfin_config
+        cfg = video_jellyfin_config(db)
+        if cfg.get("base_url") and cfg.get("api_key"):
+            return {"base_url": cfg["base_url"], "api_key": cfg["api_key"]}
+    except Exception:   # noqa: BLE001, S110
+        pass
+    return {"base_url": "", "api_key": ""}
+
+
+_JF_METHOD = {"transcode": "Transcode", "directstream": "Direct Stream", "directplay": "Direct Play"}
+_JF_TYPE = {"movie": "movie", "episode": "episode", "audio": "track", "musicvideo": "clip"}
+
+
+def normalize_jellyfin(s: Dict[str, Any], npi: Dict[str, Any]) -> Dict[str, Any]:
+    """One Jellyfin /Sessions entry (with NowPlayingItem) → the shared card
+    shape. Ticks are 100ns; images ride a 'jf:<itemId>' marker the proxy resolves."""
+    ptype = str(npi.get("Type") or "").lower()
+    mtype = _JF_TYPE.get(ptype, ptype)
+    ps = s.get("PlayState") or {}
+    ti = s.get("TranscodingInfo") or {}
+    dur = int(npi.get("RunTimeTicks") or 0) // 10000
+    off = int(ps.get("PositionTicks") or 0) // 10000
+    method = _JF_METHOD.get(str(ps.get("PlayMethod") or "").lower().replace(" ", ""),
+                            str(ps.get("PlayMethod") or "Direct Play"))
+    if mtype == "episode":
+        show = str(npi.get("SeriesName") or "")
+        sn, en = npi.get("ParentIndexNumber"), npi.get("IndexNumber")
+        code = ("S%02dE%02d" % (int(sn), int(en))) if (sn is not None and en is not None) else ""
+        subtitle, gp = (show + (" · " + code if code else "")).strip(" ·"), show
+    elif mtype == "track":
+        artist = str(npi.get("AlbumArtist") or (npi.get("Artists") or [""])[0] or "")
+        album = str(npi.get("Album") or "")
+        subtitle, gp = (artist + (" · " + album if album else "")).strip(" ·"), artist
+    else:
+        subtitle, gp = str(npi.get("ProductionYear") or ""), ""
+    item_id = str(npi.get("Id") or "")
+    thumb = ("jf:" + item_id) if item_id else ""
+    br = int(ti.get("Bitrate") or 0) // 1000
+    return {
+        "session_key": "",   # no stop button — our terminate path is Plex-only
+        "media_type": mtype, "title": str(npi.get("Name") or ""),
+        "subtitle": subtitle, "grandparent": gp, "thumb": thumb, "art": thumb,
+        "duration_ms": dur, "offset_ms": off,
+        "progress_pct": (max(0, min(100, round(100 * off / dur))) if dur else 0),
+        "state": "paused" if ps.get("IsPaused") else "playing",
+        "user": str(s.get("UserName") or "Someone"), "user_id": str(s.get("UserId") or ""),
+        "player": {"product": str(s.get("Client") or ""), "device": str(s.get("DeviceName") or ""),
+                   "platform": str(s.get("Client") or ""), "title": str(s.get("DeviceName") or "")},
+        "location": "", "bandwidth_kbps": br,
+        "stream": {"method": method, "video": str(ti.get("VideoCodec") or "").upper(),
+                   "audio": str(ti.get("AudioCodec") or "").upper(), "resolution": "",
+                   "bitrate_kbps": br, "transcode_progress": round(float(ti.get("CompletionPercentage") or 0)),
+                   "throttled": False, "hw": False, "container": str(ti.get("Container") or "")},
+    }
+
+
+def _jellyfin_activity(db=None) -> tuple:
+    """(sessions, server_name|None). name is None only when Jellyfin isn't
+    configured. Best-effort + defensive — never raises into get_activity."""
+    cfg = _jellyfin_config(db)
+    if not cfg["base_url"] or not cfg["api_key"]:
+        return [], None
+    try:
+        import requests
+        r = requests.get(cfg["base_url"].rstrip("/") + "/Sessions",
+                         headers={"X-Emby-Token": cfg["api_key"]}, timeout=_PLEX_TIMEOUT)
+        raw = r.json() if r.status_code == 200 else []
+    except Exception:   # noqa: BLE001
+        logger.debug("jellyfin /Sessions failed", exc_info=True)
+        return [], "Jellyfin"
+    out = []
+    for s in raw or []:
+        try:
+            npi = s.get("NowPlayingItem")
+            if npi:
+                out.append(normalize_jellyfin(s, npi))
+        except Exception:   # noqa: BLE001
+            logger.debug("jellyfin session normalize failed", exc_info=True)
+    return out, "Jellyfin"
+
+
 def _summarize(sessions: List[Dict[str, Any]], server_name: str, version: str) -> Dict[str, Any]:
     transcodes = sum(1 for s in sessions if s["stream"]["method"] == "Transcode")
     direct = sum(1 for s in sessions if s["stream"]["method"] == "Direct Play")
@@ -208,29 +301,47 @@ def _summarize(sessions: List[Dict[str, Any]], server_name: str, version: str) -
 
 
 def get_activity(db=None) -> Dict[str, Any]:
-    """The live activity payload. Never raises — an unconfigured / down server
-    is a normal state the UI shows, not an error."""
+    """The live activity payload — Plex AND Jellyfin sessions merged. Never
+    raises; an unconfigured / down server is a normal state the UI shows."""
+    sessions: List[Dict[str, Any]] = []
+    server_name, server_version, platform = "", "", None
     srv = _plex_server(db)
-    if srv is None:
-        return {"ok": False, "reason": "no_server",
-                "message": "No Plex server configured (or it's unreachable).",
-                "sessions": [], "summary": {"streams": 0}}
-    try:
-        raw = srv.sessions()
-    except Exception:   # noqa: BLE001
-        logger.debug("plex sessions() failed", exc_info=True)
-        return {"ok": False, "reason": "unreachable",
-                "message": "Couldn't reach the Plex server.",
-                "sessions": [], "summary": {"streams": 0}}
-    sessions = []
-    for item in raw or []:
+    plex_reachable = False
+    if srv is not None:
         try:
-            sessions.append(normalize_session(item))
-        except Exception:   # noqa: BLE001 - one odd session never blanks the view
-            logger.debug("session normalize failed", exc_info=True)
+            raw = srv.sessions() or []
+            plex_reachable = True
+            for item in raw:
+                try:
+                    sessions.append(normalize_session(item))
+                except Exception:   # noqa: BLE001 - one odd session never blanks the view
+                    logger.debug("session normalize failed", exc_info=True)
+            server_name = str(_g(srv, "friendlyName", "Plex") or "Plex")
+            server_version = str(_g(srv, "version", "") or "")
+            platform = "plex"
+        except Exception:   # noqa: BLE001 - configured but unreachable
+            logger.debug("plex sessions() failed", exc_info=True)
+
+    jf_sessions, jf_name = _jellyfin_activity(db)
+    if jf_name is not None:                       # Jellyfin is configured
+        sessions += jf_sessions
+        if not server_name:
+            server_name = jf_name
+        platform = "jellyfin" if platform is None else "plex+jellyfin"
+
+    if srv is None and jf_name is None:           # nothing configured at all
+        return {"ok": False, "reason": "no_server",
+                "message": "No Plex or Jellyfin server configured.",
+                "sessions": [], "summary": {"streams": 0}}
+    if not plex_reachable and jf_name is None:    # the one configured server is down
+        return {"ok": False, "reason": "unreachable",
+                "message": "Couldn't reach the media server.",
+                "sessions": [], "summary": {"streams": 0}}
+
     sessions.sort(key=lambda s: (s["state"] != "playing", s["user"].lower()))
-    return _summarize(sessions, str(_g(srv, "friendlyName", "Plex") or "Plex"),
-                      str(_g(srv, "version", "") or ""))
+    out = _summarize(sessions, server_name or "Server", server_version)
+    out["server"]["platform"] = platform or "plex"
+    return out
 
 
 # ── stream termination (Tautulli's kill-with-message) ────────────────────────
@@ -404,9 +515,26 @@ def get_stats(db=None, days: int = 30) -> Dict[str, Any]:
     return data
 
 
+def _fetch_jellyfin_image(item_id: str, db=None) -> Optional[tuple]:
+    cfg = _jellyfin_config(db)
+    if not item_id or not cfg["base_url"] or not cfg["api_key"]:
+        return None
+    try:
+        import requests
+        url = cfg["base_url"].rstrip("/") + "/Items/" + item_id + "/Images/Primary"
+        r = requests.get(url, params={"api_key": cfg["api_key"], "maxHeight": 480}, timeout=_PLEX_TIMEOUT)
+        if r.status_code == 200 and r.content:
+            return r.content, r.headers.get("Content-Type", "image/jpeg")
+    except Exception:   # noqa: BLE001
+        logger.debug("jellyfin image proxy failed for %s", item_id, exc_info=True)
+    return None
+
+
 def fetch_image(path: str, db=None) -> Optional[tuple]:
-    """(bytes, content_type) for a Plex image path — proxied server-side so the
-    token never reaches the browser. None on any failure."""
+    """(bytes, content_type) for a Plex or Jellyfin image — proxied server-side
+    so the token never reaches the browser. None on any failure."""
+    if path and str(path).startswith("jf:"):
+        return _fetch_jellyfin_image(str(path)[3:], db)
     if not path or not str(path).startswith("/"):
         return None
     cfg = _plex_config(db)

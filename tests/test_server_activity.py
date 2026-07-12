@@ -10,7 +10,17 @@ from __future__ import annotations
 
 from types import SimpleNamespace as NS
 
+import pytest
+
 from core.server_activity import get_activity, normalize_session
+
+
+@pytest.fixture(autouse=True)
+def _no_jellyfin(monkeypatch):
+    """Isolate get_activity tests from any real Jellyfin config in the env —
+    Jellyfin-specific tests override this."""
+    import core.server_activity as sa
+    monkeypatch.setattr(sa, "_jellyfin_activity", lambda db=None: ([], None))
 
 
 def _media(res="1080", vcodec="hevc", acodec="eac3", bitrate=12000, container="mkv"):
@@ -304,6 +314,47 @@ def test_get_stats_caches(monkeypatch):
     a = sa.get_stats(days=30)
     b = sa.get_stats(days=30)
     assert a["ok"] and a["total_plays"] == 1 and calls["n"] == 1   # second call served from cache
+
+
+# ── Jellyfin (merged activity) ───────────────────────────────────────────────
+from core.server_activity import normalize_jellyfin  # noqa: E402
+
+
+def test_jellyfin_episode_normalizes_to_shared_shape():
+    s = {"UserName": "guest", "Client": "Jellyfin Web", "DeviceName": "Firefox",
+         "PlayState": {"PositionTicks": 3000000000, "IsPaused": False, "PlayMethod": "Transcode"},
+         "TranscodingInfo": {"VideoCodec": "h264", "AudioCodec": "aac", "Bitrate": 4000000,
+                             "CompletionPercentage": 30.0, "Container": "ts"},
+         "NowPlayingItem": {"Type": "Episode", "Name": "Pilot", "SeriesName": "Severance",
+                            "ParentIndexNumber": 1, "IndexNumber": 1, "RunTimeTicks": 30000000000, "Id": "abc"}}
+    n = normalize_jellyfin(s, s["NowPlayingItem"])
+    assert n["media_type"] == "episode" and n["title"] == "Pilot"
+    assert n["subtitle"] == "Severance · S01E01"
+    assert n["progress_pct"] == 10           # 3e9 / 30e9 ticks
+    assert n["stream"]["method"] == "Transcode" and n["stream"]["video"] == "H264"
+    assert n["user"] == "guest" and n["player"]["device"] == "Firefox"
+    assert n["thumb"] == "jf:abc"            # image marker for the proxy
+    assert n["session_key"] == ""            # no stop button (Plex-only terminate)
+
+
+def test_jellyfin_track_uses_artist_album():
+    npi = {"Type": "Audio", "Name": "Teardrop", "AlbumArtist": "Massive Attack", "Album": "Mezzanine", "Id": "x"}
+    n = normalize_jellyfin({"NowPlayingItem": npi, "PlayState": {}}, npi)
+    assert n["media_type"] == "track" and n["subtitle"] == "Massive Attack · Mezzanine"
+
+
+def test_activity_merges_plex_and_jellyfin(monkeypatch):
+    import core.server_activity as sa
+    monkeypatch.setattr(sa, "_plex_server", lambda db=None: _FakePlex([_movie()]))
+    npi = {"Type": "Movie", "Name": "Dune", "RunTimeTicks": 60000000000, "Id": "d1"}
+    monkeypatch.setattr(sa, "_jellyfin_activity",
+                        lambda db=None: ([normalize_jellyfin({"NowPlayingItem": npi, "UserName": "jf-user",
+                                                              "PlayState": {}}, npi)], "Jellyfin"))
+    out = get_activity()
+    assert out["ok"] and out["summary"]["streams"] == 2      # 1 plex + 1 jellyfin
+    assert out["server"]["platform"] == "plex+jellyfin"
+    titles = {s["title"] for s in out["sessions"]}
+    assert "Heat" in titles and "Dune" in titles
 
 
 # ── frontend wiring ──────────────────────────────────────────────────────────
