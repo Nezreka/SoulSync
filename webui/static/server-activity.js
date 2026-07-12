@@ -157,7 +157,9 @@
             var map = _cardMap();
             sessions.forEach(function (s) {
                 var el = map[actKey(s)]; if (!el) return;
-                el.className = 'sact-card sact-st-' + s.state;
+                // Keep the link modifier — dropping it here is what made the card
+                // stop being clickable ~1 tick after it first rendered.
+                el.className = 'sact-card sact-st-' + s.state + (s.link ? ' sact-card--link' : '');
                 var mb = el.querySelector('.sact-badge');
                 if (mb) { var m = (s.stream || {}).method || 'Direct Play';
                     mb.className = 'sact-badge sact-badge--' + (m === 'Transcode' ? 'tc' : (m === 'Direct Stream' ? 'ds' : 'ok'));
