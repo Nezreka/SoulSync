@@ -52,6 +52,19 @@ def _parse_plex_guids(obj) -> dict:
     return out
 
 
+def _iso_dt(v):
+    """ISO 'YYYY-MM-DD HH:MM:SS' from a plexapi datetime, an ISO string
+    (Jellyfin LastPlayedDate), or None. Never raises."""
+    try:
+        if not v:
+            return None
+        if isinstance(v, str):
+            return v[:19].replace("T", " ") or None
+        return v.strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:   # noqa: BLE001
+        return None
+
+
 def _parse_jf_providers(item) -> dict:
     """tmdb/imdb/tvdb ids from a Jellyfin item's ProviderIds."""
     providers = item.get("ProviderIds") or {}
@@ -399,6 +412,18 @@ class PlexVideoSource:
                 # if the server rejects the filter.
                 try:
                     items = section.search(filters={"updatedAt>>": since}, sort="updatedAt:desc")
+                    # Watch-state changes bump lastViewedAt, NOT updatedAt — without
+                    # this second delta an incremental scan never refreshes
+                    # play_count/last_viewed_at on old items (watched-cleanup relies
+                    # on it). Deduped by ratingKey; best-effort.
+                    try:
+                        seen_keys = {str(getattr(x, "ratingKey", "")) for x in items}
+                        items = list(items) + [
+                            w for w in section.search(filters={"lastViewedAt>>": since},
+                                                      sort="lastViewedAt:desc")
+                            if str(getattr(w, "ratingKey", "")) not in seen_keys]
+                    except Exception:   # noqa: BLE001 - the watch delta is an assist
+                        logger.debug("Plex: lastViewedAt delta failed", exc_info=True)
                 except Exception:
                     logger.warning("Plex: updatedAt delta filter failed; using recent window", exc_info=True)
                     items = section.search(sort="updatedAt:desc", maxresults=200)
@@ -840,6 +865,7 @@ class PlexVideoSource:
             "rating": getattr(m, "audienceRating", None),
             "rating_critic": getattr(m, "rating", None),
             "play_count": int(getattr(m, "viewCount", 0) or 0),
+            "last_viewed_at": _iso_dt(getattr(m, "lastViewedAt", None)),
             "genres": self._tags(getattr(m, "genres", None)),
             "runtime_minutes": int(dur / 60000) if dur else None,
             "files": self._part_files(m),
@@ -1377,6 +1403,7 @@ class JellyfinVideoSource:
             "rating_critic": it.get("CriticRating"),
             "play_count": int((it.get("UserData") or {}).get("PlayCount")
                               or (1 if (it.get("UserData") or {}).get("Played") else 0)),
+            "last_viewed_at": _iso_dt((it.get("UserData") or {}).get("LastPlayedDate")),
             "genres": it.get("Genres") or [],
             "runtime_minutes": int(ticks / 600_000_000) if ticks else None,
             "files": self._files(it),

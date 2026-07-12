@@ -43,7 +43,7 @@ def _publish_video_event(event_type: str, data: dict) -> None:
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 33   # v33: video_blocklist (never re-grab a proven-bad release)
+SCHEMA_VERSION = 34   # v34: movies.last_viewed_at (watched-cleanup); v33: video_blocklist
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -274,6 +274,7 @@ _COLUMN_MIGRATIONS = [
     ("collection_definitions", "collection_mode", "TEXT"),
     # Watch state from the server (drives 'watched' smart-collection rules)
     ("movies", "play_count", "INTEGER"),
+    ("movies", "last_viewed_at", "TEXT"),
     ("shows", "watched_episodes", "INTEGER"),
     # imdb_tmdb_map poster art — the table briefly shipped without these, and
     # CREATE TABLE IF NOT EXISTS never upgrades an existing table's shape.
@@ -2255,6 +2256,7 @@ class VideoDatabase:
                 "studio": item.get("studio"), "tagline": item.get("tagline"),
                 "rating": item.get("rating"), "rating_critic": item.get("rating_critic"),
                 "play_count": item.get("play_count"),
+                "last_viewed_at": item.get("last_viewed_at"),
                 "poster_url": item.get("poster_url"),
                 "has_file": 1 if (item.get("files") or item.get("file")) else 0,
             }, {"tmdb_id": item.get("tmdb_id"), "imdb_id": item.get("imdb_id")},
@@ -4198,6 +4200,35 @@ class VideoDatabase:
         for r in multi:
             by_movie.setdefault(r["movie_id"], []).append(dict(r))
         return {"rows": list(by_tmdb.values()), "files": list(by_movie.values())}
+
+    def repair_watched_movies(self) -> list:
+        """Every OWNED movie with its watch state + largest file — the
+        watched-cleanup job's source (age filtering happens in the job)."""
+        conn = self._get_connection()
+        try:
+            return [dict(r) for r in conn.execute(
+                "SELECT m.id AS movie_id, m.tmdb_id, m.title, m.year, "
+                "m.play_count, m.last_viewed_at, m.added_at, "
+                "f.relative_path, f.size_bytes "
+                "FROM movies m JOIN media_files f ON f.movie_id = m.id "
+                "WHERE m.has_file = 1 "
+                "AND f.id = (SELECT f2.id FROM media_files f2 WHERE f2.movie_id = m.id "
+                "            ORDER BY f2.size_bytes DESC LIMIT 1)")]
+        finally:
+            conn.close()
+
+    def repair_mark_movie_fileless(self, movie_id) -> None:
+        """After a cleanup fix recycled the movie's file: reflect reality now
+        (has_file=0, file rows gone) instead of waiting for the weekly deep
+        scan — exactly the state that scan would find."""
+        conn = self._get_connection()
+        try:
+            conn.execute("DELETE FROM media_files WHERE movie_id=?", (int(movie_id),))
+            conn.execute("UPDATE movies SET has_file=0, updated_at=datetime('now') WHERE id=?",
+                         (int(movie_id),))
+            conn.commit()
+        finally:
+            conn.close()
 
     def repair_stale_wishlist(self) -> list:
         """Wishlist rows whose target is ALREADY OWNED, annotated with the owned

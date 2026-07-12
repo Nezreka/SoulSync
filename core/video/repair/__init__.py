@@ -17,6 +17,7 @@ _JOB_MODULES = [
     "duplicate_movies",
     "wishlist_audit",
     "youtube_ghosts",
+    "watched_cleanup",
 ]
 
 

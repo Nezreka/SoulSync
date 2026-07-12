@@ -57,6 +57,7 @@
         stale_wishlist: 'Stale Wishlist',
         youtube_ghost: 'YouTube Ghost',
         youtube_mass_missing: 'Mass Missing',
+        watched_cleanup: 'Watched Cleanup',
     };
     // Types absent here are report-only: no approve button, dismiss + details only.
     var FIXABLE_TYPES = {
@@ -68,10 +69,12 @@
         stale_wishlist: 'Remove',
         youtube_ghost: 'Mark Deleted',
         youtube_mass_missing: 'Flag Individually',
+        watched_cleanup: 'Clean Up',
     };
     var ACTION_LABELS = { wishlisted: 'Wishlisted', grabbed: 'Grabbed', refreshed: 'Refreshed',
         removed: 'Removed', resolved: 'Resolved',
-        marked_deleted: 'Marked Deleted', forgotten: 'Forgotten', flagged: 'Flagged' };
+        marked_deleted: 'Marked Deleted', forgotten: 'Forgotten', flagged: 'Flagged',
+        cleaned: 'Cleaned' };
     var GAP_LABELS = { unmatched: 'not TMDB-matched', overview: 'no summary',
         genres: 'no genres', poster: 'no poster', backdrop: 'no backdrop' };
 
@@ -436,6 +439,7 @@
         if (f.finding_type === 'stale_wishlist') return staleDetailHTML(d);
         if (f.finding_type === 'youtube_ghost') return ghostDetailHTML(f);
         if (f.finding_type === 'youtube_mass_missing') return massMissingDetailHTML(d);
+        if (f.finding_type === 'watched_cleanup') return watchedDetailHTML(d);
         return '<pre class="repair-finding-json">' + esc(JSON.stringify(d, null, 2)) + '</pre>';
     }
 
@@ -592,6 +596,28 @@
             '<div class="vrf-eps">' + sample +
                 (more > 0 ? row('…and ' + more + ' more', '', '') : '') +
             '</div>';
+    }
+
+    // ── Watched Cleanup: reclaim disk from seen movies ───────────────────────
+    function watchedDetailHTML(d) {
+        var poster = d.movie_id != null
+            ? '<img class="vrf-poster" src="/api/video/poster/movie/' + d.movie_id +
+              '" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
+            : '<div class="vrf-poster vrf-poster--empty">🍿</div>';
+        var chips = '<span class="vrf-chip' + (d.watched ? ' vrf-chip--got' : '') + '">' +
+            (d.watched ? ('✓ watched ' + (d.play_count > 1 ? d.play_count + '×' : 'once')) : 'never watched') +
+            '</span>';
+        if (d.last_viewed_at) chips += '<span class="vrf-chip">last: ' + esc(String(d.last_viewed_at).slice(0, 10)) + '</span>';
+        chips += '<span class="vrf-chip">' + gb(d.size_bytes) + '</span>';
+        return '<div class="vrf-show">' + poster +
+            '<div class="vrf-show-info">' +
+                '<div class="vrf-show-title">' + esc(d.title || '?') + (d.year ? ' (' + d.year + ')' : '') + '</div>' +
+                '<div class="vrf-chips">' + chips + '</div>' +
+                '<p class="vrf-show-overview">Approving moves the file into the recycle bin ' +
+                    '(Settings → Library Organization sets where and for how long) — nothing is ' +
+                    'erased outright. The weekly deep scan tidies the server view afterwards.</p>' +
+                (d.relative_path ? '<p class="vrf-show-overview">' + esc(d.relative_path) + '</p>' : '') +
+            '</div></div>';
     }
 
     function simpleEpisodeList(d) {

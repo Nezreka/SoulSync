@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS movies (
     added_at             TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at           TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     play_count       INTEGER,                         -- server watch state (viewCount)
+    last_viewed_at   TEXT,                             -- server last-watched stamp (Plex lastViewedAt / JF LastPlayedDate)
     locked_fields    TEXT                             -- JSON list of user-edited (scan/enrichment-immune) fields
 );
 CREATE INDEX IF NOT EXISTS idx_movies_tmdb       ON movies(tmdb_id);
