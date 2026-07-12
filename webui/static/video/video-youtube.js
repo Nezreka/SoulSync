@@ -239,7 +239,18 @@
                 '<label class="vyt-cset-ck"><input type="checkbox" data-cset-hdr' + (b.allow_hdr ? ' checked' : '') + '> Allow HDR</label>' +
             '</div>' +
             '<div class="vyt-cset-hint">Off = use the global YouTube quality from Settings.</div>' +
-            // retention — channels only (playlists mirror the whole thing)
+            // content filters + retention — channels only (playlists mirror the whole thing)
+            (kind === 'playlist' ? '' :
+                '<label class="vyt-cset-lbl">Only titles matching (optional)</label>' +
+                '<input class="vyt-cset-in" data-cset-inc type="text" value="' + esc(s.title_include || '') +
+                    '" placeholder="e.g. review, /GN\\d+/">' +
+                '<label class="vyt-cset-lbl">Skip titles matching (optional)</label>' +
+                '<input class="vyt-cset-in" data-cset-exc type="text" value="' + esc(s.title_exclude || '') +
+                    '" placeholder="e.g. #shorts, podcast, /trailer/i-style not needed">' +
+                '<div class="vyt-cset-hint">Comma-separated. Plain text = case-insensitive contains; wrap in <code>/…/</code> for a regex. Applies when the channel scan picks videos to wishlist.</div>' +
+                '<label class="vyt-cset-lbl">Minimum length (minutes, optional)</label>' +
+                '<input class="vyt-cset-in" data-cset-minm type="number" min="0" step="1" value="' + esc(s.min_minutes || '') + '" placeholder="0">' +
+                '<div class="vyt-cset-hint">Skips videos shorter than this (unknown lengths pass). Shorts are already excluded globally.</div>') +
             (kind === 'playlist' ? '' :
                 '<label class="vyt-cset-lbl">Keep</label>' +
                 '<select class="vyt-cset-in" data-cset-keep>' +
@@ -283,6 +294,12 @@
         saveBtn.addEventListener('click', function () {
             var nameEl = body.querySelector('[data-cset-name]');
             var payload = { custom_name: (nameEl ? nameEl.value : '').trim() };
+            var inc = body.querySelector('[data-cset-inc]');
+            var exc = body.querySelector('[data-cset-exc]');
+            var minm = body.querySelector('[data-cset-minm]');
+            if (inc) payload.title_include = inc.value.trim();
+            if (exc) payload.title_exclude = exc.value.trim();
+            if (minm) payload.min_minutes = minm.value.trim();
             var keepEl = body.querySelector('[data-cset-keep]');
             // '' for 'Everything' → dropped server-side → keep-all (clears any prior policy)
             payload.retention = (keepEl && keepEl.value !== 'all') ? keepEl.value : '';
