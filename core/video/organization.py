@@ -58,6 +58,10 @@ DEFAULTS = {
     "recycle_deletes": True,
     "recycle_keep_days": 7,
     "recycle_path": "",            # optional override folder; blank = auto per-library
+    # YouTube downloads (ytdl-sub parity): SponsorBlock chapter handling and
+    # embedded subtitles, baked into the file at download time.
+    "youtube_sponsorblock": "off",     # off | mark (chapters) | remove (cut segments)
+    "youtube_embed_subs": False,       # embed subs (subtitle_langs) into the container
 }
 
 _TRANSFER_MODES = ("copy", "move")
@@ -81,8 +85,12 @@ def normalize(raw: Any) -> dict:
         v = raw.get(key)
         if isinstance(v, str) and v.strip():
             d[key] = v.strip()
+    sb = str(raw.get("youtube_sponsorblock") or "").strip().lower()
+    if sb in ("off", "mark", "remove"):
+        d["youtube_sponsorblock"] = sb
     for key in ("verify_with_ffprobe", "replace_existing", "carry_subtitles",
-                "save_artwork", "write_nfo", "download_subtitles", "recycle_deletes"):
+                "save_artwork", "write_nfo", "download_subtitles", "recycle_deletes",
+                "youtube_embed_subs"):
         if key in raw:
             d[key] = bool(raw.get(key))
     if "recycle_keep_days" in raw:

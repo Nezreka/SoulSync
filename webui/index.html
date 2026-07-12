@@ -6560,6 +6560,24 @@
                                 </div>
 
                                 <div class="form-group">
+                                    <label>YouTube: SponsorBlock</label>
+                                    <select id="vo-sponsorblock">
+                                        <option value="off">Off</option>
+                                        <option value="mark">Mark segments as chapters</option>
+                                        <option value="remove">Cut sponsor segments out</option>
+                                    </select>
+                                    <small class="settings-hint">Uses the community SponsorBlock database at download time. <strong>Mark</strong> adds skippable chapters (sponsor, self-promo, intro, outro); <strong>Cut</strong> removes sponsor/self-promo/interaction segments from the file entirely.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="vo-yt-subs">
+                                        <span>YouTube: embed subtitles</span>
+                                    </label>
+                                    <small class="settings-hint">Embeds YouTube's subtitles (your Subtitle Languages above) into the downloaded file so Plex/Jellyfin offer them without sidecar files.</small>
+                                </div>
+
+                                <div class="form-group">
                                     <button class="test-button" id="vo-reset" style="background: #666;">&#128260; Reset to Defaults</button>
                                     <small class="settings-hint">Restores the Radarr/Sonarr standard layout.</small>
                                 </div>

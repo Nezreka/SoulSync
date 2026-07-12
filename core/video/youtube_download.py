@@ -91,9 +91,36 @@ def plan_destination(dl: Dict[str, Any], settings: Dict[str, Any], container: st
                                     youtube_fields_from_download(dl), settings, ext)
 
 
+def media_embed_opts(settings: Optional[Dict[str, Any]]) -> dict:
+    """Extra yt-dlp options from the organization settings — SponsorBlock chapter
+    marking/removal and embedded subtitles (ytdl-sub parity). Pure; {} = nothing on."""
+    settings = settings or {}
+    out: Dict[str, Any] = {}
+    pps = []
+    sb = str(settings.get("youtube_sponsorblock") or "off").lower()
+    if sb in ("mark", "remove"):
+        pps.append({"key": "SponsorBlock",
+                    "categories": ["sponsor", "selfpromo", "interaction", "intro", "outro"]})
+        if sb == "remove":
+            # cut the hard-sell segments; intros/outros stay (chapters only)
+            pps.append({"key": "ModifyChapters",
+                        "remove_sponsor_segments": ["sponsor", "selfpromo", "interaction"]})
+        else:
+            pps.append({"key": "ModifyChapters",
+                        "sponsorblock_chapter_title": "[SponsorBlock] %(category_names)l"})
+    if settings.get("youtube_embed_subs"):
+        langs = [x.strip() for x in str(settings.get("subtitle_langs") or "en").split(",")
+                 if x.strip()]
+        out.update({"writesubtitles": True, "subtitleslangs": langs or ["en"]})
+        pps.append({"key": "FFmpegEmbedSubtitle", "already_have_subtitle": False})
+    if pps:
+        out["postprocessors"] = pps
+    return out
+
+
 def ydl_download_opts(profile: Any, dest_dir: str, dest_stem: str,
                       *, progress_hook: Optional[Callable] = None, postprocess_hook: Optional[Callable] = None,
-                      cookie_opts: Optional[dict] = None) -> dict:
+                      cookie_opts: Optional[dict] = None, extra_opts: Optional[dict] = None) -> dict:
     """The yt-dlp options dict for one download: format selection from the quality profile,
     a fixed output path (dir + stem + yt-dlp's own ext), polite defaults. Pure."""
     sel = format_selection(profile)
@@ -119,6 +146,16 @@ def ydl_download_opts(profile: Any, dest_dir: str, dest_stem: str,
         "postprocessors": [{"key": "FFmpegMetadata"},
                            {"key": "FFmpegThumbnailsConvertor", "format": "jpg"}],
     }
+    if extra_opts:
+        extra = dict(extra_opts)
+        pps = extra.pop("postprocessors", [])
+        # Chapter surgery (SponsorBlock/ModifyChapters) must run BEFORE the
+        # metadata embed; subtitle embedding after. Same ordering yt-dlp's own
+        # --sponsorblock-remove flag produces.
+        chapter = [p for p in pps if p.get("key") in ("SponsorBlock", "ModifyChapters")]
+        after = [p for p in pps if p.get("key") not in ("SponsorBlock", "ModifyChapters")]
+        opts["postprocessors"] = chapter + opts["postprocessors"] + after
+        opts.update(extra)
     if cookie_opts:
         opts.update(cookie_opts)
     if progress_hook:
@@ -138,7 +175,8 @@ def _stem_and_container(dest: Dict[str, str], container: str) -> tuple:
 
 
 def download_one(video_id: Any, dest_dir: str, dest_stem: str, profile: Any, container: str,
-                 *, ydl_factory=None, progress_hook=None, postprocess_hook=None, cookie_opts=None) -> Dict[str, Any]:
+                 *, ydl_factory=None, progress_hook=None, postprocess_hook=None, cookie_opts=None,
+                 extra_opts=None) -> Dict[str, Any]:
     """Run yt-dlp for ONE video into ``dest_dir/dest_stem.ext``. Returns
     ``{ok, dest_path|None, error|None, title|None, published_at|None}`` — the
     extractor's own title/date ride along because they're AUTHORITATIVE (an
@@ -151,7 +189,8 @@ def download_one(video_id: Any, dest_dir: str, dest_stem: str, profile: Any, con
     if factory is None:
         return {"ok": False, "dest_path": None, "error": "yt-dlp unavailable"}
     opts = ydl_download_opts(profile, dest_dir, dest_stem, progress_hook=progress_hook,
-                             postprocess_hook=postprocess_hook, cookie_opts=cookie_opts)
+                             postprocess_hook=postprocess_hook, cookie_opts=cookie_opts,
+                             extra_opts=extra_opts)
     url = vid if vid.startswith("http") else "https://www.youtube.com/watch?v=" + vid
     info = {}
     try:
@@ -513,7 +552,8 @@ def process_youtube_download(
     update_row(dl.get("id"), status="downloading", progress=0, filename=dest.get("filename"))
 
     res = download(dl.get("media_id"), dl_dir, stem, profile, cont,
-                   progress_hook=progress_hook, postprocess_hook=postprocess_hook, cookie_opts=cookie_opts)
+                   progress_hook=progress_hook, postprocess_hook=postprocess_hook,
+                   cookie_opts=cookie_opts, extra_opts=media_embed_opts(settings))
 
     if not res.get("ok"):
         err = res.get("error") or "Download failed"
