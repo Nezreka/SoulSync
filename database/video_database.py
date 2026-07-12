@@ -1231,6 +1231,30 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def queue_detail_resync(self, kind: str = "all") -> int:
+        """Reset ``details_synced=0`` for on-server, TMDB-matched titles so the detail-sync
+        worker re-pulls their FULL TMDB metadata (studios/networks/overview/…) and re-applies
+        it through enrichment_apply. This is how an existing library gets the complete
+        multi-company studio/network data (the server scan only knows one). Returns the count
+        queued; the already-running worker drains it in the background."""
+        tables = []
+        if kind in ("all", "movie"):
+            tables.append("movies")
+        if kind in ("all", "show"):
+            tables.append("shows")
+        total = 0
+        conn = self._get_connection()
+        try:
+            for tbl in tables:
+                cur = conn.execute(
+                    f"UPDATE {tbl} SET details_synced=0 "
+                    f"WHERE tmdb_id IS NOT NULL AND server_id IS NOT NULL AND TRIM(server_id) != ''")
+                total += cur.rowcount
+            conn.commit()
+            return total
+        finally:
+            conn.close()
+
     def _ratings_breakdown(self) -> dict:
         """OMDb 'coverage' breakdown: matched = ratings present, pending = has an
         imdb_id but not fetched, not_found = fetched but OMDb had no rating."""

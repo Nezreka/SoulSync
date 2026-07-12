@@ -42,6 +42,24 @@ def register_routes(bp):
             logger.exception("video enrichment services failed")
             return jsonify({"services": []})
 
+    @bp.route("/enrichment/resync-details", methods=["POST"])
+    def video_enrichment_resync_details():
+        """Re-pull full TMDB metadata for every on-server, matched title — how an existing
+        library gets the COMPLETE multi-company studio/network data (the media-server scan
+        only exposes one company). Resets details_synced=0; the detail-sync worker drains it
+        in the background (watch the TMDB worker in the enrichment sidebar). Body: {kind?}."""
+        from . import get_video_db
+        try:
+            kind = str((request.get_json(silent=True) or {}).get("kind") or "all")
+            if kind not in ("all", "movie", "show"):
+                kind = "all"
+            queued = get_video_db().queue_detail_resync(kind)
+            engine()   # ensure the enrichment engine (detail-sync worker) is up to drain it
+            return jsonify({"success": True, "queued": queued})
+        except Exception:
+            logger.exception("video enrichment resync-details failed")
+            return jsonify({"success": False, "error": "Failed to queue the re-sync"}), 500
+
     @bp.route("/enrichment/config", methods=["GET"])
     def video_enrichment_config():
         from . import get_video_db

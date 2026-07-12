@@ -568,6 +568,17 @@ def test_enrichment_apply_respects_studio_lock(db):
     assert names == ["Indie Co"]                         # lock held; enrichment left it alone
 
 
+def test_queue_detail_resync_targets_owned_matched_titles(db):
+    m1 = db.upsert_movie("plex", {"server_id": "m1", "title": "A", "tmdb_id": 1})
+    db.upsert_movie("plex", {"server_id": "m2", "title": "B"})          # no tmdb → never queued
+    db.mark_details_synced("movie", m1)
+    assert db.detail_backfill_pending_count() == 0                      # nothing pending
+    queued = db.queue_detail_resync("movie")
+    assert queued == 1                                                  # only the on-server, tmdb-matched one
+    nxt = db.detail_backfill_next("movie")
+    assert nxt and nxt["id"] == m1                                      # it's back in the detail-sync queue
+
+
 def test_enrichment_apply_survives_legacy_unique(db):
     # Simulate a pre-existing DB where tvdb_id still carries a UNIQUE index.
     with db.connect() as c:
