@@ -1,3 +1,5 @@
+"""Restart-safe Acquisition import coordinator tests."""
+
 from datetime import datetime, timezone
 
 from core.acquisition.import_pipeline import (
