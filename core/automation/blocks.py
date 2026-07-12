@@ -343,11 +343,7 @@ ACTIONS: list[dict] = [
     {"type": "video_scan_watchlist_people", "label": "Scan Watchlist People", "icon": "users", "scope": "video",
      "description": "For everyone you follow on the watchlist, wishlist every movie they acted in or directed that you don't already own — the whole back catalog plus anything upcoming (kept as 'monitored' until it's released). First run backlogs everything; later runs are fast.", "available": True},
     {"type": "video_scan_watchlist_channels", "label": "Scan Watchlist Channels", "icon": "youtube", "scope": "video",
-     "description": "For every YouTube channel you follow, wishlist its new long-form uploads (Shorts excluded). Forward-looking from when you followed, plus a safety net that always keeps the last N videos. Pair with a 6-hourly Schedule trigger — channels post at all hours.", "available": True,
-     "config_fields": [
-         {"key": "backfill_count", "type": "number", "min": 0,
-          "label": "Keep the last N videos from each channel (blank = use the Library setting)"}
-     ]},
+     "description": "For every YouTube channel you follow, wishlist its new long-form uploads (Shorts excluded). Forward-looking from when you followed, plus a safety net that keeps the last N videos current — N is the 'videos to grab' setting on Settings → Library. Pair with a 6-hourly Schedule trigger — channels post at all hours.", "available": True},
     {"type": "video_scan_watchlist_playlists", "label": "Scan Watchlist Playlists", "icon": "list", "scope": "video",
      "description": "For every YouTube playlist you follow, wishlist its videos you don't have yet (and anything later added to it) — mirrors the whole list. Each playlist becomes its own show in the library (playlist-as-show). Shorts excluded. Pair with a schedule.", "available": True},
     # Stage 2 — processors that DRAIN the wishlist by downloading.
