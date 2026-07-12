@@ -3177,6 +3177,19 @@ def get_server_activity_history():
         return jsonify({"ok": False, "reason": "error", "history": []})
 
 
+@app.route('/api/server-activity/stats')
+def get_server_activity_stats():
+    """Dashboard stats — most-watched, most-active users, plays over time, top
+    devices (Tautulli's Statistics). App-wide; cached; never raises."""
+    try:
+        from core.server_activity import get_stats
+        days = request.args.get("days", default=30, type=int) or 30
+        return jsonify(get_stats(days=days))
+    except Exception:
+        logger.exception("server activity stats failed")
+        return jsonify({"ok": False, "reason": "error"})
+
+
 @app.route('/api/server-activity/stop', methods=['POST'])
 def stop_server_activity_stream():
     """Terminate an active stream with a message (Tautulli's kill move).

@@ -164,6 +164,66 @@
         getJSON(HIST + '?limit=50').then(function (d) { if (isOpen && tab === 'history') renderHistory(d); });
     }
 
+    // ── stats tab (beat the Tautulli/Plex dashboard glance) ───────────────────
+    var STATS = '/api/server-activity/stats';
+    function graph(series) {
+        var s = series || [];
+        var max = Math.max.apply(null, s.map(function (p) { return p.plays; }).concat([1]));
+        var W = 416, H = 76, n = s.length || 1, gap = 3, bw = (W - (n - 1) * gap) / n;
+        var bars = s.map(function (p, i) {
+            var h = Math.max(p.plays ? 3 : 0, Math.round((p.plays / max) * (H - 8)));
+            var x = i * (bw + gap), y = H - h;
+            var day = p.date.slice(5);
+            return '<rect x="' + x.toFixed(1) + '" y="' + y + '" width="' + bw.toFixed(1) + '" height="' + h +
+                '" rx="2" class="sact-bar"><title>' + esc(day) + ': ' + p.plays + ' plays</title></rect>';
+        }).join('');
+        var first = (s[0] && s[0].date.slice(5)) || '', last = (s[n - 1] && s[n - 1].date.slice(5)) || '';
+        return '<svg class="sact-graph" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none">' + bars + '</svg>' +
+            '<div class="sact-graph-x"><span>' + esc(first) + '</span><span>' + esc(last) + '</span></div>';
+    }
+    function rankList(items, nameKey, cls) {
+        var max = Math.max.apply(null, items.map(function (i) { return i.plays; }).concat([1]));
+        return '<div class="sact-rank">' + items.map(function (it) {
+            var av = (cls === 'user') ? '<span class="sact-ava">' + esc(initials(it[nameKey])) + '</span>' : '';
+            return '<div class="sact-rank-row">' + av +
+                '<span class="sact-rank-name" title="' + esc(it[nameKey]) + '">' + esc(it[nameKey]) + '</span>' +
+                '<span class="sact-rank-bar"><span style="width:' + Math.round(100 * it.plays / max) + '%"></span></span>' +
+                '<span class="sact-rank-n">' + it.plays + '</span></div>';
+        }).join('') + '</div>';
+    }
+    function contentRow(c) {
+        var poster = c.thumb ? img(c.thumb) : '';
+        return '<div class="sact-cw">' +
+            (poster ? '<div class="sact-cw-th"><img src="' + poster + '" alt="" loading="lazy" onerror="this.style.display=\'none\'"></div>'
+                : '<div class="sact-cw-th sact-cw-th--none">' + (TYPE_IC[c.media_type] || '🎬') + '</div>') +
+            '<div class="sact-cw-t" title="' + esc(c.title) + '">' + esc(c.title) + '</div>' +
+            '<div class="sact-cw-n">' + c.plays + '</div></div>';
+    }
+    function section(title, inner) {
+        return '<div class="sact-sec"><div class="sact-sec-h">' + esc(title) + '</div>' + inner + '</div>';
+    }
+    function renderStats(d) {
+        var body = _body(); if (!body) return;
+        if (!d || d.ok === false) { body.innerHTML = _noServer(d); return; }
+        var html = '<div class="sact-summary">' +
+            '<span class="sact-chip sact-chip--hero"><strong>' + (d.total_plays || 0) + '</strong> plays</span>' +
+            '<span class="sact-chip"><strong>' + (d.unique_users || 0) + '</strong> users</span>' +
+            '<span class="sact-chip">last ' + (d.days || 30) + ' days</span></div>';
+        html += section('Plays over time', graph(d.series));
+        if ((d.top_content || []).length)
+            html += section('Most watched', '<div class="sact-cwlist">' + d.top_content.map(contentRow).join('') + '</div>');
+        if ((d.top_users || []).length)
+            html += section('Most active users', rankList(d.top_users, 'user', 'user'));
+        if ((d.top_devices || []).length)
+            html += section('Top devices', rankList(d.top_devices, 'device', 'device'));
+        if (!(d.total_plays)) html = '<div class="sact-empty"><div class="sact-empty-ic">📊</div>' +
+            '<div class="sact-empty-t">No plays in the last ' + (d.days || 30) + ' days</div></div>';
+        body.innerHTML = html;
+    }
+    function loadStats() {
+        getJSON(STATS).then(function (d) { if (isOpen && tab === 'stats') renderStats(d); });
+    }
+
     function setBadge(n) {
         var b = document.getElementById('activity-float-badge');
         var btn = document.getElementById('activity-float-btn');
@@ -191,7 +251,8 @@
         if (body) body.innerHTML = '<div class="sact-empty"><div class="sact-empty-ic">…</div>' +
             '<div class="sact-empty-t">Loading…</div></div>';
         if (t === 'activity') { refresh(); startPoll(); }
-        else { stopPoll(); loadHistory(); }
+        else if (t === 'history') { stopPoll(); loadHistory(); }
+        else { stopPoll(); loadStats(); }
     }
 
     // ── drawer open/close ─────────────────────────────────────────────────────
@@ -207,6 +268,7 @@
             '<div class="sact-tabs">' +
                 '<button class="sact-tab sact-tab--on" type="button" data-sact-tab="activity">Activity</button>' +
                 '<button class="sact-tab" type="button" data-sact-tab="history">History</button>' +
+                '<button class="sact-tab" type="button" data-sact-tab="stats">Stats</button>' +
             '</div>' +
             '<div class="sact-body" data-sact-body></div>';
         document.body.appendChild(drawer);
