@@ -67,6 +67,11 @@
         var gb = (bytes || 0) / (1024 * 1024 * 1024);
         return gb >= 0.1 ? (Math.round(gb * 10) / 10) + ' GB' : Math.round((bytes || 0) / (1024 * 1024)) + ' MB';
     }
+    function fmtElapsed(ms) {
+        var s = Math.floor((ms || 0) / 1000);
+        var m = Math.floor(s / 60); s = s % 60;
+        return m ? (m + 'm' + (s < 10 ? '0' : '') + s + 's') : (s + 's');
+    }
 
     var X_SVG = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
     var IMP_SVG = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
@@ -164,9 +169,16 @@
         var info = STATUS[d.status] || STATUS.downloading;
         var cls = info.cls, active = isActive(d.status);
         var showBar = active;   // downloading/queued/searching/importing all get a bar
-        // queued/searching/importing have no real % → an indeterminate shimmer (not "frozen at 0/100")
-        var indet = d.status === 'queued' || d.status === 'searching' || d.status === 'importing';
+        // Import sub-phases: 'merging' (ffmpeg, no %) vs 'moving' (cross-drive copy, real %).
+        var importing = d.status === 'importing';
+        var moving = importing && d.import_phase === 'moving';
+        var iprog = Math.max(0, Math.min(100, d.import_progress || 0));
+        // queued/searching/merging (and moving until the first % lands) → indeterminate shimmer.
+        var indet = d.status === 'queued' || d.status === 'searching' || (importing && !(moving && iprog > 0));
         var pct = Math.max(0, Math.min(100, d.progress || 0));
+        // Track when this card entered the import phase so we can show an elapsed timer.
+        if (importing) { if (!el._importStart) el._importStart = Date.now(); }
+        else el._importStart = 0;
         var q = function (f) { return el.querySelector('[data-f="' + f + '"]'); };
 
         var vt = dlType(d.kind);
@@ -202,7 +214,13 @@
         var ctx;
         if (d.status === 'completed' && d.dest_path) ctx = '→ ' + d.dest_path;
         else if (d.status === 'searching') ctx = 'Trying another release…';
-        else if (d.status === 'importing') ctx = 'Moving into your library…';
+        else if (importing) {
+            if (d.import_phase === 'merging') ctx = 'Merging video + audio…';
+            else if (moving && iprog > 0) ctx = 'Moving into your library…  ' + Math.round(iprog) + '%';
+            else ctx = 'Moving into your library…';
+            var el_ms = el._importStart ? (Date.now() - el._importStart) : 0;
+            if (el_ms > 2000) ctx += '  ·  ' + fmtElapsed(el_ms);
+        }
         else if (d.status === 'queued') ctx = 'Waiting for a free slot…';
         else if (showBar) ctx = [fmtSize(d.size_bytes), d.username ? ('👤 ' + d.username) : '', Math.round(pct) + '%'].filter(Boolean).join('  ·  ');
         else ctx = (d.release_title && d.release_title !== (d.title || '')) ? d.release_title : fmtSize(d.size_bytes);
@@ -228,7 +246,7 @@
         bar.style.display = showBar ? '' : 'none';
         if (showBar) {
             bar.classList.toggle('vdpg-prog-indet', indet);
-            q('fill').style.width = indet ? '100%' : pct + '%';
+            q('fill').style.width = indet ? '100%' : (moving ? iprog : pct) + '%';
         }
 
         var st = q('status'); var stWant = 'adl-row-status ' + cls;

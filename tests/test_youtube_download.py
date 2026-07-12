@@ -12,6 +12,64 @@ from core.video import youtube_download as ytd
 from core.video.youtube_quality import default_profile
 
 
+# ── the library move: same-fs rename vs cross-drive chunked copy ──────────────
+def test_default_move_same_fs_is_instant_and_reports_100(tmp_path):
+    src = tmp_path / "stage" / "v.mp4"
+    src.parent.mkdir()
+    src.write_bytes(b"hello world")
+    dest = tmp_path / "lib" / "Chan" / "v.mp4"
+    pcts = []
+    ytd._default_move(str(src), str(dest), on_progress=pcts.append)
+    assert dest.read_bytes() == b"hello world"
+    assert not src.exists()                      # source consumed
+    assert pcts == [100]                         # instant rename → straight to 100
+
+
+def test_default_move_cross_device_copies_in_chunks_with_progress(tmp_path, monkeypatch):
+    # Force the EXDEV (cross-filesystem) branch: os.replace raises, so it falls back to the
+    # chunked copy path. Small chunk size so a modest file yields several progress ticks.
+    import errno as _errno
+    src = tmp_path / "stage" / "big.mp4"
+    src.parent.mkdir()
+    src.write_bytes(b"x" * (5 * 1024 * 1024))    # 5 MiB
+    dest = tmp_path / "lib" / "Chan" / "big.mp4"
+
+    real_replace = os.replace
+    def fake_replace(a, b):
+        if str(a).endswith(".part"):             # the final atomic rename (same fs) — allow it
+            return real_replace(a, b)
+        raise OSError(_errno.EXDEV, "cross-device link")
+    monkeypatch.setattr(ytd.os, "replace", fake_replace)
+    monkeypatch.setattr(ytd, "_MOVE_CHUNK", 1024 * 1024)   # 1 MiB → ~5 ticks
+
+    pcts = []
+    ytd._default_move(str(src), str(dest), on_progress=pcts.append)
+    assert dest.read_bytes() == b"x" * (5 * 1024 * 1024)   # full, correct copy
+    assert not src.exists()                      # staged source removed after copy
+    assert not (dest.parent / "big.mp4.part").exists()     # no leftover temp
+    assert pcts and pcts[-1] == 100 and any(0 < p < 100 for p in pcts)   # real intermediate progress
+
+
+def test_default_move_cross_device_failure_leaves_no_partial(tmp_path, monkeypatch):
+    import errno as _errno
+    src = tmp_path / "stage" / "v.mp4"
+    src.parent.mkdir()
+    src.write_bytes(b"data")
+    dest = tmp_path / "lib" / "v.mp4"
+
+    def boom_replace(a, b):
+        raise OSError(_errno.EXDEV, "cross-device link")
+    monkeypatch.setattr(ytd.os, "replace", boom_replace)
+    # make the copy blow up mid-write
+    monkeypatch.setattr(ytd.shutil, "copystat", lambda *a, **k: (_ for _ in ()).throw(OSError("boom")))
+
+    import pytest
+    with pytest.raises(OSError):
+        ytd._default_move(str(src), str(dest))
+    assert src.exists()                          # source preserved on failure (safe to retry)
+    assert not (dest.parent / "v.mp4.part").exists()   # partial cleaned up
+
+
 # ── organising fields from the queue row ──────────────────────────────────────
 def test_fields_prefer_search_ctx_then_fall_back():
     dl = {"title": "Some Channel", "year": "2024-01-01", "media_id": "vid1",
@@ -165,7 +223,7 @@ def test_process_replans_titleless_download_with_extractor_title():
                                   "published_at": "2024-03-15",
                                   "dest_path": "/yt/Chan/Season 2024/Chan - 2024-03-15 - Chan.mp4"},
         update_row=update_row, archive=archive, clear_wishlist=clear,
-        move=lambda s, d: moves.append((s, d)), now=lambda: "t")
+        move=lambda s, d, on_progress=None: moves.append((s, d)), now=lambda: "t")
     assert res["status"] == "completed"
     assert res["dest_path"].endswith("Chan - s2024e0315 - Real Title.mp4")
     assert moves == [("/yt/Chan/Season 2024/Chan - 2024-03-15 - Chan.mp4",
@@ -195,7 +253,7 @@ def test_process_stages_in_download_folder_then_imports_to_library():
         download=lambda vid, d, *a, **k: ({"ok": True, "dest_path": staged}
                                           if d == "/downloads/youtube" else {"ok": False, "error": "wrong dir"}),
         update_row=update_row, archive=archive, clear_wishlist=clear,
-        stage_dir="/downloads/youtube", move=lambda s, d: moves.append((s, d)), now=lambda: "t")
+        stage_dir="/downloads/youtube", move=lambda s, d, on_progress=None: moves.append((s, d)), now=lambda: "t")
     assert res["status"] == "completed"
     statuses = [kw.get("status") for _, kw in calls["rows"]]
     assert statuses == ["downloading", "importing", "completed"]      # the visible phases
@@ -207,7 +265,7 @@ def test_process_stages_in_download_folder_then_imports_to_library():
 def test_process_import_failure_is_terminal_and_keeps_the_wish():
     calls, update_row, archive, clear = _recorder()
 
-    def boom(_s, _d):
+    def boom(_s, _d, on_progress=None):
         raise OSError("disk full")
 
     res = ytd.process_youtube_download(
@@ -472,7 +530,7 @@ def test_channel_art_lands_BEFORE_the_video_moves_in(tmp_path, monkeypatch):
         return {"ok": True, "dest_path": pathlib_p}
 
     seen = {}
-    def move(src, dst):
+    def move(src, dst, on_progress=None):
         # the assertion that matters: poster is there before the video is
         seen["poster_at_move"] = (lib / "Chan" / "poster.jpg").exists()
         seen["season_at_move"] = (lib / "Chan" / "Season 2026" / "poster.jpg").exists()
