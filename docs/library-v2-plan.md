@@ -469,6 +469,10 @@ Completed:
   remaining checks pass;
 - the exact `lib2_entity` and Quality Profile survive legacy candidate retries;
 - Torrent and Usenet retain distinct exhaustive retry budgets;
+- an exhausted legacy worker search fails the persistent import/request and
+  blocklists the exact release instead of leaving it indefinitely importing;
+- a redacted path-health endpoint validates mapping syntax, mounted target
+  roots and open import paths without returning server paths;
 - `lib2_upgrade_scan` intentionally reuses `mirror_tracks_wishlist` as the
   compatibility adapter into the normal Wishlist/Main-Pipeline. It only selects
   monitored tracks under `until_top`/`until_cutoff`, re-evaluates the primary
@@ -481,13 +485,15 @@ Still open before LIB2-011/Phase 5 can be called complete:
   prevents blind redispatch of the quarantined file and preserves manual
   approval, but does not recreate the old worker's in-memory candidate list;
 - prove the complete old-vs-Library-v2 parity matrix and run the full suite;
-- perform real SAB/NZBGet, path-mapping and Docker restart acceptance tests;
+- perform real SAB/NZBGet, mounted path-mapping and Docker restart acceptance
+  tests (the read-only health API is implemented; real deployment acceptance is not);
 - only during the later global Wishlist cutover, replace the compatibility
   Wishlist output with direct Acquisition Requests. Do not do this earlier if
   it would bypass or duplicate the established Wishlist/Main-Pipeline behavior.
 
 Correction commits: `e1272be`, `e6484cb`, `2917f3c`, `99ffd2c`, `7d80e96`,
-`e394e2d`, `39549f0`, `e27070f`, `3eb0e92`, `a7344e5`.
+`e394e2d`, `39549f0`, `e27070f`, `3eb0e92`, `a7344e5`, `6bc4d01`,
+`b464543`, `903cbd3`.
 
 ## Verification (per phase, end-to-end in Docker)
 Build the local image (`docker build -t soulsync:dev .`), run with the user's real config+DB copy + the

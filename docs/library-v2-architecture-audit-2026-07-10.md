@@ -2090,7 +2090,8 @@ vollständige Bundles.
 - [x] Cancel-State-Machine und Remove-Bestätigung im bestehenden Usenet-Poller.
 - [x] Timeout trennt sicheren lokalen Fehler von unklarem externem Submit; unklare
   Submits bleiben offen statt automatisch erneut gesendet zu werden.
-- [ ] Remote Path Mapping Health Check.
+- [x] Remote Path Mapping Health Check; read-only API meldet Mapping-Syntax,
+  erreichbare Ziel-Roots und offene Importpfade ohne Serverpfade offenzulegen.
 - [x] Bundle-Inventarisierung und Edition-Track-Matching.
 - [x] Manual Import bei Ambiguität; manuelle Zuordnungen gehen danach durch
   dieselbe Main-Pipeline und umgehen keine Datei-Checks.
@@ -2206,14 +2207,15 @@ als fertig gelten.
 |---|---|---|
 | LIB2-F01 | **korrigiert** | Gemeinsame `source_policy` wird von DownloadOrchestrator und Acquisition genutzt. `best_quality`, Source-Priority, `hybrid_order` und profile-aware Candidate-Ordering sind nicht mehr implizite Defaults des neuen Pfads. |
 | LIB2-F02/F03 | **korrigiert** | Direkter `bundle_import.py` wurde revertiert. `main_pipeline_bridge.py` übergibt jedes Match an `post_process_matched_download_with_verification`; Main-Pipeline besitzt Quality, Integrity, AcoustID, Tagging, Quarantäne und finalen Pfad. |
-| LIB2-F04 | **Runtime korrigiert, Restart teilweise offen** | Automatische Imports erzeugen einen normalen Legacy-Task und verwenden `requeue_quarantined_task_for_retry`, Candidate Cache, `used_sources`, Source-Budgets und Worker-Suche. Torrent/Usenet haben eigene exhaustive Budgets. Die exakte Candidate-Liste ist nach Prozessneustart noch nicht persistent rekonstruierbar. |
+| LIB2-F04 | **Runtime korrigiert, Restart teilweise offen** | Automatische Imports erzeugen einen normalen Legacy-Task und verwenden `requeue_quarantined_task_for_retry`, Candidate Cache, `used_sources`, Source-Budgets und Worker-Suche. Torrent/Usenet haben eigene exhaustive Budgets. Läuft die Worker-Suche leer, werden Import/Request sauber `failed` und der Release exakt blocklisted statt ewig `importing` zu bleiben. Die exakte Candidate-Liste ist nach Prozessneustart noch nicht persistent rekonstruierbar. |
 | LIB2-F05 | **bewusst wiederverwendet** | `lib2_upgrade_scan` bleibt absichtlich der periodische Selector und `mirror_tracks_wishlist` der Kompatibilitätsadapter in die bewährte Wishlist/Main-Pipeline. Nur `until_top`/`until_cutoff` werden geprüft; Primary-Datei, Cutoff und exakte Quality-Profile-ID werden erneut validiert. Ein direkter Acquisition-Output ist erst Teil des globalen Wishlist-Cutovers und darf die bestehende Pipeline nicht duplizieren. |
 | LIB2-F06 | **korrigiert** | Acquisition-Marker überleben den bestehenden Quarantäne-Sidecar. Approve durchläuft dieselbe Pipeline erneut, überspringt nur den bestätigten Check und meldet erst nach allen übrigen Checks persistent Erfolg. |
 | LIB2-F07 | **teilweise korrigiert** | Success und Quarantäne werden persistent pro Import/Track gespeichert. Nach Restart wird eine bekannte schlechte Datei nicht blind erneut importiert; manuelles Approve bleibt möglich. Cached Candidates, `used_sources` und automatische Retry-Fortsetzung sind noch in-memory. |
-| LIB2-F08 | **teilweise korrigiert** | Gezielte Tests decken Source Policy, Main-Pipeline-Bridge, Quarantäne, Approve-Kontext, Library-ID über Candidate-Retry, Release-Source-Budgets und periodischen Upgrade-Scan ab. Full Suite und reale Client-/Docker-Abnahme stehen noch aus. |
+| LIB2-F08 | **teilweise korrigiert** | Gezielte Tests decken Source Policy, Main-Pipeline-Bridge, Quarantäne, Approve-Kontext, Library-ID über Candidate-Retry, Release-Source-Budgets, Path Health und periodischen Upgrade-Scan ab. Das breite Paritätsgate steht bei 854 Tests. Full Suite und reale Client-/Docker-Abnahme stehen noch aus. |
 
 Relevante Korrektur-Commits: `e1272be`, `e6484cb`, `2917f3c`, `99ffd2c`,
-`7d80e96`, `e394e2d`, `39549f0`, `e27070f`, `3eb0e92`, `a7344e5`.
+`7d80e96`, `e394e2d`, `39549f0`, `e27070f`, `3eb0e92`, `a7344e5`,
+`6bc4d01`, `b464543`, `903cbd3`.
 
 #### Live-Abnahme
 
@@ -2359,6 +2361,7 @@ ADR-Log in §25a.
 | Phase-5 Import-Fundament | Persistente Bundle-Inventare und eindeutiges Edition-/Track-Matching; Ambiguität bleibt im Review statt teilweise zu importieren. Zentraler Client-Monitor führt completed Grabs auch nach Restart in den Import-Coordinator. | `6090847`, `dc546d5`, `7d80e96`, `e394e2d` |
 | Main-Pipeline-Parität | Der direkte Bundle-Importer ist entfernt. Matches gehen als Kontextadapter durch die bestehende Post-Processing-Pipeline; Success, Quarantäne und spätere Freigabe werden pro Acquisition-Import persistiert. Exakte Lib2-Track-Identität bleibt über Candidate-Retries erhalten. | `e1272be`, `2917f3c`, `99ffd2c`, `39549f0`, `e27070f` |
 | Source-/Upgrade-Wiederverwendung | Gemeinsame Source Policy erhält `best_quality`, Prioritätsmodus und `hybrid_order`; Release-Quellen besitzen korrekte Retry-Budgets. Der periodische Lib2-Upgrade-Scan verwendet weiter Cutoff-/Top-Auswertung und die normale Wishlist/Main-Pipeline. | `e6484cb`, `3eb0e92`, `a7344e5` |
+| Retry-Ende/Path Health | Eine erschöpfte alte Worker-Suche beendet Import/Request retryfähig und blocklistet den Release; offene Quarantäne bleibt für Approve erhalten. Der redigierte Health-Endpunkt diagnostiziert Mapping-Konfiguration und offene Importpfade ohne Remote-/Local-Pfade zu senden. | `6bc4d01`, `b464543` |
 
 #### Verifizierter Teststand (2026-07-12)
 
@@ -2378,6 +2381,9 @@ ADR-Log in §25a.
   Commits enthalten.
 - Zusätzliches gezieltes Gate für den neuen Acquisition-/Library-v2-/Usenet-Pfad
   vor der Vollsuite: **177 bestanden**, Ruff und `py_compile` ohne Fehler.
+- Aktuelles breites Paritätsgate nach der Main-Pipeline-Korrektur (Acquisition,
+  Downloads, Import-Pipeline, Autolink, Quality/Upgrade): **854 bestanden**
+  (2026-07-12, Commit `903cbd3`; Full Suite folgt als Abschlussgate).
 
 #### Bewusst noch offen
 
@@ -2397,10 +2403,10 @@ ADR-Log in §25a.
   Category-Adoption für Phase 5 sind vorhanden; `submission_unknown` bleibt
   zur Duplicate-Vermeidung bewusst offen, wenn der Client noch keine sichere
   Korrelation liefert.
-- [ ] Phase 5 Rest: Remote-Path-Health-API, persistenter automatischer
-  Next-Candidate-Resume nach Prozessneustart, vollständige Paritätsmatrix und
-  reale SAB/NZBGet-/Docker-Abnahme. Inventar, Matching, `acquisition_imports`,
-  Review und Main-Pipeline-Übergabe sind umgesetzt.
+- [ ] Phase 5 Rest: persistenter automatischer Next-Candidate-Resume nach
+  Prozessneustart, vollständige Paritätsmatrix und reale SAB/NZBGet-/Docker-
+  Abnahme mit echten Mounts. Path-Health-API, Inventar, Matching,
+  `acquisition_imports`, Review und Main-Pipeline-Übergabe sind umgesetzt.
 - [ ] `file_state`-Lifecycle mit dem Scan verdrahten (P2-02): Missing-
   Erkennung setzt die Zustände noch nicht automatisch.
 
@@ -2415,8 +2421,8 @@ geschlossen. P0-04 wurde mit strikter Fehlerweitergabe im
 Outbox-Worker nachgehärtet (`895d27e`) und durch den periodischen Reconciler
 (`3ca3000`) ergänzt; der manuelle Grab-Pfad übergibt das serverseitige Profil
 nachweislich an die Pipeline und ist für Nicht-Admins gesperrt (`a7b08a8`).
-Als Nächstes: Phase-5-Rest mit durablem Retry-Resume, Remote-Path-Health und
-realer Client-Abnahme; danach Phase 6. Phase-3-Rest (External-/Old-ID-History und
+Als Nächstes: Phase-5-Rest mit durablem Retry-Resume und realer
+Client-/Mount-Abnahme; danach Phase 6. Phase-3-Rest (External-/Old-ID-History und
 Field-Level-Overrides) bleibt parallel offen, ist aber keine Voraussetzung mehr für
 den abgeschlossenen Phase-4-Domänenkern.
 
