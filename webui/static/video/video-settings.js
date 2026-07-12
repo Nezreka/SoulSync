@@ -745,6 +745,8 @@
         chk('vo-recycle', _videoOrg.recycle_deletes);
         set('vo-recycle-days', _videoOrg.recycle_keep_days || 7);
         set('vo-recycle-path', _videoOrg.recycle_path || '');
+        set('vo-sponsorblock', _videoOrg.youtube_sponsorblock || 'off');
+        chk('vo-yt-subs', _videoOrg.youtube_embed_subs);
         renderOrgPreview();
     }
     function loadOrganization() {
@@ -770,7 +772,9 @@
             subtitle_langs: val('vo-sub-langs'),
             recycle_deletes: on('vo-recycle'),
             recycle_keep_days: val('vo-recycle-days'),
-            recycle_path: val('vo-recycle-path')
+            recycle_path: val('vo-recycle-path'),
+            youtube_sponsorblock: val('vo-sponsorblock'),
+            youtube_embed_subs: on('vo-yt-subs')
         };
     }
     function saveOrganization(silent) {
@@ -794,7 +798,8 @@
             el.addEventListener('change', function () { saveOrganization(false); });
         });
         ['vo-transfer-mode', 'vo-verify', 'vo-replace', 'vo-subs', 'vo-artwork', 'vo-nfo',
-            'vo-subs-dl', 'vo-sub-langs', 'vo-recycle', 'vo-recycle-days', 'vo-recycle-path'].forEach(function (id) {
+            'vo-subs-dl', 'vo-sub-langs', 'vo-recycle', 'vo-recycle-days', 'vo-recycle-path',
+            'vo-sponsorblock', 'vo-yt-subs'].forEach(function (id) {
             var el = document.getElementById(id);
             if (el) el.addEventListener('change', function () { saveOrganization(false); });
         });
@@ -808,7 +813,8 @@
                     transfer_mode: 'copy', verify_with_ffprobe: true, replace_existing: true,
                     carry_subtitles: true, save_artwork: false, write_nfo: false,
                     download_subtitles: false, subtitle_langs: 'en',
-                    recycle_deletes: true, recycle_keep_days: 7, recycle_path: '' })
+                    recycle_deletes: true, recycle_keep_days: 7, recycle_path: '',
+                    youtube_sponsorblock: 'off', youtube_embed_subs: false })
             }).then(function (r) { return r.ok ? r.json() : null; })
               .then(function (d) { if (d) { _videoOrg = d; fillOrg(); toast('Reset to the standard layout', 'success'); } });
         });
