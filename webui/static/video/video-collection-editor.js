@@ -706,6 +706,28 @@
             tabs.appendChild(b);
         });
         head.appendChild(tabs);
+        // Refresh studio/network data from TMDB — the media-server scan only stores ONE company
+        // per title, so studio/network packs undercount until we re-pull the full list from TMDB.
+        var refreshBtn = h('button', 'vce-btn vce-btn--ghost', (I.spark || '') + 'Refresh studio data');
+        refreshBtn.type = 'button';
+        refreshBtn.title = 'Re-pull full metadata from TMDB so studio & network collections capture EVERY company, not just the first. Runs in the background.';
+        refreshBtn.addEventListener('click', function () {
+            ask({ title: 'Refresh studio & network data from TMDB?',
+                  message: 'Your server only stores one studio/network per title, so those collections undercount. This re-pulls the full company list from TMDB for every matched movie & show, in the background (watch the TMDB worker under Enrichment). Rebuild your collections once it finishes. On a big library it can take a while.',
+                  confirmText: 'Refresh from TMDB' }).then(function (ok) {
+                if (!ok) return;
+                refreshBtn.disabled = true;
+                fetch('/api/video/enrichment/resync-details', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                    body: JSON.stringify({ kind: 'all' })
+                }).then(function (r) { return r.json(); }).then(function (d) {
+                    refreshBtn.disabled = false;
+                    if (d && d.success) toast((d.queued || 0) + ' titles queued — refreshing from TMDB in the background');
+                    else toast((d && d.error) || 'Could not start the refresh', true);
+                }).catch(function () { refreshBtn.disabled = false; toast('Could not start the refresh', true); });
+            });
+        });
+        head.appendChild(refreshBtn);
         page.appendChild(head);
         page.appendChild(h('p', 'vce-pressub',
             'Ready-made collection packs, built from what you actually own — pick a pack, tick what you want, done.'));
