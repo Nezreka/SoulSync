@@ -484,7 +484,8 @@ Still open before LIB2-011/Phase 5 can be called complete:
   Next-Candidate continuation after a process restart. Current persistence
   prevents blind redispatch of the quarantined file and preserves manual
   approval, but does not recreate the old worker's in-memory candidate list;
-- prove the complete old-vs-Library-v2 parity matrix and run the full suite;
+- extend the old-vs-Library-v2 parity matrix for real client behavior. The
+  complete Python suite is green (8031 passed, 7 skipped, 2 deselected);
 - perform real SAB/NZBGet, mounted path-mapping and Docker restart acceptance
   tests (the read-only health API is implemented; real deployment acceptance is not);
 - only during the later global Wishlist cutover, replace the compatibility

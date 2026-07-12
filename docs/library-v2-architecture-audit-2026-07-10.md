@@ -2211,7 +2211,7 @@ als fertig gelten.
 | LIB2-F05 | **bewusst wiederverwendet** | `lib2_upgrade_scan` bleibt absichtlich der periodische Selector und `mirror_tracks_wishlist` der Kompatibilitätsadapter in die bewährte Wishlist/Main-Pipeline. Nur `until_top`/`until_cutoff` werden geprüft; Primary-Datei, Cutoff und exakte Quality-Profile-ID werden erneut validiert. Ein direkter Acquisition-Output ist erst Teil des globalen Wishlist-Cutovers und darf die bestehende Pipeline nicht duplizieren. |
 | LIB2-F06 | **korrigiert** | Acquisition-Marker überleben den bestehenden Quarantäne-Sidecar. Approve durchläuft dieselbe Pipeline erneut, überspringt nur den bestätigten Check und meldet erst nach allen übrigen Checks persistent Erfolg. |
 | LIB2-F07 | **teilweise korrigiert** | Success und Quarantäne werden persistent pro Import/Track gespeichert. Nach Restart wird eine bekannte schlechte Datei nicht blind erneut importiert; manuelles Approve bleibt möglich. Cached Candidates, `used_sources` und automatische Retry-Fortsetzung sind noch in-memory. |
-| LIB2-F08 | **teilweise korrigiert** | Gezielte Tests decken Source Policy, Main-Pipeline-Bridge, Quarantäne, Approve-Kontext, Library-ID über Candidate-Retry, Release-Source-Budgets, Path Health und periodischen Upgrade-Scan ab. Das breite Paritätsgate steht bei 854 Tests. Full Suite und reale Client-/Docker-Abnahme stehen noch aus. |
+| LIB2-F08 | **Code-Gates korrigiert, Live-Abnahme offen** | Gezielte Tests decken Source Policy, Main-Pipeline-Bridge, Quarantäne, Approve-Kontext, Library-ID über Candidate-Retry, Release-Source-Budgets, Path Health und periodischen Upgrade-Scan ab. Das breite Paritätsgate steht bei 854 Tests; die Full Suite ist mit 8031 Tests grün. Reale Client-/Docker-Abnahme steht noch aus. |
 
 Relevante Korrektur-Commits: `e1272be`, `e6484cb`, `2917f3c`, `99ffd2c`,
 `7d80e96`, `e394e2d`, `39549f0`, `e27070f`, `3eb0e92`, `a7344e5`,
@@ -2365,9 +2365,9 @@ ADR-Log in §25a.
 
 #### Verifizierter Teststand (2026-07-12)
 
-- Vollständige Backend-Suite (`pytest tests`): **7928 bestanden, 7 übersprungen,
-  2 deselektiert, 0 Fehler** (2026-07-12, Commit `672c9ba`, einschließlich des
-  Phase-4-Acquisition-Pfads samt neuer Usenet-Submit-Grenze; Laufzeit 8:38 min). Zwei
+- Vollständige Backend-Suite (`pytest tests -q`): **8031 bestanden, 7 übersprungen,
+  2 deselektiert, 0 Fehler** (2026-07-12, Commit `aed5a04`, einschließlich der
+  Main-Pipeline-Korrektur und des Phase-5-Importpfads; Laufzeit 15:57 min). Zwei
   bekannte RuntimeWarnings aus Automation-Mocktests, keine Testfehler.
 - Frontend: `oxfmt --check` und `oxlint --type-check`: **0 Warnungen,
   0 Fehler**; Vitest: **96/96 bestanden**; Vite-Produktionsbuild erfolgreich.
@@ -2383,7 +2383,7 @@ ADR-Log in §25a.
   vor der Vollsuite: **177 bestanden**, Ruff und `py_compile` ohne Fehler.
 - Aktuelles breites Paritätsgate nach der Main-Pipeline-Korrektur (Acquisition,
   Downloads, Import-Pipeline, Autolink, Quality/Upgrade): **854 bestanden**
-  (2026-07-12, Commit `903cbd3`; Full Suite folgt als Abschlussgate).
+  (2026-07-12, Commit `903cbd3`).
 
 #### Bewusst noch offen
 
