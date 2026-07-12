@@ -39504,6 +39504,27 @@ def _emit_download_status_loop():
         except Exception as e:
             logger.debug(f"Error in download status emit loop: {e}")
 
+# --- Server Activity (Tautulli replacement) live push ---
+# Subscriber-gated: one Plex/Jellyfin poll per tick broadcast to EVERY open drawer
+# (the multi-client dedup win — N users watching = 1 upstream poll, not N), and the
+# loop idles completely when nobody has the drawer open.
+_activity_sids = set()
+_activity_sids_lock = threading.Lock()
+
+def _emit_server_activity_loop():
+    """Push live server activity to subscribed drawers every 3s. Skips the upstream
+    poll entirely when no client is subscribed, so it costs nothing at rest."""
+    while not globals().get('IS_SHUTTING_DOWN', False):
+        socketio.sleep(3)
+        try:
+            with _activity_sids_lock:
+                if not _activity_sids:
+                    continue
+            from core.server_activity import get_activity
+            socketio.emit('activity:update', get_activity(), room='activity:live')
+        except Exception as e:
+            logger.debug(f"Error in server activity emit loop: {e}")
+
 # --- Socket.IO event handlers ---
 
 def _ws_connection_blocked():
@@ -39543,7 +39564,29 @@ def handle_connect():
 
 @socketio.on('disconnect')
 def handle_disconnect():
+    # Drop this client from the server-activity live set so the push loop goes
+    # idle again once the last drawer closes / navigates away.
+    try:
+        with _activity_sids_lock:
+            _activity_sids.discard(request.sid)
+    except Exception:   # noqa: BLE001, S110 - cleanup only; a missing sid is fine
+        pass
     logger.info("WebSocket client disconnected")
+
+@socketio.on('activity:subscribe')
+def handle_activity_subscribe():
+    """A drawer opened → join the live room so the push loop starts feeding it."""
+    join_room('activity:live')
+    with _activity_sids_lock:
+        _activity_sids.add(request.sid)
+    logger.debug("activity: client subscribed (%d live)", len(_activity_sids))
+
+@socketio.on('activity:unsubscribe')
+def handle_activity_unsubscribe():
+    """A drawer closed / left the Activity tab → stop feeding this client."""
+    leave_room('activity:live')
+    with _activity_sids_lock:
+        _activity_sids.discard(request.sid)
 
 @socketio.on('downloads:subscribe')
 def handle_download_subscribe(data):
@@ -40496,6 +40539,8 @@ def start_runtime_services():
         socketio.start_background_task(_emit_service_status_loop)
         socketio.start_background_task(_emit_watchlist_count_loop)
         socketio.start_background_task(_emit_download_status_loop)
+        # Server Activity — subscriber-gated live push (idle when no drawer open)
+        socketio.start_background_task(_emit_server_activity_loop)
         # Phase 2: Dashboard pollers
         socketio.start_background_task(_emit_system_stats_loop)
         socketio.start_background_task(_emit_activity_feed_loop)

@@ -305,6 +305,37 @@
     function startPoll() { stopPoll(); poll = setInterval(refresh, 3000); }   // live cadence
     function stopPoll() { if (poll) { clearInterval(poll); poll = null; } }
 
+    // Live feed: prefer the WebSocket push (one upstream poll shared across every
+    // open drawer — matters when multiple profiles are watching at once) and fall
+    // back to the 3s HTTP poll when there's no socket. A watchdog re-arms HTTP if
+    // the socket is connected but pushes stop landing.
+    var _sockLive = false, _watchdog = null, _lastPush = 0;
+    function onSocket(d) {
+        _lastPush = Date.now();
+        if (d) setBadge((d.summary && d.summary.streams) || 0);
+        if (isOpen && tab === 'activity') renderActivity(d);
+    }
+    function startLive() {
+        stopLive();
+        refresh();   // instant HTTP paint — don't wait up to 3s for the first push
+        var s = window.SoulSyncActivitySocket;
+        if (s && s.isConnected()) {
+            s.subscribe(); _sockLive = true; _lastPush = Date.now();
+            _watchdog = setInterval(function () {
+                if (_sockLive && Date.now() - _lastPush > 9000) { _sockLive = false; startPoll(); }
+            }, 3000);
+        } else {
+            startPoll();
+        }
+    }
+    function stopLive() {
+        stopPoll();
+        if (_watchdog) { clearInterval(_watchdog); _watchdog = null; }
+        var s = window.SoulSyncActivitySocket;
+        if (_sockLive && s) s.unsubscribe();
+        _sockLive = false;
+    }
+
     function setTab(t) {
         tab = t;
         if (drawer) drawer.querySelectorAll('[data-sact-tab]').forEach(function (b) {
@@ -313,9 +344,9 @@
         var body = _body();
         if (body) body.innerHTML = '<div class="sact-empty"><div class="sact-empty-ic">…</div>' +
             '<div class="sact-empty-t">Loading…</div></div>';
-        if (t === 'activity') { refresh(); startPoll(); }
-        else if (t === 'history') { stopPoll(); loadHistory(); }
-        else { stopPoll(); loadStats(); }
+        if (t === 'activity') { startLive(); }
+        else if (t === 'history') { stopLive(); loadHistory(); }
+        else { stopLive(); loadStats(); }
     }
 
     // ── drawer open/close ─────────────────────────────────────────────────────
@@ -369,7 +400,7 @@
         isOpen = false;
         if (drawer) drawer.classList.remove('visible');
         if (_scrim()) _scrim().classList.remove('visible');
-        stopPoll();
+        stopLive();
         if (ticker) { clearInterval(ticker); ticker = null; }
     }
     function toggle() { isOpen ? close() : open(); }
@@ -429,7 +460,10 @@
         badgePoll = setInterval(function () { if (!isOpen) refresh(); }, 20000);
     }
 
-    window.ServerActivity = { toggle: toggle, open: open, close: close, refresh: refresh };
+    window.ServerActivity = {
+        toggle: toggle, open: open, close: close, refresh: refresh,
+        _onSocket: onSocket, _wantsLive: function () { return isOpen && tab === 'activity'; }
+    };
     if (document.readyState === 'loading')
         document.addEventListener('DOMContentLoaded', startBadgePoll);
     else startBadgePoll();
