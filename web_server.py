@@ -9214,6 +9214,66 @@ def _build_source_only_artist_detail(artist_id, artist_name, source):
     return jsonify(payload), status
 
 
+def _load_owned_release_source_refs(database, artist_info):
+    """Return provider album IDs keyed by the grouped local album ID.
+
+    The query mirrors ``MusicDatabase.get_artist_discography`` grouping so split
+    media-server album rows resolve to the same local card ID.
+    """
+    refs = {}
+    try:
+        with database._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT
+                    MIN(a.id) AS local_album_id,
+                    MAX(a.itunes_album_id) AS itunes_album_id,
+                    MAX(a.deezer_id) AS deezer_id,
+                    MAX(a.musicbrainz_release_id) AS musicbrainz_release_id,
+                    MAX(a.spotify_album_id) AS spotify_album_id
+                FROM albums a
+                JOIN artists ar ON ar.id = a.artist_id
+                WHERE ar.name = ? AND ar.server_source = ?
+                GROUP BY a.artist_id, a.title, a.year
+                """,
+                (artist_info.get('name', ''), artist_info.get('server_source', '')),
+            )
+            for row in cursor.fetchall():
+                refs[str(row['local_album_id'])] = {
+                    'itunes_album_id': row['itunes_album_id'],
+                    'deezer_id': row['deezer_id'],
+                    'musicbrainz_release_id': row['musicbrainz_release_id'],
+                    'spotify_album_id': row['spotify_album_id'],
+                }
+    except Exception as exc:
+        logger.debug("Could not load owned release source IDs: %s", exc)
+    return refs
+
+
+def _build_library_commercial_discography(database, artist_info, owned_releases):
+    """Use iTunes → Deezer for a library artist and merge omitted owned albums."""
+    from core.metadata.library_discography import get_library_artist_discography
+    from core.source_ids import source_id_map
+
+    artist_source_ids = source_id_map(
+        artist_info,
+        'artist',
+        providers=('itunes', 'deezer'),
+    )
+    owned_source_refs = _load_owned_release_source_refs(database, artist_info)
+    return get_library_artist_discography(
+        str(artist_info.get('id') or ''),
+        artist_info.get('name', ''),
+        artist_source_ids,
+        owned_releases=owned_releases,
+        owned_source_refs=owned_source_refs,
+        limit=200,
+        skip_cache=False,
+        max_pages=0,
+    )
+
+
 @app.route('/api/artist-detail/<artist_id>')
 def get_artist_detail(artist_id):
     """Get artist detail data.
@@ -9322,52 +9382,31 @@ def get_artist_detail(artist_id):
             if single.get('image_url'):
                 single['image_url'] = fix_artist_image_url(single['image_url'])
 
-        # Get source-priority discography for proper categorization and missing releases
-        artist_detail_discography = None
+        # Library artist pages deliberately use a commercial catalogue rather
+        # than the configured metadata primary source. iTunes is preferred,
+        # Deezer is the only external fallback, and owned local releases omitted
+        # by both catalogues are merged back into the result.
         try:
-            from core.metadata.lookup import MetadataLookupOptions
-            from core.metadata_service import get_artist_detail_discography as _get_artist_detail_discography
-            from core.source_ids import source_id_map
-
-            # Per-source artist IDs, read via the canonical source-ID registry
-            # (same columns as before: spotify_artist_id / deezer_id /
-            # itunes_artist_id / discogs_id / soul_id / amazon_id).
-            artist_source_ids = source_id_map(
-                artist_info, 'artist',
-                providers=('spotify', 'deezer', 'itunes', 'discogs', 'hydrabase', 'amazon'),
+            artist_detail_discography = _build_library_commercial_discography(
+                database, artist_info, owned_releases
             )
-
-            artist_detail_discography = _get_artist_detail_discography(
-                artist_id,
-                artist_name=artist_info['name'],
-                options=MetadataLookupOptions(
-                    allow_fallback=True,
-                    skip_cache=False,
-                    max_pages=0,
-                    # Match the Download Discography endpoint cap (200)
-                    # so the artist detail view sees the same release
-                    # set the modal lists. Spotify already paginates
-                    # all; Deezer/iTunes/Discogs/Hydrabase respect the
-                    # outer limit. 200 matches iTunes/Discogs internal
-                    # caps and covers prolific catalogues.
-                    limit=200,
-                    artist_source_ids=artist_source_ids,
-                ),
-            )
-
             if artist_detail_discography['success']:
                 logger.debug(
-                    "Source-priority discography found - "
+                    "Commercial library discography found - "
+                    f"source={artist_detail_discography.get('source')}, "
                     f"Albums: {len(artist_detail_discography['albums'])}, "
                     f"EPs: {len(artist_detail_discography['eps'])}, "
                     f"Singles: {len(artist_detail_discography['singles'])}"
                 )
                 merged_discography = artist_detail_discography
             else:
-                logger.debug(f"Source-priority discography not found: {artist_detail_discography.get('error', 'Unknown error')}")
+                logger.debug(
+                    "Commercial library discography not found: %s",
+                    artist_detail_discography.get('error', 'Unknown error'),
+                )
                 merged_discography = owned_releases
         except Exception as detail_error:
-            logger.error(f"Error fetching source-priority discography: {detail_error}")
+            logger.error(f"Error fetching commercial library discography: {detail_error}")
             merged_discography = owned_releases
 
         spotify_artist_data = None
@@ -9861,13 +9900,15 @@ def get_artist_discography(artist_id):
         # With server-side resolution, every source gets its OWN stored
         # ID regardless of which one the URL carries.
         artist_source_ids = {}
+        library_db_result = None
+        _db = None
         try:
             _db = get_database()
             _conn = _db._get_connection()
             try:
                 _cur = _conn.cursor()
                 _cur.execute("""
-                    SELECT spotify_artist_id, itunes_artist_id,
+                    SELECT id, spotify_artist_id, itunes_artist_id,
                            deezer_id, musicbrainz_id
                     FROM artists
                     WHERE id = ?
@@ -9887,6 +9928,8 @@ def get_artist_discography(artist_id):
                         artist_source_ids['deezer'] = str(_row['deezer_id'])
                     if _row['musicbrainz_id']:
                         artist_source_ids['musicbrainz'] = str(_row['musicbrainz_id'])
+                    if not effective_override_source:
+                        library_db_result = _db.get_artist_discography(str(_row['id']))
                     logger.info(
                         f"Discography: resolved per-source IDs for artist_id={artist_id} → "
                         f"{artist_source_ids}"
@@ -9896,28 +9939,35 @@ def get_artist_discography(artist_id):
         except Exception as _id_exc:
             logger.debug(f"Could not resolve per-source artist IDs for {artist_id}: {_id_exc}")
 
-        discography = _get_artist_discography(
-            artist_id,
-            artist_name=artist_name,
-            options=MetadataLookupOptions(
-                source_override=effective_override_source,
-                allow_fallback=True,
-                skip_cache=False,
-                max_pages=0,
-                # Discord report: prolific artists (Bach, Beatles
-                # complete box, deep dance/electronic catalogues)
-                # showed only ~50 entries in the Download Discography
-                # modal. Spotify's `max_pages=0` already paginates
-                # through everything (per-page is clamped to 10
-                # internally), but Deezer / iTunes / Discogs /
-                # Hydrabase all honor the outer `limit` as a hard
-                # cap. 200 lines up with iTunes's and Discogs's own
-                # internal caps and covers near-everyone's full
-                # catalogue.
-                limit=200,
-                artist_source_ids=artist_source_ids or None,
-            ),
-        )
+        if library_db_result and library_db_result.get('success') and _db is not None:
+            discography = _build_library_commercial_discography(
+                _db,
+                library_db_result['artist'],
+                library_db_result['owned_releases'],
+            )
+        else:
+            discography = _get_artist_discography(
+                artist_id,
+                artist_name=artist_name,
+                options=MetadataLookupOptions(
+                    source_override=effective_override_source,
+                    allow_fallback=True,
+                    skip_cache=False,
+                    max_pages=0,
+                    # Discord report: prolific artists (Bach, Beatles
+                    # complete box, deep dance/electronic catalogues)
+                    # showed only ~50 entries in the Download Discography
+                    # modal. Spotify's `max_pages=0` already paginates
+                    # through everything (per-page is clamped to 10
+                    # internally), but Deezer / iTunes / Discogs /
+                    # Hydrabase all honor the outer `limit` as a hard
+                    # cap. 200 lines up with iTunes's and Discogs's own
+                    # internal caps and covers near-everyone's full
+                    # catalogue.
+                    limit=200,
+                    artist_source_ids=artist_source_ids or None,
+                ),
+            )
 
         album_list = discography['albums']
         eps_list = discography.get('eps', [])
@@ -10898,10 +10948,11 @@ def library_completion_stream():
                         'album_type': item.get('album_type', 'album')
                     }
 
+                    item_source_override = (item.get('source') or source_override or '').strip().lower() or None
                     if category == 'singles':
-                        result = check_single_completion(db, mapped, artist_name, source_override=source_override, candidate_albums=candidate_albums, candidate_tracks=candidate_tracks)
+                        result = check_single_completion(db, mapped, artist_name, source_override=item_source_override, candidate_albums=candidate_albums, candidate_tracks=candidate_tracks)
                     else:
-                        result = check_album_completion(db, mapped, artist_name, source_override=source_override, candidate_albums=candidate_albums)
+                        result = check_album_completion(db, mapped, artist_name, source_override=item_source_override, candidate_albums=candidate_albums)
 
                     result['id'] = item['id']
                     result['category'] = category

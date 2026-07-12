@@ -2081,10 +2081,17 @@ function createReleaseCard(release) {
                 return;
             }
 
-            // Load tracks for the album (pass name/artist for Hydrabase support)
+            // Load tracks through the release's own provider. Locally merged
+            // cards may use Deezer/MusicBrainz even when the main catalogue is iTunes.
+            const releaseSource = (rel.source || currentArtist.source || '').toString().toLowerCase();
+            if (releaseSource === 'library' || rel.downloadable === false) {
+                hideLoadingOverlay();
+                showToast(`${rel.title} is already in the library and has no external track source.`, 'info');
+                return;
+            }
             const _aat2 = new URLSearchParams({ name: albumData.name || '', artist: currentArtist.name || '' });
-            if (currentArtist.source) {
-                _aat2.set('source', currentArtist.source);
+            if (releaseSource) {
+                _aat2.set('source', releaseSource);
             }
             const response = await fetch(`/api/album/${albumData.id}/tracks?${_aat2}`);
             if (!response.ok) {
@@ -2672,16 +2679,23 @@ function _esc(s) { const d = document.createElement('div'); d.textContent = s; r
 // Artist Detail cards and the Download Discography modal so they can't drift.
 function _classifyReleaseContent(release) {
     const t = (release && (release.title || release.name)) || '';
-    // Title-based classification, shared by all sources and the download modal.
-    // On MusicBrainz artist pages the data-is-live attribute is recomputed
-    // authoritatively from secondary_types in populateDiscographySections (MB tags
-    // live/non-studio reliably), so this title heuristic only governs non-MB here.
+    // Prefer provider classifications when available. Title patterns remain
+    // as a fallback for commercial sources and the Download Discography modal.
+    // MusicBrainz artist cards are subsequently recomputed by
+    // populateDiscographySections using its broader non-studio classification.
+    const secondaryTypes = new Set(
+        (Array.isArray(release?.secondary_types) ? release.secondary_types : [])
+            .map(value => String(value).trim().toLowerCase())
+            .filter(Boolean)
+    );
     const livePattern = /\b(live)\b|\(live[^)]*\)|\[live[^\]]*\]/i;
     const compilationPattern = /\b(greatest hits|best of|collection|anthology|essential)\b/i;
     const featuredPattern = /\(?\bfeat\.?\s|\bft\.?\s|\bfeaturing\b/i;
     return {
-        isLive: livePattern.test(t),
-        isCompilation: (release && release.album_type === 'compilation') || compilationPattern.test(t),
+        isLive: secondaryTypes.has('live') || livePattern.test(t),
+        isCompilation: secondaryTypes.has('compilation')
+            || (release && release.album_type === 'compilation')
+            || compilationPattern.test(t),
         isFeatured: featuredPattern.test(t),
     };
 }
@@ -2689,20 +2703,22 @@ function _classifyReleaseContent(release) {
 function _renderDiscogCard(release, index, completionData) {
     const comp = completionData?.albums?.find(c => c.id === release.id) || completionData?.singles?.find(c => c.id === release.id);
     const status = comp?.status || 'unknown';
-    const isOwned = status === 'completed';
-    const isPartial = status === 'partial' || status === 'nearly_complete';
+    const isOwned = release.owned === true || status === 'completed';
+    const isPartial = !isOwned && (status === 'partial' || status === 'nearly_complete');
     const year = release.release_date ? release.release_date.substring(0, 4) : '';
     const tracks = release.total_tracks || release.track_count || 0;
     const img = release.image_url || '';
     const cc = _classifyReleaseContent(release);
-    const checked = !isOwned;
+    const releaseSource = (release.source || '').toString().toLowerCase();
+    const downloadable = release.downloadable !== false && releaseSource !== 'library';
+    const checked = !isOwned && downloadable;
     const statusClass = isOwned ? 'owned' : isPartial ? 'partial' : '';
     const statusIcon = isOwned ? '✓' : isPartial ? '◐' : '';
 
     const albumName = release.name || release.title || '';
     return `
-        <label class="discog-card ${statusClass}" data-type="${release._type}" data-is-live="${cc.isLive}" data-is-compilation="${cc.isCompilation}" data-is-featured="${cc.isFeatured}" style="animation-delay:${index * 0.03}s">
-            <input type="checkbox" class="discog-card-cb" data-album-id="${release.id}" data-album-name="${_esc(albumName)}" data-tracks="${tracks}" ${checked ? 'checked' : ''} onchange="_updateDiscogFooterCount()">
+        <label class="discog-card ${statusClass}" data-type="${release._type}" data-source="${releaseSource}" data-is-live="${cc.isLive}" data-is-compilation="${cc.isCompilation}" data-is-featured="${cc.isFeatured}" style="animation-delay:${index * 0.03}s">
+            <input type="checkbox" class="discog-card-cb" data-album-id="${release.id}" data-album-name="${_esc(albumName)}" data-source="${releaseSource}" data-tracks="${tracks}" ${checked ? 'checked' : ''} ${downloadable ? '' : 'disabled'} onchange="_updateDiscogFooterCount()">
             <div class="discog-card-art">
                 ${img ? `<img src="${img}" alt="" loading="lazy">` : '<div class="discog-card-art-placeholder">🎵</div>'}
                 ${statusIcon ? `<span class="discog-card-status">${statusIcon}</span>` : ''}
@@ -2789,6 +2805,7 @@ async function startDiscographyDownload() {
             albumEntries.push({
                 id: cb.dataset.albumId,
                 name: cb.dataset.albumName || '',
+                source: (cb.dataset.source || '').toLowerCase() || null,
                 tracks: parseInt(cb.dataset.tracks) || 0
             });
         }
@@ -2856,7 +2873,7 @@ async function startDiscographyDownload() {
         id: e.id,
         name: e.name,
         artist_name: artist.name,
-        source: sourceForBatch,
+        source: e.source || sourceForBatch,
     }));
 
     try {
