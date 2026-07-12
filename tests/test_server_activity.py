@@ -15,12 +15,18 @@ import pytest
 from core.server_activity import get_activity, normalize_session
 
 
+class _EmptyVDB:
+    def items_by_server_ids(self, ids, server_source=None):
+        return []
+
+
 @pytest.fixture(autouse=True)
-def _no_jellyfin(monkeypatch):
-    """Isolate get_activity tests from any real Jellyfin config in the env —
-    Jellyfin-specific tests override this."""
+def _isolate(monkeypatch):
+    """Isolate get_activity tests from any real Jellyfin config + video library in
+    the env. Jellyfin/link-specific tests override these."""
     import core.server_activity as sa
     monkeypatch.setattr(sa, "_jellyfin_activity", lambda db=None: ([], None))
+    monkeypatch.setattr("api.video.get_video_db", lambda: _EmptyVDB())
 
 
 def _media(res="1080", vcodec="hevc", acodec="eac3", bitrate=12000, container="mkv"):
@@ -357,6 +363,47 @@ def test_activity_merges_plex_and_jellyfin(monkeypatch):
     assert "Heat" in titles and "Dune" in titles
 
 
+# ── click-through: resolve a stream to its SoulSync library page ─────────────
+def test_normalize_captures_link_ids():
+    m = normalize_session(_movie(ratingKey=100))
+    assert m["_link_sid"] == "100"                    # movie links to itself
+    ep = normalize_session(_movie(type="episode", grandparentRatingKey=200))
+    assert ep["_link_sid"] == "200"                   # episode links to its SHOW
+    tr = normalize_session(_movie(type="track"))
+    assert tr["_link_sid"] == ""                       # music: no video detail to link
+
+
+def test_resolve_library_links(monkeypatch):
+    import core.server_activity as sa
+
+    class _VDB:
+        def items_by_server_ids(self, ids, server_source=None):
+            return [{"kind": "movie", "id": 7, "tmdb_id": 603, "server_id": "100", "title": "Heat"},
+                    {"kind": "show", "id": 9, "tmdb_id": 1396, "server_id": "200", "title": "BB"}]
+    monkeypatch.setattr("api.video.get_video_db", lambda: _VDB())
+    sessions = [
+        {"media_type": "movie", "_link_sid": "100", "link": None},
+        {"media_type": "episode", "_link_sid": "200", "link": None},
+        {"media_type": "movie", "_link_sid": "999", "link": None},   # not owned
+    ]
+    sa._resolve_library_links(sessions)
+    assert sessions[0]["link"] == {"kind": "movie", "id": 7, "source": "library"}
+    assert sessions[1]["link"] == {"kind": "show", "id": 9, "source": "library"}
+    assert sessions[2]["link"] is None                # not in library → not clickable
+    assert all("_link_sid" not in s for s in sessions)   # internal field cleaned up
+
+
+def test_resolve_links_kind_mismatch_is_ignored(monkeypatch):
+    import core.server_activity as sa
+    # a movie ratingKey that (bizarrely) matches a show row must NOT link
+    monkeypatch.setattr("api.video.get_video_db", lambda: type("D", (), {
+        "items_by_server_ids": lambda s, ids, server_source=None:
+            [{"kind": "show", "id": 3, "tmdb_id": 1, "server_id": "5", "title": "X"}]})())
+    sessions = [{"media_type": "movie", "_link_sid": "5", "link": None}]
+    sa._resolve_library_links(sessions)
+    assert sessions[0]["link"] is None
+
+
 # ── frontend wiring ──────────────────────────────────────────────────────────
 def test_ui_is_wired():
     from pathlib import Path
@@ -394,6 +441,11 @@ def test_ui_is_wired():
     assert "function actKey" in js and "_actKeys" in js       # key-diffed render (no flicker)
     assert "sact-eq" in js and ".sact-eq" in css              # music equalizer
     assert ".sact-head-dot" in css and "@keyframes sactCardIn" in css
+    # click-through to the SoulSync detail page
+    assert "sact-card--link" in js and "SoulSyncVideo.openDetail" in js
+    assert "data-link-kind" in js and ".sact-card--link" in css
+    vs = (root / "webui" / "static" / "video" / "video-side.js").read_text(encoding="utf-8")
+    assert "window.SoulSyncVideo.openDetail" in vs and "persistSide('video')" in vs
 
 
 def test_web_server_registers_the_routes():

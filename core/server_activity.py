@@ -161,9 +161,18 @@ def normalize_session(item: Any) -> Dict[str, Any]:
     state = str(_g(player, "state", "") or "playing").lower()
     thumb = _g(item, "grandparentThumb") or _g(item, "parentThumb") or _g(item, "thumb")
     art = _g(item, "art") or _g(item, "grandparentArt")
+    # the server id that identifies the SoulSync library row to jump to: a movie
+    # is its own ratingKey; an episode links to its SHOW (grandparentRatingKey).
+    if mtype == "movie":
+        link_sid = str(_g(item, "ratingKey", "") or "")
+    elif mtype == "episode":
+        link_sid = str(_g(item, "grandparentRatingKey", "") or "")
+    else:
+        link_sid = ""
 
     return {
         "session_key": str(_g(item, "sessionKey", "") or _g(sess, "id", "") or ""),
+        "_link_sid": link_sid, "link": None,
         "media_type": mtype,
         "title": names["title"],
         "subtitle": names["subtitle"],
@@ -238,8 +247,10 @@ def normalize_jellyfin(s: Dict[str, Any], npi: Dict[str, Any]) -> Dict[str, Any]
     item_id = str(npi.get("Id") or "")
     thumb = ("jf:" + item_id) if item_id else ""
     br = int(ti.get("Bitrate") or 0) // 1000
+    link_sid = item_id if mtype == "movie" else (str(npi.get("SeriesId") or "") if mtype == "episode" else "")
     return {
         "session_key": "",   # no stop button — our terminate path is Plex-only
+        "_link_sid": link_sid, "link": None,
         "media_type": mtype, "title": str(npi.get("Name") or ""),
         "subtitle": subtitle, "grandparent": gp, "thumb": thumb, "art": thumb,
         "duration_ms": dur, "offset_ms": off,
@@ -300,6 +311,31 @@ def _summarize(sessions: List[Dict[str, Any]], server_name: str, version: str) -
     }
 
 
+def _resolve_library_links(sessions: List[Dict[str, Any]], db=None) -> None:
+    """Attach a ``link`` = {kind, id, source:'library'} to each session whose
+    media is in the SoulSync video library, so a click opens THAT movie/show
+    page. One DB query maps native server ids (Plex ratingKey / Jellyfin id)
+    back to our rows. Best-effort — a miss just leaves the card non-clickable."""
+    ids = [s.get("_link_sid") for s in sessions if s.get("_link_sid")]
+    if ids:
+        rows = []
+        try:
+            from api.video import get_video_db
+            rows = get_video_db().items_by_server_ids(ids)
+        except Exception:   # noqa: BLE001 - no library / unresolvable → no links
+            logger.debug("library link resolve failed", exc_info=True)
+        by_sid = {}
+        for r in rows:
+            by_sid.setdefault(str(r["server_id"]), r)
+        for s in sessions:
+            r = by_sid.get(str(s.get("_link_sid") or ""))
+            want = "movie" if s["media_type"] == "movie" else "show"
+            if r and r["kind"] == want:
+                s["link"] = {"kind": r["kind"], "id": r["id"], "source": "library"}
+    for s in sessions:
+        s.pop("_link_sid", None)
+
+
 def get_activity(db=None) -> Dict[str, Any]:
     """The live activity payload — Plex AND Jellyfin sessions merged. Never
     raises; an unconfigured / down server is a normal state the UI shows."""
@@ -338,6 +374,7 @@ def get_activity(db=None) -> Dict[str, Any]:
                 "message": "Couldn't reach the media server.",
                 "sessions": [], "summary": {"streams": 0}}
 
+    _resolve_library_links(sessions, db)
     sessions.sort(key=lambda s: (s["state"] != "playing", s["user"].lower()))
     out = _summarize(sessions, server_name or "Server", server_version)
     out["server"]["platform"] = platform or "plex"

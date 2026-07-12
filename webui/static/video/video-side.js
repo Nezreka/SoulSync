@@ -485,6 +485,19 @@
         }
     }
 
+    // Public: open a video detail page from ANYWHERE (music or video side) —
+    // e.g. the app-wide Server Activity drawer clicking through to what's playing.
+    // Ensures the video side is active first (the open-detail handler only
+    // navigates; it doesn't flip data-side), then drills in.
+    window.SoulSyncVideo = window.SoulSyncVideo || {};
+    window.SoulSyncVideo.openDetail = function (detail) {
+        if (!detail || !detail.kind) return;
+        if (document.body.getAttribute('data-side') !== 'video') {
+            persistSide('video'); applySide('video');
+        }
+        document.dispatchEvent(new CustomEvent('soulsync:video-open-detail', { detail: detail }));
+    };
+
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);
     } else {
