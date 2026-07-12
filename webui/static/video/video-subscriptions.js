@@ -108,8 +108,14 @@
         var b = el.querySelector('[data-vsub-body]');
         var rows = subs.map(function (s) {
             var isPl = /[?&]list=|\/playlist/.test(s.url || '');
+            var presets = s.presets || [];
+            var has = function (name) { return presets.some(function (p) { return String(p).indexOf(name) >= 0; }); };
+            var tags = '';
+            if (!isPl && has('best_video_quality')) tags += '<span class="vsub-tag">best quality</span>';
+            if (!isPl && has('only_recent_videos')) tags += '<span class="vsub-tag">keep recent</span>';
             return '<div class="vsub-row"><span class="vsub-row-ic">' + (isPl ? '🎞️' : '▶') + '</span>' +
                 '<span class="vsub-row-name" title="' + esc(s.url) + '">' + esc(s.show_name || s.name) + '</span>' +
+                tags +
                 '<span class="vsub-row-kind">' + (isPl ? 'playlist' : 'channel') + '</span></div>';
         }).join('');
         b.innerHTML =

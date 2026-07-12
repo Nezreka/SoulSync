@@ -117,6 +117,31 @@ def wants_best_quality(presets: List[str]) -> bool:
     return any("best_video_quality" in str(p) for p in (presets or []))
 
 
+def wants_recent_only(presets: List[str]) -> bool:
+    return any("only_recent_videos" in str(p) for p in (presets or []))
+
+
+def channel_settings_from_presets(presets: List[str]) -> Dict[str, Any]:
+    """Translate the ytdl-sub presets on a subscription into SoulSync channel
+    settings (the same fields the channel cog modal edits):
+
+    - ``best_video_quality`` → a max-quality override (a full profile the modal
+      round-trips: highest resolution, any codec, mp4, 60fps + HDR on).
+    - ``only_recent_videos`` → the ``days_90`` retention window. ytdl-sub's
+      'keep recent' ≈ SoulSync's 'Last 3 months'; without it a channel keeps
+      everything (SoulSync's default), which is ytdl-sub's 'keep all'.
+
+    The custom show-name (from ``tv_show_name``) is applied separately — it needs
+    the resolved channel title to know whether it actually differs."""
+    cs: Dict[str, Any] = {}
+    if wants_best_quality(presets):
+        cs["quality"] = {"max_resolution": "best", "video_codec": "any",
+                         "container": "mp4", "prefer_60fps": True, "allow_hdr": True}
+    if wants_recent_only(presets):
+        cs["retention"] = "days_90"
+    return cs
+
+
 # ── the background import runner (pure; all I/O injected) ─────────────────────
 
 def import_subscriptions(subs: List[Dict[str, Any]], *,
@@ -165,11 +190,9 @@ def import_subscriptions(subs: List[Dict[str, Any]], *,
                     # A channel you already follow keeps whatever you configured by
                     # hand — an import is additive, it never clobbers your settings.
                     if was_followed:
-                        cs: Dict[str, Any] = {}
+                        cs = channel_settings_from_presets(sub.get("presets"))
                         if show and show != ch.get("title"):
                             cs["custom_name"] = show
-                        if wants_best_quality(sub.get("presets")):
-                            cs["quality"] = {"max_resolution": "best"}
                         if cs:
                             apply_channel_settings(ch["youtube_id"], cs)
                 else:
