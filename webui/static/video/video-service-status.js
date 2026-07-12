@@ -11,8 +11,31 @@
     'use strict';
     var API = '/api/video';
     var SOURCES = ['soulseek', 'torrent', 'usenet'];
+    // Real service logos, same sources the music side uses (torrent/usenet have no logo → emoji).
+    var DL_INFO = {
+        soulseek: { name: 'Soulseek', logo: 'https://raw.githubusercontent.com/slskd/slskd/master/docs/icon.png', emoji: '🎵' },
+        torrent: { name: 'Torrent', logo: null, emoji: '🧲' },
+        usenet: { name: 'Usenet', logo: null, emoji: '📰' }
+    };
+    var SRV_INFO = {
+        plex: { name: 'Plex', logo: 'https://www.plex.tv/wp-content/themes/plex/assets/img/plex-logo.svg', emoji: '🖥️', dark: true },
+        jellyfin: { name: 'Jellyfin', logo: 'https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/jellyfin.png', emoji: '🖥️' }
+    };
+    var META_INFO = {
+        tmdb: { name: 'TMDB', logo: 'https://www.themoviedb.org/assets/2/v4/logos/v2/blue_square_2-d537fb228cf3ded904ef09b136fe3fec72548ebc1fea3fbbd1ad9e36364db38b.svg', emoji: '🎬' },
+        tvdb: { name: 'TVDB', logo: 'https://www.svgrepo.com/show/443500/brand-tvdb.svg', emoji: '📺' }
+    };
     var SRC_LABEL = { soulseek: 'Soulseek', torrent: 'Torrent', usenet: 'Usenet' };
     var SRV_LABEL = { plex: 'Plex', jellyfin: 'Jellyfin' };
+
+    // A service logo (img, with emoji fallback on load error) — mirrors the music _ssCard media.
+    function media(cls, logo, emoji, dark) {
+        var e = emoji || '🎬';
+        return logo
+            ? '<img class="' + cls + (dark ? ' ss-disc--dark' : '') + '" src="' + logo + '" alt="" ' +
+              'onerror="this.outerHTML=\'<span class=&quot;ss-card-emoji&quot;>' + e + '</span>\'">'
+            : '<span class="ss-card-emoji">' + e + '</span>';
+    }
 
     function esc(s) {
         return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -116,18 +139,30 @@
             server: (_data.server || {}).name || 'No server',
             download: (_data.download || {}).name || 'Soulseek'
         };
+        // The rail tab shows the active service's logo where there's a single one (server /
+        // download); metadata spans two services so it keeps a glyph.
+        var s = _data.server || {}, dl = _data.download || {};
+        var railIc = {
+            metadata: '<span class="ss-tab-emoji">🎬</span>',
+            server: s.active && SRV_INFO[s.active]
+                ? media('ss-tab-logo', SRV_INFO[s.active].logo, SRV_INFO[s.active].emoji, SRV_INFO[s.active].dark)
+                : '<span class="ss-tab-emoji">🖥️</span>',
+            download: (dl.mode && dl.mode !== 'hybrid' && DL_INFO[dl.mode])
+                ? media('ss-tab-logo', DL_INFO[dl.mode].logo, DL_INFO[dl.mode].emoji)
+                : '<span class="ss-tab-emoji">⬇️</span>'
+        };
         rail.innerHTML = _TABS.map(function (t) {
             return '<button class="ss-tab' + (t.id === _tab ? ' active' : '') + '" onclick="_vssTab(\'' + t.id + '\')">' +
-                '<span class="ss-tab-emoji">' + t.emoji + '</span>' +
+                railIc[t.id] +
                 '<span class="ss-tab-text"><span class="ss-tab-cat">' + t.name + '</span>' +
                 '<span class="ss-tab-cur">' + esc(cur[t.id]) + '</span></span></button>';
         }).join('');
     }
 
-    function card(label, emoji, active, locked, onclick, badge) {
+    function card(label, logo, emoji, active, locked, onclick, badge, dark) {
         return '<button class="ss-card' + (active ? ' active' : '') + (locked ? ' ss-card--locked' : '') + '" ' +
             (onclick && !locked ? 'onclick="' + onclick + '"' : 'disabled') + '>' +
-            '<span class="ss-card-emoji">' + emoji + '</span>' +
+            '<span class="ss-card-disc' + (dark ? ' ss-disc--dark' : '') + '">' + media('ss-card-logo', logo, emoji, dark) + '</span>' +
             '<span class="ss-card-label">' + esc(label) + '</span>' +
             (badge ? '<span class="ss-card-badge">' + esc(badge) + '</span>' : '') +
             (active ? '<span class="ss-card-check">✓</span>' : '') + '</button>';
@@ -144,8 +179,8 @@
     function panelMetadata() {
         var m = _data.metadata || {};
         return '<div class="ss-grid">' +
-            card('TMDB', '🎬', !!m.tmdb, true, null, m.tmdb ? 'Set' : 'Missing') +
-            card('TVDB', '📺', !!m.tvdb, true, null, m.tvdb ? 'Set' : 'Missing') +
+            card('TMDB', META_INFO.tmdb.logo, META_INFO.tmdb.emoji, !!m.tmdb, true, null, m.tmdb ? 'Set' : 'Missing') +
+            card('TVDB', META_INFO.tvdb.logo, META_INFO.tvdb.emoji, !!m.tvdb, true, null, m.tvdb ? 'Set' : 'Missing') +
             '</div>' +
             '<div class="ss-hint">TMDB &amp; TVDB are <strong>required</strong> and can\'t be swapped &mdash; the video side matches and enriches everything from them. Set the keys in <strong>Settings &rarr; Connections</strong>.</div>';
     }
@@ -154,9 +189,10 @@
         var s = _data.server || {};
         var out = '<div class="ss-grid">';
         ['plex', 'jellyfin'].forEach(function (srv) {
-            var configured = !!s[srv];
-            out += card(SRV_LABEL[srv], srv === 'plex' ? '🟠' : '🟣', s.active === srv, !configured,
-                configured ? "_vssSetServer('" + srv + "')" : null, configured ? null : 'Not set up');
+            var info = SRV_INFO[srv], configured = !!s[srv];
+            out += card(info.name, info.logo, info.emoji, s.active === srv, !configured,
+                configured ? "_vssSetServer('" + srv + "')" : null,
+                configured ? null : 'Not set up', info.dark);
         });
         out += '</div>';
         if (!s.plex && !s.jellyfin) {
@@ -174,16 +210,18 @@
             '<button class="ss-seg-btn' + (hybrid ? ' active' : '') + '" onclick="_vssMode(\'hybrid\')">Hybrid</button></div>';
         if (!hybrid) {
             var cards = '<div class="ss-grid">' + SOURCES.map(function (src) {
-                return card(SRC_LABEL[src], '⬇️', mode === src, false, "_vssSetSource('" + src + "')");
+                var info = DL_INFO[src];
+                return card(info.name, info.logo, info.emoji, mode === src, false, "_vssSetSource('" + src + "')");
             }).join('') + '</div>';
             return toggle + cards;
         }
         var order = (d.hybrid_order && d.hybrid_order.length) ? d.hybrid_order : SOURCES.slice();
         var rows = order.map(function (src, i) {
+            var info = DL_INFO[src] || { name: src, emoji: '⬇️', logo: null };
             return '<div class="ss-hybrid-item" draggable="true" data-src="' + src + '">' +
                 '<span class="ss-hybrid-rank">' + (i + 1) + '</span>' +
-                '<span class="ss-card-emoji">⬇️</span>' +
-                '<span class="ss-hybrid-name">' + esc(SRC_LABEL[src] || src) + '</span></div>';
+                media('ss-hybrid-logo', info.logo, info.emoji) +
+                '<span class="ss-hybrid-name">' + esc(info.name) + '</span></div>';
         }).join('');
         return toggle +
             '<div class="ss-hint">Drag to set priority &mdash; the first source that has the file wins.</div>' +
