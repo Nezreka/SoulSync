@@ -531,6 +531,14 @@ def test_season_poster_is_a_composed_year_card_not_an_avatar_copy(tmp_path, monk
     ytd._ensure_channel_assets(str(lib25 / "Chan - s2025e0301 - Vid.mp4"),
                                fields25, {"save_artwork": True}, lookup)
 
+    # Plex convention: season art ALSO lands in the SHOW folder (the in-season
+    # poster.jpg is the Jellyfin/Kodi convention Plex ignores — Boulder's Plex
+    # screenshots showed the show-poster crop fallback)
+    chan = tmp_path / "yt" / "Chan"
+    assert (chan / "season2026-poster.jpg").exists()
+    assert (chan / "season2025-poster.jpg").exists()
+    assert (chan / "season2026-poster.jpg").read_bytes() == (lib / "poster.jpg").read_bytes()
+
     p26, p25 = (lib / "poster.jpg").read_bytes(), (lib25 / "poster.jpg").read_bytes()
     avatar = (tmp_path / "yt" / "Chan" / "poster.jpg").read_bytes()
     assert p26[:3] == b"\xff\xd8\xff"                 # JPEG, actually composed

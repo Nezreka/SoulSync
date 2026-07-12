@@ -411,15 +411,18 @@ def _ensure_channel_assets(final_video: str, fields: Dict[str, Any], settings: D
             os.path.normpath(season_dir) != os.path.normpath(channel_dir):
         try:
             fs.makedirs(season_dir)   # pre-move seeding: the dir may not exist yet
-            existing = {str(n).lower() for n in (fs.list_dir(season_dir) or [])}
-            if "poster.jpg" in existing:
-                logger.info("season poster: keeping existing %s (delete it to regenerate)",
-                            os.path.join(season_dir, "poster.jpg"))
-            if "poster.jpg" not in existing:
-                target = os.path.join(season_dir, "poster.jpg")
+            year = str(fields.get("published_at") or "")[:4]
+            # Plex reads season art from the SHOW folder as season<NN>-poster.jpg
+            # (Boulder's screenshots: the in-season poster.jpg was never read —
+            # the cards were Plex's automatic show-poster crop). Jellyfin/Kodi
+            # read poster.jpg inside the season folder. Write BOTH.
+            targets = [os.path.join(season_dir, "poster.jpg")]
+            if year.isdigit():
+                targets.append(os.path.join(channel_dir, "season%s-poster.jpg" % year))
+            missing = [t for t in targets if not os.path.isfile(t)]
+            if missing:
                 chan_poster = os.path.join(channel_dir, "poster.jpg")
                 data = None
-                year = str(fields.get("published_at") or "")[:4]
                 if year.isdigit():
                     try:
                         from core.video.collections.poster_gen import render_season_poster
@@ -433,13 +436,17 @@ def _ensure_channel_assets(final_video: str, fields: Dict[str, Any], settings: D
                             data = render_season_poster(hero, year, str(fields.get("channel") or ""))
                     except Exception:   # noqa: BLE001 - fall back to the avatar copy
                         data = None
-                if data:
-                    with open(target, "wb") as f:
-                        f.write(data)
-                    logger.info("season poster: composed %s (hero=year's newest thumb)", target)
-                else:
-                    fs.save_url(meta["poster_url"], target)
-                    logger.info("season poster: render unavailable — plain avatar copy at %s", target)
+                for target in missing:
+                    if data:
+                        with open(target, "wb") as f:
+                            f.write(data)
+                        logger.info("season poster: composed %s (hero=year's newest thumb)", target)
+                    else:
+                        fs.save_url(meta["poster_url"], target)
+                        logger.info("season poster: render unavailable — plain avatar copy at %s", target)
+            else:
+                logger.info("season poster: keeping existing %s (delete to regenerate)",
+                            " + ".join(targets))
         except Exception:   # noqa: BLE001 - season art is a nicety
             pass
 
