@@ -1037,6 +1037,18 @@ def test_youtube_follow_requires_url_or_channel(tmp_path):
     assert r.status_code == 400
 
 
+def test_playlist_seen_baseline_roundtrips(tmp_path):
+    from database.video_database import VideoDatabase
+    db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
+    assert db.get_playlist_seen("PL1") == []                 # nothing baselined yet
+    db.add_playlist_seen("PL1", ["a", "b"])
+    db.add_playlist_seen("PL1", ["b", "c"])                  # union, no dupes
+    assert set(db.get_playlist_seen("PL1")) == {"a", "b", "c"}
+    assert db.get_playlist_seen("PL2") == []                 # scoped per playlist
+    db.add_playlist_seen("PL1", [])                          # no-op
+    assert set(db.get_playlist_seen("PL1")) == {"a", "b", "c"}
+
+
 def test_youtube_channel_detail_hydrates_follow_and_wished(tmp_path, monkeypatch):
     client, videoapi = _make_client(tmp_path)
     import core.video.youtube as ytmod

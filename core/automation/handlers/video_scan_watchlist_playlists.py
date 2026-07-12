@@ -1,11 +1,13 @@
 """Automation handler: ``video_scan_watchlist_playlists`` action.
 
-Sibling of the watchlist-CHANNELS scan, with a deliberately different rule. A channel is a
-creator posting new stuff over time, so that scan is forward-looking (new uploads + a
-last-N net). A **playlist** is a curated, finite set someone assembled — the reason you
-follow it is "give me this whole list and keep it complete." So this scan MIRRORS the
-playlist: it wishlists every long-form video in it you don't already have, plus anything
-later added. No follow-date baseline, no last-N net.
+Sibling of the watchlist-CHANNELS scan, and now the SAME 'cap + new' rule (Boulder, 2026-07:
+following a big playlist used to wishlist the WHOLE thing at once — a flood). Instead of a
+date baseline (playlist videos are often undated / curator-ordered), a playlist uses a
+**membership baseline**: the first scan wishlists only the newest N (the global "videos to
+grab" setting, shared with channels) and records every current member as "seen"; later scans
+wishlist only members NOT yet seen — genuine additions the curator made, regardless of upload
+date. An already-mirror-flooded playlist self-migrates cleanly (everything is already owned →
+first pass adds nothing, just baselines the list → only true additions from then on).
 
 Organisation: the playlist becomes its own "show" (playlist-as-show) — its videos are
 wishlisted under the playlist's title, so the download worker files them as
@@ -25,11 +27,54 @@ from datetime import date
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from core.automation.deps import AutomationDeps
-from core.automation.handlers.video_scan_watchlist_channels import _day, long_form_uploads
+from core.automation.handlers.video_scan_watchlist_channels import (
+    _day,
+    _default_backfill_count,
+    long_form_uploads,
+)
+from utils.logging_config import get_logger
+
+logger = get_logger("automation.video_scan_watchlist_playlists")
 
 # how many playlist entries to read per scan (yt-dlp flat). Big enough for almost any real
 # playlist; genuinely huge ones truncate (logged) rather than hammering YouTube each scan.
 _PLAYLIST_FETCH_LIMIT = 1000
+
+
+def select_playlist_additions(
+    videos: List[Dict[str, Any]],
+    *,
+    seen_ids: Iterable = (),
+    backfill_count: int,
+    wishlisted_ids: Iterable = (),
+    downloaded_ids: Iterable = (),
+    dismissed_ids: Iterable = (),
+    today: str,
+    min_seconds: int = 60,
+) -> tuple:
+    """Which of a playlist's videos to wishlist now — the same 'cap + new' rule as channels.
+
+    ``seen_ids`` is the membership baseline captured on the first scan. When it's EMPTY (a
+    fresh follow, or an existing playlist not yet baselined) only the newest ``backfill_count``
+    long-form members you don't already own are wishlisted, and the WHOLE current membership is
+    returned to baseline — so a mirror-flooded playlist stops re-adding and a fresh follow is
+    capped. Afterwards only members NOT in the baseline (genuine additions the curator added)
+    are wishlisted, regardless of upload date. Shorts + unaired premieres skipped. Pure, no I/O.
+
+    Returns ``(to_wishlist, to_baseline)`` — the videos to add now, and the ids to remember."""
+    longs = [v for v in long_form_uploads(videos, min_seconds)
+             if not (_day(v.get("published_at")) and today and _day(v["published_at"]) > today)]
+    excluded = set(wishlisted_ids or ()) | set(downloaded_ids or ()) | set(dismissed_ids or ())
+    seen = set(seen_ids or ())
+    if not seen:
+        # First pass: cap to the newest N you don't already own, and baseline EVERYTHING now
+        # present so a flooded/curated playlist never re-adds and additions are tracked forward.
+        n = max(0, int(backfill_count or 0))
+        picks = [v for v in longs if v["youtube_id"] not in excluded][:n]
+        return picks, [v["youtube_id"] for v in longs]
+    # Steady state: only members not yet baselined (new additions) and not already handled.
+    picks = [v for v in longs if v["youtube_id"] not in seen and v["youtube_id"] not in excluded]
+    return picks, [v["youtube_id"] for v in picks]
 
 
 def select_playlist_video_gaps(
@@ -41,9 +86,9 @@ def select_playlist_video_gaps(
     today: str,
     min_seconds: int = 60,
 ) -> List[Dict[str, Any]]:
-    """The pure core: every long-form video in a playlist not already wishlisted /
-    downloaded / dismissed (mirror the whole list). Future-dated (unaired) entries are
-    skipped. No baseline, no last-N — a curated playlist is wanted in full. No I/O."""
+    """DEPRECATED (kept for callers/tests): every long-form video not already wishlisted /
+    downloaded / dismissed — mirror the whole list. The scan now uses
+    ``select_playlist_additions`` (cap + new) instead. No I/O."""
     excluded = set(wishlisted_ids or ()) | set(downloaded_ids or ()) | set(dismissed_ids or ())
     out: List[Dict[str, Any]] = []
     for v in long_form_uploads(videos, min_seconds):
@@ -96,6 +141,16 @@ def _default_dismissed_ids(playlist_id: Any) -> List[Any]:
     return []   # no youtube "dismissed" store yet (see channels-scan note)
 
 
+def _default_seen_ids(playlist_id: Any) -> List[Any]:
+    from api.video import get_video_db
+    return get_video_db().get_playlist_seen(playlist_id)
+
+
+def _default_mark_seen(playlist_id: Any, video_ids: Iterable) -> None:
+    from api.video import get_video_db
+    get_video_db().add_playlist_seen(playlist_id, list(video_ids or []))
+
+
 def _default_add_videos(playlist: Dict[str, Any], videos: List[Dict[str, Any]]) -> int:
     """Wishlist under the PLAYLIST as the show (title = playlist name → playlist-as-show)."""
     from api.video import get_video_db
@@ -114,8 +169,11 @@ def auto_video_scan_watchlist_playlists(
     dismissed_ids: Optional[Callable[[Any], Iterable]] = None,
     add_videos: Optional[Callable[[Dict[str, Any], List[Dict[str, Any]]], int]] = None,
     today_fn: Optional[Callable[[], str]] = None,
+    seen_ids: Optional[Callable[[Any], Iterable]] = None,
+    mark_seen: Optional[Callable[[Any, Iterable], None]] = None,
+    backfill_fn: Optional[Callable[[], int]] = None,
 ) -> Dict[str, Any]:
-    """Mirror every followed YouTube playlist into the wishlist (whole list + new additions).
+    """Scan every followed YouTube playlist — the SAME 'cap + new' rule as channels.
 
     Returns ``{'status': 'completed', 'playlists': int, 'videos_added': int, ...}``."""
     fetch_playlists = fetch_playlists or _default_fetch_playlists
@@ -125,8 +183,11 @@ def auto_video_scan_watchlist_playlists(
     dismissed_ids = dismissed_ids or _default_dismissed_ids
     add_videos = add_videos or _default_add_videos
     today_fn = today_fn or (lambda: date.today().isoformat())
+    seen_ids = seen_ids or _default_seen_ids
+    mark_seen = mark_seen or _default_mark_seen
     automation_id = config.get('_automation_id')
     min_seconds = max(0, int(config.get('min_seconds', 60) or 0))
+    backfill = max(0, int((backfill_fn or _default_backfill_count)()))
 
     try:
         today = today_fn()
@@ -146,7 +207,7 @@ def auto_video_scan_watchlist_playlists(
             ptitle = pl.get('title') or pid
             deps.update_progress(automation_id, phase='Scanning playlists…',
                                  progress=10 + int(80 * i / max(total, 1)),
-                                 log_line="Mirroring '%s'" % ptitle, log_type='info')
+                                 log_line="Checking '%s' for new videos" % ptitle, log_type='info')
             if not pid:
                 continue
             try:
@@ -156,17 +217,23 @@ def auto_video_scan_watchlist_playlists(
                                      log_type='warning')
                 continue
 
-            gaps = select_playlist_video_gaps(
-                videos, wishlisted_ids=wishlisted_ids(pid), downloaded_ids=downloaded_ids(pid),
+            picks, baseline = select_playlist_additions(
+                videos, seen_ids=seen_ids(pid), backfill_count=backfill,
+                wishlisted_ids=wishlisted_ids(pid), downloaded_ids=downloaded_ids(pid),
                 dismissed_ids=dismissed_ids(pid), today=today, min_seconds=min_seconds)
-            if gaps:
+            if picks:
                 n = int(add_videos({'youtube_id': pid, 'title': ptitle,
-                                    'avatar_url': pl.get('poster_url')}, gaps) or 0)
+                                    'avatar_url': pl.get('poster_url')}, picks) or 0)
                 added += n
                 if n:
                     deps.update_progress(
                         automation_id, log_type='success',
                         log_line="Wishlisted %d new video(s) from '%s'" % (n, ptitle))
+            if baseline:
+                try:
+                    mark_seen(pid, baseline)          # remember membership so later scans see only additions
+                except Exception:   # noqa: BLE001 - baseline is best-effort; a miss just re-checks next scan
+                    logger.debug("playlist seen-baseline write failed for %s", pid, exc_info=True)
 
         done = ('Wishlisted %d new video(s) across %d playlist(s)' % (added, total)) if added \
             else ('Playlists are up to date — nothing new across %d playlist(s)' % total)
