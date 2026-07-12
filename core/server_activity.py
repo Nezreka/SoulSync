@@ -161,18 +161,21 @@ def normalize_session(item: Any) -> Dict[str, Any]:
     state = str(_g(player, "state", "") or "playing").lower()
     thumb = _g(item, "grandparentThumb") or _g(item, "parentThumb") or _g(item, "thumb")
     art = _g(item, "art") or _g(item, "grandparentArt")
-    # the server id that identifies the SoulSync library row to jump to: a movie
-    # is its own ratingKey; an episode links to its SHOW (grandparentRatingKey).
+    # what identifies the SoulSync library row to jump to: a movie is its own
+    # ratingKey; an episode links to its SHOW. Title+year are a fallback when the
+    # server id doesn't line up (re-scan, different server_source, etc.).
     if mtype == "movie":
-        link_sid = str(_g(item, "ratingKey", "") or "")
+        link_sid, link_title, link_year = str(_g(item, "ratingKey", "") or ""), \
+            str(_g(item, "title", "") or ""), _g(item, "year")
     elif mtype == "episode":
-        link_sid = str(_g(item, "grandparentRatingKey", "") or "")
+        link_sid, link_title, link_year = str(_g(item, "grandparentRatingKey", "") or ""), \
+            str(_g(item, "grandparentTitle", "") or ""), None
     else:
-        link_sid = ""
+        link_sid, link_title, link_year = "", "", None
 
     return {
         "session_key": str(_g(item, "sessionKey", "") or _g(sess, "id", "") or ""),
-        "_link_sid": link_sid, "link": None,
+        "_link_sid": link_sid, "_link_title": link_title, "_link_year": link_year, "link": None,
         "media_type": mtype,
         "title": names["title"],
         "subtitle": names["subtitle"],
@@ -247,10 +250,15 @@ def normalize_jellyfin(s: Dict[str, Any], npi: Dict[str, Any]) -> Dict[str, Any]
     item_id = str(npi.get("Id") or "")
     thumb = ("jf:" + item_id) if item_id else ""
     br = int(ti.get("Bitrate") or 0) // 1000
-    link_sid = item_id if mtype == "movie" else (str(npi.get("SeriesId") or "") if mtype == "episode" else "")
+    if mtype == "movie":
+        link_sid, link_title, link_year = item_id, str(npi.get("Name") or ""), npi.get("ProductionYear")
+    elif mtype == "episode":
+        link_sid, link_title, link_year = str(npi.get("SeriesId") or ""), str(npi.get("SeriesName") or ""), None
+    else:
+        link_sid, link_title, link_year = "", "", None
     return {
         "session_key": "",   # no stop button — our terminate path is Plex-only
-        "_link_sid": link_sid, "link": None,
+        "_link_sid": link_sid, "_link_title": link_title, "_link_year": link_year, "link": None,
         "media_type": mtype, "title": str(npi.get("Name") or ""),
         "subtitle": subtitle, "grandparent": gp, "thumb": thumb, "art": thumb,
         "duration_ms": dur, "offset_ms": off,
@@ -316,24 +324,43 @@ def _resolve_library_links(sessions: List[Dict[str, Any]], db=None) -> None:
     media is in the SoulSync video library, so a click opens THAT movie/show
     page. One DB query maps native server ids (Plex ratingKey / Jellyfin id)
     back to our rows. Best-effort — a miss just leaves the card non-clickable."""
-    ids = [s.get("_link_sid") for s in sessions if s.get("_link_sid")]
-    if ids:
-        rows = []
-        try:
-            from api.video import get_video_db
-            rows = get_video_db().items_by_server_ids(ids)
-        except Exception:   # noqa: BLE001 - no library / unresolvable → no links
-            logger.debug("library link resolve failed", exc_info=True)
+    db_obj = None
+    try:
+        from api.video import get_video_db
+        db_obj = get_video_db()
+    except Exception:   # noqa: BLE001 - no video library → no links
+        logger.debug("library link resolve: no video db", exc_info=True)
+
+    if db_obj is not None:
+        # Pass 1 — exact native server id (Plex ratingKey / Jellyfin id).
+        ids = [s.get("_link_sid") for s in sessions if s.get("_link_sid")]
         by_sid = {}
-        for r in rows:
-            by_sid.setdefault(str(r["server_id"]), r)
+        if ids:
+            try:
+                for r in db_obj.items_by_server_ids(ids):
+                    by_sid.setdefault(str(r["server_id"]), r)
+            except Exception:   # noqa: BLE001
+                logger.debug("items_by_server_ids failed", exc_info=True)
         for s in sessions:
+            want = "movie" if s["media_type"] == "movie" else ("show" if s["media_type"] == "episode" else None)
+            if not want:
+                continue
             r = by_sid.get(str(s.get("_link_sid") or ""))
-            want = "movie" if s["media_type"] == "movie" else "show"
             if r and r["kind"] == want:
                 s["link"] = {"kind": r["kind"], "id": r["id"], "source": "library"}
+                continue
+            # Pass 2 — title (+ year for movies) fallback, for when the id doesn't
+            # line up (a re-scan, a different server_source) but you DO own it.
+            title = s.get("_link_title")
+            if title:
+                try:
+                    rid = db_obj.find_library_ref_by_title(want, title, s.get("_link_year"))
+                except Exception:   # noqa: BLE001
+                    rid = None
+                if rid:
+                    s["link"] = {"kind": want, "id": rid, "source": "library"}
     for s in sessions:
-        s.pop("_link_sid", None)
+        s.pop("_link_sid", None); s.pop("_link_title", None); s.pop("_link_year", None)
 
 
 def get_activity(db=None) -> Dict[str, Any]:

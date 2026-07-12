@@ -83,7 +83,7 @@
         var lc = s.link ? ' sact-card--link' : '';
         var la = s.link ? ' data-link-kind="' + esc(s.link.kind) + '" data-link-id="' + esc(s.link.id) +
             '" data-link-source="' + esc(s.link.source) + '"' : '';
-        var openIc = s.link ? '<span class="sact-open" title="Open in SoulSync">↗</span>' : '';
+        var openIc = s.link ? '<span class="sact-open" title="Open in SoulSync"></span>' : '';
         return '<div class="sact-card sact-st-' + esc(s.state) + lc + '" data-key="' + esc(actKey(s)) + '"' + la + '>' +
             (artUrl ? '<div class="sact-art" style="background-image:url(\'' + artUrl + '\')"></div>' : '') +
             '<div class="sact-scrim"></div>' + stop +
