@@ -133,17 +133,28 @@ class WatchedCleanupJob(VideoRepairJob):
         d = finding.get("details") or {}
         if not d.get("movie_id") or not d.get("relative_path"):
             return {"success": False, "error": "finding has no file to clean"}
-        real = resolve_video_file_path(d["relative_path"], video_base_dirs(context.db),
-                                       size_bytes=d.get("size_bytes"))
-        if not real:
+        base_dirs = video_base_dirs(context.db)
+        settings = organization.load(context.db)
+        # Recycle EVERY version of the movie (a multi-part movie has >1 file);
+        # marking it file-less while a smaller copy survived on disk would orphan
+        # it. Fall back to the finding's single path if the file list is empty.
+        files = context.db.movie_file_paths(d["movie_id"]) or [
+            {"relative_path": d["relative_path"], "size_bytes": d.get("size_bytes")}]
+        located = [(f, resolve_video_file_path(f["relative_path"], base_dirs,
+                                               size_bytes=f.get("size_bytes"))) for f in files]
+        if not any(real for _f, real in located):
             return {"success": False,
                     "error": "couldn't locate the file locally — check your library folders"}
-        res = recycle.discard(real, organization.load(context.db), context.db,
-                              reason="watched cleanup")
-        if not res.get("ok"):
-            return {"success": False, "error": "couldn't move the file to the recycle bin"}
+        recycled_any = False
+        for _f, real in located:
+            if not real:
+                continue                 # a version already gone is fine — keep going
+            res = recycle.discard(real, settings, context.db, reason="watched cleanup")
+            if not res.get("ok"):
+                return {"success": False, "error": "couldn't move the file to the recycle bin"}
+            recycled_any = recycled_any or res.get("recycled")
         context.db.repair_mark_movie_fileless(d["movie_id"])
         title = d.get("title") or "the movie"
-        where = "recycle bin" if res.get("recycled") else "gone (recycling is off)"
+        where = "recycle bin" if recycled_any else "gone (recycling is off)"
         return {"success": True, "action": "cleaned",
                 "message": f"Cleaned {title} — {_gb(d.get('size_bytes'))} to the {where}"}

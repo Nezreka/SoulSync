@@ -4217,6 +4217,18 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def movie_file_paths(self, movie_id) -> list:
+        """Every stored file for a movie ({relative_path, size_bytes}), largest
+        first — so a cleanup recycles ALL versions of a multi-part movie, not
+        just the biggest one (which would orphan the rest)."""
+        conn = self._get_connection()
+        try:
+            return [dict(r) for r in conn.execute(
+                "SELECT relative_path, size_bytes FROM media_files "
+                "WHERE movie_id=? ORDER BY size_bytes DESC", (int(movie_id),))]
+        finally:
+            conn.close()
+
     def repair_mark_movie_fileless(self, movie_id) -> None:
         """After a cleanup fix recycled the movie's file: reflect reality now
         (has_file=0, file rows gone) instead of waiting for the weekly deep

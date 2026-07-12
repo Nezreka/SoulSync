@@ -148,6 +148,29 @@ def test_fix_recycles_the_file_and_marks_fileless(db, worker, tmp_path):
     assert row["has_file"] == 0 and nfiles == 0
 
 
+def test_fix_recycles_all_versions_of_a_multi_part_movie(db, worker, tmp_path):
+    """A multi-version movie (Plex multi-part) must have EVERY file recycled —
+    recycling only the largest and marking file-less would orphan the rest."""
+    mid, big = _seed_movie(db, tmp_path, title="MultiPart", play_count=1,
+                           last_viewed=_days_ago(90))
+    small = tmp_path / "Movies" / "MultiPart" / "MultiPart 720p.mkv"
+    small.write_bytes(b"y" * 8)
+    conn = db._get_connection()
+    conn.execute("INSERT INTO media_files (movie_id, relative_path, size_bytes) VALUES (?,?,?)",
+                 (mid, str(small), 8))
+    conn.commit(); conn.close()
+
+    worker._run_job("watched_cleanup", forced=True)
+    f = _pending(db)[0]
+    res = worker.fix_finding(f["id"])
+    assert res["success"]
+    assert not big.exists() and not small.exists()          # BOTH gone from the library
+    trash = tmp_path / "Movies" / "ss_recycle"
+    names = [p.name for p in trash.iterdir()]
+    assert any(n.endswith("_MultiPart.mkv") for n in names)
+    assert any(n.endswith("_MultiPart 720p.mkv") for n in names)
+
+
 def test_fix_refuses_when_the_file_cannot_be_located(db, worker, tmp_path):
     _seed_movie(db, tmp_path, title="Phantom", play_count=1, last_viewed=_days_ago(90),
                 on_disk=False)
