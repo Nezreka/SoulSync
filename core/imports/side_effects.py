@@ -399,6 +399,16 @@ def record_download_provenance(context: Dict[str, Any]) -> None:
     except Exception as e:
         logger.debug("library v2 autolink skipped: %s", e)
 
+    # Persistent acquisition completion is intentionally downstream of every
+    # shared pipeline guard and the Library-v2 autolink. Quarantined files never
+    # reach this point; a later manual approval re-enters the same pipeline and
+    # carries these markers in its serialized context.
+    try:
+        from core.acquisition.pipeline_callback import notify_pipeline_import_success
+        notify_pipeline_import_success(context)
+    except Exception as e:
+        logger.debug("acquisition pipeline callback skipped: %s", e)
+
 
 def is_active_media_server_ready() -> tuple[bool, str]:
     """Standalone ('soulsync') is always ready — no external connection needed.

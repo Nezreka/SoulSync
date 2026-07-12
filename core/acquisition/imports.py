@@ -445,6 +445,102 @@ def record_matching_result(
     return _reload_import(conn, import_id)
 
 
+def record_pipeline_file_completed(
+    conn: Any,
+    import_id: str,
+    *,
+    relative_path: str,
+    final_path: str,
+    track_id: int,
+) -> AcquisitionImport:
+    """Persist one success reported by the shared main import pipeline.
+
+    The main pipeline owns validation, quarantine, tagging and file placement.
+    This function only journals its successful result and completes the owning
+    acquisition once every matched file has passed that pipeline.
+    """
+    record = get_import(conn, import_id)
+    if record is None:
+        raise KeyError(f"acquisition import not found: {import_id}")
+    relative = str(relative_path or "").strip().replace("\\", "/")
+    final = str(final_path or "").strip()
+    track_id = int(track_id)
+    existing_processed = [
+        dict(item) for item in record.result.get("processed", [])
+        if isinstance(item, Mapping)
+    ]
+    if record.status == "completed" and any(
+        str(item.get("relative_path") or "") == relative
+        and int(item.get("track_id") or 0) == track_id
+        and str(item.get("final_path") or "") == final
+        for item in existing_processed
+    ):
+        return record
+    if record.status != "importing":
+        raise ValueError(
+            f"pipeline completion requires importing, not {record.status}")
+    if not relative or not final or track_id <= 0:
+        raise ValueError(
+            "pipeline completion requires relative_path, final_path and track_id")
+
+    expected = {
+        (str(item.get("relative_path") or "").replace("\\", "/"),
+         int(item.get("track_id") or 0))
+        for item in record.matches
+    }
+    key = (relative, track_id)
+    if key not in expected:
+        raise ValueError("pipeline completion does not match the persisted import plan")
+
+    result = dict(record.result)
+    processed = existing_processed
+    by_key = {
+        (str(item.get("relative_path") or ""), int(item.get("track_id") or 0)): item
+        for item in processed
+    }
+    by_key[key] = {
+        "relative_path": relative,
+        "final_path": final,
+        "track_id": track_id,
+    }
+    processed = [by_key[item] for item in sorted(by_key)]
+    result["processed"] = processed
+    result_json = json.dumps(
+        result,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+
+    completed = expected and expected <= set(by_key)
+    conn.execute(
+        """UPDATE acquisition_imports
+              SET status=?, result_json=?, error=NULL,
+                  updated_at=CURRENT_TIMESTAMP,
+                  completed_at=CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE completed_at END
+            WHERE id=?""",
+        ("completed" if completed else "importing", result_json,
+         1 if completed else 0, record.id),
+    )
+    if completed:
+        transition_request(
+            conn,
+            record.request_id,
+            "completed",
+            expected_status="grabbing",
+        )
+        record_history_event(
+            conn,
+            "import_completed",
+            request_id=record.request_id,
+            candidate_id=record.candidate_id,
+            download_id=record.download_id,
+            payload={"file_count": len(processed), "pipeline": "main"},
+        )
+    return _reload_import(conn, import_id)
+
+
 def record_import_deferred(
     conn: Any,
     import_id: str,
@@ -543,4 +639,5 @@ __all__ = [
     "record_import_failure",
     "record_inventory_result",
     "record_matching_result",
+    "record_pipeline_file_completed",
 ]
