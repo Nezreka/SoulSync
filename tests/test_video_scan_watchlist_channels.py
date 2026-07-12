@@ -95,7 +95,7 @@ def test_shorts_never_counted_in_net_or_added():
 
 # ── handler: end to end with seams ────────────────────────────────────────────
 def _handler(channels, uploads_by_channel, *, wished=None, downloaded=None, dismissed=None,
-             today="2026-06-25", config=None):
+             today="2026-06-25", backfill=5, config=None):
     adds = []
 
     def add_videos(channel, videos):
@@ -110,40 +110,33 @@ def _handler(channels, uploads_by_channel, *, wished=None, downloaded=None, dism
         wishlisted_ids=lambda cid: (wished or {}).get(cid, []),
         downloaded_ids=lambda cid: (downloaded or {}).get(cid, []),
         dismissed_ids=lambda cid: (dismissed or {}).get(cid, []),
-        add_videos=add_videos, today_fn=lambda: today)
+        add_videos=add_videos, today_fn=lambda: today, backfill_fn=lambda: backfill)
     return res, adds, deps
 
 
-def test_backfill_inherits_global_setting_when_config_omits_it():
-    # No backfill_count in config → the handler falls back to the injected global
-    # ("videos to grab", Settings → Library). Here the global is 3.
+def test_backfill_comes_from_the_global_setting():
+    # The last-N net = the injected global ("videos to grab", Settings → Library). Here 3.
     channels = [{"youtube_id": "UC1", "title": "Chan", "date_added": "2026-06-25"}]
     ups = [_vid("v%d" % i, date="2026-06-%02d" % (17 - i)) for i in range(8)]   # all BEFORE baseline
-    deps = _Deps()
-    adds = []
-    res = auto_video_scan_watchlist_channels(
-        {"_automation_id": "a"}, deps,
-        fetch_channels=lambda: channels, fetch_uploads=lambda cid, limit: ups,
-        wishlisted_ids=lambda cid: [], downloaded_ids=lambda cid: [],
-        dismissed_ids=lambda cid: [], add_videos=lambda ch, v: (adds.extend(v), len(v))[1],
-        today_fn=lambda: "2026-06-25", backfill_fn=lambda: 3)
+    res, adds, _ = _handler(channels, {"UC1": ups}, backfill=3)
     assert res["videos_added"] == 3                     # only the last-3 net; nothing new after baseline
-    assert len(adds) == 3
+    assert len(adds[0][1]) == 3
 
 
-def test_explicit_config_backfill_overrides_the_global():
+def test_a_stale_config_backfill_is_ignored_global_wins():
+    # A value baked into an old automation's config must NOT override the global (the
+    # bug where changing the Library setting to 0 still wishlisted 10 per channel).
     channels = [{"youtube_id": "UC1", "title": "Chan", "date_added": "2026-06-25"}]
     ups = [_vid("v%d" % i, date="2026-06-%02d" % (17 - i)) for i in range(8)]
-    # config sets 2 → wins over the global (would be 3)
-    res, adds, _ = _handler(channels, {"UC1": ups}, config={"backfill_count": 2})
-    assert res["videos_added"] == 2
+    res, adds, _ = _handler(channels, {"UC1": ups}, backfill=0, config={"backfill_count": 10})
+    assert res["videos_added"] == 0                     # global 0 wins; the stale 10 is dead data
 
 
 def test_first_run_backlogs_last_n_then_steady_state_is_incremental():
     channels = [{"youtube_id": "UC1", "title": "Cool Channel",
                  "poster_url": "/avatar.jpg", "date_added": "2026-06-25 09:00:00"}]
     ups = [_vid("v%d" % i, date="2026-06-%02d" % (25 - i)) for i in range(15)]
-    res, adds, _ = _handler(channels, {"UC1": ups}, config={"backfill_count": 10})
+    res, adds, _ = _handler(channels, {"UC1": ups}, backfill=10)
     assert res["status"] == "completed" and res["channels"] == 1
     assert res["videos_added"] == 10                    # net backfill on the first run
     assert adds[0][0] == "UC1" and len(adds[0][1]) == 10
@@ -156,16 +149,14 @@ def test_rerun_only_adds_genuinely_new_videos():
     ups = [_vid("new", date="2026-06-25"), _vid("old1", date="2026-06-10"),
            _vid("old2", date="2026-06-09")]
     # old1/old2 already wishlisted from a prior scan → only 'new' is added
-    res, adds, _ = _handler(channels, {"UC1": ups}, wished={"UC1": ["old1", "old2"]},
-                            config={"backfill_count": 3})
+    res, adds, _ = _handler(channels, {"UC1": ups}, wished={"UC1": ["old1", "old2"]}, backfill=3)
     assert adds == [("UC1", ["new"])] and res["videos_added"] == 1
 
 
 def test_nothing_new_adds_nothing():
     channels = [{"youtube_id": "UC1", "title": "Ch", "date_added": "2026-06-01"}]
     ups = [_vid("a", date="2026-06-20"), _vid("b", date="2026-06-19")]
-    res, adds, _ = _handler(channels, {"UC1": ups}, wished={"UC1": ["a", "b"]},
-                            config={"backfill_count": 2})
+    res, adds, _ = _handler(channels, {"UC1": ups}, wished={"UC1": ["a", "b"]}, backfill=2)
     assert adds == [] and res["videos_added"] == 0
 
 
@@ -175,7 +166,7 @@ def test_multiple_channels_scanned_independently():
         {"youtube_id": "UC2", "title": "B", "date_added": "2026-06-25"},
     ]
     uploads = {"UC1": [_vid("a1", date="2026-06-24")], "UC2": [_vid("b1", date="2026-06-24")]}
-    res, adds, _ = _handler(channels, uploads, config={"backfill_count": 5})
+    res, adds, _ = _handler(channels, uploads, backfill=5)
     assert res["channels"] == 2 and res["videos_added"] == 2
     assert sorted(c for c, _ in adds) == ["UC1", "UC2"]
 
@@ -191,11 +182,11 @@ def test_one_unreachable_channel_does_not_abort_the_scan():
 
     adds = []
     res = auto_video_scan_watchlist_channels(
-        {"_automation_id": "a", "backfill_count": 5}, _Deps(),
+        {"_automation_id": "a"}, _Deps(),
         fetch_channels=lambda: channels, fetch_uploads=fetch_uploads,
         wishlisted_ids=lambda cid: [], downloaded_ids=lambda cid: [],
         dismissed_ids=lambda cid: [], add_videos=lambda ch, v: len(v),
-        today_fn=lambda: "2026-06-25")
+        today_fn=lambda: "2026-06-25", backfill_fn=lambda: 5)
     assert res["status"] == "completed" and res["videos_added"] == 1
 
 
@@ -209,7 +200,7 @@ def test_missing_follow_date_falls_back_to_net_only():
     channels = [{"youtube_id": "UC1", "title": "Ch"}]
     ups = [_vid("v1", date="2026-06-20"), _vid("v2", date="2026-06-19"),
            _vid("v3", date="2020-01-01")]
-    res, adds, _ = _handler(channels, {"UC1": ups}, config={"backfill_count": 2})
+    res, adds, _ = _handler(channels, {"UC1": ups}, backfill=2)
     assert adds == [("UC1", ["v1", "v2"])]
 
 

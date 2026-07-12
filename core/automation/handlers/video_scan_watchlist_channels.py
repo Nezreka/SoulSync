@@ -13,9 +13,8 @@ Schedule trigger; 3h is fine too, the scan is cheap). It's forward-looking and d
     are "new" and get wishlisted, forever forward.
   * **Last-N safety net.** Reaches a little BEFORE the baseline so the user is always kept
     current on the most recent videos even right after following / if a scan was missed. The
-    count is the global "videos to grab" setting (Settings → Library, default 5) — shared with
-    the follow backfill so they stay consistent; a per-automation ``backfill_count`` still
-    overrides it if set.
+    count is the global "videos to grab" setting (Settings → Library, default 5) — the SAME
+    knob as the follow backfill, so they can never disagree.
   * **Long-form only.** Shorts are excluded (the channel's Videos tab + a duration floor);
     livestreams/premieres that haven't aired are skipped (future-dated).
   * **Never duplicates.** Each candidate is diffed against what's already wishlisted, what's
@@ -252,13 +251,10 @@ def auto_video_scan_watchlist_channels(
     add_videos = add_videos or _default_add_videos
     today_fn = today_fn or (lambda: date.today().isoformat())
     automation_id = config.get('_automation_id')
-    # The last-N net: an explicit per-automation override wins; otherwise inherit the
-    # global "videos to grab" setting (Settings → Library) so both knobs agree.
-    _bc = config.get('backfill_count')
-    if _bc not in (None, ''):
-        backfill = max(0, int(_bc or 0))
-    else:
-        backfill = max(0, int((backfill_fn or _default_backfill_count)()))
+    # The last-N net is the SINGLE global "videos to grab" setting (Settings → Library),
+    # shared with the follow backfill. No per-automation override — one knob, no surprises
+    # (a stale value baked into an old automation used to silently win over the global).
+    backfill = max(0, int((backfill_fn or _default_backfill_count)()))
     min_seconds = max(0, int(config.get('min_seconds', 60) or 0))
     limit = max(backfill, 30)
 
