@@ -2085,20 +2085,24 @@ vollständige Bundles.
 - [x] Usenet-URL serverseitig und redigiert halten.
 - [x] Category-/Correlation-Vertrag für neue Acquisition-Grabs.
 - [x] persistenter Grab mit externer Job-ID.
-- [ ] zentraler Client-Monitor und Startup-Adoption.
+- [x] zentraler Client-Monitor und Startup-Adoption für bekannte sowie
+  Category-korrelierte Acquisition-Grabs.
 - [x] Cancel-State-Machine und Remove-Bestätigung im bestehenden Usenet-Poller.
 - [x] Timeout trennt sicheren lokalen Fehler von unklarem externem Submit; unklare
   Submits bleiben offen statt automatisch erneut gesendet zu werden.
 - [ ] Remote Path Mapping Health Check.
-- [ ] Bundle-Inventarisierung und Edition-Track-Matching.
-- [ ] Manual Import bei Ambiguität.
-- [ ] Bestehende Post-Processing-Pipeline fuer den Bundle-Pfad
+- [x] Bundle-Inventarisierung und Edition-Track-Matching.
+- [x] Manual Import bei Ambiguität; manuelle Zuordnungen gehen danach durch
+  dieselbe Main-Pipeline und umgehen keine Datei-Checks.
+- [x] Bestehende Post-Processing-Pipeline fuer den Bundle-Pfad
   wiederverwenden: Stabilitaet, Integritaet, Quality Profiles/Cutoff und
   `upgrade_policy` (`acceptable`, `until_cutoff`, `until_top`),
   AcoustID, Quarantaene und die vorhandene Next-Candidate-/Source-Retry-
   Semantik duerfen nicht als zweiter eigener Importpfad implementiert werden.
   Legacy-gekoppelte Helfer werden dafuer in gemeinsame Services extrahiert
-  oder ueber einen Adapter angebunden.
+  oder ueber einen Adapter angebunden. Der verworfene direkte Bundle-Importer
+  wurde revertiert; `main_pipeline_bridge.py` liefert nur Kontext und ruft die
+  bestehende Pipeline auf.
 - [ ] **LIB2-011: Pipeline-Paritaet herstellen.** Die bestehende Main-Pipeline
   bleibt fuer Search Mode, `hybrid_order`, Source-Auswahl, Quality Profile,
   Retry, Quarantaene, Approve und finalen Import die einzige fachliche
@@ -2106,6 +2110,10 @@ vollständige Bundles.
   Korrelation, Bundle-/Edition-Kontext und atomare Lib2-Schreibvorgaenge
   ergaenzen. Eine doppelte Decision Engine oder ein zweiter Quality-/Retry-
   Pfad ist zu entfernen oder in einen gemeinsamen Service zu extrahieren.
+  Der Runtime-Adapter, persistente Success-/Quarantaene-Callbacks und der
+  restart-sichere Import-Coordinator sind umgesetzt. Offen bleiben der
+  automatische Resume der exakten Candidate-Liste nach Prozessneustart und
+  das abschliessende vollstaendige Paritaets-/Live-Gate.
 - [x] Failed Download Handling, exakte Source/Indexer/GUID-Blocklist und Re-Search
   im neuen Acquisition-Pfad.
 - [ ] Retention/Minimum Age/Indexer Priority/Quality/Custom Formats.
@@ -2140,7 +2148,7 @@ Quarantaene-Approve stellt denselben Kontext wieder her, ueberspringt nur den
 genehmigten Check und fuehrt alle anderen Checks erneut aus, bevor der Import
 als erfolgreich gilt.
 
-#### Korrigierender Findings-Block: aktuelle Abweichungen des Branches
+#### Korrigierender Findings-Block: ursprüngliche Abweichungen und Disposition
 
 Die folgenden Findings wurden beim Vergleich der lokalen Phase-5-Commits und
 der uncommitted Import-Pipeline mit der bestehenden Main-Pipeline festgestellt.
@@ -2166,11 +2174,12 @@ Sie sind vor weiterer Feature-Arbeit zu beheben.
   Request aber terminal auf `failed`. Die alte Auswahl des naechsten
   Kandidaten, die Suche in der restlichen Source-Kette und der Retry nach
   Quarantaene fehlen im neuen Pfad.
-- **LIB2-F05 / P1: Quality Upgrade bleibt Wishlist-gekoppelt.**
-  `lib2_upgrade_scan` erkennt Profile mit `until_cutoff`/`until_top`, schreibt
-  aber weiterhin ueber `mirror_tracks_wishlist`. Das muss als kompatibler
-  Adapter in die normale Acquisition Request ueberfuehrt werden, ohne die
-  bestehende Upgrade-Erkennung neu zu bauen.
+- **LIB2-F05 / P1: Quality-Upgrade-Output brauchte eine klare Entscheidung.**
+  `lib2_upgrade_scan` erkennt Profile mit `until_cutoff`/`until_top` und nutzt
+  weiterhin `mirror_tracks_wishlist`. Das ist bis zum globalen Wishlist-Cutover
+  bewusst der kompatible Adapter in die bewährte Main-Pipeline; Profil, Cutoff
+  und Primary-Datei müssen erhalten bleiben. Es darf dafür keine zweite
+  Upgrade-/Download-Pipeline gebaut werden.
 - **LIB2-F06 / P0: Quarantaene-Approve nicht angeschlossen.** Die alte
   `approve_quarantine_entry`-Kette stellt Sidecar-Kontext wieder her,
   ueberspringt nur den genehmigten Check und laesst alle anderen Checks erneut
@@ -2190,6 +2199,21 @@ Orchestrierungsrolle zurueckzubauen. Fachliche Entscheidungen und bewertende
 Dateiverarbeitung werden aus der Main-Pipeline wiederverwendet oder als
 gemeinsame Services extrahiert. Erst danach darf die neue Phase-5-Funktion
 als fertig gelten.
+
+#### Korrekturstand 2026-07-12
+
+| Finding | Stand | Umsetzung / verbleibende Grenze |
+|---|---|---|
+| LIB2-F01 | **korrigiert** | Gemeinsame `source_policy` wird von DownloadOrchestrator und Acquisition genutzt. `best_quality`, Source-Priority, `hybrid_order` und profile-aware Candidate-Ordering sind nicht mehr implizite Defaults des neuen Pfads. |
+| LIB2-F02/F03 | **korrigiert** | Direkter `bundle_import.py` wurde revertiert. `main_pipeline_bridge.py` übergibt jedes Match an `post_process_matched_download_with_verification`; Main-Pipeline besitzt Quality, Integrity, AcoustID, Tagging, Quarantäne und finalen Pfad. |
+| LIB2-F04 | **Runtime korrigiert, Restart teilweise offen** | Automatische Imports erzeugen einen normalen Legacy-Task und verwenden `requeue_quarantined_task_for_retry`, Candidate Cache, `used_sources`, Source-Budgets und Worker-Suche. Torrent/Usenet haben eigene exhaustive Budgets. Die exakte Candidate-Liste ist nach Prozessneustart noch nicht persistent rekonstruierbar. |
+| LIB2-F05 | **bewusst wiederverwendet** | `lib2_upgrade_scan` bleibt absichtlich der periodische Selector und `mirror_tracks_wishlist` der Kompatibilitätsadapter in die bewährte Wishlist/Main-Pipeline. Nur `until_top`/`until_cutoff` werden geprüft; Primary-Datei, Cutoff und exakte Quality-Profile-ID werden erneut validiert. Ein direkter Acquisition-Output ist erst Teil des globalen Wishlist-Cutovers und darf die bestehende Pipeline nicht duplizieren. |
+| LIB2-F06 | **korrigiert** | Acquisition-Marker überleben den bestehenden Quarantäne-Sidecar. Approve durchläuft dieselbe Pipeline erneut, überspringt nur den bestätigten Check und meldet erst nach allen übrigen Checks persistent Erfolg. |
+| LIB2-F07 | **teilweise korrigiert** | Success und Quarantäne werden persistent pro Import/Track gespeichert. Nach Restart wird eine bekannte schlechte Datei nicht blind erneut importiert; manuelles Approve bleibt möglich. Cached Candidates, `used_sources` und automatische Retry-Fortsetzung sind noch in-memory. |
+| LIB2-F08 | **teilweise korrigiert** | Gezielte Tests decken Source Policy, Main-Pipeline-Bridge, Quarantäne, Approve-Kontext, Library-ID über Candidate-Retry, Release-Source-Budgets und periodischen Upgrade-Scan ab. Full Suite und reale Client-/Docker-Abnahme stehen noch aus. |
+
+Relevante Korrektur-Commits: `e1272be`, `e6484cb`, `2917f3c`, `99ffd2c`,
+`7d80e96`, `e394e2d`, `39549f0`, `e27070f`, `3eb0e92`, `a7344e5`.
 
 #### Live-Abnahme
 
@@ -2332,6 +2356,9 @@ ADR-Log in §25a.
 | Phase-4 Request/Candidate/Decision | Persistente, idempotente `acquisition_requests`; requestgebundene `release_candidates` mit TTL/opaque IDs; append-only versionierte Decision Runs mit strukturierten Rejections/Warnings, getrenntem Ranking sowie serverseitiger Manual-/Auto-Auswahl. Source-Capabilities erzwingen Recording vs. Release-Bundle; Browserpayloads können weder Profil, Entity-Kontext noch Search-Optionen vortäuschen. | `a6b444b`, `50c464f`, `800682b`, `3c83a8d`, `a9bc629`, `ec5fc6d` |
 | Phase-4 Search/Wanted | Typisierter Parser-/Aggregationsvertrag isoliert fehlerhafte Providerzeilen und hält Netzwerk-I/O außerhalb der DB-Transaktion. Prowlarr normalisiert reale Releases ohne Pseudo-Track-Projektion; `lib2_wanted_tracks` materialisiert idempotente Recording-Requests ausschließlich als ADR-02-Shadow und löst keinen Download aus. | `2ff3c9a`, `e546318`, `444f80f`, `7caacf2`, `9ec9536` |
 | Acquisition History/Blocklist/Usenet-Submit | Append-only, redigierte Business-History; exakte Source/Indexer/GUID-Blocklist; Failed-Download-Re-Search; auditierter Force Grab. Der neue Grab wird vor externem I/O persistiert, erfolgreiche SAB/NZBGet-Submits erhalten Category/externe Job-ID und hängen sich an den vorhandenen Poller. Unklare Submit-Timeouts bleiben offen und werden nach Neustart nicht blind erneut gesendet. | `0a15394`, `477350c`, `57b9d51`, `e9f2fd1`, `29be67e` |
+| Phase-5 Import-Fundament | Persistente Bundle-Inventare und eindeutiges Edition-/Track-Matching; Ambiguität bleibt im Review statt teilweise zu importieren. Zentraler Client-Monitor führt completed Grabs auch nach Restart in den Import-Coordinator. | `6090847`, `dc546d5`, `7d80e96`, `e394e2d` |
+| Main-Pipeline-Parität | Der direkte Bundle-Importer ist entfernt. Matches gehen als Kontextadapter durch die bestehende Post-Processing-Pipeline; Success, Quarantäne und spätere Freigabe werden pro Acquisition-Import persistiert. Exakte Lib2-Track-Identität bleibt über Candidate-Retries erhalten. | `e1272be`, `2917f3c`, `99ffd2c`, `39549f0`, `e27070f` |
+| Source-/Upgrade-Wiederverwendung | Gemeinsame Source Policy erhält `best_quality`, Prioritätsmodus und `hybrid_order`; Release-Quellen besitzen korrekte Retry-Budgets. Der periodische Lib2-Upgrade-Scan verwendet weiter Cutoff-/Top-Auswertung und die normale Wishlist/Main-Pipeline. | `e6484cb`, `3eb0e92`, `a7344e5` |
 
 #### Verifizierter Teststand (2026-07-12)
 
@@ -2366,13 +2393,14 @@ ADR-Log in §25a.
 - [ ] ADR-02-Cutover: Konsumenten (Wishlist-Mirror, Upgrade-Scan, Queries)
   schrittweise von den `monitored`-Flags auf `lib2_wanted_tracks` umstellen;
   aktuell wird Divergenz nur gezählt/geloggt.
-- [ ] ADR-07 auf Torrent ausweiten (Phase 6) und den zentralen Client-Monitor
-  mit Category-Adoption bauen (Phase 5) — Adoption läuft bisher nur über die
-  persistierte externe Job-ID des Usenet-Plugins. `submission_unknown` bleibt zur
-  Duplicate-Vermeidung bewusst offen, bis Category-Adoption es auflösen kann.
-- [ ] Phase 5: editionbezogene Bundle-Inventarisierung/Track-Matching,
-  `acquisition_imports`, Ambiguitäts-/Manual-Import-Pfad und vollständiger
-  Restart-Lifecycle bis Import.
+- [ ] ADR-07 auf Torrent ausweiten (Phase 6). Der zentrale Client-Monitor und
+  Category-Adoption für Phase 5 sind vorhanden; `submission_unknown` bleibt
+  zur Duplicate-Vermeidung bewusst offen, wenn der Client noch keine sichere
+  Korrelation liefert.
+- [ ] Phase 5 Rest: Remote-Path-Health-API, persistenter automatischer
+  Next-Candidate-Resume nach Prozessneustart, vollständige Paritätsmatrix und
+  reale SAB/NZBGet-/Docker-Abnahme. Inventar, Matching, `acquisition_imports`,
+  Review und Main-Pipeline-Übergabe sind umgesetzt.
 - [ ] `file_state`-Lifecycle mit dem Scan verdrahten (P2-02): Missing-
   Erkennung setzt die Zustände noch nicht automatisch.
 
@@ -2382,13 +2410,13 @@ Primary, ADR-03), P1-08, P1-09, P1-10, P1-11, P1-12, P1-14, P1-15, P1-16,
 P1-17, P1-29, P1-30, P1-31 sowie Teile von P1-04 (Edition/Recording-Schema +
 Backfill, ADR-04), P1-05 (Review-Findings statt stiller Titel-Merges), P1-13
 (Provenance/Labeling + Wanted-Projektion), P1-18 und P1-20/P1-21 (persistente
-Grab-Korrelation, Adoption, zweistufiger Cancel — der zentrale Client-Monitor
-fehlt noch) geschlossen. P0-04 wurde mit strikter Fehlerweitergabe im
+Grab-Korrelation, Adoption, zweistufiger Cancel und zentraler Client-Monitor)
+geschlossen. P0-04 wurde mit strikter Fehlerweitergabe im
 Outbox-Worker nachgehärtet (`895d27e`) und durch den periodischen Reconciler
 (`3ca3000`) ergänzt; der manuelle Grab-Pfad übergibt das serverseitige Profil
 nachweislich an die Pipeline und ist für Nicht-Admins gesperrt (`a7b08a8`).
-Als Nächstes: Phase 5 mit zentralem Client-Monitor/Category-Adoption und danach
-editionbezogenem Bundle-Import. Phase-3-Rest (External-/Old-ID-History und
+Als Nächstes: Phase-5-Rest mit durablem Retry-Resume, Remote-Path-Health und
+realer Client-Abnahme; danach Phase 6. Phase-3-Rest (External-/Old-ID-History und
 Field-Level-Overrides) bleibt parallel offen, ist aber keine Voraussetzung mehr für
 den abgeschlossenen Phase-4-Domänenkern.
 
@@ -2794,6 +2822,12 @@ best-effort Spiegelung (P0-04). Drei Optionen wurden abgewogen:
   Zwischenmodell bleibt outbox-basiert, nicht "Wishlist als Wahrheit".
   Zusätzlich periodischer Reconciler, der Drift zwischen `lib2_*` und Wishlist
   aktiv erkennt und meldet (nicht nur beim Schreiben, auch im Ruhezustand).
+- Diese kurzfristige Entscheidung gilt ausdrücklich auch für Quality Upgrades:
+  `lib2_upgrade_scan` und der bestehende Quality-Upgrader bestimmen Kandidat und
+  `upgrade-until`; `mirror_tracks_wishlist` übergibt mit exakter
+  `quality_profile_id` an die produktive Wishlist/Main-Pipeline. Ein direkter
+  Acquisition-Output ersetzt diesen Adapter erst beim späteren Read-/Write-Cutover,
+  nicht als parallele Download- oder Decision-Pipeline.
 - Mittelfristig: Der periodische Reconciler liefert die Datenbasis, um zu messen,
   wie oft/wie stark beide Seiten tatsächlich auseinanderlaufen — das ist zugleich
   der Fortschrittsindikator auf dem Weg zu Option 1.

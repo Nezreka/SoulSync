@@ -305,9 +305,12 @@ The existing Quality Upgrade jobs remain the canonical upgrade mechanism.
 upgrade candidate. The periodic `lib2_upgrade_scan` runs only for profiles
 whose `upgrade_policy` permits upgrades and respects `until_cutoff`/`until_top`.
 The existing `quality_upgrade` provider-search and finding logic must be
-reused. Its output must be adapted into the normal Library-v2 Acquisition
-Request when the target is a Library-v2 entity; it must not silently bypass
-the normal source-selection, Quality Profile, retry or import pipeline.
+reused. During the staged cutover, `mirror_tracks_wishlist` is intentionally
+the output adapter because it enters the battle-tested Wishlist/Main-Pipeline
+with the exact Quality Profile. A direct Library-v2 Acquisition output may
+replace this only as part of the later global Wishlist cutover, after parity is
+proven; it must not silently bypass or duplicate source selection, retry,
+quarantine or import behavior.
 
 ### Quarantine and manual approval integration
 
@@ -394,19 +397,17 @@ the exact blocklist event, preserve the Acquisition Request as retryable,
 and invoke the existing candidate/source retry semantics through an adapter.
 Only exhausted candidates/sources may produce terminal request failure.
 
-**LIB2-F05 -- Quality Upgrade still enters the legacy Wishlist path (P1).**
+**LIB2-F05 -- Quality Upgrade output ownership needed an explicit decision (P1).**
 
-`core/repair_jobs/lib2_upgrade_scan.py` detects Library-v2 upgrade candidates,
-but calls `mirror_tracks_wishlist`. It therefore does not directly create a
-Library-v2 Acquisition Request. The existing `quality_upgrade` job is the
-canonical provider-search/finding implementation, but its output is also
-legacy-oriented.
+`core/repair_jobs/lib2_upgrade_scan.py` detects Library-v2 upgrade candidates
+and calls `mirror_tracks_wishlist`. The existing `quality_upgrade` job and
+Wishlist/Main-Pipeline are the canonical, tested upgrade and download path.
 
-**Required correction:** keep the existing periodic jobs and their
-`upgrade_policy`/`upgrade_cutoff_index` semantics, but add an output adapter.
-For Library-v2 entities the adapter must create the normal Acquisition
-Request and then use the same main search/download/import pipeline. Wishlist
-mirroring remains only the compatibility path during the staged cutover.
+**Decision/correction:** keep the existing periodic jobs and their
+`upgrade_policy`/`upgrade_cutoff_index` semantics. Reuse Wishlist mirroring as
+the compatibility adapter until the global Wishlist cutover; it must carry the
+exact profile and enter the same main search/download/import pipeline. Do not
+invent a direct parallel upgrade pipeline merely to create an Acquisition row.
 
 **LIB2-F06 -- quarantine and manual approval are not connected to Bundle Import (P0).**
 
@@ -451,6 +452,42 @@ These findings supersede any earlier assumption that the new Decision Engine
 and Bundle Importer were acceptable as independent implementations. The next
 implementation phase is LIB2-011, not another feature on top of the current
 split behavior.
+
+### LIB2-011 implementation status (2026-07-12)
+
+Completed:
+
+- the direct Lib2 bundle importer was reverted;
+- Acquisition and the legacy orchestrator share one source-policy resolver for
+  `best_quality`, priority mode, `hybrid_order` and profile ordering;
+- deterministic bundle inventory, edition-track matching and manual review are
+  persistent and restart-safe;
+- matched files are dispatched through the existing import pipeline, not a
+  second quality/import implementation;
+- pipeline success and quarantine are persisted per planned track; the existing
+  sidecar/Approve path retains Acquisition markers and completes only after the
+  remaining checks pass;
+- the exact `lib2_entity` and Quality Profile survive legacy candidate retries;
+- Torrent and Usenet retain distinct exhaustive retry budgets;
+- `lib2_upgrade_scan` intentionally reuses `mirror_tracks_wishlist` as the
+  compatibility adapter into the normal Wishlist/Main-Pipeline. It only selects
+  monitored tracks under `until_top`/`until_cutoff`, re-evaluates the primary
+  file against the cutoff and carries the exact profile ID.
+
+Still open before LIB2-011/Phase 5 can be called complete:
+
+- persist or reconstruct cached candidates, used/exhausted sources and automatic
+  Next-Candidate continuation after a process restart. Current persistence
+  prevents blind redispatch of the quarantined file and preserves manual
+  approval, but does not recreate the old worker's in-memory candidate list;
+- prove the complete old-vs-Library-v2 parity matrix and run the full suite;
+- perform real SAB/NZBGet, path-mapping and Docker restart acceptance tests;
+- only during the later global Wishlist cutover, replace the compatibility
+  Wishlist output with direct Acquisition Requests. Do not do this earlier if
+  it would bypass or duplicate the established Wishlist/Main-Pipeline behavior.
+
+Correction commits: `e1272be`, `e6484cb`, `2917f3c`, `99ffd2c`, `7d80e96`,
+`e394e2d`, `39549f0`, `e27070f`, `3eb0e92`, `a7344e5`.
 
 ## Verification (per phase, end-to-end in Docker)
 Build the local image (`docker build -t soulsync:dev .`), run with the user's real config+DB copy + the
