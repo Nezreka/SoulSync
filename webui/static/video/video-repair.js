@@ -58,6 +58,7 @@
         youtube_ghost: 'YouTube Ghost',
         youtube_mass_missing: 'Mass Missing',
         watched_cleanup: 'Watched Cleanup',
+        naming_mismatch: 'Naming',
     };
     // Types absent here are report-only: no approve button, dismiss + details only.
     var FIXABLE_TYPES = {
@@ -70,11 +71,12 @@
         youtube_ghost: 'Mark Deleted',
         youtube_mass_missing: 'Flag Individually',
         watched_cleanup: 'Clean Up',
+        naming_mismatch: 'Rename',
     };
     var ACTION_LABELS = { wishlisted: 'Wishlisted', grabbed: 'Grabbed', refreshed: 'Refreshed',
         removed: 'Removed', resolved: 'Resolved',
         marked_deleted: 'Marked Deleted', forgotten: 'Forgotten', flagged: 'Flagged',
-        cleaned: 'Cleaned' };
+        cleaned: 'Cleaned', renamed: 'Renamed' };
     var GAP_LABELS = { unmatched: 'not TMDB-matched', overview: 'no summary',
         genres: 'no genres', poster: 'no poster', backdrop: 'no backdrop' };
 
@@ -440,6 +442,7 @@
         if (f.finding_type === 'youtube_ghost') return ghostDetailHTML(f);
         if (f.finding_type === 'youtube_mass_missing') return massMissingDetailHTML(d);
         if (f.finding_type === 'watched_cleanup') return watchedDetailHTML(d);
+        if (f.finding_type === 'naming_mismatch') return namingDetailHTML(d);
         return '<pre class="repair-finding-json">' + esc(JSON.stringify(d, null, 2)) + '</pre>';
     }
 
@@ -618,6 +621,16 @@
                     'erased outright. The weekly deep scan tidies the server view afterwards.</p>' +
                 (d.relative_path ? '<p class="vrf-show-overview">' + esc(d.relative_path) + '</p>' : '') +
             '</div></div>';
+    }
+
+    // ── Naming Conformance: the rename preview ───────────────────────────────
+    function namingDetailHTML(d) {
+        return '<div class="vrf-chips"><span class="vrf-chip">' + esc(d.scope || '') + '</span>' +
+                (d.size_bytes ? '<span class="vrf-chip">' + gb(d.size_bytes) + '</span>' : '') + '</div>' +
+            '<p class="vrf-show-overview"><strong>Now:</strong> ' + esc(d.current_path || '') + '</p>' +
+            '<p class="vrf-show-overview"><strong>Becomes:</strong> ' + esc(d.expected_path || '') + '</p>' +
+            '<p class="vrf-show-overview">Approving renames the file (sidecars and subtitles come along); ' +
+                'the server picks the new name up on its next scan. Nothing is ever overwritten.</p>';
     }
 
     function simpleEpisodeList(d) {

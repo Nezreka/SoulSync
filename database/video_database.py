@@ -4230,6 +4230,31 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def repair_library_files(self) -> list:
+        """Every owned movie/episode file with the fields the naming templates
+        need — the naming-conformance job's source."""
+        conn = self._get_connection()
+        try:
+            movies = [dict(r) for r in conn.execute(
+                "SELECT 'movie' AS scope, m.id AS item_id, f.id AS file_id, "
+                "m.title, m.year, m.tmdb_id, NULL AS season, NULL AS episode, "
+                "NULL AS episode_title, NULL AS series, "
+                "f.relative_path, f.size_bytes, f.quality, f.resolution, f.video_codec "
+                "FROM movies m JOIN media_files f ON f.movie_id = m.id "
+                "WHERE m.has_file = 1")]
+            eps = [dict(r) for r in conn.execute(
+                "SELECT 'episode' AS scope, e.id AS item_id, f.id AS file_id, "
+                "s.title AS title, NULL AS year, s.tmdb_id, "
+                "e.season_number AS season, e.episode_number AS episode, "
+                "e.title AS episode_title, s.title AS series, "
+                "f.relative_path, f.size_bytes, f.quality, f.resolution, f.video_codec "
+                "FROM episodes e JOIN shows s ON e.show_id = s.id "
+                "JOIN media_files f ON f.episode_id = e.id "
+                "WHERE e.has_file = 1")]
+            return movies + eps
+        finally:
+            conn.close()
+
     def repair_stale_wishlist(self) -> list:
         """Wishlist rows whose target is ALREADY OWNED, annotated with the owned
         files' resolutions — the audit job judges them against the cutoff:
