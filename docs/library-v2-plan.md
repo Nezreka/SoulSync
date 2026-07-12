@@ -193,6 +193,42 @@ then the source/candidate layer `POST /api/manual-search/<task_id>` + `POST /api
 Post-download import via `core/imports/pipeline.py::post_process_matched_download` → link into
 `lib2_track_files`.
 
+### Critical reuse rule for every new acquisition/import path
+
+Library v2 must reuse the existing, battle-tested search, download and
+post-processing behavior wherever the semantics are the same. A new
+orchestration layer may add persistent Acquisition Requests, release-level
+correlation, restart-safe state, Edition/Track matching and atomic Library
+writes. It must not create a second implementation of the existing
+file-processing policy.
+
+The following behavior is mandatory shared behavior:
+
+- configured source and protocol priorities must be applied when selecting a
+  replacement candidate;
+- Quality Profiles must control accepted quality, cutoff and the upgrade
+  policy (`acceptable`, `until_cutoff` or `until_top` / upgrade-until target);
+- retention/minimum age and Custom Formats must use the existing profile and
+  decision logic;
+- stability, integrity, quality, AcoustID and other enabled post-processing
+  checks must use the existing implementations;
+- failed files must use the existing quarantine and audit semantics;
+- a failed candidate must be blocklisted precisely and the next eligible
+  candidate, including a candidate from another configured source, must be
+  selected using the same priority rules;
+- retry state must survive restart and must not depend on legacy in-memory
+  `download_tasks` state.
+
+The Phase-5 Bundle Importer is therefore only a release/bundle coordinator:
+it inventories the completed output, matches it to the expected Edition and
+delegates per-file validation, quarantine, retry and final processing to
+shared services. If an old helper is coupled to legacy task IDs or in-memory
+state, extract a source-independent service or add an adapter; do not copy
+the old logic into a second pipeline. Phase 5 is not complete until tests
+prove a failed first candidate is replaced successfully by a candidate from
+the same source and by one from a lower-priority source, and that upgrade
+requests stop at the Quality Profile's configured upgrade-until target.
+
 ## Phase C — Re-Tag/Preview, Metadata Gap Fill, Fix Unknown Artist, Album Tag Consistency, Manual Import
 - Preview Re-Tag + Re-Tag: reuse `GET /api/library/track/<id>/tag-preview` +
   `POST /api/library/tracks/write-tags-batch` (`core/tag_writer.py`), repointed at `lib2` ids.

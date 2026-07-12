@@ -2092,6 +2092,13 @@ vollständige Bundles.
 - [ ] Remote Path Mapping Health Check.
 - [ ] Bundle-Inventarisierung und Edition-Track-Matching.
 - [ ] Manual Import bei Ambiguität.
+- [ ] Bestehende Post-Processing-Pipeline fuer den Bundle-Pfad
+  wiederverwenden: Stabilitaet, Integritaet, Quality Profiles/Cutoff und
+  `upgrade_policy` (`acceptable`, `until_cutoff`, `until_top`),
+  AcoustID, Quarantaene und die vorhandene Next-Candidate-/Source-Retry-
+  Semantik duerfen nicht als zweiter eigener Importpfad implementiert werden.
+  Legacy-gekoppelte Helfer werden dafuer in gemeinsame Services extrahiert
+  oder ueber einen Adapter angebunden.
 - [x] Failed Download Handling, exakte Source/Indexer/GUID-Blocklist und Re-Search
   im neuen Acquisition-Pfad.
 - [ ] Retention/Minimum Age/Indexer Priority/Quality/Custom Formats.
@@ -2107,6 +2114,15 @@ vollständige Bundles.
 - Remote Mapping gültig/ungültig/offline.
 - Multi-Disc-Album, Bonus Tracks, falsche Edition, fehlender Track.
 - Failed Candidate wird blocklisted und beim Re-Search nicht erneut gewählt.
+
+Zusatztest: Eine fehlerhafte erste Datei oder ein fehlerhafter Kandidat muss
+quarantaenisiert und exakt blocklisted werden. Danach muss ein Ersatzkandidat
+aus derselben Source und aus einer anderen Source gemaess Source-/Protocol-
+Prioritaet erfolgreich gewaehlt werden. Dieser Retry muss nach einem Neustart
+denselben Zustand fortsetzen koennen. Ein Upgrade darf ausserdem nur bis zum
+im Quality Profile definierten `upgrade-until`-Ziel laufen; `until_cutoff` und
+`until_top` muessen dabei mit der bestehenden Quality-Upgrade-Semantik
+uebereinstimmen.
 
 #### Live-Abnahme
 
