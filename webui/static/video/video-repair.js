@@ -56,6 +56,7 @@
         duplicate_movie: 'Duplicate',
         stale_wishlist: 'Stale Wishlist',
         youtube_ghost: 'YouTube Ghost',
+        youtube_mass_missing: 'Mass Missing',
     };
     // Types absent here are report-only: no approve button, dismiss + details only.
     var FIXABLE_TYPES = {
@@ -66,10 +67,11 @@
         metadata_gap: 'Re-enrich',
         stale_wishlist: 'Remove',
         youtube_ghost: 'Mark Deleted',
+        youtube_mass_missing: 'Flag Individually',
     };
     var ACTION_LABELS = { wishlisted: 'Wishlisted', grabbed: 'Grabbed', refreshed: 'Refreshed',
         removed: 'Removed', resolved: 'Resolved',
-        marked_deleted: 'Marked Deleted', forgotten: 'Forgotten' };
+        marked_deleted: 'Marked Deleted', forgotten: 'Forgotten', flagged: 'Flagged' };
     var GAP_LABELS = { unmatched: 'not TMDB-matched', overview: 'no summary',
         genres: 'no genres', poster: 'no poster', backdrop: 'no backdrop' };
 
@@ -433,6 +435,7 @@
         if (f.finding_type === 'duplicate_movie') return duplicateDetailHTML(d);
         if (f.finding_type === 'stale_wishlist') return staleDetailHTML(d);
         if (f.finding_type === 'youtube_ghost') return ghostDetailHTML(f);
+        if (f.finding_type === 'youtube_mass_missing') return massMissingDetailHTML(d);
         return '<pre class="repair-finding-json">' + esc(JSON.stringify(d, null, 2)) + '</pre>';
     }
 
@@ -562,6 +565,33 @@
                     'the badge clears and it will NOT be re-downloaded. Files are never touched.</p>' +
                 '<div class="vrf-actions">' + actions + '</div>' +
             '</div></div>';
+    }
+
+    // ── Mass Missing: most of the ledger gone at once — outage or real wipe ──
+    function massMissingDetailHTML(d) {
+        function row(title, channel, path) {
+            return '<div class="vrf-ep"><div class="vrf-ep-body"><div class="vrf-ep-head">' +
+                '<span class="vrf-ep-title" title="' + esc(path || '') + '">' + esc(title) + '</span>' +
+                (channel ? '<span class="vrf-ep-date">' + esc(channel) + '</span>' : '') +
+            '</div></div></div>';
+        }
+        var sample = (d.sample || []).map(function (s) {
+            return row(s.title || '?', s.channel, s.dest_path);
+        }).join('');
+        var more = (d.missing_count || 0) - (d.sample || []).length;
+        return '<div class="vrf-chips">' +
+                '<span class="vrf-chip vrf-chip--miss">' + (d.missing_count || 0) +
+                    ' of ' + (d.checked || 0) + ' missing</span></div>' +
+            '<p class="vrf-show-overview">This many files gone at once usually means a drive or ' +
+                'share is unreachable — so nothing was flagged automatically. If it IS real ' +
+                '(you deleted the files, or moved to a new drive), approve this: each video gets ' +
+                'its own finding to review, where you choose Mark Deleted (no re-download) or ' +
+                'Forget (download again). Nothing is marked by the approve itself, and files are ' +
+                'never touched. If a drive is down, fix the mount and re-run the scan instead — ' +
+                'this notice retires on its own.</p>' +
+            '<div class="vrf-eps">' + sample +
+                (more > 0 ? row('…and ' + more + ' more', '', '') : '') +
+            '</div>';
     }
 
     function simpleEpisodeList(d) {
