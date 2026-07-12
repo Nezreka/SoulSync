@@ -108,6 +108,7 @@ def api(tmp_path):
     # ADR-01: lib2 writes are admin-only (profile 1). Tests flip this to a
     # non-admin id to probe the rejection path.
     db.active_profile = 1
+    db.config = {"features.library_v2": True}
     db.acquisition_search_adapters = []
     db.acquisition_submission_adapters = {}
     app = flask.Flask(__name__)
@@ -115,8 +116,7 @@ def api(tmp_path):
     register_library_v2_routes(
         app,
         get_database=lambda: db,
-        config_get=lambda key, default=None: (
-            True if key == "features.library_v2" else default),
+        config_get=lambda key, default=None: db.config.get(key, default),
         config_manager=None,
         profile_id_getter=lambda: db.active_profile,
         acquisition_search_adapters_getter=(
@@ -322,6 +322,7 @@ def test_acquisition_evaluation_returns_only_public_candidates_and_reasons(api):
 
 def test_acquisition_search_is_server_owned_and_persists_public_decisions(api):
     client, db, ids = api
+    db.config["download_source.mode"] = "usenet"
     from core.acquisition.prowlarr_adapter import (
         ProwlarrAcquisitionAdapter,
         ProwlarrCandidateParser,
@@ -386,6 +387,7 @@ def test_acquisition_search_is_server_owned_and_persists_public_decisions(api):
 
 def test_acquisition_search_operational_failure_is_retryable_not_no_candidate(api):
     client, db, ids = api
+    db.config["download_source.mode"] = "usenet"
 
     class Parser:
         source = "usenet"

@@ -11,6 +11,8 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, Optional, Protocol, Sequence, Tuple
 
+from core.downloads.source_policy import SourcePolicy
+
 from core.acquisition.search_contract import (
     AggregatedCandidates,
     CandidateParser,
@@ -130,8 +132,9 @@ async def collect_search_results(
     adapters: Sequence[AcquisitionSearchAdapter],
     *,
     timeout_seconds: float = 30.0,
+    source_policy: Optional[SourcePolicy] = None,
 ) -> SearchCollection:
-    """Search every configured compatible source concurrently."""
+    """Search sources with the same mode/order contract as the main pipeline."""
     timeout_seconds = float(timeout_seconds)
     if timeout_seconds <= 0 or timeout_seconds > 300:
         raise ValueError("search timeout must be between 0 and 300 seconds")
@@ -145,10 +148,36 @@ async def collect_search_results(
         normalized.append(adapter)
     if not normalized:
         return SearchCollection(criteria, tuple())
-    outcomes = await asyncio.gather(*(
-        _collect_one(criteria, adapter, timeout_seconds=timeout_seconds)
-        for adapter in normalized
-    ))
+
+    if source_policy is None:
+        outcomes = await asyncio.gather(*(
+            _collect_one(criteria, adapter, timeout_seconds=timeout_seconds)
+            for adapter in normalized
+        ))
+        return SearchCollection(criteria, tuple(outcomes))
+
+    by_source = {_adapter_source(adapter): adapter for adapter in normalized}
+    permitted = [
+        by_source[source]
+        for source in source_policy.source_chain
+        if source in by_source
+    ]
+    unsupported = [
+        SourceSearchOutcome(source, "unsupported")
+        for source in by_source
+        if not source_policy.permits(source)
+    ]
+    if source_policy.search_all_sources:
+        searched = await asyncio.gather(*(
+            _collect_one(criteria, adapter, timeout_seconds=timeout_seconds)
+            for adapter in permitted
+        ))
+    else:
+        searched = []
+        for adapter in permitted:
+            searched.append(await _collect_one(
+                criteria, adapter, timeout_seconds=timeout_seconds))
+    outcomes = tuple(searched) + tuple(unsupported)
     return SearchCollection(criteria, tuple(outcomes))
 
 

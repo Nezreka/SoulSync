@@ -23,6 +23,7 @@ from core.acquisition.decisions import (
 )
 from core.acquisition.requests import create_request, transition_request
 from core.quality.model import QualityTarget
+from core.downloads.source_policy import resolve_source_policy
 
 
 @pytest.fixture
@@ -340,3 +341,87 @@ def test_profile_factory_uses_ranked_targets_and_cutoff():
     assert len(policy.quality_targets) == 2
     assert policy.fallback_enabled is False
     assert policy.cutoff_index == 1
+
+
+def test_priority_mode_ranks_source_before_quality(conn):
+    request = _request(conn)
+    preferred = _candidate(
+        conn,
+        request,
+        source="usenet",
+        protocol="usenet",
+        guid="preferred",
+        facts={
+            "artist": "Artist", "release_title": "Album", "edition": "Deluxe",
+            "format": "flac", "bit_depth": 16, "track_count": 10,
+        },
+    )
+    better_quality = _candidate(
+        conn,
+        request,
+        source="torrent",
+        protocol="torrent",
+        guid="better-quality",
+        server_ref="ssc1-other",
+        facts={
+            "artist": "Artist", "release_title": "Album", "edition": "Deluxe",
+            "format": "flac", "bit_depth": 24, "sample_rate": 96000,
+            "track_count": 10,
+        },
+    )
+    source_policy = resolve_source_policy(
+        mode="hybrid",
+        hybrid_order=["usenet", "torrent"],
+        search_mode="priority",
+    )
+    policy = _policy(
+        source_policy=source_policy,
+        source_priorities=source_policy.source_priorities,
+        protocol_priorities={},
+    )
+
+    preferred_decision = _evaluate(request, preferred, policy=policy)
+    better_decision = _evaluate(request, better_quality, policy=policy)
+
+    assert preferred_decision.sort_key < better_decision.sort_key
+
+
+def test_best_quality_mode_ranks_quality_before_source(conn):
+    source_policy = resolve_source_policy(
+        mode="hybrid",
+        hybrid_order=["usenet", "torrent"],
+        search_mode="best_quality",
+    )
+    policy = _policy(
+        source_policy=source_policy,
+        source_priorities=source_policy.source_priorities,
+        protocol_priorities={},
+    )
+    request = _request(conn)
+    preferred = _candidate(
+        conn,
+        request,
+        source="usenet",
+        protocol="usenet",
+        guid="preferred-best-mode",
+        facts={
+            "artist": "Artist", "release_title": "Album", "edition": "Deluxe",
+            "format": "flac", "bit_depth": 16, "track_count": 10,
+        },
+    )
+    better = _candidate(
+        conn,
+        request,
+        source="torrent",
+        protocol="torrent",
+        guid="better-best-mode",
+        server_ref="ssc1-best-other",
+        facts={
+            "artist": "Artist", "release_title": "Album", "edition": "Deluxe",
+            "format": "flac", "bit_depth": 24, "sample_rate": 96000,
+            "track_count": 10,
+        },
+    )
+
+    assert _evaluate(request, better, policy=policy).sort_key < _evaluate(
+        request, preferred, policy=policy).sort_key

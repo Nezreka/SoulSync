@@ -384,7 +384,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             if acquisition_request is None or acquisition_request.profile_id != ADMIN_PROFILE_ID:
                 return jsonify({"success": False, "error": "Request not found"}), 404
             automatic = acquisition_request.trigger != "manual"
-            catalog, policy = resolve_request_context(conn, acquisition_request)
+            catalog, policy = resolve_request_context(
+                conn, acquisition_request, config_get=config_get)
             runtime = (
                 acquisition_runtime_getter(acquisition_request)
                 if acquisition_runtime_getter else RuntimeContext()
@@ -448,7 +449,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     "grab": public_grab(existing),
                 })
             catalog, policy = resolve_request_context(
-                prepare_conn, acquisition_request)
+                prepare_conn, acquisition_request, config_get=config_get)
             runtime = (
                 acquisition_runtime_getter(acquisition_request)
                 if acquisition_runtime_getter else RuntimeContext()
@@ -612,7 +613,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
         read_conn = _conn()
         try:
-            from core.acquisition.catalog import resolve_catalog_context
+            from core.acquisition.catalog import (
+                load_effective_policy,
+                resolve_catalog_context,
+            )
             from core.acquisition.requests import get_request
             from core.acquisition.search_contract import build_search_criteria
             acquisition_request = get_request(read_conn, request_id)
@@ -627,6 +631,11 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 acquisition_request,
                 resolve_catalog_context(read_conn, acquisition_request),
             )
+            acquisition_policy = load_effective_policy(
+                read_conn,
+                acquisition_request.quality_profile_id,
+                config_get=config_get,
+            )
         except ValueError as exc:
             return jsonify({"success": False, "error": str(exc)}), 400
         finally:
@@ -639,6 +648,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 _acquisition_search_adapters(criteria),
                 timeout_seconds=float(config_get(
                     "acquisition.search_timeout_seconds", 30.0)),
+                source_policy=acquisition_policy.source_policy,
             ))
         except Exception as exc:  # noqa: BLE001 - external source boundary
             from core.acquisition.search_contract import safe_external_error
@@ -733,7 +743,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     "refreshed": persisted.refreshed_count,
                 },
             )
-            catalog, policy = resolve_request_context(write_conn, current)
+            catalog, policy = resolve_request_context(
+                write_conn, current, config_get=config_get)
             runtime = (
                 acquisition_runtime_getter(current)
                 if acquisition_runtime_getter else RuntimeContext()

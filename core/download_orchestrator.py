@@ -29,6 +29,7 @@ from core.download_engine import DownloadEngine
 from core.download_plugins.registry import DownloadPluginRegistry, build_default_registry
 from core.download_plugins.types import TrackResult, AlbumResult, DownloadStatus
 from core.quality.selection import load_search_mode
+from core.downloads.source_policy import resolve_source_policy
 
 logger = get_logger("download_orchestrator")
 
@@ -287,26 +288,15 @@ class DownloadOrchestrator:
         primary/secondary pair when no order set. Normalizes alias
         names through the registry so legacy ``deezer_dl`` config
         values resolve correctly to the canonical ``deezer`` plugin."""
-        if self.hybrid_order:
-            chain = []
-            seen = set()
-            for raw in self.hybrid_order:
-                canonical = self._normalize_source_name(raw)
-                if canonical and canonical not in seen:
-                    chain.append(canonical)
-                    seen.add(canonical)
-            return chain
-        primary = self._normalize_source_name(self.hybrid_primary) or 'soulseek'
-        secondary = self._normalize_source_name(self.hybrid_secondary) or 'soulseek'
-        if secondary == primary:
-            secondary = next(
-                (name for name in self.registry.names() if name != primary),
-                'soulseek',
-            )
-        chain = [primary, secondary]
-        if not chain:
-            chain = ['soulseek']
-        return chain
+        policy = resolve_source_policy(
+            mode="hybrid",
+            hybrid_order=self.hybrid_order,
+            hybrid_primary=self.hybrid_primary,
+            hybrid_secondary=self.hybrid_secondary,
+            normalize=self._normalize_source_name,
+            available_sources=self.registry.names(),
+        )
+        return list(policy.source_chain)
 
     async def search(self, query: str, timeout: int = None, progress_callback=None,
                      exclude_sources=None) -> Tuple[List[TrackResult], List[AlbumResult]]:
@@ -348,7 +338,12 @@ class DownloadOrchestrator:
         if not chain:
             logger.warning("Hybrid search exhausted: no eligible sources after exclusion filter")
             return [], []
-        if load_search_mode() == 'best_quality':
+        policy = resolve_source_policy(
+            mode="hybrid",
+            hybrid_order=chain,
+            search_mode=load_search_mode(),
+        )
+        if policy.search_all_sources:
             logger.info(f"Best-quality search ({' → '.join(chain)}): {query}")
             return await self.engine.search_all_sources(
                 query, chain, timeout, progress_callback,

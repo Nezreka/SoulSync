@@ -19,6 +19,7 @@ from core.acquisition.search_service import (
     collect_search_results,
     persist_search_results,
 )
+from core.downloads.source_policy import resolve_source_policy
 
 
 @pytest.fixture
@@ -185,3 +186,46 @@ def test_timeout_is_reported_per_source(conn):
 
     assert collection.outcomes[0].status == "failed"
     assert collection.outcomes[0].error == "Source search timed out"
+
+
+def test_priority_policy_searches_sources_in_configured_order(conn):
+    criteria = _criteria(conn)
+    calls = []
+
+    class OrderedAdapter(_Adapter):
+        async def search(self, criteria):
+            calls.append(self.source)
+            return self.payloads
+
+    usenet = OrderedAdapter(
+        "usenet", [{"guid": "u1", "title": "Artist - Album"}])
+    torrent = OrderedAdapter(
+        "torrent", [{"guid": "t1", "title": "Artist - Album"}])
+    policy = resolve_source_policy(
+        mode="hybrid",
+        hybrid_order=["torrent", "usenet"],
+        search_mode="priority",
+    )
+
+    collection = asyncio.run(collect_search_results(
+        criteria, [usenet, torrent], source_policy=policy))
+
+    assert calls == ["torrent", "usenet"]
+    assert [item.source for item in collection.outcomes] == ["torrent", "usenet"]
+
+
+def test_single_source_policy_does_not_call_other_adapter(conn):
+    criteria = _criteria(conn)
+    usenet = _Adapter("usenet", [{"guid": "u1", "title": "Artist - Album"}])
+    torrent = _Adapter("torrent", [{"guid": "t1", "title": "Artist - Album"}])
+    policy = resolve_source_policy(mode="usenet")
+
+    collection = asyncio.run(collect_search_results(
+        criteria, [torrent, usenet], source_policy=policy))
+
+    assert usenet.calls == 1
+    assert torrent.calls == 0
+    assert [(item.source, item.status) for item in collection.outcomes] == [
+        ("usenet", "searched"),
+        ("torrent", "unsupported"),
+    ]

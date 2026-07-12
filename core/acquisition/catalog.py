@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 from core.acquisition.decision_engine import CatalogContext, EffectivePolicy
 from core.acquisition.requests import AcquisitionRequest
@@ -225,21 +225,43 @@ def resolve_catalog_context(conn: Any, request: AcquisitionRequest) -> CatalogCo
     )
 
 
-def load_effective_policy(conn: Any, quality_profile_id: int) -> EffectivePolicy:
+def load_effective_policy(
+    conn: Any,
+    quality_profile_id: int,
+    *,
+    config_get: Optional[Callable[..., Any]] = None,
+) -> EffectivePolicy:
     row = conn.execute(
         "SELECT * FROM quality_profiles WHERE id=?", (int(quality_profile_id),)
     ).fetchone()
     if row is None:
         raise ValueError("acquisition quality profile no longer exists")
-    return EffectivePolicy.from_profile(_row_dict(row))
+    profile = _row_dict(row)
+    if config_get is None:
+        from config.settings import config_manager
+        config_get = config_manager.get
+    from core.downloads.source_policy import source_policy_from_settings
+    source_policy = source_policy_from_settings(
+        config_get,
+        profile=profile,
+    )
+    return EffectivePolicy.from_profile(
+        profile,
+        source_policy=source_policy,
+        source_priorities=source_policy.source_priorities,
+    )
 
 
 def resolve_request_context(
-    conn: Any, request: AcquisitionRequest,
+    conn: Any,
+    request: AcquisitionRequest,
+    *,
+    config_get: Optional[Callable[..., Any]] = None,
 ) -> Tuple[CatalogContext, EffectivePolicy]:
     return (
         resolve_catalog_context(conn, request),
-        load_effective_policy(conn, request.quality_profile_id),
+        load_effective_policy(
+            conn, request.quality_profile_id, config_get=config_get),
     )
 
 

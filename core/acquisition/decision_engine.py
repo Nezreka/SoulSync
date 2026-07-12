@@ -12,6 +12,7 @@ from core.acquisition.capabilities import get_source_capabilities
 from core.acquisition.requests import AcquisitionRequest
 from core.quality.model import AudioQuality, QualityTarget, rank_candidate
 from core.quality.selection import targets_from_profile
+from core.downloads.source_policy import SourcePolicy
 
 
 ENGINE_VERSION = "acquisition-decision/1"
@@ -74,6 +75,7 @@ class EffectivePolicy:
     maximum_age_seconds: Optional[int] = None
     protocol_priorities: Mapping[str, int] = field(default_factory=dict)
     source_priorities: Mapping[str, int] = field(default_factory=dict)
+    source_policy: Optional[SourcePolicy] = None
 
     @classmethod
     def from_profile(
@@ -413,15 +415,25 @@ class DecisionEngine:
             if candidate.size_bytes is not None and runtime.expected_size_bytes is not None
             else 0
         )
-        sort_key = (
+        quality_sort = (
             float(quality_rank),
             float(-custom_score),
             float(-edition_confidence),
+        )
+        source_sort = (
             float(protocol_priority),
             float(source_priority),
-            float(-availability),
-            float(size_distance),
         )
+        if policy.source_policy and not policy.source_policy.quality_first:
+            sort_key = source_sort + quality_sort + (
+                float(-availability),
+                float(size_distance),
+            )
+        else:
+            sort_key = quality_sort + source_sort + (
+                float(-availability),
+                float(size_distance),
+            )
 
         rejections = [reason for reason in reasons if reason.severity == "rejection"]
         forced = False
