@@ -1194,6 +1194,7 @@
                 ['default', 'Library default']]) +
             '<label class="vce-check"><input type="checkbox" data-f="pinned"' + (ed.pinned ? ' checked' : '') + '> Pin to server home</label>' +
             '<label class="vce-check" data-wishlist-row><input type="checkbox" data-f="wishlist_missing"' + (ed.wishlist_missing ? ' checked' : '') + '> <span data-wl-label>Wishlist members I don\'t own</span></label>' +
+            '<label class="vce-check" data-acquire-row title="Radarr-style import list: the list feeds your wishlist on every sync, but no collection is created on the server."><input type="checkbox" data-acquire' + (ed.definition && ed.definition.acquire_only ? ' checked' : '') + '> Acquisition list only (no server collection)</label>' +
             '<label class="vce-check"><input type="checkbox" data-f="enabled"' + (ed.enabled ? ' checked' : '') + '> Include in daily sync</label>' +
             '<div class="vce-order" data-order hidden></div>' +
             '<label class="vce-flabel">In season only (optional)</label>' +
@@ -1212,6 +1213,16 @@
         page.appendChild(acts);
 
         // field bindings
+        var acq = page.querySelector('[data-acquire]');
+        if (acq) acq.addEventListener('change', function () {
+            ed.definition = ed.definition || {};
+            ed.definition.acquire_only = acq.checked;
+            if (acq.checked) {   // an import list that doesn't wishlist does nothing
+                var wl2 = page.querySelector('[data-f="wishlist_missing"]');
+                if (wl2 && !wl2.checked) { wl2.checked = true; ed.wishlist_missing = true; }
+            }
+            ed.dirty = true;
+        });
         page.querySelectorAll('[data-f]').forEach(function (inp) {
             var f = inp.getAttribute('data-f');
             inp.addEventListener(inp.type === 'checkbox' ? 'change' : 'input', function () {
