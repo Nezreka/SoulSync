@@ -71153,3 +71153,58 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
 .sact-rank-bar span { display: block; height: 100%; background: linear-gradient(90deg, #38bdf8, #4ade80); }
 .sact-rank-n { flex: 0 0 auto; font-size: 11.5px; font-weight: 800; color: rgba(255,255,255,0.6); min-width: 22px; text-align: right; font-variant-numeric: tabular-nums; }
 .sact-rank-row .sact-ava { flex: 0 0 auto; }
+
+/* ══ Server Activity — visual elevation ═══════════════════════════════════ */
+/* card entrance stagger (only on a fresh list render, never on live updates) */
+.sact-list.sact-enter > .sact-card { animation: sactCardIn 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.sact-list.sact-enter > .sact-card:nth-child(2) { animation-delay: 0.06s; }
+.sact-list.sact-enter > .sact-card:nth-child(3) { animation-delay: 0.12s; }
+.sact-list.sact-enter > .sact-card:nth-child(4) { animation-delay: 0.18s; }
+.sact-list.sact-enter > .sact-card:nth-child(n+5) { animation-delay: 0.24s; }
+@keyframes sactCardIn { from { opacity: 0; transform: translateY(12px) scale(0.98); } to { opacity: 1; transform: none; } }
+.sact-card { transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease; }
+.sact-card:hover { transform: translateY(-2px); border-color: rgba(255,255,255,0.12);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+/* richer art backdrop */
+.sact-art { opacity: 0.58; filter: blur(1.5px) saturate(1.15); }
+.sact-card:hover .sact-art { opacity: 0.72; transform: scale(1.12); transition: opacity 0.3s ease, transform 0.6s ease; }
+.sact-scrim { background: linear-gradient(105deg, rgba(11,11,17,0.95) 40%, rgba(11,11,17,0.55) 78%, rgba(11,11,17,0.35) 100%); }
+/* progress bar: taller, gradient, glowing playhead */
+.sact-prog { height: 5px; background: rgba(255,255,255,0.09); }
+.sact-prog-fill { position: relative; background: linear-gradient(90deg, #16a34a, #4ade80);
+    box-shadow: 0 0 10px rgba(74,222,128,0.5); transition: width 0.45s linear; }
+.sact-head-dot { position: absolute; right: -1px; top: 50%; width: 8px; height: 8px; border-radius: 50%;
+    transform: translateY(-50%); background: #eafff1; box-shadow: 0 0 8px rgba(74,222,128,0.9); }
+.sact-st-paused .sact-head-dot, .sact-card:not(.sact-st-playing):not(.sact-st-buffering) .sact-head-dot { opacity: 0.6; }
+.sact-st-paused .sact-prog-fill { background: rgba(255,255,255,0.42); box-shadow: none; transition: width 0.3s ease; }
+.sact-st-paused .sact-head-dot { background: rgba(255,255,255,0.6); box-shadow: none; }
+.sact-st-buffering .sact-prog-fill { background: linear-gradient(90deg, #d97706, #fbbf24); }
+.sact-elapsed, .sact-remain { font-variant-numeric: tabular-nums; }
+.sact-remain { color: rgba(255,255,255,0.4); }
+/* music equalizer glyph on the poster */
+.sact-eq { position: absolute; left: 5px; bottom: 5px; display: flex; align-items: flex-end; gap: 2px; height: 15px; z-index: 2;
+    padding: 3px 4px; border-radius: 5px; background: rgba(0,0,0,0.45); backdrop-filter: blur(3px); }
+.sact-eq i { width: 2.5px; border-radius: 2px; background: #4ade80; height: 40%;
+    animation: sactEq 0.9s ease-in-out infinite; }
+.sact-eq i:nth-child(2) { animation-delay: 0.18s; height: 80%; }
+.sact-eq i:nth-child(3) { animation-delay: 0.36s; height: 55%; }
+.sact-eq i:nth-child(4) { animation-delay: 0.54s; height: 70%; }
+@keyframes sactEq { 0%, 100% { height: 30%; } 50% { height: 100%; } }
+.sact-st-paused .sact-eq i { animation-play-state: paused; background: rgba(255,255,255,0.4); }
+/* summary chips → a touch more presence */
+.sact-chip--hero { box-shadow: inset 0 0 0 1px rgba(74,222,128,0.2); }
+/* graph elevation */
+.sact-graph { height: 82px; }
+.sact-bar { fill: url(#sactBar); transition: fill 0.15s ease, opacity 0.15s ease; }
+.sact-bar--empty { fill: rgba(255,255,255,0.06); }
+.sact-bar--peak { fill: #4ade80; }
+.sact-bar:hover { fill: #86efac; }
+.sact-graph-x { justify-content: space-between; }
+.sact-graph-x span:nth-child(2) { color: rgba(74,222,128,0.6); font-weight: 700; }
+/* section headers get a hairline */
+.sact-sec-h { display: flex; align-items: center; gap: 8px; }
+.sact-sec-h::after { content: ''; flex: 1; height: 1px; background: rgba(255,255,255,0.06); }
+@media (prefers-reduced-motion: reduce) {
+    .sact-list.sact-enter > .sact-card, .sact-eq i { animation: none; }
+    .sact-prog-fill { transition: none; }
+}

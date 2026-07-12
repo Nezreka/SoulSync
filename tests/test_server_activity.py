@@ -388,6 +388,12 @@ def test_ui_is_wired():
     assert 'data-sact-tab="stats"' in js and "function renderStats" in js
     assert "function graph" in js and "/api/server-activity/stats" in js
     assert ".sact-graph" in css and ".sact-rank-bar" in css
+    # visual elevation: smooth-ticking progress, no-flicker key-diff, equalizer, playhead
+    assert "function liveTick" in js and "data-sact-fill" in js
+    assert "setInterval(liveTick, 500)" in js
+    assert "function actKey" in js and "_actKeys" in js       # key-diffed render (no flicker)
+    assert "sact-eq" in js and ".sact-eq" in css              # music equalizer
+    assert ".sact-head-dot" in css and "@keyframes sactCardIn" in css
 
 
 def test_web_server_registers_the_routes():
