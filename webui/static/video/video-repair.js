@@ -55,6 +55,7 @@
         metadata_gap: 'Metadata Gap',
         duplicate_movie: 'Duplicate',
         stale_wishlist: 'Stale Wishlist',
+        youtube_ghost: 'YouTube Ghost',
     };
     // Types absent here are report-only: no approve button, dismiss + details only.
     var FIXABLE_TYPES = {
@@ -64,9 +65,11 @@
         broken_file: 'Re-download',
         metadata_gap: 'Re-enrich',
         stale_wishlist: 'Remove',
+        youtube_ghost: 'Mark Deleted',
     };
     var ACTION_LABELS = { wishlisted: 'Wishlisted', grabbed: 'Grabbed', refreshed: 'Refreshed',
-        removed: 'Removed', resolved: 'Resolved' };
+        removed: 'Removed', resolved: 'Resolved',
+        marked_deleted: 'Marked Deleted', forgotten: 'Forgotten' };
     var GAP_LABELS = { unmatched: 'not TMDB-matched', overview: 'no summary',
         genres: 'no genres', poster: 'no poster', backdrop: 'no backdrop' };
 
@@ -429,6 +432,7 @@
         if (f.finding_type === 'incomplete_collection') return collectionDetailHTML(d);
         if (f.finding_type === 'duplicate_movie') return duplicateDetailHTML(d);
         if (f.finding_type === 'stale_wishlist') return staleDetailHTML(d);
+        if (f.finding_type === 'youtube_ghost') return ghostDetailHTML(f);
         return '<pre class="repair-finding-json">' + esc(JSON.stringify(d, null, 2)) + '</pre>';
     }
 
@@ -524,6 +528,39 @@
                 '<p class="vrf-show-overview">The download engine never re-grabs owned items, so this ' +
                     'wishlist row will sit forever. Approving removes the row only — files are untouched.</p>' +
                 '<div class="vrf-actions">' + view + '</div>' +
+            '</div></div>';
+    }
+
+    // ── YouTube Ghost: the remembered file is gone from disk ─────────────────
+    function ghostDetailHTML(f) {
+        var d = f.details || {};
+        var thumb = d.thumb_url
+            ? '<img class="vrf-poster" src="' + esc(d.thumb_url) +
+              '" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
+            : '<div class="vrf-poster vrf-poster--empty">👻</div>';
+        var chips = '<span class="vrf-chip vrf-chip--miss">file missing</span>';
+        if (d.channel) chips += '<span class="vrf-chip">' + esc(d.channel) + '</span>';
+        if (d.published_at) {
+            chips += '<span class="vrf-chip">' + esc(String(d.published_at).slice(0, 10)) + '</span>';
+        }
+        var actions = '';
+        if (f.status === 'pending') {
+            actions = '<button class="vrf-btn" type="button" data-vjr-fix-action="forget" ' +
+                'title="Wipe the download memory so it can be downloaded again">' +
+                'Forget (allow re-download)</button>';
+        }
+        if (d.channel_id) {
+            actions += '<button class="vrf-btn" type="button" data-vjr-open-channel="' +
+                esc(d.channel_id) + '">View channel →</button>';
+        }
+        return '<div class="vrf-show">' + thumb +
+            '<div class="vrf-show-info">' +
+                '<div class="vrf-show-title">' + esc(d.title || '?') + '</div>' +
+                '<div class="vrf-chips">' + chips + '</div>' +
+                '<p class="vrf-show-overview">SoulSync downloaded this episode but the file is gone ' +
+                    '(' + esc(d.dest_path || 'no path recorded') + '). Approving marks it deleted — ' +
+                    'the badge clears and it will NOT be re-downloaded. Files are never touched.</p>' +
+                '<div class="vrf-actions">' + actions + '</div>' +
             '</div></div>';
     }
 
@@ -874,6 +911,21 @@
             var card = e.target.closest('.repair-finding-card[data-id]');
             if (card) {
                 var fid = card.getAttribute('data-id');
+                // A non-default fix action (e.g. the ghost detail's Forget) rides
+                // the same endpoint with a fix_action the job's fix() dispatches on.
+                var fixAct = e.target.closest('[data-vjr-fix-action]');
+                if (fixAct) {
+                    jsend(API + '/findings/' + fid + '/fix',
+                          { fix_action: fixAct.getAttribute('data-vjr-fix-action') }).then(function (res) {
+                        if (res.ok && res.body.success) {
+                            toast(res.body.message || 'Done', 'success');
+                            loadFindings(); loadStatus();
+                        } else {
+                            toast((res.body && res.body.error) || 'Fix failed', 'error');
+                        }
+                    });
+                    return;
+                }
                 if (e.target.closest('[data-vjr-fix]')) {
                     jsend(API + '/findings/' + fid + '/fix').then(function (res) {
                         if (res.ok && res.body.success) {
@@ -906,6 +958,15 @@
                         detail: { kind: 'movie',
                                   id: parseInt(openMovie.getAttribute('data-vjr-open-movie'), 10),
                                   source: 'library' },
+                    }));
+                    return;
+                }
+                var openChan = e.target.closest('[data-vjr-open-channel]');
+                if (openChan) {
+                    document.dispatchEvent(new CustomEvent('soulsync:video-open-detail', {
+                        detail: { kind: 'channel',
+                                  id: openChan.getAttribute('data-vjr-open-channel'),
+                                  source: 'youtube' },
                     }));
                     return;
                 }

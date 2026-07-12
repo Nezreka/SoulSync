@@ -286,7 +286,7 @@ def register_routes(bp):
             # Real ownership: a completed download in the permanent history —
             # 'owned' on the channel page means ON DISK, not merely wished.
             try:
-                downloaded = set(db.downloaded_youtube_video_ids() or [])
+                downloaded = set(db.owned_youtube_video_ids() or [])
             except Exception:   # noqa: BLE001 - ownership is an annotation, never a 500
                 downloaded = set()
             # Dates → year-seasons. Cached list already carries them; only pull a
@@ -335,7 +335,7 @@ def register_routes(bp):
             # Same ownership annotation as the initial detail load — without it
             # every video streamed in via continuation looked un-downloaded.
             try:
-                downloaded = set(db.downloaded_youtube_video_ids() or [])
+                downloaded = set(db.owned_youtube_video_ids() or [])
             except Exception:   # noqa: BLE001 - ownership is an annotation, never a 500
                 downloaded = set()
             for v in videos:
@@ -507,7 +507,7 @@ def register_routes(bp):
             wished = db.youtube_video_wish_state(ids)
             dates = db.get_video_dates(ids)
             try:
-                downloaded = set(db.downloaded_youtube_video_ids() or [])
+                downloaded = set(db.owned_youtube_video_ids() or [])
             except Exception:   # noqa: BLE001 - ownership is an annotation, never a 500
                 downloaded = set()
             for v in vids:
