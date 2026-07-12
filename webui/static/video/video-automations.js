@@ -92,21 +92,15 @@
         actions.insertBefore(btn, actions.firstChild);
     }
 
-    // The hub's built-in tabs are MUSIC content (playlist pipelines, music recipes,
-    // music quick-start/tips). The video side will get its own content here; for now
-    // empty those four panes (Reference stays — it's generic automation reference).
-    var _HUB_EMPTY = { pipelines: 'pipelines', recipes: 'singles', guides: 'quick-start guides', tips: 'tips' };
-
+    // The hub builder is side-aware (stats-automations.js _hubGroups()/_hubRecipes()/
+    // _hubGuides()/_hubTips()/_hubReference() read the VIDEO_HUB_* datasets when
+    // data-side='video'), so it renders full video content here — pipelines that
+    // deploy owned_by='video' rows, video recipes, guides, tips and reference.
     function renderHubOnce() {
         var host = document.querySelector('[data-vauto-list]'); if (!host) return;
         if (host.querySelector('#auto-section-hub')) return;   // build it once; it's static
         if (typeof window._buildAutomationHub !== 'function') return;
-        var hub = window._buildAutomationHub();
-        Object.keys(_HUB_EMPTY).forEach(function (t) {
-            var pane = hub.querySelector('#auto-hub-pane-' + t);   // scoped to the detached hub (no id clash)
-            if (pane) pane.innerHTML = '<div class="vauto-hub-soon">Video ' + _HUB_EMPTY[t] + ' coming soon.</div>';
-        });
-        host.appendChild(hub);
+        host.appendChild(window._buildAutomationHub());
     }
 
     // User-built video automations — same grouped sections the music page renders

@@ -297,3 +297,31 @@ def test_new_block_types_have_builder_icons():
     for t in ("monthly_time", "video_download_completed", "video_repair_finding_created",
               "video_run_repair_job", "video_watchlist_added"):
         assert t + ":" in _MUSIC_JS, f"no icon for {t}"
+
+
+def test_hub_is_side_aware_with_video_content():
+    """The Automation Hub renders VIDEO pipelines/recipes/guides/tips on the
+    video page (it used to blank four tabs with 'coming soon')."""
+    for name in ("VIDEO_HUB_GROUPS", "VIDEO_HUB_RECIPES", "VIDEO_HUB_GUIDES",
+                 "VIDEO_HUB_TIPS", "VIDEO_HUB_REFERENCE"):
+        assert name in _MUSIC_JS, name
+    for getter in ("_hubGroups()", "_hubRecipes()", "_hubGuides()", "_hubTips()",
+                   "_hubReference()"):
+        assert getter in _MUSIC_JS, getter
+    assert "coming soon" not in _VAUTO_JS          # panes no longer emptied
+    assert "_HUB_EMPTY" not in _VAUTO_JS
+    # deploys from the video page tag ownership; recipes open the video builder
+    assert "if (_hubIsVideo()) payload.owned_by = 'video';" in _MUSIC_JS
+    assert "_hubIsVideo() ? showVideoAutomationBuilder() : showAutomationBuilder()" in _MUSIC_JS
+
+
+def test_video_hub_never_redeploys_the_system_processors():
+    """The system automations already scan watchlists + drain wishlists on
+    schedules — a hub pipeline deploying user copies would double-download.
+    Video pipelines must stick to alerts, chains and maintenance."""
+    groups = _MUSIC_JS.split("const VIDEO_HUB_GROUPS = [")[1].split("\nconst VIDEO_HUB_RECIPES")[0]
+    for banned in ("video_process_movie_wishlist", "video_process_episode_wishlist",
+                   "video_process_youtube_wishlist", "video_scan_watchlist_people",
+                   "video_scan_watchlist_channels", "video_scan_watchlist_playlists",
+                   "video_add_airing_episodes"):
+        assert f"action_type: '{banned}'" not in groups, f"pipeline redeploys {banned}"
