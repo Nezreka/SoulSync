@@ -2021,19 +2021,23 @@ Rejection Reasons durchgängig.
 
 #### Aufgaben
 
-- [ ] `acquisition_requests` und Idempotency-Key.
-- [ ] serverseitige `release_candidates` mit TTL und opaque IDs.
-- [ ] Parser-/Aggregation-Contract.
-- [ ] Spezifikationspipeline aus Kapitel 12.
-- [ ] Quality Profile/Cutoff/Custom Format/Size/Blocklist/Queue/Free-Space Checks.
-- [ ] Ranking getrennt von harten Rejections.
-- [ ] Manual Search zeigt Reasons und erlaubt auditierten Force Grab.
-- [ ] Automatic Search akzeptiert nur valide Candidates.
-- [ ] Source- und Protocol-Prioritäten.
-- [ ] GUID-/Indexer-Deduplikation.
-- [ ] bestehende Wishlist als Adapter auf AcquisitionRequests.
+- [x] `acquisition_requests` und Idempotency-Key.
+- [x] serverseitige `release_candidates` mit TTL und opaque IDs.
+- [x] Parser-/Aggregation-Contract.
+- [x] Spezifikationspipeline aus Kapitel 12.
+- [x] Quality Profile/Cutoff/Custom Format/Size/Blocklist/Queue/Free-Space Checks
+  im reinen Decision-Vertrag; produktive source-spezifische Health-/Path-/Space-
+  Context-Provider bleiben Teil des Phase-5-Cutovers.
+- [x] Ranking getrennt von harten Rejections.
+- [x] Manual Search zeigt Reasons und erlaubt auditierten Force Grab.
+- [x] Automatic Search akzeptiert nur valide Candidates.
+- [x] Source- und Protocol-Prioritäten.
+- [x] GUID-/Indexer-Deduplikation.
+- [x] bestehende Wishlist als Shadow-Adapter auf AcquisitionRequests (ADR-02;
+  weiterhin kein automatischer Dispatch aus der Shadow-Projektion).
 - [ ] direkter Lib2-Entity-Link bis Import/History.
-- [ ] Browserseitige `autoGrabBest`-Autorität entfernen.
+- [ ] Browserseitige `autoGrabBest`-Autorität im Legacy-Pfad entfernen. Der neue
+  `/api/library/v2/acquisition/*`-Pfad ist bereits vollständig serverautoritativ.
 
 #### Testgate
 
@@ -2051,6 +2055,25 @@ Rejection Reasons durchgängig.
   vortäuschen.
 - UI-Score ist Darstellung des Serverentscheids.
 
+#### Implementierungsstand 2026-07-12
+
+Der neue Phase-4-Pfad erfüllt den Request→Candidate→Decision→Grab→History-Vertrag:
+Admin-Profil und Quality Profile werden serverseitig aufgelöst, öffentliche
+`search_options` werden nicht akzeptiert, Source-Capabilities bestimmen Track- oder
+Bundle-Scope, und Manual/Auto verwenden dieselbe versionierte Decision Engine. Search
+läuft außerhalb langer DB-Transaktionen; Kandidaten, Decision Runs, Force-Overrides,
+externe Job-Korrelation und Blocklist/Retry werden danach kurz und atomar persistiert.
+Der Usenet-Submit committet den Grab vor dem externen Clientaufruf. Ein unklarer
+Clienttimeout bleibt `submission_unknown`, damit ein Retry keinen möglicherweise
+bereits angenommenen Job dupliziert.
+
+Noch **nicht** global erfüllt sind die Abnahmekriterien für Legacy-Routen: Die alte
+Interactive-/Wishlist-Pipeline kann weiterhin ohne `acquisition_request_id` starten,
+und das bestehende Frontend verwendet den neuen Decision-Score noch nicht. Der direkte
+Entity-Link reicht im neuen Pfad bis Grab/History, aber noch nicht durch den
+editionbezogenen Bundle-Import. Diese Punkte sind Cutover-Arbeit, kein fehlender
+Phase-4-Domänenvertrag.
+
 ### Phase 5: Usenet auf Release-Ebene neu anbinden
 
 **Ziel:** SABnzbd/NZBGet-Downloads sind wiederanlaufbar, editionbezogen und importieren
@@ -2058,17 +2081,19 @@ vollständige Bundles.
 
 #### Aufgaben
 
-- [ ] Prowlarr-Adapter liefert nur Candidates/Fakten.
-- [ ] Usenet-URL serverseitig und redigiert halten.
-- [ ] Category-/Correlation-Vertrag.
-- [ ] persistenter Grab mit externer Job-ID.
+- [x] Prowlarr-Adapter liefert im neuen Pfad nur Bundle-Candidates/Fakten.
+- [x] Usenet-URL serverseitig und redigiert halten.
+- [x] Category-/Correlation-Vertrag für neue Acquisition-Grabs.
+- [x] persistenter Grab mit externer Job-ID.
 - [ ] zentraler Client-Monitor und Startup-Adoption.
-- [ ] Cancel-State-Machine und Remove-Bestätigung.
-- [ ] Timeout trennt lokalen Beobachtungsfehler von externem Downloadfailure.
+- [x] Cancel-State-Machine und Remove-Bestätigung im bestehenden Usenet-Poller.
+- [x] Timeout trennt sicheren lokalen Fehler von unklarem externem Submit; unklare
+  Submits bleiben offen statt automatisch erneut gesendet zu werden.
 - [ ] Remote Path Mapping Health Check.
 - [ ] Bundle-Inventarisierung und Edition-Track-Matching.
 - [ ] Manual Import bei Ambiguität.
-- [ ] Failed Download Handling, Blocklist und Re-Search.
+- [x] Failed Download Handling, exakte Source/Indexer/GUID-Blocklist und Re-Search
+  im neuen Acquisition-Pfad.
 - [ ] Retention/Minimum Age/Indexer Priority/Quality/Custom Formats.
 - [ ] alte Pseudo-Track-Projektion entfernen.
 - [ ] `active_downloads`/Plugin-Daemon-Thread nach Cutover entfernen.
@@ -2221,6 +2246,9 @@ ADR-Log in §25a.
 | ProviderSnapshot-Fundament | `library_provider_snapshots` persistiert normalisierte Payloads pro Provider/Entity/Scope mit ETag/Version, Fetched-At, `is_complete`, Cursor/Page-Count, Parser-Version und kanonischem SHA-256. Upserts melden No-op-Payloads; Delete-Trigger entfernen Snapshots für Artist, Album, Track und ReleaseEdition. | `c396a4f`, `5c1ab62` |
 | Typisierte Discography | Die Library-v2-Grenze normalisiert Discography-Cards einmalig in typisierte Releases, fordert vollständige Pagination an und speichert den Snapshot in derselben Transaktion. Partielle Antworten dürfen anreichern, unterdrücken aber jedes Stale-Pruning. Provider-IDs werden exakt aus JSON gelesen und beim Refresh strukturiert gemergt statt per Teilstring gesucht. | `bd5d29d`, `5c1ab62` |
 | Edition-gebundene Tracklists | Spotify-/Deezer-Tracklisten werden typisiert normalisiert und als vollständige Album-Snapshots gespeichert. Cache und Snapshot sind an die aktuelle Default-Edition samt External IDs und Parser-Version gebunden; Edition-/Providerwechsel invalidieren dauerhaft, bestehende Alt-Caches erhalten einmalig `legacy-cache`-Provenance. | `16210f5` |
+| Phase-4 Request/Candidate/Decision | Persistente, idempotente `acquisition_requests`; requestgebundene `release_candidates` mit TTL/opaque IDs; append-only versionierte Decision Runs mit strukturierten Rejections/Warnings, getrenntem Ranking sowie serverseitiger Manual-/Auto-Auswahl. Source-Capabilities erzwingen Recording vs. Release-Bundle; Browserpayloads können weder Profil, Entity-Kontext noch Search-Optionen vortäuschen. | `a6b444b`, `50c464f`, `800682b`, `3c83a8d`, `a9bc629`, `ec5fc6d` |
+| Phase-4 Search/Wanted | Typisierter Parser-/Aggregationsvertrag isoliert fehlerhafte Providerzeilen und hält Netzwerk-I/O außerhalb der DB-Transaktion. Prowlarr normalisiert reale Releases ohne Pseudo-Track-Projektion; `lib2_wanted_tracks` materialisiert idempotente Recording-Requests ausschließlich als ADR-02-Shadow und löst keinen Download aus. | `2ff3c9a`, `e546318`, `444f80f`, `7caacf2`, `9ec9536` |
+| Acquisition History/Blocklist/Usenet-Submit | Append-only, redigierte Business-History; exakte Source/Indexer/GUID-Blocklist; Failed-Download-Re-Search; auditierter Force Grab. Der neue Grab wird vor externem I/O persistiert, erfolgreiche SAB/NZBGet-Submits erhalten Category/externe Job-ID und hängen sich an den vorhandenen Poller. Unklare Submit-Timeouts bleiben offen und werden nach Neustart nicht blind erneut gesendet. | `0a15394`, `477350c`, `57b9d51`, `e9f2fd1`, `29be67e` |
 
 #### Verifizierter Teststand (2026-07-12)
 
@@ -2238,6 +2266,9 @@ ADR-Log in §25a.
   Stable-ID-, Monitor-Rules-, Wishlist-, Primary-File-, Edition/Recording-,
   Wanted-Projektions- und Acquisition-Grab-Tests sind in den oben genannten
   Commits enthalten.
+- Gezieltes Gate für den neuen Acquisition-/Library-v2-/Usenet-Pfad nach
+  `ec5fc6d`: **177 bestanden**, Ruff und `py_compile` ohne Fehler. Die vollständige
+  Suite wird gemäß Arbeitsreihenfolge einmal nach dem Dokumentationsupdate ausgeführt.
 
 #### Bewusst noch offen
 
@@ -2246,16 +2277,20 @@ ADR-Log in §25a.
   Recording-Modell ist bisher ein Shadow-Modell; Discography-Matching und
   Duplicate-Linking lesen noch nicht vollständig daraus. Weitere Metadaten-
   Verbraucher außerhalb Discography/Tracklist sind noch untypisiert.
-- [ ] Phase 4, Rest: `acquisition_requests` + Idempotency-Key,
-  `release_candidates`/`candidate_decisions`, Spezifikationspipeline
-  (Kap. 12), Wishlist-Adapter auf AcquisitionRequests; `acquisition_grabs`
-  ist der erste Baustein.
+- [ ] Phase-4-Cutover, nicht Domänenkern: Legacy-Interactive-/Wishlist-Downloads
+  auf den Request/Candidate/Decision-Vertrag umstellen, source-spezifischen
+  Runtime-Health-Kontext anbinden und Frontend auf serverseitige Decisions/Reasons
+  migrieren. Erst danach gilt global „kein Download ohne AcquisitionRequest“.
 - [ ] ADR-02-Cutover: Konsumenten (Wishlist-Mirror, Upgrade-Scan, Queries)
   schrittweise von den `monitored`-Flags auf `lib2_wanted_tracks` umstellen;
   aktuell wird Divergenz nur gezählt/geloggt.
 - [ ] ADR-07 auf Torrent ausweiten (Phase 6) und den zentralen Client-Monitor
   mit Category-Adoption bauen (Phase 5) — Adoption läuft bisher nur über die
-  persistierte externe Job-ID des Usenet-Plugins.
+  persistierte externe Job-ID des Usenet-Plugins. `submission_unknown` bleibt zur
+  Duplicate-Vermeidung bewusst offen, bis Category-Adoption es auflösen kann.
+- [ ] Phase 5: editionbezogene Bundle-Inventarisierung/Track-Matching,
+  `acquisition_imports`, Ambiguitäts-/Manual-Import-Pfad und vollständiger
+  Restart-Lifecycle bis Import.
 - [ ] `file_state`-Lifecycle mit dem Scan verdrahten (P2-02): Missing-
   Erkennung setzt die Zustände noch nicht automatisch.
 
@@ -2270,8 +2305,10 @@ fehlt noch) geschlossen. P0-04 wurde mit strikter Fehlerweitergabe im
 Outbox-Worker nachgehärtet (`895d27e`) und durch den periodischen Reconciler
 (`3ca3000`) ergänzt; der manuelle Grab-Pfad übergibt das serverseitige Profil
 nachweislich an die Pipeline und ist für Nicht-Admins gesperrt (`a7b08a8`).
-Als Nächstes: Phase-3-Rest (External-/Old-ID-History und Field-Level-Overrides)
-oder Phase-4-Kern (`acquisition_requests` + Decision Engine).
+Als Nächstes: Phase 5 mit zentralem Client-Monitor/Category-Adoption und danach
+editionbezogenem Bundle-Import. Phase-3-Rest (External-/Old-ID-History und
+Field-Level-Overrides) bleibt parallel offen, ist aber keine Voraussetzung mehr für
+den abgeschlossenen Phase-4-Domänenkern.
 
 ## 17. Teststrategie
 

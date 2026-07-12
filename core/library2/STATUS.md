@@ -241,17 +241,50 @@ All findings of the deep branch review were fixed in one pass:
   consolidated-guard on profile assign, delete cleanup incl. artwork, album edit,
   refresh thumb busting).
 
+### Phase 4 Acquisition / Decision (serverseitiger Pfad)
+
+- Persistente, idempotente AcquisitionRequests tragen Admin-Intent, getrenntes
+  Quality Profile, Entity-Scope und serverseitig abgeleitete Search-Optionen.
+- ReleaseCandidates liegen mit TTL und opaque IDs serverseitig; URL/Magnet und
+  Provider-Secrets erscheinen weder in API noch History. Explizite Source-
+  Capabilities verhindern Track-/Bundle-Verwechslungen (ADR-08).
+- Manual und Automatic Search verwenden dieselbe versionierte Decision Engine mit
+  Rejections, Warnings und deterministischem Ranking. Force Grab ist Admin-only,
+  übergeht nur ausdrücklich overridable Policy-Reasons und schreibt Audit-History.
+- Prowlarr liefert im neuen Pfad nur Release-Bundles. Search läuft außerhalb langer
+  SQLite-Transaktionen; einzelne Source-/Parse-Fehler bleiben isoliert.
+- `lib2_wanted_tracks` kann RecordingRequests idempotent als ADR-02-Shadow
+  materialisieren. Dieser Shadow dispatcht bewusst noch keinen Download; die
+  Legacy-Wishlist bleibt bis zum gemessenen Cutover operativ.
+- Acquisition-History ist append-only; Failed Candidates werden über
+  Source/Indexer/GUID exakt blockiert. Retry bewertet alte und neue Candidates
+  erneut und kann einen blockierten Release nicht automatisch wieder wählen.
+- Neue Usenet-Grabs werden vor dem externen Clientaufruf persistiert, danach mit
+  Category und externer Job-ID korreliert und vom bestehenden Poller überwacht.
+  Ein unklarer Submit bleibt `submission_unknown`, um Duplicate-Submits zu vermeiden.
+
+**Bewusste Grenze:** Legacy-Interactive-/Wishlist-Routen und die bestehende UI sind
+noch nicht auf diesen Vertrag umgestellt. Der neue Entity-Link reicht bis
+Grab/History, nicht bis zum editionbezogenen Bundle-Import. Zentraler Client-Monitor
+mit Category-Adoption, `acquisition_imports` und Manual-Import bei Ambiguität sind
+Phase 5.
+
 ## TODO (next)
-1. Finish Phase 3 identity/provenance: dedicated external-/old-ID history,
+1. Phase 5: central client monitor with Category adoption, then edition-aware
+   bundle inventory/matching, persistent `acquisition_imports`, and Manual Import
+   for ambiguous bundles.
+2. Cut existing Interactive/Wishlist consumers over to the Acquisition contract;
+   only then enforce globally that no download starts without an AcquisitionRequest.
+3. Finish Phase 3 identity/provenance: dedicated external-/old-ID history,
    merge/move history, field-level user overrides and read projection. Extend typed
    adapters beyond Discography/Tracklist.
-2. Finish the staged Wanted cutover: consumers still using `monitored` flags must
+4. Finish the staged Wanted cutover: consumers still using `monitored` flags must
    move to `lib2_wanted_tracks` after drift metrics prove parity.
-3. Artist scope for more repair jobs (reorganize/dedup walk the transfer folder, so
+5. Artist scope for more repair jobs (reorganize/dedup walk the transfer folder, so
    they need path-level scoping, not a SQL filter).
-4. Broader metadata editing (titles/years/artists) beyond the release-type edit;
+6. Broader metadata editing (titles/years/artists) beyond the release-type edit;
    deep-linkable album detail view; Playlists (Phase E, last).
-5. Job registry (parallel background jobs + per-job polling) before multi-user use —
+7. Job registry (parallel background jobs + per-job polling) before multi-user use —
    today one global bulk-job slot is shared by monitor/retag/upgrade scans.
 
 ## Run / verify (no Node/Flask locally — use Docker)
