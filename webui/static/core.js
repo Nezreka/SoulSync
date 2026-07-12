@@ -412,6 +412,10 @@ function initializeWebSocket() {
         if (currentProfile) {
             socket.emit('profile:join', { profile_id: currentProfile.id });
         }
+        // Re-subscribe the Server Activity drawer if it's live (survives reconnects)
+        if (window.ServerActivity && window.ServerActivity._wantsLive && window.ServerActivity._wantsLive()) {
+            socket.emit('activity:subscribe');
+        }
     });
 
     socket.on('disconnect', (reason) => {
@@ -471,6 +475,17 @@ function initializeWebSocket() {
     socket.on('enrichment:soulid', (data) => updateSoulIDStatusFromData(data));
     socket.on('enrichment:listening-stats', () => { }); // Status only, no UI update needed
     socket.on('repair:progress', (data) => { qaSignal('tools'); updateRepairJobProgressFromData(data); });
+    // Server Activity live push — feed the open drawer (Tautulli replacement)
+    socket.on('activity:update', (data) => {
+        if (window.ServerActivity && window.ServerActivity._onSocket) window.ServerActivity._onSocket(data);
+    });
+    // Bridge so server-activity.js can join/leave the live room without owning the
+    // socket. isConnected() lets it fall back to HTTP polling when there's no WS.
+    window.SoulSyncActivitySocket = {
+        subscribe: () => { if (socket && socketConnected) socket.emit('activity:subscribe'); },
+        unsubscribe: () => { if (socket && socketConnected) socket.emit('activity:unsubscribe'); },
+        isConnected: () => !!socketConnected
+    };
 
     // Forward enrichment status to the dashboard worker-orbs so the hub fires
     // a pulse on each real item matched / error (additional listener — does not
