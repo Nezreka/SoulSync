@@ -95,3 +95,11 @@ def test_endpoint_and_dashboard_strip(db, tmp_path):
         videoapi._video_db = None
     assert "data-vdash-health" in _INDEX
     assert "function loadHealth" in _DASH_JS and "loadHealth();" in _DASH_JS
+
+
+def test_hidden_strip_takes_no_space():
+    """The strip's class rule sets display:flex, which overrides the [hidden]
+    attribute's UA display:none — without an explicit [hidden] rule an empty
+    healthy strip leaves a visible gap + margin above the header."""
+    css = (_ROOT / "webui" / "static" / "video" / "video-side.css").read_text(encoding="utf-8")
+    assert ".vdash-health[hidden] { display: none; }" in css

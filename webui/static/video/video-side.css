@@ -4873,6 +4873,9 @@ body[data-side="video"] #gsearch-aura {
 
 /* ── Dashboard system-health strip ─────────────────────────────────────── */
 .vdash-health { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+/* the [hidden] attr's UA `display:none` loses to the class rule above, leaving an
+   empty flex box + margin — this restores hidden so a healthy strip takes NO space */
+.vdash-health[hidden] { display: none; }
 .vdash-health-chip {
     padding: 8px 14px; border-radius: 10px; font-size: 12.5px; line-height: 1.45;
     background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.25);
