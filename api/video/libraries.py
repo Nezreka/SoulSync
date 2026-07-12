@@ -56,6 +56,44 @@ def register_routes(bp):
         get_video_db().set_setting("video_server", choice)
         return jsonify({"status": "saved", "server": choice})
 
+    @bp.route("/service-status", methods=["GET"])
+    def video_service_status():
+        """Unified sidebar status for the video side: metadata (TMDB/TVDB keys), the active
+        media server, and the download preference. Deliberately 'configured'-based (no live
+        network probe) so the 5s sidebar poll stays cheap and never hammers Plex/TMDB."""
+        from . import get_video_db
+        try:
+            from core.video import download_config
+            from core.video.sources import (resolve_video_server, video_plex_config,
+                                             video_jellyfin_config)
+            db = get_video_db()
+            tmdb = bool((db.get_setting("tmdb_api_key") or "").strip())
+            tvdb = bool((db.get_setting("tvdb_api_key") or "").strip())
+            server = resolve_video_server()
+            plex_ok = bool(video_plex_config().get("base_url"))
+            jelly_ok = bool(video_jellyfin_config().get("base_url"))
+            dl = download_config.load(db)
+            mode = dl.get("download_mode") or "soulseek"
+            order = dl.get("hybrid_order") or []
+            dl_name = (" → ".join(s.capitalize() for s in order)) if mode == "hybrid" \
+                else str(mode).capitalize()
+            return jsonify({
+                "metadata": {"configured": bool(tmdb and tvdb), "tmdb": tmdb, "tvdb": tvdb,
+                             "name": "TMDB / TVDB"},
+                "server": {"active": server, "configured": bool(plex_ok or jelly_ok),
+                           "plex": plex_ok, "jellyfin": jelly_ok,
+                           "name": server.capitalize() if server else "No server"},
+                "download": {"configured": True, "mode": mode, "hybrid_order": order,
+                             "name": dl_name},
+            })
+        except Exception:
+            logger.exception("video service-status failed")
+            return jsonify({
+                "metadata": {"configured": False, "name": "TMDB / TVDB"},
+                "server": {"active": None, "configured": False, "name": "No server"},
+                "download": {"configured": True, "name": "Soulseek"},
+            })
+
     @bp.route("/server-config", methods=["GET"])
     def video_server_config_get():
         """The video side's OWN server connection — its stored creds when set, else
