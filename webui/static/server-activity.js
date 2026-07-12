@@ -12,8 +12,9 @@
     'use strict';
 
     var URL = '/api/server-activity';
+    var HIST = '/api/server-activity/history';
     var IMG = '/api/server-activity/image?path=';
-    var drawer = null, isOpen = false, poll = null, badgePoll = null;
+    var drawer = null, isOpen = false, poll = null, badgePoll = null, tab = 'activity';
 
     function esc(s) {
         return String(s == null ? '' : s)
@@ -37,6 +38,15 @@
         return ((p[0] || '?')[0] + (p.length > 1 ? p[p.length - 1][0] : '')).toUpperCase();
     }
     var TYPE_IC = { movie: '🎬', episode: '📺', track: '🎵', clip: '🎞️' };
+    function ago(epoch) {
+        if (!epoch) return '';
+        var s = Math.max(0, Math.floor(Date.now() / 1000 - epoch));
+        if (s < 60) return 'just now';
+        if (s < 3600) return Math.floor(s / 60) + 'm ago';
+        if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+        if (s < 604800) return Math.floor(s / 86400) + 'd ago';
+        return Math.floor(s / 604800) + 'w ago';
+    }
 
     // ── one activity card ─────────────────────────────────────────────────────
     function card(s) {
@@ -94,15 +104,16 @@
         return '<div class="sact-summary">' + chips + '</div>';
     }
 
-    function renderBody(d) {
-        var body = drawer && drawer.querySelector('[data-sact-body]');
-        if (!body) return;
-        if (!d || d.ok === false) {
-            body.innerHTML = '<div class="sact-empty"><div class="sact-empty-ic">🔌</div>' +
-                '<div class="sact-empty-t">' + esc((d && d.message) || 'Server unavailable') + '</div>' +
-                '<div class="sact-empty-s">Set your Plex server in Settings to see live activity.</div></div>';
-            return;
-        }
+    function _body() { return drawer && drawer.querySelector('[data-sact-body]'); }
+    function _noServer(d) {
+        return '<div class="sact-empty"><div class="sact-empty-ic">🔌</div>' +
+            '<div class="sact-empty-t">' + esc((d && d.message) || 'Server unavailable') + '</div>' +
+            '<div class="sact-empty-s">Set your Plex server in Settings to see live activity.</div></div>';
+    }
+
+    function renderActivity(d) {
+        var body = _body(); if (!body) return;
+        if (!d || d.ok === false) { body.innerHTML = _noServer(d); return; }
         var sub = drawer.querySelector('[data-sact-server]');
         if (sub) sub.textContent = (d.server && d.server.name)
             ? (d.server.name + (d.server.version ? ' · ' + d.server.version : '')) : '';
@@ -113,6 +124,39 @@
             return;
         }
         body.innerHTML = summaryBar(d) + '<div class="sact-list">' + d.sessions.map(card).join('') + '</div>';
+    }
+
+    // ── history tab ───────────────────────────────────────────────────────────
+    function historyRow(h) {
+        var poster = h.thumb ? img(h.thumb) : '';
+        return '<div class="sact-hrow">' +
+            (poster
+                ? '<div class="sact-hthumb"><img src="' + poster + '" alt="" loading="lazy" onerror="this.style.display=\'none\'"></div>'
+                : '<div class="sact-hthumb sact-hthumb--none">' + (TYPE_IC[h.media_type] || '🎬') + '</div>') +
+            '<div class="sact-hinfo">' +
+                '<div class="sact-htitle" title="' + esc(h.title) + '">' + esc(h.title) + '</div>' +
+                (h.subtitle ? '<div class="sact-hsub">' + esc(h.subtitle) + '</div>' : '') +
+                '<div class="sact-hmeta"><span class="sact-ava">' + esc(initials(h.user)) + '</span>' +
+                    '<span class="sact-uname">' + esc(h.user) + '</span>' +
+                    (h.device ? '<span class="sact-dot">&middot;</span><span class="sact-dev">' + esc(h.device) + '</span>' : '') +
+                '</div>' +
+            '</div>' +
+            '<div class="sact-hwhen">' + esc(ago(h.viewed_epoch)) + '</div></div>';
+    }
+    function renderHistory(d) {
+        var body = _body(); if (!body) return;
+        if (!d || d.ok === false) { body.innerHTML = _noServer(d); return; }
+        var rows = d.history || [];
+        if (!rows.length) {
+            body.innerHTML = '<div class="sact-empty"><div class="sact-empty-ic">🕓</div>' +
+                '<div class="sact-empty-t">No history yet</div>' +
+                '<div class="sact-empty-s">Finished streams show up here.</div></div>';
+            return;
+        }
+        body.innerHTML = '<div class="sact-hlist">' + rows.map(historyRow).join('') + '</div>';
+    }
+    function loadHistory() {
+        getJSON(HIST + '?limit=50').then(function (d) { if (isOpen && tab === 'history') renderHistory(d); });
     }
 
     function setBadge(n) {
@@ -126,9 +170,23 @@
     function refresh() {
         return getJSON(URL).then(function (d) {
             if (d) setBadge((d.summary && d.summary.streams) || 0);
-            if (isOpen) renderBody(d);
+            if (isOpen && tab === 'activity') renderActivity(d);
             return d;
         });
+    }
+    function startPoll() { stopPoll(); poll = setInterval(refresh, 3000); }   // live cadence
+    function stopPoll() { if (poll) { clearInterval(poll); poll = null; } }
+
+    function setTab(t) {
+        tab = t;
+        if (drawer) drawer.querySelectorAll('[data-sact-tab]').forEach(function (b) {
+            b.classList.toggle('sact-tab--on', b.getAttribute('data-sact-tab') === t);
+        });
+        var body = _body();
+        if (body) body.innerHTML = '<div class="sact-empty"><div class="sact-empty-ic">…</div>' +
+            '<div class="sact-empty-t">Loading…</div></div>';
+        if (t === 'activity') { refresh(); startPoll(); }
+        else { stopPoll(); loadHistory(); }
     }
 
     // ── drawer open/close ─────────────────────────────────────────────────────
@@ -141,11 +199,16 @@
                     '<span class="sact-server" data-sact-server></span></div>' +
                 '<button class="sact-x" type="button" data-sact-close aria-label="Close">&times;</button>' +
             '</div>' +
-            '<div class="sact-body" data-sact-body><div class="sact-empty"><div class="sact-empty-ic">…</div>' +
-                '<div class="sact-empty-t">Loading…</div></div></div>';
+            '<div class="sact-tabs">' +
+                '<button class="sact-tab sact-tab--on" type="button" data-sact-tab="activity">Activity</button>' +
+                '<button class="sact-tab" type="button" data-sact-tab="history">History</button>' +
+            '</div>' +
+            '<div class="sact-body" data-sact-body></div>';
         document.body.appendChild(drawer);
         drawer.addEventListener('click', function (e) {
-            if (e.target.closest('[data-sact-close]')) close();
+            if (e.target.closest('[data-sact-close]')) { close(); return; }
+            var tb = e.target.closest('[data-sact-tab]');
+            if (tb) { setTab(tb.getAttribute('data-sact-tab')); return; }
         });
         document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && isOpen) close(); });
     }
@@ -155,15 +218,13 @@
         isOpen = true;
         if (_scrim()) _scrim().classList.add('visible');
         requestAnimationFrame(function () { drawer.classList.add('visible'); });
-        refresh();
-        if (poll) clearInterval(poll);
-        poll = setInterval(refresh, 3000);   // live cadence while open
+        setTab('activity');
     }
     function close() {
         isOpen = false;
         if (drawer) drawer.classList.remove('visible');
         if (_scrim()) _scrim().classList.remove('visible');
-        if (poll) { clearInterval(poll); poll = null; }
+        stopPoll();
     }
     function toggle() { isOpen ? close() : open(); }
 

@@ -3165,6 +3165,18 @@ def get_server_activity():
                         "summary": {"streams": 0}})
 
 
+@app.route('/api/server-activity/history')
+def get_server_activity_history():
+    """Recent watch/listen history (Tautulli's History) — app-wide."""
+    try:
+        from core.server_activity import get_history
+        limit = request.args.get("limit", default=40, type=int) or 40
+        return jsonify(get_history(limit=limit))
+    except Exception:
+        logger.exception("server activity history failed")
+        return jsonify({"ok": False, "reason": "error", "history": []})
+
+
 @app.route('/api/server-activity/image')
 def get_server_activity_image():
     """Proxy a Plex image (poster/art) for the activity view so the token never
