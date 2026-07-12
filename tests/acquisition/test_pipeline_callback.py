@@ -11,6 +11,7 @@ from core.acquisition.imports import (
 )
 from core.acquisition.pipeline_callback import (
     notify_pipeline_import_quarantined,
+    notify_pipeline_retry_exhausted,
 )
 from core.acquisition.requests import get_request
 from core.imports.quarantine import serialize_quarantine_context
@@ -175,6 +176,40 @@ def test_quarantine_callback_ignores_legacy_imports_and_uses_markers(tmp_path):
     conn = factory()
     record = get_import(conn, importing.id)
     assert record.result["quarantined"][0]["track_id"] == 102
+    conn.close()
+
+
+def test_retry_exhaustion_fails_import_and_blocklists_release(tmp_path):
+    database_path = tmp_path / "retry.sqlite"
+
+    def factory():
+        conn = sqlite3.connect(database_path)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys=ON")
+        return conn
+
+    conn = factory()
+    ensure_acquisition_schema(conn)
+    importing, request = _importing_record(conn)
+    conn.commit()
+    conn.close()
+
+    assert notify_pipeline_retry_exhausted(
+        {"_acquisition_import_id": importing.id},
+        error="No candidates remain",
+        connection_factory=factory,
+    ) is True
+
+    conn = factory()
+    assert get_import(conn, importing.id).status == "failed"
+    assert get_request(conn, request.id).status == "failed"
+    assert conn.execute(
+        "SELECT COUNT(*) FROM release_blocklist WHERE candidate_id=? AND active=1",
+        (importing.candidate_id,),
+    ).fetchone()[0] == 1
+    events = list_history_events(conn, request_id=request.id)
+    assert events[-2].event_type == "import_failed"
+    assert events[-1].event_type == "candidate_blocklisted"
     conn.close()
 
 

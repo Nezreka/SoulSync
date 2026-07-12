@@ -129,7 +129,48 @@ def notify_pipeline_import_quarantined(
         conn.close()
 
 
+def notify_pipeline_retry_exhausted(
+    context: Mapping[str, Any],
+    *,
+    error: str,
+    connection_factory: Optional[Callable[[], Any]] = None,
+) -> bool:
+    """Fail and blocklist an Acquisition release after legacy retries end."""
+    import_id = _context_value(context, "_acquisition_import_id")
+    if not import_id:
+        return False
+    if connection_factory is None:
+        from database.music_database import get_database
+        connection_factory = get_database()._get_connection
+
+    conn = connection_factory()
+    try:
+        from core.acquisition.imports import record_import_failure
+        record_import_failure(
+            conn,
+            str(import_id),
+            error=str(error or "Shared pipeline exhausted all candidates"),
+            failure_kind="candidate",
+            reason_code="pipeline_retry_exhausted",
+        )
+        conn.commit()
+        return True
+    except (KeyError, ValueError) as exc:
+        conn.rollback()
+        logger.warning(
+            "Acquisition retry exhaustion rejected for %s: %s", import_id, exc)
+        return False
+    except Exception:
+        conn.rollback()
+        logger.exception(
+            "Acquisition retry exhaustion failed for %s", import_id)
+        return False
+    finally:
+        conn.close()
+
+
 __all__ = [
     "notify_pipeline_import_quarantined",
     "notify_pipeline_import_success",
+    "notify_pipeline_retry_exhausted",
 ]
