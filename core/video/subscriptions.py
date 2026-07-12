@@ -161,14 +161,17 @@ def import_subscriptions(subs: List[Dict[str, Any]], *,
                     item["status"] = "followed" if was_followed else "skipped"
                     followed += 1 if was_followed else 0
                     skipped += 0 if was_followed else 1
-                    # carry the show name + quality intent onto the channel
-                    cs: Dict[str, Any] = {}
-                    if show and show != ch.get("title"):
-                        cs["custom_name"] = show
-                    if wants_best_quality(sub.get("presets")):
-                        cs["quality"] = {"max_resolution": "best"}
-                    if cs:
-                        apply_channel_settings(ch["youtube_id"], cs)
+                    # Carry the show name + quality onto NEWLY-followed channels only.
+                    # A channel you already follow keeps whatever you configured by
+                    # hand — an import is additive, it never clobbers your settings.
+                    if was_followed:
+                        cs: Dict[str, Any] = {}
+                        if show and show != ch.get("title"):
+                            cs["custom_name"] = show
+                        if wants_best_quality(sub.get("presets")):
+                            cs["quality"] = {"max_resolution": "best"}
+                        if cs:
+                            apply_channel_settings(ch["youtube_id"], cs)
                 else:
                     failed += 1
         except Exception:   # noqa: BLE001 - one bad subscription never aborts the batch
