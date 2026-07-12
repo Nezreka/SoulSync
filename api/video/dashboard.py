@@ -14,6 +14,18 @@ logger = get_logger("video_api.dashboard")
 
 
 def register_routes(bp):
+    @bp.route("/health", methods=["GET"])
+    def video_health():
+        """Aggregated system health strip (library roots, disk space, recycle
+        folder, maintenance errors, monitor liveness). Cheap + local only."""
+        from . import get_video_db
+        try:
+            from core.video.health import collect
+            return jsonify(collect(get_video_db()))
+        except Exception:
+            logger.exception("video health failed")
+            return jsonify({"status": "ok", "checks": []})
+
     @bp.route("/dashboard", methods=["GET"])
     def video_dashboard():
         from . import get_video_db

@@ -4870,3 +4870,14 @@ body[data-side="video"] #gsearch-aura {
     width: auto; max-width: 120px; max-height: 32px; object-fit: contain;
 }
 [data-video-only] .server-config-container { max-width: 560px; }
+
+/* ── Dashboard system-health strip ─────────────────────────────────────── */
+.vdash-health { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.vdash-health-chip {
+    padding: 8px 14px; border-radius: 10px; font-size: 12.5px; line-height: 1.45;
+    background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.25);
+    color: #f5d9a8;
+}
+.vdash-health-chip--error {
+    background: rgba(239, 68, 68, 0.08); border-color: rgba(239, 68, 68, 0.3); color: #f5b5b5;
+}
