@@ -137,6 +137,22 @@ def sync_collection(db, definition: Dict[str, Any], *, source,
         logger.warning("Collection %s (%s) resolve failed: %s", did, name, res.error)
         return {"ok": False, "definition_id": did, "name": name, "error": res.error}
 
+    # ACQUISITION LIST (Radarr import-list mode): resolve + report missing (the
+    # caller wishlists them) but never create/push a server collection. A
+    # previously-synced server object is removed once — flipping an existing
+    # collection to acquire-only shouldn't leave a stale shelf behind.
+    if (definition.get("definition") or {}).get("acquire_only"):
+        prev = db.get_collection_sync(did) if did is not None else None
+        if (prev and prev.get("server_source") == source.server_name
+                and prev.get("server_id")):
+            try:
+                if source.delete_collection(str(prev["server_id"])).get("ok"):
+                    db.delete_collection_sync(did)
+            except Exception:   # noqa: BLE001 - stale-shelf removal is best-effort
+                logger.debug("acquire-only server removal failed for %s", did, exc_info=True)
+        return {"ok": True, "acquire_only": True, "definition_id": did, "name": name,
+                "total": len(set(res.server_ids)), "missing": res.missing}
+
     # Default-on artwork — BEFORE the signature, so the very first sync pushes
     # the art with no signature churn. Best-effort: a failed render just leaves
     # the poster empty and tries again next sync. Adopted collections opt out
