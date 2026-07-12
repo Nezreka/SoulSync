@@ -52,6 +52,12 @@ DEFAULTS = {
     "write_nfo": True,
     "download_subtitles": False,   # opt-in: fetches from OpenSubtitles (external, rate-limited)
     "subtitle_langs": "en",
+    # Recycle bin: deletes (upgrade-replaced copies, retention-cleaned YouTube
+    # episodes, dismissed imports) move into an ss_recycle folder under the
+    # file's library root instead of unlinking; purged after recycle_keep_days.
+    "recycle_deletes": True,
+    "recycle_keep_days": 7,
+    "recycle_path": "",            # optional override folder; blank = auto per-library
 }
 
 _TRANSFER_MODES = ("copy", "move")
@@ -76,9 +82,16 @@ def normalize(raw: Any) -> dict:
         if isinstance(v, str) and v.strip():
             d[key] = v.strip()
     for key in ("verify_with_ffprobe", "replace_existing", "carry_subtitles",
-                "save_artwork", "write_nfo", "download_subtitles"):
+                "save_artwork", "write_nfo", "download_subtitles", "recycle_deletes"):
         if key in raw:
             d[key] = bool(raw.get(key))
+    if "recycle_keep_days" in raw:
+        try:
+            d["recycle_keep_days"] = max(1, min(365, int(raw.get("recycle_keep_days"))))
+        except (TypeError, ValueError):
+            pass
+    if "recycle_path" in raw:
+        d["recycle_path"] = str(raw.get("recycle_path") or "").strip()
     tm = str(raw.get("transfer_mode") or "").strip().lower()
     if tm in _TRANSFER_MODES:
         d["transfer_mode"] = tm

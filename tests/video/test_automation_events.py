@@ -204,7 +204,7 @@ def test_final_download_failure_publishes(db, events, monkeypatch):
     dl_id = cur.lastrowid
     conn.commit(); conn.close()
     monkeypatch.setattr("core.video.retry.plan_retry",
-                        lambda row, max_attempts=3: {"action": "fail", "reason": "out of options"})
+                        lambda row, max_attempts=3, **kw: {"action": "fail", "reason": "out of options"})
     mon._fail_or_retry(db, {"id": dl_id, "kind": "movie", "title": "Heat", "source": "slskd"},
                        "Transfer died")
     assert "video_download_failed" in _types(events)

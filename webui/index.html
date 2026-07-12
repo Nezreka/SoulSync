@@ -6540,6 +6540,26 @@
                                 </div>
 
                                 <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="vo-recycle">
+                                        <span>Recycle deleted files instead of erasing them</span>
+                                    </label>
+                                    <small class="settings-hint">Upgrade-replaced copies, retention-cleaned YouTube episodes and dismissed imports move into an <code>ss_recycle</code> folder inside the library instead of being deleted &mdash; a safety net if something gets replaced by mistake.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Keep recycled files for (days):</label>
+                                    <input type="number" id="vo-recycle-days" min="1" max="365" placeholder="7">
+                                    <small class="settings-hint">Recycled files older than this are removed for good (cleaned automatically as new files are recycled).</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Recycle folder (optional):</label>
+                                    <input type="text" id="vo-recycle-path" placeholder="auto — ss_recycle inside each library">
+                                    <small class="settings-hint">Set a single folder to collect everything (keep it on the same drive as your libraries so moves are instant). Blank = an <code>ss_recycle</code> folder per library.</small>
+                                </div>
+
+                                <div class="form-group">
                                     <button class="test-button" id="vo-reset" style="background: #666;">&#128260; Reset to Defaults</button>
                                     <small class="settings-hint">Restores the Radarr/Sonarr standard layout.</small>
                                 </div>

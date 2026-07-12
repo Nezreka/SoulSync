@@ -742,6 +742,9 @@
         chk('vo-nfo', _videoOrg.write_nfo);
         chk('vo-subs-dl', _videoOrg.download_subtitles);
         set('vo-sub-langs', _videoOrg.subtitle_langs || 'en');
+        chk('vo-recycle', _videoOrg.recycle_deletes);
+        set('vo-recycle-days', _videoOrg.recycle_keep_days || 7);
+        set('vo-recycle-path', _videoOrg.recycle_path || '');
         renderOrgPreview();
     }
     function loadOrganization() {
@@ -764,7 +767,10 @@
             save_artwork: on('vo-artwork'),
             write_nfo: on('vo-nfo'),
             download_subtitles: on('vo-subs-dl'),
-            subtitle_langs: val('vo-sub-langs')
+            subtitle_langs: val('vo-sub-langs'),
+            recycle_deletes: on('vo-recycle'),
+            recycle_keep_days: val('vo-recycle-days'),
+            recycle_path: val('vo-recycle-path')
         };
     }
     function saveOrganization(silent) {
@@ -788,7 +794,7 @@
             el.addEventListener('change', function () { saveOrganization(false); });
         });
         ['vo-transfer-mode', 'vo-verify', 'vo-replace', 'vo-subs', 'vo-artwork', 'vo-nfo',
-            'vo-subs-dl', 'vo-sub-langs'].forEach(function (id) {
+            'vo-subs-dl', 'vo-sub-langs', 'vo-recycle', 'vo-recycle-days', 'vo-recycle-path'].forEach(function (id) {
             var el = document.getElementById(id);
             if (el) el.addEventListener('change', function () { saveOrganization(false); });
         });
@@ -801,7 +807,8 @@
                 body: JSON.stringify({ movie_template: '', episode_template: '', youtube_template: '',
                     transfer_mode: 'copy', verify_with_ffprobe: true, replace_existing: true,
                     carry_subtitles: true, save_artwork: false, write_nfo: false,
-                    download_subtitles: false, subtitle_langs: 'en' })
+                    download_subtitles: false, subtitle_langs: 'en',
+                    recycle_deletes: true, recycle_keep_days: 7, recycle_path: '' })
             }).then(function (r) { return r.ok ? r.json() : null; })
               .then(function (d) { if (d) { _videoOrg = d; fillOrg(); toast('Reset to the standard layout', 'success'); } });
         });
