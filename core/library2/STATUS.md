@@ -269,6 +269,11 @@ Grab/History, nicht bis zum editionbezogenen Bundle-Import. Zentraler Client-Mon
 mit Category-Adoption, `acquisition_imports` und Manual-Import bei Ambiguität sind
 Phase 5.
 
+**Verifiziert am 2026-07-12 (`672c9ba`):** Backend-Vollsuite 7928 bestanden,
+7 übersprungen, 2 deselektiert; Frontend Vitest 96/96; oxfmt/oxlint 0 Warnungen
+und 0 Fehler; Vite-Produktionsbuild erfolgreich. Der bekannte Hinweis auf den
+großen Main-Chunk (~1,09 MB) bleibt bestehen.
+
 ## TODO (next)
 1. Phase 5: central client monitor with Category adoption, then edition-aware
    bundle inventory/matching, persistent `acquisition_imports`, and Manual Import
@@ -287,12 +292,19 @@ Phase 5.
 7. Job registry (parallel background jobs + per-job polling) before multi-user use —
    today one global bulk-job slot is shared by monitor/retag/upgrade scans.
 
-## Run / verify (no Node/Flask locally — use Docker)
+## Run / verify
+```powershell
+.venv\Scripts\python -m pytest tests
+Set-Location webui
+npm test
+npm run check
+npm run build
+```
+
+Alternativ im Container:
 ```
 docker build -t soulsync:dev .
 # run with the user's real config+DB copy + music mounted (covers come from embedded art):
 #   -v <config>:/app/config  -v <data>:/app/data  -v <Music>:/music:ro
 # set features.library_v2=true (in DB metadata app_config OR config.json)
 ```
-Pure-Python tests run via the standalone harness (sqlite-only): see `tests/library2/`.
-Frontend: `docker build --target webui-builder` then `npx oxlint --type-check src`.

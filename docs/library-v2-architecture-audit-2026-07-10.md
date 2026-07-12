@@ -2252,10 +2252,10 @@ ADR-Log in §25a.
 
 #### Verifizierter Teststand (2026-07-12)
 
-- Vollständige Backend-Suite (`pytest tests`): **7824 bestanden, 7 übersprungen,
-  2 deselektiert, 0 Fehler** (2026-07-12, Stand nach den ADR-03/04/07- und
-  ProviderSnapshot-/Wanted-Projektions-Commits; Laufzeit ~7:10 min. Zwei
-  RuntimeWarnings aus Automation-Mocktests, keine Testfehler).
+- Vollständige Backend-Suite (`pytest tests`): **7928 bestanden, 7 übersprungen,
+  2 deselektiert, 0 Fehler** (2026-07-12, Commit `672c9ba`, einschließlich des
+  Phase-4-Acquisition-Pfads samt neuer Usenet-Submit-Grenze; Laufzeit 8:38 min). Zwei
+  bekannte RuntimeWarnings aus Automation-Mocktests, keine Testfehler.
 - Frontend: `oxfmt --check` und `oxlint --type-check`: **0 Warnungen,
   0 Fehler**; Vitest: **96/96 bestanden**; Vite-Produktionsbuild erfolgreich.
   Der Build weist weiterhin auf den großen Hauptchunk (~1,09 MB) hin.
@@ -2266,9 +2266,8 @@ ADR-Log in §25a.
   Stable-ID-, Monitor-Rules-, Wishlist-, Primary-File-, Edition/Recording-,
   Wanted-Projektions- und Acquisition-Grab-Tests sind in den oben genannten
   Commits enthalten.
-- Gezieltes Gate für den neuen Acquisition-/Library-v2-/Usenet-Pfad nach
-  `ec5fc6d`: **177 bestanden**, Ruff und `py_compile` ohne Fehler. Die vollständige
-  Suite wird gemäß Arbeitsreihenfolge einmal nach dem Dokumentationsupdate ausgeführt.
+- Zusätzliches gezieltes Gate für den neuen Acquisition-/Library-v2-/Usenet-Pfad
+  vor der Vollsuite: **177 bestanden**, Ruff und `py_compile` ohne Fehler.
 
 #### Bewusst noch offen
 
