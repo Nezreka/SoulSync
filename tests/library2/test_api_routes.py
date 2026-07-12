@@ -467,6 +467,44 @@ def test_acquisition_import_detail_never_exposes_server_paths(api):
     assert "D:/mounted" not in rendered
 
 
+def test_acquisition_path_health_reports_mapping_without_exposing_paths(
+    api, tmp_path
+):
+    client, db, _ids = api
+    local_root = tmp_path / "mounted-secret"
+    (local_root / "album").mkdir(parents=True)
+    db.config["download_source.usenet_path_mappings"] = [{
+        "from": "C:/sab/secret",
+        "to": str(local_root),
+    }]
+    conn = _conn(db)
+    from core.acquisition import ensure_acquisition_schema
+    from tests.acquisition.test_bundle_inventory import _pending_import
+    ensure_acquisition_schema(conn)
+    pending, _request, _candidate = _pending_import(
+        conn,
+        download_id="api-path-health",
+        output_path="C:/sab/secret/album",
+    )
+    conn.commit()
+    conn.close()
+
+    response = client.get("/api/library/v2/acquisition/path-health")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    check = next(
+        item for item in payload["imports"]
+        if item["import_id"] == pending.id
+    )
+    assert check["status"] == "mapped"
+    assert check["readable"] is True
+    assert payload["mappings"]["healthy"] is True
+    rendered = str(payload)
+    assert "C:/sab/secret" not in rendered
+    assert str(local_root) not in rendered
+
+
 def test_acquisition_blocklist_can_be_read_and_manually_unblocked(api):
     client, db, ids = api
     created = client.post("/api/library/v2/acquisition/requests", json={

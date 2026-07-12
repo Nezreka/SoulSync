@@ -651,6 +651,41 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         finally:
             conn.close()
 
+    @app.route("/api/library/v2/acquisition/path-health")
+    def lib2_acquisition_path_health():
+        guard = _guard()
+        if guard:
+            return guard
+        from core.acquisition.path_health import (
+            inspect_mapping_configuration,
+            inspect_reported_path,
+        )
+        conn = _conn()
+        try:
+            from core.acquisition.grabs import get_grab
+            from core.acquisition.imports import list_open_imports
+            imports = []
+            for record in list_open_imports(conn):
+                grab = get_grab(conn, record.download_id) or {}
+                imports.append({
+                    "import_id": record.id,
+                    "request_id": record.request_id,
+                    "source": grab.get("source"),
+                    "import_status": record.status,
+                    **inspect_reported_path(
+                        record.output_path,
+                        config_get=config_get,
+                    ).to_public_dict(),
+                })
+            return jsonify({
+                "success": True,
+                "mappings": inspect_mapping_configuration(
+                    config_get).to_public_dict(),
+                "imports": imports,
+            })
+        finally:
+            conn.close()
+
     @app.route("/api/library/v2/acquisition/imports/<import_id>")
     def lib2_get_acquisition_import(import_id):
         guard = _guard()
