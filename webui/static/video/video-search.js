@@ -85,41 +85,48 @@
     // TMDB result never flashes "No results" before the channels arrive.
     function ytSkeletonGroup() {
         var cards = '';
-        for (var i = 0; i < 4; i++) {
-            cards += '<div class="vyt-result vyt-result--skel">' +
-                '<span class="vyt-result-art vyt-skel"></span>' +
-                '<span class="vyt-result-info"><span class="vyt-skel vyt-skel-line"></span>' +
-                '<span class="vyt-skel vyt-skel-line vyt-skel-line--sm"></span></span></div>';
+        for (var i = 0; i < 5; i++) {                 // poster-shaped skeletons in the shared grid
+            cards += '<div class="vsr-card"><div class="vsr-poster vyt-skel"></div>' +
+                '<div class="vsr-info"><span class="vyt-skel vyt-skel-line"></span>' +
+                '<span class="vyt-skel vyt-skel-line vyt-skel-line--sm"></span></div></div>';
         }
         return '<div class="vsr-group"><h2 class="vsr-group-title">' +
             '<span class="vsr-group-ic" aria-hidden="true">▶</span>YouTube channels' +
             '<span class="vsr-yt-loading">searching…</span></h2>' +
-            '<div class="vsr-grid vyt-result-grid">' + cards + '</div></div>';
+            '<div class="vsr-grid">' + cards + '</div></div>';
+    }
+    function tmdbGroup(g, results) {
+        var items = (results || []).filter(function (r) { return r.kind === g.kind; });
+        if (!items.length) return '';
+        return '<div class="vsr-group"><h2 class="vsr-group-title">' +
+            '<span class="vsr-group-ic" aria-hidden="true">' + g.icon + '</span>' + g.label +
+            '<span class="vsr-group-count">' + items.length + '</span></h2>' +
+            '<div class="vsr-grid">' +
+            items.map(g.kind === 'person' ? personCard : titleCard).join('') +
+            '</div></div>';
+    }
+    function ytGroup(ytChannels, ytSearching) {
+        if (ytChannels && ytChannels.length && window.VideoYoutube) {
+            return '<div class="vsr-group"><h2 class="vsr-group-title">' +
+                '<span class="vsr-group-ic" aria-hidden="true">▶</span>YouTube channels' +
+                '<span class="vsr-group-count">' + ytChannels.length + '</span></h2>' +
+                '<div class="vsr-grid">' +
+                ytChannels.map(function (c) { return VideoYoutube.channelResultCard(c); }).join('') +
+                '</div></div>';
+        }
+        return ytSearching ? ytSkeletonGroup() : '';
     }
     function render(results, ytChannels, ytSearching) {
         var host = $('[data-video-search-results]');
         if (!host) return;
-        var html = '';
-        GROUPS.forEach(function (g) {
-            var items = (results || []).filter(function (r) { return r.kind === g.kind; });
-            if (!items.length) return;
-            html += '<div class="vsr-group"><h2 class="vsr-group-title">' +
-                '<span class="vsr-group-ic" aria-hidden="true">' + g.icon + '</span>' + g.label +
-                '<span class="vsr-group-count">' + items.length + '</span></h2>' +
-                '<div class="vsr-grid">' +
-                items.map(g.kind === 'person' ? personCard : titleCard).join('') +
-                '</div></div>';
-        });
-        if (ytChannels && ytChannels.length && window.VideoYoutube) {
-            html += '<div class="vsr-group"><h2 class="vsr-group-title">' +
-                '<span class="vsr-group-ic" aria-hidden="true">▶</span>YouTube channels' +
-                '<span class="vsr-group-count">' + ytChannels.length + '</span></h2>' +
-                '<div class="vsr-grid vyt-result-grid">' +
-                ytChannels.map(function (c) { return VideoYoutube.channelResultCard(c); }).join('') +
-                '</div></div>';
-        } else if (ytSearching) {
-            html += ytSkeletonGroup();
-        }
+        // Order: Movies → TV Shows → YouTube channels → People. Channels sit next
+        // to TV shows (both are episodic 'shows' here), not buried under People.
+        var byKind = {};
+        GROUPS.forEach(function (g) { byKind[g.kind] = g; });
+        var html = tmdbGroup(byKind.movie, results) +
+                   tmdbGroup(byKind.show, results) +
+                   ytGroup(ytChannels, ytSearching) +
+                   tmdbGroup(byKind.person, results);
         var any = html.length > 0;
         show('[data-video-search-hint]', false);
         show('[data-video-search-empty]', !any);

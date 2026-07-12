@@ -1042,6 +1042,28 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 .vsr-card--person:hover .vsr-poster { border-radius: 50%; }
 .vsr-card--person .vsr-poster::after { border-radius: 50%; }
 
+/* YouTube channel = the SAME 2:3 poster tile as movies/TV (shared .vsr-grid,
+   hover-lift, peek), but a channel has only a square avatar — so it's centered
+   on a YouTube-branded ground with a red 'YouTube' ribbon in the ribbon slot. */
+.vsr-poster--yt {
+    display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(150deg, rgba(255, 59, 59, 0.30), rgba(12, 8, 10, 0.94));
+}
+.vsr-yt-av {
+    width: 58%; aspect-ratio: 1; border-radius: 50%; overflow: hidden;
+    border: 2px solid rgba(255, 255, 255, 0.16); background: #16161d;
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.5);
+    display: flex; align-items: center; justify-content: center;
+    transition: border-color 0.32s ease, transform 0.5s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.vsr-yt-avatar { width: 100%; height: 100%; object-fit: cover; display: block; }
+.vsr-yt-avatar.vyt-avatar--ph {
+    display: flex; align-items: center; justify-content: center;
+    font-size: 30px; font-weight: 800; color: rgba(255, 255, 255, 0.78); background: #1c1c24;
+}
+.vsr-card--yt:hover .vsr-yt-av { border-color: rgba(255, 59, 59, 0.6); transform: scale(1.05); }
+.vsr-ribbon--yt { background: rgba(255, 59, 59, 0.95); }
+
 /* ── SEARCH page ──────────────────────────────────────────────────────────── */
 .vsr-page { --vd-accent-rgb: var(--accent-rgb, 88, 101, 242); position: relative; margin: -40px -40px 0; }
 .vsr-hero {
@@ -3284,19 +3306,7 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vc-pl--collapsed .vc-pl-vids { display: none; }
 .vc-pl-loading { padding: 14px; color: rgba(255,255,255,0.5); font-size: 13px; }
 
-/* YouTube channel cards in the search results grid */
-.vyt-result-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
-.vyt-result { display: flex; flex-direction: column; align-items: center; text-align: center; text-decoration: none;
-    padding: 14px 8px; border-radius: 14px; transition: background 0.15s ease; }
-.vyt-result:hover { background: rgba(255, 59, 59, 0.07); }
-.vyt-result-art { width: 92px; height: 92px; border-radius: 50%; overflow: hidden; border: 2px solid rgba(255,59,59,0.4);
-    display: flex; align-items: center; justify-content: center; background: #16161d; }
-.vyt-result-avatar { width: 100%; height: 100%; object-fit: cover; font-size: 26px; }
-.vyt-result-info { margin-top: 10px; display: flex; flex-direction: column; align-items: center; gap: 2px; max-width: 100%; }
-.vyt-result-badge { font-size: 9.5px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: #ff6b6b; }
-.vyt-result-title { font-size: 13px; font-weight: 800; color: #fff; line-height: 1.2; max-width: 100%;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.vyt-result-sub { font-size: 11px; font-weight: 600; color: rgba(255,255,255,0.42); }
+/* (YouTube channel search cards now reuse .vsr-card/.vsr-card--yt — see above) */
 
 /* ── YouTube channel rendered through the SHOW detail page (.vd-yt-*) ───────── */
 .vd-status--yt { background: rgba(255,59,59,0.18); color: #ff8a8a; }
@@ -3341,8 +3351,6 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vyt-skel { background: linear-gradient(100deg, rgba(255,255,255,0.05) 30%, rgba(255,255,255,0.12) 50%, rgba(255,255,255,0.05) 70%);
     background-size: 200% 100%; animation: vytShimmer 1.3s ease-in-out infinite; }
 @keyframes vytShimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
-.vyt-result--skel { pointer-events: none; }
-.vyt-result--skel .vyt-result-art { border-color: rgba(255,255,255,0.08); }
 .vyt-skel-line { height: 11px; border-radius: 5px; width: 78px; }
 .vyt-skel-line--sm { height: 9px; width: 52px; }
 @media (prefers-reduced-motion: reduce) { .vyt-skel, .vsr-yt-loading::after { animation: none; } }
