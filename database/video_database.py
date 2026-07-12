@@ -1586,6 +1586,36 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def owned_youtube_video_ids(self) -> list:
+        """YouTube video ids whose file is (believed) still ON DISK — pruned rows excluded.
+        The UI-annotation variant of the above: a 'Downloaded' badge means *you have this
+        now*, while the scan dedup deliberately keeps pruned rows (had-it-once must never
+        re-download)."""
+        conn = self._get_connection()
+        try:
+            return [r["media_id"] for r in conn.execute(
+                "SELECT DISTINCT media_id FROM video_download_history "
+                "WHERE source='youtube' AND outcome='completed' AND media_id IS NOT NULL "
+                "AND pruned_at IS NULL")]
+        finally:
+            conn.close()
+
+    def youtube_ledger_rows(self) -> list:
+        """Every still-on-disk (not pruned) completed YouTube grab with a recorded file
+        path — the set the ghost-cleanup repair job path-checks. Rows without a
+        dest_path can't be verified and are left out."""
+        conn = self._get_connection()
+        try:
+            return [dict(r) for r in conn.execute(
+                "SELECT id, media_id, title, channel_id, dest_path, published_at, "
+                "completed_at FROM video_download_history "
+                "WHERE source='youtube' AND outcome='completed' AND pruned_at IS NULL "
+                "AND media_id IS NOT NULL "
+                "AND dest_path IS NOT NULL AND dest_path != '' "
+                "ORDER BY channel_id, published_at DESC")]
+        finally:
+            conn.close()
+
     def youtube_failed_counts(self) -> dict:
         """{video_id: failed-attempt count} from the permanent history — so the processor
         can stop re-grabbing a video that keeps failing (deleted / private / geo- or
@@ -1847,8 +1877,9 @@ class VideoDatabase:
             conn.close()
 
     # The YouTube OWNERSHIP LEDGER: completed grabs (incl. retention-pruned ones).
-    # Four subsystems depend on these rows never disappearing — scan dedup,
-    # retention, the Channels tab, the downloaded badges.
+    # Scan dedup, retention, the Channels tab, the downloaded badges and the
+    # ghost-cleanup repair job all depend on these rows never disappearing.
+    # Dedup reads the whole ledger; UI truth (badges/counts) excludes pruned rows.
     _YT_LEDGER = "(source='youtube' AND outcome='completed')"
 
     def clear_download_history(self, kind=None) -> int:
@@ -5001,6 +5032,7 @@ class VideoDatabase:
                 "  WHERE cv.channel_id = named.cid) AS video_count, "
                 "(SELECT COUNT(DISTINCT h.media_id) FROM video_download_history h "
                 "  WHERE h.source='youtube' AND h.outcome='completed' "
+                "  AND h.pruned_at IS NULL "
                 "  AND h.channel_id = named.cid) AS owned_count "
                 f"FROM named{w} ORDER BY {order} LIMIT ? OFFSET ?",
                 (*params, limit, (page - 1) * limit)).fetchall()

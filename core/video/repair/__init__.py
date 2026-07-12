@@ -16,6 +16,7 @@ _JOB_MODULES = [
     "metadata_gaps",
     "duplicate_movies",
     "wishlist_audit",
+    "youtube_ghosts",
 ]
 
 

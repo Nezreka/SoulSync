@@ -116,10 +116,10 @@ def test_worker_config_roundtrip(worker):
     assert cfg["enabled"] and cfg["interval_hours"] == 6 and cfg["settings"]["include_specials"]
     info = {j["job_id"]: j for j in worker.get_all_job_info()}
     assert info["missing_episodes"]["enabled"]
-    # All seven jobs registered and reporting.
+    # All eight jobs registered and reporting.
     assert set(info) >= {"missing_episodes", "movie_collections", "quality_upgrade",
                          "broken_files", "metadata_gaps", "duplicate_movies",
-                         "wishlist_audit"}
+                         "wishlist_audit", "youtube_ghosts"}
 
 
 # ── the job: scan → findings (with supersede) ────────────────────────────────
