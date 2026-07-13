@@ -372,29 +372,28 @@ def list_video_libraries():
 
 # ── Plex ──────────────────────────────────────────────────────────────────────
 def _union_episode_delta_shows(section, since, shows):
-    """Union into ``shows`` the parent shows of any EPISODE added/changed since ``since``.
+    """Union into ``shows`` the parent shows of any EPISODE ADDED since ``since``.
 
-    Plex doesn't always bump a SHOW's ``updatedAt`` when an episode is imported into it, so a
-    show-level ``updatedAt>>`` delta silently misses freshly-added episodes. Searching at the
-    EPISODE level by ``addedAt`` (new content) + ``updatedAt`` (re-matched episodes) and pulling
-    the parent shows catches them. De-duplicated by ratingKey. Best-effort: any hiccup returns
-    ``shows`` unchanged so the show-level delta still stands."""
+    A new episode doesn't change its show's addedAt, so the show-level addedAt delta misses
+    freshly-added episodes. Searching at the EPISODE level by ``addedAt`` and pulling the parent
+    shows catches them. (addedAt, not updatedAt — Plex's nightly refresh bumps updatedAt on
+    ~every episode, which would drag in the whole library.) De-duplicated by ratingKey. Best-
+    effort: any hiccup returns ``shows`` unchanged so the show-level delta still stands."""
     try:
         shows = list(shows)
         seen = {str(getattr(s, "ratingKey", "") or "") for s in shows}
         extra_keys = []
-        for filt in ({"addedAt>>": since}, {"updatedAt>>": since}):
-            try:
-                eps = section.search(libtype="episode", filters=filt,
-                                     sort="addedAt:desc", maxresults=1000)
-            except Exception:   # noqa: BLE001 - one filter failing shouldn't lose the other
-                logger.debug("Plex: episode delta search failed for %s", filt, exc_info=True)
-                continue
-            for ep in eps:
-                gk = str(getattr(ep, "grandparentRatingKey", "") or "")
-                if gk and gk not in seen:
-                    seen.add(gk)
-                    extra_keys.append(gk)
+        try:
+            eps = section.search(libtype="episode", filters={"addedAt>>": since},
+                                 sort="addedAt:desc", maxresults=2000)
+        except Exception:   # noqa: BLE001 - the episode delta is an assist over the show delta
+            logger.debug("Plex: episode addedAt delta search failed", exc_info=True)
+            eps = []
+        for ep in eps:
+            gk = str(getattr(ep, "grandparentRatingKey", "") or "")
+            if gk and gk not in seen:
+                seen.add(gk)
+                extra_keys.append(gk)
         for gk in extra_keys:
             try:
                 shows.append(section.fetchItem(int(gk)))
@@ -445,16 +444,17 @@ class PlexVideoSource:
             if not incremental:
                 items = section.all()
             elif since is not None:
-                # Delta: everything Plex modified SINCE our last scan — updatedAt bumps
-                # on a re-match / metadata edit, so a corrected title on an EXISTING
-                # movie surfaces, not just brand-new adds. Falls back to a recent window
-                # if the server rejects the filter.
+                # Delta = everything ADDED to Plex since our last scan. NOTE: use addedAt, NOT
+                # updatedAt — Plex bumps updatedAt on nearly every item during its nightly
+                # metadata refresh (a 3389-show library returns ~3373 for updatedAt>>, but only
+                # the 3 genuinely-new ones for addedAt>>), so an updatedAt delta is pure noise
+                # AND a new item's bumped updatedAt gets consumed by the advancing baseline
+                # before it's caught. addedAt is the immutable "when added" — the real signal.
                 try:
-                    items = section.search(filters={"updatedAt>>": since}, sort="updatedAt:desc")
-                    # Watch-state changes bump lastViewedAt, NOT updatedAt — without
-                    # this second delta an incremental scan never refreshes
-                    # play_count/last_viewed_at on old items (watched-cleanup relies
-                    # on it). Deduped by ratingKey; best-effort.
+                    items = section.search(filters={"addedAt>>": since}, sort="addedAt:desc")
+                    # Watch-state changes bump lastViewedAt — a separate delta so an incremental
+                    # still refreshes play_count/last_viewed_at on old items (watched-cleanup
+                    # relies on it). Deduped by ratingKey; best-effort.
                     try:
                         seen_keys = {str(getattr(x, "ratingKey", "")) for x in items}
                         items = list(items) + [
@@ -464,10 +464,10 @@ class PlexVideoSource:
                     except Exception:   # noqa: BLE001 - the watch delta is an assist
                         logger.debug("Plex: lastViewedAt delta failed", exc_info=True)
                 except Exception:
-                    logger.warning("Plex: updatedAt delta filter failed; using recent window", exc_info=True)
-                    items = section.search(sort="updatedAt:desc", maxresults=200)
+                    logger.warning("Plex: addedAt delta filter failed; using recent window", exc_info=True)
+                    items = section.search(sort="addedAt:desc", maxresults=200)
             else:
-                items = section.search(sort="updatedAt:desc", maxresults=100)   # first run: recent window
+                items = section.search(sort="addedAt:desc", maxresults=100)   # first run: recent window
             for m in items:
                 try:
                     yield self._movie(m)
@@ -476,23 +476,22 @@ class PlexVideoSource:
 
     def iter_shows(self, incremental=False, since=None):
         for section in self._scan_sections("show", self._tv_lib):
-            # updatedAt bumps when a show is re-matched; delta = everything changed since
-            # the last scan. First run uses a recent window.
+            # Delta = shows ADDED since our last scan (addedAt, not updatedAt — Plex's nightly
+            # refresh bumps updatedAt on ~everything, so it's noise; see iter_movies).
             if not incremental:
                 items = section.all()
             elif since is not None:
                 try:
-                    items = section.search(filters={"updatedAt>>": since}, sort="updatedAt:desc")
-                    # CRUCIAL: Plex does NOT reliably bump a SHOW's updatedAt when a new
-                    # episode is imported into it, so a show-only delta silently misses
-                    # freshly-added episodes. Union in the parent shows of any EPISODE added
-                    # or changed since the baseline — the reliable new-content signal.
+                    items = section.search(filters={"addedAt>>": since}, sort="addedAt:desc")
+                    # CRUCIAL: a NEW EPISODE of an existing show doesn't change the SHOW's
+                    # addedAt, so the show-level delta misses freshly-added episodes. Union in
+                    # the parent shows of any episode ADDED since the baseline.
                     items = _union_episode_delta_shows(section, since, items)
                 except Exception:
-                    logger.warning("Plex: updatedAt delta filter failed (shows); using recent window", exc_info=True)
-                    items = section.search(sort="updatedAt:desc", maxresults=300)
+                    logger.warning("Plex: addedAt delta filter failed (shows); using recent window", exc_info=True)
+                    items = section.search(sort="addedAt:desc", maxresults=300)
             else:
-                items = section.search(sort="updatedAt:desc", maxresults=200)
+                items = section.search(sort="addedAt:desc", maxresults=200)
             for sh in items:
                 try:
                     yield self._show(sh)

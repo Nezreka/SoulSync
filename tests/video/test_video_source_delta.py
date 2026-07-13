@@ -38,12 +38,12 @@ class _Section:
 def test_union_adds_parent_shows_of_new_episodes():
     existing = [_Show(100)]                   # show-level delta already found show 100
     sec = _Section(
-        eps_by_filter={"addedAt": [_Ep("200"), _Ep("100")], "updatedAt": [_Ep("300")]},
-        shows_by_key={200: _Show(200), 300: _Show(300)})
+        eps_by_filter={"addedAt": [_Ep("200"), _Ep("100")]},   # new ep of show 200 + a dup of 100
+        shows_by_key={200: _Show(200)})
     out = _union_episode_delta_shows(sec, "since", existing)
-    assert sorted(str(s.ratingKey) for s in out) == ["100", "200", "300"]   # 100 kept, 200+300 added
-    assert sec.searched == ["addedAt", "updatedAt"]                          # both signals queried
-    assert sorted(sec.fetched) == [200, 300]                                # only the NEW shows fetched
+    assert sorted(str(s.ratingKey) for s in out) == ["100", "200"]          # 100 kept, 200 added
+    assert sec.searched == ["addedAt"]         # addedAt ONLY — updatedAt would drag in the whole library
+    assert sec.fetched == [200]                # only the NEW show fetched
 
 
 def test_union_is_best_effort_when_search_explodes():
