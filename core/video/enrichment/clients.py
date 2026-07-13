@@ -497,6 +497,71 @@ class TMDBClient:
                             "poster": (self.PROFILE + it["profile_path"]) if it.get("profile_path") else None})
         return out
 
+    def search_companies(self, query):
+        """TMDB company (studio) search for the in-app Studios search — [{kind:'studio',
+        tmdb_id, title, logo, origin_country}]. Companies aren't in /search/multi."""
+        if not self.api_key or not (query or "").strip():
+            return []
+        import requests
+        r = requests.get(self.BASE + "/search/company",
+                         params={"api_key": self.api_key, "query": query}, timeout=15)
+        r.raise_for_status()
+        out = []
+        for c in ((r.json() or {}).get("results") or [])[:20]:
+            if not c.get("id"):
+                continue
+            out.append({"kind": "studio", "tmdb_id": c["id"], "title": c.get("name"),
+                        "logo": (self.LOGO + c["logo_path"]) if c.get("logo_path") else None,
+                        "origin_country": c.get("origin_country") or None})
+        return out
+
+    def company(self, company_id):
+        """TMDB company detail: {tmdb_id, name, description, logo, headquarters,
+        origin_country, homepage}, or None if unknown."""
+        if not self.api_key or company_id is None:
+            return None
+        import requests
+        r = requests.get(self.BASE + "/company/" + str(company_id),
+                         params={"api_key": self.api_key}, timeout=15)
+        if r.status_code == 404:
+            return None
+        r.raise_for_status()
+        d = r.json() or {}
+        if not d.get("id"):
+            return None
+        return {"tmdb_id": d["id"], "name": d.get("name"),
+                "description": d.get("description") or None,
+                "logo": (self.LOGO + d["logo_path"]) if d.get("logo_path") else None,
+                "headquarters": d.get("headquarters") or None,
+                "origin_country": d.get("origin_country") or None,
+                "homepage": d.get("homepage") or None}
+
+    def company_movies(self, company_id, *, page=1, sort="primary_release_date.desc"):
+        """A company's movies via /discover — newest release first by default. Returns
+        {results:[{kind:'movie', tmdb_id, title, year, date, rating, popularity, vote_count,
+        poster}], page, total_pages, total_results}."""
+        empty = {"results": [], "page": 1, "total_pages": 0, "total_results": 0}
+        if not self.api_key or company_id is None:
+            return empty
+        import requests
+        r = requests.get(self.BASE + "/discover/movie", params={
+            "api_key": self.api_key, "with_companies": str(company_id), "sort_by": sort,
+            "page": max(1, min(500, int(page))), "include_adult": "false"}, timeout=15)
+        r.raise_for_status()
+        d = r.json() or {}
+        results = []
+        for m in d.get("results") or []:
+            if not m.get("id"):
+                continue
+            date = m.get("release_date") or ""
+            results.append({"kind": "movie", "tmdb_id": m["id"], "title": m.get("title"),
+                            "year": (date or "")[:4] or None, "date": date or None,
+                            "rating": m.get("vote_average") or None,
+                            "popularity": m.get("popularity") or 0, "vote_count": m.get("vote_count") or 0,
+                            "poster": (self.POSTER_W + m["poster_path"]) if m.get("poster_path") else None})
+        return {"results": results, "page": d.get("page") or 1,
+                "total_pages": d.get("total_pages") or 0, "total_results": d.get("total_results") or 0}
+
     def trending(self, window="week", kind=None):
         """Trending titles. ``kind`` None = mixed movies + shows (/trending/all — the
         search-idle filler + Discover hero slideshow, hence backdrops via _disc_map).
