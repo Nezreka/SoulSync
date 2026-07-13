@@ -820,6 +820,72 @@ class VideoEnrichmentEngine:
                 c["library_id"] = self.db.library_id_for_tmdb(c["kind"], c["tmdb_id"], srv)
         return p
 
+    def company_search(self, query, *, limit=10) -> list:
+        """TMDB studio search for the in-app Studios search. TMDB returns namesakes in an
+        unhelpful order (the real A24 with 177 films ranks BELOW a 1-film namesake), so we
+        attach each result's movie count (fetched in parallel) and sort by it — the real
+        studio floats to the top and the UI can show '177 films' to disambiguate."""
+        w = self.workers.get("tmdb")
+        if not w or not w.enabled:
+            return []
+        try:
+            raw = (w.client.search_companies(query) or [])[:limit]
+        except Exception:
+            logger.exception("company_search failed")
+            return []
+        if not raw:
+            return []
+        from concurrent.futures import ThreadPoolExecutor
+
+        def _count(c):
+            try:
+                return w.client.company_movies(c["tmdb_id"], page=1).get("total_results") or 0
+            except Exception:   # noqa: BLE001 - a count hiccup just means 'unknown', not fatal
+                return 0
+        try:
+            with ThreadPoolExecutor(max_workers=min(8, len(raw))) as ex:
+                for c, n in zip(raw, ex.map(_count, raw)):
+                    c["movie_count"] = n
+            raw.sort(key=lambda c: c.get("movie_count") or 0, reverse=True)
+        except Exception:   # noqa: BLE001 - unranked results are still usable
+            logger.debug("company count enrichment failed", exc_info=True)
+        return raw
+
+    def company_detail(self, company_id) -> dict | None:
+        """A studio's TMDB detail (name/logo/description/HQ). Cached a day."""
+        w = self.workers.get("tmdb")
+        if not w or not w.enabled:
+            return None
+        ck = ("company", company_id)
+        cached = self._cache_get(ck)
+        if cached is None:
+            try:
+                cached = w.client.company(company_id) or {}
+                self._cache_put(ck, cached, ttl=86400)
+            except Exception:
+                logger.exception("company_detail failed for %s", company_id)
+                return None
+        return cached or None
+
+    def company_movies(self, company_id, *, page=1, sort="primary_release_date.desc") -> dict:
+        """A studio's movies (paged), each annotated with the library id if owned so the grid
+        marks owned copies + opens them in-app."""
+        empty = {"results": [], "page": 1, "total_pages": 0, "total_results": 0}
+        w = self.workers.get("tmdb")
+        if not w or not w.enabled:
+            return empty
+        try:
+            out = w.client.company_movies(company_id, page=page, sort=sort)
+        except Exception:
+            logger.exception("company_movies failed for %s", company_id)
+            return empty
+        rows = out.get("results") or []
+        owned = self.db.library_ids_for_tmdb(   # one batched query for the whole page, not N
+            "movie", [m["tmdb_id"] for m in rows if m.get("tmdb_id")], self._server())
+        for m in rows:
+            m["library_id"] = owned.get(m.get("tmdb_id"))
+        return out
+
     def _server(self):
         """Active video server — scopes ownership lookups so an item owned only on
         the inactive server doesn't read as owned (Plex/Jellyfin stay separate)."""
