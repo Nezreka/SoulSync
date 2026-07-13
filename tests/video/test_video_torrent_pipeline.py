@@ -115,6 +115,32 @@ def test_queued_below_100_is_still_downloading():
     assert upd == {"status": "downloading", "progress": 50.0}   # genuinely mid-download → not done
 
 
+def test_content_path_is_preferred_over_save_path_and_name():
+    """qBit gives the exact file via content_path; the torrent NAME differs from the real
+    filename ('Love Island S13E42 1080p WEB H264-SKYFiRE' vs 'love.island…[EZTVx.to].mkv'),
+    so we must locate by content_path, not save_path/name."""
+    seen = {}
+
+    def find_video(root, name=None):
+        seen["root"], seen["name"] = root, name
+        return "/local/the.real.file.mkv"
+
+    def organizer(dl, src):
+        seen["src"] = src
+        return {"status": "completed", "progress": 100.0, "dest_path": "/lib/x.mkv"}
+
+    upd = cd.process_client_download(
+        {"client_ref": "h1", "source": "torrent", "id": 9},
+        get_status=lambda s, r: _St(state="seeding", progress=1.0, save_path="/dl/shared",
+                                    name="Love Island S13E42 1080p WEB H264-SKYFiRE",
+                                    content_path="/dl/shared/the.real.file.mkv"),
+        resolve_path=lambda p: "/local/" + p.rsplit("/", 1)[-1] if p else p,
+        find_video=find_video, organizer=organizer)
+    assert seen["root"] == "/local/the.real.file.mkv"      # resolved content_path, not the shared dir
+    assert seen["name"] is None                            # content_path is already this job's own
+    assert upd["dest_path"] == "/lib/x.mkv"
+
+
 # ── hybrid ordered-fallback in _default_search ────────────────────────────────
 def _hybrid(monkeypatch, mode, order, per_source):
     monkeypatch.setattr("core.video.download_config.load",

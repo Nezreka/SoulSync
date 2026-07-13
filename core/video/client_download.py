@@ -62,15 +62,22 @@ def process_client_download(dl: dict, *, get_status: Callable[[str, str], Any],
     # (find_video returns nothing → we keep polling), so treating 100% as done is safe.
     if state != "completed" and pct < 100.0:
         return {"status": "downloading", "progress": pct}
-    # Completed → locate THIS job's finished video file, then import. The reported save_path is
-    # the client's download DIR — often the shared category folder holding several concurrent
-    # downloads. Scoping to the job's own content (``name``) is what prevents importing a
-    # neighbour's file: e.g. a 1.28 GB / 1080p grab landing an 8 GB / 2160p file that belongs
-    # to a different torrent saved in the same folder.
-    reported = getattr(status, "save_path", None) or getattr(status, "incomplete_path", None)
-    save = resolve_path(reported)
-    name = getattr(status, "name", None)
-    src = find_video(save, name) if save else None
+    # Completed → locate THIS job's finished video file, then import. Prefer the client's
+    # exact content_path (this torrent's own file/folder) — the reliable anti-cross-attribution
+    # signal: the shared save_path DIR holds every concurrent grab, and the torrent NAME often
+    # differs from the real on-disk filename (e.g. name 'Love Island S13E42 1080p WEB H264-SKYFiRE'
+    # vs file 'love.island.s13e42.1080p.web.h264-skyfire[EZTVx.to].mkv'), so save_path/name misses.
+    # content_path points straight at the content. Fall back to save_path + name scoping for
+    # clients that don't report it (never the largest file in the shared folder).
+    content = getattr(status, "content_path", None)
+    if content:
+        save = resolve_path(content)
+        src = find_video(save, None) if save else None       # already this job's own content
+    else:
+        reported = getattr(status, "save_path", None) or getattr(status, "incomplete_path", None)
+        save = resolve_path(reported)
+        name = getattr(status, "name", None)
+        src = find_video(save, name) if save else None
     if not src:
         if dl.get("dest_path"):
             return {"status": "completed", "progress": 100.0, "dest_path": dl.get("dest_path")}
