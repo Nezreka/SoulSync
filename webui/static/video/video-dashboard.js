@@ -142,6 +142,62 @@
             }).catch(function () { /* non-admin / unavailable → button stays hidden */ });
     }
 
+    // ── Studio enrichment-coverage widget ──────────────────────────────────────
+    // Overlay + Collection Studio read the library's enriched TMDB/TVDB metadata
+    // (posters, ratings, logos, studios/networks). Surface how much of the library
+    // is covered right on each Studio card so it's clear enrichment comes first.
+    // Purely visual + additive: it renders into [data-video-studio-coverage] and
+    // touches nothing else.
+    function _covRow(label, done, total) {
+        done = done || 0; total = total || 0;
+        var pct = total ? Math.round(done / total * 100) : 0;
+        var col = pct >= 90 ? '#6cd391' : (pct >= 60 ? '#f5c518' : '#f0883e');
+        return '<div style="display:flex;align-items:center;gap:10px;">' +
+            '<span style="flex:0 0 96px;font-size:11px;font-weight:700;color:rgba(255,255,255,.6);">' + _esc(label) + '</span>' +
+            '<span style="flex:1;height:7px;border-radius:4px;background:rgba(255,255,255,.08);overflow:hidden;">' +
+                '<span style="display:block;height:100%;width:' + pct + '%;background:' + col + ';border-radius:4px;"></span></span>' +
+            '<span style="flex:0 0 auto;min-width:34px;text-align:right;font-size:11px;font-weight:800;color:' + col + ';">' + pct + '%</span>' +
+        '</div>';
+    }
+    function _studioCoverageHTML(d) {
+        var m = (d && d.movies) || {}, s = (d && d.shows) || {};
+        var mt = m.total || 0, st = s.total || 0;
+        var wrap = 'display:flex;flex-direction:column;gap:9px;padding:12px 14px;border-radius:12px;' +
+            'background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);';
+        if (!mt && !st) {
+            return '<div style="' + wrap + '"><div style="font-size:12px;line-height:1.55;color:rgba(255,255,255,.6);">' +
+                'Scan your library first — this studio reads your enriched <b>TMDB / TVDB</b> metadata ' +
+                '(posters, ratings, artwork).</div></div>';
+        }
+        var rows = '', pcts = [];
+        function push(label, done, total) {
+            if (total) { rows += _covRow(label, done, total); pcts.push(Math.round((done || 0) / total * 100)); }
+        }
+        push('Movies · TMDB', m.tmdb_enriched, mt);
+        push('Shows · TMDB', s.tmdb_enriched, st);
+        push('Shows · TVDB', s.tvdb_matched, st);
+        var lo = pcts.length ? Math.min.apply(null, pcts) : 0;
+        var note = lo >= 90
+            ? '<div style="font-size:11.5px;line-height:1.5;color:rgba(108,211,145,.85);">✓ Well enriched — this studio has the metadata it needs.</div>'
+            : '<div style="font-size:11.5px;line-height:1.5;color:rgba(245,197,24,.9);">⚠ This studio pulls posters, ratings &amp; artwork from enriched metadata. ' +
+              'Run the enrichment workers (Settings → Enrichment) to raise coverage before relying on it.</div>';
+        return '<div style="' + wrap + '">' +
+            '<span style="font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:rgba(255,255,255,.5);">Enrichment coverage</span>' +
+            rows + note + '</div>';
+    }
+    function loadStudioCoverage() {
+        var hosts = document.querySelectorAll('[data-video-studio-coverage]');
+        if (!hosts.length) return;
+        fetch('/api/video/enrichment/coverage', { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d) return;
+                var html = _studioCoverageHTML(d);
+                Array.prototype.forEach.call(hosts, function (h) { h.innerHTML = html; });
+            })
+            .catch(function () { /* coverage is a nice-to-have; never block the dashboard */ });
+    }
+
     // The Studios are admin-only — non-admins got two prominent cards whose
     // buttons silently did nothing. Hide the cards outright for them.
     function gateStudioCards() {
@@ -327,6 +383,7 @@
         loadUpcoming();
         loadAttention();            // open issues + pending maintenance findings
         gateStudioCards();
+        loadStudioCoverage();       // TMDB/TVDB coverage bars on the Studio cards
         loadSystemStats();          // immediate fill (memory/uptime)
         startSystemStatsPolling();  // then keep it live
     }
