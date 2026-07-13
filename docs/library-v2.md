@@ -1155,8 +1155,14 @@ auf dem aktuellen gespaltenen Verhalten.
   grün). Die abschließende Python-Fullsuite ist ebenfalls grün (8081 passed,
   2 deselected; 291.13s);
 - echte SAB/NZBGet-, gemountete Path-Mapping- und Docker-Restart-
-  Acceptance-Tests durchführen (die read-only Health-API ist implementiert;
-  echte Deployment-Acceptance ist es nicht);
+  Acceptance-Tests durchführen. **Teilstand 2026-07-14:** echte isolierte
+  SABnzbd-5.0.4- und NZBGet-26.2-Container bestehen Connection, NZB-Submit,
+  Job-Status/Category und Remove über die produktiven SoulSync-Adapter. Dabei
+  wurde verifiziert, dass SAB eine dort nicht angelegte Kategorie still auf
+  `*` zurückschreibt; der Settings-Connection-Test validiert deshalb jetzt
+  die konfigurierte SAB-Kategorie (`96c323a2`, 50 gezielte Tests + echter
+  Client-Check). Gemountetes Path-Mapping, Monitor-Adoption über einen echten
+  App-/Container-Restart und completed Bundle-Import bleiben offen;
 - erst während des späteren globalen Wishlist-Cutovers den
   Compatibility-Wishlist-Output durch direkte Acquisition Requests ersetzen.
   Das nicht früher tun, wenn es das etablierte Wishlist/Main-Pipeline-
@@ -1167,7 +1173,7 @@ Correction-Commits: `e1272be`, `e6484cb`, `2917f3c`, `99ffd2c`, `7d80e96`,
 `903cbd3`, `6ea7f3e2`, `d921c1eb`, `74ec9ceb`, `297dc099`, `8ea30221`,
 `47ec6365`, `70336a57`, `ee896e4d`.
 
-**Session-Status 2026-07-13:** F06, F07, das F08-Contract-Gate und das lokale
+**Session-Status 2026-07-14:** F06, F07, das F08-Contract-Gate und das lokale
 LIB2-011-Meilenstein-Gate sind abgeschlossen. Der erste Fullsuite-Anlauf hat die
 Python-3.14-Async-Bridge-Blockade gefunden; sie ist mit `74ec9ceb` behoben und
 mit 70 gezielten Tests verifiziert. Der anschließende diagnostische Lauf hat
@@ -1182,8 +1188,15 @@ fand bei 94 Prozent den letzten bekannten yt-dlp-Executor-Shutdown;
 weiterer Lauf isolierte den gleichen Wakeup im Usenet-Adapter-Testloop;
 `ee896e4d` ist mit 46 grünen SABnzbd-/NZBGet-Tests verifiziert. Der finale
 Fullsuite-Lauf ist grün (8081 passed, 2 deselected; 291.13s).
-**Logischer nächster Schritt:** echte SAB/NZBGet-, gemountete Path-Mapping- und
-Docker-Restart-Acceptance als obersten offenen Phase-5-Punkt durchführen.
+Die erste echte Deployment-Acceptance-Slice ist ebenfalls abgeschlossen:
+SABnzbd 5.0.4 und NZBGet 26.2 wurden in isolierten Containern über die
+produktiven Adapter verbunden, mit einem synthetischen NZB beschickt,
+beobachtet und bereinigt. Der dabei gefundene SAB-Category-Fallback auf `*`
+ist durch einen fail-closed Settings-Check behoben (`96c323a2`).
+**Logischer nächster Schritt:** dieselben echten Clients mit dem zentralen
+Acquisition-Monitor gegen eine persistente Test-DB koppeln, den
+`submission_unknown`-Job nach Container-Restart adoptieren und anschließend
+das gemountete Path-Mapping bis zum Bundle-Inventory verifizieren.
 
 ### 5.6 Verifikation (pro Phase, End-to-End in Docker)
 
@@ -1449,6 +1462,10 @@ P2-05 und eine Reihe P2-UX/Robustheits-Findings).
    Path-Mapping- und Docker-Restart-Tests durchführen. Client-Monitor,
    Category-Adoption, Bundle-Inventory/Matching, `acquisition_imports` und
    Manual Review sind implementiert; die reale Deployment-Abnahme fehlt.
+   **Teilstand 2026-07-14:** echte Client-API-/Submit-/Status-/Remove-Flows
+   sind für SABnzbd 5.0.4 und NZBGet 26.2 grün; SAB-Category-Konfiguration
+   wird nun beim Connection-Test validiert (`96c323a2`). Offen bleiben
+   Restart-Adoption, gemountetes Path-Mapping und completed Bundle-Import.
 3. Bestehende Interactive-/Wishlist-Consumer auf den Acquisition-Contract
    umstellen; erst danach global durchsetzen, dass kein Download ohne
    AcquisitionRequest startet.
