@@ -43,7 +43,7 @@ def _publish_video_event(event_type: str, data: dict) -> None:
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 37   # v37: video_downloads.client_ref (torrent/usenet grab tracking); v36: overlay_apply.plex_poster_key
+SCHEMA_VERSION = 38   # v38: episodes.added_at (episode-aware Recently Added); v37: video_downloads.client_ref; v36: overlay_apply.plex_poster_key
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -196,6 +196,7 @@ _COLUMN_MIGRATIONS = [
     ("shows", "last_air_date", "TEXT"),
     ("episodes", "still_url", "TEXT"),
     ("episodes", "rating", "REAL"),
+    ("episodes", "added_at", "TEXT"),   # server add-date, so a show ranks "recently added" on a new episode
     ("movies", "logo_url", "TEXT"),
     ("shows", "logo_url", "TEXT"),
     ("shows", "episodes_synced", "INTEGER NOT NULL DEFAULT 0"),
@@ -404,6 +405,9 @@ class VideoDatabase:
         # Index on movies.tmdb_collection_id — a migration-added column, so it must be
         # created AFTER _ensure_columns (the schema executescript runs before the ALTERs).
         "CREATE INDEX IF NOT EXISTS idx_movies_collection ON movies(tmdb_collection_id)",
+        # Recently-Added ranks shows by their newest episode's add-date — MAX(added_at)
+        # per show over a 200k-episode table, so index it.
+        "CREATE INDEX IF NOT EXISTS idx_episodes_show_added ON episodes(show_id, added_at)",
     )
 
     @classmethod
@@ -2066,22 +2070,30 @@ class VideoDatabase:
 
     # ── dashboard ─────────────────────────────────────────────────────────────
     def recently_added(self, server_source=None, limit=12) -> list:
-        """Newest owned movies + shows by added_at, for the dashboard's Recently
-        Added row. [{kind, id, title, year, added_at}], newest first."""
+        """Newest movies + shows for the dashboard's Recently Added row. A SHOW ranks by its
+        NEWEST EPISODE's add-date (so a show with a freshly-added episode surfaces — matching
+        Plex's own Recently Added), falling back to the show's own add-date. Movies rank by
+        their add-date. [{kind, id, title, year, added_at}], newest first."""
         limit = max(1, min(50, int(limit)))
-        where = "server_id IS NOT NULL AND server_id <> '' AND added_at IS NOT NULL"
+        m_where = "server_id IS NOT NULL AND server_id <> '' AND added_at IS NOT NULL"
+        s_where = "s.server_id IS NOT NULL AND s.server_id <> ''"
         if server_source:
-            where += " AND server_source = ?"
-        params = ([server_source] if server_source else [])
+            m_where += " AND server_source = ?"
+            s_where += " AND s.server_source = ?"
+        p = ([server_source] if server_source else [])
         conn = self._get_connection()
         try:
             rows = conn.execute(
                 "SELECT kind, id, title, year, added_at FROM ("
-                f"  SELECT 'movie' AS kind, id, title, year, added_at FROM movies WHERE {where}"
+                f"  SELECT 'movie' AS kind, id, title, year, added_at FROM movies WHERE {m_where}"
                 "   UNION ALL "
-                f"  SELECT 'show' AS kind, id, title, year, added_at FROM shows WHERE {where}"
+                "  SELECT 'show' AS kind, s.id AS id, s.title AS title, s.year AS year, "
+                "         COALESCE(MAX(e.added_at), s.added_at) AS added_at "
+                "  FROM shows s LEFT JOIN episodes e ON e.show_id = s.id "
+                f"  WHERE {s_where} GROUP BY s.id "
+                "  HAVING COALESCE(MAX(e.added_at), s.added_at) IS NOT NULL"
                 ") ORDER BY added_at DESC, id DESC LIMIT ?",
-                params + params + [limit]).fetchall()
+                p + p + [limit]).fetchall()
             return [dict(r) for r in rows]
         except sqlite3.Error:
             logger.exception("recently_added query failed")
@@ -2433,18 +2445,22 @@ class VideoDatabase:
                     conn.execute(
                         "INSERT INTO episodes (show_id, season_id, server_source, server_id, "
                         "season_number, episode_number, title, overview, air_date, "
-                        "runtime_minutes, still_url, rating, tvdb_id, has_file) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                        "runtime_minutes, still_url, rating, tvdb_id, has_file, added_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                         "ON CONFLICT(show_id, season_number, episode_number) DO UPDATE SET "
                         "season_id=excluded.season_id, server_source=excluded.server_source, "
                         "server_id=excluded.server_id, title=excluded.title, "
                         "overview=excluded.overview, air_date=excluded.air_date, "
                         "runtime_minutes=excluded.runtime_minutes, still_url=excluded.still_url, "
-                        "rating=excluded.rating, tvdb_id=excluded.tvdb_id, has_file=excluded.has_file",
+                        "rating=excluded.rating, tvdb_id=excluded.tvdb_id, has_file=excluded.has_file, "
+                        # keep the earliest known add-date: don't clobber it with a NULL from a
+                        # source that didn't report one.
+                        "added_at=COALESCE(episodes.added_at, excluded.added_at)",
                         (show_id, season_id, server_source, ep.get("server_id"), snum, enum,
                          ep.get("title"), ep.get("overview"), ep.get("air_date"),
                          ep.get("runtime_minutes"), ep.get("still_url"), ep.get("rating"),
-                         ep.get("tvdb_id"), 1 if (ep.get("files") or ep.get("file")) else 0),
+                         ep.get("tvdb_id"), 1 if (ep.get("files") or ep.get("file")) else 0,
+                         ep.get("added_at")),
                     )
                     ep_id = conn.execute(
                         "SELECT id FROM episodes WHERE show_id=? AND season_number=? AND episode_number=?",
