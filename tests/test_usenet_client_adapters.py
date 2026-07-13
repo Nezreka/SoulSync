@@ -70,6 +70,30 @@ def test_sab_is_configured_requires_url_and_key() -> None:
     assert _sab_with_config('http://x', 'k').is_configured() is True
 
 
+def test_sab_category_exists_uses_authenticated_category_list() -> None:
+    adapter = _sab_with_config()
+    with patch(
+        'core.usenet_clients.sabnzbd.http_requests.get',
+        return_value=_mock_response(200, {
+            'categories': ['*', 'Music', 'SoulSync'],
+        }),
+    ) as mock_get:
+        assert _run(adapter.category_exists('soulsync')) is True
+
+    params = mock_get.call_args.kwargs['params']
+    assert params['mode'] == 'get_cats'
+    assert params['apikey'] == 'k'
+
+
+def test_sab_category_exists_fails_closed_on_invalid_response() -> None:
+    adapter = _sab_with_config()
+    with patch(
+        'core.usenet_clients.sabnzbd.http_requests.get',
+        return_value=_mock_response(200, {'status': True}),
+    ):
+        assert _run(adapter.category_exists('soulsync')) is False
+
+
 def test_sab_state_mapping_covers_queue_states() -> None:
     assert sab_map('Downloading') == 'downloading'
     assert sab_map('Verifying') == 'verifying'
