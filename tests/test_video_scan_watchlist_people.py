@@ -344,3 +344,42 @@ def test_detail_json_is_filled_not_wiped_on_readd(db):
     status, dj = _row(db, 14)
     assert status == "wanted"
     assert json.loads(dj)["overview"] == "rich"
+
+
+# ── forward-only default + per-person lookback window ─────────────────────────
+def test_person_cutoff_forward_only_and_lookback():
+    from core.automation.handlers.video_scan_watchlist_people import person_cutoff
+    assert person_cutoff("2026-07-13", 0) == "2026-07-13"       # forward-only: floor at follow date
+    assert person_cutoff("2026-07-13", None) == "2026-07-13"
+    assert person_cutoff("2026-07-13", 2) == "2024-07-13"       # 2yr lookback widens the window
+    assert person_cutoff("2026-07-13", -1) is None              # -1 = everything → no cutoff
+    assert person_cutoff(None, 0) is None                       # no follow date → never hide films
+    assert person_cutoff("2024-02-29", 1) == "2023-02-28"       # leap-day anchor clamps
+
+
+def test_select_gaps_since_skips_old_keeps_upcoming():
+    credits = [_credit(10, "Old", date="2010-01-01"),
+               _credit(11, "Recent", date="2026-01-01"),
+               _credit(12, "Upcoming", date="2099-01-01"),
+               _credit(13, "Undated", date=None)]
+    got = {g["tmdb_id"] for g in select_person_movie_gaps(
+        credits, owned_ids=set(), ignored_ids=set(), today="2026-07-13", since="2025-01-01")}
+    assert got == {11, 12, 13}                                  # only the pre-2025 title is dropped
+
+
+def test_scan_is_forward_only_by_default():
+    people = [{"tmdb_id": 500, "title": "Actor", "date_added": "2026-01-01", "lookback_years": 0}]
+    credits = {500: [_credit(3, "Old Back-Catalog", date="2000-01-01"),   # before follow → skip
+                     _credit(4, "New Since Follow", date="2026-05-01"),   # after follow → wanted
+                     _credit(5, "Upcoming", date="2099-01-01")]}          # upcoming → monitored
+    res, adds, _, _ = _handler(people, credits, today="2026-07-13")
+    assert {a["tmdb_id"] for a in adds} == {4, 5}               # old catalog NOT grabbed by default
+
+
+def test_scan_lookback_widens_the_window():
+    people = [{"tmdb_id": 500, "title": "Actor", "date_added": "2026-01-01", "lookback_years": 3}]
+    credits = {500: [_credit(2, "Ancient", date="2010-01-01"),            # >3yr before follow → skip
+                     _credit(3, "Within Lookback", date="2024-06-01"),    # within 3yr → wanted
+                     _credit(4, "New", date="2026-05-01")]}
+    res, adds, _, _ = _handler(people, credits, today="2026-07-13")
+    assert {a["tmdb_id"] for a in adds} == {3, 4}               # 2024 now included, 2010 still not

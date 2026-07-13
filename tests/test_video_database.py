@@ -1424,3 +1424,23 @@ def test_enrichment_coverage_counts(db):
     assert cov["movies"]["total"] == 2 and cov["movies"]["tmdb_matched"] == 1
     assert cov["movies"]["tmdb_enriched"] == 1
     assert cov["shows"]["total"] == 1 and cov["shows"]["tmdb_matched"] == 1 and cov["shows"]["tvdb_matched"] == 1
+
+
+def test_person_lookback_get_set(db):
+    """Per-person back-catalog window: default 0 (forward-only), clamped, and reflected in
+    list_watchlist so the scan can read it."""
+    db.add_to_watchlist("person", 777, title="Some Actor")
+    s = db.get_person_lookback(777)
+    assert s and s["lookback_years"] == 0 and s["date_added"]          # default forward-only
+    assert db.set_person_lookback(777, 5) is True
+    assert db.get_person_lookback(777)["lookback_years"] == 5
+    assert db.set_person_lookback(777, -1) is True                     # everything
+    assert db.get_person_lookback(777)["lookback_years"] == -1
+    assert db.set_person_lookback(777, 999)                            # clamped to 100
+    assert db.get_person_lookback(777)["lookback_years"] == 100
+    # surfaced on the watchlist row the scan reads
+    row = next(p for p in db.list_watchlist("person") if p["tmdb_id"] == 777)
+    assert row["lookback_years"] == 100
+    # not-followed person → None / False
+    assert db.get_person_lookback(999999) is None
+    assert db.set_person_lookback(999999, 3) is False
