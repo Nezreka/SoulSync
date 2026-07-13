@@ -169,8 +169,79 @@ def notify_pipeline_retry_exhausted(
         conn.close()
 
 
+def _close_retry_journal(
+    context: Mapping[str, Any],
+    *,
+    status: str,
+    connection_factory: Optional[Callable[[], Any]] = None,
+) -> bool:
+    """Terminally close the retry journal for one acquisition track."""
+    import_id = _context_value(context, "_acquisition_import_id")
+    track_id = _context_value(context, "_acquisition_track_id")
+    if not import_id or not track_id:
+        return False
+    if connection_factory is None:
+        from database.music_database import get_database
+        connection_factory = get_database()._get_connection
+
+    conn = connection_factory()
+    try:
+        from core.acquisition.retry_state import close_retry_state
+        closed = close_retry_state(
+            conn,
+            status=status,
+            import_id=str(import_id),
+            track_id=int(track_id),
+        )
+        conn.commit()
+        return bool(closed)
+    except Exception:
+        conn.rollback()
+        logger.exception(
+            "Acquisition retry journal close (%s) failed for %s",
+            status,
+            import_id,
+        )
+        return False
+    finally:
+        conn.close()
+
+
+def notify_quarantine_approved(
+    context: Mapping[str, Any],
+    *,
+    connection_factory: Optional[Callable[[], Any]] = None,
+) -> bool:
+    """End the retry walk when a user approves the quarantined file.
+
+    The approval re-dispatches the shared pipeline itself; after a restart
+    the journal must not resurrect an automatic candidate walk for a track
+    the user already resolved by hand.
+    """
+    return _close_retry_journal(
+        context, status="approved", connection_factory=connection_factory)
+
+
+def notify_task_retry_cancelled(
+    track_info: Any,
+    *,
+    connection_factory: Optional[Callable[[], Any]] = None,
+) -> bool:
+    """End the retry walk when the user cancels the task.
+
+    Cancel must never trigger an automatic restart (docs/library-v2.md §8).
+    Ordinary tasks carry no acquisition markers and are a no-op.
+    """
+    if not isinstance(track_info, Mapping):
+        return False
+    return _close_retry_journal(
+        track_info, status="cancelled", connection_factory=connection_factory)
+
+
 __all__ = [
     "notify_pipeline_import_quarantined",
     "notify_pipeline_import_success",
     "notify_pipeline_retry_exhausted",
+    "notify_quarantine_approved",
+    "notify_task_retry_cancelled",
 ]

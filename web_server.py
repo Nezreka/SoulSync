@@ -8519,6 +8519,13 @@ def approve_quarantine_item(entry_id):
         # for this one restored pass so multi-reason failures do not loop.
         context['_skip_quarantine_check'] = 'all'
         context['_approved_quarantine_trigger'] = trigger
+        # Acquisition tracks: the approve resolves this track by hand, so the
+        # persistent retry walk must not be resumable after a restart.
+        try:
+            from core.acquisition.pipeline_callback import notify_quarantine_approved
+            notify_quarantine_approved(context)
+        except Exception as _acq_journal_exc:
+            logger.debug(f"[Quarantine] acquisition retry journal close skipped: {_acq_journal_exc}")
         # If the caller (download-modal chooser) passed the originating task, run
         # the re-import through the verification WRAPPER with that task_id so the
         # task is marked completed on success — otherwise the modal row stays
@@ -20700,7 +20707,15 @@ def cancel_download_task():
             
             # Immediately mark as cancelled to prevent race conditions
             task['status'] = 'cancelled'
-            
+
+        # Acquisition tracks: cancel ends the persistent retry walk — it must
+        # never auto-restart after a process restart (docs/library-v2.md §8).
+        try:
+            from core.acquisition.pipeline_callback import notify_task_retry_cancelled
+            notify_task_retry_cancelled(task.get('track_info'))
+        except Exception as _acq_journal_exc:
+            logger.debug(f"[Cancel] acquisition retry journal close skipped: {_acq_journal_exc}")
+
         # IMPROVED WORKER SLOT MANAGEMENT: Use batch state validation instead of task status
         batch_id = task.get('batch_id')
         worker_slot_freed = False

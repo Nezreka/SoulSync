@@ -22,6 +22,7 @@ from core.acquisition.grabs import (
 )
 from core.acquisition.history import record_history_event
 from core.acquisition.requests import get_request, transition_request
+from core.acquisition.retry_state import close_retry_state
 
 
 IMPORT_ID_PREFIX = "aim1-"
@@ -550,6 +551,10 @@ def record_pipeline_file_completed(
             download_id=record.download_id,
             payload={"file_count": len(processed), "pipeline": "main"},
         )
+    # The shared pipeline finished this track — its retry walk (if any) is
+    # over, so a restart must not resume it (docs/library-v2.md §8).
+    close_retry_state(
+        conn, status="completed", import_id=record.id, track_id=track_id)
     return _reload_import(conn, import_id)
 
 
@@ -739,6 +744,9 @@ def record_import_failure(
             message=safe_error,
             download_id=record.download_id,
         )
+    # Terminal imports leave no resumable worker state behind — close every
+    # open retry-journal row of this import (docs/library-v2.md §8).
+    close_retry_state(conn, status="failed", import_id=record.id, error=safe_error)
     return _reload_import(conn, import_id)
 
 

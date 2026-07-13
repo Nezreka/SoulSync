@@ -96,6 +96,39 @@ def order_candidates(candidates, *, quality_first=False, targets=None):
     return sorted(candidates, key=key, reverse=True)
 
 
+def _acquisition_task_ref(task):
+    """(import_id, track_id) for acquisition-dispatched tasks, else None."""
+    try:
+        from core.acquisition.retry_state import acquisition_task_ref
+        return acquisition_task_ref(task.get('track_info'))
+    except Exception:
+        return None
+
+
+def _persist_acquisition_used_sources(task_id, used_sources):
+    """Journal an acquisition walk's used_sources before the download starts.
+
+    Only rows the requeue path already opened are touched (no-op before the
+    first quarantine). Failing open is mandatory: the journal must never
+    break or delay an actual download attempt.
+    """
+    try:
+        from core.acquisition.retry_state import update_retry_progress
+        from database.music_database import get_database
+        conn = get_database()._get_connection()
+        try:
+            update_retry_progress(
+                conn, task_id,
+                used_sources=used_sources,
+                last_progress='attempting next candidate',
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as exc:
+        logger.debug("acquisition retry journal update skipped: %s", exc)
+
+
 @dataclass
 class CandidatesDeps:
     """Bundle of cross-cutting deps the candidate-fallback logic needs."""
@@ -139,6 +172,7 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
         # the file; we trust their selection over AcoustID disagreement so
         # repeated manual picks don't loop back into quarantine.
         user_manual_pick = bool(task.get('_user_manual_pick', False))
+        acquisition_walk_ref = _acquisition_task_ref(task)
     
     # Try each candidate until one succeeds (like GUI's fallback logic)
     for candidate_index, candidate in enumerate(candidates):
@@ -170,11 +204,19 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
         
         # CRITICAL: Add source to used_sources IMMEDIATELY to prevent race conditions
         # This must happen BEFORE starting download to prevent multiple retries from picking same source
+        used_sources_snapshot = None
         with tasks_lock:
             if task_id in download_tasks:
                 download_tasks[task_id]['used_sources'].add(source_key)
                 logger.info(f"[Modal Worker] Marked source as used before download attempt: {source_key}")
-            
+                if acquisition_walk_ref:
+                    used_sources_snapshot = set(download_tasks[task_id]['used_sources'])
+        if used_sources_snapshot is not None:
+            # Acquisition walks persist every retry-relevant fact BEFORE
+            # external work starts, so a restart cannot re-pick this source
+            # (docs/library-v2.md §8). Fail-open, outside tasks_lock.
+            _persist_acquisition_used_sources(task_id, used_sources_snapshot)
+
         logger.info(f"[Modal Worker] Trying candidate {candidate_index + 1}/{len(candidates)}: {candidate.filename} (Confidence: {candidate.confidence:.2f})")
         
         try:
