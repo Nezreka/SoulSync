@@ -83,6 +83,33 @@ class SABnzbdAdapter:
         data = self._call_sync('version')
         return bool(data and data.get('version'))
 
+    async def category_exists(self, category: str) -> bool:
+        """Return whether SAB knows the category SoulSync will submit with.
+
+        SAB silently rewrites an unknown category to ``*``.  Normal submits
+        still retain their external job id, but a timed-out submit must be
+        adopted after restart by category and title.  Detecting the mismatch
+        during the settings connection test keeps that recovery boundary
+        reliable without broadening monitor adoption to unrelated jobs.
+        """
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, self._category_exists_sync, category,
+        )
+
+    def _category_exists_sync(self, category: str) -> bool:
+        expected = str(category or "").strip().casefold()
+        if not expected:
+            return False
+        data = self._call_sync('get_cats')
+        categories = data.get('categories') if isinstance(data, dict) else None
+        if not isinstance(categories, list):
+            return False
+        return any(
+            str(value or "").strip().casefold() == expected
+            for value in categories
+        )
+
     def _call_sync(self, mode: str, **extra) -> Optional[dict]:
         if not self.is_configured():
             return None
