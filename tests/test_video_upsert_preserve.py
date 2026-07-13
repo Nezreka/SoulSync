@@ -64,10 +64,10 @@ class _Src:
     def __init__(self, shows):
         self._shows = shows
 
-    def iter_movies(self, incremental=False):
+    def iter_movies(self, incremental=False, since=None):
         return iter([])
 
-    def iter_shows(self, incremental=False):
+    def iter_shows(self, incremental=False, since=None):
         return iter(self._shows)
 
 

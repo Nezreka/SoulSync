@@ -113,8 +113,7 @@ def test_video_dashboard_subpage_present_with_expected_cards():
         _INDEX, r'<section class="video-subpage" data-video-subpage="video-dashboard"', "</section>")
     # The video landing page's own card set (redesigned Jul 2026: recently-added
     # hero, stats, library, upcoming, tools + the two admin studio cards).
-    for card in ("recent", "stats", "library", "upcoming", "tools",
-                 "overlay-studio", "collection-studio"):
+    for card in ("recent", "stats", "library", "upcoming", "tools", "studios"):
         assert f'data-card="{card}"' in block, f"video dashboard missing the '{card}' card"
     # Reuses music's dashboard classes so the look matches.
     assert 'class="dash-grid"' in block
