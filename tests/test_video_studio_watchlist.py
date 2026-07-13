@@ -37,12 +37,14 @@ class _Deps:
 
 # ── pure: select_studio_movie_gaps ────────────────────────────────────────────
 
-def test_status_tagging_released_vs_upcoming():
-    films = [_film(1, "Out", date="2026-06-01"), _film(2, "Soon", date="2027-01-01"),
-             _film(3, "Undated", date=None)]
+def test_status_tagging_and_look_ahead_horizon():
+    films = [_film(1, "Out", date="2026-06-01"),       # released → wanted
+             _film(2, "Soon", date="2027-01-01"),      # within a year → monitored
+             _film(3, "Undated", date=None),           # no date → skipped
+             _film(4, "Way off", date="2029-01-01")]   # >1yr out → skipped
     gaps = {g["tmdb_id"]: g["_status"] for g in
             select_studio_movie_gaps(films, [], [], today=TODAY, since=None)}
-    assert gaps == {1: "wanted", 2: "monitored", 3: "monitored"}
+    assert gaps == {1: "wanted", 2: "monitored"}       # undated + far-future dropped
 
 
 def test_vote_floor_gates_only_settled_obscure_films():

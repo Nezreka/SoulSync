@@ -28,11 +28,33 @@ a pure function in tests (no DB, no TMDB); production lazily binds the real call
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from core.automation.deps import AutomationDeps
 from core.video.discovery_gaps import filmography_gaps
+
+
+# How far ahead we monitor UPCOMING films. A film releasing within a year lands on the
+# wishlist as 'monitored' (it auto-grabs once its digital date hits); anything dated further
+# out — or with no date at all (rumored / TBA) — is skipped so the wishlist stays "soon + now".
+# The scan is idempotent + daily, so a far-off film is simply re-added once it's within a year.
+LOOK_AHEAD_DAYS = 365
+
+
+def within_look_ahead(date_str: Any, today: str, horizon_days: int = LOOK_AHEAD_DAYS) -> bool:
+    """True if an UPCOMING film is close enough to monitor now: it has a real date on/before
+    ``today + horizon_days``. Undated or further-out → False (skipped; a later scan re-adds it
+    once it enters the window). Only meaningful for unreleased films — released ones are always
+    wishlisted regardless."""
+    d = str(date_str or '')[:10]
+    if len(d) != 10:
+        return False                     # undated → too speculative to wishlist yet
+    try:
+        horizon = (date.fromisoformat(str(today)[:10]) + timedelta(days=horizon_days)).isoformat()
+    except (ValueError, TypeError):
+        return True                      # can't compute the window → don't over-filter
+    return d <= horizon
 
 
 # ── pure credit classification ────────────────────────────────────────────────
@@ -126,8 +148,11 @@ def select_person_movie_gaps(credits: List[Dict[str, Any]], owned_ids: Iterable,
         gd = str(g.get('date') or '')[:10]
         if since and len(gd) == 10 and gd < since:
             continue                 # released before the cutoff → old back-catalog, skip
+        released = is_released(g.get('date'), today)
+        if not released and not within_look_ahead(g.get('date'), today):
+            continue                 # upcoming but >1yr out / undated → skip (re-added when it's near)
         g = dict(g)
-        g['_status'] = 'wanted' if is_released(g.get('date'), today) else 'monitored'
+        g['_status'] = 'wanted' if released else 'monitored'
         out.append(g)
     return out
 

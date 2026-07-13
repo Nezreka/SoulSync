@@ -19,6 +19,7 @@ from core.automation.handlers.video_scan_watchlist_people import (
     is_relevant_movie_credit,
     is_self_credit,
     select_person_movie_gaps,
+    within_look_ahead,
 )
 
 
@@ -73,7 +74,7 @@ def test_select_filters_owned_ignored_and_tags_status():
         _credit(1, "Owned", pop=99),                                   # owned → dropped
         _credit(2, "Ignored", pop=98),                                 # ignored → dropped
         _credit(3, "Old Hit", pop=50, date="1990-01-01"),              # released actor → wanted
-        _credit(4, "Future Film", pop=40, date="2099-01-01",           # upcoming director → monitored
+        _credit(4, "Future Film", pop=40, date="2026-11-01",           # upcoming (within a year) → monitored
                 dept="Directing", role="Director"),
         _credit(5, "TV Thing", kind="show", pop=80),                   # show → dropped
         _credit(6, "Doc Self", role="Self", pop=70),                   # self → dropped
@@ -88,6 +89,30 @@ def test_select_ranks_by_popularity():
     credits = [_credit(10, "Low", pop=1), _credit(11, "High", pop=99), _credit(12, "Mid", pop=50)]
     gaps = select_person_movie_gaps(credits, owned_ids=set(), ignored_ids=set(), today="2026-06-25")
     assert [g["tmdb_id"] for g in gaps] == [11, 12, 10]
+
+
+def test_within_look_ahead():
+    today = "2026-06-25"
+    assert within_look_ahead("2026-09-01", today)          # ~2 months out → yes
+    assert within_look_ahead("2027-06-25", today)          # exactly 1 year → yes (boundary)
+    assert not within_look_ahead("2027-06-26", today)      # just over a year → no
+    assert not within_look_ahead("2030-01-01", today)      # way out → no
+    assert not within_look_ahead(None, today)              # undated → no
+    assert not within_look_ahead("", today)
+
+
+def test_select_skips_far_future_and_undated_upcoming():
+    # The clutter fix: only monitor upcoming films releasing within a year; drop the rest.
+    today = "2026-06-25"
+    credits = [
+        _credit(1, "Released", date="2020-01-01"),         # out → wanted
+        _credit(2, "Soon", date="2026-12-01"),             # within a year → monitored
+        _credit(3, "Way Off", date="2028-06-01"),          # >1yr out → skipped
+        _credit(4, "TBA", date=None),                      # undated → skipped
+    ]
+    gaps = {g["tmdb_id"]: g["_status"] for g in
+            select_person_movie_gaps(credits, owned_ids=set(), ignored_ids=set(), today=today)}
+    assert gaps == {1: "wanted", 2: "monitored"}           # far-future + undated dropped
 
 
 # ── rich detail blob ──────────────────────────────────────────────────────────
@@ -168,7 +193,7 @@ def test_first_run_backlogs_released_and_upcoming():
     people = [{"tmdb_id": 500, "title": "Famous Actor"}]
     credits = {500: [
         _credit(3, "Old Hit", pop=50, date="1990-01-01"),                 # released → wanted
-        _credit(4, "Future Film", pop=40, date="2099-01-01"),             # upcoming → monitored
+        _credit(4, "Future Film", pop=40, date="2026-12-01"),             # upcoming (within a year) → monitored
         _credit(1, "Owned Movie", pop=80, date="2000-01-01"),             # owned → skipped
         _credit(7, "A Show", kind="show", pop=90),                        # show → skipped
     ]}
@@ -227,7 +252,7 @@ def test_rerun_promotes_monitored_now_that_it_released():
 
 def test_rerun_leaves_still_upcoming_monitored_alone():
     people = [{"tmdb_id": 1, "title": "P"}]
-    credits = {1: [_credit(10, "Still Coming", date="2099-01-01")]}
+    credits = {1: [_credit(10, "Still Coming", date="2026-12-01")]}   # within horizon, still upcoming
     res, adds, _, _ = _handler(people, credits, wished={10: "monitored"})
     assert adds == [] and res["promoted"] == 0
 
@@ -358,20 +383,19 @@ def test_person_cutoff_forward_only_and_lookback():
 
 
 def test_select_gaps_since_skips_old_keeps_upcoming():
-    credits = [_credit(10, "Old", date="2010-01-01"),
-               _credit(11, "Recent", date="2026-01-01"),
-               _credit(12, "Upcoming", date="2099-01-01"),
-               _credit(13, "Undated", date=None)]
+    credits = [_credit(10, "Old", date="2010-01-01"),           # before since → dropped
+               _credit(11, "Recent", date="2026-01-01"),        # after since, released → kept
+               _credit(12, "Upcoming", date="2026-12-01")]      # after since, within horizon → kept
     got = {g["tmdb_id"] for g in select_person_movie_gaps(
         credits, owned_ids=set(), ignored_ids=set(), today="2026-07-13", since="2025-01-01")}
-    assert got == {11, 12, 13}                                  # only the pre-2025 title is dropped
+    assert got == {11, 12}                                      # the pre-2025 title is dropped by `since`
 
 
 def test_scan_is_forward_only_by_default():
     people = [{"tmdb_id": 500, "title": "Actor", "date_added": "2026-01-01", "lookback_years": 0}]
     credits = {500: [_credit(3, "Old Back-Catalog", date="2000-01-01"),   # before follow → skip
                      _credit(4, "New Since Follow", date="2026-05-01"),   # after follow → wanted
-                     _credit(5, "Upcoming", date="2099-01-01")]}          # upcoming → monitored
+                     _credit(5, "Upcoming", date="2026-12-01")]}          # upcoming (within a year) → monitored
     res, adds, _, _ = _handler(people, credits, today="2026-07-13")
     assert {a["tmdb_id"] for a in adds} == {4, 5}               # old catalog NOT grabbed by default
 
