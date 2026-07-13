@@ -1645,6 +1645,7 @@
                             <div class="vd-facts-section" data-vd-facts-section hidden>
                                 <h2 class="vd-section-h">Details</h2>
                                 <div class="vd-facts" data-vd-facts></div>
+                                <div class="vd-studios" data-vd-studios></div>
                                 <div class="vd-keywords" data-vd-keywords></div>
                             </div>
                             <div class="vd-videos-section" data-vd-videos-section hidden>
@@ -1721,6 +1722,7 @@
                             <div class="vd-facts-section" data-vd-facts-section hidden>
                                 <h2 class="vd-section-h">Details</h2>
                                 <div class="vd-facts" data-vd-facts></div>
+                                <div class="vd-studios" data-vd-studios></div>
                                 <div class="vd-keywords" data-vd-keywords></div>
                             </div>
                             <div class="vd-videos-section" data-vd-videos-section hidden>
@@ -2024,6 +2026,55 @@
                                 </div>
                                 <div class="vsr-grid" data-vp-credits></div>
                                 <div class="vp-credits-empty" data-vp-credits-empty hidden></div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+                <!-- Studio detail (drill-in from a search result or a title's studio chip;
+                     not a nav page). A studio is a *collection of films* — no seasons, no
+                     single hero — so it gets its own layout: logo/about header + a film grid
+                     with owned copies marked. Built by video/video-studio.js, .vst-* CSS. -->
+                <section class="video-subpage" data-video-subpage="video-studio-detail" hidden>
+                    <div class="vst-page" data-video-studio data-has-bg="0">
+                        <div class="vp-ambient" data-vst-ambient aria-hidden="true"></div>
+                        <button class="vd-back" type="button" data-video-detail-back>
+                            <span aria-hidden="true">&larr;</span> <span data-vd-back-label>Back</span>
+                        </button>
+                        <div class="vd-loading" data-vst-loading hidden>
+                            <div class="loading-spinner"></div><div class="loading-text">Loading&hellip;</div>
+                        </div>
+                        <div class="vst-hero">
+                            <div class="vst-logo-frame">
+                                <img class="vst-logo" data-vst-logo alt="" hidden>
+                                <span class="vst-logo-ph" data-vst-logo-ph aria-hidden="true">&#127902;</span>
+                            </div>
+                            <div class="vst-hero-info">
+                                <div class="vst-eyebrow">Studio</div>
+                                <h1 class="vst-name" data-vst-name></h1>
+                                <div class="vst-meta" data-vst-meta></div>
+                                <div class="vst-actions" data-vst-actions></div>
+                            </div>
+                        </div>
+                        <div class="vst-body">
+                            <p class="vst-about" data-vst-about hidden></p>
+                            <div class="vst-films-section">
+                                <div class="vst-films-head">
+                                    <h2 class="vst-films-title">Films <span class="vst-count" data-vst-count></span></h2>
+                                    <div class="vst-films-tools">
+                                        <select class="vp-sort" data-vst-sort aria-label="Sort films">
+                                            <option value="primary_release_date.desc">Newest first</option>
+                                            <option value="primary_release_date.asc">Oldest first</option>
+                                            <option value="popularity.desc">Most popular</option>
+                                            <option value="vote_average.desc">Highest rated</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="vsr-grid" data-vst-films></div>
+                                <div class="vst-films-empty" data-vst-films-empty hidden>No films found.</div>
+                                <div class="vst-sentinel" data-vst-sentinel hidden></div>
+                                <div class="vst-more-spinner" data-vst-more hidden>
+                                    <div class="loading-spinner"></div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -11526,6 +11577,8 @@
     <script src="{{ url_for('static', filename='video/video-calendar.js', v=static_v) }}"></script>
     <!-- Video person page (isolated; cast/crew drill-in → filmography) -->
     <script src="{{ url_for('static', filename='video/video-person.js', v=static_v) }}"></script>
+    <!-- Video studio page (isolated; production-company drill-in → film collection) -->
+    <script src="{{ url_for('static', filename='video/video-studio.js', v=static_v) }}"></script>
     <!-- Video watchlist page (isolated; tabbed shows / people you follow) -->
     <script src="{{ url_for('static', filename='video/video-watchlist.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='video/video-subscriptions.js', v=static_v) }}"></script>

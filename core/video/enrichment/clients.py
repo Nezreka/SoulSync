@@ -345,6 +345,17 @@ class TMDBClient:
         if facts:
             out["facts"] = facts
 
+        # Production studios (id + logo) so the detail page can chip-link each one
+        # to its Studio page. Carries the tmdb company id the stored `studios`
+        # (names only) can't, without touching that field.
+        studios = []
+        for c in (d.get("production_companies") or [])[:8]:
+            if c.get("id") and c.get("name"):
+                studios.append({"tmdb_id": c["id"], "name": c["name"],
+                                "logo": (self.LOGO + c["logo_path"]) if c.get("logo_path") else None})
+        if studios:
+            out["studios"] = studios
+
         # Full cast (for the "view all" expansion) — tv carries episode counts.
         out["cast_full"] = self._full_cast(d, kind)
         if not out["cast_full"]:

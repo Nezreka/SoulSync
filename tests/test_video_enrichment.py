@@ -71,6 +71,8 @@ def test_tmdb_client_with_known_id_skips_the_search(monkeypatch):
     urls = []
 
     class _Resp:
+        status_code = 200
+        def raise_for_status(self): pass
         def json(self):
             return {"overview": "by-id overview", "backdrop_path": "/b.jpg"}
 
@@ -86,6 +88,7 @@ def test_tmdb_client_with_known_id_skips_the_search(monkeypatch):
 def test_tmdb_pulls_full_metadata(monkeypatch):
     # Everything TMDB offers comes from the one detail call.
     class _Resp:
+        status_code = 200
         def __init__(self, b): self._b = b
         def raise_for_status(self): pass
         def json(self): return self._b
@@ -608,6 +611,7 @@ def test_get_stats_excludes_episode_coverage_from_pending(db):
 
 def test_tmdb_extras_parse(monkeypatch):
     class _Resp:
+        status_code = 200
         def __init__(self, b): self._b = b
         def raise_for_status(self): pass
         def json(self): return self._b
@@ -663,6 +667,8 @@ def test_tmdb_extras_gallery_videos_keywords_facts(monkeypatch):
             {"site": "YouTube", "type": "Featurette", "key": "f1", "name": "Making of"},
             {"site": "YouTube", "type": "Trailer", "key": "t1", "name": "Trailer"}]},
         "keywords": {"keywords": [{"name": "hacker"}, {"name": "dystopia"}]},
+        "production_companies": [{"id": 79, "name": "Village Roadshow", "logo_path": "/vr.png"},
+                                 {"name": "No Id Co"}],
         "credits": {"cast": [{"id": 1, "name": "Keanu", "character": "Neo", "profile_path": "/k.jpg"}]}}
     monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(get=lambda u, **k: _Resp(detail)))
     ex = TMDBClient("KEY").extras("movie", 603)
@@ -672,6 +678,9 @@ def test_tmdb_extras_gallery_videos_keywords_facts(monkeypatch):
     assert [v["type"] for v in ex["videos"]] == ["Trailer", "Featurette"]   # trailer ordered first
     assert ex["keywords"] == ["hacker", "dystopia"]
     assert ex["cast_full"][0]["character"] == "Neo"
+    # studios carry the tmdb id + logo for chip-linking; id-less companies dropped
+    assert ex["studios"] == [{"tmdb_id": 79, "name": "Village Roadshow",
+                              "logo": "https://image.tmdb.org/t/p/w500/vr.png"}]
 
 
 def test_tmdb_extras_featured_review(monkeypatch):
@@ -793,6 +802,7 @@ def test_tmdb_episode_detail_parses_guests(monkeypatch):
 
 def test_tmdb_season_episodes_parses(monkeypatch):
     class _Resp:
+        status_code = 200
         def __init__(self, b): self._b = b
         def raise_for_status(self): pass
         def json(self): return self._b
@@ -808,6 +818,7 @@ def test_tmdb_season_episodes_parses(monkeypatch):
 
 def test_tmdb_parses_cast_and_crew(monkeypatch):
     class _Resp:
+        status_code = 200
         def __init__(self, b): self._b = b
         def raise_for_status(self): pass
         def json(self): return self._b
@@ -828,6 +839,7 @@ def test_tmdb_parses_cast_and_crew(monkeypatch):
 
 def test_tmdb_picks_english_clearlogo(monkeypatch):
     class _Resp:
+        status_code = 200
         def __init__(self, b): self._b = b
         def raise_for_status(self): pass
         def json(self): return self._b
@@ -841,6 +853,7 @@ def test_tmdb_picks_english_clearlogo(monkeypatch):
 
 def test_tmdb_show_returns_season_posters(monkeypatch):
     class _Resp:
+        status_code = 200
         def __init__(self, b): self._b = b
         def raise_for_status(self): pass
         def json(self): return self._b
