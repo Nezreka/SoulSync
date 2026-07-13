@@ -49,6 +49,7 @@ from core.library2.editions import (
     LIB2_RELEASE_EDITIONS_DDL,
     LIB2_RELEASE_TRACKS_DDL,
 )
+from core.quality.schema import ensure_quality_profiles_schema
 from core.usenet_clients.nzbget import NZBGetAdapter
 from core.usenet_clients.sabnzbd import SABnzbdAdapter
 from utils.async_helpers import run_async
@@ -131,6 +132,26 @@ def _mapping_roots() -> tuple[str, Path]:
     return remote, local
 
 
+def _remove_stale_acceptance_jobs(adapter) -> None:
+    """Keep reruns deterministic after an interrupted verify phase.
+
+    Byte submissions use the adapters' fixed ``soulsync.nzb`` upload name.
+    The deployment contract is restricted to an isolated client/category, so
+    only that exact marker is eligible for cleanup; unrelated jobs are never
+    touched.
+    """
+    for status in run_async(adapter.get_all()):
+        name = str(status.name or "").strip().casefold()
+        category = str(status.category or "").strip().casefold()
+        if name.removesuffix(".nzb") != "soulsync":
+            continue
+        if category != _category().casefold():
+            continue
+        assert run_async(
+            adapter.remove(str(status.id), delete_files=True),
+        ) is True
+
+
 def _write_review_fixture(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(
@@ -142,9 +163,9 @@ def _write_review_fixture(path: Path) -> None:
             "-f",
             "lavfi",
             "-i",
-            "anullsrc=r=44100:cl=mono",
+            "sine=frequency=440:sample_rate=44100",
             "-t",
-            "0.2",
+            "1.0",
             str(path),
         ],
         check=True,
@@ -160,10 +181,27 @@ def _write_review_fixture(path: Path) -> None:
 
 def _seed_expected_edition(conn: sqlite3.Connection) -> None:
     conn.execute(
-        "CREATE TABLE IF NOT EXISTS lib2_albums(id INTEGER PRIMARY KEY)",
+        "CREATE TABLE IF NOT EXISTS lib2_artists("
+        "id INTEGER PRIMARY KEY, name TEXT NOT NULL)",
     )
     conn.execute(
-        "CREATE TABLE IF NOT EXISTS lib2_tracks(id INTEGER PRIMARY KEY)",
+        """CREATE TABLE IF NOT EXISTS lib2_albums(
+               id INTEGER PRIMARY KEY,
+               primary_artist_id INTEGER NOT NULL,
+               title TEXT NOT NULL,
+               album_type TEXT,
+               release_date TEXT,
+               spotify_id TEXT)""",
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS lib2_tracks(
+               id INTEGER PRIMARY KEY,
+               album_id INTEGER NOT NULL,
+               title TEXT NOT NULL,
+               track_number INTEGER,
+               disc_number INTEGER,
+               duration INTEGER,
+               spotify_id TEXT)""",
     )
     for ddl in (
         LIB2_RELEASE_EDITIONS_DDL,
@@ -171,15 +209,28 @@ def _seed_expected_edition(conn: sqlite3.Connection) -> None:
         LIB2_RELEASE_TRACKS_DDL,
     ):
         conn.execute(ddl)
-    conn.execute("INSERT OR IGNORE INTO lib2_albums(id) VALUES(10)")
-    conn.execute("INSERT OR IGNORE INTO lib2_tracks(id) VALUES(101)")
+    ensure_quality_profiles_schema(conn)
+    conn.execute(
+        "INSERT OR IGNORE INTO lib2_artists(id, name) "
+        "VALUES(301, 'Acceptance Artist')",
+    )
+    conn.execute(
+        """INSERT OR IGNORE INTO lib2_albums(
+               id, primary_artist_id, title, album_type, release_date)
+           VALUES(10, 301, 'Acceptance Album', 'album', '2026')""",
+    )
+    conn.execute(
+        """INSERT OR IGNORE INTO lib2_tracks(
+               id, album_id, title, track_number, disc_number, duration)
+           VALUES(101, 10, 'Expected Song', 1, 1, 1000)""",
+    )
     conn.execute(
         "INSERT OR IGNORE INTO lib2_release_editions(id, release_group_id, is_default) "
         "VALUES(10, 10, 1)",
     )
     conn.execute(
         "INSERT OR IGNORE INTO lib2_recordings(id, title, duration) "
-        "VALUES(100, 'Expected Song', 180000)",
+        "VALUES(100, 'Expected Song', 1000)",
     )
     conn.execute(
         """INSERT OR IGNORE INTO lib2_release_tracks(
@@ -197,6 +248,7 @@ def test_prepare_submission_unknown_before_container_restart() -> None:
     assert run_async(adapter.check_connection()) is True
     if isinstance(adapter, SABnzbdAdapter):
         assert run_async(adapter.category_exists(_category())) is True
+    _remove_stale_acceptance_jobs(adapter)
 
     job_id = run_async(adapter.add_nzb(_NZB, category=_category()))
     assert job_id
@@ -313,6 +365,7 @@ def test_verify_restart_adoption_and_mounted_path_mapping() -> None:
             "from": remote_root,
             "to": str(local_root),
         }],
+        "soulseek.transfer_path": str(local_root / "phase5-transfer"),
     }
     config_get = lambda key, default=None: config.get(key, default)
     mapping_health = inspect_mapping_configuration(config_get)
@@ -389,6 +442,21 @@ def test_verify_restart_adoption_and_mounted_path_mapping() -> None:
         assert resolved.status == "importing"
         assert resolved.matches[0]["strategy"] == "manual"
         conn.commit()
+    finally:
+        conn.close()
+
+    completed_result = advance_open_imports(
+        _connect,
+        config_get=config_get,
+    )
+    assert completed_result.outcomes[pending_import.id] == "completed"
+    conn = _connect()
+    try:
+        completed = get_import(conn, pending_import.id)
+        assert completed is not None
+        assert completed.status == "completed"
+        assert completed.result["processed"][0]["track_id"] == 101
+        assert completed.result["processed"][0]["final_path"]
     finally:
         conn.close()
 
