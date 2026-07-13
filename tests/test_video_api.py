@@ -69,6 +69,26 @@ def test_settings_endpoints_are_admin_only(tmp_path):
         assert r.status_code == 403, "%s %s must be admin-only" % (method.upper(), url)
 
 
+def test_library_management_is_admin_only(tmp_path):
+    """Parity with music's @admin_only library edits (delete/sync/clear-match/batch): mutating
+    library metadata / artwork / monitoring / the download blocklist is admin-only."""
+    c = _client_as(tmp_path, is_admin=False)
+    gated = [
+        ("post", "/api/video/bulk/start"),
+        ("post", "/api/video/monitor"),
+        ("post", "/api/video/poster/set"),
+        ("post", "/api/video/downloads/blocklist"),
+        ("put", "/api/video/detail/movie/5/metadata"),
+        ("post", "/api/video/detail/movie/5/lock"),
+        ("post", "/api/video/detail/movie/5/refresh-art"),
+    ]
+    for method, url in gated:
+        r = getattr(c, method)(url, json={})
+        assert r.status_code == 403, "%s %s must be admin-only" % (method.upper(), url)
+    # ...but READING an item's detail stays open (it's a content view, not a mutation).
+    assert c.get("/api/video/detail/movie/5").status_code != 403
+
+
 def test_content_reads_stay_open_for_non_admins(tmp_path):
     """The config GETs a non-admin's download modal / content views legitimately need
     (library paths, quality tiers, server presence, UI prefs) must NOT be gated."""

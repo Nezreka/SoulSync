@@ -78,6 +78,12 @@ def create_video_blueprint() -> Blueprint:
                                  "/api/video/downloads/quality",
                                  "/api/video/downloads/youtube-quality",
                                  "/api/video/enrichment")   # all enrichment mutations
+            # Library / metadata MANAGEMENT — parity with music's @admin_only library edits
+            # (delete/sync/clear-match/delete-batch) + the download blocklist config. Content
+            # views only READ metadata (the detail GET stays open); these MUTATE the library.
+            admin = admin or _p("/api/video/bulk", "/api/video/monitor",
+                                 "/api/video/poster/set", "/api/video/downloads/blocklist") \
+                or path.endswith(("/metadata", "/lock", "/refresh-art"))
         if admin and not is_admin:
             return jsonify({"error": "Admin only."}), 403
 
