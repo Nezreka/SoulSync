@@ -148,42 +148,45 @@
     // is covered right on each Studio card so it's clear enrichment comes first.
     // Purely visual + additive: it renders into [data-video-studio-coverage] and
     // touches nothing else.
-    function _covRow(label, done, total) {
-        done = done || 0; total = total || 0;
-        var pct = total ? Math.round(done / total * 100) : 0;
-        var col = pct >= 90 ? '#6cd391' : (pct >= 60 ? '#f5c518' : '#f0883e');
-        return '<div style="display:flex;align-items:center;gap:10px;">' +
-            '<span style="flex:0 0 96px;font-size:11px;font-weight:700;color:rgba(255,255,255,.6);">' + _esc(label) + '</span>' +
-            '<span style="flex:1;height:7px;border-radius:4px;background:rgba(255,255,255,.08);overflow:hidden;">' +
-                '<span style="display:block;height:100%;width:' + pct + '%;background:' + col + ';border-radius:4px;"></span></span>' +
-            '<span style="flex:0 0 auto;min-width:34px;text-align:right;font-size:11px;font-weight:800;color:' + col + ';">' + pct + '%</span>' +
+    // One compact fill-ring (music-artist style): % in the middle, source colour, animated
+    // fill + a subtle coverage-scaled glow. Small — this is a top-corner status, not a hero.
+    var _COV_R = 20, _COV_CIRC = 2 * Math.PI * _COV_R;   // svg geometry (viewBox 0 0 46 46 → r20 @ 23,23)
+    function _covRing(provider, kind, done, total, color, idx) {
+        var pct = total ? Math.round((done || 0) / total * 100) : 0;
+        var off = _COV_CIRC - (_COV_CIRC * pct / 100);
+        var glow = pct >= 90 ? 4 : (pct >= 70 ? 2 : 0);
+        var delay = (idx * 0.09).toFixed(2) + 's';
+        return '<div class="vcov-item" title="' + _esc(provider + ' ' + kind) + ' — ' + pct +
+                '% have artwork &amp; ratings this studio uses">' +
+            '<div class="vcov-ring" style="filter:drop-shadow(0 0 ' + glow + 'px ' + color + ');">' +
+                '<svg viewBox="0 0 46 46">' +
+                    '<circle class="vcov-bg" cx="23" cy="23" r="' + _COV_R + '"/>' +
+                    '<circle class="vcov-fill" cx="23" cy="23" r="' + _COV_R + '" stroke="' + color + '" ' +
+                        'stroke-dasharray="' + _COV_CIRC.toFixed(1) + '" ' +
+                        'style="--c:' + _COV_CIRC.toFixed(1) + ';--o:' + off.toFixed(1) + ';--d:' + delay + ';stroke-dashoffset:' + off.toFixed(1) + ';"/>' +
+                '</svg>' +
+                '<span class="vcov-pct" style="--d:' + delay + ';">' + pct + '</span>' +
+            '</div>' +
+            '<span class="vcov-label"><b>' + _esc(provider) + '</b><span>' + _esc(kind) + '</span></span>' +
         '</div>';
     }
     function _studioCoverageHTML(d) {
         var m = (d && d.movies) || {}, s = (d && d.shows) || {};
         var mt = m.total || 0, st = s.total || 0;
-        var wrap = 'display:flex;flex-direction:column;gap:9px;padding:12px 14px;border-radius:12px;' +
-            'background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);';
-        if (!mt && !st) {
-            return '<div style="' + wrap + '"><div style="font-size:12px;line-height:1.55;color:rgba(255,255,255,.6);">' +
-                'Scan your library first — this studio reads your enriched <b>TMDB / TVDB</b> metadata ' +
-                '(posters, ratings, artwork).</div></div>';
-        }
-        var rows = '', pcts = [];
-        function push(label, done, total) {
-            if (total) { rows += _covRow(label, done, total); pcts.push(Math.round((done || 0) / total * 100)); }
-        }
-        push('Movies · TMDB', m.tmdb_enriched, mt);
-        push('Shows · TMDB', s.tmdb_enriched, st);
-        push('Shows · TVDB', s.tvdb_matched, st);
-        var lo = pcts.length ? Math.min.apply(null, pcts) : 0;
-        var note = lo >= 90
-            ? '<div style="font-size:11.5px;line-height:1.5;color:rgba(108,211,145,.85);">✓ Well enriched — this studio has the metadata it needs.</div>'
-            : '<div style="font-size:11.5px;line-height:1.5;color:rgba(245,197,24,.9);">⚠ This studio pulls posters, ratings &amp; artwork from enriched metadata. ' +
-              'Run the enrichment workers (Settings → Enrichment) to raise coverage before relying on it.</div>';
-        return '<div style="' + wrap + '">' +
-            '<span style="font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:rgba(255,255,255,.5);">Enrichment coverage</span>' +
-            rows + note + '</div>';
+        if (!mt && !st) return '';           // no library → nothing to show (no clutter)
+        // Plain-language framing: these studios draw posters/ratings/logos from enriched
+        // metadata, so the rings say how "ready" the library is — hence the title + tooltip.
+        var tip = 'Overlays &amp; collections pull posters, ratings and logos from your TMDB/TVDB ' +
+            'metadata. These show how much of your library has that data — fuller rings mean ' +
+            'richer, more complete results.';
+        var rings = [], i = 0;
+        if (mt) rings.push(_covRing('TMDB', 'Movies', m.tmdb_enriched, mt, '#01b4e4', i++));
+        if (st) rings.push(_covRing('TMDB', 'Shows', s.tmdb_enriched, st, '#5bd0a0', i++));
+        if (st) rings.push(_covRing('TVDB', 'Shows', s.tvdb_matched, st, '#e0a458', i++));
+        return '<div class="vcov">' +
+            '<div class="vcov-title">Metadata ready ' +
+                '<span class="vcov-info" title="' + tip + '" aria-label="What is this?">?</span></div>' +
+            '<div class="vcov-grid">' + rings.join('') + '</div></div>';
     }
     function loadStudioCoverage() {
         var hosts = document.querySelectorAll('[data-video-studio-coverage]');
