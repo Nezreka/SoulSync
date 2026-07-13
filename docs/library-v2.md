@@ -1080,6 +1080,13 @@ Schwester-Clients Executor-I/O starten. Commit `297dc099` macht die bereits
 durch `reset_state` isolierte Test-App sessionweit und mockt in diesen
 Contract-Tests alle Aggregat-Plugins. 61 Socket.IO-/SoundCloud-Tests liefen
 danach grün; die Produktionspfade wurden in diesem zweiten Fix nicht geändert.
+Der nächste Lauf überschritt diese Stelle und diagnostizierte bei 76 Prozent
+denselben Python-3.14-Selector-Wakeup-Effekt im lokalen Event-Loop von
+`tests/test_prowlarr_client.py`: ein fertiger Executor-Job weckte den Loop
+nicht zuverlässig. Commit `8ea30221` lässt den Test-Runner mit kurzen
+Async-Ticks bis zur Task-Completion weiterlaufen und schließt den Loop danach;
+alle 13 Prowlarr-Tests liefen in 0,17 Sekunden grün. Auch dieser Fix ändert
+keinen Produktionspfad.
 
 Diese Findings ersetzen jede frühere Annahme, dass die neue Decision Engine
 und der Bundle-Importer als unabhängige Implementierungen akzeptabel waren.
@@ -1136,17 +1143,19 @@ auf dem aktuellen gespaltenen Verhalten.
 
 Correction-Commits: `e1272be`, `e6484cb`, `2917f3c`, `99ffd2c`, `7d80e96`,
 `e394e2d`, `39549f0`, `e27070f`, `3eb0e92`, `a7344e5`, `6bc4d01`, `b464543`,
-`903cbd3`, `6ea7f3e2`, `d921c1eb`, `74ec9ceb`, `297dc099`.
+`903cbd3`, `6ea7f3e2`, `d921c1eb`, `74ec9ceb`, `297dc099`, `8ea30221`.
 
 **Session-Status 2026-07-13:** F06, F07 und das F08-Contract-Gate sind
 implementiert und gezielt getestet. Der erste Fullsuite-Anlauf hat die
 Python-3.14-Async-Bridge-Blockade gefunden; sie ist mit `74ec9ceb` behoben und
 mit 70 gezielten Tests verifiziert. Der anschließende diagnostische Lauf hat
 die Harness-Thread-/Client-Leaks gefunden; `297dc099` behebt sie und ist mit
-61 gezielten Tests verifiziert. **Logischer nächster Schritt:** den Fullsuite-
-Lauf jetzt erneut als LIB2-011-Meilenstein-Abschluss ausführen; danach sind
-echte SAB/NZBGet-, Path-Mapping- und Docker-Restart-Acceptance der oberste
-offene Phase-5-Punkt.
+61 gezielten Tests verifiziert. Der folgende Lauf überschritt die alte
+Blockade und fand den isolierten Prowlarr-Testloop-Wakeup; `8ea30221` behebt
+ihn mit 13 grünen Prowlarr-Tests. **Logischer nächster Schritt:** den
+Fullsuite-Lauf jetzt erneut als LIB2-011-Meilenstein-Abschluss ausführen;
+danach sind echte SAB/NZBGet-, Path-Mapping- und Docker-Restart-Acceptance der
+oberste offene Phase-5-Punkt.
 
 ### 5.6 Verifikation (pro Phase, End-to-End in Docker)
 
