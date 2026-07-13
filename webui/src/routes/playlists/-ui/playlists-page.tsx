@@ -7,6 +7,7 @@ import type { PersonalizedPlaylist, PlaylistKind, PlaylistTrack } from '../-play
 
 import {
   activatePlaylist,
+  deletePlaylist,
   invalidatePlaylistsQueries,
   kindsQueryOptions,
   playlistDetailQueryOptions,
@@ -214,6 +215,16 @@ function PlaylistCard({
     },
   });
 
+  const deactivateMutation = useMutation({
+    mutationFn: () => deletePlaylist(playlist.kind, playlist.variant),
+    onSuccess: () => {
+      void invalidatePlaylistsQueries(queryClient);
+    },
+    onError: (err: Error) => {
+      console.error('Failed to deactivate playlist:', err);
+    },
+  });
+
   const updateNameMutation = useMutation({
     mutationFn: async (newName: string) => {
       return updatePlaylistConfig(playlist.kind, playlist.variant, {
@@ -228,17 +239,6 @@ function PlaylistCard({
       console.error('Failed to rename playlist:', err);
       setEditingName(false);
       setNameValue(playlist.name);
-    },
-  });
-
-  const autoRefreshMutation = useMutation({
-    mutationFn: (autoRefresh: boolean) =>
-      toggleAutoRefresh(playlist.kind, playlist.variant, autoRefresh),
-    onSuccess: () => {
-      void invalidatePlaylistsQueries(queryClient);
-    },
-    onError: (err: Error) => {
-      console.error('Failed to toggle auto-refresh:', err);
     },
   });
 
@@ -344,22 +344,30 @@ function PlaylistCard({
           )}
         </div>
         <div className={styles.cardActions}>
-          <div className={styles.toggleRow}>
-            <span className={styles.toggleLabel}>Auto-refresh</span>
-            <label className={styles.toggle}>
-              <input
-                type="checkbox"
-                checked={playlist.auto_refresh}
-                onChange={(e) => {
-                  e.stopPropagation();
-                  autoRefreshMutation.mutate(e.target.checked);
-                }}
-                onClick={(e) => e.stopPropagation()}
-                aria-label={`Toggle auto-refresh for ${playlist.name}`}
-              />
-              <span className={styles.toggleSlider} />
-            </label>
-          </div>
+          <button
+            className={`${styles.btn} ${styles.btnDanger}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (window.confirm(`Deactivate "${playlist.name}"? This will remove the playlist.`)) {
+                deactivateMutation.mutate();
+              }
+            }}
+            disabled={deactivateMutation.isPending}
+            aria-label={`Deactivate ${playlist.name}`}
+          >
+            {deactivateMutation.isPending ? 'Deactivating...' : 'Deactivate'}
+          </button>
+          <button
+            className={styles.btn}
+            onClick={(e) => {
+              e.stopPropagation();
+              refreshMutation.mutate();
+            }}
+            disabled={refreshMutation.isPending}
+            aria-label={`Refresh ${playlist.name}`}
+          >
+            {refreshMutation.isPending ? 'Refreshing...' : 'Refresh'}
+          </button>
           {playlist.auto_refresh && (
             <select
               className={styles.intervalSelect}
@@ -378,17 +386,6 @@ function PlaylistCard({
               ))}
             </select>
           )}
-          <button
-            className={styles.btn}
-            onClick={(e) => {
-              e.stopPropagation();
-              refreshMutation.mutate();
-            }}
-            disabled={refreshMutation.isPending}
-            aria-label={`Refresh ${playlist.name}`}
-          >
-            {refreshMutation.isPending ? 'Refreshing...' : 'Refresh'}
-          </button>
         </div>
       </div>
 

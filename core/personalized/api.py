@@ -213,6 +213,19 @@ def toggle_auto_refresh(
     }
 
 
+def delete_playlist(
+    manager: PersonalizedPlaylistManager,
+    kind: str,
+    variant: str,
+    profile_id: int,
+) -> Dict[str, Any]:
+    """Delete a playlist and all its tracks."""
+    deleted = manager.delete_playlist(kind, variant, profile_id)
+    if not deleted:
+        return {'success': False, 'error': 'Playlist not found'}
+    return {'success': True}
+
+
 __all__ = [
     'list_kinds',
     'list_playlists',
@@ -221,4 +234,5 @@ __all__ = [
     'update_config',
     'activate_playlist',
     'toggle_auto_refresh',
+    'delete_playlist',
 ]

@@ -192,66 +192,6 @@
   flex-shrink: 0;
 }
 
-.toggleRow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.toggleLabel {
-  font-size: 0.75rem;
-  color: rgba(255, 255, 255, 0.5);
-  white-space: nowrap;
-}
-
-.toggle {
-  position: relative;
-  display: inline-block;
-  width: 36px;
-  height: 20px;
-  flex-shrink: 0;
-}
-
-.toggle input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-
-.toggle input:focus-visible + .toggleSlider {
-  outline: 2px solid rgba(139, 92, 246, 0.7);
-  outline-offset: 2px;
-}
-
-.toggleSlider {
-  position: absolute;
-  inset: 0;
-  background: rgba(255, 255, 255, 0.15);
-  border-radius: 20px;
-  transition: background 0.2s;
-  cursor: pointer;
-}
-
-.toggleSlider::before {
-  content: '';
-  position: absolute;
-  width: 16px;
-  height: 16px;
-  left: 2px;
-  bottom: 2px;
-  background: #fff;
-  border-radius: 50%;
-  transition: transform 0.2s;
-}
-
-.toggle input:checked + .toggleSlider {
-  background: rgba(34, 197, 94, 0.7);
-}
-
-.toggle input:checked + .toggleSlider::before {
-  transform: translateX(16px);
-}
-
 .intervalSelect {
   font-size: 0.75rem;
   padding: 4px 8px;
@@ -307,6 +247,16 @@
 
 .btnPrimary:hover {
   background: rgba(139, 92, 246, 0.35);
+}
+
+.btnDanger {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: rgba(252, 165, 165, 0.95);
+}
+
+.btnDanger:hover {
+  background: rgba(239, 68, 68, 0.25);
 }
 
 .cardBody {

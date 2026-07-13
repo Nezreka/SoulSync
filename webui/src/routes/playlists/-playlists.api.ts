@@ -79,6 +79,16 @@ export async function toggleAutoRefresh(
   return await readJson<ConfigUpdateResponse>(apiClient.put(path, { json: body }));
 }
 
+export async function deletePlaylist(
+  kind: string,
+  variant: string = '',
+): Promise<{ success: boolean }> {
+  const path = variant
+    ? `personalized/playlist/${encodeURIComponent(kind)}/${encodeURIComponent(variant)}`
+    : `personalized/playlist/${encodeURIComponent(kind)}`;
+  return await readJson<{ success: boolean }>(apiClient.delete(path));
+}
+
 export function kindsQueryOptions() {
   return queryOptions({
     queryKey: [...PLAYLISTS_QUERY_KEY, 'kinds'],
