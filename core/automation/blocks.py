@@ -332,11 +332,11 @@ ACTIONS: list[dict] = [
     {"type": "video_refresh_airing_schedules", "label": "Refresh Airing TV Schedules", "icon": "calendar", "scope": "video",
      "description": "Re-pull the latest TMDB episode schedules (air dates, stills) for the still-airing shows on your watchlist, so the calendar the airing automation reads is current — newly-announced or rescheduled episodes get picked up instead of being missed. Skips ended/canceled shows. Pair with a daily Schedule a couple hours before the airing run.", "available": True},
     {"type": "video_reenrich_stale", "label": "Refresh Stale Metadata", "icon": "refresh", "scope": "video",
-     "description": "Rolling freshness pass: re-pulls the stalest matched movies & shows (oldest first, up to a per-run cap) by their stored TMDB id — so ratings, newly-written overviews, late-arriving art and episode air-dates roll in over time. Refreshing a show cascades its episodes too. Skips anything already fresh (movies within 30 days, shows within 14 by default — TV drifts faster). Gap-fills static fields, overwrites the dynamic ratings, never clobbers your owned data. Pair with a 6-hourly Schedule.", "available": True,
+     "description": "Rolling freshness pass: re-pulls the stalest matched movies & shows (oldest first, up to a per-run cap) by their stored TMDB id — so ratings, newly-written overviews, late-arriving art and episode air-dates roll in over time. Refreshing a show cascades its episodes too. Skips anything refreshed within the last month by default (metadata drifts slowly). Gap-fills static fields, overwrites the dynamic ratings, never clobbers your owned data. Pair with a 6-hourly Schedule.", "available": True,
      "config_fields": [
          {"key": "batch_size", "type": "number", "label": "Items per run", "default": 500},
          {"key": "movie_stale_days", "type": "number", "label": "Skip movies refreshed within (days)", "default": 30},
-         {"key": "show_stale_days", "type": "number", "label": "Skip shows refreshed within (days)", "default": 14}
+         {"key": "show_stale_days", "type": "number", "label": "Skip shows refreshed within (days)", "default": 30}
      ]},
     {"type": "video_clean_youtube_episodes", "label": "Clean Old YouTube Episodes", "icon": "trash", "scope": "video",
      "description": "Delete downloaded YouTube channel episodes that fall outside each channel's keep window (set per channel via its cog → Keep: e.g. last 30 episodes / last 3–6 months). Removes the video + its sidecars but keeps the history record so it's never re-downloaded. No-op for channels left on 'keep everything' (the default). Playlists are excluded. Pair with a daily Schedule.", "available": True},

@@ -73,7 +73,7 @@ def test_defaults_when_config_absent_or_junk():
     auto_video_reenrich_stale(
         {"_automation_id": "a", "batch_size": "oops", "movie_stale_days": None},
         _Deps(), fetch_stale=fetch)
-    assert captured == {"limit": 500, "movie_days": 30, "show_days": 14}
+    assert captured == {"limit": 500, "movie_days": 30, "show_days": 30}
 
 
 def test_nothing_stale_is_a_clean_noop():

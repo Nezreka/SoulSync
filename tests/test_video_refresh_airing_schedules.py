@@ -150,6 +150,15 @@ def test_omdb_limit_latches_off_and_stops_hammering():
     eng._backfill_ratings("show", 2)               # now short-circuits before calling OMDb
     assert rc.n == 1                               # only the first attempt ever reached OMDb
 
+    # …and the latch self-heals: once the retry window elapses it re-probes OMDb (its daily
+    # quota resets), so a long-running server recovers ratings without needing a restart.
+    import core.video.enrichment.engine as eng_mod
+    assert eng._omdb_blocked_now() is True                     # still blocked (just tripped)
+    eng._omdb_blocked_at -= eng_mod._OMDB_RETRY_SECONDS + 1    # pretend the window passed
+    assert eng._omdb_blocked_now() is False                    # cleared → ready to retry
+    eng._backfill_ratings("show", 3)                           # re-probes OMDb (trips again)
+    assert rc.n == 2                                            # the second real attempt got through
+
 
 def test_tmdb_detail_ratings_share_the_same_latch():
     # the detail/drawer path (_fill_tmdb_ratings) must honour + set the SAME latch — it was

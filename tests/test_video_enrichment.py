@@ -226,7 +226,8 @@ def test_detail_backfill_marks_done_even_when_status_absent(db):
 def test_show_match_info(db):
     sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "year": 2019,
                                        "tmdb_id": 1396, "seasons": []})
-    assert db.show_match_info(sid) == {"title": "S", "year": 2019, "tmdb_id": 1396}
+    # tvdb_id is included (the TVDB episode-fallback refresh reads it) — None until enriched.
+    assert db.show_match_info(sid) == {"title": "S", "year": 2019, "tmdb_id": 1396, "tvdb_id": None}
     assert db.show_match_info(999999) is None
 
 
