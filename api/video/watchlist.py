@@ -103,6 +103,27 @@ def register_routes(bp):
             logger.exception("Failed to remove from video watchlist")
             return jsonify({"success": False, "error": "Failed"}), 500
 
+    @bp.route("/watchlist/person/<int:tmdb_id>/settings", methods=["GET"])
+    def video_watchlist_person_settings(tmdb_id):
+        """A followed person's back-catalog window {tmdb_id, title, date_added, lookback_years}
+        (0=forward-only, N=years, -1=everything) — for the person settings modal."""
+        from . import get_video_db
+        s = get_video_db().get_person_lookback(tmdb_id)
+        if not s:
+            return jsonify({"success": False, "error": "not followed"}), 404
+        return jsonify({"success": True, "settings": s})
+
+    @bp.route("/watchlist/person/<int:tmdb_id>/settings", methods=["POST"])
+    def video_watchlist_person_settings_save(tmdb_id):
+        """Set a person's lookback window. Body: {lookback_years} (0=forward-only, N=years,
+        -1=everything). The next daily scan backfills any newly-included films."""
+        from . import get_video_db
+        body = request.get_json(silent=True) or {}
+        ok = get_video_db().set_person_lookback(tmdb_id, body.get("lookback_years"))
+        if not ok:
+            return jsonify({"success": False, "error": "not followed or invalid value"}), 400
+        return jsonify({"success": True, "settings": get_video_db().get_person_lookback(tmdb_id)})
+
     @bp.route("/watchlist/check", methods=["POST"])
     def video_watchlist_check():
         """Hydrate cards. Body: {kind, tmdb_ids: [...]} → {results: {id: true}}.

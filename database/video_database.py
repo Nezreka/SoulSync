@@ -43,7 +43,7 @@ def _publish_video_event(event_type: str, data: dict) -> None:
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 39   # v39: video_wishlist.release_date (movie release-window gate); v38: episodes.added_at; v37: video_downloads.client_ref
+SCHEMA_VERSION = 40   # v40: video_watchlist.lookback_years (per-person back-catalog window); v39: video_wishlist.release_date; v38: episodes.added_at
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -209,6 +209,7 @@ _COLUMN_MIGRATIONS = [
     ("shows", "airs_time", "TEXT"),   # TVDB show air time, e.g. "21:00" (network local)
     ("video_watchlist", "state", "TEXT NOT NULL DEFAULT 'follow'"),  # follow | mute (tombstone)
     ("video_wishlist", "release_date", "TEXT"),   # movie release date — gate: don't search until near release
+    ("video_watchlist", "lookback_years", "INTEGER"),   # per-person back-catalog window: NULL/0=forward-only, N=years, -1=everything
     ("video_wishlist", "still_url", "TEXT"),   # episode still thumbnail (captured at add time)
     ("video_wishlist", "season_poster_url", "TEXT"),   # the episode's season poster
     ("video_wishlist", "episode_overview", "TEXT"),    # episode synopsis
@@ -4787,8 +4788,9 @@ class VideoDatabase:
             people = []
             if kind in (None, "person"):
                 for r in conn.execute(
-                        "SELECT tmdb_id, title, poster_url, library_id, date_added FROM video_watchlist "
-                        "WHERE kind='person' AND state='follow' ORDER BY date_added DESC, id DESC"):
+                        "SELECT tmdb_id, title, poster_url, library_id, date_added, lookback_years "
+                        "FROM video_watchlist WHERE kind='person' AND state='follow' "
+                        "ORDER BY date_added DESC, id DESC"):
                     d = dict(r); d["kind"] = "person"; people.append(d)
             shows = self._effective_shows(conn, server_source) if kind in (None, "show") else []
             if kind == "person":
@@ -5390,6 +5392,46 @@ class VideoDatabase:
                 _publish_video_event("video_watchlist_removed",
                                      {"kind": "channel", "title": was["title"] or ""})
             return True
+        finally:
+            conn.close()
+
+    def get_person_lookback(self, tmdb_id) -> dict | None:
+        """A followed person's back-catalog window: {tmdb_id, title, date_added, lookback_years}
+        (lookback_years: 0/NULL = forward-only, N = years, -1 = everything). None if not followed."""
+        conn = self._get_connection()
+        try:
+            r = conn.execute("SELECT tmdb_id, title, date_added, lookback_years FROM video_watchlist "
+                             "WHERE kind='person' AND tmdb_id=? AND state='follow'",
+                             (int(tmdb_id),)).fetchone()
+            if not r:
+                return None
+            d = dict(r)
+            d["lookback_years"] = int(d["lookback_years"]) if d["lookback_years"] is not None else 0
+            return d
+        except (sqlite3.Error, TypeError, ValueError):
+            logger.exception("get_person_lookback failed for %s", tmdb_id)
+            return None
+        finally:
+            conn.close()
+
+    def set_person_lookback(self, tmdb_id, lookback_years) -> bool:
+        """Set a followed person's back-catalog window (0=forward-only, N=years, -1=everything).
+        Returns True if a followed person row was updated."""
+        try:
+            lb = int(lookback_years)
+        except (TypeError, ValueError):
+            return False
+        lb = max(-1, min(100, lb))
+        conn = self._get_connection()
+        try:
+            cur = conn.execute("UPDATE video_watchlist SET lookback_years=? "
+                               "WHERE kind='person' AND tmdb_id=? AND state='follow'",
+                               (lb, int(tmdb_id)))
+            conn.commit()
+            return cur.rowcount > 0
+        except sqlite3.Error:
+            logger.exception("set_person_lookback failed for %s", tmdb_id)
+            return False
         finally:
             conn.close()
 

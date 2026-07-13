@@ -86,9 +86,17 @@
         var pill = kind === 'show' ? statusPill(it.status) : '';
         var meta = (kind === 'show' && it.episode_count)
             ? '<span class="vwlp-card-meta">' + (it.owned_count || 0) + '/' + it.episode_count + ' eps</span>' : '';
+        // People get a settings cog (like followed channels) to set their back-catalog window.
+        var cog = kind === 'person'
+            ? '<button type="button" data-vwlp-psettings="' + it.tmdb_id + '" data-title="' + esc(it.title) + '" ' +
+              'title="Back-catalog settings" aria-label="Back-catalog settings" ' +
+              'style="position:absolute;top:8px;right:8px;z-index:4;width:30px;height:30px;border:none;border-radius:9px;' +
+              'background:rgba(0,0,0,.55);color:#fff;font-size:15px;line-height:1;cursor:pointer;display:flex;' +
+              'align-items:center;justify-content:center;backdrop-filter:blur(4px);">&#9881;</button>'
+            : '';
         return '<a class="vwlp-card' + (kind === 'person' ? ' vwlp-card--person' : '') + '" href="' + href + '" ' +
             'data-vwlp-open="' + kind + '" data-vwlp-source="' + source + '" data-vwlp-openid="' + esc(openId) + '">' +
-            '<div class="vwlp-card-art">' + art + '<div class="vwlp-card-scrim"></div>' + pill + btn + '</div>' +
+            '<div class="vwlp-card-art">' + art + '<div class="vwlp-card-scrim"></div>' + pill + cog + btn + '</div>' +
             '<div class="vwlp-card-info"><span class="vwlp-card-title" title="' + esc(it.title) + '">' +
             esc(it.title) + '</span>' + meta + '</div></a>';
     }
@@ -213,6 +221,81 @@
         else refreshBadge();                              // not visible → keep the nav badge current
     }
 
+    // ── per-person back-catalog settings modal (mirrors the channel cog) ─────────
+    function openPersonSettings(tmdbId, title) {
+        fetch('/api/video/watchlist/person/' + tmdbId + '/settings', { headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d || !d.success) { if (typeof showToast === 'function') showToast('Could not load settings', 'error'); return; }
+                renderPersonSettings(tmdbId, title, d.settings || {});
+            })
+            .catch(function () { if (typeof showToast === 'function') showToast('Could not load settings', 'error'); });
+    }
+
+    function renderPersonSettings(tmdbId, title, s) {
+        var OPTS = [{ l: 'Forward only', v: 0 }, { l: 'Last 1 year', v: 1 }, { l: 'Last 2 years', v: 2 },
+                    { l: 'Last 3 years', v: 3 }, { l: 'Last 5 years', v: 5 }, { l: 'Last 10 years', v: 10 },
+                    { l: 'Everything', v: -1 }];
+        var sel = (s.lookback_years == null) ? 0 : parseInt(s.lookback_years, 10);
+        var followed = String(s.date_added || '').slice(0, 10);
+        function optHTML(o) {
+            var on = o.v === sel;
+            return '<button type="button" data-pset-v="' + o.v + '" style="text-align:left;padding:11px 13px;border-radius:10px;' +
+                'cursor:pointer;font-size:13px;font-weight:700;color:#fff;border:1px solid ' +
+                (on ? 'rgb(var(--accent-rgb))' : 'rgba(255,255,255,.12)') + ';background:' +
+                (on ? 'rgba(var(--accent-rgb),.18)' : 'rgba(255,255,255,.03)') + ';">' + o.l + '</button>';
+        }
+        var ov = document.createElement('div');
+        ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.6);display:flex;' +
+            'align-items:center;justify-content:center;padding:20px;';
+        ov.innerHTML =
+            '<div style="width:min(430px,100%);background:#15161c;border:1px solid rgba(255,255,255,.1);' +
+                'border-radius:16px;padding:22px;box-shadow:0 24px 60px rgba(0,0,0,.5);">' +
+                '<div style="font-size:11px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:rgba(255,255,255,.45);">Back-catalog window</div>' +
+                '<h3 style="margin:4px 0 2px;font-size:19px;color:#fff;">' + esc(title || 'Person') + '</h3>' +
+                '<p style="margin:0 0 16px;font-size:12.5px;line-height:1.55;color:rgba(255,255,255,.55);">' +
+                    'How far back to wishlist their films. New &amp; upcoming films are always followed either way' +
+                    (followed ? ' — you followed them on <b>' + esc(followed) + '</b>.' : '.') + '</p>' +
+                '<div data-pset-opts style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
+                    OPTS.map(optHTML).join('') + '</div>' +
+                '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:20px;">' +
+                    '<button type="button" data-pset-cancel style="padding:9px 16px;border-radius:10px;border:1px solid rgba(255,255,255,.14);background:transparent;color:rgba(255,255,255,.8);font-weight:700;cursor:pointer;">Cancel</button>' +
+                    '<button type="button" data-pset-save style="padding:9px 18px;border-radius:10px;border:none;background:rgb(var(--accent-rgb));color:#fff;font-weight:800;cursor:pointer;">Save</button>' +
+                '</div></div>';
+        document.body.appendChild(ov);
+        function close() { if (ov.parentNode) ov.parentNode.removeChild(ov); document.removeEventListener('keydown', onKey); }
+        function onKey(e) { if (e.key === 'Escape') close(); }
+        document.addEventListener('keydown', onKey);
+        ov.addEventListener('click', function (e) {
+            if (e.target === ov || e.target.closest('[data-pset-cancel]')) { close(); return; }
+            var opt = e.target.closest('[data-pset-v]');
+            if (opt) {
+                sel = parseInt(opt.getAttribute('data-pset-v'), 10);
+                Array.prototype.forEach.call(ov.querySelectorAll('[data-pset-v]'), function (b) {
+                    var on = parseInt(b.getAttribute('data-pset-v'), 10) === sel;
+                    b.style.border = '1px solid ' + (on ? 'rgb(var(--accent-rgb))' : 'rgba(255,255,255,.12)');
+                    b.style.background = on ? 'rgba(var(--accent-rgb),.18)' : 'rgba(255,255,255,.03)';
+                });
+                return;
+            }
+            var save = e.target.closest('[data-pset-save]');
+            if (save) {
+                save.disabled = true;
+                fetch('/api/video/watchlist/person/' + tmdbId + '/settings', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ lookback_years: sel }) })
+                    .then(function (r) { return r.ok ? r.json() : null; })
+                    .then(function (res) {
+                        if (res && res.success) {
+                            if (typeof showToast === 'function') showToast('Saved — the next scan applies it', 'success');
+                            close();
+                        } else { save.disabled = false; if (typeof showToast === 'function') showToast('Could not save', 'error'); }
+                    })
+                    .catch(function () { save.disabled = false; if (typeof showToast === 'function') showToast('Could not save', 'error'); });
+            }
+        });
+    }
+
     function wire() {
         var tabs = document.querySelectorAll('[data-vwlp-tab]');
         for (var i = 0; i < tabs.length; i++) (function (b) {
@@ -264,6 +347,12 @@
     // FULL page reload). The eye button's capture-phase handler already stops its
     // own clicks from reaching here. Mirrors video-library.js.
     function onGridClick(e) {
+        var pcog = e.target.closest('[data-vwlp-psettings]');
+        if (pcog) {
+            e.preventDefault(); e.stopPropagation();
+            openPersonSettings(pcog.getAttribute('data-vwlp-psettings'), pcog.getAttribute('data-title'));
+            return;
+        }
         var cog = e.target.closest('[data-vyt-wsettings]');
         if (cog && window.VideoYoutube && VideoYoutube.openChannelSettings) {
             e.preventDefault(); e.stopPropagation();

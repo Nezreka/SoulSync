@@ -70,6 +70,33 @@ def is_released(date_str: Any, today: str) -> bool:
     return bool(d) and d[:10] <= today
 
 
+def person_cutoff(date_added: Any, lookback_years: Any) -> Optional[str]:
+    """The earliest RELEASE date to wishlist for a followed person, as 'YYYY-MM-DD'.
+
+    Best-in-class default is FORWARD-ONLY: anchor on ``date_added`` (when they were followed),
+    so only films released from then on (plus anything upcoming) are grabbed — not their whole
+    back catalog. ``lookback_years`` moves the anchor back N years (a one-time window, not a
+    sliding one). ``-1`` = everything (no cutoff); ``0``/None = forward-only. A missing
+    ``date_added`` → None (no cutoff), so we never accidentally hide a person's films."""
+    try:
+        lb = int(lookback_years) if lookback_years is not None else 0
+    except (TypeError, ValueError):
+        lb = 0
+    if lb < 0:                       # -1 = everything
+        return None
+    da = str(date_added or '')[:10]
+    if len(da) != 10:
+        return None
+    try:
+        d = date.fromisoformat(da)
+    except ValueError:
+        return None
+    try:
+        return d.replace(year=d.year - lb).isoformat()
+    except ValueError:              # Feb 29 in a non-leap target year → clamp to the 28th
+        return date(d.year - lb, d.month, 28).isoformat()
+
+
 def _int_set(values: Iterable) -> set:
     out = set()
     for x in values or []:
@@ -81,18 +108,24 @@ def _int_set(values: Iterable) -> set:
 
 
 def select_person_movie_gaps(credits: List[Dict[str, Any]], owned_ids: Iterable,
-                             ignored_ids: Iterable, *, today: str) -> List[Dict[str, Any]]:
+                             ignored_ids: Iterable, *, today: str,
+                             since: Optional[str] = None) -> List[Dict[str, Any]]:
     """The pure core: a followed person's un-owned actor/director MOVIE credits.
 
     Keeps only relevant movie credits, drops owned + ignored + duplicates, ranks by
     popularity (via ``filmography_gaps``), and tags each with the wishlist ``_status`` it
-    should get — ``'wanted'`` if released, else ``'monitored'``. No I/O."""
+    should get — ``'wanted'`` if released, else ``'monitored'``. ``since`` (YYYY-MM-DD) is the
+    back-catalog cutoff: a movie RELEASED before it is skipped (forward-only default / lookback
+    window), while undated + upcoming films are always kept (the 'going forward' part). No I/O."""
     relevant = [c for c in (credits or []) if is_relevant_movie_credit(c)]
     ignored = _int_set(ignored_ids)
     out: List[Dict[str, Any]] = []
     for g in filmography_gaps(owned_ids, relevant, kinds=("movie",)):
         if int(g['tmdb_id']) in ignored:
             continue
+        gd = str(g.get('date') or '')[:10]
+        if since and len(gd) == 10 and gd < since:
+            continue                 # released before the cutoff → old back-catalog, skip
         g = dict(g)
         g['_status'] = 'wanted' if is_released(g.get('date'), today) else 'monitored'
         out.append(g)
@@ -245,7 +278,10 @@ def auto_video_scan_watchlist_people(
                                      log_type='warning')
                 continue
 
-            for g in select_person_movie_gaps(credits, owned, ignored, today=today):
+            # Forward-only by default: only wishlist films released since they were followed
+            # (date_added), widened by the person's own lookback window if they set one.
+            since = person_cutoff(person.get('date_added'), person.get('lookback_years'))
+            for g in select_person_movie_gaps(credits, owned, ignored, today=today, since=since):
                 tid = int(g['tmdb_id'])
                 want = g['_status']                  # 'wanted' | 'monitored'
                 existing = wished.get(tid)
