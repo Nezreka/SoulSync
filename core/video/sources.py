@@ -371,6 +371,41 @@ def list_video_libraries():
 
 
 # ── Plex ──────────────────────────────────────────────────────────────────────
+def _union_episode_delta_shows(section, since, shows):
+    """Union into ``shows`` the parent shows of any EPISODE added/changed since ``since``.
+
+    Plex doesn't always bump a SHOW's ``updatedAt`` when an episode is imported into it, so a
+    show-level ``updatedAt>>`` delta silently misses freshly-added episodes. Searching at the
+    EPISODE level by ``addedAt`` (new content) + ``updatedAt`` (re-matched episodes) and pulling
+    the parent shows catches them. De-duplicated by ratingKey. Best-effort: any hiccup returns
+    ``shows`` unchanged so the show-level delta still stands."""
+    try:
+        shows = list(shows)
+        seen = {str(getattr(s, "ratingKey", "") or "") for s in shows}
+        extra_keys = []
+        for filt in ({"addedAt>>": since}, {"updatedAt>>": since}):
+            try:
+                eps = section.search(libtype="episode", filters=filt,
+                                     sort="addedAt:desc", maxresults=1000)
+            except Exception:   # noqa: BLE001 - one filter failing shouldn't lose the other
+                logger.debug("Plex: episode delta search failed for %s", filt, exc_info=True)
+                continue
+            for ep in eps:
+                gk = str(getattr(ep, "grandparentRatingKey", "") or "")
+                if gk and gk not in seen:
+                    seen.add(gk)
+                    extra_keys.append(gk)
+        for gk in extra_keys:
+            try:
+                shows.append(section.fetchItem(int(gk)))
+            except Exception:   # noqa: BLE001 - a show we can't re-fetch is skipped, not fatal
+                logger.debug("Plex: could not fetch show %s for episode delta", gk, exc_info=True)
+        return shows
+    except Exception:   # noqa: BLE001 - the episode-level delta is an assist over the show delta
+        logger.debug("Plex: episode-level delta failed", exc_info=True)
+        return shows
+
+
 class PlexVideoSource:
     server_name = "plex"
 
@@ -441,13 +476,18 @@ class PlexVideoSource:
 
     def iter_shows(self, incremental=False, since=None):
         for section in self._scan_sections("show", self._tv_lib):
-            # updatedAt bumps when a show gains episodes or is re-matched. Delta =
-            # everything changed since the last scan; first run uses a recent window.
+            # updatedAt bumps when a show is re-matched; delta = everything changed since
+            # the last scan. First run uses a recent window.
             if not incremental:
                 items = section.all()
             elif since is not None:
                 try:
                     items = section.search(filters={"updatedAt>>": since}, sort="updatedAt:desc")
+                    # CRUCIAL: Plex does NOT reliably bump a SHOW's updatedAt when a new
+                    # episode is imported into it, so a show-only delta silently misses
+                    # freshly-added episodes. Union in the parent shows of any EPISODE added
+                    # or changed since the baseline — the reliable new-content signal.
+                    items = _union_episode_delta_shows(section, since, items)
                 except Exception:
                     logger.warning("Plex: updatedAt delta filter failed (shows); using recent window", exc_info=True)
                     items = section.search(sort="updatedAt:desc", maxresults=300)
