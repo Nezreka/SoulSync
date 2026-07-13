@@ -95,8 +95,11 @@ def test_movie_wrong_year_is_rejected():
     ok = evaluate_release(parse_release("The.Odyssey.2026.1080p.WEB-DL.H.264-GRP"),
                           prof, scope="movie", want_year=2026)
     assert ok["accepted"]
-    # ±1 year slop is tolerated; a release with no year is not rejected on year
-    assert evaluate_release(parse_release("Movie.2025.1080p.WEB-DL-GRP"), prof,
+    # an EARLIER-year release is rejected (a different, older film — the 'Moana 2 2025' bug)
+    assert not evaluate_release(parse_release("Movie.2025.1080p.WEB-DL-GRP"), prof,
+                                scope="movie", want_year=2026)["accepted"]
+    # a slightly LATER year is allowed (a film's home release can land the next year); no year → no judgement
+    assert evaluate_release(parse_release("Movie.2027.1080p.WEB-DL-GRP"), prof,
                             scope="movie", want_year=2026)["accepted"]
     assert evaluate_release(parse_release("Movie.1080p.WEB-DL-GRP"), prof,
                             scope="movie", want_year=2026)["accepted"]
