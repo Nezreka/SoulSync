@@ -1087,6 +1087,12 @@ nicht zuverlässig. Commit `8ea30221` lässt den Test-Runner mit kurzen
 Async-Ticks bis zur Task-Completion weiterlaufen und schließt den Loop danach;
 alle 13 Prowlarr-Tests liefen in 0,17 Sekunden grün. Auch dieser Fix ändert
 keinen Produktionspfad.
+Der folgende Lauf erreichte 82 Prozent und fand denselben Effekt noch im
+SoundCloud-Testhelper: `asyncio.run()` wartete beim Executor-Shutdown, obwohl
+die gemockte yt-dlp-Arbeit fertig war. Commit `47ec6365` verwendet dort
+denselben deterministischen Heartbeat-Loop mit direktem Close. Die komplette
+Datei lief danach mit 48 bestandenen und zwei erwartungsgemäß abgewählten
+Live-Tests grün; auch dieser Commit ändert nur Testinfrastruktur.
 
 Diese Findings ersetzen jede frühere Annahme, dass die neue Decision Engine
 und der Bundle-Importer als unabhängige Implementierungen akzeptabel waren.
@@ -1143,7 +1149,8 @@ auf dem aktuellen gespaltenen Verhalten.
 
 Correction-Commits: `e1272be`, `e6484cb`, `2917f3c`, `99ffd2c`, `7d80e96`,
 `e394e2d`, `39549f0`, `e27070f`, `3eb0e92`, `a7344e5`, `6bc4d01`, `b464543`,
-`903cbd3`, `6ea7f3e2`, `d921c1eb`, `74ec9ceb`, `297dc099`, `8ea30221`.
+`903cbd3`, `6ea7f3e2`, `d921c1eb`, `74ec9ceb`, `297dc099`, `8ea30221`,
+`47ec6365`.
 
 **Session-Status 2026-07-13:** F06, F07 und das F08-Contract-Gate sind
 implementiert und gezielt getestet. Der erste Fullsuite-Anlauf hat die
@@ -1152,10 +1159,12 @@ mit 70 gezielten Tests verifiziert. Der anschließende diagnostische Lauf hat
 die Harness-Thread-/Client-Leaks gefunden; `297dc099` behebt sie und ist mit
 61 gezielten Tests verifiziert. Der folgende Lauf überschritt die alte
 Blockade und fand den isolierten Prowlarr-Testloop-Wakeup; `8ea30221` behebt
-ihn mit 13 grünen Prowlarr-Tests. **Logischer nächster Schritt:** den
-Fullsuite-Lauf jetzt erneut als LIB2-011-Meilenstein-Abschluss ausführen;
-danach sind echte SAB/NZBGet-, Path-Mapping- und Docker-Restart-Acceptance der
-oberste offene Phase-5-Punkt.
+ihn mit 13 grünen Prowlarr-Tests. Der nächste Lauf fand bei 82 Prozent den
+gleichen Executor-Shutdown im SoundCloud-Testhelper; `47ec6365` ist mit 48
+bestandenen und zwei abgewählten Live-Tests verifiziert. **Logischer nächster
+Schritt:** den Fullsuite-Lauf jetzt erneut als LIB2-011-Meilenstein-Abschluss
+ausführen; danach sind echte SAB/NZBGet-, Path-Mapping- und Docker-Restart-
+Acceptance der oberste offene Phase-5-Punkt.
 
 ### 5.6 Verifikation (pro Phase, End-to-End in Docker)
 
