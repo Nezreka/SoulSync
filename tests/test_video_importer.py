@@ -109,6 +109,28 @@ def test_not_an_upgrade_is_rejected():
     assert p["action"] == "reject" and "upgrade" in p["reason"].lower()
 
 
+def test_already_placed_reports_completed_not_failed():
+    # Crash-recovery: the file already sits at the EXACT path we'd write (a copy that
+    # finished before the row flipped to 'completed', then a restart re-drove the import).
+    # It's not an upgrade over itself, but it IS in the library — report done, don't fail.
+    dl = _movie_dl("The Matrix 1999 1080p BluRay")
+    folder = os.path.join("/lib/movies", "The Matrix (1999)")
+    fs_dirs = {folder: ["The Matrix (1999) Bluray-1080p.mkv"]}   # our own already-placed file
+    p = importer.plan_import(dl, "/dl/x/matrix.mkv", list_dir=lambda d: fs_dirs.get(d, []))
+    assert p["action"] == "already_placed"
+    assert p["dest"]["path"].endswith(os.path.join("The Matrix (1999)", "The Matrix (1999) Bluray-1080p.mkv"))
+
+
+def test_run_import_already_placed_completes_without_recopy():
+    dl = _movie_dl("The Matrix 1999 1080p BluRay", source="torrent")
+    folder = os.path.join("/lib/movies", "The Matrix (1999)")
+    fs = FakeFS({folder: ["The Matrix (1999) Bluray-1080p.mkv"]})
+    patch = importer.run_import(dl, "/dl/x/matrix.mkv", fs=fs)
+    assert patch["status"] == "completed"
+    assert not fs.copied and not fs.moved            # nothing re-copied — the file's already there
+    assert patch["dest_path"].endswith("The Matrix (1999) Bluray-1080p.mkv")
+
+
 # ── ffprobe verification ──────────────────────────────────────────────────────
 def test_probe_true_resolution_overrides_lying_name():
     # name claims 1080p; the file is really 720p → tag + folder use the truth

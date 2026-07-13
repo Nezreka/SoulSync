@@ -251,6 +251,14 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
         if force:
             return {"action": "upgrade", "dest": dest, "quality_label": quality,
                     "replace_path": os.path.join(dest["dir"], existing), "artwork_dir": artwork_dir}
+        # Idempotent re-import: the file already sits at the EXACT path we'd write. This is
+        # the crash-recovery case — an import that finished the copy but died before the row
+        # flipped to 'completed' (e.g. a restart), so the monitor re-drives it. The goal (this
+        # item in the library, here) is already met → report it done instead of the misleading
+        # "not an upgrade" failure that would otherwise leave a landed download looking failed.
+        if existing == dest["filename"]:
+            return {"action": "already_placed", "dest": dest, "quality_label": quality,
+                    "artwork_dir": artwork_dir}
         if not settings.get("replace_existing", True):
             return _reject("Already in the library (%s) — replace is turned off" % existing)
         new_score = quality_score(parsed)
@@ -322,6 +330,13 @@ def run_import(dl: dict, src_path: str, *, fs: Any, prober: Callable | None = No
         # the monitor to blocklist this exact release so it's never re-picked.
         return {"status": "import_failed", "progress": 100.0, "error": plan["reason"],
                 "dest_path": src_path, "_bad_release": bool(plan.get("bad_release"))}
+
+    if plan["action"] == "already_placed":
+        # The file is already at its destination (a re-driven, crash-interrupted import) —
+        # nothing to copy, and it's not an upgrade. Report completed at the placed path so a
+        # download whose file genuinely landed stops showing as in-progress / failed.
+        return {"status": "completed", "progress": 100.0, "dest_path": plan["dest"]["path"],
+                "quality_label": plan.get("quality_label") or dl.get("quality_label")}
 
     dest = plan["dest"]
     move_mode = settings.get("transfer_mode") == "move"
