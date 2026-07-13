@@ -29,9 +29,10 @@ from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from core.automation.deps import AutomationDeps
 from core.video.discovery_gaps import filmography_gaps
-# Reuse the people scan's generic date helpers (forward-only cutoff + release check) so the
-# two scans share one definition of "the back-catalog window".
-from core.automation.handlers.video_scan_watchlist_people import person_cutoff, is_released
+# Reuse the people scan's generic date helpers (forward-only cutoff + release check + the
+# 1-year look-ahead horizon) so the two scans share one definition of the wishlist window.
+from core.automation.handlers.video_scan_watchlist_people import (
+    person_cutoff, is_released, within_look_ahead)
 
 
 # A big studio's back catalog is full of obscure shorts/specials with a handful of votes;
@@ -85,8 +86,11 @@ def select_studio_movie_gaps(films: List[Dict[str, Any]], owned_ids: Iterable,
         if (vote_floor and settle and len(gd) == 10 and gd < settle
                 and (g.get('vote_count') or 0) < vote_floor):
             continue                 # settled but obscure → skip (new/upcoming exempt)
+        released = is_released(g.get('date'), today)
+        if not released and not within_look_ahead(g.get('date'), today):
+            continue                 # upcoming but >1yr out / undated → skip (re-added when it's near)
         g = dict(g)
-        g['_status'] = 'wanted' if is_released(g.get('date'), today) else 'monitored'
+        g['_status'] = 'wanted' if released else 'monitored'
         out.append(g)
     return out
 
