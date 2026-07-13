@@ -982,6 +982,21 @@ def test_wishlist_movie_add_is_idempotent(db):
     assert db.wishlist_counts()["movie"] == 1
 
 
+def test_wishlist_movie_art_backfill(db):
+    # An upcoming movie added with no poster → a backfill target that fills without clobbering.
+    db.add_movie_to_wishlist(1, "Has Art", year=2020, poster_url="/have.jpg")
+    db.add_movie_to_wishlist(2, "No Art Yet")                          # upcoming → no poster
+    targets = {t["tmdb_id"] for t in db.wishlist_movies_missing_art()}
+    assert targets == {2}                                             # only the art-less one
+    assert db.set_wishlist_movie_art(2, poster_url="/new.jpg", year=2027) is True
+    assert db.wishlist_movies_missing_art() == []                     # filled → no longer a target
+    m = {x["tmdb_id"]: x for x in db.query_wishlist("movie")["items"]}
+    assert m[2]["poster_url"] == "/new.jpg" and m[2]["year"] == 2027
+    db.set_wishlist_movie_art(1, poster_url="/overwrite.jpg")         # never clobbers existing art
+    assert db.query_wishlist("movie")["items"] and \
+        {x["tmdb_id"]: x["poster_url"] for x in db.query_wishlist("movie")["items"]}[1] == "/have.jpg"
+
+
 def test_wishlist_episodes_group_into_show_tree(db):
     n = db.add_episodes_to_wishlist(1396, "Breaking Bad", [
         {"season_number": 1, "episode_number": 1, "title": "Pilot", "air_date": "2008-01-20"},

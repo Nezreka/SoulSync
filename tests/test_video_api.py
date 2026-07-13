@@ -223,6 +223,24 @@ def test_discover_trailer_returns_key(tmp_path, monkeypatch):
     assert client.get("/api/video/discover/trailer?kind=movie").get_json() == {"trailer": None}
 
 
+def test_wishlist_backfill_movie_art(tmp_path, monkeypatch):
+    client, vapi = _make_client(tmp_path)
+    db = vapi._video_db
+    db.add_movie_to_wishlist(1, "Has Art", poster_url="/have.jpg")
+    db.add_movie_to_wishlist(2, "No Art Yet")                    # upcoming → no poster
+    import core.video.enrichment.engine as eng_mod
+
+    class FakeEng:
+        def tmdb_detail(self, kind, tmdb_id):
+            return {"poster_url": "/filled.jpg", "year": 2027}
+    monkeypatch.setattr(eng_mod, "get_video_enrichment_engine", lambda: FakeEng())
+    r = client.post("/api/video/wishlist/backfill-movie-art").get_json()
+    assert r["success"] and r["updated"] == 1                    # only the art-less movie filled
+    m = {x["tmdb_id"]: x for x in db.query_wishlist("movie")["items"]}
+    assert m[2]["poster_url"] == "/filled.jpg" and m[2]["year"] == 2027
+    assert m[1]["poster_url"] == "/have.jpg"                     # existing art untouched
+
+
 def test_discover_morelike_builds_seeded_rails(tmp_path, monkeypatch):
     client, vapi = _make_client(tmp_path)
     db = vapi._video_db
