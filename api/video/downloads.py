@@ -111,7 +111,13 @@ def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None)
     results.sort(key=lambda r: (r["accepted"], r["score"], r["_avail"], r["size_bytes"]), reverse=True)
     for r in results:
         r.pop("_avail", None)
-    return results[:40]
+    # Keep every accepted release, but cap the greyed-out rejects — the structured
+    # tv/movie search casts a wide net (whole-season noise) that our scope filter rejects,
+    # so without a cap the list would be flooded with wrong-episode releases. A handful of
+    # rejects stay visible (with their reason) for a deliberate manual override.
+    accepted = [r for r in results if r["accepted"]]
+    rejected = [r for r in results if not r["accepted"]]
+    return (accepted[:40] + rejected[:15])
 
 
 def _active_episode_keys(db, title) -> set:
