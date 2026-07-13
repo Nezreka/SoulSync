@@ -141,7 +141,10 @@ def _scope_ok(parsed, scope, want_season, want_episode, want_year=None):
         if season is not None:
             return None, "This is a TV release, not the movie"
         py, wy = parsed.get("year"), _as_year(want_year)
-        if wy and py and abs(py - wy) > 1:
+        # An EARLIER-year release is a different, older film ("Moana 2 … 2025" for the 2026
+        # "Moana", "Troy The Odyssey 2017" for the 2026 one). A slightly later year is allowed
+        # (a film's home release can land the next calendar year). Unknown year → no judgement.
+        if wy and py and (py < wy or py > wy + 1):
             return None, "Wrong year (%s — wanted %s)" % (py, wy)
         return None, None
     if scope == "episode":
