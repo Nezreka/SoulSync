@@ -2199,6 +2199,49 @@ body[data-side="video"] #soulsync-toggle { display: none; }
     backdrop-filter: blur(4px); }
 /* the follow eye sits opposite the cog on studio cards */
 .vwlp-card--studio .vwl-btn { position: absolute; top: 8px; left: 8px; z-index: 4; }
+
+/* ── Studio enrichment-coverage rings (Overlay/Collection Studio dashboard cards) ──
+   Circular progress rings à la the music artist page: a number in the middle, per-source
+   colour, animated fill + a coverage-scaled glow (the fuller the ring, the brighter it
+   burns). Purely visual. */
+/* Lives top-right of the Studio card header (opposite the title) — a compact readiness
+   cluster, right-aligned. */
+.dash-card__head--cov { flex-wrap: wrap; gap: 10px 16px; }
+.dash-card__head-txt { min-width: 0; }
+.vcov { display: flex; flex-direction: column; align-items: flex-end; }
+.vcov-title { display: inline-flex; align-items: center; gap: 5px; font-size: 9.5px; font-weight: 800;
+    letter-spacing: 0.06em; text-transform: uppercase; color: rgba(255, 255, 255, 0.42); margin-bottom: 9px; }
+.vcov-info { display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px;
+    border-radius: 50%; border: 1px solid rgba(255, 255, 255, 0.28); color: rgba(255, 255, 255, 0.55);
+    font-size: 9px; font-weight: 800; cursor: help; }
+.vcov-info:hover { color: #fff; border-color: rgba(255, 255, 255, 0.6); }
+.vcov-grid { display: flex; gap: 16px; }
+.vcov-item { display: flex; flex-direction: column; align-items: center; gap: 6px;
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
+.vcov-item:hover { transform: translateY(-2px) scale(1.05); }
+.vcov-ring { position: relative; width: 46px; height: 46px; transition: filter 0.4s ease; }
+.vcov-ring svg { width: 46px; height: 46px; transform: rotate(-90deg); }
+.vcov-bg { fill: none; stroke: rgba(255, 255, 255, 0.08); stroke-width: 3.5; }
+.vcov-fill { fill: none; stroke-width: 3.5; stroke-linecap: round;
+    animation: vcovFill 1s cubic-bezier(0.34, 0.1, 0.2, 1) var(--d, 0s) both; }
+.vcov-pct { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 800; color: #fff; letter-spacing: -0.02em; font-variant-numeric: tabular-nums;
+    animation: vcovPct 0.65s ease var(--d, 0s) both; }
+.vcov-label { display: flex; flex-direction: column; align-items: center; line-height: 1.15; text-align: center; }
+.vcov-label b { font-size: 10px; font-weight: 800; color: rgba(255, 255, 255, 0.78); letter-spacing: 0.02em; }
+.vcov-label span { font-size: 8.5px; font-weight: 600; color: rgba(255, 255, 255, 0.38);
+    text-transform: uppercase; letter-spacing: 0.04em; }
+@keyframes vcovFill { from { stroke-dashoffset: var(--c); } to { stroke-dashoffset: var(--o); } }
+@keyframes vcovPct { 0% { opacity: 0; transform: scale(0.6); } 55% { opacity: 0; } 100% { opacity: 1; transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) {
+    .vcov-fill, .vcov-pct { animation: none; }
+    .vcov-fill { stroke-dashoffset: var(--o); }
+}
+/* On a narrow card the header wraps: the cluster drops below the title, left-aligned. */
+@media (max-width: 560px) {
+    .dash-card__head--cov { justify-content: flex-start; }
+    .vcov { align-items: flex-start; }
+}
 .vwlp-card-info { padding: 9px 4px 0; }
 .vwlp-card-title { display: block; font-size: 13.5px; font-weight: 700; line-height: 1.3;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
