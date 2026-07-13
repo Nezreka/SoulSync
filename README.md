@@ -2,7 +2,7 @@
   <img src="./assets/trans.png" alt="SoulSync Logo">
 </p>
 
-# SoulSync - Intelligent Music Discovery & Automation Platform
+# SoulSync - Intelligent Music & Video Automation Platform
 
 **Spotify-quality music discovery for self-hosted libraries.** Automates downloads, curates playlists, monitors artists, and organizes your collection with zero manual effort.
 
@@ -25,6 +25,8 @@ SoulSync bridges streaming services to your music library with automated discove
 7. **Organizes files** → Custom templates for clean folder structures
 8. **Manages library** → Plex, Jellyfin, Navidrome, or SoulSync Standalone (no media server required)
 9. **Scrobbles plays** → Automatic scrobbling to Last.fm and ListenBrainz from your media server
+
+**Plus a full video side.** SoulSync also manages **Movies, TV Shows, and YouTube** — the same discovery, automation, and enrichment approach applied to video, with its own isolated database, dashboard, and pipeline. Works with Plex and Jellyfin. See **[Video Library](#video-library--movies-tv-shows--youtube)** below.
 
 ---
 
@@ -227,6 +229,98 @@ restores the retag.
 - Comprehensive mobile layouts for Stats, Automations, Hydrabase, Issues, Help pages
 - Artist hero section, enhanced library track table with bottom sheet action popover
 - Enrichment rings, filter bars, and discover cards all adapt to narrow screens
+
+---
+
+## Video Library — Movies, TV Shows & YouTube
+
+A fully isolated video side that brings SoulSync's discovery/automation/enrichment philosophy to **movies, TV, and YouTube**. Its own database, dashboard, search, calendar, and download pipeline — sharing the automation engine but never touching the music side. Works with **Plex** and **Jellyfin** (per-server isolation).
+
+### Libraries & Scanning
+
+- **Plex + Jellyfin**, source-agnostic — Movies and TV are tracked as independent libraries
+- **Three scan modes**: incremental (a modified-since delta — only re-reads what the server touched), deep (full re-read + prune removed), full (clean reset)
+- **Smart post-download scan** — probes the server with a cheap search and skips the full crawl when it already has the newest grab
+- Weekly deep scans (TV Mondays, Movies Tuesdays) + an hourly incremental safety net for manual additions
+
+### Metadata & Enrichment
+
+**Matchers** — TMDB (movies + shows), TVDB (shows + an episode-metadata fallback for titles/overviews TMDB lacks), OMDb (IMDb / Rotten Tomatoes / Metacritic ratings)
+
+**10 background enrichment workers** — fanart.tv (logos/art), OpenSubtitles (subtitles), Return YouTube Dislike, SponsorBlock, Trakt (ratings/votes), TVmaze, AniList (anime), Wikidata (official sites), TMDB watch providers (streaming availability), MediaStinger (after-credits scenes)
+
+- **Gap-fill by design** — enrichment only fills what the media server left blank, never clobbers server data; per-field user locking (a locked field belongs to the user, enrichment skips it forever)
+- **Rolling re-enrichment automation** — keeps ratings, overviews, art, and episode air-dates from going stale: re-pulls the stalest matched items by stored id (never re-search, so no mis-match risk), oldest first, ~monthly per item, self-healing OMDb daily-quota latch
+- **Lazy on-view refresh** + a daily airing-schedule refresh keep what you're actively watching current
+
+### Detail Pages & Search
+
+- Source-agnostic **movie / show / person / studio** pages — cast & crew, trailers, where-to-watch, similar titles, seasons & episodes
+- **Progressive "Netflix-feel" search** — results stream in per group (movies, TV, YouTube channels, people, studios) as they arrive instead of one blocking load
+
+### TV Calendar
+
+- A real 7-column week grid with air times, a billboard hero, and a per-episode modal
+- Scope toggle: your **watchlist** (followed ∪ airing) vs the **whole library**
+- Wishlist an aired-but-missing episode straight from the calendar modal
+
+### Watchlist → Wishlist → Download Pipeline
+
+**Follow anything** — shows, actors/directors (their whole filmography), studios, YouTube channels, YouTube playlists
+
+- **Studio watchlist** — follow Pixar, A24, Disney… with **family presets** (Disney = Pixar + Marvel + Lucasfilm) and per-member selection (follow just Pixar if you want); a settled-films vote floor keeps obscure shorts out
+- **People watchlist** — every un-owned movie a followed actor/director made, back catalog + upcoming
+- **Look-ahead horizon** — upcoming titles are wishlisted only within ~1 year of theatrical/digital release, so the wishlist never fills with distant announcements but is never out of date
+- **Sonarr-style airing** — wishlist every episode airing today for the shows you follow
+
+### Downloads
+
+- **Sources**: Soulseek (slskd), Prowlarr indexers, YouTube (yt-dlp)
+- **Radarr/Sonarr-class quality profiles** — quality ladder, cutoff, upgrade-until-cutoff, reject rules, preferred-words scoring
+- Fulfillment engine, download monitor, organization + sidecars + subtitle fetch, disk guard
+- **Permanent download-history archive** + a History modal
+- **Release blocklist** (auto-added only on proven-bad-file rejects) + a **recycle bin** for reversible deletes
+
+### Overlay Studio (Kometa-style overlays)
+
+- Visual **overlay-template editor**, applied via Pillow directly onto Plex/Jellyfin posters
+- Per-scope assignments (movie / show / season / episode), a logo-badge system (provider/resolution/rating badges)
+- Nightly re-apply automation that skips items whose template + art + data are unchanged
+- **Clean Up Plex Images** job reclaims the space poster re-uploads accumulate
+
+### Collection Manager (Kometa-style collections)
+
+- Build **Plex Collections / Jellyfin BoxSets** from smart filters and ranked lists
+- **Ranked list sources**: IMDb charts & lists, TMDB charts & lists, Trakt lists, MDBList — rendered in true rank order (e.g. IMDb Top 250 by rank, not year)
+- Franchise auto-backfill, a paginated gallery, and a nightly **Sync Collections** automation that pushes add/remove to the server
+
+### YouTube
+
+- **Follow channels as shows** and **playlists as shows** (yt-dlp, no API key) — long-form only, Shorts excluded
+- Per-channel **keep windows / retention** with an old-episode cleanup job
+- True downloaded-state tracking (ownership derived from download history) + ghost cleanup
+
+### Library Maintenance (repair jobs)
+
+- Broken files, duplicate movies, metadata gaps, missing episodes, naming conformance, quality upgrade, watched-cleanup, wishlist audit, movie collections, YouTube ghosts
+- Rich findings dashboard with lazy detail, mirrored from the music-side Maintenance standard
+
+### Bulk Editing, Locking & Issues
+
+- **Manage panel** — inline metadata edits with per-field locking, plus **re-identify** (re-file an imported title to a different release through the staging pipeline)
+- **Bulk select bar** for mass metadata operations
+- **Issues system** — report a problem from the Manage sidebar; an Issues page + nav badge (full music-side parity)
+
+### Server Activity (Tautulli-style monitoring)
+
+- Live Plex/Jellyfin **now-playing** + watch **history** in an app-wide slide-out drawer, plus statistics & graphs
+- Gated to Plex/Jellyfin servers (hidden when the active server can't provide it)
+
+### Automations & Dashboard
+
+- A dedicated **video Automations page** — the same drag-and-drop builder, showing only video-owned rows (the music page is untouched)
+- A video **event bus** (batch-complete, scan-complete, …) drives the full watchlist → wishlist → download pipeline plus airing refresh, re-enrichment, overlays, collection sync, deep scans, cleanup, and backups
+- **Dashboard** — recently-added hero, library/upcoming/stats cards, enrichment-coverage rings, and a combined Studios (Overlay + Collection) admin card
 
 ---
 
