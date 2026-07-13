@@ -79,3 +79,30 @@ def test_resolution_only_release_still_grabbable():
     v = evaluate_release(parse_release("Show S01E01 720p"), default_profile(),
                          scope="episode", want_season=1, want_episode=1)
     assert v["accepted"] is True
+
+
+def test_movie_wrong_year_is_rejected():
+    """A text search for a 2026 film must not match a differently-yeared movie whose title
+    merely contains the words (Boulder's 'Troy The Odyssey 2017' / 'Moana 2 2024' cases)."""
+    prof = default_profile()
+    troy = evaluate_release(parse_release("Troy.The.Odyssey.2017.1080p.BluRay.x265-TGx"),
+                            prof, scope="movie", want_year=2026)
+    assert not troy["accepted"] and "year" in troy["rejected"].lower()
+    moana = evaluate_release(parse_release("Moana 2 2024 1080p BluRay x265-PSA"),
+                             prof, scope="movie", want_year=2026)
+    assert not moana["accepted"] and "2024" in moana["rejected"]
+    # the correct-year release still passes
+    ok = evaluate_release(parse_release("The.Odyssey.2026.1080p.WEB-DL.H.264-GRP"),
+                          prof, scope="movie", want_year=2026)
+    assert ok["accepted"]
+    # ±1 year slop is tolerated; a release with no year is not rejected on year
+    assert evaluate_release(parse_release("Movie.2025.1080p.WEB-DL-GRP"), prof,
+                            scope="movie", want_year=2026)["accepted"]
+    assert evaluate_release(parse_release("Movie.1080p.WEB-DL-GRP"), prof,
+                            scope="movie", want_year=2026)["accepted"]
+
+
+def test_parse_release_year_uses_the_release_year_not_a_title_year():
+    from core.video.release_parse import parse_release
+    assert parse_release("Blade.Runner.2049.2017.1080p.BluRay")["year"] == 2017   # title year first, release last
+    assert parse_release("Movie.2160p.WEB")["year"] is None                        # resolution ≠ year

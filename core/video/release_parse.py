@@ -72,11 +72,18 @@ def _first(table, text) -> Any:
     return None
 
 
+# Release year — a 4-digit 19xx/20xx not embedded in a longer number. The LAST match is the
+# release year (a year IN the title, e.g. "Blade Runner 2049", comes before it).
+_YEAR = re.compile(r"(?<!\d)((?:19|20)\d{2})(?!\d)")
+
+
 def parse_release(title: Any) -> dict:
     """Parse a release name into quality + scope fields. Never raises."""
     t = str(title or "")
+    _years = _YEAR.findall(t)
     out = {
         "title": t,
+        "year": int(_years[-1]) if _years else None,
         "resolution": _first(_RES, t),
         "source": _first(_SOURCE, t),
         "codec": _first(_CODEC, t),
