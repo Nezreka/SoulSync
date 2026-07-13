@@ -885,7 +885,7 @@ class VideoEnrichmentEngine:
                 return 0
         try:
             with ThreadPoolExecutor(max_workers=min(8, len(raw))) as ex:
-                for c, n in zip(raw, ex.map(_count, raw)):
+                for c, n in zip(raw, ex.map(_count, raw), strict=True):   # map() is 1:1 with raw
                     c["movie_count"] = n
             raw = [c for c in raw if (c.get("movie_count") or 0) > 0]   # no films → nothing to follow
             raw.sort(key=lambda c: c.get("movie_count") or 0, reverse=True)
