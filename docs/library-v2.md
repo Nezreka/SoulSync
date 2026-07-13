@@ -1098,6 +1098,10 @@ kleinen YouTube-Leading-Dash-Regressionstest. Commit `70336a57` stellt dessen
 zwei Async-Aufrufe ebenfalls auf den deterministischen lokalen Runner um; alle
 drei Tests der Datei liefen danach in 0,15 Sekunden grün. Die getestete
 yt-dlp-Query-Escaping-Produktionslogik blieb unverändert.
+Ein weiterer Lauf diagnostizierte denselben Wakeup-Effekt im gemeinsamen
+Test-Loop der SABnzbd-/NZBGet-Adapter. Commit `ee896e4d` verwendet auch dort
+Heartbeat plus direkten Loop-Close; alle 46 Usenet-Adaptertests liefen danach
+in 0,20 Sekunden grün. Die Adapter-Produktionslogik blieb unverändert.
 
 Diese Findings ersetzen jede frühere Annahme, dass die neue Decision Engine
 und der Bundle-Importer als unabhängige Implementierungen akzeptabel waren.
@@ -1155,7 +1159,7 @@ auf dem aktuellen gespaltenen Verhalten.
 Correction-Commits: `e1272be`, `e6484cb`, `2917f3c`, `99ffd2c`, `7d80e96`,
 `e394e2d`, `39549f0`, `e27070f`, `3eb0e92`, `a7344e5`, `6bc4d01`, `b464543`,
 `903cbd3`, `6ea7f3e2`, `d921c1eb`, `74ec9ceb`, `297dc099`, `8ea30221`,
-`47ec6365`, `70336a57`.
+`47ec6365`, `70336a57`, `ee896e4d`.
 
 **Session-Status 2026-07-13:** F06, F07 und das F08-Contract-Gate sind
 implementiert und gezielt getestet. Der erste Fullsuite-Anlauf hat die
@@ -1168,7 +1172,9 @@ ihn mit 13 grünen Prowlarr-Tests. Der nächste Lauf fand bei 82 Prozent den
 gleichen Executor-Shutdown im SoundCloud-Testhelper; `47ec6365` ist mit 48
 bestandenen und zwei abgewählten Live-Tests verifiziert. Der folgende Lauf
 fand bei 94 Prozent den letzten bekannten yt-dlp-Executor-Shutdown;
-`70336a57` ist mit drei grünen YouTube-Regressionstests verifiziert.
+`70336a57` ist mit drei grünen YouTube-Regressionstests verifiziert. Ein
+weiterer Lauf isolierte den gleichen Wakeup im Usenet-Adapter-Testloop;
+`ee896e4d` ist mit 46 grünen SABnzbd-/NZBGet-Tests verifiziert.
 **Logischer nächster Schritt:** den Fullsuite-Lauf jetzt erneut als LIB2-011-
 Meilenstein-Abschluss ausführen; danach sind echte SAB/NZBGet-, Path-Mapping-
 und Docker-Restart-Acceptance der oberste offene Phase-5-Punkt.
