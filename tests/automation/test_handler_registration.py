@@ -62,6 +62,7 @@ EXPECTED_ACTION_NAMES = frozenset({
     'video_update_database_hourly',
     'video_add_airing_episodes',
     'video_refresh_airing_schedules',
+    'video_reenrich_stale',
     'video_scan_watchlist_people',
     'video_scan_watchlist_studios',
     'video_scan_watchlist_channels',

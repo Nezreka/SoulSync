@@ -446,6 +446,9 @@ def test_libraries_endpoint_lists_and_saves(tmp_path, monkeypatch):
         import core.video.sources as vs
         monkeypatch.setattr(vs, "list_video_libraries", lambda: {
             "server": "plex", "movies": [{"title": "Movies"}], "tv": [{"title": "TV"}]})
+        # the POST save path resolves the server directly (not via list_video_libraries),
+        # and correctly 400s when none is configured — give it one so the save is exercised.
+        monkeypatch.setattr(vs, "resolve_video_server", lambda: "plex")
         import config.settings as cs
         monkeypatch.setattr(cs.config_manager, "get_active_media_server", lambda: "plex")
 
