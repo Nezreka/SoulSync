@@ -1195,6 +1195,56 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def stale_enriched_items(self, limit: int = 500, movie_days: int = 30,
+                             show_days: int = 14) -> list[dict]:
+        """The N matched library items whose metadata is stalest — for the periodic
+        re-enrichment automation. Oldest-refreshed first, and ONLY items last touched
+        beyond their per-kind staleness floor (so a run never re-pulls something already
+        fresh). ``tmdb_last_attempted`` is stamped by every enrichment_apply — initial
+        match, lazy on-view refresh, or a prior re-enrich pass — so it doubles as the
+        'last refreshed' cursor without a new column.
+
+        Movies and shows carry DIFFERENT floors on purpose: a released movie's metadata
+        settles (``movie_days`` default 30), while a show is volatile — weekly episodes,
+        running ratings, status flips — so it's revisited sooner (``show_days`` default
+        14). An episode rides along when its show is refreshed (refresh_show_art cascades
+        the episode list), so there's no separate episode queue.
+
+        Returns ``[{kind, id, title, last_attempted}]`` (kind ∈ movie/show). A NULL
+        last_attempted (matched but never stamped — legacy rows) sorts first."""
+        try:
+            limit = max(1, int(limit))
+        except (TypeError, ValueError):
+            limit = 500
+
+        def _cutoff(days, default):
+            try:
+                d = max(0, int(days))
+            except (TypeError, ValueError):
+                d = default
+            return (datetime.now(timezone.utc) - timedelta(days=d)).strftime("%Y-%m-%d %H:%M:%S")
+
+        m_cut = _cutoff(movie_days, 30)
+        s_cut = _cutoff(show_days, 14)
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT kind, id, title, last_attempted FROM ("
+                "  SELECT 'movie' AS kind, id, title, tmdb_last_attempted AS last_attempted"
+                "    FROM movies"
+                "   WHERE tmdb_match_status='matched'"
+                "     AND (tmdb_last_attempted IS NULL OR tmdb_last_attempted < ?)"
+                "  UNION ALL"
+                "  SELECT 'show' AS kind, id, title, tmdb_last_attempted AS last_attempted"
+                "    FROM shows"
+                "   WHERE tmdb_match_status='matched'"
+                "     AND (tmdb_last_attempted IS NULL OR tmdb_last_attempted < ?)"
+                ") ORDER BY last_attempted ASC LIMIT ?",
+                (m_cut, s_cut, limit)).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
     def episode_sync_pending_count(self) -> int:
         conn = self._get_connection()
         try:
