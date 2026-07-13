@@ -2070,6 +2070,35 @@ class VideoDatabase:
         self.set_setting(server + ".tv_library", tv or "")
 
     # ── dashboard ─────────────────────────────────────────────────────────────
+    def enrichment_coverage(self) -> dict:
+        """How much of the library is matched + detail-enriched against TMDB / TVDB — powers
+        the dashboard Studio cards' coverage bars (Overlay + Collection Studio need this
+        metadata: posters, ratings, logos, studios/networks). ``tmdb_enriched`` = full detail
+        pulled (``details_synced``); ``*_matched`` = an external id resolved. Purely read-only."""
+        conn = self._get_connection()
+        try:
+            def n(sql):
+                r = conn.execute(sql).fetchone()
+                return int(r[0]) if r and r[0] is not None else 0
+            return {
+                "movies": {
+                    "total": n("SELECT COUNT(*) FROM movies"),
+                    "tmdb_matched": n("SELECT COUNT(*) FROM movies WHERE tmdb_id IS NOT NULL"),
+                    "tmdb_enriched": n("SELECT COUNT(*) FROM movies WHERE details_synced=1"),
+                },
+                "shows": {
+                    "total": n("SELECT COUNT(*) FROM shows"),
+                    "tmdb_matched": n("SELECT COUNT(*) FROM shows WHERE tmdb_id IS NOT NULL"),
+                    "tmdb_enriched": n("SELECT COUNT(*) FROM shows WHERE details_synced=1"),
+                    "tvdb_matched": n("SELECT COUNT(*) FROM shows WHERE tvdb_id IS NOT NULL"),
+                },
+            }
+        except sqlite3.Error:
+            logger.exception("enrichment_coverage failed")
+            return {"movies": {}, "shows": {}}
+        finally:
+            conn.close()
+
     def recently_added(self, server_source=None, limit=12) -> list:
         """Newest movies + shows for the dashboard's Recently Added row. A SHOW ranks by its
         NEWEST EPISODE's add-date (so a show with a freshly-added episode surfaces — matching

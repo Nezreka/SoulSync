@@ -1405,3 +1405,18 @@ def test_release_window_gate_skips_far_off_movies_and_episodes(db):
         {"season_number": 1, "episode_number": 3, "air_date": past}])
     eps = {(r["season_number"], r["episode_number"]) for r in db.episode_wishlist_to_download()}
     assert (1, 1) not in eps and {(1, 2), (1, 3)} <= eps
+
+
+def test_enrichment_coverage_counts(db):
+    """The Studio-card coverage read: totals + tmdb match / tmdb-detail / tvdb match counts."""
+    F = [{"path": "/x.mkv", "resolution": "1080p"}]
+    db.upsert_movie("plex", {"server_id": "m1", "title": "Matched", "tmdb_id": 5, "files": F})
+    db.upsert_movie("plex", {"server_id": "m2", "title": "Unmatched", "files": F})
+    db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "tmdb_id": 9, "tvdb_id": 11, "seasons": []})
+    conn = db._get_connection()
+    conn.execute("UPDATE movies SET details_synced=1 WHERE server_id='m1'")
+    conn.commit(); conn.close()
+    cov = db.enrichment_coverage()
+    assert cov["movies"]["total"] == 2 and cov["movies"]["tmdb_matched"] == 1
+    assert cov["movies"]["tmdb_enriched"] == 1
+    assert cov["shows"]["total"] == 1 and cov["shows"]["tmdb_matched"] == 1 and cov["shows"]["tvdb_matched"] == 1

@@ -42,6 +42,17 @@ def register_routes(bp):
             logger.exception("video enrichment services failed")
             return jsonify({"services": []})
 
+    @bp.route("/enrichment/coverage", methods=["GET"])
+    def video_enrichment_coverage():
+        """TMDB/TVDB match + enrichment coverage for movies + shows — drives the dashboard
+        Studio cards' coverage bars (Overlay/Collection Studio need enriched metadata)."""
+        from . import get_video_db
+        try:
+            return jsonify(get_video_db().enrichment_coverage())
+        except Exception:
+            logger.exception("video enrichment coverage failed")
+            return jsonify({"movies": {}, "shows": {}})
+
     @bp.route("/enrichment/resync-details", methods=["POST"])
     def video_enrichment_resync_details():
         """Re-pull full TMDB metadata for every on-server, matched title — how an existing
