@@ -419,8 +419,22 @@
                 updatePagination(p);
                 updateEmpty(p.total_count);
                 maybeBackfillArt(d.items || []);
+                maybeBackfillMovieArt(d.items || []);
             })
             .catch(function () { if (ld) ld.classList.add('hidden'); render([]); updatePagination(null); updateEmpty(0); });
+    }
+
+    // Movie rows added while upcoming have no poster yet — fill them once TMDB has art
+    // (one cached tmdb_detail per movie, server-side), then reload so they light up.
+    var movieArtBackfilled = false;
+    function maybeBackfillMovieArt(items) {
+        if (state.tab !== 'movie' || movieArtBackfilled) return;
+        if (!(items || []).some(function (it) { return !it.poster_url; })) return;
+        movieArtBackfilled = true;
+        fetch('/api/video/wishlist/backfill-movie-art', { method: 'POST', headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (res) { if (res && res.updated > 0) load(); })
+            .catch(function () { /* best-effort */ });
     }
 
     // Rows added before art-capture have no episode still / season poster — fetch

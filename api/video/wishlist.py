@@ -164,6 +164,31 @@ def register_routes(bp):
             logger.exception("wishlist art backfill failed")
             return jsonify({"success": False, "updated": updated})
 
+    @bp.route("/wishlist/backfill-movie-art", methods=["POST"])
+    def video_wishlist_backfill_movie_art():
+        """Fill posters for movie wishlist rows added while upcoming (no art yet). One cached
+        tmdb_detail call per movie; best-effort. Returns rows filled."""
+        from . import get_video_db
+        from core.video.enrichment.engine import get_video_enrichment_engine
+        db = get_video_db()
+        eng = get_video_enrichment_engine()
+        updated = 0
+        try:
+            for row in db.wishlist_movies_missing_art():
+                try:
+                    d = eng.tmdb_detail("movie", row["tmdb_id"]) or {}
+                except Exception:   # noqa: BLE001 - one bad lookup shouldn't sink the batch
+                    continue
+                if d.get("redirect"):   # now owned → it'll drop off the wishlist on its own
+                    continue
+                if (d.get("poster_url") or d.get("year")) and db.set_wishlist_movie_art(
+                        row["tmdb_id"], poster_url=d.get("poster_url"), year=d.get("year")):
+                    updated += 1
+            return jsonify({"success": True, "updated": updated})
+        except Exception:
+            logger.exception("wishlist movie art backfill failed")
+            return jsonify({"success": False, "updated": updated})
+
     @bp.route("/wishlist/check", methods=["POST"])
     def video_wishlist_check():
         """Hydrate cards/modal. Body: {movie_ids: [...], show_tmdb_id?} →

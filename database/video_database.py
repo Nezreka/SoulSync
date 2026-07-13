@@ -5285,6 +5285,41 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def wishlist_movies_missing_art(self, limit: int = 40) -> list:
+        """Movie wishlist rows with no poster yet — added while upcoming, before TMDB had art.
+        Bounded; the movie art-backfill re-fetches these so they stop rendering art-less."""
+        conn = self._get_connection()
+        try:
+            return [{"tmdb_id": r["tmdb_id"], "title": r["title"]} for r in conn.execute(
+                "SELECT tmdb_id, title FROM video_wishlist "
+                "WHERE kind='movie' AND tmdb_id IS NOT NULL "
+                "AND (poster_url IS NULL OR TRIM(poster_url)='') "
+                "ORDER BY id DESC LIMIT ?", (int(limit),))]
+        except sqlite3.Error:
+            logger.exception("wishlist_movies_missing_art failed")
+            return []
+        finally:
+            conn.close()
+
+    def set_wishlist_movie_art(self, tmdb_id, poster_url=None, year=None) -> bool:
+        """Fill a wishlist movie's poster / year once TMDB has them. Only fills blanks
+        (COALESCE keeps any art already there), so it never clobbers. Returns True if updated."""
+        if not poster_url and not year:
+            return False
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE video_wishlist SET poster_url=COALESCE(poster_url, ?), year=COALESCE(year, ?) "
+                "WHERE kind='movie' AND tmdb_id=?",
+                (poster_url or None, year or None, int(tmdb_id)))
+            conn.commit()
+            return cur.rowcount > 0
+        except sqlite3.Error:
+            logger.exception("set_wishlist_movie_art failed (%s)", tmdb_id)
+            return False
+        finally:
+            conn.close()
+
     def set_wishlist_still(self, show_tmdb_id, season_number, episode_number, still_url) -> bool:
         """Fill a single episode's still (only if it doesn't already have one)."""
         if not still_url:
