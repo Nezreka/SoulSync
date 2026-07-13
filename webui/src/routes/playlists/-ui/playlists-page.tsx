@@ -50,7 +50,8 @@ export function PlaylistsPage() {
   const otherKinds = useMemo(
     () =>
       kinds.filter(
-        (k) => !k.tags.includes('library') && !k.tags.includes('discovery') && !activeKinds.has(k.kind),
+        (k) =>
+          !k.tags.includes('library') && !k.tags.includes('discovery') && !activeKinds.has(k.kind),
       ),
     [kinds, activeKinds],
   );
@@ -119,7 +120,9 @@ export function PlaylistsPage() {
                 {libraryKinds.length > 0 && (
                   <KindGroup title="From Your Library" kinds={libraryKinds} />
                 )}
-                {discoveryKinds.length > 0 && <KindGroup title="Discovery" kinds={discoveryKinds} />}
+                {discoveryKinds.length > 0 && (
+                  <KindGroup title="Discovery" kinds={discoveryKinds} />
+                )}
                 {otherKinds.length > 0 && <KindGroup title="Other" kinds={otherKinds} />}
               </section>
             )}
@@ -424,9 +427,7 @@ function PlaylistCard({
           <div className={styles.trackSection}>
             <h5 className={styles.configSectionTitle}>Tracks ({tracks.length})</h5>
             {detailQuery.isLoading && <p className={styles.loadingText}>Loading tracks...</p>}
-            {detailQuery.isError && (
-              <p className={styles.errorText}>Failed to load tracks</p>
-            )}
+            {detailQuery.isError && <p className={styles.errorText}>Failed to load tracks</p>}
             {tracks.length > 0 && (
               <div className={styles.trackList}>
                 {tracks.slice(0, 100).map((track, i) => (

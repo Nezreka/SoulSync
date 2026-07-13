@@ -6976,9 +6976,9 @@ class MusicDatabase:
                 mbid = getattr(track_obj, 'musicBrainzId', None) or None
 
                 # Extract addedAt from the media server object for date_added tracking
+                from datetime import datetime as _dt, timezone as _tz
                 added_at = getattr(track_obj, 'addedAt', None)
                 if added_at is not None:
-                    from datetime import datetime as _dt, timezone as _tz
                     if hasattr(added_at, 'strftime'):
                         added_at_str = added_at.strftime('%Y-%m-%d %H:%M:%S')
                     else:
