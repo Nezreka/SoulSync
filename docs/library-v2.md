@@ -1035,8 +1035,7 @@ externe oder Filesystem-Arbeit passiert.
 offen bleibt nur die echte Docker-Restart-Acceptance (Teil des ohnehin
 offenen Deployment-Acceptance-Punkts in 5.5) und die F08-Paritäts-Matrix.
 
-**LIB2-F08 — Behavior-Parität ist noch nicht durch die Test-Matrix bewiesen
-(P1).**
+**LIB2-F08 — Behavior-Parität durch Contract-Matrix absichern (P1).**
 Aktuelle gezielte Tests decken viele neue State-Transitions, Inventory- und
 Matching-Fälle ab, beweisen aber noch keine Parität für alle relevanten
 Kombinationen aus `best_quality`, Hybrid/Source-Order,
@@ -1047,6 +1046,23 @@ der neuesten lokalen Phase-5-Arbeit.
 und Library-v2-Szenarien laufen lassen und Selected Source, Candidate-Order,
 Rejection, Quarantäne, Approval, Retry und Terminal-State vergleichen. Die
 Full-Suite erst nach diesem Paritäts-Gate laufen lassen.
+**Status 2026-07-13: Contract-Gate implementiert** (`d921c1eb`).
+`tests/acquisition/test_legacy_parity_contract.py` speist beide Pfade mit
+denselben Szenarien und vergleicht normalisierte Business-Outcomes für:
+
+- Priority vs. `best_quality` (Selected Source + Candidate-Order);
+- Quality-Accept/Reject gegen das gemeinsame Profilmodell;
+- `acceptable`/`until_cutoff`/`until_top` gegen Legacy-Upgrade-Job und
+  Library-v2-Evaluation;
+- Quarantäne-, Per-Track-Completion- und globalen Request-Terminal-State;
+- Next-Candidate-Retry mit identischem Legacy-Task-State (Acquisition ergänzt
+  nur den Journal-Snapshot);
+- Restart-Resume gegen den vor dem Neustart persistierten Walk.
+
+Zusammen mit den F06-Tests für exakten Force-Reason-Match/abweichenden Grund
+liefen 60 gezielte Tests grün. Offen für den Meilenstein-Abschluss ist jetzt
+nur noch die bewusst nachgelagerte Python-Fullsuite; echte Client-/Docker-
+Acceptance bleibt ein separater Deployment-Punkt.
 
 Diese Findings ersetzen jede frühere Annahme, dass die neue Decision Engine
 und der Bundle-Importer als unabhängige Implementierungen akzeptabel waren.
@@ -1090,9 +1106,9 @@ auf dem aktuellen gespaltenen Verhalten.
   rekonstruieren~~ — **erledigt 2026-07-13** (Abschnitt 8: Retry-Journal
   `acquisition_retry_state` + Resume im periodischen Import-Zyklus, Commits
   `e3eca302`/`899536db`/`364262bf`);
-- die Old-vs-Library-v2-Paritäts-Matrix für echtes Client-Verhalten
-  erweitern. Die komplette Python-Suite ist grün (8031 bestanden, 7
-  übersprungen, 2 deselektiert);
+- ~~die Old-vs-Library-v2-Paritäts-Matrix erweitern~~ — **erledigt
+  2026-07-13** (`d921c1eb`, 11 neue Contract-Szenarien; 60 relevante Tests
+  grün). Die abschließende Python-Fullsuite läuft als nächstes;
 - echte SAB/NZBGet-, gemountete Path-Mapping- und Docker-Restart-
   Acceptance-Tests durchführen (die read-only Health-API ist implementiert;
   echte Deployment-Acceptance ist es nicht);
@@ -1103,15 +1119,13 @@ auf dem aktuellen gespaltenen Verhalten.
 
 Correction-Commits: `e1272be`, `e6484cb`, `2917f3c`, `99ffd2c`, `7d80e96`,
 `e394e2d`, `39549f0`, `e27070f`, `3eb0e92`, `a7344e5`, `6bc4d01`, `b464543`,
-`903cbd3`, `6ea7f3e2`.
+`903cbd3`, `6ea7f3e2`, `d921c1eb`.
 
-**Session-Status 2026-07-13:** F07-Retry-Persistenz und die letzte offene
-F06-Force-Grab↔Quarantäne-Brücke sind implementiert und gezielt getestet.
-**Logischer nächster Schritt:** F08 als abschließendes Paritäts-Gate:
-Contract-Tests Old-vs-Library-v2 über best_quality/Hybrid-Order/
-Upgrade-Policy/Quarantäne/Approval/Retry/Restart erweitern, danach die
-Python-Fullsuite als LIB2-011-Meilenstein-Abschluss und anschließend echte
-SAB/NZBGet-, Path-Mapping- und Docker-Restart-Acceptance durchführen.
+**Session-Status 2026-07-13:** F06, F07 und das F08-Contract-Gate sind
+implementiert und gezielt getestet. **Logischer nächster Schritt:** jetzt die
+Python-Fullsuite als LIB2-011-Meilenstein-Abschluss laufen lassen; danach sind
+echte SAB/NZBGet-, Path-Mapping- und Docker-Restart-Acceptance der oberste
+offene Phase-5-Punkt.
 
 ### 5.6 Verifikation (pro Phase, End-to-End in Docker)
 
@@ -1370,9 +1384,9 @@ zusätzliche, kleinteiligere offene Punkte aus dem 2026-07-10-Audit, die hier
 noch nicht als eigene Zeile standen (u.a. P1-02, P1-06, P1-24, P1-26, P1-28,
 P2-05 und eine Reihe P2-UX/Robustheits-Findings).
 
-1. **LIB2-011/F08 abschließen**: Old-vs-Library-v2-Contract-Matrix für
-   Source-Order, Quality-/Upgrade-Policy, Quarantäne/Approval, Retry und
-   Restart erweitern; danach erst die Fullsuite als Meilenstein-Gate.
+1. **LIB2-011 abschließen**: F08-Contract-Matrix ist implementiert
+   (`d921c1eb`); jetzt die bewusst nachgelagerte Python-Fullsuite als
+   Meilenstein-Gate ausführen und den Ergebnisstand hier festhalten.
 2. **Deployment-Acceptance für Phase 5**: echte SAB/NZBGet-, gemountete
    Path-Mapping- und Docker-Restart-Tests durchführen. Client-Monitor,
    Category-Adoption, Bundle-Inventory/Matching, `acquisition_imports` und
