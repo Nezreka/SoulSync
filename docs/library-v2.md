@@ -1064,6 +1064,16 @@ liefen 60 gezielte Tests grün. Offen für den Meilenstein-Abschluss ist jetzt
 nur noch die bewusst nachgelagerte Python-Fullsuite; echte Client-/Docker-
 Acceptance bleibt ein separater Deployment-Punkt.
 
+Der erste Fullsuite-Anlauf am 2026-07-13 deckte zusätzlich eine Python-3.14-
+Blockade im prozessweiten Sync-to-Async-Adapter auf: die erste
+`run_coroutine_threadsafe()`-Einreichung konnte den Selector-Loop-Thread in
+dieser Laufzeit nicht aufwecken. Commit `74ec9ceb` behält den persistenten
+Einzel-Loop bei, übergibt Arbeit aber über eine threadsichere Queue und pinnt
+den ersten Aufruf in einem frischen Prozess. Zwei Blocklist-Guard-Tests sind
+außerdem vom nachgelagerten externen Download isoliert. 70 gezielte Tests für
+Async-Bridge, Soulseek, Blocklist, Client-Monitor und Candidate-Store liefen
+danach grün; der erneute Fullsuite-Lauf bleibt das Meilenstein-Gate.
+
 Diese Findings ersetzen jede frühere Annahme, dass die neue Decision Engine
 und der Bundle-Importer als unabhängige Implementierungen akzeptabel waren.
 Die nächste Implementierungsphase ist LIB2-011, nicht ein weiteres Feature
@@ -1119,13 +1129,15 @@ auf dem aktuellen gespaltenen Verhalten.
 
 Correction-Commits: `e1272be`, `e6484cb`, `2917f3c`, `99ffd2c`, `7d80e96`,
 `e394e2d`, `39549f0`, `e27070f`, `3eb0e92`, `a7344e5`, `6bc4d01`, `b464543`,
-`903cbd3`, `6ea7f3e2`, `d921c1eb`.
+`903cbd3`, `6ea7f3e2`, `d921c1eb`, `74ec9ceb`.
 
 **Session-Status 2026-07-13:** F06, F07 und das F08-Contract-Gate sind
-implementiert und gezielt getestet. **Logischer nächster Schritt:** jetzt die
-Python-Fullsuite als LIB2-011-Meilenstein-Abschluss laufen lassen; danach sind
-echte SAB/NZBGet-, Path-Mapping- und Docker-Restart-Acceptance der oberste
-offene Phase-5-Punkt.
+implementiert und gezielt getestet. Der erste Fullsuite-Anlauf hat die
+Python-3.14-Async-Bridge-Blockade gefunden; sie ist mit `74ec9ceb` behoben und
+mit 70 gezielten Tests verifiziert. **Logischer nächster Schritt:** den
+Fullsuite-Lauf jetzt erneut als LIB2-011-Meilenstein-Abschluss ausführen;
+danach sind echte SAB/NZBGet-, Path-Mapping- und Docker-Restart-Acceptance der
+oberste offene Phase-5-Punkt.
 
 ### 5.6 Verifikation (pro Phase, End-to-End in Docker)
 
