@@ -417,22 +417,35 @@
     // send an identical request (incl. the auto-retry candidate pool).
     function buildGrabPayload(panel, r) {
         var p = panel._search || {};
+        var src = p.source || 'soulseek';   // the DOWNLOAD source this panel actually searched
         var container = panel.closest('[data-vgm-dl-content]');
         var o = (container && (container._opts || container._dl)) || {};
-        // the other accepted (live slskd) hits become the auto-retry pool
-        var pool = (panel._rows || []).filter(function (x) { return x.accepted && x.username && x.filename !== r.filename; })
-            .map(function (x) { return { username: x.username, filename: x.filename, size_bytes: x.size_bytes,
-                quality_label: x.quality_label, title: x.title }; });
-        return {
+        var payload = {
             kind: p.scope || 'movie', title: p.title || '', release_title: r.title,
-            source: 'soulseek', username: r.username, filename: r.filename,
-            size_bytes: r.size_bytes, quality_label: r.quality_label,
+            source: src, size_bytes: r.size_bytes, quality_label: r.quality_label,
             media_id: o.id || o.mediaId, media_source: o.source || o.mediaSource,
             year: o.year, poster_url: o.poster,
-            candidates: pool,
             search_ctx: { scope: p.scope || 'movie', title: p.title || '', year: o.year,
                 season: p.season != null ? p.season : null, episode: p.episode != null ? p.episode : null }
         };
+        if (src === 'soulseek') {
+            // the other accepted (live slskd) hits become the auto-retry pool
+            payload.username = r.username;
+            payload.filename = r.filename;
+            payload.candidates = (panel._rows || []).filter(function (x) { return x.accepted && x.username && x.filename !== r.filename; })
+                .map(function (x) { return { username: x.username, filename: x.filename, size_bytes: x.size_bytes,
+                    quality_label: x.quality_label, title: x.title }; });
+        } else {
+            // torrent / usenet — hand the magnet/NZB carriers to the backend client (no slskd requery)
+            payload.download_url = r.download_url;
+            payload.protocol = r.protocol;
+            payload.indexer_id = r.indexer_id;
+            payload.guid = r.guid;
+            payload.username = r.username;          // indexer name (display only)
+            payload.filename = r.filename || r.title;
+            payload.candidates = [];
+        }
+        return payload;
     }
 
     function sendGrab(payload) { return postJSON('/api/video/downloads/grab', payload); }
@@ -702,7 +715,17 @@
             container.addEventListener('change', onShowChange);
         }
         getJSON('/api/video/downloads/quality').then(function (p) { if (container.isConnected && p) renderTarget(container, p, false); });
-        getJSON('/api/video/downloads/config').then(function (c) { if (container.isConnected) st.sources = sourcesFromConfig(c); });
+        getJSON('/api/video/downloads/config').then(function (c) {
+            if (!container.isConnected) return;
+            st.sources = sourcesFromConfig(c);
+            // Any episode expanded BEFORE the config arrived built its source rows from the
+            // fallback list (soulseek only) and cached that via data-srcbuilt — rebuild those
+            // so every configured source (e.g. torrent) actually shows.
+            Array.prototype.slice.call(container.querySelectorAll('.vdl-ep[data-srcbuilt]')).forEach(function (ep) {
+                ep.removeAttribute('data-srcbuilt');
+                if (ep.classList.contains('vdl-ep--open')) buildEpSearch(container, ep);
+            });
+        });
         buildSeasons(container, d, st);
     }
 

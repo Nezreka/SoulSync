@@ -87,26 +87,32 @@
     // Auto-grab one episode: search → pick the best accepted release → grab it.
     function episode(opts) {
         opts = opts || {};
+        var src = opts.source || 'soulseek';
         var params = { scope: 'episode', title: opts.title, season: opts.season,
-            episode: opts.episode, source: opts.source || 'soulseek' };
+            episode: opts.episode, source: src };
         return runSearch(params).then(function (rows) {
             var best = bestRow(rows);
             if (!best) return { ok: false, error: 'no release found' };
-            // The other accepted hits become the auto-retry pool (same as the modal).
-            var pool = rows.filter(function (x) { return x.accepted && x.username && x.filename !== best.filename; })
-                .map(function (x) {
-                    return { username: x.username, filename: x.filename, size_bytes: x.size_bytes,
-                        quality_label: x.quality_label, title: x.title };
-                });
             var payload = {
                 kind: 'show', title: opts.title, release_title: best.title,
-                source: 'soulseek', username: best.username, filename: best.filename,
-                size_bytes: best.size_bytes, quality_label: best.quality_label,
+                source: src, size_bytes: best.size_bytes, quality_label: best.quality_label,
                 media_id: opts.mediaId, media_source: opts.mediaSource, year: opts.year, poster_url: opts.poster,
-                candidates: pool,
                 search_ctx: { scope: 'episode', title: opts.title, year: opts.year,
                     season: opts.season, episode: opts.episode }
             };
+            if (src === 'soulseek') {
+                // The other accepted hits become the auto-retry pool (same as the modal).
+                payload.username = best.username; payload.filename = best.filename;
+                payload.candidates = rows.filter(function (x) { return x.accepted && x.username && x.filename !== best.filename; })
+                    .map(function (x) { return { username: x.username, filename: x.filename, size_bytes: x.size_bytes,
+                        quality_label: x.quality_label, title: x.title }; });
+            } else {
+                // torrent / usenet — the magnet/NZB carriers the backend hands to the client
+                payload.download_url = best.download_url; payload.protocol = best.protocol;
+                payload.indexer_id = best.indexer_id; payload.guid = best.guid;
+                payload.username = best.username; payload.filename = best.filename || best.title;
+                payload.candidates = [];
+            }
             return postJSON('/api/video/downloads/grab', payload).then(function (res) {
                 if (res && res.ok) {
                     document.dispatchEvent(new CustomEvent('soulsync:video-download-started'));
