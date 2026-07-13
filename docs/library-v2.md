@@ -11,7 +11,9 @@
 > `Entity-Eligibility-Gate`) und 5.3.2 (Force-Grab↔Quarantäne-Brücke, Teil
 > von F06); am 2026-07-13 ergänzt um Abschnitt 10 (ADR-Log + Findings-Nachtrag
 > aus `docs/library-v2-architecture-audit-2026-07-10.md`, danach gelöscht —
-> diese Datei war die letzte verbleibende separate Library-v2-Doku).
+> diese Datei war die letzte verbleibende separate Library-v2-Doku); am
+> 2026-07-13 Abschnitt 8 (Retry-Persistenz) von Spec auf implementiert
+> gestellt (F07 geschlossen bis auf Deployment-Acceptance).
 
 Opt-in, Lidarr-style Library-Manager auf SoulSyncs eigener
 Such-/Download-/Processing-/Tagging-Pipeline. Gated hinter
@@ -1001,6 +1003,10 @@ Retry-Entscheidung verlieren, auch wenn die neuen Monitor-/Import-Rows
 Legacy-Task-/Batch-Kontext auf Acquisition Request, Grab, Candidate, Import
 und History-IDs mappt, dann jeden retry-relevanten Fact persistieren, BEVOR
 externe oder Filesystem-Arbeit passiert.
+**Status 2026-07-13: implementiert** gemäß der Spec in Abschnitt 8
+(Retry-Journal + Restart-Resume, Commits `e3eca302`/`899536db`/`364262bf`);
+offen bleibt nur die echte Docker-Restart-Acceptance (Teil des ohnehin
+offenen Deployment-Acceptance-Punkts in 5.5) und die F08-Paritäts-Matrix.
 
 **LIB2-F08 — Behavior-Parität ist noch nicht durch die Test-Matrix bewiesen
 (P1).**
@@ -1048,11 +1054,11 @@ auf dem aktuellen gespaltenen Verhalten.
   primäre File gegen den Cutoff und trägt die exakte Profil-ID.
 
 **Noch offen, bevor LIB2-011/Phase 5 als komplett gilt:**
-- gecachte Candidates, used/exhausted Sources und automatische
+- ~~gecachte Candidates, used/exhausted Sources und automatische
   Next-Candidate-Continuation nach einem Prozess-Neustart persistieren oder
-  rekonstruieren. Aktuelle Persistenz verhindert Blind-Redispatch der
-  quarantänten Datei und bewahrt Manual Approval, rekreiert aber nicht die
-  In-Memory-Candidate-Liste des alten Workers;
+  rekonstruieren~~ — **erledigt 2026-07-13** (Abschnitt 8: Retry-Journal
+  `acquisition_retry_state` + Resume im periodischen Import-Zyklus, Commits
+  `e3eca302`/`899536db`/`364262bf`);
 - die Old-vs-Library-v2-Paritäts-Matrix für echtes Client-Verhalten
   erweitern. Die komplette Python-Suite ist grün (8031 bestanden, 7
   übersprungen, 2 deselektiert);
@@ -1067,6 +1073,16 @@ auf dem aktuellen gespaltenen Verhalten.
 Correction-Commits: `e1272be`, `e6484cb`, `2917f3c`, `99ffd2c`, `7d80e96`,
 `e394e2d`, `39549f0`, `e27070f`, `3eb0e92`, `a7344e5`, `6bc4d01`, `b464543`,
 `903cbd3`.
+
+**Session-Status 2026-07-13:** Die F07-Retry-Persistenz (Abschnitt 8) ist
+implementiert und getestet — Journal, Hooks und Restart-Resume laufen im
+periodischen Import-Zyklus. **Logischer nächster Schritt:** die
+Force-Grab↔Quarantäne-Brücke aus 5.3.2 umsetzen (letzter konkret spezifizierter
+Teil von F06 — Reason-Code des Force-Grab persistiert vorhanden, Auto-Approve
+bei identischem Quarantäne-Grund fehlt), danach F08 als abschließendes
+Paritäts-Gate (Contract-Tests Old-vs-Library-v2 über best_quality/
+Hybrid-Order/Upgrade-Policy/Quarantäne/Approval/Retry/Restart) und erst dann
+die Full-Suite als Meilenstein-Abschluss.
 
 ### 5.6 Verifikation (pro Phase, End-to-End in Docker)
 
@@ -1364,15 +1380,56 @@ P2-05 und eine Reihe P2-UX/Robustheits-Findings).
 
 ---
 
-## 8. Retry-Persistenz nach Quality-/Integrity-/AcoustID-Fehlern (Spec, noch nicht implementiert)
+## 8. Retry-Persistenz nach Quality-/Integrity-/AcoustID-Fehlern (implementiert 2026-07-13)
 
-Dieser Punkt ist bewusst als eigener Folgejob offen (Teil von LIB2-F07). Der
+Dieser Punkt war als eigener Folgejob offen (Teil von LIB2-F07). Der
 bestehende Worker besitzt Kandidatenliste, `used_sources`, erschöpfte Quellen
 und Retry-Zähler bisher nur im RAM. Für Library-Acquisition muss dieser
 Zustand nach einem Neustart wiederherstellbar werden, ohne die bestehende
 Auswahl- oder Retry-Logik zu duplizieren.
 
-**Geplante Umsetzung:**
+> **Status: implementiert am 2026-07-13** (Commits `e3eca302` Journal-Modul,
+> `899536db` Write-/Close-Hooks, `364262bf` Restart-Resume). Ein früherer
+> Anlauf (`17a309fa`) war als unverdrahtetes Standalone-Modul reverted worden
+> (`4d03bd30`); diese Umsetzung folgt der untenstehenden Spec vollständig.
+> Umsetzungsdetails:
+> - `core/acquisition/retry_state.py`: Tabelle `acquisition_retry_state`
+>   (PK = Legacy-`task_id`, plus `import_id`/`track_id`), redigierter
+>   Kandidaten-Snapshot per Feld-Whitelist (nie `_source_metadata`/URLs/
+>   Magnets/Tokens), used/exhausted Sources, Zähler pro Quelle + gesamt,
+>   `query_count`, Status `active/completed/failed/approved/cancelled`
+>   (terminale Rows können nie reaktiviert werden), 7-Tage-Expiry.
+> - Hooks (`899536db`): `requeue_quarantined_task_for_retry` snapshottet den
+>   Walk VOR der Worker-Resubmission (bzw. schließt die Row bei Cancel/
+>   Budget-Erschöpfung) — dafür wurde die Funktion in einen gelockten
+>   Entscheidungs-Teil und Journal-I/O außerhalb von `tasks_lock` zerlegt;
+>   `attempt_download_with_candidates` persistiert jede neue used-Source vor
+>   dem externen Download-Start; `record_pipeline_file_completed`/`record_
+>   import_failure` schließen Rows in derselben Transaktion; Quarantäne-
+>   Approve und Task-Cancel schließen via `pipeline_callback`-Notifier.
+>   Alles fail-open; Legacy-Tasks ohne Acquisition-Marker zahlen nur einen
+>   Dict-Lookup.
+> - `core/acquisition/retry_resume.py` (`364262bf`): läuft am Anfang jedes
+>   `advance_open_imports`-Zyklus (also im 15s-Monitor-Takt), purged expired
+>   Rows und baut für jede aktive Row ohne lebenden `download_tasks`-Eintrag
+>   den Legacy-Task wieder auf (Track-Kontext aus dem persistierten
+>   Import-Plan via Bridge-`_pipeline_context`, Kandidaten als rekonstruierte
+>   `TrackResult`s inkl. `confidence`, `_quarantine_retry=True` für den
+>   Cached-First-Walk) und resubmittet den EXISTIERENDEN Worker.
+> - Manual Picks journalen nie (Requeue verweigert sie vor jedem Snapshot) —
+>   ein Resume kann daher nie eine manuelle Kandidatenwahl überschreiben.
+> - Bewusste Grenzen: (1) Cancel-Pfade jenseits des Einzel-Task-Cancel-
+>   Endpoints (z.B. Cancel-All) schließen Rows nicht sofort — terminale
+>   Import-Transitions + TTL decken das ab; (2) wird der Retry-Toggle
+>   (`retry_next_candidate_on_mismatch`) mitten im Walk deaktiviert, bleibt
+>   die Row bis zum TTL aktiv — ein Resume walkt dann einmal die Kandidaten,
+>   eine erneute Quarantäne wird aber ohne Requeue normal fehlschlagen;
+>   (3) die echte Docker-Restart-Acceptance steht noch aus (Teil des offenen
+>   Deployment-Acceptance-Punkts in 5.5).
+> Tests: `tests/acquisition/test_retry_state.py`,
+> `test_retry_journal_hooks.py`, `test_retry_resume.py`.
+
+**Umsetzung (ursprüngliche Spec, unverändert gültig):**
 - Ein kurzlebiges Retry-Journal pro Acquisition-Task und Track speichern.
 - Nur redigierte Kandidatenfelder speichern: Quelle, Dateiname,
   Qualitätsdaten und Reihenfolge; keine URLs, Magnet-Links, Tokens oder
