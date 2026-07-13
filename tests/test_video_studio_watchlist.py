@@ -206,3 +206,50 @@ def test_api_follow_and_settings(tmp_path):
         assert chk["results"] == {"41077": True}
     finally:
         videoapi._video_db = None
+
+
+# ── studio family presets (Phase 3) ───────────────────────────────────────────
+
+def test_studio_presets_are_pure_with_valid_deduped_members():
+    from core.video.studio_presets import studio_presets, preset_member_ids, get_preset
+    ps = studio_presets()
+    disney = get_preset("disney")
+    assert disney and {3, 420, 1}.issubset({m["tmdb_id"] for m in disney["members"]})  # pixar/marvel/lucasfilm
+    ids = preset_member_ids()
+    assert len(ids) == len(set(ids))                # deduped across families
+    for p in ps:
+        for m in p["members"]:
+            assert isinstance(m["tmdb_id"], int) and m["name"]
+    # returned copies are independent — annotating one call doesn't leak into the source
+    studio_presets()[0]["members"][0]["logo"] = "x"
+    assert "logo" not in get_preset("disney")["members"][0]
+
+
+def test_studio_presets_endpoint_carries_logo_and_followed(tmp_path):
+    import api.video as videoapi
+    import core.video.enrichment.engine as eng_mod
+    from core.video.enrichment.engine import VideoEnrichmentEngine
+    db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
+    db.add_to_watchlist("studio", 3, "Pixar")        # follow one member only
+
+    class FakeTmdb:
+        enabled = True
+        def company(self, cid):
+            return {"tmdb_id": cid, "name": "Studio %d" % cid, "logo": "/l%d.png" % cid}
+
+    videoapi._video_db = db
+    eng_mod._engine = VideoEnrichmentEngine(db, {"tmdb": FakeTmdb()})
+    app = Flask(__name__)
+    app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
+    client = app.test_client()
+    try:
+        d = client.get("/api/video/studio/presets").get_json()
+        assert d["success"]
+        disney = [p for p in d["presets"] if p["id"] == "disney"][0]
+        pix = [m for m in disney["members"] if m["tmdb_id"] == 3][0]
+        marvel = [m for m in disney["members"] if m["tmdb_id"] == 420][0]
+        assert pix["followed"] is True and pix["logo"]        # followed member, logo resolved
+        assert marvel["followed"] is False                    # sibling stays independent
+    finally:
+        videoapi._video_db = None
+        eng_mod._engine = None

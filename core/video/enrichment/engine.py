@@ -821,19 +821,34 @@ class VideoEnrichmentEngine:
                 c["library_id"] = self.db.library_id_for_tmdb(c["kind"], c["tmdb_id"], srv)
         return p
 
+    @staticmethod
+    def _norm_company(s) -> str:
+        """Lowercased alphanumerics only — so 'A 24 Studios' → 'a24studios' matches 'a24'."""
+        return "".join(ch for ch in str(s or "").lower() if ch.isalnum())
+
     def company_search(self, query, *, limit=10) -> list:
-        """TMDB studio search for the in-app Studios search. TMDB returns namesakes in an
-        unhelpful order (the real A24 with 177 films ranks BELOW a 1-film namesake), so we
-        attach each result's movie count (fetched in parallel) and sort by it — the real
-        studio floats to the top and the UI can show '177 films' to disambiguate."""
+        """TMDB studio search for the in-app Studios search. TMDB's /search/company is fuzzy
+        (a query of 'a24' also returns N24 / A2O / B24 / A26 …), so we (1) keep only results
+        whose normalized name actually contains the query (or vice-versa) to drop the junk,
+        (2) attach each survivor's movie count in parallel, (3) drop empty (0-film) shells you
+        couldn't follow anyway, and (4) sort by count so the real studio (A24, 177 films) leads
+        and the UI can show '177 films' to disambiguate genuine namesakes."""
         w = self.workers.get("tmdb")
         if not w or not w.enabled:
             return []
         try:
-            raw = (w.client.search_companies(query) or [])[:limit]
+            raw = w.client.search_companies(query) or []
         except Exception:
             logger.exception("company_search failed")
             return []
+        # Relevance filter first (before the expensive count fetch), so 'a24' stops matching
+        # 'N24'/'A2O'/'B24'. A genuinely-named namesake ('A24' with 1 film) still matches and
+        # is kept — disambiguation is by film count, not by hiding real namesakes.
+        qn = self._norm_company(query)
+        if qn:
+            raw = [c for c in raw
+                   if (lambda n: n and (qn in n or n in qn))(self._norm_company(c.get("title")))]
+        raw = raw[:limit]
         if not raw:
             return []
         from concurrent.futures import ThreadPoolExecutor
@@ -847,6 +862,7 @@ class VideoEnrichmentEngine:
             with ThreadPoolExecutor(max_workers=min(8, len(raw))) as ex:
                 for c, n in zip(raw, ex.map(_count, raw)):
                     c["movie_count"] = n
+            raw = [c for c in raw if (c.get("movie_count") or 0) > 0]   # no films → nothing to follow
             raw.sort(key=lambda c: c.get("movie_count") or 0, reverse=True)
         except Exception:   # noqa: BLE001 - unranked results are still usable
             logger.debug("company count enrichment failed", exc_info=True)

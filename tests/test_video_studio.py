@@ -187,6 +187,22 @@ def test_company_movies_annotates_owned(db):
     assert owned[500] is None and owned[502] is None
 
 
+def test_company_search_drops_fuzzy_noise_and_empty_shells(db):
+    # TMDB /search/company is fuzzy: 'A24' also returns N24 / A2O and a 0-film 'A24 Music'.
+    class Noisy:
+        enabled = True
+        def search_companies(self, q):
+            return [{"kind": "studio", "tmdb_id": 41077, "title": "A24", "logo": "l"},
+                    {"kind": "studio", "tmdb_id": 999, "title": "N24", "logo": "l"},   # name miss
+                    {"kind": "studio", "tmdb_id": 888, "title": "A2O", "logo": "l"},   # name miss
+                    {"kind": "studio", "tmdb_id": 777, "title": "A24 Music", "logo": None}]  # 0 films
+        def company_movies(self, cid, *, page=1, sort="primary_release_date.desc"):
+            counts = {41077: 177, 999: 23, 888: 1, 777: 0}
+            return {"results": [], "total_pages": 1, "total_results": counts.get(cid, 0)}
+    out = VideoEnrichmentEngine(db, {"tmdb": Noisy()}).company_search("A24")
+    assert [c["tmdb_id"] for c in out] == [41077]   # only the real, non-empty A24 survives
+
+
 # --------------------------------------------------------------------------- #
 # API endpoints                                                               #
 # --------------------------------------------------------------------------- #
