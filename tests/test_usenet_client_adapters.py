@@ -20,7 +20,18 @@ from core.usenet_clients.sabnzbd import SABnzbdAdapter, _map_state as sab_map
 
 
 def _run(coro):
-    return asyncio.new_event_loop().run_until_complete(coro)
+    loop = asyncio.new_event_loop()
+
+    async def _drain_with_heartbeat():
+        task = loop.create_task(coro)
+        while not task.done():
+            await asyncio.sleep(0.01)
+        return task.result()
+
+    try:
+        return loop.run_until_complete(_drain_with_heartbeat())
+    finally:
+        loop.close()
 
 
 def _mock_response(status_code: int, json_body=None):
