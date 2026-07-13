@@ -63,6 +63,7 @@ EXPECTED_ACTION_NAMES = frozenset({
     'video_add_airing_episodes',
     'video_refresh_airing_schedules',
     'video_scan_watchlist_people',
+    'video_scan_watchlist_studios',
     'video_scan_watchlist_channels',
     'video_scan_watchlist_playlists',
     'video_process_movie_wishlist',

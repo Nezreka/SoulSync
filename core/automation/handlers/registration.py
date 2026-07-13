@@ -40,6 +40,7 @@ from core.automation.handlers.video_auto_wishlist_airing import auto_video_add_a
 from core.automation.handlers.video_refresh_airing_schedules import auto_video_refresh_airing_schedules
 from core.automation.handlers.video_clean_youtube import auto_video_clean_youtube_episodes
 from core.automation.handlers.video_scan_watchlist_people import auto_video_scan_watchlist_people
+from core.automation.handlers.video_scan_watchlist_studios import auto_video_scan_watchlist_studios
 from core.automation.handlers.video_scan_watchlist_channels import auto_video_scan_watchlist_channels
 from core.automation.handlers.video_process_youtube_wishlist import auto_video_process_youtube_wishlist
 from core.automation.handlers.video_scan_watchlist_playlists import auto_video_scan_watchlist_playlists
@@ -263,6 +264,11 @@ def register_all(deps: AutomationDeps) -> None:
     engine.register_action_handler(
         'video_scan_watchlist_people',
         lambda config: auto_video_scan_watchlist_people(config, deps),
+    )
+    # Studios: wishlist every un-owned movie a followed studio produced (catalog + upcoming).
+    engine.register_action_handler(
+        'video_scan_watchlist_studios',
+        lambda config: auto_video_scan_watchlist_studios(config, deps),
     )
     # Channels: new long-form uploads from followed YouTube channels (forward + last-N net).
     engine.register_action_handler(

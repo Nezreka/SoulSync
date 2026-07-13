@@ -13,7 +13,7 @@
     var PAGE_ID = 'video-watchlist';
     var LIMIT = 60;
     var state = { loaded: false, tab: 'show', search: '', sort: 'default', page: 1,
-                  counts: { show: 0, person: 0 }, channelCount: 0 };
+                  counts: { show: 0, person: 0, studio: 0 }, channelCount: 0 };
     var searchTimer = null;
 
     // A followed YouTube channel card. Clicking it opens the in-app channel page
@@ -46,6 +46,22 @@
                 esc(pl.title) + '</span><span class="vyt-wcard-meta">' +
                 (pl.video_count > 0 ? esc(pl.video_count + ' video' + (pl.video_count === 1 ? '' : 's')) : 'Playlist') +
             '</span></div></div>';
+    }
+
+    // A followed studio card — a bright logo tile (studio logos are dark artwork) with a
+    // back-catalog cog + the shared follow eye; opens the studio detail page.
+    function studioCard(it) {
+        var logo = it.poster_url
+            ? '<img class="vwlp-studio-logo" src="' + esc(it.poster_url) + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">'
+            : '<span class="vwlp-studio-ph">&#127902;</span>';
+        var eye = wlBtn({ kind: 'studio', tmdbId: it.tmdb_id, title: it.title, poster: it.poster_url });
+        var cog = '<button type="button" data-vwlp-ssettings="' + esc(it.tmdb_id) + '" data-title="' + esc(it.title) + '" ' +
+            'title="Back-catalog settings" aria-label="Back-catalog settings" class="vwlp-studio-cog">&#9881;</button>';
+        return '<a class="vwlp-card vwlp-card--studio" href="/video-detail/tmdb/studio/' + esc(it.tmdb_id) + '" ' +
+            'data-vwlp-open="studio" data-vwlp-source="tmdb" data-vwlp-openid="' + esc(it.tmdb_id) + '">' +
+            '<div class="vwlp-studio-logo-wrap">' + logo + cog + eye + '</div>' +
+            '<div class="vwlp-card-info"><span class="vwlp-card-title" title="' + esc(it.title) + '">' +
+            esc(it.title) + '</span></div></a>';
     }
 
     function $(s, r) { return (r || document).querySelector(s); }
@@ -103,7 +119,7 @@
 
     function updateNavBadge(counts) {
         var b = $('[data-video-watchlist-badge]'); if (!b) return;
-        var n = counts ? ((counts.show || 0) + (counts.person || 0)) : 0;
+        var n = counts ? ((counts.show || 0) + (counts.person || 0) + (counts.studio || 0)) : 0;
         b.textContent = n;
         b.classList.toggle('hidden', !n);
     }
@@ -115,9 +131,11 @@
     }
 
     function setCounts(counts) {
-        state.counts = { show: (counts && counts.show) || 0, person: (counts && counts.person) || 0 };
+        state.counts = { show: (counts && counts.show) || 0, person: (counts && counts.person) || 0,
+                         studio: (counts && counts.studio) || 0 };
         var cs = $('[data-vwlp-count-show]'); if (cs) cs.textContent = state.counts.show;
         var cp = $('[data-vwlp-count-person]'); if (cp) cp.textContent = state.counts.person;
+        var cst = $('[data-vwlp-count-studio]'); if (cst) cst.textContent = state.counts.studio;
         updateNavBadge(state.counts);
     }
 
@@ -140,6 +158,7 @@
             et.textContent = state.search ? 'No matches'
                 : state.tab === 'show' ? 'No shows on your watchlist yet'
                 : state.tab === 'person' ? 'No people on your watchlist yet'
+                : state.tab === 'studio' ? 'No studios followed yet — follow one from its studio page'
                 : 'No channels followed yet — paste a channel link on the Search page';
         }
     }
@@ -158,7 +177,9 @@
             items.forEach(function (it) { VideoWatchlist._watched[state.tab][it.tmdb_id] = true; });
         }
         if (grid) {
-            grid.innerHTML = items.map(function (it) { return cardHTML(it, state.tab); }).join('');
+            var renderer = state.tab === 'studio'
+                ? studioCard : function (it) { return cardHTML(it, state.tab); };
+            grid.innerHTML = items.map(renderer).join('');
             if (window.VideoWatchlist) VideoWatchlist.hydrate(grid);
         }
     }
@@ -202,7 +223,7 @@
     }
 
     function setTab(tab) {
-        if (tab !== 'show' && tab !== 'person' && tab !== 'channel') return;
+        if (tab !== 'show' && tab !== 'person' && tab !== 'channel' && tab !== 'studio') return;
         state.tab = tab; state.page = 1;
         var tabs = document.querySelectorAll('[data-vwlp-tab]');
         for (var i = 0; i < tabs.length; i++)
@@ -221,18 +242,22 @@
         else refreshBadge();                              // not visible → keep the nav badge current
     }
 
-    // ── per-person back-catalog settings modal (mirrors the channel cog) ─────────
-    function openPersonSettings(tmdbId, title) {
-        fetch('/api/video/watchlist/person/' + tmdbId + '/settings', { headers: { Accept: 'application/json' } })
+    // ── per-follow back-catalog settings modal (person + studio; mirrors the channel cog) ──
+    // kind: 'person' | 'studio' — same window control, kind-specific copy + endpoint.
+    var _LB_NOUN = { person: { fallback: 'Person', films: 'their films', you: 'them' },
+                     studio: { fallback: 'Studio', films: "this studio's films", you: 'it' } };
+    function openLookbackSettings(kind, tmdbId, title) {
+        fetch('/api/video/watchlist/' + kind + '/' + tmdbId + '/settings', { headers: { Accept: 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
                 if (!d || !d.success) { if (typeof showToast === 'function') showToast('Could not load settings', 'error'); return; }
-                renderPersonSettings(tmdbId, title, d.settings || {});
+                renderLookbackSettings(kind, tmdbId, title, d.settings || {});
             })
             .catch(function () { if (typeof showToast === 'function') showToast('Could not load settings', 'error'); });
     }
 
-    function renderPersonSettings(tmdbId, title, s) {
+    function renderLookbackSettings(kind, tmdbId, title, s) {
+        var noun = _LB_NOUN[kind] || _LB_NOUN.person;
         var OPTS = [{ l: 'Forward only', v: 0 }, { l: 'Last 1 year', v: 1 }, { l: 'Last 2 years', v: 2 },
                     { l: 'Last 3 years', v: 3 }, { l: 'Last 5 years', v: 5 }, { l: 'Last 10 years', v: 10 },
                     { l: 'Everything', v: -1 }];
@@ -252,10 +277,10 @@
             '<div style="width:min(430px,100%);background:#15161c;border:1px solid rgba(255,255,255,.1);' +
                 'border-radius:16px;padding:22px;box-shadow:0 24px 60px rgba(0,0,0,.5);">' +
                 '<div style="font-size:11px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:rgba(255,255,255,.45);">Back-catalog window</div>' +
-                '<h3 style="margin:4px 0 2px;font-size:19px;color:#fff;">' + esc(title || 'Person') + '</h3>' +
+                '<h3 style="margin:4px 0 2px;font-size:19px;color:#fff;">' + esc(title || noun.fallback) + '</h3>' +
                 '<p style="margin:0 0 16px;font-size:12.5px;line-height:1.55;color:rgba(255,255,255,.55);">' +
-                    'How far back to wishlist their films. New &amp; upcoming films are always followed either way' +
-                    (followed ? ' — you followed them on <b>' + esc(followed) + '</b>.' : '.') + '</p>' +
+                    'How far back to wishlist ' + noun.films + '. New &amp; upcoming films are always followed either way' +
+                    (followed ? ' — you followed ' + noun.you + ' on <b>' + esc(followed) + '</b>.' : '.') + '</p>' +
                 '<div data-pset-opts style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
                     OPTS.map(optHTML).join('') + '</div>' +
                 '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:20px;">' +
@@ -281,7 +306,7 @@
             var save = e.target.closest('[data-pset-save]');
             if (save) {
                 save.disabled = true;
-                fetch('/api/video/watchlist/person/' + tmdbId + '/settings', {
+                fetch('/api/video/watchlist/' + kind + '/' + tmdbId + '/settings', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ lookback_years: sel }) })
                     .then(function (r) { return r.ok ? r.json() : null; })
@@ -350,7 +375,13 @@
         var pcog = e.target.closest('[data-vwlp-psettings]');
         if (pcog) {
             e.preventDefault(); e.stopPropagation();
-            openPersonSettings(pcog.getAttribute('data-vwlp-psettings'), pcog.getAttribute('data-title'));
+            openLookbackSettings('person', pcog.getAttribute('data-vwlp-psettings'), pcog.getAttribute('data-title'));
+            return;
+        }
+        var scog = e.target.closest('[data-vwlp-ssettings]');
+        if (scog) {
+            e.preventDefault(); e.stopPropagation();
+            openLookbackSettings('studio', scog.getAttribute('data-vwlp-ssettings'), scog.getAttribute('data-title'));
             return;
         }
         var cog = e.target.closest('[data-vyt-wsettings]');

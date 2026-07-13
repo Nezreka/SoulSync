@@ -4656,10 +4656,10 @@ class VideoDatabase:
 
     def add_to_watchlist(self, kind: str, tmdb_id: int, title: str,
                          poster_url: str | None = None, library_id: int | None = None) -> bool:
-        """Explicitly follow a show/person (state='follow'). Idempotent upsert on
+        """Explicitly follow a show/person/studio (state='follow'). Idempotent upsert on
         (kind, tmdb_id) — re-adding refreshes title/poster/library_id and clears
         any 'mute' tombstone. Returns True on success."""
-        if kind not in ("show", "person") or not tmdb_id or not title:
+        if kind not in ("show", "person", "studio") or not tmdb_id or not title:
             return False
         conn = self._get_connection()
         try:
@@ -4725,7 +4725,7 @@ class VideoDatabase:
         """Un-follow. Stored as a 'mute' tombstone (not a delete) so an
         actively-airing library show — watched by default — is not silently
         re-added. Returns True."""
-        if kind not in ("show", "person") or not tmdb_id:
+        if kind not in ("show", "person", "studio") or not tmdb_id:
             return False
         conn = self._get_connection()
         try:
@@ -4781,8 +4781,8 @@ class VideoDatabase:
         return out
 
     def list_watchlist(self, kind: str | None = None, server_source=None) -> list[dict]:
-        """Effective watchlist. Shows include the airing-library default; people
-        are explicit follows only."""
+        """Effective watchlist. Shows include the airing-library default; people and
+        studios are explicit follows only."""
         conn = self._get_connection()
         try:
             people = []
@@ -4792,12 +4792,21 @@ class VideoDatabase:
                         "FROM video_watchlist WHERE kind='person' AND state='follow' "
                         "ORDER BY date_added DESC, id DESC"):
                     d = dict(r); d["kind"] = "person"; people.append(d)
+            studios = []
+            if kind in (None, "studio"):
+                for r in conn.execute(
+                        "SELECT tmdb_id, title, poster_url, library_id, date_added, lookback_years "
+                        "FROM video_watchlist WHERE kind='studio' AND state='follow' "
+                        "ORDER BY date_added DESC, id DESC"):
+                    d = dict(r); d["kind"] = "studio"; studios.append(d)
             shows = self._effective_shows(conn, server_source) if kind in (None, "show") else []
             if kind == "person":
                 return people
+            if kind == "studio":
+                return studios
             if kind == "show":
                 return shows
-            return shows + people
+            return shows + people + studios
         finally:
             conn.close()
 
@@ -4806,7 +4815,7 @@ class VideoDatabase:
         shows) an actively-airing library show that isn't muted. Hydrates buttons."""
         out: dict = {}
         ids = [int(x) for x in (tmdb_ids or []) if x]
-        if kind not in ("show", "person") or not ids:
+        if kind not in ("show", "person", "studio") or not ids:
             return out
         conn = self._get_connection()
         try:
@@ -4833,10 +4842,12 @@ class VideoDatabase:
             conn.close()
 
     def watchlist_counts(self, server_source=None) -> dict:
-        """{'show': n, 'person': n, 'total': n} over the EFFECTIVE watchlist."""
+        """{'show': n, 'person': n, 'studio': n, 'total': n} over the EFFECTIVE watchlist."""
         shows = self.list_watchlist("show", server_source=server_source)
         people = self.list_watchlist("person")
-        return {"show": len(shows), "person": len(people), "total": len(shows) + len(people)}
+        studios = self.list_watchlist("studio")
+        return {"show": len(shows), "person": len(people), "studio": len(studios),
+                "total": len(shows) + len(people) + len(studios)}
 
     def query_watchlist(self, kind: str, *, search=None, sort="default", page=1, limit=60,
                         server_source=None) -> dict:
@@ -4849,7 +4860,7 @@ class VideoDatabase:
             limit = max(1, min(200, int(limit or 60)))
         except (TypeError, ValueError):
             page, limit = 1, 60
-        items = self.list_watchlist(kind, server_source=server_source) if kind in ("show", "person") else []
+        items = self.list_watchlist(kind, server_source=server_source) if kind in ("show", "person", "studio") else []
         s = (search or "").strip().lower()
         if s:
             items = [it for it in items if s in (it.get("title") or "").lower()]
@@ -5395,28 +5406,33 @@ class VideoDatabase:
         finally:
             conn.close()
 
-    def get_person_lookback(self, tmdb_id) -> dict | None:
-        """A followed person's back-catalog window: {tmdb_id, title, date_added, lookback_years}
-        (lookback_years: 0/NULL = forward-only, N = years, -1 = everything). None if not followed."""
+    def get_watchlist_lookback(self, kind: str, tmdb_id) -> dict | None:
+        """A followed person/studio's back-catalog window: {tmdb_id, title, date_added,
+        lookback_years} (0/NULL = forward-only, N = years, -1 = everything). None if not
+        followed. Shared by the person + studio settings modals."""
+        if kind not in ("person", "studio"):
+            return None
         conn = self._get_connection()
         try:
             r = conn.execute("SELECT tmdb_id, title, date_added, lookback_years FROM video_watchlist "
-                             "WHERE kind='person' AND tmdb_id=? AND state='follow'",
-                             (int(tmdb_id),)).fetchone()
+                             "WHERE kind=? AND tmdb_id=? AND state='follow'",
+                             (kind, int(tmdb_id))).fetchone()
             if not r:
                 return None
             d = dict(r)
             d["lookback_years"] = int(d["lookback_years"]) if d["lookback_years"] is not None else 0
             return d
         except (sqlite3.Error, TypeError, ValueError):
-            logger.exception("get_person_lookback failed for %s", tmdb_id)
+            logger.exception("get_watchlist_lookback failed (%s %s)", kind, tmdb_id)
             return None
         finally:
             conn.close()
 
-    def set_person_lookback(self, tmdb_id, lookback_years) -> bool:
-        """Set a followed person's back-catalog window (0=forward-only, N=years, -1=everything).
-        Returns True if a followed person row was updated."""
+    def set_watchlist_lookback(self, kind: str, tmdb_id, lookback_years) -> bool:
+        """Set a followed person/studio's back-catalog window (0=forward-only, N=years,
+        -1=everything). Returns True if a followed row was updated."""
+        if kind not in ("person", "studio"):
+            return False
         try:
             lb = int(lookback_years)
         except (TypeError, ValueError):
@@ -5425,15 +5441,28 @@ class VideoDatabase:
         conn = self._get_connection()
         try:
             cur = conn.execute("UPDATE video_watchlist SET lookback_years=? "
-                               "WHERE kind='person' AND tmdb_id=? AND state='follow'",
-                               (lb, int(tmdb_id)))
+                               "WHERE kind=? AND tmdb_id=? AND state='follow'",
+                               (lb, kind, int(tmdb_id)))
             conn.commit()
             return cur.rowcount > 0
         except sqlite3.Error:
-            logger.exception("set_person_lookback failed for %s", tmdb_id)
+            logger.exception("set_watchlist_lookback failed (%s %s)", kind, tmdb_id)
             return False
         finally:
             conn.close()
+
+    # kind-specific delegates (keep the existing person call sites + a studio pair).
+    def get_person_lookback(self, tmdb_id) -> dict | None:
+        return self.get_watchlist_lookback("person", tmdb_id)
+
+    def set_person_lookback(self, tmdb_id, lookback_years) -> bool:
+        return self.set_watchlist_lookback("person", tmdb_id, lookback_years)
+
+    def get_studio_lookback(self, tmdb_id) -> dict | None:
+        return self.get_watchlist_lookback("studio", tmdb_id)
+
+    def set_studio_lookback(self, tmdb_id, lookback_years) -> bool:
+        return self.set_watchlist_lookback("studio", tmdb_id, lookback_years)
 
     def list_watchlist_channels(self) -> list[dict]:
         """Followed channels (newest first): ``video_count`` is the REMEMBERED catalog

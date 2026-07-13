@@ -936,7 +936,7 @@ def test_watchlist_state_and_counts(db):
     assert db.watchlist_state("show", [1399, 1396, 9999]) == {1399: True, 1396: True}
     assert db.watchlist_state("show", []) == {}
     assert db.watchlist_state("person", [287]) == {287: True}
-    assert db.watchlist_counts() == {"show": 2, "person": 1, "total": 3}
+    assert db.watchlist_counts() == {"show": 2, "person": 1, "studio": 0, "total": 3}
 
 
 def test_query_watchlist_paginates_and_searches(db):
@@ -1227,7 +1227,7 @@ def test_youtube_rows_do_not_disturb_tmdb_counts(db):
                               [{"youtube_id": "x1", "title": "X1"}])
     # existing shapes unchanged
     assert db.wishlist_counts() == {"movie": 1, "show": 1, "episode": 1, "total": 2}
-    assert db.watchlist_counts() == {"show": 1, "person": 0, "total": 1}
+    assert db.watchlist_counts() == {"show": 1, "person": 0, "studio": 0, "total": 1}
     # youtube counts live on their own surface
     assert db.youtube_wishlist_counts() == {"channel": 1, "video": 1}
     assert db.list_watchlist_channels()[0]["wished_count"] == 1   # 1 wished video

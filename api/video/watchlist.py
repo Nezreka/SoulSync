@@ -14,7 +14,7 @@ from utils.logging_config import get_logger
 
 logger = get_logger("video_api.watchlist")
 
-_KINDS = ("show", "person")
+_KINDS = ("show", "person", "studio")
 
 
 def _server():
@@ -51,7 +51,9 @@ def register_routes(bp):
             rows = db.list_watchlist(server_source=server)
             shows = [r for r in rows if r.get("kind") == "show"]
             people = [r for r in rows if r.get("kind") == "person"]
-            return jsonify({"success": True, "shows": shows, "people": people, "counts": counts})
+            studios = [r for r in rows if r.get("kind") == "studio"]
+            return jsonify({"success": True, "shows": shows, "people": people,
+                            "studios": studios, "counts": counts})
         except Exception:
             logger.exception("Failed to list video watchlist")
             return jsonify({"success": False, "error": "Failed to load watchlist"}), 500
@@ -123,6 +125,27 @@ def register_routes(bp):
         if not ok:
             return jsonify({"success": False, "error": "not followed or invalid value"}), 400
         return jsonify({"success": True, "settings": get_video_db().get_person_lookback(tmdb_id)})
+
+    @bp.route("/watchlist/studio/<int:tmdb_id>/settings", methods=["GET"])
+    def video_watchlist_studio_settings(tmdb_id):
+        """A followed studio's back-catalog window {tmdb_id, title, date_added, lookback_years}
+        (0=forward-only, N=years, -1=everything) — for the studio settings modal."""
+        from . import get_video_db
+        s = get_video_db().get_studio_lookback(tmdb_id)
+        if not s:
+            return jsonify({"success": False, "error": "not followed"}), 404
+        return jsonify({"success": True, "settings": s})
+
+    @bp.route("/watchlist/studio/<int:tmdb_id>/settings", methods=["POST"])
+    def video_watchlist_studio_settings_save(tmdb_id):
+        """Set a studio's lookback window. Body: {lookback_years} (0=forward-only, N=years,
+        -1=everything). The next daily scan backfills any newly-included films."""
+        from . import get_video_db
+        body = request.get_json(silent=True) or {}
+        ok = get_video_db().set_studio_lookback(tmdb_id, body.get("lookback_years"))
+        if not ok:
+            return jsonify({"success": False, "error": "not followed or invalid value"}), 400
+        return jsonify({"success": True, "settings": get_video_db().get_studio_lookback(tmdb_id)})
 
     @bp.route("/watchlist/check", methods=["POST"])
     def video_watchlist_check():

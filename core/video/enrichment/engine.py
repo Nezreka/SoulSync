@@ -887,6 +887,34 @@ class VideoEnrichmentEngine:
             m["library_id"] = owned.get(m.get("tmdb_id"))
         return out
 
+    def company_films(self, company_id, *, max_pages=10,
+                      sort="primary_release_date.desc") -> list:
+        """A studio's catalog as a flat film list (newest first), for the studio-watchlist
+        scan. Pages through /discover up to ``max_pages`` (TMDB caps discover at 500 pages /
+        20 per page); logs when a big catalog is truncated so a silent cap can't read as
+        'scanned everything'. No ownership annotation — the scan diffs against owned itself."""
+        w = self.workers.get("tmdb")
+        if not w or not w.enabled:
+            return []
+        films: list = []
+        total_pages = 1
+        page = 1
+        while page <= max_pages:
+            try:
+                out = w.client.company_movies(company_id, page=page, sort=sort)
+            except Exception:
+                logger.exception("company_films page %s failed for %s", page, company_id)
+                break
+            films.extend(out.get("results") or [])
+            total_pages = out.get("total_pages") or 1
+            if page >= total_pages:
+                break
+            page += 1
+        if total_pages > max_pages:
+            logger.info("company_films: studio %s has %s pages; scanned the newest %s (%s films)",
+                        company_id, total_pages, max_pages, len(films))
+        return films
+
     def _server(self):
         """Active video server — scopes ownership lookups so an item owned only on
         the inactive server doesn't read as owned (Plex/Jellyfin stay separate)."""
