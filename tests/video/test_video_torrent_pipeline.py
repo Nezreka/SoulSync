@@ -18,7 +18,7 @@ class _St:
 def _proc(dl, status, *, find="/local/movie.mkv", organizer=None):
     return cd.process_client_download(
         dl, get_status=lambda s, r: status, resolve_path=lambda p: "/local",
-        find_video=lambda p: find, organizer=organizer)
+        find_video=lambda root, name=None: find, organizer=organizer)
 
 
 def test_in_progress_reports_downloading_percent():
@@ -33,8 +33,35 @@ def test_error_state_fails():
 
 def test_no_ref_is_missing():
     upd = cd.process_client_download({"source": "torrent"}, get_status=lambda s, r: None,
-                                     resolve_path=lambda p: p, find_video=lambda p: None)
+                                     resolve_path=lambda p: p, find_video=lambda root, name=None: None)
     assert upd == {"_missing": True}
+
+
+def test_find_video_is_scoped_to_this_jobs_content(tmp_path):
+    """The cross-attribution guard: a shared download folder holds THIS job's small file plus a
+    neighbour's much larger one. Scoping by the job name must pick OUR file, never the biggest."""
+    shared = tmp_path / "soulsync"
+    shared.mkdir()
+    # our single-file torrent (small) — named after the torrent
+    ours = shared / "Lego Masters AU S08E02 1080p.mkv"
+    ours.write_bytes(b"x" * 1000)
+    # a neighbour torrent's much larger file sitting in the SAME shared folder
+    (shared / "Some Other Show S01E01 2160p.mkv").write_bytes(b"y" * 9000)
+
+    scoped = cd.find_video_file(str(shared), "Lego Masters AU S08E02 1080p.mkv")
+    assert scoped == str(ours)                       # ours, not the 9x-larger neighbour
+
+    # a multi-file job: name is the folder; only its contents are searched
+    folder = shared / "Lego Masters AU S08E03 1080p"
+    folder.mkdir()
+    (folder / "episode.mkv").write_bytes(b"z" * 500)
+    assert cd.find_video_file(str(shared), "Lego Masters AU S08E03 1080p") == str(folder / "episode.mkv")
+
+    # the job's content isn't on disk → None (never grab a neighbour's file)
+    assert cd.find_video_file(str(shared), "Nonexistent Torrent Name") is None
+
+    # no name (per-job usenet folder) → largest-in-root fallback still works
+    assert cd.find_video_file(str(folder)) == str(folder / "episode.mkv")
 
 
 def test_client_forgot_job_is_missing_when_unplaced():
