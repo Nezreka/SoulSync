@@ -707,15 +707,19 @@ def _spawn_worker(dl_id: Any, db_provider: Callable) -> None:
 
 
 def requeue_orphaned_youtube(db_provider: Callable) -> int:
-    """Recover YouTube downloads stuck in 'downloading' with no live worker (e.g. after a
-    restart killed the threads) by putting them back to 'queued' so the pump re-runs them.
-    A download whose worker is alive is in ``_active_worker_ids`` and is left untouched.
+    """Recover YouTube downloads stranded with no live worker (e.g. after a restart killed the
+    threads) by putting them back to 'queued' so the pump re-runs them. Covers BOTH 'downloading'
+    AND 'importing' — a restart mid-merge/move leaves the row at status='importing' (phase
+    'merging'/'moving'), which would otherwise sit stuck forever since the worker that owned it
+    is gone. A download whose worker is alive is in ``_active_worker_ids`` and is left untouched.
     Returns the count recovered."""
     n = 0
     for d in (db_provider().get_active_video_downloads() or []):
-        if (d.get("source") == "youtube" and d.get("status") == "downloading"
+        if (d.get("source") == "youtube" and d.get("status") in ("downloading", "importing")
                 and d.get("id") not in _active_worker_ids):
-            db_provider().update_video_download(d["id"], status="queued", progress=0)
+            # Re-queue + clear the import phase so the card doesn't keep showing 'Merging…'.
+            db_provider().update_video_download(d["id"], status="queued", progress=0,
+                                                import_phase=None, import_progress=0)
             n += 1
     return n
 
@@ -729,6 +733,33 @@ def start_next_queued(db_provider: Callable) -> Any:
         return None
     _spawn_worker(row["id"], db_provider)
     return row["id"]
+
+
+_MAX_CONCURRENT = 3   # same cap the wishlist pump + add endpoint use
+
+
+def recover_and_pump(db_provider: Callable, cap: int = _MAX_CONCURRENT) -> tuple:
+    """Re-adopt orphaned YouTube downloads AND keep the queue pumped — the reliable
+    recovery the monitor calls on its tick. Safe to call repeatedly (idempotent):
+
+    1. ``requeue_orphaned_youtube`` only touches rows with NO live worker, so a restart
+       that stranded a row at 'downloading' or 'importing'/'merging' puts it back to
+       'queued'; a row with a live worker is protected by ``_active_worker_ids``.
+    2. Then fill the free slots up to ``cap`` — ``claim_next_youtube_queued`` is an atomic
+       'queued'→'downloading' flip, so concurrent callers can't double-claim, and the slot
+       count is read once so we never over-subscribe.
+
+    Without this, orphaned rows only recovered when the YouTube-wishlist automation
+    happened to run — so a restart mid-merge left "Merging video + audio…" stuck forever.
+    Returns ``(recovered, started)``."""
+    recovered = requeue_orphaned_youtube(db_provider)
+    started = 0
+    slots = cap - db_provider().count_active_youtube_downloads()
+    for _ in range(max(0, slots)):
+        if start_next_queued(db_provider) is None:
+            break                     # queue drained
+        started += 1
+    return recovered, started
 
 
 # ── production wiring ─────────────────────────────────────────────────────────
@@ -816,5 +847,6 @@ def run_youtube_download(dl_id: Any, db_provider: Callable) -> None:
 __all__ = [
     "youtube_fields_from_download", "plan_destination", "ydl_download_opts",
     "download_one", "process_youtube_download", "run_youtube_download",
-    "start_next_queued", "requeue_orphaned_youtube", "quality_override_from_download",
+    "start_next_queued", "requeue_orphaned_youtube", "recover_and_pump",
+    "quality_override_from_download",
 ]

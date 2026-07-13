@@ -334,9 +334,10 @@ def test_process_passes_settings_to_sidecars():
 
 
 def test_requeue_orphaned_youtube_recovers_only_dead_downloads():
-    """After a restart no worker threads survive, so any 'downloading' YouTube row is an
-    orphan → back to 'queued'. A row whose worker is still alive (in _active_worker_ids) and
-    non-youtube / non-downloading rows are left alone."""
+    """After a restart no worker threads survive, so any 'downloading' OR 'importing'
+    (mid-merge/move) YouTube row is an orphan → back to 'queued', with the import phase
+    cleared so the card stops showing 'Merging…'. A row whose worker is still alive (in
+    _active_worker_ids) and non-youtube / terminal rows are left alone."""
     updates = []
 
     class _DB:
@@ -344,8 +345,10 @@ def test_requeue_orphaned_youtube_recovers_only_dead_downloads():
             return [
                 {"id": 1, "source": "youtube", "status": "downloading"},   # orphan → requeue
                 {"id": 2, "source": "youtube", "status": "downloading"},   # live worker → keep
-                {"id": 3, "source": "youtube", "status": "queued"},        # not downloading → keep
+                {"id": 3, "source": "youtube", "status": "queued"},        # not in flight → keep
                 {"id": 4, "source": "soulseek", "status": "downloading"},  # not youtube → keep
+                {"id": 5, "source": "youtube", "status": "importing",      # stuck merging → requeue
+                 "import_phase": "merging"},
             ]
 
         def update_video_download(self, dl_id, **kw):
@@ -357,8 +360,70 @@ def test_requeue_orphaned_youtube_recovers_only_dead_downloads():
         n = ytd.requeue_orphaned_youtube(lambda: _DB())
     finally:
         ytd._active_worker_ids.clear()
-    assert n == 1
-    assert updates == [(1, {"status": "queued", "progress": 0})]   # only the orphan
+    assert n == 2                                       # the 'downloading' orphan + the 'importing' one
+    patch = {"status": "queued", "progress": 0, "import_phase": None, "import_progress": 0}
+    assert updates == [(1, patch), (5, patch)]          # phase cleared on both
+
+
+def test_recover_and_pump_requeues_orphans_then_fills_free_slots():
+    """The monitor's reliable recovery: re-adopt orphaned rows, then pump the queue up to
+    the cap — reading the free-slot count ONCE so it never over-subscribes."""
+    updates, claimed = [], []
+
+    class _DB:
+        def __init__(self):
+            self.queued = [10, 11, 12, 13]              # ids waiting in the queue
+            self.active = 1                             # one youtube worker already live
+
+        def get_active_video_downloads(self):
+            return [{"id": 9, "source": "youtube", "status": "importing", "import_phase": "merging"}]
+
+        def update_video_download(self, dl_id, **kw):
+            updates.append((dl_id, kw))
+
+        def count_active_youtube_downloads(self):
+            return self.active
+
+        def claim_next_youtube_queued(self):
+            if not self.queued:
+                return None
+            rid = self.queued.pop(0)
+            claimed.append(rid)
+            return {"id": rid}
+
+    db = _DB()
+    spawned = []
+    ytd._active_worker_ids.clear()
+    orig = ytd._spawn_worker
+    ytd._spawn_worker = lambda dl_id, dp: spawned.append(dl_id)
+    try:
+        recovered, started = ytd.recover_and_pump(lambda: db, cap=3)
+    finally:
+        ytd._spawn_worker = orig
+        ytd._active_worker_ids.clear()
+    assert recovered == 1                               # the stuck 'importing' orphan → queued
+    assert started == 2                                 # cap 3 − 1 already active = 2 free slots
+    assert claimed == [10, 11] and spawned == [10, 11]  # exactly the free slots, oldest first
+
+
+def test_recover_and_pump_no_free_slots_starts_nothing():
+    """When the concurrency cap is already full, recovery still re-adopts orphans but starts
+    no new workers (slots read once, clamped at zero)."""
+    class _DB:
+        def get_active_video_downloads(self):
+            return []                                   # nothing to re-adopt
+
+        def update_video_download(self, dl_id, **kw):
+            pass
+
+        def count_active_youtube_downloads(self):
+            return 3                                    # full
+
+        def claim_next_youtube_queued(self):
+            raise AssertionError("must not claim when full")
+
+    recovered, started = ytd.recover_and_pump(lambda: _DB(), cap=3)
+    assert (recovered, started) == (0, 0)
 
 
 def test_process_passes_the_organised_dir_to_the_downloader():

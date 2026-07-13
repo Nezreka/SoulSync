@@ -675,12 +675,29 @@ def _tick(db) -> None:
             logger.exception("video monitor: batch-complete notify failed")
 
 
+def _recover_youtube(db_provider) -> None:
+    """Re-adopt orphaned YouTube downloads (stranded at 'downloading' or 'importing'/
+    'merging' when a restart killed their worker thread) + keep the YouTube queue pumped.
+    Guarded on its own — a YouTube hiccup must never wedge the slskd/torrent monitor.
+    YouTube rows are owned by their yt-dlp worker (not the slskd/client poll below), so
+    this is their ONLY reliable recovery path once the process that owned them is gone."""
+    try:
+        from core.video.youtube_download import recover_and_pump
+        recovered, started = recover_and_pump(db_provider)
+        if recovered or started:
+            logger.info("youtube recovery: re-queued %d orphan(s), started %d worker(s)",
+                        recovered, started)
+    except Exception:
+        logger.exception("youtube recovery pass failed")
+
+
 def _run(db_provider) -> None:
     logger.info("video download monitor started")
     while True:
         try:
             db = db_provider()
             if db is not None:
+                _recover_youtube(db_provider)   # re-adopt orphaned youtube rows + pump the queue
                 _tick(db)
         except Exception:
             logger.exception("video download monitor tick failed")
