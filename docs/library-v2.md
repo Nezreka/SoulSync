@@ -1161,8 +1161,14 @@ auf dem aktuellen gespaltenen Verhalten.
   wurde verifiziert, dass SAB eine dort nicht angelegte Kategorie still auf
   `*` zurückschreibt; der Settings-Connection-Test validiert deshalb jetzt
   die konfigurierte SAB-Kategorie (`96c323a2`, 50 gezielte Tests + echter
-  Client-Check). Gemountetes Path-Mapping, Monitor-Adoption über einen echten
-  App-/Container-Restart und completed Bundle-Import bleiben offen;
+  Client-Check). **Restart-/Mapping-Slice ebenfalls erledigt 2026-07-14:**
+  der opt-in Contract `test_live_usenet_deployment.py` persistiert einen
+  absichtlich unklaren Submit ohne externe Job-ID; ein neuer SoulSync-
+  Container öffnet dieselbe DB, adoptiert den pausierten echten SAB-/NZBGet-
+  Job über den zentralen Monitor und bestätigt das gemeinsame Bind-Mount über
+  den produktiven Path-Resolver als `mapped/readable` (`00c57184`). Beide
+  Prepare→Container-Ende→Verify-Flows sind real grün. Completed Bundle-
+  Inventory/Matching/Import und Manual Review bleiben offen;
 - erst während des späteren globalen Wishlist-Cutovers den
   Compatibility-Wishlist-Output durch direkte Acquisition Requests ersetzen.
   Das nicht früher tun, wenn es das etablierte Wishlist/Main-Pipeline-
@@ -1188,15 +1194,19 @@ fand bei 94 Prozent den letzten bekannten yt-dlp-Executor-Shutdown;
 weiterer Lauf isolierte den gleichen Wakeup im Usenet-Adapter-Testloop;
 `ee896e4d` ist mit 46 grünen SABnzbd-/NZBGet-Tests verifiziert. Der finale
 Fullsuite-Lauf ist grün (8081 passed, 2 deselected; 291.13s).
-Die erste echte Deployment-Acceptance-Slice ist ebenfalls abgeschlossen:
+Die ersten echten Deployment-Acceptance-Slices sind ebenfalls abgeschlossen:
 SABnzbd 5.0.4 und NZBGet 26.2 wurden in isolierten Containern über die
 produktiven Adapter verbunden, mit einem synthetischen NZB beschickt,
 beobachtet und bereinigt. Der dabei gefundene SAB-Category-Fallback auf `*`
 ist durch einen fail-closed Settings-Check behoben (`96c323a2`).
-**Logischer nächster Schritt:** dieselben echten Clients mit dem zentralen
-Acquisition-Monitor gegen eine persistente Test-DB koppeln, den
-`submission_unknown`-Job nach Container-Restart adoptieren und anschließend
-das gemountete Path-Mapping bis zum Bundle-Inventory verifizieren.
+Der neue opt-in Deployment-Contract (`00c57184`) lief danach für beide Clients
+über zwei echte SoulSync-Container: Prepare persistierte
+`submission_unknown`, Verify adoptierte nach Container-Ende/-Neustart den
+echten Job und verifizierte den gemounteten Pfad als `mapped/readable`.
+**Logischer nächster Schritt:** einen echten Client-Completion-Snapshot mit
+finalem gemapptem Pfad durch Bundle-Inventory, Edition-Matching und
+`acquisition_imports` treiben; dabei auch den persistenten Manual-Review-Fall
+abnehmen.
 
 ### 5.6 Verifikation (pro Phase, End-to-End in Docker)
 
@@ -1464,8 +1474,10 @@ P2-05 und eine Reihe P2-UX/Robustheits-Findings).
    Manual Review sind implementiert; die reale Deployment-Abnahme fehlt.
    **Teilstand 2026-07-14:** echte Client-API-/Submit-/Status-/Remove-Flows
    sind für SABnzbd 5.0.4 und NZBGet 26.2 grün; SAB-Category-Konfiguration
-   wird nun beim Connection-Test validiert (`96c323a2`). Offen bleiben
-   Restart-Adoption, gemountetes Path-Mapping und completed Bundle-Import.
+   wird nun beim Connection-Test validiert (`96c323a2`). Restart-Adoption und
+   gemountetes Path-Mapping sind für beide Clients über getrennte echte
+   SoulSync-Container grün (`00c57184`). Offen bleiben completed Bundle-
+   Inventory/Matching/Import und Manual Review.
 3. Bestehende Interactive-/Wishlist-Consumer auf den Acquisition-Contract
    umstellen; erst danach global durchsetzen, dass kein Download ohne
    AcquisitionRequest startet.
