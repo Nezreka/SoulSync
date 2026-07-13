@@ -1357,3 +1357,28 @@ def test_remembered_channel_videos_and_meta(db):
                                   "subscriber_count": 1234, "tags": ["x", "y"]})
     m = db.get_channel_meta("UCc")
     assert m["title"] == "Chan" and m["subscriber_count"] == 1234 and m["tags"] == ["x", "y"]
+
+
+def test_recently_added_ranks_a_show_by_its_newest_episode(db):
+    """A show with a freshly-added episode outranks an older movie — Recently Added is
+    episode-aware (matches Plex), and a re-scan with a NULL add-date preserves the stored one."""
+    F = [{"path": "/x.mkv", "resolution": "1080p"}]
+    db.upsert_movie("plex", {"server_id": "m1", "title": "Old Movie", "year": 2020, "files": F})
+    db.upsert_show_tree("plex", {"server_id": "s1", "title": "Old Show", "year": 2015, "seasons": [
+        {"server_id": "se1", "season_number": 3, "episodes": [
+            {"server_id": "e1", "season_number": 3, "episode_number": 1, "added_at": "2026-06-01 00:00:00", "files": F},
+            {"server_id": "e2", "season_number": 3, "episode_number": 2, "added_at": "2026-07-12 20:00:00", "files": F}]}]})
+    conn = db._get_connection()
+    conn.execute("UPDATE movies SET added_at='2026-07-01 00:00:00' WHERE server_id='m1'")
+    conn.execute("UPDATE shows SET added_at='2015-01-01 00:00:00' WHERE server_id='s1'")
+    conn.commit(); conn.close()
+
+    out = db.recently_added(server_source="plex", limit=10)
+    assert out[0]["kind"] == "show" and out[0]["added_at"] == "2026-07-12 20:00:00"   # newest episode wins
+    assert out[1]["kind"] == "movie"
+
+    # re-scan reporting NO add-date must not wipe the stored one (COALESCE-preserve)
+    db.upsert_show_tree("plex", {"server_id": "s1", "title": "Old Show", "year": 2015, "seasons": [
+        {"server_id": "se1", "season_number": 3, "episodes": [
+            {"server_id": "e2", "season_number": 3, "episode_number": 2, "added_at": None, "files": F}]}]})
+    assert db.recently_added(server_source="plex", limit=10)[0]["added_at"] == "2026-07-12 20:00:00"

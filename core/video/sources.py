@@ -953,6 +953,7 @@ class PlexVideoSource:
             "still_url": getattr(ep, "thumb", None),
             "rating": getattr(ep, "audienceRating", None),
             "tvdb_id": _parse_plex_guids(ep).get("tvdb_id"),
+            "added_at": _iso_dt(getattr(ep, "addedAt", None)),   # ranks the show in Recently Added
             "files": self._part_files(ep),
             "file": self._part_file(ep),
         }
@@ -1018,7 +1019,7 @@ class PlexVideoSource:
 _JF_MOVIE_FIELDS = ("Overview,Path,MediaSources,ProductionYear,OfficialRating,RunTimeTicks,Studios,"
                     "ProviderIds,Genres,Taglines,CommunityRating,CriticRating,UserData")
 _JF_EP_FIELDS = ("Overview,Path,MediaSources,PremiereDate,RunTimeTicks,IndexNumber,ParentIndexNumber,"
-                 "ProviderIds,CommunityRating")
+                 "ProviderIds,CommunityRating,DateCreated")
 _JF_SHOW_FIELDS = ("Overview,ProductionYear,OfficialRating,ProviderIds,Genres,Taglines,CommunityRating,"
                    "PremiereDate,EndDate,UserData,RecursiveItemCount")
 
@@ -1564,6 +1565,7 @@ class JellyfinVideoSource:
                     "still_url": (ep.get("ImageTags") or {}).get("Primary"),
                     "rating": ep.get("CommunityRating"),
                     "tvdb_id": _parse_jf_providers(ep).get("tvdb_id"),
+                    "added_at": ((ep.get("DateCreated") or "").replace("T", " ")[:19] or None),
                     "files": self._files(ep),
                     "file": self._file(ep),
                 })
