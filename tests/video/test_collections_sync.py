@@ -196,3 +196,74 @@ def test_sync_all_aggregates_and_isolates_failures(db):
     db.create_collection_definition("Bad", definition={"rules": []})   # will error
     out = sync_all_collections(db, source=src)
     assert out["total"] == 2 and out["synced"] == 1 and out["failed"] == 1
+
+
+# ── ranked list order (IMDb Top 250 rank, not release date) ──────────────────
+
+class ReorderSource(FakeSource):
+    """FakeSource that also records collection_reorder calls (Plex-only capability)."""
+    def __init__(self, **k):
+        super().__init__(**k)
+        self.reorder_calls = []
+
+    def collection_reorder(self, collection_id, ordered):
+        self.reorder_calls.append((str(collection_id), list(ordered)))
+        return {"ok": True}
+
+
+def _add_movie_tmdb(db, mid, tmdb_id, sid):
+    conn = db._get_connection()
+    try:
+        conn.execute("INSERT INTO movies (id, server_source, server_id, tmdb_id, title, year, has_file) "
+                     "VALUES (?,?,?,?,?,?,1)", (mid, "plex", sid, tmdb_id, f"M{mid}", 2000))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _imdb_top_def(db, name="IMDb Top 250", sort_order="release"):
+    # "release" is the DB default → the real-world case a chart collection lands in.
+    cid = db.create_collection_definition(name, kind="list", media_type="movie",
+                                          sort_order=sort_order,
+                                          definition={"source": "imdb_chart", "chart": "top"})
+    return db.get_collection_definition(cid)
+
+
+def test_ranked_list_pushes_in_rank_order_with_custom_sort(db):
+    # Inserted deliberately out of rank order; the chart ranks them A, B, C.
+    _add_movie_tmdb(db, 1, 30, "srvC")   # rank #3
+    _add_movie_tmdb(db, 2, 10, "srvA")   # rank #1
+    _add_movie_tmdb(db, 3, 20, "srvB")   # rank #2
+
+    def fetcher(source, ref):
+        assert source == "imdb_chart"
+        return [{"tmdb_id": 10}, {"tmdb_id": 20}, {"tmdb_id": 30}]   # rank order
+
+    src = ReorderSource()
+    r = sync_collection(db, _imdb_top_def(db), source=src, list_fetcher=fetcher)
+    assert r["ok"]
+    cid = r["server_id"]
+    assert src.reorder_calls == [(cid, ["srvA", "srvB", "srvC"])]        # rank, not srvC/srvB/srvA
+    assert src.collections[cid]["meta"]["sort"] == "custom"             # Plex told to keep custom order
+
+
+def test_explicit_sort_on_ranked_list_is_respected(db):
+    _add_movie_tmdb(db, 1, 10, "srvA")
+
+    def fetcher(source, ref):
+        return [{"tmdb_id": 10}]
+
+    src = ReorderSource()
+    sync_collection(db, _imdb_top_def(db, name="IMDb A-Z", sort_order="alpha"),
+                    source=src, list_fetcher=fetcher)
+    assert src.reorder_calls == []                                      # user picked alpha → no rank reorder
+    cid = next(iter(src.collections))
+    assert src.collections[cid]["meta"]["sort"] == "alpha"
+
+
+def test_ranked_order_change_re_syncs(db):
+    from core.video.collections.sync import members_signature
+    defn = _imdb_top_def(db)
+    sig_ab = members_signature(defn, ["srvA", "srvB"])
+    sig_ba = members_signature(defn, ["srvB", "srvA"])
+    assert sig_ab != sig_ba                                             # a re-rank changes the signature

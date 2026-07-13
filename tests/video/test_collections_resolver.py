@@ -166,6 +166,25 @@ def test_tmdb_list_intersects_owned(db):
     assert [m["tmdb_id"] for m in res.missing] == [9]
 
 
+def test_list_preserves_fetched_rank_order(db):
+    # Insert in a DIFFERENT order than the list ranks them (owned_by_tmdb_ids returns
+    # table order); the resolver must restore the fetched (rank) order.
+    _add_movie(db, mid=1, title="Third", tmdb_id=30, year=1990)
+    _add_movie(db, mid=2, title="First", tmdb_id=10, year=2020)
+    _add_movie(db, mid=3, title="Second", tmdb_id=20, year=2005)
+
+    def fetcher(source, ref):   # ranked: First, Second, Third
+        return [{"tmdb_id": 10, "title": "First"}, {"tmdb_id": 20, "title": "Second"},
+                {"tmdb_id": 30, "title": "Third"}]
+
+    res = resolve_collection(
+        db, {"media_type": "movie", "kind": "list",
+             "definition": {"source": "imdb_chart", "chart": "top"}},
+        list_fetcher=fetcher)
+    assert [m["title"] for m in res.owned] == ["First", "Second", "Third"]   # rank, not table/year order
+    assert res.server_ids == ["srv2", "srv3", "srv1"]
+
+
 def test_list_without_fetcher_errors_gracefully(db):
     res = resolve_collection(db, {"media_type": "movie", "kind": "list",
                                   "definition": {"source": "tmdb_list", "list_id": "abc"}})

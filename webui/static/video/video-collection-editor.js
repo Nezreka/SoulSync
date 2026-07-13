@@ -1089,6 +1089,14 @@
     }
 
     // ── editor ───────────────────────────────────────────────────────────────
+    // Ranked list/chart sources present in their OWN order (IMDb Top 250 rank, a Trakt list).
+    // For these, "Rank (list order)" is the meaningful default — not release date.
+    var _RANKED_SRCS = { imdb_chart: 1, imdb_list: 1, tmdb_chart: 1, tmdb_list: 1,
+                         trakt_list: 1, mdblist_list: 1 };
+    function _isRankedListEd(e) {
+        return !!(e && e.kind === 'list' && e.definition && _RANKED_SRCS[e.definition.source]);
+    }
+
     function newCollection() {
         ed = { id: null, name: '', kind: 'smart', media_type: 'movie',
                definition: { match: 'all', rules: [] },
@@ -1118,6 +1126,10 @@
                 window_start: c.window_start || '', window_end: c.window_end || '',
                 collection_mode: c.collection_mode || '', dirty: false
             };
+            // A ranked list left on the default 'release' actually presents in rank — reflect
+            // that in the picker instead of the misleading "Release date".
+            if (_isRankedListEd(ed) && (ed.sort_order === 'release' || !ed.sort_order))
+                ed.sort_order = 'rank';
             renderEditor();
         });
     }
@@ -1203,7 +1215,9 @@
             '<textarea class="vce-input" data-f="summary" rows="2" placeholder="Optional description shown on the server">' + esc(ed.summary) + '</textarea>' +
             '<div class="vce-row2" style="margin-top:2px">' +
                 '<div><label class="vce-flabel">Sort</label>' +
-                    sel('sort_order', ed.sort_order, [['release', 'Release date'], ['alpha', 'A → Z'], ['rating', 'Rating'], ['added', 'Date added'], ['custom', 'Custom']]) + '</div>' +
+                    sel('sort_order', ed.sort_order,
+                        (_isRankedListEd(ed) ? [['rank', 'Rank (list order)']] : []).concat(
+                            [['release', 'Release date'], ['alpha', 'A → Z'], ['rating', 'Rating'], ['added', 'Date added'], ['custom', 'Custom']])) + '</div>' +
                 '<div><label class="vce-flabel">Sync mode</label>' +
                     sel('sync_mode', ed.sync_mode, [['sync', 'Sync (add + remove)'], ['append', 'Append (add only)']]) + '</div>' +
             '</div>' +

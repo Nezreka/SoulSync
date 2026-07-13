@@ -195,6 +195,16 @@ def _resolve_list(db, media_type: str, body: Dict[str, Any],
         owned = db.owned_by_tmdb_ids(media_type, tmdb_ids)
     except Exception as e:   # noqa: BLE001
         return ResolvedCollection(media_type=media_type, error=f"resolve failed: {e}")
+    # ``owned_by_tmdb_ids`` uses ``WHERE tmdb_id IN (…)`` — no ORDER BY, so it returns rows in
+    # table order, discarding the LIST's own order (e.g. the IMDb Top 250 rank). Re-sort owned
+    # back into the fetched order so the collection syncs + displays in rank, not by release date.
+    pos = {}
+    for i, item in enumerate(full or []):
+        t = item.get("tmdb_id")
+        if t is not None:
+            pos.setdefault(int(t), i)
+    tail = len(pos)
+    owned.sort(key=lambda m: pos.get(int(m["tmdb_id"]), tail) if m.get("tmdb_id") is not None else tail)
     owned_tmdb = {int(m["tmdb_id"]) for m in owned if m.get("tmdb_id") is not None}
     missing = _missing_from(full, owned_tmdb)
     return ResolvedCollection(media_type=media_type, owned=owned, missing=missing)
