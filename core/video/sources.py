@@ -1024,6 +1024,36 @@ _JF_SHOW_FIELDS = ("Overview,ProductionYear,OfficialRating,ProviderIds,Genres,Ta
                    "PremiereDate,EndDate,UserData,RecursiveItemCount")
 
 
+def _union_jf_episode_delta_series(req, uid, view_id, since, series_items, show_fields):
+    """Jellyfin twin of ``_union_episode_delta_shows``: union into ``series_items`` the parent
+    series of any EPISODE saved since ``since``. Jellyfin doesn't bump a Series' DateLastSaved
+    when it gains an episode, so the series-level MinDateLastSaved delta misses freshly-added
+    episodes; an episode-level query catches both new adds and re-matches (both bump the
+    episode's DateLastSaved). ``req(path, params)->dict|None``. Best-effort — any hiccup returns
+    ``series_items`` unchanged so the series-level delta still stands."""
+    try:
+        series_items = list(series_items)
+        seen = {str(s.get("Id")) for s in series_items if s.get("Id")}
+        ep_resp = req(f"/Users/{uid}/Items", {
+            "ParentId": view_id, "IncludeItemTypes": "Episode", "Recursive": "true",
+            "MinDateLastSaved": since.isoformat(), "Fields": "SeriesId", "Limit": "1000"}) or {}
+        new_ids = []
+        for ep in ep_resp.get("Items", []):
+            sid = str(ep.get("SeriesId") or "")
+            if sid and sid not in seen:
+                seen.add(sid)
+                new_ids.append(sid)
+        if new_ids:
+            got = req(f"/Users/{uid}/Items", {
+                "Ids": ",".join(new_ids), "IncludeItemTypes": "Series",
+                "Recursive": "true", "Fields": show_fields}) or {}
+            series_items += got.get("Items", [])
+        return series_items
+    except Exception:   # noqa: BLE001 - the episode-level delta is an assist over the series delta
+        logger.debug("Jellyfin: episode-level delta failed", exc_info=True)
+        return series_items
+
+
 class JellyfinVideoSource:
     server_name = "jellyfin"
 
@@ -1488,10 +1518,14 @@ class JellyfinVideoSource:
             params = {"ParentId": view["Id"], "IncludeItemTypes": "Series",
                       "Recursive": "true", "Fields": _JF_SHOW_FIELDS}
             if incremental and since is not None:
-                # Delta: metadata (re-)saved since the last scan — catches re-matches +
-                # edits + shows that gained episodes.
+                # Delta: metadata (re-)saved since the last scan — catches re-matches + edits.
                 params.update({"MinDateLastSaved": since.isoformat()})
                 items = (self._req(path, params) or {}).get("Items", [])
+                # A Series' DateLastSaved does NOT bump when it gains an episode, so union in
+                # the parent series of episodes saved since the baseline (the reliable new-
+                # episode signal) — otherwise freshly-imported episodes are invisible.
+                items = _union_jf_episode_delta_series(
+                    self._req, self.uid, view["Id"], since, items, _JF_SHOW_FIELDS)
             elif incremental:
                 # DateLastContentAdded bumps when a series gains episodes (DateCreated
                 # is the series' original add-date and never moves). Fall back to DateCreated.
