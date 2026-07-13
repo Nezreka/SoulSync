@@ -73,6 +73,16 @@
         for (var i = 0; i < data.seasons.length; i++) if (data.seasons[i].season_number === n) return data.seasons[i];
         return null;
     }
+    // The season a show opens on: the LATEST real season (highest number), not specials/S1.
+    // Falls back to specials only when that's all there is.
+    function defaultSeasonNum(seasons) {
+        if (!seasons || !seasons.length) return null;
+        var real = seasons.filter(function (s) { return (s.season_number || 0) > 0; });
+        var pool = real.length ? real : seasons;
+        return pool.reduce(function (best, s) {
+            return (s.season_number > best.season_number) ? s : best;
+        }, pool[0]).season_number;
+    }
     function seasonArt(s) {
         // tmdb + youtube carry direct (already-proxied for yt) art urls on the payload.
         if (data && (data.source === 'tmdb' || data.source === 'youtube')) return s.poster_url || data.poster_url || '';
@@ -1040,6 +1050,16 @@
         else if (seasonView === 'timeline') host.innerHTML = timelineHTML();
         else if (seasonView === 'pills') host.innerHTML = pillsHTML();
         else host.innerHTML = dropdownHTML();
+        // Keep the selected season (which now defaults to the LATEST) visible in the
+        // horizontal nav — otherwise a show with many seasons opens scrolled to S1 with the
+        // active card off-screen. block:'nearest' avoids yanking the page vertically.
+        requestAnimationFrame(function () {
+            var active = host.querySelector('.vd-rcard--active, .vd-tseg--active, .vd-pill-btn--active');
+            if (active && active.scrollIntoView) {
+                try { active.scrollIntoView({ inline: 'center', block: 'nearest' }); }
+                catch (e) { /* older browsers: options unsupported, skip */ }
+            }
+        });
     }
 
     function railHTML() {
@@ -1534,7 +1554,7 @@
                 if (!d || d.error) { setText('[data-vd-title]', 'Not found'); return; }
                 if (currentId !== id || currentKind !== 'show') return;
                 data = d; menuOpen = false; missingOnly = false;
-                selectedSeason = d.seasons && d.seasons.length ? d.seasons[0].season_number : null;
+                selectedSeason = defaultSeasonNum(d.seasons);
                 var mt = q('[data-vd-missing-toggle]');
                 if (mt) { mt.hidden = !(d.seasons && d.seasons.length); mt.classList.remove('vd-missing-toggle--on'); }
                 renderBillboard(d);
@@ -1602,7 +1622,7 @@
                 d.next_episode = prev.next_episode || null;
                 data = d;
                 if (!seasonByNum(selectedSeason)) {
-                    selectedSeason = d.seasons && d.seasons.length ? d.seasons[0].season_number : null;
+                    selectedSeason = defaultSeasonNum(d.seasons);
                 }
                 renderBillboard(d); renderSeasonNav(); renderEpisodes();
             })
