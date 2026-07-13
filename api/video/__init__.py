@@ -39,25 +39,52 @@ def create_video_blueprint() -> Blueprint:
 
     # Profile permission guards behind the frontend gating. Uses flask.g (set
     # app-wide by web_server's before_request: profile_id — 1==admin — and
-    # can_download) so this stays isolated from the music DB.
-    #   • Overlay Studio + Import  → admin-only
-    #   • download/wishlist actions → require can_download (mirrors music)
+    # can_download) so this stays isolated from the music DB. Parity with the
+    # music side's @admin_only on Settings-class endpoints:
+    #   • Overlay Studio / Import / Collections / Repair (management) → admin
+    #   • Settings that EXPOSE or MUTATE tokens, API keys, server / slskd /
+    #     download config → admin for BOTH reads and writes (a GET here returns
+    #     raw keys — e.g. /enrichment/config, /downloads/slskd)
+    #   • Config the Settings page WRITES but content views legitimately READ
+    #     (library paths, quality tiers, server presence) → admin for WRITES only
+    #   • download-triggering actions → require can_download (mirrors music)
     @bp.before_request
     def _video_perm_gate():
         from flask import request, g, jsonify
         path = request.path or ""
+        writing = request.method in ("POST", "PUT", "PATCH", "DELETE")
+
+        def _p(*prefixes):
+            return any(path.startswith(x) for x in prefixes)
+
         # Admin = the profile's REAL is_admin flag (web_server stashes g.is_admin;
         # music supports secondary admins, and the frontend gates on the same
         # flag — a profile-1-only check here split-brained against it). Fallback
         # keeps the old convention when g wasn't populated (tests, edge callers).
         is_admin = bool(getattr(g, "is_admin", getattr(g, "profile_id", 1) == 1))
-        if (path.startswith("/api/video/overlays") or path.startswith("/api/video/import")
-                or path.startswith("/api/video/collections")
-                or path.startswith("/api/video/repair")) \
-                and not is_admin:
+
+        # Management surfaces + credential/settings-only endpoints — admin for ANY
+        # method (their GETs leak raw tokens/keys or expose server config, and are
+        # only ever hit by the admin-only Settings page).
+        admin = _p("/api/video/overlays", "/api/video/import", "/api/video/collections",
+                   "/api/video/repair",
+                   "/api/video/server-config", "/api/video/jellyfin", "/api/video/libraries",
+                   "/api/video/organization", "/api/video/downloads/slskd",
+                   "/api/video/enrichment/config", "/api/video/enrichment/priority")
+        # Config the Settings page WRITES but content views (download modal / grab)
+        # legitimately READ — gate the writes, leave the GETs open.
+        if writing:
+            admin = admin or _p("/api/video/server", "/api/video/downloads/config",
+                                 "/api/video/downloads/quality",
+                                 "/api/video/downloads/youtube-quality",
+                                 "/api/video/enrichment")   # all enrichment mutations
+        if admin and not is_admin:
             return jsonify({"error": "Admin only."}), 403
-        if request.method == "POST" and not getattr(g, "can_download", True) and (
-                path.startswith("/api/video/downloads/grab") or path == "/api/video/wishlist/add"):
+
+        if writing and not getattr(g, "can_download", True) and _p(
+                "/api/video/downloads/grab", "/api/video/downloads/retry",
+                "/api/video/youtube/download", "/api/video/wishlist/add",
+                "/api/video/watchlist/add", "/api/video/youtube/wishlist/add"):
             return jsonify({"error": "Downloads are disabled for this profile."}), 403
 
     from .dashboard import register_routes as reg_dashboard
