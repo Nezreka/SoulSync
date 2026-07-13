@@ -20,7 +20,8 @@
     var fieldCache = {};          // media_type -> {fields, suggestions}
     var presetCache = {};         // media_type -> packs[]
     var ed = null;                // editor state
-    var gal = { tab: 'all', q: '', collections: null,
+    var PER_PAGE = 25;            // gallery paginates client-side (a big library shouldn't dump 200 cards at once)
+    var gal = { tab: 'all', q: '', collections: null, page: 1,
                 sort: _pref('vce:sort', 'smart'), density: _pref('vce:density', 'cozy'),
                 selecting: false, selected: {} };
     var view = 'gallery';         // gallery | presets | picker | editor | server
@@ -289,7 +290,7 @@
             var b = h('button', 'vce-tab' + (gal.tab === t[0] ? ' vce-tab--on' : ''),
                 esc(t[1]) + '<span class="vce-tab-n">' + counts[t[0]] + '</span>');
             b.type = 'button';
-            b.addEventListener('click', function () { gal.tab = t[0]; renderGallery(page); });
+            b.addEventListener('click', function () { gal.tab = t[0]; gal.page = 1; renderGallery(page); });
             tabs.appendChild(b);
         });
         filters.appendChild(tabs);
@@ -299,6 +300,7 @@
         si.value = gal.q;
         si.addEventListener('input', function () {
             gal.q = si.value;
+            gal.page = 1;
             paintCards(grid);
         });
         search.appendChild(si);
@@ -312,6 +314,7 @@
         sortSel.addEventListener('change', function () {
             gal.sort = sortSel.value;
             _setPref('vce:sort', gal.sort);
+            gal.page = 1;
             paintCards(grid);
         });
         filters.appendChild(sortSel);
@@ -433,10 +436,15 @@
     }
 
     function paintCards(grid) {
-        var cols = sortCols(visibleCols());
+        var all = sortCols(visibleCols());
+        var pages = Math.max(1, Math.ceil(all.length / PER_PAGE));
+        if (gal.page > pages) gal.page = pages;
+        if (gal.page < 1) gal.page = 1;
+        var cols = all.slice((gal.page - 1) * PER_PAGE, gal.page * PER_PAGE);
         grid.innerHTML = '';
 
-        if (!gal.selecting) {
+        // The "New collection" card leads the FIRST page only (so it isn't re-shown every page).
+        if (!gal.selecting && gal.page === 1) {
             var add = h('button', 'vce-card vce-card--new', I.plus + '<span>New collection</span>');
             add.type = 'button';
             add.addEventListener('click', function () { newCollection(); });
@@ -444,6 +452,31 @@
         }
 
         cols.forEach(function (c) { grid.appendChild(card(c)); });
+        renderPager(grid, all.length, pages);
+    }
+
+    // Client-side pager under the grid — a big library shouldn't render every card at once.
+    // Prev/Next re-slice + repaint instantly; hidden when everything fits one page.
+    function renderPager(grid, total, pages) {
+        var host = grid.parentNode; if (!host) return;
+        var pager = host.querySelector('.vce-pager');
+        if (pages <= 1) { if (pager) pager.parentNode.removeChild(pager); return; }
+        if (!pager) { pager = h('div', 'vce-pager'); host.insertBefore(pager, grid.nextSibling); }
+        var start = (gal.page - 1) * PER_PAGE + 1, end = Math.min(total, gal.page * PER_PAGE);
+        pager.innerHTML = '';
+        function nav(label, delta, disabled) {
+            var b = h('button', 'vce-btn vce-btn--ghost', label);
+            b.type = 'button';
+            b.disabled = disabled;
+            b.addEventListener('click', function () {
+                gal.page += delta; paintCards(grid);
+                try { grid.scrollIntoView({ block: 'start', behavior: 'smooth' }); } catch (e) { /* ignore */ }
+            });
+            return b;
+        }
+        pager.appendChild(nav('← Prev', -1, gal.page <= 1));
+        pager.appendChild(h('span', 'vce-pager-info', start + '–' + end + ' of ' + total));
+        pager.appendChild(nav('Next →', 1, gal.page >= pages));
     }
 
     function card(c) {
