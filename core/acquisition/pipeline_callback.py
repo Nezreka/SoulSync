@@ -129,6 +129,102 @@ def notify_pipeline_import_quarantined(
         conn.close()
 
 
+def notify_force_quarantine_auto_approved(
+    context: Mapping[str, Any],
+    *,
+    reason_code: str,
+    trigger: str,
+    reason: str,
+    connection_factory: Optional[Callable[[], Any]] = None,
+) -> bool:
+    """Consume an exact Force-Grab approval at a shared pipeline guard.
+
+    The serialized context is only correlation data. Authorization comes from
+    the immutable forced decision run linked to the acquisition grab, so a
+    forged or stale context cannot broaden the approved reason.
+    """
+    import_id = _context_value(context, "_acquisition_import_id")
+    relative_path = _context_value(context, "_acquisition_relative_path")
+    track_id = _context_value(context, "_acquisition_track_id")
+    code = str(reason_code or "").strip().lower()
+    if not import_id or not relative_path or not track_id or not code:
+        return False
+    if len(code) > 100:
+        return False
+
+    if connection_factory is None:
+        from database.music_database import get_database
+        connection_factory = get_database()._get_connection
+
+    conn = connection_factory()
+    try:
+        row = conn.execute(
+            """SELECT ai.request_id, ai.candidate_id, ai.download_id
+                 FROM acquisition_imports ai
+                 JOIN acquisition_grabs grab
+                   ON grab.download_id=ai.download_id
+                 JOIN candidate_decision_runs run
+                   ON run.id=grab.decision_run_id
+                  AND run.request_id=ai.request_id
+                  AND run.candidate_id=ai.candidate_id
+                 JOIN candidate_decisions decision
+                   ON decision.run_id=run.id
+                  AND decision.candidate_id=ai.candidate_id
+                WHERE ai.id=?
+                  AND run.forced=1
+                  AND decision.severity='rejection'
+                  AND decision.overridable=1
+                  AND lower(decision.code)=?
+                LIMIT 1""",
+            (str(import_id), code),
+        ).fetchone()
+        if row is None:
+            return False
+
+        from core.acquisition.imports import get_import
+        record = get_import(conn, str(import_id))
+        expected = {
+            (
+                str(item.get("relative_path") or "").replace("\\", "/"),
+                int(item.get("track_id") or 0),
+            )
+            for item in (record.matches if record else ())
+            if isinstance(item, Mapping)
+        }
+        key = (
+            str(relative_path).strip().replace("\\", "/"),
+            int(track_id),
+        )
+        if record is None or record.status != "importing" or key not in expected:
+            return False
+
+        from core.acquisition.history import record_history_event
+        record_history_event(
+            conn,
+            "force_quarantine_auto_approved",
+            request_id=str(row[0]),
+            candidate_id=str(row[1]),
+            download_id=str(row[2]),
+            reason_code=code,
+            message=str(reason or "Shared pipeline rejection auto-approved"),
+            payload={
+                "import_id": str(import_id),
+                "relative_path": key[0],
+                "track_id": key[1],
+                "trigger": str(trigger or "unknown"),
+            },
+        )
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        logger.exception(
+            "Force-Grab quarantine approval lookup failed for %s", import_id)
+        return False
+    finally:
+        conn.close()
+
+
 def notify_pipeline_retry_exhausted(
     context: Mapping[str, Any],
     *,

@@ -151,6 +151,32 @@ def _should_skip_quarantine_check(context: dict, check_name: str) -> bool:
     return bypass == check_name
 
 
+def _try_force_grab_quarantine_approval(
+    context: dict,
+    *,
+    reason_code: str,
+    trigger: str,
+    reason: str,
+) -> bool:
+    """Use a persisted Force-Grab approval only for the exact same reason."""
+    try:
+        from core.acquisition.pipeline_callback import (
+            notify_force_quarantine_auto_approved,
+        )
+        approved = notify_force_quarantine_auto_approved(
+            context,
+            reason_code=reason_code,
+            trigger=trigger,
+            reason=reason,
+        )
+    except Exception as exc:  # Fail closed into the normal quarantine flow.
+        logger.warning("Force-Grab quarantine bridge failed: %s", exc)
+        return False
+    if approved:
+        context['_force_approved_quarantine_reason'] = reason_code
+    return approved
+
+
 def _resolve_context_quality_profile(context: dict) -> dict:
     """The item's quality profile — its own assigned one
     (``track_info.quality_profile_id``, e.g. from a wishlist row or the
@@ -579,6 +605,18 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             rejection_reason = None if _skip_quality else check_quality_target(file_path, context)
             if _skip_quality:
                 logger.info(f"[QualityGuard] Skipped (user approval) for {_basename}")
+            if rejection_reason and _try_force_grab_quarantine_approval(
+                context,
+                reason_code='quality_not_allowed',
+                trigger='quality',
+                reason=rejection_reason,
+            ):
+                logger.info(
+                    "[QualityGuard] Auto-approved exact Force-Grab reason "
+                    "quality_not_allowed for %s",
+                    _basename,
+                )
+                rejection_reason = None
             if rejection_reason:
                 try:
                     quarantine_path = move_to_quarantine(
