@@ -217,6 +217,16 @@ def advance_open_imports(
     now: Optional[float] = None,
 ) -> ImportPipelineResult:
     timestamp = float(now) if now is not None else datetime.now(timezone.utc).timestamp()
+
+    # First revive retry walks a restart interrupted — their imports carry
+    # quarantined entries and are deliberately NOT due below; the journaled
+    # legacy-worker state is the only thing that can continue them.
+    try:
+        from core.acquisition.retry_resume import resume_interrupted_retry_walks
+        resume_interrupted_retry_walks(connection_factory, now=timestamp)
+    except Exception as exc:  # noqa: BLE001 - resume must not stop imports
+        logger.warning("Acquisition retry resume failed: %s", exc)
+
     conn = connection_factory()
     try:
         records = [
