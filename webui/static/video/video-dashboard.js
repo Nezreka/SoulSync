@@ -201,14 +201,12 @@
             .catch(function () { /* coverage is a nice-to-have; never block the dashboard */ });
     }
 
-    // The Studios are admin-only — non-admins got two prominent cards whose
-    // buttons silently did nothing. Hide the cards outright for them.
+    // The Studios are admin-only — non-admins got a prominent card whose buttons
+    // silently did nothing. Hide the combined card outright for them.
     function gateStudioCards() {
         if (typeof currentProfile !== 'undefined' && currentProfile && !currentProfile.is_admin) {
-            ['overlay-studio', 'collection-studio'].forEach(function (k) {
-                var card = document.querySelector('.dash-card[data-card="' + k + '"]');
-                if (card) card.style.display = 'none';
-            });
+            var card = document.querySelector('.dash-card[data-card="studios"]');
+            if (card) card.style.display = 'none';
         }
     }
 
@@ -233,6 +231,32 @@
                 _recentSub(it) +
                 '</a>';
         }).join('');
+        renderStudioBackgrounds(items);   // reuse the same owned posters for the Studios card art
+    }
+
+    // Paint the combined Studios card's backgrounds from real library posters: the Overlay
+    // half shows one poster wearing example badges (what overlays do); the Collection half
+    // shows a fanned stack of titles (what a collection is). Purely decorative + best-effort.
+    function _poster(it) { return '/api/video/poster/' + it.kind + '/' + it.id + '?w=300'; }
+    function renderStudioBackgrounds(items) {
+        items = (items || []).filter(function (it) { return it && it.id && it.kind; });
+        if (!items.length) return;
+        var ov = document.querySelector('[data-vst-bg="overlay"]');
+        if (ov) {
+            var hero = items.filter(function (it) { return it.kind === 'movie'; })[0] || items[0];
+            ov.innerHTML =
+                '<img class="vst-ov-poster" src="' + _poster(hero) + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">' +
+                '<span class="vst-ov-badge" style="top:8px;right:36px;background:rgba(var(--accent-rgb),.92);color:#fff;">4K</span>' +
+                '<span class="vst-ov-badge" style="top:36px;right:36px;background:rgba(245,197,24,.94);color:#111;">★ IMDb</span>' +
+                '<span class="vst-ov-badge" style="top:64px;right:36px;background:rgba(255,255,255,.9);color:#111;">HDR</span>';
+        }
+        var col = document.querySelector('[data-vst-bg="collection"]');
+        if (col) {
+            var picks = items.slice(0, 3);
+            col.innerHTML = picks.map(function (it) {
+                return '<img class="vst-col-poster" src="' + _poster(it) + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">';
+            }).join('');
+        }
     }
 
     // ── Upcoming (calendar preview) — mini-billboards for the next few episodes ──
