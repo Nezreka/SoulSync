@@ -95,6 +95,27 @@ class VideoEnrichmentEngine:
     def start_all(self):
         for w in self.workers.values():
             w.start()
+        self._kick_franchise_backfill_soon()
+
+    def _kick_franchise_backfill_soon(self, delay: float = 45.0):
+        """Self-heal the franchise collection-id backlog on ANY first video activity (this runs
+        when the engine boots — dashboard, search, sync, whatever), not only on a Collection
+        Studio visit. Delayed off the boot path; single-flight + no-op-when-empty live inside
+        kick_franchise_backfill, so repeat engine starts are cheap. Lazy import avoids the
+        collections→engine circular; stays lazy overall (music-only sessions never start the
+        engine, so this never fires)."""
+        def _go():
+            try:
+                from core.video.collections.presets import kick_franchise_backfill
+                kick_franchise_backfill(self.db)
+            except Exception:   # noqa: BLE001 - a heal-nicety must never disturb the engine
+                logger.debug("delayed franchise backfill kick failed", exc_info=True)
+        try:
+            t = threading.Timer(delay, _go)
+            t.daemon = True
+            t.start()
+        except Exception:   # noqa: BLE001
+            logger.debug("could not schedule franchise backfill", exc_info=True)
 
     def stop_all(self):
         for w in self.workers.values():
