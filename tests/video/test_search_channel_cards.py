@@ -29,21 +29,20 @@ def test_channel_card_reuses_the_vsr_poster_tile():
 
 
 def test_channels_render_in_the_shared_grid_after_tv_before_people():
-    # the group builder uses the shared .vsr-grid, not a bespoke grid
-    ytg = _SEARCH_JS.split("function ytGroup")[1].split("function render")[0]
-    assert "vsr-grid" in ytg and "vyt-result-grid" not in ytg
-    # render order: movie, show, YT, person
-    order = _SEARCH_JS.split("var html =")[1].split(";")[0]
-    i_show = order.index("byKind.show")
-    i_yt = order.index("ytGroup(")
-    i_person = order.index("byKind.person")
+    # progressive render: the group ORDER is the _ORDER list; channels sit after TV, before People.
+    order = _SEARCH_JS.split("var _ORDER = [")[1].split("];")[0]
+    i_show = order.index("'show'")
+    i_yt = order.index("'youtube'")
+    i_person = order.index("'person'")
     assert i_show < i_yt < i_person, "channels must sit after TV Shows, before People"
+    # every group fills the shared .vsr-grid (via slotHTML), not a bespoke grid
+    assert "vsr-grid" in _SEARCH_JS and "vyt-result-grid" not in _SEARCH_JS
 
 
 def test_skeleton_uses_poster_shaped_tiles_in_the_shared_grid():
-    skel = _SEARCH_JS.split("function ytSkeletonGroup")[1].split("function tmdbGroup")[0]
-    assert "vsr-card" in skel and "vsr-poster" in skel
-    assert "vsr-grid" in skel and "vyt-result-grid" not in skel
+    skel = _SEARCH_JS.split("function skelCards")[1].split("function slotHTML")[0]
+    assert "vsr-card" in skel and "vsr-poster" in skel   # poster-shaped skeleton tiles
+    assert "vyt-result-grid" not in skel
 
 
 def test_branded_poster_css_exists_and_old_component_removed():

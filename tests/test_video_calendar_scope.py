@@ -100,9 +100,9 @@ def test_episode_modal_offers_single_episode_wishlist_action():
     js = (Path(__file__).resolve().parent.parent
           / "webui" / "static" / "video" / "video-calendar.js").read_text(encoding="utf-8")
     assert "data-vcm-wish" in js
-    # gate: missing + aired only
-    assert "!ep.has_file && ep.show_tmdb_id" in js
-    assert "ep.air_date < state.data.today" in js
+    # gate: missing + has a show tmdb id (unaired/upcoming ones are flagged separately)
+    assert "!ep.has_file && !!ep.show_tmdb_id" in js
+    assert "ep.air_date > state.data.today" in js
     # pre-check against what's already queued, then the parity payload
     assert js.count("/api/video/wishlist/check") == 2      # bulk button + modal
     assert "library_id: ep.show_id" in js
