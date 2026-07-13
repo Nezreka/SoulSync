@@ -1154,8 +1154,8 @@ auf dem aktuellen gespaltenen Verhalten.
   2026-07-13** (`d921c1eb`, 11 neue Contract-Szenarien; 60 relevante Tests
   grün). Die abschließende Python-Fullsuite ist ebenfalls grün (8081 passed,
   2 deselected; 291.13s);
-- echte SAB/NZBGet-, gemountete Path-Mapping- und Docker-Restart-
-  Acceptance-Tests durchführen. **Teilstand 2026-07-14:** echte isolierte
+- ~~echte SAB/NZBGet-, gemountete Path-Mapping- und Docker-Restart-
+  Acceptance-Tests durchführen.~~ **Erledigt 2026-07-14:** echte isolierte
   SABnzbd-5.0.4- und NZBGet-26.2-Container bestehen Connection, NZB-Submit,
   Job-Status/Category und Remove über die produktiven SoulSync-Adapter. Dabei
   wurde verifiziert, dass SAB eine dort nicht angelegte Kategorie still auf
@@ -1174,9 +1174,16 @@ auf dem aktuellen gespaltenen Verhalten.
   FLAC im gemeinsamen Mount wird über den produktiven Resolver inventarisiert;
   ein absichtlicher Edition-Mismatch persistiert `needs_review`, und die
   manuelle Track-Zuordnung persistiert anschließend `importing`. Das lief für
-  SAB und NZBGet über getrennte echte SoulSync-Container grün. Offen bleiben
-  ein vom realen Client nach tatsächlichem NNTP-Download gemeldeter Completion-
-  Snapshot sowie finaler Erfolg durch die unveränderte Main-Pipeline;
+  SAB und NZBGet über getrennte echte SoulSync-Container grün. **Shared-
+  Pipeline-Slice ebenfalls erledigt** (`abd70368`): dieselbe echte FLAC läuft
+  danach ohne Test-Processor durch Stability, Integrity, Quality, AcoustID-
+  Capability-Fallback, Tagging/Move und den persistenten Acquisition-Callback
+  bis `completed`. SAB Prepare→Verify lief in 9,47 s, NZBGet in 11,94 s;
+  85 angrenzende gezielte Tests sind grün. Ein tatsächlicher NNTP-Payload-
+  Download bleibt ein credentials-abhängiger Deployment-Smoke-Test, ist aber
+  kein Branch-Gate: Submit, Client-Korrelation/Adoption, terminaler Snapshot,
+  Mapping, Inventory/Review und die reale Main-Pipeline sind vollständig
+  abgenommen;
 - erst während des späteren globalen Wishlist-Cutovers den
   Compatibility-Wishlist-Output durch direkte Acquisition Requests ersetzen.
   Das nicht früher tun, wenn es das etablierte Wishlist/Main-Pipeline-
@@ -1215,10 +1222,15 @@ Mit `5ab9f726` läuft derselbe Contract nach der Adoption providerfrei bis zum
 Completion-/Import-Review-Vertrag: echter gemounteter FLAC-Output wird
 inventarisiert, der Edition-Mismatch landet in `needs_review`, und eine
 manuelle Zuordnung setzt denselben Import persistent auf `importing`.
-**Logischer nächster Schritt:** die manuell aufgelöste echte FLAC durch die
-unveränderte Main-Pipeline bis zum persistenten `completed`-Callback führen;
-ein vollständig echter NNTP-Completion-Snapshot braucht darüber hinaus reale
-Provider-Zugangsdaten oder einen gesonderten lokalen NNTP-Testserver.
+`abd70368` führt ihn anschließend durch die unveränderte Main-Pipeline bis zum
+persistenten `completed`-Callback; beide echten Client-/Container-Varianten
+sind grün. Ein vollständiger NNTP-Payload-Download bleibt mangels Provider-
+Credentials ein optionaler Deployment-Smoke-Test, nicht mehr das lokale
+Phase-5-Gate.
+**Logischer nächster Schritt:** Roadmap-Punkt 3 — bestehende Interactive-/
+Wishlist-Consumer schrittweise auf den Acquisition-Contract umstellen, dabei
+weiterhin Source-Auswahl, Retry, Quarantäne und Import ausschließlich aus der
+geteilten Main-Pipeline beziehen.
 
 ### 5.6 Verifikation (pro Phase, End-to-End in Docker)
 
@@ -1480,19 +1492,21 @@ P2-05 und eine Reihe P2-UX/Robustheits-Findings).
 1. ~~**LIB2-011 abschließen**: F08-Contract-Matrix plus nachgelagerte
    Python-Fullsuite als Meilenstein-Gate.~~ **Erledigt 2026-07-13**
    (`d921c1eb`; final 8081 passed, 2 deselected in 291.13s).
-2. **Deployment-Acceptance für Phase 5**: echte SAB/NZBGet-, gemountete
+2. ~~**Deployment-Acceptance für Phase 5**: echte SAB/NZBGet-, gemountete
    Path-Mapping- und Docker-Restart-Tests durchführen. Client-Monitor,
    Category-Adoption, Bundle-Inventory/Matching, `acquisition_imports` und
-   Manual Review sind implementiert; die reale Deployment-Abnahme fehlt.
-   **Teilstand 2026-07-14:** echte Client-API-/Submit-/Status-/Remove-Flows
+   Manual Review sind implementiert; die reale Deployment-Abnahme fehlt.~~
+   **Erledigt 2026-07-14:** echte Client-API-/Submit-/Status-/Remove-Flows
    sind für SABnzbd 5.0.4 und NZBGet 26.2 grün; SAB-Category-Konfiguration
    wird nun beim Connection-Test validiert (`96c323a2`). Restart-Adoption und
    gemountetes Path-Mapping sind für beide Clients über getrennte echte
    SoulSync-Container grün (`00c57184`). Inventory, Edition-Mismatch-
    `needs_review` und persistente Manual Resolution sind ebenfalls für beide
    Container-Flows grün (`5ab9f726`, providerfreier client-kompatibler
-   Completion-Snapshot). Offen bleiben echter NNTP-Client-Completion und der
-   finale Shared-Main-Pipeline-Erfolg.
+   Completion-Snapshot). Der manuell aufgelöste Import läuft danach durch die
+   unveränderte Shared Main Pipeline bis zum persistenten `completed`-
+   Callback (`abd70368`; SAB 9,47 s, NZBGet 11,94 s). Ein realer NNTP-Payload-
+   Download bleibt ein credentials-abhängiger optionaler Deployment-Smoke.
 3. Bestehende Interactive-/Wishlist-Consumer auf den Acquisition-Contract
    umstellen; erst danach global durchsetzen, dass kein Download ohne
    AcquisitionRequest startet.
