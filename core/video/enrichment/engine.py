@@ -197,14 +197,36 @@ class VideoEnrichmentEngine:
         # Backfills season posters + show metadata gaps (never clobbers).
         self.db.enrichment_apply("tmdb", "show", show_id, matched=True,
                                  external_id=result["id"], metadata=result.get("metadata"))
+        nums = []
         try:
             nums = [s["season_number"] for s in (result.get("metadata") or {}).get("seasons") or []]
             w._cascade_episodes(show_id, result["id"], nums)    # full list: owned + missing
         except Exception:
             logger.exception("refresh_show_art: episode cascade failed for show %s", show_id)
+        # TVDB episode GAP-FILL — TMDB is often slow on just-aired / reality-TV episode
+        # overviews + titles; TVDB frequently has them first. backfill_episodes is COALESCE
+        # gap-fill, so this only fills what TMDB left blank and never clobbers.
+        self._cascade_tvdb_episodes(show_id, info.get("tvdb_id"), nums)
         if with_ratings:
             self._backfill_ratings("show", show_id)
         return {"ok": True}
+
+    def _cascade_tvdb_episodes(self, show_id, tvdb_id, season_nums) -> None:
+        """Fill episode overviews/titles/stills TMDB lacked from TVDB (best-effort, gap-only)."""
+        tw = self.workers.get("tvdb")
+        if not tvdb_id or not tw or not tw.enabled:
+            return
+        for sn in season_nums or []:
+            try:
+                eps = tw.client.season_episodes(tvdb_id, sn) or []
+            except Exception:   # noqa: BLE001 - one bad season shouldn't abort the refresh
+                logger.debug("tvdb season fetch failed (%s S%s)", tvdb_id, sn, exc_info=True)
+                continue
+            if eps:
+                try:
+                    self.db.backfill_episodes(show_id, sn, eps)
+                except Exception:   # noqa: BLE001
+                    logger.debug("tvdb episode backfill failed (show %s S%s)", show_id, sn, exc_info=True)
 
     def refresh_movie_art(self, movie_id) -> dict:
         """On-demand (lazy) backfill of a movie's cast / genres / backdrop / ratings
