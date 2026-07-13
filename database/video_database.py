@@ -43,7 +43,7 @@ def _publish_video_event(event_type: str, data: dict) -> None:
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 38   # v38: episodes.added_at (episode-aware Recently Added); v37: video_downloads.client_ref; v36: overlay_apply.plex_poster_key
+SCHEMA_VERSION = 39   # v39: video_wishlist.release_date (movie release-window gate); v38: episodes.added_at; v37: video_downloads.client_ref
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -208,6 +208,7 @@ _COLUMN_MIGRATIONS = [
     ("shows", "ratings_synced", "INTEGER NOT NULL DEFAULT 0"),
     ("shows", "airs_time", "TEXT"),   # TVDB show air time, e.g. "21:00" (network local)
     ("video_watchlist", "state", "TEXT NOT NULL DEFAULT 'follow'"),  # follow | mute (tombstone)
+    ("video_wishlist", "release_date", "TEXT"),   # movie release date — gate: don't search until near release
     ("video_wishlist", "still_url", "TEXT"),   # episode still thumbnail (captured at add time)
     ("video_wishlist", "season_poster_url", "TEXT"),   # the episode's season poster
     ("video_wishlist", "episode_overview", "TEXT"),    # episode synopsis
@@ -4857,6 +4858,9 @@ class VideoDatabase:
         """
         if not tmdb_id or not title:
             return False
+        # Capture the release date (drives the "don't search until near release" gate) from the
+        # rich detail blob when the caller supplied one — before it's serialised.
+        release_date = detail_json.get("release_date") if isinstance(detail_json, dict) else None
         if isinstance(detail_json, (dict, list)):
             import json as _json
             detail_json = _json.dumps(detail_json)
@@ -4866,17 +4870,18 @@ class VideoDatabase:
                 "SELECT 1 FROM video_wishlist WHERE kind='movie' AND tmdb_id=?",
                 (int(tmdb_id),)).fetchone()
             conn.execute(
-                """INSERT INTO video_wishlist (kind, tmdb_id, title, poster_url, year, library_id, server_source, status, detail_json)
-                   VALUES ('movie', ?, ?, ?, ?, ?, ?, ?, ?)
+                """INSERT INTO video_wishlist (kind, tmdb_id, title, poster_url, year, library_id, server_source, status, detail_json, release_date)
+                   VALUES ('movie', ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(tmdb_id) WHERE kind='movie' DO UPDATE SET
                        title=excluded.title,
                        poster_url=COALESCE(excluded.poster_url, video_wishlist.poster_url),
                        year=COALESCE(excluded.year, video_wishlist.year),
                        library_id=COALESCE(excluded.library_id, video_wishlist.library_id),
                        detail_json=COALESCE(excluded.detail_json, video_wishlist.detail_json),
+                       release_date=COALESCE(excluded.release_date, video_wishlist.release_date),
                        status=CASE WHEN video_wishlist.status='monitored' AND excluded.status='wanted'
                                    THEN 'wanted' ELSE video_wishlist.status END""",
-                (int(tmdb_id), title, poster_url, year, library_id, server_source, status, detail_json))
+                (int(tmdb_id), title, poster_url, year, library_id, server_source, status, detail_json, release_date))
             conn.commit()
             if not existed:   # a refresh-upsert is not a new wish
                 _publish_video_event("video_wishlist_item_added",
@@ -4936,6 +4941,11 @@ class VideoDatabase:
                 "  WHERE m.tmdb_id=w.tmdb_id AND m.has_file=1) AS owned_resolutions "
                 "FROM video_wishlist w "
                 "WHERE w.kind='movie' AND w.status='wanted' AND w.tmdb_id IS NOT NULL "
+                # release-window gate: only search once within a week of release (early scene
+                # releases appear a few days out). A further-off movie stays wished but isn't
+                # hunted — no risk of grabbing a wrong-titled or fake 'release' before it exists.
+                # Unknown release date → allow (the year check on the release still guards).
+                "AND (w.release_date IS NULL OR w.release_date <= date('now', '+7 days')) "
                 "ORDER BY w.year DESC, w.id DESC")]
         finally:
             conn.close()
@@ -4962,9 +4972,11 @@ class VideoDatabase:
                 "  AND e.episode_number = w.episode_number AND e.has_file = 1) "
                 "  AS owned_resolutions "
                 "FROM video_wishlist w WHERE w.kind='episode' AND w.tmdb_id IS NOT NULL "
-                # air-date gate: aired or unknown only — an unaired (future) episode stays on
-                # the wishlist but isn't searched until its air date arrives.
-                "AND (w.air_date IS NULL OR w.air_date <= date('now')) "
+                # release-window gate: search an episode only once it's within a week of air
+                # (early scene releases show up a few days out) — a further-off episode stays on
+                # the wishlist but isn't searched yet, so the drain never hunts a release that
+                # can't exist. Unknown air date → allow (can't prove it's future).
+                "AND (w.air_date IS NULL OR w.air_date <= date('now', '+7 days')) "
                 "ORDER BY w.air_date DESC, w.id DESC")]
         finally:
             conn.close()

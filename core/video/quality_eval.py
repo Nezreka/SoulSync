@@ -20,6 +20,14 @@ _RES_RANK = (("2160", 4), ("4k", 4), ("1440", 3), ("1080", 3),
 _RES_LABEL = {4: "4K", 3: "1080p", 2: "720p", 1: "SD", 0: ""}
 
 
+def _as_year(v: Any):
+    """Coerce a wanted-year hint (int / '2026' / '2026-07-01') to an int, or None."""
+    try:
+        return int(str(v)[:4]) if v not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
 def resolution_rank(res: Any) -> int:
     """Map a raw resolution token to a rank int (4=4K … 1=SD, 0=unknown)."""
     s = str(res or "").strip().lower()
@@ -122,13 +130,20 @@ def tier_key(source, resolution) -> str:
     return (pre + "-" + resolution) if resolution else ""
 
 
-def _scope_ok(parsed, scope, want_season, want_episode):
+def _scope_ok(parsed, scope, want_season, want_episode, want_year=None):
     """Validate a hit actually matches what was searched (Sonarr-style): an episode
     search wants SxxExx, a season search wants the whole season PACK, a show search
-    wants a complete-series pack."""
+    wants a complete-series pack. For a movie, the release YEAR must match the wanted
+    year (±1 for production-vs-release slop) — otherwise a text search for 'The Odyssey
+    (2026)' happily matches 'Troy The Odyssey 2017', a different film."""
     season, episode = parsed.get("season"), parsed.get("episode")
     if scope == "movie":
-        return (None, None) if season is None else (None, "This is a TV release, not the movie")
+        if season is not None:
+            return None, "This is a TV release, not the movie"
+        py, wy = parsed.get("year"), _as_year(want_year)
+        if wy and py and abs(py - wy) > 1:
+            return None, "Wrong year (%s — wanted %s)" % (py, wy)
+        return None, None
     if scope == "episode":
         if episode is None:
             return None, "Not a single episode"
@@ -149,7 +164,7 @@ def _scope_ok(parsed, scope, want_season, want_episode):
 
 
 def evaluate_release(parsed, profile, *, scope="movie", want_season=None,
-                     want_episode=None, size_gb=None) -> dict:
+                     want_episode=None, size_gb=None, want_year=None) -> dict:
     """Judge a parsed search hit against the quality profile + the search scope.
 
     Returns ``{accepted, score, rejected, tier, quality_label}`` — ``accepted`` False
@@ -182,9 +197,9 @@ def evaluate_release(parsed, profile, *, scope="movie", want_season=None,
     if not rejected and profile.get("prefer_hdr") == "require" and not parsed.get("hdr"):
         rejected = "HDR required but this is SDR"
 
-    # 4) scope validation (episode vs season pack vs series pack)
+    # 4) scope validation (episode vs season pack vs series pack; movie year match)
     if not rejected:
-        _, scope_reason = _scope_ok(parsed, scope, want_season, want_episode)
+        _, scope_reason = _scope_ok(parsed, scope, want_season, want_episode, want_year)
         if scope_reason:
             rejected = scope_reason
 

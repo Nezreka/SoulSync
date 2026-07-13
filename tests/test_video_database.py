@@ -1382,3 +1382,26 @@ def test_recently_added_ranks_a_show_by_its_newest_episode(db):
         {"server_id": "se1", "season_number": 3, "episodes": [
             {"server_id": "e2", "season_number": 3, "episode_number": 2, "added_at": None, "files": F}]}]})
     assert db.recently_added(server_source="plex", limit=10)[0]["added_at"] == "2026-07-12 20:00:00"
+
+
+def test_release_window_gate_skips_far_off_movies_and_episodes(db):
+    """A movie/episode more than a week from release stays wished but isn't drained (no hunting
+    for a release that can't exist); released / within-a-week / date-unknown are searchable."""
+    import datetime
+    d = datetime.date.today()
+    far = (d + datetime.timedelta(days=30)).isoformat()
+    near = (d + datetime.timedelta(days=3)).isoformat()
+    past = (d - datetime.timedelta(days=30)).isoformat()
+    db.add_movie_to_wishlist(1, "Far", year=2027, detail_json={"release_date": far})
+    db.add_movie_to_wishlist(2, "Near", year=2026, detail_json={"release_date": near})
+    db.add_movie_to_wishlist(3, "Out", year=2026, detail_json={"release_date": past})
+    db.add_movie_to_wishlist(4, "Undated", year=2026)
+    seen = {r["title"] for r in db.movie_wishlist_to_download()}
+    assert "Far" not in seen and {"Near", "Out", "Undated"} <= seen
+
+    db.add_episodes_to_wishlist(100, "Show", [
+        {"season_number": 1, "episode_number": 1, "air_date": far},
+        {"season_number": 1, "episode_number": 2, "air_date": near},
+        {"season_number": 1, "episode_number": 3, "air_date": past}])
+    eps = {(r["season_number"], r["episode_number"]) for r in db.episode_wishlist_to_download()}
+    assert (1, 1) not in eps and {(1, 2), (1, 3)} <= eps

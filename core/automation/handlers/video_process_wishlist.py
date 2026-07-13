@@ -211,7 +211,8 @@ def _search_one_source(source: str, item: Dict[str, Any], media_type: str):
         hits = pres["hits"]
     else:
         return None, "unsupported source %r" % source
-    cands = _evaluate_hits(hits, profile, ctx["scope"], ctx.get("season"), ctx.get("episode"))
+    cands = _evaluate_hits(hits, profile, ctx["scope"], ctx.get("season"), ctx.get("episode"),
+                           want_year=ctx.get("year"))
     for c in cands:
         c["source"] = source
     return cands, None

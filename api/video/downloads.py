@@ -54,7 +54,7 @@ _SLSKD_KEYS = {
 }
 
 
-def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None) -> list:
+def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None, want_year=None) -> list:
     """Parse → evaluate → rank a list of raw indexer hits against the quality profile.
     Shared by the mock search and the live slskd start/poll endpoints.
 
@@ -75,7 +75,7 @@ def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None)
         parsed = parse_release(hit.get("title"))
         size_gb = round((hit.get("size_bytes") or 0) / (1024 ** 3), 1)
         verdict = evaluate_release(parsed, profile, scope=scope, want_season=want_season,
-                                   want_episode=want_episode, size_gb=size_gb)
+                                   want_episode=want_episode, size_gb=size_gb, want_year=want_year)
         is_blocked = (hit.get("username"), hit.get("filename")) in blocked
         if is_blocked:
             verdict = {**verdict, "accepted": False,
@@ -418,7 +418,7 @@ def register_routes(bp):
             raw = mock_search(scope, title, year=body.get("year"), season=want_season,
                               episode=want_episode, season_end=season_end, source=source)
         return jsonify({"scope": scope, "live": live,
-                        "results": _evaluate_hits(raw, profile, scope, want_season, want_episode)})
+                        "results": _evaluate_hits(raw, profile, scope, want_season, want_episode, want_year=body.get("year"))})
 
     @bp.route("/downloads/search/start", methods=["POST"])
     def video_downloads_search_start():
@@ -457,12 +457,12 @@ def register_routes(bp):
             if pres.get("error"):
                 return jsonify({"error": "Prowlarr: " + str(pres["error"])})
             return jsonify({"id": None, "live": True, "complete": True,
-                            "results": _evaluate_hits(pres["hits"], profile, scope, want_season, want_episode)})
+                            "results": _evaluate_hits(pres["hits"], profile, scope, want_season, want_episode, want_year=body.get("year"))})
         # remaining mock sources (e.g. youtube placeholder) resolve in one shot
         raw = mock_search(scope, title, year=body.get("year"), season=want_season,
                           episode=want_episode, season_end=season_end, source=source)
         return jsonify({"id": None, "live": False, "complete": True,
-                        "results": _evaluate_hits(raw, profile, scope, want_season, want_episode)})
+                        "results": _evaluate_hits(raw, profile, scope, want_season, want_episode, want_year=body.get("year"))})
 
     @bp.route("/downloads/search/poll", methods=["GET"])
     def video_downloads_search_poll():
@@ -479,7 +479,7 @@ def register_routes(bp):
         profile = load_profile(get_video_db())
         polled = poll_search(sid)
         return jsonify({"live": True, "total_files": polled["total_files"],
-                        "results": _evaluate_hits(polled["hits"], profile, scope, want_season, want_episode)})
+                        "results": _evaluate_hits(polled["hits"], profile, scope, want_season, want_episode, want_year=request.args.get("year"))})
 
     @bp.route("/downloads/grab", methods=["POST"])
     def video_downloads_grab():

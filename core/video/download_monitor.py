@@ -533,7 +533,8 @@ def _requery_worker(dl_id) -> None:
             for hit in (polled.get("hits") or []):
                 v = evaluate_release(parse_release(hit.get("title")), profile,
                                      scope=ctx.get("scope") or "movie",
-                                     want_season=ctx.get("season"), want_episode=ctx.get("episode"))
+                                     want_season=ctx.get("season"), want_episode=ctx.get("episode"),
+                                     want_year=ctx.get("year"))
                 if v["accepted"]:
                     accepted.append(hit)
             row2 = db.get_video_download(dl_id)
