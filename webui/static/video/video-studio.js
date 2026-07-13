@@ -80,14 +80,54 @@
             if (d.description) { about.textContent = d.description; about.hidden = false; }
             else { about.hidden = true; about.textContent = ''; }
         }
-        var acts = q('[data-vst-actions]');
-        if (acts) {
-            // Homepage is the studio's own site — the one intentional external link,
-            // opened in a new tab with rel=noopener (matches the person page's homepage chip).
-            acts.innerHTML = d.homepage
-                ? '<a class="vst-site" href="' + esc(d.homepage) + '" target="_blank" rel="noopener noreferrer">Official site ↗</a>'
-                : '';
+        renderActions(d);
+    }
+
+    // ── follow a studio (same control + flow as the person page) ──────────────
+    function renderActions(d) {
+        var acts = q('[data-vst-actions]'); if (!acts) return;
+        var on = !!d._vw_watched;
+        var site = d.homepage
+            ? '<a class="vst-site" href="' + esc(d.homepage) + '" target="_blank" rel="noopener noreferrer">Official site ↗</a>'
+            : '';
+        acts.innerHTML =
+            '<button class="library-artist-watchlist-btn' + (on ? ' watching' : '') + '" type="button" data-vst-watch>' +
+            '<span class="watchlist-icon">' + (on ? '✓' : '＋') + '</span>' +
+            '<span class="watchlist-text">' + (on ? 'Following' : 'Follow studio') + '</span></button>' + site;
+        // Resolve the real followed state once (lazy), then re-render.
+        if (!d._vw_checked && currentId) {
+            d._vw_checked = true;
+            fetch('/api/video/watchlist/check', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ kind: 'studio', tmdb_ids: [currentId] }) })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (res) {
+                    if (res && res.results && studio === d) {
+                        d._vw_watched = !!res.results[String(currentId)];
+                        renderActions(d);
+                    }
+                }).catch(function () { /* keep default (off) */ });
         }
+    }
+    function toggleWatch() {
+        var d = studio; if (!d || !currentId) return;
+        var on = !!d._vw_watched;
+        var url = on ? '/api/video/watchlist/remove' : '/api/video/watchlist/add';
+        var body = on ? { kind: 'studio', tmdb_id: currentId }
+            : { kind: 'studio', tmdb_id: currentId, title: d.name, poster_url: d.logo || null };
+        fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (res) {
+                if (!res || res.success === false) {
+                    if (typeof showToast === 'function') showToast('Watchlist update failed', 'error');
+                    return;
+                }
+                d._vw_watched = !on;
+                renderActions(d);
+                if (typeof showToast === 'function')
+                    showToast(!on ? 'Following ' + (d.name || 'studio') : 'Unfollowed', !on ? 'success' : 'info');
+                document.dispatchEvent(new CustomEvent('soulsync:video-watchlist-changed',
+                    { detail: { kind: 'studio', id: String(currentId), watched: !on } }));
+            }).catch(function () { if (typeof showToast === 'function') showToast('Watchlist update failed', 'error'); });
     }
 
     function setCount(total) {
@@ -196,6 +236,8 @@
 
     function onClick(e) {
         var r = root(); if (!r) return;
+        var watchBtn = e.target.closest('[data-vst-watch]');
+        if (watchBtn && r.contains(watchBtn)) { toggleWatch(); return; }
         var card = e.target.closest('[data-vst-open]');
         if (card && r.contains(card)) {
             if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;

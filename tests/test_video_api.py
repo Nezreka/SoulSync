@@ -844,8 +844,8 @@ def test_watchlist_add_check_list_remove_roundtrip(tmp_path):
 
     # empty to start
     assert client.get("/api/video/watchlist").get_json() == {
-        "success": True, "shows": [], "people": [],
-        "counts": {"show": 0, "person": 0, "total": 0}}
+        "success": True, "shows": [], "people": [], "studios": [],
+        "counts": {"show": 0, "person": 0, "studio": 0, "total": 0}}
 
     # add a show + a person
     r = client.post("/api/video/watchlist/add", json={
@@ -857,7 +857,7 @@ def test_watchlist_add_check_list_remove_roundtrip(tmp_path):
 
     # list groups by kind
     data = client.get("/api/video/watchlist").get_json()
-    assert data["counts"] == {"show": 1, "person": 1, "total": 2}
+    assert data["counts"] == {"show": 1, "person": 1, "studio": 0, "total": 2}
     assert data["shows"][0]["title"] == "Game of Thrones"
     assert data["people"][0]["tmdb_id"] == 287
 
@@ -868,7 +868,7 @@ def test_watchlist_add_check_list_remove_roundtrip(tmp_path):
 
     # counts endpoint
     assert client.get("/api/video/watchlist/counts").get_json() == {
-        "success": True, "show": 1, "person": 1, "total": 2}
+        "success": True, "show": 1, "person": 1, "studio": 0, "total": 2}
 
     # remove
     rem = client.post("/api/video/watchlist/remove",

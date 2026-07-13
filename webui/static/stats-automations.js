@@ -2445,6 +2445,7 @@ const VIDEO_HUB_REFERENCE = {
         {
             group: 'Watchlist Scans (fill the wishlist)', items: [
                 { type: 'video_scan_watchlist_people', label: 'Scan Watchlist People', desc: 'Wishlist followed people\'s filmographies' },
+                { type: 'video_scan_watchlist_studios', label: 'Scan Watchlist Studios', desc: 'Wishlist followed studios\' films' },
                 { type: 'video_scan_watchlist_channels', label: 'Scan Watchlist Channels', desc: 'Wishlist new uploads from followed channels' },
                 { type: 'video_scan_watchlist_playlists', label: 'Scan Watchlist Playlists', desc: 'Mirror followed playlists into the wishlist' },
                 { type: 'video_add_airing_episodes', label: 'Wishlist Today\'s Airings', desc: 'Sonarr-style: queue every episode airing today' },
@@ -2543,7 +2544,7 @@ const _autoIcons = {
     video_scan_library: '\uD83C\uDFAC', video_scan_server: '\uD83D\uDD04', video_update_database: '\uD83D\uDDC4\uFE0F', video_update_database_hourly: '\uD83D\uDDC4\uFE0F',
     video_add_airing_episodes: '\uD83D\uDCFA', video_deep_scan_movies: '\uD83C\uDFAC', video_deep_scan_tv: '\uD83D\uDCFA',
     video_scan_watchlist_people: '\uD83C\uDFAD', video_scan_watchlist_channels: '\uD83D\uDCE1',
-    video_scan_watchlist_playlists: '\uD83C\uDFB5',
+    video_scan_watchlist_playlists: '\uD83C\uDFB5', video_scan_watchlist_studios: '\uD83C\uDFAC',
     video_process_movie_wishlist: '\uD83C\uDFAC', video_process_episode_wishlist: '\uD83D\uDCFA',
     video_process_youtube_wishlist: '\u2B07\uFE0F',
     video_refresh_airing_schedules: '\uD83D\uDDD3\uFE0F', video_clean_youtube_episodes: '\uD83E\uDDF9',
@@ -4158,6 +4159,7 @@ function _autoFormatAction(type) {
         video_add_airing_episodes: 'Wishlist Airing Episodes',
         video_deep_scan_movies: 'Deep Scan Movie Library', video_deep_scan_tv: 'Deep Scan TV Library',
         video_scan_watchlist_people: 'Scan Watchlist People',
+        video_scan_watchlist_studios: 'Scan Watchlist Studios',
         video_scan_watchlist_channels: 'Scan Watchlist Channels',
         video_scan_watchlist_playlists: 'Scan Watchlist Playlists',
         video_process_movie_wishlist: 'Process Movie Wishlist',

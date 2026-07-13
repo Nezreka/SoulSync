@@ -342,6 +342,8 @@ ACTIONS: list[dict] = [
     # Stage 1 — scans that FILL the wishlist from what you follow.
     {"type": "video_scan_watchlist_people", "label": "Scan Watchlist People", "icon": "users", "scope": "video",
      "description": "For everyone you follow on the watchlist, wishlist every movie they acted in or directed that you don't already own — the whole back catalog plus anything upcoming (kept as 'monitored' until it's released). First run backlogs everything; later runs are fast.", "available": True},
+    {"type": "video_scan_watchlist_studios", "label": "Scan Watchlist Studios", "icon": "film", "scope": "video",
+     "description": "For every studio you follow (Pixar, A24, Disney…), wishlist every movie it produced that you don't already own — forward from when you followed it plus anything upcoming (kept 'monitored' until released), widened by each studio's lookback window. A settled-films vote floor keeps obscure shorts out; new releases always get through.", "available": True},
     {"type": "video_scan_watchlist_channels", "label": "Scan Watchlist Channels", "icon": "youtube", "scope": "video",
      "description": "For every YouTube channel you follow, wishlist its new long-form uploads (Shorts excluded). Forward-looking from when you followed, plus a safety net that keeps the last N videos current — N is the 'videos to grab' setting on Settings → Library. Pair with a 6-hourly Schedule trigger — channels post at all hours.", "available": True},
     {"type": "video_scan_watchlist_playlists", "label": "Scan Watchlist Playlists", "icon": "list", "scope": "video",

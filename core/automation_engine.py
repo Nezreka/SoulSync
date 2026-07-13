@@ -306,6 +306,14 @@ SYSTEM_AUTOMATIONS = [
         'owned_by': 'video',
     },
     {
+        'name': 'Auto-Scan Watchlist Studios',         # followed studios → wished movies
+        'trigger_type': 'daily_time',                  # daily; catalogs change slowly
+        'trigger_config': {'time': '03:30'},           # staggered off the people scan
+        'action_type': 'video_scan_watchlist_studios',
+        'initial_delay': 1500,
+        'owned_by': 'video',
+    },
+    {
         'name': 'Auto-Scan Watchlist Channels',        # followed YouTube channels → wished videos
         'trigger_type': 'schedule',
         'trigger_config': {'interval': 6, 'unit': 'hours'},   # YouTube posts at all hours

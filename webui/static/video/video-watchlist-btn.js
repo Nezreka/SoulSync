@@ -17,7 +17,7 @@
 
     // Client-side cache of watched tmdb_ids per kind (so freshly-rendered cards
     // can paint correctly before a hydrate round-trip returns).
-    var WATCHED = { show: {}, person: {} };
+    var WATCHED = { show: {}, person: {}, studio: {} };
 
     function esc(s) {
         return String(s == null ? '' : s)
@@ -34,7 +34,7 @@
     // string-concatenated unconditionally by callers).
     function btn(opts) {
         if (!opts || !opts.tmdbId) return '';
-        if (opts.kind !== 'show' && opts.kind !== 'person') return '';
+        if (opts.kind !== 'show' && opts.kind !== 'person' && opts.kind !== 'studio') return '';
         var on = !!WATCHED[opts.kind][opts.tmdbId];
         return '<button type="button" class="vwl-btn' + (on ? ' active' : '') + '"' +
             ' data-vwl-kind="' + opts.kind + '" data-vwl-id="' + esc(opts.tmdbId) + '"' +
@@ -77,7 +77,8 @@
             // small + easy to mis-click and the card vanishes on the watchlist
             // page. Adding stays instant.
             var name = b.getAttribute('data-vwl-title') || '';
-            var label = name ? '“' + name + '”' : (kind === 'person' ? 'this person' : 'this show');
+            var label = name ? '“' + name + '”'
+                : (kind === 'person' ? 'this person' : kind === 'studio' ? 'this studio' : 'this show');
             var doRemove = function () {
                 fetch('/api/video/watchlist/remove', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -117,7 +118,7 @@
     // Batch-check watched state for every un-painted button under `root`.
     function hydrate(root) {
         root = root || document;
-        ['show', 'person'].forEach(function (kind) {
+        ['show', 'person', 'studio'].forEach(function (kind) {
             var nodes = root.querySelectorAll('.vwl-btn[data-vwl-kind="' + kind + '"]');
             if (!nodes.length) return;
             var ids = [], seen = {};
