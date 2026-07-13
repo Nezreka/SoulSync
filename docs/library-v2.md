@@ -1226,7 +1226,12 @@ manuelle Zuordnung setzt denselben Import persistent auf `importing`.
 persistenten `completed`-Callback; beide echten Client-/Container-Varianten
 sind grün. Ein vollständiger NNTP-Payload-Download bleibt mangels Provider-
 Credentials ein optionaler Deployment-Smoke-Test, nicht mehr das lokale
-Phase-5-Gate.
+Phase-5-Gate. Der abschließende Fullsuite-Lauf nach allen Phase-5-
+Acceptance-Änderungen ist ebenfalls grün: **8085 passed, 2 skipped,
+2 deselected, 299 warnings in 211.79s**. Die beiden Skips sind die bewusst
+opt-in markierten Live-Deployment-Varianten, die separat für SABnzbd und
+NZBGet in echten Zwei-Container-Flows bestanden haben. Frontend-Code wurde in
+dieser Etappe nicht verändert; deshalb waren keine Frontend-Gates erforderlich.
 **Logischer nächster Schritt:** Roadmap-Punkt 3 — bestehende Interactive-/
 Wishlist-Consumer schrittweise auf den Acquisition-Contract umstellen, dabei
 weiterhin Source-Auswahl, Retry, Quarantäne und Import ausschließlich aus der
@@ -1507,6 +1512,8 @@ P2-05 und eine Reihe P2-UX/Robustheits-Findings).
    unveränderte Shared Main Pipeline bis zum persistenten `completed`-
    Callback (`abd70368`; SAB 9,47 s, NZBGet 11,94 s). Ein realer NNTP-Payload-
    Download bleibt ein credentials-abhängiger optionaler Deployment-Smoke.
+   Der abschließende Branch-Gate-Lauf ist grün (8085 passed, 2 skipped,
+   2 deselected in 211.79s).
 3. Bestehende Interactive-/Wishlist-Consumer auf den Acquisition-Contract
    umstellen; erst danach global durchsetzen, dass kein Download ohne
    AcquisitionRequest startet.
