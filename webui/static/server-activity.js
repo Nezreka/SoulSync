@@ -297,8 +297,18 @@
         else { b.style.display = 'none'; btn.classList.remove('activity-live'); }
     }
 
+    // Server Activity is a Plex/Jellyfin-only feature (live sessions). Hide the launcher
+    // entirely when neither is configured (e.g. a Navidrome music setup) so it isn't dead
+    // weight. A fetch failure leaves the button as-is — only a definitive 'no_server' hides it.
+    function setSupported(on) {
+        var btn = document.getElementById('activity-float-btn');
+        if (btn) btn.style.display = on ? '' : 'none';
+    }
+
     function refresh() {
         return getJSON(URL).then(function (d) {
+            if (d && d.ok === false && d.reason === 'no_server') setSupported(false);
+            else if (d) setSupported(true);
             if (d) setBadge((d.summary && d.summary.streams) || 0);
             if (isOpen && tab === 'activity') renderActivity(d);
             return d;
