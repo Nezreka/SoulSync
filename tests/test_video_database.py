@@ -1392,10 +1392,14 @@ def test_release_window_gate_skips_far_off_movies_and_episodes(db):
     far = (d + datetime.timedelta(days=30)).isoformat()
     near = (d + datetime.timedelta(days=3)).isoformat()
     past = (d - datetime.timedelta(days=30)).isoformat()
-    db.add_movie_to_wishlist(1, "Far", year=2027, detail_json={"release_date": far})
-    db.add_movie_to_wishlist(2, "Near", year=2026, detail_json={"release_date": near})
-    db.add_movie_to_wishlist(3, "Out", year=2026, detail_json={"release_date": past})
+    db.add_movie_to_wishlist(1, "Far", year=2027)
+    db.add_movie_to_wishlist(2, "Near", year=2026)
+    db.add_movie_to_wishlist(3, "Out", year=2026)
     db.add_movie_to_wishlist(4, "Undated", year=2026)
+    # the availability backfill records the downloadable date (add() no longer does)
+    db.set_wishlist_release_date(1, far)
+    db.set_wishlist_release_date(2, near)
+    db.set_wishlist_release_date(3, past)
     seen = {r["title"] for r in db.movie_wishlist_to_download()}
     assert "Far" not in seen and {"Near", "Out", "Undated"} <= seen
 

@@ -4887,9 +4887,10 @@ class VideoDatabase:
         """
         if not tmdb_id or not title:
             return False
-        # Capture the release date (drives the "don't search until near release" gate) from the
-        # rich detail blob when the caller supplied one — before it's serialised.
-        release_date = detail_json.get("release_date") if isinstance(detail_json, dict) else None
+        # NOTE: release_date (the downloadable/home-availability date) is NOT set here — TMDB's
+        # primary detail date is theatrical/premiere, which mis-gates cinema-only films. The
+        # wishlist drain's availability backfill owns it (digital/physical, or wide-theatrical +
+        # window), leaving it NULL here so the backfill picks the movie up.
         if isinstance(detail_json, (dict, list)):
             import json as _json
             detail_json = _json.dumps(detail_json)
@@ -4899,18 +4900,17 @@ class VideoDatabase:
                 "SELECT 1 FROM video_wishlist WHERE kind='movie' AND tmdb_id=?",
                 (int(tmdb_id),)).fetchone()
             conn.execute(
-                """INSERT INTO video_wishlist (kind, tmdb_id, title, poster_url, year, library_id, server_source, status, detail_json, release_date)
-                   VALUES ('movie', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """INSERT INTO video_wishlist (kind, tmdb_id, title, poster_url, year, library_id, server_source, status, detail_json)
+                   VALUES ('movie', ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(tmdb_id) WHERE kind='movie' DO UPDATE SET
                        title=excluded.title,
                        poster_url=COALESCE(excluded.poster_url, video_wishlist.poster_url),
                        year=COALESCE(excluded.year, video_wishlist.year),
                        library_id=COALESCE(excluded.library_id, video_wishlist.library_id),
                        detail_json=COALESCE(excluded.detail_json, video_wishlist.detail_json),
-                       release_date=COALESCE(excluded.release_date, video_wishlist.release_date),
                        status=CASE WHEN video_wishlist.status='monitored' AND excluded.status='wanted'
                                    THEN 'wanted' ELSE video_wishlist.status END""",
-                (int(tmdb_id), title, poster_url, year, library_id, server_source, status, detail_json, release_date))
+                (int(tmdb_id), title, poster_url, year, library_id, server_source, status, detail_json))
             conn.commit()
             if not existed:   # a refresh-upsert is not a new wish
                 _publish_video_event("video_wishlist_item_added",
@@ -5007,6 +5007,21 @@ class VideoDatabase:
             conn.commit()
         except sqlite3.Error:
             logger.exception("set_wishlist_release_date failed for %s", tmdb_id)
+        finally:
+            conn.close()
+
+    def clear_wishlist_movie_release_dates(self) -> int:
+        """Wipe every wished movie's derived availability date so the backfill re-derives them
+        with the current logic (used once when that logic changes). Returns rows cleared."""
+        conn = self._get_connection()
+        try:
+            cur = conn.execute("UPDATE video_wishlist SET release_date=NULL "
+                               "WHERE kind='movie' AND release_date IS NOT NULL")
+            conn.commit()
+            return cur.rowcount
+        except sqlite3.Error:
+            logger.exception("clear_wishlist_movie_release_dates failed")
+            return 0
         finally:
             conn.close()
 
