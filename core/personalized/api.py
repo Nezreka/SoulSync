@@ -166,16 +166,17 @@ def activate_playlist(
     refresh_interval_hours: int = 24,
 ) -> Dict[str, Any]:
     """Activate a playlist: ensure it exists, enable auto-refresh, and refresh it."""
+    record = manager.ensure_playlist(kind, variant, profile_id)
+    original_extra = record.config.extra or {} if record.config else {}
     extra_update = {
         'auto_refresh': True,
         'refresh_interval_hours': refresh_interval_hours,
     }
-    record = manager.ensure_playlist(kind, variant, profile_id)
     record = manager.update_config(kind, variant, profile_id, {'extra': extra_update})
     try:
         record = manager.refresh_playlist(kind, variant, profile_id)
     except Exception:
-        manager.update_config(kind, variant, profile_id, {'extra': {'auto_refresh': False}})
+        manager.update_config(kind, variant, profile_id, {'extra': original_extra})
         raise
     tracks = manager.get_playlist_tracks(record.id)
     return {

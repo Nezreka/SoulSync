@@ -118,10 +118,11 @@ def generate(deps: Any, variant: str, config: PlaylistConfig) -> List[Track]:
         LEFT JOIN albums a ON t.album_id = a.id
         WHERE {' AND '.join(where)}
         ORDER BY t.created_at DESC
+        LIMIT ?
     """
 
     with db._get_connection() as conn:
-        cursor = conn.execute(query, params)
+        cursor = conn.execute(query, params + [config.limit * 10])
         rows = cursor.fetchall()
 
     tracks: List[Track] = []

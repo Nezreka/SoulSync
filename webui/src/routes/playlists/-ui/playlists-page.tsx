@@ -154,9 +154,10 @@ function KindCard({ kind }: { kind: PlaylistKind }) {
     mutationFn: () => activatePlaylist(kind.kind, '', 24),
     onSuccess: () => {
       void invalidatePlaylistsQueries(queryClient);
+      window.showToast?.('Playlist activated', 'success');
     },
     onError: (err: Error) => {
-      console.error('Failed to activate playlist:', err);
+      window.showToast?.(err.message || 'Failed to activate playlist', 'error');
     },
   });
 
@@ -212,9 +213,10 @@ function PlaylistCard({
     mutationFn: () => refreshPlaylist(playlist.kind, playlist.variant),
     onSuccess: () => {
       void invalidatePlaylistsQueries(queryClient);
+      window.showToast?.('Playlist refreshed', 'success');
     },
     onError: (err: Error) => {
-      console.error('Failed to refresh playlist:', err);
+      window.showToast?.(err.message || 'Failed to refresh playlist', 'error');
     },
   });
 
@@ -222,9 +224,10 @@ function PlaylistCard({
     mutationFn: () => deletePlaylist(playlist.kind, playlist.variant),
     onSuccess: () => {
       void invalidatePlaylistsQueries(queryClient);
+      window.showToast?.('Playlist deactivated', 'success');
     },
     onError: (err: Error) => {
-      console.error('Failed to deactivate playlist:', err);
+      window.showToast?.(err.message || 'Failed to deactivate playlist', 'error');
     },
   });
 
@@ -239,7 +242,7 @@ function PlaylistCard({
       setEditingName(false);
     },
     onError: (err: Error) => {
-      console.error('Failed to rename playlist:', err);
+      window.showToast?.(err.message || 'Failed to rename playlist', 'error');
       setEditingName(false);
       setNameValue(playlist.name);
     },
@@ -252,7 +255,7 @@ function PlaylistCard({
       void invalidatePlaylistsQueries(queryClient);
     },
     onError: (err: Error) => {
-      console.error('Failed to update interval:', err);
+      window.showToast?.(err.message || 'Failed to update interval', 'error');
     },
   });
 
@@ -264,7 +267,7 @@ function PlaylistCard({
       void invalidatePlaylistsQueries(queryClient);
     },
     onError: (err: Error) => {
-      console.error('Failed to update config:', err);
+      window.showToast?.(err.message || 'Failed to update config', 'error');
     },
   });
 
@@ -315,6 +318,12 @@ function PlaylistCard({
                     if (nameValue.trim() && nameValue !== playlist.name) {
                       updateNameMutation.mutate(nameValue.trim());
                     } else {
+                      setEditingName(false);
+                      setNameValue(playlist.name);
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') {
                       setEditingName(false);
                       setNameValue(playlist.name);
                     }

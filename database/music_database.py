@@ -7,7 +7,7 @@ import os
 import re
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, Tuple
 from dataclasses import dataclass
 from pathlib import Path
@@ -6976,7 +6976,6 @@ class MusicDatabase:
                 mbid = getattr(track_obj, 'musicBrainzId', None) or None
 
                 # Extract addedAt from the media server object for date_added tracking
-                from datetime import datetime as _dt, timezone as _tz
                 added_at = getattr(track_obj, 'addedAt', None)
                 if added_at is not None:
                     if hasattr(added_at, 'strftime'):
@@ -6996,7 +6995,7 @@ class MusicDatabase:
                         INSERT INTO tracks
                         (id, album_id, artist_id, title, track_number, disc_number, duration, file_path, bitrate, file_size, server_source, track_artist, musicbrainz_recording_id, created_at, updated_at)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    """, (track_id, album_id, artist_id, title, track_number, disc_number, duration, file_path, bitrate, file_size, server_source, track_artist, mbid, added_at_str or _dt.now(_tz.utc).strftime('%Y-%m-%d %H:%M:%S')))
+                    """, (track_id, album_id, artist_id, title, track_number, disc_number, duration, file_path, bitrate, file_size, server_source, track_artist, mbid, added_at_str or datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')))
                 else:
                     # Update server-provided fields only — preserves spotify_track_id, deezer_id,
                     # isrc, bpm, and all other enrichment data. file_size uses
@@ -15943,6 +15942,20 @@ class MusicDatabase:
                 return [dict(row) for row in rows]
         except Exception as e:
             logger.error(f"Error getting automations: {e}")
+            return []
+
+    def get_automations_by_action(self, action_type: str):
+        """Get all automations matching an action_type. Returns list of dicts."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT * FROM automations WHERE action_type = ?",
+                    (action_type,),
+                )
+                return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting automations by action {action_type}: {e}")
             return []
 
     def get_system_automation_by_action(self, action_type: str):

@@ -87,6 +87,14 @@ def generate(deps: Any, variant: str, config: PlaylistConfig) -> List[Track]:
             source='library',
         ))
 
+    from core.personalized.generators.unplayed_tracks import _diversity_limit
+    tracks = _diversity_limit(
+        tracks,
+        limit=config.limit,
+        max_per_artist=config.max_per_artist,
+        max_per_album=config.max_per_album,
+    )
+
     return tracks
 
 

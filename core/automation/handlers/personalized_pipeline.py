@@ -63,9 +63,10 @@ def auto_personalized_pipeline(config: Dict[str, Any], deps: AutomationDeps) -> 
         discover_due = bool(config.get('discover_due', False))
 
         # In discover_due mode, dynamically find all playlists with auto_refresh enabled
+        manager = deps.build_personalized_manager()
+        profile_id = deps.get_current_profile_id()
+
         if discover_due and not kinds_config:
-            manager = deps.build_personalized_manager()
-            profile_id = deps.get_current_profile_id()
             kinds_config = _discover_due_playlists(manager, profile_id)
             if not kinds_config:
                 deps.state.set_pipeline_running(False)
@@ -93,8 +94,6 @@ def auto_personalized_pipeline(config: Dict[str, Any], deps: AutomationDeps) -> 
 
         refresh_first = bool(config.get('refresh_first', False))
         skip_wishlist = bool(config.get('skip_wishlist', False))
-
-        manager = deps.build_personalized_manager()
 
         deps.update_progress(
             automation_id,
