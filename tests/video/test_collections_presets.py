@@ -344,6 +344,36 @@ def test_franchise_backfill_drains_the_backlog(db):
     assert any(m["tmdb_id"] == 1011 for m in db.movies_missing_collection(limit=50))
 
 
+def test_missing_collection_re_targets_mis_zeroed_rows(db):
+    # The old bug backfilled real franchises as id 0 (name kept) — the Jurassic Park case.
+    # NULL = never checked; 0 WITH a name = mis-zeroed franchise → re-check; 0 with NO name =
+    # genuinely standalone → leave excluded so it isn't re-fetched forever.
+    _add_movie(db, 1, "Never Checked")                                   # tmdb_collection_id NULL
+    _add_movie(db, 2, "Jurassic Park", franchise=0, franchise_name="Jurassic Park Collection")
+    _add_movie(db, 3, "Standalone", franchise=0, franchise_name=None)    # legit no-franchise
+    assert {m["id"] for m in db.movies_missing_collection(limit=50)} == {1, 2}
+
+
+def test_backfill_heals_mis_zeroed_franchise(db):
+    from core.video.collections.presets import backfill_missing_franchises
+    _add_movie(db, 2, "Jurassic Park", franchise=0, franchise_name="Jurassic Park Collection")
+
+    class _Eng:
+        def movie_collection(self, tmdb_id):
+            return {"id": 328, "name": "Jurassic Park Collection"}       # fixed lookup returns the real id
+
+    backfill_missing_franchises(db, engine=_Eng(), batch=10, cap=100)
+    assert any(f["name"] == "Jurassic Park Collection" for f in db.owned_movie_collections(limit=50))
+    assert db.movies_missing_collection(limit=50) == []                  # healed → no longer a target
+
+
+def test_set_movie_collection_no_franchise_clears_name(db):
+    # A no-franchise result (id falsy) must not leave a stale name → id 0 + NULL name.
+    _add_movie(db, 5, "Was Mislabeled", franchise=0, franchise_name="Stale Collection")
+    db.set_movie_collection(5, None, "Stale Collection")
+    assert db.movies_missing_collection(limit=50) == []                  # 0 + NULL name → excluded, not looped
+
+
 def test_apply_chart_creates_living_list_definition(db):
     _seed_movies(db)
     r = apply_pack(db, "charts", "movie", ["chart:top"], wishlist_missing=True,

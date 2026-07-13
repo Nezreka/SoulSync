@@ -1029,9 +1029,14 @@ class VideoDatabase:
 
     def movies_missing_collection(self, server_source=None, limit: int = 20) -> list:
         """Owned, TMDB-matched movies whose franchise (tmdb_collection_id) hasn't been
-        backfilled yet — drives the lazy collection-id backfill. Returns [{id, tmdb_id}]."""
+        backfilled yet — drives the lazy collection-id backfill. Returns [{id, tmdb_id}].
+
+        Also re-checks rows the OLD buggy backfill zeroed: id=0 WITH a franchise name is a
+        real franchise (e.g. Jurassic Park) that got mis-written as 0 — genuinely-no-franchise
+        rows are id=0 with a NULL name, so they stay excluded and aren't re-fetched forever."""
         sql = ("SELECT id, tmdb_id FROM movies WHERE has_file=1 AND tmdb_id IS NOT NULL "
-               "AND tmdb_collection_id IS NULL")
+               "AND (tmdb_collection_id IS NULL "
+               "     OR (tmdb_collection_id = 0 AND tmdb_collection_name IS NOT NULL))")
         args: list = []
         if server_source:
             sql += " AND server_source=?"
@@ -1052,8 +1057,11 @@ class VideoDatabase:
         franchise). 0 is excluded from the gap rails."""
         conn = self._get_connection()
         try:
+            # A 0 (no-franchise) row must not carry a name — otherwise it looks like a
+            # mis-zeroed franchise and gets re-fetched forever.
             conn.execute("UPDATE movies SET tmdb_collection_id=?, tmdb_collection_name=? WHERE id=?",
-                         (int(collection_id) if collection_id else 0, name, int(movie_id)))
+                         (int(collection_id) if collection_id else 0,
+                          name if collection_id else None, int(movie_id)))
             conn.commit()
         except sqlite3.Error:
             pass
