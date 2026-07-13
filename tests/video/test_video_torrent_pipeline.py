@@ -93,6 +93,28 @@ def test_completed_but_file_not_visible_yet_keeps_polling():
     assert upd == {"progress": 100.0}                        # no status → the monitor waits
 
 
+def test_seed_queued_at_100_percent_imports_not_stuck_downloading():
+    """A torrent that FINISHED downloading but is queued to seed (qBit 'queuedUP' → adapter
+    'queued') must import — not sit on 'Downloading 100%' forever. Byte progress, not the
+    seed/upload state, is the done signal."""
+    seen = {}
+
+    def organizer(dl, src):
+        seen["src"] = src
+        return {"status": "completed", "progress": 100.0, "dest_path": "/lib/x.mkv"}
+
+    upd = _proc({"client_ref": "h1", "source": "torrent", "id": 7},
+                _St(state="queued", progress=1.0, save_path="/dl/x", name="x"),
+                find="/local/x.mkv", organizer=organizer)
+    assert seen["src"] == "/local/x.mkv"                     # imported despite the 'queued' seed state
+    assert upd["dest_path"] == "/lib/x.mkv"
+
+
+def test_queued_below_100_is_still_downloading():
+    upd = _proc({"client_ref": "h1", "source": "torrent"}, _St(state="queued", progress=0.5))
+    assert upd == {"status": "downloading", "progress": 50.0}   # genuinely mid-download → not done
+
+
 # ── hybrid ordered-fallback in _default_search ────────────────────────────────
 def _hybrid(monkeypatch, mode, order, per_source):
     monkeypatch.setattr("core.video.download_config.load",

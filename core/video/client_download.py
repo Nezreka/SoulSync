@@ -53,8 +53,14 @@ def process_client_download(dl: dict, *, get_status: Callable[[str, str], Any],
     state = _norm_state(status)
     if state == "failed":
         return {"status": "failed", "error": getattr(status, "error", None) or "Download client reported an error"}
-    if state != "completed":
-        pct = max(0.0, min(100.0, float(getattr(status, "progress", 0) or 0) * 100.0))
+    pct = max(0.0, min(100.0, float(getattr(status, "progress", 0) or 0) * 100.0))
+    # Ready to import once the DOWNLOAD is 100% — the byte progress, NOT the seed/upload state.
+    # 'seeding'/'stalledUP'/'uploading'/'pausedUP'/'queuedUP' all mean the download is finished;
+    # the adapter lumps queuedUP (done, just queued to seed) in with checking/moving under
+    # 'queued', so state alone would leave a completed-but-seed-queued torrent stuck on
+    # "Downloading 100%" forever. A file that isn't settled on disk yet is handled below
+    # (find_video returns nothing → we keep polling), so treating 100% as done is safe.
+    if state != "completed" and pct < 100.0:
         return {"status": "downloading", "progress": pct}
     # Completed → locate THIS job's finished video file, then import. The reported save_path is
     # the client's download DIR — often the shared category folder holding several concurrent
