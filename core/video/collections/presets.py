@@ -662,9 +662,12 @@ def kick_franchise_backfill(db) -> bool:
 
     def run():
         try:
+            pending = len(db.movies_missing_collection(limit=5000) or [])
+            if not pending:
+                return                                    # backlog empty → nothing to log/do
+            logger.info("franchise backfill: draining %d movie(s) missing a collection id…", pending)
             n = backfill_missing_franchises(db)
-            if n:
-                logger.info("franchise backfill checked %d movies", n)
+            logger.info("franchise backfill: checked %d movies", n)
         except Exception:   # noqa: BLE001 - background nicety
             logger.exception("franchise backfill failed")
         finally:

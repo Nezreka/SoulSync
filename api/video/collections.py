@@ -57,7 +57,16 @@ def register_routes(bp):
         from . import get_video_db
         from core.video.collections.sync import in_season
         try:
-            rows = get_video_db().list_collection_definitions()
+            db = get_video_db()
+            # Drain the franchise-id backlog off-request whenever Collection Studio opens
+            # (not just the presets browse) so franchise packs stop under-reporting. It's a
+            # single-flight background thread that no-ops once the backlog is empty.
+            try:
+                from core.video.collections.presets import kick_franchise_backfill
+                kick_franchise_backfill(db)
+            except Exception:   # noqa: BLE001 - a heal-nicety must never block the list
+                logger.debug("franchise backfill kick failed", exc_info=True)
+            rows = db.list_collection_definitions()
             for r in rows:
                 # Only meaningful when a window is set; None = not seasonal.
                 r["in_season"] = in_season(r) if (r.get("window_start") and r.get("window_end")) else None
