@@ -1073,6 +1073,13 @@ den ersten Aufruf in einem frischen Prozess. Zwei Blocklist-Guard-Tests sind
 außerdem vom nachgelagerten externen Download isoliert. 70 gezielte Tests für
 Async-Bridge, Soulseek, Blocklist, Client-Monitor und Candidate-Store liefen
 danach grün; der erneute Fullsuite-Lauf bleibt das Meilenstein-Gate.
+Der diagnostische Wiederholungslauf fand danach zwei reine Harness-Leaks:
+`test_app` startete pro Test zwölf nie endende Socket.IO-Emitter-Threads (456
+Threads bis 63 Prozent), und drei SoundCloud-Aggregat-Tests ließen ungemockte
+Schwester-Clients Executor-I/O starten. Commit `297dc099` macht die bereits
+durch `reset_state` isolierte Test-App sessionweit und mockt in diesen
+Contract-Tests alle Aggregat-Plugins. 61 Socket.IO-/SoundCloud-Tests liefen
+danach grün; die Produktionspfade wurden in diesem zweiten Fix nicht geändert.
 
 Diese Findings ersetzen jede frühere Annahme, dass die neue Decision Engine
 und der Bundle-Importer als unabhängige Implementierungen akzeptabel waren.
@@ -1129,15 +1136,17 @@ auf dem aktuellen gespaltenen Verhalten.
 
 Correction-Commits: `e1272be`, `e6484cb`, `2917f3c`, `99ffd2c`, `7d80e96`,
 `e394e2d`, `39549f0`, `e27070f`, `3eb0e92`, `a7344e5`, `6bc4d01`, `b464543`,
-`903cbd3`, `6ea7f3e2`, `d921c1eb`, `74ec9ceb`.
+`903cbd3`, `6ea7f3e2`, `d921c1eb`, `74ec9ceb`, `297dc099`.
 
 **Session-Status 2026-07-13:** F06, F07 und das F08-Contract-Gate sind
 implementiert und gezielt getestet. Der erste Fullsuite-Anlauf hat die
 Python-3.14-Async-Bridge-Blockade gefunden; sie ist mit `74ec9ceb` behoben und
-mit 70 gezielten Tests verifiziert. **Logischer nächster Schritt:** den
-Fullsuite-Lauf jetzt erneut als LIB2-011-Meilenstein-Abschluss ausführen;
-danach sind echte SAB/NZBGet-, Path-Mapping- und Docker-Restart-Acceptance der
-oberste offene Phase-5-Punkt.
+mit 70 gezielten Tests verifiziert. Der anschließende diagnostische Lauf hat
+die Harness-Thread-/Client-Leaks gefunden; `297dc099` behebt sie und ist mit
+61 gezielten Tests verifiziert. **Logischer nächster Schritt:** den Fullsuite-
+Lauf jetzt erneut als LIB2-011-Meilenstein-Abschluss ausführen; danach sind
+echte SAB/NZBGet-, Path-Mapping- und Docker-Restart-Acceptance der oberste
+offene Phase-5-Punkt.
 
 ### 5.6 Verifikation (pro Phase, End-to-End in Docker)
 
