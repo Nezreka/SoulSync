@@ -31,7 +31,8 @@
     // reload / Back / Forward / open-in-new-tab all work. ``source`` is 'library'
     // (a video.db id) today; 'tmdb' (a search result not yet in the library) later.
     var DETAIL_BASE = '/video-detail/';
-    var DETAIL_PAGES = { 'video-show-detail': 1, 'video-movie-detail': 1, 'video-person-detail': 1 };
+    var DETAIL_PAGES = { 'video-show-detail': 1, 'video-movie-detail': 1, 'video-person-detail': 1,
+        'video-studio-detail': 1 };
 
     function buildDetailPath(source, kind, id) {
         return DETAIL_BASE + encodeURIComponent(source || 'library') + '/' + kind + '/' + encodeURIComponent(id);
@@ -45,7 +46,7 @@
             return { source: decodeURIComponent(p[0]), kind: kind, id: decodeURIComponent(p[2]) };
         }
         var id = parseInt(p[2], 10);
-        if ((kind !== 'movie' && kind !== 'show' && kind !== 'person') || isNaN(id)) return null;
+        if ((kind !== 'movie' && kind !== 'show' && kind !== 'person' && kind !== 'studio') || isNaN(id)) return null;
         return { source: decodeURIComponent(p[0]), kind: kind, id: id };
     }
     // Restore a detail from the URL (popstate / initial load) WITHOUT re-pushing.
@@ -88,6 +89,10 @@
         if (pageId === 'video-person-detail') {
             var n = document.querySelector('[data-video-person] [data-vp-name]');
             return n ? (n.textContent || '').trim() : '';
+        }
+        if (pageId === 'video-studio-detail') {
+            var s = document.querySelector('[data-video-studio] [data-vst-name]');
+            return s ? (s.textContent || '').trim() : '';
         }
         var host = pageId === 'video-movie-detail' ? '[data-video-detail="movie"]' : '[data-video-detail="show"]';
         var t = document.querySelector(host + ' [data-vd-title]');
@@ -171,6 +176,7 @@
         { id: 'video-show-detail', label: 'Show' },
         { id: 'video-movie-detail', label: 'Movie' },
         { id: 'video-person-detail', label: 'Person' },
+        { id: 'video-studio-detail', label: 'Studio' },
     ];
 
     // "Shared" video pages reuse the REAL music page (shown identically on the
@@ -393,6 +399,7 @@
             if (d.kind === 'movie') navigate('video-movie-detail');
             else if (d.kind === 'show') navigate('video-show-detail');
             else if (d.kind === 'person') navigate('video-person-detail');
+            else if (d.kind === 'studio') navigate('video-studio-detail');
             else if (d.kind === 'channel') navigate('video-show-detail');   // channels reuse the show detail page
             else if (d.kind === 'playlist') navigate('video-show-detail');   // playlists too (flat list)
             else return;

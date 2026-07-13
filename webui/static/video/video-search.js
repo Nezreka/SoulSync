@@ -79,6 +79,31 @@
             esc(it.title) + '</span><span class="vsr-sub">' + esc(sub) + '</span></div></a>';
     }
 
+    // A studio (production company) — a wide logo tile, since a studio has no
+    // poster. Opens the studio detail page (a collection of films) via the shared
+    // data-vsr-open dispatch.
+    function studioCard(it) {
+        var logo = it.logo
+            ? '<img src="' + esc(it.logo) + '" alt="" loading="lazy" ' +
+              'onerror="this.outerHTML=\'<span class=&quot;vsr-studio-ph&quot;>&#127902;</span>\'">'
+            : '<span class="vsr-studio-ph">&#127902;</span>';
+        var n = it.movie_count;
+        var sub = n ? (n + (n === 1 ? ' film' : ' films')) : 'Studio';
+        return '<a class="vsr-card vsr-card--studio" href="#" ' +
+            'data-vsr-open="studio" data-vsr-source="tmdb" data-vsr-id="' + it.tmdb_id + '">' +
+            '<div class="vsr-studio-logo">' + logo + '</div>' +
+            '<div class="vsr-info vsr-info--center"><span class="vsr-name" title="' + esc(it.title) + '">' +
+            esc(it.title) + '</span><span class="vsr-sub">' + esc(sub) + '</span></div></a>';
+    }
+    function studioGroup(results) {
+        var items = (results || []).filter(function (r) { return r.kind === 'studio'; });
+        if (!items.length) return '';
+        return '<div class="vsr-group"><h2 class="vsr-group-title">' +
+            '<span class="vsr-group-ic" aria-hidden="true">&#127902;</span>Studios' +
+            '<span class="vsr-group-count">' + items.length + '</span></h2>' +
+            '<div class="vsr-grid vsr-grid--studios">' + items.map(studioCard).join('') + '</div></div>';
+    }
+
     // TMDB groups (movies/shows/people) + a YouTube channels group, each painted
     // as soon as its source resolves (they're fetched in parallel). While YouTube
     // is still in flight a "Searching YouTube…" skeleton group shows — so an empty
@@ -126,7 +151,8 @@
         var html = tmdbGroup(byKind.movie, results) +
                    tmdbGroup(byKind.show, results) +
                    ytGroup(ytChannels, ytSearching) +
-                   tmdbGroup(byKind.person, results);
+                   tmdbGroup(byKind.person, results) +
+                   studioGroup(results);
         var any = html.length > 0;
         show('[data-video-search-hint]', false);
         show('[data-video-search-empty]', !any);

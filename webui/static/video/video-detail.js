@@ -730,7 +730,7 @@
 
         data.cast_full = ex.cast_full || null;
         renderCastAll(data);
-        renderFacts(ex.facts, ex.keywords);
+        renderFacts(ex.facts, ex.keywords, ex.studios);
         renderVideos(ex.videos);
         renderGallery(ex.gallery);
         renderReview(ex.review);
@@ -763,9 +763,9 @@
         if (n >= 1e3) return Math.round(n / 1e3) + 'K';
         return String(n);
     }
-    function renderFacts(facts, keywords) {
+    function renderFacts(facts, keywords, studios) {
         var sec = q('[data-vd-facts-section]'), host = q('[data-vd-facts]'), kwh = q('[data-vd-keywords]');
-        facts = facts || {}; keywords = keywords || [];
+        facts = facts || {}; keywords = keywords || []; studios = studios || [];
         var rows = [];
         if (facts.budget) rows.push(['Budget', '$' + fmtMoney(facts.budget)]);
         if (facts.revenue) rows.push(['Box office', '$' + fmtMoney(facts.revenue)]);
@@ -777,10 +777,23 @@
                     '</span><span class="vd-detail-v">' + esc(r[1]) + '</span></div>';
             }).join('') + '</div>' : '';
         }
+        // Studio chips → each opens its Studio page (a collection of films). Logo when
+        // TMDB has one, else the name; a data-vd-studio hook drives the click.
+        var sth = q('[data-vd-studios]');
+        if (sth) {
+            sth.innerHTML = studios.map(function (s) {
+                var inner = s.logo
+                    ? '<img class="vd-studio-logo" src="' + esc(s.logo) + '" alt="' + esc(s.name) +
+                      '" loading="lazy" onerror="this.outerHTML=\'' + esc(s.name).replace(/'/g, '&#39;') + '\'">'
+                    : esc(s.name);
+                return '<button type="button" class="vd-studio-chip" data-vd-studio="' + s.tmdb_id +
+                    '" title="' + esc(s.name) + '">' + inner + '</button>';
+            }).join('');
+        }
         if (kwh) {
             kwh.innerHTML = keywords.map(function (k) { return '<span class="vd-kw">' + esc(k) + '</span>'; }).join('');
         }
-        if (sec) sec.hidden = !(rows.length || keywords.length);
+        if (sec) sec.hidden = !(rows.length || keywords.length || studios.length);
     }
 
     // ── videos (all trailers/teasers/clips) ───────────────────────────────────
@@ -2118,6 +2131,14 @@
             var pid = parseInt(person.getAttribute('data-vd-person'), 10);
             if (!isNaN(pid)) document.dispatchEvent(new CustomEvent('soulsync:video-open-detail',
                 { detail: { kind: 'person', id: pid, source: 'tmdb' } }));
+            return;
+        }
+        var studio = e.target.closest('[data-vd-studio]');
+        if (studio && r.contains(studio)) {
+            e.preventDefault();
+            var stid = parseInt(studio.getAttribute('data-vd-studio'), 10);
+            if (!isNaN(stid)) document.dispatchEvent(new CustomEvent('soulsync:video-open-detail',
+                { detail: { kind: 'studio', id: stid, source: 'tmdb' } }));
             return;
         }
         var shot = e.target.closest('[data-vd-shot]');
