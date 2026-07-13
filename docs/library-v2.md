@@ -6,7 +6,10 @@
 > die einzige Quelle für Library-v2-Kontext, -Plan, -Status und -Review-Historie.
 > Letzter inhaltlicher Stand der Quellen: 2026-07-12 (Phase 4/5 Acquisition,
 > LIB2-011 Findings); am 2026-07-13 ergänzt um Abschnitt 4.5 (Main-Pipeline-
-> Hardening-Split, unabhängig von Library v2 vorzuziehen).
+> Hardening-Split, unabhängig von Library v2 vorzuziehen); am 2026-07-14
+> ergänzt um Abschnitt 5.3.1 (Umbenennung „Decision Engine" →
+> `Entity-Eligibility-Gate`) und 5.3.2 (Force-Grab↔Quarantäne-Brücke, Teil
+> von F06).
 
 Opt-in, Lidarr-style Library-Manager auf SoulSyncs eigener
 Such-/Download-/Processing-/Tagging-Pipeline. Gated hinter
@@ -378,10 +381,14 @@ behoben:
 - ReleaseCandidates liegen mit TTL und opaquen IDs serverseitig; URL/Magnet
   und Provider-Secrets erscheinen weder in API noch History. Explizite
   Source-Capabilities verhindern Track-/Bundle-Verwechslungen (ADR-08).
-- Manual und Automatic Search verwenden dieselbe versionierte Decision Engine
-  mit Rejections, Warnings und deterministischem Ranking. Force Grab ist
-  Admin-only, übergeht nur ausdrücklich overridable Policy-Reasons und
-  schreibt Audit-History.
+- Manual und Automatic Search verwenden dieselbe versionierte Filter-/
+  Override-Instanz mit Rejections, Warnings und deterministischem Ranking —
+  ursprünglich „Decision Engine" genannt, seit 2026-07-14 umbenannt zu
+  **`Entity-Eligibility-Gate`** (Abschnitt 5.3.1), weil ihr tatsächlicher
+  Scope nach der F01-Korrektur nur noch Edition/Entity-Match + Force-Grab
+  ist — Quelle/Qualität entscheidet die geteilte Main-Pipeline. Force Grab
+  ist Admin-only, übergeht nur ausdrücklich overridable Policy-Reasons und
+  schreibt Audit-History; siehe 5.3.2 für die Force-Grab↔Quarantäne-Brücke.
 - Prowlarr liefert im neuen Pfad nur Release-Bundles. Search läuft außerhalb
   langer SQLite-Transaktionen; einzelne Source-/Parse-Fehler bleiben isoliert.
 - `lib2_wanted_tracks` kann RecordingRequests idempotent als ADR-02-Shadow
@@ -817,6 +824,73 @@ Library-v2-Import-/History-State darf erst nach finalem geteiltem
 Pipeline-Erfolg fortschreiten. Legacy-Thin-Sidecars laufen weiter über den
 bestehenden Manual-Staging-Fallback.
 
+### 5.3.1 Umbenennung: „Decision Engine" → `Entity-Eligibility-Gate` (2026-07-14)
+
+Nach der F01-Korrektur entscheidet dieses Modul **nicht mehr** über Quelle
+oder Qualität — das läuft komplett durch den geteilten Source-Policy-Resolver
+und das geteilte Quality-Profile-Gate (dieselbe Main-Pipeline-Logik, die auch
+Legacy-Wishlist/Interactive-Search nutzen). Der Name „Decision Engine" ist
+danach irreführend, weil er eine zweite Entscheidungsinstanz suggeriert —
+genau das Muster, das F01 als Fehler markiert hat. Der Modulname wird daher
+konzeptionell (und bei der nächsten Implementierung auch im Code:
+`core/acquisition/decision_engine.py` → `core/acquisition/eligibility_gate.py`)
+umbenannt zu **`Entity-Eligibility-Gate`**. Sein tatsächlicher, schmaler Scope
+nach der Korrektur ist nur noch:
+
+1. **Edition/Entity-Match** — passt ein von der geteilten Pipeline bereits
+   nach Quelle/Qualität akzeptierter Kandidat zur *genau* angefragten Edition
+   dieser Acquisition-Request (Tracklist-Länge, Release-Type, gewählte
+   Edition-ID)? Das kann die Main-Pipeline nicht wissen, weil sie nichts von
+   Editions-Identität hat — sie kennt nur „Suche → bestes Ergebnis".
+2. **Admin Force-Grab** — ein gezielter, auditierter Override eines
+   einzelnen, ausdrücklich „overridable" Ablehnungsgrundes (siehe 5.3.2 für
+   die konkrete Anschluss-Regel an die Quarantäne).
+
+Die persistente Buchführung (Acquisition-History, Request↔Grab↔Import-
+Korrelation) bleibt bewusst ein eigenes Modul (`core/acquisition/history.py`,
+`requests.py`) und ist NICHT Teil des Eligibility-Gate — das Gate filtert nur,
+es protokolliert nicht selbst.
+
+### 5.3.2 Force-Grab ↔ Quarantäne-Brücke (Spec-Ergänzung 2026-07-14, Teil von F06)
+
+Offene Frage, die die bisherige Spec nicht beantwortet hatte: Ein Admin
+forced einen Grab trotz eines Quality-Profile-Ablehnungsgrundes (z.B. „below
+profile" / zu klein). Der fertige Download landet danach — weil die
+Quality-Messung am echten File denselben Grund erneut bestätigt — in der
+normalen Post-Download-Quarantäne. Muss der Admin diesen bereits bewusst
+akzeptierten Grund ein zweites Mal manuell approven?
+
+**Nein — erwartetes Verhalten:** Force-Grab schreibt den exakt übergangenen
+Ablehnungsgrund (Reason-Code, z.B. `quality_below_profile`,
+`size_too_small`) als Teil des persistenten Acquisition-Request/History-
+Eintrags fest. Landet der Download in der Quarantäne und ist der
+Quarantäne-Grund **derselbe Reason-Code**, der beim Force-Grab bereits
+übergangen wurde, wird die Quarantäne **automatisch durchgewunken** (File
+wiederhergestellt, geteilte Pipeline re-dispatcht) — ohne zweiten manuellen
+Klick. Das ist keine neue Regel, sondern dieselbe Semantik wie das normale
+Quarantäne-Approve nur vorgezogen: „Approval darf nur den spezifisch
+approvten Check umgehen" (oben) gilt genauso für einen *vorab* erteilten
+Approve.
+
+**Wichtige Grenze:** Nur der exakt übergangene Reason-Code wird
+auto-approved. Löst dieselbe Datei einen **anderen** Quarantäne-Grund aus,
+den der Admin nicht explizit übergangen hat (z.B. Integrity-Fehler,
+AcoustID-Mismatch, falscher Artist) — muss die Quarantäne ganz normal
+manuell reviewt werden. Force-Grab ist kein Freifahrtschein für alle Checks,
+sondern übergeht exakt einen benannten, im Voraus akzeptierten Grund.
+
+**Warum das noch nicht existiert:** Das ist Teil der offenen Korrektur
+LIB2-F06 (Abschnitt 5.4) — aktuell gibt es keine Brücke zwischen dem
+Force-Grab-Override zum Such-/Auswahlzeitpunkt und der
+Post-Download-Quarantäne-Entscheidung; ein Force-Grab, das denselben Grund
+erneut auslöst, würde heute ein zweites Mal (unnötig) manuell landen.
+
+**Abnahmekriterium (Ergänzung zu F06):** Ein Force-Grab mit übergangenem
+Reason-Code X, dessen Download post-download denselben Reason-Code X
+auslöst, muss automatisch aus der Quarantäne freigegeben werden. Ein
+Force-Grab mit übergangenem Reason-Code X, dessen Download einen anderen
+Reason-Code Y auslöst, muss normal in der Quarantäne pausieren.
+
 ### 5.4 Findings aus dem Reuse-Audit (2026-07-12) — Korrekturarbeit vor weiteren Acquisition-Features
 
 Diese Findings beschreiben den damaligen Branch-Stand inkl. lokaler
@@ -903,7 +977,10 @@ Approven wie ein Old-Path-Quarantäne-Eintrag verhält.
 bewahren, `approve_quarantine_entry` wiederverwenden, die Datei
 wiederherstellen und in die geteilte Pipeline re-entern. Nur der approvte
 Check darf umgangen werden; alle anderen Checks müssen vor Lib2-Completion
-erneut laufen.
+erneut laufen. **Ergänzt 2026-07-14** (siehe 5.3.2): das schließt explizit die
+Force-Grab↔Quarantäne-Brücke ein — ein bereits beim Force-Grab übergangener
+Reason-Code muss bei erneutem Auftreten in der Quarantäne automatisch
+durchgewunken werden, ohne zweiten manuellen Approve.
 
 **LIB2-F07 — Persistenter State und Legacy-In-Memory-Retry-State sind nicht
 gebrückt (P1).**
