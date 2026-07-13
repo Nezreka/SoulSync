@@ -154,9 +154,9 @@
         }
     }
 
-    // The video sidebar pages. Pages flagged shared: true are "same as music"
-    // (Import / Issues / Help) — wired to reuse the music pages in a later step;
-    // for now every page renders the placeholder.
+    // The video sidebar pages. Pages flagged shared: true are "same as music":
+    // Help reuses the music docs page (SHARED_PAGES below); Issues has its own
+    // video subpage. Import is not yet built and renders the placeholder.
     var VIDEO_PAGES = [
         { id: 'video-dashboard', label: 'Dashboard' },
         { id: 'video-search', label: 'Search' },
@@ -180,9 +180,11 @@
     ];
 
     // "Shared" video pages reuse the REAL music page (shown identically on the
-    // video side for now) instead of a video subpage: video page id -> music
-    // page id. CSS reveals the music page; we trigger its loader once shown.
-    var SHARED_PAGES = { 'video-settings': 'settings' };
+    // video side) instead of a video subpage: video page id -> music page id. CSS
+    // reveals the music page; we trigger its loader once shown. Help & Docs is the
+    // same docs page as the music side (it'll host video + music docs together);
+    // Settings is the shared, per-side-filtered settings page.
+    var SHARED_PAGES = { 'video-settings': 'settings', 'video-help': 'help' };
 
     function readSide() {
         try {
