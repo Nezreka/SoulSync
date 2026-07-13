@@ -4925,11 +4925,12 @@ class VideoDatabase:
             conn.close()
 
     def episode_wishlist_to_download(self) -> list:
-        """Wished episodes ready to grab (all of them — the airing scan only wishlists
-        episodes that have aired). OWNED episodes are included with the same
-        ``owned``/``owned_resolutions`` annotation as movies (upgrade-until
-        semantics; the drain does the cutoff/strictly-better judging). Newest
-        air date first."""
+        """Wished episodes READY to grab: aired (or air-date-unknown), never episodes still in
+        the future. Upcoming episodes CAN sit on the wishlist now (e.g. pre-ordered from the
+        calendar), but the drain must not hunt for a release that can't exist yet — so this
+        skips ``air_date`` in the future. OWNED episodes are included with the same
+        ``owned``/``owned_resolutions`` annotation as movies (upgrade-until semantics; the
+        drain does the cutoff/strictly-better judging). Newest air date first."""
         conn = self._get_connection()
         try:
             return [dict(r) for r in conn.execute(
@@ -4945,6 +4946,9 @@ class VideoDatabase:
                 "  AND e.episode_number = w.episode_number AND e.has_file = 1) "
                 "  AS owned_resolutions "
                 "FROM video_wishlist w WHERE w.kind='episode' AND w.tmdb_id IS NOT NULL "
+                # air-date gate: aired or unknown only — an unaired (future) episode stays on
+                # the wishlist but isn't searched until its air date arrives.
+                "AND (w.air_date IS NULL OR w.air_date <= date('now')) "
                 "ORDER BY w.air_date DESC, w.id DESC")]
         finally:
             conn.close()

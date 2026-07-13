@@ -511,12 +511,11 @@
         if (ep.rating) tags.push('<span class="vcm-tag vcm-tag--star">★ ' + (Math.round(ep.rating * 10) / 10) + '</span>');
         var eyebrow = [ep.network, ep.show_year, ep.show_status].filter(Boolean).map(esc).join(' · ');
 
-        // Aired-and-missing episodes get their own wishlist action — same rule as
-        // the bulk catch-up button: upcoming episodes are left to the auto-promoter
-        // (wishing an unaired episode would send the drain hunting for a release
-        // that can't exist yet).
-        var wishable = !ep.has_file && ep.show_tmdb_id &&
-            ep.air_date && state.data && ep.air_date < state.data.today;
+        // Any missing episode can be wishlisted — including UPCOMING ones (pre-order from the
+        // calendar). The drain safely skips a wished episode until its air date arrives, so
+        // wishing an unaired one no longer sends it hunting for a release that can't exist yet.
+        var wishable = !ep.has_file && !!ep.show_tmdb_id;
+        var upcoming = wishable && ep.air_date && state.data && ep.air_date > state.data.today;
 
         var ov = document.createElement('div');
         ov.className = 'vcm-overlay'; ov.setAttribute('data-vcm', '');
@@ -555,7 +554,8 @@
                 '</div>' +
                 '<div class="vcm-actions">' +
                     '<button class="vcm-btn vcm-btn--ghost" type="button" data-vcm-close>Close</button>' +
-                    (wishable ? '<button class="vcm-btn vcm-btn--ghost vcm-btn--wish" type="button" data-vcm-wish disabled>＋ Wishlist episode</button>' : '') +
+                    (wishable ? '<button class="vcm-btn vcm-btn--ghost vcm-btn--wish" type="button" data-vcm-wish disabled' +
+                        (upcoming ? ' title="Grabs automatically once it airs"' : '') + '>＋ Wishlist episode</button>' : '') +
                     '<button class="vcm-btn vcm-btn--primary" type="button" data-vcm-open>Open full show page →</button>' +
                 '</div>' +
             '</div>';
