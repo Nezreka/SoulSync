@@ -4979,6 +4979,37 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def wishlist_movies_missing_release_date(self, limit=25) -> list:
+        """Wished (wanted) movies whose downloadable date hasn't been resolved yet — the drain's
+        availability backfill fills these (via TMDB) before it gates. Returns [tmdb_id, ...]."""
+        conn = self._get_connection()
+        try:
+            return [int(r["tmdb_id"]) for r in conn.execute(
+                "SELECT tmdb_id FROM video_wishlist WHERE kind='movie' AND status='wanted' "
+                "AND tmdb_id IS NOT NULL AND release_date IS NULL ORDER BY id DESC LIMIT ?",
+                (max(1, int(limit)),))]
+        except sqlite3.Error:
+            logger.exception("wishlist_movies_missing_release_date failed")
+            return []
+        finally:
+            conn.close()
+
+    def set_wishlist_release_date(self, tmdb_id, release_date) -> None:
+        """Record a wished movie's downloadable ('available') date — drives the release-window
+        gate. Pass the sentinel '1970-01-01' for 'checked, but TMDB has no date' so it isn't
+        re-queried forever yet still searches (the year check guards)."""
+        if not tmdb_id or not release_date:
+            return
+        conn = self._get_connection()
+        try:
+            conn.execute("UPDATE video_wishlist SET release_date=? WHERE kind='movie' AND tmdb_id=?",
+                         (str(release_date), int(tmdb_id)))
+            conn.commit()
+        except sqlite3.Error:
+            logger.exception("set_wishlist_release_date failed for %s", tmdb_id)
+        finally:
+            conn.close()
+
     def episode_wishlist_to_download(self) -> list:
         """Wished episodes READY to grab: aired (or air-date-unknown), never episodes still in
         the future. Upcoming episodes CAN sit on the wishlist now (e.g. pre-ordered from the
