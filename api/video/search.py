@@ -53,28 +53,13 @@ def register_routes(bp):
         from core.video.studio_presets import studio_presets, preset_member_ids
         from . import get_video_db
         try:
-            presets = studio_presets()
-            ids = preset_member_ids()
+            presets = studio_presets()             # logos are baked in → no TMDB round-trips
             try:
-                followed = get_video_db().watchlist_state("studio", ids)
+                followed = get_video_db().watchlist_state("studio", preset_member_ids())
             except Exception:   # noqa: BLE001 - picker still works without follow state
                 followed = {}
-            logos = {}
-            try:
-                from core.video.enrichment.engine import get_video_enrichment_engine
-                from concurrent.futures import ThreadPoolExecutor
-                eng = get_video_enrichment_engine()
-
-                def _logo(i):
-                    return i, (eng.company_detail(i) or {}).get("logo")
-                with ThreadPoolExecutor(max_workers=min(8, len(ids) or 1)) as ex:
-                    for i, lg in ex.map(_logo, ids):
-                        logos[i] = lg
-            except Exception:   # noqa: BLE001 - name-only pills are still usable
-                logger.debug("studio preset logos failed", exc_info=True)
             for p in presets:
                 for m in p["members"]:
-                    m["logo"] = logos.get(m["tmdb_id"])
                     m["followed"] = bool(followed.get(m["tmdb_id"]))
             return jsonify({"success": True, "presets": presets})
         except Exception:
