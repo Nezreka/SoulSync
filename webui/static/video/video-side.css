@@ -87,17 +87,16 @@ body:not(.video-admin) [data-video-overlay-studio] { display: none !important; }
 
 /* Video dashboard bento order + column spans. SCOPED to the video subpage because
    these data-card names (stats/library/tools) also exist on the music dashboard —
-   an unscoped rule would reorder music's grid too. Layout on the 3-col grid:
-     Row 1  Recently Added (2 cols) · Collection Studio (1 col)
-     Row 2  System Stats · Quick Actions · Library
-     Row 3  Overlay Studio · Upcoming (2 cols) */
+   an unscoped rule would reorder music's grid too. Three balanced 2/3 + 1/3 rows:
+     Row 1  Recently Added (2 cols) · Library (1 col)
+     Row 2  Quick Actions (1 col) · Studios [Overlay + Collection] (2 cols)
+     Row 3  Upcoming (2 cols) · System Stats (1 col) */
 .video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="recent"] { order: 1; grid-column: span 2; }
-.video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="collection-studio"] { order: 2; }
-.video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="stats"] { order: 3; }
-.video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="tools"] { order: 4; }
-.video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="library"] { order: 5; }
-.video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="overlay-studio"] { order: 6; }
-.video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="upcoming"] { order: 7; grid-column: span 2; }
+.video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="library"] { order: 2; }
+.video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="tools"] { order: 3; }
+.video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="studios"] { order: 4; grid-column: span 2; }
+.video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="upcoming"] { order: 5; grid-column: span 2; }
+.video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="stats"] { order: 6; }
 
 /* Dashboard "Recently Added" — a single full-width, horizontally-scrolling row. */
 .video-recent-grid { display: flex; align-items: flex-start; gap: 14px; overflow-x: auto; padding-bottom: 8px; scroll-snap-type: x proximity; }
@@ -2242,6 +2241,75 @@ body[data-side="video"] #soulsync-toggle { display: none; }
     .dash-card__head--cov { justify-content: flex-start; }
     .vcov { align-items: flex-start; }
 }
+
+/* ── Combined Studios card (Overlay + Collection) ───────────────────────────────
+   One 2/3-wide card: the shared 'Metadata ready' rings live in the header; the body is
+   two whole-clickable halves, each with real library art behind a gradient scrim. */
+.vst-combo { overflow: hidden; }
+.vst-combo .dash-card__head { margin-bottom: 0; padding-bottom: 16px; }
+.vst-combo-panels { display: grid; grid-template-columns: 1fr 1fr;
+    margin: 0 -24px -22px;   /* bleed past the card's 22px/24px padding to the edges */
+}
+.vst-half { position: relative; overflow: hidden; min-height: 208px; padding: 0; border: 0; cursor: pointer;
+    background: #101017; text-align: left; display: block; isolation: isolate; appearance: none; -webkit-appearance: none;
+    border-top: 1px solid rgba(255, 255, 255, 0.07); font: inherit; color: inherit; }
+.vst-half + .vst-half { border-left: 1px solid rgba(255, 255, 255, 0.07); }
+.vst-half:focus-visible { outline: 2px solid rgb(var(--accent-rgb)); outline-offset: -2px; }
+
+.vst-half-bg { position: absolute; inset: 0; z-index: 0; overflow: hidden;
+    transition: transform 0.6s cubic-bezier(0.2, 0.7, 0.2, 1); }
+.vst-half:hover .vst-half-bg { transform: scale(1.05); }
+.vst-half-bg img { position: absolute; object-fit: cover; border-radius: 10px;
+    box-shadow: 0 16px 34px rgba(0, 0, 0, 0.55); }
+/* Overlay side: one poster up-right, tilted, with example badge chips dropped on it. */
+.vst-half--overlay .vst-ov-poster { top: -14px; right: 26px; width: 118px; height: 177px; transform: rotate(5deg); }
+.vst-ov-badge { position: absolute; z-index: 1; font-size: 10px; font-weight: 800; letter-spacing: .02em;
+    padding: 4px 8px; border-radius: 7px; box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4); }
+/* Collection side: a fanned stack of posters (a 'collection'). */
+.vst-half--collection .vst-col-poster { top: -10px; width: 104px; height: 156px; transition: transform 0.6s ease; }
+.vst-half--collection .vst-col-poster:nth-child(1) { right: 96px; transform: rotate(-9deg); z-index: 1; }
+.vst-half--collection .vst-col-poster:nth-child(2) { right: 44px; transform: rotate(-1deg); z-index: 2; }
+.vst-half--collection .vst-col-poster:nth-child(3) { right: -4px; transform: rotate(8deg); z-index: 3; }
+.vst-half--collection:hover .vst-col-poster:nth-child(1) { transform: rotate(-13deg) translateY(-4px); }
+.vst-half--collection:hover .vst-col-poster:nth-child(3) { transform: rotate(12deg) translateY(-4px); }
+
+/* Scrim: darken bottom-left where the text sits, let the art breathe top-right. */
+.vst-half-scrim { position: absolute; inset: 0; z-index: 1; pointer-events: none;
+    background:
+        linear-gradient(120deg, rgba(14, 15, 22, 0.97) 30%, rgba(14, 15, 22, 0.72) 52%, transparent 82%),
+        linear-gradient(0deg, rgba(14, 15, 22, 0.9) 0%, transparent 55%); }
+.vst-half--overlay .vst-half-scrim { background:
+        linear-gradient(120deg, rgba(16, 14, 24, 0.97) 30%, rgba(16, 14, 24, 0.72) 52%, transparent 82%),
+        linear-gradient(0deg, rgba(16, 14, 24, 0.9) 0%, transparent 55%); }
+
+.vst-half-fg { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column;
+    justify-content: flex-end; gap: 4px; padding: 20px; }
+.vst-half-eyebrow { font-size: 10px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase;
+    color: rgb(var(--accent-rgb)); }
+.vst-half--collection .vst-half-eyebrow { color: #5bd0a0; }
+.vst-half-title { font-size: 17px; font-weight: 800; color: #fff; letter-spacing: -0.01em; }
+.vst-half-desc { font-size: 12px; line-height: 1.5; color: rgba(255, 255, 255, 0.6); max-width: 30ch; margin-bottom: 8px; }
+.vst-half-cta { display: inline-flex; align-items: center; gap: 7px; align-self: flex-start;
+    font-size: 12.5px; font-weight: 800; color: #fff; padding: 8px 15px; border-radius: 10px;
+    background: rgba(var(--accent-rgb), 0.9); box-shadow: 0 6px 18px rgba(var(--accent-rgb), 0.36);
+    transition: transform 0.16s ease, filter 0.16s ease; }
+.vst-half--collection .vst-half-cta { background: rgba(45, 170, 130, 0.92); box-shadow: 0 6px 18px rgba(45, 170, 130, 0.34); }
+.vst-half:hover .vst-half-cta { transform: translateY(-1px); filter: brightness(1.08); }
+.vst-half-cta span { transition: transform 0.16s ease; }
+.vst-half:hover .vst-half-cta span { transform: translateX(3px); }
+
+@media (prefers-reduced-motion: reduce) {
+    .vst-half-bg, .vst-half--collection .vst-col-poster, .vst-half-cta, .vst-half-cta span { transition: none; }
+    .vst-half:hover .vst-half-bg { transform: none; }
+}
+@media (max-width: 640px) {
+    .vst-combo-panels { grid-template-columns: 1fr; }
+    .vst-half + .vst-half { border-left: 0; }
+}
+/* Non-admins can't use the studios (launchers are gated) — if only one half remains
+   visible, let it fill the width. */
+body:not(.video-admin) .vst-half--overlay { display: none; }
+body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 .vwlp-card-info { padding: 9px 4px 0; }
 .vwlp-card-title { display: block; font-size: 13.5px; font-weight: 700; line-height: 1.3;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
