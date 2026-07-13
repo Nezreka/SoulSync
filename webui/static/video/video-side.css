@@ -189,6 +189,14 @@ body[data-side="video"][data-video-page="video-settings"] #settings-page {
 body[data-side="video"][data-video-page="video-settings"] #video-page-host {
     display: none !important;
 }
+/* Help & Docs is the SAME docs page as the music side — reuse it verbatim (it'll
+   carry both music + video docs). Same reveal mechanism as Settings above. */
+body[data-side="video"][data-video-page="video-help"] #help-page {
+    display: block !important;
+}
+body[data-side="video"][data-video-page="video-help"] #video-page-host {
+    display: none !important;
+}
 /* Video-only additions inside the shared settings page (e.g. the Movies/TV
    library mapping) — hidden on the music side. */
 body[data-side="music"] [data-video-only] {
