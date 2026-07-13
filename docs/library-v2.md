@@ -13,7 +13,9 @@
 > aus `docs/library-v2-architecture-audit-2026-07-10.md`, danach gelöscht —
 > diese Datei war die letzte verbleibende separate Library-v2-Doku); am
 > 2026-07-13 Abschnitt 8 (Retry-Persistenz) von Spec auf implementiert
-> gestellt (F07 geschlossen bis auf Deployment-Acceptance).
+> gestellt (F07 geschlossen bis auf Deployment-Acceptance); am 2026-07-13
+> die Force-Grab↔Quarantäne-Brücke aus 5.3.2 umgesetzt (F06 geschlossen,
+> Commit `6ea7f3e2`).
 
 Opt-in, Lidarr-style Library-Manager auf SoulSyncs eigener
 Such-/Download-/Processing-/Tagging-Pipeline. Gated hinter
@@ -860,7 +862,7 @@ Korrelation) bleibt bewusst ein eigenes Modul (`core/acquisition/history.py`,
 `requests.py`) und ist NICHT Teil des Eligibility-Gate — das Gate filtert nur,
 es protokolliert nicht selbst.
 
-### 5.3.2 Force-Grab ↔ Quarantäne-Brücke (Spec-Ergänzung 2026-07-14, Teil von F06)
+### 5.3.2 Force-Grab ↔ Quarantäne-Brücke (umgesetzt 2026-07-13, Teil von F06)
 
 Offene Frage, die die bisherige Spec nicht beantwortet hatte: Ein Admin
 forced einen Grab trotz eines Quality-Profile-Ablehnungsgrundes (z.B. „below
@@ -899,6 +901,26 @@ Reason-Code X, dessen Download post-download denselben Reason-Code X
 auslöst, muss automatisch aus der Quarantäne freigegeben werden. Ein
 Force-Grab mit übergangenem Reason-Code X, dessen Download einen anderen
 Reason-Code Y auslöst, muss normal in der Quarantäne pausieren.
+
+**Status 2026-07-13: implementiert** (`6ea7f3e2`). Der bestehende
+Main-Pipeline-Quality-Guard meldet einen echten File-Reject als
+`quality_not_allowed` an
+`pipeline_callback.notify_force_quarantine_auto_approved`. Die Bridge
+autorisiert nicht anhand des serialisierten Pipeline-Kontexts, sondern prüft
+fail-closed direkt in der DB: Import↔Grab↔Decision-Run müssen zusammengehören,
+der Run muss `forced=1` sein und exakt derselbe Reason-Code muss dort als
+`rejection` + `overridable=1` persistiert sein. Zusätzlich muss der Track zum
+persistierten Import-Plan gehören. Nur dann wird der bereits erteilte Approve
+als append-only History-Event `force_quarantine_auto_approved` verbucht und
+das Quality-Gate fortgesetzt; AcoustID, Integrity und alle anderen Checks
+laufen unverändert weiter. Bei anderem Code, normalem Grab, inkonsistentem
+Kontext oder DB-Fehler greift unverändert die normale Quarantäne.
+
+Die Implementierung konsumiert den vorab erteilten Approve direkt am
+gemeinsamen Guard, bevor die Datei redundant physisch in Quarantäne verschoben
+und sofort wiederhergestellt würde. Das ist dieselbe fachliche
+Approve/Re-Dispatch-Semantik ohne einen verschachtelten zweiten Pipeline-Lauf
+und ohne zweite Decision- oder Import-Implementierung.
 
 ### 5.4 Findings aus dem Reuse-Audit (2026-07-12) — Korrekturarbeit vor weiteren Acquisition-Features
 
@@ -990,6 +1012,11 @@ erneut laufen. **Ergänzt 2026-07-14** (siehe 5.3.2): das schließt explizit die
 Force-Grab↔Quarantäne-Brücke ein — ein bereits beim Force-Grab übergangener
 Reason-Code muss bei erneutem Auftreten in der Quarantäne automatisch
 durchgewunken werden, ohne zweiten manuellen Approve.
+**Status 2026-07-13: geschlossen.** Acquisition-Kontext überlebt Sidecar und
+Approval bereits im geteilten Main-Pipeline-Pfad; die noch fehlende exakte
+Force-Grab-Brücke ist mit Commit `6ea7f3e2` umgesetzt und in 5.3.2
+dokumentiert. Gezielte Tests beweisen exakten Code-Match, Ablehnung eines
+anderen Codes, Ablehnung nicht erzwungener Runs und Import-Plan-Bindung.
 
 **LIB2-F07 — Persistenter State und Legacy-In-Memory-Retry-State sind nicht
 gebrückt (P1).**
@@ -1040,6 +1067,10 @@ auf dem aktuellen gespaltenen Verhalten.
 - Pipeline-Erfolg und Quarantäne werden pro geplantem Track persistiert; der
   bestehende Sidecar-/Approve-Pfad behält Acquisition-Marker und completed
   erst, nachdem die restlichen Checks bestehen;
+- ein beim Force-Grab übergangener Quality-Reason wird am echten File-Gate nur
+  bei identischem, im unveränderlichen Decision-Run persistiertem Reason-Code
+  automatisch akzeptiert; andere Gründe gehen normal in Quarantäne
+  (`6ea7f3e2`);
 - das exakte `lib2_entity` und Quality Profile überleben Legacy-Candidate-
   Retries;
 - Torrent und Usenet behalten getrennte erschöpfende Retry-Budgets;
@@ -1072,17 +1103,15 @@ auf dem aktuellen gespaltenen Verhalten.
 
 Correction-Commits: `e1272be`, `e6484cb`, `2917f3c`, `99ffd2c`, `7d80e96`,
 `e394e2d`, `39549f0`, `e27070f`, `3eb0e92`, `a7344e5`, `6bc4d01`, `b464543`,
-`903cbd3`.
+`903cbd3`, `6ea7f3e2`.
 
-**Session-Status 2026-07-13:** Die F07-Retry-Persistenz (Abschnitt 8) ist
-implementiert und getestet — Journal, Hooks und Restart-Resume laufen im
-periodischen Import-Zyklus. **Logischer nächster Schritt:** die
-Force-Grab↔Quarantäne-Brücke aus 5.3.2 umsetzen (letzter konkret spezifizierter
-Teil von F06 — Reason-Code des Force-Grab persistiert vorhanden, Auto-Approve
-bei identischem Quarantäne-Grund fehlt), danach F08 als abschließendes
-Paritäts-Gate (Contract-Tests Old-vs-Library-v2 über best_quality/
-Hybrid-Order/Upgrade-Policy/Quarantäne/Approval/Retry/Restart) und erst dann
-die Full-Suite als Meilenstein-Abschluss.
+**Session-Status 2026-07-13:** F07-Retry-Persistenz und die letzte offene
+F06-Force-Grab↔Quarantäne-Brücke sind implementiert und gezielt getestet.
+**Logischer nächster Schritt:** F08 als abschließendes Paritäts-Gate:
+Contract-Tests Old-vs-Library-v2 über best_quality/Hybrid-Order/
+Upgrade-Policy/Quarantäne/Approval/Retry/Restart erweitern, danach die
+Python-Fullsuite als LIB2-011-Meilenstein-Abschluss und anschließend echte
+SAB/NZBGet-, Path-Mapping- und Docker-Restart-Acceptance durchführen.
 
 ### 5.6 Verifikation (pro Phase, End-to-End in Docker)
 
@@ -1341,12 +1370,13 @@ zusätzliche, kleinteiligere offene Punkte aus dem 2026-07-10-Audit, die hier
 noch nicht als eigene Zeile standen (u.a. P1-02, P1-06, P1-24, P1-26, P1-28,
 P2-05 und eine Reihe P2-UX/Robustheits-Findings).
 
-1. **Phase 5 fortsetzen**: zentraler Client-Monitor mit Category-Adoption,
-   dann edition-aware Bundle-Inventory/Matching, persistente
-   `acquisition_imports`, Manual Import für ambige Bundles (siehe Abschnitt
-   5.5 für Detailstatus/offene Punkte).
-2. **LIB2-011-Findings zuerst schließen** (Abschnitt 5.4, F01–F08), bevor
-   weitere Acquisition-Features gebaut werden.
+1. **LIB2-011/F08 abschließen**: Old-vs-Library-v2-Contract-Matrix für
+   Source-Order, Quality-/Upgrade-Policy, Quarantäne/Approval, Retry und
+   Restart erweitern; danach erst die Fullsuite als Meilenstein-Gate.
+2. **Deployment-Acceptance für Phase 5**: echte SAB/NZBGet-, gemountete
+   Path-Mapping- und Docker-Restart-Tests durchführen. Client-Monitor,
+   Category-Adoption, Bundle-Inventory/Matching, `acquisition_imports` und
+   Manual Review sind implementiert; die reale Deployment-Abnahme fehlt.
 3. Bestehende Interactive-/Wishlist-Consumer auf den Acquisition-Contract
    umstellen; erst danach global durchsetzen, dass kein Download ohne
    AcquisitionRequest startet.
