@@ -9,7 +9,9 @@
 > Hardening-Split, unabhängig von Library v2 vorzuziehen); am 2026-07-14
 > ergänzt um Abschnitt 5.3.1 (Umbenennung „Decision Engine" →
 > `Entity-Eligibility-Gate`) und 5.3.2 (Force-Grab↔Quarantäne-Brücke, Teil
-> von F06).
+> von F06); am 2026-07-13 ergänzt um Abschnitt 10 (ADR-Log + Findings-Nachtrag
+> aus `docs/library-v2-architecture-audit-2026-07-10.md`, danach gelöscht —
+> diese Datei war die letzte verbleibende separate Library-v2-Doku).
 
 Opt-in, Lidarr-style Library-Manager auf SoulSyncs eigener
 Such-/Download-/Processing-/Tagging-Pipeline. Gated hinter
@@ -44,7 +46,12 @@ Tests: `tests/library2/`.
 
 - **Jeder** lib2-Dateizugriff läuft über `core/library2/paths.resolve_lib2_path`
   (gespeicherte Pfade sind die Media-Server-Sicht; roher `os.path.exists` bricht
-  path-gemappte Setups).
+  path-gemappte Setups). **Bekannte, verifizierte Ausnahme (2026-07-13):**
+  `core/library2/artwork.py::_resolve_abs` (Zeile ~60-63) nutzt weiterhin den
+  Legacy-Resolver `core.library.path_resolver.resolve_library_file_path` statt
+  `resolve_lib2_path` (P2-05 im Audit-Nachtrag, Abschnitt 10.3) — auf
+  path-gemappten Setups kann Artwork-Auflösung daher von Scan/Retag/Skip-Cleanup
+  abweichen. Noch offen.
 - Background-Threads dürfen **nie** `_profile()` aufrufen — das aktive
   Nutzerprofil im Request-Kontext auflösen und explizit in den Thread reichen
   (sonst stiller Fallback auf Profil 1).
@@ -1313,7 +1320,10 @@ vollständiger Library (B6). Alle sechs sind seit dem 2026-07-07-Pass gefixt.
 
 ## 7. Offene Roadmap (konsolidiert, nicht vergessen, nicht versehentlich „fixen")
 
-Aus Plan + STATUS + Review, priorisiert:
+Aus Plan + STATUS + Review, priorisiert. **Siehe auch Abschnitt 10.3** für
+zusätzliche, kleinteiligere offene Punkte aus dem 2026-07-10-Audit, die hier
+noch nicht als eigene Zeile standen (u.a. P1-02, P1-06, P1-24, P1-26, P1-28,
+P2-05 und eine Reihe P2-UX/Robustheits-Findings).
 
 1. **Phase 5 fortsetzen**: zentraler Client-Monitor mit Category-Adoption,
    dann edition-aware Bundle-Inventory/Matching, persistente
@@ -1410,3 +1420,245 @@ Auswahl- oder Retry-Logik zu duplizieren.
   `/api/download-selected-candidate/<id>`.
 - **Tagging/Repair:** `core/tag_writer.py`, `core/repair_jobs/*`,
   `core/imports/pipeline.py`.
+
+---
+
+## 10. Audit-Nachtrag (2026-07-10-Architektur-Audit, hierher konsolidiert)
+
+Diese Section fasst zusammen, was aus
+`docs/library-v2-architecture-audit-2026-07-10.md` (3145 Zeilen, seither
+gelöscht) inhaltlich erhalten bleiben muss: getroffene Architektur-
+entscheidungen (ADRs), bereits gefixte Findings ohne bisherige Doku-Spur, und
+Findings, die bisher NICHT in Abschnitt 7 (Roadmap) auftauchten. Der Rest des
+Audits (Verifikations-Snapshots, Lidarr-Vergleichstabellen, das ursprünglich
+vorgeschlagene, inzwischen durch ADR-04 abgelöste `library_*`-Zieldatenmodell,
+Test-/Observability-/Security-Checklisten, 19-Punkte-Definition-of-Done) war
+zum Löschzeitpunkt entweder überholt oder reine Methodik ohne Entscheidungs-
+wert und wurde bewusst nicht übernommen.
+
+### 10.1 ADR-Log (Kernentscheidungen, Audit-Kapitel 20/25a)
+
+- **ADR-01 — Ist Library v2 profilbezogen? Entschieden: Admin-only.** Library
+  v2 kennt nur einen maßgeblichen Nutzer-Intent: das Admin-User-Profil
+  (`profiles.id=1`, `is_admin=1`). Andere Haushalts-/User-Profile haben
+  keinen eigenen Monitoring-/Wanted-Zustand in Library v2 (ihre eigene Legacy-
+  Watchlist/Wishlist außerhalb Library v2 bleibt unberührt). Wichtig: das ist
+  eine andere Achse als **Quality-Profile** (`quality_profiles`,
+  Lidarr-artige Presets) — die bleiben app-weit und pro Artist/Album/Track
+  zuweisbar, nur das *Zuweisen/Ändern* ist ebenfalls auf Admin beschränkt.
+  Technisch erzwungen (nicht nur UI-Ausblendung): `core/library2/importer.py`
+  lehnt Fremdprofile hart ab (`6ab520f`), Library-v2-Writes sind auf
+  Profil 1 begrenzt (`10bfdd6`). Macht P0-02 (globaler Monitorzustand
+  kollidiert mit Multi-Profil) obsolet, nicht durch neues Datenmodell,
+  sondern durch erzwungene Beschränkung — die für Multi-Profil ursprünglich
+  geplante `monitor_rules`/Wanted-Projektions-Phase ist dadurch stark
+  vereinfacht (existiert trotzdem, siehe ADR-02, aber ohne Merge-Problem
+  zwischen mehreren Nutzer-Profilen).
+- **ADR-02 — Source of Truth für „Wanted"/Monitoring.** Kurzfristig
+  (umgesetzt): Option 3 — `lib2_*` und Legacy-Wishlist/Watchlist bleiben
+  nebeneinander, aber über eine transaktionale Outbox (`lib2_mirror_outbox`,
+  `bdc95b2`) statt best-effort gespiegelt, plus periodischer Reconciler
+  (`3ca3000`). Langfristiges Ziel: Option 1 — `lib2_*` wird alleinige
+  Wahrheit, Wishlist wird abgeleitete Ausführungsliste (Cutover in Stufen,
+  siehe Abschnitt 7 Punkt 5). Option 2 (Wishlist bleibt Wahrheit, lib2 nur
+  Anzeige) wurde bewusst verworfen.
+- **ADR-03 — File-Kardinalität. Entschieden: Multi-File-Modell mit
+  `is_primary`.** Mehrere Dateien pro Track bleiben erlaubt (z.B.
+  FLAC+MP3 derselben Aufnahme, alte+neue Datei während Upgrade), aber mit
+  definierter Auswahl statt `ORDER BY id LIMIT 1` (willkürlich älteste
+  Zeile). **Umgesetzt** (`1df403d`): `lib2_track_files` hat `is_primary` +
+  `file_state` (`active`/`missing_suspected`/`missing_confirmed`/
+  `quarantined`/`deleted`); Auswahlstrategie (active > lossless >
+  Bit-Tiefe/Sample-Rate/Bitrate > neueste Zeile) über Insert-/Move-/
+  Delete-Trigger erzwungen. Alle vorher willkürlichen Read-Pfade
+  (Track-Serialisierung, Wishlist-Upgrade-Eval, Retag, Track-File-Move,
+  Duplicate-View, Embedded-Artwork) nutzen jetzt die Primary-Datei.
+- **ADR-04 — Release Group vs. Edition. Entschieden: immer beide
+  modellieren** (Lidarr-Vorbild `Album`/`AlbumRelease`). Bereits in
+  Abschnitt 3 „Provider Snapshots"/§3 „Refresh & Scan" grob erwähnt; hier
+  die vollständige Entscheidung: additives Shadow-Modell (`7743641`) —
+  `lib2_albums` bleibt Release Group, neu sind `lib2_release_editions`
+  (genau eine Default-Edition je Album, partieller Unique-Index),
+  `lib2_recordings` (harte IDs) und `lib2_release_tracks`
+  (Kompat-Link auf `lib2_tracks`). Recordings mergen NUR über
+  ISRC/MB-Recording-ID/Spotify-ID — Titel mergen nie (Live/Remaster bleiben
+  getrennt); unverifizierte Canonical-Links landen als
+  `lib2_recording_review`-Findings statt still gemergt zu werden. Größter
+  strukturell Einzelumbau im ganzen Fahrplan; Discography-Matching/
+  Duplicate-Linking lesen noch nicht vollständig aus dem neuen Modell
+  (bleibt Shadow, siehe Roadmap Punkt 4).
+- **ADR-05 — Löschsemantik. Entschieden: getrennte Commands +
+  Preview/Journal.** „Library-Entity entfernen" (Katalogeintrag,
+  Monitoring, Verknüpfungen) und „physische Datei löschen" sind und bleiben
+  zwei unabhängige, einzeln auslösbare Aktionen — nie stillschweigend
+  kombiniert. Jede physische Löschung muss vorher eine Preview zeigen
+  (betroffene Dateien, Root, Anzahl); wo möglich Recycle-Bin/Journal statt
+  sofortigem `unlink()`. Physisches Löschen wird bewusst erst freigeschaltet,
+  wenn Preview/Journal/Root-Safety produktiv stehen — **Status: Entscheidung
+  getroffen, Umsetzung noch offen** (siehe Abschnitt 10.3).
+- **ADR-06 — Providerpriorität und User Overrides. Entschieden: getrennt
+  speichern, Override gewinnt.** Providerfelder tragen eigene Provenance
+  (`provider_updated_at`, Snapshot-Version) und werden bei Refresh
+  korrigiert, außer ein Nutzer hat das konkrete Feld explizit überschrieben;
+  Overrides liegen strukturell getrennt von Providerdaten. Löst weg vom
+  bisherigen `COALESCE`-Verhalten (einmal gesetzter Wert bleibt für immer,
+  auch wenn er falsch war). **Status 2026-07-12: Infrastruktur umgesetzt**
+  (`library_provider_snapshots` mit Provenance/Completeness/Hash, `c396a4f`;
+  typisierte Discography-/Tracklist-Adapter, `bd5d29d`/`16210f5`; gezielte
+  Tracklist-Invalidierung bei Edition-/Providerwechsel) — **Field-Level-
+  User-Overrides selbst (die getrennte Speicherung + Read-Projektion pro
+  Feld) bleiben offen**, ebenso das vollständige Ersetzen der verbliebenen
+  `COALESCE`-Anreicherung.
+- **ADR-07 — Interne Queue vs. Client-Queue. Entschieden: Client ist
+  Live-Queue.** Bereits ausführlich in Abschnitt 3 „Phase 4
+  Acquisition/Decision" beschrieben (persistente Grab-Korrelation, Adoption
+  nach Neustart, zweistufiger Cancel). Diese ADR liefert die Begründung:
+  entspricht Lidarrs Modell — Live-Progress aus dem externen Client lesen
+  ist robuster als eine intern gespiegelte Queue, die bei jedem Neustart neu
+  synchronisiert werden müsste. Torrent-Ausweitung (Phase 6) steht noch aus.
+- **ADR-08 — Track- vs. Albumquellen. Entschieden: explizite Source
+  Capabilities.** Bereits in Abschnitt 3 erwähnt (verhindert Track-/Bundle-
+  Verwechslungen). Begründung: jede Downloadquelle deklariert
+  `recording_download`/`release_bundle_download` (exklusiv),
+  `search_by_id`, `client_queue`, `supports_cancel/remove`,
+  `supports_quality_metadata` statt dass Decision-Engine/Auto-Grab/Import
+  Quellentyp über Username-/Dateiname-Heuristik raten (behebt zugleich
+  P2-10 „Torrent wird im Modal als Soulseek dargestellt" und P1-18
+  „Auto-Grab kann Albumresultat bei Trackaktion wählen").
+
+### 10.2 Weitere gefixte Findings ohne bisherige Doku-Spur (Commit-Referenzen)
+
+Diese waren im Audit selbst (§16.1) bereits als geschlossen mit Commit-Hash
+vermerkt, tauchten aber nirgends in diesem Dokument auf:
+
+- **P0-01** — Artist-Delete unterschied nicht Primary- von
+  Featured-Zuordnung (löschte fremde/geteilte Alben mit). Fix: Löschen
+  respektiert die Junction-Rolle, UI zeigt Impact-Vorschau (`1efa72d`).
+- **P0-04** — Lib2↔Wishlist-Mirror war nicht atomar (Split-Brain-Risiko).
+  Fix: `lib2_mirror_outbox` in derselben Transaktion wie der Lib2-Write,
+  idempotenter Drain-Worker, strikte Fehlerweitergabe (`bdc95b2`,
+  gehärtet `895d27e`), periodischer Reconciler (`3ca3000`).
+- **P1-08/09/10/11** — Wishlist-Add war nicht idempotent (Composite-ID-Bug),
+  aktualisierte Profil/Source bei Re-Add nicht, und automatische Mirrors
+  überschrieben fälschlich User-Ignore-Entscheidungen. Fix: profil-/track-/
+  albumbezogene Composite-Identität mit Upsert-Semantik (`ebdd8a0`); nur
+  direkte Track-Aktionen setzen `user_initiated=true` (`a531111`).
+- **P1-12** — Providerlose Wishlist-IDs (`lib2-track:<surrogate>`) waren
+  nicht migrationsstabil (Reset/Reimport konnte IDs verschieben). Fix:
+  persistente `stable_id` (deterministischer Hash der natürlichen
+  Identität), Reset+Reimport reproduziert dieselbe ID (`52b0e51`).
+- **P1-13/14** — Monitored war nicht zuverlässig „wird gesucht", und
+  Album-Unmonitor überschrieb bewussten Track-Level-Intent. Fix:
+  `lib2_monitor_rules` mit Provenance
+  (`user_explicit`/`cascade`/`new_release`/`legacy_import`); Kaskaden
+  überschreiben explizite Track-Entscheidungen nicht mehr (`705beb4`), plus
+  `lib2_wanted_tracks` als materialisierte Wanted-Projektion (`45fc67a`,
+  Divergenz zu `monitored`-Flags wird geloggt, aber laut ADR-02 bis zum
+  Cutover nicht angewendet).
+- **P1-15/16/17** — Profilzuweisung setzte ungewollt Tracks auf monitored;
+  Interactive Search sendete weder Entity- noch Quality-Profile-Kontext;
+  Album-Suche nutzte fälschlich das Artist-Profil. Fix: Profil-Zuweisung und
+  Monitoring als getrennte Commands (`bb7c815`); manuelle Grabs tragen
+  Lib2-Track-/Album-ID bis zum Post-Processing, Server löst das Profil selbst
+  auf (`195e5c6`).
+- **P1-29** — Eingecheckter Frontend-Stand war nicht typecheck-stabil
+  (fehlende `routeTree.gen.ts`-Route). Fix: CI-Gate committet
+  Route-Tree-Diff als Pflichtprüfung (`b498b66`, `b53ce43`, `4845c9f`).
+- **P1-01 (Ergänzung zu §1-Invariante)** — Profil-1-Fallback war nicht nur
+  Laufzeit-Default, sondern auch Schema-`DEFAULT 1` ohne FK. Vollständig
+  behoben über drei Commits: Löschung remapped transaktional (`df285b9`),
+  Inserts lösen das Default-Profil live auf (`31a1fb1`), Schema nutzt echte
+  FKs ohne numerischen Default (`9e716ab`).
+
+### 10.3 Bisher nicht in Abschnitt 7 (Roadmap) getrackte offene Punkte
+
+**Aus dem Audit übernommene, weiterhin offene Findings:**
+
+- **P1-02** — Legacy-Import reconciliert Löschungen/Pfadänderungen nicht:
+  entfernte Legacy-Zeilen bleiben als Phantom-Lib2-Zeilen bestehen, ein
+  geänderter `file_path` erzeugt eine neue File-Zeile statt die alte zu
+  ersetzen. Braucht Snapshot-Reconciliation mit Run-ID.
+- **P1-06** — Canonical-/Move-API validieren Artist/Recording/Titel/Dauer
+  nicht; ein bereits-Canonical-Track kann selbst zum Duplicate gemacht
+  werden (Ketten möglich); Move-File bewegt nur die erste Source-Datei und
+  kann den Track fälschlich unmonitored setzen, wenn mehrere Files existieren.
+- **P1-24** — `monitor_new_items='new'` verhält sich identisch zu `'all'`
+  (beide auto-monitoren jedes neu entdeckte Release, auch alte
+  Backkatalog-Einträge). Lidarr vergleicht für „New" das Release-Datum
+  gegen das neueste bestehende Release — das fehlt hier noch.
+- **P1-26** — Tracklist-Materialisierung: ist `expected_track_count` zu
+  klein, schneidet der Import Provider-Einträge ab und löscht anschließend
+  überzählige fileless Rows, ohne deren Monitor-Zustand zu prüfen — kann
+  bewusst gewishlistete/monitorte Rows stumm entfernen.
+- **P1-28** — „Refresh & Scan" liest nur Audioqualität/Größe neu ein;
+  `tags_json`/`missing_tags_json`/`metadata_gaps_json` werden nicht
+  aktualisiert, Retag invalidiert diesen Cache ebenfalls nicht — UI zeigt
+  nach erfolgreichem Retag weiterhin alte Gaps.
+- **P2-02** — Missing Files haben keinen belastbaren Lifecycle: Scan lässt
+  fehlende Files bewusst unverändert (Mount kann temporär fehlen), aber ohne
+  Root-Health/`missing_since`/Miss-Counter bleiben wirklich gelöschte Dateien
+  für immer als „present" markiert. Hängt mit dem `file_state`-Feld aus
+  ADR-03 zusammen — das Schema-Feld existiert, ist aber noch nicht mit dem
+  Scan verdrahtet.
+- **P2-05** — **verifiziert 2026-07-13, weiterhin aktuell** (siehe auch die
+  Ergänzung in Abschnitt 1): `core/library2/artwork.py::_resolve_abs`
+  verletzt den gemeinsamen Path-Resolver-Vertrag (nutzt Legacy-
+  `resolve_library_file_path` statt `resolve_lib2_path`).
+- **ADR-05-Umsetzung** — physisches Datei-Löschen mit Preview/Journal/
+  Root-Safety ist als Entscheidung getroffen (10.1), aber noch nicht gebaut;
+  aktuell löscht Library v2 nur DB-Einträge.
+- **ADR-06-Rest** — Field-Level-User-Overrides (getrennte Speicherung +
+  Read-Projektion pro überschriebenem Provider-Feld) sind noch nicht gebaut,
+  nur die Snapshot-/Provenance-Infrastruktur darunter.
+
+**Weitere P2/P3-UX- und Robustheits-Findings ohne Roadmap-Eintrag** (niedrigere
+Priorität, kompakt aufgelistet für spätere Aufnahme):
+
+- P2-01: Scan/Retag halten SQLite-Write-Lock über lange Dateisystem-I/O offen
+  (Netzwerk-/Bind-Mounts verschärfen das) — Scope lesen, Connection
+  schließen, in kleinen Transaktionen schreiben.
+- P2-03: Skip-Audit (`lib2_manual_skips`) schreibt weder `file_path` noch
+  `profile_id` und wird von keinem Quality-/Repair-Job gelesen — die
+  versprochene Wirkung „spätere Jobs respektieren den Override" tritt nicht ein.
+- P2-04: Artwork-Bytes werden ungeprüft als `.jpg` gespeichert, Response-MIME
+  ist immer `image/jpeg`, Cache-Control/Invalidierung und Artist- vs.
+  Album-Art-Strategie sind unsauber.
+- P2-06: UI-Fehlerzustände bleiben oft als Dauer-Loading oder ganz unsichtbar
+  (Monitor-Mutation ohne sichtbare Fehlerbehandlung, `monitor_new_items`-Save
+  kann still scheitern).
+- P2-07: Artist-Karten verschachteln einen Button (MonitorToggle) in einem
+  Button (die Karte selbst) — ungültiges HTML, unzuverlässiges Keyboard-/
+  Click-Verhalten.
+- P2-08: „Search Monitored"/„Search Upgrades" wirken auf Artist-/Album-Ebene
+  positioniert, laufen aber global über die ganze Wishlist/Library.
+- P2-09: Interactive-Search-Modal nutzt die vorhandene Source-Auswahl
+  (`/api/search/sources`) nicht; „Searching all configured sources" stimmt
+  nur im `best_quality`-Modus.
+- P2-11: Fehlendes Publish-Datum wird beim Descending-Age-Sort als unendlich
+  behandelt und kann vor bekannten Releases einsortiert werden.
+- P2-12: „My Library"-Ansicht zeigt nur monitorierte/library Releases, aber
+  „Monitor all" wirkt backendseitig auf den vollen Release-Scope inkl.
+  versteckter provider-only Discography — Risiko, unbeabsichtigt den ganzen
+  Backkatalog zu monitoren.
+- P2-13: Discography-Sync hat keine Concurrency-/Snapshot-Garantie
+  (gleichzeitiger manueller + periodischer Refresh, kein Artist-Sync-Lock).
+- P2-15: Tracklist-Fallback ohne Spotify-ID kann bei Deezer die falsche
+  Edition wählen (kein Jahr-/Trackcount-/UPC-Abgleich).
+- P2-16: `quality_eval.py` behandelt fehlende/ungültige Qualität als
+  „meets_profile=True" — unterdrückt nötige Scans/Upgrades statt eines
+  dritten `unknown`-Zustands.
+- P2-17: Albumdetail/Index-Stats skalieren mit N+1-Queries und korrelierten
+  Subqueries — bei großen Libraries sichtbar (verwandt mit A5/Roadmap-Punkt 12).
+- P2-18: Fehlende Request-Validierung erzeugt vermeidbare 500er (ungeschütztes
+  `int()`, `json.loads` nach Commit, ungeklemmte negative Limits).
+- P2-20: Fortschritts-Prozentwerte sind nicht auf 0-100 geklemmt.
+- P2-21: Bundle-Completion kann nach Wartefrist auf einen unvollständigen
+  `incomplete_path` zurückfallen statt einen finalen Pfad zu verlangen.
+- P2-23: Orchestrator und Download-Engine teilen weiterhin
+  Download-Verantwortung (Engine macht Suche/Status/Cancel, Orchestrator ruft
+  aber weiter direkt `client.download(...)` auf) — Bezug zum bestehenden
+  `docs/download-engine-refactor-plan.md`.
+- P2-24 (Rest-Risiko): Artist-Credit-Splitting an `&`/`and`/Kommas kann bei
+  bisher unbekannten Bandnamen (nicht nur beim M1-Fixfall) weiterhin
+  Phantom-Artists erzeugen, wenn der volle Credit-String noch nicht als
+  Artist bekannt ist.
