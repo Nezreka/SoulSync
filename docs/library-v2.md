@@ -1167,8 +1167,16 @@ auf dem aktuellen gespaltenen Verhalten.
   Container öffnet dieselbe DB, adoptiert den pausierten echten SAB-/NZBGet-
   Job über den zentralen Monitor und bestätigt das gemeinsame Bind-Mount über
   den produktiven Path-Resolver als `mapped/readable` (`00c57184`). Beide
-  Prepare→Container-Ende→Verify-Flows sind real grün. Completed Bundle-
-  Inventory/Matching/Import und Manual Review bleiben offen;
+  Prepare→Container-Ende→Verify-Flows sind real grün. **Inventory-/Review-
+  Slice erledigt 2026-07-14** (`5ab9f726`): die Verify-Container führen den
+  adoptierten echten Job mit einem providerfrei erzeugten, client-kompatiblen
+  Completion-Snapshot und finalem Remote-Pfad weiter. Eine echte getaggte
+  FLAC im gemeinsamen Mount wird über den produktiven Resolver inventarisiert;
+  ein absichtlicher Edition-Mismatch persistiert `needs_review`, und die
+  manuelle Track-Zuordnung persistiert anschließend `importing`. Das lief für
+  SAB und NZBGet über getrennte echte SoulSync-Container grün. Offen bleiben
+  ein vom realen Client nach tatsächlichem NNTP-Download gemeldeter Completion-
+  Snapshot sowie finaler Erfolg durch die unveränderte Main-Pipeline;
 - erst während des späteren globalen Wishlist-Cutovers den
   Compatibility-Wishlist-Output durch direkte Acquisition Requests ersetzen.
   Das nicht früher tun, wenn es das etablierte Wishlist/Main-Pipeline-
@@ -1203,10 +1211,14 @@ Der neue opt-in Deployment-Contract (`00c57184`) lief danach für beide Clients
 über zwei echte SoulSync-Container: Prepare persistierte
 `submission_unknown`, Verify adoptierte nach Container-Ende/-Neustart den
 echten Job und verifizierte den gemounteten Pfad als `mapped/readable`.
-**Logischer nächster Schritt:** einen echten Client-Completion-Snapshot mit
-finalem gemapptem Pfad durch Bundle-Inventory, Edition-Matching und
-`acquisition_imports` treiben; dabei auch den persistenten Manual-Review-Fall
-abnehmen.
+Mit `5ab9f726` läuft derselbe Contract nach der Adoption providerfrei bis zum
+Completion-/Import-Review-Vertrag: echter gemounteter FLAC-Output wird
+inventarisiert, der Edition-Mismatch landet in `needs_review`, und eine
+manuelle Zuordnung setzt denselben Import persistent auf `importing`.
+**Logischer nächster Schritt:** die manuell aufgelöste echte FLAC durch die
+unveränderte Main-Pipeline bis zum persistenten `completed`-Callback führen;
+ein vollständig echter NNTP-Completion-Snapshot braucht darüber hinaus reale
+Provider-Zugangsdaten oder einen gesonderten lokalen NNTP-Testserver.
 
 ### 5.6 Verifikation (pro Phase, End-to-End in Docker)
 
@@ -1476,8 +1488,11 @@ P2-05 und eine Reihe P2-UX/Robustheits-Findings).
    sind für SABnzbd 5.0.4 und NZBGet 26.2 grün; SAB-Category-Konfiguration
    wird nun beim Connection-Test validiert (`96c323a2`). Restart-Adoption und
    gemountetes Path-Mapping sind für beide Clients über getrennte echte
-   SoulSync-Container grün (`00c57184`). Offen bleiben completed Bundle-
-   Inventory/Matching/Import und Manual Review.
+   SoulSync-Container grün (`00c57184`). Inventory, Edition-Mismatch-
+   `needs_review` und persistente Manual Resolution sind ebenfalls für beide
+   Container-Flows grün (`5ab9f726`, providerfreier client-kompatibler
+   Completion-Snapshot). Offen bleiben echter NNTP-Client-Completion und der
+   finale Shared-Main-Pipeline-Erfolg.
 3. Bestehende Interactive-/Wishlist-Consumer auf den Acquisition-Contract
    umstellen; erst danach global durchsetzen, dass kein Download ohne
    AcquisitionRequest startet.
