@@ -21,19 +21,32 @@ logger = get_logger("video_api.search")
 def register_routes(bp):
     @bp.route("/search", methods=["GET"])
     def video_search():
+        """Fast multi-search (movies / shows / people). Studios are a SEPARATE call
+        (/search/studios) so their slower film-count ranking never blocks this — the UI
+        paints titles instantly and streams studios in after."""
         q = (request.args.get("q") or "").strip()
         if not q:
             return jsonify({"results": [], "query": ""})
         try:
             from core.video.enrichment.engine import get_video_enrichment_engine
-            eng = get_video_enrichment_engine()
-            results = eng.search(q) or []
-            try:
-                results = results + (eng.company_search(q) or [])   # studios aren't in /search/multi
-            except Exception:   # noqa: BLE001 - a studio-search hiccup shouldn't sink the search
-                logger.debug("studio search merge failed", exc_info=True)
+            results = get_video_enrichment_engine().search(q) or []
         except Exception:
             logger.exception("video search failed for %r", q)
+            results = []
+        return jsonify({"results": results, "query": q})
+
+    @bp.route("/search/studios", methods=["GET"])
+    def video_search_studios():
+        """Studio (production-company) search — its own endpoint so the main search paints
+        without waiting on the per-studio film-count ranking."""
+        q = (request.args.get("q") or "").strip()
+        if not q:
+            return jsonify({"results": [], "query": ""})
+        try:
+            from core.video.enrichment.engine import get_video_enrichment_engine
+            results = get_video_enrichment_engine().company_search(q) or []
+        except Exception:
+            logger.exception("video studio search failed for %r", q)
             results = []
         return jsonify({"results": results, "query": q})
 
