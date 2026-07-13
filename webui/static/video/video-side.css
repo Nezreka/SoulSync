@@ -956,6 +956,24 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 }
 @keyframes vsr-pop { from { opacity: 0; transform: translateY(14px) scale(0.97); } to { opacity: 1; transform: none; } }
 
+/* Progressive search: skeletons sit still (only real content animates in), each group fades
+   out if it has no results, and real cards cascade in for a Netflix-style reveal. */
+.vsr-card--skel { animation: none; cursor: default; pointer-events: none; }
+.vsr-card--skel .vsr-poster, .vsr-card--skel .vsr-studio-logo { box-shadow: none; border-color: rgba(255, 255, 255, 0.05); }
+.vsr-group { transition: opacity 0.24s ease; }
+.vsr-group--gone { opacity: 0; }
+.vsr-grid > .vsr-card:not(.vsr-card--skel):nth-child(2) { animation-delay: 0.03s; }
+.vsr-grid > .vsr-card:not(.vsr-card--skel):nth-child(3) { animation-delay: 0.06s; }
+.vsr-grid > .vsr-card:not(.vsr-card--skel):nth-child(4) { animation-delay: 0.09s; }
+.vsr-grid > .vsr-card:not(.vsr-card--skel):nth-child(5) { animation-delay: 0.12s; }
+.vsr-grid > .vsr-card:not(.vsr-card--skel):nth-child(6) { animation-delay: 0.15s; }
+.vsr-grid > .vsr-card:not(.vsr-card--skel):nth-child(7) { animation-delay: 0.18s; }
+.vsr-grid > .vsr-card:not(.vsr-card--skel):nth-child(n+8) { animation-delay: 0.21s; }
+@media (prefers-reduced-motion: reduce) {
+    .vsr-card { animation: none; }
+    .vsr-group { transition: none; }
+}
+
 .vsr-poster {
     position: relative; aspect-ratio: 2 / 3; border-radius: 14px; overflow: hidden;
     background: linear-gradient(145deg, rgba(var(--vd-accent-rgb), 0.22), rgba(8, 8, 12, 0.9));

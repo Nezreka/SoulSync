@@ -14,11 +14,7 @@
 
     var PAGE_ID = 'video-search';
     var SEARCH_URL = '/api/video/search';
-    var GROUPS = [
-        { kind: 'movie', label: 'Movies', icon: '🎬' },
-        { kind: 'show', label: 'TV Shows', icon: '📺' },
-        { kind: 'person', label: 'People', icon: '👤' },
-    ];
+    var STUDIO_URL = '/api/video/search/studios';
 
     var lastQuery = '';
     var reqSeq = 0;            // guards against out-of-order responses
@@ -95,69 +91,85 @@
             '<div class="vsr-info vsr-info--center"><span class="vsr-name" title="' + esc(it.title) + '">' +
             esc(it.title) + '</span><span class="vsr-sub">' + esc(sub) + '</span></div></a>';
     }
-    function studioGroup(results) {
-        var items = (results || []).filter(function (r) { return r.kind === 'studio'; });
-        if (!items.length) return '';
-        return '<div class="vsr-group"><h2 class="vsr-group-title">' +
-            '<span class="vsr-group-ic" aria-hidden="true">&#127902;</span>Studios' +
-            '<span class="vsr-group-count">' + items.length + '</span></h2>' +
-            '<div class="vsr-grid vsr-grid--studios">' + items.map(studioCard).join('') + '</div></div>';
-    }
+    // ── progressive, per-group rendering (Netflix-style) ─────────────────────
+    // Order: Movies → TV Shows → YouTube channels → People → Studios. Each group is
+    // its OWN section that fills in when its source resolves — the fast multi-search
+    // (movies/shows/people) paints instantly while YouTube + Studios (slower, parallel
+    // fetches) stream in after. A group's DOM is only touched when ITS data lands, so
+    // already-painted cards never re-animate.
+    var _ORDER = [
+        { kind: 'movie', label: 'Movies', icon: '🎬' },
+        { kind: 'show', label: 'TV Shows', icon: '📺' },
+        { kind: 'youtube', label: 'YouTube channels', icon: '▶' },
+        { kind: 'person', label: 'People', icon: '👤' },
+        { kind: 'studio', label: 'Studios', icon: '🎞️' },
+    ];
+    var _META = {}; _ORDER.forEach(function (g) { _META[g.kind] = g; });
+    var _done = { multi: false, studio: false, youtube: false };
 
-    // TMDB groups (movies/shows/people) + a YouTube channels group, each painted
-    // as soon as its source resolves (they're fetched in parallel). While YouTube
-    // is still in flight a "Searching YouTube…" skeleton group shows — so an empty
-    // TMDB result never flashes "No results" before the channels arrive.
-    function ytSkeletonGroup() {
-        var cards = '';
-        for (var i = 0; i < 5; i++) {                 // poster-shaped skeletons in the shared grid
-            cards += '<div class="vsr-card"><div class="vsr-poster vyt-skel"></div>' +
-                '<div class="vsr-info"><span class="vyt-skel vyt-skel-line"></span>' +
+    function skelCards(kind) {
+        var n = kind === 'person' ? 5 : kind === 'studio' ? 4 : 6;
+        var studio = kind === 'studio';
+        var art = studio ? '<div class="vsr-studio-logo vyt-skel"></div>' : '<div class="vsr-poster vyt-skel"></div>';
+        var extra = studio ? ' vsr-card--studio' : (kind === 'person' ? ' vsr-card--person' : '');
+        var ic = (kind === 'person' || studio) ? ' vsr-info--center' : '';
+        var out = '';
+        for (var i = 0; i < n; i++)
+            out += '<div class="vsr-card vsr-card--skel' + extra + '">' + art +
+                '<div class="vsr-info' + ic + '"><span class="vyt-skel vyt-skel-line"></span>' +
                 '<span class="vyt-skel vyt-skel-line vyt-skel-line--sm"></span></div></div>';
+        return out;
+    }
+    function slotHTML(g, inner, count, loading) {
+        var grid = 'vsr-grid' + (g.kind === 'studio' ? ' vsr-grid--studios' : '');
+        var badge = loading ? '<span class="vsr-yt-loading">searching…</span>'
+            : (count != null ? '<span class="vsr-group-count">' + count + '</span>' : '');
+        return '<section class="vsr-group" data-group="' + g.kind + '">' +
+            '<h2 class="vsr-group-title"><span class="vsr-group-ic" aria-hidden="true">' + g.icon + '</span>' +
+            esc(g.label) + badge + '</h2>' +
+            '<div class="' + grid + '">' + inner + '</div></section>';
+    }
+    // Replace a group's skeleton with real cards, or fade it out when it has none.
+    function fillGroup(kind, inner, count) {
+        var host = $('[data-video-search-results]'); if (!host) return;
+        var node = host.querySelector('[data-group="' + kind + '"]');
+        if (!inner) {
+            if (node) {
+                node.classList.add('vsr-group--gone');
+                setTimeout(function () { if (node.parentNode) node.parentNode.removeChild(node); checkEmpty(); }, 240);
+            } else { checkEmpty(); }
+            return;
         }
-        return '<div class="vsr-group"><h2 class="vsr-group-title">' +
-            '<span class="vsr-group-ic" aria-hidden="true">▶</span>YouTube channels' +
-            '<span class="vsr-yt-loading">searching…</span></h2>' +
-            '<div class="vsr-grid">' + cards + '</div></div>';
+        var html = slotHTML(_META[kind], inner, count, false);
+        if (node) node.outerHTML = html;
+        else host.insertAdjacentHTML('beforeend', html);
+        var fresh = host.querySelector('[data-group="' + kind + '"]');
+        if (fresh && window.VideoWatchlist) VideoWatchlist.hydrate(fresh);
+        checkEmpty();
     }
-    function tmdbGroup(g, results) {
-        var items = (results || []).filter(function (r) { return r.kind === g.kind; });
-        if (!items.length) return '';
-        return '<div class="vsr-group"><h2 class="vsr-group-title">' +
-            '<span class="vsr-group-ic" aria-hidden="true">' + g.icon + '</span>' + g.label +
-            '<span class="vsr-group-count">' + items.length + '</span></h2>' +
-            '<div class="vsr-grid">' +
-            items.map(g.kind === 'person' ? personCard : titleCard).join('') +
-            '</div></div>';
+    function fillMulti(results) {
+        ['movie', 'show', 'person'].forEach(function (kind) {
+            var items = (results || []).filter(function (r) { return r.kind === kind; });
+            var fn = kind === 'person' ? personCard : titleCard;
+            fillGroup(kind, items.length ? items.map(fn).join('') : null, items.length);
+        });
     }
-    function ytGroup(ytChannels, ytSearching) {
-        if (ytChannels && ytChannels.length && window.VideoYoutube) {
-            return '<div class="vsr-group"><h2 class="vsr-group-title">' +
-                '<span class="vsr-group-ic" aria-hidden="true">▶</span>YouTube channels' +
-                '<span class="vsr-group-count">' + ytChannels.length + '</span></h2>' +
-                '<div class="vsr-grid">' +
-                ytChannels.map(function (c) { return VideoYoutube.channelResultCard(c); }).join('') +
-                '</div></div>';
-        }
-        return ytSearching ? ytSkeletonGroup() : '';
+    function fillStudios(items) {
+        fillGroup('studio', (items && items.length) ? items.map(studioCard).join('') : null,
+                  items ? items.length : 0);
     }
-    function render(results, ytChannels, ytSearching) {
+    function fillYt(channels) {
+        var ok = channels && channels.length && window.VideoYoutube;
+        fillGroup('youtube', ok ? channels.map(function (c) { return VideoYoutube.channelResultCard(c); }).join('') : null,
+                  channels ? channels.length : 0);
+    }
+    // Only declare "No results" once every source has resolved and nothing remains.
+    function checkEmpty() {
+        if (!(_done.multi && _done.studio && _done.youtube)) return;
         var host = $('[data-video-search-results]');
-        if (!host) return;
-        // Order: Movies → TV Shows → YouTube channels → People. Channels sit next
-        // to TV shows (both are episodic 'shows' here), not buried under People.
-        var byKind = {};
-        GROUPS.forEach(function (g) { byKind[g.kind] = g; });
-        var html = tmdbGroup(byKind.movie, results) +
-                   tmdbGroup(byKind.show, results) +
-                   ytGroup(ytChannels, ytSearching) +
-                   tmdbGroup(byKind.person, results) +
-                   studioGroup(results);
-        var any = html.length > 0;
-        show('[data-video-search-hint]', false);
+        var any = host && host.querySelector('.vsr-group');
         show('[data-video-search-empty]', !any);
-        host.innerHTML = any ? html : '';
-        if (any && window.VideoWatchlist) VideoWatchlist.hydrate(host);
+        if (!any && host) host.innerHTML = '';
     }
 
     // Idle state: a "Trending this week" rail so the page isn't a blank box.
@@ -189,37 +201,35 @@
         loadTrending();
     }
 
-    var curResults = null, curYt = null, ytSearching = false;   // TMDB + YouTube halves of the active query
-    function paint(seq) {
-        if (seq !== reqSeq) return;
-        render(curResults || [], curYt, ytSearching);
-    }
+    function _json(r) { return r.ok ? r.json() : null; }
+    var _accept = { headers: { 'Accept': 'application/json' } };
     function runSearch(q) {
         var seq = ++reqSeq;
-        curResults = null; curYt = null;
-        ytSearching = !!(window.VideoYoutube && q.length >= 2);
-        show('[data-video-search-loading]', true);
-        fetch(SEARCH_URL + '?q=' + encodeURIComponent(q), { headers: { 'Accept': 'application/json' } })
-            .then(function (r) { return r.ok ? r.json() : null; })
-            .then(function (d) {
-                if (seq !== reqSeq) return;           // a newer query superseded this one
-                show('[data-video-search-loading]', false);
-                curResults = (d && d.results) ? d.results : [];
-                paint(seq);
-            })
-            .catch(function () {
-                if (seq !== reqSeq) return;
-                show('[data-video-search-loading]', false);
-                curResults = [];
-                paint(seq);
-            });
-        // YouTube channels in parallel (best-effort) — its own group, shown as a
-        // "searching…" skeleton until it resolves so nothing flashes "No results".
-        if (ytSearching) {
-            VideoYoutube.searchChannels(q)
-                .then(function (d) { if (seq !== reqSeq) return; curYt = (d && d.channels) || []; ytSearching = false; paint(seq); })
-                .catch(function () { if (seq !== reqSeq) return; curYt = []; ytSearching = false; paint(seq); });
-        }
+        var doYt = !!(window.VideoYoutube && q.length >= 2);
+        _done = { multi: false, studio: false, youtube: !doYt };   // no YT search → that leg is "done"
+        show('[data-video-search-loading]', false);   // skeletons stand in for the spinner now
+        show('[data-video-search-hint]', false);
+        show('[data-video-search-empty]', false);
+        // Instant ordered skeletons, so the page reacts the moment you type.
+        var host = $('[data-video-search-results]');
+        if (host) host.innerHTML = _ORDER
+            .filter(function (g) { return g.kind !== 'youtube' || doYt; })
+            .map(function (g) { return slotHTML(g, skelCards(g.kind), null, true); }).join('');
+
+        // Fast multi-search (movies / shows / people) — paints first.
+        fetch(SEARCH_URL + '?q=' + encodeURIComponent(q), _accept).then(_json)
+            .then(function (d) { if (seq !== reqSeq) return; _done.multi = true; fillMulti((d && d.results) || []); })
+            .catch(function () { if (seq !== reqSeq) return; _done.multi = true; fillMulti([]); });
+
+        // Studios — parallel, slower (per-studio film-count ranking); streams in after.
+        fetch(STUDIO_URL + '?q=' + encodeURIComponent(q), _accept).then(_json)
+            .then(function (d) { if (seq !== reqSeq) return; _done.studio = true; fillStudios((d && d.results) || []); })
+            .catch(function () { if (seq !== reqSeq) return; _done.studio = true; fillStudios([]); });
+
+        // YouTube channels — parallel, best-effort.
+        if (doYt) VideoYoutube.searchChannels(q)
+            .then(function (d) { if (seq !== reqSeq) return; _done.youtube = true; fillYt((d && d.channels) || []); })
+            .catch(function () { if (seq !== reqSeq) return; _done.youtube = true; fillYt([]); });
     }
 
     // A pasted YouTube channel OR playlist link → resolve + render a Follow chip

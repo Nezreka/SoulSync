@@ -241,12 +241,15 @@ def test_studio_movies_endpoint_rejects_evil_sort(tmp_path):
         eng_mod._engine = None
 
 
-def test_search_endpoint_merges_studios(tmp_path):
+def test_studio_search_endpoint(tmp_path):
+    # Studios have their OWN endpoint (kept out of the main search so it paints without
+    # waiting on the per-studio film-count ranking).
     client, videoapi, eng_mod, _ = _make_studio_client(tmp_path)
     try:
-        data = client.get("/api/video/search?q=A24").get_json()
+        data = client.get("/api/video/search/studios?q=A24").get_json()
         kinds = {r.get("kind") for r in data["results"]}
-        assert "studio" in kinds                              # studios ride alongside multi-search
+        assert "studio" in kinds
+        assert client.get("/api/video/search/studios").get_json() == {"results": [], "query": ""}
     finally:
         videoapi._video_db = None
         eng_mod._engine = None
