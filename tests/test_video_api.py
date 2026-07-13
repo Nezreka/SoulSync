@@ -23,6 +23,80 @@ def _make_client(tmp_path):
     return app.test_client(), videoapi
 
 
+def _client_as(tmp_path, *, is_admin=True, can_download=True):
+    """A test client whose app-level before_request stamps g.is_admin / g.can_download
+    (as web_server does in production) so the video blueprint's permission gate can be
+    exercised for non-admin / download-disabled profiles."""
+    import api.video as videoapi
+    from database.video_database import VideoDatabase
+    videoapi._video_db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
+    app = Flask(__name__)
+
+    @app.before_request
+    def _stamp_g():
+        from flask import g
+        g.is_admin = is_admin
+        g.can_download = can_download
+
+    app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
+    return app.test_client()
+
+
+def test_settings_endpoints_are_admin_only(tmp_path):
+    """Parity with music's @admin_only: settings that expose OR mutate tokens/keys/server/
+    download config are blocked for non-admins — INCLUDING the GETs that leaked raw keys."""
+    c = _client_as(tmp_path, is_admin=False)
+    gated = [
+        ("get", "/api/video/enrichment/config"),   # was returning every API key raw
+        ("get", "/api/video/downloads/slskd"),     # was returning the shared slskd api_key
+        ("get", "/api/video/server-config"),
+        ("get", "/api/video/libraries"),
+        ("get", "/api/video/enrichment/priority"),
+        ("post", "/api/video/enrichment/config"),
+        ("post", "/api/video/downloads/slskd"),
+        ("post", "/api/video/downloads/config"),
+        ("post", "/api/video/downloads/quality"),
+        ("post", "/api/video/downloads/youtube-quality"),
+        ("post", "/api/video/organization"),
+        ("post", "/api/video/server-config"),
+        ("post", "/api/video/server"),
+        ("post", "/api/video/libraries"),
+        ("post", "/api/video/jellyfin/user"),
+        ("post", "/api/video/enrichment/resync-details"),
+    ]
+    for method, url in gated:
+        r = getattr(c, method)(url, json={})
+        assert r.status_code == 403, "%s %s must be admin-only" % (method.upper(), url)
+
+
+def test_content_reads_stay_open_for_non_admins(tmp_path):
+    """The config GETs a non-admin's download modal / content views legitimately need
+    (library paths, quality tiers, server presence, UI prefs) must NOT be gated."""
+    c = _client_as(tmp_path, is_admin=False)
+    for url in ["/api/video/downloads/config", "/api/video/downloads/quality",
+                "/api/video/downloads/youtube-quality", "/api/video/prefs",
+                "/api/video/server", "/api/video/service-status"]:
+        assert c.get(url).status_code != 403, "GET %s must stay open" % url
+
+
+def test_admin_passes_the_settings_gate(tmp_path):
+    c = _client_as(tmp_path, is_admin=True)
+    for url in ["/api/video/enrichment/config", "/api/video/downloads/slskd",
+                "/api/video/libraries", "/api/video/server-config"]:
+        assert c.get(url).status_code != 403
+
+
+def test_download_actions_require_can_download(tmp_path):
+    """A download-disabled profile can't start a download by ANY route — grab, pack (via the
+    grab prefix), retry, or a YouTube fetch — not just the two the old gate covered."""
+    c = _client_as(tmp_path, is_admin=True, can_download=False)
+    for url in ["/api/video/downloads/grab", "/api/video/downloads/grab-pack",
+                "/api/video/downloads/retry", "/api/video/youtube/download",
+                "/api/video/wishlist/add", "/api/video/watchlist/add"]:
+        r = c.post(url, json={})
+        assert r.status_code == 403, "POST %s must require can_download" % url
+
+
 def test_blueprint_exposes_dashboard_route():
     from api.video import create_video_blueprint
     app = Flask(__name__)
