@@ -44,6 +44,43 @@ def register_routes(bp):
         s = request.args.get("sort") or "primary_release_date.desc"
         return s if s in _STUDIO_SORTS else "primary_release_date.desc"
 
+    @bp.route("/studio/presets", methods=["GET"])
+    def video_studio_presets():
+        """Curated studio families (Disney = Pixar + Marvel + Lucasfilm…) for the watchlist
+        picker. Each member carries its logo + whether it's already followed, so the picker
+        toggles members individually — a family is just a bulk-add over per-studio follows,
+        never a forced bundle."""
+        from core.video.studio_presets import studio_presets, preset_member_ids
+        from . import get_video_db
+        try:
+            presets = studio_presets()
+            ids = preset_member_ids()
+            try:
+                followed = get_video_db().watchlist_state("studio", ids)
+            except Exception:   # noqa: BLE001 - picker still works without follow state
+                followed = {}
+            logos = {}
+            try:
+                from core.video.enrichment.engine import get_video_enrichment_engine
+                from concurrent.futures import ThreadPoolExecutor
+                eng = get_video_enrichment_engine()
+
+                def _logo(i):
+                    return i, (eng.company_detail(i) or {}).get("logo")
+                with ThreadPoolExecutor(max_workers=min(8, len(ids) or 1)) as ex:
+                    for i, lg in ex.map(_logo, ids):
+                        logos[i] = lg
+            except Exception:   # noqa: BLE001 - name-only pills are still usable
+                logger.debug("studio preset logos failed", exc_info=True)
+            for p in presets:
+                for m in p["members"]:
+                    m["logo"] = logos.get(m["tmdb_id"])
+                    m["followed"] = bool(followed.get(m["tmdb_id"]))
+            return jsonify({"success": True, "presets": presets})
+        except Exception:
+            logger.exception("studio presets failed")
+            return jsonify({"success": False, "presets": []}), 500
+
     @bp.route("/studio/<int:company_id>", methods=["GET"])
     def video_studio_detail(company_id):
         """A studio's header (name / logo / about / HQ) + its first page of movies. Powers the

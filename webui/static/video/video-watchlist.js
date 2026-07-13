@@ -231,6 +231,9 @@
         // the subscription-import button is channel-specific (follows are channels/playlists)
         var imp = document.querySelector('[data-vwlp-import]');
         if (imp) imp.hidden = tab !== 'channel';
+        // studio-family picker is studio-specific
+        var fam = document.querySelector('[data-vwlp-families]');
+        if (fam) fam.hidden = tab !== 'studio';
         load();
     }
 
@@ -321,6 +324,121 @@
         });
     }
 
+    // ── studio families picker (curated groups; members are followed individually) ──────
+    // A family is pure convenience: following it just adds each member as its own studio
+    // follow, and every member has its own toggle — you can follow only Pixar and skip the
+    // rest of Disney. Nothing here bundles or forces the whole group.
+    function openStudioFamilies() {
+        fetch('/api/video/studio/presets', { headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d || !d.success) { if (typeof showToast === 'function') showToast('Could not load studio families', 'error'); return; }
+                renderStudioFamilies(d.presets || []);
+            })
+            .catch(function () { if (typeof showToast === 'function') showToast('Could not load studio families', 'error'); });
+    }
+
+    function renderStudioFamilies(presets) {
+        // followed-state lives in the member objects; we mutate + re-render on each toggle.
+        function memberHTML(fam, m) {
+            var on = !!m.followed;
+            var logo = m.logo
+                ? '<img src="' + esc(m.logo) + '" alt="" style="max-width:100%;max-height:26px;object-fit:contain;" onerror="this.replaceWith(document.createTextNode(\'' + esc(m.name).replace(/'/g, '') + '\'))">'
+                : esc(m.name);
+            return '<button type="button" data-fam-mem="' + esc(fam.id) + ':' + esc(m.tmdb_id) + '" ' +
+                'title="' + esc(m.name) + (on ? ' — following (click to unfollow)' : ' — click to follow') + '" ' +
+                'style="position:relative;display:flex;align-items:center;justify-content:center;min-height:52px;padding:8px 12px;' +
+                'border-radius:11px;cursor:pointer;border:1.5px solid ' + (on ? 'rgb(var(--accent-rgb))' : 'rgba(255,255,255,.12)') +
+                ';background:' + (on ? 'linear-gradient(160deg,#fafafe,#d9dbe6)' : 'rgba(255,255,255,.04)') + ';">' +
+                (on ? '' : '') + logo +
+                (on ? '<span style="position:absolute;top:4px;right:5px;font-size:11px;font-weight:900;color:#16a34a;">✓</span>' : '') +
+                '</button>';
+        }
+        function familyHTML(fam) {
+            var total = fam.members.length;
+            var followedN = fam.members.filter(function (m) { return m.followed; }).length;
+            var allOn = followedN === total;
+            return '<div style="margin-bottom:22px;">' +
+                '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:4px;">' +
+                    '<h3 style="margin:0;font-size:17px;color:#fff;">' + esc(fam.name) +
+                        '<span style="font-size:12px;font-weight:600;color:rgba(255,255,255,.4);margin-left:8px;">' +
+                        followedN + '/' + total + ' followed</span></h3>' +
+                    '<button type="button" data-fam-all="' + esc(fam.id) + '" ' +
+                        'style="padding:7px 14px;border-radius:9px;border:none;cursor:pointer;font-weight:800;font-size:12.5px;' +
+                        'background:' + (allOn ? 'rgba(255,255,255,.08)' : 'rgb(var(--accent-rgb))') + ';color:#fff;">' +
+                        (allOn ? 'Following all' : 'Follow all') + '</button>' +
+                '</div>' +
+                '<p style="margin:0 0 10px;font-size:12px;color:rgba(255,255,255,.5);">' + esc(fam.blurb || '') + '</p>' +
+                '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;">' +
+                    fam.members.map(function (m) { return memberHTML(fam, m); }).join('') +
+                '</div></div>';
+        }
+        var ov = document.createElement('div');
+        ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.62);display:flex;' +
+            'align-items:center;justify-content:center;padding:20px;';
+        function body() {
+            return '<div style="width:min(640px,100%);max-height:86vh;overflow:auto;background:#15161c;' +
+                'border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:24px;box-shadow:0 24px 60px rgba(0,0,0,.5);">' +
+                '<div style="font-size:11px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:rgba(255,255,255,.45);">Studio families</div>' +
+                '<h2 style="margin:4px 0 2px;font-size:21px;color:#fff;">Follow a family — or just the parts you want</h2>' +
+                '<p style="margin:0 0 20px;font-size:12.5px;color:rgba(255,255,255,.55);">Each studio is followed on its own. Follow the whole family, or tick only the ones you care about (just Pixar, skip the rest).</p>' +
+                '<div data-fam-list>' + presets.map(familyHTML).join('') + '</div>' +
+                '<div style="display:flex;justify-content:flex-end;margin-top:6px;">' +
+                    '<button type="button" data-fam-close style="padding:9px 18px;border-radius:10px;border:1px solid rgba(255,255,255,.14);background:transparent;color:rgba(255,255,255,.85);font-weight:700;cursor:pointer;">Done</button>' +
+                '</div></div>';
+        }
+        ov.innerHTML = body();
+        document.body.appendChild(ov);
+        function close() { if (ov.parentNode) ov.parentNode.removeChild(ov); document.removeEventListener('keydown', onKey); }
+        function onKey(e) { if (e.key === 'Escape') close(); }
+        document.addEventListener('keydown', onKey);
+        function rerender() { ov.innerHTML = body(); }
+        function findMember(key) {
+            var parts = String(key).split(':'), famId = parts[0], mid = parseInt(parts[1], 10);
+            var fam = presets.filter(function (f) { return f.id === famId; })[0];
+            if (!fam) return null;
+            var m = fam.members.filter(function (x) { return x.tmdb_id === mid; })[0];
+            return m ? { fam: fam, m: m } : null;
+        }
+        function follow(m, on) {
+            var url = on ? '/api/video/watchlist/add' : '/api/video/watchlist/remove';
+            var b = on ? { kind: 'studio', tmdb_id: m.tmdb_id, title: m.name, poster_url: m.logo || null }
+                : { kind: 'studio', tmdb_id: m.tmdb_id };
+            return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (res) {
+                    if (!res || res.success === false) throw new Error('failed');
+                    m.followed = on;
+                    document.dispatchEvent(new CustomEvent('soulsync:video-watchlist-changed',
+                        { detail: { kind: 'studio', id: String(m.tmdb_id), watched: on, _silent: true } }));
+                });
+        }
+        ov.addEventListener('click', function (e) {
+            if (e.target === ov || e.target.closest('[data-fam-close]')) { close(); return; }
+            var memBtn = e.target.closest('[data-fam-mem]');
+            if (memBtn) {
+                var hit = findMember(memBtn.getAttribute('data-fam-mem')); if (!hit) return;
+                follow(hit.m, !hit.m.followed).then(rerender)
+                    .catch(function () { if (typeof showToast === 'function') showToast('Update failed', 'error'); });
+                return;
+            }
+            var allBtn = e.target.closest('[data-fam-all]');
+            if (allBtn) {
+                var fam = presets.filter(function (f) { return f.id === allBtn.getAttribute('data-fam-all'); })[0];
+                if (!fam) return;
+                var pending = fam.members.filter(function (m) { return !m.followed; });
+                if (!pending.length) return;   // already all following
+                allBtn.disabled = true;
+                Promise.all(pending.map(function (m) { return follow(m, true).catch(function () {}); }))
+                    .then(function () {
+                        rerender();
+                        if (typeof showToast === 'function') showToast('Following ' + esc(fam.name), 'success');
+                    });
+                return;
+            }
+        });
+    }
+
     function wire() {
         var tabs = document.querySelectorAll('[data-vwlp-tab]');
         for (var i = 0; i < tabs.length; i++) (function (b) {
@@ -347,6 +465,9 @@
         if (prev) prev.addEventListener('click', function () { if (state.page > 1) { state.page--; load(); } });
         var next = $('[data-vwlp-next]');
         if (next) next.addEventListener('click', function () { state.page++; load(); });
+
+        var famBtn = document.querySelector('[data-vwlp-families]');
+        if (famBtn) famBtn.addEventListener('click', function () { openStudioFamilies(); });
 
         document.addEventListener('soulsync:video-watchlist-changed', onChanged);
         // Following a channel fires the wishlist-changed event — keep the
