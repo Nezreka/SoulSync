@@ -131,7 +131,8 @@ def test_resume_fails_row_when_track_left_the_plan(tmp_path):
     assert "acq-x-999" not in download_tasks
 
 
-def test_resume_without_wired_worker_keeps_row_active_and_purges(tmp_path):
+def test_resume_without_wired_worker_keeps_row_active_and_purges(
+        tmp_path, monkeypatch):
     factory, _importing, _request, task_id = _seed_walk(tmp_path)
     conn = factory()
     journal_retry_snapshot(
@@ -140,7 +141,10 @@ def test_resume_without_wired_worker_keeps_row_active_and_purges(tmp_path):
     conn.commit()
     conn.close()
 
-    # No submit injected and the monitor globals are unwired in tests.
+    # No submit injected and the worker pool is unwired (pinned: earlier
+    # tests in a full run may have wired the monitor globals for good).
+    monkeypatch.setattr(
+        "core.acquisition.retry_resume._default_submit", lambda: None)
     assert resume_interrupted_retry_walks(factory) == ()
 
     conn = factory()
