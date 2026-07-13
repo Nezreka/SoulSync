@@ -1060,9 +1060,11 @@ denselben Szenarien und vergleicht normalisierte Business-Outcomes für:
 - Restart-Resume gegen den vor dem Neustart persistierten Walk.
 
 Zusammen mit den F06-Tests für exakten Force-Reason-Match/abweichenden Grund
-liefen 60 gezielte Tests grün. Offen für den Meilenstein-Abschluss ist jetzt
-nur noch die bewusst nachgelagerte Python-Fullsuite; echte Client-/Docker-
-Acceptance bleibt ein separater Deployment-Punkt.
+liefen 60 gezielte Tests grün. Die bewusst nachgelagerte Python-Fullsuite ist
+am 2026-07-13 nach den unten dokumentierten Python-3.14-/Harness-Korrekturen
+ebenfalls abgeschlossen: **8081 passed, 2 deselected, 400 warnings in
+291.13s**. Damit ist das lokale F08-/LIB2-011-Meilenstein-Gate geschlossen;
+echte Client-/Docker-Acceptance bleibt ein separater Deployment-Punkt.
 
 Der erste Fullsuite-Anlauf am 2026-07-13 deckte zusätzlich eine Python-3.14-
 Blockade im prozessweiten Sync-to-Async-Adapter auf: die erste
@@ -1072,7 +1074,8 @@ Einzel-Loop bei, übergibt Arbeit aber über eine threadsichere Queue und pinnt
 den ersten Aufruf in einem frischen Prozess. Zwei Blocklist-Guard-Tests sind
 außerdem vom nachgelagerten externen Download isoliert. 70 gezielte Tests für
 Async-Bridge, Soulseek, Blocklist, Client-Monitor und Candidate-Store liefen
-danach grün; der erneute Fullsuite-Lauf bleibt das Meilenstein-Gate.
+danach grün; zu diesem Zeitpunkt blieb der erneute Fullsuite-Lauf das
+Meilenstein-Gate.
 Der diagnostische Wiederholungslauf fand danach zwei reine Harness-Leaks:
 `test_app` startete pro Test zwölf nie endende Socket.IO-Emitter-Threads (456
 Threads bis 63 Prozent), und drei SoundCloud-Aggregat-Tests ließen ungemockte
@@ -1102,6 +1105,8 @@ Ein weiterer Lauf diagnostizierte denselben Wakeup-Effekt im gemeinsamen
 Test-Loop der SABnzbd-/NZBGet-Adapter. Commit `ee896e4d` verwendet auch dort
 Heartbeat plus direkten Loop-Close; alle 46 Usenet-Adaptertests liefen danach
 in 0,20 Sekunden grün. Die Adapter-Produktionslogik blieb unverändert.
+Der anschließende vollständige Lauf von `pytest tests/` endete mit **8081
+passed, 2 deselected, 400 warnings in 291.13s** und Exitcode 0.
 
 Diese Findings ersetzen jede frühere Annahme, dass die neue Decision Engine
 und der Bundle-Importer als unabhängige Implementierungen akzeptabel waren.
@@ -1147,7 +1152,8 @@ auf dem aktuellen gespaltenen Verhalten.
   `e3eca302`/`899536db`/`364262bf`);
 - ~~die Old-vs-Library-v2-Paritäts-Matrix erweitern~~ — **erledigt
   2026-07-13** (`d921c1eb`, 11 neue Contract-Szenarien; 60 relevante Tests
-  grün). Die abschließende Python-Fullsuite läuft als nächstes;
+  grün). Die abschließende Python-Fullsuite ist ebenfalls grün (8081 passed,
+  2 deselected; 291.13s);
 - echte SAB/NZBGet-, gemountete Path-Mapping- und Docker-Restart-
   Acceptance-Tests durchführen (die read-only Health-API ist implementiert;
   echte Deployment-Acceptance ist es nicht);
@@ -1161,8 +1167,8 @@ Correction-Commits: `e1272be`, `e6484cb`, `2917f3c`, `99ffd2c`, `7d80e96`,
 `903cbd3`, `6ea7f3e2`, `d921c1eb`, `74ec9ceb`, `297dc099`, `8ea30221`,
 `47ec6365`, `70336a57`, `ee896e4d`.
 
-**Session-Status 2026-07-13:** F06, F07 und das F08-Contract-Gate sind
-implementiert und gezielt getestet. Der erste Fullsuite-Anlauf hat die
+**Session-Status 2026-07-13:** F06, F07, das F08-Contract-Gate und das lokale
+LIB2-011-Meilenstein-Gate sind abgeschlossen. Der erste Fullsuite-Anlauf hat die
 Python-3.14-Async-Bridge-Blockade gefunden; sie ist mit `74ec9ceb` behoben und
 mit 70 gezielten Tests verifiziert. Der anschließende diagnostische Lauf hat
 die Harness-Thread-/Client-Leaks gefunden; `297dc099` behebt sie und ist mit
@@ -1174,10 +1180,10 @@ bestandenen und zwei abgewählten Live-Tests verifiziert. Der folgende Lauf
 fand bei 94 Prozent den letzten bekannten yt-dlp-Executor-Shutdown;
 `70336a57` ist mit drei grünen YouTube-Regressionstests verifiziert. Ein
 weiterer Lauf isolierte den gleichen Wakeup im Usenet-Adapter-Testloop;
-`ee896e4d` ist mit 46 grünen SABnzbd-/NZBGet-Tests verifiziert.
-**Logischer nächster Schritt:** den Fullsuite-Lauf jetzt erneut als LIB2-011-
-Meilenstein-Abschluss ausführen; danach sind echte SAB/NZBGet-, Path-Mapping-
-und Docker-Restart-Acceptance der oberste offene Phase-5-Punkt.
+`ee896e4d` ist mit 46 grünen SABnzbd-/NZBGet-Tests verifiziert. Der finale
+Fullsuite-Lauf ist grün (8081 passed, 2 deselected; 291.13s).
+**Logischer nächster Schritt:** echte SAB/NZBGet-, gemountete Path-Mapping- und
+Docker-Restart-Acceptance als obersten offenen Phase-5-Punkt durchführen.
 
 ### 5.6 Verifikation (pro Phase, End-to-End in Docker)
 
@@ -1436,9 +1442,9 @@ zusätzliche, kleinteiligere offene Punkte aus dem 2026-07-10-Audit, die hier
 noch nicht als eigene Zeile standen (u.a. P1-02, P1-06, P1-24, P1-26, P1-28,
 P2-05 und eine Reihe P2-UX/Robustheits-Findings).
 
-1. **LIB2-011 abschließen**: F08-Contract-Matrix ist implementiert
-   (`d921c1eb`); jetzt die bewusst nachgelagerte Python-Fullsuite als
-   Meilenstein-Gate ausführen und den Ergebnisstand hier festhalten.
+1. ~~**LIB2-011 abschließen**: F08-Contract-Matrix plus nachgelagerte
+   Python-Fullsuite als Meilenstein-Gate.~~ **Erledigt 2026-07-13**
+   (`d921c1eb`; final 8081 passed, 2 deselected in 291.13s).
 2. **Deployment-Acceptance für Phase 5**: echte SAB/NZBGet-, gemountete
    Path-Mapping- und Docker-Restart-Tests durchführen. Client-Monitor,
    Category-Adoption, Bundle-Inventory/Matching, `acquisition_imports` und
