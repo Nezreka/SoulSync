@@ -33,24 +33,54 @@ from utils.logging_config import get_logger
 logger = get_logger("video.collections.sync")
 
 # Bump to force every collection to re-sync once (e.g. after a push-logic change).
-_SYNC_VERSION = 1
+# v2: ranked lists/charts (IMDb Top 250…) now push in rank order instead of the
+# server's default release-date sort.
+_SYNC_VERSION = 2
+
+# Remote lists/charts whose OWN order is meaningful — the collection should present in that
+# rank on the server (unless the user picks an explicit sort), not by release date.
+_RANKED_LIST_SOURCES = {"imdb_chart", "imdb_list", "tmdb_chart", "tmdb_list",
+                        "trakt_list", "mdblist_list"}
+
+
+def _is_ranked_list(definition: Dict[str, Any]) -> bool:
+    return ((definition or {}).get("definition") or {}).get("source") in _RANKED_LIST_SOURCES
+
+
+# The collection DB defaults sort_order to "release", so a ranked list/chart created with
+# defaults ends up release-date-sorted on the server — the wrong order for a chart (IMDb Top
+# 250 became a 1926→ chronological list). Treat "release" as "unset" for ranked sources so the
+# list's own rank wins by default; an explicit alpha / rating / custom choice is still honoured.
+_RANK_DEFAULT_SORTS = {None, "", "rank", "release"}
+
+
+def _ranked_default(definition: Dict[str, Any]) -> bool:
+    """True when a ranked list should drive the server order — it IS a ranked list and the user
+    hasn't picked a non-default sort (alpha / rating / custom)."""
+    return ((definition or {}).get("sort_order") in _RANK_DEFAULT_SORTS
+            and _is_ranked_list(definition))
 
 
 def members_signature(definition: Dict[str, Any], server_ids) -> str:
     """Signature of everything a sync would push: the member set + the settings
-    that affect the server object. Unchanged signature → skip the sync."""
+    that affect the server object. Unchanged signature → skip the sync. ``server_ids``
+    is passed in ORDER (rank order for ranked lists) so a re-rank changes the signature."""
+    so = (definition or {}).get("sort_order")
+    ids = [str(i) for i in server_ids]
     sub = {
         "_v": _SYNC_VERSION,
-        "ids": sorted(str(i) for i in set(server_ids)),
+        "ids": sorted(set(ids)),
         "name": (definition or {}).get("name"),
         "summary": (definition or {}).get("summary"),
-        "sort": (definition or {}).get("sort_order"),
+        "sort": so,
         "sync_mode": (definition or {}).get("sync_mode"),
         "pinned": bool((definition or {}).get("pinned")),
         "poster": (definition or {}).get("poster_url"),
         "mode": (definition or {}).get("collection_mode"),
-        "order": (((definition or {}).get("definition") or {}).get("order")
-                  if (definition or {}).get("sort_order") == "custom" else None),
+        # ORDER is captured whenever it drives the server object: an explicit custom order, or a
+        # ranked list/chart (so re-ranking the source re-syncs + re-orders, not only add/remove).
+        "order": ((((definition or {}).get("definition") or {}).get("order")) if so == "custom"
+                  else (ids if _ranked_default(definition) else None)),
     }
     return hashlib.sha1(json.dumps(sub, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
@@ -167,9 +197,9 @@ def sync_collection(db, definition: Dict[str, Any], *, source,
         if url:
             definition = dict(definition, poster_url=url)
 
-    desired = _dedup(res.server_ids)
+    desired = _dedup(res.server_ids)      # rank order for ranked lists (resolver preserves it)
     desired_set = set(desired)
-    sig = members_signature(definition, desired_set)
+    sig = members_signature(definition, desired)   # ORDER matters for ranked lists
 
     prev = db.get_collection_sync(did) if did is not None else None
     prev_server_id = None
@@ -246,25 +276,33 @@ def sync_collection(db, definition: Dict[str, Any], *, source,
         if is_generated_ref(poster_url):
             poster_bytes = read_poster(did)
             poster_url = None
+        # A ranked list/chart with no explicit sort → present it in RANK order (custom),
+        # not the server's default release-date sort. An explicit sort choice is honoured.
+        ranked_default = _ranked_default(definition)
+        effective_sort = "custom" if ranked_default else definition.get("sort_order")
         source.set_collection_meta(
             collection_id,
             poster_url=poster_url,
             poster_bytes=poster_bytes,
             summary=definition.get("summary"),
-            sort=definition.get("sort_order"),
+            sort=effective_sort,
             pinned=bool(definition.get("pinned")),
             mode=definition.get("collection_mode"),
         )
     except Exception:   # noqa: BLE001
         logger.debug("set_collection_meta failed for %s", collection_id, exc_info=True)
 
-    # Custom member ORDER (e.g. the MCU in timeline order) — best-effort, Plex
-    # only (Jellyfin BoxSets have no reorder API). Runs after the member diff so
-    # every ordered member exists on the server.
-    if (definition.get("sort_order") == "custom"
-            and hasattr(source, "collection_reorder")):
-        order = (definition.get("definition") or {}).get("order") or []
-        ordered = _ordered_server_ids(order, res.owned)
+    # Member ORDER — best-effort, Plex only (Jellyfin BoxSets have no reorder API). Runs after
+    # the member diff so every ordered member exists. Two ordered cases:
+    #   • sort_order == 'custom' → the definition's stored order (e.g. the MCU in timeline order)
+    #   • a ranked list/chart with no explicit sort → the list's rank (res.owned is already in it)
+    if hasattr(source, "collection_reorder"):
+        ordered = None
+        if definition.get("sort_order") == "custom":
+            order = (definition.get("definition") or {}).get("order") or []
+            ordered = _ordered_server_ids(order, res.owned)
+        elif _ranked_default(definition):
+            ordered = _dedup(res.server_ids)      # rank order, deduped
         if ordered:
             try:
                 source.collection_reorder(collection_id, ordered)
