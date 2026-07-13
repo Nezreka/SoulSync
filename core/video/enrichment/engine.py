@@ -615,7 +615,11 @@ class VideoEnrichmentEngine:
             return None
         try:
             meta = w.client.match("movie", None, None, known_id=tmdb_id) or {}
-            return {"id": meta.get("tmdb_collection_id"), "name": meta.get("tmdb_collection_name")}
+            # match() nests everything under 'metadata' — read the collection fields THERE,
+            # not at the top level (reading the top level returned None, so every franchise
+            # backfilled as id 0 → whole franchises like Jurassic Park never surfaced).
+            md = meta.get("metadata") or {}
+            return {"id": md.get("tmdb_collection_id"), "name": md.get("tmdb_collection_name")}
         except Exception:
             logger.exception("movie_collection backfill failed for %s", tmdb_id)
             return None

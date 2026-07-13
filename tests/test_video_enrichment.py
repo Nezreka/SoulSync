@@ -702,6 +702,18 @@ def test_tmdb_extras_tv_full_cast_episode_counts(monkeypatch):
     assert c["character"] == "Lead" and c["episode_count"] == 42
 
 
+def test_movie_collection_reads_nested_metadata(db):
+    # match() nests fields under 'metadata' — movie_collection must read there, not the top
+    # level (the top-level bug returned None → every franchise backfilled as id 0).
+    class Tmdb:
+        enabled = True
+        def match(self, kind, title, year, known_id=None):
+            return {"id": known_id, "metadata": {
+                "tmdb_collection_id": 328, "tmdb_collection_name": "Jurassic Park Collection"}}
+    eng = VideoEnrichmentEngine(db, {"tmdb": Tmdb()})
+    assert eng.movie_collection(329) == {"id": 328, "name": "Jurassic Park Collection"}
+
+
 def test_item_extras_caches_tmdb_call(db, monkeypatch):
     mid = db.upsert_movie("plex", {"server_id": "m1", "title": "A", "tmdb_id": 603})
     import config.settings as cs
