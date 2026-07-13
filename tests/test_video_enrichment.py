@@ -714,6 +714,47 @@ def test_movie_collection_reads_nested_metadata(db):
     assert eng.movie_collection(329) == {"id": 328, "name": "Jurassic Park Collection"}
 
 
+def test_tvdb_season_episodes_maps_and_filters():
+    c = TVDBClient("KEY")
+
+    def fake(path, params=None):
+        assert path == "/series/76706/episodes/default" and params == {"season": 28, "page": 0}
+        return {"data": {"episodes": [
+            {"number": 1, "seasonNumber": 28, "name": "Premiere", "overview": "O",
+             "aired": "2026-07-09", "runtime": 43, "image": "http://img/1.jpg"},
+            {"number": 5, "seasonNumber": 27, "name": "Wrong season"},   # filtered by season
+            {"seasonNumber": 28, "name": "No number"},                   # dropped (no episode number)
+        ]}}
+    c._authed_get = fake
+    out = c.season_episodes(76706, 28)
+    assert out == [{"episode_number": 1, "title": "Premiere", "overview": "O",
+                    "air_date": "2026-07-09", "runtime_minutes": 43, "still_url": "http://img/1.jpg"}]
+
+
+def test_tvdb_episode_gap_fill(db):
+    # TMDB left the episode without an overview/air date; TVDB fills the blanks but doesn't
+    # clobber the title TMDB already set (backfill_episodes is COALESCE gap-fill).
+    with db.connect() as c:
+        c.execute("INSERT INTO shows (id, server_source, server_id, title, tmdb_id, tvdb_id) "
+                  "VALUES (7, 'plex', 's7', 'Big Brother', 10160, 76706)")
+        c.commit()
+    db.backfill_episodes(7, 28, [{"episode_number": 1, "title": "Episode 1"}])
+
+    class FakeTvdb:
+        enabled = True
+        def season_episodes(self, series_id, season):
+            assert series_id == 76706 and season == 28
+            return [{"episode_number": 1, "title": "Episode 1 - Premiere",
+                     "overview": "A time-warping season.", "air_date": "2026-07-09"}]
+
+    VideoEnrichmentEngine(db, {"tvdb": FakeTvdb()})._cascade_tvdb_episodes(7, 76706, [28])
+    with db.connect() as c:
+        r = c.execute("SELECT overview, air_date, title FROM episodes "
+                      "WHERE show_id=7 AND episode_number=1").fetchone()
+    assert r[0] == "A time-warping season." and r[1] == "2026-07-09"   # blanks filled from TVDB
+    assert r[2] == "Episode 1"                                         # TMDB's title kept, not clobbered
+
+
 def test_item_extras_caches_tmdb_call(db, monkeypatch):
     mid = db.upsert_movie("plex", {"server_id": "m1", "title": "A", "tmdb_id": 603})
     import config.settings as cs

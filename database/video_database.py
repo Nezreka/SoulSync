@@ -793,10 +793,11 @@ class VideoDatabase:
             conn.close()
 
     def show_match_info(self, show_id: int) -> dict | None:
-        """Title/year/tmdb_id for one show — for on-demand (lazy) art refresh."""
+        """Title/year/tmdb_id/tvdb_id for one show — for on-demand (lazy) art refresh
+        (tvdb_id lets the refresh gap-fill episode metadata TMDB is missing)."""
         conn = self._get_connection()
         try:
-            row = conn.execute("SELECT title, year, tmdb_id FROM shows WHERE id=?",
+            row = conn.execute("SELECT title, year, tmdb_id, tvdb_id FROM shows WHERE id=?",
                                (show_id,)).fetchone()
             return dict(row) if row else None
         finally:

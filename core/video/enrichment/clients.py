@@ -1067,6 +1067,35 @@ class TVDBClient:
             return None
         return {"id": tvdb_id, "metadata": {k: v for k, v in meta.items() if v}}
 
+    def season_episodes(self, series_id, season_number):
+        """A TVDB series+season's episodes (v4) → [{episode_number, title, overview, air_date,
+        runtime_minutes, still_url}]. Used to GAP-FILL episode metadata TMDB is missing (TVDB
+        often has reality-TV / just-aired synopses + fuller titles first). Filters by season
+        defensively in case the API's ``season`` param is loose. Best-effort — [] on any error."""
+        if not self.api_key or series_id is None:
+            return []
+        try:
+            sn = int(season_number)
+        except (TypeError, ValueError):
+            return []
+        try:
+            d = self._authed_get("/series/" + str(series_id) + "/episodes/default",
+                                 {"season": sn, "page": 0}) or {}
+        except Exception:
+            logger.exception("TVDB season episodes fetch failed for %s S%s", series_id, sn)
+            return []
+        out = []
+        for e in (((d.get("data") or {}).get("episodes")) or []):
+            if e.get("seasonNumber") != sn:
+                continue
+            num = e.get("number")
+            if num is None:
+                continue
+            out.append({"episode_number": num, "title": e.get("name") or None,
+                        "overview": e.get("overview") or None, "air_date": e.get("aired") or None,
+                        "runtime_minutes": e.get("runtime") or None, "still_url": e.get("image") or None})
+        return out
+
 
 class OMDbAuthError(Exception):
     """OMDb rejected the API key (HTTP 401 / 'Invalid API key!'). Distinct from a
