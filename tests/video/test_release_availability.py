@@ -38,3 +38,17 @@ def test_ignores_malformed_entries():
                                   {"type": None, "release_date": "2025-01-01"},
                                   {"type": 4, "release_date": "2025-06-06T00:00:00Z"}]}]
     assert available_date(results) == "2025-06-06"
+
+
+def test_premiere_type1_is_ignored_uses_wide_theatrical():
+    # The Invite case: a Jan premiere (type 1) months before the July wide theatrical (type 3).
+    # The estimate must anchor on the WIDE date, not the premiere.
+    results = [_country("US", (1, "2026-01-24"), (2, "2026-06-26"), (3, "2026-07-10"))]
+    assert available_date(results, delay_days=90) == \
+        (datetime.date(2026, 7, 10) + datetime.timedelta(days=90)).isoformat()
+
+
+def test_limited_theatrical_used_when_no_wide():
+    results = [_country("US", (1, "2026-01-24"), (2, "2026-06-26"))]   # premiere + limited, no wide
+    assert available_date(results, delay_days=90) == \
+        (datetime.date(2026, 6, 26) + datetime.timedelta(days=90)).isoformat()

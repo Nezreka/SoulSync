@@ -15,7 +15,10 @@ from typing import Any, List, Optional
 # TMDB release types: 1 Premiere · 2 Theatrical (limited) · 3 Theatrical · 4 Digital ·
 # 5 Physical · 6 TV. Digital/Physical/TV = a copy exists to download.
 _HOME_TYPES = frozenset({4, 5, 6})
-_THEATRICAL_TYPES = frozenset({1, 2, 3})
+# Anchor the home-release ESTIMATE on the WIDE theatrical release (type 3), falling back to a
+# LIMITED run (type 2). NEVER a PREMIERE (type 1) — a festival/special screening that can be
+# months ahead of the real release (e.g. a Jan premiere for a film that opens in July).
+_THEATRICAL_TYPES_IN_ORDER = (3, 2)
 DEFAULT_THEATRICAL_TO_HOME_DAYS = 90   # the usual cinema→home gap when TMDB has no digital date
 
 
@@ -46,13 +49,14 @@ def available_date(results: Any, *, delay_days: int = DEFAULT_THEATRICAL_TO_HOME
     home = sorted(d for t in _HOME_TYPES for d in by.get(t, []))
     if home:
         return home[0]
-    theatrical = sorted(d for t in _THEATRICAL_TYPES for d in by.get(t, []))
-    if theatrical:
-        try:
-            base = datetime.date.fromisoformat(theatrical[0])
-        except ValueError:
-            return None
-        return (base + datetime.timedelta(days=max(0, int(delay_days)))).isoformat()
+    for t in _THEATRICAL_TYPES_IN_ORDER:   # wide first, then limited — never a premiere
+        dates = sorted(by.get(t, []))
+        if dates:
+            try:
+                base = datetime.date.fromisoformat(dates[0])
+            except ValueError:
+                return None
+            return (base + datetime.timedelta(days=max(0, int(delay_days)))).isoformat()
     return None
 
 

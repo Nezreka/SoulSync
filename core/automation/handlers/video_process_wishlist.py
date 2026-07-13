@@ -180,6 +180,12 @@ def _backfill_movie_available_dates(limit: int = 25) -> None:
         from api.video import get_video_db
         from core.video.enrichment.engine import get_video_enrichment_engine
         db = get_video_db()
+        # One-time reset: an earlier version anchored the estimate on TMDB PREMIERE dates
+        # (festival screenings months before release), so previously-derived dates are wrong.
+        # Wipe them once and re-derive with the wide-theatrical logic.
+        if db.get_setting("avail_dates_logic") != "v2":
+            db.clear_wishlist_movie_release_dates()
+            db.set_setting("avail_dates_logic", "v2")
         need = db.wishlist_movies_missing_release_date(limit)
         if not need:
             return
