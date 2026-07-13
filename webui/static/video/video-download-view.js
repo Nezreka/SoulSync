@@ -1204,11 +1204,10 @@
         document.addEventListener('keydown', onKey);
 
         getJSON('/api/video/downloads/config').then(function (c) {
-            // Only search sources that return REAL, grabbable results. Torrent/Usenet/
-            // YouTube currently fall through to mock_search (demo data, live:false) and
-            // grab is Soulseek-only — including them would show placeholder releases.
-            // As the engine wires a source for real, add it here.
-            var REAL = { soulseek: 1 };
+            // Search every configured source that returns REAL, grabbable results. Soulseek
+            // (slskd), Torrent + Usenet (Prowlarr) are all wired end-to-end now — live search
+            // + source-aware grab — so honour the user's configured sources/hybrid order.
+            var REAL = { soulseek: 1, torrent: 1, usenet: 1 };
             var srcs = sourcesFromConfig(c).filter(function (s) { return SRC_META[s] && REAL[s]; });
             if (!srcs.length) srcs = ['soulseek'];
             var sub = ov.querySelector('[data-vms-sub]');
