@@ -8,6 +8,7 @@ key is configured). Imports only video.db + this package.
 from __future__ import annotations
 
 import threading
+import time
 
 from utils.logging_config import get_logger
 
@@ -18,6 +19,11 @@ from .worker import VideoEnrichmentWorker
 logger = get_logger("video_enrichment.engine")
 
 _DISPLAY = {"tmdb": "TMDB", "tvdb": "TVDB", "omdb": "OMDb"}
+
+# Once the OMDb daily-limit / bad-key latch trips it pauses ratings for the rest of the
+# run — but it self-heals after this window so a long-running server re-probes OMDb (whose
+# quota resets daily) on its own, without needing a restart. Matches the re-enrich cadence.
+_OMDB_RETRY_SECONDS = 6 * 3600
 
 
 class VideoEnrichmentEngine:
@@ -58,15 +64,38 @@ class VideoEnrichmentEngine:
     def _cache_put(self, key, data, ttl=1800):
         self._cache.put(key, data, ttl=ttl)
 
+    def _omdb_blocked_now(self) -> bool:
+        """The OMDb over-quota / bad-key latch — True while ratings should be skipped.
+        Self-healing: once tripped it stays set (no per-item re-probe within a run), but
+        auto-clears after ``_OMDB_RETRY_SECONDS`` so the next run re-tries OMDb once its
+        daily quota has rolled over, instead of staying stuck until the app restarts."""
+        if not getattr(self, "_omdb_blocked", False):
+            return False
+        at = getattr(self, "_omdb_blocked_at", None)
+        if at is not None and (time.time() - at) >= _OMDB_RETRY_SECONDS:
+            self._omdb_blocked = False
+            self._omdb_blocked_at = None
+            logger.info("OMDb ratings latch cleared — re-probing (quota window elapsed)")
+            return False
+        return True
+
+    def _trip_omdb_latch(self, exc) -> None:
+        """Latch OMDb off (daily limit / bad key) with a timestamp so it can self-heal."""
+        self._omdb_blocked = True
+        self._omdb_blocked_at = time.time()
+        logger.warning("OMDb ratings paused (auto-retries in ~%dh): %s",
+                       _OMDB_RETRY_SECONDS // 3600, exc)
+
     def _backfill_ratings(self, kind, item_id):
         # The OMDb worker owns the ratings client (fallback to an injected one
         # for tests that don't build a worker).
         w = self.workers.get("omdb")
         rc = w.client if w else self.ratings_client
         # _omdb_blocked latches once the daily request limit / a bad key is hit — it affects
-        # EVERY item, so we stop calling OMDb for the rest of the process instead of failing
-        # (and logging a traceback) once per show.
-        if not rc or not getattr(rc, "enabled", False) or getattr(self, "_omdb_blocked", False):
+        # EVERY item, so we stop calling OMDb for the rest of the run instead of failing
+        # (and logging a traceback) once per show. The latch self-heals after a window
+        # (_omdb_blocked_now) so a long-running server recovers ratings without a restart.
+        if not rc or not getattr(rc, "enabled", False) or self._omdb_blocked_now():
             return
         info = (self.db.movie_match_info(item_id) if kind == "movie"
                 else self.db.show_match_info(item_id))
@@ -87,8 +116,7 @@ class VideoEnrichmentEngine:
                 self.db.apply_ratings(kind, item_id, ratings)
         except OMDbAuthError as e:
             # daily limit / bad key — hits every item; latch off + one quiet warning, no spam.
-            self._omdb_blocked = True
-            logger.warning("OMDb ratings paused for this run: %s", e)
+            self._trip_omdb_latch(e)
         except Exception:
             logger.exception("ratings backfill failed for %s %s", kind, item_id)
 
@@ -785,7 +813,7 @@ class VideoEnrichmentEngine:
         # share the same daily-limit latch as _backfill_ratings — once OMDb is over quota,
         # every detail fetch would otherwise re-hit it and dump a traceback per title.
         if (not imdb_id or not ow or not getattr(ow.client, "enabled", False)
-                or getattr(self, "_omdb_blocked", False)):
+                or self._omdb_blocked_now()):
             return
         try:
             r = ow.client.ratings(imdb_id) or {}
@@ -793,8 +821,7 @@ class VideoEnrichmentEngine:
                 if r.get(k) is not None:
                     d[k] = r[k]
         except OMDbAuthError as e:
-            self._omdb_blocked = True
-            logger.warning("OMDb ratings paused for this run: %s", e)
+            self._trip_omdb_latch(e)
         except Exception:
             logger.exception("tmdb_detail ratings failed for %s", imdb_id)
 

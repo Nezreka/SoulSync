@@ -1196,7 +1196,7 @@ class VideoDatabase:
             conn.close()
 
     def stale_enriched_items(self, limit: int = 500, movie_days: int = 30,
-                             show_days: int = 14) -> list[dict]:
+                             show_days: int = 30) -> list[dict]:
         """The N matched library items whose metadata is stalest — for the periodic
         re-enrichment automation. Oldest-refreshed first, and ONLY items last touched
         beyond their per-kind staleness floor (so a run never re-pulls something already
@@ -1204,11 +1204,10 @@ class VideoDatabase:
         match, lazy on-view refresh, or a prior re-enrich pass — so it doubles as the
         'last refreshed' cursor without a new column.
 
-        Movies and shows carry DIFFERENT floors on purpose: a released movie's metadata
-        settles (``movie_days`` default 30), while a show is volatile — weekly episodes,
-        running ratings, status flips — so it's revisited sooner (``show_days`` default
-        14). An episode rides along when its show is refreshed (refresh_show_art cascades
-        the episode list), so there's no separate episode queue.
+        Movies and shows each carry their own floor (both default 30 — roughly monthly;
+        metadata drifts slowly, so once a month is plenty). An episode rides along when
+        its show is refreshed (refresh_show_art cascades the episode list), so there's no
+        separate episode queue — episodes stay as fresh as their show's monthly pass.
 
         Returns ``[{kind, id, title, last_attempted}]`` (kind ∈ movie/show). A NULL
         last_attempted (matched but never stamped — legacy rows) sorts first."""
@@ -1225,7 +1224,7 @@ class VideoDatabase:
             return (datetime.now(timezone.utc) - timedelta(days=d)).strftime("%Y-%m-%d %H:%M:%S")
 
         m_cut = _cutoff(movie_days, 30)
-        s_cut = _cutoff(show_days, 14)
+        s_cut = _cutoff(show_days, 30)
         conn = self._get_connection()
         try:
             rows = conn.execute(

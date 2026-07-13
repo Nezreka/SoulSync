@@ -213,7 +213,7 @@ SYSTEM_AUTOMATIONS = [
         'trigger_type': 'schedule',
         'trigger_config': {'interval': 6, 'unit': 'hours'},
         'action_type': 'video_reenrich_stale',
-        'action_config': {'batch_size': 500, 'movie_stale_days': 30, 'show_stale_days': 14},
+        'action_config': {'batch_size': 500, 'movie_stale_days': 30, 'show_stale_days': 30},
         'initial_delay': 900,
         'owned_by': 'video',
     },

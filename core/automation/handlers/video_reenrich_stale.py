@@ -31,11 +31,11 @@ from typing import Any, Callable, Dict, List, Optional
 from core.automation.deps import AutomationDeps
 
 # Default per-run cap and per-kind staleness floors — overridable from the block's config.
-# Movies settle after release (30d); shows are volatile — weekly episodes, running ratings,
-# status flips — so they're revisited sooner (14d).
+# Both default to ~monthly: metadata drifts slowly, so once a month per item is plenty (and
+# at that cadence the steady-state OMDb call volume stays under the free daily quota).
 DEFAULT_BATCH = 500
 DEFAULT_MOVIE_DAYS = 30
-DEFAULT_SHOW_DAYS = 14
+DEFAULT_SHOW_DAYS = 30
 # A small courtesy pause between items so a 500-item run doesn't machine-gun the
 # metadata providers (refresh_*_art is a direct synchronous call, no worker interval).
 _ITEM_PAUSE = 0.25
@@ -70,7 +70,7 @@ def auto_video_reenrich_stale(
 
     Config: ``batch_size`` (per-run cap, default 500), ``movie_stale_days`` (skip movies
     refreshed within this many days, default 30), ``show_stale_days`` (same for shows,
-    default 14 — TV drifts faster).
+    default 30 — both roughly monthly).
 
     Returns ``{'status': 'completed', 'refreshed': int, 'failed': int, 'items': int, ...}``."""
     fetch_stale = fetch_stale or _default_fetch_stale
