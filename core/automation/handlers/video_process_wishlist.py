@@ -170,6 +170,29 @@ def _default_fetch_items(media_type: str) -> List[Dict[str, Any]]:
     return db.movie_wishlist_to_download() if media_type == "movie" else db.episode_wishlist_to_download()
 
 
+def _backfill_movie_available_dates(limit: int = 25) -> None:
+    """Resolve the DOWNLOADABLE (home/digital) date for wished movies that don't have one yet —
+    TMDB digital/physical, or theatrical + a home-release window (Radarr's 'minimum availability
+    = released'). This is what lets the drain SKIP a film that's still only in cinemas instead of
+    grabbing a wrong/fake copy. Bounded per run + engine-cached; best-effort. A past-date sentinel
+    is stored when TMDB knows nothing, so it isn't re-queried forever (the year check still guards)."""
+    try:
+        from api.video import get_video_db
+        from core.video.enrichment.engine import get_video_enrichment_engine
+        db = get_video_db()
+        need = db.wishlist_movies_missing_release_date(limit)
+        if not need:
+            return
+        eng = get_video_enrichment_engine()
+        for tmdb_id in need:
+            try:
+                db.set_wishlist_release_date(tmdb_id, eng.movie_available_date(tmdb_id) or "1970-01-01")
+            except Exception:   # noqa: BLE001 - one lookup failing shouldn't stall the rest
+                logger.debug("available-date backfill failed for %s", tmdb_id, exc_info=True)
+    except Exception:   # noqa: BLE001 - the backfill is an assist; never block the drain
+        logger.debug("movie available-date backfill failed", exc_info=True)
+
+
 def _default_active_keys(media_type: str) -> set:
     from api.video import get_video_db
     return active_download_keys(get_video_db().get_active_video_downloads())
@@ -328,6 +351,8 @@ def auto_video_process_wishlist(
 
         deps.update_progress(automation_id, phase='Checking the wishlist…', progress=5,
                              log_line='Looking for wished %ss to grab' % label, log_type='info')
+        if media_type == 'movie':
+            _backfill_movie_available_dates()   # resolve downloadable dates so the gate can skip cinema-only films
         items = fetch_items(media_type) or []
         # Upgrade-until-cutoff: owned rows are judged against the profile cutoff
         # (skip when met; strictly-better-only when below). Only loaded when an

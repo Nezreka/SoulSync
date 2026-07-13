@@ -204,6 +204,17 @@ class TMDBClient:
         self._fill_collection(out)
         return out
 
+    def movie_release_dates(self, tmdb_id):
+        """TMDB /movie/{id}/release_dates 'results' — per-country release dates by type
+        (theatrical / digital / physical). Feeds the 'is it downloadable yet' gate."""
+        if not self.api_key or tmdb_id is None:
+            return []
+        import requests
+        r = requests.get(self.BASE + "/movie/" + str(tmdb_id) + "/release_dates",
+                         params={"api_key": self.api_key}, timeout=15)
+        r.raise_for_status()
+        return (r.json() or {}).get("results") or []
+
     def poster_options(self, kind, tmdb_id):
         """Just the poster art for a title (for the poster manager) — a light
         /images call, no detail/credits. Returns [{thumb, full, lang, vote}] with

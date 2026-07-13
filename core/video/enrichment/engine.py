@@ -636,6 +636,25 @@ class VideoEnrichmentEngine:
                 return None
         return cached or None
 
+    def movie_available_date(self, tmdb_id) -> str | None:
+        """The date a downloadable (home/digital) copy of a movie is expected — Radarr-style
+        'released' availability, so the wishlist drain skips films still only in cinemas.
+        Cached a day; None when TMDB has no release-date data at all."""
+        w = self.workers.get("tmdb")
+        if not w or not w.enabled or not tmdb_id:
+            return None
+        ck = ("avail_date", tmdb_id)
+        cached = self._cache_get(ck)
+        if cached is None:
+            try:
+                from core.video.release_availability import available_date
+                cached = available_date(w.client.movie_release_dates(tmdb_id)) or ""
+                self._cache_put(ck, cached, ttl=86400)
+            except Exception:
+                logger.exception("movie_available_date failed for %s", tmdb_id)
+                return None
+        return cached or None
+
     def tmdb_full_detail(self, kind, tmdb_id) -> dict | None:
         """Raw TMDB full detail (absolute image URLs + metadata) WITHOUT the
         owned→library redirect — for sidecar / NFO writing, which needs the data even
