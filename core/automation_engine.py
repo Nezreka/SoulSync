@@ -203,6 +203,20 @@ SYSTEM_AUTOMATIONS = [
         'action_type': 'video_add_airing_episodes',
         'owned_by': 'video',
     },
+    # Freshness: every 6 hours, re-enrich the stalest matched library items (oldest-refreshed
+    # first, capped per run, skipping anything touched in the last 2 weeks) so ratings drift,
+    # newly-written overviews, late-arriving art and episode air-dates roll in over time. Rolling
+    # rather than a monthly big-bang — the whole library cycles through without spiking TMDB/OMDb.
+    # A 900s initial delay keeps it off the boot path.
+    {
+        'name': 'Refresh Stale Metadata',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 6, 'unit': 'hours'},
+        'action_type': 'video_reenrich_stale',
+        'action_config': {'batch_size': 500, 'movie_stale_days': 30, 'show_stale_days': 14},
+        'initial_delay': 900,
+        'owned_by': 'video',
+    },
     # Daily: re-apply overlays to the library. Reads the per-scope overlay settings
     # (movie/show/season/episode assignments) and touches ONLY enabled scopes; the
     # applier skips items whose template + art + consumed data are unchanged since
