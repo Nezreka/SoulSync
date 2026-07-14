@@ -2617,6 +2617,14 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 .vgm-eps-toggle { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 700;
     color: rgba(255, 255, 255, 0.6); cursor: pointer; user-select: none; }
 .vgm-eps-toggle input { accent-color: rgb(var(--accent-rgb, 88 101 242)); width: 15px; height: 15px; cursor: pointer; }
+.vgm-eps-head-actions { display: inline-flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.vgm-select-missing { font-size: 12px; font-weight: 700; padding: 5px 11px; border-radius: 999px;
+    border: 1px solid rgba(var(--accent-rgb, 88 101 242), 0.4); background: rgba(var(--accent-rgb, 88 101 242), 0.12);
+    color: rgb(var(--accent-light-rgb, 148 158 255)); cursor: pointer; transition: background 0.15s ease, border-color 0.15s ease; }
+.vgm-select-missing:hover:not(:disabled) { background: rgba(var(--accent-rgb, 88 101 242), 0.22);
+    border-color: rgba(var(--accent-rgb, 88 101 242), 0.6); }
+.vgm-select-missing:disabled { opacity: 0.55; cursor: default; }
+.vgm-select-missing[hidden] { display: none; }
 
 .vgm-eps-list { display: flex; flex-direction: column; gap: 8px; }
 .vgm-season { border: 1px solid rgba(255, 255, 255, 0.07); border-radius: 12px; background: rgba(255, 255, 255, 0.02); overflow: hidden; }

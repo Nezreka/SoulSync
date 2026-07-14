@@ -248,6 +248,8 @@
                 }
                 return;
             }
+            var selMissing = e.target.closest('[data-vgm-select-missing]');
+            if (selMissing) { selectAllMissing(ov, selMissing); return; }
             if (e.target.closest('[data-vgm-download]')) { enterDownload(ov, o); return; }
             if (e.target.closest('[data-vgm-back]')) { exitDownload(ov); return; }
             if (e.target.closest('[data-vgm-wishlist]')) { submitWishlist(ov); }
@@ -368,8 +370,11 @@
         modalState = { kind: 'show', sel: new Set(), tvId: tvId, today: today, epMeta: {}, seasonPoster: {} };
         var totalMissing = 0, anyLazy = false;
         var html = '<div class="vgm-eps-head"><span class="vgm-eps-h">Episodes</span>' +
+            '<div class="vgm-eps-head-actions">' +
+            '<button class="vgm-select-missing" type="button" data-vgm-select-missing ' +
+                'title="Load every season and select every missing aired episode">Select all missing</button>' +
             '<label class="vgm-eps-toggle"><input type="checkbox" data-vgm-missing-only checked>' +
-            '<span>Missing only</span></label></div><div class="vgm-eps-list">';
+            '<span>Missing only</span></label></div></div><div class="vgm-eps-list">';
         d.seasons.forEach(function (s) {
             // Capture this season's poster (owned → proxy by season id, tmdb → direct).
             modalState.seasonPoster[String(s.season_number)] = (o && o.source === 'library')
@@ -419,11 +424,45 @@
         wrap.innerHTML = html;
         wrap.classList.add('vgm-eps--missing-only');
         wrap.hidden = false;
+        // Nothing to select when you own everything (and no lazy seasons to load).
+        var sm = wrap.querySelector('[data-vgm-select-missing]');
+        if (sm) sm.hidden = (totalMissing === 0 && !anyLazy);
         // initial season-checkbox states reflect the (missing-only) selection
         d.seasons.forEach(function (s) { syncSeasonCheck(modalEl, s.season_number); });
         // Prefetch the first real season of an un-owned show so its first expand
         // is instant (and its missing episodes pre-count in the footer).
         if (anyLazy) prefetchFirstSeason(wrap);
+    }
+
+    // "Select all missing" — load every unexpanded (lazy) season, then tick every
+    // missing-aired episode across the whole show so one Add click wishlists it
+    // all. Re-ticks boxes the user may have unchecked; owned rows (re-download)
+    // and upcoming rows (no checkbox) are untouched.
+    function selectAllMissing(ov, btn) {
+        if (!modalState || modalState.kind !== 'show') return;
+        var els = ov.querySelectorAll('.vgm-season[data-vgm-lazy="1"]:not([data-vgm-loaded])');
+        var lazies = [];
+        for (var i = 0; i < els.length; i++) lazies.push(els[i]);
+        var label = btn.textContent;
+        btn.disabled = true;
+        if (lazies.length) btn.textContent = 'Loading seasons…';
+        Promise.all(lazies.map(function (el) { return loadSeason(el) || Promise.resolve(); }))
+            .then(function () {
+                if (!modalEl) return;   // modal closed mid-load
+                var boxes = ov.querySelectorAll('.vgm-ep--missing .vgm-ep-cb');
+                for (var j = 0; j < boxes.length; j++) {
+                    boxes[j].checked = true;
+                    toggleSel(boxes[j].getAttribute('data-vgm-ep'), true);
+                }
+                var sas = ov.querySelectorAll('[data-vgm-season-all]');
+                for (var k = 0; k < sas.length; k++) syncSeasonCheck(ov, sas[k].getAttribute('data-vgm-season-all'));
+                btn.disabled = false; btn.textContent = label;
+                updateFooter();
+                var n = modalState.sel.size;
+                toast(n ? n + ' episode' + (n === 1 ? '' : 's') + ' selected — hit Add to wishlist them'
+                        : 'Nothing missing to select', n ? 'success' : 'info');
+            })
+            .catch(function () { btn.disabled = false; btn.textContent = label; });
     }
 
     function prefetchFirstSeason(wrap) {
@@ -440,12 +479,12 @@
     // Fetch a tmdb season's episodes the first time it's expanded, render them,
     // and pre-select the missing-aired ones (everything un-owned that has aired).
     function loadSeason(seasonEl) {
-        if (!modalState || !modalState.tvId || !seasonEl) return;
+        if (!modalState || !modalState.tvId || !seasonEl) return Promise.resolve();
         var sn = parseInt(seasonEl.getAttribute('data-vgm-season'), 10);
         seasonEl.setAttribute('data-vgm-loaded', '1');   // guard double-fetch
         var body = seasonEl.querySelector('.vgm-season-eps');
         if (body) body.innerHTML = '<div class="vgm-season-loading">Loading episodes…</div>';
-        fetch('/api/video/tmdb/show/' + modalState.tvId + '/season/' + sn, { headers: { Accept: 'application/json' } })
+        return fetch('/api/video/tmdb/show/' + modalState.tvId + '/season/' + sn, { headers: { Accept: 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (data) {
                 if (!modalEl || !seasonEl.parentNode) return;

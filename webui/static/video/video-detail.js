@@ -495,6 +495,15 @@
                 '<span class="discog-btn-icon">⭳</span><span class="discog-btn-text">' + showGetLabel + '</span>' +
                 '<span class="discog-btn-shimmer"></span></button>';
         }
+        // Whole-show wishlist — every missing AIRED episode across every season in
+        // one click (the season bar only covers the selected season). YouTube
+        // channels have their own wishlist system (yt wish buttons), so skip them.
+        if (d.kind === 'show' && d.source !== 'youtube' && window.VideoGrab) {
+            html += '<button class="discog-download-btn discog-btn-compact" type="button" data-vd-act="wishlist-missing" ' +
+                'title="Add every missing aired episode across all seasons to the wishlist">' +
+                '<span class="discog-btn-icon">＋</span><span class="discog-btn-text">Wishlist Missing</span>' +
+                '<span class="discog-btn-shimmer"></span></button>';
+        }
         // Manage Poster — library items only (we need a server id + folder to push a
         // new poster to) and a tmdb id (to fetch the alternates). Opens VideoPoster.
         var ownLibItem = (d.source !== 'tmdb') || d.owned;
@@ -2201,6 +2210,7 @@
             if (which === 'watchlist') toggleWatchlist();
             else if (which === 'get') openGetModal();
             else if (which === 'missing') openGetModal(true);
+            else if (which === 'wishlist-missing') wishlistAllMissing(act);
             else if (which === 'poster') openPosterModal();
             else if (which === 'manage') openManagePanel();
             else if (which === 'yt-follow') toggleYtFollow();
@@ -2388,6 +2398,63 @@
             if (ok) { _btnLabel(btn, 'Wishlisted'); toast('Added ' + eps.length + ' episode' + (eps.length === 1 ? '' : 's') + ' to wishlist', 'success'); }
             else { btn.disabled = false; toast('Could not add to wishlist', 'error'); }
         });
+    }
+
+    // ── Whole-show wishlist ("Wishlist Missing" hero button) ──
+    // Library shows ship every season's episodes with the detail payload; TMDB
+    // previews load per-season on demand — fetch whatever the user never opened
+    // so "all missing" really means ALL seasons, not just the browsed ones.
+    function _ensureAllSeasonsLoaded() {
+        if (!data || data.source !== 'tmdb') return Promise.resolve();
+        var sid = data.id;
+        var pending = (data.seasons || []).filter(function (s) {
+            return !s._loaded && !(s.episodes && s.episodes.length);
+        });
+        return Promise.all(pending.map(function (s) {
+            return fetch(TMDB_URL + 'show/' + sid + '/season/' + s.season_number, { headers: { 'Accept': 'application/json' } })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (se) {
+                    s._loaded = true;
+                    if (se && se.episodes) { s.episodes = se.episodes; s.episode_total = se.episodes.length; }
+                })
+                .catch(function () { s._loaded = true; });
+        }));
+    }
+    // Missing = not owned AND already aired — un-aired episodes are the airing
+    // watchlist's job, not a backlog wishlist's (mirrors the get-modal's epState).
+    function _allMissingMetas() {
+        var today = new Date().toISOString().slice(0, 10);
+        var out = [];
+        (data.seasons || []).forEach(function (s) {
+            (s.episodes || []).forEach(function (ep) {
+                if (ep.owned) return;
+                if (ep.air_date && ep.air_date > today) return;
+                var still = (data.source === 'tmdb')
+                    ? (ep.still_url || null)
+                    : (ep.has_still && ep.id != null ? '/api/video/poster/episode/' + ep.id : null);
+                out.push({ season_number: s.season_number, episode_number: ep.episode_number,
+                    title: ep.title, air_date: ep.air_date, still_url: still, overview: ep.overview,
+                    season_poster_url: seasonArt(s) || null });
+            });
+        });
+        return out;
+    }
+    function wishlistAllMissing(btn) {
+        if (!window.VideoGrab || !data || data.kind !== 'show') return;
+        if (!data.tmdb_id) { toast('Can’t wishlist — this show isn’t matched to TMDB yet', 'error'); return; }
+        if (btn) { btn.disabled = true; _btnLabel(btn, 'Wishlisting…'); }
+        var reset = function () { if (btn) { btn.disabled = false; _btnLabel(btn, 'Wishlist Missing'); } };
+        _ensureAllSeasonsLoaded().then(function () {
+            var eps = _allMissingMetas();
+            if (!eps.length) { reset(); toast('Nothing missing — you have every aired episode', 'info'); return; }
+            VideoGrab.wishlistEpisodes(_showIdentity(), eps).then(function (ok) {
+                if (ok) {
+                    if (btn) _btnLabel(btn, 'Wishlisted');
+                    toast('Added ' + eps.length + ' missing episode' + (eps.length === 1 ? '' : 's') + ' to wishlist', 'success');
+                    document.dispatchEvent(new CustomEvent('soulsync:video-wishlist-changed'));
+                } else { reset(); toast('Could not add to wishlist', 'error'); }
+            });
+        }).catch(reset);
     }
 
     // Manual search — a dedicated modal that auto-searches every configured source
