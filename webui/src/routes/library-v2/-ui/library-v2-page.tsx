@@ -53,6 +53,7 @@ import {
   type Lib2EntityRef,
   type LibraryV2AlbumType,
 } from '../-library-v2.api';
+import { computeTrackEditValues } from '../-metadata-edit';
 import { Route } from '../route';
 import { InteractiveSearchModal } from './interactive-search';
 import styles from './library-v2-page.module.css';
@@ -2850,11 +2851,125 @@ function TrackRow({
           disabled={!track.id}
           onClick={() => onAction(`Grab Release: ${label} (${albumTitle})`, entity)}
         />
+        {track.id ? <TrackEditButton track={track} /> : null}
         {!missing && track.file ? (
           <TrackSourceInfoButton track={track} albumTitle={albumTitle} />
         ) : null}
       </td>
     </tr>
+  );
+}
+
+/** Per-track "Edit metadata" trigger (title / track / disc corrections). */
+function TrackEditButton({ track }: { track: LibraryV2Track }) {
+  const [open, setOpen] = useState(false);
+  if (!track.id) return null;
+  return (
+    <>
+      <IconActionButton
+        icon="edit"
+        title="Edit track metadata (title, track/disc number)"
+        onClick={() => setOpen(true)}
+      />
+      {open ? <EditTrackModal track={track} onClose={() => setOpen(false)} /> : null}
+    </>
+  );
+}
+
+function EditTrackModal({ track, onClose }: { track: LibraryV2Track; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const [title, setTitle] = useState(track.title ?? '');
+  const [trackNumber, setTrackNumber] = useState(
+    track.track_number === null ? '' : String(track.track_number),
+  );
+  const [discNumber, setDiscNumber] = useState(
+    track.disc_number === null ? '' : String(track.disc_number),
+  );
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const { values, valid } = computeTrackEditValues(
+    { title: track.title, track_number: track.track_number, disc_number: track.disc_number },
+    { title, trackNumber, discNumber },
+  );
+  const overrides = track.user_overrides ?? {};
+  const resettable = ['title', 'track_number', 'disc_number'].filter((field) => field in overrides);
+
+  async function save(valuesToSet: Record<string, unknown>, clear: string[] = []) {
+    if (!track.id) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await updateLibraryV2MetadataOverrides('track', track.id, valuesToSet, clear);
+      await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+      onClose();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Edit failed');
+      setBusy(false);
+    }
+  }
+
+  return (
+    <ModalShell title={`Edit — ${track.title ?? 'track'}`} onClose={onClose}>
+      <div className={styles.editRow}>
+        <label htmlFor="lib2-track-title">Title</label>
+        <input
+          id="lib2-track-title"
+          className={styles.searchInput}
+          value={title}
+          disabled={busy}
+          onChange={(event) => setTitle(event.target.value)}
+        />
+      </div>
+      <div className={styles.editRow}>
+        <label htmlFor="lib2-track-number">Track number</label>
+        <input
+          id="lib2-track-number"
+          className={styles.searchInput}
+          type="number"
+          min={0}
+          value={trackNumber}
+          disabled={busy}
+          onChange={(event) => setTrackNumber(event.target.value)}
+        />
+      </div>
+      <div className={styles.editRow}>
+        <label htmlFor="lib2-track-disc">Disc number</label>
+        <input
+          id="lib2-track-disc"
+          className={styles.searchInput}
+          type="number"
+          min={0}
+          value={discNumber}
+          disabled={busy}
+          onChange={(event) => setDiscNumber(event.target.value)}
+        />
+      </div>
+      {error ? <div className={styles.searchError}>{error}</div> : null}
+      <div className={styles.modalActions}>
+        {resettable.length > 0 ? (
+          <button
+            type="button"
+            className={styles.btnGhost}
+            disabled={busy}
+            onClick={() => void save({}, resettable)}
+          >
+            Restore provider values
+          </button>
+        ) : null}
+        <button type="button" className={styles.btnGhost} disabled={busy} onClick={onClose}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          className={styles.btnPrimary}
+          disabled={busy || !valid || Object.keys(values).length === 0}
+          onClick={() => void save(values)}
+        >
+          {busy ? 'Saving…' : 'Save'}
+        </button>
+      </div>
+    </ModalShell>
   );
 }
 

@@ -36,6 +36,25 @@ describe('library v2 metadata api', () => {
     ).resolves.toEqual({ title: 'Corrected', year: 2024 });
   });
 
+  it('sends a track-level metadata correction to the track override endpoint', async () => {
+    server.use(
+      http.patch('/api/library/v2/metadata-overrides/track/900', async ({ request }) => {
+        expect(await request.json()).toEqual({
+          set: { title: 'Correct Title', track_number: 3 },
+          clear: [],
+        });
+        return HttpResponse.json({
+          success: true,
+          overrides: { title: 'Correct Title', track_number: 3 },
+        });
+      }),
+    );
+
+    await expect(
+      updateLibraryV2MetadataOverrides('track', 900, { title: 'Correct Title', track_number: 3 }),
+    ).resolves.toEqual({ title: 'Correct Title', track_number: 3 });
+  });
+
   it('surfaces a rejected metadata correction', async () => {
     server.use(
       http.patch('/api/library/v2/metadata-overrides/artist/7', () =>

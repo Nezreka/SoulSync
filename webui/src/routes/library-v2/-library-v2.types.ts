@@ -154,6 +154,8 @@ export interface LibraryV2Track {
   /** Quality vs the album's profile (null when missing or not measurable). */
   meets_profile?: boolean | null;
   upgrade_candidate?: boolean | null;
+  /** Field-level admin corrections applied over provider metadata. */
+  user_overrides?: Record<string, unknown>;
 }
 
 export interface LibraryV2AlbumDetail {
