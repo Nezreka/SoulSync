@@ -1791,41 +1791,57 @@ function PlaylistDetailView({ playlistId }: { playlistId: number }) {
   );
 }
 
+export function ArtistCard({
+  artist,
+  onOpen,
+}: {
+  artist: LibraryV2ArtistSummary;
+  onOpen: (artistId: number) => void;
+}) {
+  return (
+    <article className={styles.artistCard}>
+      <button
+        type="button"
+        className={styles.artistCardLink}
+        aria-label={`Open ${artist.name}`}
+        onClick={() => onOpen(artist.id)}
+      >
+        <Artwork
+          src={artist.image_url ?? ''}
+          alt={artist.name}
+          className={styles.artistThumb}
+          thumb
+        />
+        <span className={styles.artistInfo}>
+          <span className={styles.artistName}>{artist.name}</span>
+          <span className={styles.artistMeta}>
+            {artist.album_count} albums · {artist.single_count} singles
+          </span>
+          <span className={styles.artistMeta}>
+            {trackProgress(artist.tracks_present, artist.track_count)} tracks
+            {artist.tracks_missing > 0 ? (
+              <span className={styles.missingBadge}>{artist.tracks_missing} missing</span>
+            ) : null}
+          </span>
+        </span>
+      </button>
+      <span className={styles.cardMonitor}>
+        <MonitorToggle entity="artists" id={artist.id} monitored={artist.monitored} />
+      </span>
+    </article>
+  );
+}
+
 function ArtistCards({ artists }: { artists: LibraryV2ArtistSummary[] }) {
   const navigate = useNavigate();
   return (
     <div className={styles.cardGrid}>
       {artists.map((artist) => (
-        <button
+        <ArtistCard
           key={artist.id}
-          type="button"
-          className={styles.artistCard}
-          onClick={() => void navigate({ search: (p) => ({ ...p, artist: artist.id }) })}
-        >
-          <div className={styles.artistThumbWrap}>
-            <Artwork
-              src={artist.image_url ?? ''}
-              alt={artist.name}
-              className={styles.artistThumb}
-              thumb
-            />
-            <span className={styles.cardMonitor}>
-              <MonitorToggle entity="artists" id={artist.id} monitored={artist.monitored} />
-            </span>
-          </div>
-          <div className={styles.artistInfo}>
-            <span className={styles.artistName}>{artist.name}</span>
-            <span className={styles.artistMeta}>
-              {artist.album_count} albums · {artist.single_count} singles
-            </span>
-            <span className={styles.artistMeta}>
-              {trackProgress(artist.tracks_present, artist.track_count)} tracks
-              {artist.tracks_missing > 0 ? (
-                <span className={styles.missingBadge}>{artist.tracks_missing} missing</span>
-              ) : null}
-            </span>
-          </div>
-        </button>
+          artist={artist}
+          onOpen={(artistId) => void navigate({ search: (p) => ({ ...p, artist: artistId }) })}
+        />
       ))}
     </div>
   );

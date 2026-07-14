@@ -630,29 +630,40 @@
 }
 
 .artistCard {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+  position: relative;
   padding: 10px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 14px;
-  cursor: pointer;
-  text-align: left;
-  color: #f3f3f3; /* buttons don't inherit page color → set explicitly */
-  font: inherit;
   transition:
     transform 0.15s ease,
     border-color 0.15s ease;
 }
 
-.artistCard:hover {
+.artistCardLink {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  color: #f3f3f3;
+  font: inherit;
+}
+
+.artistCard:hover,
+.artistCard:focus-within {
   transform: translateY(-3px);
   border-color: rgba(var(--accent-rgb), 0.5);
 }
 
-.artistThumbWrap {
-  position: relative;
+.artistCardLink:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.8);
+  outline-offset: 4px;
+  border-radius: 10px;
 }
 
 .artistThumb,
@@ -672,8 +683,9 @@
 
 .cardMonitor {
   position: absolute;
-  top: 8px;
-  right: 8px;
+  z-index: 2;
+  top: 18px;
+  right: 18px;
 }
 
 .artPlaceholder {

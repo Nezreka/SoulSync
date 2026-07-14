@@ -2297,6 +2297,20 @@ bekannte Main-Chunk-Hinweis). **Logischer nächster Schritt:** P2-06 als kleinst
     logischer Schritt:** P2-07 — Artist-Karten dürfen den Monitor-Button nicht
     länger in einen zweiten Button verschachteln; semantische Card-Navigation
     und Toggle als getrennte interaktive Elemente modellieren.
+28. ~~**Gültige Artist-Card-Interaktion (P2-07).**~~ **Abgeschlossen
+    2026-07-14:** Die Karte ist nun ein nicht-interaktiver `article`; ihr
+    vollflächiger, fokussierbarer Navigations-Button und der darüberliegende
+    Bookmark-Monitor-Toggle sind echte Geschwister statt verschachtelte
+    Buttons. Maus-/Toggle-Klicks können dadurch keine Navigation mehr
+    miterzeugen, native Button-Tastatursemantik und ein sichtbarer
+    `focus-visible`-Ring bleiben erhalten. Ein Komponenten-Vertragstest
+    verbietet `button button`, prüft getrennten Fokus/Klick und pinnt, dass
+    Monitoring genau einen API-Write ohne Card-Navigation auslöst. 21
+    Library-v2-Vitests, Frontend-Format/Lint/Typecheck und Production-Build
+    sind grün. **Nächster logischer Schritt:** P2-08 — die heute globalen
+    „Search Monitored“-/„Search Upgrades“-Actions nicht länger optisch als
+    Artist-/Album-Scope darstellen; Scope im Label und Bestätigungs-/Status-
+    Text unmissverständlich machen, ohne eine zweite Suchpipeline zu bauen.
 
 **Session-Abschluss-Gate 2026-07-14:** Seit dem vorherigen Full-Gate wurden
 Roadmap 13 sowie 16–23 und Phase E vollständig abgeschlossen und jeweils
@@ -2640,9 +2654,10 @@ Priorität, kompakt aufgelistet für spätere Aufnahme):
   Mutationsgrenzen wurden inventarisiert; zuvor stille Monitor-/Refresh-/
   Profile-/Import-/Grab-/Mirror- und Playlist-Fehler besitzen sichtbare,
   endliche Zustände und einen Retry-Vertrag (Roadmap-Punkt 27).
-- P2-07: Artist-Karten verschachteln einen Button (MonitorToggle) in einem
+- ~~P2-07: Artist-Karten verschachteln einen Button (MonitorToggle) in einem
   Button (die Karte selbst) — ungültiges HTML, unzuverlässiges Keyboard-/
-  Click-Verhalten.
+  Click-Verhalten.~~ **Behoben 2026-07-14:** Card-Navigation und Monitor-
+  Toggle sind semantische Geschwister-Buttons (Roadmap-Punkt 28).
 - P2-08: „Search Monitored"/„Search Upgrades" wirken auf Artist-/Album-Ebene
   positioniert, laufen aber global über die ganze Wishlist/Library.
 - P2-09: Interactive-Search-Modal nutzt die vorhandene Source-Auswahl
