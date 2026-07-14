@@ -207,24 +207,38 @@ def acceptable_titles(want_title: Any) -> set:
 def titles_match(release_name: Any, want_title: Any) -> bool:
     """True when a release's parsed title matches ANY acceptable title (primary +
     aliases). Exact after normalization, tolerating only trailing edition words
-    ('Paradox Extended' for 'Paradox'). An unknown/unisolable title passes (the year
-    gate still applies) so a numeric title like '2012' is never falsely rejected — we
-    only ever REJECT on a confident mismatch against every acceptable title, never
-    guess a match."""
+    ('Paradox Extended' for 'Paradox') and squeezed spacing ('90DayFiance').
+
+    Soulseek results are share PATHS, not scene one-liners — the show name often
+    lives in a parent folder ('TV/90 Day Fiancé/Season 12/ep.mkv'), so every path
+    SEGMENT is tried as a title candidate, not just the whole string. An
+    unknown/unisolable title passes (the year gate still applies) so a numeric
+    title like '2012' is never falsely rejected — we only ever REJECT on a
+    confident mismatch against every acceptable title, never guess a match."""
     wants = acceptable_titles(want_title)
     if not wants:
         return True
-    got = normalize_title(extract_title(release_name))
-    if not got:
-        return True
-    for want in wants:
-        if got == want:
-            return True
-        if got.startswith(want + " "):
-            rest = got[len(want):].split()
-            if rest and all(tok in _EDITION_TOKENS for tok in rest):
+    raw = str(release_name or "")
+    cands = [raw]
+    segs = [s for s in re.split(r"[\\/]+", raw) if s.strip()]
+    if len(segs) > 1:
+        cands += segs
+    saw_any = False
+    for cand in cands:
+        got = normalize_title(extract_title(cand))
+        if not got:
+            continue
+        saw_any = True
+        for want in wants:
+            if got == want:
                 return True
-    return False
+            if got.replace(" ", "") == want.replace(" ", ""):
+                return True                              # '90DayFiance' == '90 day fiance'
+            if got.startswith(want + " "):
+                rest = got[len(want):].split()
+                if rest and all(tok in _EDITION_TOKENS for tok in rest):
+                    return True
+    return not saw_any
 
 
 __all__ = ["parse_release", "extract_title", "normalize_title",

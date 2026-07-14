@@ -541,10 +541,11 @@ def _requery_worker(dl_id) -> None:
             polled = _search_for_retry(query)
             accepted = []
             blocked_users = db.blocked_usernames()
+            from api.video.downloads import _parse_text
             for hit in (polled.get("hits") or []):
                 if hit.get("username") in blocked_users:
                     continue                                  # source-wide blocked uploader
-                v = evaluate_release(parse_release(hit.get("title")), profile,
+                v = evaluate_release(parse_release(_parse_text(hit)), profile,
                                      scope=ctx.get("scope") or "movie",
                                      want_season=ctx.get("season"), want_episode=ctx.get("episode"),
                                      want_year=ctx.get("year"),

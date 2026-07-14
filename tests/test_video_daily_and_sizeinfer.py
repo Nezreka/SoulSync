@@ -19,6 +19,7 @@ from __future__ import annotations
 from core.video.quality_eval import evaluate_release, _infer_resolution
 from core.video.release_parse import parse_release
 from core.video.retry import next_query
+from core.video.release_parse import titles_match
 
 _PROFILE = {"tiers": [{"key": k, "enabled": True} for k in
                       ("web-2160p", "web-1080p", "webrip-1080p", "hdtv-1080p",
@@ -131,3 +132,65 @@ def test_named_resolution_still_wins_over_size():
     v = evaluate_release(parsed, _PROFILE, scope="episode", size_gb=3.0)
     assert v["tier"] == "web-720p"                             # size does not override
     assert "~" not in v["quality_label"]
+
+
+# ── Soulseek path-aware matching (the 'Wrong title (Season 12)' log lines) ────
+def test_release_name_promotes_show_folder_over_generic_season_dir():
+    from core.video.slskd_search import _release_name
+    assert _release_name(r"@@x\TV\90 Day Fiancé\Season 12\90.Day.Fiance.S12E09.1080p.mkv") \
+        == "90 Day Fiancé/Season 12"
+    # scene-style folders keep their name (the existing behavior)
+    assert _release_name(r"@@x\The.Wire.S02.1080p.BluRay.x265-GRP\the.wire.s02e01.mkv") \
+        == "The.Wire.S02.1080p.BluRay.x265-GRP"
+    # a share-root grandparent ('@@…') is never a show name
+    assert _release_name(r"@@x\Season 12\ep.mkv") == "Season 12"
+
+
+def test_different_shows_season_folders_no_longer_collide():
+    from core.video.slskd_search import group_video_files
+    hits = group_video_files([
+        {"username": "a", "uploadSpeed": 1, "freeUploadSlots": 1, "files": [
+            {"filename": r"@@x\90 Day Fiance\Season 12\ep.mkv", "size": 1}]},
+        {"username": "b", "uploadSpeed": 1, "freeUploadSlots": 1, "files": [
+            {"filename": r"@@y\Love Island\Season 12\ep.mkv", "size": 1}]},
+    ])
+    assert len(hits) == 2                     # used to merge into one 'Season 12' hit
+
+
+def test_parse_text_joins_folder_title_and_filename():
+    from api.video.downloads import _parse_text
+    slskd_hit = {"title": "90 Day Fiancé/Season 12",
+                 "filename": r"@@x\TV\90 Day Fiancé\Season 12\90.Day.Fiance.S12E09.1080p.HEVC.mkv"}
+    assert _parse_text(slskd_hit) == "90 Day Fiancé/Season 12/90.Day.Fiance.S12E09.1080p.HEVC.mkv"
+    torrent_hit = {"title": "90 Day Fiance S12E09 1080p HEVC x265-MeGusta", "filename": None}
+    assert _parse_text(torrent_hit) == "90 Day Fiance S12E09 1080p HEVC x265-MeGusta"
+
+
+def test_the_reported_library_share_now_matches_end_to_end():
+    # the literal failing log line: 1 result for '90 Day Fiancé S12E09' rejected
+    # 'Wrong title (Season 12 — wanted [aliases])'
+    from api.video.downloads import _evaluate_hits
+    hit = {"title": "90 Day Fiancé/Season 12",
+           "filename": r"@@x\TV\90 Day Fiancé\Season 12\90.Day.Fiance.S12E09.1080p.HEVC.mkv",
+           "size_bytes": 1_073_741_824, "username": "peer1"}
+    out = _evaluate_hits([hit], _PROFILE, "episode", 12, 9,
+                         blocked=set(), blocked_users=set(),
+                         want_title=["90 Day Fiancé", "90 Day Fiance"])
+    assert out[0]["accepted"] is True, out[0]["rejected"]
+
+
+def test_wrong_show_library_share_still_rejected():
+    from api.video.downloads import _evaluate_hits
+    hit = {"title": "Little House On The Prairie/Season 3",
+           "filename": r"@@x\TV\Little House On The Prairie\Season 3\LHOTP.S03E05.1080p.mkv",
+           "size_bytes": 1_000_000_000, "username": "peer1"}
+    out = _evaluate_hits([hit], _PROFILE, "episode", 277, 5,
+                         blocked=set(), blocked_users=set(),
+                         want_title=["House Hunters"])
+    assert out[0]["accepted"] is False and "Wrong" in out[0]["rejected"]
+
+
+def test_titles_match_squeezed_spacing_and_segments():
+    assert titles_match("90DayFiance.S12E09.1080p.mkv", "90 Day Fiancé") is True
+    assert titles_match(r"TV/90 Day Fiancé/Season 12/ep.mkv", ["90 Day Fiancé"]) is True
+    assert titles_match(r"TV/Little House/Season 12/ep.mkv", ["House Hunters"]) is False
