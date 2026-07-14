@@ -1566,7 +1566,7 @@ implementiert und größtenteils solide.
 | `tests/quality`, `tests/imports`, `tests/wishlist` | 971 passed |
 | Flask-Routen `api/library_v2.py` | keine Tests (Lücke — seit geschlossen, siehe 3.) |
 | Frontend | kein lokales Node; Typecheck via `docker build --target webui-builder` |
-| End-to-End | in Docker gegen die reale ~285-Track-Bibliothek verifiziert; Phase-C/D-Klick-Flows teilweise nur code-verified |
+| End-to-End | Docker-Acceptance für Phase-C/D seit 2026-07-14 automatisiert geklickt; zwei Playwright-Flows grün (isolierte 4-Artist-/4-Album-/16-File-Fixture) |
 
 **Empfohlene manuelle Docker-Checks (damals vor dem nächsten Merge, jeweils
 mit Fund-Referenz):** Multi-Profil-Install-Bulk-Monitor (B2); Setup mit
@@ -1979,8 +1979,23 @@ verändert; daher waren Frontend-Typecheck/Vitest/Build nicht erforderlich.
     **Nächster logischer Schritt:** Roadmap-Punkt 15 — die bisher code-/curl-
     verifizierten Phase-C/D-Flows im Docker-Deployment per Browser klicken und
     nur tatsächlich reproduzierbare UI-Lücken korrigieren.
-15. **Browser-Klick-Verifikation** in Docker für Phase-C/D-Flows, die nur
-    code-/curl-verified sind.
+15. ~~**Browser-Klick-Verifikation** in Docker für Phase-C/D-Flows, die nur
+    code-/curl-verified sind.~~ **Abgeschlossen 2026-07-14:** Vom aktuellen
+    Branch gebautes Docker-Image, isolierte Beispielkonfiguration und kopierte
+    Fixture-DB (lib2-Import: 4 Artists, 4 Alben, 16 Files). Zwei persistente
+    Playwright-Acceptance-Tests klicken Artist- und Album-Deep-Links, Retag-
+    Preview, Maintenance inkl. Datenbasis, Manage Tracks, History, Artist-/
+    Album-Edit, Monitoring, Quality Profile, beide sicheren Delete-Dialoge,
+    Album-Expansion, Interactive Search, Manual Import sowie die Playlist-
+    Sektion. **2 passed** im echten Browser gegen den Container. Dabei wurde
+    eine reale Testinfrastruktur-Lücke gefunden und geschlossen:
+    `playwright.config.ts` erzwingt nicht länger das oft fehlende
+    `/usr/bin/chromium`, sondern nutzt optional `PLAYWRIGHT_CHROMIUM_PATH` und
+    sonst Playwrights gepinnten Browser. Destruktive Bestätigungen sowie echte
+    Such-/Downloadstarts wurden bewusst nicht ausgelöst. **Nächster logischer
+    Schritt:** das verbliebene kleine 5.4-Finding A7 (`until_top`-Wording in
+    Code-/API-Dokumentation vereinheitlichen), danach das nächste priorisierte
+    Finding aus 10.3.
 
 ---
 
