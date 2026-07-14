@@ -697,3 +697,34 @@ select.voe-input option { background: #17171d; }
 .voe-grid-grouphead i { font-style: normal; font-weight: 600; text-transform: none;
     letter-spacing: 0; color: rgba(255,255,255,.35); font-size: 11.5px; }
 .voe-card--wide .voe-card-canvas { aspect-ratio: 16 / 9; }
+
+/* ── Mobile / tablet (<=768px): the editor was desktop-only ────────────────
+   The 3-pane editor row (236px palette | canvas | 268px inspector) left ~15px
+   of canvas on a phone, and the stage sized itself from HEIGHT (min(80vh) at
+   2:3 = ~400px wide on a 375px screen). Stack the panes into one scrolling
+   column — canvas first, tools next, layers/inspector last — and size the
+   stage from the viewport WIDTH instead. Desktop (>768px) untouched. */
+@media (max-width: 768px) {
+    .voe-topbar { flex-wrap: wrap; height: auto; padding: 10px 12px; gap: 8px; row-gap: 6px; }
+    .voe-name-input { min-width: 120px; flex: 1 1 140px; max-width: none; }
+
+    .voe-editor { flex-direction: column; overflow-y: auto; }
+    .voe-canvas-wrap { order: 1; flex: 0 0 auto; overflow: visible; padding: 16px 10px 22px; }
+    .voe-canvas-bar { flex-wrap: wrap; justify-content: center; }
+    .voe-stage { height: auto; width: min(86vw, 340px); }
+    .voe-stage--wide { width: 96%; }
+
+    .voe-palette {
+        order: 2; flex: 0 0 auto; overflow-y: visible;
+        border-right: 0; border-top: 1px solid rgba(255,255,255,.07);
+    }
+    .voe-pal-label { display: inline; }            /* room for labels again */
+
+    .voe-side {
+        order: 3; flex: 0 0 auto;
+        border-left: 0; border-top: 1px solid rgba(255,255,255,.07);
+    }
+
+    .voe-gallery-inner { padding: 30px 16px 48px; }
+    .voe-gallery-title { font-size: 24px; }
+}
