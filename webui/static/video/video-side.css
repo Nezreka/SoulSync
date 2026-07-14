@@ -817,10 +817,25 @@ body[data-side="video"] .dashboard-header-sweep {
 .vd-ep--missing .vd-ep-index, .vd-ep--missing .vd-ep-title { opacity: 0.7; }
 
 @media (max-width: 820px) {
-    .vd-bb-content { padding-left: 24px; }
+    .vd-bb-content { padding-left: 24px; padding-right: 24px; }
     .vd-body { padding: 24px 22px 60px; }
     .vd-ep { grid-template-columns: 36px 1fr auto; }
     .vd-ep-thumb { display: none; }
+}
+/* The detail page full-bleeds with -40px margins over the .page padding — but
+   mobile.css shrinks that padding to 16px (<=768) / 12px (<=480), so the fixed
+   -40 overhung the viewport by up to 28px per side (billboard, title, actions
+   all clipped at the right edge). Match the bleed to the real padding. */
+@media (max-width: 768px) {
+    .vd-page { margin-left: -16px; margin-right: -16px; }
+}
+@media (max-width: 480px) {
+    .vd-page { margin-left: -12px; margin-right: -12px; }
+    .vd-bb-content { padding-left: 16px; padding-right: 16px; padding-bottom: 34px; }
+    .vd-billboard { min-height: 62vh; }
+    /* Episode rows: the nowrap runtime chip beside the title squeezed titles
+       into one-word-per-line columns — let the top line wrap instead. */
+    .vd-ep-top { flex-wrap: wrap; row-gap: 2px; }
 }
 
 .video-card--clickable { cursor: pointer; }
