@@ -6,7 +6,110 @@ import pytest
 
 from core.library2.artwork import _provider_art_url
 from core.library2.metadata_overrides import set_field_override
-from core.library2.provider_adapters import ArtworkProviderResult, fetch_artwork_url
+from core.library2.provider_adapters import (
+    ArtworkProviderResult,
+    fetch_album_tracklist,
+    fetch_artwork_url,
+)
+
+
+class _DeezerTracklistClient:
+    def __init__(self, metadata):
+        self.metadata = metadata
+        self.track_calls = []
+
+    def search_album(self, artist_name, album_title):
+        assert (artist_name, album_title) == ("Artist", "Album")
+        return {"id": "dz-search"}
+
+    def get_album_metadata(self, album_id, include_tracks=True):
+        assert album_id == "dz-search"
+        assert include_tracks is False
+        return self.metadata
+
+    def get_album_tracks(self, album_id):
+        self.track_calls.append(album_id)
+        return {"data": [{"title": "Track", "track_position": 1}]}
+
+
+def _tracklist_registry(monkeypatch, deezer):
+    monkeypatch.setattr("core.metadata.registry.get_spotify_client", lambda: None)
+    monkeypatch.setattr("core.metadata.registry.get_deezer_client", lambda: deezer)
+
+
+def test_deezer_name_search_accepts_matching_edition_facts(monkeypatch):
+    deezer = _DeezerTracklistClient({
+        "release_date": "2020-09-04",
+        "total_tracks": 12,
+        "_raw_data": {"upc": "0194398123456"},
+    })
+    _tracklist_registry(monkeypatch, deezer)
+
+    result = fetch_album_tracklist(
+        "Album",
+        "Artist",
+        source_album_ids={"upc": "0-194398-123456"},
+        release_date="2020",
+        expected_track_count=12,
+    )
+
+    assert result is not None
+    assert result.provider_entity_id == "dz-search"
+    assert deezer.track_calls == ["dz-search"]
+
+
+@pytest.mark.parametrize(
+    ("metadata", "source_ids", "release_date", "track_count"),
+    [
+        ({"release_date": "2021-01-01", "total_tracks": 12}, {}, "2020", 12),
+        ({"release_date": "2020-01-01", "total_tracks": 16}, {}, "2020", 12),
+        (
+            {"release_date": "2020", "total_tracks": 12, "_raw_data": {"upc": "2"}},
+            {"upc": "1"},
+            "2020",
+            12,
+        ),
+        ({"release_date": "2020", "total_tracks": 12}, {"upc": "1"}, "2020", 12),
+    ],
+)
+def test_deezer_name_search_rejects_conflicting_or_missing_edition_facts(
+    monkeypatch, metadata, source_ids, release_date, track_count
+):
+    deezer = _DeezerTracklistClient(metadata)
+    _tracklist_registry(monkeypatch, deezer)
+
+    assert fetch_album_tracklist(
+        "Album",
+        "Artist",
+        source_album_ids=source_ids,
+        release_date=release_date,
+        expected_track_count=track_count,
+    ) is None
+    assert deezer.track_calls == []
+
+
+def test_direct_deezer_identity_does_not_use_name_search_validation(monkeypatch):
+    class Deezer:
+        def search_album(self, *_args):
+            raise AssertionError("direct identity must not search")
+
+        def get_album_tracks(self, album_id):
+            assert album_id == "dz-exact"
+            return {"data": [{"title": "Track", "track_position": 1}]}
+
+    deezer = Deezer()
+    _tracklist_registry(monkeypatch, deezer)
+
+    result = fetch_album_tracklist(
+        "Album",
+        "Artist",
+        source_album_ids={"deezer": "dz-exact"},
+        release_date="1900",
+        expected_track_count=999,
+    )
+
+    assert result is not None
+    assert result.provider_entity_id == "dz-exact"
 
 
 def test_artist_artwork_uses_explicit_source_identity(monkeypatch):

@@ -7,6 +7,7 @@ shape. Provider-specific response keys must not leak beyond this module.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, Mapping, Optional, Tuple
 
@@ -214,11 +215,81 @@ def _normalize_tracklist(payload: Any, provider: str) -> Tuple[TracklistTrack, .
     return tuple(tracks)
 
 
+def _release_year(value: Any) -> Optional[int]:
+    text = str(value or "").strip()
+    if len(text) < 4 or not text[:4].isdigit():
+        return None
+    return int(text[:4])
+
+
+def _barcode(value: Any) -> Optional[str]:
+    normalized = re.sub(r"[^0-9A-Za-z]", "", str(value or "")).upper()
+    return normalized or None
+
+
+def _deezer_search_match(
+    metadata: Any,
+    *,
+    release_date: Optional[str],
+    expected_track_count: Optional[int],
+    source_ids: Mapping[str, str],
+) -> bool:
+    """Accept a name-search result only when every known edition fact matches."""
+    if not isinstance(metadata, Mapping):
+        return not (
+            _release_year(release_date)
+            or _optional_nonnegative_int(expected_track_count)
+            or source_ids.get("upc")
+            or source_ids.get("barcode")
+        )
+
+    raw = metadata.get("_raw_data")
+    if not isinstance(raw, Mapping):
+        raw = metadata
+
+    wanted_year = _release_year(release_date)
+    if wanted_year is not None:
+        actual_year = _release_year(
+            metadata.get("release_date") or raw.get("release_date"))
+        if actual_year != wanted_year:
+            return False
+
+    wanted_count = _optional_nonnegative_int(expected_track_count)
+    if wanted_count:
+        actual_count = _optional_nonnegative_int(
+            metadata.get("total_tracks")
+            or metadata.get("nb_tracks")
+            or raw.get("nb_tracks")
+            or raw.get("total_tracks")
+        )
+        if actual_count != wanted_count:
+            return False
+
+    wanted_upc = _barcode(source_ids.get("upc") or source_ids.get("barcode"))
+    if wanted_upc:
+        external_ids = metadata.get("external_ids")
+        if not isinstance(external_ids, Mapping):
+            external_ids = {}
+        actual_upc = _barcode(
+            metadata.get("upc")
+            or metadata.get("barcode")
+            or external_ids.get("upc")
+            or external_ids.get("barcode")
+            or raw.get("upc")
+            or raw.get("barcode")
+        )
+        if actual_upc != wanted_upc:
+            return False
+    return True
+
+
 def fetch_album_tracklist(
     album_title: str,
     artist_name: str,
     *,
     source_album_ids: Optional[Mapping[str, str]] = None,
+    release_date: Optional[str] = None,
+    expected_track_count: Optional[int] = None,
 ) -> Optional[TracklistProviderResult]:
     """Resolve a canonical tracklist through typed Spotify/Deezer adapters."""
     from core.metadata.registry import get_deezer_client, get_spotify_client
@@ -244,7 +315,27 @@ def fetch_album_tracklist(
                 if not deezer_id:
                     album = client.search_album(artist_name, album_title)
                     if isinstance(album, Mapping) and album.get("id"):
-                        deezer_id = str(album["id"])
+                        candidate_id = str(album["id"])
+                        fetch_metadata = getattr(client, "get_album_metadata", None)
+                        metadata = (
+                            fetch_metadata(candidate_id, include_tracks=False)
+                            if callable(fetch_metadata)
+                            else album
+                        )
+                        if _deezer_search_match(
+                            metadata,
+                            release_date=release_date,
+                            expected_track_count=expected_track_count,
+                            source_ids=source_ids,
+                        ):
+                            deezer_id = candidate_id
+                        else:
+                            logger.info(
+                                "Rejected Deezer name-search edition %s for %s - %s",
+                                candidate_id,
+                                artist_name,
+                                album_title,
+                            )
                 if deezer_id:
                     tracks = _normalize_tracklist(
                         client.get_album_tracks(deezer_id), "deezer")

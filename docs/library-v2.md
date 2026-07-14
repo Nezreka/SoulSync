@@ -2384,6 +2384,22 @@ bekannte Main-Chunk-Hinweis). **Logischer nächster Schritt:** P2-06 als kleinst
     logischer Schritt:** P2-15 — den providerlosen Deezer-Tracklist-Fallback
     mit vorhandenen Jahr-/Trackcount-/External-ID-Fakten gegen falsche
     Editions absichern, weiterhin innerhalb des typed Provider-Adapters.
+34. ~~**Deezer-Tracklist-Fallback an Edition-Fakten binden (P2-15).**~~
+    **Abgeschlossen 2026-07-14:** Der vorhandene typed Tracklist-Adapter
+    reichert einen namenbasierten Deezer-Suchtreffer über den bereits
+    bestehenden Deezer-Client an und akzeptiert ihn fail-closed nur, wenn alle
+    bekannten Editionsfakten übereinstimmen: Release-Jahr, erwartete Trackzahl
+    und UPC/Barcode. Eine vorhandene Deezer-ID bleibt als harte Identität der
+    direkte Pfad und benötigt keine heuristische Gegenprüfung. Der bestehende
+    `resolve_tracklist`-Consumer reicht die effektiven Fakten der
+    Default-Edition weiter; dieselben Fakten sind Bestandteil der bestehenden
+    Provider-Snapshot-Referenz, sodass alte oder nach Editionsänderungen
+    unpassende Tracklist-Caches invalidiert werden. Es entstand weder ein
+    zweiter Resolver noch ein zweiter Importpfad. **40 gezielte Adapter-,
+    Completeness-, Snapshot- und Editions-Tests** sowie Ruff sind grün.
+    **Nächster logischer Schritt:** P2-16 — fehlende oder ungültige
+    Qualitätsinformationen im zentralen `quality_eval.py` als explizites
+    `unknown` statt als fälschliches `meets_profile=True` modellieren.
 
 **Session-Abschluss-Gate 2026-07-14:** Seit dem vorherigen Full-Gate wurden
 Roadmap 13 sowie 16–23 und Phase E vollständig abgeschlossen und jeweils
@@ -2756,8 +2772,10 @@ Priorität, kompakt aufgelistet für spätere Aufnahme):
   (gleichzeitiger manueller + periodischer Refresh, kein Artist-Sync-Lock).~~
   **Behoben 2026-07-14:** gemeinsame per-DB/per-Artist Refresh→Auto-Monitor-
   Sequenz für API und Repair-Job (Roadmap-Punkt 33).
-- P2-15: Tracklist-Fallback ohne Spotify-ID kann bei Deezer die falsche
-  Edition wählen (kein Jahr-/Trackcount-/UPC-Abgleich).
+- ~~P2-15: Tracklist-Fallback ohne Spotify-ID kann bei Deezer die falsche
+  Edition wählen (kein Jahr-/Trackcount-/UPC-Abgleich).~~ **Behoben
+  2026-07-14:** der bestehende typed Adapter prüft namenbasierte Treffer gegen
+  effektive Default-Editionsfakten (Roadmap-Punkt 34).
 - P2-16: `quality_eval.py` behandelt fehlende/ungültige Qualität als
   „meets_profile=True" — unterdrückt nötige Scans/Upgrades statt eines
   dritten `unknown`-Zustands.

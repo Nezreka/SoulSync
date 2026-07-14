@@ -157,6 +157,50 @@ def test_resolve_tracklist_snapshots_spotify_and_reuses_durable_cache(
     assert payload["tracks"][0]["spotify_id"] == "sp-t1"
 
 
+def test_resolve_tracklist_uses_effective_default_edition_facts(
+    imported_conn, monkeypatch
+):
+    views_id = imported_conn.execute(
+        "SELECT id FROM lib2_albums WHERE title='Views'"
+    ).fetchone()[0]
+    edition_id = imported_conn.execute(
+        "SELECT id FROM lib2_release_editions WHERE release_group_id=? AND is_default=1",
+        (views_id,),
+    ).fetchone()[0]
+    imported_conn.execute(
+        """UPDATE lib2_albums
+              SET release_date='2016-04-29', expected_track_count=2,
+                  external_ids='{"upc":"group-upc"}', tracklist_json=NULL
+            WHERE id=?""",
+        (views_id,),
+    )
+    imported_conn.execute(
+        """UPDATE lib2_release_editions
+              SET release_date='2017-01-01', track_count=20,
+                  external_ids='{"upc":"edition-upc"}'
+            WHERE id=?""",
+        (edition_id,),
+    )
+    captured = {}
+
+    def fake_fetch(album_title, artist_name, **kwargs):
+        captured.update(
+            album_title=album_title,
+            artist_name=artist_name,
+            **kwargs,
+        )
+        return None
+
+    monkeypatch.setattr(
+        "core.library2.provider_adapters.fetch_album_tracklist", fake_fetch
+    )
+
+    assert resolve_tracklist(None, imported_conn, views_id) is None
+    assert captured["release_date"] == "2017-01-01"
+    assert captured["expected_track_count"] == 20
+    assert captured["source_album_ids"]["upc"] == "edition-upc"
+
+
 def test_default_edition_change_invalidates_tracklist_cache(
         imported_conn, monkeypatch):
     views_id = imported_conn.execute(

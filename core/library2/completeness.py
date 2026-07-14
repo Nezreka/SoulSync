@@ -40,10 +40,16 @@ def _album_tracklist_context(
     """Return album row, edition reference and provider IDs for cache binding."""
     row = conn.execute(
         """SELECT al.title, al.primary_artist_id, al.tracklist_json,
+                  al.year AS album_year,
+                  al.release_date AS album_release_date,
+                  al.track_count AS album_track_count,
+                  al.expected_track_count AS album_expected_track_count,
                   al.spotify_id AS album_spotify_id,
                   al.musicbrainz_id AS album_musicbrainz_id,
                   al.external_ids AS album_external_ids,
                   ed.id AS release_edition_id,
+                  ed.release_date AS edition_release_date,
+                  ed.track_count AS edition_track_count,
                   ed.spotify_id AS edition_spotify_id,
                   ed.musicbrainz_id AS edition_musicbrainz_id,
                   ed.external_ids AS edition_external_ids
@@ -64,11 +70,23 @@ def _album_tracklist_context(
         source_ids["spotify"] = str(spotify_id)
     if musicbrainz_id:
         source_ids["musicbrainz"] = str(musicbrainz_id)
+    release_date = (
+        row["edition_release_date"]
+        or row["album_release_date"]
+        or (str(row["album_year"]) if row["album_year"] else None)
+    )
+    track_count = (
+        row["edition_track_count"]
+        or row["album_expected_track_count"]
+        or row["album_track_count"]
+    )
     reference = {
         "release_edition_id": row["release_edition_id"],
         "spotify_id": source_ids.get("spotify"),
         "musicbrainz_id": source_ids.get("musicbrainz"),
         "external_ids": dict(sorted(source_ids.items())),
+        "release_date": release_date,
+        "track_count": track_count,
     }
     return row, reference, source_ids
 
@@ -335,7 +353,12 @@ def resolve_tracklist(config_manager, conn, album_id: int) -> Optional[List[dict
     artist_name = artist["name"] if artist else ""
     from core.library2.provider_adapters import fetch_album_tracklist
     provider_result = fetch_album_tracklist(
-        al["title"], artist_name, source_album_ids=source_ids)
+        al["title"],
+        artist_name,
+        source_album_ids=source_ids,
+        release_date=reference["release_date"],
+        expected_track_count=reference["track_count"],
+    )
     if provider_result:
         tracks = provider_result.track_payloads()
         try:
