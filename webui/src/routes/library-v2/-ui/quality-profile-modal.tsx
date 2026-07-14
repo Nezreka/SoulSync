@@ -20,27 +20,24 @@ function policyLabel(p: LibraryV2QualityProfile): string {
   return 'No upgrades once acceptable';
 }
 
-/** Pick the quality profile for an artist or album. These are the app-wide
- *  profiles (Settings → Quality) — the exact rows the wishlist/download
- *  pipeline enforces, so assigning one here changes what gets searched,
- *  accepted and upgraded for this artist/album. */
-export function QualityProfileModal({
+/** Pick + assign a quality profile for an artist/album/track. Pure content —
+ *  no modal chrome — so it can be embedded standalone (QualityProfileModal
+ *  below) or as a tab inside a bigger modal (the per-track detail modal). */
+export function QualityProfilePicker({
   entity,
   id,
   currentProfileId,
-  title,
-  onClose,
+  onSaved,
 }: {
   entity: 'artists' | 'albums' | 'tracks';
   id: number;
   currentProfileId: number;
-  title: string;
-  onClose: () => void;
+  onSaved?: () => void;
 }) {
   const profilesQuery = useQuery(libraryV2QualityProfilesQueryOptions());
   const queryClient = useQueryClient();
-  // Assigning a profile is a quality decision. Monitoring the tracks for
-  // upgrades (queueing downloads) is a separate wanted-action — explicit
+  // Assigning a profile is a quality decision. Monitoring existing track(s)
+  // for upgrades (queueing downloads) is a separate wanted-action — explicit
   // opt-in, default off (audit P1-15).
   const [monitorExisting, setMonitorExisting] = useState(false);
   const mutation = useMutation({
@@ -48,10 +45,85 @@ export function QualityProfileModal({
       // A track has no children to cascade to.
       setLibraryV2QualityProfile(entity, id, profileId, entity !== 'tracks', monitorExisting),
     onSettled: () => queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY }),
-    onSuccess: () => onClose(),
+    onSuccess: () => onSaved?.(),
   });
   const profiles = profilesQuery.data ?? [];
 
+  return (
+    <>
+      <label className={styles.checkOption}>
+        <input
+          type="checkbox"
+          checked={monitorExisting}
+          onChange={(e) => setMonitorExisting(e.target.checked)}
+        />
+        {entity === 'tracks'
+          ? 'Also monitor this track for upgrades (may queue a download)'
+          : 'Also monitor existing tracks for upgrades (adds them to Wanted and may queue downloads)'}
+      </label>
+      <div className={styles.qpList}>
+        {profilesQuery.isLoading ? (
+          <div className={styles.inlineLoading}>Loading profiles…</div>
+        ) : (
+          profiles.map((p) => {
+            const active = p.id === currentProfileId;
+            return (
+              <button
+                key={p.id}
+                type="button"
+                className={`${styles.qpOption} ${active ? styles.qpOptionActive : ''}`}
+                disabled={mutation.isPending}
+                onClick={() => mutation.mutate(p.id)}
+              >
+                <span className={styles.qpName}>
+                  {p.name}
+                  {active ? <span className={styles.qpCurrent}>current</span> : null}
+                </span>
+                {p.description ? <span className={styles.qpDesc}>{p.description}</span> : null}
+                <span className={styles.qpPolicy}>{policyLabel(p)}</span>
+              </button>
+            );
+          })
+        )}
+      </div>
+      {mutation.isError && typeof mutation.variables === 'number' ? (
+        <div className={styles.mutationError} role="alert">
+          <span>
+            {mutation.error instanceof Error && mutation.error.message.trim()
+              ? mutation.error.message
+              : 'Quality profile could not be saved'}
+          </span>
+          <button
+            type="button"
+            className={styles.inlineRetry}
+            onClick={() => mutation.mutate(mutation.variables)}
+          >
+            Retry
+          </button>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+/** Pick the quality profile for an artist or album (standalone modal). These
+ *  are the app-wide profiles (Settings → Quality) — the exact rows the
+ *  wishlist/download pipeline enforces, so assigning one here changes what
+ *  gets searched, accepted and upgraded for this artist/album. Per-track
+ *  assignment is embedded as a tab in the track detail modal instead. */
+export function QualityProfileModal({
+  entity,
+  id,
+  currentProfileId,
+  title,
+  onClose,
+}: {
+  entity: 'artists' | 'albums';
+  id: number;
+  currentProfileId: number;
+  title: string;
+  onClose: () => void;
+}) {
   return (
     <div className={styles.modalBackdrop} role="presentation" onClick={onClose}>
       <div
@@ -68,60 +140,17 @@ export function QualityProfileModal({
         </div>
         <div className={styles.qpHeadRow}>
           <p className={styles.qpSubtitle}>
-            {entity === 'artists' ? 'Artist' : entity === 'albums' ? 'Album' : 'Track'}: {title}
+            {entity === 'artists' ? 'Artist' : 'Album'}: {title}
             {entity === 'artists' ? ' — applies to all its albums' : ''}
           </p>
           <span className={styles.qpManagedHint}>Profiles are managed in Settings → Quality</span>
         </div>
-        <label className={styles.checkOption}>
-          <input
-            type="checkbox"
-            checked={monitorExisting}
-            onChange={(e) => setMonitorExisting(e.target.checked)}
-          />
-          Also monitor existing tracks for upgrades (adds them to Wanted and may queue downloads)
-        </label>
-        <div className={styles.qpList}>
-          {profilesQuery.isLoading ? (
-            <div className={styles.inlineLoading}>Loading profiles…</div>
-          ) : (
-            profiles.map((p) => {
-              const active = p.id === currentProfileId;
-              return (
-                <button
-                  key={p.id}
-                  type="button"
-                  className={`${styles.qpOption} ${active ? styles.qpOptionActive : ''}`}
-                  disabled={mutation.isPending}
-                  onClick={() => mutation.mutate(p.id)}
-                >
-                  <span className={styles.qpName}>
-                    {p.name}
-                    {active ? <span className={styles.qpCurrent}>current</span> : null}
-                  </span>
-                  {p.description ? <span className={styles.qpDesc}>{p.description}</span> : null}
-                  <span className={styles.qpPolicy}>{policyLabel(p)}</span>
-                </button>
-              );
-            })
-          )}
-        </div>
-        {mutation.isError && typeof mutation.variables === 'number' ? (
-          <div className={styles.mutationError} role="alert">
-            <span>
-              {mutation.error instanceof Error && mutation.error.message.trim()
-                ? mutation.error.message
-                : 'Quality profile could not be saved'}
-            </span>
-            <button
-              type="button"
-              className={styles.inlineRetry}
-              onClick={() => mutation.mutate(mutation.variables)}
-            >
-              Retry
-            </button>
-          </div>
-        ) : null}
+        <QualityProfilePicker
+          entity={entity}
+          id={id}
+          currentProfileId={currentProfileId}
+          onSaved={onClose}
+        />
       </div>
     </div>
   );

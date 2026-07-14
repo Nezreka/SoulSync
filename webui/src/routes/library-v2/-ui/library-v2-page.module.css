@@ -564,7 +564,7 @@
 
 .albumTypeBadge,
 .albumDateBadge,
-.albumProfileBadge {
+.qualityProfileBadge {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -586,12 +586,15 @@
   color: rgb(147, 197, 253);
 }
 
-.albumProfileBadge {
+/* Quality-profile badge — same lilac styling for both the album header and
+ * the per-track quality cell, bordered so it reads as a distinct chip. */
+.qualityProfileBadge {
   background: rgba(168, 85, 247, 0.16);
   color: rgb(196, 156, 250);
+  border: 1px solid rgba(168, 85, 247, 0.4);
 }
 
-.albumProfileBadge svg {
+.qualityProfileBadge svg {
   width: 11px;
   height: 11px;
 }
@@ -1580,14 +1583,39 @@
   font-family: var(--font-mono, monospace);
 }
 
-.trackProfileName {
-  display: inline-block;
-  font-size: 10.5px;
+/* --- track detail modal tabs (Quality / Metadata / Info) --- */
+.trackDetailTabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.trackDetailTab {
+  appearance: none;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 13px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.55);
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 6px;
-  padding: 1px 6px;
+  padding: 7px 12px;
+  cursor: pointer;
+}
+
+.trackDetailTab:hover {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.trackDetailTabActive {
+  color: #fff;
+  border-bottom-color: rgb(196, 156, 250);
+}
+
+.trackHistoryWrap {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 /* --- inline present/missing (right after the track title) --- */

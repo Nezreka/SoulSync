@@ -66,7 +66,7 @@ import { computeTrackEditValues } from '../-metadata-edit';
 import { Route } from '../route';
 import { InteractiveSearchModal } from './interactive-search';
 import styles from './library-v2-page.module.css';
-import { QualityProfileModal } from './quality-profile-modal';
+import { QualityProfileModal, QualityProfilePicker } from './quality-profile-modal';
 import { RetagModal } from './retag-modal';
 
 interface QpTarget {
@@ -2875,7 +2875,7 @@ function AlbumBlock({
               </span>
             ) : null}
             {profileName ? (
-              <span className={styles.albumProfileBadge} title="Quality profile">
+              <span className={styles.qualityProfileBadge} title="Quality profile">
                 <SvgIcon name="star" />
                 {profileName}
               </span>
@@ -3086,7 +3086,8 @@ function TrackRow({
         <QualityDisplay file={track.file} />
         <TrackQualityProfileBadge track={track} />
         {profileName ? (
-          <span className={styles.trackProfileName} title="Quality profile for this track">
+          <span className={styles.qualityProfileBadge} title="Quality profile for this track">
+            <SvgIcon name="star" />
             {profileName}
           </span>
         ) : null}
@@ -3125,56 +3126,10 @@ function TrackRow({
           disabled={!track.id}
           onClick={() => onAction(`Interactive Search: ${label} (${albumTitle})`, entity)}
         />
-        {track.id ? (
-          <TrackQualityProfileButton
-            track={track}
-            profileName={profileName}
-            albumTitle={albumTitle}
-          />
-        ) : null}
-        {track.id ? <TrackEditButton track={track} /> : null}
         {!missing && track.file ? <TrackReplayGainButton track={track} /> : null}
-        {!missing && track.file ? (
-          <TrackSourceInfoButton track={track} albumTitle={albumTitle} />
-        ) : null}
+        {track.id ? <TrackDetailButton track={track} albumTitle={albumTitle} /> : null}
       </td>
     </tr>
-  );
-}
-
-/** Per-track quality-profile picker (the endpoint already supports tracks). */
-function TrackQualityProfileButton({
-  track,
-  profileName,
-  albumTitle,
-}: {
-  track: LibraryV2Track;
-  profileName: string | null;
-  albumTitle: string;
-}) {
-  const [open, setOpen] = useState(false);
-  if (!track.id) return null;
-  return (
-    <>
-      <IconActionButton
-        icon="star"
-        title={
-          profileName
-            ? `Quality profile: ${profileName} — click to change for this track`
-            : 'Set a quality profile for this track'
-        }
-        onClick={() => setOpen(true)}
-      />
-      {open ? (
-        <QualityProfileModal
-          entity="tracks"
-          id={track.id}
-          currentProfileId={track.quality_profile_id}
-          title={track.title ?? albumTitle}
-          onClose={() => setOpen(false)}
-        />
-      ) : null}
-    </>
   );
 }
 
@@ -3252,23 +3207,75 @@ function MissingTrackAddButton({
   );
 }
 
-/** Per-track "Edit metadata" trigger (title / track / disc corrections). */
-function TrackEditButton({ track }: { track: LibraryV2Track }) {
+/** Per-track details, consolidated behind one button: Quality profile (the
+ *  default/first tab — the most common reason to open this), Metadata edit,
+ *  and Info (source/download history). Keeps the row from getting crowded
+ *  with a separate icon per action. */
+function TrackDetailButton({ track, albumTitle }: { track: LibraryV2Track; albumTitle: string }) {
   const [open, setOpen] = useState(false);
   if (!track.id) return null;
   return (
     <>
       <IconActionButton
         icon="edit"
-        title="Edit track metadata (title, track/disc number)"
+        title="Track details — quality profile, metadata, source info"
         onClick={() => setOpen(true)}
       />
-      {open ? <EditTrackModal track={track} onClose={() => setOpen(false)} /> : null}
+      {open ? (
+        <TrackDetailModal track={track} albumTitle={albumTitle} onClose={() => setOpen(false)} />
+      ) : null}
     </>
   );
 }
 
-function EditTrackModal({ track, onClose }: { track: LibraryV2Track; onClose: () => void }) {
+type TrackDetailTab = 'quality' | 'metadata' | 'info';
+
+function TrackDetailModal({
+  track,
+  albumTitle,
+  onClose,
+}: {
+  track: LibraryV2Track;
+  albumTitle: string;
+  onClose: () => void;
+}) {
+  const [tab, setTab] = useState<TrackDetailTab>('quality');
+  const trackId = track.id as number; // TrackDetailButton only renders when track.id is set
+  return (
+    <ModalShell title={track.title ?? albumTitle} onClose={onClose}>
+      <div className={styles.trackDetailTabs}>
+        {(['quality', 'metadata', 'info'] as const).map((t) => (
+          <button
+            key={t}
+            type="button"
+            className={`${styles.trackDetailTab} ${tab === t ? styles.trackDetailTabActive : ''}`}
+            onClick={() => setTab(t)}
+          >
+            {t === 'quality' ? 'Quality' : t === 'metadata' ? 'Metadata' : 'Info'}
+          </button>
+        ))}
+      </div>
+      {tab === 'quality' ? (
+        <QualityProfilePicker
+          entity="tracks"
+          id={trackId}
+          currentProfileId={track.quality_profile_id}
+          onSaved={onClose}
+        />
+      ) : null}
+      {tab === 'metadata' ? <TrackMetadataForm track={track} onSaved={onClose} /> : null}
+      {tab === 'info' ? (
+        <TrackInfoPanel
+          trackId={trackId}
+          trackTitle={track.title ?? albumTitle}
+          trackArtist={track.artists.map((a) => a.name).join(', ')}
+        />
+      ) : null}
+    </ModalShell>
+  );
+}
+
+function TrackMetadataForm({ track, onSaved }: { track: LibraryV2Track; onSaved: () => void }) {
   const queryClient = useQueryClient();
   const [title, setTitle] = useState(track.title ?? '');
   const [trackNumber, setTrackNumber] = useState(
@@ -3294,7 +3301,7 @@ function EditTrackModal({ track, onClose }: { track: LibraryV2Track; onClose: ()
     try {
       await updateLibraryV2MetadataOverrides('track', track.id, valuesToSet, clear);
       await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
-      onClose();
+      onSaved();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Edit failed');
       setBusy(false);
@@ -3302,7 +3309,7 @@ function EditTrackModal({ track, onClose }: { track: LibraryV2Track; onClose: ()
   }
 
   return (
-    <ModalShell title={`Edit — ${track.title ?? 'track'}`} onClose={onClose}>
+    <>
       <div className={styles.editRow}>
         <label htmlFor="lib2-track-title">Title</label>
         <input
@@ -3349,9 +3356,6 @@ function EditTrackModal({ track, onClose }: { track: LibraryV2Track; onClose: ()
             Restore provider values
           </button>
         ) : null}
-        <button type="button" className={styles.btnGhost} disabled={busy} onClick={onClose}>
-          Cancel
-        </button>
         <button
           type="button"
           className={styles.btnPrimary}
@@ -3361,7 +3365,7 @@ function EditTrackModal({ track, onClose }: { track: LibraryV2Track; onClose: ()
           {busy ? 'Saving…' : 'Save'}
         </button>
       </div>
-    </ModalShell>
+    </>
   );
 }
 
@@ -3391,35 +3395,6 @@ function baseFileName(name: string | null): string {
   return name.replace(/\\/g, '/').split('/').pop() || name;
 }
 
-/** Per-track "Source Info" popover trigger: legacy download-provenance parity. */
-function TrackSourceInfoButton({
-  track,
-  albumTitle,
-}: {
-  track: LibraryV2Track;
-  albumTitle: string;
-}) {
-  const [open, setOpen] = useState(false);
-  if (!track.id) return null;
-  return (
-    <>
-      <IconActionButton
-        icon="info"
-        title="Source info — where this file was downloaded from"
-        onClick={() => setOpen(true)}
-      />
-      {open ? (
-        <SourceInfoModal
-          trackId={track.id}
-          trackTitle={track.title ?? albumTitle}
-          trackArtist={track.artists.map((a) => a.name).join(', ')}
-          onClose={() => setOpen(false)}
-        />
-      ) : null}
-    </>
-  );
-}
-
 function SourceInfoRow({
   label,
   value,
@@ -3444,16 +3419,16 @@ function SourceInfoRow({
   );
 }
 
-function SourceInfoModal({
+/** Info tab: current source (with blacklist) + the full download history —
+ *  every past provenance record for this track, not just the latest. */
+function TrackInfoPanel({
   trackId,
   trackTitle,
   trackArtist,
-  onClose,
 }: {
   trackId: number;
   trackTitle: string;
   trackArtist: string;
-  onClose: () => void;
 }) {
   const query = useQuery(libraryV2TrackSourceInfoQueryOptions(trackId, true));
   const rows = query.data ?? [];
@@ -3468,71 +3443,97 @@ function SourceInfoModal({
       }),
   });
 
-  const audioParts = dl
-    ? [
-        dl.bit_depth ? `${dl.bit_depth}-bit` : null,
-        dl.sample_rate ? `${(dl.sample_rate / 1000).toFixed(1)} kHz` : null,
-        dl.bitrate ? `${Math.round(dl.bitrate / 1000)} kbps` : null,
-      ].filter(Boolean)
-    : [];
+  if (query.isLoading) {
+    return <div className={styles.inlineLoading}>Loading source info…</div>;
+  }
+  if (!dl) {
+    return (
+      <p>No download source data for this track yet. Source tracking starts with new downloads.</p>
+    );
+  }
+
+  const audioParts = [
+    dl.bit_depth ? `${dl.bit_depth}-bit` : null,
+    dl.sample_rate ? `${(dl.sample_rate / 1000).toFixed(1)} kHz` : null,
+    dl.bitrate ? `${Math.round(dl.bitrate / 1000)} kbps` : null,
+  ].filter(Boolean);
 
   return (
-    <ModalShell title="Source Info" onClose={onClose}>
-      {query.isLoading ? (
-        <div className={styles.inlineLoading}>Loading source info…</div>
-      ) : !dl ? (
-        <p>
-          No download source data for this track yet. Source tracking starts with new downloads.
-        </p>
-      ) : (
-        <div className={styles.sourceInfoBody}>
-          <SourceInfoRow label="Service" value={sourceServiceLabel(dl.source_service)} />
-          {dl.source_service === 'soulseek' && dl.source_username ? (
-            <SourceInfoRow label="User" value={dl.source_username} mono />
-          ) : null}
-          <SourceInfoRow label="Original File" value={baseFileName(dl.source_filename)} mono />
-          {dl.source_size ? (
-            <SourceInfoRow label="Size" value={`${(dl.source_size / 1048576).toFixed(1)} MB`} />
-          ) : null}
-          {dl.audio_quality ? <SourceInfoRow label="Quality" value={dl.audio_quality} /> : null}
-          {audioParts.length ? (
-            <SourceInfoRow label="Audio" value={audioParts.join(' · ')} />
-          ) : null}
-          {dl.created_at ? (
-            <SourceInfoRow
-              label="Downloaded"
-              value={dl.created_at.slice(0, 16).replace('T', ' ')}
-            />
-          ) : null}
-          {dl.status && dl.status !== 'completed' ? (
-            <SourceInfoRow label="Status" value={dl.status} danger />
-          ) : null}
-          {dl.source_username && dl.source_filename ? (
-            <div className={styles.modalActions}>
-              <ActionButton
-                icon="delete"
-                tone="danger"
-                busy={blacklist.isPending}
-                disabled={blacklist.isSuccess}
-                label={blacklist.isSuccess ? 'Blacklisted' : 'Blacklist This Source'}
-                title="Skip this source in future downloads"
-                onClick={() => blacklist.mutate()}
-              />
-            </div>
-          ) : null}
-          {blacklist.isError ? (
-            <p className={styles.sourceInfoError} role="alert">
-              {mutationErrorMessage(blacklist.error, 'Failed to blacklist source')}
-            </p>
-          ) : null}
-          {rows.length > 1 ? (
-            <p className={styles.sourceInfoHistory}>
-              {rows.length} download records for this track
-            </p>
-          ) : null}
+    <div className={styles.sourceInfoBody}>
+      <SourceInfoRow label="Service" value={sourceServiceLabel(dl.source_service)} />
+      {dl.source_service === 'soulseek' && dl.source_username ? (
+        <SourceInfoRow label="User" value={dl.source_username} mono />
+      ) : null}
+      <SourceInfoRow label="Original File" value={baseFileName(dl.source_filename)} mono />
+      {dl.source_size ? (
+        <SourceInfoRow label="Size" value={`${(dl.source_size / 1048576).toFixed(1)} MB`} />
+      ) : null}
+      {dl.audio_quality ? <SourceInfoRow label="Quality" value={dl.audio_quality} /> : null}
+      {audioParts.length ? <SourceInfoRow label="Audio" value={audioParts.join(' · ')} /> : null}
+      {dl.created_at ? (
+        <SourceInfoRow label="Downloaded" value={dl.created_at.slice(0, 16).replace('T', ' ')} />
+      ) : null}
+      {dl.status && dl.status !== 'completed' ? (
+        <SourceInfoRow label="Status" value={dl.status} danger />
+      ) : null}
+      {dl.source_username && dl.source_filename ? (
+        <div className={styles.modalActions}>
+          <ActionButton
+            icon="delete"
+            tone="danger"
+            busy={blacklist.isPending}
+            disabled={blacklist.isSuccess}
+            label={blacklist.isSuccess ? 'Blacklisted' : 'Blacklist This Source'}
+            title="Skip this source in future downloads"
+            onClick={() => blacklist.mutate()}
+          />
         </div>
-      )}
-    </ModalShell>
+      ) : null}
+      {blacklist.isError ? (
+        <p className={styles.sourceInfoError} role="alert">
+          {mutationErrorMessage(blacklist.error, 'Failed to blacklist source')}
+        </p>
+      ) : null}
+      {rows.length > 1 ? (
+        <div className={styles.trackHistoryWrap}>
+          <p className={styles.sourceInfoHistory}>History — {rows.length} download records</p>
+          <table className={styles.trackTable}>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Service</th>
+                <th>User</th>
+                <th>File</th>
+                <th>Quality</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={r.id ?? i}>
+                  <td className={styles.muted}>
+                    {r.created_at ? r.created_at.slice(0, 16).replace('T', ' ') : '—'}
+                  </td>
+                  <td>{sourceServiceLabel(r.source_service)}</td>
+                  <td className={styles.sourceInfoMono}>{r.source_username ?? '—'}</td>
+                  <td title={r.source_filename ?? undefined}>{baseFileName(r.source_filename)}</td>
+                  <td className={styles.qualityText}>
+                    {[
+                      r.bit_depth ? `${r.bit_depth}-bit` : null,
+                      r.sample_rate ? `${(r.sample_rate / 1000).toFixed(1)} kHz` : null,
+                      r.bitrate ? `${Math.round(r.bitrate / 1000)} kbps` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ') || '—'}
+                  </td>
+                  <td>{r.status ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

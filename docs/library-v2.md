@@ -3331,6 +3331,8 @@ Basierend auf Nutzer-Feedback und real-world Testlauf, aufzunehmend nach Abschlu
 
 **Priorität:** Niedrig-Mittel — nützlich für Debugging/Vertrauen, nicht blockierend für Kernfunktion.
 
+**Root-Cause-Nachtrag (2026-07-14, Deep-Audit — siehe Abschnitt 16.1):** Der `lib2`-Endpoint EXISTIERT bereits (`api/library_v2.py:1156-1168` → `core/library2/source_info.py:26`), zeigt aber für praktisch jeden Track „No download source data" an, weil er `track_downloads` nur per aktuellem File-Pfad abfragt und dabei den längst vorhandenen `legacy_track_id`-Link ignoriert, den der Importer für JEDEN migrierten Track korrekt setzt. Das ist kein fehlendes Feature mehr, sondern ein konkreter, gut lokalisierter Bug — Priorität entsprechend höher als „nice-to-have".
+
 ---
 
 ### 48. Rich-Metadata-Edit (Free-Text-Felder + Track-Level-Edit + Bulk-Edit) fehlt größtenteils
@@ -3398,3 +3400,82 @@ Basierend auf Nutzer-Feedback und real-world Testlauf, aufzunehmend nach Abschlu
 **Gemeinsames Muster über alle 7 Punkte:** Fast überall existiert die eigentliche Backend-Logik bereits app-weit (Reorganize-Planner, Enrichment-Worker, ReplayGain-Analyse, Rematch-Module, Download-Provenance-Query, Manual-Match-Service) und ist **wiederverwendbar** — der Aufwand für Library v2 liegt primär in dünnen `lib2`-ID-Mapping-Endpoints + UI, nicht in neuer Kernlogik. Das passt zur bestehenden Reuse-First-Philosophie (Abschnitt 4.5).
 
 **Status:** Reine Dokumentation, keine Implementierung. Nächster Schritt bei Aufnahme in aktive Arbeit: mit Nutzer Priorität festlegen, dann pro Punkt eine TDD-Slice wie bei den bisherigen Roadmap-Punkten.
+
+---
+
+## 16. Importer-Deep-Audit (2026-07-14, zweite Session) — drei konkrete Root-Causes
+
+**Auslöser:** Nutzer bat um einen erneuten, gezielten Blick auf `core/library2/importer.py` und einen Feature-Vergleich gegen die alte Library, plus drei live im Dev-Server beobachtete Bugs. Zwei dedizierte Explore-Agents haben die Root-Causes mit Datei:Zeile-Belegen identifiziert. **Reine Dokumentation — keine Implementierung in dieser Session.**
+
+### 16.1 Source-Info zeigt „No download source data" trotz vorhandener Provenance-Daten
+
+Vertieft Punkt 47 (Abschnitt 15). Bestätigter Root Cause, keine Vermutung mehr:
+
+- `core/library2/source_info.py:26-50` (`track_source_info`, aufgerufen von `api/library_v2.py:1156-1168`) fragt `track_downloads` **ausschließlich per aktuellem Datei-Pfad** ab (exact match, dann `LIKE '%/<filename>'`-Fallback) — laut eigenem Docstring (`source_info.py:6-11`) bewusst so gebaut, weil „lib2-Track-IDs ein eigener ID-Space sind, unabhängig von den Legacy-`tracks`-Rows, auf die `track_downloads.track_id` zeigt".
+- Das ist unnötig vorsichtig: `lib2_tracks.legacy_track_id` (`core/library2/schema.py:142`) UND `lib2_track_files.legacy_track_id` (`schema.py:196`) existieren genau für diesen Zweck und werden vom Importer für **jeden** migrierten Track zuverlässig gesetzt — sowohl beim Insert (`importer.py:596-598`, `642-649`) als auch beim Update (`importer.py:655-664`), bestätigt durch `tests/library2/test_importer.py:158-169,190,204-215`. Andere lib2-Module nutzen `legacy_track_id` bereits genau so als Join-Schlüssel (`match_status.py:60,149-162`, `completeness.py:123,149`, `identity_history.py:68`) — `source_info.py` ist der einzige Ausreißer.
+- Die Legacy-Route macht es umgekehrt richtig (`web_server.py:14229-14260`): erst `database.get_track_downloads(track_id)` per **ID** (`database/music_database.py:14151-14164`), Pfad/Dateiname nur als Fallback — und **self-healed** dabei sogar den Link zurück (`get_download_by_filename(..., link_track_id=track_id)`, `database/music_database.py:14197-14222`).
+- Warum reine Pfad-Suche in der Praxis so oft leerläuft: `tracks.file_path` (Legacy) und `lib2_track_files.path` können unabhängig voneinander durch Rename/Reorganize/Repair verändert werden (`core/reorganize_runner.py:71`, `core/imports/pipeline.py:1482`, `core/repair_jobs/track_number_repair.py:979`, `core/repair_worker.py:1759-1762,3679-3691`) — keiner dieser Call-Sites aktualisiert `track_downloads.file_path` mit. Es gibt sogar einen dafür vorgesehenen Helper, `database.update_provenance_file_path()` (`database/music_database.py:14166-14179`), der aber **nirgends im Code aufgerufen wird** (nur seine eigene Definition matched einen Grep). Sobald sich der Pfad seit dem Download geändert hat, findet die pfad-only Suche nichts mehr, obwohl die Zeile via `legacy_track_id` trivial erreichbar wäre.
+
+**Fix-Richtung (für spätere Umsetzung):** `source_info.py` soll zuerst `track_downloads WHERE track_id = lib2_track.legacy_track_id` (bzw. `lib2_track_files.legacy_track_id`) probieren — analog zur Legacy-Route — und nur bei `legacy_track_id IS NULL` (reine Autolink-Neuanlage ohne Legacy-Pendant) auf die bestehende Pfad-/Dateiname-Suche zurückfallen.
+
+**Priorität:** Hoch genug, um vor den generischen Roadmap-Punkten 45–51 behandelt zu werden — es ist ein Bug mit klarer Lokalisierung, kein offenes Feature-Gap.
+
+---
+
+### 16.2 Album wird beim Teil-Import komplett monitored statt nur die gewünschten Tracks
+
+**Beobachtung (User):** Import eines Albums, von dem nur 3 Tracks je in der Wishlist standen bzw. heruntergeladen wurden — trotzdem wird das GESAMTE Album auf `monitored` gesetzt, nicht nur die 3 gewünschten Tracks.
+
+**Root Cause:** `lib2_albums.monitored` hat Schema-Default `1` (`core/library2/schema.py:100`); der Album-INSERT im Haupt-Legacy-Import-Loop (`importer.py:539-548`) trägt `monitored` gar nicht explizit in die Insert-Felder ein — jedes importierte Album mit mindestens einer lokalen Track-Zeile bekommt also automatisch `monitored=1`, unabhängig davon, wie viele seiner Tracks tatsächlich gewollt waren. Das steht im Kontrast zu `seed_wishlist_tracks` (`importer.py:782-1063`), das für den Wishlist-Seeding-Pfad explizit `monitored=0` auf Album-Ebene einsetzt (`importer.py:929-934`, Docstring `789-791`: „ein gewishlisteter Song darf nicht das ganze Album monitored machen") — diese Sorgfalt existiert aber nur im Wishlist-Seeding-Pfad, nicht im Haupt-Album-Loop, der die Album-Zeile für ein teilweise vorhandenes Album tatsächlich erzeugt.
+
+Der Fehler pflanzt sich fort:
+1. `seed_legacy_rules` (`monitor_rules.py:179-200`, aufgerufen von `importer.py:687`) friert den (bereits falschen) Album-`monitored`-Wert 1:1 als `lib2_monitor_rules`-Zeile mit `provenance='legacy_import'` ein — ohne zu prüfen, wie viele Tracks tatsächlich gewishlistet/heruntergeladen wurden.
+2. `wanted.py::_decide()` (Zeilen 68-84, aufgerufen via `recompute_wanted`, `importer.py:697`) lässt jeden Track OHNE eigene Track-Regel auf die Album-Regel zurückfallen (`alb_mon is not None`, Zeile 78-79) — die 3 tatsächlich gewünschten Tracks bekommen korrekt eigene `wishlist_import`-Regeln, aber ALLE anderen Tracks des Albums erben `wanted=True` einzig weil das Album fälschlich monitored=1 ist.
+3. `completeness.py::_persist_tracklist_tracks` (Zeile 250) verstärkt das: neu materialisierte Missing-Track-Platzhalter werden direkt mit `monitored = 1 if al["monitored"] else 0` angelegt — die Platzhalter für die nie gewollten Songs kommen also schon monitored zur Welt.
+
+Die Album-Monitor-Intent-Snapshot/Restore-Logik (`snapshot_album_monitor_intent`/`restore_album_monitor_intent`, `monitor_rules.py:55-102`, `importer.py:434-439,680-682`) bewahrt NUR Album-Entity-Regeln über Re-Importe hinweg — sie leitet den initialen Album-Flag nie aus „wie viele/welche Tracks waren gewollt" ab. Track-Ebene ist an sich korrekt (`_has_preserved_intent`/`_reconcile_legacy_snapshot`, `importer.py:253-264`), das Album-Flag selbst ist der Bug.
+
+**Fix-Richtung:** Album-INSERT im Haupt-Loop (`importer.py:539-548`) sollte `monitored` aus der tatsächlichen Track-Datenlage ableiten (z.B. `monitored=1` nur wenn ALLE oder eine konfigurierbare Mehrheit der bekannten Tracks lokal vorhanden/gewishlistet sind), statt den Schema-Default durchzureichen — analog zur bereits vorhandenen Sorgfalt in `seed_wishlist_tracks`.
+
+**Priorität:** Hoch — verfälscht das Monitoring-Verhalten für jeden Nutzer, der nur Teile eines Albums wollte, und führt zu ungewollten Auto-Downloads/Upgrade-Scans für nie gewünschte Tracks.
+
+---
+
+### 16.3 Track-Nummer-Korruption ("swag" → alle Tracks Nummer 1; "Thriller 40" → alle Tracks 2/3/4 dupliziert)
+
+**Beobachtung (User, live Dev-Server):** Album "swag" — jeder Track bekam `track_number=1`, wodurch alle bis auf einen als "missing" erscheinen (nur ein DB-Slot für Position 1). Album "Thriller 40" (40th-Anniversary-Edition) — Tracks bleiben durchgehend bei Nummer 2/3/4 (dupliziert), auch nach "Update Discography"; Verdacht: falsch gematchter Artist.
+
+Zwei unabhängige Root Causes in verschiedenen Modulen:
+
+**(a) Alle Tracks bekommen dieselbe Nummer — Default-Floor ohne Batch-Eindeutigkeits-Check:**
+- `core/imports/track_number.py::resolve_track_number()` (Zeilen 106-161) probiert Album-Info → Track-Info → verschachtelte Spotify-Daten → Dateiname-Präfix → Embedded-Tag, gibt `None` zurück wenn alles fehlt.
+- `core/imports/pipeline.py:892-904` ist die Stelle, die den finalen Fallback anwendet:
+  ```
+  if not isinstance(track_number, int) or track_number < 1:
+      logger.error(f"Invalid track number ({track_number}), defaulting to 1")
+      track_number = 1
+  ```
+  Das ist ein **Per-Track-Fallback ohne Batch-/Album-weiten Eindeutigkeits-Check** — wenn für einen ganzen Batch (z.B. ein via Search-Endpoint ohne Positions-Daten gematchtes Album, Dateinamen ohne numerisches Präfix, kein Embedded-Tag) keine der 4 Quellen eine brauchbare Nummer liefert, floort JEDER Track unabhängig auf `1`.
+- `core/library2/importer.py:579,587,595` (`_pick(row, "track_number")`) kopiert den (bereits korrupten) Legacy-Wert 1:1 nach `lib2_tracks.track_number` — **keine Validierung, keine Deduplizierung, kein Fallback auf Datei-/Scan-Reihenfolge**. Der Importer selbst hat keine Logik, „N Tracks teilen sich track_number=1" zu erkennen, bevor die Zeile geschrieben wird.
+
+**(b) Falscher Artist verhindert Selbstheilung via Tracklist-Abgleich:**
+- `core/library2/importer.py::_ArtistResolver.get_or_create_by_name` (Zeilen 147-159) matched/erstellt `lib2_artists` rein über `normalize_name(name)`-Stringgleichheit — keine Disambiguierung über `spotify_id`/`musicbrainz_id`/Genres. Das ist der wahrscheinliche Mechanismus, über den ein Album an die falsche Artist-Entity gehängt wird (Namenskollision oder falsch getaggter Upload) — genutzt sowohl beim Wishlist-Artist-Seeding (`importer.py:888,1020`) als auch im Haupt-Legacy-Import (`resolver.upsert_legacy`/`get_legacy`).
+- `core/library2/completeness.py::resolve_tracklist` (Zeilen 286-389) holt die kanonische Tracklist über `al["primary_artist_id"]` → löst NUR den Namen dieses Artists auf (`completeness.py:350-357`) und übergibt `(album_title, artist_name)` an `fetch_album_tracklist`. Zeigt `primary_artist_id` auf die falsche Artist-Entity, wird die falsche (oder gar keine) Provider-Release geholt — die echte "Thriller 40th Anniversary"-Tracklist wird nie abgeglichen.
+- Entscheidend: `_persist_tracklist_tracks` (`completeness.py:170-283`) matched/dedupliziert kanonische Einträge gegen lokale Zeilen **ausschließlich über `(album_id, disc_number, track_number)`** (`completeness.py:226-230`) — **niemals über den Titel**. Selbst wenn eine (evtl. falsche) Tracklist geholt wird, aktualisieren Einträge, deren `track_number` mit einer bereits korrupten lokalen Zeile kollidiert (aus (a): dupliziertes 2/3/4), einfach dieselbe existierende Zeile wieder und wieder. Es gibt keinen titel-basierten Re-Key, der „diese 3 verschiedenen Songs beanspruchen alle track_number=3" erkennen könnte. Genau deshalb repariert "Update Discography" die Duplikate nicht — der Abgleichs-Schlüssel (disc+number) ist exakt das korrupte Feld, kann sich also über diesen Pfad nie selbst heilen.
+
+**Fix-Richtung:**
+- `pipeline.py:892-904`: Batch-/Album-weiten Uniqueness-Check vor dem `default to 1`-Fallback einziehen (z.B. Scan-Reihenfolge/Dateiname-Sortierung als letzter Fallback statt eines konstanten Werts für alle).
+- `_ArtistResolver.get_or_create_by_name`: Disambiguierung über Provider-IDs vor reinem Namens-Match, deckt sich mit Roadmap-Punkt 40 (Artist-Aliasing).
+- `completeness.py::_persist_tracklist_tracks`: Titel-basierten Abgleich (zusätzlich zu disc+number) einziehen, damit ein korrekt gematchter Re-Fetch auch kollidierende/duplizierte Nummern reparieren kann statt sie nur zu bestätigen.
+
+**Priorität:** Hoch — führt zu sichtbarem Datenverlust in der UI (Tracks als "missing" trotz vorhandener Datei) und ist durch normale Nutzer-Aktionen ("Update Discography") nicht selbst-heilend.
+
+---
+
+### 16.4 Priorisierung Abschnitt 16
+
+1. **16.3 (Track-Nummer-Korruption)** — Kritisch: sichtbarer Datenverlust ("missing" trotz vorhandener Datei), nicht selbstheilend.
+2. **16.2 (Über-breites Album-Monitoring)** — Hoch: verfälscht Monitoring-/Auto-Download-Verhalten systematisch bei jedem Teil-Album-Import.
+3. **16.1 (Source-Info-Query-Bug)** — Hoch-genug-lokalisiert, um vor Roadmap 45–51 behandelt zu werden, aber kein Datenverlust — nur fehlende Anzeige bereits vorhandener Daten.
+
+**Status:** Reine Dokumentation (zwei Explore-Agents, Datei:Zeile-verifiziert), keine Implementierung in dieser Session.
