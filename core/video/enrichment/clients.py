@@ -431,6 +431,33 @@ class TMDBClient:
         out.sort(key=lambda x: x["date"] or "zzzz")
         return out
 
+    def alternative_titles(self, kind, tmdb_id):
+        """AKA / alternative-release titles for a movie or show — the alias set the
+        downloader matches releases against (Radarr/Sonarr parity: a release named
+        'God Particle' still matches 'The Cloverfield Paradox'). Returns a deduped
+        list of title strings; best-effort ([] on any error / no key)."""
+        if not self.api_key or tmdb_id is None:
+            return []
+        import requests
+        path = "/movie/" if kind == "movie" else "/tv/"
+        try:
+            r = requests.get(self.BASE + path + str(tmdb_id) + "/alternative_titles",
+                             params={"api_key": self.api_key}, timeout=12)
+            r.raise_for_status()
+            d = r.json() or {}
+        except Exception:
+            logger.debug("alt-titles fetch failed for %s %s", kind, tmdb_id, exc_info=True)
+            return []
+        rows = d.get("titles") if kind == "movie" else d.get("results")
+        seen, out = set(), []
+        for a in (rows or []):
+            t = str(a.get("title") or "").strip()
+            k = t.lower()
+            if t and k not in seen:
+                seen.add(k)
+                out.append(t)
+        return out[:30]
+
     def season_episodes(self, tv_id, season_number):
         """Episode-level data for one season (still/overview/rating) — the show
         worker cascades over a show's seasons to backfill episodes the media

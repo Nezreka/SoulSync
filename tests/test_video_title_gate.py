@@ -83,6 +83,61 @@ def test_episode_release_matches_on_the_show_name():
     assert titles_match("Some.Other.Show.S02E03.1080p", "The Wire") is False
 
 
+def test_alias_set_beats_false_negatives():
+    # the 'beat Radarr' win: a release named by a KNOWN alias still matches
+    # ('God Particle' is TMDB's alternative title for 'The Cloverfield Paradox').
+    aliases = ["The Cloverfield Paradox", "God Particle"]
+    assert titles_match("God.Particle.2018.1080p.WEBRip.x264", aliases) is True
+    assert titles_match("The.Cloverfield.Paradox.2018.1080p", aliases) is True
+    # an unrelated film is still rejected against the WHOLE alias set
+    assert titles_match("Paradox.2017.1080p.BluRay", aliases) is False
+    # a single string still works (back-compat)
+    assert titles_match("Paradox.2017.1080p", "Paradox") is True
+
+
+def test_evaluate_release_accepts_a_matching_alias_end_to_end():
+    parsed = parse_release("God.Particle.2018.1080p.WEBRip.x264")
+    v = evaluate_release(parsed, _PROFILE, scope="movie", want_year=2018,
+                         want_title=["The Cloverfield Paradox", "God Particle"])
+    assert v["accepted"] is True
+
+
+# ── alias plumbing (fetch → cache → search context) ───────────────────────────
+def test_engine_alt_titles_for_caches_and_is_best_effort():
+    from core.video.enrichment.engine import VideoEnrichmentEngine
+    from core.video.enrichment.cache import TTLCache
+    calls = {"n": 0}
+
+    class _Client:
+        def alternative_titles(self, kind, tmdb_id):
+            calls["n"] += 1
+            return ["God Particle"]
+
+    eng = VideoEnrichmentEngine.__new__(VideoEnrichmentEngine)
+    eng._cache = TTLCache(maxsize=16, ttl=60)
+    eng.workers = {"tmdb": type("W", (), {"enabled": True, "client": _Client()})()}
+    assert eng.alt_titles_for("movie", 42) == ["God Particle"]
+    assert eng.alt_titles_for("movie", 42) == ["God Particle"]   # served from cache
+    assert calls["n"] == 1                                        # only one TMDB hit
+    assert eng.alt_titles_for("movie", None) == []               # no id → no call
+
+
+def test_search_context_carries_the_alias_set(monkeypatch):
+    import core.automation.handlers.video_process_wishlist as mod
+
+    class _Eng:
+        def alt_titles_for(self, kind, tmdb_id):
+            return ["God Particle"] if str(tmdb_id) == "42" else []
+
+    monkeypatch.setattr(
+        "core.video.enrichment.engine.get_video_enrichment_engine", lambda: _Eng())
+    ctx = mod.search_context({"title": "The Cloverfield Paradox", "year": 2018, "tmdb_id": 42}, "movie")
+    assert ctx["title"] == "The Cloverfield Paradox"
+    assert ctx["titles"] == ["The Cloverfield Paradox", "God Particle"]
+    # no aliases → ctx keeps its old shape (no 'titles' key)
+    assert "titles" not in mod.search_context({"title": "Paradox", "year": 2017, "tmdb_id": 99}, "movie")
+
+
 # ── evaluate_release integration (the actual gate the downloader uses) ─────────
 def test_evaluate_release_rejects_the_wrong_film_end_to_end():
     parsed = parse_release("The.Cloverfield.Paradox.2018.1080p.WEBRip.x265-PS")
