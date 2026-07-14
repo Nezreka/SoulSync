@@ -73,6 +73,14 @@ function trackProgress(present: number, total: number): string {
   return `${present}/${total}`;
 }
 
+/** Single clamp for every derived progress percent (P2-20): counters can
+ *  exceed their nominal total under races/consolidation, and must never
+ *  render as a >100% or negative bar/label. */
+export function clampPercent(value: number | null | undefined): number {
+  if (value == null || Number.isNaN(value)) return 0;
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   const units = ['KB', 'MB', 'GB', 'TB'];
@@ -1527,7 +1535,8 @@ function activePipeline(state: LibraryV2PlaylistPipelineState | null): boolean {
 
 function pipelineLabel(state: LibraryV2PlaylistPipelineState | null): string | null {
   if (!state || state.status === 'idle') return null;
-  if (state.status === 'running') return `${state.phase || 'Running'} · ${state.progress || 0}%`;
+  if (state.status === 'running')
+    return `${state.phase || 'Running'} · ${clampPercent(state.progress)}%`;
   if (state.status === 'finished') return 'Last pipeline completed';
   if (state.status === 'skipped') return state.error || 'Pipeline skipped';
   if (state.status === 'error') return state.error || 'Pipeline failed';
@@ -1575,7 +1584,7 @@ export function PlaylistPipelineButton({ playlist }: { playlist: LibraryV2Playli
 function PlaylistPipelineState({ state }: { state: LibraryV2PlaylistPipelineState | null }) {
   const label = pipelineLabel(state);
   if (!label) return null;
-  const progress = Math.max(0, Math.min(100, state?.progress ?? 0));
+  const progress = clampPercent(state?.progress);
   return (
     <div
       className={`${styles.playlistPipeline} ${state?.status === 'error' ? styles.playlistPipelineError : ''}`}
@@ -2633,7 +2642,9 @@ function AlbumBlock({
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const complete = album.tracks_missing === 0 && album.track_count > 0;
-  const pct = album.track_count ? Math.round((100 * album.tracks_present) / album.track_count) : 0;
+  const pct = album.track_count
+    ? clampPercent((100 * album.tracks_present) / album.track_count)
+    : 0;
   const unowned = album.origin === 'discography' && album.tracks_present === 0;
   return (
     <div className={`${styles.albumBlock} ${open ? styles.albumBlockOpen : ''}`}>

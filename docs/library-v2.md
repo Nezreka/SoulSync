@@ -2845,7 +2845,24 @@ Priorität, kompakt aufgelistet für spätere Aufnahme):
   (ungeschütztes `int()`, `json.loads` nach Commit, ungeklemmte negative
   Limits).~~ **Behoben 2026-07-14:** Range-/Shape-/ID-Validierung vor Reads,
   Mutationen und Jobstarts (Roadmap-Punkt 37).
-- P2-20: Fortschritts-Prozentwerte sind nicht auf 0-100 geklemmt.
+- ~~P2-20: Fortschritts-Prozentwerte sind nicht auf 0-100 geklemmt.~~
+  **Behoben 2026-07-14:** Der eine gemeinsame Schreibpfad
+  `core/automation/progress.py::update_progress` (genutzt von Watchlist-
+  Auto-Scan, Discovery-Sync/Playlist-Pipeline und Wishlist-Processing,
+  inkl. der von Library v2 angezeigten Playlist-Pipeline) klemmt den
+  `progress`-Kwarg jetzt zentral auf 0-100 (mit Rundung), statt dass jeder
+  der über 20 Call-Sites einzeln validiert. Im Frontend nutzen `pipelineLabel`
+  und der Album-Track-Completion-Balken (`library-v2-page.tsx`) denselben neu
+  extrahierten `clampPercent`-Helper statt zweier bisher abweichender
+  Ad-hoc-Berechnungen (eine ungeklemmt, eine nur teilweise geklemmt — echte
+  UI-Inkonsistenz bei genau demselben `state.progress`-Wert). 4 gezielte
+  Python-Tests (`tests/automation/test_automation_progress.py`) und 6
+  gezielte Vitests (`progress-clamp.test.ts`) pinnen Über-/Unterlauf,
+  Rundung und In-Range-Passthrough. Bewusst nicht angefasst: die Legacy-
+  Reorganize-Queue-Prozentanzeige in `webui/static/library.js` (außerhalb
+  des Library-v2-Scopes). **Nächster logischer Schritt:** P2-21 —
+  Bundle-Completion darf nach Wartefrist nicht auf einen unvollständigen
+  `incomplete_path` zurückfallen.
 - P2-21: Bundle-Completion kann nach Wartefrist auf einen unvollständigen
   `incomplete_path` zurückfallen statt einen finalen Pfad zu verlangen.
 - P2-23: Orchestrator und Download-Engine teilen weiterhin
@@ -3103,6 +3120,13 @@ Basierend auf Nutzer-Feedback und real-world Testlauf, aufzunehmend nach Abschlu
 
 **Nächster Schritt:** Grep für bestehende ReplayGain-Logik; falls nicht vorhanden, prüfen ob externe Bibliothek (z.B. `python-acoustid`, `librosa`) integrierbar ist.
 
+**Audit-Ergänzung 2026-07-14 (Legacy-Enhanced-View-Parity-Audit, siehe Abschnitt 15):** Die Logik existiert bereits vollständig und wiederverwendbar — muss NICHT neu gebaut werden.
+- Per-Track: "RG"-Button pro Track-Row (`library.js:4406-4411`) → `POST /api/library/track/<id>/analyze-replaygain` (`web_server.py:12521`) — synchron, LUFS-basiert (`core/replaygain.py`, `RG_REFERENCE_LUFS`), schreibt sofort in Datei-Tags.
+- Per-Album: "♫ ReplayGain"-Button (`:3949-3955`) → `POST /api/library/album/<id>/analyze-replaygain` (`web_server.py:12564`) — Background-Thread, 2-Pass (Analyse dann Schreiben von Track+Album-Gain aus Mean-LUFS), gepollt via `GET .../analyze-replaygain/status` (`:12668`).
+- Batch (Selektion): `POST /api/library/tracks/analyze-replaygain-batch` (`:12677`).
+- Alle drei nutzen dasselbe Modul `core/replaygain.py`, das auch der automatisierte Repair-Job `core/repair_jobs/replaygain_filler.py` nutzt — Analyse-/Tag-Writing-Logik ist bereits identisch zwischen manueller UI-Aktion und Automation.
+- **Für Library v2 reduziert sich der Scope auf:** dünne `lib2`-Endpoints (Track-/Album-/Artist-Scope, ID-Mapping auf `lib2_track_id`/`lib2_album_id`) + UI-Buttons analog zu Legacy. Keine neue Analyse-Logik nötig.
+
 ---
 
 ### 44. Enrich Album/Track-Funktion fehlt
@@ -3114,6 +3138,11 @@ Basierend auf Nutzer-Feedback und real-world Testlauf, aufzunehmend nach Abschlu
 - UI: Modal mit durchsuchbaren Quellen (Spotify, Deezer, MB) + Diff-Preview.
 
 **Nächster Schritt:** Audit bestehender Enrichment-Logik (wahrscheinlich im Import-Flow), Scope für Library-v2-Only-Action definieren.
+
+**Audit-Ergänzung 2026-07-14 (Legacy-Enhanced-View-Parity-Audit, siehe Abschnitt 15):** Legacy-Backend existiert vollständig und ist pro-Provider granularer als hier ursprünglich angenommen.
+- Legacy `Enrich ▾`-Dropdown (Artist: `library.js:3250-3289`; Album: `:3907-3940`) listet bis zu 12 Provider **einzeln** auf: Spotify, MusicBrainz, Deezer, JioSaavn, Discogs, AudioDB, iTunes, Last.fm, Genius, Bandcamp, Tidal, Qobuz — je nach Entity-Typ eingeschränkt (Genius kein Album, Discogs kein Track, Bandcamp kein Artist). Klick auf einen Eintrag enriched **nur von dieser einen Quelle**.
+- `POST /api/library/enrich` (`web_server.py:13629`) → `_run_single_enrichment()` (`:13721-13859`) dispatcht an die bereits initialisierten Background-Enrichment-Worker (`spotify_enrichment_worker`, `deezer_worker`, `mb_worker`, `audiodb_worker`, `itunes_enrichment_worker`, `lastfm_worker`, `genius_worker`, `tidal_enrichment_worker`, `qobuz_enrichment_worker`, `discogs_worker`, `bandcamp_worker`, `jiosaavn_worker`) — eine echte Provider-Re-Query (Genres, Bilder, externe IDs, Bio), kein reines Re-Matching. Per-Service-Concurrency-Lock (`_enrichment_locks`) verhindert Overlap.
+- **Für Library v2 reduziert sich der Scope auf:** dünne `lib2`-Endpoints, die an dieselben bestehenden Worker-Methoden delegieren (ID-Mapping auf `lib2_artist_id`/`lib2_album_id`/`lib2_track_id`) + UI-Dropdown analog zu Legacy. Keine neue Provider-Integration nötig.
 
 ---
 
@@ -3198,7 +3227,7 @@ Basierend auf Nutzer-Feedback und real-world Testlauf, aufzunehmend nach Abschlu
 
 **Nicht implementierbar (UI-only Limitation):**
 
-- **"Match via Source" Display:** Die Information, welche Metadaten-Quelle (Spotify vs. Deezer) matched wurde, ist **nicht in der API vorhanden**. Braucht Backend-Schema um zu trackten, welcher Provider die Metadata liefert. Für nächste Session in Roadmap aufnehmen.
+- **"Match via Source" Display:** Die Information, welche Metadaten-Quelle (Spotify vs. Deezer) matched wurde, ist **nicht in der API vorhanden**. Braucht Backend-Schema um zu trackten, welcher Provider die Metadata liefert. Für nächste Session in Roadmap aufnehmen. **Vertieft in Abschnitt 15, Punkt 46** — Legacy hat dafür ein vollständiges Match-Status-Chip-System + manuelle Re-Match-Funktion, keine reine Anzeige-Frage.
 
 **Bekannte Backend-Issues für Roadmap:**
 
@@ -3207,3 +3236,126 @@ Basierend auf Nutzer-Feedback und real-world Testlauf, aufzunehmend nach Abschlu
 - **Update Discovery Instability** (Roadmap #38): Michael Jackson, Hirokyu Samono zeigen nicht alle Releases.
 
 **Frontend:** 121 Tests ✓, TypeCheck ✓, Build ✓. Alle UI-Änderungen sind non-breaking und reuse bestehende Data-Structures.
+
+---
+
+## 15. Legacy-Enhanced-View-Parity-Audit (2026-07-14) — vollständiger Feature-Vergleich
+
+**Auslöser:** Nutzer-Frage, ob alle Enrich-artigen Features der alten Library ("Enhanced View", `webui/static/library.js`, 9691 Zeilen) bereits in Library v2 erfasst sind. Ein dedizierter Explore-Agent hat den kompletten Legacy-Code (`library.js` + zugehörige `web_server.py`-Routen + Backend-Module) systematisch nach 9 konkret benannten Feature-Kategorien durchsucht und gegen den aktuellen `library-v2-page.tsx`-Stand verglichen. **Reine Dokumentation — keine Implementierung in dieser Session.**
+
+**Wichtiger Architektur-Hinweis aus dem Audit:** `api/library.py` (311 Zeilen) ist nur eine schreibgeschützte Public-REST-API (GET-only, externe API-Clients) — **nicht** das Backend der Legacy-UI. Alle interaktiven Legacy-Features unten sind über interne Routen in `web_server.py` (40.961 Zeilen) verdrahtet.
+
+**Bereits bekannt/erfasst (siehe Roadmap 43/44 oben, jetzt mit Architektur-Details ergänzt):** ReplayGain, Enrich (Multi-Provider-Dropdown).
+
+**Neu identifiziert, bisher NICHT in der Roadmap erfasst:**
+
+### 45. Reidentify — Re-Filing eines Tracks unter anderem Release fehlt
+
+**Beobachtung:** Legacy hat eine `↔`-Aktion pro Track ("Re-identify — file this track under a different release", `library.js:4427`, `openReidentifyModal`, `:9507-9539`, referenziert Issue #889). Erlaubt es, dieselbe Aufnahme (ISRC-Treffer bevorzugt gerankt) unter einem anderen Release-Typ (Single vs. EP vs. Album) neu einzuordnen und die physische Datei dorthin umzuziehen.
+
+**Architektur (bereits vollständig im Backend vorhanden, wiederverwendbar):**
+- `GET /api/reidentify/sources` → `core.imports.rematch_search.available_sources()`
+- `GET /api/reidentify/search?source=&q=` → `core.imports.rematch_search.search_release_candidates()`
+- `POST /api/reidentify/apply` → staged Copy + Hint via `core.imports.rematch_apply.stage_file_for_reidentify` + `core.imports.rematch_hints.create_hint`; Original wird erst nach erfolgreichem Re-Import entfernt (nur bei `replace=true`).
+
+**Unterschied zu Enrich (Punkt 44):** Enrich holt neue Metadaten-Felder für eine bestehende Entity; Reidentify ändert, **welchem Release** die physische Datei zugeordnet ist (läuft erneut durch die Import-Pipeline unter anderer kanonischer Release-Identität).
+
+**Scope für Library v2:** Reuse der bestehenden `core.imports.rematch_*`-Module (keine zweite Implementierung nötig) + neue `lib2`-Endpoints mit `lib2_track_id`/`lib2_album_id`-Mapping statt Legacy-IDs; UI-Modal analog zu Legacy.
+
+**Priorität:** Mittel — Nischen-Feature (Single-vs-Album-Fehlklassifikation), aber ohne es bleibt dieser Fehlerfall in Library v2 unkorrigierbar.
+
+---
+
+### 46. Match-Status-Anzeige & manuelles Re-Match pro Provider fehlt
+
+**Beobachtung:** Legacy zeigt auf Artist-/Album-/Track-Ebene farbcodierte Chips (`matched`/`not_found`/`pending`) pro Metadaten-Provider (Spotify, MusicBrainz, Deezer, JioSaavn, AudioDB, Discogs, iTunes, Last.fm, Genius, Tidal, Qobuz, Amazon). Klick öffnet `openManualMatchModal()` — freitextige Provider-Suche (`POST /api/library/search-service` → `core.library.service_search._search_service`) → Auswahl schreibt externe ID + `matched`-Status (`PUT /api/library/manual-match`), oder löst den Match (`PUT /api/library/clear-match`).
+
+**Ergänzt die Notiz in Abschnitt 14** ("Match via Source Display... nicht in der API vorhanden") — dieser Audit zeigt: es ist mehr als reine Anzeige, es ist eine vollständige manuelle Re-Match-Funktion inkl. Locking des kanonischen Release bei manuellem Album-Match (`core.metadata.canonical_version.should_pin_manual_canonical`).
+
+**Nicht zu verwechseln mit:** `core/library/manual_library_match.py` — anderes Feature (Wishlist/Sync-History-Source zu existierendem Library-Track verlinken, um Re-Downloads zu verhindern), keine Metadaten-Provider-Zuordnung.
+
+**Scope für Library v2:** Audit nötig, ob `lib2_artists`/`lib2_albums`/`lib2_tracks` dieselben `{service}_match_status`/`{service}_id`-Spalten spiegeln, die Legacy nutzt, oder nur die IDs ohne Status. Falls Spalten vorhanden: reiner UI-Reuse (Chips + Modal); falls nicht: kleine additive Migration nötig.
+
+**Priorität:** Mittel-Hoch — vom Nutzer explizit als fehlend benannt.
+
+---
+
+### 47. Source-Info-Popover (Download-Provenance) fehlt
+
+**Beobachtung:** Legacy zeigt pro Track ein `ℹ`-Popover (`showTrackSourceInfo`, `:4960-…`) mit: Service-Icon/Label, Soulseek-Username, Original-Dateiname, Dateigröße, Audio-Qualität-String, Bit-Depth/Sample-Rate/Bitrate, "downloaded"-Zeitstempel, Status (rot bei Nicht-„completed"), Anzahl historischer Download-Records. Zusätzlich eine "⛔ Blacklist This Source"-Action direkt aus dem Popover.
+
+**API:** `GET /api/library/track/<id>/source-info` → `database.get_track_downloads(track_id)` mit Fallback-Matching per Pfad/Dateiname.
+
+**Unterschied zu Match (Punkt 46):** Match ist über Metadaten-Provider-IDs; Source-Info ist über **woher die tatsächliche Audiodatei kam** (Download-Quelle/-Qualität/-Provenienz).
+
+**Scope für Library v2:** `database.get_track_downloads()` ist bereits app-weit vorhanden und wiederverwendbar; braucht nur einen `lib2`-Endpoint (Track-ID-Mapping) + UI-Popover-Komponente. Blacklist-Action (`POST /api/library/blacklist`) ebenfalls reusable.
+
+**Priorität:** Niedrig-Mittel — nützlich für Debugging/Vertrauen, nicht blockierend für Kernfunktion.
+
+---
+
+### 48. Rich-Metadata-Edit (Free-Text-Felder + Track-Level-Edit + Bulk-Edit) fehlt größtenteils
+
+**Beobachtung:** Legacy erlaubt Editieren von Artist (`name`, `genres`, `label`, `style`, `mood`, `summary`), Album (`title`, `genres`, `year`, `release_date`, `explicit`, `track_count`, `label`, `style`, `mood`) und **Track** (`title`, `track_number`, `bpm`, `explicit`, `style`, `mood`) über inline-editierbare Felder + `PUT /api/library/{artist,album,track}/<id>` mit serverseitigem Feld-Whitelist (`database/music_database.py:12808-12810`). Zusätzlich ein Bulk-Edit-Modal für mehrere selektierte Tracks (`PUT /api/library/tracks/batch` → `database.batch_update_tracks()`).
+
+**Library v2 aktueller Stand** (Roadmap Punkt 8, bereits umgesetzt): Nur `title`/`year`/`release_type` fürs Album (Batch-Override-API) und `name`/`genres` fürs Artist. **Kein Track-Level-Edit-Endpoint existiert überhaupt** (bestätigt: nur `GET .../tracks/<id>`, `.../canonical`, `.../move-file` unter `/api/library/v2/tracks/`). Kein Bulk-Edit.
+
+**Wichtiger Architektur-Unterschied:** Library v2 nutzt bereits ein saubereres Konzept — `lib2_metadata_overrides` (Roadmap Punkt 4, Slice 3) trennt validierte Admin-Overrides von der Provider-Baseline, mit Read-Projection. Fehlende Felder (BPM, Style, Mood, Label, Summary, Explicit, Track-Title/Number) sollten in dieses bestehende Override-System **erweitert** werden, nicht als Parallel-Struktur wie Legacys direktes Feld-Whitelisting auf der Katalogtabelle.
+
+**Scope für Library v2:** Override-Store um die fehlenden Felder erweitern; Track-Entity-Typ zum bestehenden Batch-Override-Command hinzufügen (existiert bereits für Artist/Album); Bulk-Edit-UI analog zu Legacy, aber über denselben Override-Endpoint statt einer zweiten Route.
+
+**Priorität:** Mittel-Hoch — Kernfunktionalität einer "Library Manager"-UI; aktuell deutlich eingeschränkter als Legacy.
+
+---
+
+### 49. Alternate-Cover-Art-Picker fehlt
+
+**Beobachtung:** Legacy erlaubt Klick auf Album-Cover → "Change cover"-Overlay → `openAlbumArtPicker()` (`:3664-3790`) zeigt mehrere Kandidaten-Cover mit Quellen-Badge (`GET /api/album/<id>/art-options`), Anwenden via `POST /api/album/<id>/art`.
+
+**Library v2 aktueller Stand:** Nur statischer Cover-Platzhalter (`library-v2-page.tsx:201`), kein Picker, keine Alternative-Auswahl.
+
+**Scope für Library v2:** Audit nötig, ob `/api/album/<id>/art-options`/`/art` über `lib2_album_id`-Mapping wiederverwendbar sind oder ein `lib2`-Wrapper nötig ist. Kernlogik (Kandidaten-Fetch von Providern) sollte über den bestehenden `provider_adapters.py`-Boundary laufen (Konsistenz mit Artwork-Regeln aus Abschnitt 1).
+
+**Priorität:** Niedrig — kosmetisch, aber von Nutzern geschätzt bei falschem/fehlendem Auto-Cover.
+
+---
+
+### 50. Interaktives Reorganize (Preview, Mode/Source-Picker, Album-Einzelaktion) fehlt
+
+**Beobachtung:** Legacy bietet:
+- Pro Album: "📁 Reorganize"-Button → Preview-Modal (`showReorganizeModal`) mit Live-Vorschau (aktueller vs. vorgeschlagener Pfad) → `GET /api/library/album/<id>/reorganize/preview` → Apply via `POST /api/library/album/<id>/reorganize` (enqueued via `core/reorganize_queue.py`).
+- Pro Artist: "Reorganize All"-Button → Modal mit Metadata-Mode (API vs. embedded Tags) + Metadata-Source-Picker (Spotify/Deezer/…/auto) → wendet auf **alle Alben des Artists** an (`POST /api/library/artist/<id>/reorganize-all`).
+- **Wichtig:** Es gibt **kein** globales „ganze Library reorganisieren"-Feature in Legacy — jede Reorganize-Aktion ist Artist- oder Album-scoped. Das nächstliegende ist der Repair-Job `core/repair_jobs/library_reorganize.py` (library-weiter Scanner, off-by-default, dry-run-default), der aber dieselbe Planner-/Queue-Logik wiederverwendet (`core.library_reorganize.preview_album_reorganize`/`reorganize_album` + `core.reorganize_queue`) — keine zweite Implementierung.
+
+**Library v2 aktueller Stand:** "Rename / Reorganize Files" ist nur ein generischer Eintrag in der `MAINTENANCE_JOBS`-Liste (`library-v2-page.tsx:1009-1042`, `id: 'library_reorganize'`, `scoped: true`) — läuft wie ein Lidarr-Style-Batch-Job ohne Preview, ohne Mode/Source-Wahl, kein Einzelalbum-Sofort-Reorganize.
+
+**Scope für Library v2:** Die zugrundeliegende Planner-Logik (`core/library_reorganize.py::preview_album_reorganize`/`reorganize_album`) und Queue (`core/reorganize_queue.py`) sind bereits app-weit vorhanden und wiederverwendbar — reine Frage neuer, dünner `lib2`-Endpoints (ID-Mapping) + UI-Preview-Modal analog zu Legacy statt des generischen Maintenance-Batch-Eintrags. **Deckt sich mit Roadmap-Punkt 9** (Artist-Scope für Reorganize/Dedup, bereits abgeschlossen für Path-Safety), ergänzt aber die fehlende **interaktive Einzelalbum-Preview-UI**, die Punkt 9 nicht abdeckte.
+
+**Priorität:** Mittel — Kernfeature für Bibliotheks-Pflege, aktuell nur als generischer Batch-Job ohne Feedback/Kontrolle nutzbar.
+
+---
+
+### 51. Interaktiver Missing-Track-Manager ("Manage" → Add to Library / I Have This) fehlt
+
+**Beobachtung:** Legacy zeigt fehlende Tracks disc-/tracknummer-genau in derselben Tabelle wie vorhandene (`enhanced-missing-track-row`, echter Titel aus kanonischer Tracklist statt "Track N", "Missing"-Badge statt Play-Button). Pro fehlendem Track gibt es einen "Manage"-Button (`openMissingTrackManageModal`) mit zwei Pfaden:
+- **"Add to Library"** → normaler Wishlist-Flow (`wishlistEnhancedMissingTrack`).
+- **"I Have This"** → Datei-Picker, importiert eine existierende Datei direkt in den exakten Album-Slot (`POST /api/library/album/<id>/import-existing-track`).
+
+**Library v2 aktueller Stand:** `completeness.py` löst kanonische Tracklists bereits serverseitig auf (echte Titel statt "Track N", disc-aware) — das Backend-Fundament ist da. Die UI zeigt aber nur ein aggregiertes „N missing"-Badge + generisches „missing"-Label pro Zeile (`library-v2-page.tsx:1839-1840, 1908, 2798-2802`), **keine** interaktive Per-Slot-Aktion.
+
+**Scope für Library v2:** UI-seitig ist am wenigsten zu tun (Backend-Tracklist-Auflösung existiert schon) — "Manage"-Button + Modal mit denselben zwei Pfaden hinzufügen: Wishlist-Mirror für "Add to Library" ist bereits die etablierte lib2-Monitoring-Mechanik; "I Have This" bräuchte einen neuen `lib2`-Import-Endpoint, der eine hochgeladene/ausgewählte Datei direkt an den bestehenden `lib2_track_id`-Slot bindet (analog zu Legacys `import-existing-track`, aber durch die lib2-Autolink-Logik statt Legacy-Tabellen).
+
+**Priorität:** Mittel-Hoch — direkt sichtbare UX-Regression gegenüber Legacy (Nutzer sehen "12 missing", können aber nichts tun außer den globalen "Search Monitored"-Button zu drücken).
+
+---
+
+### Priorisierung der neuen Punkte 45–51
+
+1. **48 (Rich-Metadata-Edit) & 51 (Missing-Track-Manager)** — Mittel-Hoch: direkt sichtbare Kernfunktions-Lücken gegenüber Legacy.
+2. **46 (Match-Status-Anzeige)** — Mittel-Hoch: vom Nutzer explizit benannt.
+3. **45 (Reidentify) & 50 (Interaktives Reorganize)** — Mittel: Nischenfälle bzw. bereits teilweise über generischen Batch-Job abgedeckt.
+4. **47 (Source-Info-Popover) & 49 (Cover-Art-Picker)** — Niedrig-Mittel: nützlich, nicht blockierend.
+
+**Gemeinsames Muster über alle 7 Punkte:** Fast überall existiert die eigentliche Backend-Logik bereits app-weit (Reorganize-Planner, Enrichment-Worker, ReplayGain-Analyse, Rematch-Module, Download-Provenance-Query, Manual-Match-Service) und ist **wiederverwendbar** — der Aufwand für Library v2 liegt primär in dünnen `lib2`-ID-Mapping-Endpoints + UI, nicht in neuer Kernlogik. Das passt zur bestehenden Reuse-First-Philosophie (Abschnitt 4.5).
+
+**Status:** Reine Dokumentation, keine Implementierung. Nächster Schritt bei Aufnahme in aktive Arbeit: mit Nutzer Priorität festlegen, dann pro Punkt eine TDD-Slice wie bei den bisherigen Roadmap-Punkten.
