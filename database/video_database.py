@@ -43,7 +43,7 @@ def _publish_video_event(event_type: str, data: dict) -> None:
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 40   # v40: video_watchlist.lookback_years (per-person back-catalog window); v39: video_wishlist.release_date; v38: episodes.added_at
+SCHEMA_VERSION = 41   # v41: one-time details_synced heal (status-less burn victims); v40: video_watchlist.lookback_years; v39: video_wishlist.release_date
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -379,10 +379,12 @@ class VideoDatabase:
         schema = _SCHEMA_FILE.read_text(encoding="utf-8")
         conn = self._get_connection()
         try:
+            prev_version = int(conn.execute("PRAGMA user_version").fetchone()[0])
             conn.executescript(schema)
             self._ensure_columns(conn)
             self._ensure_indexes(conn)
             self._seed_named_links_from_scalar(conn)
+            self._run_data_migrations(conn, prev_version)
             conn.execute(f"PRAGMA user_version = {int(SCHEMA_VERSION)}")
             conn.commit()
             logger.info(
@@ -425,6 +427,26 @@ class VideoDatabase:
             cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
             if col not in cols:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {coltype}")
+
+    @staticmethod
+    def _run_data_migrations(conn, prev_version: int) -> None:
+        """One-time data fixes, gated on the PRAGMA user_version the DB carried
+        BEFORE this boot (fresh DBs start at 0 with empty tables, so every step
+        is a no-op there)."""
+        if prev_version < 41:
+            # v41 heal: the details backfill used to swallow failed TMDB calls
+            # (429/5xx/timeout) into empty metadata and still mark
+            # details_synced=1 — permanently, since the queue only picks
+            # details_synced=0. Those burn victims sit matched-but-status-less
+            # forever: no watchlist button (unknown status reads as ended), no
+            # airing refresh, no calendar. The call-failure propagation is fixed
+            # (clients.py raises now); this re-queues the already-burned rows for
+            # one fresh attempt. Genuine TMDB 404s just settle back to synced.
+            for tbl in ("shows", "movies"):
+                conn.execute(
+                    f"UPDATE {tbl} SET details_synced=0 "
+                    f"WHERE tmdb_id IS NOT NULL AND details_synced=1 "
+                    f"AND (status IS NULL OR TRIM(status) = '')")
 
     # ── enrichment plumbing (per-source match status, like music) ─────────────
     def enrichment_next(self, service: str, retry_days: int = 30, priority=None) -> dict | None:
