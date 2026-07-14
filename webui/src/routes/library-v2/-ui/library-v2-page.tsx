@@ -332,8 +332,8 @@ function MonitoringModal({
   async function apply(scope: 'all' | 'missing', monitored: boolean, label: string) {
     setBusy(label);
     try {
-      await bulkMonitorLibraryV2Releases(artistId, scope, monitored);
-      await awaitBulkJob(queryClient);
+      const jobId = await bulkMonitorLibraryV2Releases(artistId, scope, monitored);
+      await awaitBulkJob(queryClient, jobId);
       onClose();
     } catch {
       await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
@@ -1148,8 +1148,8 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
     setUpgradeScanBusy(true);
     setGrabBanner({ tone: 'busy', text: 'Scanning monitored tracks for quality upgrades…' });
     try {
-      await startLibraryV2UpgradeScan();
-      const error = await awaitBulkJob(queryClient);
+      const jobId = await startLibraryV2UpgradeScan();
+      const error = await awaitBulkJob(queryClient, jobId);
       setGrabBanner(
         error
           ? { tone: 'err', text: `Upgrade scan failed: ${error}` }
@@ -1554,9 +1554,10 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
 /** Poll the background bulk-job status until it settles, then refresh. */
 async function awaitBulkJob(
   queryClient: ReturnType<typeof useQueryClient>,
+  jobId: string,
 ): Promise<string | null> {
   for (let i = 0; i < 300; i += 1) {
-    const state = await fetchLibraryV2JobStatus();
+    const state = await fetchLibraryV2JobStatus(jobId);
     if (!state.running) {
       await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
       return state.error;
@@ -1597,8 +1598,8 @@ function AlbumGroup({
   async function bulkMonitor(monitored: boolean) {
     setBulkBusy(true);
     try {
-      await bulkMonitorLibraryV2Releases(artistId, scope, monitored);
-      await awaitBulkJob(queryClient);
+      const jobId = await bulkMonitorLibraryV2Releases(artistId, scope, monitored);
+      await awaitBulkJob(queryClient, jobId);
     } catch {
       // Job endpoint already logs; refresh so the UI shows the actual state.
       await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });

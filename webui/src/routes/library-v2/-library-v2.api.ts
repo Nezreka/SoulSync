@@ -152,13 +152,15 @@ export async function bulkMonitorLibraryV2Releases(
   artistId: number,
   scope: 'albums' | 'eps' | 'singles' | 'all' | 'missing',
   monitored: boolean,
-): Promise<void> {
-  const payload = await readJson<{ success: boolean; error?: string }>(
+): Promise<string> {
+  const payload = await readJson<{ success: boolean; job_id?: string; error?: string }>(
     apiClient.post(`library/v2/artists/${artistId}/releases/monitor`, {
       json: { scope, monitored },
     }),
   );
   if (!payload.success) throw new Error(payload.error || 'Bulk monitor failed');
+  if (!payload.job_id) throw new Error('Bulk monitor did not return a job id');
+  return payload.job_id;
 }
 
 export async function editLibraryV2Artist(
@@ -295,13 +297,15 @@ export async function fetchLibraryV2TagPreview(
   };
 }
 
-export async function writeLibraryV2Tags(trackIds: number[], embedCover = true): Promise<void> {
-  const payload = await readJson<{ success: boolean; error?: string }>(
+export async function writeLibraryV2Tags(trackIds: number[], embedCover = true): Promise<string> {
+  const payload = await readJson<{ success: boolean; job_id?: string; error?: string }>(
     apiClient.post('library/v2/tags/write', {
       json: { track_ids: trackIds, embed_cover: embedCover },
     }),
   );
   if (!payload.success) throw new Error(payload.error || 'Write tags failed');
+  if (!payload.job_id) throw new Error('Tag writer did not return a job id');
+  return payload.job_id;
 }
 
 export interface LibraryV2DuplicateSide {
@@ -372,15 +376,21 @@ export async function runRepairJob(jobId: string, artistName?: string): Promise<
   if (payload.error) throw new Error(payload.error);
 }
 
-export async function startLibraryV2UpgradeScan(): Promise<void> {
-  const payload = await readJson<{ success: boolean; error?: string }>(
+export async function startLibraryV2UpgradeScan(): Promise<string> {
+  const payload = await readJson<{ success: boolean; job_id?: string; error?: string }>(
     apiClient.post('library/v2/upgrade-scan', { json: {} }),
   );
   if (!payload.success) throw new Error(payload.error || 'Upgrade scan failed');
+  if (!payload.job_id) throw new Error('Upgrade scan did not return a job id');
+  return payload.job_id;
 }
 
-export async function fetchLibraryV2JobStatus(): Promise<LibraryV2JobState> {
-  return readJson<LibraryV2JobState>(apiClient.get('library/v2/jobs/status'));
+export async function fetchLibraryV2JobStatus(jobId?: string): Promise<LibraryV2JobState> {
+  const params = new URLSearchParams();
+  if (jobId) params.set('job_id', jobId);
+  return readJson<LibraryV2JobState>(
+    apiClient.get('library/v2/jobs/status', { searchParams: params }),
+  );
 }
 
 export async function fetchLibraryV2Track(trackId: number): Promise<LibraryV2Track> {

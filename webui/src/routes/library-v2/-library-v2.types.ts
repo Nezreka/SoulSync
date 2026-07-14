@@ -181,13 +181,16 @@ export interface LibraryV2ImportState {
 }
 
 export interface LibraryV2JobState {
+  job_id: string | null;
   running: boolean;
   kind: string | null;
   current: number;
   total: number;
   result: Record<string, number> | null;
   error: string | null;
+  started_at: number | null;
   finished_at: number | null;
+  jobs?: LibraryV2JobState[];
 }
 
 export interface LibraryV2DiscographyStats {

@@ -834,12 +834,23 @@ def test_bulk_monitor_updates_rules_projection_and_preserves_explicit_tracks(api
         json={"scope": "all", "monitored": False},
     )
     assert response.status_code == 200
+    started = response.get_json()
+    assert started["job_id"]
     for _ in range(200):
-        status = client.get("/api/library/v2/jobs/status").get_json()
+        status = client.get(
+            "/api/library/v2/jobs/status",
+            query_string={"job_id": started["job_id"]},
+        ).get_json()
         if not status["running"]:
             break
         time.sleep(0.01)
     assert status["running"] is False and status["error"] is None
+    assert status["job_id"] == started["job_id"]
+    assert any(job["job_id"] == started["job_id"] for job in status["jobs"])
+    assert client.get(
+        "/api/library/v2/jobs/status",
+        query_string={"job_id": "unknown"},
+    ).status_code == 404
 
     with _conn(db) as conn:
         explicit = conn.execute(

@@ -72,10 +72,10 @@ export function RetagModal({
     setPhase('writing');
     setMessage(`Writing tags to ${ids.length} file(s)…`);
     try {
-      await writeLibraryV2Tags(ids);
-      // Poll the shared bulk-job status until the write finishes.
+      const jobId = await writeLibraryV2Tags(ids);
+      // Poll this write only; other background jobs have independent ids.
       for (let i = 0; i < 600; i += 1) {
-        const state = await fetchLibraryV2JobStatus();
+        const state = await fetchLibraryV2JobStatus(jobId);
         if (!state.running) {
           if (state.error) throw new Error(state.error);
           const r = state.result ?? {};

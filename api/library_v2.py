@@ -24,6 +24,7 @@ from typing import Any, Callable, Dict, List, Optional
 from flask import jsonify, request, send_file
 
 from core.library2 import ADMIN_PROFILE_ID
+from core.library2.job_registry import JobAlreadyRunning, JobRegistry
 from utils.logging_config import get_logger
 
 logger = get_logger("api.library_v2")
@@ -34,12 +35,9 @@ _import_state: Dict[str, Any] = {"running": False, "stage": None, "current": 0,
                                  "total": 0, "stats": None, "error": None,
                                  "finished_at": None}
 
-# Bulk monitor / upgrade-scan job state (background; tracklist resolution can
-# hit metadata providers once per release, so these must not block a request).
-_job_lock = threading.Lock()
-_job_state: Dict[str, Any] = {"running": False, "kind": None, "current": 0,
-                              "total": 0, "result": None, "error": None,
-                              "finished_at": None}
+# Background jobs are independent by opaque id. Duplicate kinds serialize;
+# monitor/upgrade/retag may run concurrently without overwriting each other.
+_job_registry = JobRegistry()
 
 _MONITOR_TABLES = {"artists": "lib2_artists", "albums": "lib2_albums", "tracks": "lib2_tracks"}
 _PROFILE_TABLES = {"artists": "lib2_artists", "albums": "lib2_albums", "tracks": "lib2_tracks"}
@@ -1580,11 +1578,17 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         }.get(scope)
         if not type_filter:
             return jsonify({"success": False, "error": "Unknown scope"}), 400
-        with _job_lock:
-            if _job_state["running"]:
-                return jsonify({"success": False, "error": "A bulk job is already running"}), 409
-            _job_state.update(running=True, kind=f"monitor:{scope}", current=0,
-                              total=0, result=None, error=None, finished_at=None)
+        try:
+            # All monitor scopes mutate the same rule/projection set and must
+            # therefore serialize with each other. Other job kinds stay free.
+            job = _job_registry.start("monitor")
+        except JobAlreadyRunning as exc:
+            return jsonify({
+                "success": False,
+                "error": str(exc),
+                "job_id": exc.state["job_id"],
+            }), 409
+        job_id = job["job_id"]
 
         # Resolve the active profile OUTSIDE the thread (request context) —
         # _profile() degrades to 1 without one, which would mirror into the
@@ -1592,7 +1596,6 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         active_profile = _profile()
 
         def _run():
-            import time as _t
             db = get_database()
             try:
                 conn = db._get_connection()
@@ -1601,10 +1604,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                         f"""SELECT al.id FROM lib2_album_artists aa
                             JOIN lib2_albums al ON al.id = aa.album_id
                            WHERE aa.artist_id = ? AND {type_filter}""", (artist_id,))]
-                    _job_state.update(total=len(albums))
+                    _job_registry.update(job_id, total=len(albums))
                     mirrored = 0
                     for i, album_id in enumerate(albums):
-                        _job_state.update(current=i)
+                        _job_registry.update(job_id, current=i)
                         if monitored:
                             has_tracks = conn.execute(
                                 "SELECT 1 FROM lib2_tracks WHERE album_id=? LIMIT 1",
@@ -1683,24 +1686,43 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                                 track_ids,
                                 profile_id=active_profile,
                             )
-                    _job_state.update(result={"albums": len(albums), "mirrored": mirrored})
+                    _job_registry.update(
+                        job_id,
+                        result={"albums": len(albums), "mirrored": mirrored},
+                    )
                 finally:
                     conn.close()
             except Exception as e:  # noqa: BLE001
                 logger.error("Bulk monitor failed (artist %s): %s", artist_id, e, exc_info=True)
-                _job_state.update(error=str(e))
+                _job_registry.update(job_id, error=str(e))
             finally:
-                _job_state.update(running=False, finished_at=_t.time())
+                _job_registry.finish(job_id)
 
         threading.Thread(target=_run, name="lib2-bulk-monitor", daemon=True).start()
-        return jsonify({"success": True, "started": True})
+        return jsonify({"success": True, "started": True, "job_id": job_id})
 
     @app.route("/api/library/v2/jobs/status")
     def lib2_job_status():
         guard = _guard()
         if guard:
             return guard
-        return jsonify({"success": True, **_job_state})
+        job_id = str(request.args.get("job_id") or "").strip()
+        state = _job_registry.get(job_id) if job_id else _job_registry.latest()
+        if job_id and state is None:
+            return jsonify({"success": False, "error": "Job not found"}), 404
+        if state is None:
+            state = {
+                "job_id": None,
+                "running": False,
+                "kind": None,
+                "current": 0,
+                "total": 0,
+                "result": None,
+                "error": None,
+                "started_at": None,
+                "finished_at": None,
+            }
+        return jsonify({"success": True, **state, "jobs": _job_registry.list()})
 
     # -- edit / delete / history (Lidarr artist-page actions) ------------------
 
@@ -2158,24 +2180,27 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         guard = _guard()
         if guard:
             return guard
-        with _job_lock:
-            if _job_state["running"]:
-                return jsonify({"success": False, "error": "A bulk job is already running"}), 409
-            _job_state.update(running=True, kind="upgrade-scan", current=0,
-                              total=0, result=None, error=None, finished_at=None)
+        try:
+            job = _job_registry.start("upgrade-scan")
+        except JobAlreadyRunning as exc:
+            return jsonify({
+                "success": False,
+                "error": str(exc),
+                "job_id": exc.state["job_id"],
+            }), 409
+        job_id = job["job_id"]
 
         # Resolve the active profile OUTSIDE the thread (request context).
         active_profile = _profile()
 
         def _run():
-            import time as _t
             db = get_database()
             try:
                 conn = db._get_connection()
                 try:
                     from core.library2.wishlist_mirror import upgrade_candidate_track_ids
                     track_ids = upgrade_candidate_track_ids(conn)
-                    _job_state.update(total=len(track_ids))
+                    _job_registry.update(job_id, total=len(track_ids))
                     # _mirror_tracks_wishlist re-checks upgrade_candidate per
                     # track and only queues genuine upgrade candidates.
                     from core.library2.wishlist_mirror import (
@@ -2187,17 +2212,20 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                         track_ids,
                         profile_id=active_profile,
                     )
-                    _job_state.update(result={"checked": len(track_ids), "queued": queued})
+                    _job_registry.update(
+                        job_id,
+                        result={"checked": len(track_ids), "queued": queued},
+                    )
                 finally:
                     conn.close()
             except Exception as e:  # noqa: BLE001
                 logger.error("Upgrade scan failed: %s", e, exc_info=True)
-                _job_state.update(error=str(e))
+                _job_registry.update(job_id, error=str(e))
             finally:
-                _job_state.update(running=False, finished_at=_t.time())
+                _job_registry.finish(job_id)
 
         threading.Thread(target=_run, name="lib2-upgrade-scan", daemon=True).start()
-        return jsonify({"success": True, "started": True})
+        return jsonify({"success": True, "started": True, "job_id": job_id})
 
     # -- Phase C: tag preview / re-tag -----------------------------------------
 
@@ -2245,36 +2273,38 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         embed_cover = bool(body.get("embed_cover", True))
         if not track_ids:
             return jsonify({"success": False, "error": "No track_ids"}), 400
-        with _job_lock:
-            if _job_state["running"]:
-                return jsonify({"success": False, "error": "A bulk job is already running"}), 409
-            _job_state.update(running=True, kind="retag", current=0,
-                              total=len(track_ids), result=None, error=None,
-                              finished_at=None)
+        try:
+            job = _job_registry.start("retag", total=len(track_ids))
+        except JobAlreadyRunning as exc:
+            return jsonify({
+                "success": False,
+                "error": str(exc),
+                "job_id": exc.state["job_id"],
+            }), 409
+        job_id = job["job_id"]
 
         def _run():
-            import time as _t
             from core.library2 import retag
             db = get_database()
             try:
                 conn = db._get_connection()
                 try:
                     def _progress(_stage, current, total):
-                        _job_state.update(current=current, total=total)
+                        _job_registry.update(job_id, current=current, total=total)
                     stats = retag.write_tags(db, conn, track_ids,
                                              embed_cover=embed_cover,
                                              progress=_progress)
-                    _job_state.update(result=stats)
+                    _job_registry.update(job_id, result=stats)
                 finally:
                     conn.close()
             except Exception as e:  # noqa: BLE001
                 logger.error("Library v2 retag failed: %s", e, exc_info=True)
-                _job_state.update(error=str(e))
+                _job_registry.update(job_id, error=str(e))
             finally:
-                _job_state.update(running=False, finished_at=_t.time())
+                _job_registry.finish(job_id)
 
         threading.Thread(target=_run, name="lib2-retag", daemon=True).start()
-        return jsonify({"success": True, "started": True})
+        return jsonify({"success": True, "started": True, "job_id": job_id})
 
     # -- refresh & scan (re-read tags into DB + bust artwork cache) -----------
 

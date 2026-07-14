@@ -1488,12 +1488,15 @@ implementiert und größtenteils solide.
   (`visibleReleases`). B8 zeigte, wie die Kopien auseinanderlaufen konnten.
   Vorschlag: die API liefert ein berechnetes `in_library`-Flag pro Release,
   UI und Stats konsumieren nur noch dieses Feld.
-- **A3 — Job-Registry statt zweier Modul-globaler Dicts.** `_import_state`/
-  `_job_state` sind faktisch ein Ein-Slot-Scheduler. Ein Mini-Registry
-  (`{job_id: state}`, Endpoint `/jobs/<id>`) macht Bulk-Monitor, Retag und
-  Upgrade-Scan parallel möglich, beseitigt M8 und ist Voraussetzung für
-  Multi-User. Alternativ: die Jobs in den bestehenden RepairWorker hängen.
-  **Weiterhin offen** (siehe Abschnitt 7).
+- ~~**A3 — Job-Registry statt zweier Modul-globaler Dicts.**~~ `_job_state`
+  war faktisch ein Ein-Slot-Scheduler. **Umgesetzt 2026-07-14:** Eine kleine
+  threadsichere Registry hält opaque Job-IDs und unabhängige Zustände;
+  Bulk-Monitor, Retag und Upgrade-Scan dürfen als verschiedene Jobtypen
+  parallel laufen, doppelte Typen bleiben serialisiert. Startantworten liefern
+  `job_id`, der React-Client pollt genau diese ID, und `/jobs/status` behält
+  den kompatiblen Latest-Fallback ohne ID. Der Importjob bleibt bewusst bei
+  seinem eigenen exklusiven Import-Slot, weil parallele Full-Imports nicht
+  zulässig sind (siehe Abschnitt 7).
 - **A4 — Wishlist→Autolink über `lib2_track_id` schließen.**
   `wishlist_mirror` legt `_source_info.lib2_track_id` auf die Wishlist-Row —
   aber `autolink` matcht den fertigen Download wieder per
@@ -1824,9 +1827,22 @@ verändert; daher waren Frontend-Typecheck/Vitest/Build nicht erforderlich.
    Rule-/Wanted-/Stable-ID-/Discography-/API-Tests sind grün.
    **Nächster logischer Schritt:** Roadmap-Punkt 7, die globale `_job_state`-
    Einzelbelegung in eine Job-ID-Registry überführen.
-7. **Job-Registry** (M8/A3): heute teilen sich Bulk-Monitor/Retag/
-   Upgrade-Scan EINEN globalen Job-Slot (`_job_state`) — vor Multi-User-
-   Nutzung auf Job-IDs umstellen.
+7. ~~**Job-Registry** (M8/A3): Bulk-Monitor/Retag/Upgrade-Scan vom globalen
+   `_job_state` auf Job-IDs umstellen.~~ **Abgeschlossen 2026-07-14:** Die
+   threadsichere In-Process-Registry verwaltet pro Lauf eine opaque UUID,
+   Zeitstempel, Fortschritt, Ergebnis und Fehler. Unterschiedliche Typen
+   laufen unabhängig; doppelte Retag-/Upgrade-/Monitor-Jobs werden mit 409 und
+   der bereits aktiven Job-ID abgewiesen. Alle Monitor-Scopes teilen bewusst
+   einen Typ, weil sie dieselben Rules/Projections verändern. Die drei
+   Startendpunkte liefern `job_id`; gezieltes `GET /jobs/status?job_id=...`
+   verhindert Cross-Job-Races im React-Client, während der Statusaufruf ohne
+   ID als kompatibler Latest-Fallback bestehen bleibt und zusätzlich die
+   Registry-Sicht liefert. 51 gezielte Python-Tests plus Ruff sowie Frontend-
+   Check/Typecheck, 96 Vitest-Tests und Production-Build sind grün.
+   **Nächster logischer Schritt:** Roadmap-Punkt 8 — das vorhandene zentrale
+   Override-/Read-Projection-Fundament für breiteres Metadaten-Edit und eine
+   deep-linkbare Album-Detailansicht nutzen, ohne Provider-Snapshots direkt zu
+   überschreiben.
 8. **Breiteres Metadaten-Edit** (Titel/Jahr/Artists) über den
    Release-Type-Edit hinaus; deep-linkbare Album-Detail-Ansicht.
 9. **Artist-Scope für Reorganize/Dedup** (brauchen Pfad-Scoping, kein
