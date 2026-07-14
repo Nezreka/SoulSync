@@ -3132,3 +3132,34 @@ Basierend auf Nutzer-Feedback und real-world Testlauf, aufzunehmend nach Abschlu
 ---
 
 **Session 2026-07-14 Abschluss:** Branch bleibt clean, alle Tests bestanden bis Punkt 37. Die Punkte 38–44 sind als separate Aufgaben zu verstehen, die in zukünftigen Sessions aufgegriffen werden.
+
+---
+
+## 13. UI-Improvements Session (2026-07-14, späte Session)
+
+**Dokumentation:** `docs/library-v2-ui-requirements.md` konsolidiert alle Nutzer-Anforderungen zur UI-Verbesserung (Icons, Labels, visuelle Hierarchie).
+
+**Umgesetzt in dieser Session (Klein-Commits):**
+
+1. **Quality Display Refactor** (`f170dc65`):
+   - Neue `QualityDisplay`-Komponente statt `detailedQualityText()` String
+   - Format, Resolution (Bit-Depth/Sample-Rate), Bitrate als separate visuelle Blöcke
+   - CSS Styles für `.qualityDisplay`, `.qualityBlock`, `.qualityMissing`
+   - Bessere Lesbarkeit ohne Schrägstrich-Noise
+   - Frontend: 121 Tests, TypeCheck sauber, Build erfolgreich
+
+2. **Search Action Labels & Icons (Lidarr-Alignment)** (`07f87a61`):
+   - "Search All Monitored (global)" → "Search (global)" (icon: automatic/Lupe)
+   - "Search All Upgrades (global)" → "Search Upgrades (global)"
+   - "Interactive Search" unverändert (icon: interactive/Mensch-Silhouette)
+   - Improved Tooltips für semantische Klarheit
+   - Frontend: 121 Tests, TypeCheck sauber, Build erfolgreich
+
+**Nicht umgesetzt (braucht Backend/API-Änderung):**
+
+- **Quality Profile vor Expand zeigen:** `LibraryV2AlbumSummary` hat nur `quality_profile_id`, nicht den vollen Profil-Namen. Entweder API-Erweiterung (Summary-View mit Profil-Objekt) oder UI-seitige ID→Name-Auflösung. Priorisiert für nächste Session.
+- **Managed Tracks Fixes:** Backend-Query-Bug (Roadmap 39)
+- **Update Discovery Robustheit:** Backend-Audit (Roadmap 38)
+- **Artist Aliasing:** Design + Implementation (Roadmap 40–41)
+
+**Nächste Session:** Entweder Quality-Profile-Frontend-Lookups (schnell), oder eine der Backend-Roadmap-Punkte (38/39 Priorität: Critical).
