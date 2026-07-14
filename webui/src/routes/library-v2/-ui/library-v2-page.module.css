@@ -1483,6 +1483,7 @@
 
 .qBelow,
 .qUpgrade,
+.qUnknown,
 .qMeets,
 .qAcceptable {
   margin-left: 8px;
@@ -1501,6 +1502,11 @@
 .qUpgrade {
   background: rgba(245, 158, 11, 0.16);
   color: rgb(245, 158, 11);
+}
+
+.qUnknown {
+  background: rgba(96, 165, 250, 0.16);
+  color: rgb(147, 197, 253);
 }
 
 .qMeets {

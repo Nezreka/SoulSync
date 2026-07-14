@@ -15,8 +15,8 @@ wishlist/download pipeline resolves via ``core/quality/selection``), so the
 badges here and the pipeline's accept/upgrade decisions can't drift apart.
 
 This is the read-side that powers the "meets profile / upgrade available" badges and
-feeds the upgrade search. Never raises — unknown/unreadable quality is treated as
-satisfying the profile so nothing is falsely flagged.
+feeds the upgrade search. Never raises — unknown/unreadable quality is represented
+as a third state (``None``), never as a false successful evaluation.
 """
 
 from __future__ import annotations
@@ -78,7 +78,7 @@ def profile_targets(profile_row: Optional[Dict[str, Any]]) -> Tuple[List[Any], s
 
 def evaluate_file(file_row: Optional[Dict[str, Any]], targets: List[Any],
                   upgrade_policy: str, cutoff_index: int = 0) -> Dict[str, Any]:
-    """Return ``{meets_profile, upgrade_candidate}`` for one file.
+    """Return tri-state ``{meets_profile, upgrade_candidate}`` for one file.
 
     Policy contract: ``acceptable`` stops at any matching target,
     ``until_cutoff`` stops at ``cutoff_index`` or better, and legacy
@@ -87,13 +87,13 @@ def evaluate_file(file_row: Optional[Dict[str, Any]], targets: List[Any],
     if not targets:
         return {"meets_profile": True, "upgrade_candidate": False}
     aq = audio_quality_from_file(file_row)
-    if aq is None:
-        return {"meets_profile": True, "upgrade_candidate": False}
+    if aq is None or str(aq.format or "").strip().lower() == "unknown":
+        return {"meets_profile": None, "upgrade_candidate": None}
     try:
         from core.quality.model import rank_candidate
         idx, _score = rank_candidate(aq, targets)
     except Exception:
-        return {"meets_profile": True, "upgrade_candidate": False}
+        return {"meets_profile": None, "upgrade_candidate": None}
     meets = idx < len(targets)
     if is_upgrade_policy(upgrade_policy):
         # Done once the cutoff target (or better) is reached; 'until_top' is

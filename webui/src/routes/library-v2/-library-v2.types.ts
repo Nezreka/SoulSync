@@ -134,9 +134,9 @@ export interface LibraryV2Track {
   file_status: 'present' | 'missing' | 'duplicate_single';
   metadata_gaps: string[];
   is_missing?: boolean;
-  /** Quality vs the album's profile (null for missing rows). */
+  /** Quality vs the album's profile (null when missing or not measurable). */
   meets_profile?: boolean | null;
-  upgrade_candidate?: boolean;
+  upgrade_candidate?: boolean | null;
 }
 
 export interface LibraryV2AlbumDetail {

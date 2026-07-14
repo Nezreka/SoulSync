@@ -2791,15 +2791,7 @@ function TrackRow({
       <td>{track.artists.map((a) => a.name).join(', ')}</td>
       <td className={styles.qualityText}>
         {detailedQualityText(track.file)}
-        {track.file && track.meets_profile === false ? (
-          <span className={styles.qBelow} title="Below the album's quality profile">
-            below profile
-          </span>
-        ) : track.file && track.upgrade_candidate ? (
-          <span className={styles.qUpgrade} title="A higher-quality version may be available">
-            upgrade ↑
-          </span>
-        ) : null}
+        <TrackQualityProfileBadge track={track} />
       </td>
       <td>
         <FileStatusBadge status={track.file_status} />
@@ -2839,6 +2831,32 @@ function TrackRow({
       </td>
     </tr>
   );
+}
+
+export function TrackQualityProfileBadge({ track }: { track: LibraryV2Track }) {
+  if (!track.file) return null;
+  if (track.meets_profile === false) {
+    return (
+      <span className={styles.qBelow} title="Below the album's quality profile">
+        below profile
+      </span>
+    );
+  }
+  if (track.upgrade_candidate === true) {
+    return (
+      <span className={styles.qUpgrade} title="A higher-quality version may be available">
+        upgrade ↑
+      </span>
+    );
+  }
+  if (track.meets_profile === null) {
+    return (
+      <span className={styles.qUnknown} title="Scan the file to evaluate its quality profile">
+        quality unknown
+      </span>
+    );
+  }
+  return null;
 }
 
 function FileStatusBadge({ status }: { status: LibraryV2Track['file_status'] }) {

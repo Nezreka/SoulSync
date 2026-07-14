@@ -121,6 +121,26 @@ def test_get_album_shows_expected_missing_track_rows(imported_conn):
     assert missing_rows[1]["metadata_gaps"] == []
 
 
+def test_get_album_preserves_unknown_present_file_quality(imported_conn):
+    track_id = imported_conn.execute(
+        "SELECT id FROM lib2_tracks WHERE legacy_track_id=100"
+    ).fetchone()[0]
+    album_id = imported_conn.execute(
+        "SELECT album_id FROM lib2_tracks WHERE id=?", (track_id,)
+    ).fetchone()[0]
+    imported_conn.execute(
+        "UPDATE lib2_track_files SET format='unknown' WHERE track_id=?",
+        (track_id,),
+    )
+
+    album = Q.get_album(imported_conn, album_id)
+    track = next(item for item in album["tracks"] if item["id"] == track_id)
+
+    assert track["file_status"] == "present"
+    assert track["meets_profile"] is None
+    assert track["upgrade_candidate"] is None
+
+
 def test_get_album_single_is_duplicate(imported_conn):
     single_id = imported_conn.execute(
         "SELECT id FROM lib2_albums WHERE title='One Dance'").fetchone()[0]

@@ -102,3 +102,17 @@ def test_payload_carries_app_wide_profile_id(imported_conn):
     # An MP3 under an until_cutoff FLAC-only profile is an upgrade candidate.
     assert payload["_should_queue"] is True
     assert payload["_source_info"]["quality_profile_id"] == profile_id
+
+
+def test_unknown_quality_queues_existing_file_for_shared_probe_pipeline(imported_conn):
+    track_id = _seed(imported_conn, policy="until_cutoff")
+    imported_conn.execute(
+        "UPDATE lib2_track_files SET format='unknown' WHERE track_id=?",
+        (track_id,),
+    )
+
+    payload = track_wishlist_payload(imported_conn, track_id)
+
+    assert payload is not None
+    assert payload["_should_queue"] is True
+    assert payload["_source_info"]["quality_evaluation"] == "unknown"

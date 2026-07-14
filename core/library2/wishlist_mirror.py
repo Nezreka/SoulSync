@@ -62,15 +62,25 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
 
     from core.library2.quality_eval import is_upgrade_policy
     should_queue = not bool(t["has_file"])
+    quality_evaluation = "not_applicable"
     if t["has_file"] and is_upgrade_policy(profile_info["upgrade_policy"]):
         try:
             from core.library2.quality_eval import evaluate_file, profile_targets
             targets, upgrade_policy, cutoff = profile_targets(profile_info)
-            should_queue = bool(evaluate_file(
-                file_info, targets, upgrade_policy, cutoff)["upgrade_candidate"])
+            evaluation = evaluate_file(file_info, targets, upgrade_policy, cutoff)
+            candidate = evaluation["upgrade_candidate"]
+            quality_evaluation = (
+                "unknown" if candidate is None
+                else "upgrade_candidate" if candidate
+                else "satisfied"
+            )
+            # Unknown quality must enter the existing probe/upgrade pipeline;
+            # silently treating it as satisfied would suppress re-evaluation.
+            should_queue = candidate is not False
         except Exception as e:  # noqa: BLE001
             logger.debug("quality-profile upgrade check failed (track %s): %s", track_id, e)
             should_queue = False
+            quality_evaluation = "error"
 
     return {
         "id": source_track_id, "name": t["title"],
@@ -100,6 +110,7 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
             "quality_profile_name": profile_info["name"],
             "upgrade_policy": profile_info["upgrade_policy"],
             "upgrade_check": bool(t["has_file"]),
+            "quality_evaluation": quality_evaluation,
         },
     }
 

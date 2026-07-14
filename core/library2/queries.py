@@ -545,8 +545,12 @@ def get_album(conn, album_id: int) -> Optional[Dict[str, Any]]:
         if t.get("file") and t["file_status"] != "missing":
             ev = evaluate_file(t["file"], targets, upgrade_policy, cutoff_index)
             t["meets_profile"] = ev["meets_profile"]
-            t["upgrade_candidate"] = bool(t["monitored"] and ev["upgrade_candidate"])
-            if t["upgrade_candidate"]:
+            candidate = ev["upgrade_candidate"]
+            t["upgrade_candidate"] = (
+                None if candidate is None
+                else bool(t["monitored"] and candidate)
+            )
+            if t["upgrade_candidate"] is True:
                 upgrades_available += 1
         else:
             t["meets_profile"] = None

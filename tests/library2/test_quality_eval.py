@@ -53,7 +53,31 @@ def test_is_upgrade_policy():
     assert not is_upgrade_policy(None)
 
 
-def test_unknown_quality_never_flags():
+def test_unknown_quality_is_not_reported_as_satisfied():
     targets, policy, cutoff = profile_targets(_profile("until_cutoff"))
     ev = evaluate_file(None, targets, policy, cutoff)
-    assert ev == {"meets_profile": True, "upgrade_candidate": False}
+    assert ev == {"meets_profile": None, "upgrade_candidate": None}
+
+
+def test_explicit_unknown_format_is_tristate():
+    targets, policy, cutoff = profile_targets(_profile("until_cutoff"))
+    ev = evaluate_file({"format": "unknown"}, targets, policy, cutoff)
+    assert ev == {"meets_profile": None, "upgrade_candidate": None}
+
+
+def test_invalid_quality_values_are_tristate():
+    targets, policy, cutoff = profile_targets(_profile("until_cutoff"))
+    ev = evaluate_file(
+        {"format": "flac", "bit_depth": "not-a-number"},
+        targets,
+        policy,
+        cutoff,
+    )
+    assert ev == {"meets_profile": None, "upgrade_candidate": None}
+
+
+def test_missing_quality_without_targets_remains_unconstrained():
+    assert evaluate_file(None, [], "acceptable") == {
+        "meets_profile": True,
+        "upgrade_candidate": False,
+    }

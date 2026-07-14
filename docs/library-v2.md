@@ -2400,6 +2400,24 @@ bekannte Main-Chunk-Hinweis). **Logischer nächster Schritt:** P2-06 als kleinst
     **Nächster logischer Schritt:** P2-16 — fehlende oder ungültige
     Qualitätsinformationen im zentralen `quality_eval.py` als explizites
     `unknown` statt als fälschliches `meets_profile=True` modellieren.
+35. ~~**Tri-State-Qualitätsauswertung (P2-16).**~~ **Abgeschlossen
+    2026-07-14:** Das bestehende zentrale `quality_eval.py` liefert für eine
+    fehlende, explizit unbekannte oder ungültige Dateiqualität nun
+    `meets_profile=null` und `upgrade_candidate=null`; ein Profil ohne Ziele
+    bleibt dagegen korrekt unbeschränkt. Albumdetail und React-Typvertrag
+    bewahren den dritten Zustand, und die UI zeigt „quality unknown“ mit dem
+    Hinweis auf Refresh & Scan statt eines stillen Erfolgs. Der bestehende
+    Wishlist-Mirror schickt unbekannte Qualität bei aktivem Upgrade-Profil zur
+    erneuten Prüfung durch dieselbe Probe-/Upgrade-Pipeline und kennzeichnet
+    diese Entscheidung im vorhandenen `source_info`; bekannte erfüllte und
+    echte Upgrade-Fälle bleiben unverändert getrennt. Es entstand keine zweite
+    Quality-Decision-Engine. **37 gezielte Quality-/Query-/Wishlist-/Parity-
+    Tests**, **10 Library-v2-Vitest-Dateien / 25 Tests**, Frontend-Format/Lint/
+    Typecheck, Production-Build und Ruff sind grün (nur der bekannte
+    Main-Chunk-Hinweis). **Nächster logischer Schritt:** P2-17 — die
+    Albumdetail-/Index-Queries mit realistischen Row-Counts profilieren und
+    zunächst die belegten N+1-/korrelierten Hotspots in den bestehenden Query-
+    Helpern bündeln.
 
 **Session-Abschluss-Gate 2026-07-14:** Seit dem vorherigen Full-Gate wurden
 Roadmap 13 sowie 16–23 und Phase E vollständig abgeschlossen und jeweils
@@ -2776,9 +2794,11 @@ Priorität, kompakt aufgelistet für spätere Aufnahme):
   Edition wählen (kein Jahr-/Trackcount-/UPC-Abgleich).~~ **Behoben
   2026-07-14:** der bestehende typed Adapter prüft namenbasierte Treffer gegen
   effektive Default-Editionsfakten (Roadmap-Punkt 34).
-- P2-16: `quality_eval.py` behandelt fehlende/ungültige Qualität als
+- ~~P2-16: `quality_eval.py` behandelt fehlende/ungültige Qualität als
   „meets_profile=True" — unterdrückt nötige Scans/Upgrades statt eines
-  dritten `unknown`-Zustands.
+  dritten `unknown`-Zustands.~~ **Behoben 2026-07-14:** Tri-State-Auswertung
+  bleibt von Backend über Wishlist-Consumer bis zur UI erhalten
+  (Roadmap-Punkt 35).
 - P2-17: Albumdetail/Index-Stats skalieren mit N+1-Queries und korrelierten
   Subqueries — bei großen Libraries sichtbar (verwandt mit A5/Roadmap-Punkt 12).
 - P2-18: Fehlende Request-Validierung erzeugt vermeidbare 500er (ungeschütztes
