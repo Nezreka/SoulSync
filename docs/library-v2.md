@@ -1694,6 +1694,18 @@ P2-05 und eine Reihe P2-UX/Robustheits-Findings).
 2 skipped, 2 deselected in 291.41s**. Die zwei Skips sind weiterhin die
 bewusst opt-in markierten Live-Deployment-Varianten. Frontend unberührt;
 daher keine Frontend-Gates erforderlich.
+
+**Session-Abschluss-Gate 2026-07-14 (Roadmap-3-Fortsetzung):** Die volle
+Python-Suite nach den Legacy-Shadow-, Prepare→Dispatch→Bind-, Strict-Gate- und
+Coverage-Slices ist grün: **8132 passed, 2 skipped, 2 deselected, 302 warnings
+in 212.62s**. Die zwei Skips sind weiterhin ausschließlich die bewusst opt-in
+Live-Deployment-Varianten. Frontend-Code wurde in dieser Session nicht
+verändert; daher waren Frontend-Typecheck/Vitest/Build nicht erforderlich.
+**Nächster logischer Schritt:** reale Docker-Coverage-Acceptance für
+`/api/library/v2/acquisition/correlation-coverage` mit Gate aus, danach das
+Gate aktivieren und je einen echten Manual- und Wishlist-Recording-Dispatch
+smoke-testen. Ist `ready=true` ohne `unprepared_dispatched`, Roadmap-Punkt 3
+schließen und mit Punkt 4 (Identity/Provenance) fortfahren.
 4. Phase-3-Identity/Provenance fertigstellen: dedizierte externe-/
    Old-ID-History, Merge-/Move-History, Field-Level-User-Overrides und
    Read-Projection. Typed Adapters über Discography/Tracklist hinaus
