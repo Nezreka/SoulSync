@@ -232,6 +232,7 @@ def _correlate_grab(
     legacy_download_id: Optional[str],
     history_event: str,
     rejection_reason_code: str,
+    grab_status: str,
     config_get: Optional[Callable[..., Any]] = None,
     now: Optional[float] = None,
 ) -> Optional[Dict[str, str]]:
@@ -247,7 +248,7 @@ def _correlate_grab(
     from core.acquisition.catalog import resolve_request_context
     from core.acquisition.decisions import record_decision
     from core.acquisition.eligibility_gate import EligibilityGate, RuntimeContext
-    from core.acquisition.grabs import STATUS_DOWNLOADING, record_grab
+    from core.acquisition.grabs import record_grab
     from core.acquisition.history import record_history_event
     from core.acquisition.requests import create_request, transition_request
 
@@ -364,7 +365,7 @@ def _correlate_grab(
             "legacy_download_id": str(legacy_download_id) if legacy_download_id else None,
             **grab_context_extra,
         },
-        status=STATUS_DOWNLOADING,
+        status=grab_status,
     )
     record_history_event(
         conn,
@@ -420,6 +421,47 @@ def correlate_manual_grab(
         },
         history_event="manual_grab_correlated",
         rejection_reason_code="gate_rejections_overridden_by_manual_pick",
+        grab_status="downloading",
+        config_get=config_get,
+        now=now,
+    )
+
+
+def prepare_manual_grab(
+    conn: Any,
+    *,
+    lib2_context: Optional[Mapping[str, Any]] = None,
+    target_context: Optional[Mapping[str, Any]] = None,
+    search_result: Mapping[str, Any],
+    source: str,
+    batch_id: Optional[str] = None,
+    config_get: Optional[Callable[..., Any]] = None,
+    now: Optional[float] = None,
+) -> Optional[Dict[str, str]]:
+    """Persist a manual correlation before the external client dispatch."""
+    download_id = "manual-" + str(uuid.uuid4())
+    dispatch_options: Dict[str, Any] = {}
+    if batch_id:
+        dispatch_options["manual_batch_id"] = str(batch_id)
+    return _correlate_grab(
+        conn,
+        lib2_context=lib2_context,
+        target_context=target_context,
+        search_result=search_result,
+        source=source,
+        trigger="manual",
+        download_id=download_id,
+        idempotency_key=MANUAL_GRAB_KEY_PREFIX + download_id,
+        shadow_source="legacy_interactive",
+        dispatch_options=dispatch_options,
+        legacy_download_id=None,
+        grab_context_extra={
+            "manual_pick": True,
+            "manual_batch_id": str(batch_id) if batch_id else None,
+        },
+        history_event="manual_grab_correlated",
+        rejection_reason_code="gate_rejections_overridden_by_manual_pick",
+        grab_status="submitting",
         config_get=config_get,
         now=now,
     )
@@ -469,6 +511,7 @@ def correlate_scheduled_grab(
         },
         history_event="scheduled_grab_correlated",
         rejection_reason_code="gate_rejections_observed_not_enforced",
+        grab_status="downloading",
         config_get=config_get,
         now=now,
     )
@@ -534,6 +577,29 @@ def try_correlate_manual_grab(
     )
 
 
+def try_prepare_manual_grab(
+    *,
+    lib2_context: Optional[Mapping[str, Any]],
+    target_context: Optional[Mapping[str, Any]] = None,
+    search_result: Mapping[str, Any],
+    source: str,
+    batch_id: Optional[str] = None,
+    connection_factory: Optional[Callable[[], Any]] = None,
+    config_get: Optional[Callable[..., Any]] = None,
+) -> Optional[Dict[str, str]]:
+    """Fail-open preparation before one manual external dispatch."""
+    return _try_correlate(
+        prepare_manual_grab,
+        lib2_context=lib2_context,
+        target_context=target_context,
+        connection_factory=connection_factory,
+        search_result=search_result,
+        source=source,
+        batch_id=batch_id,
+        config_get=config_get,
+    )
+
+
 def try_correlate_scheduled_grab(
     *,
     lib2_context: Optional[Mapping[str, Any]],
@@ -559,6 +625,102 @@ def try_correlate_scheduled_grab(
         legacy_download_id=legacy_download_id,
         config_get=config_get,
     )
+
+
+def bind_correlated_grab_transfer(
+    markers: Optional[Mapping[str, Any]],
+    legacy_download_id: Any,
+    *,
+    connection_factory: Optional[Callable[[], Any]] = None,
+) -> bool:
+    """Attach a successful legacy-client transfer to a prepared grab."""
+    download_id = str((markers or {}).get("download_id") or "").strip()
+    transfer_id = str(legacy_download_id or "").strip()
+    if not download_id or not transfer_id:
+        return False
+    try:
+        if connection_factory is None:
+            from database.music_database import get_database
+            connection_factory = get_database()._get_connection
+        conn = connection_factory()
+        try:
+            from core.acquisition.grabs import (
+                get_grab,
+                patch_grab_context,
+                update_grab,
+            )
+            from core.acquisition.history import record_history_event
+
+            grab = get_grab(conn, download_id)
+            if grab is None or grab["status"] not in {"submitting", "downloading"}:
+                return False
+            existing = str(grab["context"].get("legacy_download_id") or "")
+            if existing:
+                return existing == transfer_id
+            if not patch_grab_context(
+                conn, download_id, {"legacy_download_id": transfer_id}
+            ):
+                return False
+            update_grab(
+                conn,
+                download_id,
+                status="downloading",
+                last_client_state="legacy_dispatched",
+            )
+            record_history_event(
+                conn,
+                "grab_submitted",
+                request_id=grab.get("acquisition_request_id"),
+                candidate_id=grab.get("release_candidate_id"),
+                download_id=download_id,
+                payload={"source": grab.get("source"), "client": "legacy"},
+            )
+            conn.commit()
+            return True
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+    except Exception as exc:  # noqa: BLE001 - dispatch already succeeded
+        logger.debug("legacy grab transfer binding skipped: %s", exc)
+        return False
+
+
+def fail_prepared_correlated_grab(
+    markers: Optional[Mapping[str, Any]],
+    error: Any,
+    *,
+    connection_factory: Optional[Callable[[], Any]] = None,
+) -> bool:
+    """Close a prepared correlation after an unambiguous dispatch failure."""
+    download_id = str((markers or {}).get("download_id") or "").strip()
+    if not download_id:
+        return False
+    try:
+        if connection_factory is None:
+            from database.music_database import get_database
+            connection_factory = get_database()._get_connection
+        conn = connection_factory()
+        try:
+            from core.acquisition.workflow import record_grab_outcome
+            record_grab_outcome(
+                conn,
+                download_id,
+                completed=False,
+                failure_kind="runtime",
+                error=str(error or "legacy client rejected the dispatch"),
+            )
+            conn.commit()
+            return True
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+    except Exception as exc:  # noqa: BLE001 - fail-open bookkeeping
+        logger.debug("prepared legacy grab failure could not be recorded: %s", exc)
+        return False
 
 
 def fail_stale_correlated_grabs(
@@ -622,7 +784,11 @@ __all__ = [
     "SCHEDULED_GRAB_KEY_PREFIX",
     "correlate_manual_grab",
     "correlate_scheduled_grab",
+    "bind_correlated_grab_transfer",
+    "fail_prepared_correlated_grab",
     "fail_stale_correlated_grabs",
+    "prepare_manual_grab",
     "try_correlate_manual_grab",
     "try_correlate_scheduled_grab",
+    "try_prepare_manual_grab",
 ]

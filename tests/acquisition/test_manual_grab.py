@@ -8,8 +8,11 @@ from core.acquisition import ensure_acquisition_schema
 from core.acquisition.history import list_history_events
 from core.acquisition.manual_grab import (
     GRAB_MARKER,
+    bind_correlated_grab_transfer,
     correlate_manual_grab,
+    fail_prepared_correlated_grab,
     fail_stale_correlated_grabs,
+    prepare_manual_grab,
     try_correlate_manual_grab,
 )
 from core.acquisition.pipeline_callback import (
@@ -131,6 +134,78 @@ def test_manual_grab_without_lib2_entity_uses_legacy_shadow_identity(legacy_db):
         assert first_request.search_options["catalog_snapshot"] == {
             "album": "Views", "artist": "Drake", "title": "One Dance"}
         assert "lib2_track_id" not in first_request.search_options
+    finally:
+        conn.close()
+
+
+def test_manual_grab_prepares_before_dispatch_then_binds_transfer(legacy_db):
+    conn = _prepared_conn(legacy_db)
+    try:
+        markers = prepare_manual_grab(
+            conn,
+            target_context={
+                "id": "spotify-track-123",
+                "name": "One Dance",
+                "artist": "Drake",
+            },
+            search_result=_search_result(),
+            source="soulseek",
+            config_get=_CONFIG_GET,
+        )
+        conn.commit()
+
+        before = conn.execute(
+            "SELECT status, context_json FROM acquisition_grabs WHERE download_id=?",
+            (markers["download_id"],),
+        ).fetchone()
+        assert before["status"] == "submitting"
+        assert get_request(conn, markers["request_id"]).status == "grabbing"
+
+        assert bind_correlated_grab_transfer(
+            markers,
+            "legacy-transfer-1",
+            connection_factory=legacy_db._get_connection,
+        )
+        grab = conn.execute(
+            "SELECT status, last_client_state, context_json FROM acquisition_grabs "
+            "WHERE download_id=?",
+            (markers["download_id"],),
+        ).fetchone()
+        import json
+        assert grab["status"] == "downloading"
+        assert grab["last_client_state"] == "legacy_dispatched"
+        assert json.loads(grab["context_json"])["legacy_download_id"] == (
+            "legacy-transfer-1")
+        events = list_history_events(conn, request_id=markers["request_id"])
+        assert [event.event_type for event in events][-1] == "grab_submitted"
+    finally:
+        conn.close()
+
+
+def test_failed_manual_dispatch_closes_prepared_request_without_blocklist(legacy_db):
+    conn = _prepared_conn(legacy_db)
+    try:
+        markers = prepare_manual_grab(
+            conn,
+            target_context={"name": "One Dance", "artist": "Drake"},
+            search_result=_search_result(),
+            source="soulseek",
+            config_get=_CONFIG_GET,
+        )
+        conn.commit()
+
+        assert fail_prepared_correlated_grab(
+            markers,
+            "client returned no transfer id",
+            connection_factory=legacy_db._get_connection,
+        )
+        assert get_request(conn, markers["request_id"]).status == "failed"
+        assert conn.execute(
+            "SELECT status FROM acquisition_grabs WHERE download_id=?",
+            (markers["download_id"],),
+        ).fetchone()["status"] == "failed"
+        assert conn.execute(
+            "SELECT COUNT(*) FROM release_blocklist").fetchone()[0] == 0
     finally:
         conn.close()
 

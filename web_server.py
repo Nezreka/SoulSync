@@ -7072,10 +7072,8 @@ def _audit_manual_skip(context_key, title, artist, skip_checks):
         logger.debug("manual-skip audit write failed: %s", _se)
 
 
-def _correlate_manual_grab(
-        username, search_result, lib2_ctx, batch_id=None,
-        legacy_download_id=None):
-    """Acquisition correlation for a dispatched manual grab (roadmap 3).
+def _prepare_manual_grab(username, search_result, lib2_ctx, batch_id=None):
+    """Prepare Acquisition correlation before a manual client dispatch.
 
     Entirely fail-open: correlation is observational bookkeeping and must
     never fail or delay the download it describes. When the plugin registry
@@ -7088,14 +7086,13 @@ def _correlate_manual_grab(
             return None
         spec = download_orchestrator.registry.get_spec(username) if username else None
         source = spec.name if spec else 'soulseek'
-        from core.acquisition.manual_grab import try_correlate_manual_grab
-        return try_correlate_manual_grab(
+        from core.acquisition.manual_grab import try_prepare_manual_grab
+        return try_prepare_manual_grab(
             lib2_context=lib2_ctx,
             target_context=search_result,
             search_result=search_result,
             source=source,
             batch_id=batch_id,
-            legacy_download_id=legacy_download_id,
         )
     except Exception as _acq_err:
         logger.debug("manual grab correlation skipped: %s", _acq_err)
@@ -7173,30 +7170,37 @@ def start_download():
                     username = track_data.get('username')
                     filename = track_data.get('filename')
                     file_size = track_data.get('size', 0)
-
-                    with _cand_scope():
-                        download_id = run_async(download_orchestrator.download(
-                            username,
-                            filename,
-                            file_size
-                        ))
+                    _manual_result = {
+                        'username': username,
+                        'filename': filename,
+                        'size': file_size,
+                        'title': track_data.get('title'),
+                        'artist': track_data.get('artist'),
+                        'album': data.get('album_name'),
+                        'quality': track_data.get('quality'),
+                        'bitrate': track_data.get('bitrate'),
+                    }
+                    _acq_markers = _prepare_manual_grab(
+                        username,
+                        _manual_result,
+                        _lib2_ctx,
+                        batch_id=_album_batch_id,
+                    )
+                    try:
+                        with _cand_scope():
+                            download_id = run_async(download_orchestrator.download(
+                                username,
+                                filename,
+                                file_size
+                            ))
+                    except Exception:
+                        from core.acquisition.manual_grab import fail_prepared_correlated_grab
+                        fail_prepared_correlated_grab(
+                            _acq_markers, "legacy client dispatch raised")
+                        raise
                     if download_id:
-                        _acq_markers = _correlate_manual_grab(
-                            username,
-                            {
-                                'username': username,
-                                'filename': filename,
-                                'size': file_size,
-                                'title': track_data.get('title'),
-                                'artist': track_data.get('artist'),
-                                'album': data.get('album_name'),
-                                'quality': track_data.get('quality'),
-                                'bitrate': track_data.get('bitrate'),
-                            },
-                            _lib2_ctx,
-                            batch_id=_album_batch_id,
-                            legacy_download_id=download_id,
-                        )
+                        from core.acquisition.manual_grab import bind_correlated_grab_transfer
+                        bind_correlated_grab_transfer(_acq_markers, download_id)
                         # Register download for post-processing (simple transfer to /Transfer)
                         context_key = _make_context_key(username, filename)
                         with matched_context_lock:
@@ -7226,6 +7230,10 @@ def start_download():
                             _audit_manual_skip(context_key, track_data.get('title'),
                                                track_data.get('artist'), _album_skip_checks)
                         started_downloads += 1
+                    else:
+                        from core.acquisition.manual_grab import fail_prepared_correlated_grab
+                        fail_prepared_correlated_grab(
+                            _acq_markers, "legacy client rejected the dispatch")
                 except Exception as e:
                     logger.error(f"Failed to start track download: {e}")
                     continue
@@ -7270,29 +7278,32 @@ def start_download():
                 except Exception as _bl_err:
                     logger.debug("manual download blocklist check skipped: %s", _bl_err)
 
-            with _cand_scope():
-                download_id = run_async(download_orchestrator.download(username, filename, file_size))
+            _manual_result = {
+                'username': username,
+                'filename': filename,
+                'size': file_size,
+                'title': data.get('title'),
+                'artist': data.get('artist'),
+                'album': data.get('album_name'),
+                'quality': data.get('quality'),
+                'bitrate': data.get('bitrate'),
+            }
+            _acq_markers = _prepare_manual_grab(
+                username, _manual_result, _lib2_ctx)
+            try:
+                with _cand_scope():
+                    download_id = run_async(download_orchestrator.download(
+                        username, filename, file_size))
+            except Exception:
+                from core.acquisition.manual_grab import fail_prepared_correlated_grab
+                fail_prepared_correlated_grab(
+                    _acq_markers, "legacy client dispatch raised")
+                raise
             logger.info(f"Download ID returned: {download_id}")
 
             if download_id:
-                # Acquisition correlation (roadmap 3): preserve an exact
-                # lib2 entity when named; otherwise use a namespaced legacy
-                # shadow identity for the already-dispatched manual pick.
-                _acq_markers = _correlate_manual_grab(
-                    username,
-                    {
-                        'username': username,
-                        'filename': filename,
-                        'size': file_size,
-                        'title': data.get('title'),
-                        'artist': data.get('artist'),
-                        'album': data.get('album_name'),
-                        'quality': data.get('quality'),
-                        'bitrate': data.get('bitrate'),
-                    },
-                    _lib2_ctx,
-                    legacy_download_id=download_id,
-                )
+                from core.acquisition.manual_grab import bind_correlated_grab_transfer
+                bind_correlated_grab_transfer(_acq_markers, download_id)
                 # Register download for post-processing (simple transfer to /Transfer)
                 context_key = _make_context_key(username, filename)
                 is_streaming_source = username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud', 'amazon')
@@ -7342,6 +7353,9 @@ def start_download():
                 add_activity_item("", "Track Download Started", f"'{track_name}'", "Now")
                 return jsonify({"success": True, "message": "Download started"})
             else:
+                from core.acquisition.manual_grab import fail_prepared_correlated_grab
+                fail_prepared_correlated_grab(
+                    _acq_markers, "legacy client rejected the dispatch")
                 logger.error(f"Failed to start download for: {filename}")
                 return jsonify({"error": "Failed to start download"}), 500
                 

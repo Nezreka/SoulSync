@@ -1632,7 +1632,20 @@ P2-05 und eine Reihe P2-UX/Robustheits-Findings).
    Profile verbleiben in ihrem unabhängigen Legacy-Wishlist-Pfad. 51 gezielte
    Korrelations-/Candidate-/Cancel-Tests sind grün. **Noch offen:** globale
    Durchsetzung nach einem fail-open-/Coverage-Gate entwerfen und erst dann
-   aktivieren.
+   aktivieren. **Fünfte Scheibe erledigt 2026-07-14:** Der manuelle Consumer
+   persistiert Request→Candidate→Gate-Run→Grab jetzt VOR dem externen
+   Client-Aufruf (`status=submitting`) und bindet die echte Legacy-Transfer-ID
+   erst nach bestätigtem Dispatch (`status=downloading`, `grab_submitted`).
+   Ein eindeutig abgelehnter/geworfener Dispatch schließt den vorbereiteten
+   Request als Runtime-Failure, ohne den Candidate zu blocklisten; ein
+   Bookkeeping-Fehler bleibt bis zur späteren expliziten Durchsetzung
+   fail-open. Der gemeinsame Grab-Service besitzt dafür einen kleinen
+   JSON-Context-Patch statt consumerseitiger SQL-Kopien. Damit ist die
+   notwendige Persist-before-External-Work-Reihenfolge für Interactive-Grabs
+   hergestellt. **Logischer nächster Schritt:** denselben zweiphasigen
+   Prepare→Dispatch→Bind-Vertrag im Wishlist-Candidate-Walk nutzen; erst wenn
+   beide Legacy-Consumer vorab persistieren, ein opt-in Fail-closed-Gate
+   hinzufügen.
 
 **Session-Abschluss-Gate:** volle Python-Suite grün — **8112 passed,
 2 skipped, 2 deselected in 291.41s**. Die zwei Skips sind weiterhin die

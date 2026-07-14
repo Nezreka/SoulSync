@@ -156,20 +156,30 @@ def test_library_v2_profile_reaches_download_pipeline(client, monkeypatch):
 
 def test_admin_manual_download_without_lib2_context_is_correlated(client, monkeypatch):
     calls = []
+    order = []
 
     class _DownloadOrchestrator:
         @staticmethod
         def download(*_args):
+            order.append('dispatch')
             return object()
 
     def _capture(username, search_result, lib2_ctx, **kwargs):
+        order.append('prepare')
         calls.append((username, search_result, lib2_ctx, kwargs))
         return {"download_id": "manual-shadow", "request_id": "arq1-shadow"}
 
     monkeypatch.setattr(web_server, 'download_orchestrator', _DownloadOrchestrator())
     monkeypatch.setattr(web_server, 'run_async', lambda _result: 'download-id')
     monkeypatch.setattr(web_server, 'add_activity_item', lambda *_args: None)
-    monkeypatch.setattr(web_server, '_correlate_manual_grab', _capture)
+    monkeypatch.setattr(web_server, '_prepare_manual_grab', _capture)
+    from core.acquisition import manual_grab
+    monkeypatch.setattr(
+        manual_grab,
+        'bind_correlated_grab_transfer',
+        lambda markers, transfer_id: order.append(
+            ('bind', markers['download_id'], transfer_id)),
+    )
 
     key = web_server._make_context_key('user', 'folder/shadow.flac')
     web_server.matched_downloads_context.pop(key, None)
@@ -183,6 +193,11 @@ def test_admin_manual_download_without_lib2_context_is_correlated(client, monkey
 
     assert response.status_code == 200
     assert len(calls) == 1
+    assert order == [
+        'prepare',
+        'dispatch',
+        ('bind', 'manual-shadow', 'download-id'),
+    ]
     assert calls[0][2] is None
     assert calls[0][1]['title'] == 'Shadow Track'
     context = web_server.matched_downloads_context.pop(key)

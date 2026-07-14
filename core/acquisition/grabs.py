@@ -176,6 +176,36 @@ def update_grab(conn: Any, download_id: str, *,
     return cur.rowcount > 0
 
 
+def patch_grab_context(
+    conn: Any, download_id: str, updates: Dict[str, Any],
+) -> bool:
+    """Merge non-secret correlation fields into a persisted grab context.
+
+    The caller owns the transaction. Keeping this beside ``update_grab``
+    avoids ad-hoc JSON read/modify/write logic in consumer adapters.
+    """
+    row = conn.execute(
+        "SELECT context_json FROM acquisition_grabs WHERE download_id=?",
+        (str(download_id),),
+    ).fetchone()
+    if row is None:
+        return False
+    try:
+        context = json.loads(row[0] or "{}")
+    except (TypeError, ValueError):
+        context = {}
+    if not isinstance(context, dict):
+        context = {}
+    context.update(dict(updates))
+    cur = conn.execute(
+        """UPDATE acquisition_grabs
+              SET context_json=?, updated_at=CURRENT_TIMESTAMP
+            WHERE download_id=?""",
+        (json.dumps(context), str(download_id)),
+    )
+    return cur.rowcount > 0
+
+
 _COLUMNS = ("id", "download_id", "acquisition_request_id",
             "release_candidate_id", "decision_run_id",
             "source", "client", "external_job_id",
@@ -258,6 +288,7 @@ __all__ = [
     "find_request_candidate_grab",
     "get_grab",
     "open_grabs",
+    "patch_grab_context",
     "public_grab",
     "record_grab",
     "update_grab",
