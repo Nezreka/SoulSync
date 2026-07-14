@@ -18,6 +18,7 @@ server. Never raises — callers get ``None``/placeholder behaviour on failure.
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -95,31 +96,93 @@ def _provider_art_url(conn, kind: str, entity_id: int) -> Optional[str]:
     try:
         if kind == "artist":
             row = conn.execute(
-                "SELECT spotify_id, musicbrainz_id, name FROM lib2_artists WHERE id=?",
+                "SELECT id, spotify_id, musicbrainz_id, external_ids, name "
+                "FROM lib2_artists WHERE id=?",
                 (entity_id,),
             ).fetchone()
             if not row:
                 return None
-            from core.metadata.artist_image import get_artist_image_url
-            ext = row["spotify_id"] or row["musicbrainz_id"]
-            if ext:
-                return get_artist_image_url(ext, artist_name=row["name"])
+            source_ids = _source_ids(row["external_ids"])
+            if row["spotify_id"]:
+                source_ids["spotify"] = row["spotify_id"]
+            if row["musicbrainz_id"]:
+                source_ids["musicbrainz"] = row["musicbrainz_id"]
+            from core.library2.metadata_overrides import project_metadata
+            effective, _overrides = project_metadata(
+                conn,
+                entity_type="artist",
+                entity_id=row["id"],
+                provider_fields=dict(row),
+            )
+            from core.library2.provider_adapters import fetch_artwork_url
+            result = fetch_artwork_url(
+                "artist",
+                artist_name=effective["name"],
+                source_ids=source_ids,
+            )
+            return result.url if result else None
         elif kind == "album":
             row = conn.execute(
-                """SELECT al.title, al.musicbrainz_id, ar.name AS artist_name
+                """SELECT al.id, al.title, al.spotify_id, al.musicbrainz_id,
+                          al.external_ids, ar.id AS artist_id,
+                          ar.name AS artist_name,
+                          ed.spotify_id AS edition_spotify_id,
+                          ed.musicbrainz_id AS edition_musicbrainz_id,
+                          ed.external_ids AS edition_external_ids
                    FROM lib2_albums al JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                   LEFT JOIN lib2_release_editions ed
+                          ON ed.release_group_id=al.id AND ed.is_default=1
                    WHERE al.id = ?""",
                 (entity_id,),
             ).fetchone()
             if not row:
                 return None
-            from core.metadata.art_lookup import available_art_sources, select_preferred_art_url
-            metadata = {"musicbrainz_release_id": row["musicbrainz_id"]} if row["musicbrainz_id"] else {}
-            order = available_art_sources()
-            return select_preferred_art_url(row["artist_name"], row["title"], metadata, order)
+            source_ids = _source_ids(row["external_ids"])
+            source_ids.update(_source_ids(row["edition_external_ids"]))
+            for source, value in (
+                ("spotify", row["edition_spotify_id"] or row["spotify_id"]),
+                ("musicbrainz", row["edition_musicbrainz_id"] or row["musicbrainz_id"]),
+            ):
+                if value:
+                    source_ids[source] = value
+            from core.library2.metadata_overrides import project_metadata
+            album_effective, _album_overrides = project_metadata(
+                conn,
+                entity_type="release_group",
+                entity_id=row["id"],
+                provider_fields=dict(row),
+            )
+            artist_effective, _artist_overrides = project_metadata(
+                conn,
+                entity_type="artist",
+                entity_id=row["artist_id"],
+                provider_fields={"name": row["artist_name"]},
+            )
+            from core.library2.provider_adapters import fetch_artwork_url
+            result = fetch_artwork_url(
+                "album",
+                artist_name=artist_effective["name"],
+                album_title=album_effective["title"],
+                source_ids=source_ids,
+            )
+            return result.url if result else None
     except Exception as e:  # noqa: BLE001
         logger.debug("provider art lookup failed (%s %s): %s", kind, entity_id, e)
     return None
+
+
+def _source_ids(raw: Any) -> Dict[str, str]:
+    try:
+        value = json.loads(raw or "{}")
+    except (TypeError, ValueError):
+        return {}
+    if not isinstance(value, dict):
+        return {}
+    return {
+        str(source).strip().lower(): str(provider_id).strip()
+        for source, provider_id in value.items()
+        if str(source).strip() and str(provider_id).strip()
+    }
 
 
 def build_artwork(database, conn, config_manager, kind: str, entity_id: int,

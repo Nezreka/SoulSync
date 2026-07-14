@@ -15,6 +15,7 @@ from utils.logging_config import get_logger
 
 DISCOGRAPHY_PARSER_VERSION = "library2-discography/1"
 TRACKLIST_PARSER_VERSION = "library2-tracklist/1"
+ARTWORK_PARSER_VERSION = "library2-artwork/1"
 logger = get_logger("library2.provider_adapters")
 
 
@@ -169,6 +170,27 @@ class TracklistProviderResult:
         }
 
 
+@dataclass(frozen=True)
+class ArtworkProviderResult:
+    """Normalized result from the shared artist/cover-art resolvers."""
+
+    kind: str
+    source: str
+    provider_entity_id: Optional[str]
+    url: str
+    parser_version: str = ARTWORK_PARSER_VERSION
+
+
+def _normalized_source_ids(
+    source_ids: Optional[Mapping[str, str]],
+) -> Dict[str, str]:
+    return {
+        str(source).strip().lower(): str(value).strip()
+        for source, value in (source_ids or {}).items()
+        if str(source).strip() and str(value).strip()
+    }
+
+
 def _track_items(payload: Any) -> list[Mapping[str, Any]]:
     if isinstance(payload, list):
         return [item for item in payload if isinstance(item, Mapping)]
@@ -201,11 +223,7 @@ def fetch_album_tracklist(
     """Resolve a canonical tracklist through typed Spotify/Deezer adapters."""
     from core.metadata.registry import get_deezer_client, get_spotify_client
 
-    source_ids = {
-        str(source).strip().lower(): str(value).strip()
-        for source, value in (source_album_ids or {}).items()
-        if str(source).strip() and str(value).strip()
-    }
+    source_ids = _normalized_source_ids(source_album_ids)
     spotify_id = source_ids.get("spotify")
     if spotify_id:
         try:
@@ -251,11 +269,7 @@ def fetch_artist_discography(
     from core.metadata.discography import get_artist_detail_discography
     from core.metadata.lookup import MetadataLookupOptions
 
-    normalized_ids = {
-        str(source).strip().lower(): str(value).strip()
-        for source, value in (source_artist_ids or {}).items()
-        if str(source).strip() and str(value).strip()
-    }
+    normalized_ids = _normalized_source_ids(source_artist_ids)
     result = get_artist_detail_discography(
         "",
         artist_name=artist_name,
@@ -294,13 +308,90 @@ def fetch_artist_discography(
     )
 
 
+def fetch_artwork_url(
+    kind: str,
+    *,
+    artist_name: str,
+    album_title: Optional[str] = None,
+    source_ids: Optional[Mapping[str, str]] = None,
+    source_order: Optional[Tuple[str, ...]] = None,
+) -> Optional[ArtworkProviderResult]:
+    """Resolve artwork through existing engines and return one typed result.
+
+    Library v2 supplies normalized catalog facts; provider-specific response
+    dictionaries stay inside ``core.metadata``. No image bytes or signed
+    provider payloads are persisted by this adapter.
+    """
+    kind = str(kind or "").strip().lower()
+    if kind not in {"artist", "album"}:
+        raise ValueError("artwork kind must be artist or album")
+    normalized_ids = _normalized_source_ids(source_ids)
+    artist_name = str(artist_name or "").strip()
+
+    if kind == "artist":
+        from core.metadata.artist_image import get_artist_image_url
+        preferred = ["spotify", "musicbrainz"]
+        preferred.extend(sorted(set(normalized_ids) - set(preferred)))
+        for source in preferred:
+            provider_id = normalized_ids.get(source)
+            if not provider_id:
+                continue
+            url = get_artist_image_url(
+                provider_id,
+                source_override=source,
+                artist_name=artist_name,
+            )
+            url = _optional_text(url)
+            if url:
+                return ArtworkProviderResult(
+                    kind="artist",
+                    source=source,
+                    provider_entity_id=provider_id,
+                    url=url,
+                )
+        return None
+
+    album_title = str(album_title or "").strip()
+    if not artist_name or not album_title:
+        return None
+    from core.metadata.art_lookup import (
+        available_art_sources,
+        select_preferred_art,
+    )
+    order = tuple(source_order) if source_order is not None else tuple(
+        available_art_sources()
+    )
+    metadata = {}
+    if normalized_ids.get("musicbrainz"):
+        metadata["musicbrainz_release_id"] = normalized_ids["musicbrainz"]
+    url, source = select_preferred_art(
+        artist_name,
+        album_title,
+        metadata,
+        order,
+    )
+    url = _optional_text(url)
+    source = _optional_text(source)
+    if not url or not source:
+        return None
+    return ArtworkProviderResult(
+        kind="album",
+        source=source,
+        provider_entity_id=normalized_ids.get(source),
+        url=url,
+    )
+
+
 __all__ = [
+    "ARTWORK_PARSER_VERSION",
     "DISCOGRAPHY_PARSER_VERSION",
     "TRACKLIST_PARSER_VERSION",
+    "ArtworkProviderResult",
     "DiscographyProviderResult",
     "DiscographyRelease",
     "TracklistProviderResult",
     "TracklistTrack",
     "fetch_album_tracklist",
+    "fetch_artwork_url",
     "fetch_artist_discography",
 ]

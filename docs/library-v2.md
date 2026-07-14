@@ -221,9 +221,13 @@ weiteren Acquisition-Features zuerst geschlossen werden muss. Phase E
   Entity/Scope mit Completeness, Cursor/Page-Count, Parser-Version,
   ETag/Version und stabilem Hash. Entity-Delete-Trigger verhindern verwaiste
   Snapshots.
-- Discography- und Spotify/Deezer-Tracklists queren eine typed Adapter-Boundary
-  vor der Library-v2-Persistenz. Provider-IDs werden exakt gematcht und
+- Discography-, Spotify/Deezer-Tracklist- und Artwork-Fallbacks queren eine
+  typed Adapter-Boundary. Provider-spezifische Response-Dicts verlassen
+  `provider_adapters.py` nicht. Provider-IDs werden exakt gematcht und
   strukturell gemerged; partielle Discography-Snapshots prunen nie Releases.
+  Artwork benutzt weiterhin die eine gemeinsame Artist-/Cover-Art-Engine;
+  der Adapter liefert lediglich URL, tatsächliche Quelle und Entity-ID typisiert
+  an Library v2 zurück.
 - Tracklist-Snapshots sind an die gewählte Default-ReleaseEdition und deren
   externe IDs gebunden. Ein Edition-/Provider-Wechsel invalidiert den alten
   Cache auch wenn der Ersatz-Provider temporär nicht erreichbar ist; Legacy
@@ -1720,10 +1724,10 @@ das vorhandene Shadow-Modell und die verbliebenen Identitäts-Schreib-/Read-
 Pfade inventarisieren, dann dedizierte externe-/Old-ID-History als kleinste
 persistente Slice umsetzen. Field-Level-Overrides und Read-Projection bauen
 darauf auf.
-4. Phase-3-Identity/Provenance fertigstellen: dedizierte externe-/
+4. ~~Phase-3-Identity/Provenance fertigstellen: dedizierte externe-/
    Old-ID-History, Merge-/Move-History, Field-Level-User-Overrides und
    Read-Projection. Typed Adapters über Discography/Tracklist hinaus
-   erweitern. **Erste Slice erledigt 2026-07-14:**
+   erweitern.~~ **Vollständig abgeschlossen 2026-07-14. Erste Slice:**
    `lib2_external_id_history` ist eine append-only History für alle heutigen
    skalaren Provider-/Legacy-IDs auf Artist, Release Group, Track,
    ReleaseEdition und Recording sowie die Long-Tail-`external_ids`-JSONs.
@@ -1756,7 +1760,20 @@ darauf auf.
    freigegebenen Felder. Entity-Deletes räumen den Current-State auf,
    Monitoring/Quality/IDs/Pfade sind nicht überschreibbar. 87 gezielte
    Override-/Query-/API-/Schema-/Snapshot-/Discography-Tests sind grün.
-   **Noch offen in Punkt 4:** typed Adapter über Discography/Tracklist hinaus.
+   **Vierte/abschließende Slice erledigt 2026-07-14:** Auch der letzte direkte
+   Library-v2-Providerpfad, der Artwork-Fallback, läuft jetzt über
+   `provider_adapters.py`. `ArtworkProviderResult` normalisiert URL, tatsächliche
+   Quelle und Provider-Entity-ID; Artist-/Album-Overrides werden vor dem Lookup
+   effektiv projiziert und ReleaseEdition-IDs einbezogen. Die vorhandene
+   zentrale Artist-Image-/Cover-Art-Priorisierung wurde wiederverwendet; ihr
+   kompatibler URL-Entry-Point delegiert an denselben Resolver, der typed
+   Consumer zusätzlich die gewählte Quelle liefert. Außer dem lokalen
+   Embedded-Art-Parser liegen damit alle `core.metadata`-Providerzugriffe aus
+   `core/library2` ausschließlich in der Adapterdatei. 122 gezielte Adapter-/
+   Artwork-/API-/Override-/Snapshot-/Discography-/Completeness-Tests sind grün.
+   **Nächster logischer Schritt nach dem Phase-3-Meilenstein-Gate:** Roadmap-
+   Punkt 5, den gestaffelten Wanted-Cutover anhand der vorhandenen Drift-
+   Metriken und verbliebenen `monitored`-Consumer aufnehmen.
 5. Gestaffelten Wanted-Cutover fertigstellen: Consumer, die noch
    `monitored`-Flags nutzen, müssen nach Drift-Metriken-Beweis der Parität
    auf `lib2_wanted_tracks` wechseln.
@@ -1968,8 +1985,10 @@ wert und wurde bewusst nicht übernommen.
   Tracklist-Invalidierung bei Edition-/Providerwechsel). **Field-Level-
   User-Overrides und zentrale Read-Projektion sind seit 2026-07-14 ebenfalls
   umgesetzt** (`lib2_metadata_overrides`; Roadmap Punkt 4, dritte Slice).
-  Offen bleibt das vollständige Ersetzen der verbliebenen
-  `COALESCE`-Anreicherung durch typed Adapter.
+  Der letzte direkte Library-v2-Providerpfad (Artwork) quert seit der vierten
+  Roadmap-4-Slice ebenfalls die typed Boundary. Verbliebene `COALESCE`-Updates
+  sind lokale Merge-Policy in Import/Refresh bzw. File-Probing, keine
+  provider-spezifischen Wire-Dict-Grenzen.
 - **ADR-07 — Interne Queue vs. Client-Queue. Entschieden: Client ist
   Live-Queue.** Bereits ausführlich in Abschnitt 3 „Phase 4
   Acquisition/Decision" beschrieben (persistente Grab-Korrelation, Adoption

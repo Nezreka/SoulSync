@@ -280,15 +280,37 @@ def select_preferred_art_url(
     upload) is skipped and the next source is tried instead of winning by
     priority alone.
     """
+    url, _source = select_preferred_art(
+        artist,
+        album,
+        metadata,
+        configured_order,
+        validate=validate,
+    )
+    return url
+
+
+def select_preferred_art(
+    artist: Optional[str],
+    album: Optional[str],
+    metadata: Optional[dict],
+    configured_order,
+    validate: Optional[Callable[[str, str], bool]] = None,
+) -> tuple[Optional[str], Optional[str]]:
+    """Return the preferred URL and its source through the shared resolver.
+
+    ``select_preferred_art_url`` remains the compatibility entry point. Typed
+    consumers can use this result without rebuilding the source-priority
+    decision outside the existing art pipeline.
+    """
     if not isinstance(configured_order, (list, tuple)) or not configured_order:
-        return None
+        return None, None
     from core.metadata.art_sources import effective_art_order, resolve_cover_art
     order = [s for s in effective_art_order(configured_order) if is_art_source_available(s)]
     if not order:
-        return None
+        return None, None
     lookup = build_art_lookup(artist or "", album or "", metadata or {})
-    url, _src = resolve_cover_art(order, lookup, validate=validate)
-    return url
+    return resolve_cover_art(order, lookup, validate=validate)
 
 
 def build_art_lookup(
