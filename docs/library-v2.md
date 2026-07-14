@@ -2077,6 +2077,21 @@ verändert; daher waren Frontend-Typecheck/Vitest/Build nicht erforderlich.
     Scan-/Retag-/Query-/API-Tests** und Ruff sind grün. **Nächster logischer
     Schritt:** P2-02 — Missing-File-Lifecycle mit bestätigtem Zustand und
     Mount-sicherer Semantik vervollständigen.
+21. ~~**Mount-sicherer Missing-File-Lifecycle (P2-02).**~~ **Abgeschlossen
+    2026-07-14:** `lib2_track_files` persistiert additiv `missing_since` und
+    `missing_scan_count`. Refresh & Scan führt bei glaubwürdig gesundem Root
+    `active → missing_suspected → missing_confirmed` über zwei aufeinander
+    folgende Misses; ein wieder sichtbares File wird `active` und setzt beide
+    Felder zurück. Ein Miss zählt nur, wenn der direkte absolute Parent lesbar
+    ist oder **alle** expliziten `library.music_paths`-Roots gemountet sind;
+    unbekannte bzw. teilweise ausgefallene Mounts lassen den Zustand bewusst
+    unverändert. `quarantined`/`deleted` werden vom Scan nicht überschrieben.
+    Confirmed/deleted Files zählen in Artist-/Albumstatistiken nicht mehr als
+    present, werden nicht auf Qualität bewertet und erscheinen im Trackstatus
+    als missing; Pfad und Lifecycle bleiben zur Diagnose sichtbar. **89
+    gezielte Schema-/Scan-/Multi-File-/Query-/API-/Wanted-Adapter-Tests** und
+    Ruff sind grün. **Nächster logischer Schritt:** P2-05 — Artwork auf den
+    verbindlichen `resolve_lib2_path`-Resolver umstellen.
 
 ---
 
@@ -2364,12 +2379,13 @@ vermerkt, tauchten aber nirgends in diesem Dokument auf:
   aktualisiert, Retag invalidiert diesen Cache ebenfalls nicht — UI zeigt
   nach erfolgreichem Retag weiterhin alte Gaps.~~ **Behoben 2026-07-14:**
   gemeinsamer Tag-Cache-Adapter in Scan und Retag; Details in Roadmap-Punkt 20.
-- **P2-02** — Missing Files haben keinen belastbaren Lifecycle: Scan lässt
+- ~~**P2-02** — Missing Files haben keinen belastbaren Lifecycle: Scan lässt
   fehlende Files bewusst unverändert (Mount kann temporär fehlen), aber ohne
   Root-Health/`missing_since`/Miss-Counter bleiben wirklich gelöschte Dateien
   für immer als „present" markiert. Hängt mit dem `file_state`-Feld aus
   ADR-03 zusammen — das Schema-Feld existiert, ist aber noch nicht mit dem
-  Scan verdrahtet.
+  Scan verdrahtet.~~ **Behoben 2026-07-14:** Zwei-Scan-Bestätigung unter
+  konservativer Root-Health und Recovery; Details in Roadmap-Punkt 21.
 - **P2-05** — **verifiziert 2026-07-13, weiterhin aktuell** (siehe auch die
   Ergänzung in Abschnitt 1): `core/library2/artwork.py::_resolve_abs`
   verletzt den gemeinsamen Path-Resolver-Vertrag (nutzt Legacy-

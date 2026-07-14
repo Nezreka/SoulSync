@@ -142,3 +142,109 @@ def test_failed_tag_read_invalidates_stale_gap_cache(scoped_conn):
     assert json.loads(row["tags_json"]) == {}
     assert json.loads(row["missing_tags_json"]) is None
     assert json.loads(row["metadata_gaps_json"]) is None
+
+
+def test_healthy_consecutive_misses_confirm_and_recovery_resets_lifecycle(
+        scoped_conn, tmp_path, monkeypatch):
+    from core.library2.scan import rescan_files
+
+    conn, album_ids = scoped_conn
+    db_path = conn.execute("PRAGMA database_list").fetchone()[2]
+
+    class _Shim:
+        def _get_connection(self):
+            opened = sqlite3.connect(db_path)
+            opened.row_factory = sqlite3.Row
+            return opened
+
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda _path: None)
+    monkeypatch.setattr(
+        "core.library2.paths.missing_path_root_is_healthy", lambda _path: True
+    )
+
+    rescan_files(_Shim(), album_ids=[album_ids[0]])
+    first = conn.execute(
+        """SELECT file_state, missing_scan_count, missing_since
+             FROM lib2_track_files WHERE path='/m/a.flac'"""
+    ).fetchone()
+    assert first["file_state"] == "missing_suspected"
+    assert first["missing_scan_count"] == 1
+    assert first["missing_since"] is not None
+
+    rescan_files(_Shim(), album_ids=[album_ids[0]])
+    second = conn.execute(
+        """SELECT file_state, missing_scan_count
+             FROM lib2_track_files WHERE path='/m/a.flac'"""
+    ).fetchone()
+    assert dict(second) == {
+        "file_state": "missing_confirmed",
+        "missing_scan_count": 2,
+    }
+
+    recovered = tmp_path / "recovered.flac"
+    recovered.write_bytes(b"fake")
+    monkeypatch.setattr(
+        "core.library2.paths.resolve_lib2_path", lambda _path: str(recovered)
+    )
+    monkeypatch.setattr("core.tag_writer.read_file_tags", lambda _path: {"error": "fake"})
+    monkeypatch.setattr("core.imports.file_ops.probe_audio_quality", lambda _path: None)
+    rescan_files(_Shim(), album_ids=[album_ids[0]])
+
+    final = conn.execute(
+        """SELECT file_state, missing_scan_count, missing_since
+             FROM lib2_track_files WHERE path='/m/a.flac'"""
+    ).fetchone()
+    assert dict(final) == {
+        "file_state": "active",
+        "missing_scan_count": 0,
+        "missing_since": None,
+    }
+
+
+def test_unhealthy_root_does_not_advance_missing_lifecycle(
+        scoped_conn, monkeypatch):
+    from core.library2.scan import rescan_files
+
+    conn, album_ids = scoped_conn
+    db_path = conn.execute("PRAGMA database_list").fetchone()[2]
+
+    class _Shim:
+        def _get_connection(self):
+            opened = sqlite3.connect(db_path)
+            opened.row_factory = sqlite3.Row
+            return opened
+
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda _path: None)
+    monkeypatch.setattr(
+        "core.library2.paths.missing_path_root_is_healthy", lambda _path: False
+    )
+    rescan_files(_Shim(), album_ids=[album_ids[0]])
+
+    row = conn.execute(
+        """SELECT file_state, missing_scan_count, missing_since
+             FROM lib2_track_files WHERE path='/m/a.flac'"""
+    ).fetchone()
+    assert dict(row) == {
+        "file_state": "active",
+        "missing_scan_count": 0,
+        "missing_since": None,
+    }
+
+
+def test_root_health_requires_every_configured_library_mount(tmp_path):
+    from core.library2.paths import missing_path_root_is_healthy
+
+    healthy = tmp_path / "music-a"
+    healthy.mkdir()
+
+    class _Config:
+        roots = [str(healthy)]
+
+        def get(self, key, default=None):
+            assert key == "library.music_paths"
+            return self.roots
+
+    config = _Config()
+    assert missing_path_root_is_healthy("/remote/Artist/song.flac", config)
+    config.roots.append(str(tmp_path / "offline-mount"))
+    assert not missing_path_root_is_healthy("/remote/Artist/song.flac", config)

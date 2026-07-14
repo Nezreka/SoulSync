@@ -191,6 +191,8 @@ CREATE TABLE IF NOT EXISTS lib2_track_files (
     content_hash TEXT,                                -- for dedup / single-vs-album
     is_primary INTEGER NOT NULL DEFAULT 0,            -- exactly one per track (ADR-03)
     file_state TEXT NOT NULL DEFAULT 'active',        -- 'active'|'missing_suspected'|'missing_confirmed'|'quarantined'|'deleted'
+    missing_since TIMESTAMP,
+    missing_scan_count INTEGER NOT NULL DEFAULT 0,
     legacy_track_id INTEGER,                          -- non-NULL only for legacy-import-owned files
     legacy_import_run_id TEXT,                        -- last complete legacy snapshot that saw it
     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -345,6 +347,12 @@ _ADDED_COLUMNS = (
      "ALTER TABLE lib2_track_files ADD COLUMN legacy_track_id INTEGER"),
     ("lib2_track_files", "legacy_import_run_id",
      "ALTER TABLE lib2_track_files ADD COLUMN legacy_import_run_id TEXT"),
+    # Missing lifecycle (audit P2-02): consecutive misses only count while
+    # the relevant library root is known healthy.
+    ("lib2_track_files", "missing_since",
+     "ALTER TABLE lib2_track_files ADD COLUMN missing_since TIMESTAMP"),
+    ("lib2_track_files", "missing_scan_count",
+     "ALTER TABLE lib2_track_files ADD COLUMN missing_scan_count INTEGER NOT NULL DEFAULT 0"),
 )
 
 

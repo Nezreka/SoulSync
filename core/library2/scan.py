@@ -10,8 +10,9 @@ The same pass refreshes the tag/gap cache through ``core.tag_writer``'s
 canonical reader. Tag and quality probes are independent: failure of one must
 not keep the other stale.
 
-Files whose path does not exist are left untouched (bind mounts can be
-temporarily absent in Docker; a missing path is not proof the file is gone).
+Missing paths advance only while their library root is known healthy: one
+miss is suspected, two are confirmed. Unhealthy/unknown mounts defer the
+transition, and a recovered path returns to active.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from utils.logging_config import get_logger
 logger = get_logger("library2.scan")
 
 ProgressCb = Optional[Callable[[str, int, int], None]]
+MISSING_CONFIRMATION_SCANS = 2
 
 
 def _file_rows_in_scope(conn, *, album_ids: Optional[List[int]] = None) -> List[Any]:
@@ -35,13 +37,15 @@ def _file_rows_in_scope(conn, *, album_ids: Optional[List[int]] = None) -> List[
             return []
         marks = ",".join("?" for _ in album_ids)
         return conn.execute(
-            f"""SELECT tf.id, tf.path FROM lib2_track_files tf
+            f"""SELECT tf.id, tf.path, tf.file_state, tf.missing_scan_count
+                  FROM lib2_track_files tf
                 JOIN lib2_tracks t ON t.id = tf.track_id
                WHERE t.album_id IN ({marks}) AND tf.path IS NOT NULL AND tf.path <> ''""",
             album_ids,
         ).fetchall()
     return conn.execute(
-        "SELECT id, path FROM lib2_track_files WHERE path IS NOT NULL AND path <> ''"
+        """SELECT id, path, file_state, missing_scan_count
+             FROM lib2_track_files WHERE path IS NOT NULL AND path <> ''"""
     ).fetchall()
 
 
@@ -60,7 +64,10 @@ def rescan_files(database, *, album_ids: Optional[List[int]] = None,
     would report the whole library "missing".
     """
     from core.imports.file_ops import probe_audio_quality
-    from core.library2.paths import resolve_lib2_path
+    from core.library2.paths import (
+        missing_path_root_is_healthy,
+        resolve_lib2_path,
+    )
     from core.library2.status import quality_tier
     from core.library2.tag_cache import read_and_persist_tag_cache
 
@@ -75,8 +82,38 @@ def rescan_files(database, *, album_ids: Optional[List[int]] = None,
                 progress("scan", i, total)
             if not path:
                 stats["missing"] += 1
+                if (
+                    row["file_state"]
+                    in ("active", "missing_suspected", "missing_confirmed")
+                    and missing_path_root_is_healthy(row["path"])
+                ):
+                    misses = int(row["missing_scan_count"] or 0) + 1
+                    state = (
+                        "missing_confirmed"
+                        if misses >= MISSING_CONFIRMATION_SCANS
+                        else "missing_suspected"
+                    )
+                    conn.execute(
+                        """UPDATE lib2_track_files
+                              SET missing_scan_count=?,
+                                  missing_since=COALESCE(missing_since, CURRENT_TIMESTAMP),
+                                  updated_at=CURRENT_TIMESTAMP
+                            WHERE id=?""",
+                        (misses, row["id"]),
+                    )
+                    from core.library2.track_files import set_file_state
+                    set_file_state(conn, row["id"], state)
                 continue
             stats["scanned"] += 1
+            if row["file_state"] in ("missing_suspected", "missing_confirmed"):
+                from core.library2.track_files import set_file_state
+                set_file_state(conn, row["id"], "active")
+            conn.execute(
+                """UPDATE lib2_track_files
+                      SET missing_scan_count=0, missing_since=NULL
+                    WHERE id=? AND (missing_scan_count<>0 OR missing_since IS NOT NULL)""",
+                (row["id"],),
+            )
             read_and_persist_tag_cache(conn, row["id"], path)
             try:
                 quality = probe_audio_quality(path)
@@ -112,4 +149,4 @@ def rescan_files(database, *, album_ids: Optional[List[int]] = None,
     return stats
 
 
-__all__ = ["rescan_files"]
+__all__ = ["MISSING_CONFIRMATION_SCANS", "rescan_files"]

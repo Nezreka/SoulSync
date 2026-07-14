@@ -44,7 +44,9 @@ _ARTIST_STATS = """
                         WHERE tf.track_id = t.id))) AS track_count,
     (SELECT COUNT(DISTINCT ta.track_id) FROM lib2_track_artists ta
        JOIN lib2_track_files tf ON tf.track_id = ta.track_id
-       WHERE ta.artist_id = a.id) AS track_files_present
+       WHERE ta.artist_id = a.id
+         AND COALESCE(tf.file_state, 'active') NOT IN ('missing_confirmed','deleted'))
+       AS track_files_present
 """
 # track_count deliberately counts only tracks that are wanted (monitored) or
 # owned (have a file): merely BROWSING an unowned discography release
@@ -190,7 +192,9 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
                (SELECT COUNT(*) FROM lib2_tracks t WHERE t.album_id = al.id) AS db_track_count,
                (SELECT COUNT(DISTINCT t.id) FROM lib2_tracks t
                   JOIN lib2_track_files tf ON tf.track_id = t.id
-                  WHERE t.album_id = al.id) AS files_present
+                  WHERE t.album_id = al.id
+                    AND COALESCE(tf.file_state, 'active')
+                        NOT IN ('missing_confirmed','deleted')) AS files_present
         FROM lib2_album_artists aa
         JOIN lib2_albums al ON al.id = aa.album_id
         WHERE aa.artist_id = ?
@@ -445,6 +449,7 @@ def _serialize_track(conn, t, album=None) -> Dict[str, Any]:
             "import_status": file_row["import_status"],
             "verification_status": file_row["verification_status"],
             "source": source,
+            "file_state": file_row["file_state"],
         }
     return {
         "id": t["id"],
@@ -529,7 +534,7 @@ def get_album(conn, album_id: int) -> Optional[Dict[str, Any]]:
         album_for_tracks["primary_artist_name"] = artist_effective["name"]
         album_for_tracks["primary_artist_id"] = artist["id"]
     tracks = [_serialize_track(conn, t, album_for_tracks) for t in track_rows]
-    present_count = sum(1 for t in tracks if t["file"] is not None)
+    present_count = sum(1 for t in tracks if t["file_status"] != "missing")
 
     # Evaluate each present file against the album's quality profile (meets /
     # upgrade-available), reusing core/quality. Missing rows stay neutral.
@@ -537,7 +542,7 @@ def get_album(conn, album_id: int) -> Optional[Dict[str, Any]]:
     targets, upgrade_policy, cutoff_index = profile_targets(dict(qp) if qp else None)
     upgrades_available = 0
     for t in tracks:
-        if t.get("file"):
+        if t.get("file") and t["file_status"] != "missing":
             ev = evaluate_file(t["file"], targets, upgrade_policy, cutoff_index)
             t["meets_profile"] = ev["meets_profile"]
             t["upgrade_candidate"] = bool(t["monitored"] and ev["upgrade_candidate"])

@@ -22,6 +22,9 @@ def test_file_status():
     assert file_status(None, None) == "missing"
     assert file_status({"path": "/x.flac"}, None) == "present"
     assert file_status({"path": "/x.flac"}, 42) == "duplicate_single"
+    assert file_status(
+        {"path": "/x.flac", "file_state": "missing_confirmed"}, None
+    ) == "missing"
 
 
 def test_metadata_gaps_uses_db_and_tags():
@@ -75,6 +78,29 @@ def test_get_album_track_status(imported_conn):
     assert one_dance["file"]["quality_tier"] == "lossless"
     # The track with no file_path is reported missing.
     assert by_title["Hotline Bling"]["file_status"] == "missing"
+
+
+def test_confirmed_missing_file_is_not_counted_as_present(imported_conn):
+    album_id = imported_conn.execute(
+        "SELECT id FROM lib2_albums WHERE title='Views'"
+    ).fetchone()[0]
+    imported_conn.execute(
+        """UPDATE lib2_track_files SET file_state='missing_confirmed'
+            WHERE track_id=(
+                SELECT id FROM lib2_tracks
+                 WHERE album_id=? AND title='One Dance'
+            )""",
+        (album_id,),
+    )
+
+    album = Q.get_album(imported_conn, album_id)
+
+    assert album["tracks_present"] == 0
+    assert album["tracks_missing"] == 2
+    one_dance = next(track for track in album["tracks"] if track["title"] == "One Dance")
+    assert one_dance["file_status"] == "missing"
+    assert one_dance["file"]["file_state"] == "missing_confirmed"
+    assert one_dance["meets_profile"] is None
 
 
 def test_get_album_shows_expected_missing_track_rows(imported_conn):

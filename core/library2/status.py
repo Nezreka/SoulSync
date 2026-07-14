@@ -126,6 +126,8 @@ def file_status(file_row: Optional[Mapping[str, Any]], canonical_track_id: Optio
     """
     if not file_row or not file_row.get("path"):
         return "missing"
+    if file_row.get("file_state") in ("missing_confirmed", "deleted"):
+        return "missing"
     if canonical_track_id:
         return "duplicate_single"
     return "present"

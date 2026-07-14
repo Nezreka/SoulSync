@@ -17,6 +17,7 @@ Never raises: unresolvable paths return ``None``.
 
 from __future__ import annotations
 
+import os
 from typing import Any, Optional
 
 from utils.logging_config import get_logger
@@ -43,8 +44,35 @@ def resolve_lib2_path(file_path: Any, config_manager: Any = None) -> Optional[st
         return resolve_library_file_path(file_path, config_manager=config_manager)
     except Exception as e:  # noqa: BLE001
         logger.debug("path resolve failed for %s: %s", file_path, e)
-        import os
         return file_path if os.path.exists(file_path) else None
 
 
-__all__ = ["resolve_lib2_path"]
+def missing_path_root_is_healthy(file_path: Any, config_manager: Any = None) -> bool:
+    """Whether absence is credible enough to advance the missing lifecycle.
+
+    A live direct parent is strong evidence for a single deleted file. For
+    mapped setups, every explicitly configured Library music root must be
+    mounted/readable; if any is unavailable we conservatively defer all misses
+    because a stored media-server path cannot always be assigned to one root.
+    """
+    if not isinstance(file_path, str) or not file_path:
+        return False
+    parent = os.path.dirname(file_path) if os.path.isabs(file_path) else ""
+    if parent and os.path.isdir(parent):
+        return True
+    try:
+        if config_manager is None:
+            from config.settings import config_manager as _cm
+            config_manager = _cm
+        configured = config_manager.get("library.music_paths", []) or []
+    except Exception:  # noqa: BLE001
+        configured = []
+    roots = [
+        os.path.abspath(os.path.expanduser(root.strip()))
+        for root in configured
+        if isinstance(root, str) and root.strip()
+    ]
+    return bool(roots) and all(os.path.isdir(root) for root in roots)
+
+
+__all__ = ["missing_path_root_is_healthy", "resolve_lib2_path"]
