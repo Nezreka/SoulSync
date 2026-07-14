@@ -1,4 +1,4 @@
-"""Roadmap 3: legacy interactive grabs correlate into the acquisition contract."""
+"""Roadmap 3 slice 2: wishlist-worker dispatches correlate as scheduled requests."""
 
 from __future__ import annotations
 
@@ -9,13 +9,11 @@ from core.acquisition.history import list_history_events
 from core.acquisition.manual_grab import (
     GRAB_MARKER,
     correlate_manual_grab,
+    correlate_scheduled_grab,
     fail_stale_correlated_grabs,
-    try_correlate_manual_grab,
+    try_correlate_scheduled_grab,
 )
-from core.acquisition.pipeline_callback import (
-    notify_manual_grab_import_success,
-    notify_manual_grab_quarantined,
-)
+from core.acquisition.pipeline_callback import notify_manual_grab_import_success
 from core.acquisition.requests import get_request
 from core.library2.importer import import_legacy_library
 
@@ -64,25 +62,29 @@ def _search_result(**overrides):
     return result
 
 
-def test_track_grab_correlates_recording_request(legacy_db):
+def test_wishlist_dispatch_correlates_scheduled_request(legacy_db):
     conn = _prepared_conn(legacy_db)
     try:
-        markers = correlate_manual_grab(
+        markers = correlate_scheduled_grab(
             conn,
             lib2_context=_track_context(conn),
             search_result=_search_result(),
             source="soulseek",
+            task_id="task-77",
+            batch_id="batch-9",
             config_get=_CONFIG_GET,
         )
 
         assert markers is not None
-        assert markers["download_id"].startswith("manual-")
+        assert markers["download_id"].startswith("scheduled-")
         request = get_request(conn, markers["request_id"])
         assert request.scope == "recording"
-        assert request.trigger == "manual"
+        assert request.trigger == "scheduled"
         assert request.status == "grabbing"
         assert request.search_options["content_scope"] == "recording"
-        assert request.search_options["shadow_source"] == "legacy_interactive"
+        assert request.search_options["shadow_source"] == "legacy_wishlist_worker"
+        assert request.search_options["legacy_task_id"] == "task-77"
+        assert request.search_options["legacy_batch_id"] == "batch-9"
         grab = conn.execute(
             "SELECT * FROM acquisition_grabs WHERE download_id=?",
             (markers["download_id"],),
@@ -93,40 +95,20 @@ def test_track_grab_correlates_recording_request(legacy_db):
         assert grab["decision_run_id"]
         events = [event.event_type for event in list_history_events(
             conn, request_id=request.id)]
-        assert events == ["request_created", "manual_grab_correlated"]
+        assert events == ["request_created", "scheduled_grab_correlated"]
     finally:
         conn.close()
 
 
-def test_matching_manual_pick_is_accepted_by_the_gate(legacy_db):
+def test_gate_rejections_are_recorded_but_never_enforced(legacy_db):
     conn = _prepared_conn(legacy_db)
     try:
-        markers = correlate_manual_grab(
-            conn,
-            lib2_context=_track_context(conn),
-            search_result=_search_result(),
-            source="soulseek",
-            config_get=_CONFIG_GET,
-        )
-        run = conn.execute(
-            """SELECT r.accepted FROM candidate_decision_runs r
-                 JOIN acquisition_grabs g ON g.decision_run_id=r.id
-                WHERE g.download_id=?""",
-            (markers["download_id"],),
-        ).fetchone()
-        assert run["accepted"] == 1
-    finally:
-        conn.close()
-
-
-def test_gate_rejections_do_not_block_a_manual_pick(legacy_db):
-    conn = _prepared_conn(legacy_db)
-    try:
-        markers = correlate_manual_grab(
+        markers = correlate_scheduled_grab(
             conn,
             lib2_context=_track_context(conn),
             search_result=_search_result(artist="Completely Different Artist"),
             source="soulseek",
+            task_id="task-78",
             config_get=_CONFIG_GET,
         )
 
@@ -143,33 +125,11 @@ def test_gate_rejections_do_not_block_a_manual_pick(legacy_db):
         assert request.status == "grabbing"
         correlated = [
             event for event in list_history_events(conn, request_id=request.id)
-            if event.event_type == "manual_grab_correlated"
+            if event.event_type == "scheduled_grab_correlated"
         ]
         assert correlated[0].reason_code == (
-            "gate_rejections_overridden_by_manual_pick")
+            "gate_rejections_observed_not_enforced")
         assert "artist_mismatch" in correlated[0].payload["rejections"]
-    finally:
-        conn.close()
-
-
-def test_album_only_context_uses_release_group_scope(legacy_db):
-    conn = _prepared_conn(legacy_db)
-    try:
-        album_id = _track_context(conn)["album_id"]
-        markers = correlate_manual_grab(
-            conn,
-            lib2_context={"album_id": album_id, "quality_profile_id": 1},
-            search_result=_search_result(),
-            source="soulseek",
-            batch_id="batch-1",
-            config_get=_CONFIG_GET,
-        )
-
-        request = get_request(conn, markers["request_id"])
-        assert request.scope == "release_group"
-        assert request.entity_id == album_id
-        assert request.search_options["manual_batch_id"] == "batch-1"
-        assert request.search_options["content_scope"] == "recording"
     finally:
         conn.close()
 
@@ -177,11 +137,12 @@ def test_album_only_context_uses_release_group_scope(legacy_db):
 def test_bundle_scope_sources_are_not_correlated(legacy_db):
     conn = _prepared_conn(legacy_db)
     try:
-        markers = correlate_manual_grab(
+        markers = correlate_scheduled_grab(
             conn,
             lib2_context=_track_context(conn),
             search_result=_search_result(),
             source="usenet",
+            task_id="task-79",
             config_get=_CONFIG_GET,
         )
         assert markers is None
@@ -191,14 +152,15 @@ def test_bundle_scope_sources_are_not_correlated(legacy_db):
         conn.close()
 
 
-def test_success_callback_completes_grab_and_request(legacy_db):
+def test_success_callback_completes_scheduled_grab(legacy_db):
     conn = _prepared_conn(legacy_db)
     try:
-        markers = correlate_manual_grab(
+        markers = correlate_scheduled_grab(
             conn,
             lib2_context=_track_context(conn),
             search_result=_search_result(),
             source="soulseek",
+            task_id="task-80",
             config_get=_CONFIG_GET,
         )
         conn.commit()
@@ -210,93 +172,53 @@ def test_success_callback_completes_grab_and_request(legacy_db):
         assert notify_manual_grab_import_success(
             context, connection_factory=legacy_db._get_connection) is True
 
-        request = get_request(conn, markers["request_id"])
-        assert request.status == "completed"
+        assert get_request(conn, markers["request_id"]).status == "completed"
         grab = conn.execute(
-            "SELECT status, output_path FROM acquisition_grabs WHERE download_id=?",
+            "SELECT status FROM acquisition_grabs WHERE download_id=?",
             (markers["download_id"],),
         ).fetchone()
         assert grab["status"] == "completed"
-        assert grab["output_path"].endswith("One Dance.flac")
-        events = [event.event_type for event in list_history_events(
-            conn, request_id=request.id)]
-        assert "grab_completed" in events
     finally:
         conn.close()
 
 
-def test_quarantine_callback_journals_without_closing(legacy_db):
+def test_stale_sweep_covers_manual_and_scheduled_grabs(legacy_db):
     conn = _prepared_conn(legacy_db)
     try:
-        markers = correlate_manual_grab(
+        stale_manual = correlate_manual_grab(
             conn,
             lib2_context=_track_context(conn),
             search_result=_search_result(),
             source="soulseek",
             config_get=_CONFIG_GET,
         )
-        conn.commit()
-
-        assert notify_manual_grab_quarantined(
-            {GRAB_MARKER: markers["download_id"]},
-            trigger="quality",
-            reason="below profile",
-            connection_factory=legacy_db._get_connection) is True
-
-        request = get_request(conn, markers["request_id"])
-        assert request.status == "grabbing"
-        quarantined = [
-            event for event in list_history_events(conn, request_id=request.id)
-            if event.event_type == "import_file_quarantined"
-        ]
-        assert quarantined[0].reason_code == "quality"
-        assert quarantined[0].payload["manual_grab"] is True
-    finally:
-        conn.close()
-
-
-def test_unmarked_context_is_a_noop_for_both_callbacks(legacy_db):
-    conn = _prepared_conn(legacy_db)
-    conn.close()
-    assert notify_manual_grab_import_success(
-        {"_final_processed_path": "/music/x.flac"},
-        connection_factory=legacy_db._get_connection) is False
-    assert notify_manual_grab_quarantined(
-        {}, trigger="quality", reason="below profile",
-        connection_factory=legacy_db._get_connection) is False
-
-
-def test_stale_sweep_fails_only_expired_manual_grabs(legacy_db):
-    conn = _prepared_conn(legacy_db)
-    try:
-        stale = correlate_manual_grab(
-            conn,
-            lib2_context=_track_context(conn),
-            search_result=_search_result(),
-            source="soulseek",
-            config_get=_CONFIG_GET,
-        )
-        fresh = correlate_manual_grab(
+        stale_scheduled = correlate_scheduled_grab(
             conn,
             lib2_context=_track_context(conn, title="Hotline Bling"),
             search_result=_search_result(title="Hotline Bling"),
             source="soulseek",
+            task_id="task-81",
             config_get=_CONFIG_GET,
         )
-        conn.execute(
-            "UPDATE acquisition_requests SET updated_at='2020-01-01 00:00:00' WHERE id=?",
-            (stale["request_id"],),
+        fresh = correlate_scheduled_grab(
+            conn,
+            lib2_context=_track_context(conn),
+            search_result=_search_result(),
+            source="soulseek",
+            task_id="task-82",
+            config_get=_CONFIG_GET,
         )
+        for markers in (stale_manual, stale_scheduled):
+            conn.execute(
+                "UPDATE acquisition_requests SET updated_at='2020-01-01 00:00:00' WHERE id=?",
+                (markers["request_id"],),
+            )
 
-        assert fail_stale_correlated_grabs(conn) == 1
+        assert fail_stale_correlated_grabs(conn) == 2
 
-        assert get_request(conn, stale["request_id"]).status == "failed"
+        assert get_request(conn, stale_manual["request_id"]).status == "failed"
+        assert get_request(conn, stale_scheduled["request_id"]).status == "failed"
         assert get_request(conn, fresh["request_id"]).status == "grabbing"
-        stale_grab = conn.execute(
-            "SELECT status FROM acquisition_grabs WHERE download_id=?",
-            (stale["download_id"],),
-        ).fetchone()
-        assert stale_grab["status"] == "failed"
         # runtime failures must never blocklist the release itself
         assert conn.execute(
             "SELECT COUNT(*) FROM release_blocklist").fetchone()[0] == 0
@@ -308,15 +230,17 @@ def test_try_wrapper_fails_open(legacy_db):
     def _broken_factory():
         raise RuntimeError("db unavailable")
 
-    assert try_correlate_manual_grab(
+    assert try_correlate_scheduled_grab(
         lib2_context={"track_id": 1, "album_id": 1, "quality_profile_id": 1},
         search_result=_search_result(),
         source="soulseek",
+        task_id="task-83",
         connection_factory=_broken_factory,
     ) is None
-    assert try_correlate_manual_grab(
+    assert try_correlate_scheduled_grab(
         lib2_context=None,
         search_result=_search_result(),
         source="soulseek",
+        task_id="task-83",
         connection_factory=_broken_factory,
     ) is None

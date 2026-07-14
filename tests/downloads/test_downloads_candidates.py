@@ -552,6 +552,129 @@ def test_no_skip_acoustid_flag_keeps_verification():
     assert "_skip_quarantine_check" not in ctx
 
 
+# ---------------------------------------------------------------------------
+# Scheduled acquisition correlation (roadmap 3 slice 2): a wishlist-worker
+# dispatch whose track_info rides lib2 mirror context correlates into the
+# acquisition contract and stamps the grab marker into the post-process
+# context. Strictly observational — a failing correlation must never touch
+# the download itself.
+# ---------------------------------------------------------------------------
+
+_LIB2_SOURCE_INFO = {
+    "source": "library_v2",
+    "lib2_track_id": 42,
+    "lib2_album_id": 7,
+    "quality_profile_id": 3,
+}
+
+
+def _capture_scheduled_correlation(monkeypatch, markers=None):
+    calls = []
+
+    def _fake(**kwargs):
+        calls.append(kwargs)
+        return markers
+
+    from core.acquisition import manual_grab
+    monkeypatch.setattr(manual_grab, "try_correlate_scheduled_grab", _fake)
+    return calls
+
+
+def test_wishlist_lib2_dispatch_correlates_and_stamps_grab_marker(monkeypatch):
+    calls = _capture_scheduled_correlation(
+        monkeypatch, markers={"download_id": "scheduled-x", "request_id": "arq1-x"})
+    deps = _build_deps()
+    _seed_task("t_wl", track_info={"source_info": dict(_LIB2_SOURCE_INFO)})
+
+    result = dc.attempt_download_with_candidates(
+        "t_wl", [_Candidate(filename="wl.flac")], _Track(), batch_id="b_wl", deps=deps)
+
+    assert result is True
+    assert len(calls) == 1
+    assert calls[0]["lib2_context"] == {
+        "track_id": 42, "album_id": 7, "quality_profile_id": 3}
+    assert calls[0]["task_id"] == "t_wl"
+    assert calls[0]["batch_id"] == "b_wl"
+    assert calls[0]["source"] == "soulseek"
+    assert calls[0]["search_result"]["filename"] == "wl.flac"
+    ctx = matched_downloads_context["user1::wl.flac"]
+    assert ctx["_acquisition_grab_download_id"] == "scheduled-x"
+
+
+def test_wishlist_source_info_json_string_is_parsed(monkeypatch):
+    import json
+    calls = _capture_scheduled_correlation(
+        monkeypatch, markers={"download_id": "scheduled-y", "request_id": "arq1-y"})
+    deps = _build_deps()
+    _seed_task("t_wl_json", track_info={
+        "source_info": json.dumps(_LIB2_SOURCE_INFO)})
+
+    dc.attempt_download_with_candidates(
+        "t_wl_json", [_Candidate(filename="wlj.flac")], _Track(), deps=deps)
+
+    assert len(calls) == 1
+    assert calls[0]["lib2_context"]["track_id"] == 42
+
+
+def test_native_acquisition_dispatch_is_not_double_correlated(monkeypatch):
+    calls = _capture_scheduled_correlation(monkeypatch)
+    deps = _build_deps()
+    _seed_task("t_native", track_info={
+        "source_info": dict(_LIB2_SOURCE_INFO),
+        "_acquisition_import_id": "aim1-test",
+    })
+
+    dc.attempt_download_with_candidates(
+        "t_native", [_Candidate(filename="native.flac")], _Track(), deps=deps)
+
+    assert calls == []
+    assert "_acquisition_grab_download_id" not in (
+        matched_downloads_context["user1::native.flac"])
+
+
+def test_user_manual_pick_is_not_scheduled_correlated(monkeypatch):
+    calls = _capture_scheduled_correlation(monkeypatch)
+    deps = _build_deps()
+    _seed_task("t_pick", track_info={"source_info": dict(_LIB2_SOURCE_INFO)})
+    download_tasks["t_pick"]["_user_manual_pick"] = True
+
+    dc.attempt_download_with_candidates(
+        "t_pick", [_Candidate(filename="pick.flac")], _Track(), deps=deps)
+
+    assert calls == []
+
+
+def test_source_info_without_lib2_context_is_not_correlated(monkeypatch):
+    calls = _capture_scheduled_correlation(monkeypatch)
+    deps = _build_deps()
+    _seed_task("t_pl", track_info={
+        "source_info": {"playlist_name": "My Playlist"}})
+
+    dc.attempt_download_with_candidates(
+        "t_pl", [_Candidate(filename="pl.flac")], _Track(), deps=deps)
+
+    assert calls == []
+    assert "_acquisition_grab_download_id" not in (
+        matched_downloads_context["user1::pl.flac"])
+
+
+def test_failed_correlation_never_blocks_the_download(monkeypatch):
+    def _boom(**kwargs):
+        raise RuntimeError("correlation exploded")
+
+    from core.acquisition import manual_grab
+    monkeypatch.setattr(manual_grab, "try_correlate_scheduled_grab", _boom)
+    deps = _build_deps()
+    _seed_task("t_boom", track_info={"source_info": dict(_LIB2_SOURCE_INFO)})
+
+    result = dc.attempt_download_with_candidates(
+        "t_boom", [_Candidate(filename="boom.flac")], _Track(), deps=deps)
+
+    assert result is True
+    ctx = matched_downloads_context["user1::boom.flac"]
+    assert "_acquisition_grab_download_id" not in ctx
+
+
 def test_equal_confidence_candidates_prefer_better_peer_quality():
     """Equal-confidence Soulseek candidates use peer quality as the tiebreaker."""
     deps = _build_deps()

@@ -23,6 +23,7 @@ EVENT_TYPES = frozenset({
     "grab_submitted",
     "grab_submission_uncertain",
     "manual_grab_correlated",
+    "scheduled_grab_correlated",
     "client_job_adopted",
     "force_grab",
     "force_quarantine_auto_approved",

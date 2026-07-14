@@ -1,15 +1,23 @@
-"""Correlate legacy interactive grabs into the acquisition contract.
+"""Correlate legacy grabs into the acquisition contract.
 
-Roadmap step 3 (docs/library-v2.md section 7): an Interactive-Search grab
-that NAMES a Library-v2 entity gains persistent Request -> Candidate ->
-Gate-Run -> Grab -> History correlation. The adapter is strictly
-observational: the download was already dispatched by the legacy route, and
-the Entity-Eligibility-Gate result is recorded, never enforced — a manual
-pick is the user asserting the match (Lidarr interactive-search semantics).
-The gate run is persisted with ``forced=0`` so the force<->quarantine bridge
-can never auto-approve anything on behalf of a manual pick; source
-selection, quality gating, AcoustID, quarantine and retry stay owned by the
-shared main pipeline at import time.
+Roadmap step 3 (docs/library-v2.md section 7): a legacy download that acts
+for a Library-v2 entity gains persistent Request -> Candidate -> Gate-Run ->
+Grab -> History correlation. Two legacy dispatch paths feed this adapter:
+
+- **Manual** (slice 1): an Interactive-Search grab naming a lib2 entity
+  (``trigger='manual'``). A manual pick is the user asserting the match
+  (Lidarr interactive-search semantics).
+- **Scheduled** (slice 2): a wishlist-worker candidate dispatch whose
+  ``track_info.source_info`` rides the lib2 mirror context
+  (``trigger='scheduled'``); the pick was made by the legacy worker's own
+  battle-tested matching.
+
+Both are strictly observational: the download was already dispatched by the
+legacy path, and the Entity-Eligibility-Gate result is recorded, never
+enforced. The gate run is persisted with ``forced=0`` so the
+force<->quarantine bridge can never auto-approve anything on behalf of a
+correlated grab; source selection, quality gating, AcoustID, quarantine and
+retry stay owned by the shared main pipeline at import time.
 
 Bundle-scope sources (usenet/torrent/lidarr) are deliberately excluded:
 their client plugins already record their own grab rows, and their full
@@ -32,9 +40,10 @@ logger = get_logger("acquisition.manual_grab")
 GRAB_MARKER = "_acquisition_grab_download_id"
 
 MANUAL_GRAB_KEY_PREFIX = "manual-grab:"
+SCHEDULED_GRAB_KEY_PREFIX = "scheduled-grab:"
 
-# Mirrors retry_state.RETRY_STATE_TTL_SECONDS: a manual grab whose download
-# never reached a pipeline outcome must not stay "grabbing" forever.
+# Mirrors retry_state.RETRY_STATE_TTL_SECONDS: a correlated grab whose
+# download never reached a pipeline outcome must not stay "grabbing" forever.
 MANUAL_GRAB_TTL_SECONDS = 7 * 24 * 60 * 60
 
 
@@ -83,17 +92,24 @@ def _candidate_facts(search_result: Mapping[str, Any], *, scope: str) -> Dict[st
     }
 
 
-def correlate_manual_grab(
+def _correlate_grab(
     conn: Any,
     *,
     lib2_context: Mapping[str, Any],
     search_result: Mapping[str, Any],
     source: str,
-    batch_id: Optional[str] = None,
+    trigger: str,
+    download_id: str,
+    idempotency_key: str,
+    shadow_source: str,
+    dispatch_options: Mapping[str, Any],
+    grab_context_extra: Mapping[str, Any],
+    history_event: str,
+    rejection_reason_code: str,
     config_get: Optional[Callable[..., Any]] = None,
     now: Optional[float] = None,
 ) -> Optional[Dict[str, str]]:
-    """Persist the acquisition correlation for one dispatched legacy grab.
+    """Shared correlation core for one dispatched legacy grab.
 
     Returns ``{"download_id", "request_id"}`` markers for the download
     context, or None when the grab cannot be correlated (no resolvable
@@ -122,19 +138,17 @@ def correlate_manual_grab(
         quality_profile_id = default_quality_profile_id(conn)
 
     ensure_acquisition_schema(conn)
-    download_id = "manual-" + str(uuid.uuid4())
     search_options: Dict[str, Any] = {
-        # Legacy manual grabs fulfil even release_group intents one file at
-        # a time, so every candidate is a recording, never a bundle.
+        # Legacy grabs fulfil even release_group intents one file at a time,
+        # so every candidate is a recording, never a bundle.
         "content_scope": "recording",
-        "shadow_source": "legacy_interactive",
+        "shadow_source": shadow_source,
     }
     if lib2_context.get("track_id"):
         search_options["lib2_track_id"] = int(lib2_context["track_id"])
     if lib2_context.get("album_id"):
         search_options["lib2_album_id"] = int(lib2_context["album_id"])
-    if batch_id:
-        search_options["manual_batch_id"] = str(batch_id)
+    search_options.update(dispatch_options)
 
     request, _created = create_request(
         conn,
@@ -142,8 +156,8 @@ def correlate_manual_grab(
         scope=scope,
         entity_id=entity_id,
         quality_profile_id=int(quality_profile_id),
-        trigger="manual",
-        idempotency_key=MANUAL_GRAB_KEY_PREFIX + download_id,
+        trigger=trigger,
+        idempotency_key=idempotency_key,
         search_options=search_options,
     )
     record_history_event(
@@ -155,7 +169,7 @@ def correlate_manual_grab(
             "entity_id": request.entity_id,
             "quality_profile_id": request.quality_profile_id,
             "trigger": request.trigger,
-            "shadow_source": "legacy_interactive",
+            "shadow_source": shadow_source,
         },
     )
     request = transition_request(
@@ -167,7 +181,7 @@ def correlate_manual_grab(
         source=source,
         protocol="p2p" if source == "soulseek" else "streaming",
         content_scope="recording",
-        server_ref="manual:" + download_id,
+        server_ref=trigger + ":" + download_id,
         title=_candidate_title(search_result),
         size_bytes=search_result.get("size") or None,
         facts=_candidate_facts(search_result, scope=scope),
@@ -202,30 +216,137 @@ def correlate_manual_grab(
             "quality_profile_id": request.quality_profile_id,
             "scope": request.scope,
             "entity_id": request.entity_id,
-            "manual_pick": True,
-            "manual_batch_id": str(batch_id) if batch_id else None,
+            **grab_context_extra,
         },
         status=STATUS_DOWNLOADING,
     )
     record_history_event(
         conn,
-        "manual_grab_correlated",
+        history_event,
         request_id=request.id,
         candidate_id=candidate.id,
         download_id=download_id,
-        reason_code=(
-            None if decision.accepted
-            else "gate_rejections_overridden_by_manual_pick"),
+        reason_code=None if decision.accepted else rejection_reason_code,
         payload={
             "decision_run_id": run.id,
             "accepted": decision.accepted,
             "rejections": [reason.code for reason in decision.rejections],
             "warnings": [reason.code for reason in decision.warnings],
             "source": source,
-            "manual_batch_id": str(batch_id) if batch_id else None,
+            **dispatch_options,
         },
     )
     return {"download_id": download_id, "request_id": request.id}
+
+
+def correlate_manual_grab(
+    conn: Any,
+    *,
+    lib2_context: Mapping[str, Any],
+    search_result: Mapping[str, Any],
+    source: str,
+    batch_id: Optional[str] = None,
+    config_get: Optional[Callable[..., Any]] = None,
+    now: Optional[float] = None,
+) -> Optional[Dict[str, str]]:
+    """Correlate one dispatched Interactive-Search grab (trigger=manual)."""
+    download_id = "manual-" + str(uuid.uuid4())
+    dispatch_options: Dict[str, Any] = {}
+    if batch_id:
+        dispatch_options["manual_batch_id"] = str(batch_id)
+    return _correlate_grab(
+        conn,
+        lib2_context=lib2_context,
+        search_result=search_result,
+        source=source,
+        trigger="manual",
+        download_id=download_id,
+        idempotency_key=MANUAL_GRAB_KEY_PREFIX + download_id,
+        shadow_source="legacy_interactive",
+        dispatch_options=dispatch_options,
+        grab_context_extra={
+            "manual_pick": True,
+            "manual_batch_id": str(batch_id) if batch_id else None,
+        },
+        history_event="manual_grab_correlated",
+        rejection_reason_code="gate_rejections_overridden_by_manual_pick",
+        config_get=config_get,
+        now=now,
+    )
+
+
+def correlate_scheduled_grab(
+    conn: Any,
+    *,
+    lib2_context: Mapping[str, Any],
+    search_result: Mapping[str, Any],
+    source: str,
+    task_id: str,
+    batch_id: Optional[str] = None,
+    config_get: Optional[Callable[..., Any]] = None,
+    now: Optional[float] = None,
+) -> Optional[Dict[str, str]]:
+    """Correlate one dispatched wishlist-worker grab (trigger=scheduled).
+
+    The legacy worker's own matching picked the candidate; the gate result
+    is recorded for observability only. Every dispatch of the same legacy
+    task (e.g. the quarantine-retry walk moving to the next candidate) is
+    its own request — ``legacy_task_id`` in the search options ties them
+    together, and the stale sweep closes rows the pipeline never resolved.
+    """
+    download_id = "scheduled-" + str(uuid.uuid4())
+    dispatch_options: Dict[str, Any] = {"legacy_task_id": str(task_id)}
+    if batch_id:
+        dispatch_options["legacy_batch_id"] = str(batch_id)
+    return _correlate_grab(
+        conn,
+        lib2_context=lib2_context,
+        search_result=search_result,
+        source=source,
+        trigger="scheduled",
+        download_id=download_id,
+        idempotency_key=SCHEDULED_GRAB_KEY_PREFIX + download_id,
+        shadow_source="legacy_wishlist_worker",
+        dispatch_options=dispatch_options,
+        grab_context_extra={
+            "manual_pick": False,
+            "legacy_task_id": str(task_id),
+            "legacy_batch_id": str(batch_id) if batch_id else None,
+        },
+        history_event="scheduled_grab_correlated",
+        rejection_reason_code="gate_rejections_observed_not_enforced",
+        config_get=config_get,
+        now=now,
+    )
+
+
+def _try_correlate(
+    correlate: Callable[..., Optional[Dict[str, str]]],
+    *,
+    lib2_context: Optional[Mapping[str, Any]],
+    connection_factory: Optional[Callable[[], Any]],
+    **kwargs: Any,
+) -> Optional[Dict[str, str]]:
+    """Fail-open wrapper: correlation must never block or fail a download."""
+    if not lib2_context:
+        return None
+    try:
+        if connection_factory is None:
+            from database.music_database import get_database
+            connection_factory = get_database()._get_connection
+        conn = connection_factory()
+        try:
+            markers = correlate(conn, lib2_context=lib2_context, **kwargs)
+            conn.commit()
+            return markers
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+    except Exception as exc:  # noqa: BLE001 - observational bookkeeping only
+        logger.debug("legacy grab correlation skipped: %s", exc)
+        return None
 
 
 def try_correlate_manual_grab(
@@ -237,46 +358,53 @@ def try_correlate_manual_grab(
     connection_factory: Optional[Callable[[], Any]] = None,
     config_get: Optional[Callable[..., Any]] = None,
 ) -> Optional[Dict[str, str]]:
-    """Fail-open wrapper: correlation must never block or fail a download."""
-    if not lib2_context:
-        return None
-    try:
-        if connection_factory is None:
-            from database.music_database import get_database
-            connection_factory = get_database()._get_connection
-        conn = connection_factory()
-        try:
-            markers = correlate_manual_grab(
-                conn,
-                lib2_context=lib2_context,
-                search_result=search_result,
-                source=source,
-                batch_id=batch_id,
-                config_get=config_get,
-            )
-            conn.commit()
-            return markers
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
-    except Exception as exc:  # noqa: BLE001 - observational bookkeeping only
-        logger.debug("manual grab correlation skipped: %s", exc)
-        return None
+    """Fail-open correlation of one dispatched manual grab."""
+    return _try_correlate(
+        correlate_manual_grab,
+        lib2_context=lib2_context,
+        connection_factory=connection_factory,
+        search_result=search_result,
+        source=source,
+        batch_id=batch_id,
+        config_get=config_get,
+    )
 
 
-def fail_stale_manual_grabs(
+def try_correlate_scheduled_grab(
+    *,
+    lib2_context: Optional[Mapping[str, Any]],
+    search_result: Mapping[str, Any],
+    source: str,
+    task_id: str,
+    batch_id: Optional[str] = None,
+    connection_factory: Optional[Callable[[], Any]] = None,
+    config_get: Optional[Callable[..., Any]] = None,
+) -> Optional[Dict[str, str]]:
+    """Fail-open correlation of one dispatched wishlist-worker grab."""
+    return _try_correlate(
+        correlate_scheduled_grab,
+        lib2_context=lib2_context,
+        connection_factory=connection_factory,
+        search_result=search_result,
+        source=source,
+        task_id=task_id,
+        batch_id=batch_id,
+        config_get=config_get,
+    )
+
+
+def fail_stale_correlated_grabs(
     conn: Any,
     *,
     now: Optional[float] = None,
     ttl_seconds: int = MANUAL_GRAB_TTL_SECONDS,
     limit: int = 50,
 ) -> int:
-    """Close manual-grab requests whose download never reached an outcome.
+    """Close correlated legacy grabs whose download never reached an outcome.
 
-    ``failure_kind='runtime'`` deliberately never blocklists the release —
-    nothing is known to be wrong with the candidate itself.
+    Covers both manual (interactive) and scheduled (wishlist-worker)
+    correlations. ``failure_kind='runtime'`` deliberately never blocklists
+    the release — nothing is known to be wrong with the candidate itself.
     """
     from core.acquisition.workflow import record_grab_outcome
 
@@ -286,14 +414,19 @@ def fail_stale_manual_grabs(
         """SELECT g.download_id
              FROM acquisition_requests r
              JOIN acquisition_grabs g ON g.acquisition_request_id = r.id
-            WHERE r.trigger='manual'
-              AND r.idempotency_key LIKE ?
+            WHERE r.trigger IN ('manual','scheduled')
+              AND (r.idempotency_key LIKE ? OR r.idempotency_key LIKE ?)
               AND r.status='grabbing'
               AND g.status NOT IN ('completed','failed','cancelled')
               AND CAST(strftime('%s', r.updated_at) AS INTEGER) <= ?
             ORDER BY r.updated_at
             LIMIT ?""",
-        (MANUAL_GRAB_KEY_PREFIX + "%", cutoff, max(int(limit), 0)),
+        (
+            MANUAL_GRAB_KEY_PREFIX + "%",
+            SCHEDULED_GRAB_KEY_PREFIX + "%",
+            cutoff,
+            max(int(limit), 0),
+        ),
     ).fetchall()
     closed = 0
     for row in rows:
@@ -304,12 +437,13 @@ def fail_stale_manual_grabs(
                 download_id,
                 completed=False,
                 failure_kind="runtime",
-                error="manual grab expired without a pipeline outcome",
+                error="correlated grab expired without a pipeline outcome",
             )
             closed += 1
         except Exception as exc:  # noqa: BLE001 - one row must not stop the sweep
             logger.warning(
-                "Stale manual grab %s could not be closed: %s", download_id, exc)
+                "Stale correlated grab %s could not be closed: %s",
+                download_id, exc)
     return closed
 
 
@@ -317,7 +451,10 @@ __all__ = [
     "GRAB_MARKER",
     "MANUAL_GRAB_KEY_PREFIX",
     "MANUAL_GRAB_TTL_SECONDS",
+    "SCHEDULED_GRAB_KEY_PREFIX",
     "correlate_manual_grab",
-    "fail_stale_manual_grabs",
+    "correlate_scheduled_grab",
+    "fail_stale_correlated_grabs",
     "try_correlate_manual_grab",
+    "try_correlate_scheduled_grab",
 ]

@@ -362,7 +362,7 @@ def notify_manual_grab_quarantined(
     The request deliberately stays ``grabbing``: legacy semantics keep the
     file waiting for manual review, and an approval re-enters the shared
     pipeline whose success closes the grab. Stale rows are eventually failed
-    by ``manual_grab.fail_stale_manual_grabs``.
+    by ``manual_grab.fail_stale_correlated_grabs``.
     """
     from core.acquisition.manual_grab import GRAB_MARKER
 

@@ -105,6 +105,61 @@ def _acquisition_task_ref(task):
         return None
 
 
+def _correlate_scheduled_acquisition(task_id, batch_id, track_info, candidate, deps):
+    """Roadmap 3 slice 2 (docs/library-v2.md §5.5): a wishlist-worker dispatch
+    whose ``track_info.source_info`` rides the lib2 mirror context correlates
+    observationally into the acquisition contract (trigger=scheduled).
+
+    Acquisition-native dispatches (``_acquisition_import_id``) already carry
+    their full persistent bookkeeping and must not be double-booked. When the
+    plugin registry cannot identify the source, the walk is Soulseek's
+    (ADR-08: never guess a source family from heuristics beyond the registry).
+    Fail-open: correlation must never break or delay the download it describes.
+    """
+    try:
+        if not isinstance(track_info, dict):
+            return None
+        if track_info.get('_acquisition_import_id'):
+            return None
+        from core.downloads.origin import _parse_source_info
+        source_info = _parse_source_info(track_info.get('source_info'))
+        if not source_info.get('lib2_track_id'):
+            return None
+        source = 'soulseek'
+        try:
+            spec = deps.download_orchestrator.registry.get_spec(candidate.username)
+            if spec is not None:
+                source = spec.name
+        except Exception:
+            pass
+        from core.acquisition import manual_grab
+        return manual_grab.try_correlate_scheduled_grab(
+            lib2_context={
+                'track_id': source_info.get('lib2_track_id'),
+                'album_id': source_info.get('lib2_album_id'),
+                'quality_profile_id': source_info.get('quality_profile_id'),
+            },
+            search_result={
+                'username': candidate.username,
+                'filename': candidate.filename,
+                'size': getattr(candidate, 'size', None),
+                'title': getattr(candidate, 'title', None),
+                'artist': getattr(candidate, 'artist', None),
+                'album': getattr(candidate, 'album', None),
+                'quality': getattr(candidate, 'quality', None),
+                'bitrate': getattr(candidate, 'bitrate', None),
+                'sample_rate': getattr(candidate, 'sample_rate', None),
+                'bit_depth': getattr(candidate, 'bit_depth', None),
+            },
+            source=source,
+            task_id=task_id,
+            batch_id=batch_id,
+        )
+    except Exception as exc:  # noqa: BLE001 - observational bookkeeping only
+        logger.debug("scheduled grab correlation skipped: %s", exc)
+        return None
+
+
 def _persist_acquisition_used_sources(task_id, used_sources):
     """Journal an acquisition walk's used_sources before the download starts.
 
@@ -337,6 +392,14 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
             download_id = deps.run_async(deps.download_orchestrator.download(username, filename, size))
 
             if download_id:
+                # Scheduled acquisition correlation (roadmap 3 slice 2): a
+                # wishlist-worker dispatch with lib2 mirror context gets a
+                # persistent request/grab/history trail. Manual picks are the
+                # interactive route's concern (slice 1), not this walk's.
+                acq_markers = None
+                if not user_manual_pick:
+                    acq_markers = _correlate_scheduled_acquisition(
+                        task_id, batch_id, track_info, candidate, deps)
                 # Store context for post-processing with complete Spotify metadata (GUI PARITY)
                 context_key = deps.make_context_key(username, filename)
                 with matched_context_lock:
@@ -418,6 +481,11 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                         "track_info": track_info,  # Add track_info for playlist folder mode
                         "_download_username": username,  # Source username for AcoustID skip logic
                     }
+                    if acq_markers:
+                        # Survives quarantine sidecars; pipeline_callback
+                        # closes the correlated grab on success/quarantine.
+                        matched_downloads_context[context_key][
+                            '_acquisition_grab_download_id'] = acq_markers['download_id']
                     if user_manual_pick:
                         # The user explicitly picked this candidate via the
                         # candidates modal — trust their metadata judgement
