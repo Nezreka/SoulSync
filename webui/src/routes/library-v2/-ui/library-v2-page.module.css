@@ -1231,6 +1231,22 @@
   white-space: nowrap;
   color: rgba(255, 255, 255, 0.65);
 }
+
+.grabAction {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.grabError {
+  max-width: 180px;
+  color: rgb(248, 113, 113);
+  font-size: 11px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
 .isTitle {
   font-weight: 500;
 }

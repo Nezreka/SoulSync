@@ -2270,7 +2270,18 @@ bekannte Main-Chunk-Hinweis). **Logischer nächster Schritt:** P2-06 als kleinst
     Polling-Vertragstests pinnen Timeout und terminalen Fehlerzustand.
     **Nächste Slice:** Interactive-Grab bewahrt bislang nur den generischen
     Buttonzustand „Retry“, verwirft aber den konkreten API-Fehler; Grund
-    sichtbar machen und denselben Kandidaten retrybar halten.
+    sichtbar machen und denselben Kandidaten retrybar halten. **Siebte Slice
+    abgeschlossen 2026-07-14:** Interactive Search speichert den redigierten
+    Downloadfehler pro Ergebnis-Key und zeigt ihn direkt unter dem weiterhin
+    bedienbaren Retry. Ein erneuter Klick löscht nur den Fehler dieser Zeile
+    und dispatcht dasselbe serverseitig ausgewählte Ergebnis mit denselben
+    Quality-/AcoustID-/Entity-Optionen; andere Kandidatenzustände bleiben
+    unberührt. Ein Komponenten-Vertragstest beweist Error→identischer
+    Retry→Grabbed. **Nächster logischer Schritt:** P2-06-Inventur fortsetzen:
+    Mirror-Outbox-Retry zeigt aktuell keinen eigenen API-Fehler, und der
+    Playlist-Pipeline-Start zeigt zwar den Grund, labelt denselben Button aber
+    nicht explizit als Retry. Diese beiden kleinen Mutationsgrenzen als nächste
+    Slice schließen, bevor P2-07 (verschachtelte Buttons) aufgenommen wird.
 
 **Session-Abschluss-Gate 2026-07-14:** Seit dem vorherigen Full-Gate wurden
 Roadmap 13 sowie 16–23 und Phase E vollständig abgeschlossen und jeweils

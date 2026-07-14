@@ -301,6 +301,7 @@ export function InteractiveSearchModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [grabbed, setGrabbed] = useState<Record<string, GrabState>>({});
+  const [grabErrors, setGrabErrors] = useState<Record<string, string>>({});
   const [qualityCheck, setQualityCheck] = useState(true);
   const [acoustidCheck, setAcoustidCheck] = useState(true);
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'quality', dir: -1 });
@@ -365,11 +366,21 @@ export function InteractiveSearchModal({
     // have no filename, so a filename-based key would never update the button.
     const key = resultKey(r);
     setGrabbed((g) => ({ ...g, [key]: 'pending' }));
+    setGrabErrors((errors) => {
+      const next = { ...errors };
+      delete next[key];
+      return next;
+    });
     try {
       await startSourceDownload(r, { qualityCheck, skipAcoustid: !acoustidCheck }, entity);
       setGrabbed((g) => ({ ...g, [key]: 'done' }));
-    } catch {
+    } catch (caught) {
       setGrabbed((g) => ({ ...g, [key]: 'error' }));
+      setGrabErrors((errors) => ({
+        ...errors,
+        [key]:
+          caught instanceof Error && caught.message.trim() ? caught.message : 'Download failed',
+      }));
     }
   }
 
@@ -485,20 +496,27 @@ export function InteractiveSearchModal({
                       </td>
                       <td className={styles.isAvailCell}>{availabilityCell(r)}</td>
                       <td>
-                        <button
-                          type="button"
-                          className={styles.toolButton}
-                          disabled={state === 'pending' || state === 'done'}
-                          onClick={() => void grab(r)}
-                        >
-                          {state === 'done'
-                            ? 'Grabbed ✓'
-                            : state === 'pending'
-                              ? '…'
-                              : state === 'error'
-                                ? 'Retry'
-                                : 'Download'}
-                        </button>
+                        <span className={styles.grabAction}>
+                          <button
+                            type="button"
+                            className={styles.toolButton}
+                            disabled={state === 'pending' || state === 'done'}
+                            onClick={() => void grab(r)}
+                          >
+                            {state === 'done'
+                              ? 'Grabbed ✓'
+                              : state === 'pending'
+                                ? '…'
+                                : state === 'error'
+                                  ? 'Retry'
+                                  : 'Download'}
+                          </button>
+                          {state === 'error' ? (
+                            <span className={styles.grabError} role="alert">
+                              {grabErrors[key] ?? 'Download failed'}
+                            </span>
+                          ) : null}
+                        </span>
                       </td>
                     </tr>
                   );
