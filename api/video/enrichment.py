@@ -248,3 +248,68 @@ def register_routes(bp):
             service, body.get("kind", "movie"),
             scope=body.get("scope", "failed"), item_id=body.get("item_id"))
         return jsonify({"success": True, "reset": n})
+
+    # ── manual match editor (Manage panel "Matches" section) ──────────────────
+    # GET is open (metadata read, like the detail GET); the POSTs mutate the
+    # library and inherit the blueprint's admin gate on /api/video/enrichment.
+
+    @bp.route("/enrichment/matches/<kind>/<int:item_id>", methods=["GET"])
+    def video_item_matches(kind, item_id):
+        from . import get_video_db
+        try:
+            matches = get_video_db().item_matches(kind, item_id)
+            if matches is None:
+                return jsonify({"error": "unknown kind"}), 400
+            return jsonify({"matches": matches})
+        except Exception:
+            logger.exception("video item matches failed for %s %s", kind, item_id)
+            return jsonify({"error": "Failed to load matches"}), 500
+
+    @bp.route("/enrichment/matches/<kind>/<int:item_id>/search", methods=["POST"])
+    def video_match_search(kind, item_id):
+        """Candidate search for a manual re-match. {service, query} → results
+        straight from the service's own search endpoint (no scoring — the user
+        is the matcher here)."""
+        body = request.get_json(silent=True) or {}
+        service = (body.get("service") or "").strip().lower()
+        query = (body.get("query") or "").strip()
+        if service not in ("tmdb", "tvdb") or not query:
+            return jsonify({"error": "service (tmdb|tvdb) and query are required"}), 400
+        w = engine().workers.get(service)
+        client = getattr(w, "client", None)
+        if not client or not hasattr(client, "search_candidates"):
+            return jsonify({"error": "Service not configured"}), 503
+        try:
+            return jsonify({"results": client.search_candidates(kind, query)})
+        except Exception:
+            logger.exception("video match search failed (%s: %r)", service, query)
+            return jsonify({"error": "Search failed — try again"}), 502
+
+    @bp.route("/enrichment/matches/<kind>/<int:item_id>/apply", methods=["POST"])
+    def video_match_apply(kind, item_id):
+        """Re-point (or clear) one service's match. {service, external_id|null}.
+        The DB layer resets everything derived from the old match; the already-
+        running workers then re-enrich by the new id in the background."""
+        import re as _re
+        body = request.get_json(silent=True) or {}
+        service = (body.get("service") or "").strip().lower()
+        external_id = body.get("external_id")
+        if external_id is not None:
+            if service == "imdb":
+                external_id = str(external_id).strip()
+                if not _re.fullmatch(r"tt\d{5,10}", external_id):
+                    return jsonify({"error": "IMDb id must look like tt0944947"}), 400
+            else:
+                try:
+                    external_id = int(external_id)
+                except (TypeError, ValueError):
+                    return jsonify({"error": "external_id must be numeric"}), 400
+        from . import get_video_db
+        try:
+            ok = get_video_db().rematch_item(kind, item_id, service, external_id)
+            if not ok:
+                return jsonify({"success": False, "error": "Unknown item or service"}), 400
+            return jsonify({"success": True})
+        except Exception:
+            logger.exception("video match apply failed for %s %s (%s)", kind, item_id, service)
+            return jsonify({"success": False, "error": "Failed to update the match"}), 500
