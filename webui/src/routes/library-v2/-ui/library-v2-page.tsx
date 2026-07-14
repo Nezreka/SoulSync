@@ -112,7 +112,8 @@ const ICON_PATHS = {
   back: 'M15 18l-6-6 6-6M9 12h12',
   refresh: 'M21 12a9 9 0 0 1-15.3 6.4M3 12A9 9 0 0 1 18.3 5.6M18 3v5h-5M6 21v-5h5',
   search: 'M11 19a8 8 0 1 1 5.7-2.3L21 21',
-  interactive: 'M12 11a2 2 0 1 1-4 0 2 2 0 0 1 4 0zM12 19a7 7 0 1 1 0-14 7 7 0 0 1 0 14z',
+  interactive:
+    'M12 8c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z',
   automatic: 'M11 19a8 8 0 1 1 5.7-2.3L21 21',
   organize: 'M4 7h16M7 7v12M17 7v12M4 19h16',
   retag: 'M20 10l-8.5 8.5a2 2 0 0 1-2.8 0L4 13.8V4h9.8L20 10zM8 8h.01',
@@ -126,21 +127,33 @@ const ICON_PATHS = {
   collapse: 'M9 3v6H3M15 3v6h6M9 21v-6H3M15 21v-6h6',
   download: 'M12 3v12M8 11l4 4 4-4M5 21h14',
   profile: 'M5 6h14M5 12h14M5 18h9',
+  userProfile:
+    'M224 256A128 128 0 1 0 224 0a128 128 0 1 0 0 256zm-45.7 48C79.8 304 0 383.8 0 482.3C0 498.7 13.3 512 29.7 512l388.6 0c16.4 0 29.7-13.3 29.7-29.7C448 383.8 368.2 304 269.7 304l-91.4 0z',
   folder: 'M3 6h7l2 2h9v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z',
   close: 'M6 6l12 12M18 6L6 18',
 } as const;
 
 type IconName = keyof typeof ICON_PATHS;
+type IconRenderMode = 'stroke' | 'fill';
 
-function SvgIcon({ name, filled }: { name: IconName; filled?: boolean }) {
+function SvgIcon({
+  name,
+  filled,
+  renderMode = 'stroke',
+}: {
+  name: IconName;
+  filled?: boolean;
+  renderMode?: IconRenderMode;
+}) {
+  const isFillIcon = renderMode === 'fill' || name === 'userProfile';
   return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
+    <svg viewBox={isFillIcon ? '0 0 512 512' : '0 0 24 24'} aria-hidden="true">
       <path
         d={ICON_PATHS[name]}
-        fill={filled ? 'currentColor' : 'none'}
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
+        fill={isFillIcon || filled ? 'currentColor' : 'none'}
+        stroke={!isFillIcon && !filled ? 'currentColor' : 'none'}
+        strokeLinecap={!isFillIcon ? 'round' : undefined}
+        strokeLinejoin={!isFillIcon ? 'round' : undefined}
       />
     </svg>
   );
@@ -2263,7 +2276,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 onClick={() => setShowMonitoring(true)}
               />
               <ActionButton
-                icon="profile"
+                icon="userProfile"
                 label="Quality Profile"
                 onClick={() => handleAction('Quality Profile')}
               />
@@ -2685,7 +2698,7 @@ function AlbumBlock({
             }
           />
           <IconActionButton
-            icon="profile"
+            icon="userProfile"
             title="Quality Profile"
             onClick={() =>
               onQualityProfile({
