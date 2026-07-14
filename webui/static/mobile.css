@@ -1859,8 +1859,11 @@
 
     /* Global touch targets - only standalone/action buttons, not inline.
        Round icon buttons (fixed-size circles) are excluded so the min-height
-       can't stretch them into vertical ellipses. */
-    button:not(.watchlist-card-remove):not(.wishlist-delete-btn):not(.wishlist-delete-album-btn):not(.wishlist-delete-btn-small):not(.wishlist-back-btn):not(.alphabet-btn):not(.filter-btn):not(.playlist-modal-close):not(.notif-bell-btn):not(.helper-float-btn):not(.hero-indicator):not(.discover-blacklist-btn):not(.tool-help-button):not([data-import-page-result-row]):not([data-import-page-inline-action]) {
+       can't stretch them into vertical ellipses. The video dashboard's Studios
+       halves (.vst-half) are excluded because this chain's specificity beats
+       their own min-height: 208px — their content is absolutely positioned, so
+       "winning" here collapses each half to a 38px sliver on phones. */
+    button:not(.watchlist-card-remove):not(.wishlist-delete-btn):not(.wishlist-delete-album-btn):not(.wishlist-delete-btn-small):not(.wishlist-back-btn):not(.alphabet-btn):not(.filter-btn):not(.playlist-modal-close):not(.notif-bell-btn):not(.helper-float-btn):not(.hero-indicator):not(.discover-blacklist-btn):not(.tool-help-button):not(.vst-half):not([data-import-page-result-row]):not([data-import-page-inline-action]) {
         min-height: 38px;
     }
 

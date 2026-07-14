@@ -98,6 +98,56 @@ body:not(.video-admin) [data-video-overlay-studio] { display: none !important; }
 .video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="upcoming"] { order: 5; grid-column: span 2; }
 .video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="stats"] { order: 6; }
 
+/* ── Dashboard responsive (tablet + phone) ──────────────────────────────────
+   The shared .dash-grid (style.css) collapses 3→2 cols at 1499px and →1 col at
+   699px, but its mobile reset only covers the music helper classes
+   (.dash-card--wide/--full) — NOT the raw span-2 rules above. Without the reset
+   below, the three spanning cards force an IMPLICIT second column into the
+   1-col phone grid (double-width cards, sideways page scroll). */
+@media (max-width: 1499px) and (min-width: 700px) {
+    /* 2-col tablet range: Stats is the last card and sat alone at half width —
+       let it finish the grid full-width (its six stat tiles flow 3-up there). */
+    .video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="stats"] { grid-column: span 2; }
+}
+@media (max-width: 699px) {
+    .video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="recent"],
+    .video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="studios"],
+    .video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="upcoming"],
+    .video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="stats"] { grid-column: auto; }
+    /* The studios "Metadata ready" rings wrap under the title on phones —
+       left-align the wrapped row so it reads cleanly. */
+    .vcov { align-items: flex-start; }
+}
+
+/* Phone enrichment strip — worker orbs are disabled ≤768px (video-worker-orbs.js)
+   so the 13 accent buttons + the Manage Workers pill render as real elements.
+   Mirror music's treatment (style.css scopes it to #dashboard-page, which never
+   reaches this subpage): an even auto-fit grid of the 46px buttons, with the
+   pill on its own full-width row instead of dangling inline. */
+@media (max-width: 768px) {
+    .video-subpage[data-video-subpage="video-dashboard"] .header-actions {
+        width: 100%;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(46px, 1fr));
+        justify-items: center;
+        align-items: center;
+        gap: 12px 10px;
+    }
+    .video-subpage[data-video-subpage="video-dashboard"] .header-actions .em-manage-btn {
+        grid-column: 1 / -1;
+        width: 100%;
+        margin-left: 0;
+        justify-content: center;
+    }
+}
+
+/* Touch devices get no hover — an enrichment tooltip would pop on tap and sit
+   stuck over the buttons. Music hides its worker tooltips at this width
+   (style.css @900px); same for the video workers. */
+@media (max-width: 900px) {
+    .video-enrich-tooltip { display: none !important; }
+}
+
 /* Dashboard "Recently Added" — a single full-width, horizontally-scrolling row. */
 .video-recent-grid { display: flex; align-items: flex-start; gap: 14px; overflow-x: auto; padding-bottom: 8px; scroll-snap-type: x proximity; }
 .video-recent-grid::-webkit-scrollbar { height: 6px; }
