@@ -3003,3 +3003,132 @@ Falls dieser Punkt später aufgegriffen wird, sind die Voraussetzungen dafür:
    dort oder im nachgelagerten Wishlist-Mirror-Schritt ansetzen.
 3. UI-Entscheidung, wo der Playlist-Default-Profil-Picker sitzt (11.4,
    erster Punkt).
+
+---
+
+## 12. Offene Backend-Findings & Roadmap-Fortsetzung (2026-07-14)
+
+Basierend auf Nutzer-Feedback und real-world Testlauf, aufzunehmend nach Abschluss von Roadmap-Punkt 37:
+
+### 38. Update Discovery funktioniert nicht konsistent (Discography-Sync Robustheit)
+
+**Beobachtung:** Update Discography funktioniert bei manchen Artists nicht zuverlässig:
+- Michael Jackson: findet oft nur Singles, nicht den ganzen Katalog.
+- Hirokyu Samono: aliasing-bedingte Duplikation, mehrere Versionen desselben Release unter verschiedenen Aliases.
+- Generell: Mehrere Release-Variationen unter verschiedenen Artist-Namen-Kombinationen (feat., &, x usw.) werden nicht konsistent erkannt.
+
+**Vermutete Root Causes:**
+- Provider (besonders Deezer) liefert Provider-Artist-IDs inkonsistent oder mit Alias-Varianten.
+- Normalisierter Discography-Match (§3 / Abschnitt 3 "Discography") nutzt Provider-ID-Matching; fehlende/alternative IDs führen zu „nicht gefunden".
+- Multi-Artist-Splits im Importer (`feat./&/x` Parsing) laufen nicht konsistent über alle Provider-Quellen.
+- Tracklist-Fallback-Suche (Deezer ohne ID) bei Namensvarianten nicht robust.
+
+**Scope:** Backend-Audit von `core/library2/discography.py` + `core/metadata/discography.py` + Provider-Adapter-Boundary, möglicherweise neue Robust-Heuristik für Alias-Matching.
+
+**Nächster Schritt:** Artist-Watchlist-Sync-Flows in Docker mit gezielten Testkandidaten verifizieren (Michael Jackson, Hirokyu Samono).
+
+---
+
+### 39. Managed Tracks funktioniert nicht (UI sagt „No Duplicates found", aber Duplikate existieren)
+
+**Beobachtung:** Managed Tracks Modal zeigt bei Artists mit echten Single↔Album-Duplikaten falsch „No Single Album Duplicates found for the artist".
+
+**Vermutete Root Causes:**
+- Query `GET /api/library/v2/artists/<id>/duplicates` filtert zu streng oder hat SQL-Bug.
+- Canonical-Link-Logik (`lib2_tracks.canonical_track_id`) wird nicht konsistent gespeichert beim Import.
+- Duplikat-Erkennung läuft nur wenn beide Varianten mindestens eine Datei haben; fileless Wanted-Rows werden übersehen.
+
+**Scope:** Backend-Audit von `core/library2/manage.py` + `api/library_v2.py:GET /artists/<id>/duplicates` Query.
+
+**Nächster Schritt:** Manually created Single↔Album-Duplikate in Test-DB einfügen und Query-Korrektheit prüfen.
+
+---
+
+### 40. Artist Aliasing & Matching braucht Überarbeitung (Multi-Alias Artists)
+
+**Beobachtung:** Artists mit mehreren Aliases (z.B. Hirokyu Samono mit alternativen Romanisierungen) führen zu:
+- Artist-Watchlist-Seite zeigt dieselben Releases unter verschiedenen Artists mehrfach.
+- „Search/Update Discovery" findet nicht alle Releases, weil sie unter unterschiedlichen Aliases veröffentlicht wurden.
+- Importer erstellt Duplikat-Artists statt sie zu mergen.
+
+**Vermutete Root Causes:**
+- `core/metadata/discography.py` sucht nur nach Provider-IDs (Spotify, Deezer), nicht nach Namen-Normaliserungen.
+- Alias-Matching existiert nur im `_multi_artist_split` (Collaborator-Feature-Feauture, nicht Artist-Alias).
+- Keine zentrale Artist-Deduplication auf Basis von Aliases/Name-Normaliserung.
+
+**Scope:** Alias-Registry (wie in Musikdatenbanken MB/Discogs), oder zumindest eine Fallback-Heuristik für Name-Normalisierung vor Duplicate-Create.
+
+**Nächster Schritt:** Audit wie andere Systeme (Lidarr, Music Brainz) Artist-Aliases handhaben; dann Design entwerfen (zentrales `lib2_artist_aliases`-Schema vs. Provider-Snapshot-Basis).
+
+---
+
+### 41. Manual Artist Matching UI (Fehler-Recovery wie Plex)
+
+**Beobachtung:** Wenn eine Discography-Suche fehlschlägt oder Aliases falsch matched werden, gibt es keinen Weg, manuell zu sagen „dieser Download gehört zu Artist X, nicht Y".
+
+**Gewünschte Funktionalität:** Ähnlich Plex/Jellyfin — wo ein Upload/Match-Fehler erkannt wird, kann der Nutzer interaktiv sagen „das ist Artist X" oder „das Release ist falsch, sollte Artist Y sein" und die DB-Verknüpfung korrigieren.
+
+**Scope:** Neue UI-Modal + Endpoint `POST /api/library/v2/artists/<id>/manual-alias-link`, der:
+- Eine existierende Artist-Row mit einer anderen Artist-Row verknüpft (als Alias oder Redirect).
+- Alle Tracks/Releases dieser Seite per `canonical` oder `merge` zu einer Identität konsolidiert.
+- Die bestehende Wishlist/Monitor-Regeln beibehalten.
+
+**Nächster Schritt:** Anforderungs-Design, Datenschema (Alias-Tabelle?), Testing-Strategie.
+
+---
+
+### 42. Preview Retag zeigt falsche „File not found" Fehler
+
+**Beobachtung:** „Preview Retag" zeigt für heruntergeladene Tracks „No File" oder „File not found on disk", obwohl die Datei vorhanden ist.
+
+**Vermutete Root Causes:**
+- `core/library2/paths.resolve_lib2_path` wird nicht konsistent aufgerufen; älterer `os.path.exists` wird noch irgendwo verwendet.
+- Gespeicherter Pfad in `lib2_track_files.file_path` ist Media-Server-Sicht (z.B. mit Mapping), wird aber gegen den lokalen Filesystem-Pfad geprüft.
+- Relative Pfade werden nicht korekt aufgelöst.
+
+**Scope:** Audit aller Pfad-Zugriffe in `core/library2/retag.py` + Preview-Route.
+
+**Nächster Schritt:** Manuell einen Track downloaden, in DB seinen `file_path` inspizieren, Preview Retag öffnen und Fehler-Root-Cause identifizieren.
+
+---
+
+### 43. ReplayGain-Funktion fehlt
+
+**Beobachtung:** Die alte Library bot die Möglichkeit, ReplayGain-Werte zu berechnen und zu Album/Track zu schreiben. Library v2 hat das nicht.
+
+**Scope:** Neue Library-v2-Action (Artist- oder Track-Scope):
+- `POST /api/library/v2/artists/<id>/calculate-replay-gain` oder
+- `POST /api/library/v2/albums/<id>/calculate-replay-gain`
+- Nutzt bestehende ReplayGain-Berechnung (falls vorhanden in `core/imports/*` oder `core/tag_writer.py`), schreibt in Datei-Tags, persistiert in DB.
+
+**Nächster Schritt:** Grep für bestehende ReplayGain-Logik; falls nicht vorhanden, prüfen ob externe Bibliothek (z.B. `python-acoustid`, `librosa`) integrierbar ist.
+
+---
+
+### 44. Enrich Album/Track-Funktion fehlt
+
+**Beobachtung:** Die alte Library bot Enrich: gezielt zusätzliche Metadaten für ein Album/Track abfragen und einzufügen (z.B. Year, Genre, Labels).
+
+**Scope:** Neue Library-v2-Action:
+- `POST /api/library/v2/albums/<id>/enrich` — hole aktuelle Metadaten vom bestehenden Provider, update `lib2_albums` + `lib2_tracks`.
+- UI: Modal mit durchsuchbaren Quellen (Spotify, Deezer, MB) + Diff-Preview.
+
+**Nächster Schritt:** Audit bestehender Enrichment-Logik (wahrscheinlich im Import-Flow), Scope für Library-v2-Only-Action definieren.
+
+---
+
+## Nächste Schritte (Priorisierung)
+
+1. **38 (Discography):** Kritisch — blockiert Update Discovery. Zuerst Docker-Verifizierung mit Testkandidaten, dann Root-Cause-Audit.
+2. **39 (Managed Tracks):** Kritisch — Kernfeature funktioniert nicht. Query-Audit + Testfall.
+3. **40 (Aliasing):** Mittelhoch — Design vor Umsetzung. Vielleicht mit 38 kombiniert addressierbar.
+4. **41 (Manual Matching UI):** Mittelhoch — nützlich für 40-Recovery, aber größerer Umfang.
+5. **42 (Preview Retag):** Niedrig-Mittelhoch — UX-Bug, aber Pfad-Resolver sollte bereits existieren (wurde in 2026-07-07 behoben); wahrscheinlich kleines Regressions-Loch.
+6. **43 (ReplayGain):** Niedrig — schön-zu-haben, nicht kritisch.
+7. **44 (Enrich):** Niedrig — schön-zu-haben, nicht kritisch.
+
+**Neben diesen Backend-Punkten:** UI-Improvements aus `docs/library-v2-ui-requirements.md` können parallel laufen (Icons, Labels, Layout).
+
+---
+
+**Session 2026-07-14 Abschluss:** Branch bleibt clean, alle Tests bestanden bis Punkt 37. Die Punkte 38–44 sind als separate Aufgaben zu verstehen, die in zukünftigen Sessions aufgegriffen werden.
