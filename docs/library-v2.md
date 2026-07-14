@@ -2225,10 +2225,15 @@ bekannte Main-Chunk-Hinweis). **Logischer nächster Schritt:** P2-06 als kleinst
     sendet. Beide Controls verlassen Pending bei Erfolg und Fehler; die
     Monitoring-/Wishlist-Backendsemantik wurde nicht verändert. Zwei neue
     Komponenten-Vertragstests, alle 11 Library-v2-Vitests, Frontend-Format/
-    Lint/Typecheck und Production-Build sind grün. **Nächste Slice:** die noch
-    still fehlschlagenden Bulk-Monitor-, Quality-Profile- und übrigen
-    Artist-/Album-Mutationen inventarisieren und dieselbe endliche
-    Error/Retry-Grenze zuerst auf den Bulk-Monitor-Job anwenden.
+    Lint/Typecheck und Production-Build sind grün. **Zweite Slice abgeschlossen
+    2026-07-14:** Der Bulk-Monitor-Dialog wertet nun auch den terminalen
+    Background-Job-Fehler aus (vorher wurde er trotz `error` geschlossen),
+    zeigt Start-/Polling-/Job-Fehler sichtbar, beendet Busy zuverlässig und
+    wiederholt per Retry exakt Scope und Zielzustand des fehlgeschlagenen
+    Commands. Nur die tatsächlich laufende Option zeigt „Applying“. Drei
+    Monitoring-Komponenten-Vertragstests sind grün. **Nächste Slice:** die
+    Quality-Profile-Mutation mit derselben sichtbaren Error/Retry-Grenze
+    absichern; danach die verbliebenen Artist-/Album-Mutationen inventarisieren.
 
 **Session-Abschluss-Gate 2026-07-14:** Seit dem vorherigen Full-Gate wurden
 Roadmap 13 sowie 16–23 und Phase E vollständig abgeschlossen und jeweils

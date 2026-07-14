@@ -375,6 +375,12 @@ export function MonitoringModal({
 }) {
   const queryClient = useQueryClient();
   const [busy, setBusy] = useState<string | null>(null);
+  const [bulkError, setBulkError] = useState<string | null>(null);
+  const [failedBulkAction, setFailedBulkAction] = useState<{
+    scope: 'all' | 'missing';
+    monitored: boolean;
+    label: string;
+  } | null>(null);
   const initialNewItems =
     monitorNewItems === 'none' || monitorNewItems === 'new' ? monitorNewItems : 'all';
   const [newItems, setNewItems] = useState<'all' | 'none' | 'new'>(initialNewItems);
@@ -390,12 +396,17 @@ export function MonitoringModal({
 
   async function apply(scope: 'all' | 'missing', monitored: boolean, label: string) {
     setBusy(label);
+    setBulkError(null);
+    setFailedBulkAction(null);
     try {
       const jobId = await bulkMonitorLibraryV2Releases(artistId, scope, monitored);
-      await awaitBulkJob(queryClient, jobId);
+      const jobError = await awaitBulkJob(queryClient, jobId);
+      if (jobError) throw new Error(jobError);
       onClose();
-    } catch {
+    } catch (caught) {
       await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+      setBulkError(mutationErrorMessage(caught, 'Bulk monitoring failed'));
+      setFailedBulkAction({ scope, monitored, label });
       setBusy(null);
     }
   }
@@ -429,11 +440,25 @@ export function MonitoringModal({
             disabled={busy !== null}
             onClick={o.run}
           >
-            <span className={styles.qpName}>{busy ? 'Applying…' : o.label}</span>
+            <span className={styles.qpName}>{busy === o.label ? 'Applying…' : o.label}</span>
             <span className={styles.qpDesc}>{o.desc}</span>
           </button>
         ))}
       </div>
+      {bulkError && failedBulkAction ? (
+        <div className={styles.mutationError} role="alert">
+          <span>{bulkError}</span>
+          <button
+            type="button"
+            className={styles.inlineRetry}
+            onClick={() =>
+              void apply(failedBulkAction.scope, failedBulkAction.monitored, failedBulkAction.label)
+            }
+          >
+            Retry
+          </button>
+        </div>
+      ) : null}
       <div className={styles.editRow}>
         <label htmlFor="lib2-monitor-new">Future releases</label>
         <select

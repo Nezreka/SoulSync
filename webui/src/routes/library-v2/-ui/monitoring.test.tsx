@@ -76,4 +76,41 @@ describe('library v2 monitoring mutations', () => {
     expect(submitted).toEqual([{ monitor_new_items: 'new' }, { monitor_new_items: 'new' }]);
     expect(select).toBeEnabled();
   });
+
+  it('surfaces a failed bulk-monitor job and retries the same scope', async () => {
+    let starts = 0;
+    const submitted: unknown[] = [];
+    const onClose = vi.fn();
+    server.use(
+      http.post('/api/library/v2/artists/7/releases/monitor', async ({ request }) => {
+        starts += 1;
+        submitted.push(await request.json());
+        return HttpResponse.json({ success: true, job_id: `job-${starts}` });
+      }),
+      http.get('/api/library/v2/jobs/status', ({ request }) => {
+        const jobId = new URL(request.url).searchParams.get('job_id');
+        return HttpResponse.json({
+          running: false,
+          error: jobId === 'job-1' ? 'Wishlist mirror failed' : null,
+        });
+      }),
+    );
+
+    renderWithQueryClient(<MonitoringModal artistId={7} monitorNewItems="all" onClose={onClose} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /Monitor missing only/ }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Wishlist mirror failed');
+    expect(screen.getByRole('button', { name: /Monitor missing only/ })).toBeEnabled();
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(starts).toBe(2);
+    expect(submitted).toEqual([
+      { scope: 'missing', monitored: true },
+      { scope: 'missing', monitored: true },
+    ]);
+  });
 });
