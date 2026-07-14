@@ -53,6 +53,32 @@ EXPECTED_ACTION_NAMES = frozenset({
     'full_cleanup',
     'run_script',
     'search_and_download',
+    # Video side (isolated app, shared engine).
+    'video_scan_library',
+    'video_deep_scan_movies',
+    'video_deep_scan_tv',
+    'video_scan_server',
+    'video_update_database',
+    'video_update_database_hourly',
+    'video_add_airing_episodes',
+    'video_refresh_airing_schedules',
+    'video_reenrich_stale',
+    'video_scan_watchlist_people',
+    'video_scan_watchlist_studios',
+    'video_scan_watchlist_channels',
+    'video_scan_watchlist_playlists',
+    'video_process_movie_wishlist',
+    'video_process_episode_wishlist',
+    'video_process_youtube_wishlist',
+    'video_clean_youtube_episodes',
+    'video_clean_search_history',
+    'video_clean_completed_downloads',
+    'video_full_cleanup',
+    'video_backup_database',
+    'video_apply_overlays',
+    'video_clean_plex_images',
+    'video_sync_collections',
+    'video_run_repair_job',
 })
 
 # Action names that MUST register a guard (duplicate-run prevention).
@@ -66,6 +92,10 @@ EXPECTED_GUARDED_ACTIONS = frozenset({
     'deep_scan_library',
     'run_duplicate_cleaner',
     'start_quality_scan',
+    'video_process_movie_wishlist',
+    'video_process_episode_wishlist',
+    'video_apply_overlays',
+    'video_clean_plex_images',
 })
 
 
@@ -173,6 +203,25 @@ class TestActionHandlerRegistration:
         extra = registered - EXPECTED_ACTION_NAMES
         assert not missing, f"register_all dropped: {missing}"
         assert not extra, f"register_all added unexpected: {extra}"
+
+    def test_deep_scans_route_to_readonly_update_in_deep_mode(self, monkeypatch):
+        """A deep scan is a full READ + reconcile (music's full-refresh equivalent) —
+        it must NOT nudge Plex to rescan its disk. So the deep-scan action types route
+        to the read-only update-database handler in 'deep' mode, scoped per library,
+        never to the nudge+read scan-library handler."""
+        import core.automation.handlers.registration as reg
+        seen = []
+        monkeypatch.setattr(reg, 'auto_video_update_database',
+                            lambda config, deps: seen.append(config) or {'status': 'completed'})
+        monkeypatch.setattr(reg, 'auto_video_scan_library',
+                            lambda *a, **k: pytest.fail('deep scan must not nudge the server'))
+        engine = _RecordingEngine()
+        register_all(_build_deps(engine))
+
+        engine.action_handlers['video_deep_scan_tv']['handler']({'_automation_id': 'x'})
+        engine.action_handlers['video_deep_scan_movies']['handler']({})
+        assert seen[0]['media_type'] == 'show' and seen[0]['mode'] == 'deep'
+        assert seen[1]['media_type'] == 'movie' and seen[1]['mode'] == 'deep'
 
     def test_guarded_actions_have_a_guard(self):
         engine = _RecordingEngine()

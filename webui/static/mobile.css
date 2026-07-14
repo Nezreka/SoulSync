@@ -2943,6 +2943,10 @@
 
     .docs-sidebar-header {
         padding: 16px;
+        /* The header (title + filter + debug controls) runs ~194px tall — as
+           a sticky bar it fills this 200px strip and leaves the nav items a
+           few px of tappable space. Let it scroll away instead. */
+        position: static;
     }
 
     .docs-sidebar-header h3 {

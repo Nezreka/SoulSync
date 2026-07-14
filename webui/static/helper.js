@@ -3404,14 +3404,13 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Convention: keep only the CURRENT release here, plus a single brief
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '2.8.9': [
-        { date: 'July 2026 — 2.8.9' },
-        { title: 'Multi-disc downloads fixed (#1009)', desc: 'downloading a box set was collapsing every disc into one folder — multi-disc albums now always follow your naming template, so $cdnum/$disc folders and the auto "Disc N" folders actually stick.', page: 'library' },
-        { title: 'Track Number Repair understands discs (#1009)', desc: 'the repair job was mangling $disc$track filenames (0213 became 133) and flagging perfectly-formatted box sets as broken. repairs now keep your naming convention (0213 for disc 2 track 13, plain 01 for single disc), correct files are left alone, and approving a finding applies exactly the change it shows.', page: 'tools' },
-        { title: 'Server Playlists page is fast now (#1005)', desc: 'opening a big synced playlist took 15+ seconds; it\'s a few seconds now. the missing/matched filter actually filters after a reload, and syncing a single song updates just that row instead of reloading the whole playlist.', page: 'sync' },
-        { title: 'New: prefer explicit versions (#923)', desc: 'a sub-setting under "Allow explicit content": explicit-marked soulseek files rank up, clean/censored/radio-edit files rank down. nothing is ever skipped — if only a clean version exists it still downloads.', page: 'settings' },
-        { title: 'Stability + mobile fixes', desc: 'the status endpoint could 500 with several tabs open (a thread race — fixed with a lock), and on phones the floating bell/help buttons no longer cover the album modal\'s buttons. plus unified React page headers and a webui CI gate — thanks @bluejorts.', page: 'dashboard' },
-        { title: 'Earlier versions', desc: '2.8.8 fixed a tag write that could corrupt FLAC audio (#1000, atomic + audio-verified writes now), added the Corrupt File Detector job, Bandcamp enrichment, opt-in atomic album publishing, and unjammed the download queue. 2.8.7 made the discovery playlists first-class Auto-Sync items and fixed a settings-save that could wipe API secrets (#992). 2.8.6/2.8.5 were fix batches (Docker black screens, mirrored-playlist wipes, iTunes singles, Reorganize pruning). 2.8.4 added Artist Web + Quality Profiles; 2.8.3 rebuilt Discover; 2.7.0 made multi-user real.' },
+    '3.0.0': [
+        { date: 'July 2026 — 3.0.0' },
+        { title: 'New: the entire video side (movies, tv & youtube)', desc: 'soulsync isn\'t just music anymore. a whole isolated video app: library scanning for plex/jellyfin, tmdb/tvdb/omdb enrichment plus 10 background backfill workers, a tv calendar, and a follow-to-wishlist-to-download pipeline for shows, actors, directors, studios, and youtube channels. its own database and dashboard, never touches the music side.' },
+        { title: 'Video: overlays & collections (kometa-style)', desc: 'an overlay studio that paints template overlays onto your plex/jellyfin posters, and a collection manager that builds plex collections / jellyfin boxsets from smart filters and ranked lists (imdb, tmdb, trakt, mdblist) in true rank order. both with nightly automations.' },
+        { title: 'New: Server Activity (tautulli-style)', desc: 'a live now-playing view for plex + jellyfin in a slide-out drawer: live streams over websocket, click one to open it inside soulsync, a history tab, a stats tab, and terminate-a-stream-with-a-message.', page: 'dashboard' },
+        { title: 'Mobile docs nav fixed', desc: 'the help/docs sidebar was untappable on phones (a sticky header ate the tap area, and the scroll target was a no-op on the stacked mobile layout). fixed in both spots. thanks @bluejorts for the characterization tests that caught it.', page: 'help' },
+        { title: 'Earlier versions', desc: '2.8.9 fixed multi-disc downloads (#1009), sped up the Server Playlists page (#1005), and added a prefer-explicit-versions setting (#923). 2.8.8 stopped a tag write from corrupting FLAC audio (#1000) and added the Corrupt File Detector. 2.8.7 made discovery playlists first-class Auto-Sync items. 2.8.4 added Artist Web + Quality Profiles; 2.7.0 made multi-user real.' },
     ],
 };
 
@@ -3442,7 +3441,18 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "2.8.9 — multi-disc fixed, fast server playlists, prefer explicit",
+        title: "3.0.0 — soulsync does video now",
+        description: "the big one: a whole video side (movies, tv, youtube) plus a tautulli-style live server activity view, on top of the usual pile of fixes.",
+        features: [
+            "the video side is a fully isolated app (its own database, dashboard, search, calendar and download pipeline) for plex and jellyfin that never touches the music side. library scanning, tmdb/tvdb/omdb enrichment plus 10 backfill workers, source-agnostic movie/show/person/studio detail pages, and a progressive netflix-feel search",
+            "follow shows, actors, directors, studios (with family presets like disney = pixar + marvel + lucasfilm) and youtube channels/playlists, then let the wishlist-to-download pipeline grab them: soulseek + prowlarr + yt-dlp, with radarr/sonarr-class quality profiles, a download history, a recycle bin and a release blocklist",
+            "kometa-style overlay studio (paint template overlays onto your posters) and collection manager (build plex collections / jellyfin boxsets from imdb/tmdb/trakt/mdblist ranked lists in true rank order), both with nightly automations",
+            "Server Activity: a tautulli-style live now-playing drawer for plex + jellyfin, with websocket streams, click-to-open-inside-soulsync, a history tab, a stats tab, and terminate-a-stream-with-a-message",
+            "music-side: the help/docs sidebar nav works on mobile again (thanks @bluejorts for the characterization tests that caught it), the dashboard header reads 'music dashboard', and there's a github sponsor button now",
+        ],
+    },
+    {
+        title: "Earlier in 2.8.9",
         description: "a bug-fix + quality-of-life release: box sets keep their disc folders, the Server Playlists compare view stopped taking 15 seconds, and a new matching preference for explicit versions.",
         features: [
             "#1009 — downloading a multi-disc album was collapsing every disc into one folder (and the Track Number Repair job mangled $disc$track filenames like 0213 into 133, flagging correct box sets as broken). both fixed: disc folders follow your template, repairs keep your naming convention, and approving a repair finding applies exactly the change it shows",

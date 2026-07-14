@@ -105,11 +105,10 @@ def auto_update_discovery_pool(config: Dict[str, Any], deps: AutomationDeps) -> 
 _MAX_BACKUPS = 5
 
 
-def auto_backup_database(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str, Any]:
-    """Create a hot SQLite backup, then prune old backups so only the
-    newest ``_MAX_BACKUPS`` remain."""
-    automation_id = config.get('_automation_id')
-    db_path = os.environ.get('DATABASE_PATH', 'database/music_library.db')
+def _backup_db_at(db_path: str, deps: AutomationDeps, automation_id) -> Dict[str, Any]:
+    """Create a hot SQLite backup of ``db_path``, then prune old backups so only
+    the newest ``_MAX_BACKUPS`` remain. Shared by the music and video backup
+    actions — only the DB file differs (they can't share one backup)."""
     if not os.path.exists(db_path):
         return {'status': 'error', 'reason': 'Database file not found'}
 
@@ -144,6 +143,20 @@ def auto_backup_database(config: Dict[str, Any], deps: AutomationDeps) -> Dict[s
         log_type='success',
     )
     return {'status': 'completed', 'backup_path': backup_path, 'size_mb': str(size_mb)}
+
+
+def auto_backup_database(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str, Any]:
+    """Hot SQLite backup of the MUSIC database (``DATABASE_PATH``)."""
+    db_path = os.environ.get('DATABASE_PATH', 'database/music_library.db')
+    return _backup_db_at(db_path, deps, config.get('_automation_id'))
+
+
+def auto_backup_video_database(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str, Any]:
+    """Hot SQLite backup of the VIDEO database (``VIDEO_DATABASE_PATH`` /
+    video_library.db). Same logic as the music backup but a different DB file —
+    the two can't share one backup, so this is a video-specific action."""
+    db_path = os.environ.get('VIDEO_DATABASE_PATH', 'database/video_library.db')
+    return _backup_db_at(db_path, deps, config.get('_automation_id'))
 
 
 # ─── refresh_beatport_cache ──────────────────────────────────────────

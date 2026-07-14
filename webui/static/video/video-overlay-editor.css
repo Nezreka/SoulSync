@@ -1,0 +1,699 @@
+/* ============================================================================
+ * SoulSync — Overlay Studio (Artwork Studio)
+ * Full-bleed visual editor for poster-overlay templates. Design-tool chrome:
+ * a gallery of saved templates and a canvas editor (palette · stage · layers).
+ * Positions are normalized + anchored so a template fits any poster.
+ * Prefix: .voe-*   Accent: --accent-rgb (the user's theme accent).
+ * ==========================================================================*/
+
+.voe-overlay {
+    position: fixed; inset: 0; z-index: 9300;
+    --a: var(--accent-rgb, 88, 101, 242);
+    display: none; flex-direction: column;
+    background: #0a0a0e; color: #e9ecf3;
+    opacity: 0; transition: opacity .24s ease;
+    font-family: inherit;
+}
+.voe-overlay--on { display: flex; opacity: 1; }
+.voe-overlay * { box-sizing: border-box; }
+.voe-overlay ::-webkit-scrollbar { width: 10px; height: 10px; }
+.voe-overlay ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.13); border-radius: 5px; }
+.voe-overlay ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.22); }
+/* The icon set is stroke-based (fill:none) but the strings omit stroke="currentColor",
+ * so give every editor/dialog icon a currentColor stroke — otherwise icon-only
+ * buttons (card duplicate/delete, undo/redo) render blank. */
+.voe-overlay svg, .voe-confirm-back svg { stroke: currentColor; }
+.voe-topbar .voe-brand-mark svg { stroke: #fff; }
+.voe-lr-grip svg { stroke: none; }   /* fill-based dots — keep them fill-only */
+
+/* ── shared top bar ──────────────────────────────────────────────────────── */
+.voe-topbar {
+    flex: 0 0 auto; display: flex; align-items: center; gap: 16px;
+    height: 60px; padding: 0 20px;
+    background: linear-gradient(180deg, #14141b, #101015);
+    border-bottom: 1px solid rgba(255,255,255,.07);
+}
+.voe-brand { display: flex; align-items: center; gap: 11px; }
+.voe-brand-mark {
+    width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center;
+    background: linear-gradient(135deg, rgba(var(--a),.9), rgba(var(--a),.55));
+    box-shadow: 0 4px 14px rgba(var(--a),.4);
+}
+.voe-brand-mark svg { width: 17px; height: 17px; stroke: #fff; }
+.voe-brand-name { font-size: 15px; font-weight: 800; letter-spacing: -.01em; }
+.voe-brand-name span { color: rgba(255,255,255,.4); font-weight: 600; }
+.voe-top-spacer { flex: 1; }
+/* Close matches the get-modal / poster-manager standard: a circular dark button,
+ * separated from the action cluster. */
+.voe-x {
+    flex: 0 0 auto; width: 36px; height: 36px; border-radius: 50%; cursor: pointer; margin-left: 4px;
+    font-size: 22px; line-height: 1; color: rgba(255,255,255,.7);
+    background: rgba(0,0,0,.4); border: 1px solid rgba(255,255,255,.16);
+    backdrop-filter: blur(6px); transition: all .15s ease; display: grid; place-items: center;
+}
+.voe-x:hover { color: #fff; background: rgba(0,0,0,.68); border-color: rgba(255,255,255,.4); }
+
+/* generic buttons — same shape/weight as .vgm-btn / .vpm-apply across the video UI */
+.voe-btn {
+    display: inline-flex; align-items: center; gap: 8px; font: inherit;
+    font-size: 13px; font-weight: 700; padding: 10px 18px; border-radius: 11px; cursor: pointer;
+    color: rgba(255,255,255,.82); background: rgba(255,255,255,.06);
+    border: 1px solid rgba(255,255,255,.12); transition: all .15s ease;
+}
+.voe-btn:hover { color: #fff; background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.2); }
+.voe-btn svg { width: 15px; height: 15px; }
+.voe-btn--primary {
+    color: #fff; background: rgb(var(--a)); border-color: transparent;
+    box-shadow: 0 8px 24px rgba(var(--a),.4);
+}
+.voe-btn--primary:hover { filter: brightness(1.08); background: rgb(var(--a)); transform: translateY(-1px); }
+.voe-btn--primary:disabled, .voe-btn:disabled { opacity: .45; cursor: default; box-shadow: none; filter: none; transform: none; }
+.voe-btn--ghost { background: transparent; border-color: transparent; color: rgba(255,255,255,.6); }
+.voe-btn--ghost:hover { background: rgba(255,255,255,.08); color: #fff; }
+
+/* ── GALLERY ─────────────────────────────────────────────────────────────── */
+.voe-gallery { flex: 1; overflow-y: auto; }
+.voe-gallery-inner { max-width: 1120px; margin: 0 auto; padding: 56px 32px 64px; }
+.voe-gallery-head { margin-bottom: 40px; text-align: center; }
+.voe-gallery-kick {
+    font-size: 12px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase;
+    color: rgb(var(--a)); display: inline-flex; align-items: center; gap: 8px;
+}
+.voe-gallery-kick::before { content: ""; width: 7px; height: 7px; border-radius: 50%;
+    background: rgb(var(--a)); box-shadow: 0 0 10px rgb(var(--a)); }
+.voe-gallery-title { font-size: 34px; font-weight: 900; letter-spacing: -.03em; margin: 12px 0 8px; }
+.voe-gallery-sub { font-size: 14.5px; color: rgba(255,255,255,.5); max-width: 600px; line-height: 1.6; margin: 0 auto; }
+/* studio settings + maintenance panel — quick overlay config right on the gallery */
+.voe-gallery-head { margin-bottom: 26px; }
+.voe-studio-settings { display: flex; gap: 16px; flex-wrap: wrap; align-items: stretch; max-width: 980px; margin: 0 auto 36px; }
+.voe-studio-panel { flex: 1 1 300px; min-width: 0; padding: 18px 18px 16px; border-radius: 15px;
+    background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.08); }
+.voe-studio-panel--assign { flex: 2 1 460px; }
+.voe-studio-panel-h { display: flex; align-items: baseline; gap: 10px; font-size: 14px; font-weight: 800; color: #f2f4fa; margin-bottom: 14px; }
+.voe-studio-panel-tag { font-size: 10.5px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: rgba(255,255,255,.38); }
+.voe-studio-panel .voe-apply-cards { grid-template-columns: 1fr 1fr; gap: 10px; }
+.voe-studio-note { font-size: 11.5px; color: rgba(255,255,255,.42); line-height: 1.5; margin-top: 13px; }
+.voe-studio-note strong { color: rgba(255,255,255,.65); font-weight: 700; }
+.voe-studio-maint-desc { font-size: 12.5px; color: rgba(255,255,255,.55); line-height: 1.55; margin: 0 0 14px; }
+.voe-studio-cleanup-status { font-size: 12px; color: rgba(var(--a),.95); margin-top: 11px; font-variant-numeric: tabular-nums; }
+@media (max-width: 720px) { .voe-studio-panel--assign { flex-basis: 100%; } }
+/* Fixed-width, centred cards so any count stays balanced on wide screens (was
+ * auto-fill 1fr, which stranded a couple of cards at the left with empty stretch
+ * columns to the right). */
+.voe-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, 236px); justify-content: center; gap: 24px;
+}
+.voe-card {
+    position: relative; border-radius: 16px; overflow: hidden; cursor: pointer;
+    background: #15151c; border: 1px solid rgba(255,255,255,.08);
+    transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease;
+}
+.voe-card:hover { transform: translateY(-4px); border-color: rgba(var(--a),.5);
+    box-shadow: 0 20px 44px -18px rgba(0,0,0,.8); }
+.voe-card-canvas {
+    aspect-ratio: 2 / 3; background: #0e0e13 center/cover;
+    display: grid; place-items: center; position: relative;
+    background-image: radial-gradient(120% 90% at 50% 0%, #23232e, #0e0e13 70%);
+}
+.voe-card-canvas img { width: 100%; height: 100%; object-fit: cover; }
+.voe-card-thumb { position: absolute; inset: 0; opacity: 0; transition: opacity .25s ease; }
+.voe-card-thumb--on { opacity: 1; }
+.voe-card-empty-ic { font-size: 30px; opacity: .3; }
+.voe-card-meta { padding: 12px 14px 14px; }
+.voe-card-name { font-size: 14px; font-weight: 700; color: #f2f4fa; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.voe-card-info { font-size: 11.5px; color: rgba(255,255,255,.42); margin-top: 3px; }
+.voe-card-actions { position: absolute; top: 10px; right: 10px; display: flex; gap: 6px; opacity: 0; transition: opacity .15s; }
+.voe-card:hover .voe-card-actions { opacity: 1; }
+.voe-card-act {
+    width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; cursor: pointer;
+    background: rgba(0,0,0,.6); border: 1px solid rgba(255,255,255,.14); color: #fff; backdrop-filter: blur(6px);
+    transition: all .13s ease;
+}
+.voe-card-act:hover { background: rgba(0,0,0,.85); }
+.voe-card-act--danger:hover { background: rgba(239,68,68,.85); border-color: rgba(239,68,68,.6); }
+.voe-card-act svg { width: 14px; height: 14px; }
+.voe-card--new .voe-card-canvas {
+    background: rgba(var(--a),.06); border: 1.5px dashed rgba(var(--a),.4);
+    border-radius: 16px; flex-direction: column; gap: 10px; color: rgb(var(--a));
+}
+.voe-card--new:hover .voe-card-canvas { background: rgba(var(--a),.12); }
+.voe-card--new .voe-plus { width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center;
+    background: rgba(var(--a),.18); font-size: 26px; font-weight: 300; }
+.voe-card--new .voe-new-label { font-size: 13.5px; font-weight: 700; }
+.voe-gallery-empty { text-align: center; padding: 60px 20px; color: rgba(255,255,255,.4); }
+
+/* ── EDITOR ──────────────────────────────────────────────────────────────── */
+.voe-editor { flex: 1; display: flex; min-height: 0; }
+.voe-name-input {
+    font: inherit; font-size: 14px; font-weight: 700; color: #fff;
+    background: transparent; border: 1px solid transparent; border-radius: 8px;
+    padding: 6px 10px; min-width: 180px; max-width: 340px; transition: all .15s;
+}
+.voe-name-input:hover { background: rgba(255,255,255,.05); }
+.voe-name-input:focus { outline: none; background: rgba(255,255,255,.08); border-color: rgba(var(--a),.5); }
+.voe-save-state { font-size: 12px; color: rgba(255,255,255,.4); margin-right: 2px; }
+.voe-save-state--dirty { color: #f5b74a; }
+
+/* left: palette */
+.voe-palette {
+    flex: 0 0 236px; overflow-y: auto; overflow-x: hidden; padding: 16px 14px 26px;
+    background: linear-gradient(180deg, #121218, #0e0e13);
+    border-right: 1px solid rgba(255,255,255,.07);
+}
+.voe-pal-section { margin-bottom: 20px; }
+.voe-pal-section:last-child { margin-bottom: 2px; }
+.voe-pal-h {
+    display: flex; align-items: center; gap: 7px;
+    font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .085em;
+    color: rgba(255,255,255,.44); padding: 0 3px; margin-bottom: 10px;
+}
+.voe-pal-n {
+    min-width: 16px; height: 15px; padding: 0 5px; border-radius: 999px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 9.5px; font-weight: 700; letter-spacing: 0;
+    background: rgba(255,255,255,.07); color: rgba(255,255,255,.42);
+}
+/* tool cards — icon actions (Basics / Artwork / Shapes) */
+.voe-pal-tools { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 7px; }
+.voe-pal-item {
+    display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 12px 6px; min-width: 0;
+    border-radius: 11px; cursor: grab; text-align: center;
+    background: rgba(255,255,255,.035); border: 1px solid rgba(255,255,255,.07);
+    transition: transform .14s ease, background .14s ease, border-color .14s ease; user-select: none;
+}
+.voe-pal-item:hover { background: rgba(var(--a),.13); border-color: rgba(var(--a),.42); transform: translateY(-2px); }
+.voe-pal-item:active { cursor: grabbing; transform: translateY(0); }
+.voe-pal-item.voe-dragging { opacity: .5; }
+.voe-pal-ic { width: 24px; height: 24px; display: grid; place-items: center; color: rgba(255,255,255,.82); }
+.voe-pal-ic svg { width: 20px; height: 20px; }
+.voe-pal-label { font-size: 10.5px; font-weight: 600; color: rgba(255,255,255,.62); line-height: 1.2;
+    max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* data-badge chips — live WYSIWYG previews that wrap to fit (Quality / Ratings / …) */
+.voe-pal-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.voe-pal-tag {
+    display: inline-flex; align-items: center; max-width: 100%; min-width: 0;
+    padding: 5px 9px; border-radius: 8px; cursor: grab; user-select: none;
+    background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1);
+    transition: transform .14s ease, background .14s ease, border-color .14s ease;
+}
+.voe-pal-tag:hover { background: rgba(var(--a),.16); border-color: rgba(var(--a),.5); transform: translateY(-1px); }
+.voe-pal-tag:active { cursor: grabbing; transform: translateY(0); }
+.voe-pal-tag.voe-dragging { opacity: .5; }
+.voe-pal-tag-v { font-size: 11px; font-weight: 700; letter-spacing: .01em; color: rgba(255,255,255,.9);
+    max-width: 172px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* locked Logo badge — needs an installed pack; click opens the installer */
+.voe-pal-item--locked { cursor: pointer; position: relative; border-style: dashed;
+    border-color: rgba(255,255,255,.14); background: rgba(255,255,255,.02); }
+.voe-pal-item--locked .voe-pal-ic { color: rgba(255,255,255,.4); }
+.voe-pal-item--locked .voe-pal-label { color: rgba(255,255,255,.45); }
+.voe-pal-item--locked:hover { background: rgba(var(--a),.1); border-color: rgba(var(--a),.4); transform: none; }
+.voe-pal-lock { font-size: 8.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em;
+    color: rgb(var(--a)); background: rgba(var(--a),.14); padding: 2px 6px; border-radius: 999px; margin-top: 1px; }
+
+/* logo-pack installer popup */
+.voe-lp { width: min(460px, 92vw); background: #17171e; border: 1px solid rgba(255,255,255,.1);
+    border-radius: 16px; padding: 22px 22px 18px; box-shadow: 0 30px 80px rgba(0,0,0,.6); }
+.voe-lp-t { display: flex; align-items: center; gap: 9px; font-size: 15px; font-weight: 800; color: #fff; }
+.voe-lp-t svg { width: 19px; height: 19px; color: rgb(var(--a)); }
+.voe-lp-m { font-size: 13px; color: rgba(255,255,255,.6); line-height: 1.55; margin: 10px 0 4px; }
+.voe-lp-prog { margin: 14px 0 4px; }
+.voe-lp-ptxt { font-size: 11.5px; color: rgba(255,255,255,.5); margin-top: 6px; font-variant-numeric: tabular-nums; }
+.voe-lp-help { margin: 12px 0 2px; }
+.voe-lp-help summary { font-size: 12px; color: rgba(var(--a),.95); cursor: pointer; user-select: none; list-style: none; }
+.voe-lp-help summary::-webkit-details-marker { display: none; }
+.voe-lp-help summary:hover { color: rgb(var(--a)); }
+.voe-lp-help-b { font-size: 12px; color: rgba(255,255,255,.55); line-height: 1.6; margin-top: 8px; }
+.voe-lp-help-b code, .voe-insp-hint code { font-size: 11px; background: rgba(255,255,255,.08);
+    padding: 1px 5px; border-radius: 4px; color: rgba(255,255,255,.82); }
+.voe-lp-row { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+.voe-lp-ok { color: #63d68b; font-weight: 700; }
+.voe-lp-miss { color: rgba(255,255,255,.5); }
+.voe-lp-link { color: rgb(var(--a)); font-weight: 700; text-decoration: none; }
+.voe-lp-link:hover { text-decoration: underline; }
+
+/* center: stage */
+.voe-canvas-wrap {
+    flex: 1; min-width: 0; position: relative; overflow: hidden;
+    display: grid; place-items: center; padding: 34px;
+    background:
+        radial-gradient(60% 60% at 50% 30%, rgba(var(--a),.06), transparent 70%),
+        repeating-conic-gradient(#0c0c11 0% 25%, #0e0e14 0% 50%) 50% / 26px 26px;
+}
+.voe-stage {
+    position: relative; height: min(80vh, 740px); aspect-ratio: 2 / 3;
+    background: #16161d center/cover no-repeat;
+    border-radius: 8px; box-shadow: 0 30px 80px -20px rgba(0,0,0,.85), 0 0 0 1px rgba(255,255,255,.06);
+    overflow: hidden; user-select: none;
+}
+/* episode templates design on a 16:9 still, so the stage goes landscape */
+.voe-stage--wide { aspect-ratio: 16 / 9; height: auto; width: min(94%, 1120px); }
+.voe-stage-ph {
+    position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 20px;
+    background: radial-gradient(120% 90% at 50% 0%, #262631, #101016 72%);
+    color: rgba(255,255,255,.28); font-size: 13px; font-weight: 600;
+}
+/* selection frame — corner resize handles + a rotate handle */
+.voe-selbox { position: absolute; z-index: 38; box-sizing: border-box; pointer-events: none;
+    border: 1.5px solid rgb(var(--a)); box-shadow: 0 0 0 1px rgba(0,0,0,.35); }
+.voe-sel-h { position: absolute; width: 11px; height: 11px; border-radius: 3px; pointer-events: auto;
+    background: #fff; border: 1.5px solid rgb(var(--a)); box-shadow: 0 1px 3px rgba(0,0,0,.5); }
+.voe-sel-h--tl { left: -6px; top: -6px; cursor: nwse-resize; }
+.voe-sel-h--tr { right: -6px; top: -6px; cursor: nesw-resize; }
+.voe-sel-h--br { right: -6px; bottom: -6px; cursor: nwse-resize; }
+.voe-sel-h--bl { left: -6px; bottom: -6px; cursor: nesw-resize; }
+.voe-sel-rot-line { position: absolute; left: 50%; top: -22px; width: 1.5px; height: 22px;
+    background: rgb(var(--a)); transform: translateX(-50%); pointer-events: none; }
+.voe-sel-rot { position: absolute; left: 50%; top: -30px; width: 15px; height: 15px; border-radius: 50%;
+    transform: translateX(-50%); pointer-events: auto; cursor: grab; background: #fff;
+    border: 1.5px solid rgb(var(--a)); box-shadow: 0 1px 4px rgba(0,0,0,.5); }
+.voe-sel-rot:active { cursor: grabbing; }
+
+.voe-guide { position: absolute; z-index: 35; display: none; background: rgb(var(--a)); pointer-events: none;
+    box-shadow: 0 0 6px rgba(var(--a),.85); }
+.voe-guide--v { top: 0; bottom: 0; width: 1px; }
+.voe-guide--h { left: 0; right: 0; height: 1px; }
+.voe-icon-btn { padding: 9px; }
+.voe-icon-btn svg { width: 16px; height: 16px; }
+.voe-drop-hint { position: absolute; inset: 0; z-index: 40; display: none; place-items: center;
+    background: rgba(var(--a),.14); border: 2.5px dashed rgba(var(--a),.7); border-radius: 8px;
+    color: #fff; font-size: 15px; font-weight: 700; pointer-events: none; }
+.voe-stage--dropping .voe-drop-hint { display: grid; }
+
+/* a rendered layer on the stage */
+.voe-layer {
+    position: absolute; cursor: grab; white-space: nowrap;
+    outline: 2px solid transparent; outline-offset: 2px; border-radius: 3px;
+}
+.voe-layer:hover { outline-color: rgba(var(--a),.45); }
+.voe-layer--sel { outline-color: rgb(var(--a)); cursor: move; }
+.voe-layer--sel::after {
+    content: ""; position: absolute; inset: -2px; border-radius: 4px; pointer-events: none;
+    box-shadow: 0 0 0 1px rgba(0,0,0,.4);
+}
+.voe-layer--hidden { display: none; }
+.voe-layer-row--locked .voe-lr-grip { opacity: .3; pointer-events: none; }
+/* inspector arrange toolbar */
+.voe-arrange { display: flex; align-items: center; gap: 3px; margin-bottom: 14px; }
+.voe-arrange .voe-seg-btn { background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1);
+    border-radius: 8px; min-width: 30px; height: 30px; font-size: 15px; }
+.voe-arrange .voe-seg-btn svg { width: 15px; height: 15px; }
+.voe-arrange-sp { flex: 1; }
+/* secondary (shift-selected) layers in a multi-selection */
+.voe-layer--gsel { outline-color: rgba(var(--a),.7); outline-style: dashed; }
+.voe-layer-row--gsel { background: rgba(var(--a),.1); }
+.voe-insp-sec-h--static { cursor: default; }
+/* a conditional layer that wouldn't render for the current sample title */
+.voe-layer--cond { opacity: .38 !important; }
+.voe-layer--cond::before { content: "⊘"; position: absolute; top: -7px; left: -7px; z-index: 5;
+    font-size: 12px; color: #fff; background: rgba(var(--a),.9); width: 15px; height: 15px;
+    border-radius: 50%; display: grid; place-items: center; pointer-events: none; }
+.voe-layer-text { line-height: 1.05; }
+
+/* canvas floating toolbar (top of stage area) */
+.voe-canvas-bar {
+    position: absolute; top: 14px; left: 50%; transform: translateX(-50%); z-index: 30;
+    display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 12px;
+    background: rgba(16,16,22,.82); border: 1px solid rgba(255,255,255,.1); backdrop-filter: blur(10px);
+    box-shadow: 0 8px 24px rgba(0,0,0,.4);
+}
+.voe-canvas-bar .voe-btn { padding: 7px 12px; font-size: 12px; }
+.voe-canvas-bar .voe-icon-btn { padding: 7px 9px; }
+
+/* zoom controls */
+.voe-zoomctl { display: flex; align-items: center; gap: 3px; margin-left: 2px;
+    padding-left: 8px; border-left: 1px solid rgba(255,255,255,.12); }
+.voe-zoomctl .voe-icon-btn { font-size: 15px; line-height: 1; font-weight: 700; min-width: 30px; }
+.voe-zoomlabel { min-width: 50px; justify-content: center; text-align: center;
+    font-variant-numeric: tabular-nums; }
+
+/* pan affordances */
+.voe-canvas-wrap.voe-space { cursor: grab; }
+.voe-canvas-wrap.voe-space .voe-stage,
+.voe-canvas-wrap.voe-space .voe-layer { cursor: grab !important; }
+.voe-stage.voe-panning, .voe-canvas-wrap.voe-space .voe-stage.voe-panning { cursor: grabbing !important; }
+
+/* right: layers panel */
+.voe-side {
+    flex: 0 0 268px; display: flex; flex-direction: column; min-height: 0;
+    background: #101015; border-left: 1px solid rgba(255,255,255,.07);
+}
+.voe-side-h {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 15px 16px 11px; font-size: 12px; font-weight: 800; text-transform: uppercase;
+    letter-spacing: .06em; color: rgba(255,255,255,.55);
+}
+.voe-side-count { font-weight: 700; color: rgba(255,255,255,.32); }
+.voe-layers { flex: 1; overflow-y: auto; padding: 4px 10px 14px; }
+.voe-layer-row {
+    display: flex; align-items: center; gap: 9px; padding: 8px 9px; border-radius: 10px; cursor: pointer;
+    border: 1px solid transparent; margin-bottom: 3px; transition: background .12s, border-color .12s;
+}
+.voe-layer-row:hover { background: rgba(255,255,255,.04); }
+.voe-layer-row--sel { background: rgba(var(--a),.15); border-color: rgba(var(--a),.4); }
+.voe-lr-grip { color: rgba(255,255,255,.3); cursor: grab; flex: 0 0 auto; display: grid; place-items: center; }
+.voe-lr-grip svg { width: 13px; height: 13px; }
+.voe-lr-ic { flex: 0 0 auto; width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center;
+    background: rgba(255,255,255,.06); color: rgba(255,255,255,.7); }
+.voe-lr-ic svg { width: 14px; height: 14px; }
+.voe-lr-name { flex: 1; min-width: 0; font-size: 13px; color: #e9ecf3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.voe-lr-btn { flex: 0 0 auto; width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center;
+    cursor: pointer; color: rgba(255,255,255,.4); background: transparent; border: none; transition: all .12s; }
+.voe-lr-btn:hover { color: #fff; background: rgba(255,255,255,.1); }
+.voe-lr-btn svg { width: 15px; height: 15px; }
+.voe-lr-btn--off { color: rgba(255,255,255,.25); }
+.voe-layer-row--dragging { opacity: .4; }
+.voe-layer-row--dropbefore { box-shadow: 0 -2px 0 rgb(var(--a)); }
+.voe-layer-row--dropafter { box-shadow: 0 2px 0 rgb(var(--a)); }
+.voe-layers-empty { padding: 30px 16px; text-align: center; color: rgba(255,255,255,.32); font-size: 12.5px; line-height: 1.6; }
+
+/* right side is two stacked panels: layers (top) + inspector (below) */
+.voe-side-layers { display: flex; flex-direction: column; min-height: 0; max-height: 46%; }
+.voe-inspector { flex: 1; overflow-y: auto; border-top: 1px solid rgba(255,255,255,.07); min-height: 0; }
+.voe-insp-empty { padding: 40px 22px; text-align: center; color: rgba(255,255,255,.34); font-size: 12.5px; line-height: 1.6;
+    display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.voe-insp-empty svg { width: 30px; height: 30px; stroke: rgba(255,255,255,.2); }
+.voe-insp-sec { padding: 14px 15px; border-bottom: 1px solid rgba(255,255,255,.05); }
+.voe-insp-sec-h { display: flex; align-items: center; justify-content: space-between; width: 100%;
+    font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .07em;
+    color: rgba(255,255,255,.42); margin-bottom: 12px; padding: 0; background: none; border: none;
+    cursor: pointer; font-family: inherit; transition: color .12s; }
+.voe-insp-sec-h:hover { color: rgba(255,255,255,.7); }
+.voe-insp-chev { display: inline-flex; transition: transform .16s ease; }
+.voe-insp-chev svg { width: 13px; height: 13px; stroke: currentColor; }
+.voe-sec-collapsed .voe-insp-sec-h { margin-bottom: 0; }
+.voe-sec-collapsed .voe-insp-chev { transform: rotate(-90deg); }
+.voe-sec-collapsed .voe-insp-body { display: none; }
+.voe-field { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.voe-field:last-child { margin-bottom: 0; }
+.voe-field-l { flex: 0 0 62px; font-size: 12px; color: rgba(255,255,255,.55); }
+.voe-field-hint { font-size: 11px; color: rgba(255,255,255,.32); margin-left: 2px; white-space: nowrap; }
+.voe-field-c { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
+.voe-row2 { display: flex; gap: 10px; }
+.voe-row2 .voe-field { flex: 1; margin-bottom: 10px; }
+.voe-row2 .voe-field-l { flex: 0 0 auto; }
+.voe-input {
+    width: 100%; min-width: 0; font: inherit; font-size: 12.5px; color: #eef1f7;
+    background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1); border-radius: 8px;
+    padding: 7px 9px; outline: none; transition: border-color .13s, box-shadow .13s;
+}
+.voe-input:focus { border-color: rgba(var(--a),.6); box-shadow: 0 0 0 2px rgba(var(--a),.14); }
+.voe-input--num { text-align: right; }
+.voe-unit { font-size: 11px; color: rgba(255,255,255,.35); flex: 0 0 auto; }
+select.voe-input { cursor: pointer; -webkit-appearance: none; appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 12 12'%3E%3Cpath fill='none' stroke='rgba(255,255,255,.4)' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round' d='M2.5 4.5 6 8l3.5-3.5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 9px center; padding-right: 26px; }
+select.voe-input option { background: #17171d; }
+.voe-textarea { width: 100%; resize: vertical; min-height: 40px; font: inherit; font-size: 12.5px; }
+
+/* 9-point anchor picker */
+.voe-anchor-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; width: 96px; }
+.voe-anchor-cell { aspect-ratio: 1; border-radius: 6px; cursor: pointer; position: relative;
+    background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.09); transition: all .12s; }
+.voe-anchor-cell::after { content: ""; position: absolute; inset: 0; margin: auto; width: 5px; height: 5px;
+    border-radius: 50%; background: rgba(255,255,255,.3); }
+.voe-anchor-cell:hover { background: rgba(255,255,255,.1); }
+.voe-anchor-cell--on { background: rgba(var(--a),.28); border-color: rgb(var(--a)); }
+.voe-anchor-cell--on::after { background: rgb(var(--a)); }
+
+/* quick-place grid — the dot mirrors the poster region the click targets */
+.voe-place { display: flex; flex-direction: column; gap: 9px; }
+.voe-place-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; width: 96px; }
+.voe-place-cell { aspect-ratio: 1; border-radius: 6px; cursor: pointer; position: relative; padding: 0;
+    background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.09); transition: all .12s; }
+.voe-place-cell i { position: absolute; width: 5px; height: 5px; border-radius: 50%;
+    background: rgba(255,255,255,.35); top: 50%; left: 50%; transform: translate(-50%, -50%); transition: background .12s; }
+.voe-place-cell:hover { background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.18); }
+.voe-place-cell:hover i { background: rgba(255,255,255,.7); }
+.voe-place-cell--on { background: rgba(var(--a),.28); border-color: rgb(var(--a)); }
+.voe-place-cell--on i { background: rgb(var(--a)); }
+.voe-place-cell:nth-child(1) i { left: 24%; top: 24%; }
+.voe-place-cell:nth-child(2) i { left: 50%; top: 24%; }
+.voe-place-cell:nth-child(3) i { left: 76%; top: 24%; }
+.voe-place-cell:nth-child(4) i { left: 24%; top: 50%; }
+.voe-place-cell:nth-child(5) i { left: 50%; top: 50%; }
+.voe-place-cell:nth-child(6) i { left: 76%; top: 50%; }
+.voe-place-cell:nth-child(7) i { left: 24%; top: 76%; }
+.voe-place-cell:nth-child(8) i { left: 50%; top: 76%; }
+.voe-place-cell:nth-child(9) i { left: 76%; top: 76%; }
+.voe-place-margin { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: rgba(255,255,255,.55); }
+.voe-place-margin input.voe-input--num { width: 54px; }
+
+/* badge-row: on-stage bar + inspector chips */
+.voe-layer-rowbar { align-items: center; }
+.voe-rowbar-empty { padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 700;
+    color: rgba(255,255,255,.6); background: rgba(255,255,255,.12); border: 1px dashed rgba(255,255,255,.25); }
+.voe-rowchips { display: flex; flex-wrap: wrap; gap: 6px; }
+.voe-rowchip { display: inline-flex; align-items: center; gap: 2px; padding: 3px 3px 3px 4px; border-radius: 7px;
+    background: rgba(var(--a),.16); border: 1px solid rgba(var(--a),.4); font-size: 12px; }
+.voe-rowchip-t { padding: 0 2px; }
+.voe-rowchip-mv, .voe-rowchip-x { border: none; background: transparent; color: rgba(255,255,255,.6);
+    cursor: pointer; font-size: 13px; line-height: 1; padding: 1px 4px; border-radius: 5px; }
+.voe-rowchip-mv:hover, .voe-rowchip-x:hover { background: rgba(255,255,255,.15); color: #fff; }
+.voe-rowchip-mv:disabled { opacity: .3; cursor: default; }
+.voe-rowchip-x { font-size: 15px; }
+.voe-rowadd { margin-top: 8px; }
+
+/* segmented control (alignment, weight) */
+.voe-seg { display: inline-flex; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1);
+    border-radius: 9px; padding: 2px; gap: 2px; }
+.voe-seg-btn { border: none; background: transparent; color: rgba(255,255,255,.55); cursor: pointer;
+    padding: 6px 10px; border-radius: 7px; font: inherit; font-size: 12px; font-weight: 700; transition: all .12s; display: grid; place-items: center; }
+.voe-seg-btn svg { width: 15px; height: 15px; }
+.voe-seg-btn:hover { color: #fff; }
+.voe-seg-btn--on { background: rgba(var(--a),.25); color: #fff; }
+
+/* color field */
+.voe-color { display: flex; align-items: center; gap: 8px; flex: 1; }
+.voe-color-sw { width: 30px; height: 30px; border-radius: 8px; border: 1px solid rgba(255,255,255,.18);
+    padding: 0; cursor: pointer; overflow: hidden; background: none; }
+.voe-color-sw::-webkit-color-swatch-wrapper { padding: 0; }
+.voe-color-sw::-webkit-color-swatch { border: none; border-radius: 6px; }
+
+/* slider */
+.voe-slider { -webkit-appearance: none; appearance: none; width: 100%; height: 4px; border-radius: 3px;
+    background: rgba(255,255,255,.14); outline: none; cursor: pointer; }
+.voe-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 15px; height: 15px; border-radius: 50%;
+    background: rgb(var(--a)); box-shadow: 0 2px 6px rgba(0,0,0,.4); cursor: pointer; }
+.voe-slider::-moz-range-thumb { width: 15px; height: 15px; border: none; border-radius: 50%; background: rgb(var(--a)); }
+
+/* toggle switch */
+.voe-toggle { flex: 0 0 auto; width: 38px; height: 22px; border-radius: 11px; cursor: pointer; position: relative;
+    background: rgba(255,255,255,.14); border: none; transition: background .15s; }
+.voe-toggle::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%;
+    background: #fff; transition: transform .16s; box-shadow: 0 1px 3px rgba(0,0,0,.4); }
+.voe-toggle--on { background: rgb(var(--a)); }
+.voe-toggle--on::after { transform: translateX(16px); }
+.voe-sec-collapsed .voe-insp-body { display: none; }
+.voe-insp-hint { font-size: 12px; color: rgba(255,255,255,.5); line-height: 1.5; }
+.voe-img-ph { display: grid; place-items: center; border: 1.5px dashed rgba(255,255,255,.32); border-radius: 6px;
+    color: rgba(255,255,255,.5); font-size: 12px; font-weight: 800; letter-spacing: .06em; background: rgba(255,255,255,.05); }
+.voe-layer--image, .voe-layer--shape { border-radius: 4px; }
+.voe-layer--image img { pointer-events: none; }
+
+/* ── canvas floating popovers (preview title · sample data) ──────────────── */
+.voe-pop {
+    position: fixed; z-index: 9420; width: 320px; max-height: 60vh; display: flex; flex-direction: column;
+    background: linear-gradient(180deg, #1a1a22, #141419); border: 1px solid rgba(255,255,255,.12);
+    border-radius: 14px; box-shadow: 0 24px 60px -12px rgba(0,0,0,.75);
+    opacity: 0; transform: translateY(-6px); transition: opacity .14s ease, transform .14s ease;
+}
+.voe-pop--on { opacity: 1; transform: none; }
+.voe-pop-h { padding: 13px 15px 6px; font-size: 13px; font-weight: 800; color: #fff; }
+.voe-pop-note { padding: 0 15px 10px; font-size: 11.5px; color: rgba(255,255,255,.45); line-height: 1.5; }
+.voe-pop-search { padding: 0 12px 10px; }
+.voe-pop-body { overflow-y: auto; padding: 4px 12px 12px; }
+.voe-pop-result { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 9px; cursor: pointer; }
+.voe-pop-result:hover { background: rgba(255,255,255,.06); }
+.voe-pop-result img { width: 30px; height: 45px; object-fit: cover; border-radius: 4px; background: #22222b; flex: 0 0 auto; }
+.voe-pop-result-t { font-size: 13px; color: #eef1f7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.voe-pop-result-m { font-size: 11px; color: rgba(255,255,255,.4); }
+.voe-pop-empty { padding: 20px; text-align: center; color: rgba(255,255,255,.35); font-size: 12.5px; }
+.voe-pop-grp { font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em;
+    color: rgba(255,255,255,.35); margin: 12px 4px 6px; }
+.voe-pop-grp:first-child { margin-top: 2px; }
+.voe-pop-row { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; }
+.voe-pop-row-l { flex: 0 0 96px; font-size: 12px; color: rgba(255,255,255,.6); }
+.voe-pop-row-c { flex: 1; min-width: 0; }
+.voe-pop-clear { margin: 2px 12px 12px; }
+
+.voe-data-preview { display: inline-block; padding: 4px 10px; border-radius: 7px; font-size: 12px; font-weight: 700;
+    background: rgba(var(--a),.16); color: #fff; border: 1px solid rgba(var(--a),.34); }
+
+/* ── little confirm dialog (delete) ──────────────────────────────────────── */
+.voe-confirm-back {
+    position: fixed; inset: 0; z-index: 9400; display: grid; place-items: center;
+    background: rgba(4,4,7,.6); backdrop-filter: blur(4px); opacity: 0; transition: opacity .15s;
+}
+.voe-confirm-back--on { opacity: 1; }
+.voe-confirm {
+    width: min(400px, 92vw); padding: 24px; border-radius: 16px;
+    background: linear-gradient(180deg, #1a1a22, #141419); border: 1px solid rgba(255,255,255,.1);
+    box-shadow: 0 30px 80px rgba(0,0,0,.7); transform: scale(.96); transition: transform .16s;
+}
+.voe-confirm-back--on .voe-confirm { transform: none; }
+.voe-confirm-t { font-size: 17px; font-weight: 800; margin-bottom: 8px; }
+.voe-confirm-m { font-size: 13.5px; color: rgba(255,255,255,.6); line-height: 1.55; margin-bottom: 20px; }
+.voe-confirm-row { display: flex; justify-content: flex-end; gap: 10px; }
+.voe-btn--danger { background: #ef4444; color: #fff; border-color: transparent; }
+.voe-btn--danger:hover { background: #dc2626; }
+
+/* ── starter-template picker ─────────────────────────────────────────────── */
+.voe-starter-modal { width: min(560px, 94vw); padding: 24px; border-radius: 18px;
+    background: linear-gradient(180deg, #1a1a22, #141419); border: 1px solid rgba(255,255,255,.1);
+    box-shadow: 0 30px 80px rgba(0,0,0,.7); transform: scale(.96); transition: transform .16s; }
+.voe-confirm-back--on .voe-starter-modal { transform: none; }
+.voe-starter-h { font-size: 19px; font-weight: 800; }
+.voe-starter-sub { font-size: 13px; color: rgba(255,255,255,.55); line-height: 1.5; margin: 6px 0 18px; }
+.voe-starter-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.voe-starter-card { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left;
+    padding: 15px; border-radius: 13px; cursor: pointer; font: inherit;
+    background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.09); transition: all .14s ease; }
+.voe-starter-card:hover { background: rgba(var(--a),.12); border-color: rgba(var(--a),.45); transform: translateY(-2px); }
+.voe-starter-ic { font-size: 22px; margin-bottom: 4px; }
+.voe-starter-name { font-size: 14px; font-weight: 700; color: #f2f4fa; }
+.voe-starter-desc { font-size: 12px; color: rgba(255,255,255,.5); line-height: 1.4; }
+/* template-type selector (Poster / Season / Episode) */
+.voe-type-tabs { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin: 4px 0 18px; }
+.voe-type-tab { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 14px 8px 12px;
+    border-radius: 12px; cursor: pointer; font: inherit; background: rgba(255,255,255,.03);
+    border: 1px solid rgba(255,255,255,.09); transition: all .14s ease; }
+.voe-type-tab:hover { background: rgba(var(--a),.1); border-color: rgba(var(--a),.35); }
+.voe-type-tab--on { background: rgba(var(--a),.16); border-color: rgb(var(--a)); }
+.voe-type-shape { display: block; border-radius: 3px; background: rgba(255,255,255,.22);
+    border: 1.5px solid rgba(255,255,255,.5); }
+.voe-type-tab--on .voe-type-shape { background: rgba(var(--a),.5); border-color: rgb(var(--a)); }
+.voe-type-shape--tall { width: 22px; height: 33px; }
+.voe-type-shape--wide { width: 40px; height: 22px; margin: 5px 0 6px; }
+.voe-type-name { font-size: 13px; font-weight: 700; color: #f2f4fa; }
+.voe-type-sub { font-size: 10.5px; color: rgba(255,255,255,.5); text-align: center; line-height: 1.35; }
+
+/* ── shortcuts dialog ────────────────────────────────────────────────────── */
+.voe-shortcuts-modal { width: min(440px, 94vw); padding: 24px; border-radius: 18px;
+    background: linear-gradient(180deg, #1a1a22, #141419); border: 1px solid rgba(255,255,255,.1);
+    box-shadow: 0 30px 80px rgba(0,0,0,.7); transform: scale(.96); transition: transform .16s; }
+.voe-confirm-back--on .voe-shortcuts-modal { transform: none; }
+.voe-shortcuts-list { margin: 16px 0 4px; }
+.voe-shortcut-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid rgba(255,255,255,.06); }
+.voe-shortcut-k { flex: 0 0 42%; font-size: 12.5px; font-weight: 700; color: #eef1f7; }
+.voe-shortcut-d { font-size: 12.5px; color: rgba(255,255,255,.55); }
+
+/* ── filmstrip: template on real posters ─────────────────────────────────── */
+.voe-filmstrip-modal { width: min(860px, 94vw); }
+.voe-fs-sub { font-size: 12px; font-weight: 500; color: rgba(255,255,255,.45); margin-left: 8px; }
+.voe-filmstrip { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px;
+    margin: 16px 0 6px; max-height: 62vh; overflow-y: auto; padding: 2px; }
+.voe-fs-card { margin: 0; }
+.voe-fs-card img { width: 100%; aspect-ratio: 2/3; object-fit: cover; border-radius: 8px; display: block;
+    background: #16161d; box-shadow: 0 8px 20px rgba(0,0,0,.5); }
+.voe-fs-card figcaption { margin-top: 6px; font-size: 11px; color: rgba(255,255,255,.6); text-align: center;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.voe-fs-loading { grid-column: 1 / -1; text-align: center; color: rgba(255,255,255,.5); padding: 46px 0; font-size: 13px; }
+
+/* ── micro-animation ─────────────────────────────────────────────────────── */
+.voe-selbox { animation: voe-sel-in .14s ease; }
+@keyframes voe-sel-in { from { opacity: 0; } to { opacity: 1; } }
+.voe-layer--pop { animation: voe-pop-in .22s cubic-bezier(.2,1.3,.4,1); }
+@keyframes voe-pop-in { from { transform: scale(.6); opacity: 0; } to { opacity: 1; } }
+
+/* ── apply-to-library dialog ─────────────────────────────────────────────── */
+.voe-apply-modal { width: min(500px, 94vw); padding: 24px; border-radius: 18px;
+    background: linear-gradient(180deg, #1a1a22, #141419); border: 1px solid rgba(255,255,255,.1);
+    box-shadow: 0 30px 80px rgba(0,0,0,.7); transform: scale(.96); transition: transform .16s; }
+.voe-confirm-back--on .voe-apply-modal { transform: none; }
+.voe-apply-t { font-size: 19px; font-weight: 800; }
+.voe-apply-sub { font-size: 13px; color: rgba(255,255,255,.55); line-height: 1.55; margin: 6px 0 18px; }
+.voe-apply-note { font-size: 12px; color: rgba(255,255,255,.42); line-height: 1.5; margin: 10px 2px 4px; }
+.voe-apply-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid rgba(255,255,255,.06); }
+.voe-apply-row-l { flex: 0 0 66px; font-size: 13.5px; font-weight: 700; }
+.voe-apply-row .voe-input { flex: 1; }
+.voe-apply-applied { font-size: 12.5px; color: rgba(255,255,255,.45); margin: 14px 0 4px; }
+.voe-apply-prog { margin: 16px 0 6px; }
+.voe-apply-prog[hidden] { display: none; }
+.voe-apply-bar { height: 8px; border-radius: 5px; background: rgba(255,255,255,.1); overflow: hidden; }
+.voe-apply-bar-fill { height: 100%; width: 0; border-radius: 5px; background: rgb(var(--a)); transition: width .25s ease; }
+.voe-apply-prog-txt { font-size: 12px; color: rgba(255,255,255,.6); margin-top: 8px; }
+.voe-apply-foot { display: flex; align-items: center; gap: 8px; margin-top: 22px; flex-wrap: wrap; }
+.voe-apply-foot .voe-spacer { flex: 1; min-width: 8px; }
+.voe-apply-foot .voe-btn { padding: 9px 14px; }   /* fit Remove · Reset · Close · Apply */
+
+/* ── redesigned overlay-settings modal (v2) ─────────────────────────────────── */
+.voe-apply-modal--v2 { width: min(600px, 95vw); padding: 26px 26px 20px; }
+.voe-apply-modal--v2 .voe-apply-sub { margin: 6px 0 16px; }
+.voe-apply-auto { display: flex; gap: 11px; align-items: flex-start; padding: 13px 15px; margin-bottom: 18px;
+    border-radius: 12px; background: rgba(var(--a),.09); border: 1px solid rgba(var(--a),.22); }
+.voe-apply-auto-ic { flex: 0 0 auto; width: 20px; height: 20px; color: rgb(var(--a)); margin-top: 1px; }
+.voe-apply-auto-ic svg { width: 20px; height: 20px; }
+.voe-apply-auto-tx { font-size: 12.5px; color: rgba(255,255,255,.72); line-height: 1.55; }
+.voe-apply-auto-tx strong { color: #fff; font-weight: 700; }
+.voe-apply-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.voe-apply-card { display: flex; flex-direction: column; gap: 9px; padding: 14px; border-radius: 13px;
+    background: rgba(255,255,255,.035); border: 1px solid rgba(255,255,255,.08); transition: border-color .14s, background .14s; }
+.voe-apply-card--on { background: rgba(var(--a),.08); border-color: rgba(var(--a),.4); }
+.voe-apply-card-h { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.voe-apply-card-name { font-size: 14px; font-weight: 700; color: #f2f4fa; }
+.voe-apply-card .voe-input { width: 100%; }
+.voe-apply-card-empty { font-size: 11.5px; color: rgba(255,255,255,.4); }
+.voe-apply-card-note { font-size: 11px; color: rgba(255,255,255,.4); line-height: 1.45; }
+.voe-apply-modal--v2 .voe-apply-foot { margin-top: 20px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,.07); }
+.voe-apply-modal--v2 .voe-apply-applied { margin: 0; }
+@media (max-width: 560px) { .voe-apply-cards { grid-template-columns: 1fr; } }
+
+/* keyboard-focus rings across the studio + its dialogs (accessibility) */
+.voe-overlay button:focus-visible, .voe-overlay input:focus-visible, .voe-overlay select:focus-visible,
+.voe-overlay [tabindex]:focus-visible, .voe-confirm-back button:focus-visible, .voe-card:focus-visible {
+    outline: 2px solid rgba(var(--a),.75); outline-offset: 2px;
+}
+
+@media (max-width: 900px) {
+    .voe-palette { flex-basis: 150px; padding: 14px 10px 22px; }
+    .voe-pal-label { display: none; }              /* tool cards go icon-only */
+    .voe-pal-tag-v { max-width: 116px; }
+    .voe-side { flex-basis: 210px; }
+}
+
+/* ── filtered targeting (scope-card "Applies to…" mini rule builder) ─────── */
+.voe-filter { margin-top: 8px; }
+.voe-filter-line {
+    display: flex; align-items: center; gap: 7px; width: 100%; text-align: left;
+    font: inherit; font-size: 11.5px; font-weight: 600; padding: 6px 9px;
+    border-radius: 9px; cursor: pointer; color: rgba(255,255,255,.55);
+    background: rgba(0,0,0,.22); border: 1px solid rgba(255,255,255,.07);
+    transition: color .13s ease, border-color .13s ease;
+}
+.voe-filter-line:hover { color: #fff; border-color: rgba(255,255,255,.18); }
+.voe-filter-ic { color: rgba(var(--a), .9); font-size: 10px; }
+.voe-filter-body { margin-top: 6px; display: flex; flex-direction: column; gap: 6px; }
+.voe-filter-loading { font-size: 11.5px; color: rgba(255,255,255,.4); padding: 6px 2px; }
+.voe-filter-match { font-size: 11.5px; color: rgba(255,255,255,.6); display: flex; align-items: center; gap: 6px; }
+.voe-filter-match i { font-style: normal; color: rgba(255,255,255,.35); }
+.voe-filter-match-sel { width: auto; padding: 3px 6px; font-size: 11.5px; }
+.voe-filter-rule { display: flex; gap: 5px; align-items: center; }
+.voe-filter-rule .voe-input { min-width: 0; font-size: 11.5px; padding: 6px 8px; }
+.voe-filter-rule select.voe-input { flex: 0 0 32%; }
+.voe-filter-rule select.voe-filter-op { flex: 0 0 24%; }
+.voe-filter-x {
+    flex: 0 0 auto; width: 24px; height: 24px; border-radius: 7px; cursor: pointer;
+    font-size: 14px; line-height: 1; color: rgba(255,255,255,.45);
+    background: transparent; border: 1px solid transparent;
+}
+.voe-filter-x:hover { background: rgba(255,70,70,.18); color: #ff8a8a; }
+.voe-filter-foot { display: flex; align-items: center; gap: 10px; }
+.voe-filter-add { font-size: 11.5px; padding: 5px 11px; }
+.voe-filter-count { font-size: 11px; color: rgba(255,255,255,.45); font-variant-numeric: tabular-nums; }
+
+/* ── gallery grouped by template type; episode cards in true 16:9 ────────── */
+.voe-grid { display: block; }
+.voe-grid-row {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 16px; margin-bottom: 8px;
+}
+.voe-grid-row--wide { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+.voe-grid-grouphead {
+    display: flex; align-items: baseline; gap: 10px; margin: 22px 2px 12px;
+    font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em;
+    color: rgba(255,255,255,.5);
+}
+.voe-grid-grouphead::after { content: ""; flex: 1; height: 1px; background: rgba(255,255,255,.08); }
+.voe-grid-grouphead i { font-style: normal; font-weight: 600; text-transform: none;
+    letter-spacing: 0; color: rgba(255,255,255,.35); font-size: 11.5px; }
+.voe-card--wide .voe-card-canvas { aspect-ratio: 16 / 9; }

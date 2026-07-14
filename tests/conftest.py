@@ -16,6 +16,13 @@ endpoints and event handlers without importing the full web_server.py
 # that call get_database() with no path → the real DB. Running those writers
 # against the live DB over a WSL-mounted Windows drive corrupted a user's
 # library. This guarantees it can't recur — tests get their own disposable DB.
+#
+# The VIDEO side has the SAME hazard: VideoDatabase()/get_video_db() with no
+# path resolves from os.environ['VIDEO_DATABASE_PATH'] (see
+# database/video_database.py) → the real database/video_library.db, and its
+# enrichment threads WRITE. A blueprint/handler test that opened the default
+# VideoDatabase corrupted the real video library once — same WSL/NTFS + WAL
+# trap. So redirect VIDEO_DATABASE_PATH to /tmp here too, before any import.
 import os as _os
 import tempfile as _tempfile
 import atexit as _atexit
@@ -24,6 +31,7 @@ import shutil as _shutil
 if not _os.environ.get('SOULSYNC_TEST_DB_READY'):
     _TEST_DB_DIR = _tempfile.mkdtemp(prefix='soulsync-testdb-')
     _os.environ['DATABASE_PATH'] = _os.path.join(_TEST_DB_DIR, 'test_music_library.db')
+    _os.environ['VIDEO_DATABASE_PATH'] = _os.path.join(_TEST_DB_DIR, 'test_video_library.db')
     _os.environ['SOULSYNC_TEST_DB_READY'] = '1'
     _atexit.register(lambda: _shutil.rmtree(_TEST_DB_DIR, ignore_errors=True))
 

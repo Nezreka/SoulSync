@@ -32,12 +32,36 @@ services:
       # Persistent data volumes
       - ./config:/app/config
       - ./logs:/app/logs
+      # Shared INPUT folder — slskd / torrent / usenet drop downloads here, and BOTH
+      # the music and video sides read from it (Settings → Downloads uses one path).
       - ./downloads:/app/downloads
+      # ─── Music library (OUTPUT) — REQUIRED: uncomment + set your path ────
+      # The app needs a Transfer folder — where finished, organised music is moved
+      # to for Plex / Jellyfin / Navidrome to read. UNCOMMENT the line below, point
+      # the host side (left of the colon) at your music library, then set
+      # Settings → Downloads → Transfer to /app/Transfer (matches the in-app
+      
+      # ./Transfer placeholder). Left commented so it never clashes with a Transfer
+      # mount you already added in a previous setup — if you have one, keep it.
+
+      # - ./Transfer:/app/Transfer
+
       - ./Staging:/app/Staging
       - ./MusicVideos:/app/MusicVideos
       - ./scripts:/app/scripts
+      # ─── Video libraries (OUTPUT) — one per content type ─────────────────
+      # The video Downloads tab sorts finished files into these by type. Point each
+      # at where Plex/Jellyfin reads from, then set the matching path on
+      # Settings → Downloads (the in-app placeholders match the in-container paths):
+      #   Movies → /media/movies   ·   TV → /media/tv   ·   YouTube → /media/youtube
+      - ./Movies:/media/movies
+      - ./TV:/media/tv
+      - ./YouTube:/media/youtube
       # Use named volume for database persistence (separate from host database)
       # NOTE: Changed from /app/database to /app/data to avoid overwriting Python package
+      # Holds BOTH databases (music_library.db + video_library.db) plus the video
+      # poster-asset store — watchlists/collections/overlays/issues/download-ledger
+      # all persist here across container upgrades.
       - soulsync_database:/app/data
       # IMPORTANT: Mount host paths that your input/output folders live on.
       # Replace these examples with your actual paths:
