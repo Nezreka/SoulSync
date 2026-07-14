@@ -1085,6 +1085,33 @@ def test_artist_delete_preview_for_primary_artist(api):
     assert missing.status_code == 404
 
 
+def test_physical_file_delete_preview_is_separate_and_root_safe(api, tmp_path, monkeypatch):
+    client, db, ids = api
+    root = tmp_path / "music"
+    root.mkdir()
+    path = root / "one-dance.flac"
+    path.write_bytes(b"audio")
+    with _conn(db) as conn:
+        conn.execute(
+            "UPDATE lib2_track_files SET path=? WHERE track_id=?",
+            (str(path), ids["album_track"]),
+        )
+        conn.commit()
+    monkeypatch.setattr(
+        "core.library2.file_delete._library_roots", lambda _config=None: [str(root)]
+    )
+
+    preview = client.get(
+        f"/api/library/v2/albums/{ids['views']}/file-delete-preview"
+    ).get_json()
+
+    assert preview["success"] is True
+    assert preview["deletable_count"] == 1
+    assert preview["unsafe_count"] == 0
+    assert preview["files"][0]["path"] == str(path)
+    assert path.exists(), "preview must never mutate the filesystem"
+
+
 def test_non_admin_profile_writes_are_rejected(api):
     """ADR-01 (admin-only, technically enforced): lib2 mutations from any
     profile but the admin are rejected with 403 — not silently applied to the

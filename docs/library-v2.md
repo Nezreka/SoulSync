@@ -2138,6 +2138,25 @@ verändert; daher waren Frontend-Typecheck/Vitest/Build nicht erforderlich.
     logischer Schritt:** ADR-05 als obersten offenen Architekturpunkt mit einer
     nicht-destruktiven Preview-/Journal-/Root-Safety-Slice beginnen; physisches
     Löschen erst nach abgesichertem Vertrag freischalten.
+25. **ADR-05 — getrenntes physisches Datei-Löschen. Erste, nicht-destruktive
+    Slice abgeschlossen 2026-07-14:** Der neue, admin-geschützte
+    `GET /api/library/v2/<artists|albums>/<id>/file-delete-preview`-Vertrag
+    materialisiert ausschließlich Files von Releases, die das Ziel wirklich
+    besitzt, schließt SQLite und löst erst danach die Pfade über den
+    verbindlichen `resolve_lib2_path` auf. Die Preview zeigt gruppierte
+    physische Dateien, DB-File-IDs, Root, Größe, Sicherheitsgrund und einen
+    deterministischen Snapshot-Token; mehrere DB-Links auf denselben Pfad
+    werden nur einmal als physische Datei gezählt. Löschbar ist ein File nur,
+    wenn sein kanonischer Realpath innerhalb eines explizit konfigurierten,
+    aktuell vorhandenen `library.music_paths`-Roots liegt. Fehlende Roots,
+    unauflösbare Pfade, Nicht-Dateien und Symlink-Escapes werden fail-closed
+    abgewiesen. Die Route mutiert weder DB noch Filesystem; der bestehende
+    Entity-Delete bleibt unverändert ein reines Unlink/Unmonitor-Command.
+    48 gezielte File-Delete-/API-Tests, Compile und Ruff sind grün. **Nächste
+    Slice:** den Snapshot-Token beim Execute erneut validieren, Operation und
+    Items vor Filesystem-Arbeit journalisieren und erst dann ein File nach dem
+    anderen löschen/als `file_state='deleted'` markieren; Crash-Zustände
+    müssen aus dem Journal rekonstruierbar bleiben.
 
 **Session-Abschluss-Gate 2026-07-14:** Seit dem vorherigen Full-Gate wurden
 Roadmap 13 sowie 16–23 und Phase E vollständig abgeschlossen und jeweils
@@ -2323,8 +2342,10 @@ wert und wurde bewusst nicht übernommen.
   kombiniert. Jede physische Löschung muss vorher eine Preview zeigen
   (betroffene Dateien, Root, Anzahl); wo möglich Recycle-Bin/Journal statt
   sofortigem `unlink()`. Physisches Löschen wird bewusst erst freigeschaltet,
-  wenn Preview/Journal/Root-Safety produktiv stehen — **Status: Entscheidung
-  getroffen, Umsetzung noch offen** (siehe Abschnitt 10.3).
+  wenn Preview/Journal/Root-Safety produktiv stehen — **Status 2026-07-14:
+  Umsetzung begonnen.** Der separate, fail-closed Preview-/Root-Safety-
+  Vertrag steht (Roadmap-Punkt 25); Journal und Execute bleiben die nächste
+  Slice.
 - **ADR-06 — Providerpriorität und User Overrides. Entschieden: getrennt
   speichern, Override gewinnt.** Providerfelder tragen eigene Provenance
   (`provider_updated_at`, Snapshot-Version) und werden bei Refresh
@@ -2447,8 +2468,9 @@ vermerkt, tauchten aber nirgends in diesem Dokument auf:
   statt `resolve_lib2_path`).~~ **Behoben 2026-07-14:** Artwork nutzt den
   verbindlichen lib2-Resolver; Details in Roadmap-Punkt 22.
 - **ADR-05-Umsetzung** — physisches Datei-Löschen mit Preview/Journal/
-  Root-Safety ist als Entscheidung getroffen (10.1), aber noch nicht gebaut;
-  aktuell löscht Library v2 nur DB-Einträge.
+  Root-Safety. **Teilweise umgesetzt 2026-07-14:** separate sichere Preview
+  steht; Journal/Execute sind noch offen (Roadmap-Punkt 25). Der bestehende
+  Entity-Delete löscht weiterhin nur DB-Einträge.
 - ~~**ADR-06-Rest** — Field-Level-User-Overrides (getrennte Speicherung +
   Read-Projektion pro überschriebenem Provider-Feld).~~ **Erledigt
   2026-07-14** (Roadmap Punkt 4, dritte Slice): getrennte validierte Speicherung,

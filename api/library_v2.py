@@ -2022,6 +2022,21 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         finally:
             conn.close()
 
+    @app.route("/api/library/v2/<entity>/<int:eid>/file-delete-preview")
+    def lib2_file_delete_preview(entity, eid):
+        """ADR-05 preview for the separate physical-file delete command."""
+        guard = _guard()
+        if guard:
+            return guard
+        from core.library2.file_delete import FileDeleteError, preview_entity_files
+        try:
+            preview = preview_entity_files(
+                get_database(), entity=entity, entity_id=eid
+            )
+            return jsonify({"success": True, **preview})
+        except FileDeleteError as exc:
+            return jsonify({"success": False, "error": str(exc)}), exc.status
+
     @app.route("/api/library/v2/artists/<int:artist_id>", methods=["DELETE"])
     def lib2_delete_artist(artist_id):
         """Remove an artist (and their releases/tracks/file links) from
