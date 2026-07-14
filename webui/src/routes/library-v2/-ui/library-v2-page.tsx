@@ -106,25 +106,14 @@ function buildSearchQuery(artistName: string, action: string): string {
   return `${artistName} ${rest}`.trim();
 }
 
-/** Real quality string: format + bitrate (+ bit-depth/sample-rate when scanned). */
-function qualityText(file: LibraryV2Track['file']): string {
-  if (!file) return '-';
-  const fmt = (file.format ?? '').toUpperCase();
-  const kbps = file.bitrate
-    ? file.bitrate > 5000
-      ? Math.round(file.bitrate / 1000)
-      : file.bitrate
-    : null;
-  return [fmt, kbps ? `${kbps} kbps` : null].filter(Boolean).join(' / ') || '-';
-}
-
 const BOOKMARK_PATH = 'M5 3.5A1.5 1.5 0 0 1 6.5 2h11A1.5 1.5 0 0 1 19 3.5V22l-7-4.2L5 22V3.5z';
 
 const ICON_PATHS = {
   back: 'M15 18l-6-6 6-6M9 12h12',
   refresh: 'M21 12a9 9 0 0 1-15.3 6.4M3 12A9 9 0 0 1 18.3 5.6M18 3v5h-5M6 21v-5h5',
   search: 'M11 19a8 8 0 1 1 5.7-2.3L21 21',
-  interactive: 'M4 5h16M4 12h10M4 19h7M17 14l4 4-4 4',
+  interactive: 'M12 11a2 2 0 1 1-4 0 2 2 0 0 1 4 0zM12 19a7 7 0 1 1 0-14 7 7 0 0 1 0 14z',
+  automatic: 'M11 19a8 8 0 1 1 5.7-2.3L21 21',
   organize: 'M4 7h16M7 7v12M17 7v12M4 19h16',
   retag: 'M20 10l-8.5 8.5a2 2 0 0 1-2.8 0L4 13.8V4h9.8L20 10zM8 8h.01',
   tracks: 'M9 18V5l10-2v13M9 18a3 3 0 1 1-2-2.8M19 16a3 3 0 1 1-2-2.8',
@@ -157,9 +146,11 @@ function SvgIcon({ name, filled }: { name: IconName; filled?: boolean }) {
   );
 }
 
-function detailedQualityText(file: LibraryV2Track['file']): string {
-  if (!file) return qualityText(file);
-  const fmt = (file.format ?? '').toUpperCase();
+/** Quality display component: renders format, resolution, and bitrate as separate visual blocks. */
+function QualityDisplay({ file }: { file: LibraryV2Track['file'] | null | undefined }) {
+  if (!file) return <span className={styles.qualityMissing}>-</span>;
+
+  const fmt = (file.format ?? '').toUpperCase() || null;
   const kbps = file.bitrate
     ? file.bitrate > 5000
       ? Math.round(file.bitrate / 1000)
@@ -169,10 +160,15 @@ function detailedQualityText(file: LibraryV2Track['file']): string {
   const sampleRate = file.sample_rate
     ? `${Number((file.sample_rate / 1000).toFixed(file.sample_rate % 1000 === 0 ? 0 : 1))} kHz`
     : null;
-  const resolution = [bitDepth, sampleRate].filter(Boolean).join('/');
+  const resolution = [bitDepth, sampleRate].filter(Boolean).join(' / ') || null;
+
   return (
-    [fmt, resolution || null, kbps ? `${kbps} kbps` : null].filter(Boolean).join(' / ') ||
-    qualityText(file)
+    <div className={styles.qualityDisplay}>
+      {fmt && <span className={styles.qualityBlock}>{fmt}</span>}
+      {resolution && <span className={styles.qualityBlock}>{resolution}</span>}
+      {kbps && <span className={styles.qualityBlock}>{kbps} kbps</span>}
+      {!fmt && !resolution && !kbps && <span className={styles.qualityMissing}>unknown</span>}
+    </div>
   );
 }
 
@@ -2790,7 +2786,7 @@ function TrackRow({
       <td>{track.title ?? <span className={styles.muted}>{label}</span>}</td>
       <td>{track.artists.map((a) => a.name).join(', ')}</td>
       <td className={styles.qualityText}>
-        {detailedQualityText(track.file)}
+        <QualityDisplay file={track.file} />
         <TrackQualityProfileBadge track={track} />
       </td>
       <td>

@@ -471,6 +471,29 @@
   color: rgba(255, 255, 255, 0.8);
 }
 
+.qualityDisplay {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 0.9em;
+}
+
+.qualityBlock {
+  display: inline-block;
+  padding: 0.25rem 0.5rem;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 0.25rem;
+  border-left: 2px solid rgba(255, 255, 255, 0.3);
+  white-space: nowrap;
+}
+
+.qualityMissing {
+  color: rgba(255, 255, 255, 0.5);
+  font-style: italic;
+}
+
 /* --- album blocks (Lidarr-style, expandable) --- */
 .albumList {
   display: flex;
