@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from core.library2 import retag
 
 
@@ -85,3 +87,65 @@ def test_scope_helpers(imported_conn):
     artist_id, album_id, track_id = _seed_album_with_files(conn)
     assert track_id in retag.album_track_ids(conn, album_id)
     assert track_id in retag.artist_track_ids(conn, artist_id)
+
+
+def test_unchanged_retag_refreshes_stale_gap_cache(
+        imported_conn, legacy_db, tmp_path, monkeypatch):
+    conn = imported_conn
+    file_path = tmp_path / "track.flac"
+    file_path.write_bytes(b"fake")
+    _, _, track_id = _seed_album_with_files(conn, path="/mapped/track.flac")
+    file_tags = {
+        "title": "One Dance", "artist": "Drake; Wizkid",
+        "album_artist": "Drake", "album": "Views", "year": "2016-04-29",
+        "genre": "rap, pop", "track_number": 1, "disc_number": 1,
+        "has_cover_art": True, "error": None,
+    }
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda _path: str(file_path))
+    monkeypatch.setattr("core.tag_writer.read_file_tags", lambda _path: file_tags)
+    monkeypatch.setattr("core.tag_writer.build_tag_diff", lambda *_args: [])
+
+    stats = retag.write_tags(legacy_db, conn, [track_id], embed_cover=False)
+
+    cache = conn.execute(
+        "SELECT tags_json, missing_tags_json FROM lib2_track_files WHERE track_id=?",
+        (track_id,),
+    ).fetchone()
+    assert stats["skipped"] == 1
+    assert json.loads(cache["tags_json"])["cover"] is True
+    assert json.loads(cache["missing_tags_json"]) == []
+
+
+def test_successful_retag_reloads_written_tags_instead_of_leaving_old_gaps(
+        imported_conn, legacy_db, tmp_path, monkeypatch):
+    conn = imported_conn
+    file_path = tmp_path / "track.flac"
+    file_path.write_bytes(b"fake")
+    _, _, track_id = _seed_album_with_files(conn, path="/mapped/track.flac")
+    reads = iter([
+        {"title": None, "error": None},
+        {
+            "title": "One Dance", "artist": "Drake; Wizkid",
+            "album_artist": "Drake", "album": "Views", "year": "2016-04-29",
+            "genre": "rap, pop", "track_number": 1, "disc_number": 1,
+            "has_cover_art": True, "error": None,
+        },
+    ])
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda _path: str(file_path))
+    monkeypatch.setattr("core.tag_writer.read_file_tags", lambda _path: next(reads))
+    monkeypatch.setattr(
+        "core.tag_writer.build_tag_diff",
+        lambda *_args: [{"changed": True}],
+    )
+    monkeypatch.setattr(
+        "core.tag_writer.write_tags_to_file",
+        lambda *_args, **_kwargs: {"success": True},
+    )
+
+    stats = retag.write_tags(legacy_db, conn, [track_id], embed_cover=False)
+
+    cache = conn.execute(
+        "SELECT missing_tags_json FROM lib2_track_files WHERE track_id=?", (track_id,)
+    ).fetchone()
+    assert stats["written"] == 1
+    assert json.loads(cache["missing_tags_json"]) == []

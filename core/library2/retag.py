@@ -43,6 +43,9 @@ def _track_rows(conn, track_ids: List[int]) -> List[Any]:
                    al.title AS album_title, al.year, al.release_date, al.genres,
                    al.expected_track_count, al.track_count,
                    ar.name AS album_artist_name,
+                   (SELECT tf.id FROM lib2_track_files tf
+                     WHERE tf.track_id = t.id AND tf.path IS NOT NULL AND tf.path <> ''
+                     ORDER BY {primary_order('tf')} LIMIT 1) AS file_id,
                    (SELECT tf.path FROM lib2_track_files tf
                      WHERE tf.track_id = t.id AND tf.path IS NOT NULL AND tf.path <> ''
                      ORDER BY {primary_order('tf')} LIMIT 1) AS file_path
@@ -177,6 +180,7 @@ def write_tags(database, conn, track_ids: List[int], *, embed_cover: bool = True
     silent cap on a write the user asked for.
     """
     from core.library2.paths import resolve_lib2_path
+    from core.library2.tag_cache import persist_tag_cache, read_and_persist_tag_cache
     from core.tag_writer import build_tag_diff, read_file_tags, write_tags_to_file
 
     stats: Dict[str, Any] = {"written": 0, "skipped": 0, "failed": 0, "errors": []}
@@ -202,6 +206,7 @@ def write_tags(database, conn, track_ids: List[int], *, embed_cover: bool = True
             if not file_tags.get("error"):
                 diff = build_tag_diff(file_tags, db_data)
                 if not any(d.get("changed") for d in diff):
+                    persist_tag_cache(conn, row["file_id"], file_tags)
                     stats["skipped"] += 1
                     continue
             cover = None
@@ -215,9 +220,7 @@ def write_tags(database, conn, track_ids: List[int], *, embed_cover: bool = True
             )
             if result.get("success"):
                 stats["written"] += 1
-                conn.execute(
-                    "UPDATE lib2_track_files SET updated_at=CURRENT_TIMESTAMP WHERE track_id=? AND path=?",
-                    (row["id"], row["file_path"]))
+                read_and_persist_tag_cache(conn, row["file_id"], abs_path)
             else:
                 stats["failed"] += 1
                 stats["errors"].append({"track_id": row["id"],

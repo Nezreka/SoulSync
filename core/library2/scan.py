@@ -6,6 +6,10 @@ format+bitrate. "Refresh & Scan" calls this to probe each file on disk
 sample-rate/bit-depth-based quality targets (hi-res FLAC tiers) evaluate
 against real values instead of format-based fallbacks.
 
+The same pass refreshes the tag/gap cache through ``core.tag_writer``'s
+canonical reader. Tag and quality probes are independent: failure of one must
+not keep the other stale.
+
 Files whose path does not exist are left untouched (bind mounts can be
 temporarily absent in Docker; a missing path is not proof the file is gone).
 """
@@ -58,6 +62,7 @@ def rescan_files(database, *, album_ids: Optional[List[int]] = None,
     from core.imports.file_ops import probe_audio_quality
     from core.library2.paths import resolve_lib2_path
     from core.library2.status import quality_tier
+    from core.library2.tag_cache import read_and_persist_tag_cache
 
     stats = {"scanned": 0, "updated": 0, "missing": 0}
     conn = database._get_connection()
@@ -72,6 +77,7 @@ def rescan_files(database, *, album_ids: Optional[List[int]] = None,
                 stats["missing"] += 1
                 continue
             stats["scanned"] += 1
+            read_and_persist_tag_cache(conn, row["id"], path)
             try:
                 quality = probe_audio_quality(path)
             except Exception as e:  # noqa: BLE001

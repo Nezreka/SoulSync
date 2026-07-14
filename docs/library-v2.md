@@ -2064,6 +2064,19 @@ verändert; daher waren Frontend-Typecheck/Vitest/Build nicht erforderlich.
     Provider-Snapshots und API sowie Ruff sind grün. **Nächster logischer
     Schritt:** P1-28 — Refresh & Scan und Retag müssen den Tag-/Gap-Cache
     konsistent aktualisieren bzw. invalidieren.
+20. ~~**Tag-/Gap-Cache-Konsistenz (P1-28).**~~ **Abgeschlossen 2026-07-14:**
+    Ein gemeinsamer `core/library2/tag_cache.py`-Adapter persistiert die
+    Ergebnisse der bereits etablierten `core.tag_writer.read_file_tags`-Engine
+    in `tags_json`, `missing_tags_json` und `metadata_gaps_json`; es gibt keinen
+    zweiten Tag-Reader. Refresh & Scan aktualisiert Tagcache und Audioqualität
+    unabhängig, sodass ein fehlgeschlagener Quality-Probe keine frischen Tags
+    verhindert. Retag persistiert sowohl beim „unchanged“-Fastpath als auch
+    nach erfolgreichem Schreiben den tatsächlich gelesenen Stand. Ein
+    Lesefehler invalidiert alte Listen explizit auf JSON-`null` (unknown),
+    statt alte Gaps oder fälschlich „gap-free“ anzuzeigen. **67 gezielte
+    Scan-/Retag-/Query-/API-Tests** und Ruff sind grün. **Nächster logischer
+    Schritt:** P2-02 — Missing-File-Lifecycle mit bestätigtem Zustand und
+    Mount-sicherer Semantik vervollständigen.
 
 ---
 
@@ -2346,10 +2359,11 @@ vermerkt, tauchten aber nirgends in diesem Dokument auf:
   bewusst gewishlistete/monitorte Rows stumm entfernen.~~ **Behoben
   2026-07-14:** Provider-Liste bestimmt die Mindestgröße; positive Monitor-/
   Wanted-Absicht schützt fileless Rows. Details in Roadmap-Punkt 19.
-- **P1-28** — „Refresh & Scan" liest nur Audioqualität/Größe neu ein;
+- ~~**P1-28** — „Refresh & Scan" liest nur Audioqualität/Größe neu ein;
   `tags_json`/`missing_tags_json`/`metadata_gaps_json` werden nicht
   aktualisiert, Retag invalidiert diesen Cache ebenfalls nicht — UI zeigt
-  nach erfolgreichem Retag weiterhin alte Gaps.
+  nach erfolgreichem Retag weiterhin alte Gaps.~~ **Behoben 2026-07-14:**
+  gemeinsamer Tag-Cache-Adapter in Scan und Retag; Details in Roadmap-Punkt 20.
 - **P2-02** — Missing Files haben keinen belastbaren Lifecycle: Scan lässt
   fehlende Files bewusst unverändert (Mount kann temporär fehlen), aber ohne
   Root-Health/`missing_since`/Miss-Counter bleiben wirklich gelöschte Dateien

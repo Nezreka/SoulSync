@@ -8,6 +8,7 @@ albums would otherwise probe every file in the database.
 from __future__ import annotations
 
 import sqlite3
+import json
 
 import pytest
 
@@ -71,3 +72,73 @@ def test_rescan_files_with_empty_scope_probes_nothing(scoped_conn, tmp_path):
     db_path = str(tmp_path / "lib2.db")
     stats = rescan_files(_Shim(db_path), album_ids=[])
     assert stats == {"scanned": 0, "updated": 0, "missing": 0}
+
+
+def test_rescan_refreshes_tag_and_gap_cache_independently_of_quality(
+        scoped_conn, tmp_path, monkeypatch):
+    from core.library2.scan import rescan_files
+
+    conn, album_ids = scoped_conn
+    db_path = conn.execute("PRAGMA database_list").fetchone()[2]
+    file_path = tmp_path / "readable.flac"
+    file_path.write_bytes(b"not-real-audio")
+
+    class _Shim:
+        def _get_connection(self):
+            opened = sqlite3.connect(db_path)
+            opened.row_factory = sqlite3.Row
+            return opened
+
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda _path: str(file_path))
+    monkeypatch.setattr("core.imports.file_ops.probe_audio_quality", lambda _path: None)
+    monkeypatch.setattr("core.tag_writer.read_file_tags", lambda _path: {
+        "title": "Album One",
+        "artist": "A",
+        "album": "Album One",
+        "album_artist": "A",
+        "track_number": 1,
+        "disc_number": 1,
+        "year": "2026",
+        "genre": None,
+        "has_cover_art": False,
+        "error": None,
+    })
+
+    stats = rescan_files(_Shim(), album_ids=[album_ids[0]])
+
+    row = conn.execute(
+        """SELECT tags_json, missing_tags_json, metadata_gaps_json
+             FROM lib2_track_files WHERE path='/m/a.flac'"""
+    ).fetchone()
+    assert stats == {"scanned": 1, "updated": 0, "missing": 0}
+    assert json.loads(row["tags_json"])["title"] == "Album One"
+    assert json.loads(row["missing_tags_json"]) == ["genre", "cover"]
+    assert json.loads(row["metadata_gaps_json"]) == ["genre", "cover"]
+
+
+def test_failed_tag_read_invalidates_stale_gap_cache(scoped_conn):
+    from core.library2.tag_cache import persist_tag_cache
+
+    conn, _album_ids = scoped_conn
+    file_id = conn.execute(
+        "SELECT id FROM lib2_track_files WHERE path='/m/a.flac'"
+    ).fetchone()[0]
+    conn.execute(
+        """UPDATE lib2_track_files
+              SET tags_json='{"title":"stale"}',
+                  missing_tags_json='["cover"]',
+                  metadata_gaps_json='["cover"]'
+            WHERE id=?""",
+        (file_id,),
+    )
+
+    assert persist_tag_cache(conn, file_id, {"error": "unreadable"}) is False
+
+    row = conn.execute(
+        """SELECT tags_json, missing_tags_json, metadata_gaps_json
+             FROM lib2_track_files WHERE id=?""",
+        (file_id,),
+    ).fetchone()
+    assert json.loads(row["tags_json"]) == {}
+    assert json.loads(row["missing_tags_json"]) is None
+    assert json.loads(row["metadata_gaps_json"]) is None
