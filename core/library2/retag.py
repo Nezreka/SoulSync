@@ -113,13 +113,24 @@ def _db_data_for_row(conn, row: Any) -> Dict[str, Any]:
     return data
 
 
-def tag_preview(database, conn, track_ids: List[int]) -> List[Dict[str, Any]]:
-    """Per-track diff of file tags vs the lib2 DB metadata. Never raises."""
+def track_contexts(conn, track_ids: List[int]) -> List[Dict[str, Any]]:
+    """Materialize all DB metadata needed by preview/write before file I/O."""
+    contexts: List[Dict[str, Any]] = []
+    for start in range(0, len(track_ids), MAX_TRACKS):
+        for row in _track_rows(conn, track_ids[start:start + MAX_TRACKS]):
+            context = dict(row)
+            context["db_data"] = _db_data_for_row(conn, row)
+            contexts.append(context)
+    return contexts
+
+
+def tag_preview(contexts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Per-track diff of file tags vs a materialized lib2 snapshot. Never raises."""
     from core.library2.paths import resolve_lib2_path
     from core.tag_writer import build_tag_diff, read_file_tags
 
     out: List[Dict[str, Any]] = []
-    for row in _track_rows(conn, track_ids):
+    for row in contexts:
         entry: Dict[str, Any] = {
             "track_id": row["id"],
             "title": row["title"],
@@ -145,7 +156,7 @@ def tag_preview(database, conn, track_ids: List[int]) -> List[Dict[str, Any]]:
                 entry.update(error=file_tags["error"], has_changes=False, diff=[])
                 out.append(entry)
                 continue
-            diff = build_tag_diff(file_tags, _db_data_for_row(conn, row))
+            diff = build_tag_diff(file_tags, row["db_data"])
             entry.update(
                 diff=[d for d in diff if d.get("changed")],
                 has_changes=any(d.get("changed") for d in diff),
@@ -168,7 +179,20 @@ def _album_cover_data(database, album_id: int) -> Optional[Tuple[bytes, str]]:
     return None
 
 
-def write_tags(database, conn, track_ids: List[int], *, embed_cover: bool = True,
+def _persist_file_tags(database, file_id: int, file_tags: Dict[str, Any]) -> bool:
+    """Persist one tag-cache result in a short transaction."""
+    from core.library2.tag_cache import persist_tag_cache
+
+    conn = database._get_connection()
+    try:
+        persisted = persist_tag_cache(conn, int(file_id), file_tags)
+        conn.commit()
+        return persisted
+    finally:
+        conn.close()
+
+
+def write_tags(database, track_ids: List[int], *, embed_cover: bool = True,
                progress=None) -> Dict[str, Any]:
     """Write lib2 DB metadata into the files' tags.
 
@@ -180,14 +204,16 @@ def write_tags(database, conn, track_ids: List[int], *, embed_cover: bool = True
     silent cap on a write the user asked for.
     """
     from core.library2.paths import resolve_lib2_path
-    from core.library2.tag_cache import persist_tag_cache, read_and_persist_tag_cache
+    from core.library2.tag_cache import read_tag_snapshot
     from core.tag_writer import build_tag_diff, read_file_tags, write_tags_to_file
 
     stats: Dict[str, Any] = {"written": 0, "skipped": 0, "failed": 0, "errors": []}
     covers: Dict[int, Optional[Tuple[bytes, str]]] = {}
-    rows: List[Any] = []
-    for start in range(0, len(track_ids), MAX_TRACKS):
-        rows.extend(_track_rows(conn, track_ids[start:start + MAX_TRACKS]))
+    conn = database._get_connection()
+    try:
+        rows = track_contexts(conn, track_ids)
+    finally:
+        conn.close()
     for i, row in enumerate(rows):
         if progress:
             progress("retag", i, len(rows))
@@ -202,11 +228,11 @@ def write_tags(database, conn, track_ids: List[int], *, embed_cover: bool = True
             continue
         try:
             file_tags = read_file_tags(abs_path)
-            db_data = _db_data_for_row(conn, row)
+            db_data = row["db_data"]
             if not file_tags.get("error"):
                 diff = build_tag_diff(file_tags, db_data)
                 if not any(d.get("changed") for d in diff):
-                    persist_tag_cache(conn, row["file_id"], file_tags)
+                    _persist_file_tags(database, row["file_id"], file_tags)
                     stats["skipped"] += 1
                     continue
             cover = None
@@ -220,7 +246,9 @@ def write_tags(database, conn, track_ids: List[int], *, embed_cover: bool = True
             )
             if result.get("success"):
                 stats["written"] += 1
-                read_and_persist_tag_cache(conn, row["file_id"], abs_path)
+                _persist_file_tags(
+                    database, row["file_id"], read_tag_snapshot(abs_path)
+                )
             else:
                 stats["failed"] += 1
                 stats["errors"].append({"track_id": row["id"],
@@ -228,10 +256,16 @@ def write_tags(database, conn, track_ids: List[int], *, embed_cover: bool = True
         except Exception as e:  # noqa: BLE001
             stats["failed"] += 1
             stats["errors"].append({"track_id": row["id"], "error": str(e)})
-    conn.commit()
     logger.info("Library v2 retag: %(written)d written, %(skipped)d unchanged, "
                 "%(failed)d failed", stats)
     return stats
 
 
-__all__ = ["tag_preview", "write_tags", "album_track_ids", "artist_track_ids", "MAX_TRACKS"]
+__all__ = [
+    "tag_preview",
+    "track_contexts",
+    "write_tags",
+    "album_track_ids",
+    "artist_track_ids",
+    "MAX_TRACKS",
+]

@@ -2337,9 +2337,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             track_ids = (retag.album_track_ids(conn, eid) if entity == "albums"
                          else retag.artist_track_ids(conn, eid))
             truncated = len(track_ids) > retag.MAX_TRACKS
-            preview = retag.tag_preview(db, conn, track_ids)
+            contexts = retag.track_contexts(conn, track_ids[:retag.MAX_TRACKS])
         finally:
             conn.close()
+        preview = retag.tag_preview(contexts)
         return jsonify({
             "success": True,
             "tracks": preview,
@@ -2376,16 +2377,12 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             from core.library2 import retag
             db = get_database()
             try:
-                conn = db._get_connection()
-                try:
-                    def _progress(_stage, current, total):
-                        _job_registry.update(job_id, current=current, total=total)
-                    stats = retag.write_tags(db, conn, track_ids,
-                                             embed_cover=embed_cover,
-                                             progress=_progress)
-                    _job_registry.update(job_id, result=stats)
-                finally:
-                    conn.close()
+                def _progress(_stage, current, total):
+                    _job_registry.update(job_id, current=current, total=total)
+                stats = retag.write_tags(db, track_ids,
+                                         embed_cover=embed_cover,
+                                         progress=_progress)
+                _job_registry.update(job_id, result=stats)
             except Exception as e:  # noqa: BLE001
                 logger.error("Library v2 retag failed: %s", e, exc_info=True)
                 _job_registry.update(job_id, error=str(e))

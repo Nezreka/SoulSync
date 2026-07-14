@@ -2115,8 +2115,8 @@ verändert; daher waren Frontend-Typecheck/Vitest/Build nicht erforderlich.
     Wishlist-/AcoustID-/Import-Pipeline-/Repair-Tests**, Webserver-Compile und
     Ruff sind grün. **Nächster logischer Schritt:** P2-01 — Scan/Retag-I/O von
     lang gehaltenen SQLite-Verbindungen entkoppeln.
-24. **Kurze SQLite-Transaktionen für Scan/Retag (P2-01). Erste Slice
-    abgeschlossen 2026-07-14:** Refresh & Scan materialisiert den DB-Scope
+24. ~~**Kurze SQLite-Transaktionen für Scan/Retag (P2-01).**~~ **Abgeschlossen
+    2026-07-14. Erste Slice:** Refresh & Scan materialisiert den DB-Scope
     einmal und schließt die Snapshot-Verbindung, bevor Pfadauflösung,
     Root-Health, Tag-Reader, Quality-Probe oder Größenabfrage das Dateisystem
     berühren. Tag- und Quality-Ergebnis werden danach pro File in einer kurzen
@@ -2126,9 +2126,18 @@ verändert; daher waren Frontend-Typecheck/Vitest/Build nicht erforderlich.
     `core.tag_writer.read_file_tags`-Pfad bleibt über einen read-only
     Tag-Cache-Helper die einzige Tag-Engine. Ein Connection-Lifecycle-
     Regressionstest sowie 20 gezielte Scan-/Retag-/API-Tests und Ruff sind
-    grün. **Nächste Slice:** Retag-Metadaten vollständig vorladen, die
-    Read-Verbindung vor Preview-/Write-I/O schließen und Tagcache-Ergebnisse
-    ebenfalls in kurzen Transaktionen zurückschreiben.
+    grün. **Zweite/abschließende Slice:** Preview und Write materialisieren
+    Track-, Album- und Artist-Credits vollständig in gebatchten DB-Reads.
+    Danach laufen Pfadauflösung, Tag-Diff, Cover-Read und der unveränderte
+    `core.tag_writer.write_tags_to_file` ohne offene Snapshot-Verbindung;
+    unveränderte bzw. erfolgreich geschriebene Tag-Snapshots werden je File in
+    einer kurzen Transaktion gespeichert. Preview behält sein 500-Track-Limit,
+    der Write-Pfad verarbeitet weiterhin beliebig viele angeforderte Tracks in
+    DB-Batches. Ein eigener Connection-Lifecycle-Test pinnt die Grenze; 61
+    gezielte Retag-/Scan-/API-Tests, Compile und Ruff sind grün. **Nächster
+    logischer Schritt:** ADR-05 als obersten offenen Architekturpunkt mit einer
+    nicht-destruktiven Preview-/Journal-/Root-Safety-Slice beginnen; physisches
+    Löschen erst nach abgesichertem Vertrag freischalten.
 
 **Session-Abschluss-Gate 2026-07-14:** Seit dem vorherigen Full-Gate wurden
 Roadmap 13 sowie 16–23 und Phase E vollständig abgeschlossen und jeweils
@@ -2448,11 +2457,11 @@ vermerkt, tauchten aber nirgends in diesem Dokument auf:
 **Weitere P2/P3-UX- und Robustheits-Findings ohne Roadmap-Eintrag** (niedrigere
 Priorität, kompakt aufgelistet für spätere Aufnahme):
 
-- P2-01: Scan/Retag halten SQLite-Write-Lock über lange Dateisystem-I/O offen
+- ~~P2-01: Scan/Retag halten SQLite-Write-Lock über lange Dateisystem-I/O offen
   (Netzwerk-/Bind-Mounts verschärfen das) — Scope lesen, Connection
-  schließen, in kleinen Transaktionen schreiben. **Teilweise behoben
-  2026-07-14:** Scan ist entkoppelt; Retag bleibt als zweite Slice offen
-  (Roadmap-Punkt 24).
+  schließen, in kleinen Transaktionen schreiben.~~ **Behoben 2026-07-14:**
+  Scan und Retag trennen DB-Snapshots vollständig von Datei-I/O und schreiben
+  nur kurze Per-File-Transaktionen (Roadmap-Punkt 24).
 - ~~P2-03: Skip-Audit (`lib2_manual_skips`) schreibt weder `file_path` noch
   `profile_id` und wird von keinem Quality-/Repair-Job gelesen — die
   versprochene Wirkung „spätere Jobs respektieren den Override" tritt nicht
