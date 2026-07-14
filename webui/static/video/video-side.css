@@ -2418,6 +2418,13 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
     .vwlp-head, .vwlp-body { padding-left: 18px; padding-right: 18px; }
     .vwlp-grid { grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 18px 14px; }
 }
+@media (max-width: 640px) {
+    /* Four tabs (Shows/People/Studios/Channels + counts) don't fit one row on a
+       phone — the no-wrap row ran the Channels tab clean off-screen. */
+    .vwlp-tabs { flex-wrap: wrap; }
+    .vwlp-tab { padding: 8px 14px; font-size: 13px; }
+    .vwlp-title { font-size: 28px; }
+}
 
 /* Ensure the show poster box is a positioning context for its .vwl-btn
    (scoped to VIDEO cards so the shared music .library-artist-image is untouched). */
