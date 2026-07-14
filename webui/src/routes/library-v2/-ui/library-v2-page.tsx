@@ -1281,7 +1281,7 @@ export function LibraryV2Page() {
  *  wishlist through a transactional outbox. When ops are stuck or failed,
  *  say so — the UI must not show "monitored" while the pipeline never
  *  learned about it. */
-function MirrorStatusBanner() {
+export function MirrorStatusBanner() {
   const queryClient = useQueryClient();
   const statusQuery = useQuery(libraryV2MirrorStatusQueryOptions());
   const retry = useMutation({
@@ -1297,14 +1297,21 @@ function MirrorStatusBanner() {
       : `${s.pending} wishlist sync ${s.pending === 1 ? 'operation' : 'operations'} pending…`;
   return (
     <div className={`${styles.grabBanner} ${s.failed > 0 ? styles.grab_err : styles.grab_busy}`}>
-      <span>{label}</span>
+      <span>
+        {label}
+        {retry.isError ? (
+          <span className={styles.mirrorRetryError} role="alert">
+            {mutationErrorMessage(retry.error, 'Mirror retry failed')}
+          </span>
+        ) : null}
+      </span>
       <button
         type="button"
         className={styles.grabBannerClose}
         disabled={retry.isPending}
         onClick={() => retry.mutate()}
       >
-        {retry.isPending ? 'Retrying…' : 'Retry'}
+        {retry.isPending ? 'Retrying…' : retry.isError ? 'Retry again' : 'Retry'}
       </button>
     </div>
   );
@@ -1519,7 +1526,7 @@ function pipelineLabel(state: LibraryV2PlaylistPipelineState | null): string | n
   return state.status;
 }
 
-function PlaylistPipelineButton({ playlist }: { playlist: LibraryV2PlaylistSummary }) {
+export function PlaylistPipelineButton({ playlist }: { playlist: LibraryV2PlaylistSummary }) {
   const queryClient = useQueryClient();
   const unsupported = playlist.source === 'file' || playlist.source === 'beatport';
   const mutation = useMutation({
@@ -1538,7 +1545,7 @@ function PlaylistPipelineButton({ playlist }: { playlist: LibraryV2PlaylistSumma
     <span className={styles.playlistRunWrap}>
       <ActionButton
         icon="refresh"
-        label={running ? 'Pipeline running…' : 'Run pipeline'}
+        label={running ? 'Pipeline running…' : mutation.isError ? 'Retry pipeline' : 'Run pipeline'}
         busy={running}
         disabled={unsupported}
         title={

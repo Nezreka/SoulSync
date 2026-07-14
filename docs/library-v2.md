@@ -2215,8 +2215,8 @@ bekannte Main-Chunk-Hinweis). **Logischer nächster Schritt:** P2-06 als kleinst
     `monitor_new_items`-Save mit sichtbarem Fehler/Retry und garantiertem Ende des
     Loading-Zustands; anschließend dieselbe Fehlergrenze auf die restlichen
     Library-v2-Mutationen ausrollen.
-27. **Endliche, sichtbare UI-Mutationsfehler (P2-06). Erste Slice abgeschlossen
-    2026-07-14:** Der Bookmark-Monitor-Toggle zeigt einen fehlgeschlagenen
+27. ~~**Endliche, sichtbare UI-Mutationsfehler (P2-06).**~~ **Abgeschlossen
+    2026-07-14. Erste Slice:** Der Bookmark-Monitor-Toggle zeigt einen fehlgeschlagenen
     Artist-/Album-/Track-Write jetzt als sichtbaren Alert mit dem redigiert vom
     API-Client gelieferten Fehler und bleibt danach für denselben Klick als
     Retry bedienbar. Der `monitor_new_items`-Select besitzt explizite
@@ -2282,6 +2282,21 @@ bekannte Main-Chunk-Hinweis). **Logischer nächster Schritt:** P2-06 als kleinst
     Playlist-Pipeline-Start zeigt zwar den Grund, labelt denselben Button aber
     nicht explizit als Retry. Diese beiden kleinen Mutationsgrenzen als nächste
     Slice schließen, bevor P2-07 (verschachtelte Buttons) aufgenommen wird.
+    **Achte/abschließende Slice 2026-07-14:** Ein fehlgeschlagener Mirror-
+    Outbox-Retry zeigt nun seinen konkreten API-Fehler und labelt die weiterhin
+    bedienbare Action „Retry again“. Ein abgelehnter Playlist-Pipeline-Start
+    zeigte den Grund bereits; sein Button heißt danach jetzt explizit „Retry
+    pipeline“. Zwei neue Komponenten-Vertragstests beweisen beide
+    Failure→Retry-Pfade. Die abschließende Inventur aller Library-v2-
+    Mutationsgrenzen bestätigt: Delete/File-Delete, Metadaten-Edit, Manage
+    Tracks, Maintenance, Retag, Search, Discography, Upgrade-Scan und
+    Wishlist-Processing besaßen bereits sichtbare endliche Fehlerzustände bzw.
+    einen direkt wieder bedienbaren Command; stille bzw. fälschlich dauerhafte
+    Pfade sind geschlossen. Insgesamt sind 20 Library-v2-Vitests,
+    Frontend-Format/Lint/Typecheck und Production-Build grün. **Nächster
+    logischer Schritt:** P2-07 — Artist-Karten dürfen den Monitor-Button nicht
+    länger in einen zweiten Button verschachteln; semantische Card-Navigation
+    und Toggle als getrennte interaktive Elemente modellieren.
 
 **Session-Abschluss-Gate 2026-07-14:** Seit dem vorherigen Full-Gate wurden
 Roadmap 13 sowie 16–23 und Phase E vollständig abgeschlossen und jeweils
@@ -2620,11 +2635,11 @@ Priorität, kompakt aufgelistet für spätere Aufnahme):
   Roadmap-Punkt 26. Cache-Control/Invalidierung waren bereits korrekt. Die
   Artist-vs.-Album-Art-Priorität bleibt als bewusste Produktentscheidung
   getrennt offen (Abschnitt 11.2), nicht als Formatbug.
-- P2-06: UI-Fehlerzustände bleiben bei mehreren Mutationen als Dauer-Loading
-  oder ganz unsichtbar. **Teilweise behoben 2026-07-14:** Bookmark-Monitor-
-  Mutation und `monitor_new_items`-Save besitzen sichtbare endliche Zustände
-  und Retry (Roadmap-Punkt 27); die übrigen Library-v2-Mutationen werden in
-  weiteren kleinen Slices nachgezogen.
+- ~~P2-06: UI-Fehlerzustände bleiben bei mehreren Mutationen als Dauer-Loading
+  oder ganz unsichtbar.~~ **Behoben 2026-07-14:** Alle Library-v2-
+  Mutationsgrenzen wurden inventarisiert; zuvor stille Monitor-/Refresh-/
+  Profile-/Import-/Grab-/Mirror- und Playlist-Fehler besitzen sichtbare,
+  endliche Zustände und einen Retry-Vertrag (Roadmap-Punkt 27).
 - P2-07: Artist-Karten verschachteln einen Button (MonitorToggle) in einem
   Button (die Karte selbst) — ungültiges HTML, unzuverlässiges Keyboard-/
   Click-Verhalten.
