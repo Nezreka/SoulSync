@@ -84,7 +84,7 @@ def test_ranker_unaccepts_blocked_releases(db):
     profile = load_profile(db)
     blocked = {("peer1", "bad.mkv")}
     out = _evaluate_hits([_hit("peer1", "bad.mkv"), _hit("peer2", "good.mkv")],
-                         profile, "movie", None, None, blocked=blocked)
+                         profile, "movie", None, None, blocked=blocked, blocked_users=set())
     by_fn = {r["filename"]: r for r in out}
     assert by_fn["bad.mkv"]["blocked"] is True
     assert by_fn["bad.mkv"]["accepted"] is False
@@ -93,6 +93,38 @@ def test_ranker_unaccepts_blocked_releases(db):
     # pick_best (first accepted) therefore skips the blocked one
     from core.automation.handlers.video_process_wishlist import pick_best
     assert pick_best(out)["filename"] == "good.mkv"
+
+
+# ── source (uploader) blocklist — block a whole peer, skip all their releases ──
+def test_block_source_roundtrip_and_excluded_from_release_pairs(db):
+    rid = db.block_video_source("baduser", reason="always fake")
+    assert rid > 0
+    assert db.blocked_usernames() == {"baduser"}
+    assert db.block_video_source("baduser") == rid          # idempotent on the username
+    assert db.block_video_source("") == 0                   # empty never writes
+    # a source-wide block is NOT a per-release pair (the '' sentinel is excluded)
+    _block(db, user="peer1")
+    assert db.video_blocklist_pairs() == {("peer1", "@@x\\Movies\\Heat.1995.mkv")}
+    assert db.blocked_usernames() == {"baduser"}
+
+
+def test_ranker_unaccepts_every_release_from_a_blocked_uploader(db):
+    from api.video.downloads import _evaluate_hits
+    from core.video.quality_profile import load as load_profile
+    profile = load_profile(db)
+    out = _evaluate_hits([_hit("baduser", "a.mkv"), _hit("goodpeer", "b.mkv")],
+                         profile, "movie", None, None, blocked=set(), blocked_users={"baduser"})
+    by_user = {r["username"]: r for r in out}
+    assert by_user["baduser"]["accepted"] is False and by_user["baduser"]["blocked"] is True
+    assert "Uploader blocklisted" in by_user["baduser"]["rejected"]
+    assert by_user["goodpeer"]["accepted"] is True          # a different peer still passes
+
+
+def test_block_source_api_via_scope(client):
+    c, db = client
+    r = c.post("/api/video/downloads/blocklist", json={"username": "baduser", "scope": "source"})
+    assert r.status_code == 200 and r.get_json()["success"] is True
+    assert db.blocked_usernames() == {"baduser"}
 
 
 # ── retry paths ──────────────────────────────────────────────────────────────

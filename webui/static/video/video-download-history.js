@@ -124,6 +124,26 @@
                     }).catch(function () { blk.disabled = false; });
                 return;
             }
+            // Block uploader (source-wide): never grab from this peer again.
+            var blks = e.target.closest('[data-vdh-block-src]');
+            if (blks) {
+                e.stopPropagation();
+                blks.disabled = true;
+                fetch('/api/video/downloads/blocklist',
+                    { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                      body: JSON.stringify({ history_id: +blks.getAttribute('data-vdh-block-src'), scope: 'source' }) })
+                    .then(function (r) { return r.json(); })
+                    .then(function (d) {
+                        if (d && d.success) {
+                            if (typeof showToast === 'function') showToast('Uploader blocked — future searches will skip them', 'success');
+                            blks.textContent = 'Uploader blocked';
+                        } else {
+                            blks.disabled = false;
+                            if (typeof showToast === 'function') showToast((d && d.error) || 'Could not block that uploader', 'error');
+                        }
+                    }).catch(function () { blks.disabled = false; });
+                return;
+            }
             // Clear all history (guarded — it's permanent).
             if (e.target.closest('[data-vdh-clear]')) {
                 var go = function () {
@@ -193,6 +213,10 @@
                     ((it.outcome === 'failed' || it.outcome === 'import_failed') && it.username && it.filename && it.source !== 'youtube'
                         ? '<button class="vdh-redl vdh-block" type="button" data-vdh-block="' + esc(it.id) +
                           '" title="Never pick this exact release again">&#8856; Block release</button>'
+                        : '') +
+                    (it.username && it.source !== 'youtube'
+                        ? '<button class="vdh-redl vdh-block" type="button" data-vdh-block-src="' + esc(it.id) +
+                          '" title="Never grab from this uploader (' + esc(it.username) + ') again">&#8856; Block uploader</button>'
                         : '') +
                 '</div>' +
             '</div>';
