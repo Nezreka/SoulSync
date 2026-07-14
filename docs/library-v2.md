@@ -2019,6 +2019,21 @@ verändert; daher waren Frontend-Typecheck/Vitest/Build nicht erforderlich.
     Monitor-Regeln, Wanted-Projektion, Editions, Multi-File, Provider-Snapshots
     und Metadata-Overrides sowie Ruff sind grün. **Nächster logischer Schritt:**
     P1-06 — Canonical-/Move-Validierung und Multi-File-Move-Semantik härten.
+17. ~~**Canonical-/Move-Invarianten (P1-06).**~~ **Abgeschlossen 2026-07-14:**
+    Canonical-Link und File-Move verwenden jetzt denselben konservativen
+    Duplicate-Pair-Validator: gemeinsame Artist-Credits, normalisierter Titel,
+    Dauer-Toleranz (5 Sekunden bzw. 3 %) und widerspruchsfreie ISRC-/MBID-/
+    Spotify-Recording-IDs. Canonical-Ketten werden abgewiesen; ungültige IDs
+    liefern kontrolliert 400 statt 500. Der Move verschiebt atomar **alle**
+    Source-File-Zeilen statt nur des Primary-Files und setzt erst den danach
+    wirklich filelosen Source-Track unmonitored. Beim legitimen Gegenmove vom
+    bisherigen Canonical zum direkten Duplicate wird die Beziehung atomar
+    umgedreht, sodass die filebesitzende Seite Canonical bleibt. Die alte
+    `moved_file_id`-Antwort bleibt kompatibel, ergänzt um IDs/Count aller Files.
+    **84 gezielte Python-Tests**, Ruff, Frontend-Check/Typecheck, acht Vitests
+    und Production-Build sind grün. **Nächster logischer Schritt:** P1-24 —
+    `monitor_new_items='new'` anhand des Release-Datums wirklich von `all`
+    unterscheiden.
 
 ---
 
@@ -2283,10 +2298,12 @@ vermerkt, tauchten aber nirgends in diesem Dokument auf:
   ersetzen. Braucht Snapshot-Reconciliation mit Run-ID.~~ **Behoben
   2026-07-14:** Run-ID-basierte, ownership-sichere Snapshot-Reconciliation;
   Details und Testumfang in Roadmap-Punkt 16.
-- **P1-06** — Canonical-/Move-API validieren Artist/Recording/Titel/Dauer
+- ~~**P1-06** — Canonical-/Move-API validieren Artist/Recording/Titel/Dauer
   nicht; ein bereits-Canonical-Track kann selbst zum Duplicate gemacht
   werden (Ketten möglich); Move-File bewegt nur die erste Source-Datei und
-  kann den Track fälschlich unmonitored setzen, wenn mehrere Files existieren.
+  kann den Track fälschlich unmonitored setzen, wenn mehrere Files existieren.~~
+  **Behoben 2026-07-14:** gemeinsamer Pair-Validator, kettenfreie Canonical-
+  Semantik und atomarer Multi-File-Move; Details in Roadmap-Punkt 17.
 - **P1-24** — `monitor_new_items='new'` verhält sich identisch zu `'all'`
   (beide auto-monitoren jedes neu entdeckte Release, auch alte
   Backkatalog-Einträge). Lidarr vergleicht für „New" das Release-Datum

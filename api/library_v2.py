@@ -2154,17 +2154,19 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     "updated_at=CURRENT_TIMESTAMP WHERE id=?", (track_id,))
                 conn.commit()
                 return jsonify({"success": True, "canonical_track_id": None})
-            canonical_id = int(raw)
-            if canonical_id == track_id:
-                return jsonify({"success": False, "error": "A track cannot duplicate itself"}), 400
-            target = conn.execute(
-                "SELECT canonical_track_id FROM lib2_tracks WHERE id=?", (canonical_id,)
-            ).fetchone()
-            if not target:
-                return jsonify({"success": False, "error": "Canonical track not found"}), 404
-            if target["canonical_track_id"]:
+            try:
+                canonical_id = int(raw)
+            except (TypeError, ValueError):
                 return jsonify({"success": False,
-                                "error": "Target is itself a duplicate — link to its canonical instead"}), 400
+                                "error": "canonical_track_id must be an integer"}), 400
+            from core.library2.duplicate_relationship import (
+                DuplicateRelationshipError,
+                validate_duplicate_pair,
+            )
+            try:
+                validate_duplicate_pair(conn, track_id, canonical_id)
+            except DuplicateRelationshipError as exc:
+                return jsonify({"success": False, "error": str(exc)}), exc.status
             conn.execute(
                 "UPDATE lib2_tracks SET canonical_track_id=?, "
                 "updated_at=CURRENT_TIMESTAMP WHERE id=?", (canonical_id, track_id))

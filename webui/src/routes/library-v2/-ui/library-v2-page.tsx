@@ -903,7 +903,7 @@ function ManageTracksModal({ artistId, onClose }: { artistId: number; onClose: (
     <ModalShell title="Manage Tracks — single ↔ album duplicates" wide onClose={onClose}>
       <p className={styles.qpSubtitle}>
         The same recording released as a single and on an album. Unmonitor the version you don't
-        want kept up to date; <strong>Move file</strong> re-homes the only existing file onto the
+        want kept up to date; <strong>Move file</strong> re-homes all source file links onto the
         other version (disk untouched — run Rename/Reorganize after); removing duplicate{' '}
         <em>files</em> is the "Single/Album Dedup" job under Maintenance.
       </p>

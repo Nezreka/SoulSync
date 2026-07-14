@@ -135,6 +135,67 @@ def _conn(db: FakeDB) -> sqlite3.Connection:
     return db._get_connection()
 
 
+def test_canonical_api_rejects_chains_and_invalid_ids(api):
+    client, _db, ids = api
+
+    response = client.post(
+        f"/api/library/v2/tracks/{ids['album_track']}/canonical",
+        json={"canonical_track_id": ids["ep_track"]},
+    )
+    assert response.status_code == 400
+    assert "canonical target" in response.get_json()["error"]
+
+    response = client.post(
+        f"/api/library/v2/tracks/{ids['ep_track']}/canonical",
+        json={"canonical_track_id": ids["single_track"]},
+    )
+    assert response.status_code == 400
+    assert "itself a duplicate" in response.get_json()["error"]
+
+    response = client.post(
+        f"/api/library/v2/tracks/{ids['ep_track']}/canonical",
+        json={"canonical_track_id": "not-an-id"},
+    )
+    assert response.status_code == 400
+    assert "must be an integer" in response.get_json()["error"]
+
+
+def test_canonical_api_validates_pair_and_links_compatible_tracks(api):
+    client, db, ids = api
+    conn = _conn(db)
+    candidate = conn.execute(
+        """INSERT INTO lib2_tracks(album_id, title, duration, spotify_id)
+           VALUES(?, 'One Dance', 200000, 'sp-t1')""",
+        (ids["single"],),
+    ).lastrowid
+    conn.execute(
+        """UPDATE lib2_tracks SET duration=202000, spotify_id='shared-recording'
+            WHERE id=?""",
+        (ids["ep_track"],),
+    )
+    conn.commit()
+    conn.close()
+
+    mismatch = client.post(
+        f"/api/library/v2/tracks/{ids['single_track']}/canonical",
+        json={"canonical_track_id": ids["ep_track"]},
+    )
+    assert mismatch.status_code == 400
+    assert "titles" in mismatch.get_json()["error"]
+
+    linked = client.post(
+        f"/api/library/v2/tracks/{candidate}/canonical",
+        json={"canonical_track_id": ids["album_track"]},
+    )
+    assert linked.status_code == 200
+    assert linked.get_json()["canonical_track_id"] == ids["album_track"]
+    conn = _conn(db)
+    assert conn.execute(
+        "SELECT canonical_track_id FROM lib2_tracks WHERE id=?", (candidate,)
+    ).fetchone()[0] == ids["album_track"]
+    conn.close()
+
+
 def test_eps_get_local_artwork_urls(api):
     """Every release group — including EPs — must point at the local artwork
     endpoint, never at a raw DB image_url (which may be a media-server URL)."""

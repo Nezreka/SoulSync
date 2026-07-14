@@ -343,9 +343,9 @@ export interface LibraryV2DuplicatePair {
   album: LibraryV2DuplicateSide;
 }
 
-/** Re-home a file link onto the other track of a duplicate pair. The file on
- *  disk is untouched (run Rename/Reorganize afterwards); the source track is
- *  unmonitored so the consolidated-away variant isn't re-downloaded. */
+/** Re-home every file link onto the other track of a validated duplicate pair.
+ *  Files on disk are untouched (run Rename/Reorganize afterwards); the now
+ *  fileless source is unmonitored so it is not immediately re-downloaded. */
 export async function moveLibraryV2TrackFile(
   fromTrackId: number,
   toTrackId: number,
