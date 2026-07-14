@@ -7057,7 +7057,7 @@ def get_music_video_status(video_id):
     return jsonify(status)
 
 
-def _audit_manual_skip(context_key, title, artist, skip_checks):
+def _audit_manual_skip(context_key, title, artist, skip_checks, profile_id=1):
     """Record a user-initiated check override in the Library v2 skip audit.
 
     Only when the Library v2 feature is enabled — the audit exists for lib2's
@@ -7067,16 +7067,15 @@ def _audit_manual_skip(context_key, title, artist, skip_checks):
     try:
         if config_manager.get('features.library_v2', False) is not True:
             return
-        import json as _json
-        _db = get_database()
-        with _db._get_connection() as _c:
-            _c.execute(
-                "INSERT INTO lib2_manual_skips "
-                "(content_key, title, artist, skipped_checks, reason) "
-                "VALUES (?,?,?,?, 'manual_download')",
-                (context_key, title, artist, _json.dumps(skip_checks)),
-            )
-            _c.commit()
+        from core.library2.manual_skips import record_manual_skip
+        record_manual_skip(
+            get_database(),
+            content_key=context_key,
+            title=title,
+            artist=artist,
+            skipped_checks=skip_checks,
+            profile_id=profile_id,
+        )
     except Exception as _se:
         logger.debug("manual-skip audit write failed: %s", _se)
 
@@ -7285,8 +7284,10 @@ def start_download():
                                     _acq_markers or {}).get('download_id'),
                             }
                         if _album_skip_checks:
-                            _audit_manual_skip(context_key, track_data.get('title'),
-                                               track_data.get('artist'), _album_skip_checks)
+                            _audit_manual_skip(
+                                context_key, track_data.get('title'),
+                                track_data.get('artist'), _album_skip_checks,
+                                _requesting_profile)
                         started_downloads += 1
                     else:
                         from core.acquisition.manual_grab import fail_prepared_correlated_grab
@@ -7413,8 +7414,9 @@ def start_download():
                 # checks were skipped so cleanup/repair jobs (and the user) know it
                 # was a deliberate manual choice (#library-v2).
                 if _skip_checks:
-                    _audit_manual_skip(context_key, data.get('title'),
-                                       data.get('artist'), _skip_checks)
+                    _audit_manual_skip(
+                        context_key, data.get('title'), data.get('artist'),
+                        _skip_checks, _requesting_profile)
 
                 # Extract track name from filename for activity
                 track_name = filename.split('/')[-1] if '/' in filename else filename.split('\\')[-1] if '\\' in filename else filename

@@ -33,7 +33,7 @@ def _seed(conn, *, policy: str, monitored: int = 1, with_file: bool = True) -> i
     if with_file:
         cur.execute(
             "INSERT INTO lib2_track_files(track_id, path, format, bitrate) "
-            "VALUES(?, '/m/t.mp3', 'mp3', 320)", (track_id,))
+            "VALUES(?, ?, 'mp3', 320)", (track_id, f"/m/t-{track_id}.mp3"))
     conn.commit()
     record_rule(
         conn, "track", track_id, bool(monitored), PROVENANCE_LEGACY
@@ -70,6 +70,24 @@ def test_upgrade_candidates_follow_wanted_projection_not_legacy_flag(imported_co
 
     assert projected_wanted in ids
     assert projected_unwanted not in ids
+
+
+def test_upgrade_candidates_respect_active_manual_quality_skip(imported_conn):
+    conn = imported_conn
+    track_id = _seed(conn, policy="until_cutoff")
+    path = conn.execute(
+        "SELECT path FROM lib2_track_files WHERE track_id=?", (track_id,)
+    ).fetchone()[0]
+    conn.execute(
+        """INSERT INTO lib2_manual_skips(
+               file_path, skipped_checks, profile_id, acknowledged)
+           VALUES(?, '["quality"]', 1, 0)""",
+        (path,),
+    )
+
+    assert track_id not in upgrade_candidate_track_ids(conn)
+    conn.execute("UPDATE lib2_manual_skips SET acknowledged=1 WHERE file_path=?", (path,))
+    assert track_id in upgrade_candidate_track_ids(conn)
 
 
 def test_payload_carries_app_wide_profile_id(imported_conn):

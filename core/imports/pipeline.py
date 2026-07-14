@@ -380,6 +380,17 @@ def _persist_verification_status(context, final_path):
         logger.debug(f"verification-status persist skipped: {_vs_err}")
 
 
+def _attach_manual_skip_path(context_key, final_path):
+    """Bind a dispatch-time Library-v2 skip audit to the successful final file."""
+    try:
+        from core.library2.manual_skips import attach_manual_skip_file
+        attach_manual_skip_file(
+            get_database(), content_key=context_key, file_path=final_path
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("manual-skip final-path attach skipped: %s", exc)
+
+
 def post_process_matched_download(context_key, context, file_path, runtime, metadata_runtime=None):
     on_download_completed = getattr(runtime, "on_download_completed", None)
     automation_engine = getattr(runtime, "automation_engine", None)
@@ -811,6 +822,7 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             context['_simple_download_completed'] = True
             context['_final_path'] = str(destination)
             _persist_verification_status(context, destination)
+            _attach_manual_skip_path(context_key, destination)
             emit_track_downloaded(context, automation_engine)
             record_library_history_download(context)
             record_download_provenance(context)
@@ -1189,6 +1201,7 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             context['_final_processed_path'] = final_path
 
         _persist_verification_status(context, final_path)
+        _attach_manual_skip_path(context_key, final_path)
 
         blasphemy_path = create_lossy_copy(final_path, settings={
             'enabled': _qp_post.get('lossy_copy_enabled'),

@@ -100,6 +100,31 @@ def test_scan_handles_mixed_track_id_types(monkeypatch):
     assert scanned_track_ids == ["42"]
 
 
+def test_scan_respects_active_manual_acoustid_override(monkeypatch):
+    job = AcoustIDScannerJob()
+    context = _make_context([
+        (42, "Good Track", "Artist", "/music/good.flac", 2, "Album",
+         "album-thumb", "artist-thumb", "", "Artist", 240000),
+    ])
+    monkeypatch.setattr(job, "_resolve_path", lambda file_path, _context: file_path)
+    monkeypatch.setattr(
+        "core.library2.manual_skips.check_is_skipped",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        job,
+        "_scan_file",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("manual override must skip fingerprinting")
+        ),
+    )
+
+    result = job.scan(context)
+
+    assert result.scanned == 0
+    assert result.skipped == 1
+
+
 # ---------------------------------------------------------------------------
 # Multi-value artist credit — Foxxify Discord report
 # ---------------------------------------------------------------------------

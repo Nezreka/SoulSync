@@ -122,6 +122,29 @@ class AcoustIDScannerJob(RepairJob):
             if not resolved:
                 result.skipped += 1
                 continue
+            try:
+                from core.library2.manual_skips import check_is_skipped
+                conn = context.db._get_connection()
+                try:
+                    skip_acoustid = check_is_skipped(
+                        conn,
+                        (file_path, resolved),
+                        ("acoustid",),
+                        profile_id=1,
+                    )
+                finally:
+                    conn.close()
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("manual-skip lookup failed for %s: %s", file_path, exc)
+                skip_acoustid = False
+            if skip_acoustid:
+                result.skipped += 1
+                if context.report_progress:
+                    context.report_progress(
+                        log_line=f"Skipped (manual AcoustID override): {os.path.basename(resolved)}",
+                        log_type="skip",
+                    )
+                continue
 
             result.scanned += 1
             batch_count += 1

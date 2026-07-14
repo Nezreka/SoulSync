@@ -2096,6 +2096,20 @@ verändert; daher waren Frontend-Typecheck/Vitest/Build nicht erforderlich.
     Delegations-/Fehlertests plus Ruff sind grün. **Nächster logischer Schritt:**
     ADR-05-Umsetzung (physisches Löschen) ist groß und destruktiv; davor den
     nächsten kleineren offenen Robustheits-/UX-Punkt P2-03 prüfen.
+23. ~~**Wirksamer Manual-Skip-Audit (P2-03).**~~ **Abgeschlossen 2026-07-14:**
+    Ein gemeinsamer `core/library2/manual_skips.py`-Helper bildet den Audit
+    zweiphasig ab: Beim manuellen Dispatch werden deduplizierte Checks und die
+    echte Request-`profile_id` gespeichert; nach erfolgreichem Post-Processing
+    bindet der bestehende Importpfad den neuesten ungebundenen Eintrag an den
+    tatsächlichen Finalpfad. Unbestätigte, profilbezogene Overrides werden nun
+    auch konsumiert: Library-v2-Upgrade-Auswahl überspringt einen geschützten
+    Primary-File-Pfad bei `quality`/`bit_depth`, der bestehende AcoustID-Repair-
+    Job überspringt `acoustid`-geschützte Pfade vor dem Fingerprinting. Nach
+    `acknowledged=1` greift der Schutz nicht mehr; der vorhandene Cleanup-Job
+    bleibt für Pfad-/Retention-Ablauf zuständig. **55 gezielte Manual-Skip-/
+    Wishlist-/AcoustID-/Import-Pipeline-/Repair-Tests**, Webserver-Compile und
+    Ruff sind grün. **Nächster logischer Schritt:** P2-01 — Scan/Retag-I/O von
+    lang gehaltenen SQLite-Verbindungen entkoppeln.
 
 ---
 
@@ -2408,9 +2422,11 @@ Priorität, kompakt aufgelistet für spätere Aufnahme):
 - P2-01: Scan/Retag halten SQLite-Write-Lock über lange Dateisystem-I/O offen
   (Netzwerk-/Bind-Mounts verschärfen das) — Scope lesen, Connection
   schließen, in kleinen Transaktionen schreiben.
-- P2-03: Skip-Audit (`lib2_manual_skips`) schreibt weder `file_path` noch
+- ~~P2-03: Skip-Audit (`lib2_manual_skips`) schreibt weder `file_path` noch
   `profile_id` und wird von keinem Quality-/Repair-Job gelesen — die
-  versprochene Wirkung „spätere Jobs respektieren den Override" tritt nicht ein.
+  versprochene Wirkung „spätere Jobs respektieren den Override" tritt nicht
+  ein.~~ **Behoben 2026-07-14:** zweiphasige Finalpfad-Bindung plus Consumer in
+  Upgrade-Auswahl und AcoustID-Repair; Details in Roadmap-Punkt 23.
 - P2-04: Artwork-Bytes werden ungeprüft als `.jpg` gespeichert, Response-MIME
   ist immer `image/jpeg`, Cache-Control/Invalidierung und Artist- vs.
   Album-Art-Strategie sind unsauber.

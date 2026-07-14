@@ -179,18 +179,27 @@ def upgrade_candidate_track_ids(conn, *, profile_id: int = 1) -> List[int]:
     (``until_top``/``until_cutoff``). The per-track upgrade re-check happens in
     ``mirror_tracks_wishlist`` (only genuine candidates queue)."""
     from core.library2.wanted import PROJECTION_VERSION
-    return [r["id"] for r in conn.execute(
-        """SELECT t.id FROM lib2_tracks t
+    from core.library2.track_files import primary_order
+    rows = conn.execute(
+        f"""SELECT t.id,
+                  (SELECT tf.path FROM lib2_track_files tf
+                    WHERE tf.track_id=t.id AND tf.path IS NOT NULL AND tf.path<>''
+                    ORDER BY {primary_order('tf')} LIMIT 1) AS path
+             FROM lib2_tracks t
            JOIN lib2_wanted_tracks wt ON wt.track_id=t.id
                 AND wt.profile_id=? AND wt.wanted=1
            JOIN quality_profiles qp ON qp.id = t.quality_profile_id
           WHERE wt.projection_version=?
             AND qp.upgrade_policy IN ('until_top', 'until_cutoff')
-            AND EXISTS (SELECT 1 FROM lib2_track_files tf
-                        WHERE tf.track_id = t.id
-                          AND tf.path IS NOT NULL AND tf.path <> '')""",
+            AND EXISTS (SELECT 1 FROM lib2_track_files f
+                         WHERE f.track_id=t.id AND f.path IS NOT NULL AND f.path<>'')""",
         (int(profile_id), PROJECTION_VERSION),
-    )]
+    ).fetchall()
+    from core.library2.manual_skips import active_skip_paths
+    protected = active_skip_paths(
+        conn, ("quality", "bit_depth"), profile_id=profile_id
+    )
+    return sorted({int(row["id"]) for row in rows if row["path"] not in protected})
 
 
 __all__ = [
