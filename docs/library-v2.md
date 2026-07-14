@@ -2863,8 +2863,29 @@ Priorität, kompakt aufgelistet für spätere Aufnahme):
   des Library-v2-Scopes). **Nächster logischer Schritt:** P2-21 —
   Bundle-Completion darf nach Wartefrist nicht auf einen unvollständigen
   `incomplete_path` zurückfallen.
-- P2-21: Bundle-Completion kann nach Wartefrist auf einen unvollständigen
-  `incomplete_path` zurückfallen statt einen finalen Pfad zu verlangen.
+- ~~P2-21: Bundle-Completion kann nach Wartefrist auf einen unvollständigen
+  `incomplete_path` zurückfallen statt einen finalen Pfad zu verlangen.~~
+  **Behoben 2026-07-14:** Der geteilte Poll-Loop
+  (`core/download_plugins/album_bundle.py::poll_album_download`, genutzt
+  von Torrent- UND Usenet-Bundle-Downloads) sowie der duplizierte
+  Per-Track-Loop in `usenet.py::_download_thread` akzeptieren
+  `incomplete_path` nicht mehr allein deshalb, weil das
+  Completed-no-path-Zeitfenster abgelaufen ist — der Client kann in
+  genau diesem Moment noch in dieses Verzeichnis schreiben (Unpack/
+  Repair/Move). Ein neuer, injizierbarer
+  `snapshot_incomplete_path`-Fingerprint (Größe/Dateianzahl/mtime) muss
+  auf zwei aufeinanderfolgenden Polls identisch sein, bevor der Pfad als
+  final akzeptiert wird; bis dahin wird weitergepollt, begrenzt vom
+  äußeren Poll-Timeout (6h Default) statt vom kurzen Fenster — läuft die
+  Stabilisierung nie ein, endet der Download in einem lauten Timeout-
+  Fehler statt eines stillen Imports aus einem eventuell
+  unvollständigen/korrupten Verzeichnis. Die #721-Geduldsregel (SAB
+  braucht bis zu 2 Minuten für `storage`) bleibt unverändert erhalten.
+  9 gezielte Poll-/Snapshot-Tests (`tests/test_album_bundle.py`,
+  `tests/test_torrent_usenet_plugins.py`) sowie der volle
+  Usenet/Torrent/Bundle/Acquisition-Testausschnitt (604 passed) und Ruff
+  sind grün. **Nächster logischer Schritt:** P2-23 — Orchestrator und
+  Download-Engine teilen weiterhin Download-Verantwortung.
 - P2-23: Orchestrator und Download-Engine teilen weiterhin
   Download-Verantwortung (Engine macht Suche/Status/Cancel, Orchestrator ruft
   aber weiter direkt `client.download(...)` auf) — Bezug zum bestehenden

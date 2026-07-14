@@ -28,6 +28,7 @@ from core.download_plugins.album_bundle import (
     pick_best_album_release,
     poll_album_download,
     resolve_reported_save_path,
+    snapshot_incomplete_path,
 )
 from core.download_plugins.base import DownloadSourcePlugin
 from core.download_plugins.candidate_store import get_candidate_store
@@ -524,6 +525,12 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
         deadline = time.monotonic() + _POLL_TIMEOUT_SECONDS
         last_save_path: Optional[str] = None
         last_incomplete_path: Optional[str] = None
+        # Stability gate for the incomplete_path fallback below (P2-21,
+        # sibling of the same fix in album_bundle.poll_album_download):
+        # the snapshot + path it was taken for, so a poll returning the
+        # SAME fingerprint for the SAME path counts as "stopped changing".
+        last_incomplete_snapshot: Optional[tuple] = None
+        last_incomplete_snapshot_path: Optional[str] = None
         # Tolerate transient None / unmapped 'error' reads — SAB
         # removes a job from the queue before adding it to history,
         # and on busy servers that gap spans several polls. See
@@ -594,14 +601,41 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
                 # than erroring a download that actually succeeded.
                 if completed_no_path_misses.record_miss():
                     if last_incomplete_path:
-                        logger.warning(
-                            "Usenet %s: '%s' completed but no final save_path after "
-                            "%d polls — falling back to in-progress path %r",
-                            download_id[:8], job_id, completed_no_path_misses.misses,
-                            last_incomplete_path,
+                        # Don't trust incomplete_path just because the
+                        # window elapsed — SAB/NZBGet post-processing may
+                        # still be writing into it. Require the same
+                        # fingerprint on two consecutive polls before
+                        # accepting it; otherwise keep polling, bounded by
+                        # the outer deadline rather than this window
+                        # (P2-21).
+                        current_snapshot = snapshot_incomplete_path(last_incomplete_path)
+                        stable = (
+                            current_snapshot is not None
+                            and last_incomplete_snapshot_path == last_incomplete_path
+                            and current_snapshot == last_incomplete_snapshot
                         )
-                        self._finalize_download(download_id, last_incomplete_path)
-                        return
+                        if stable:
+                            logger.warning(
+                                "Usenet %s: '%s' completed but no final save_path after "
+                                "%d polls — falling back to in-progress path %r (its "
+                                "contents were unchanged across a poll, so "
+                                "post-processing looks done).",
+                                download_id[:8], job_id, completed_no_path_misses.misses,
+                                last_incomplete_path,
+                            )
+                            self._finalize_download(download_id, last_incomplete_path)
+                            return
+                        logger.info(
+                            "Usenet %s: '%s' completed but save_path never landed and "
+                            "in-progress path %r is still changing (or unreadable) — "
+                            "waiting for it to stabilize (poll %d).",
+                            download_id[:8], job_id, last_incomplete_path,
+                            completed_no_path_misses.misses,
+                        )
+                        last_incomplete_snapshot = current_snapshot
+                        last_incomplete_snapshot_path = last_incomplete_path
+                        time.sleep(_POLL_INTERVAL_SECONDS)
+                        continue
                     self._mark_error(
                         download_id,
                         "Usenet job completed but client never reported a save_path",
