@@ -3113,6 +3113,11 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 
 /* ── small screens ────────────────────────────────────────────────────────── */
 @media (max-width: 640px) {
+    /* The Ignore-List pill floats top-right over the page on desktop, where the
+       hero body hugs the bottom-left. On a phone the (shorter) hero's text can
+       reach the top row, so the pill sat ON the hero title — flow it above the
+       hero instead, still right-aligned. */
+    .vdsc-ignore-btn { position: static; display: flex; width: max-content; margin: 4px 0 10px auto; }
     .vdsc-browse { padding: 13px 13px 15px; margin-bottom: 22px; }
     .vdsc-browse-top { gap: 10px; }
     .vdsc-shelf { margin-bottom: 24px; }
