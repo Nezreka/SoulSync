@@ -275,6 +275,31 @@ def test_replaygain_endpoint_starts_a_background_job(api, monkeypatch):
     assert body["job_id"]
 
 
+def test_match_status_endpoints_return_service_chips(api, monkeypatch):
+    client, db, ids = api
+    # The api fixture's lib2 rows have no legacy back-reference, so stub the
+    # match reader to prove the routes shape their responses correctly.
+    monkeypatch.setattr(
+        "core.library2.match_status.entity_match_status",
+        lambda conn, entity, eid: [
+            {"service": "spotify", "label": "Spotify", "status": "matched",
+             "external_id": "sp1", "last_attempted": None, "legacy_entity_id": 5},
+        ],
+    )
+    monkeypatch.setattr(
+        "core.library2.match_status.album_match_bundle",
+        lambda conn, album_id: {"album": [], "tracks": {ids["album_track"]: []}},
+    )
+
+    artist = client.get(f"/api/library/v2/artists/{ids['artist']}/match-status").get_json()
+    assert artist["success"] is True
+    assert artist["services"][0]["service"] == "spotify"
+
+    album = client.get(f"/api/library/v2/albums/{ids['views']}/match-status").get_json()
+    assert album["success"] is True
+    assert "tracks" in album
+
+
 def test_eps_get_local_artwork_urls(api):
     """Every release group — including EPs — must point at the local artwork
     endpoint, never at a raw DB image_url (which may be a media-server URL)."""

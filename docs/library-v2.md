@@ -2894,6 +2894,24 @@ Priorität, kompakt aufgelistet für spätere Aufnahme):
   bisher unbekannten Bandnamen (nicht nur beim M1-Fixfall) weiterhin
   Phantom-Artists erzeugen, wenn der volle Credit-String noch nicht als
   Artist bekannt ist.
+- P2-25 (gefunden via PR #1025, Nezreka, 320k-Track-Library): Import zeigt
+  keinen echten Live-Fortschritt an. Backend loggt granularen Fortschritt
+  (`import_legacy_library` alle 200 Rows in `core/library2/importer.py:474,
+  555,665`, danach `precache_tracklists` alle 20 Alben und
+  `precache_all_artwork` alle 25 Items) und exponiert ihn über
+  `GET /api/library/v2/import/status` (`api/library_v2.py:2657-2662`) — das
+  Frontend (`ImportButton`, `webui/.../library-v2-page.tsx:2907-2938`) liest
+  `stage`/`current`/`total` aber nie aus und zeigt nur ein statisches
+  "Importing…". Zusätzlich pollt `waitForLibraryV2Import`
+  (`library-v2-page.tsx:2895-2905`) nur 10 Minuten und wirft danach einen
+  Timeout, obwohl der Import als Daemon-Thread im Backend unbeeinflusst
+  weiterläuft. Ursache für die lange Laufzeit selbst: nach dem reinen
+  DB-Insert (schnell, batched) läuft synchron ein Enrichment-Schritt, der pro
+  Album sequenzielle Live-Requests an Spotify/Deezer schickt
+  (`provider_adapters.py:294-330`, `artwork.py:264-271`) — bei 320k Tracks
+  potenziell zehntausende Calls. **Fix-Richtung:** echten Fortschritt im UI
+  anzeigen (Backend liefert die Daten bereits) und den 10-Minuten-Timeout im
+  Frontend entfernen/erhöhen, da er keine reale Fehlerbedingung abbildet.
 
 ---
 

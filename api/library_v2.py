@@ -1167,6 +1167,34 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             conn.close()
         return jsonify({"success": True, "downloads": downloads})
 
+    @app.route("/api/library/v2/artists/<int:artist_id>/match-status")
+    def lib2_artist_match_status(artist_id):
+        """Per-provider metadata match chips for an artist (legacy parity)."""
+        guard = _guard()
+        if guard:
+            return guard
+        from core.library2.match_status import entity_match_status
+        conn = _conn()
+        try:
+            services = entity_match_status(conn, "artist", artist_id)
+        finally:
+            conn.close()
+        return jsonify({"success": True, "services": services})
+
+    @app.route("/api/library/v2/albums/<int:album_id>/match-status")
+    def lib2_album_match_status(album_id):
+        """Album chips + per-track chip map in one batched read (legacy parity)."""
+        guard = _guard()
+        if guard:
+            return guard
+        from core.library2.match_status import album_match_bundle
+        conn = _conn()
+        try:
+            bundle = album_match_bundle(conn, album_id)
+        finally:
+            conn.close()
+        return jsonify({"success": True, **bundle})
+
     @app.route(
         "/api/library/v2/albums/<int:album_id>/missing-tracks/materialize",
         methods=["POST"],

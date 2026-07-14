@@ -118,6 +118,18 @@ export interface LibraryV2TrackFile {
   source: string | null;
 }
 
+/** One provider's match state for an entity (legacy Enhanced-View match chips). */
+export interface LibraryV2MatchService {
+  service: string;
+  label: string;
+  /** 'matched' | 'not_found' | 'pending' (kept as string for forward-compat). */
+  status: string;
+  external_id: string | null;
+  last_attempted: string | null;
+  /** The legacy row id — used to drive the app-wide manual-match endpoint. */
+  legacy_entity_id: number | null;
+}
+
 /** One row from the legacy `track_downloads` provenance table (Source Info popover). */
 export interface LibraryV2TrackDownload {
   id: number;

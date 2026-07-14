@@ -13,6 +13,7 @@ import type {
   LibraryV2PlaylistDetail,
   LibraryV2PlaylistPipelineState,
   LibraryV2PlaylistSummary,
+  LibraryV2MatchService,
   LibraryV2QualityProfile,
   LibraryV2Search,
   LibraryV2Track,
@@ -154,6 +155,84 @@ export async function fetchLibraryV2Album(
   );
   if (!payload.success || !payload.album) throw new Error(payload.error || 'Album not found');
   return payload.album;
+}
+
+/** Provider match chips for an artist (legacy Enhanced-View parity). */
+export async function fetchLibraryV2ArtistMatchStatus(
+  artistId: number,
+): Promise<LibraryV2MatchService[]> {
+  const payload = await readJson<{
+    success: boolean;
+    services: LibraryV2MatchService[];
+    error?: string;
+  }>(apiClient.get(`library/v2/artists/${artistId}/match-status`));
+  if (!payload.success) throw new Error(payload.error || 'Failed to load match status');
+  return payload.services ?? [];
+}
+
+export interface LibraryV2AlbumMatchBundle {
+  album: LibraryV2MatchService[];
+  tracks: Record<number, LibraryV2MatchService[]>;
+}
+
+/** Album chips + per-track chip map in one batched read. */
+export async function fetchLibraryV2AlbumMatchStatus(
+  albumId: number,
+): Promise<LibraryV2AlbumMatchBundle> {
+  const payload = await readJson<{
+    success: boolean;
+    album: LibraryV2MatchService[];
+    tracks: Record<number, LibraryV2MatchService[]>;
+    error?: string;
+  }>(apiClient.get(`library/v2/albums/${albumId}/match-status`));
+  if (!payload.success) throw new Error(payload.error || 'Failed to load match status');
+  return { album: payload.album ?? [], tracks: payload.tracks ?? {} };
+}
+
+/** Manually match an entity to a provider id, reusing the app-wide legacy
+ *  endpoint (keys on the legacy row id carried by the match chip). */
+export async function manualMatchLibraryV2Entity(input: {
+  entity_type: 'artist' | 'album' | 'track';
+  legacy_entity_id: number;
+  service: string;
+  service_id: string;
+  artist_legacy_id?: number;
+}): Promise<void> {
+  const payload = await readJson<{ success: boolean; error?: string }>(
+    apiClient.put('library/manual-match', {
+      json: {
+        entity_type: input.entity_type,
+        entity_id: input.legacy_entity_id,
+        service: input.service,
+        service_id: input.service_id,
+        ...(input.artist_legacy_id ? { artist_id: input.artist_legacy_id } : {}),
+      },
+    }),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Manual match failed');
+}
+
+export interface LibraryV2MatchSearchResult {
+  id: string;
+  name: string;
+  extra?: string;
+  image?: string;
+  provider?: string;
+}
+
+/** Search a provider for candidate matches (reuses the app-wide endpoint). */
+export async function searchLibraryV2MatchService(input: {
+  service: string;
+  entity_type: 'artist' | 'album' | 'track';
+  query: string;
+}): Promise<LibraryV2MatchSearchResult[]> {
+  const payload = await readJson<{
+    success: boolean;
+    results: LibraryV2MatchSearchResult[];
+    error?: string;
+  }>(apiClient.post('library/search-service', { json: input }));
+  if (!payload.success) throw new Error(payload.error || 'Provider search failed');
+  return payload.results ?? [];
 }
 
 interface SourceInfoResponse {
@@ -598,6 +677,24 @@ export function libraryV2AlbumQueryOptions(albumId: number, options: { resolve?:
     queryKey: [...LIBRARY_V2_QUERY_KEY, 'album', albumId, options.resolve ?? false],
     queryFn: () => fetchLibraryV2Album(albumId, options),
     enabled: albumId > 0,
+  });
+}
+
+export function libraryV2ArtistMatchStatusQueryOptions(artistId: number) {
+  return queryOptions({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'artist-match', artistId],
+    queryFn: () => fetchLibraryV2ArtistMatchStatus(artistId),
+    enabled: artistId > 0,
+    staleTime: 30_000,
+  });
+}
+
+export function libraryV2AlbumMatchStatusQueryOptions(albumId: number) {
+  return queryOptions({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'album-match', albumId],
+    queryFn: () => fetchLibraryV2AlbumMatchStatus(albumId),
+    enabled: albumId > 0,
+    staleTime: 30_000,
   });
 }
 

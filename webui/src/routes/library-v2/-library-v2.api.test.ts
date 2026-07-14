@@ -5,13 +5,17 @@ import { HttpResponse, http, server } from '@/test/msw';
 import {
   blacklistLibraryV2Source,
   deleteLibraryV2Files,
+  fetchLibraryV2AlbumMatchStatus,
+  fetchLibraryV2ArtistMatchStatus,
   fetchLibraryV2FileDeletePreview,
   fetchLibraryV2Playlist,
   fetchLibraryV2Playlists,
   fetchLibraryV2TrackSourceInfo,
+  manualMatchLibraryV2Entity,
   materializeLibraryV2MissingTrack,
   runLibraryV2PlaylistPipeline,
   runRepairJob,
+  searchLibraryV2MatchService,
   startLibraryV2AlbumReplayGain,
   updateLibraryV2MetadataOverrides,
 } from './-library-v2.api';
@@ -164,6 +168,77 @@ describe('library v2 missing-track add api', () => {
     await expect(materializeLibraryV2MissingTrack(42, { track_number: 1 })).rejects.toThrow(
       'Album not found',
     );
+  });
+});
+
+describe('library v2 match-status api', () => {
+  it('fetches artist provider match chips', async () => {
+    server.use(
+      http.get('/api/library/v2/artists/7/match-status', () =>
+        HttpResponse.json({
+          success: true,
+          services: [
+            {
+              service: 'spotify',
+              label: 'Spotify',
+              status: 'matched',
+              external_id: 'sp1',
+              last_attempted: null,
+              legacy_entity_id: 3,
+            },
+          ],
+        }),
+      ),
+    );
+    const rows = await fetchLibraryV2ArtistMatchStatus(7);
+    expect(rows[0].status).toBe('matched');
+    expect(rows[0].legacy_entity_id).toBe(3);
+  });
+
+  it('fetches album + per-track match bundle', async () => {
+    server.use(
+      http.get('/api/library/v2/albums/9/match-status', () =>
+        HttpResponse.json({ success: true, album: [], tracks: { 100: [] } }),
+      ),
+    );
+    const bundle = await fetchLibraryV2AlbumMatchStatus(9);
+    expect(bundle.tracks).toHaveProperty('100');
+  });
+
+  it('searches a provider and applies a manual match via the legacy endpoint', async () => {
+    server.use(
+      http.post('/api/library/search-service', async ({ request }) => {
+        expect(await request.json()).toEqual({
+          service: 'deezer',
+          entity_type: 'album',
+          query: 'Views',
+        });
+        return HttpResponse.json({ success: true, results: [{ id: 'dz1', name: 'Views' }] });
+      }),
+      http.put('/api/library/manual-match', async ({ request }) => {
+        expect(await request.json()).toEqual({
+          entity_type: 'album',
+          entity_id: 42,
+          service: 'deezer',
+          service_id: 'dz1',
+        });
+        return HttpResponse.json({ success: true });
+      }),
+    );
+    const results = await searchLibraryV2MatchService({
+      service: 'deezer',
+      entity_type: 'album',
+      query: 'Views',
+    });
+    expect(results[0].id).toBe('dz1');
+    await expect(
+      manualMatchLibraryV2Entity({
+        entity_type: 'album',
+        legacy_entity_id: 42,
+        service: 'deezer',
+        service_id: 'dz1',
+      }),
+    ).resolves.toBeUndefined();
   });
 });
 

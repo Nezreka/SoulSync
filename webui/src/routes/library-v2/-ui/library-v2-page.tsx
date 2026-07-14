@@ -9,6 +9,7 @@ import type {
   LibraryV2AlbumSummary,
   LibraryV2ArtistDetail,
   LibraryV2ArtistSummary,
+  LibraryV2MatchService,
   LibraryV2PlaylistPipelineState,
   LibraryV2PlaylistSummary,
   LibraryV2PlaylistTrack,
@@ -30,7 +31,9 @@ import {
   fetchLibraryV2JobStatus,
   LIBRARY_V2_ALBUM_TYPES,
   LIBRARY_V2_QUERY_KEY,
+  libraryV2AlbumMatchStatusQueryOptions,
   libraryV2AlbumQueryOptions,
+  libraryV2ArtistMatchStatusQueryOptions,
   libraryV2ArtistQueryOptions,
   libraryV2ArtistsQueryOptions,
   libraryV2EnabledQueryOptions,
@@ -38,8 +41,10 @@ import {
   libraryV2PlaylistQueryOptions,
   libraryV2PlaylistsQueryOptions,
   libraryV2TrackSourceInfoQueryOptions,
+  manualMatchLibraryV2Entity,
   materializeLibraryV2MissingTrack,
   moveLibraryV2TrackFile,
+  searchLibraryV2MatchService,
   processWishlist,
   refreshLibraryV2,
   refreshLibraryV2Discography,
@@ -414,6 +419,161 @@ function ModalShell({
       </div>
     </div>
   );
+}
+
+// --- metadata match chips (legacy Enhanced-View parity) ---------------------
+
+function matchChipClass(status: string): string {
+  if (status === 'matched') return styles.matchMatched;
+  if (status === 'not_found') return styles.matchNotFound;
+  return styles.matchPending;
+}
+
+/** A row of provider match chips. Clicking a chip opens the manual-match modal
+ *  (reuses the app-wide match endpoints via the legacy entity id). */
+function MatchChips({
+  entityType,
+  entityName,
+  services,
+}: {
+  entityType: 'artist' | 'album' | 'track';
+  entityName: string;
+  services: LibraryV2MatchService[];
+}) {
+  const [active, setActive] = useState<LibraryV2MatchService | null>(null);
+  if (!services.length) return null;
+  return (
+    <div className={styles.matchChips}>
+      {services.map((s) => {
+        const tip = [
+          s.external_id ? `id: ${s.external_id}` : 'no id',
+          s.last_attempted ? `last: ${s.last_attempted.slice(0, 16).replace('T', ' ')}` : null,
+          s.legacy_entity_id != null ? 'click to (re)match' : null,
+        ]
+          .filter(Boolean)
+          .join(' · ');
+        return (
+          <button
+            key={s.service}
+            type="button"
+            className={`${styles.matchChip} ${matchChipClass(s.status)}`}
+            title={tip}
+            disabled={s.legacy_entity_id == null}
+            onClick={() => setActive(s)}
+          >
+            {s.label}: {s.status}
+          </button>
+        );
+      })}
+      {active && active.legacy_entity_id != null ? (
+        <ManualMatchModal
+          entityType={entityType}
+          entityName={entityName}
+          service={active}
+          onClose={() => setActive(null)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function ManualMatchModal({
+  entityType,
+  entityName,
+  service,
+  onClose,
+}: {
+  entityType: 'artist' | 'album' | 'track';
+  entityName: string;
+  service: LibraryV2MatchService;
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [query, setQuery] = useState(entityName);
+  const search = useMutation({
+    mutationFn: () =>
+      searchLibraryV2MatchService({ service: service.service, entity_type: entityType, query }),
+  });
+  const apply = useMutation({
+    mutationFn: (serviceId: string) =>
+      manualMatchLibraryV2Entity({
+        entity_type: entityType,
+        legacy_entity_id: service.legacy_entity_id as number,
+        service: service.service,
+        service_id: serviceId,
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+      onClose();
+    },
+  });
+  const results = search.data ?? [];
+  return (
+    <ModalShell title={`Match ${entityType} on ${service.label}`} onClose={onClose}>
+      <div className={styles.matchSearchRow}>
+        <input
+          className={styles.searchInput}
+          value={query}
+          disabled={apply.isPending}
+          placeholder={`Search ${service.label}…`}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') search.mutate();
+          }}
+        />
+        <button
+          type="button"
+          className={styles.btnPrimary}
+          disabled={search.isPending || !query.trim()}
+          onClick={() => search.mutate()}
+        >
+          {search.isPending ? 'Searching…' : 'Search'}
+        </button>
+      </div>
+      {search.isError ? (
+        <div className={styles.searchError}>
+          {mutationErrorMessage(search.error, 'Provider search failed')}
+        </div>
+      ) : null}
+      {apply.isError ? (
+        <div className={styles.searchError}>
+          {mutationErrorMessage(apply.error, 'Manual match failed')}
+        </div>
+      ) : null}
+      <div className={styles.matchResults}>
+        {search.isSuccess && results.length === 0 ? (
+          <div className={styles.inlineLoading}>No results — try a different search.</div>
+        ) : null}
+        {results.map((r) => (
+          <div key={`${r.provider ?? service.service}:${r.id}`} className={styles.matchResultRow}>
+            <div className={styles.matchResultInfo}>
+              <span className={styles.matchResultName}>{r.name || 'Unknown'}</span>
+              {r.extra ? <span className={styles.matchResultExtra}>{r.extra}</span> : null}
+              <span className={styles.matchResultId}>
+                ID: {r.id}
+                {r.provider && r.provider !== service.service ? ` (${r.provider})` : ''}
+              </span>
+            </div>
+            <button
+              type="button"
+              className={styles.btnPrimary}
+              disabled={apply.isPending}
+              onClick={() => apply.mutate(r.id)}
+            >
+              {apply.isPending ? 'Matching…' : 'Match'}
+            </button>
+          </div>
+        ))}
+      </div>
+    </ModalShell>
+  );
+}
+
+/** Fetches an artist's provider match chips and renders them. */
+function ArtistMatchChips({ artistId, artistName }: { artistId: number; artistName: string }) {
+  const query = useQuery(libraryV2ArtistMatchStatusQueryOptions(artistId));
+  if (!query.data?.length) return null;
+  return <MatchChips entityType="artist" entityName={artistName} services={query.data} />;
 }
 
 /** Lidarr-style artist monitoring options: one click applies a monitoring
@@ -2353,6 +2513,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               {artist.genres.length > 0 ? (
                 <p className={styles.genres}>{artist.genres.join(', ')}</p>
               ) : null}
+              <ArtistMatchChips artistId={artist.id} artistName={artist.name} />
             </div>
           </header>
 
@@ -2784,12 +2945,21 @@ function AlbumTrackTable({
   onAction: ActionHandler;
 }) {
   const albumQuery = useQuery(libraryV2AlbumQueryOptions(albumId, { resolve }));
+  const matchQuery = useQuery(libraryV2AlbumMatchStatusQueryOptions(albumId));
   const album = albumQuery.data;
   if (albumQuery.isLoading || !album) {
     return <div className={styles.inlineLoading}>Loading tracks…</div>;
   }
+  const albumMatch = matchQuery.data?.album ?? [];
+  const trackMatch = matchQuery.data?.tracks ?? {};
   return (
     <div className={styles.trackTableWrap}>
+      {albumMatch.length > 0 ? (
+        <div className={styles.albumMatchRow}>
+          <span className={styles.albumMatchLabel}>Matched via</span>
+          <MatchChips entityType="album" entityName={album.title} services={albumMatch} />
+        </div>
+      ) : null}
       <table className={styles.trackTable}>
         <thead>
           <tr>
@@ -2798,7 +2968,6 @@ function AlbumTrackTable({
             <th>Title</th>
             <th>Artists</th>
             <th>Quality</th>
-            <th>File</th>
             <th>Metadata</th>
             <th className={styles.colActions}>Actions</th>
           </tr>
@@ -2810,6 +2979,7 @@ function AlbumTrackTable({
               track={track}
               albumTitle={album.title}
               entityBase={{ albumId: album.id, qualityProfileId: album.quality_profile?.id }}
+              matchServices={track.id ? (trackMatch[track.id] ?? []) : []}
               onAction={onAction}
             />
           ))}
@@ -2823,15 +2993,17 @@ function TrackRow({
   track,
   albumTitle,
   entityBase,
+  matchServices,
   onAction,
 }: {
   track: LibraryV2Track;
   albumTitle: string;
   entityBase: Lib2EntityRef;
+  matchServices: LibraryV2MatchService[];
   onAction: ActionHandler;
 }) {
   const missing = track.file_status === 'missing';
-  const label = track.title ?? `Track ${track.track_number ?? '?'} - missing`;
+  const label = track.title ?? `Track ${track.track_number ?? '?'}`;
   const entity: Lib2EntityRef = { ...entityBase, ...(track.id ? { trackId: track.id } : {}) };
   return (
     <tr className={missing ? styles.missingRow : styles.staticRow}>
@@ -2841,22 +3013,37 @@ function TrackRow({
         ) : null}
       </td>
       <td className={styles.colNum}>{track.track_number ?? '—'}</td>
-      <td>{track.title ?? <span className={styles.muted}>{label}</span>}</td>
+      <td>
+        {/* Legacy parity: present/missing shown inline right after the title. */}
+        <span className={styles.trackTitleCell}>
+          <span className={missing ? styles.muted : undefined}>{label}</span>
+          <InlineFileStatus status={track.file_status} />
+        </span>
+        {matchServices.length > 0 ? (
+          <MatchChips
+            entityType="track"
+            entityName={`${track.artists.map((a) => a.name).join(' ')} ${track.title ?? ''}`.trim()}
+            services={matchServices}
+          />
+        ) : null}
+      </td>
       <td>{track.artists.map((a) => a.name).join(', ')}</td>
       <td className={styles.qualityText}>
         <QualityDisplay file={track.file} />
         <TrackQualityProfileBadge track={track} />
       </td>
       <td>
-        <FileStatusBadge status={track.file_status} />
-      </td>
-      <td>
         {track.id ? (
           track.metadata_gaps.length === 0 ? (
-            <span className={styles.statusOk}>complete</span>
+            <span className={styles.statusOk} title="All expected metadata tags present">
+              tags ✓
+            </span>
           ) : (
-            <span className={styles.statusWarn} title={track.metadata_gaps.join(', ')}>
-              {track.metadata_gaps.length} missing
+            <span
+              className={styles.statusWarn}
+              title={`Missing: ${track.metadata_gaps.join(', ')}`}
+            >
+              {track.metadata_gaps.length} tag gaps
             </span>
           )
         ) : (
@@ -2868,22 +3055,16 @@ function TrackRow({
           <MissingTrackAddButton track={track} albumId={entityBase.albumId} />
         ) : null}
         <IconActionButton
-          icon="search"
-          title="Search"
+          icon="automatic"
+          title="Automatic Search — find & grab the best source"
           disabled={!track.id}
           onClick={() => onAction(`Search: ${label} (${albumTitle})`, entity)}
         />
         <IconActionButton
           icon="interactive"
-          title="Interactive Search"
+          title="Interactive Search — pick the source yourself"
           disabled={!track.id}
           onClick={() => onAction(`Interactive Search: ${label} (${albumTitle})`, entity)}
-        />
-        <IconActionButton
-          icon="download"
-          title="Grab / Download"
-          disabled={!track.id}
-          onClick={() => onAction(`Grab Release: ${label} (${albumTitle})`, entity)}
         />
         {track.id ? <TrackEditButton track={track} /> : null}
         {!missing && track.file ? (
@@ -2892,6 +3073,14 @@ function TrackRow({
       </td>
     </tr>
   );
+}
+
+/** Legacy parity: present/missing indicator that sits inline after the title. */
+function InlineFileStatus({ status }: { status: LibraryV2Track['file_status'] }) {
+  if (status === 'present') return <span className={styles.inlinePresent}>present</span>;
+  if (status === 'duplicate_single')
+    return <span className={styles.inlineDuplicate}>also on album</span>;
+  return <span className={styles.inlineMissing}>missing</span>;
 }
 
 /** Legacy "Add to Library" for a missing track: materialize the slot into a
@@ -3245,12 +3434,6 @@ export function TrackQualityProfileBadge({ track }: { track: LibraryV2Track }) {
     );
   }
   return null;
-}
-
-function FileStatusBadge({ status }: { status: LibraryV2Track['file_status'] }) {
-  if (status === 'present') return <span className={styles.statusPresent}>present</span>;
-  if (status === 'duplicate_single') return <span className={styles.statusDup}>also on album</span>;
-  return <span className={styles.statusMissing}>missing</span>;
 }
 
 function BackLink({ children, onClick }: { children: ReactNode; onClick: () => void }) {

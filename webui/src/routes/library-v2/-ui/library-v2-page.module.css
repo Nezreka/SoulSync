@@ -1426,6 +1426,147 @@
   color: rgba(255, 255, 255, 0.4);
 }
 
+/* --- metadata match chips (legacy Enhanced-View parity) --- */
+.matchChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.matchChip {
+  font-size: 10.5px;
+  font-weight: 600;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 2px 7px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    filter 0.12s ease,
+    opacity 0.12s ease;
+}
+
+.matchChip:hover:not(:disabled) {
+  filter: brightness(1.2);
+}
+
+.matchChip:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.matchMatched {
+  background: rgba(16, 185, 129, 0.16);
+  color: rgb(52, 211, 153);
+  border-color: rgba(16, 185, 129, 0.35);
+}
+
+.matchNotFound {
+  background: rgba(239, 68, 68, 0.14);
+  color: rgb(248, 113, 113);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.matchPending {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.5);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.albumMatchRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 10px 10px;
+}
+
+.albumMatchLabel {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.45);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* --- manual match modal --- */
+.matchSearchRow {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.matchResults {
+  max-height: 360px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.matchResultRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+}
+
+.matchResultInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.matchResultName {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.matchResultExtra {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.matchResultId {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+  font-family: var(--font-mono, monospace);
+}
+
+/* --- inline present/missing (right after the track title) --- */
+.trackTitleCell {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.inlinePresent,
+.inlineMissing,
+.inlineDuplicate {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.inlinePresent {
+  color: rgb(52, 211, 153);
+}
+
+.inlineMissing {
+  color: rgb(248, 113, 113);
+}
+
+.inlineDuplicate {
+  color: rgb(96, 165, 250);
+}
+
 /* --- auto-grab status banner --- */
 .grabBanner {
   display: flex;
