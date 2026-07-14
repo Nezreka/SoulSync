@@ -9,6 +9,7 @@ import {
   fetchLibraryV2Playlist,
   fetchLibraryV2Playlists,
   fetchLibraryV2TrackSourceInfo,
+  materializeLibraryV2MissingTrack,
   runLibraryV2PlaylistPipeline,
   runRepairJob,
   updateLibraryV2MetadataOverrides,
@@ -127,6 +128,41 @@ describe('library v2 source info api', () => {
         blocked_username: 'user',
       }),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe('library v2 missing-track add api', () => {
+  it('materializes a missing slot and returns the new track id', async () => {
+    server.use(
+      http.post('/api/library/v2/albums/42/missing-tracks/materialize', async ({ request }) => {
+        expect(await request.json()).toEqual({
+          track_number: 7,
+          disc_number: 2,
+          title: 'Hidden Track',
+        });
+        return HttpResponse.json({ success: true, track_id: 501, created: true });
+      }),
+    );
+
+    await expect(
+      materializeLibraryV2MissingTrack(42, {
+        track_number: 7,
+        disc_number: 2,
+        title: 'Hidden Track',
+      }),
+    ).resolves.toEqual({ track_id: 501, created: true });
+  });
+
+  it('surfaces a rejected materialization', async () => {
+    server.use(
+      http.post('/api/library/v2/albums/42/missing-tracks/materialize', () =>
+        HttpResponse.json({ success: false, error: 'Album not found' }, { status: 404 }),
+      ),
+    );
+
+    await expect(materializeLibraryV2MissingTrack(42, { track_number: 1 })).rejects.toThrow(
+      'Album not found',
+    );
   });
 });
 

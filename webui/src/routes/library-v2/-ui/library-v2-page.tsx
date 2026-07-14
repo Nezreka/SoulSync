@@ -38,6 +38,7 @@ import {
   libraryV2PlaylistQueryOptions,
   libraryV2PlaylistsQueryOptions,
   libraryV2TrackSourceInfoQueryOptions,
+  materializeLibraryV2MissingTrack,
   moveLibraryV2TrackFile,
   processWishlist,
   refreshLibraryV2,
@@ -2833,6 +2834,9 @@ function TrackRow({
         )}
       </td>
       <td className={styles.trackActions}>
+        {missing && !track.monitored ? (
+          <MissingTrackAddButton track={track} albumId={entityBase.albumId} />
+        ) : null}
         <IconActionButton
           icon="search"
           title="Search"
@@ -2857,6 +2861,49 @@ function TrackRow({
         ) : null}
       </td>
     </tr>
+  );
+}
+
+/** Legacy "Add to Library" for a missing track: materialize the slot into a
+ *  real row if needed, then monitor it (queues it for download via the
+ *  wishlist mirror). Reuses the proven /monitor path for the mirror. */
+function MissingTrackAddButton({
+  track,
+  albumId,
+}: {
+  track: LibraryV2Track;
+  albumId: number | undefined;
+}) {
+  const queryClient = useQueryClient();
+  const mutation = useMutation({
+    mutationFn: async () => {
+      let trackId = track.id;
+      if (trackId == null) {
+        if (albumId == null || track.track_number == null) {
+          throw new Error('This track slot cannot be added yet');
+        }
+        const created = await materializeLibraryV2MissingTrack(albumId, {
+          track_number: track.track_number,
+          disc_number: track.disc_number ?? 1,
+          title: track.title ?? undefined,
+        });
+        trackId = created.track_id;
+      }
+      await setLibraryV2Monitored('tracks', trackId, true);
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY }),
+  });
+  return (
+    <IconActionButton
+      icon="import"
+      title={
+        mutation.isError
+          ? mutationErrorMessage(mutation.error, 'Failed to add to library')
+          : 'Add to Library — monitor this track so it queues for download'
+      }
+      disabled={mutation.isPending || (track.id == null && track.track_number == null)}
+      onClick={() => mutation.mutate()}
+    />
   );
 }
 

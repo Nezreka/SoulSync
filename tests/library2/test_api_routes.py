@@ -229,6 +229,34 @@ def test_source_info_endpoint_empty_without_provenance(api):
     assert response.get_json() == {"success": True, "downloads": []}
 
 
+def test_materialize_missing_track_creates_a_real_row(api):
+    client, db, ids = api
+    response = client.post(
+        f"/api/library/v2/albums/{ids['views']}/missing-tracks/materialize",
+        json={"track_number": 9, "disc_number": 1, "title": "New Missing Slot"},
+    )
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["success"] is True
+    assert body["created"] is True
+
+    conn = _conn(db)
+    row = conn.execute(
+        "SELECT title FROM lib2_tracks WHERE id=?", (body["track_id"],)
+    ).fetchone()
+    conn.close()
+    assert row["title"] == "New Missing Slot"
+
+
+def test_materialize_missing_track_requires_track_number(api):
+    client, _db, ids = api
+    response = client.post(
+        f"/api/library/v2/albums/{ids['views']}/missing-tracks/materialize",
+        json={"title": "No Number"},
+    )
+    assert response.status_code == 400
+
+
 def test_eps_get_local_artwork_urls(api):
     """Every release group — including EPs — must point at the local artwork
     endpoint, never at a raw DB image_url (which may be a media-server URL)."""

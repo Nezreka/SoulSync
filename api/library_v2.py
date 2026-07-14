@@ -1167,6 +1167,45 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             conn.close()
         return jsonify({"success": True, "downloads": downloads})
 
+    @app.route(
+        "/api/library/v2/albums/<int:album_id>/missing-tracks/materialize",
+        methods=["POST"],
+    )
+    def lib2_materialize_missing_track(album_id):
+        """Turn a missing album slot into a real track row (legacy "Add to
+        Library" prerequisite). Monitoring is a separate /monitor call."""
+        guard = _guard()
+        if guard:
+            return guard
+        body = request.get_json(silent=True) or {}
+        try:
+            track_number = int(body.get("track_number"))
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "error": "track_number is required"}), 400
+        try:
+            disc_number = int(body.get("disc_number") or 1)
+        except (TypeError, ValueError):
+            disc_number = 1
+        from core.library2.missing_tracks import (
+            MissingTrackError,
+            materialize_missing_track,
+        )
+        conn = _conn()
+        try:
+            result = materialize_missing_track(
+                conn,
+                album_id,
+                track_number=track_number,
+                disc_number=disc_number,
+                title=body.get("title"),
+                config_manager=config_manager,
+            )
+        except MissingTrackError as exc:
+            return jsonify({"success": False, "error": str(exc)}), exc.status
+        finally:
+            conn.close()
+        return jsonify({"success": True, **result})
+
     @app.route("/api/library/v2/quality-profiles/sync", methods=["POST"])
     def lib2_sync_quality_profiles():
         """Compatibility endpoint: profiles are the app-wide ``quality_profiles``

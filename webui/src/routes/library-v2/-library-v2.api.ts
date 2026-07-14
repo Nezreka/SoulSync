@@ -83,6 +83,23 @@ export async function setLibraryV2Monitored(
   if (!payload.success) throw new Error(payload.error || 'Failed to update monitoring');
 }
 
+/** Turn a missing album slot into a real track row (legacy "Add to Library"
+ *  prerequisite). Returns the new/existing track id; monitoring is a separate
+ *  setLibraryV2Monitored call so it runs through the proven wishlist mirror. */
+export async function materializeLibraryV2MissingTrack(
+  albumId: number,
+  slot: { track_number: number; disc_number?: number; title?: string },
+): Promise<{ track_id: number; created: boolean }> {
+  const payload = await readJson<{
+    success: boolean;
+    track_id: number;
+    created: boolean;
+    error?: string;
+  }>(apiClient.post(`library/v2/albums/${albumId}/missing-tracks/materialize`, { json: slot }));
+  if (!payload.success) throw new Error(payload.error || 'Failed to add track to library');
+  return { track_id: payload.track_id, created: payload.created };
+}
+
 export async function fetchLibraryV2QualityProfiles(): Promise<LibraryV2QualityProfile[]> {
   const payload = await readJson<QualityProfilesResponse>(
     apiClient.get('library/v2/quality-profiles'),
