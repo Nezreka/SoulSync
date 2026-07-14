@@ -122,6 +122,47 @@ def test_reset_rebuilds(legacy_db):
     conn.close()
 
 
+def test_album_monitor_intent_reprojects_and_survives_reset(legacy_db):
+    from core.library2.monitor_rules import PROVENANCE_USER, record_rule
+
+    import_legacy_library(legacy_db)
+    conn = legacy_db._get_connection()
+    album_id = conn.execute(
+        "SELECT id FROM lib2_albums WHERE title='Views'"
+    ).fetchone()[0]
+    record_rule(conn, "album", album_id, False, PROVENANCE_USER)
+    # Simulate compatibility-column drift: the rule remains authoritative.
+    conn.execute("UPDATE lib2_albums SET monitored=1 WHERE id=?", (album_id,))
+    conn.commit()
+    conn.close()
+
+    import_legacy_library(legacy_db)
+    conn = legacy_db._get_connection()
+    row = conn.execute(
+        "SELECT monitored FROM lib2_albums WHERE title='Views'"
+    ).fetchone()
+    assert row["monitored"] == 0
+    conn.close()
+
+    stats = import_legacy_library(legacy_db, reset=True)
+    conn = legacy_db._get_connection()
+    row = conn.execute(
+        """SELECT al.monitored, r.monitored AS rule_monitored, r.provenance
+             FROM lib2_albums al
+             JOIN lib2_monitor_rules r
+               ON r.entity_type='album' AND r.entity_id=al.id AND r.profile_id=1
+            WHERE al.title='Views'"""
+    ).fetchone()
+    conn.close()
+
+    assert stats["album_monitor_intent_restored"] == 1
+    assert dict(row) == {
+        "monitored": 0,
+        "rule_monitored": 0,
+        "provenance": "user_explicit",
+    }
+
+
 def test_import_uses_live_default_after_profile_one_is_deleted(legacy_db):
     from core.library2.schema import ensure_library_v2_schema
 

@@ -262,12 +262,24 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
         ensure_library_v2_schema(conn)
         cursor = conn.cursor()
 
+        preserved_album_intent = {}
+
         if reset:
+            # Local ids change across a destructive rebuild. Preserve deliberate
+            # album intent by provider/stable identity, never by surrogate id.
+            from core.library2.monitor_rules import snapshot_album_monitor_intent
+            from core.library2.stable_ids import backfill_stable_ids
+            backfill_stable_ids(cursor)
+            preserved_album_intent = snapshot_album_monitor_intent(
+                conn, profile_id=profile_id
+            )
             # lib2_manual_skips deliberately survives a reset: it's an audit of
             # user decisions about FILES, not derived library state.
             for table in ("lib2_track_files", "lib2_track_artists", "lib2_tracks",
                           "lib2_album_artists", "lib2_albums", "lib2_artists"):
                 cursor.execute(f"DELETE FROM {table}")
+            cursor.execute("DELETE FROM lib2_monitor_rules")
+            cursor.execute("DELETE FROM lib2_wanted_tracks")
 
         artist_cols = _existing_columns(cursor, "artists")
         album_cols = _existing_columns(cursor, "albums")
@@ -462,11 +474,19 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
         # (audit P1-12) — the schema-ensure backfill ran before the inserts.
         from core.library2.stable_ids import backfill_stable_ids
         backfill_stable_ids(cursor)
+        from core.library2.monitor_rules import (
+            project_entity_monitor_rules,
+            restore_album_monitor_intent,
+        )
+        stats["album_monitor_intent_restored"] = restore_album_monitor_intent(
+            conn, preserved_album_intent, profile_id=profile_id
+        )
         # Import-derived monitored flags are provenance 'legacy_import', never
         # mistaken for deliberate user choices (audit P1-13/P1-14). Recorded
         # intent (re-import over an existing library) is never downgraded.
         from core.library2.monitor_rules import seed_legacy_rules
         seed_legacy_rules(cursor)
+        project_entity_monitor_rules(conn, profile_id=profile_id)
         # Materialize the edition/recording shadow model for everything this
         # run inserted (audit P1-04 / ADR-04) — the schema-ensure backfill ran
         # before the inserts, so it has to run again here.

@@ -293,6 +293,12 @@ weiteren Acquisition-Features zuerst geschlossen werden muss. Phase E
   Nutzerprofil gescoped, sodass der Wanted-State eines anderen Profils nicht
   mehr in diese View leakt. `None` behält das Legacy-Read-Everything-Verhalten;
   Tabellen von vor der `profile_id`-Column werden behandelt.
+- Album-Monitor-Intent wird bei jedem Re-Import aktiv aus
+  `lib2_monitor_rules` auf die Kompatibilitätsspalte zurückprojiziert und ist
+  damit unabhängig davon, welche Tracks gerade in der Legacy-Wishlist stehen.
+  Auch `reset=True` bewahrt nicht-legacy Album-Regeln über Spotify-/
+  MusicBrainz-/deterministische `stable_id` und bindet sie nach dem Rebuild an
+  die neue lokale Album-ID; alte surrogate-ID-Regeln werden nicht mitgeschleppt.
 
 ### Skip-Audit-Housekeeping
 - Repair-Job `lib2_skips_cleanup` (default-off, wöchentlich): expired
@@ -1805,9 +1811,19 @@ verändert; daher waren Frontend-Typecheck/Vitest/Build nicht erforderlich.
    **Nächster logischer Schritt:** Roadmap-Punkt 6 — Monitor-Provenance bei
    Re-Imports prüfen und Album-Intent unabhängig vom Track-Wishlist-Zustand
    dauerhaft absichern.
-6. **Monitor-Provenance**: Album-Monitoring, das Re-Imports unabhängig vom
+6. ~~**Monitor-Provenance**: Album-Monitoring, das Re-Imports unabhängig vom
    Track-Wishlist-Zustand überlebt (Provenance-/Mode-Spalten statt
-   Ableitung).
+   Ableitung).~~ **Abgeschlossen 2026-07-14:** Nicht-destruktive Re-Imports
+   projizieren Artist-/Album-Regeln aktiv auf die Compatibility-Flags zurück.
+   Für `reset=True` wird nicht-legacy Album-Intent vor dem Delete über
+   Provider-ID oder deterministische Album-`stable_id` gesichert, nach dem
+   Rebuild auf die neue lokale ID restored und erst danach werden fehlende
+   Legacy-Regeln ergänzt/Wanted neu berechnet. Damit kann Track-Wishlist-
+   Seeding Album-Intent weder erzeugen noch löschen; verwaiste surrogate-ID-
+   Regeln werden beim Reset bewusst entfernt. 100 gezielte Importer-/Monitor-
+   Rule-/Wanted-/Stable-ID-/Discography-/API-Tests sind grün.
+   **Nächster logischer Schritt:** Roadmap-Punkt 7, die globale `_job_state`-
+   Einzelbelegung in eine Job-ID-Registry überführen.
 7. **Job-Registry** (M8/A3): heute teilen sich Bulk-Monitor/Retag/
    Upgrade-Scan EINEN globalen Job-Slot (`_job_state`) — vor Multi-User-
    Nutzung auf Job-IDs umstellen.

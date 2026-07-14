@@ -29,7 +29,7 @@ projection wrote, exactly like before this table existed.
 
 from __future__ import annotations
 
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Tuple
 
 from utils.logging_config import get_logger
 
@@ -42,6 +42,86 @@ PROVENANCE_WISHLIST = "wishlist_import"
 PROVENANCE_LEGACY = "legacy_import"
 
 _ENTITY_TABLES = {"artist": "lib2_artists", "album": "lib2_albums", "track": "lib2_tracks"}
+
+
+def _album_intent_key(row) -> str:
+    if row["spotify_id"]:
+        return f"spotify:{row['spotify_id']}"
+    if row["musicbrainz_id"]:
+        return f"musicbrainz:{row['musicbrainz_id']}"
+    return f"stable:{row['stable_id']}" if row["stable_id"] else ""
+
+
+def snapshot_album_monitor_intent(
+    conn, *, profile_id: int = 1
+) -> Dict[str, Tuple[bool, str]]:
+    """Durable non-legacy album intent keyed independently of local row ids."""
+    rows = conn.execute(
+        """SELECT al.spotify_id, al.musicbrainz_id, al.stable_id,
+                  r.monitored, r.provenance
+             FROM lib2_monitor_rules r
+             JOIN lib2_albums al ON al.id=r.entity_id
+            WHERE r.entity_type='album' AND r.profile_id=?
+              AND r.provenance<>'legacy_import'""",
+        (int(profile_id),),
+    ).fetchall()
+    return {
+        key: (bool(row["monitored"]), str(row["provenance"]))
+        for row in rows
+        if (key := _album_intent_key(row))
+    }
+
+
+def restore_album_monitor_intent(
+    conn,
+    intent: Dict[str, Tuple[bool, str]],
+    *,
+    profile_id: int = 1,
+) -> int:
+    """Restore reset-safe album rules onto freshly imported local rows."""
+    if not intent:
+        return 0
+    restored = 0
+    rows = conn.execute(
+        "SELECT id, spotify_id, musicbrainz_id, stable_id FROM lib2_albums"
+    ).fetchall()
+    for row in rows:
+        saved = intent.get(_album_intent_key(row))
+        if saved is None:
+            continue
+        monitored, provenance = saved
+        record_rule(
+            conn,
+            "album",
+            row["id"],
+            monitored,
+            provenance,
+            profile_id=profile_id,
+        )
+        restored += 1
+    return restored
+
+
+def project_entity_monitor_rules(conn, *, profile_id: int = 1) -> int:
+    """Apply artist/album rules to their compatibility monitor columns."""
+    updated = 0
+    for entity_type, table in (("artist", "lib2_artists"), ("album", "lib2_albums")):
+        result = conn.execute(
+            f"""UPDATE {table}
+                   SET monitored=(
+                       SELECT r.monitored FROM lib2_monitor_rules r
+                        WHERE r.entity_type=? AND r.entity_id={table}.id
+                          AND r.profile_id=?
+                   )
+                 WHERE EXISTS (
+                       SELECT 1 FROM lib2_monitor_rules r
+                        WHERE r.entity_type=? AND r.entity_id={table}.id
+                          AND r.profile_id=?
+                 )""",
+            (entity_type, int(profile_id), entity_type, int(profile_id)),
+        )
+        updated += int(result.rowcount)
+    return updated
 
 
 def record_rule(conn, entity_type: str, entity_id: int, monitored: bool,
@@ -143,7 +223,10 @@ __all__ = [
     "explicit_track_rules_for_album",
     "explicitly_unmonitored_track_ids",
     "prune_orphaned_rules",
+    "project_entity_monitor_rules",
     "record_rule",
     "record_rules",
+    "restore_album_monitor_intent",
     "seed_legacy_rules",
+    "snapshot_album_monitor_intent",
 ]
