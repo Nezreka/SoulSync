@@ -226,6 +226,34 @@ function availabilityCell(r: SourceSearchResult): string {
 
 type GrabState = 'pending' | 'done' | 'error';
 
+export function sortSourceSearchResults(
+  results: SourceSearchResult[],
+  key: SortKey,
+  direction: 1 | -1,
+): SourceSearchResult[] {
+  const copy = [...results];
+  copy.sort((a, b) => {
+    const va = sortValue(a, key);
+    const vb = sortValue(b, key);
+    let cmp: number;
+    if (key === 'age') {
+      const aUnknown = !Number.isFinite(va);
+      const bUnknown = !Number.isFinite(vb);
+      if (aUnknown !== bUnknown) return aUnknown ? 1 : -1;
+      cmp = aUnknown ? 0 : Number(va) - Number(vb);
+    } else {
+      cmp =
+        typeof va === 'string' || typeof vb === 'string'
+          ? String(va).localeCompare(String(vb))
+          : va - vb;
+    }
+    if (cmp !== 0) return cmp * direction;
+    // Stable tiebreak: better quality first, then larger size.
+    return qualityRank(b) - qualityRank(a) || (resultSize(b) ?? 0) - (resultSize(a) ?? 0);
+  });
+  return copy;
+}
+
 /** Preview badge: how this result measures against the entity's quality
  *  profile. Informative only — the pipeline runs the authoritative check. */
 function ProfileBadge({
@@ -313,21 +341,10 @@ export function InteractiveSearchModal({
   const [acoustidCheck, setAcoustidCheck] = useState(true);
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'quality', dir: -1 });
 
-  const sorted = useMemo(() => {
-    const copy = [...results];
-    copy.sort((a, b) => {
-      const va = sortValue(a, sort.key);
-      const vb = sortValue(b, sort.key);
-      const cmp =
-        typeof va === 'string' || typeof vb === 'string'
-          ? String(va).localeCompare(String(vb))
-          : va - vb;
-      if (cmp !== 0) return cmp * sort.dir;
-      // Stable tiebreak: better quality first, then larger size.
-      return qualityRank(b) - qualityRank(a) || (resultSize(b) ?? 0) - (resultSize(a) ?? 0);
-    });
-    return copy;
-  }, [results, sort]);
+  const sorted = useMemo(
+    () => sortSourceSearchResults(results, sort.key, sort.dir),
+    [results, sort],
+  );
 
   function toggleSort(key: SortKey) {
     setSort((s) => (s.key === key ? { key, dir: s.dir === 1 ? -1 : 1 } : { key, dir: -1 }));

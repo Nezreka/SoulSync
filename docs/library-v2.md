@@ -2341,6 +2341,18 @@ bekannte Main-Chunk-Hinweis). **Logischer nächster Schritt:** P2-06 als kleinst
     logischer Schritt:** P2-11 — unbekannte Publish-Daten beim Descending-Age-
     Sort stabil hinter bekannte Releases stellen, ohne die Source-Daten oder
     Ranking-Defaults zu erfinden.
+31. ~~**Unknown-Age-Sort stabilisieren (P2-11).**~~ **Abgeschlossen
+    2026-07-14:** Der bestehende Interactive-Search-Sortierer ist als reine
+    Funktion gekapselt. Beim Age-Key bilden fehlende und ungültige
+    Publish-Daten nun eine explizite Unknown-Gruppe, die sowohl auf- als auch
+    absteigend hinter allen bekannten Daten bleibt; bekannte Releases und der
+    vorhandene Quality-/Size-Tiebreak behalten ihre bisherige Reihenfolge.
+    Es werden weder Alter noch Provider-Fakten geschätzt. Ein Regressionstest
+    pinnt beide Richtungen inklusive fehlendem und ungültigem Datum. 23
+    Library-v2-Vitests, Frontend-Format/Lint/Typecheck und Production-Build
+    sind grün. **Nächster logischer Schritt:** P2-12 — „Monitor all“ darf aus
+    „My Library“ nicht unsichtbare provider-only Releases miterfassen; UI-
+    Scope und Backend-Scope müssen denselben sichtbaren Satz meinen.
 
 **Session-Abschluss-Gate 2026-07-14:** Seit dem vorherigen Full-Gate wurden
 Roadmap 13 sowie 16–23 und Phase E vollständig abgeschlossen und jeweils
@@ -2699,8 +2711,10 @@ Priorität, kompakt aufgelistet für spätere Aufnahme):
   Server-Sourceauswahl plus ehrliches Default-/Selected-Source-Label;
   Ausführung bleibt beim vorhandenen `/api/search`-Orchestrator
   (Roadmap-Punkt 30).
-- P2-11: Fehlendes Publish-Datum wird beim Descending-Age-Sort als unendlich
-  behandelt und kann vor bekannten Releases einsortiert werden.
+- ~~P2-11: Fehlendes Publish-Datum wird beim Descending-Age-Sort als unendlich
+  behandelt und kann vor bekannten Releases einsortiert werden.~~ **Behoben
+  2026-07-14:** Unknown-Gruppe bleibt richtungsunabhängig am Ende
+  (Roadmap-Punkt 31).
 - P2-12: „My Library"-Ansicht zeigt nur monitorierte/library Releases, aber
   „Monitor all" wirkt backendseitig auf den vollen Release-Scope inkl.
   versteckter provider-only Discography — Risiko, unbeabsichtigt den ganzen

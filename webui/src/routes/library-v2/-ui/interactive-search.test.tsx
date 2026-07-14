@@ -5,9 +5,41 @@ import { describe, expect, it, vi } from 'vitest';
 import { HttpResponse, http, server } from '@/test/msw';
 import { createTestQueryClient } from '@/test/query-client';
 
-import { InteractiveSearchModal } from './interactive-search';
+import type { SourceSearchResult } from '../-library-v2.api';
+
+import { InteractiveSearchModal, sortSourceSearchResults } from './interactive-search';
 
 describe('library v2 interactive grab', () => {
+  it('keeps unknown publish dates behind known releases in both age directions', () => {
+    const result = (title: string, publishDate?: string): SourceSearchResult => ({
+      result_type: 'track',
+      username: 'usenet',
+      filename: `${title}.flac`,
+      title,
+      size: 1,
+      _source_metadata: { publish_date: publishDate },
+    });
+    const rows = [
+      result('Unknown'),
+      result('Older', '2020-01-01T00:00:00Z'),
+      result('Newer', '2025-01-01T00:00:00Z'),
+      result('Invalid', 'not-a-date'),
+    ];
+
+    expect(sortSourceSearchResults(rows, 'age', -1).map((row) => row.title)).toEqual([
+      'Older',
+      'Newer',
+      'Unknown',
+      'Invalid',
+    ]);
+    expect(sortSourceSearchResults(rows, 'age', 1).map((row) => row.title)).toEqual([
+      'Newer',
+      'Older',
+      'Unknown',
+      'Invalid',
+    ]);
+  });
+
   it('shows the candidate download error and retries the same result', async () => {
     let attempts = 0;
     const submitted: unknown[] = [];
