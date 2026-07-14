@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { HttpResponse, http, server } from '@/test/msw';
 
-import { updateLibraryV2MetadataOverrides } from './-library-v2.api';
+import { runRepairJob, updateLibraryV2MetadataOverrides } from './-library-v2.api';
 
 describe('library v2 metadata api', () => {
   it('sends one batch command for set and clear operations', async () => {
@@ -36,5 +36,18 @@ describe('library v2 metadata api', () => {
     await expect(updateLibraryV2MetadataOverrides('artist', 7, { name: '' })).rejects.toThrow(
       'metadata override cannot be empty',
     );
+  });
+
+  it('sends lib2 artist identity for repair file-scope resolution', async () => {
+    server.use(
+      http.post('/api/repair/jobs/library_reorganize/run', async ({ request }) => {
+        expect(await request.json()).toEqual({ artist_id: 17, artist_name: 'Corrected Artist' });
+        return HttpResponse.json({ success: true, scope_files: 12 });
+      }),
+    );
+
+    await expect(
+      runRepairJob('library_reorganize', { id: 17, name: 'Corrected Artist' }),
+    ).resolves.toBeUndefined();
   });
 });

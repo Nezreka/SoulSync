@@ -1877,9 +1877,9 @@ verändert; daher waren Frontend-Typecheck/Vitest/Build nicht erforderlich.
    Roadmap-Punkt 8 vollständig abgeschlossen. **Nächster logischer Schritt:**
    Roadmap-Punkt 9 — Reorganize/Dedup ehrlich auf Artist-Pfade scopen, mit
    Root-Safety und ohne einen SQL-Filter als Dateisystem-Scope auszugeben.
-9. **Artist-Scope für Reorganize/Dedup** (brauchen Pfad-Scoping, kein
+9. ~~**Artist-Scope für Reorganize/Dedup** (brauchen Pfad-Scoping, kein
    SQL-Filter — im Maintenance-Modal laufen diese Jobs derzeit ehrlich
-   gekennzeichnet library-wide). **Erste Slice 2026-07-14 abgeschlossen:**
+   gekennzeichnet library-wide).~~ **Erste Slice 2026-07-14 abgeschlossen:**
    Die Repair-Run-Grenze kann eine lib2-Artist-ID jetzt serverseitig in eine
    exakte Allowlist der über `lib2_album_artists`/Tracks verknüpften Dateipfade
    auflösen; eine explizit leere Liste bleibt ein leerer Scope und fällt nie
@@ -1892,7 +1892,17 @@ verändert; daher waren Frontend-Typecheck/Vitest/Build nicht erforderlich.
    zweite Move-Implementierung. 28 gezielte File-Scope-/Repair-Worker-/
    Reorganize-Tests plus Ruff sind grün. **Nächste Slice:** Maintenance-Client
    auf Artist-ID + Name umstellen, beide Jobs ehrlich als „this artist“
-   markieren und den Frontend-Gate laufen lassen.
+   markieren und den Frontend-Gate laufen lassen. **Zweite/abschließende Slice
+   2026-07-14:** Der Maintenance-Client sendet für alle artist-scoped Jobs die
+   lib2-Artist-ID plus effektiven Namen; ein Vertragstest pinnt den Request.
+   Reorganize und Single/Album-Dedup tragen erst seit der wirksamen Path-
+   Allowlist das „this artist“-Badge und beschreiben den begrenzten Datei-Scope
+   ehrlich. Frontend-Check/Typecheck, drei gezielte API-Tests und Production-
+   Build sind grün. Damit ist Roadmap-Punkt 9 vollständig abgeschlossen.
+   **Nächster logischer Schritt:** Roadmap-Punkt 11/A4 — die bereits in der
+   Wishlist gespeicherte `lib2_track_id` bis zur Download-Provenance tragen und
+   Autolink deterministisch zuerst über diese ID schließen; die bestehende
+   heuristische Namensauflösung bleibt nur Legacy-Fallback.
 10. ~~**Album-Detail-Deep-Link** (`search.album`-Parameter, M14) implementieren
     oder entfernen.~~ **Abgeschlossen in Roadmap-8-Slice 1 am 2026-07-14:**
     validierter Search-State, Loader-Prefetch, eigenständige Detailansicht und

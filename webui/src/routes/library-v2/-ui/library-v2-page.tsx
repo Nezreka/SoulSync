@@ -755,12 +755,14 @@ const MAINTENANCE_JOBS: Array<{ id: string; label: string; desc: string; scoped?
   {
     id: 'library_reorganize',
     label: 'Rename / Reorganize Files',
-    desc: 'Move files into the configured folder/name scheme (preview via Stats → Repair).',
+    desc: 'Move this artist’s allowlisted files into the configured folder/name scheme.',
+    scoped: true,
   },
   {
     id: 'single_album_dedup',
     label: 'Single/Album Dedup',
-    desc: 'Find duplicate files where a single also exists on an album (review under Stats → Repair).',
+    desc: 'Find redundant single files for this artist (review under Stats → Repair).',
+    scoped: true,
   },
   {
     id: 'library_retag',
@@ -775,7 +777,15 @@ const MAINTENANCE_JOBS: Array<{ id: string; label: string; desc: string; scoped?
   },
 ];
 
-function MaintenanceModal({ artistName, onClose }: { artistName: string; onClose: () => void }) {
+function MaintenanceModal({
+  artistId,
+  artistName,
+  onClose,
+}: {
+  artistId: number;
+  artistName: string;
+  onClose: () => void;
+}) {
   const [state, setState] = useState<Record<string, 'queued' | 'error'>>({});
   return (
     <ModalShell title="Maintenance" onClose={onClose}>
@@ -792,7 +802,7 @@ function MaintenanceModal({ artistName, onClose }: { artistName: string; onClose
             className={styles.qpOption}
             disabled={state[job.id] === 'queued'}
             onClick={() => {
-              void runRepairJob(job.id, job.scoped ? artistName : undefined)
+              void runRepairJob(job.id, job.scoped ? { id: artistId, name: artistName } : undefined)
                 .then(() => setState((s) => ({ ...s, [job.id]: 'queued' })))
                 .catch(() => setState((s) => ({ ...s, [job.id]: 'error' })));
             }}
@@ -1788,7 +1798,11 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             <HistoryModal artistId={artistId} onClose={() => setShowHistory(false)} />
           ) : null}
           {showMaintenance ? (
-            <MaintenanceModal artistName={artist.name} onClose={() => setShowMaintenance(false)} />
+            <MaintenanceModal
+              artistId={artist.id}
+              artistName={artist.name}
+              onClose={() => setShowMaintenance(false)}
+            />
           ) : null}
           {showManageTracks ? (
             <ManageTracksModal artistId={artistId} onClose={() => setShowManageTracks(false)} />

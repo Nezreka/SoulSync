@@ -378,12 +378,15 @@ export async function fetchLibraryV2Duplicates(
   return payload.pairs ?? [];
 }
 
-/** Trigger a repair job (Stats → Repair jobs) immediately. Jobs that support
- *  artist scoping honor `artistName`; the rest run library-wide. */
-export async function runRepairJob(jobId: string, artistName?: string): Promise<void> {
+/** Trigger a repair job (Stats → Repair jobs) immediately. Artist scope uses
+ *  the lib2 id so the server can derive an exact file allowlist. */
+export async function runRepairJob(
+  jobId: string,
+  artist?: { id: number; name: string },
+): Promise<void> {
   const payload = await readJson<{ success?: boolean; error?: string }>(
     apiClient.post(`repair/jobs/${jobId}/run`, {
-      json: artistName ? { artist_name: artistName } : {},
+      json: artist ? { artist_id: artist.id, artist_name: artist.name } : {},
     }),
   );
   if (payload.error) throw new Error(payload.error);
