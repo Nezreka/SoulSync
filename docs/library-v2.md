@@ -1258,11 +1258,24 @@ eine Source-Familie zu raten (ADR-08). Frontend unberührt.
 **Session-Abschluss-Gate:** volle Python-Suite grün — **8095 passed,
 2 skipped, 2 deselected in 211.41s** (Skips = die opt-in
 Live-Deployment-Varianten).
-**Logischer nächster Schritt:** zweite Roadmap-3-Scheibe — Wishlist-Worker-
-Downloads mit lib2-Mirror-Kontext (`_source_info.lib2_track_id`) beim
-Dispatch als Acquisition-Request (trigger=scheduled) korrelieren, gleiche
-observational Semantik; dabei prüfen, ob der bestehende Retry-Journal-Hook
-(`attempt_download_with_candidates`) die Grab-Marker mitträgt.
+
+**Session 2026-07-14 (dritte Etappe):** Die zweite Roadmap-3-Scheibe ist
+implementiert (`0bb3f6d5`, Details am Roadmap-Punkt 3): Wishlist-Worker-
+Dispatches mit lib2-Mirror-Kontext korrelieren als `trigger=scheduled` in
+den Acquisition-Contract — geteilter Korrelations-Kern in `manual_grab.py`
+(kein zweiter Pfad), Hook im Candidate-Walk, gleiche Callbacks/Marker,
+Stale-Sweep generalisiert (`fail_stale_correlated_grabs`). TDD: 6 neue
+Tests in `tests/acquisition/test_scheduled_grab.py` + 6 neue Dispatch-Tests
+in `tests/downloads/test_downloads_candidates.py`; gezielte Suiten grün
+(tests/acquisition+downloads+library2: 1071 passed, 2 skipped;
+tests/wishlist+imports: 834 passed). Frontend unberührt. Der im letzten
+Status offene Prüfauftrag zum Retry-Journal ist beantwortet (siehe
+Roadmap-Punkt 3): Journal-Hook bleibt exklusiv nativ, Marker reist über
+Matched-Context/Sidecar.
+**Logischer nächster Schritt:** dritte Roadmap-3-Scheibe — Cancel-Wiring:
+der Downloads-Cancel-Endpoint soll korrelierte Grabs (manual + scheduled)
+als `cancelled` schließen statt sie dem 7-Tage-Sweep zu überlassen; danach
+Grabs ohne lib2-Entity betrachten, erst dann globale Durchsetzung.
 
 ### 5.6 Verifikation (pro Phase, End-to-End in Docker)
 
@@ -1556,10 +1569,29 @@ P2-05 und eine Reihe P2-UX/Robustheits-Findings).
    ein Sweep in `advance_open_imports` failt verwaiste manuelle Grabs nach
    7 Tagen (`failure_kind=runtime`, blocklistet nie). Bundle-Quellen
    (usenet/torrent/lidarr) bewusst ausgenommen — deren Plugins schreiben
-   eigene Grab-Rows. **Noch offen:** Wishlist-Worker-Downloads korrelieren
-   (trigger=scheduled, vermutlich am `lib2_track_id`-Mirror-Kontext
-   andockend), Grabs ohne lib2-Entity, Cancel-Wiring des
-   Downloads-Cancel-Endpoints, danach erst die globale Durchsetzung.
+   eigene Grab-Rows. **Zweite Scheibe erledigt 2026-07-14** (`0bb3f6d5`):
+   Wishlist-Worker-Dispatches korrelieren als `trigger=scheduled` — der
+   Candidate-Walk (`core/downloads/candidates.py`) erkennt den
+   lib2-Mirror-Kontext (`track_info.source_info.lib2_track_id`, von
+   `wishlist_mirror` über die Wishlist-Row bis in den Task getragen) und
+   ruft die geteilte Korrelation (`manual_grab.py::_correlate_grab`,
+   `correlate_scheduled_grab`, `shadow_source=legacy_wishlist_worker`,
+   `legacy_task_id`/`legacy_batch_id` in den Search-Options). Gleiche
+   observational Semantik: Gate-Ergebnis mit `forced=0` protokolliert
+   (`gate_rejections_observed_not_enforced`), nie durchgesetzt; derselbe
+   Marker, dieselben Pipeline-Callbacks schließen den Grab. Ausgeschlossen:
+   acquisition-native Dispatches (`_acquisition_import_id`, sonst
+   Doppel-Buchung) und User-Manual-Picks aus dem Candidates-Modal. Der
+   Stale-Sweep heißt jetzt `fail_stale_correlated_grabs` und deckt manual
+   UND scheduled ab. Retry-Journal-Prüfauftrag beantwortet: der Journal-Hook
+   in `attempt_download_with_candidates` bleibt exklusiv für native
+   Acquisition-Walks (`_acquisition_task_ref` liest nur
+   `_acquisition_import_id`); der Grab-Marker reist unabhängig davon über
+   den Matched-Context/Sidecar. Bewusste Grenze: requeued Walks derselben
+   Legacy-Task erzeugen pro Dispatch einen eigenen Request; der vorherige
+   bleibt bis Approve-Erfolg oder 7-Tage-Sweep `grabbing` (identisch zur
+   Manual-Semantik). **Noch offen:** Grabs ohne lib2-Entity, Cancel-Wiring
+   des Downloads-Cancel-Endpoints, danach erst die globale Durchsetzung.
 4. Phase-3-Identity/Provenance fertigstellen: dedizierte externe-/
    Old-ID-History, Merge-/Move-History, Field-Level-User-Overrides und
    Read-Projection. Typed Adapters über Discography/Tracklist hinaus
