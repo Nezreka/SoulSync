@@ -41,7 +41,13 @@ import os
 from typing import Optional
 
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import (
+    file_path_in_scope,
+    get_scope_file_paths,
+    JobContext,
+    JobResult,
+    RepairJob,
+)
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.library_reorganize")
@@ -78,6 +84,7 @@ class LibraryReorganizeJob(RepairJob):
         'dry_run': True,
     }
     auto_fix = True
+    supports_artist_scope = True
 
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
@@ -127,6 +134,12 @@ class LibraryReorganizeJob(RepairJob):
             logger.warning("Couldn't read active media server: %s", exc)
 
         album_rows = self._load_albums(context.db, active_server=active_server)
+        scope_paths = get_scope_file_paths(context)
+        if scope_paths is not None:
+            scoped_album_ids = self._album_ids_for_scope_paths(context.db, scope_paths)
+            album_rows = [
+                row for row in album_rows if str(row["id"]) in scoped_album_ids
+            ]
         total = len(album_rows)
 
         if total == 0:
@@ -241,12 +254,26 @@ class LibraryReorganizeJob(RepairJob):
                 continue
 
             # Successful plan — count mismatched tracks
+            existing_tracks = [t for t in tracks if t.get('file_exists')]
+            if scope_paths is not None and any(
+                not self._preview_track_in_scope(track, scope_paths)
+                for track in existing_tracks
+            ):
+                # Live queueing operates per album. A partially scoped album
+                # must not widen into moves for files outside the allowlist.
+                result.skipped += 1
+                logger.warning(
+                    "Skipping partially scoped album %s (%s)", album_id, album_title,
+                )
+                continue
+
             mismatched = [
                 t for t in tracks
                 if t.get('matched')
                 and t.get('new_path')
                 and not t.get('unchanged')
                 and t.get('file_exists')
+                and self._preview_track_in_scope(t, scope_paths)
             ]
 
             if not mismatched:
@@ -434,6 +461,37 @@ class LibraryReorganizeJob(RepairJob):
                     conn.close()
                 except Exception:  # noqa: S110 — finally-block cleanup, logger may be torn down
                     pass
+
+    @staticmethod
+    def _preview_track_in_scope(track: dict, scope_paths: Optional[frozenset[str]]) -> bool:
+        return file_path_in_scope(
+            track.get('current_path_abs') or track.get('current_path'),
+            scope_paths,
+        ) or file_path_in_scope(track.get('current_path'), scope_paths)
+
+    @staticmethod
+    def _album_ids_for_scope_paths(db, scope_paths: frozenset[str]) -> set[str]:
+        """Map exact allowed source paths to albums without artist-name SQL."""
+        if not scope_paths:
+            return set()
+        conn = None
+        try:
+            conn = db._get_connection()
+            rows = conn.execute(
+                """SELECT album_id, file_path FROM tracks
+                    WHERE file_path IS NOT NULL AND file_path<>''"""
+            ).fetchall()
+            return {
+                str(row[0])
+                for row in rows
+                if file_path_in_scope(row[1], scope_paths)
+            }
+        except Exception as exc:
+            logger.error("Failed to map reorganize artist file scope: %s", exc)
+            return set()
+        finally:
+            if conn:
+                conn.close()
 
     def _get_setting(self, context: JobContext, key: str, default):
         """Read a job-specific setting from config."""

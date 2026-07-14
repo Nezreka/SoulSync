@@ -1879,7 +1879,20 @@ verändert; daher waren Frontend-Typecheck/Vitest/Build nicht erforderlich.
    Root-Safety und ohne einen SQL-Filter als Dateisystem-Scope auszugeben.
 9. **Artist-Scope für Reorganize/Dedup** (brauchen Pfad-Scoping, kein
    SQL-Filter — im Maintenance-Modal laufen diese Jobs derzeit ehrlich
-   gekennzeichnet library-wide).
+   gekennzeichnet library-wide). **Erste Slice 2026-07-14 abgeschlossen:**
+   Die Repair-Run-Grenze kann eine lib2-Artist-ID jetzt serverseitig in eine
+   exakte Allowlist der über `lib2_album_artists`/Tracks verknüpften Dateipfade
+   auflösen; eine explizit leere Liste bleibt ein leerer Scope und fällt nie
+   auf library-wide zurück. `single_album_dedup` begrenzt die actionable/
+   löschbare Single-Seite auf diese Pfade, hält albumweite Vergleichskandidaten
+   aber lesbar. `library_reorganize` mappt erlaubte Quellpfade auf Alben und
+   queued nur vollständig im Scope liegende Alben; ein teilweise fremdes Album
+   wird übersprungen, weil die wiederverwendete Reorganize-Queue atomar pro
+   Album arbeitet. Es gibt weder einen Artist-Name-SQL-Scheinfilter noch eine
+   zweite Move-Implementierung. 28 gezielte File-Scope-/Repair-Worker-/
+   Reorganize-Tests plus Ruff sind grün. **Nächste Slice:** Maintenance-Client
+   auf Artist-ID + Name umstellen, beide Jobs ehrlich als „this artist“
+   markieren und den Frontend-Gate laufen lassen.
 10. ~~**Album-Detail-Deep-Link** (`search.album`-Parameter, M14) implementieren
     oder entfernen.~~ **Abgeschlossen in Roadmap-8-Slice 1 am 2026-07-14:**
     validierter Search-State, Loader-Prefetch, eigenständige Detailansicht und

@@ -566,6 +566,63 @@ def test_scan_only_iterates_albums_for_active_server(make_context, monkeypatch):
     assert sorted(seen_album_ids) == ['jelly_album_1', 'jelly_album_2']
 
 
+def test_artist_file_scope_skips_partially_scoped_album(make_context, monkeypatch):
+    """The live queue works per album, so one out-of-scope file must prevent
+    the whole album from being queued/moved."""
+    db = _FakeDB([_make_album_row(id_='A1')])
+    _stub_preview(monkeypatch, {
+        'A1': {
+            'success': True, 'status': 'planned', 'source': 'tags',
+            'album': 'Shared Album', 'artist': 'Artist',
+            'tracks': [
+                {'track_id': 't1', 'title': 'Allowed',
+                 'current_path': '/music/Artist/allowed.flac',
+                 'new_path': '/music/Artist/new/allowed.flac',
+                 'matched': True, 'unchanged': False, 'file_exists': True},
+                {'track_id': 't2', 'title': 'Outside',
+                 'current_path': '/music/Other/outside.flac',
+                 'new_path': '/music/Other/new/outside.flac',
+                 'matched': True, 'unchanged': False, 'file_exists': True},
+            ],
+        },
+    })
+    ctx = make_context(db=db, dry_run=False)
+    ctx.scope = {'file_paths': ['/music/Artist/allowed.flac']}
+    job = LibraryReorganizeJob()
+    monkeypatch.setattr(job, '_album_ids_for_scope_paths', lambda *_: {'A1'})
+
+    result = job.scan(ctx)
+
+    assert result.auto_fixed == 0
+    assert result.skipped == 1
+
+
+def test_artist_file_scope_emits_only_allowlisted_reorganize_findings(
+        make_context, monkeypatch):
+    db = _FakeDB([_make_album_row(id_='A1')])
+    _stub_preview(monkeypatch, {
+        'A1': {
+            'success': True, 'status': 'planned', 'source': 'tags',
+            'album': 'Album', 'artist': 'Artist',
+            'tracks': [
+                {'track_id': 't1', 'title': 'Allowed',
+                 'current_path': '/music/Artist/allowed.flac',
+                 'new_path': '/music/Artist/new/allowed.flac',
+                 'matched': True, 'unchanged': False, 'file_exists': True},
+            ],
+        },
+    })
+    ctx = make_context(db=db, dry_run=True)
+    ctx.scope = {'file_paths': ['/music/Artist/allowed.flac']}
+    job = LibraryReorganizeJob()
+    monkeypatch.setattr(job, '_album_ids_for_scope_paths', lambda *_: {'A1'})
+
+    result = job.scan(ctx)
+
+    assert result.findings_created == 1
+    assert ctx._captured_findings[0]['file_path'] == '/music/Artist/allowed.flac'
+
+
 def test_estimate_scope_returns_album_count(monkeypatch):
     """Pin: ``estimate_scope`` returns the DB album count (matches
     what scan iterates over)."""

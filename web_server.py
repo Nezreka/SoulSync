@@ -39570,21 +39570,35 @@ def repair_job_settings(job_id):
 def repair_job_run(job_id):
     """Trigger immediate run of a specific job.
 
-    Optional JSON body ``{"artist_name": "..."}`` scopes the run to one artist
-    for jobs that declare ``supports_artist_scope`` (triggered from a Library
-    artist page); other jobs ignore it and run library-wide."""
+    Optional JSON body ``{"artist_id": 1, "artist_name": "..."}`` resolves a
+    Library-v2 artist to an exact file allowlist. Jobs that move/delete files
+    enforce that path scope; metadata-only jobs use the accompanying name.
+    Other jobs ignore the scope and run library-wide."""
     try:
         if repair_worker is None:
             return jsonify({'error': 'Repair worker not initialized'}), 400
 
         body = request.get_json(silent=True) or {}
         artist_name = str(body.get('artist_name') or '').strip()
-        scope = {'artist_name': artist_name} if artist_name else None
+        artist_id = body.get('artist_id')
+        scope = None
+        if artist_id is not None:
+            from core.repair_jobs.base import build_artist_file_scope
+            scope = build_artist_file_scope(repair_worker.db, artist_id, artist_name)
+            artist_name = scope['artist_name']
+        elif artist_name:
+            scope = {'artist_name': artist_name}
         repair_worker.run_job_now(job_id, scope=scope)
         logger.info("Repair job %s triggered manually via UI%s", job_id,
                     f" (artist scope: {artist_name})" if artist_name else "")
-        return jsonify({'success': True, 'job_id': job_id,
-                        'scoped_to': artist_name or None}), 200
+        return jsonify({
+            'success': True,
+            'job_id': job_id,
+            'scoped_to': artist_name or None,
+            'scope_files': len(scope.get('file_paths', [])) if scope else None,
+        }), 200
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
     except Exception as e:
         logger.error(f"Error running repair job {job_id}: {e}")
         return jsonify({'error': str(e)}), 500

@@ -20,6 +20,74 @@ def get_scope_artist(context: Any) -> Optional[str]:
     return None
 
 
+def _file_scope_key(path: Any) -> Optional[str]:
+    value = str(path or "").strip().replace("\\", "/")
+    if not value:
+        return None
+    return os.path.normcase(os.path.normpath(value))
+
+
+def get_scope_file_paths(context: Any) -> Optional[frozenset[str]]:
+    """Exact file allowlist for a scoped run; None means library-wide.
+
+    An explicitly empty list remains an empty scope and must never widen into
+    a full-library run. Exact paths are used because an artist-name SQL filter
+    is not a safe boundary for jobs that move or delete files.
+    """
+    scope = getattr(context, "scope", None)
+    if not isinstance(scope, dict) or "file_paths" not in scope:
+        return None
+    values = scope.get("file_paths")
+    if not isinstance(values, (list, tuple, set, frozenset)):
+        return frozenset()
+    return frozenset(
+        key for value in values if (key := _file_scope_key(value)) is not None
+    )
+
+
+def file_path_in_scope(path: Any, allowed_paths: Optional[frozenset[str]]) -> bool:
+    """Return whether ``path`` is inside an exact per-run file allowlist."""
+    if allowed_paths is None:
+        return True
+    key = _file_scope_key(path)
+    return key is not None and key in allowed_paths
+
+
+def build_artist_file_scope(db: Any, artist_id: int, artist_name: str = "") -> Dict[str, Any]:
+    """Resolve a lib2 artist to exact linked file paths for repair jobs."""
+    artist_id = int(artist_id)
+    if artist_id <= 0:
+        raise ValueError("artist_id must be positive")
+    conn = db._get_connection()
+    try:
+        artist = conn.execute(
+            "SELECT name FROM lib2_artists WHERE id=?", (artist_id,)
+        ).fetchone()
+        if artist is None:
+            raise ValueError("Library v2 artist not found")
+        paths = [
+            row[0]
+            for row in conn.execute(
+                """SELECT DISTINCT tf.path
+                     FROM lib2_album_artists aa
+                     JOIN lib2_tracks t ON t.album_id=aa.album_id
+                     JOIN lib2_track_files tf ON tf.track_id=t.id
+                    WHERE aa.artist_id=?
+                      AND tf.path IS NOT NULL AND tf.path<>''
+                    ORDER BY tf.path""",
+                (artist_id,),
+            ).fetchall()
+        ]
+        resolved_name = str(artist_name or artist[0] or "").strip()
+        return {
+            "artist_id": artist_id,
+            "artist_name": resolved_name,
+            "file_paths": paths,
+        }
+    finally:
+        conn.close()
+
+
 def skip_deleted_quarantine(root: str, dirs: list, transfer_folder: str) -> None:
     """In-place prune of the ``<transfer>/deleted`` quarantine from an ``os.walk``
     ``dirs`` list (topdown walks only).

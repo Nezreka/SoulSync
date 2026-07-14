@@ -5,7 +5,13 @@ from collections import defaultdict
 from difflib import SequenceMatcher
 
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import (
+    file_path_in_scope,
+    get_scope_file_paths,
+    JobContext,
+    JobResult,
+    RepairJob,
+)
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.single_album_dedup")
@@ -37,6 +43,7 @@ class SingleAlbumDedupJob(RepairJob):
         'artist_similarity': 0.80,
     }
     auto_fix = False
+    supports_artist_scope = True
 
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
@@ -44,6 +51,7 @@ class SingleAlbumDedupJob(RepairJob):
         settings = self._get_settings(context)
         title_threshold = float(settings.get('title_similarity', 0.85))
         artist_threshold = float(settings.get('artist_similarity', 0.80))
+        scope_paths = get_scope_file_paths(context)
 
         # Fetch all tracks with album type info
         conn = None
@@ -113,8 +121,11 @@ class SingleAlbumDedupJob(RepairJob):
                 (entry['album_type'] not in ('album', 'compilation', 'ep') and entry['total_tracks'] <= 2)
             )
             if is_single:
-                singles.append(entry)
+                if file_path_in_scope(entry['file_path'], scope_paths):
+                    singles.append(entry)
             elif entry['total_tracks'] > 2:
+                # Album candidates remain library-wide: only the redundant
+                # single is actionable/deleted, and that path is allowlisted.
                 album_tracks.append(entry)
 
         logger.info("Single/Album dedup: %d singles/EPs, %d album tracks", len(singles), len(album_tracks))

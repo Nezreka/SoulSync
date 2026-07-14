@@ -22,7 +22,13 @@ def test_scope_artist_name_returns_trimmed():
 def test_scoped_jobs_declare_support():
     from core.repair_jobs import get_all_jobs
     registry = get_all_jobs()
-    for job_id in ("metadata_gap_filler", "album_tag_consistency", "library_retag"):
+    for job_id in (
+        "metadata_gap_filler",
+        "album_tag_consistency",
+        "library_retag",
+        "library_reorganize",
+        "single_album_dedup",
+    ):
         assert registry[job_id].supports_artist_scope is True, job_id
     # Semantically artist-scoping can't apply here (tracks ARE Unknown Artist).
     assert registry["unknown_artist_fixer"].supports_artist_scope is False
