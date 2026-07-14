@@ -615,9 +615,16 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         # that one folder is whichever disc landed first, so every later track
         # of a box set would be funneled into it — collapsing all discs into a
         # single disc folder and colliding same-numbered filenames.
+        # Reorganize disables reuse outright (`_no_album_folder_reuse`): its whole
+        # job is to move albums OUT of the folder they currently sit in, and the
+        # resolver would answer with exactly that folder — making every reorganize
+        # compute "destination == current location" and no-op (the template-change
+        # complaint from TheHomeGuy).
         reuse_folder = None
         _multi_disc_album = total_discs > 1 or disc_number > 1
-        if filename_base and not _multi_disc_album and raw_album_type not in ("compilation", "compile"):
+        if (filename_base and not _multi_disc_album
+                and raw_album_type not in ("compilation", "compile")
+                and not context.get("_no_album_folder_reuse")):
             try:
                 from core.library.existing_album_folder import resolve_existing_album_folder
                 from database.music_database import get_database

@@ -762,6 +762,42 @@ def test_multi_disc_album_skips_folder_reuse(monkeypatch, tmp_path):
         tmp_path / "Transfer" / "Artist One" / "Album One" / "CD02" / "13 - Song One.flac")
 
 
+def test_reorganize_flag_disables_folder_reuse(monkeypatch, tmp_path):
+    """A reorganize context carries `_no_album_folder_reuse` — its destination
+    must come from the CURRENT template, never the folder the album already
+    sits in. Otherwise a template change computes "destination == current
+    location" for every already-together album and reorganize silently no-ops
+    (TheHomeGuy's report: old `$albumartist - $album` folders never moved)."""
+    config = _reuse_test_config(tmp_path, "$albumartist/$album/$track - $title")
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: config)
+    monkeypatch.setattr(import_paths, "_get_album_tracks_for_source", lambda *a: None)
+
+    # The album's current home under the OLD template — the resolver would
+    # happily return it, and the resulting path must NOT use it.
+    old_home = tmp_path / "Transfer" / "Artist One" / "Artist One - Album One"
+    old_home.mkdir(parents=True)
+    import core.library.existing_album_folder as eaf
+    import database.music_database as mdb
+    monkeypatch.setattr(mdb, "get_database", lambda: object(), raising=False)
+    resolver_calls = []
+    monkeypatch.setattr(eaf, "resolve_existing_album_folder",
+                        lambda **kw: resolver_calls.append(kw) or str(old_home))
+
+    context = _reuse_context(disc_number=1, total_discs_from_api=1)
+    context["_no_album_folder_reuse"] = True
+    final_path, created = import_paths.build_final_path_for_track(
+        context,
+        {"name": "Artist One"},
+        {"is_album": True, "album_name": "Album One", "track_number": 13, "disc_number": 1},
+        ".flac",
+        create_dirs=False,
+    )
+    assert created is True
+    assert resolver_calls == []  # reuse lookup skipped entirely
+    assert final_path == str(
+        tmp_path / "Transfer" / "Artist One" / "Album One" / "13 - Song One.flac")
+
+
 def test_single_disc_album_still_reuses_existing_folder(monkeypatch, tmp_path):
     """The #829 behavior the gate must NOT break: single-disc albums keep
     joining their existing folder so $albumtype/$year drift can't split them."""
