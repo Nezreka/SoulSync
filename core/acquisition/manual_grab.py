@@ -1,14 +1,16 @@
 """Correlate legacy grabs into the acquisition contract.
 
-Roadmap step 3 (docs/library-v2.md section 7): a legacy download that acts
-for a Library-v2 entity gains persistent Request -> Candidate -> Gate-Run ->
-Grab -> History correlation. Two legacy dispatch paths feed this adapter:
+Roadmap step 3 (docs/library-v2.md section 7): an admin-profile legacy
+download gains persistent Request -> Candidate -> Gate-Run -> Grab -> History
+correlation. Two legacy dispatch paths feed this adapter:
 
-- **Manual** (slice 1): an Interactive-Search grab naming a lib2 entity
-  (``trigger='manual'``). A manual pick is the user asserting the match
-  (Lidarr interactive-search semantics).
-- **Scheduled** (slice 2): a wishlist-worker candidate dispatch whose
-  ``track_info.source_info`` rides the lib2 mirror context
+- **Manual** (slices 1/4): an Interactive-Search grab, with its exact lib2
+  entity when present or an explicitly namespaced legacy-shadow identity
+  otherwise (``trigger='manual'``). A manual pick is the user asserting the
+  match (Lidarr interactive-search semantics).
+- **Scheduled** (slices 2/4): a wishlist-worker candidate dispatch, again
+  preserving an exact lib2 mirror identity when available and otherwise
+  using the server-owned task target as a legacy-shadow identity
   (``trigger='scheduled'``); the pick was made by the legacy worker's own
   battle-tested matching.
 
@@ -26,6 +28,8 @@ conversion is the acquisition-native bundle path.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import time
 import uuid
 from typing import Any, Callable, Dict, Mapping, Optional
@@ -47,9 +51,11 @@ SCHEDULED_GRAB_KEY_PREFIX = "scheduled-grab:"
 MANUAL_GRAB_TTL_SECONDS = 7 * 24 * 60 * 60
 
 
-def _resolve_scope_entity(
-    conn: Any, lib2_context: Mapping[str, Any],
+def _resolve_lib2_scope_entity(
+    conn: Any, lib2_context: Optional[Mapping[str, Any]],
 ) -> tuple[Optional[str], Optional[int]]:
+    if not lib2_context:
+        return None, None
     track_id = lib2_context.get("track_id")
     album_id = lib2_context.get("album_id")
     if track_id:
@@ -62,6 +68,124 @@ def _resolve_scope_entity(
     if album_id:
         return "release_group", int(album_id)
     return None, None
+
+
+def _first_text(*values: Any) -> Optional[str]:
+    for value in values:
+        if isinstance(value, Mapping):
+            value = value.get("name") or value.get("title")
+        text = str(value or "").strip()
+        if text and text.lower() != "unknown":
+            return text
+    return None
+
+
+def _first_artist(context: Mapping[str, Any]) -> Optional[str]:
+    artists = context.get("artists")
+    if isinstance(artists, (list, tuple)) and artists:
+        return _first_text(artists[0])
+    return _first_text(
+        context.get("artist"),
+        context.get("artist_name"),
+        context.get("spotify_clean_artist"),
+    )
+
+
+def _legacy_shadow_context(
+    target_context: Optional[Mapping[str, Any]],
+    search_result: Mapping[str, Any],
+) -> tuple[Optional[int], Optional[Any], Dict[str, Any]]:
+    """Build a non-lib2 recording identity for observational correlation.
+
+    ``acquisition_requests.entity_id`` is a positive integer without a
+    catalog foreign key. Legacy consumers often have a durable provider id
+    but no lib2 row, so namespace a stable digest explicitly instead of
+    inventing a lib2 entity or copying catalog rows.
+    """
+    from core.acquisition.eligibility_gate import CatalogContext
+
+    target = dict(target_context or {})
+    artist = _first_artist(target) or _first_artist(search_result)
+    title = _first_text(
+        target.get("name"), target.get("title"), target.get("track_name"),
+        target.get("spotify_clean_title"), search_result.get("title"),
+    )
+    album = _first_text(
+        target.get("album"), target.get("album_name"),
+        target.get("spotify_clean_album"), search_result.get("album"),
+    )
+    if not artist and not title:
+        return None, None, {}
+
+    raw_source_info = target.get("source_info")
+    if isinstance(raw_source_info, str):
+        try:
+            raw_source_info = json.loads(raw_source_info)
+        except (TypeError, ValueError):
+            raw_source_info = {}
+    source_info = raw_source_info if isinstance(raw_source_info, Mapping) else {}
+    provider_id = _first_text(
+        target.get("id"), target.get("track_id"),
+        target.get("spotify_track_id"), target.get("deezer_track_id"),
+        target.get("itunes_track_id"), source_info.get("track_id"),
+    )
+    provider = _first_text(
+        target.get("source"), source_info.get("source"),
+    ) or "legacy"
+    if provider_id:
+        identity = {
+            "provider": provider.casefold(),
+            "provider_id": provider_id,
+        }
+    else:
+        identity = {
+            "provider": provider.casefold(),
+            "artist": (artist or "").casefold(),
+            "title": (title or "").casefold(),
+            "album": (album or "").casefold(),
+        }
+    digest = hashlib.blake2b(
+        json.dumps(
+            identity, ensure_ascii=False, sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8"),
+        digest_size=8,
+        person=b"ss-acq-v1",
+    ).digest()
+    entity_id = int.from_bytes(digest, "big") & ((1 << 63) - 1)
+    if entity_id == 0:
+        entity_id = 1
+    snapshot = {"artist": artist, "title": title, "album": album}
+    return (
+        entity_id,
+        CatalogContext(artist=artist, release_title=title, track_count=1),
+        {
+            "entity_namespace": "legacy_shadow",
+            "legacy_identity_digest": digest.hex(),
+            "catalog_snapshot": snapshot,
+        },
+    )
+
+
+def _context_quality_profile_id(
+    lib2_context: Optional[Mapping[str, Any]],
+    target_context: Optional[Mapping[str, Any]],
+) -> Optional[int]:
+    for context in (lib2_context, target_context):
+        if not isinstance(context, Mapping):
+            continue
+        value = context.get("quality_profile_id")
+        if value:
+            return int(value)
+        source_info = context.get("source_info")
+        if isinstance(source_info, str):
+            try:
+                source_info = json.loads(source_info)
+            except (TypeError, ValueError):
+                source_info = {}
+        if isinstance(source_info, Mapping) and source_info.get("quality_profile_id"):
+            return int(source_info["quality_profile_id"])
+    return None
 
 
 def _candidate_title(search_result: Mapping[str, Any]) -> str:
@@ -95,7 +219,8 @@ def _candidate_facts(search_result: Mapping[str, Any], *, scope: str) -> Dict[st
 def _correlate_grab(
     conn: Any,
     *,
-    lib2_context: Mapping[str, Any],
+    lib2_context: Optional[Mapping[str, Any]],
+    target_context: Optional[Mapping[str, Any]],
     search_result: Mapping[str, Any],
     source: str,
     trigger: str,
@@ -113,8 +238,8 @@ def _correlate_grab(
     """Shared correlation core for one dispatched legacy grab.
 
     Returns ``{"download_id", "request_id"}`` markers for the download
-    context, or None when the grab cannot be correlated (no resolvable
-    entity, bundle-scope source). The caller owns the transaction.
+    context, or None when the grab cannot be correlated (no usable identity,
+    bundle-scope source). The caller owns the transaction.
     """
     from core.acquisition import ensure_acquisition_schema
     from core.acquisition.candidates import register_candidate
@@ -130,10 +255,17 @@ def _correlate_grab(
     capabilities = get_source_capabilities(source)
     if capabilities is None or not capabilities.recording_download:
         return None
-    scope, entity_id = _resolve_scope_entity(conn, lib2_context)
+    scope, entity_id = _resolve_lib2_scope_entity(conn, lib2_context)
+    catalog = None
+    shadow_options: Dict[str, Any] = {}
     if scope is None or entity_id is None:
+        entity_id, catalog, shadow_options = _legacy_shadow_context(
+            target_context, search_result)
+        scope = "recording"
+    if entity_id is None:
         return None
-    quality_profile_id = lib2_context.get("quality_profile_id")
+    quality_profile_id = _context_quality_profile_id(
+        lib2_context, target_context)
     if not quality_profile_id:
         from core.library2.profile_lookup import default_quality_profile_id
         quality_profile_id = default_quality_profile_id(conn)
@@ -144,10 +276,11 @@ def _correlate_grab(
         # so every candidate is a recording, never a bundle.
         "content_scope": "recording",
         "shadow_source": shadow_source,
+        **shadow_options,
     }
-    if lib2_context.get("track_id"):
+    if lib2_context and lib2_context.get("track_id"):
         search_options["lib2_track_id"] = int(lib2_context["track_id"])
-    if lib2_context.get("album_id"):
+    if lib2_context and lib2_context.get("album_id"):
         search_options["lib2_album_id"] = int(lib2_context["album_id"])
     search_options.update(dispatch_options)
 
@@ -171,6 +304,7 @@ def _correlate_grab(
             "quality_profile_id": request.quality_profile_id,
             "trigger": request.trigger,
             "shadow_source": shadow_source,
+            "entity_namespace": search_options.get("entity_namespace", "lib2"),
         },
     )
     request = transition_request(
@@ -195,7 +329,13 @@ def _correlate_grab(
     request = transition_request(
         conn, request.id, "candidates_ready", expected_status="searching")
 
-    catalog, policy = resolve_request_context(conn, request, config_get=config_get)
+    if catalog is None:
+        catalog, policy = resolve_request_context(
+            conn, request, config_get=config_get)
+    else:
+        from core.acquisition.catalog import load_effective_policy
+        policy = load_effective_policy(
+            conn, request.quality_profile_id, config_get=config_get)
     decision = EligibilityGate.evaluate(
         request, candidate, catalog, RuntimeContext(), policy, now=now)
     run = record_decision(conn, decision)
@@ -248,7 +388,8 @@ def _correlate_grab(
 def correlate_manual_grab(
     conn: Any,
     *,
-    lib2_context: Mapping[str, Any],
+    lib2_context: Optional[Mapping[str, Any]] = None,
+    target_context: Optional[Mapping[str, Any]] = None,
     search_result: Mapping[str, Any],
     source: str,
     batch_id: Optional[str] = None,
@@ -264,6 +405,7 @@ def correlate_manual_grab(
     return _correlate_grab(
         conn,
         lib2_context=lib2_context,
+        target_context=target_context,
         search_result=search_result,
         source=source,
         trigger="manual",
@@ -286,7 +428,8 @@ def correlate_manual_grab(
 def correlate_scheduled_grab(
     conn: Any,
     *,
-    lib2_context: Mapping[str, Any],
+    lib2_context: Optional[Mapping[str, Any]] = None,
+    target_context: Optional[Mapping[str, Any]] = None,
     search_result: Mapping[str, Any],
     source: str,
     task_id: str,
@@ -310,6 +453,7 @@ def correlate_scheduled_grab(
     return _correlate_grab(
         conn,
         lib2_context=lib2_context,
+        target_context=target_context,
         search_result=search_result,
         source=source,
         trigger="scheduled",
@@ -334,11 +478,12 @@ def _try_correlate(
     correlate: Callable[..., Optional[Dict[str, str]]],
     *,
     lib2_context: Optional[Mapping[str, Any]],
+    target_context: Optional[Mapping[str, Any]],
     connection_factory: Optional[Callable[[], Any]],
     **kwargs: Any,
 ) -> Optional[Dict[str, str]]:
     """Fail-open wrapper: correlation must never block or fail a download."""
-    if not lib2_context:
+    if not lib2_context and not target_context and not kwargs.get("search_result"):
         return None
     try:
         if connection_factory is None:
@@ -346,7 +491,12 @@ def _try_correlate(
             connection_factory = get_database()._get_connection
         conn = connection_factory()
         try:
-            markers = correlate(conn, lib2_context=lib2_context, **kwargs)
+            markers = correlate(
+                conn,
+                lib2_context=lib2_context,
+                target_context=target_context,
+                **kwargs,
+            )
             conn.commit()
             return markers
         except Exception:
@@ -362,6 +512,7 @@ def _try_correlate(
 def try_correlate_manual_grab(
     *,
     lib2_context: Optional[Mapping[str, Any]],
+    target_context: Optional[Mapping[str, Any]] = None,
     search_result: Mapping[str, Any],
     source: str,
     batch_id: Optional[str] = None,
@@ -373,6 +524,7 @@ def try_correlate_manual_grab(
     return _try_correlate(
         correlate_manual_grab,
         lib2_context=lib2_context,
+        target_context=target_context,
         connection_factory=connection_factory,
         search_result=search_result,
         source=source,
@@ -385,6 +537,7 @@ def try_correlate_manual_grab(
 def try_correlate_scheduled_grab(
     *,
     lib2_context: Optional[Mapping[str, Any]],
+    target_context: Optional[Mapping[str, Any]] = None,
     search_result: Mapping[str, Any],
     source: str,
     task_id: str,
@@ -397,6 +550,7 @@ def try_correlate_scheduled_grab(
     return _try_correlate(
         correlate_scheduled_grab,
         lib2_context=lib2_context,
+        target_context=target_context,
         connection_factory=connection_factory,
         search_result=search_result,
         source=source,

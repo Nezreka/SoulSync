@@ -106,10 +106,11 @@ def _acquisition_task_ref(task):
 
 
 def _correlate_scheduled_acquisition(
-        task_id, batch_id, track_info, candidate, download_id, deps):
+        task_id, batch_id, profile_id, track_info, candidate, download_id, deps):
     """Roadmap 3 slice 2 (docs/library-v2.md §5.5): a wishlist-worker dispatch
-    whose ``track_info.source_info`` rides the lib2 mirror context correlates
-    observationally into the acquisition contract (trigger=scheduled).
+    correlates observationally into the acquisition contract
+    (trigger=scheduled). A lib2 mirror keeps its exact entity; an ordinary
+    wishlist task gets an explicitly namespaced legacy-shadow identity.
 
     Acquisition-native dispatches (``_acquisition_import_id``) already carry
     their full persistent bookkeeping and must not be double-booked. When the
@@ -118,14 +119,16 @@ def _correlate_scheduled_acquisition(
     Fail-open: correlation must never break or delay the download it describes.
     """
     try:
+        # Acquisition/Library-v2 is admin-profile only (ADR-01). Other
+        # profiles keep their independent legacy wishlist behavior.
+        if int(profile_id or 1) != 1:
+            return None
         if not isinstance(track_info, dict):
             return None
         if track_info.get('_acquisition_import_id'):
             return None
         from core.downloads.origin import _parse_source_info
         source_info = _parse_source_info(track_info.get('source_info'))
-        if not source_info.get('lib2_track_id'):
-            return None
         source = 'soulseek'
         try:
             spec = deps.download_orchestrator.registry.get_spec(candidate.username)
@@ -139,7 +142,8 @@ def _correlate_scheduled_acquisition(
                 'track_id': source_info.get('lib2_track_id'),
                 'album_id': source_info.get('lib2_album_id'),
                 'quality_profile_id': source_info.get('quality_profile_id'),
-            },
+            } if source_info.get('lib2_track_id') else None,
+            target_context=track_info,
             search_result={
                 'username': candidate.username,
                 'filename': candidate.filename,
@@ -282,10 +286,12 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
 
             # Prepare download - check if we have explicit album context from artist page
             track_info = {}
+            task_profile_id = 1
             with tasks_lock:
                 if task_id in download_tasks:
                     raw_track_info = download_tasks[task_id].get('track_info')
                     track_info = raw_track_info if isinstance(raw_track_info, dict) else {}
+                    task_profile_id = download_tasks[task_id].get('profile_id', 1) or 1
 
             # Use explicit album/artist context if available (from artist album downloads)
             has_explicit_context = track_info and track_info.get('_is_explicit_album_download', False)
@@ -401,7 +407,8 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                 acq_markers = None
                 if not user_manual_pick:
                     acq_markers = _correlate_scheduled_acquisition(
-                        task_id, batch_id, track_info, candidate, download_id, deps)
+                        task_id, batch_id, task_profile_id, track_info,
+                        candidate, download_id, deps)
                 # Store context for post-processing with complete Spotify metadata (GUI PARITY)
                 context_key = deps.make_context_key(username, filename)
                 with matched_context_lock:

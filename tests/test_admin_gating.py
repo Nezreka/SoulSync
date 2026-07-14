@@ -152,3 +152,38 @@ def test_library_v2_profile_reaches_download_pipeline(client, monkeypatch):
     assert context['track_info']['quality_profile_id'] == 7
     assert context['track_info']['name'] == 'Route Track'
     assert context['track_info']['artists'] == [{'name': 'Route Artist'}]
+
+
+def test_admin_manual_download_without_lib2_context_is_correlated(client, monkeypatch):
+    calls = []
+
+    class _DownloadOrchestrator:
+        @staticmethod
+        def download(*_args):
+            return object()
+
+    def _capture(username, search_result, lib2_ctx, **kwargs):
+        calls.append((username, search_result, lib2_ctx, kwargs))
+        return {"download_id": "manual-shadow", "request_id": "arq1-shadow"}
+
+    monkeypatch.setattr(web_server, 'download_orchestrator', _DownloadOrchestrator())
+    monkeypatch.setattr(web_server, 'run_async', lambda _result: 'download-id')
+    monkeypatch.setattr(web_server, 'add_activity_item', lambda *_args: None)
+    monkeypatch.setattr(web_server, '_correlate_manual_grab', _capture)
+
+    key = web_server._make_context_key('user', 'folder/shadow.flac')
+    web_server.matched_downloads_context.pop(key, None)
+    response = client.post('/api/download', json={
+        'username': 'user',
+        'filename': 'folder/shadow.flac',
+        'title': 'Shadow Track',
+        'artist': 'Shadow Artist',
+        'album_name': 'Shadow Album',
+    })
+
+    assert response.status_code == 200
+    assert len(calls) == 1
+    assert calls[0][2] is None
+    assert calls[0][1]['title'] == 'Shadow Track'
+    context = web_server.matched_downloads_context.pop(key)
+    assert context['_acquisition_grab_download_id'] == 'manual-shadow'

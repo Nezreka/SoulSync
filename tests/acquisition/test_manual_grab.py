@@ -98,6 +98,43 @@ def test_track_grab_correlates_recording_request(legacy_db):
         conn.close()
 
 
+def test_manual_grab_without_lib2_entity_uses_legacy_shadow_identity(legacy_db):
+    conn = _prepared_conn(legacy_db)
+    try:
+        target = {
+            "id": "spotify-track-123",
+            "source": "spotify",
+            "name": "One Dance",
+            "artists": [{"name": "Drake"}],
+            "album": {"name": "Views"},
+        }
+        first = correlate_manual_grab(
+            conn,
+            target_context=target,
+            search_result=_search_result(),
+            source="soulseek",
+            config_get=_CONFIG_GET,
+        )
+        second = correlate_manual_grab(
+            conn,
+            target_context=target,
+            search_result=_search_result(filename="another-peer.flac"),
+            source="soulseek",
+            config_get=_CONFIG_GET,
+        )
+
+        first_request = get_request(conn, first["request_id"])
+        second_request = get_request(conn, second["request_id"])
+        assert first_request.scope == "recording"
+        assert first_request.entity_id == second_request.entity_id
+        assert first_request.search_options["entity_namespace"] == "legacy_shadow"
+        assert first_request.search_options["catalog_snapshot"] == {
+            "album": "Views", "artist": "Drake", "title": "One Dance"}
+        assert "lib2_track_id" not in first_request.search_options
+    finally:
+        conn.close()
+
+
 def test_matching_manual_pick_is_accepted_by_the_gate(legacy_db):
     conn = _prepared_conn(legacy_db)
     try:

@@ -1617,8 +1617,22 @@ P2-05 und eine Reihe P2-UX/Robustheits-Findings).
    mit dem synthetischen Correlation-ID; der Callback ist fail-open und
    ignoriert completed, native Acquisition- und normale Legacy-Downloads.
    Gezielte Tests: manual, scheduled, completed, unbekannt sowie Callback-
-   Fehler am Endpoint (48 passed). **Noch offen:** Grabs ohne lib2-Entity,
-   danach erst die globale Durchsetzung.
+   Fehler am Endpoint (48 passed). **Vierte Scheibe erledigt 2026-07-14:**
+   Auch Admin-Profil-Grabs ohne lib2-Entity werden jetzt über denselben
+   observational/fail-open Adapter korreliert. Ein vorhandener lib2-Verweis
+   bleibt unverändert die exakte Entity; normale Interactive-Picks und
+   Wishlist-Tasks erhalten stattdessen eine explizit namespacete
+   `legacy_shadow`-Recording-Identität aus einem stabilen, redigierten Digest.
+   Der serverseitige Wishlist-Task ist dabei die Ziel-Wahrheit, nicht der
+   Candidate; manuelle Picks verwenden die bereits dispatchten Pick-Fakten.
+   Es werden bewusst keine künstlichen lib2-Katalogzeilen erzeugt. Das
+   Eligibility-Gate bleibt observational (`forced=0`), während Quality,
+   Source-Auswahl, Retry, Quarantäne und Import weiter vollständig der
+   Main-Pipeline gehören. ADR-01 bleibt erhalten: nicht-administrative
+   Profile verbleiben in ihrem unabhängigen Legacy-Wishlist-Pfad. 51 gezielte
+   Korrelations-/Candidate-/Cancel-Tests sind grün. **Noch offen:** globale
+   Durchsetzung nach einem fail-open-/Coverage-Gate entwerfen und erst dann
+   aktivieren.
 
 **Session-Abschluss-Gate:** volle Python-Suite grün — **8112 passed,
 2 skipped, 2 deselected in 291.41s**. Die zwei Skips sind weiterhin die

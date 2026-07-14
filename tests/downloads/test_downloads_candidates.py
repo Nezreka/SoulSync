@@ -117,12 +117,13 @@ def _build_deps(
 
 
 def _seed_task(task_id, *, status="pending", track_info=None, used_sources=None,
-               download_id=None):
+               download_id=None, profile_id=1):
     download_tasks[task_id] = {
         "status": status,
         "track_info": track_info or {},
         "used_sources": used_sources or set(),
         "download_id": download_id,
+        "profile_id": profile_id,
     }
 
 
@@ -644,18 +645,41 @@ def test_user_manual_pick_is_not_scheduled_correlated(monkeypatch):
     assert calls == []
 
 
-def test_source_info_without_lib2_context_is_not_correlated(monkeypatch):
-    calls = _capture_scheduled_correlation(monkeypatch)
+def test_wishlist_without_lib2_context_uses_legacy_shadow_correlation(monkeypatch):
+    calls = _capture_scheduled_correlation(
+        monkeypatch, markers={"download_id": "scheduled-shadow", "request_id": "arq1-z"})
     deps = _build_deps()
     _seed_task("t_pl", track_info={
-        "source_info": {"playlist_name": "My Playlist"}})
+        "id": "spotify-track-123",
+        "name": "Song Title",
+        "artists": [{"name": "Artist Name"}],
+        "source_info": {"playlist_name": "My Playlist"},
+    })
 
     dc.attempt_download_with_candidates(
         "t_pl", [_Candidate(filename="pl.flac")], _Track(), deps=deps)
 
+    assert len(calls) == 1
+    assert calls[0]["lib2_context"] is None
+    assert calls[0]["target_context"]["id"] == "spotify-track-123"
+    assert matched_downloads_context[
+        "user1::pl.flac"]["_acquisition_grab_download_id"] == "scheduled-shadow"
+
+
+def test_nonadmin_wishlist_dispatch_stays_outside_admin_acquisition(monkeypatch):
+    calls = _capture_scheduled_correlation(monkeypatch)
+    deps = _build_deps()
+    _seed_task(
+        "t_other_profile",
+        profile_id=2,
+        track_info={"id": "spotify-track-123", "name": "Song Title"},
+    )
+
+    result = dc.attempt_download_with_candidates(
+        "t_other_profile", [_Candidate(filename="other.flac")], _Track(), deps=deps)
+
+    assert result is True
     assert calls == []
-    assert "_acquisition_grab_download_id" not in (
-        matched_downloads_context["user1::pl.flac"])
 
 
 def test_failed_correlation_never_blocks_the_download(monkeypatch):

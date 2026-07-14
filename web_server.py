@@ -7072,10 +7072,10 @@ def _audit_manual_skip(context_key, title, artist, skip_checks):
         logger.debug("manual-skip audit write failed: %s", _se)
 
 
-def _correlate_lib2_manual_grab(
+def _correlate_manual_grab(
         username, search_result, lib2_ctx, batch_id=None,
         legacy_download_id=None):
-    """Acquisition correlation for a dispatched lib2 manual grab (roadmap 3).
+    """Acquisition correlation for a dispatched manual grab (roadmap 3).
 
     Entirely fail-open: correlation is observational bookkeeping and must
     never fail or delay the download it describes. When the plugin registry
@@ -7083,13 +7083,15 @@ def _correlate_lib2_manual_grab(
     source family from the username (ADR-08).
     """
     try:
-        if not lib2_ctx:
+        from core.library2 import ADMIN_PROFILE_ID
+        if get_current_profile_id() != ADMIN_PROFILE_ID:
             return None
         spec = download_orchestrator.registry.get_spec(username) if username else None
         source = spec.name if spec else 'soulseek'
         from core.acquisition.manual_grab import try_correlate_manual_grab
         return try_correlate_manual_grab(
             lib2_context=lib2_ctx,
+            target_context=search_result,
             search_result=search_result,
             source=source,
             batch_id=batch_id,
@@ -7163,7 +7165,7 @@ def start_download():
 
             # Acquisition correlation (roadmap 3): one shared batch id ties
             # the per-file requests of this album grab together.
-            _album_batch_id = str(uuid.uuid4()) if _lib2_ctx else None
+            _album_batch_id = str(uuid.uuid4())
 
             started_downloads = 0
             for track_data in tracks:
@@ -7179,7 +7181,7 @@ def start_download():
                             file_size
                         ))
                     if download_id:
-                        _acq_markers = _correlate_lib2_manual_grab(
+                        _acq_markers = _correlate_manual_grab(
                             username,
                             {
                                 'username': username,
@@ -7273,9 +7275,10 @@ def start_download():
             logger.info(f"Download ID returned: {download_id}")
 
             if download_id:
-                # Acquisition correlation (roadmap 3): a grab that names a
-                # lib2 entity gets a persistent request/grab/history trail.
-                _acq_markers = _correlate_lib2_manual_grab(
+                # Acquisition correlation (roadmap 3): preserve an exact
+                # lib2 entity when named; otherwise use a namespaced legacy
+                # shadow identity for the already-dispatched manual pick.
+                _acq_markers = _correlate_manual_grab(
                     username,
                     {
                         'username': username,

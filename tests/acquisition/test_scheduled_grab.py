@@ -103,6 +103,42 @@ def test_wishlist_dispatch_correlates_scheduled_request(legacy_db):
         conn.close()
 
 
+def test_wishlist_dispatch_without_lib2_entity_uses_task_target(legacy_db):
+    conn = _prepared_conn(legacy_db)
+    try:
+        markers = correlate_scheduled_grab(
+            conn,
+            target_context={
+                "id": "spotify-track-123",
+                "source": "spotify",
+                "name": "One Dance",
+                "artists": [{"name": "Drake"}],
+                "album": {"name": "Views"},
+                "quality_profile_id": 1,
+            },
+            search_result=_search_result(artist="Wrong Candidate Artist"),
+            source="soulseek",
+            task_id="task-shadow",
+            config_get=_CONFIG_GET,
+        )
+
+        request = get_request(conn, markers["request_id"])
+        assert request.scope == "recording"
+        assert request.search_options["entity_namespace"] == "legacy_shadow"
+        assert request.search_options["catalog_snapshot"]["artist"] == "Drake"
+        run = conn.execute(
+            """SELECT r.accepted FROM candidate_decision_runs r
+                 JOIN acquisition_grabs g ON g.decision_run_id=r.id
+                WHERE g.download_id=?""",
+            (markers["download_id"],),
+        ).fetchone()
+        assert run["accepted"] == 0
+        event = list_history_events(conn, request_id=request.id)[-1]
+        assert "artist_mismatch" in event.payload["rejections"]
+    finally:
+        conn.close()
+
+
 def test_gate_rejections_are_recorded_but_never_enforced(legacy_db):
     conn = _prepared_conn(legacy_db)
     try:
