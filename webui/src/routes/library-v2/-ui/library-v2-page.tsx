@@ -2498,11 +2498,13 @@ export function SectionBulkMonitorButton({
   scope,
   title,
   allMonitored,
+  albumIds,
 }: {
   artistId: number;
   scope: 'albums' | 'eps' | 'singles';
   title: string;
   allMonitored: boolean;
+  albumIds: number[];
 }) {
   const queryClient = useQueryClient();
   const [busy, setBusy] = useState(false);
@@ -2513,7 +2515,7 @@ export function SectionBulkMonitorButton({
     setBusy(true);
     setError(null);
     try {
-      const jobId = await bulkMonitorLibraryV2Releases(artistId, scope, targetMonitored);
+      const jobId = await bulkMonitorLibraryV2Releases(artistId, scope, targetMonitored, albumIds);
       const jobError = await awaitBulkJob(queryClient, jobId);
       if (jobError) throw new Error(jobError);
     } catch (caught) {
@@ -2585,6 +2587,7 @@ function AlbumGroup({
           scope={scope}
           title={title}
           allMonitored={allMonitored}
+          albumIds={albums.map((album) => album.id)}
         />
       </h2>
       <div className={styles.albumList}>

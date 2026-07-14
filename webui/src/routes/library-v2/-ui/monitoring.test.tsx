@@ -133,7 +133,13 @@ describe('library v2 monitoring mutations', () => {
     );
 
     renderWithQueryClient(
-      <SectionBulkMonitorButton artistId={7} scope="albums" title="Albums" allMonitored={false} />,
+      <SectionBulkMonitorButton
+        artistId={7}
+        scope="albums"
+        title="Albums"
+        allMonitored={false}
+        albumIds={[11, 12]}
+      />,
     );
 
     fireEvent.click(screen.getByRole('button', { name: /Monitor all/ }));
@@ -146,8 +152,8 @@ describe('library v2 monitoring mutations', () => {
     await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
     expect(starts).toBe(2);
     expect(submitted).toEqual([
-      { scope: 'albums', monitored: true },
-      { scope: 'albums', monitored: true },
+      { scope: 'albums', monitored: true, album_ids: [11, 12] },
+      { scope: 'albums', monitored: true, album_ids: [11, 12] },
     ]);
   });
 });

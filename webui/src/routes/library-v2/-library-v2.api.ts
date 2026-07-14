@@ -155,10 +155,11 @@ export async function bulkMonitorLibraryV2Releases(
   artistId: number,
   scope: 'albums' | 'eps' | 'singles' | 'all' | 'missing',
   monitored: boolean,
+  albumIds?: number[],
 ): Promise<string> {
   const payload = await readJson<{ success: boolean; job_id?: string; error?: string }>(
     apiClient.post(`library/v2/artists/${artistId}/releases/monitor`, {
-      json: { scope, monitored },
+      json: { scope, monitored, ...(albumIds ? { album_ids: albumIds } : {}) },
     }),
   );
   if (!payload.success) throw new Error(payload.error || 'Bulk monitor failed');

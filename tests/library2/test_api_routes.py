@@ -932,6 +932,52 @@ def test_bulk_monitor_updates_rules_projection_and_preserves_explicit_tracks(api
     assert album_rules == 3
 
 
+def test_bulk_monitor_album_allowlist_excludes_hidden_releases(api):
+    import time
+
+    client, db, ids = api
+    response = client.post(
+        f"/api/library/v2/artists/{ids['artist']}/releases/monitor",
+        json={
+            "scope": "all",
+            "monitored": True,
+            "album_ids": [ids["views"]],
+        },
+    )
+    assert response.status_code == 200
+    job_id = response.get_json()["job_id"]
+    for _ in range(200):
+        status = client.get(
+            "/api/library/v2/jobs/status",
+            query_string={"job_id": job_id},
+        ).get_json()
+        if not status["running"]:
+            break
+        time.sleep(0.01)
+    assert status["error"] is None
+    assert status["result"]["albums"] == 1
+
+    with _conn(db) as conn:
+        rows = {
+            row["id"]: row["monitored"]
+            for row in conn.execute(
+                "SELECT id, monitored FROM lib2_albums WHERE id IN (?,?,?)",
+                (ids["views"], ids["ep"], ids["single"]),
+            )
+        }
+    assert rows == {ids["views"]: 1, ids["ep"]: 0, ids["single"]: 0}
+
+
+def test_bulk_monitor_rejects_invalid_album_allowlist(api):
+    client, _db, ids = api
+    response = client.post(
+        f"/api/library/v2/artists/{ids['artist']}/releases/monitor",
+        json={"scope": "all", "monitored": True, "album_ids": [True]},
+    )
+    assert response.status_code == 400
+    assert "positive integers" in response.get_json()["error"]
+
+
 def test_monitor_actions_record_provenance(api):
     client, db, ids = api
     client.post(f"/api/library/v2/tracks/{ids['ep_track']}/monitor",

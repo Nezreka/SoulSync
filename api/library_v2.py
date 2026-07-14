@@ -1574,7 +1574,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
     def lib2_bulk_monitor(artist_id):
         """Bulk-set the monitor flag on an artist's releases.
 
-        Body: ``{"scope": "albums"|"eps"|"singles"|"all", "monitored": bool}``.
+        Body: ``{"scope": "albums"|"eps"|"singles"|"all", "monitored": bool,
+        "album_ids": [int, ...]}``.  ``album_ids`` is an optional fail-closed
+        allowlist used when the UI is showing a filtered release set.
         Runs in the background: monitoring unowned releases resolves each
         tracklist from a metadata provider before mirroring to the wishlist.
         """
@@ -1584,6 +1586,19 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         body = request.json or {}
         scope = str(body.get("scope") or "all")
         monitored = bool(body.get("monitored", True))
+        requested_album_ids = body.get("album_ids")
+        album_allowlist = None
+        if requested_album_ids is not None:
+            if not isinstance(requested_album_ids, list) or len(requested_album_ids) > 5000:
+                return jsonify({"success": False, "error": "album_ids must be a list of at most 5000 IDs"}), 400
+            if any(
+                isinstance(album_id, bool)
+                or not isinstance(album_id, int)
+                or album_id <= 0
+                for album_id in requested_album_ids
+            ):
+                return jsonify({"success": False, "error": "album_ids must contain positive integers"}), 400
+            album_allowlist = sorted(set(requested_album_ids))
         type_filter = {
             "albums": "al.album_type NOT IN ('single','ep')",
             "eps": "al.album_type = 'ep'",
@@ -1622,10 +1637,20 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             try:
                 conn = db._get_connection()
                 try:
-                    albums = [r["id"] for r in conn.execute(
-                        f"""SELECT al.id FROM lib2_album_artists aa
-                            JOIN lib2_albums al ON al.id = aa.album_id
-                           WHERE aa.artist_id = ? AND {type_filter}""", (artist_id,))]
+                    albums = []
+                    if album_allowlist is None or album_allowlist:
+                        allowlist_sql = ""
+                        params = [artist_id]
+                        if album_allowlist is not None:
+                            marks = ",".join("?" for _ in album_allowlist)
+                            allowlist_sql = f" AND al.id IN ({marks})"
+                            params.extend(album_allowlist)
+                        albums = [r["id"] for r in conn.execute(
+                            f"""SELECT al.id FROM lib2_album_artists aa
+                                JOIN lib2_albums al ON al.id = aa.album_id
+                               WHERE aa.artist_id = ? AND {type_filter}{allowlist_sql}""",
+                            params,
+                        )]
                     _job_registry.update(job_id, total=len(albums))
                     mirrored = 0
                     for i, album_id in enumerate(albums):

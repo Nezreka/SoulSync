@@ -2353,6 +2353,21 @@ bekannte Main-Chunk-Hinweis). **Logischer nächster Schritt:** P2-06 als kleinst
     sind grün. **Nächster logischer Schritt:** P2-12 — „Monitor all“ darf aus
     „My Library“ nicht unsichtbare provider-only Releases miterfassen; UI-
     Scope und Backend-Scope müssen denselben sichtbaren Satz meinen.
+32. ~~**Sichtbarer Bulk-Monitor-Scope (P2-12).**~~ **Abgeschlossen
+    2026-07-14:** Der vorhandene Release-Bulk-Monitor akzeptiert optional eine
+    streng validierte `album_ids`-Allowlist und schneidet sie serverseitig
+    zusätzlich mit Artist und Release-Type-Scope. Die Album-/EP-/Singles-
+    Sektionen senden exakt die IDs, die der aktuelle „My Library“-/„All
+    Releases“-View anzeigt; Retry bewahrt dieselbe Liste. Eine leere Allowlist
+    bleibt leer, fremde/verborgene Releases werden nie durch den groben Scope
+    ergänzt. Der Monitoring-Dialog ohne sichtbaren Listenfilter verwendet
+    bewusst weiter den bestehenden vollständigen `all`/`missing`-Scope. Rules,
+    Wanted-Projektion und Wishlist-Mirror laufen unverändert durch denselben
+    Bulk-Worker. Drei gezielte Backend- und vier Monitoring-UI-Tests sowie
+    Ruff, 23 Library-v2-Vitests, Frontend-Format/Lint/Typecheck und
+    Production-Build sind grün. **Nächster logischer Schritt:** P2-13 —
+    gleichzeitigen manuellen und periodischen Discography-Sync pro Artist
+    serialisieren und Snapshot-/Auto-Monitor-Folgen deterministisch halten.
 
 **Session-Abschluss-Gate 2026-07-14:** Seit dem vorherigen Full-Gate wurden
 Roadmap 13 sowie 16–23 und Phase E vollständig abgeschlossen und jeweils
@@ -2715,10 +2730,12 @@ Priorität, kompakt aufgelistet für spätere Aufnahme):
   behandelt und kann vor bekannten Releases einsortiert werden.~~ **Behoben
   2026-07-14:** Unknown-Gruppe bleibt richtungsunabhängig am Ende
   (Roadmap-Punkt 31).
-- P2-12: „My Library"-Ansicht zeigt nur monitorierte/library Releases, aber
+- ~~P2-12: „My Library"-Ansicht zeigt nur monitorierte/library Releases, aber
   „Monitor all" wirkt backendseitig auf den vollen Release-Scope inkl.
   versteckter provider-only Discography — Risiko, unbeabsichtigt den ganzen
-  Backkatalog zu monitoren.
+  Backkatalog zu monitoren.~~ **Behoben 2026-07-14:** sichtbare Release-ID-
+  Allowlist wird fail-closed im bestehenden Bulk-Worker angewendet
+  (Roadmap-Punkt 32).
 - P2-13: Discography-Sync hat keine Concurrency-/Snapshot-Garantie
   (gleichzeitiger manueller + periodischer Refresh, kein Artist-Sync-Lock).
 - P2-15: Tracklist-Fallback ohne Spotify-ID kann bei Deezer die falsche
