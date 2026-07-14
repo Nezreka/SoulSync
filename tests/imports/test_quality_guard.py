@@ -158,6 +158,18 @@ def test_force_grab_approval_fail_closed_for_other_reason(monkeypatch):
     assert '_force_approved_quarantine_reason' not in context
 
 
+def test_manual_import_bypass_list_skips_quality_but_not_acoustid():
+    # The Import page's explicit-match flows set this exact list (#1017):
+    # the quality profile has no veto on a file the user hand-matched, but
+    # AcoustID/integrity/silence still guard against a mislabeled file.
+    ctx = {'_skip_quarantine_check': ['quality', 'bit_depth']}
+    assert _should_skip_quarantine_check(ctx, 'quality') is True
+    assert _should_skip_quarantine_check(ctx, 'bit_depth') is True
+    assert _should_skip_quarantine_check(ctx, 'acoustid') is False
+    assert _should_skip_quarantine_check(ctx, 'integrity') is False
+    assert _should_skip_quarantine_check(ctx, 'silence') is False
+
+
 def test_quality_quarantine_persists_quality_trigger(monkeypatch, tmp_path):
     # A quality reject writes trigger='quality' (not 'acoustid') into the
     # sidecar, so Approve never routes it through the force_import path.
