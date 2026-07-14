@@ -780,8 +780,8 @@ Confirmation. (Status: teilweise — siehe Abschnitt 7 TODO.)
 (`POST /api/wishlist/process`) + Watchlist-Scan
 (`core/watchlist_scanner.py`). Playlists-Integration zuletzt. (Status:
 Search Monitored korrekt implementiert seit 2026-07-07-Pass; Playlists
-seit 2026-07-14 begonnen; typisierte Library-v2-Route/API-Grenze steht,
-Darstellung folgt in Roadmap-Punkt 14.)
+seit 2026-07-14 über die vorhandenen Mirrored-Playlist-Reads und die zentrale
+Playlist-Pipeline in Library v2 integriert.)
 
 ### 5.3 Architektur-Korrektur — bestehende Main-Pipeline wiederverwenden
 
@@ -1955,7 +1955,7 @@ verändert; daher waren Frontend-Typecheck/Vitest/Build nicht erforderlich.
     Punkt 14 / Phase E — Playlists zuletzt über die vorhandene Wishlist-/
     Acquisition-Pipeline anbinden, ohne zweiten Importer oder zweite
     Decision-Engine.
-14. **Playlists** (Phase E, bewusst zuletzt). **Erste Slice 2026-07-14:**
+14. ~~**Playlists** (Phase E, bewusst zuletzt).~~ **Erste Slice 2026-07-14:**
     Library v2 hat jetzt typisierte List-/Detail-Reads auf die vorhandenen
     `mirrored_playlists`-Endpoints und einen dünnen Start-Client für exakt die
     bestehende `run_mirrored_playlist_pipeline`-Kette (Refresh → Discovery →
@@ -1966,6 +1966,19 @@ verändert; daher waren Frontend-Typecheck/Vitest/Build nicht erforderlich.
     Build sind grün. **Nächste Slice:** Playlist-Index und -Detail mit Track-/
     Pipeline-Status auf der Library-Seite darstellen und den vorhandenen
     Pipeline-Start sichtbar verdrahten.
+    **Zweite/abschließende Slice 2026-07-14:** Der Library-Header schaltet
+    stabil zwischen Artists und Playlists; Playlist-Index und `playlist=<id>`-
+    Detail zeigen Source, Owner, Artwork, Tracks, Discovery-/Wanted-/Library-
+    Zähler sowie den live gepollten Pipeline-Status. „Run pipeline" delegiert
+    ausschließlich an den vorhandenen Endpoint und damit an denselben
+    `run_mirrored_playlist_pipeline`; nicht refreshbare File-/Beatport-Quellen
+    bleiben ehrlich deaktiviert. Mirroring/Quellenauswahl bleibt bewusst auf
+    der etablierten Playlists-Seite statt in Library v2 dupliziert. Frontend-
+    Check/Typecheck, acht gezielte API-/Schema-Vitests und Production-Build
+    sind grün. Damit ist Phase E / Roadmap-Punkt 14 abgeschlossen.
+    **Nächster logischer Schritt:** Roadmap-Punkt 15 — die bisher code-/curl-
+    verifizierten Phase-C/D-Flows im Docker-Deployment per Browser klicken und
+    nur tatsächlich reproduzierbare UI-Lücken korrigieren.
 15. **Browser-Klick-Verifikation** in Docker für Phase-C/D-Flows, die nur
     code-/curl-verified sind.
 

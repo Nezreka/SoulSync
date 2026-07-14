@@ -149,6 +149,135 @@
   font-weight: 600;
 }
 
+/* --- mirrored playlists (Phase E) --- */
+.playlistGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 14px;
+}
+
+.playlistCard {
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.playlistCardLink {
+  display: flex;
+  width: 100%;
+  gap: 14px;
+  align-items: center;
+  border: 0;
+  padding: 14px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.playlistCardLink:hover {
+  background: rgba(var(--accent-rgb), 0.06);
+}
+
+.playlistArtwork {
+  width: 76px;
+  height: 76px;
+  flex: 0 0 76px;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.playlistCardBody {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.playlistCardTitle {
+  overflow: hidden;
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.playlistMeta {
+  color: rgba(255, 255, 255, 0.48);
+  font-size: 12px;
+}
+
+.playlistCounts {
+  display: flex;
+  gap: 5px 10px;
+  flex-wrap: wrap;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 11px;
+}
+
+.playlistCardFooter {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  padding: 10px 14px;
+}
+
+.playlistRunWrap {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.playlistPipeline {
+  min-width: 0;
+  flex: 1;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 11px;
+}
+
+.playlistPipelineError {
+  color: #fb7185;
+}
+
+.playlistPipelineRow {
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.playlistProgressTrack {
+  overflow: hidden;
+  height: 3px;
+  margin-top: 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.playlistProgressTrack span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: rgb(var(--accent-rgb));
+  transition: width 0.25s ease;
+}
+
+@media (max-width: 620px) {
+  .playlistGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .playlistCardFooter {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
 /* --- buttons --- */
 .btnPrimary,
 .btnGhost {
