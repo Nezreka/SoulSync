@@ -303,6 +303,102 @@ def _close_retry_journal(
         conn.close()
 
 
+def notify_manual_grab_import_success(
+    context: Mapping[str, Any],
+    *,
+    connection_factory: Optional[Callable[[], Any]] = None,
+) -> bool:
+    """Complete a correlated manual grab after shared-pipeline success.
+
+    Manual legacy grabs carry only the grab marker, never an acquisition
+    import id; ordinary downloads carry neither and remain untouched. The
+    marker survives quarantine sidecar serialization, so a later manual
+    approval reaches this callback after the remaining checks pass.
+    """
+    from core.acquisition.manual_grab import GRAB_MARKER
+
+    download_id = _context_value(context, GRAB_MARKER)
+    if not download_id:
+        return False
+    final_path = context.get("_final_processed_path") or context.get("_final_path")
+
+    if connection_factory is None:
+        from database.music_database import get_database
+        connection_factory = get_database()._get_connection
+
+    conn = connection_factory()
+    try:
+        from core.acquisition.workflow import record_grab_outcome
+        record_grab_outcome(
+            conn,
+            str(download_id),
+            completed=True,
+            output_path=str(final_path) if final_path else None,
+        )
+        conn.commit()
+        return True
+    except (KeyError, ValueError) as exc:
+        conn.rollback()
+        logger.warning(
+            "Manual grab completion rejected for %s: %s", download_id, exc)
+        return False
+    except Exception:
+        conn.rollback()
+        logger.exception("Manual grab completion failed for %s", download_id)
+        return False
+    finally:
+        conn.close()
+
+
+def notify_manual_grab_quarantined(
+    context: Mapping[str, Any],
+    *,
+    trigger: str,
+    reason: str,
+    connection_factory: Optional[Callable[[], Any]] = None,
+) -> bool:
+    """Journal quarantine of a correlated manual grab as history only.
+
+    The request deliberately stays ``grabbing``: legacy semantics keep the
+    file waiting for manual review, and an approval re-enters the shared
+    pipeline whose success closes the grab. Stale rows are eventually failed
+    by ``manual_grab.fail_stale_manual_grabs``.
+    """
+    from core.acquisition.manual_grab import GRAB_MARKER
+
+    download_id = _context_value(context, GRAB_MARKER)
+    if not download_id:
+        return False
+
+    if connection_factory is None:
+        from database.music_database import get_database
+        connection_factory = get_database()._get_connection
+
+    conn = connection_factory()
+    try:
+        from core.acquisition.grabs import get_grab
+        from core.acquisition.history import record_history_event
+        grab = get_grab(conn, str(download_id)) or {}
+        record_history_event(
+            conn,
+            "import_file_quarantined",
+            request_id=grab.get("acquisition_request_id"),
+            candidate_id=grab.get("release_candidate_id"),
+            download_id=str(download_id),
+            reason_code=str(trigger or "unknown")[:100],
+            message=str(reason or "Shared pipeline quarantine"),
+            payload={"manual_grab": True},
+        )
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        logger.exception("Manual grab quarantine journal failed for %s", download_id)
+        return False
+    finally:
+        conn.close()
+
+
 def notify_quarantine_approved(
     context: Mapping[str, Any],
     *,
@@ -335,6 +431,8 @@ def notify_task_retry_cancelled(
 
 
 __all__ = [
+    "notify_manual_grab_import_success",
+    "notify_manual_grab_quarantined",
     "notify_pipeline_import_quarantined",
     "notify_pipeline_import_success",
     "notify_pipeline_retry_exhausted",

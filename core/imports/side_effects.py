@@ -409,6 +409,14 @@ def record_download_provenance(context: Dict[str, Any]) -> None:
     except Exception as e:
         logger.debug("acquisition pipeline callback skipped: %s", e)
 
+    # Correlated legacy manual grabs close their request/grab here too; the
+    # callback is a no-op for downloads without the manual-grab marker.
+    try:
+        from core.acquisition.pipeline_callback import notify_manual_grab_import_success
+        notify_manual_grab_import_success(context)
+    except Exception as e:
+        logger.debug("manual grab callback skipped: %s", e)
+
 
 def is_active_media_server_ready() -> tuple[bool, str]:
     """Standalone ('soulsync') is always ready — no external connection needed.

@@ -7133,6 +7133,10 @@ def start_download():
             if data.get('quality_check') is False:
                 _album_skip_checks.extend(['bit_depth', 'quality'])
 
+            # Acquisition correlation (roadmap 3): one shared batch id ties
+            # the per-file requests of this album grab together.
+            _album_batch_id = str(uuid.uuid4()) if _lib2_ctx else None
+
             started_downloads = 0
             for track_data in tracks:
                 try:
@@ -7147,6 +7151,25 @@ def start_download():
                             file_size
                         ))
                     if download_id:
+                        _acq_markers = None
+                        if _lib2_ctx:
+                            from core.acquisition.manual_grab import try_correlate_manual_grab
+                            _acq_spec = download_orchestrator.registry.get_spec(username) if username else None
+                            _acq_markers = try_correlate_manual_grab(
+                                lib2_context=_lib2_ctx,
+                                search_result={
+                                    'username': username,
+                                    'filename': filename,
+                                    'size': file_size,
+                                    'title': track_data.get('title'),
+                                    'artist': track_data.get('artist'),
+                                    'album': data.get('album_name'),
+                                    'quality': track_data.get('quality'),
+                                    'bitrate': track_data.get('bitrate'),
+                                },
+                                source=(_acq_spec.name if _acq_spec else 'soulseek'),
+                                batch_id=_album_batch_id,
+                            )
                         # Register download for post-processing (simple transfer to /Transfer)
                         context_key = _make_context_key(username, filename)
                         with matched_context_lock:
@@ -7169,6 +7192,8 @@ def start_download():
                                 ),
                                 '_skip_quarantine_check': _album_skip_checks or None,
                                 'lib2_entity': _lib2_ctx,
+                                '_acquisition_grab_download_id': (
+                                    _acq_markers or {}).get('download_id'),
                             }
                         if _album_skip_checks:
                             _audit_manual_skip(context_key, track_data.get('title'),
@@ -7223,6 +7248,26 @@ def start_download():
             logger.info(f"Download ID returned: {download_id}")
 
             if download_id:
+                # Acquisition correlation (roadmap 3): a grab that names a
+                # lib2 entity gets a persistent request/grab/history trail.
+                _acq_markers = None
+                if _lib2_ctx:
+                    from core.acquisition.manual_grab import try_correlate_manual_grab
+                    _acq_spec = download_orchestrator.registry.get_spec(username) if username else None
+                    _acq_markers = try_correlate_manual_grab(
+                        lib2_context=_lib2_ctx,
+                        search_result={
+                            'username': username,
+                            'filename': filename,
+                            'size': file_size,
+                            'title': data.get('title'),
+                            'artist': data.get('artist'),
+                            'album': data.get('album_name'),
+                            'quality': data.get('quality'),
+                            'bitrate': data.get('bitrate'),
+                        },
+                        source=(_acq_spec.name if _acq_spec else 'soulseek'),
+                    )
                 # Register download for post-processing (simple transfer to /Transfer)
                 context_key = _make_context_key(username, filename)
                 is_streaming_source = username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud', 'amazon')
@@ -7253,6 +7298,8 @@ def start_download():
                         ),
                         '_skip_quarantine_check': _skip_checks or None,
                         'lib2_entity': _lib2_ctx,
+                        '_acquisition_grab_download_id': (
+                            _acq_markers or {}).get('download_id'),
                     }
                     source_label = username.title() if is_streaming_source else 'Soulseek'
                     logger.info(f"[{source_label}] Registered simple download for post-processing: {context_key}")

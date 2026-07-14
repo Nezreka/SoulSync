@@ -227,6 +227,19 @@ def advance_open_imports(
     except Exception as exc:  # noqa: BLE001 - resume must not stop imports
         logger.warning("Acquisition retry resume failed: %s", exc)
 
+    # Correlated legacy manual grabs have no client monitor; a download that
+    # silently vanished must not leave its request "grabbing" forever.
+    try:
+        from core.acquisition.manual_grab import fail_stale_manual_grabs
+        sweep_conn = connection_factory()
+        try:
+            if fail_stale_manual_grabs(sweep_conn, now=timestamp):
+                sweep_conn.commit()
+        finally:
+            sweep_conn.close()
+    except Exception as exc:  # noqa: BLE001 - sweep must not stop imports
+        logger.warning("Stale manual grab sweep failed: %s", exc)
+
     conn = connection_factory()
     try:
         records = [
