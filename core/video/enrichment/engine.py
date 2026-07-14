@@ -74,6 +74,26 @@ class VideoEnrichmentEngine:
     def _cache_put(self, key, data, ttl=1800):
         self._cache.put(key, data, ttl=ttl)
 
+    def alt_titles_for(self, kind, tmdb_id) -> list:
+        """Cached AKA titles for a movie/show — the alias set the downloader matches
+        releases against. Cached hard (aliases barely change) so the search path adds
+        no per-grab TMDB latency. Best-effort: [] when TMDB isn't configured."""
+        if not tmdb_id:
+            return []
+        key = ("alt_titles", kind, str(tmdb_id))
+        hit = self._cache_get(key)
+        if hit is not None:
+            return hit
+        out = []
+        w = self.workers.get("tmdb")
+        if w and getattr(w, "enabled", False) and hasattr(w.client, "alternative_titles"):
+            try:
+                out = w.client.alternative_titles(kind, tmdb_id) or []
+            except Exception:   # noqa: BLE001 - a matching assist must never break a grab
+                logger.debug("alt_titles_for failed for %s %s", kind, tmdb_id, exc_info=True)
+        self._cache_put(key, out, ttl=86400)
+        return out
+
     def _omdb_blocked_now(self) -> bool:
         """The OMDb over-quota / bad-key latch — True while ratings should be skipped.
         Self-healing: once tripped it stays set (no per-item re-probe within a run), but

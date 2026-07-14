@@ -179,23 +179,40 @@ def normalize_title(s: Any) -> str:
     return _ARTICLE.sub("", s, count=1)
 
 
+def acceptable_titles(want_title: Any) -> set:
+    """The set of normalized titles a release may legitimately carry. ``want_title`` is
+    a single title OR an iterable of them (the film/show's primary title + its TMDB
+    alternative / original-language titles) — this is how we beat Radarr/Sonarr on
+    FALSE NEGATIVES: a release named by any known alias ('God Particle' for 'The
+    Cloverfield Paradox', a foreign film under its original title) still matches."""
+    if want_title is None:
+        return set()
+    items = [want_title] if isinstance(want_title, str) else list(want_title)
+    return {n for n in (normalize_title(x) for x in items) if n}
+
+
 def titles_match(release_name: Any, want_title: Any) -> bool:
-    """True when a release's parsed title matches the wanted film/show. Exact after
-    normalization, tolerating only trailing edition words ('Paradox Extended' for
-    'Paradox'). An unknown/unisolable title passes (the year gate still applies) so a
-    numeric title like '2012' is never falsely rejected — we only ever REJECT on a
-    confident mismatch, never guess a match."""
-    want = normalize_title(want_title)
-    if not want:
+    """True when a release's parsed title matches ANY acceptable title (primary +
+    aliases). Exact after normalization, tolerating only trailing edition words
+    ('Paradox Extended' for 'Paradox'). An unknown/unisolable title passes (the year
+    gate still applies) so a numeric title like '2012' is never falsely rejected — we
+    only ever REJECT on a confident mismatch against every acceptable title, never
+    guess a match."""
+    wants = acceptable_titles(want_title)
+    if not wants:
         return True
     got = normalize_title(extract_title(release_name))
-    if not got or got == want:
+    if not got:
         return True
-    if got.startswith(want + " "):
-        rest = got[len(want):].split()
-        if rest and all(tok in _EDITION_TOKENS for tok in rest):
+    for want in wants:
+        if got == want:
             return True
+        if got.startswith(want + " "):
+            rest = got[len(want):].split()
+            if rest and all(tok in _EDITION_TOKENS for tok in rest):
+                return True
     return False
 
 
-__all__ = ["parse_release", "extract_title", "normalize_title", "titles_match"]
+__all__ = ["parse_release", "extract_title", "normalize_title",
+           "acceptable_titles", "titles_match"]
