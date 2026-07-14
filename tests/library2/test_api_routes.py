@@ -717,6 +717,23 @@ def test_wanted_materialize_endpoint_is_shadow_only_and_idempotent(api):
     assert first["requests"][0]["request"]["id"] == second["requests"][0]["request"]["id"]
 
 
+def test_wanted_projection_status_endpoint_reports_cutover_readiness(api):
+    client, db, _ids = api
+    body = client.get("/api/library/v2/wanted-projection/status").get_json()
+    assert body["success"] is True
+    assert body["consumer_ready"] is False
+    assert body["missing"] == body["tracks"]
+
+    with _conn(db) as conn:
+        from core.library2.wanted import recompute_wanted
+        recompute_wanted(conn)
+        conn.commit()
+    body = client.get("/api/library/v2/wanted-projection/status").get_json()
+    assert body["consumer_ready"] is True
+    assert body["projection_version"] >= 1
+    assert body["missing"] == 0 and body["stale"] == 0
+
+
 def test_monitor_album_mirrors_with_active_profile(api):
     client, db, ids = api
     resp = client.post(f"/api/library/v2/albums/{ids['ep']}/monitor",
@@ -802,6 +819,44 @@ def test_album_cascade_still_projects_ruleless_tracks(api):
     with _conn(db) as conn:
         assert conn.execute("SELECT monitored FROM lib2_tracks WHERE id=?",
                             (ids["album_track"],)).fetchone()[0] == 0
+
+
+def test_bulk_monitor_updates_rules_projection_and_preserves_explicit_tracks(api):
+    import time
+
+    client, db, ids = api
+    client.post(
+        f"/api/library/v2/tracks/{ids['ep_track']}/monitor",
+        json={"monitored": True},
+    )
+    response = client.post(
+        f"/api/library/v2/artists/{ids['artist']}/releases/monitor",
+        json={"scope": "all", "monitored": False},
+    )
+    assert response.status_code == 200
+    for _ in range(200):
+        status = client.get("/api/library/v2/jobs/status").get_json()
+        if not status["running"]:
+            break
+        time.sleep(0.01)
+    assert status["running"] is False and status["error"] is None
+
+    with _conn(db) as conn:
+        explicit = conn.execute(
+            "SELECT wanted, reason FROM lib2_wanted_tracks WHERE track_id=?",
+            (ids["ep_track"],),
+        ).fetchone()
+        cascaded = conn.execute(
+            "SELECT wanted, reason FROM lib2_wanted_tracks WHERE track_id=?",
+            (ids["album_track"],),
+        ).fetchone()
+        album_rules = conn.execute(
+            "SELECT COUNT(*) FROM lib2_monitor_rules "
+            "WHERE entity_type='album' AND provenance='user_explicit'"
+        ).fetchone()[0]
+    assert dict(explicit) == {"wanted": 1, "reason": "track_explicit"}
+    assert dict(cascaded) == {"wanted": 0, "reason": "track_rule:cascade"}
+    assert album_rules == 3
 
 
 def test_monitor_actions_record_provenance(api):

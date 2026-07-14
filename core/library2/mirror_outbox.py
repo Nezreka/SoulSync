@@ -81,6 +81,30 @@ def enqueue_tracks(conn, track_ids: List[int], monitored: bool, *,
     return outbox_ids
 
 
+def enqueue_projected_tracks(
+    conn,
+    track_ids: List[int],
+    *,
+    profile_id: int = 1,
+    user_initiated: bool = False,
+) -> List[int]:
+    """Queue mirrors from authoritative wanted states, never flag guesses."""
+    from core.library2.wanted import track_wanted_states
+    states = track_wanted_states(conn, track_ids, profile_id=profile_id)
+    outbox_ids: List[int] = []
+    for wanted in (False, True):
+        selected = [track_id for track_id, state in states.items() if state is wanted]
+        if selected:
+            outbox_ids.extend(enqueue_tracks(
+                conn,
+                selected,
+                wanted,
+                profile_id=profile_id,
+                user_initiated=user_initiated,
+            ))
+    return outbox_ids
+
+
 def enqueue_artist_watchlist(conn, artist_id: int, monitored: bool, *,
                              profile_id: int = 1) -> List[int]:
     """Queue a watchlist add/remove mirror for a lib2 artist (same-transaction)."""
@@ -222,6 +246,6 @@ def prune_done(conn, *, keep: int = 500) -> int:
 
 
 __all__ = [
-    "enqueue_tracks", "enqueue_artist_watchlist", "drain",
+    "enqueue_tracks", "enqueue_projected_tracks", "enqueue_artist_watchlist", "drain",
     "outbox_status", "retry_failed", "prune_done", "MAX_ATTEMPTS",
 ]

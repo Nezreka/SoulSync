@@ -37,7 +37,9 @@ _ARTIST_STATS = """
     (SELECT COUNT(DISTINCT ta.track_id) FROM lib2_track_artists ta
        JOIN lib2_tracks t ON t.id = ta.track_id
        WHERE ta.artist_id = a.id
-         AND (t.monitored = 1
+         AND (COALESCE((SELECT wt.wanted FROM lib2_wanted_tracks wt
+                         WHERE wt.track_id=t.id AND wt.profile_id=1),
+                       t.monitored) = 1
               OR EXISTS(SELECT 1 FROM lib2_track_files tf
                         WHERE tf.track_id = t.id))) AS track_count,
     (SELECT COUNT(DISTINCT ta.track_id) FROM lib2_track_artists ta
@@ -398,6 +400,16 @@ def _serialize_track(conn, t, album=None) -> Dict[str, Any]:
         entity_id=t["id"],
         provider_fields=dict(t),
     )
+    keys = set(t.keys())
+    if "effective_wanted" in keys:
+        wanted = bool(t["effective_wanted"])
+    else:
+        wanted_row = conn.execute(
+            "SELECT wanted FROM lib2_wanted_tracks "
+            "WHERE profile_id=1 AND track_id=?",
+            (t["id"],),
+        ).fetchone()
+        wanted = bool(wanted_row["wanted"]) if wanted_row else bool(t["monitored"])
     track_meta = {
         "title": effective["title"],
         "track_number": effective["track_number"],
@@ -441,7 +453,7 @@ def _serialize_track(conn, t, album=None) -> Dict[str, Any]:
         "disc_number": effective["disc_number"],
         "duration": effective["duration"],
         "isrc": t["isrc"],
-        "monitored": bool(t["monitored"]),
+        "monitored": wanted,
         "quality_profile_id": t["quality_profile_id"],
         "canonical_track_id": t["canonical_track_id"],
         "artists": artists,
@@ -498,7 +510,12 @@ def get_album(conn, album_id: int) -> Optional[Dict[str, Any]]:
         "SELECT id, name FROM lib2_artists WHERE id = ?", (al["primary_artist_id"],)
     ).fetchone()
     track_rows = conn.execute(
-        "SELECT * FROM lib2_tracks WHERE album_id = ? ORDER BY disc_number, track_number, id",
+        """SELECT t.*, COALESCE(w.wanted, t.monitored) AS effective_wanted
+             FROM lib2_tracks t
+             LEFT JOIN lib2_wanted_tracks w
+                    ON w.track_id=t.id AND w.profile_id=1
+            WHERE t.album_id = ?
+            ORDER BY t.disc_number, t.track_number, t.id""",
         (album_id,),
     ).fetchall()
     album_for_tracks = album_effective
@@ -611,7 +628,14 @@ def get_album(conn, album_id: int) -> Optional[Dict[str, Any]]:
 
 def get_track(conn, track_id: int) -> Optional[Dict[str, Any]]:
     """Single-track detail incl. linked album + artists + file + status."""
-    t = conn.execute("SELECT * FROM lib2_tracks WHERE id = ?", (track_id,)).fetchone()
+    t = conn.execute(
+        """SELECT t.*, COALESCE(w.wanted, t.monitored) AS effective_wanted
+             FROM lib2_tracks t
+             LEFT JOIN lib2_wanted_tracks w
+                    ON w.track_id=t.id AND w.profile_id=1
+            WHERE t.id = ?""",
+        (track_id,),
+    ).fetchone()
     if t is None:
         return None
     album = conn.execute("SELECT * FROM lib2_albums WHERE id = ?", (t["album_id"],)).fetchone()

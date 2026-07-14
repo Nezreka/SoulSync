@@ -1,8 +1,9 @@
 """Monitor rules with provenance for Library v2 (audit P1-13/P1-14, Phase 1).
 
-The ``monitored`` columns on lib2 rows are the effective *projection* the
-rest of the app consumes (wishlist mirror, queries, UI). What was missing is
-WHY a row is (un)monitored — without that, an album cascade destroys
+The ``monitored`` columns on lib2 rows remain a compatibility projection for
+entity toggles and old code. Track acquisition, mirroring and read status use
+``lib2_wanted_tracks``. The rules capture WHY a row is (un)monitored — without
+that, an album cascade destroys
 deliberate per-track choices (P1-14) and nothing can distinguish "the user
 chose this" from "an import copied a flag" (P1-13).
 
@@ -16,6 +17,9 @@ chose this" from "an import copied a flag" (P1-13).
   profile-assign auto-monitor). Freely overwritten by later actions.
 - ``new_release``   — auto-monitored by the discography "monitor new items"
   enforcement.
+- ``wishlist_import`` — a concrete track was present in the admin's legacy
+  Wishlist at import time; it beats inherited parent intent but remains
+  distinguishable from a direct Library-v2 click.
 - ``legacy_import`` — the flag existed before rules were introduced (or came
   from the legacy import); provenance unknown, never blocks a cascade.
 
@@ -34,6 +38,7 @@ logger = get_logger("library2.monitor_rules")
 PROVENANCE_USER = "user_explicit"
 PROVENANCE_CASCADE = "cascade"
 PROVENANCE_NEW_RELEASE = "new_release"
+PROVENANCE_WISHLIST = "wishlist_import"
 PROVENANCE_LEGACY = "legacy_import"
 
 _ENTITY_TABLES = {"artist": "lib2_artists", "album": "lib2_albums", "track": "lib2_tracks"}
@@ -134,6 +139,7 @@ __all__ = [
     "PROVENANCE_LEGACY",
     "PROVENANCE_NEW_RELEASE",
     "PROVENANCE_USER",
+    "PROVENANCE_WISHLIST",
     "explicit_track_rules_for_album",
     "explicitly_unmonitored_track_ids",
     "prune_orphaned_rules",

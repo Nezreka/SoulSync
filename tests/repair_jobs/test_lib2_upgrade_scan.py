@@ -4,7 +4,9 @@ from types import SimpleNamespace
 import pytest
 
 from core.library2 import ADMIN_PROFILE_ID
+from core.library2.monitor_rules import PROVENANCE_LEGACY, record_rule
 from core.library2.schema import ensure_library_v2_schema
+from core.library2.wanted import recompute_wanted
 from core.repair_jobs.base import JobContext
 from core.repair_jobs.lib2_upgrade_scan import Lib2UpgradeScanJob
 
@@ -59,6 +61,8 @@ def _seed_track(conn, *, policy: str, monitored: int = 1) -> int:
         "VALUES(?,?,?,?)",
         (track, f"/music/{track}.mp3", "mp3", 320),
     )
+    record_rule(conn, "track", track, bool(monitored), PROVENANCE_LEGACY)
+    recompute_wanted(conn, track_ids=[track])
     conn.commit()
     return track
 
@@ -73,12 +77,12 @@ def test_periodic_job_queues_only_profiles_that_allow_upgrades(
     _seed_track(conn, policy="until_cutoff", monitored=0)
     calls = []
 
-    def mirror(_db, _conn, track_ids, monitored, *, profile_id, **_kwargs):
-        calls.append((tuple(track_ids), monitored, profile_id))
+    def mirror(_db, _conn, track_ids, *, profile_id, **_kwargs):
+        calls.append((tuple(track_ids), profile_id))
         return len(track_ids)
 
     monkeypatch.setattr(
-        "core.library2.wishlist_mirror.mirror_tracks_wishlist", mirror)
+        "core.library2.wishlist_mirror.mirror_projected_tracks_wishlist", mirror)
     progress = []
     context = JobContext(
         db=database,
@@ -96,7 +100,7 @@ def test_periodic_job_queues_only_profiles_that_allow_upgrades(
     assert result.scanned == 2
     assert result.auto_fixed == 2
     assert result.errors == 0
-    assert calls == [((cutoff, top), True, ADMIN_PROFILE_ID)]
+    assert calls == [((cutoff, top), ADMIN_PROFILE_ID)]
     assert progress == [(2, 2)]
 
 

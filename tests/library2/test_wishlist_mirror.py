@@ -6,6 +6,8 @@ from core.library2.wishlist_mirror import (
     track_wishlist_payload,
     upgrade_candidate_track_ids,
 )
+from core.library2.monitor_rules import PROVENANCE_LEGACY, PROVENANCE_USER, record_rule
+from core.library2.wanted import recompute_wanted
 
 
 def _seed(conn, *, policy: str, monitored: int = 1, with_file: bool = True) -> int:
@@ -33,6 +35,10 @@ def _seed(conn, *, policy: str, monitored: int = 1, with_file: bool = True) -> i
             "INSERT INTO lib2_track_files(track_id, path, format, bitrate) "
             "VALUES(?, '/m/t.mp3', 'mp3', 320)", (track_id,))
     conn.commit()
+    record_rule(
+        conn, "track", track_id, bool(monitored), PROVENANCE_LEGACY
+    )
+    recompute_wanted(conn, track_ids=[track_id])
     return track_id
 
 
@@ -50,6 +56,20 @@ def test_upgrade_candidates_only_monitored_upgrade_policies_with_files(imported_
     assert t_acceptable not in ids
     assert t_unmonitored not in ids
     assert t_fileless not in ids
+
+
+def test_upgrade_candidates_follow_wanted_projection_not_legacy_flag(imported_conn):
+    conn = imported_conn
+    projected_wanted = _seed(conn, policy="until_cutoff", monitored=0)
+    projected_unwanted = _seed(conn, policy="until_cutoff", monitored=1)
+    record_rule(conn, "track", projected_wanted, True, PROVENANCE_USER)
+    record_rule(conn, "track", projected_unwanted, False, PROVENANCE_USER)
+    recompute_wanted(conn, track_ids=[projected_wanted, projected_unwanted])
+
+    ids = set(upgrade_candidate_track_ids(conn))
+
+    assert projected_wanted in ids
+    assert projected_unwanted not in ids
 
 
 def test_payload_carries_app_wide_profile_id(imported_conn):

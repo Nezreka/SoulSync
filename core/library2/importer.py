@@ -752,6 +752,19 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
             lib2_track_id = cursor.lastrowid
             created_or_updated += 1
 
+        # Presence in the admin Wishlist is concrete track-level wanted
+        # intent. Keep it distinct from a Library-v2 click, but stronger than
+        # the parent album's imported unmonitored baseline.
+        from core.library2.monitor_rules import PROVENANCE_WISHLIST, record_rule
+        record_rule(
+            cursor.connection,
+            "track",
+            lib2_track_id,
+            True,
+            PROVENANCE_WISHLIST,
+            profile_id=profile_id or 1,
+        )
+
         # Wishlist payloads often contain the Spotify release's total_tracks but
         # not the titles for the other release tracks. For albums that only exist
         # because of wishlist rows, keep the expected size to the known wishlist

@@ -267,6 +267,11 @@ def link_download_into_library_v2(context: Dict[str, Any]) -> Optional[int]:
             conn.execute(
                 "UPDATE lib2_albums SET origin='library', updated_at=CURRENT_TIMESTAMP "
                 "WHERE id=? AND origin='discography'", (album_id,))
+            # Heuristic auto-link can create a catalog track outside importer/
+            # tracklist flows; materialize its wanted state before commit so
+            # projection consumers never silently miss the new row.
+            from core.library2.wanted import recompute_wanted
+            recompute_wanted(conn, track_ids=[track_id])
             conn.commit()
             logger.info("Library v2 auto-linked download: %s → track %s (file %s)",
                         os.path.basename(str(file_path)), track_id, file_id)

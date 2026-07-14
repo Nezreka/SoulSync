@@ -335,7 +335,6 @@ def auto_monitor_releases(db, config_manager, album_ids: List[int],
     tracks mirrored. Never raises for individual albums.
     """
     from core.library2.completeness import resolve_tracklist
-    from core.library2.wishlist_mirror import mirror_tracks_wishlist
 
     mirrored = 0
     conn = db._get_connection()
@@ -402,8 +401,15 @@ def auto_monitor_releases(db, config_manager, album_ids: List[int],
             track_ids = [r[0] for r in conn.execute(
                 "SELECT id FROM lib2_tracks WHERE album_id=?", (album_id,))]
             if track_ids:
-                mirrored += mirror_tracks_wishlist(
-                    db, conn, track_ids, True, profile_id=wishlist_profile_id)
+                from core.library2.wishlist_mirror import (
+                    mirror_projected_tracks_wishlist,
+                )
+                mirrored += mirror_projected_tracks_wishlist(
+                    db,
+                    conn,
+                    track_ids,
+                    profile_id=wishlist_profile_id,
+                )
     finally:
         conn.close()
     return mirrored

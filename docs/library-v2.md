@@ -348,7 +348,7 @@ behoben:
   das aktive Nutzerprofil im Request-Kontext auf und reichen es in den Thread
   (war: stiller Fallback auf Profil 1 auf Multi-Profil-Installs) (fixt B2).
 - **Search Monitored ist jetzt real**: triggert `POST /api/wishlist/process`
-  (alle monitored Missing Tracks sind bereits wishlist-gemirrort) statt Blind
+  (alle effektiv wanted Missing Tracks sind bereits wishlist-gemirrort) statt Blind
   Auto-Grab des besten Ergebnisses für eine bloße Artist-Namen-Query (fixt B6).
 - **Consolidated-Duplicate-Guard**: Bulk-Re-Monitor und
   Upgrade-Profil-Assignment überspringen Tracks, deren Datei bewusst zum
@@ -408,7 +408,8 @@ behoben:
   langer SQLite-Transaktionen; einzelne Source-/Parse-Fehler bleiben isoliert.
 - `lib2_wanted_tracks` kann RecordingRequests idempotent als ADR-02-Shadow
   materialisieren. Dieser Shadow dispatcht bewusst noch keinen Download; die
-  Legacy-Wishlist bleibt bis zum gemessenen Cutover operativ.
+  Legacy-Wishlist bleibt als abgeleitete Ausführungsliste operativ, ist aber
+  nicht mehr Wanted-Source-of-Truth (Roadmap-Punkt 5).
 - Acquisition-History ist append-only; Failed Candidates werden über
   Source/Indexer/GUID exakt blockiert. Retry bewertet alte und neue
   Candidates erneut und kann einen blockierten Release nicht automatisch
@@ -1781,9 +1782,29 @@ vollständigen typed Provider-Boundary ist grün: **8164 passed, 3 skipped,
 2 deselected, 335 warnings in 234.76s**. Die drei Skips sind die bewusst
 opt-in markierten Docker-/Live-Deployment-Varianten. Frontend-Code wurde nicht
 verändert; daher waren Frontend-Typecheck/Vitest/Build nicht erforderlich.
-5. Gestaffelten Wanted-Cutover fertigstellen: Consumer, die noch
+5. ~~Gestaffelten Wanted-Cutover fertigstellen: Consumer, die noch
    `monitored`-Flags nutzen, müssen nach Drift-Metriken-Beweis der Parität
-   auf `lib2_wanted_tracks` wechseln.
+   auf `lib2_wanted_tracks` wechseln.~~ **Abgeschlossen 2026-07-14:**
+   Track-Acquisition, manueller/periodischer Upgrade-Scan, zentrale Track-
+   Reads/Artist-Stats und das Legacy-Wishlist-Mirroring konsumieren jetzt die
+   versionierte `lib2_wanted_tracks`-Projektion statt `t.monitored`. Artist-/
+   Album-Flags bleiben nur Eingabe-/Kompatibilitätszustand; die Legacy-Wishlist
+   ist eine transaktional abgeleitete Ausführungsliste. Projected Mirror-
+   Enqueues brechen bei fehlenden/veralteten Rows ab statt still auf Flags
+   zurückzufallen. `GET /api/library/v2/wanted-projection/status` meldet
+   Coverage (`missing`/`stale`), Version, Wanted-Count und Flag-Drift;
+   `consumer_ready` verlangt vollständige aktuelle Projektion, während
+   dokumentierte Parent-Rule-Abweichungen sichtbar bleiben dürfen. Importer,
+   Tracklist-Materialisierung und Auto-Link legen neue Projektionszeilen an.
+   Der Cutover deckte einen realen Legacy-Randfall auf: konkrete Admin-
+   Wishlist-Tracks erhalten nun `wishlist_import`-Provenance und werden nicht
+   mehr von der unmonitorierten importierten Parent-Album-Regel überstimmt.
+   Bulk-Monitor und Track-File-Move schreiben jetzt ebenfalls Rules + Projektion
+   und spiegeln daraus; Bulk wahrt explizite Track-Vetos. 154 gezielte Wanted-/
+   Importer-/Mirror-/Query-/API-/Upgrade-/Discography-/Move-Tests sind grün.
+   **Nächster logischer Schritt:** Roadmap-Punkt 6 — Monitor-Provenance bei
+   Re-Imports prüfen und Album-Intent unabhängig vom Track-Wishlist-Zustand
+   dauerhaft absichern.
 6. **Monitor-Provenance**: Album-Monitoring, das Re-Imports unabhängig vom
    Track-Wishlist-Zustand überlebt (Provenance-/Mode-Spalten statt
    Ableitung).
@@ -1938,14 +1959,15 @@ wert und wurde bewusst nicht übernommen.
   geplante `monitor_rules`/Wanted-Projektions-Phase ist dadurch stark
   vereinfacht (existiert trotzdem, siehe ADR-02, aber ohne Merge-Problem
   zwischen mehreren Nutzer-Profilen).
-- **ADR-02 — Source of Truth für „Wanted"/Monitoring.** Kurzfristig
+- **ADR-02 — Source of Truth für „Wanted"/Monitoring.** Übergang
   (umgesetzt): Option 3 — `lib2_*` und Legacy-Wishlist/Watchlist bleiben
   nebeneinander, aber über eine transaktionale Outbox (`lib2_mirror_outbox`,
   `bdc95b2`) statt best-effort gespiegelt, plus periodischer Reconciler
-  (`3ca3000`). Langfristiges Ziel: Option 1 — `lib2_*` wird alleinige
-  Wahrheit, Wishlist wird abgeleitete Ausführungsliste (Cutover in Stufen,
-  siehe Abschnitt 7 Punkt 5). Option 2 (Wishlist bleibt Wahrheit, lib2 nur
-  Anzeige) wurde bewusst verworfen.
+  (`3ca3000`). **Track-Cutover abgeschlossen 2026-07-14:** Option 1 gilt für
+  Wanted-Consumer — `lib2_monitor_rules` → `lib2_wanted_tracks` ist die
+  alleinige Track-Intent-Wahrheit, die Wishlist nur noch abgeleitete
+  Ausführungsliste (Abschnitt 7 Punkt 5). Option 2 (Wishlist bleibt Wahrheit,
+  lib2 nur Anzeige) wurde bewusst verworfen.
 - **ADR-03 — File-Kardinalität. Entschieden: Multi-File-Modell mit
   `is_primary`.** Mehrere Dateien pro Track bleiben erlaubt (z.B.
   FLAC+MP3 derselben Aufnahme, alte+neue Datei während Upgrade), aber mit
@@ -2037,11 +2059,11 @@ vermerkt, tauchten aber nirgends in diesem Dokument auf:
 - **P1-13/14** — Monitored war nicht zuverlässig „wird gesucht", und
   Album-Unmonitor überschrieb bewussten Track-Level-Intent. Fix:
   `lib2_monitor_rules` mit Provenance
-  (`user_explicit`/`cascade`/`new_release`/`legacy_import`); Kaskaden
+  (`user_explicit`/`wishlist_import`/`cascade`/`new_release`/`legacy_import`); Kaskaden
   überschreiben explizite Track-Entscheidungen nicht mehr (`705beb4`), plus
-  `lib2_wanted_tracks` als materialisierte Wanted-Projektion (`45fc67a`,
-  Divergenz zu `monitored`-Flags wird geloggt, aber laut ADR-02 bis zum
-  Cutover nicht angewendet).
+  `lib2_wanted_tracks` als materialisierte Wanted-Projektion (`45fc67a`).
+  Seit Roadmap-Punkt 5 wird sie von Track-Reads, Acquisition/Upgrade und
+  Wishlist-Mirror angewendet; Flag-Divergenz bleibt als Metrik sichtbar.
 - **P1-15/16/17** — Profilzuweisung setzte ungewollt Tracks auf monitored;
   Interactive Search sendete weder Entity- noch Quality-Profile-Kontext;
   Album-Suche nutzte fälschlich das Artist-Profil. Fix: Profil-Zuweisung und

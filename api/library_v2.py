@@ -1034,6 +1034,19 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         finally:
             conn.close()
 
+    @app.route("/api/library/v2/wanted-projection/status")
+    def lib2_wanted_projection_status():
+        guard = _guard()
+        if guard:
+            return guard
+        conn = _conn()
+        try:
+            from core.library2.wanted import wanted_projection_status
+            status = wanted_projection_status(conn, profile_id=ADMIN_PROFILE_ID)
+            return jsonify({"success": True, **status})
+        finally:
+            conn.close()
+
     @app.route("/api/library/v2/artists")
     def lib2_list_artists():
         guard = _guard()
@@ -1251,26 +1264,6 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         finally:
             conn.close()
 
-    def _mirror_tracks_wishlist(db, conn, track_ids: List[int], monitored: bool,
-                                profile_id: Optional[int] = None,
-                                user_initiated: bool = False) -> int:
-        """Delegates to the shared mirror (core/library2/wishlist_mirror.py) with
-        the active user profile as the wishlist scope.
-
-        Callers running in a BACKGROUND THREAD must resolve the profile in the
-        request context and pass it explicitly — ``_profile()`` reads Flask's
-        ``g`` and silently degrades to profile 1 outside a request.
-
-        ``user_initiated=True`` is reserved for the direct track-level monitor
-        toggle — it clears a user's wishlist-ignore. Cascades and jobs stay
-        False so a deliberate cancel/remove keeps sticking (audit P1-11).
-        """
-        from core.library2.wishlist_mirror import mirror_tracks_wishlist
-        return mirror_tracks_wishlist(db, conn, track_ids, monitored,
-                                      profile_id=profile_id if profile_id is not None
-                                      else _profile(),
-                                      user_initiated=user_initiated)
-
     @app.route("/api/library/v2/<entity>/<int:eid>/monitor", methods=["POST"])
     def lib2_set_monitored(entity, eid):
         guard = _guard()
@@ -1353,10 +1346,14 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # failure can no longer leave lib2 saying "monitored" while the
             # pipeline never learned about it. The drain below replays them;
             # failures stay visible in lib2_mirror_outbox instead of a 200.
+            # Recompute before enqueue: the derived Wishlist consumes the
+            # authoritative projection, never the compatibility flag/command.
+            from core.library2.wanted import recompute_wanted_for_entity
+            recompute_wanted_for_entity(conn, entity, eid, profile_id=_profile())
             from core.library2.mirror_outbox import (
                 drain as drain_mirror_outbox,
                 enqueue_artist_watchlist,
-                enqueue_tracks,
+                enqueue_projected_tracks,
             )
             outbox_ids: List[int] = []
             if entity == "artists":
@@ -1366,13 +1363,12 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 # Only the track-level toggle is a direct user action on that
                 # track; an album toggle is a cascade and must respect a
                 # per-track ignore (user cancelled that download on purpose).
-                outbox_ids = enqueue_tracks(conn, track_ids, monitored,
-                                            profile_id=_profile(),
-                                            user_initiated=(entity == "tracks"))
-            # Keep the materialized wanted projection in step with the rules
-            # (same transaction as flags + rules + outbox — audit §11.2).
-            from core.library2.wanted import recompute_wanted_for_entity
-            recompute_wanted_for_entity(conn, entity, eid, profile_id=_profile())
+                outbox_ids = enqueue_projected_tracks(
+                    conn,
+                    track_ids,
+                    profile_id=_profile(),
+                    user_initiated=(entity == "tracks"),
+                )
             conn.commit()
             mirrored = mirror_pending = 0
             if outbox_ids:
@@ -1489,7 +1485,15 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             conn.commit()
             mirrored = 0
             if auto_monitor_track_ids:
-                mirrored = _mirror_tracks_wishlist(db, conn, auto_monitor_track_ids, True)
+                from core.library2.wishlist_mirror import (
+                    mirror_projected_tracks_wishlist,
+                )
+                mirrored = mirror_projected_tracks_wishlist(
+                    db,
+                    conn,
+                    auto_monitor_track_ids,
+                    profile_id=_profile(),
+                )
             settings = json.loads(profile["repair_settings"] or "{}")
         finally:
             conn.close()
@@ -1614,26 +1618,71 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                                                  album_id, e)
                         conn.execute("UPDATE lib2_albums SET monitored=? WHERE id=?",
                                      (1 if monitored else 0, album_id))
+                        from core.library2.monitor_rules import (
+                            PROVENANCE_CASCADE,
+                            PROVENANCE_USER,
+                            explicit_track_rules_for_album,
+                            record_rule,
+                            record_rules,
+                        )
+                        record_rule(
+                            conn,
+                            "album",
+                            album_id,
+                            monitored,
+                            PROVENANCE_USER,
+                            profile_id=active_profile,
+                        )
                         # Re-monitoring skips consolidated-away duplicates (the
                         # user just moved their file to the other variant) —
                         # both for the flag AND the wishlist mirror; unmonitoring
                         # always applies to every track.
                         if monitored:
-                            track_ids = [r["id"] for r in conn.execute(
+                            candidate_track_ids = [r["id"] for r in conn.execute(
                                 f"SELECT id FROM lib2_tracks WHERE album_id=? "
                                 f"AND {_NOT_CONSOLIDATED_SQL}", (album_id,))]
                         else:
-                            track_ids = _bulk_track_ids_for_albums(conn, [album_id])
+                            candidate_track_ids = _bulk_track_ids_for_albums(
+                                conn, [album_id]
+                            )
+                        explicit = explicit_track_rules_for_album(
+                            conn, album_id, profile_id=active_profile
+                        )
+                        track_ids = [
+                            track_id for track_id in candidate_track_ids
+                            if track_id not in explicit
+                        ]
                         if track_ids:
                             marks = ",".join("?" for _ in track_ids)
                             conn.execute(
                                 f"UPDATE lib2_tracks SET monitored=? WHERE id IN ({marks})",
                                 [1 if monitored else 0, *track_ids])
+                            record_rules(
+                                conn,
+                                "track",
+                                track_ids,
+                                monitored,
+                                PROVENANCE_CASCADE,
+                                profile_id=active_profile,
+                            )
+                        from core.library2.wanted import recompute_wanted_for_entity
+                        recompute_wanted_for_entity(
+                            conn,
+                            "album",
+                            album_id,
+                            profile_id=active_profile,
+                        )
                         conn.commit()
                         if track_ids:
-                            mirrored += _mirror_tracks_wishlist(
-                                db, conn, track_ids, monitored,
-                                profile_id=active_profile)
+                            from core.library2.wishlist_mirror import (
+                                mirror_projected_tracks_wishlist,
+                            )
+                            mirrored += mirror_projected_tracks_wishlist(
+                                db,
+                                conn,
+                                track_ids,
+                                profile_id=active_profile,
+                            )
                     _job_state.update(result={"albums": len(albums), "mirrored": mirrored})
                 finally:
                     conn.close()
@@ -2129,8 +2178,15 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     _job_state.update(total=len(track_ids))
                     # _mirror_tracks_wishlist re-checks upgrade_candidate per
                     # track and only queues genuine upgrade candidates.
-                    queued = _mirror_tracks_wishlist(db, conn, track_ids, True,
-                                                     profile_id=active_profile)
+                    from core.library2.wishlist_mirror import (
+                        mirror_projected_tracks_wishlist,
+                    )
+                    queued = mirror_projected_tracks_wishlist(
+                        db,
+                        conn,
+                        track_ids,
+                        profile_id=active_profile,
+                    )
                     _job_state.update(result={"checked": len(track_ids), "queued": queued})
                 finally:
                     conn.close()

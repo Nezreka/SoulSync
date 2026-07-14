@@ -4,11 +4,12 @@ These tests PIN the documented priority — the audit requires the order to be
 fixed in tests before the projection is used:
 
 1. explicit track rule    (beats everything, both directions)
-2. projected track rule   (cascade / new_release)
-3. album rule             (any provenance)
-4. artist rule            (any provenance)
-5. legacy track rule      (legacy_import)
-6. default                (unmonitored)
+2. imported Wishlist rule (wishlist_import)
+3. projected track rule   (cascade / new_release)
+4. album rule             (any provenance)
+5. artist rule            (any provenance)
+6. legacy track rule      (legacy_import)
+7. default                (unmonitored)
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from core.library2.monitor_rules import (
     PROVENANCE_LEGACY,
     PROVENANCE_NEW_RELEASE,
     PROVENANCE_USER,
+    PROVENANCE_WISHLIST,
     record_rule,
 )
 from core.library2.wanted import (
@@ -25,6 +27,7 @@ from core.library2.wanted import (
     ensure_wanted_projection,
     recompute_wanted,
     recompute_wanted_for_entity,
+    wanted_projection_status,
     wanted_track_ids,
 )
 
@@ -81,6 +84,15 @@ def test_cascade_track_rule_beats_album_rule(imported_conn):
     record_rule(conn, "track", track, True, PROVENANCE_CASCADE)
     recompute_wanted(conn, track_ids=[track])
     assert _projected(conn, track) == (True, "track_rule:cascade")
+
+
+def test_imported_wishlist_track_beats_parent_import_state(imported_conn):
+    conn = imported_conn
+    _, album, track = _seed_chain(conn)
+    record_rule(conn, "album", album, False, PROVENANCE_LEGACY)
+    record_rule(conn, "track", track, True, PROVENANCE_WISHLIST)
+    recompute_wanted(conn, track_ids=[track])
+    assert _projected(conn, track) == (True, "track_rule:wishlist_import")
 
 
 def test_album_rule_decides_ruleless_tracks(imported_conn):
@@ -180,3 +192,19 @@ def test_ensure_rebuilds_on_version_bump(imported_conn):
     assert conn.execute(
         "SELECT MIN(projection_version) FROM lib2_wanted_tracks"
     ).fetchone()[0] == PROJECTION_VERSION
+
+
+def test_projection_status_separates_completeness_from_flag_drift(imported_conn):
+    conn = imported_conn
+    artist, _album, track = _seed_chain(conn)
+    record_rule(conn, "artist", artist, True, PROVENANCE_USER)
+    recompute_wanted(conn, track_ids=[track])
+
+    status = wanted_projection_status(conn)
+
+    assert status["consumer_ready"] is True
+    assert status["missing"] == 0 and status["stale"] == 0
+    assert status["flag_mismatches"] >= 1
+    conn.execute("DELETE FROM lib2_wanted_tracks WHERE track_id=?", (track,))
+    status = wanted_projection_status(conn)
+    assert status["consumer_ready"] is False and status["missing"] == 1

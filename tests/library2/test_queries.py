@@ -182,3 +182,27 @@ def test_effective_reads_project_user_metadata_without_rewriting_provider(import
         field_name="title",
     )
     assert Q.get_album(imported_conn, album_id)["title"] == "Provider Refresh"
+
+
+def test_track_reads_expose_effective_wanted_projection(imported_conn):
+    from core.library2.monitor_rules import PROVENANCE_USER, record_rule
+    from core.library2.wanted import recompute_wanted
+
+    track_id = imported_conn.execute(
+        "SELECT id FROM lib2_tracks ORDER BY id LIMIT 1"
+    ).fetchone()[0]
+    imported_conn.execute(
+        "UPDATE lib2_tracks SET monitored=0 WHERE id=?", (track_id,)
+    )
+    album_id = imported_conn.execute(
+        "SELECT album_id FROM lib2_tracks WHERE id=?", (track_id,)
+    ).fetchone()[0]
+    record_rule(imported_conn, "track", track_id, True, PROVENANCE_USER)
+    recompute_wanted(imported_conn, track_ids=[track_id])
+
+    assert Q.get_track(imported_conn, track_id)["monitored"] is True
+    album_track = next(
+        row for row in Q.get_album(imported_conn, album_id)["tracks"]
+        if row["id"] == track_id
+    )
+    assert album_track["monitored"] is True

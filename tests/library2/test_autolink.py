@@ -67,6 +67,11 @@ def test_links_new_album_track_and_file(lib2_enabled, imported_conn):
     assert row["album"] == "Scorpion"
     assert row["album_sp"] == "sp-scorpion"
     assert row["source"] == "usenet"
+    assert imported_conn.execute(
+        "SELECT COUNT(*) FROM lib2_wanted_tracks WHERE track_id=("
+        "SELECT track_id FROM lib2_track_files WHERE id=?)",
+        (file_id,),
+    ).fetchone()[0] == 1
     # Reuses the existing Drake artist row (no duplicate artist).
     assert imported_conn.execute(
         "SELECT COUNT(*) c FROM lib2_artists WHERE name='Drake'").fetchone()["c"] == 1

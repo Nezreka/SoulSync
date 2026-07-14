@@ -83,17 +83,43 @@ def move_track_file(db, conn, from_track_id: int, to_track_id: int,
     )
     # The source just lost its file on purpose; stop wanting it so the
     # pipeline doesn't instantly re-download the consolidated-away variant.
-    source_unmonitored = bool(src["monitored"])
+    from core.library2.wanted import recompute_wanted, track_is_wanted
+    try:
+        source_unmonitored = track_is_wanted(
+            conn, from_track_id, profile_id=wishlist_profile_id
+        )
+    except RuntimeError:
+        # Upgrade path for rows created before the projection was complete.
+        recompute_wanted(conn, track_ids=[from_track_id])
+        source_unmonitored = track_is_wanted(
+            conn, from_track_id, profile_id=wishlist_profile_id
+        )
     conn.execute("UPDATE lib2_tracks SET monitored=0, updated_at=CURRENT_TIMESTAMP WHERE id=?",
                  (from_track_id,))
+    from core.library2.monitor_rules import PROVENANCE_USER, record_rule
+    record_rule(
+        conn,
+        "track",
+        from_track_id,
+        False,
+        PROVENANCE_USER,
+        profile_id=wishlist_profile_id,
+    )
+    recompute_wanted(conn, track_ids=[from_track_id])
     conn.commit()
 
     unmirrored = 0
     if source_unmonitored:
         try:
-            from core.library2.wishlist_mirror import mirror_tracks_wishlist
-            unmirrored = mirror_tracks_wishlist(
-                db, conn, [from_track_id], False, profile_id=wishlist_profile_id)
+            from core.library2.wishlist_mirror import (
+                mirror_projected_tracks_wishlist,
+            )
+            unmirrored = mirror_projected_tracks_wishlist(
+                db,
+                conn,
+                [from_track_id],
+                profile_id=wishlist_profile_id,
+            )
         except Exception as e:  # noqa: BLE001
             logger.debug("wishlist unmirror after move failed (track %s): %s",
                          from_track_id, e)

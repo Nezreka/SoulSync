@@ -43,6 +43,11 @@ def _seed_pair(conn, *, single_has_file: bool = True, album_has_file: bool = Fal
     if album_has_file:
         cur.execute("INSERT INTO lib2_track_files(track_id, path, format) "
                     "VALUES(?, '/m/move-album.flac', 'flac')", (album_track,))
+    from core.library2.monitor_rules import PROVENANCE_LEGACY, record_rule
+    from core.library2.wanted import recompute_wanted
+    for track_id in (single_track, album_track):
+        record_rule(conn, "track", track_id, True, PROVENANCE_LEGACY)
+    recompute_wanted(conn, track_ids=[single_track, album_track])
     conn.commit()
     return single_track, album_track
 
@@ -61,6 +66,10 @@ def test_move_rehomes_file_and_unmonitors_source(imported_conn):
     assert conn.execute(
         "SELECT monitored FROM lib2_tracks WHERE id=?", (single,)
     ).fetchone()["monitored"] == 0
+    projected = conn.execute(
+        "SELECT wanted, reason FROM lib2_wanted_tracks WHERE track_id=?", (single,)
+    ).fetchone()
+    assert dict(projected) == {"wanted": 0, "reason": "track_explicit"}
     # File did NOT get duplicated: exactly one row for this path.
     assert conn.execute(
         "SELECT COUNT(*) c FROM lib2_track_files WHERE path='/m/move-single.flac'"

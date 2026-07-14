@@ -146,19 +146,56 @@ def mirror_tracks_wishlist(db, conn, track_ids: List[int], monitored: bool,
     return int(row[0]) if row else 0
 
 
-def upgrade_candidate_track_ids(conn) -> List[int]:
-    """Monitored tracks with files whose profile keeps upgrading
+def mirror_projected_tracks_wishlist(
+    db,
+    conn,
+    track_ids: List[int],
+    *,
+    profile_id: int = 1,
+    user_initiated: bool = False,
+) -> int:
+    """Mirror current wanted projection states for the requested tracks."""
+    from core.library2.mirror_outbox import drain, enqueue_projected_tracks
+    outbox_ids = enqueue_projected_tracks(
+        conn,
+        track_ids,
+        profile_id=profile_id,
+        user_initiated=user_initiated,
+    )
+    if not outbox_ids:
+        return 0
+    conn.commit()
+    drain(db)
+    marks = ",".join("?" for _ in outbox_ids)
+    row = conn.execute(
+        f"SELECT COUNT(*) FROM lib2_mirror_outbox "
+        f"WHERE id IN ({marks}) AND status='done'", outbox_ids
+    ).fetchone()
+    return int(row[0]) if row else 0
+
+
+def upgrade_candidate_track_ids(conn, *, profile_id: int = 1) -> List[int]:
+    """Wanted tracks with files whose profile keeps upgrading
     (``until_top``/``until_cutoff``). The per-track upgrade re-check happens in
     ``mirror_tracks_wishlist`` (only genuine candidates queue)."""
+    from core.library2.wanted import PROJECTION_VERSION
     return [r["id"] for r in conn.execute(
         """SELECT t.id FROM lib2_tracks t
+           JOIN lib2_wanted_tracks wt ON wt.track_id=t.id
+                AND wt.profile_id=? AND wt.wanted=1
            JOIN quality_profiles qp ON qp.id = t.quality_profile_id
-          WHERE t.monitored = 1
+          WHERE wt.projection_version=?
             AND qp.upgrade_policy IN ('until_top', 'until_cutoff')
             AND EXISTS (SELECT 1 FROM lib2_track_files tf
                         WHERE tf.track_id = t.id
-                          AND tf.path IS NOT NULL AND tf.path <> '')"""
+                          AND tf.path IS NOT NULL AND tf.path <> '')""",
+        (int(profile_id), PROJECTION_VERSION),
     )]
 
 
-__all__ = ["track_wishlist_payload", "mirror_tracks_wishlist", "upgrade_candidate_track_ids"]
+__all__ = [
+    "mirror_projected_tracks_wishlist",
+    "mirror_tracks_wishlist",
+    "track_wishlist_payload",
+    "upgrade_candidate_track_ids",
+]

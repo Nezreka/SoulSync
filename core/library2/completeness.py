@@ -210,7 +210,15 @@ def _persist_tracklist_tracks(conn, album_id: int, tracks: List[dict]) -> int:
                VALUES(?,?, 'primary', 0)""",
             (track_id, al["primary_artist_id"]),
         )
-    return created + _trim_excess_fileless_tracks(conn, album_id, expected, protect_ids=touched_ids)
+    changed = created + _trim_excess_fileless_tracks(
+        conn, album_id, expected, protect_ids=touched_ids
+    )
+    # Every newly materialized provider row enters the authoritative wanted
+    # projection immediately, even when browsing (not monitoring) created it.
+    if touched_ids:
+        from core.library2.wanted import recompute_wanted
+        recompute_wanted(conn, track_ids=sorted(touched_ids))
+    return changed
 
 
 def resolve_tracklist(config_manager, conn, album_id: int) -> Optional[List[dict]]:

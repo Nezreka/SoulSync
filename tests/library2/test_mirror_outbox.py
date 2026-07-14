@@ -105,6 +105,27 @@ def test_enqueue_and_drain_happy_path(db):
     assert _outbox_rows(conn)[0]["status"] == "done"
 
 
+def test_projected_enqueue_uses_wanted_state_and_rejects_projection_gaps(db):
+    flaky, conn = db
+    track_id = flaky.ids["track"]
+    from core.library2.monitor_rules import PROVENANCE_USER, record_rule
+    from core.library2.wanted import recompute_wanted
+    record_rule(conn, "track", track_id, True, PROVENANCE_USER)
+    recompute_wanted(conn, track_ids=[track_id])
+    outbox_ids = MO.enqueue_projected_tracks(conn, [track_id])
+    assert outbox_ids
+    assert _outbox_rows(conn)[-1]["op"] == "wishlist_add"
+
+    record_rule(conn, "track", track_id, False, PROVENANCE_USER)
+    recompute_wanted(conn, track_ids=[track_id])
+    MO.enqueue_projected_tracks(conn, [track_id])
+    assert _outbox_rows(conn)[-1]["op"] == "wishlist_remove"
+
+    conn.execute("DELETE FROM lib2_wanted_tracks WHERE track_id=?", (track_id,))
+    with pytest.raises(RuntimeError, match="missing or stale"):
+        MO.enqueue_projected_tracks(conn, [track_id])
+
+
 def test_failed_mirror_stays_pending_and_later_drain_completes(db):
     """The audit's injected-failure scenario: the legacy write fails, the lib2
     command remains traceable as pending, and a later drain reconciles."""

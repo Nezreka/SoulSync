@@ -19,6 +19,8 @@ def test_persist_tracklist_tracks_creates_monitorable_missing_rows(imported_conn
         "UPDATE lib2_albums SET monitored=1, quality_profile_id=2 WHERE id=?",
         (views_id,),
     )
+    from core.library2.monitor_rules import PROVENANCE_USER, record_rule
+    record_rule(imported_conn, "album", views_id, True, PROVENANCE_USER)
 
     created = _persist_tracklist_tracks(imported_conn, views_id, [
         {"track_number": 1, "title": "One Dance"},
@@ -34,6 +36,11 @@ def test_persist_tracklist_tracks_creates_monitorable_missing_rows(imported_conn
     assert row["monitored"] == 1
     assert row["quality_profile_id"] == 2
     assert row["spotify_id"] == "sp-missing"
+    projected = imported_conn.execute(
+        "SELECT wanted, projection_version FROM lib2_wanted_tracks WHERE track_id=?",
+        (row["id"],),
+    ).fetchone()
+    assert projected is not None and bool(projected["wanted"]) is True
 
     linked_artist = imported_conn.execute(
         "SELECT COUNT(*) FROM lib2_track_artists WHERE track_id=?",

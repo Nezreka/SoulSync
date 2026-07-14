@@ -1,9 +1,10 @@
 """Materialized wanted projection for Library v2 (audit §11.2, ADR-02 Stufe 2).
 
 ``lib2_monitor_rules`` records WHY entities are (un)monitored; the
-``monitored`` flags remain today's operative projection (ADR-02: staged).
-This module adds the next stage: ``lib2_wanted_tracks``, the effective
-wanted state PER TRACK computed from the rules alone, with the deciding
+``monitored`` flags remain a compatibility projection. This module owns
+``lib2_wanted_tracks``, the effective
+wanted state PER TRACK consumed by acquisition/mirroring and computed from
+the rules alone, with the deciding
 rule level recorded — fast to query, idempotent for acquisition, and
 auditable when it disagrees with a flag.
 
@@ -12,17 +13,19 @@ Priority (the audit demands this be pinned in tests before use; see
 
 1. **explicit track rule** (``user_explicit``) — a direct user decision on
    exactly this track beats everything, in both directions (P1-14).
-2. **projected track rule** (``cascade`` / ``new_release``) — the most
+2. **imported Wishlist track rule** (``wishlist_import``) — a concrete
+   admin-Wishlist item beats inherited album/artist state.
+3. **projected track rule** (``cascade`` / ``new_release``) — the most
    recent bulk action projected onto this track (album toggle cascade,
    profile-assign opt-in, new-release enforcement).
-3. **album rule** — any provenance; decides tracks with no own rule (e.g.
+4. **album rule** — any provenance; decides tracks with no own rule (e.g.
    rows materialized from a provider tracklist after the album was toggled).
-4. **artist rule** — any provenance. Note: artist toggles never cascade
+5. **artist rule** — any provenance. Note: artist toggles never cascade
    flags onto tracks, so this level is exactly the "monitored heißt nicht
    gesucht" gap (P1-13) the projection closes.
-5. **legacy track rule** (``legacy_import``) — a flag whose origin is
+6. **legacy track rule** (``legacy_import``) — a flag whose origin is
    unknown ranks below deliberate parent rules but above the default.
-6. **default: unmonitored** — no recorded intent anywhere means not wanted.
+7. **default: unmonitored** — no recorded intent anywhere means not wanted.
 
 ``wanted`` is the effective *intent*: whether acquisition should consider
 the track at all. Whether a wanted track actually queues (missing file,
@@ -68,6 +71,8 @@ def _decide(trk_mon: Optional[int], trk_prov: Optional[str],
     """Apply the documented priority to one track's rule set."""
     if trk_prov == "user_explicit":
         return bool(trk_mon), "track_explicit"
+    if trk_prov == "wishlist_import":
+        return bool(trk_mon), "track_rule:wishlist_import"
     if trk_prov in ("cascade", "new_release"):
         return bool(trk_mon), f"track_rule:{trk_prov}"
     if alb_mon is not None:
@@ -181,6 +186,80 @@ def wanted_track_ids(conn: Any, *, profile_id: int = 1) -> List[int]:
         (int(profile_id),))]
 
 
+def track_wanted_states(
+    conn: Any, track_ids: List[int], *, profile_id: int = 1
+) -> Dict[int, bool]:
+    """Current authoritative states for existing tracks.
+
+    Mirror/acquisition consumers must not silently fall back to compatibility
+    flags when a projection row is missing or stale.
+    """
+    normalized = sorted({int(track_id) for track_id in track_ids})
+    if not normalized:
+        return {}
+    marks = ",".join("?" for _ in normalized)
+    rows = conn.execute(
+        f"""SELECT t.id, w.wanted, w.projection_version
+              FROM lib2_tracks t
+              LEFT JOIN lib2_wanted_tracks w
+                     ON w.track_id=t.id AND w.profile_id=?
+             WHERE t.id IN ({marks})""",
+        (int(profile_id), *normalized),
+    ).fetchall()
+    found = {int(row["id"]): row for row in rows}
+    incomplete = [
+        track_id for track_id in normalized
+        if track_id not in found
+        or found[track_id]["wanted"] is None
+        or found[track_id]["projection_version"] != PROJECTION_VERSION
+    ]
+    if incomplete:
+        raise RuntimeError(
+            "wanted projection missing or stale for tracks: "
+            + ",".join(str(track_id) for track_id in incomplete[:20])
+        )
+    return {track_id: bool(found[track_id]["wanted"]) for track_id in normalized}
+
+
+def track_is_wanted(conn: Any, track_id: int, *, profile_id: int = 1) -> bool:
+    return track_wanted_states(
+        conn, [int(track_id)], profile_id=profile_id
+    )[int(track_id)]
+
+
+def wanted_projection_status(conn: Any, *, profile_id: int = 1) -> Dict[str, Any]:
+    """Read-only completeness/drift metrics for the staged consumer cutover."""
+    profile_id = int(profile_id)
+    row = conn.execute(
+        """SELECT COUNT(*) AS tracks,
+                  SUM(CASE WHEN w.track_id IS NULL THEN 1 ELSE 0 END) AS missing,
+                  SUM(CASE WHEN w.track_id IS NOT NULL
+                                AND w.projection_version<>? THEN 1 ELSE 0 END) AS stale,
+                  SUM(CASE WHEN w.wanted=1 THEN 1 ELSE 0 END) AS wanted,
+                  SUM(CASE WHEN w.track_id IS NOT NULL
+                                AND w.projection_version=?
+                                AND w.wanted<>t.monitored THEN 1 ELSE 0 END)
+                      AS flag_mismatches
+             FROM lib2_tracks t
+             LEFT JOIN lib2_wanted_tracks w
+                    ON w.track_id=t.id AND w.profile_id=?""",
+        (PROJECTION_VERSION, PROJECTION_VERSION, profile_id),
+    ).fetchone()
+    values = {
+        "profile_id": profile_id,
+        "projection_version": PROJECTION_VERSION,
+        "tracks": int(row["tracks"] or 0),
+        "wanted": int(row["wanted"] or 0),
+        "missing": int(row["missing"] or 0),
+        "stale": int(row["stale"] or 0),
+        "flag_mismatches": int(row["flag_mismatches"] or 0),
+    }
+    # Flag mismatches are observable migration drift, but can be intentional:
+    # parent rules are exactly what the old per-track flag failed to express.
+    values["consumer_ready"] = values["missing"] == 0 and values["stale"] == 0
+    return values
+
+
 def ensure_wanted_projection(cursor: Any) -> None:
     """Schema-ensure hook: create the table; rebuild the projection when it
     is empty-but-should-not-be or was built by an older priority version.
@@ -207,5 +286,8 @@ __all__ = [
     "ensure_wanted_schema",
     "recompute_wanted",
     "recompute_wanted_for_entity",
+    "track_is_wanted",
+    "track_wanted_states",
+    "wanted_projection_status",
     "wanted_track_ids",
 ]

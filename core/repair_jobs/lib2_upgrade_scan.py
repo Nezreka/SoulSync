@@ -62,7 +62,7 @@ class Lib2UpgradeScanJob(RepairJob):
             return result
 
         from core.library2.wishlist_mirror import (
-            mirror_tracks_wishlist,
+            mirror_projected_tracks_wishlist,
             upgrade_candidate_track_ids,
         )
 
@@ -79,8 +79,12 @@ class Lib2UpgradeScanJob(RepairJob):
                     break
                 chunk = track_ids[start:start + batch]
                 from core.library2 import ADMIN_PROFILE_ID
-                queued += mirror_tracks_wishlist(context.db, conn, chunk, True,
-                                                 profile_id=ADMIN_PROFILE_ID)
+                queued += mirror_projected_tracks_wishlist(
+                    context.db,
+                    conn,
+                    chunk,
+                    profile_id=ADMIN_PROFILE_ID,
+                )
                 result.scanned += len(chunk)
                 if context.update_progress:
                     context.update_progress(result.scanned, total)

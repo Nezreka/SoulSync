@@ -403,8 +403,8 @@ def test_failed_auto_monitor_tracklist_is_persisted_and_retried(
 
     monkeypatch.setattr("core.library2.completeness.resolve_tracklist", materialize)
     monkeypatch.setattr(
-        "core.library2.wishlist_mirror.mirror_tracks_wishlist",
-        lambda _db, _conn, track_ids, _monitored, **_kwargs: len(track_ids),
+        "core.library2.wishlist_mirror.mirror_projected_tracks_wishlist",
+        lambda _db, _conn, track_ids, **_kwargs: len(track_ids),
     )
     assert D.auto_monitor_releases(legacy_db, None, [album_id]) == 1
 
