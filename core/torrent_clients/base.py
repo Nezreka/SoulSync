@@ -65,6 +65,12 @@ class TorrentStatus:
     peers: int = 0
     eta: Optional[int] = None        # seconds, None if unknown
     save_path: Optional[str] = None
+    # Absolute path to THIS torrent's own content (the single file, or the
+    # multi-file root folder). Unlike save_path — the shared download DIR — this
+    # points straight at the torrent's files, so a consumer never has to guess
+    # which file in a shared folder belongs to this torrent. Optional: only
+    # clients that expose it (qBittorrent) populate it; others leave it None.
+    content_path: Optional[str] = None
     files: Optional[List[str]] = None
     error: Optional[str] = None
 

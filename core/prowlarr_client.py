@@ -144,17 +144,28 @@ class ProwlarrClient:
         categories: Sequence[int] = DEFAULT_MUSIC_CATEGORIES,
         indexer_ids: Optional[Sequence[int]] = None,
         limit: int = 100,
+        search_type: str = "search",
+        extra_params: Optional[Sequence[tuple]] = None,
     ) -> List[ProwlarrSearchResult]:
         """Run a Newznab search across the selected indexers.
 
         ``indexer_ids`` is the list of Prowlarr internal indexer IDs to
         query. ``None`` means all enabled indexers.
+
+        ``search_type`` selects the Newznab search mode — ``search`` (generic
+        free-text, the default), ``tvsearch`` or ``movie`` (structured). For the
+        structured modes, ``extra_params`` carries the id/season/ep hints
+        (``[('season', 3), ('ep', 4), ('tvdbid', 12345)]``); Prowlarr passes each
+        to the indexers that advertise support for it and falls back to the text
+        ``query`` on those that don't. Both are additive — the existing music
+        callers keep the plain free-text behaviour.
         """
         if not self.is_configured() or not query.strip():
             return []
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
-            None, self._search_sync, query, list(categories), list(indexer_ids or []), limit
+            None, self._search_sync, query, list(categories), list(indexer_ids or []),
+            limit, search_type, list(extra_params or []),
         )
 
     def _search_sync(
@@ -163,14 +174,19 @@ class ProwlarrClient:
         categories: List[int],
         indexer_ids: List[int],
         limit: int,
+        search_type: str = "search",
+        extra_params: Optional[Sequence[tuple]] = None,
     ) -> List[ProwlarrSearchResult]:
         # Prowlarr's search endpoint accepts repeated params: ``categories=3000&categories=3010``.
         # ``requests`` serializes lists in that exact form when passed as tuples of pairs.
-        params: List[tuple] = [('query', query), ('type', 'search'), ('limit', limit)]
+        params: List[tuple] = [('query', query), ('type', search_type or 'search'), ('limit', limit)]
         for cat in categories:
             params.append(('categories', cat))
         for indexer_id in indexer_ids:
             params.append(('indexerIds', indexer_id))
+        for key, value in (extra_params or []):
+            if value is not None and value != '':
+                params.append((key, value))
 
         data = self._api_get('search', params=params)
         if not isinstance(data, list):

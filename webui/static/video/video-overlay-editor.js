@@ -1,0 +1,3304 @@
+/*
+ * SoulSync — Overlay Studio (Artwork Studio): the visual overlay-template editor.
+ *
+ * A full-bleed design tool for authoring poster overlays. Phase 1a: a gallery of
+ * saved templates + a canvas editor (palette · stage · layers) that can add text
+ * layers, drag/select/reorder them, and save/load the design. Compositing a
+ * template onto real posters (the "apply" pipeline) is a separate later module.
+ *
+ * COORDINATE MODEL (the whole "works on every poster" trick): every layer stores
+ * a normalized anchor-point position — x,y in [0..1] of the stage — plus a
+ * 9-point `anchor` and sizes as fractions of the stage. Rendering multiplies by
+ * the real poster dimensions, so one template fits any resolution.
+ *
+ * Self-contained IIFE; styled by video-overlay-editor.css. window.VideoOverlayEditor.
+ */
+(function () {
+    'use strict';
+
+    function esc(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+    function toast(m, t) { if (typeof showToast === 'function') showToast(m, t); }
+    function uid() { return 'l' + Math.random().toString(36).slice(2, 9); }
+
+    // ── bundled font set (browser preview uses real fallback stacks now; exact
+    // woff2 bundling lands with the apply pipeline for pixel parity). No system
+    // free-entry — users pick from this curated list only. ─────────────────────
+    var FONTS = [
+        { id: 'Inter', label: 'Inter', stack: "'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif" },
+        { id: 'Archivo', label: 'Archivo Black', stack: "'Archivo Black','Arial Black',system-ui,sans-serif" },
+        { id: 'Oswald', label: 'Oswald', stack: "'Oswald','Bebas Neue','Haettenschweiler','Impact',sans-serif" },
+        { id: 'Bebas', label: 'Bebas Neue', stack: "'Bebas Neue','Oswald','Impact',sans-serif" },
+        { id: 'Anton', label: 'Anton', stack: "'Anton','Impact','Arial Black',sans-serif" },
+        { id: 'RobotoCondensed', label: 'Roboto Condensed', stack: "'Roboto Condensed','Arial Narrow',sans-serif" },
+        { id: 'Montserrat', label: 'Montserrat', stack: "'Montserrat',system-ui,sans-serif" },
+        { id: 'Georgia', label: 'Georgia', stack: "Georgia,'Times New Roman',serif" },
+    ];
+    function fontStack(id) { for (var i = 0; i < FONTS.length; i++) if (FONTS[i].id === id) return FONTS[i].stack; return FONTS[0].stack; }
+
+    // ── dynamic-badge fields: each maps sample data → the badge's display text.
+    // `fmt` returns null when there's no value (the editor then shows a placeholder;
+    // at apply time such a badge would simply not render). `opts`/`num`/text drive
+    // the sample-data editor controls. ─────────────────────────────────────────
+    function up(v) { return String(v).toUpperCase(); }
+    var FIELDS = {
+        resolution: { label: 'Resolution', cat: 'Quality', opts: ['2160p', '1080p', '720p', '480p'], fmt: function (v) {
+            if (!v) return null; var s = String(v).toLowerCase();
+            if (s.indexOf('2160') > -1 || s === '4k') return '4K';
+            if (s.indexOf('1080') > -1) return '1080p';
+            if (s.indexOf('720') > -1) return '720p';
+            if (s.indexOf('480') > -1 || s.indexOf('576') > -1) return 'SD'; return up(v); } },
+        hdr: { label: 'HDR / DV', cat: 'Quality', opts: ['HDR', 'HDR10+', 'Dolby Vision', ''], fmt: function (v) { return v ? up(v) : null; } },
+        video_codec: { label: 'Video codec', cat: 'Quality', opts: ['hevc', 'h264', 'av1', 'vp9'], fmt: function (v) {
+            if (!v) return null; var s = String(v).toLowerCase();
+            if (s.indexOf('hevc') > -1 || s.indexOf('265') > -1) return 'HEVC';
+            if (s.indexOf('264') > -1 || s === 'avc') return 'H.264';
+            if (s.indexOf('av1') > -1) return 'AV1'; if (s.indexOf('vp9') > -1) return 'VP9'; return up(v); } },
+        audio_codec: { label: 'Audio codec', cat: 'Quality', opts: ['atmos', 'truehd', 'dts-hd', 'dts', 'ac3', 'aac'], fmt: function (v) {
+            if (!v) return null; var s = String(v).toLowerCase();
+            if (s.indexOf('atmos') > -1) return 'ATMOS'; if (s.indexOf('truehd') > -1) return 'TrueHD'; return up(v); } },
+        source: { label: 'Source', cat: 'Quality', opts: ['bluray', 'web-dl', 'webrip', 'hdtv', 'remux', 'dvd'], fmt: function (v) {
+            if (!v) return null; var m = { bluray: 'BluRay', 'web-dl': 'WEB-DL', webdl: 'WEB-DL', webrip: 'WEBRip', hdtv: 'HDTV', remux: 'REMUX', dvd: 'DVD' };
+            return m[String(v).toLowerCase()] || up(v); } },
+        aspect: { label: 'Aspect ratio', cat: 'Quality', opts: ['4:3', '16:9', '2:1', '2.40:1'], fmt: function (v) { return v ? String(v) : null; } },
+        imdb: { label: 'IMDb rating', cat: 'Ratings', num: true, fmt: function (v) { return v == null ? null : 'IMDb ' + (Math.round(v * 10) / 10); } },
+        rt: { label: 'Rotten Tomatoes', cat: 'Ratings', num: true, fmt: function (v) { return v == null ? null : 'RT ' + v + '%'; } },
+        metacritic: { label: 'Metacritic', cat: 'Ratings', num: true, fmt: function (v) { return v == null ? null : 'MC ' + v; } },
+        tmdb: { label: 'TMDB rating', cat: 'Ratings', num: true, fmt: function (v) { return v == null ? null : 'TMDB ' + (Math.round(v * 10) / 10); } },
+        trakt: { label: 'Trakt rating', cat: 'Ratings', num: true, fmt: function (v) { return v == null ? null : 'Trakt ' + (Math.round(v * 10) / 10); } },
+        tvmaze: { label: 'TVmaze rating', cat: 'Ratings', num: true, fmt: function (v) { return v == null ? null : 'TVmaze ' + (Math.round(v * 10) / 10); } },
+        anilist: { label: 'AniList score', cat: 'Ratings', num: true, fmt: function (v) { return v == null ? null : 'AniList ' + Math.round(v); } },
+        content_rating: { label: 'Content rating', cat: 'Details', opts: ['G', 'PG', 'PG-13', 'R', 'NC-17', 'TV-Y', 'TV-PG', 'TV-14', 'TV-MA'], fmt: function (v) { return v ? up(v) : null; } },
+        status: { label: 'Status', cat: 'Details', opts: ['Returning', 'Ended', 'Released', 'Upcoming', 'Canceled'], fmt: function (v) {
+            if (!v) return null; var s = String(v).toLowerCase();
+            if (s.indexOf('cancel') > -1) return 'Canceled'; if (s.indexOf('end') > -1) return 'Ended';
+            if (s.indexOf('continu') > -1 || s.indexOf('return') > -1) return 'Returning';
+            if (s.indexOf('releas') > -1) return 'Released';
+            if (s.indexOf('upcom') > -1 || s.indexOf('announc') > -1 || s.indexOf('production') > -1) return 'Upcoming'; return up(v); } },
+        year: { label: 'Year', cat: 'Details', num: true, fmt: function (v) { return v == null ? null : String(v); } },
+        runtime: { label: 'Runtime', cat: 'Details', num: true, fmt: function (v) {
+            if (v == null) return null; var h = Math.floor(v / 60), m = v % 60; return h ? (h + 'h' + (m ? ' ' + m + 'm' : '')) : (m + 'm'); } },
+        season_count: { label: 'Seasons', cat: 'Details', num: true, fmt: function (v) { return v == null ? null : v + ' Season' + (v == 1 ? '' : 's'); } },
+        episode_count: { label: 'Episodes', cat: 'Details', num: true, fmt: function (v) { return v == null ? null : v + ' Episodes'; } },
+        subtitles: { label: 'Subtitles', cat: 'Details', num: true, fmt: function (v) { return v == null ? null : v + (v == 1 ? ' Subtitle' : ' Subtitles'); } },
+        versions: { label: 'Versions', cat: 'Details', num: true, fmt: function (v) { return (v == null || v <= 1) ? null : v + ' Versions'; } },
+        mediastinger: { label: 'Mediastinger', cat: 'Details', num: true, fmt: function (v) { return v ? 'After Credits' : null; } },
+        title: { label: 'Title', cat: 'Details', text: true, fmt: function (v) { return v ? String(v) : null; } },
+        collection: { label: 'Collection', cat: 'Details', text: true, fmt: function (v) { return v ? String(v) : null; } },
+        tagline: { label: 'Tagline', cat: 'Details', text: true, fmt: function (v) { return v ? String(v) : null; } },
+        awards: { label: 'Awards', cat: 'Details', opts: ['oscar', 'winner'], fmt: function (v) { return v ? (String(v).toLowerCase() === 'oscar' ? 'Oscar Winner' : 'Award Winner') : null; } },
+        streaming: { label: 'Streaming', cat: 'Details', text: true, fmt: function (v) { return v ? String(v) : null; } },
+        network: { label: 'Network', cat: 'Details', text: true, fmt: function (v) { return v ? String(v) : null; } },
+        studio: { label: 'Studio', cat: 'Details', text: true, fmt: function (v) { return v ? String(v) : null; } },
+        genre: { label: 'Genre', cat: 'Details', text: true, fmt: function (v) { return v ? (String(v).split(',')[0].trim() || null) : null; } },
+        season_number: { label: 'Season number', cat: 'Episode', num: true, fmt: function (v) { return v == null ? null : 'Season ' + Math.round(v); } },
+        episode_number: { label: 'Episode number', cat: 'Episode', num: true, fmt: function (v) { return v == null ? null : 'Episode ' + Math.round(v); } },
+        episode_code: { label: 'Episode code', cat: 'Episode', text: true, fmt: function (v) { return v ? String(v) : null; } },
+    };
+    // Canonical TMDB genres (movie + TV sets, unioned) for the conditional value
+    // dropdown. `genre` values carry a title's FULL comma-joined genre list, so a
+    // "genre includes X" condition matches any of them.
+    var GENRES = ['Action', 'Action & Adventure', 'Adventure', 'Animation', 'Comedy', 'Crime', 'Documentary',
+        'Drama', 'Family', 'Fantasy', 'History', 'Horror', 'Kids', 'Music', 'Mystery', 'News', 'Reality',
+        'Romance', 'Science Fiction', 'Sci-Fi & Fantasy', 'Soap', 'Talk', 'TV Movie', 'Thriller', 'War',
+        'War & Politics', 'Western'];
+    var FIELD_ORDER = ['resolution', 'hdr', 'video_codec', 'audio_codec', 'source', 'aspect', 'imdb', 'rt', 'metacritic', 'tmdb', 'trakt', 'tvmaze', 'anilist',
+        'content_rating', 'genre', 'status', 'year', 'runtime', 'season_count', 'episode_count', 'subtitles', 'versions', 'mediastinger', 'title', 'tagline', 'collection', 'awards', 'streaming', 'network', 'studio',
+        'season_number', 'episode_number', 'episode_code'];
+    var FIELD_CATS = ['Quality', 'Ratings', 'Details', 'Episode'];
+    // Fields a Logo badge can resolve to a drop-in pack image (mirrors logos.py
+    // LOGO_FIELDS, limited to the ones we actually carry data for).
+    var LOGO_BADGE_FIELDS = ['resolution', 'hdr', 'video_codec', 'audio_codec', 'source', 'aspect', 'content_rating', 'status', 'streaming', 'network', 'studio', 'mediastinger', 'collection', 'awards'];
+
+    // Which logo-badge fields the Kometa installer can actually source art for
+    // (mirrors logo_packs.SOURCEABLE_FIELDS); used to word the install popup.
+    var LOGO_SOURCEABLE = ['resolution', 'audio_codec', 'hdr', 'source', 'aspect', 'streaming', 'network', 'studio'];
+
+    // Overlay templates come in three types, split by BOTH art shape and which
+    // fields make sense: Poster (movies+shows, 2:3), Season (2:3, season art),
+    // Episode (16:9 still, per-episode data). The type fixes the canvas aspect and
+    // filters the palette so you only see fields that apply.
+    var TEMPLATE_TYPES = {
+        poster:  { label: 'Poster',  aspect: '2:3',  wide: false, scopes: ['movie', 'show'], sub: 'Movies & TV shows' },
+        season:  { label: 'Season',  aspect: '2:3',  wide: false, scopes: ['season'],         sub: 'Season posters' },
+        episode: { label: 'Episode', aspect: '16:9', wide: true,  scopes: ['episode'],        sub: 'Episode stills' },
+    };
+    var TYPE_ORDER = ['poster', 'season', 'episode'];
+    // Fields available per type (poster = everything except the sub-item fields).
+    var TYPE_FIELDS = {
+        season: ['title', 'season_number', 'episode_count', 'year', 'content_rating', 'status', 'network', 'streaming', 'awards', 'genre'],
+        episode: ['title', 'episode_code', 'season_number', 'episode_number', 'year', 'runtime', 'content_rating', 'network',
+            'tmdb', 'imdb', 'resolution', 'hdr', 'video_codec', 'audio_codec', 'source', 'aspect', 'subtitles', 'streaming', 'genre'],
+    };
+    function templateKind() { return (ed && ed.kind) || 'poster'; }
+    function fieldsForType(kind) {
+        if (kind !== 'season' && kind !== 'episode') {
+            return FIELD_ORDER.filter(function (k) { return ['season_number', 'episode_number', 'episode_code'].indexOf(k) === -1; });
+        }
+        return TYPE_FIELDS[kind].filter(function (k) { return !!FIELDS[k]; });
+    }
+    // Installed-logo state (per field counts); logo badge is gated until a pack exists.
+    var logoPack = { installed: false, counts: {}, loaded: false };
+    function anyLogoPack() { return !!logoPack.installed; }
+    function logoPackHas(field) { return !!(logoPack.counts && logoPack.counts[field]); }
+    function refreshLogoPack(cb) {
+        api('GET', '/api/video/overlays/logopack').then(function (d) {
+            logoPack = { installed: !!(d && d.installed), counts: (d && d.counts) || {}, loaded: true };
+        }).catch(function () { logoPack.loaded = true; }).then(function () { if (cb) cb(); });
+    }
+    function refreshPaletteDOM() {
+        var pal = overlay && overlay.querySelector('.voe-palette');
+        if (pal) { pal.innerHTML = paletteHTML(); wirePalette(); }
+    }
+    // Inspector guidance for a logo-badge field: where the art lives + whether any
+    // is installed for this field, with a shortcut to the Kometa installer.
+    function logoBadgeHint(field) {
+        var cnt = (logoPack.counts && logoPack.counts[field]) || 0;
+        var sourceable = LOGO_SOURCEABLE.indexOf(field) > -1;
+        var status = cnt
+            ? '<span class="voe-lp-ok">✓ ' + cnt + ' ' + esc(field) + ' logo' + (cnt === 1 ? '' : 's') + ' installed</span>'
+            : '<span class="voe-lp-miss">No ' + esc(field) + ' logos yet — shows the text below</span>';
+        var getpack = (!cnt && (sourceable || !anyLogoPack()))
+            ? ' <a href="#" class="voe-lp-link" data-voe-getpack>Get Kometa pack</a>' : '';
+        return '<div class="voe-insp-hint">' + status + getpack +
+            '<br>Art lives at <code>logos/' + esc(field) + '/&lt;value&gt;.png</code>; each value falls back to text when it has no image.</div>';
+    }
+
+    function defaultSample() {
+        return { resolution: '2160p', hdr: 'HDR', video_codec: 'hevc', audio_codec: 'atmos', source: 'bluray', aspect: '2.40:1',
+            imdb: 8.4, rt: 92, metacritic: 81, tmdb: 8.1, trakt: 8.3, tvmaze: 8.0, anilist: 82, content_rating: 'PG-13', status: 'Returning',
+            year: 2021, runtime: 148, season_count: 4, episode_count: 62, subtitles: 7, versions: 2, mediastinger: 1, title: 'Example Title', tagline: 'Every legend has a beginning', collection: 'The Collection', awards: 'oscar', streaming: 'Netflix', network: 'HBO', studio: 'A24', genre: 'Sci-Fi',
+            season_number: 1, episode_number: 1, episode_code: 'S1E1' };
+    }
+    // A loaded title shows ITS OWN data — fields it genuinely lacks stay blank, so
+    // the preview is truthful and matches what apply actually renders. (Falling
+    // back to defaultSample here fabricated data: a movie has no network, so it
+    // inherited the sample 'HBO'.) The representative defaults are only the
+    // placeholder for the no-title-selected state.
+    function mergeSample(real) {
+        if (!real) return defaultSample();
+        var d = {};
+        FIELD_ORDER.forEach(function (k) { d[k] = (real[k] != null && real[k] !== '') ? real[k] : null; });
+        Object.keys(real).forEach(function (k) { if (!(k in d)) d[k] = real[k]; });   // has_poster, etc.
+        d.logo_url = real.logo_url || null;   // logo art (not a text field) for logo layers
+        return d;
+    }
+    function resolveBinding(b) {
+        var f = FIELDS[b.field]; if (!f) return '?';
+        var out = f.fmt(ed.sample ? ed.sample[b.field] : null);
+        return out == null ? '[' + f.label + ']' : out;
+    }
+
+    // ── 9-point anchors: fraction of the ELEMENT that pins to (x,y). ───────────
+    var ANCHORS = {
+        'top-left': [0, 0], 'top-center': [0.5, 0], 'top-right': [1, 0],
+        'mid-left': [0, 0.5], 'center': [0.5, 0.5], 'mid-right': [1, 0.5],
+        'bottom-left': [0, 1], 'bottom-center': [0.5, 1], 'bottom-right': [1, 1],
+    };
+    function anchorFrac(a) { return ANCHORS[a] || ANCHORS.center; }
+
+    // ── SVG icons ──────────────────────────────────────────────────────────────
+    var I = {
+        brand: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 15l5-5 4 4"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M14 13l3-3 4 4"/></svg>',
+        text: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V5h16v2"/><path d="M12 5v14"/><path d="M9 19h6"/></svg>',
+        eye: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>',
+        eyeOff: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.9 4.2A10.9 10.9 0 0 1 12 4c6.5 0 10 7 10 7a15 15 0 0 1-2.9 3.6"/><path d="M6.6 6.6A15 15 0 0 0 2 11s3.5 7 10 7a10.9 10.9 0 0 0 3.6-.6"/><path d="M3 3l18 18"/></svg>',
+        trash: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2m-9 0v14a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V6"/></svg>',
+        grip: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>',
+        copy: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+        back: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>',
+        save: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>',
+        badge: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="10" rx="3"/><path d="M7 12h2m3 0h5"/></svg>',
+        star: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.2l5.9-.9L12 3Z"/></svg>',
+        info: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>',
+        chev: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>',
+        undo: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-1"/></svg>',
+        redo: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14l5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h1"/></svg>',
+        dupe: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+        apply: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2 4 4 .5-3 3 .8 4.2L12 16l-3.8 1.7.8-4.2-3-3 4-.5 2-4Z"/><path d="M5 20h14"/></svg>',
+        help: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.8.4-1 .9-1 1.7"/><path d="M12 17h.01"/></svg>',
+        dice: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="4"/><circle cx="8.5" cy="8.5" r="1.2" fill="currentColor" stroke="none"/><circle cx="15.5" cy="15.5" r="1.2" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/></svg>',
+        poster: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M4 15l4-4 3 3 3-3 6 6"/></svg>',
+        image: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>',
+        logo: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 7v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V7M9 12h6"/></svg>',
+        shape: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="12" rx="2"/></svg>',
+        scrim: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 14h18" opacity=".5"/><path d="M3 17h18" opacity=".8"/></svg>',
+        row: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="9" width="6" height="6" rx="1.5"/><rect x="9.5" y="9" width="5" height="6" rx="1.5"/><rect x="16" y="9" width="6" height="6" rx="1.5"/></svg>',
+        film: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16M3 9h4M17 9h4M3 15h4M17 15h4"/></svg>',
+        ellipse: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2"><ellipse cx="12" cy="12" rx="9" ry="6.5"/></svg>',
+        line: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M4 12h16"/></svg>',
+        ribbon: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15L15 4l5 5L9 20z"/></svg>',
+        lock: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>',
+        unlock: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/></svg>',
+        front: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="12" height="12" rx="2"/><path d="M9 15v4a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-4"/></svg>',
+    };
+    function catIcon(cat) { return cat === 'Ratings' ? I.star : cat === 'Quality' ? I.badge : I.info; }
+
+    // ── overlay + view state ────────────────────────────────────────────────────
+    var overlay = null;         // the .voe-overlay root
+    var ed = null;              // editor state (null while in gallery)
+    var resizeBound = null;
+    var _clipboard = [];   // copied layers — survives across templates in one session
+
+    function ensureOverlay() {
+        if (overlay) return overlay;
+        overlay = document.createElement('div');
+        overlay.className = 'voe-overlay';
+        document.body.appendChild(overlay);
+        return overlay;
+    }
+
+    function open(templateId) {
+        ensureOverlay();
+        document.body.classList.add('vdh-locked');
+        requestAnimationFrame(function () { overlay.classList.add('voe-overlay--on'); });
+        if (templateId != null) loadTemplate(templateId);
+        else showGallery();
+    }
+
+    function hardClose() {
+        if (!overlay) return;
+        closePop();
+        overlay.classList.remove('voe-overlay--on');
+        document.body.classList.remove('vdh-locked');
+        if (resizeBound) { window.removeEventListener('resize', resizeBound); resizeBound = null; }
+        ed = null;
+        setTimeout(function () { if (overlay) overlay.innerHTML = ''; }, 260);
+    }
+
+    // Saving only happens when the user clicks Save (or Cmd/Ctrl+S). Leaving with
+    // unsaved changes warns instead of silently persisting.
+    function close() {
+        if (ed && ed.dirty) {
+            confirmDialog('Discard unsaved changes?', 'Your edits since the last save will be lost. Cancel and hit Save to keep them.', 'Discard', hardClose);
+            return;
+        }
+        hardClose();
+    }
+
+    // ── API helpers ─────────────────────────────────────────────────────────────
+    function api(method, url, body) {
+        return fetch(url, {
+            method: method, headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: body ? JSON.stringify(body) : undefined,
+        }).then(function (r) { return r.ok ? r.json() : Promise.reject(r); });
+    }
+
+    // ── GALLERY ─────────────────────────────────────────────────────────────────
+    function showGallery() {
+        ed = null;
+        overlay.innerHTML =
+            '<div class="voe-topbar">' +
+                '<div class="voe-brand"><span class="voe-brand-mark">' + I.brand + '</span>' +
+                    '<span class="voe-brand-name">Overlay Studio</span></div>' +
+                '<div class="voe-top-spacer"></div>' +
+                '<button class="voe-btn voe-btn--primary" data-voe-apply-open>' + I.apply + ' Apply to library</button>' +
+                '<button class="voe-x" data-voe-close aria-label="Close">&times;</button>' +
+            '</div>' +
+            '<div class="voe-gallery"><div class="voe-gallery-inner">' +
+                '<div class="voe-gallery-head">' +
+                    '<div class="voe-gallery-kick">Artwork Studio</div>' +
+                    '<h1 class="voe-gallery-title">Overlay Templates</h1>' +
+                    '<p class="voe-gallery-sub">Design badge &amp; artwork overlays on a canvas — resolution, ratings, logos, text — then reuse them across your library. Positions are relative, so one template fits every poster.</p>' +
+                '</div>' +
+                '<div class="voe-studio-settings">' +
+                    '<div class="voe-studio-panel voe-studio-panel--assign">' +
+                        '<div class="voe-studio-panel-h">Overlay settings' +
+                            '<span class="voe-studio-panel-tag">applied nightly &amp; on demand</span></div>' +
+                        '<div class="voe-apply-cards" data-voe-assign><div class="voe-gallery-empty">Loading…</div></div>' +
+                        '<div class="voe-studio-note">Auto-updates each night; only changed items re-render. Manage the schedule on the <strong>Automations</strong> page, or hit <strong>Apply to library</strong> to run it now.</div>' +
+                    '</div>' +
+                    '<div class="voe-studio-panel voe-studio-panel--maint">' +
+                        '<div class="voe-studio-panel-h">Maintenance</div>' +
+                        '<p class="voe-studio-maint-desc">Plex keeps every uploaded poster, so overlays add up over time. Reclaim the space — Empty Trash, Clean Bundles, Optimize DB.</p>' +
+                        '<button class="voe-btn" data-voe-cleanup>' + I.trash + ' Clean up Plex images</button>' +
+                        '<div class="voe-studio-cleanup-status" data-voe-cleanup-status hidden></div>' +
+                        '<div class="voe-studio-note">Runs weekly on its own — manage on the <strong>Automations</strong> page.</div>' +
+                    '</div>' +
+                '</div>' +
+                '<div class="voe-grid" data-voe-grid><div class="voe-gallery-empty">Loading…</div></div>' +
+            '</div></div>';
+        overlay.querySelector('[data-voe-close]').addEventListener('click', close);
+        overlay.querySelector('[data-voe-apply-open]').addEventListener('click', openApplyDialog);
+        overlay.querySelector('[data-voe-cleanup]').addEventListener('click', startStudioCleanup);
+        loadGallery();
+        renderStudioSettings();
+    }
+
+    // Fill the studio's quick overlay-settings panel (same scope cards + wiring as
+    // the Apply modal — one source of truth) and keep it in sync after edits.
+    function renderStudioSettings() {
+        var host = overlay && overlay.querySelector('[data-voe-assign]');
+        if (!host) return;
+        api('GET', '/api/video/overlays/assignments').then(function (d) {
+            host.innerHTML = assignCardsHTML((d && d.assignments) || {}, (d && d.templates) || []);
+            wireAssign(host);
+        }).catch(function () { host.innerHTML = '<div class="voe-gallery-empty">Could not load settings</div>'; });
+    }
+
+    var _cleanupPoll = null;
+    function startStudioCleanup() {
+        var btn = overlay.querySelector('[data-voe-cleanup]');
+        var box = overlay.querySelector('[data-voe-cleanup-status]');
+        if (!btn || !box) return;
+        confirmDialog('Clean up Plex images?', 'Runs Plex maintenance (Empty Trash, Clean Bundles, Optimize DB) to reclaim space from old overlay uploads. Safe, but heavy — best when nothing else is applying overlays.', 'Clean up', function () {
+            btn.disabled = true;
+            box.hidden = false; box.textContent = 'Starting…';
+            api('POST', '/api/video/overlays/cleanup').then(function (r) {
+                if (!r || !r.ok) { box.textContent = 'Could not start'; btn.disabled = false; return; }
+                _cleanupPoll = setInterval(pollStudioCleanup, 1500);
+            }).catch(function () { box.textContent = 'Could not start'; btn.disabled = false; });
+        });
+    }
+    function pollStudioCleanup() {
+        api('GET', '/api/video/overlays/cleanup/status').then(function (s) {
+            var box = overlay && overlay.querySelector('[data-voe-cleanup-status]');
+            var btn = overlay && overlay.querySelector('[data-voe-cleanup]');
+            if (!box) { if (_cleanupPoll) { clearInterval(_cleanupPoll); _cleanupPoll = null; } return; }
+            if (s && s.running) {
+                var step = s.step ? String(s.step).replace(/_/g, ' ') : 'working';
+                box.textContent = 'Cleaning up… (' + step + ')';
+                return;
+            }
+            if (_cleanupPoll) { clearInterval(_cleanupPoll); _cleanupPoll = null; }
+            if (btn) btn.disabled = false;
+            if (s && s.phase === 'error') box.textContent = 'Failed: ' + (s.error || 'error');
+            else box.textContent = 'Done · cleaned ' + ((s && s.done || []).length) + ' step' + (((s && s.done || []).length) === 1 ? '' : 's') + (((s && s.failed || []).length) ? ', ' + s.failed.length + ' failed' : '');
+        }).catch(function () {});
+    }
+
+    // ── apply overlays to the library ────────────────────────────────────────────
+    var applyPollTimer = null;
+    function openApplyDialog() {
+        api('GET', '/api/video/overlays/assignments').then(function (d) {
+            renderApplyDialog(d || { assignments: {}, templates: [], applied: 0 });
+        }).catch(function () { toast('Could not load apply settings', 'error'); });
+    }
+    // Which template type a library scope takes (movies+shows share Poster).
+    function scopeKind(scope) { return scope === 'season' ? 'season' : scope === 'episode' ? 'episode' : 'poster'; }
+    // One settings card per library scope: template picker (only type-matching
+    // templates) + enable toggle + an optional note. This is the shared editor —
+    // the same markup the Automations-side config reuses.
+    function scopeCard(label, scope, assign, templates, note) {
+        var want = scopeKind(scope);
+        var pool = (templates || []).filter(function (t) { return (t.kind || 'poster') === want; });
+        var cur = (assign && assign.template_id) || '';
+        var on = !!(assign && assign.enabled && assign.template_id);
+        var opts = '<option value="">— None —</option>' + pool.map(function (t) {
+            return '<option value="' + t.id + '"' + (String(t.id) === String(cur) ? ' selected' : '') + '>' + esc(t.name) + '</option>';
+        }).join('');
+        return '<div class="voe-apply-card' + (on ? ' voe-apply-card--on' : '') + '" data-apply-card="' + scope + '">' +
+            '<div class="voe-apply-card-h">' +
+                '<span class="voe-apply-card-name">' + esc(label) + '</span>' +
+                '<button class="voe-toggle' + (on ? ' voe-toggle--on' : '') + '" data-apply-en="' + scope + '" aria-label="Enable overlays for ' + esc(label) + '"></button>' +
+            '</div>' +
+            '<select class="voe-input" data-apply-tpl="' + scope + '"' + (pool.length ? '' : ' disabled') + '>' + opts + '</select>' +
+            (pool.length ? '' : '<div class="voe-apply-card-empty">No ' + esc(want) + ' templates yet — design one first.</div>') +
+            '<div class="voe-filter" data-filter-host="' + scope + '">' +
+                '<button type="button" class="voe-filter-line" data-filter-toggle="' + scope + '">' +
+                    '<span class="voe-filter-ic">◇</span><span data-filter-sum>' + filterSummary(assign && assign.filter) + '</span>' +
+                '</button>' +
+                '<div class="voe-filter-body" data-filter-body hidden></div>' +
+            '</div>' +
+            (note ? '<div class="voe-apply-card-note">' + esc(note) + '</div>' : '') +
+            '</div>';
+    }
+    // The 4 scope cards, shared by the Apply modal AND the studio settings panel.
+    function assignCardsHTML(a, templates) {
+        a = a || {};
+        ['movie', 'show', 'season', 'episode'].forEach(function (s) {
+            _scopeFilters[s] = (a[s] && a[s].filter) || null;
+        });
+        return scopeCard('Movies', 'movie', a.movie, templates, '') +
+            scopeCard('TV Shows', 'show', a.show, templates, '') +
+            scopeCard('Seasons', 'season', a.season, templates, 'Season posters') +
+            scopeCard('Episodes', 'episode', a.episode, templates, 'Episode stills · runs only when enabled');
+    }
+    // Wire the template pickers + enable toggles within any container (modal or studio).
+    function wireAssign(root) {
+        root.querySelectorAll('[data-apply-tpl]').forEach(function (sel) {
+            sel.addEventListener('change', function () { saveAssign(root, sel.getAttribute('data-apply-tpl')); });
+        });
+        root.querySelectorAll('[data-apply-en]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var on = btn.classList.toggle('voe-toggle--on');
+                var card = btn.closest('[data-apply-card]');
+                if (card) card.classList.toggle('voe-apply-card--on', on);
+                saveAssign(root, btn.getAttribute('data-apply-en'));
+            });
+        });
+        root.querySelectorAll('[data-filter-toggle]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                toggleFilterEditor(root, btn.getAttribute('data-filter-toggle'));
+            });
+        });
+    }
+
+    // ── filtered targeting: "apply this overlay only to items matching…" ─────
+    // Same rule language as the Collection Studio (one brain: the smart-filter
+    // compiler); seasons/episodes filter their PARENT SHOW.
+    var _scopeFilters = {};      // scope -> definition ({match, rules}) or null
+    var _filterFields = {};      // 'movie'|'show' -> field schema (lazy, shared API)
+
+    function filterSummary(filt) {
+        var n = filt && filt.rules ? filt.rules.length : 0;
+        return n ? ('Applies to items matching ' + n + ' rule' + (n === 1 ? '' : 's'))
+                 : 'Applies to everything';
+    }
+
+    function filterFieldKind(scope) { return scope === 'movie' ? 'movie' : 'show'; }
+
+    function loadFilterFields(kind) {
+        if (_filterFields[kind]) return Promise.resolve(_filterFields[kind]);
+        return fetch('/api/video/collections/fields?media_type=' + kind, { headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.json(); })
+            .then(function (d) { _filterFields[kind] = d || { fields: [], suggestions: {} }; return _filterFields[kind]; });
+    }
+
+    function toggleFilterEditor(root, scope) {
+        var host = root.querySelector('[data-filter-host="' + scope + '"]');
+        if (!host) return;
+        var body = host.querySelector('[data-filter-body]');
+        if (!body.hidden) { body.hidden = true; return; }
+        body.hidden = false;
+        body.innerHTML = '<div class="voe-filter-loading">Loading…</div>';
+        loadFilterFields(filterFieldKind(scope)).then(function () { paintFilterEditor(root, scope); });
+    }
+
+    function paintFilterEditor(root, scope) {
+        var host = root.querySelector('[data-filter-host="' + scope + '"]');
+        var body = host && host.querySelector('[data-filter-body]');
+        if (!body) return;
+        var meta = _filterFields[filterFieldKind(scope)] || { fields: [], suggestions: {} };
+        var filt = _scopeFilters[scope] || { match: 'all', rules: [] };
+        _scopeFilters[scope] = filt;
+        body.innerHTML = '';
+
+        if ((filt.rules || []).length > 1) {
+            var m = document.createElement('div');
+            m.className = 'voe-filter-match';
+            m.innerHTML = 'Match <select class="voe-input voe-filter-match-sel">' +
+                '<option value="all"' + (filt.match !== 'any' ? ' selected' : '') + '>all</option>' +
+                '<option value="any"' + (filt.match === 'any' ? ' selected' : '') + '>any</option>' +
+                '</select> of these rules' + (scope === 'season' || scope === 'episode' ? ' <i>(rules describe the SHOW)</i>' : '');
+            m.querySelector('select').addEventListener('change', function (e) {
+                filt.match = e.target.value;
+                filterChanged(root, scope);
+            });
+            body.appendChild(m);
+        }
+
+        (filt.rules || []).forEach(function (rule, i) {
+            var spec = meta.fields.filter(function (f) { return f.field === rule.field; })[0] || meta.fields[0];
+            if (!spec) return;
+            if (!rule.op || spec.ops.indexOf(rule.op) < 0) rule.op = spec.ops[0];
+            var row = document.createElement('div');
+            row.className = 'voe-filter-rule';
+            var fsel = document.createElement('select');
+            fsel.className = 'voe-input';
+            fsel.innerHTML = meta.fields.map(function (f) {
+                return '<option value="' + f.field + '"' + (f.field === rule.field ? ' selected' : '') + '>' + esc(f.label) + '</option>';
+            }).join('');
+            fsel.addEventListener('change', function () {
+                rule.field = fsel.value; rule.op = ''; rule.value = '';
+                paintFilterEditor(root, scope); filterChanged(root, scope);
+            });
+            var osel = document.createElement('select');
+            osel.className = 'voe-input voe-filter-op';
+            osel.innerHTML = spec.ops.map(function (o) {
+                return '<option value="' + o + '"' + (o === rule.op ? ' selected' : '') + '>' + esc(o.replace(/_/g, ' ')) + '</option>';
+            }).join('');
+            osel.addEventListener('change', function () { rule.op = osel.value; filterChanged(root, scope); });
+            var val = document.createElement('input');
+            val.className = 'voe-input';
+            val.placeholder = spec.type === 'number' ? 'number' : 'value';
+            val.value = Array.isArray(rule.value) ? rule.value.join(', ') : (rule.value == null ? '' : rule.value);
+            var opts = spec.options || (meta.suggestions && meta.suggestions[rule.field]);
+            if (opts && opts.length) {
+                var dlid = 'voe-fdl-' + scope + '-' + i;
+                val.setAttribute('list', dlid);
+                var dl = document.createElement('datalist');
+                dl.id = dlid;
+                dl.innerHTML = opts.map(function (o) { return '<option value="' + esc(String(o)) + '">'; }).join('');
+                row.appendChild(dl);
+            }
+            val.addEventListener('input', function () {
+                rule.value = (rule.op === 'in' || rule.op === 'not_in')
+                    ? val.value.split(',').map(function (s) { return s.trim(); }).filter(Boolean)
+                    : val.value;
+                filterChanged(root, scope);
+            });
+            var x = document.createElement('button');
+            x.type = 'button';
+            x.className = 'voe-filter-x';
+            x.innerHTML = '&times;';
+            x.addEventListener('click', function () {
+                filt.rules.splice(i, 1);
+                paintFilterEditor(root, scope); filterChanged(root, scope);
+            });
+            row.appendChild(fsel); row.appendChild(osel); row.appendChild(val); row.appendChild(x);
+            body.appendChild(row);
+        });
+
+        var foot = document.createElement('div');
+        foot.className = 'voe-filter-foot';
+        var add = document.createElement('button');
+        add.type = 'button';
+        add.className = 'voe-btn voe-btn--ghost voe-filter-add';
+        add.textContent = '+ Rule';
+        add.addEventListener('click', function () {
+            filt.rules.push({ field: (meta.fields[0] || {}).field || 'year', op: '', value: '' });
+            paintFilterEditor(root, scope);
+        });
+        foot.appendChild(add);
+        var count = document.createElement('span');
+        count.className = 'voe-filter-count';
+        count.setAttribute('data-filter-count', scope);
+        foot.appendChild(count);
+        body.appendChild(foot);
+        refreshFilterCount(root, scope);
+    }
+
+    var _filterTimers = {};
+    function filterChanged(root, scope) {
+        var sum = root.querySelector('[data-filter-host="' + scope + '"] [data-filter-sum]');
+        if (sum) sum.textContent = filterSummary(_scopeFilters[scope]);
+        clearTimeout(_filterTimers[scope]);
+        _filterTimers[scope] = setTimeout(function () {
+            saveAssign(root, scope);
+            refreshFilterCount(root, scope);
+        }, 450);
+    }
+
+    function refreshFilterCount(root, scope) {
+        var el = root.querySelector('[data-filter-count="' + scope + '"]');
+        if (!el) return;
+        var filt = _scopeFilters[scope];
+        if (!filt || !(filt.rules || []).length) { el.textContent = 'No filter — every item gets the overlay'; return; }
+        el.textContent = 'Counting…';
+        api('POST', '/api/video/overlays/filter/preview', { scope: scope, filter: filt })
+            .then(function (d) {
+                if (d && d.ok) el.textContent = d.count + ' of ' + d.total + ' match — the rest get their clean art back';
+                else el.textContent = (d && d.error) || 'Filter incomplete';
+            }).catch(function () { el.textContent = ''; });
+    }
+    function renderApplyDialog(d) {
+        var templates = d.templates || [], a = d.assignments || {};
+        var back = document.createElement('div');
+        back.className = 'voe-confirm-back';
+        back.innerHTML = '<div class="voe-apply-modal voe-apply-modal--v2">' +
+            '<div class="voe-apply-t">Overlays</div>' +
+            '<div class="voe-apply-sub">Choose a template for each part of your library. It renders onto a clean copy and pushes to your server; the originals are backed up, so you can remove them anytime.</div>' +
+            '<div class="voe-apply-auto"><span class="voe-apply-auto-ic">' + I.dice + '</span>' +
+                '<div class="voe-apply-auto-tx">These are your overlay settings. Overlays refresh <strong>automatically every night</strong> — only the items that changed get re-rendered. Turn that schedule on or off on the <strong>Automations</strong> page.</div></div>' +
+            '<div class="voe-apply-cards">' + assignCardsHTML(a, templates) + '</div>' +
+            '<div class="voe-apply-prog" data-apply-prog hidden><div class="voe-apply-bar"><div class="voe-apply-bar-fill" data-apply-fill></div></div>' +
+            '<div class="voe-apply-prog-txt" data-apply-progtxt></div></div>' +
+            '<div class="voe-apply-foot">' +
+                '<div class="voe-apply-applied" data-apply-count>' + (d.applied || 0) + ' item' + (d.applied === 1 ? '' : 's') + ' currently overlaid</div>' +
+                '<div class="voe-spacer"></div>' +
+                '<button class="voe-btn voe-btn--ghost" data-apply-remove title="Restore each poster from its backup">Remove</button>' +
+                '<button class="voe-btn voe-btn--ghost" data-apply-reset title="Re-pull the clean TMDB poster and push it (wipes Kometa overlays too)">Reset</button>' +
+                '<button class="voe-btn" data-apply-cancel>Close</button>' +
+                '<button class="voe-btn voe-btn--primary" data-apply-run>' + I.apply + ' Apply now</button>' +
+            '</div></div>';
+        document.body.appendChild(back);
+        requestAnimationFrame(function () { back.classList.add('voe-confirm-back--on'); });
+        function done() {
+            if (applyPollTimer) { clearInterval(applyPollTimer); applyPollTimer = null; }
+            back.classList.remove('voe-confirm-back--on'); setTimeout(function () { back.remove(); }, 180);
+        }
+        wireAssign(back);
+        back.querySelector('[data-apply-cancel]').addEventListener('click', done);
+        back.addEventListener('click', function (e) { if (e.target === back) done(); });
+        back.querySelector('[data-apply-run]').addEventListener('click', function () { startApply(back, {}); });
+        back.querySelector('[data-apply-remove]').addEventListener('click', function () {
+            confirmDialog('Remove all overlays?', 'Every overlaid poster is restored from its backup on the server. Your templates are kept.', 'Remove', function () { startApply(back, { remove: true }); });
+        });
+        back.querySelector('[data-apply-reset]').addEventListener('click', function () {
+            confirmDialog('Reset posters to originals?', 'Re-pulls each title\'s clean TMDB poster and pushes it to your server — this also wipes overlays burned in by other tools (e.g. Kometa). Your templates are kept.', 'Reset', function () { startApply(back, { reset: true }); });
+        });
+        // If a run is already going (started here earlier, or by the nightly automation),
+        // resume the live progress view instead of showing a reset state.
+        api('GET', '/api/video/overlays/apply/status').then(function (s) {
+            if (!s || !(s.running || s.phase === 'starting' || s.phase === 'running')) return;
+            _applyBtns(back).forEach(function (b) { b.disabled = true; });
+            back.querySelector('[data-apply-prog]').hidden = false;
+            setApplyProg(back, s);
+            if (!applyPollTimer) applyPollTimer = setInterval(function () { pollApply(back); }, 700);
+        }).catch(function () {});
+    }
+    function saveAssign(back, scope) {
+        var sel = back.querySelector('[data-apply-tpl="' + scope + '"]');
+        var en = back.querySelector('[data-apply-en="' + scope + '"]');
+        var tid = sel.value ? parseInt(sel.value, 10) : null;
+        var enabled = en.classList.contains('voe-toggle--on') && !!tid;
+        var filt = _scopeFilters[scope];
+        api('PUT', '/api/video/overlays/assignments',
+            { scope: scope, template_id: tid, enabled: enabled,
+              filter: (filt && (filt.rules || []).length ? filt : null) })
+            .catch(function () { toast('Could not save assignment', 'error'); });
+    }
+    function _applyBtns(back) { return back.querySelectorAll('[data-apply-run],[data-apply-remove],[data-apply-reset]'); }
+    // Movies + TV always run (matches prior behavior); seasons/episodes only when
+    // their toggle is on, since episodes can be a huge, server-hammering job.
+    function _runScopes(back) {
+        var scopes = ['movie', 'show'];
+        ['season', 'episode'].forEach(function (s) {
+            var t = back.querySelector('[data-apply-en="' + s + '"]');
+            if (t && t.classList.contains('voe-toggle--on')) scopes.push(s);
+        });
+        return scopes;
+    }
+    function startApply(back, opts) {
+        opts = opts || {};
+        _applyBtns(back).forEach(function (b) { b.disabled = true; });
+        var prog = back.querySelector('[data-apply-prog]'); prog.hidden = false;
+        setApplyProg(back, { phase: 'starting', done: 0, total: 0 });
+        api('POST', '/api/video/overlays/apply', { scopes: _runScopes(back), remove: !!opts.remove, reset: !!opts.reset })
+            .then(function (r) {
+                if (!r || !r.ok) { toast((r && r.error) || 'Could not start', 'error'); _applyBtns(back).forEach(function (b) { b.disabled = false; }); return; }
+                applyPollTimer = setInterval(function () { pollApply(back); }, 700);
+            })
+            .catch(function () { toast('Could not start', 'error'); _applyBtns(back).forEach(function (b) { b.disabled = false; }); });
+    }
+    function _modeVerb(mode, ing) {
+        if (mode === 'remove') return ing ? 'Removing' : 'Removed overlays';
+        if (mode === 'reset') return ing ? 'Resetting' : 'Reset posters';
+        return ing ? 'Applying' : 'Overlays applied';
+    }
+    function pollApply(back) {
+        api('GET', '/api/video/overlays/apply/status').then(function (s) {
+            if (!document.body.contains(back)) { if (applyPollTimer) { clearInterval(applyPollTimer); applyPollTimer = null; } return; }
+            setApplyProg(back, s);
+            if (!s.running && s.phase !== 'starting') {
+                clearInterval(applyPollTimer); applyPollTimer = null;
+                _applyBtns(back).forEach(function (b) { b.disabled = false; });
+                if (s.phase === 'error') toast('Failed: ' + (s.error || ''), 'error');
+                else toast(_modeVerb(s.mode, false) + ' · ' + (s.applied || 0) + ' done' +
+                    (s.mode === 'apply' ? ', ' + (s.skipped || 0) + ' unchanged' : '') + (s.failed ? ', ' + s.failed + ' failed' : ''), 'success');
+                document.dispatchEvent(new CustomEvent('soulsync:video-overlays-applied'));
+            }
+        }).catch(function () { /* keep polling */ });
+    }
+    function setApplyProg(back, s) {
+        var fill = back.querySelector('[data-apply-fill]'), txt = back.querySelector('[data-apply-progtxt]');
+        var pct = s.total ? Math.round((s.done / s.total) * 100) : (s.phase === 'done' ? 100 : 5);
+        if (fill) fill.style.width = pct + '%';
+        if (txt) {
+            if (s.phase === 'running' || s.phase === 'starting') txt.textContent = _modeVerb(s.mode, true) + '… ' + (s.done || 0) + ' / ' + (s.total || '…') + (s.title ? ' · ' + s.title : '');
+            else if (s.phase === 'done') txt.textContent = 'Done — ' + (s.applied || 0) + ' applied, ' + (s.skipped || 0) + ' unchanged' + (s.failed ? ', ' + s.failed + ' failed' : '');
+            else if (s.phase === 'error') txt.textContent = 'Failed.';
+        }
+    }
+
+    function loadGallery() {
+        api('GET', '/api/video/overlays/templates').then(function (d) {
+            renderGallery((d && d.templates) || []);
+        }).catch(function () { renderGallery([]); });
+    }
+
+    function templateCardHTML(t) {
+        var when = t.updated_at ? String(t.updated_at).slice(0, 10) : '';
+        var n = t.layer_count || 0;
+        var wide = (t.kind || 'poster') === 'episode';
+        return '<div class="voe-card' + (wide ? ' voe-card--wide' : '') + '" data-voe-open="' + t.id + '">' +
+            '<div class="voe-card-canvas">' +
+                '<span class="voe-card-empty-ic">🎬</span>' +
+                '<img class="voe-card-thumb" src="/api/video/overlays/templates/' + t.id + '/thumb?v=' + encodeURIComponent(t.updated_at || '') + '"' +
+                ' alt="" loading="lazy" onload="this.classList.add(\'voe-card-thumb--on\')" onerror="this.remove()">' +
+                '<div class="voe-card-actions">' +
+                    '<div class="voe-card-act" data-voe-dupe="' + t.id + '" title="Duplicate">' + I.copy + '</div>' +
+                    '<div class="voe-card-act voe-card-act--danger" data-voe-del="' + t.id + '" data-voe-delname="' + esc(t.name) + '" title="Delete">' + I.trash + '</div>' +
+                '</div>' +
+            '</div>' +
+            '<div class="voe-card-meta"><div class="voe-card-name">' + esc(t.name) + '</div>' +
+                '<div class="voe-card-info">' + n + ' layer' + (n === 1 ? '' : 's') + (when ? ' · ' + when : '') + '</div></div>' +
+            '</div>';
+    }
+
+    function renderGallery(templates) {
+        var grid = overlay && overlay.querySelector('[data-voe-grid]');
+        if (!grid) return;
+        // Grouped by template type — each shape lives with its own kind, and
+        // episode templates render in their true 16:9.
+        var GROUPS = [['poster', 'Posters', 'Movies & shows · 2:3'],
+                      ['season', 'Seasons', 'Season posters · 2:3'],
+                      ['episode', 'Episodes', 'Episode stills · 16:9']];
+        var byKind = { poster: [], season: [], episode: [] };
+        (templates || []).forEach(function (t) {
+            (byKind[(t.kind || 'poster')] || byKind.poster).push(t);
+        });
+        var html = '<div class="voe-grid-row">' +
+            '<div class="voe-card voe-card--new" data-voe-new>' +
+            '<div class="voe-card-canvas"><span class="voe-plus">+</span><span class="voe-new-label">New template</span></div></div></div>';
+        GROUPS.forEach(function (g) {
+            var list = byKind[g[0]];
+            if (!list.length) return;
+            html += '<div class="voe-grid-grouphead"><span>' + g[1] + '</span>' +
+                '<i>' + list.length + ' · ' + g[2] + '</i></div>' +
+                '<div class="voe-grid-row' + (g[0] === 'episode' ? ' voe-grid-row--wide' : '') + '">' +
+                list.map(templateCardHTML).join('') + '</div>';
+        });
+        grid.innerHTML = html;
+        grid.querySelector('[data-voe-new]').addEventListener('click', openStarterPicker);
+        grid.querySelectorAll('[data-voe-open]').forEach(function (c) {
+            c.addEventListener('click', function (e) {
+                if (e.target.closest('[data-voe-dupe],[data-voe-del]')) return;
+                loadTemplate(c.getAttribute('data-voe-open'));
+            });
+        });
+        grid.querySelectorAll('[data-voe-dupe]').forEach(function (b) {
+            b.addEventListener('click', function (e) {
+                e.stopPropagation();
+                api('POST', '/api/video/overlays/templates/' + b.getAttribute('data-voe-dupe') + '/duplicate')
+                    .then(function () { loadGallery(); toast('Template duplicated', 'success'); })
+                    .catch(function () { toast('Could not duplicate', 'error'); });
+            });
+        });
+        grid.querySelectorAll('[data-voe-del]').forEach(function (b) {
+            b.addEventListener('click', function (e) {
+                e.stopPropagation();
+                confirmDialog('Delete “' + b.getAttribute('data-voe-delname') + '”?',
+                    'This template will be permanently removed. This cannot be undone.', 'Delete', function () {
+                        api('DELETE', '/api/video/overlays/templates/' + b.getAttribute('data-voe-del'))
+                            .then(function () { loadGallery(); }).catch(function () { toast('Could not delete', 'error'); });
+                    });
+            });
+        });
+    }
+
+    function createTemplate(name, def) {
+        api('POST', '/api/video/overlays/templates',
+            { name: name || 'Untitled template', definition: def || { version: 1, canvas: { aspect: '2:3' }, layers: [] } })
+            .then(function (d) { if (d && d.id) loadTemplate(d.id); })
+            .catch(function () { toast('Could not create template', 'error'); });
+    }
+
+    // ── starter templates (skip the blank-canvas cold start) ────────────────────
+    function _def(layers, kind) {
+        kind = TEMPLATE_TYPES[kind] ? kind : 'poster';
+        return { version: 1, kind: kind, canvas: { aspect: TEMPLATE_TYPES[kind].aspect }, layers: layers };
+    }
+    function _badge(field, anchor, x, y, size) {
+        var l = defaultLayer('badge', x, y, field);
+        l.anchor = anchor; if (size) l.size = size; return l;
+    }
+    // Starters are per-type — a season/episode template opens with fields that
+    // actually apply, on the right canvas.
+    function STARTERS(kind) {
+        if (kind === 'season') return [
+            { name: 'Blank', desc: 'Empty season poster.', icon: '📄', build: function () { return _def([], 'season'); } },
+            { name: 'Season number', desc: '“Season 1” badge, bottom-left.', icon: '#️⃣',
+                build: function () { return _def([_badge('season_number', 'bottom-left', 0.06, 0.94, 0.05)], 'season'); } },
+            { name: 'Season + count', desc: 'Season number and episode count.', icon: '🗂️',
+                build: function () { return _def([_badge('season_number', 'bottom-left', 0.06, 0.9, 0.05), _badge('episode_count', 'bottom-left', 0.06, 0.97, 0.032)], 'season'); } },
+        ];
+        if (kind === 'episode') return [
+            { name: 'Blank', desc: 'Empty episode still.', icon: '📄', build: function () { return _def([], 'episode'); } },
+            { name: 'Episode code', desc: '“S1E1” badge, bottom-left.', icon: '🎬',
+                build: function () { return _def([_badge('episode_code', 'bottom-left', 0.04, 0.9, 0.07)], 'episode'); } },
+            { name: 'Code + quality', desc: 'S1E1 with a resolution badge.', icon: '🏷️',
+                build: function () { return _def([_badge('episode_code', 'bottom-left', 0.04, 0.9, 0.07), _badge('resolution', 'top-right', 0.96, 0.08, 0.06)], 'episode'); } },
+        ];
+        return [
+            { name: 'Blank', desc: 'Start from an empty poster.', icon: '📄', build: function () { return _def([], 'poster'); } },
+            { name: 'Quality corner', desc: 'Resolution + audio badges, top-right.', icon: '🏷️',
+                build: function () { return _def([_badge('resolution', 'top-right', 0.95, 0.05), _badge('audio_codec', 'top-right', 0.95, 0.14, 0.038)], 'poster'); } },
+            { name: 'Ratings bar', desc: 'IMDb + Rotten Tomatoes, bottom-left.', icon: '⭐',
+                build: function () { return _def([_badge('imdb', 'bottom-left', 0.05, 0.95), _badge('rt', 'bottom-left', 0.30, 0.95)], 'poster'); } },
+            { name: 'The works', desc: 'Scrim, title logo, quality + rating.', icon: '✨',
+                build: function () {
+                    var scrim = defaultLayer('scrim');
+                    var logo = defaultLayer('logo', 0.5, 0.82); logo.anchor = 'bottom-center'; logo.w = 0.6;
+                    return _def([scrim, logo, _badge('resolution', 'top-right', 0.95, 0.05), _badge('imdb', 'bottom-left', 0.05, 0.7)], 'poster');
+                } },
+        ];
+    }
+    var _newKind = 'poster';
+    function openStarterPicker() {
+        _newKind = 'poster';
+        var back = document.createElement('div');
+        back.className = 'voe-confirm-back';
+        function typeTabs() {
+            return TYPE_ORDER.map(function (k) {
+                var t = TEMPLATE_TYPES[k];
+                return '<button class="voe-type-tab' + (k === _newKind ? ' voe-type-tab--on' : '') + '" data-type="' + k + '">' +
+                    '<span class="voe-type-shape voe-type-shape--' + (t.wide ? 'wide' : 'tall') + '"></span>' +
+                    '<span class="voe-type-name">' + esc(t.label) + '</span>' +
+                    '<span class="voe-type-sub">' + esc(t.sub) + '</span></button>';
+            }).join('');
+        }
+        function starterCards() {
+            return STARTERS(_newKind).map(function (s, i) {
+                return '<button class="voe-starter-card" data-starter="' + i + '"><span class="voe-starter-ic">' + s.icon + '</span>' +
+                    '<span class="voe-starter-name">' + esc(s.name) + '</span><span class="voe-starter-desc">' + esc(s.desc) + '</span></button>';
+            }).join('');
+        }
+        back.innerHTML = '<div class="voe-starter-modal"><div class="voe-starter-h">New overlay template</div>' +
+            '<div class="voe-starter-sub">Pick what it overlays — the canvas shape and available fields follow.</div>' +
+            '<div class="voe-type-tabs" data-type-tabs>' + typeTabs() + '</div>' +
+            '<div class="voe-starter-grid" data-starter-grid>' + starterCards() + '</div>' +
+            '<div class="voe-confirm-row"><button class="voe-btn" data-starter-cancel>Cancel</button></div></div>';
+        document.body.appendChild(back);
+        requestAnimationFrame(function () { back.classList.add('voe-confirm-back--on'); });
+        function done() { back.classList.remove('voe-confirm-back--on'); setTimeout(function () { back.remove(); }, 180); }
+        back.addEventListener('click', function (e) {
+            var tab = e.target.closest('[data-type]');
+            if (tab) {
+                _newKind = tab.getAttribute('data-type');
+                back.querySelector('[data-type-tabs]').innerHTML = typeTabs();
+                back.querySelector('[data-starter-grid]').innerHTML = starterCards();
+                return;
+            }
+            if (e.target === back || e.target.closest('[data-starter-cancel]')) { done(); return; }
+            var list = STARTERS(_newKind);
+            var c = e.target.closest('[data-starter]');
+            if (c) { var s = list[parseInt(c.getAttribute('data-starter'), 10)]; done(); createTemplate(s.name === 'Blank' ? 'Untitled template' : s.name, s.build()); }
+        });
+    }
+
+    var _SHORTCUTS = [
+        ['Drag on the poster', 'Move a layer'],
+        ['Corner handle', 'Resize (scale)'],
+        ['Top handle', 'Rotate — hold Shift to snap 15°'],
+        ['Double-click text', 'Edit the text inline'],
+        ['Arrow keys', 'Nudge 1px — Shift for 10px'],
+        ['Delete / Backspace', 'Remove the selected layer'],
+        ['Ctrl / ⌘ + D', 'Duplicate'],
+        ['Ctrl / ⌘ + Z', 'Undo — add Shift to redo'],
+        ['Ctrl / ⌘ + S', 'Save'],
+        ['Scroll / + −', 'Zoom in & out (toward the cursor)'],
+        ['Space-drag / middle-drag', 'Pan the canvas'],
+        ['0', 'Reset zoom to fit'],
+        ['Shift-click', 'Multi-select — then align / distribute / move together'],
+        ['Ctrl / ⌘ + C / V', 'Copy / paste layers (works across templates)'],
+        ['[  /  ]', 'Send backward / bring forward — add Ctrl for back / front'],
+        ['Ctrl / ⌘ + L', 'Lock / unlock the selected layer'],
+    ];
+    function openShortcuts() {
+        var back = document.createElement('div');
+        back.className = 'voe-confirm-back';
+        back.innerHTML = '<div class="voe-shortcuts-modal"><div class="voe-starter-h">Keyboard &amp; canvas</div>' +
+            '<div class="voe-shortcuts-list">' + _SHORTCUTS.map(function (s) {
+                return '<div class="voe-shortcut-row"><span class="voe-shortcut-k">' + esc(s[0]) + '</span>' +
+                    '<span class="voe-shortcut-d">' + esc(s[1]) + '</span></div>';
+            }).join('') + '</div>' +
+            '<div class="voe-confirm-row"><button class="voe-btn voe-btn--primary" data-sc-close>Got it</button></div></div>';
+        document.body.appendChild(back);
+        requestAnimationFrame(function () { back.classList.add('voe-confirm-back--on'); });
+        function done() { back.classList.remove('voe-confirm-back--on'); setTimeout(function () { back.remove(); }, 180); }
+        back.addEventListener('click', function (e) { if (e.target === back || e.target.closest('[data-sc-close]')) done(); });
+    }
+
+    // Render the current (unsaved) template onto several real library posters so you
+    // can check it holds across varying data — different resolutions, missing ratings.
+    function openFilmstrip() {
+        var back = document.createElement('div');
+        back.className = 'voe-confirm-back';
+        back.innerHTML = '<div class="voe-starter-modal voe-filmstrip-modal">' +
+            '<div class="voe-starter-h">On real titles <span class="voe-fs-sub">your template on random library posters</span></div>' +
+            '<div class="voe-filmstrip" data-voe-fs></div>' +
+            '<div class="voe-confirm-row"><button class="voe-btn" data-fs-more>' + I.dice + ' Shuffle</button>' +
+            '<button class="voe-btn voe-btn--primary" data-fs-close>Done</button></div></div>';
+        document.body.appendChild(back);
+        requestAnimationFrame(function () { back.classList.add('voe-confirm-back--on'); });
+        function done() { back.classList.remove('voe-confirm-back--on'); setTimeout(function () { back.remove(); }, 180); }
+        function load() {
+            var strip = back.querySelector('[data-voe-fs]');
+            strip.innerHTML = '<div class="voe-fs-loading">Rendering on your library…</div>';
+            api('POST', '/api/video/overlays/preview/filmstrip', { definition: definition(), n: 5 }).then(function (d) {
+                var frames = (d && d.frames) || [];
+                strip.innerHTML = frames.length ? frames.map(function (f) {
+                    return '<figure class="voe-fs-card"><img src="' + f.data_uri + '" alt="" loading="lazy">' +
+                        '<figcaption>' + esc(f.title || '') + '</figcaption></figure>';
+                }).join('') : '<div class="voe-fs-loading">No library titles with art to preview on yet.</div>';
+            }).catch(function () { strip.innerHTML = '<div class="voe-fs-loading">Preview failed — try again.</div>'; });
+        }
+        back.addEventListener('click', function (e) {
+            if (e.target === back || e.target.closest('[data-fs-close]')) { done(); return; }
+            if (e.target.closest('[data-fs-more]')) load();
+        });
+        load();
+    }
+
+    function loadTemplate(id) {
+        api('GET', '/api/video/overlays/templates/' + id).then(function (t) {
+            var def = t.definition || {};
+            ed = {
+                id: t.id, name: t.name || 'Untitled template',
+                kind: (TEMPLATE_TYPES[def.kind] ? def.kind : 'poster'),
+                layers: (def.layers || []).map(normalizeLayer),
+                selected: null, extra: [], dirty: false,
+                stage: null, W: 0, H: 0,
+                zoom: 1, panX: 0, panY: 0, space: false,
+                sample: defaultSample(), previewTitle: null, bg: null,
+                history: [], histPos: -1,
+            };
+            renderEditor();
+        }).catch(function () { toast('Could not open template', 'error'); showGallery(); });
+    }
+
+    // Fill in defaults for any layer loaded from storage (forward-compatible).
+    function normalizeLayer(l) {
+        l = l || {};
+        l.id = l.id || uid();
+        l.type = l.type || 'text';
+        l.anchor = l.anchor || 'center';
+        if (typeof l.x !== 'number') l.x = 0.5;
+        if (typeof l.y !== 'number') l.y = 0.5;
+        l.hidden = !!l.hidden;
+        l.locked = !!l.locked;
+        if (typeof l.opacity !== 'number') l.opacity = 1;
+        if (typeof l.rotation !== 'number') l.rotation = 0;
+        if (l.type === 'image') {
+            if (typeof l.w !== 'number') l.w = 0.4;
+            l.src = l.src || '';
+            if (typeof l.radius !== 'number') l.radius = 0;
+            if (typeof l.grayscale !== 'boolean') l.grayscale = false;
+            l.border = l.border || {};
+            l.border.enabled = !!l.border.enabled;
+            l.border.color = l.border.color || '#ffffff';
+            if (typeof l.border.w !== 'number') l.border.w = 0.004;
+        }
+        if (l.type === 'shape') {
+            l.shapeKind = l.shapeKind || 'rect';
+            if (typeof l.w !== 'number') l.w = 0.5;
+            if (typeof l.h !== 'number') l.h = 0.12;
+            if (typeof l.thickness !== 'number') l.thickness = 0.006;
+            if (typeof l.radius !== 'number') l.radius = 0.02;
+            l.border = l.border || {};
+            l.border.enabled = !!l.border.enabled;
+            l.border.color = l.border.color || '#ffffff';
+            if (typeof l.border.w !== 'number') l.border.w = 0.004;
+            l.fill = l.fill || {};
+            l.fill.grad = !!l.fill.grad;
+            l.fill.c1 = l.fill.c1 || '#000000'; if (typeof l.fill.a1 !== 'number') l.fill.a1 = 0.72;
+            l.fill.c2 = l.fill.c2 || '#000000'; if (typeof l.fill.a2 !== 'number') l.fill.a2 = 0;
+            if (typeof l.fill.dir !== 'number') l.fill.dir = 180;
+        }
+        if (l.type === 'ribbon') {
+            l.corner = l.corner || 'top-right';
+            // Filled corner-flag model: one `size` (leg length). Migrate old
+            // dist/thickness ribbons by seeding size from their `dist`.
+            if (typeof l.size !== 'number') l.size = (typeof l.dist === 'number' ? l.dist : 0.2);
+            l.color = l.color || '#d11e2a';
+            l.textColor = l.textColor || '#ffffff';
+            if (l.text == null) l.text = 'NEW';
+            l.font = l.font || 'Inter';
+            if (typeof l.weight !== 'number') l.weight = 800;
+            if (typeof l.upper !== 'boolean') l.upper = true;
+            if (typeof l.textScale !== 'number') l.textScale = 0.5;
+            if (typeof l.bandOpacity !== 'number') l.bandOpacity = 1;
+        }
+        if (l.type === 'rating') {
+            l.field = l.field || 'imdb';
+            if (typeof l.stars !== 'number') l.stars = 5;
+            if (typeof l.size !== 'number') l.size = 0.05;
+            if (typeof l.gap !== 'number') l.gap = 0.2;
+            l.color = l.color || '#f5c518';
+            l.emptyColor = l.emptyColor || '#ffffff';
+            if (typeof l.emptyOpacity !== 'number') l.emptyOpacity = 0.28;
+            l.bg = l.bg || {};
+            l.bg.enabled = !!l.bg.enabled;
+            l.bg.color = l.bg.color || '#000000';
+            if (typeof l.bg.opacity !== 'number') l.bg.opacity = 0.6;
+            if (typeof l.bg.radius !== 'number') l.bg.radius = 0.02;
+            if (typeof l.bg.padX !== 'number') l.bg.padX = 0.02;
+            if (typeof l.bg.padY !== 'number') l.bg.padY = 0.012;
+            l.bg.line = !!l.bg.line;
+            l.bg.lineColor = l.bg.lineColor || '#ffffff';
+            if (typeof l.bg.lineW !== 'number') l.bg.lineW = 0.004;
+        }
+        if (l.type === 'logobadge') {
+            l.field = (l.field && LOGO_BADGE_FIELDS.indexOf(l.field) > -1) ? l.field : 'audio_codec';
+            if (typeof l.w !== 'number') l.w = 0.14;
+            if (typeof l.size !== 'number') l.size = 0.035;   // fallback-text font size
+            l.color = l.color || '#ffffff';
+            l.font = l.font || 'Inter';
+            if (typeof l.weight !== 'number') l.weight = 800;
+            l.bg = l.bg || {};
+            l.bg.enabled = !!l.bg.enabled;
+            l.bg.color = l.bg.color || '#000000';
+            if (typeof l.bg.opacity !== 'number') l.bg.opacity = 0.6;
+            if (typeof l.bg.radius !== 'number') l.bg.radius = 0.02;
+            if (typeof l.bg.padX !== 'number') l.bg.padX = 0.02;
+            if (typeof l.bg.padY !== 'number') l.bg.padY = 0.012;
+            l.bg.line = !!l.bg.line;
+            l.bg.lineColor = l.bg.lineColor || '#ffffff';
+            if (typeof l.bg.lineW !== 'number') l.bg.lineW = 0.004;
+        }
+        if (l.type === 'row') {
+            if (typeof l.gap !== 'number') l.gap = 0.014;
+            if (!Array.isArray(l.fields)) l.fields = [];
+            l.fields = l.fields.filter(function (f) { return FIELDS[f]; });
+            var s = l.style = l.style || {};
+            if (typeof s.size !== 'number') s.size = 0.036;
+            s.color = s.color || '#ffffff';
+            s.font = s.font || 'Inter';
+            if (typeof s.weight !== 'number') s.weight = 800;
+            if (typeof s.shadow !== 'boolean') s.shadow = false;
+            if (typeof s.upper !== 'boolean') s.upper = false;
+            if (typeof s.tracking !== 'number') s.tracking = 0;
+            s.shadowColor = s.shadowColor || '#000000';
+            if (typeof s.shadowOpacity !== 'number') s.shadowOpacity = 0.55;
+            if (typeof s.shadowBlur !== 'number') s.shadowBlur = 0.3;
+            if (typeof s.shadowDy !== 'number') s.shadowDy = 0.12;
+            s.stroke = s.stroke || {}; s.stroke.enabled = !!s.stroke.enabled;
+            s.stroke.color = s.stroke.color || '#000000';
+            if (typeof s.stroke.w !== 'number') s.stroke.w = 0.08;
+            s.bg = s.bg || {}; s.bg.enabled = s.bg.enabled !== false;   // pill on by default
+            s.bg.color = s.bg.color || '#000000';
+            if (typeof s.bg.opacity !== 'number') s.bg.opacity = 0.72;
+            if (typeof s.bg.radius !== 'number') s.bg.radius = 0.02;
+            if (typeof s.bg.padX !== 'number') s.bg.padX = 0.03;
+            if (typeof s.bg.padY !== 'number') s.bg.padY = 0.016;
+        }
+        if (l.type === 'text') {
+            if (l.text == null) l.text = 'Text';
+            if (typeof l.size !== 'number') l.size = 0.06;
+            l.color = l.color || '#ffffff';
+            l.font = l.font || 'Inter';
+            if (typeof l.weight !== 'number') l.weight = 800;
+            l.align = l.align || 'center';
+            if (typeof l.shadow !== 'boolean') l.shadow = true;
+            l.shadowColor = l.shadowColor || '#000000';
+            if (typeof l.shadowOpacity !== 'number') l.shadowOpacity = 0.55;
+            if (typeof l.shadowBlur !== 'number') l.shadowBlur = 0.3;
+            if (typeof l.shadowDy !== 'number') l.shadowDy = 0.12;
+            if (typeof l.maxW !== 'number') l.maxW = 0;   // 0 = no width cap
+            if (typeof l.upper !== 'boolean') l.upper = false;
+            if (typeof l.tracking !== 'number') l.tracking = 0;
+            l.stroke = l.stroke || {};
+            l.stroke.enabled = !!l.stroke.enabled;
+            l.stroke.color = l.stroke.color || '#000000';
+            if (typeof l.stroke.w !== 'number') l.stroke.w = 0.08;   // fraction of font size
+            l.bg = l.bg || {};
+            l.bg.enabled = !!l.bg.enabled;
+            l.bg.color = l.bg.color || '#000000';
+            if (typeof l.bg.opacity !== 'number') l.bg.opacity = 0.6;
+            if (typeof l.bg.radius !== 'number') l.bg.radius = 0.014;
+            if (typeof l.bg.padX !== 'number') l.bg.padX = 0.022;
+            if (typeof l.bg.padY !== 'number') l.bg.padY = 0.012;
+            l.bg.line = !!l.bg.line;
+            l.bg.lineColor = l.bg.lineColor || '#ffffff';
+            if (typeof l.bg.lineW !== 'number') l.bg.lineW = 0.004;
+        }
+        return l;
+    }
+
+    // ── EDITOR shell ────────────────────────────────────────────────────────────
+    function renderEditor() {
+        overlay.innerHTML =
+            '<div class="voe-topbar">' +
+                '<button class="voe-btn voe-btn--ghost" data-voe-back>' + I.back + ' Studio</button>' +
+                '<div class="voe-brand" style="margin-left:2px"><span class="voe-brand-mark">' + I.brand + '</span></div>' +
+                '<input class="voe-name-input" data-voe-name value="' + esc(ed.name) + '" spellcheck="false">' +
+                '<button class="voe-btn voe-btn--ghost voe-icon-btn" data-voe-undo title="Undo (Ctrl+Z)">' + I.undo + '</button>' +
+                '<button class="voe-btn voe-btn--ghost voe-icon-btn" data-voe-redo title="Redo (Ctrl+Shift+Z)">' + I.redo + '</button>' +
+                '<div class="voe-top-spacer"></div>' +
+                '<button class="voe-btn voe-btn--ghost voe-icon-btn" data-voe-help title="Keyboard shortcuts">' + I.help + '</button>' +
+                '<span class="voe-save-state" data-voe-savestate></span>' +
+                '<button class="voe-btn voe-btn--primary" data-voe-save>' + I.save + ' Save</button>' +
+                '<button class="voe-x" data-voe-close aria-label="Close">&times;</button>' +
+            '</div>' +
+            '<div class="voe-editor">' +
+                '<div class="voe-palette">' + paletteHTML() + '</div>' +
+                '<div class="voe-canvas-wrap" data-voe-canvaswrap>' +
+                    '<div class="voe-canvas-bar">' +
+                        '<button class="voe-btn" data-voe-preview>' + I.poster + ' <span data-voe-previewname>Sample poster</span> ' + I.chev + '</button>' +
+                        '<button class="voe-btn voe-icon-btn" data-voe-random title="Surprise me — a random title">' + I.dice + '</button>' +
+                        '<button class="voe-btn" data-voe-sampledata>' + I.info + ' Sample data ' + I.chev + '</button>' +
+                        '<button class="voe-btn voe-icon-btn" data-voe-filmstrip title="Preview on real titles">' + I.film + '</button>' +
+                        '<div class="voe-zoomctl">' +
+                            '<button class="voe-btn voe-icon-btn" data-voe-zoomout title="Zoom out (−)">&minus;</button>' +
+                            '<button class="voe-btn voe-zoomlabel" data-voe-zoomlabel data-voe-zoomfit title="Reset zoom (0)">100%</button>' +
+                            '<button class="voe-btn voe-icon-btn" data-voe-zoomin title="Zoom in (+)">+</button>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="voe-stage' + (TEMPLATE_TYPES[templateKind()].wide ? ' voe-stage--wide' : '') + '" data-voe-stage>' +
+                        '<div class="voe-stage-ph" data-voe-ph>Drag elements from the left onto the poster.<br>This background is just a preview — only the overlay is saved.</div>' +
+                        '<div class="voe-guide voe-guide--v" data-voe-gv></div>' +
+                        '<div class="voe-guide voe-guide--h" data-voe-gh></div>' +
+                        '<div class="voe-drop-hint">Drop to add</div>' +
+                    '</div>' +
+                '</div>' +
+                '<div class="voe-side">' +
+                    '<div class="voe-side-layers">' +
+                        '<div class="voe-side-h"><span>Layers</span><span class="voe-side-count" data-voe-count></span></div>' +
+                        '<div class="voe-layers" data-voe-layers></div>' +
+                    '</div>' +
+                    '<div class="voe-inspector" data-voe-inspector></div>' +
+                '</div>' +
+            '</div>';
+
+        overlay.querySelector('[data-voe-back]').addEventListener('click', function () {
+            if (ed && ed.dirty) confirmDialog('Discard unsaved changes?', 'Your edits since the last save will be lost. Cancel and hit Save to keep them.', 'Discard', showGallery);
+            else showGallery();
+        });
+        overlay.querySelector('[data-voe-close]').addEventListener('click', close);
+        overlay.querySelector('[data-voe-save]').addEventListener('click', function () { saveTemplate(); });
+        var nameInput = overlay.querySelector('[data-voe-name]');
+        nameInput.addEventListener('input', function () { ed.name = nameInput.value; markDirty(); });
+
+        wirePalette();
+        if (!logoPack.loaded) refreshLogoPack(refreshPaletteDOM);   // gate the Logo badge once we know what's installed
+        var stage = overlay.querySelector('[data-voe-stage]');
+        stage.addEventListener('pointerdown', onStagePointerDown);
+        overlay.querySelector('[data-voe-canvaswrap]').addEventListener('wheel', onCanvasWheel, { passive: false });
+        overlay.querySelector('[data-voe-zoomin]').addEventListener('click', function () { zoomBy(1.25); });
+        overlay.querySelector('[data-voe-zoomout]').addEventListener('click', function () { zoomBy(1 / 1.25); });
+        overlay.querySelector('[data-voe-zoomfit]').addEventListener('click', resetView);
+        overlay.querySelector('[data-voe-preview]').addEventListener('click', function (e) { openPreviewPop(e.currentTarget); });
+        overlay.querySelector('[data-voe-random]').addEventListener('click', loadRandomPreview);
+        overlay.querySelector('[data-voe-filmstrip]').addEventListener('click', openFilmstrip);
+        overlay.querySelector('[data-voe-sampledata]').addEventListener('click', function (e) { openSamplePop(e.currentTarget); });
+        overlay.querySelector('[data-voe-undo]').addEventListener('click', undo);
+        overlay.querySelector('[data-voe-redo]').addEventListener('click', redo);
+        overlay.querySelector('[data-voe-help]').addEventListener('click', openShortcuts);
+
+        resizeBound = function () { measureStage(); relayoutAll(); applyView(); };
+        window.addEventListener('resize', resizeBound);
+
+        measureStage();
+        applyStageBg();
+        renderStageLayers();
+        renderLayersPanel();
+        renderInspector();
+        updateSaveState();
+        updatePreviewName();
+        seedHistory();
+        applyView();
+    }
+
+    function applyStageBg() {
+        if (!ed.stage) return;
+        ed.stage.style.backgroundImage = ed.bg ? "url('" + ed.bg + "')" : '';
+        var ph = ed.stage.querySelector('[data-voe-ph]');
+        if (ph) ph.style.display = (ed.bg || ed.layers.length) ? 'none' : '';
+    }
+    function updatePreviewName() {
+        var n = overlay && overlay.querySelector('[data-voe-previewname]');
+        if (n) n.textContent = ed.previewTitle ? ed.previewTitle.title : 'Sample poster';
+    }
+
+    function measureStage() {
+        var stage = overlay && overlay.querySelector('[data-voe-stage]');
+        if (!stage) return;
+        var r = stage.getBoundingClientRect();
+        // getBoundingClientRect is post-transform; divide out the zoom so W/H stay
+        // the stage's natural (layout) size that layer sizing/positioning uses.
+        var z = ed.zoom || 1;
+        ed.stage = stage; ed.W = r.width / z; ed.H = r.height / z;
+    }
+
+    // ── zoom / pan ───────────────────────────────────────────────────────────────
+    // The stage carries a `translate(pan) scale(zoom)` transform (origin 0,0). Every
+    // pointer→normalized conversion reads the live getBoundingClientRect, which is
+    // post-transform, so drag/drop/handle math stays correct at any zoom (see the
+    // divide-by-zoom in measureStage + _stagePt). We never touch the layer model.
+    var MIN_ZOOM = 1, MAX_ZOOM = 8;
+    function applyView() {
+        if (!ed || !ed.stage) return;
+        clampPan();
+        ed.stage.style.transformOrigin = '0 0';
+        ed.stage.style.transform = 'translate(' + ed.panX + 'px,' + ed.panY + 'px) scale(' + ed.zoom + ')';
+        updateZoomLabel();
+        rescaleSelBox();   // re-apply the handles' inverse-zoom counter-scale (no rebuild → no flicker)
+    }
+    // Keep the stage overlapping the canvas: when it's larger than the viewport it
+    // must cover it; when smaller it must stay inside. Screen-space so it's origin/
+    // transform agnostic.
+    function clampPan() {
+        var wrap = ed.stage.parentElement; if (!wrap) return;
+        ed.stage.style.transform = 'translate(' + ed.panX + 'px,' + ed.panY + 'px) scale(' + ed.zoom + ')';
+        var wr = wrap.getBoundingClientRect(), sr = ed.stage.getBoundingClientRect();
+        function axis(sLo, sHi, wLo, wHi) {
+            if (sHi - sLo <= wHi - wLo) {           // stage smaller → keep inside
+                if (sLo < wLo) return wLo - sLo;
+                if (sHi > wHi) return wHi - sHi;
+            } else {                                 // stage larger → cover viewport
+                if (sLo > wLo) return wLo - sLo;
+                if (sHi < wHi) return wHi - sHi;
+            }
+            return 0;
+        }
+        ed.panX += axis(sr.left, sr.right, wr.left, wr.right);
+        ed.panY += axis(sr.top, sr.bottom, wr.top, wr.bottom);
+    }
+    // Zoom toward a screen point, holding the content under it fixed.
+    function zoomAt(cx, cy, next) {
+        next = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, next));
+        if (Math.abs(next - ed.zoom) < 1e-4) return;
+        var r = ed.stage.getBoundingClientRect(), k = 1 - next / ed.zoom;
+        ed.panX += (cx - r.left) * k;
+        ed.panY += (cy - r.top) * k;
+        ed.zoom = next;
+        applyView();
+    }
+    function zoomBy(factor) {
+        var w = ed.stage.parentElement.getBoundingClientRect();
+        zoomAt(w.left + w.width / 2, w.top + w.height / 2, ed.zoom * factor);
+    }
+    function resetView() { ed.zoom = 1; ed.panX = 0; ed.panY = 0; applyView(); }
+    function updateZoomLabel() {
+        var lb = overlay && overlay.querySelector('[data-voe-zoomlabel]');
+        if (lb) lb.textContent = Math.round(ed.zoom * 100) + '%';
+    }
+    function onCanvasWheel(e) {
+        if (!ed || !ed.stage) return;
+        e.preventDefault();
+        zoomAt(e.clientX, e.clientY, ed.zoom * (e.deltaY < 0 ? 1.12 : 1 / 1.12));
+    }
+    function startPan(e) {
+        e.preventDefault();
+        var sx = e.clientX, sy = e.clientY, px = ed.panX, py = ed.panY;
+        ed.stage.classList.add('voe-panning');
+        function move(ev) { ed.panX = px + (ev.clientX - sx); ed.panY = py + (ev.clientY - sy); applyView(); }
+        function up() {
+            document.removeEventListener('pointermove', move);
+            document.removeEventListener('pointerup', up);
+            ed.stage.classList.remove('voe-panning');
+        }
+        document.addEventListener('pointermove', move);
+        document.addEventListener('pointerup', up);
+    }
+
+    // ── palette (tool cards + dynamic data-badge chips grouped by category) ─────
+    function paletteHTML() {
+        // Tools = icon cards (few, distinct actions). Data badges = live-preview
+        // chips that wrap and show exactly what lands on the poster.
+        var html = palTools('Basics',
+            palItem('text', 'Text', I.text) + palItem('row', 'Badge row', I.row) +
+            palItem('rating', 'Rating stars', I.star));
+        var avail = fieldsForType(templateKind());
+        FIELD_CATS.forEach(function (cat) {
+            var items = avail.filter(function (k) { return FIELDS[k] && FIELDS[k].cat === cat; });
+            if (items.length) html += palData(cat, items.length, items.map(palTag).join(''));   // hide empty cats (e.g. Season has no Quality)
+        });
+        html += palTools('Artwork',
+            palItem('logo', 'Title Logo', I.logo) + palItem('image', 'Image', I.image) +
+            palLogoBadge());
+        html += palTools('Shapes',
+            palItem('shape', 'Rectangle', I.shape) + palItem('ellipse', 'Ellipse', I.ellipse) +
+            palItem('line', 'Line', I.line) + palItem('ribbon', 'Corner ribbon', I.ribbon) +
+            palItem('scrim', 'Scrim', I.scrim));
+        return html;
+    }
+    function palTools(title, inner) {
+        return '<div class="voe-pal-section"><div class="voe-pal-h">' + esc(title) + '</div>' +
+            '<div class="voe-pal-tools">' + inner + '</div></div>';
+    }
+    function palData(title, n, inner) {
+        return '<div class="voe-pal-section"><div class="voe-pal-h">' + esc(title) +
+            '<span class="voe-pal-n">' + n + '</span></div>' +
+            '<div class="voe-pal-tags">' + inner + '</div></div>';
+    }
+    function palItem(kind, label, icon) {
+        return '<div class="voe-pal-item" data-voe-add="' + kind + '" data-field="" data-label="' + esc(label) + '" title="' + esc(label) + '">' +
+            '<span class="voe-pal-ic">' + icon + '</span>' +
+            '<span class="voe-pal-label">' + esc(label) + '</span></div>';
+    }
+    // The Logo badge needs image art we don't ship. Until a pack is installed it's
+    // locked — clicking opens the installer instead of dropping a (text-only) badge.
+    function palLogoBadge() {
+        if (anyLogoPack()) return palItem('logobadge', 'Logo badge', I.logo);
+        return '<div class="voe-pal-item voe-pal-item--locked" data-voe-logopack tabindex="0" role="button" ' +
+            'title="Logo badges need an image pack — click to install">' +
+            '<span class="voe-pal-ic">' + I.lock + '</span>' +
+            '<span class="voe-pal-label">Logo badge</span><span class="voe-pal-lock">Get pack</span></div>';
+    }
+    // A data badge previews the real value it produces (e.g. "4K", "IMDb 8.4",
+    // "S1E1") so the palette is WYSIWYG; the field name rides along as the tooltip.
+    function palTag(field) {
+        var f = FIELDS[field]; if (!f) return '';
+        var v = f.fmt(((ed && ed.sample) ? ed.sample : defaultSample())[field]);
+        return '<div class="voe-pal-tag" data-voe-add="badge" data-field="' + esc(field) + '"' +
+            ' data-label="' + esc(f.label) + '" title="' + esc(f.label) + '">' +
+            '<span class="voe-pal-tag-v">' + esc(v || f.label) + '</span></div>';
+    }
+    function wirePalette() {
+        overlay.querySelectorAll('[data-voe-add]').forEach(function (it) {
+            it.addEventListener('pointerdown', function (e) { startPaletteDrag(e, it); });
+        });
+        overlay.querySelectorAll('[data-voe-logopack]').forEach(function (it) {
+            it.addEventListener('click', openLogoPackDialog);
+            it.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openLogoPackDialog(); } });
+        });
+    }
+
+    // ── add / create layers ─────────────────────────────────────────────────────
+    // All layers are text under the hood; a `binding` makes one a dynamic badge, so
+    // every text/pill style control applies to badges too.
+    function defaultLayer(kind, x, y, field) {
+        if (kind === 'logobadge') {
+            return { id: uid(), type: 'logobadge', name: 'Logo badge', anchor: 'top-right',
+                x: 0.95, y: 0.06, hidden: false, opacity: 1, rotation: 0,
+                field: (field && LOGO_BADGE_FIELDS.indexOf(field) > -1) ? field : 'audio_codec', w: 0.14,
+                size: 0.035, color: '#ffffff', font: 'Inter', weight: 800,
+                bg: { enabled: false, color: '#000000', opacity: 0.6, radius: 0.02, padX: 0.02, padY: 0.012, line: false, lineColor: '#ffffff', lineW: 0.004 } };
+        }
+        if (kind === 'ribbon') {
+            return { id: uid(), type: 'ribbon', name: 'Ribbon', corner: 'top-right', size: 0.2,
+                color: '#d11e2a', textColor: '#ffffff', text: 'NEW', font: 'Inter', weight: 800, upper: true,
+                textScale: 0.42, bandOpacity: 1, opacity: 1, hidden: false, x: 0.5, y: 0.5, anchor: 'center', rotation: 0 };
+        }
+        if (kind === 'rating') {
+            return { id: uid(), type: 'rating', name: 'Rating stars', anchor: 'bottom-left',
+                x: 0.06, y: 0.9, hidden: false, opacity: 1, rotation: 0,
+                field: 'imdb', stars: 5, size: 0.05, gap: 0.2,
+                color: '#f5c518', emptyColor: '#ffffff', emptyOpacity: 0.28,
+                bg: { enabled: false, color: '#000000', opacity: 0.6, radius: 0.02, padX: 0.02, padY: 0.012, line: false, lineColor: '#ffffff', lineW: 0.004 } };
+        }
+        if (kind === 'row') {
+            return { id: uid(), type: 'row', name: 'Badge row', anchor: 'bottom-left',
+                x: 0.06, y: 0.94, hidden: false, opacity: 1, rotation: 0, gap: 0.014,
+                fields: ['resolution', 'video_codec', 'audio_codec'],   // all backed by real per-title data
+                style: { size: 0.036, color: '#ffffff', font: 'Inter', weight: 800, shadow: false,
+                    shadowColor: '#000000', shadowOpacity: 0.55, shadowBlur: 0.3, shadowDy: 0.12,
+                    upper: false, tracking: 0,
+                    stroke: { enabled: false, color: '#000000', w: 0.08 },
+                    bg: { enabled: true, color: '#000000', opacity: 0.72, radius: 0.02, padX: 0.03, padY: 0.016 } } };
+        }
+        var base = { id: uid(), type: 'text', anchor: 'center', x: x, y: y, hidden: false, opacity: 1,
+            text: 'New Text', size: 0.06, color: '#ffffff', font: 'Inter', weight: 800, align: 'center', shadow: true,
+            shadowColor: '#000000', shadowOpacity: 0.55, shadowBlur: 0.3, shadowDy: 0.12,
+            upper: false, tracking: 0,
+            stroke: { enabled: false, color: '#000000', w: 0.08 },
+            bg: { enabled: false, color: '#000000', opacity: 0.6, radius: 0.014, padX: 0.022, padY: 0.012 } };
+        if (kind === 'badge' && field && FIELDS[field]) {
+            base.binding = { field: field };
+            base.name = FIELDS[field].label;
+            base.size = 0.045; base.shadow = false;
+            if (field === 'title') { base.size = 0.07; base.maxW = 0.88; }   // titles auto-fit by default
+            base.bg = { enabled: true, color: '#000000', opacity: 0.72, radius: 0.022, padX: 0.032, padY: 0.017 };
+            return base;
+        }
+        if (kind === 'logo') {
+            return { id: uid(), type: 'image', name: 'Title Logo', logo: true, src: '', anchor: 'center',
+                x: x, y: y, w: 0.55, hidden: false, opacity: 1,
+                radius: 0, grayscale: false, border: { enabled: false, color: '#ffffff', w: 0.004 } };
+        }
+        if (kind === 'image') {
+            return { id: uid(), type: 'image', name: 'Image', src: '', anchor: 'center',
+                x: x, y: y, w: 0.4, hidden: false, opacity: 1,
+                radius: 0, grayscale: false, border: { enabled: false, color: '#ffffff', w: 0.004 } };
+        }
+        if (kind === 'scrim') {
+            return { id: uid(), type: 'shape', name: 'Scrim', anchor: 'bottom-center', x: 0.5, y: 1,
+                w: 1, h: 0.42, radius: 0, opacity: 1, hidden: false,
+                fill: { grad: true, c1: '#000000', a1: 0, c2: '#000000', a2: 0.85, dir: 180 } };
+        }
+        if (kind === 'shape' || kind === 'ellipse' || kind === 'line') {
+            var sk = kind === 'shape' ? 'rect' : kind;
+            var nm = { rect: 'Rectangle', ellipse: 'Ellipse', line: 'Line' }[sk];
+            return { id: uid(), type: 'shape', shapeKind: sk, name: nm, anchor: 'center', x: x, y: y,
+                w: sk === 'line' ? 0.4 : 0.5, h: 0.12, thickness: 0.006, radius: sk === 'ellipse' ? 0.5 : 0.02,
+                opacity: 1, hidden: false,
+                border: { enabled: false, color: '#ffffff', w: 0.004 },
+                fill: { grad: false, c1: '#000000', a1: 0.72, c2: '#000000', a2: 0, dir: 180 } };
+        }
+        base.name = 'Text';
+        return base;
+    }
+    function addLayer(kind, x, y, field) {
+        var l = defaultLayer(kind, x, y, field);
+        // Every kind spawns at a fixed default spot, so adding a second of the
+        // same kind would stack it invisibly on the first. Cascade the new layer
+        // off any existing layer already sitting at that position.
+        var guard = 0;
+        while (guard++ < 20 && ed.layers.some(function (o) {
+            return Math.abs((o.x || 0) - (l.x || 0)) < 0.005 && Math.abs((o.y || 0) - (l.y || 0)) < 0.005;
+        })) {
+            l.x = clamp01((l.x || 0) + 0.03);
+            l.y = clamp01((l.y || 0) + 0.03);
+        }
+        ed.layers.push(l);              // paint order: last = front
+        ed.selected = l.id;
+        markDirty();
+        renderStageLayers();
+        renderLayersPanel();
+        renderInspector();
+        var node = ed.stage && ed.stage.querySelector('.voe-layer[data-voe-layer="' + l.id + '"]');
+        if (node) { node.classList.add('voe-layer--pop'); setTimeout(function () { node.classList.remove('voe-layer--pop'); }, 260); }
+        return l;
+    }
+
+    // ── palette drag → drop onto the stage ──────────────────────────────────────
+    function startPaletteDrag(e, item) {
+        e.preventDefault();
+        var kind = item.getAttribute('data-voe-add');
+        var field = item.getAttribute('data-field') || '';
+        var startX = e.clientX, startY = e.clientY, dragging = false, ghost = null;
+        var stage = ed.stage;
+
+        function move(ev) {
+            if (!dragging && Math.abs(ev.clientX - startX) + Math.abs(ev.clientY - startY) > 5) {
+                dragging = true; item.classList.add('voe-dragging');
+                ghost = document.createElement('div');
+                ghost.textContent = item.getAttribute('data-label') || kind;
+                ghost.style.cssText = 'position:fixed;z-index:9500;pointer-events:none;padding:6px 12px;border-radius:8px;' +
+                    'background:rgba(var(--accent-rgb,88,101,242),.9);color:#fff;font-size:12px;font-weight:700;box-shadow:0 8px 20px rgba(0,0,0,.5);';
+                document.body.appendChild(ghost);
+            }
+            if (!dragging) return;
+            ghost.style.left = (ev.clientX + 12) + 'px';
+            ghost.style.top = (ev.clientY + 12) + 'px';
+            var over = overStage(ev);
+            stage.classList.toggle('voe-stage--dropping', over);
+        }
+        function up(ev) {
+            document.removeEventListener('pointermove', move);
+            document.removeEventListener('pointerup', up);
+            item.classList.remove('voe-dragging');
+            stage.classList.remove('voe-stage--dropping');
+            if (ghost) ghost.remove();
+            if (!dragging) { addLayer(kind, 0.5, 0.5, field); return; }   // a click → add centered
+            if (overStage(ev)) {
+                var r = stage.getBoundingClientRect();
+                addLayer(kind, clamp01((ev.clientX - r.left) / r.width), clamp01((ev.clientY - r.top) / r.height), field);
+            }
+        }
+        document.addEventListener('pointermove', move);
+        document.addEventListener('pointerup', up);
+    }
+    function overStage(ev) {
+        var r = ed.stage.getBoundingClientRect();
+        return ev.clientX >= r.left && ev.clientX <= r.right && ev.clientY >= r.top && ev.clientY <= r.bottom;
+    }
+    function clamp01(v) { return Math.max(0, Math.min(1, v)); }
+
+    // ── render layers onto the stage ────────────────────────────────────────────
+    function renderStageLayers() {
+        var stage = ed.stage; if (!stage) return;
+        // wipe existing layer nodes (keep placeholder + drop hint)
+        stage.querySelectorAll('.voe-layer').forEach(function (n) { n.remove(); });
+        var ph = stage.querySelector('[data-voe-ph]');
+        if (ph) ph.style.display = (ed.bg || ed.layers.length) ? 'none' : '';
+        ed.layers.forEach(function (l) {
+            var el = document.createElement('div');
+            el.className = 'voe-layer voe-layer--' + l.type + (l.id === ed.selected ? ' voe-layer--sel' : '') + (l.hidden ? ' voe-layer--hidden' : '');
+            el.setAttribute('data-voe-layer', l.id);
+            styleLayerEl(el, l);
+            stage.appendChild(el);
+            layoutLayer(el, l);
+            markConditional(el, l);
+        });
+        if (ed.extra && ed.extra.length) refreshGroupSelection();   // restore multi-select outlines
+        updateSelBox();
+    }
+
+    function hexToRgba(hex, a) {
+        var h = String(hex || '#000000').replace('#', '');
+        if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+        var n = parseInt(h, 16);
+        if (isNaN(n)) return 'rgba(0,0,0,' + a + ')';
+        return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
+    }
+
+    // Apply the shared bg pill (fill + radius + padding + inset border) to a preview element.
+    function applyBadgeBg(el, bg) {
+        bg = bg || {};
+        el.style.boxSizing = 'content-box';
+        el.style.background = bg.enabled ? hexToRgba(bg.color, bg.opacity) : 'none';
+        el.style.borderRadius = bg.enabled ? (bg.radius * ed.H) + 'px' : '0';
+        el.style.padding = bg.enabled ? ((bg.padY * ed.H) + 'px ' + (bg.padX * ed.H) + 'px') : '0';
+        el.style.boxShadow = (bg.enabled && bg.line) ? ('inset 0 0 0 ' + (bg.lineW * ed.H) + 'px ' + bg.lineColor) : 'none';
+    }
+
+    function fillCss(f) {
+        if (f.grad) return 'linear-gradient(' + f.dir + 'deg,' + hexToRgba(f.c1, f.a1) + ',' + hexToRgba(f.c2, f.a2) + ')';
+        return hexToRgba(f.c1, f.a1);
+    }
+    // uploaded images are stored as asset:// refs; serve them same-origin for display
+    function srcUrl(s) { return !s ? '' : (s.indexOf('asset://') === 0 ? '/api/video/overlays/asset/' + s.slice(8) : s); }
+    function imgPlaceholder(l) {
+        var h = l.w * ed.W * (l.logo ? 0.34 : 0.62);
+        return '<div class="voe-img-ph" style="height:' + h + 'px">' + (l.logo ? 'LOGO' : 'IMAGE') + '</div>';
+    }
+    // Glyph width in px at a given font size — canvas measure, so it matches the
+    // compositor's textbbox width for auto-fit (maxW) without needing the DOM.
+    function measureTextPx(text, l, fpx) {
+        var c = measureTextPx._c || (measureTextPx._c = document.createElement('canvas').getContext('2d'));
+        c.font = (l.weight || 400) + ' ' + fpx + 'px ' + fontStack(l.font);
+        return c.measureText(text).width;
+    }
+
+    // CSS text-shadow from a text/style object (offsets in em = fraction of font size,
+    // matching the compositor's fraction-of-px shadow).
+    function shadowCss(o) {
+        var dx = o.shadowDx != null ? o.shadowDx : 0;
+        var dy = o.shadowDy != null ? o.shadowDy : 0.12;
+        var bl = o.shadowBlur != null ? o.shadowBlur : 0.3;
+        return dx + 'em ' + dy + 'em ' + bl + 'em ' + hexToRgba(o.shadowColor || '#000000', o.shadowOpacity != null ? o.shadowOpacity : 0.55);
+    }
+
+    // Style one badge element inside a row from the row's shared style object.
+    function styleBadgeEl(el, s, text) {
+        var fpx = (s.size || 0.036) * ed.H;
+        el.textContent = s.upper ? String(text).toUpperCase() : text;
+        el.style.whiteSpace = 'nowrap';
+        el.style.lineHeight = '1.05';
+        el.style.color = s.color || '#ffffff';
+        el.style.fontFamily = fontStack(s.font);
+        el.style.fontWeight = s.weight || 800;
+        el.style.fontSize = fpx + 'px';
+        el.style.letterSpacing = s.tracking ? (s.tracking * fpx) + 'px' : 'normal';
+        el.style.textShadow = s.shadow ? shadowCss(s) : 'none';
+        var st = s.stroke || {};
+        if (st.enabled && st.w > 0) {
+            el.style.webkitTextStrokeWidth = (st.w * fpx) + 'px';
+            el.style.webkitTextStrokeColor = st.color;
+            el.style.paintOrder = 'stroke fill';
+        }
+        var bg = s.bg || {};
+        if (bg.enabled) {
+            el.style.background = hexToRgba(bg.color, bg.opacity);
+            el.style.padding = (bg.padY * ed.H) + 'px ' + (bg.padX * ed.H) + 'px';
+            el.style.borderRadius = (bg.radius * ed.H) + 'px';
+        }
+    }
+
+    function styleLayerEl(el, l) {
+        el.style.opacity = (l.opacity != null ? l.opacity : 1);
+        el.style.transform = l.rotation ? 'rotate(' + l.rotation + 'deg)' : '';
+        if (l.type === 'row') {
+            el.classList.add('voe-layer-rowbar');
+            el.style.display = 'flex';
+            el.style.alignItems = 'center';
+            el.style.gap = (l.gap * ed.W) + 'px';
+            el.innerHTML = '';
+            var rs = l.style || {};
+            (l.fields || []).forEach(function (f) {
+                var fmt = FIELDS[f] && FIELDS[f].fmt;
+                var val = fmt ? fmt((ed.sample || {})[f]) : null;
+                if (val == null || val === '') return;   // no value → skip (this is the reflow)
+                var pill = document.createElement('div');
+                styleBadgeEl(pill, rs, String(val));
+                el.appendChild(pill);
+            });
+            if (!el.children.length) {
+                var ph = document.createElement('div');
+                ph.className = 'voe-rowbar-empty';
+                ph.textContent = 'Badge row (no values)';
+                el.appendChild(ph);
+            }
+            return;
+        }
+        if (l.type === 'ribbon') {
+            var rL = l.size * Math.min(ed.W, ed.H);   // L×L square seated in the corner
+            var clip = {
+                'top-right': 'polygon(100% 0, 0 0, 100% 100%)', 'top-left': 'polygon(0 0, 100% 0, 0 100%)',
+                'bottom-right': 'polygon(100% 100%, 100% 0, 0 100%)', 'bottom-left': 'polygon(0 100%, 0 0, 100% 100%)'
+            }[l.corner] || 'polygon(100% 0, 0 0, 100% 100%)';
+            var cen = {
+                'top-right': [66.67, 33.33], 'top-left': [33.33, 33.33],
+                'bottom-right': [66.67, 66.67], 'bottom-left': [33.33, 66.67]
+            }[l.corner] || [66.67, 33.33];
+            var rot = { 'top-left': -45, 'top-right': 45, 'bottom-left': 45, 'bottom-right': -45 }[l.corner];
+            if (rot == null) rot = 45;
+            el.style.width = rL + 'px'; el.style.height = rL + 'px';
+            el.style.background = hexToRgba(l.color, l.bandOpacity != null ? l.bandOpacity : 1);
+            el.style.clipPath = clip; el.style.webkitClipPath = clip;
+            el.style.transformOrigin = 'center'; el.style.overflow = 'visible';
+            el.innerHTML = '<span></span>';
+            var rsp = el.querySelector('span');
+            rsp.textContent = l.upper ? String(l.text || '').toUpperCase() : (l.text || '');
+            rsp.style.position = 'absolute';
+            rsp.style.left = cen[0] + '%'; rsp.style.top = cen[1] + '%';
+            rsp.style.transform = 'translate(-50%, -50%) rotate(' + rot + 'deg)';
+            rsp.style.color = l.textColor; rsp.style.fontFamily = fontStack(l.font);
+            rsp.style.fontWeight = l.weight;
+            rsp.style.fontSize = ((rL / Math.SQRT2) * (l.textScale || 0.42)) + 'px';
+            rsp.style.whiteSpace = 'nowrap'; rsp.style.lineHeight = '1';
+            return;
+        }
+        if (l.type === 'rating') {
+            var rval = (ed.sample || {})[l.field];
+            var rmax = (l.field === 'rt' || l.field === 'metacritic' || l.field === 'anilist') ? 100 : 10;
+            var rfrac = (rval == null || rval === '') ? 0 : Math.max(0, Math.min(1, parseFloat(rval) / rmax));
+            var ssz = l.size * ed.H, sgap = l.gap * ssz, stars = '';
+            for (var si = 0; si < l.stars; si++) stars += '★';
+            el.style.position = 'absolute'; el.style.whiteSpace = 'nowrap'; el.style.transformOrigin = 'center';
+            var rbg = l.bg || {};
+            el.style.boxSizing = 'content-box';
+            el.style.background = rbg.enabled ? hexToRgba(rbg.color, rbg.opacity) : 'none';
+            el.style.borderRadius = rbg.enabled ? (rbg.radius * ed.H) + 'px' : '0';
+            el.style.padding = rbg.enabled ? ((rbg.padY * ed.H) + 'px ' + (rbg.padX * ed.H) + 'px') : '0';
+            el.style.boxShadow = rbg.enabled && rbg.line ? ('inset 0 0 0 ' + (rbg.lineW * ed.H) + 'px ' + rbg.lineColor) : 'none';
+            // Inner wrapper keeps the absolute fill overlay aligned with the track
+            // regardless of the background padding.
+            el.innerHTML = '<span class="voe-rating-inner" style="position:relative;display:block">' +
+                '<span class="voe-rating-track">' + stars + '</span><span class="voe-rating-fill">' + stars + '</span></span>';
+            el.querySelectorAll('.voe-rating-track,.voe-rating-fill').forEach(function (s) {
+                s.style.fontSize = ssz + 'px'; s.style.letterSpacing = sgap + 'px'; s.style.lineHeight = '1'; s.style.display = 'block';
+            });
+            var trk = el.querySelector('.voe-rating-track'), fll = el.querySelector('.voe-rating-fill');
+            trk.style.color = hexToRgba(l.emptyColor, l.emptyOpacity);
+            fll.style.color = l.color;
+            fll.style.position = 'absolute'; fll.style.left = '0'; fll.style.top = '0';
+            fll.style.overflow = 'hidden'; fll.style.width = (rfrac * 100) + '%';
+            return;
+        }
+        el.style.transformOrigin = 'center';
+        if (l.type === 'image') {
+            var iw = l.w * ed.W;
+            el.style.width = iw + 'px'; el.style.height = 'auto';
+            el.style.borderRadius = (l.radius ? l.radius * iw : 0) + 'px';
+            el.style.overflow = l.radius ? 'hidden' : '';
+            el.style.filter = l.grayscale ? 'grayscale(1)' : '';
+            var ib = l.border || {};
+            el.style.border = ib.enabled ? ((ib.w || 0.004) * ed.H) + 'px solid ' + (ib.color || '#ffffff') : 'none';
+            el.style.boxSizing = 'border-box';
+            var src = l.logo ? (ed.sample && ed.sample.logo_url) : l.src;
+            if (src) {
+                el.innerHTML = '<img src="' + esc(srcUrl(src)) + '" style="width:100%;display:block" draggable="false">';
+                var img = el.querySelector('img');
+                img.onload = function () { layoutLayer(el, l); };
+                img.onerror = function () { el.innerHTML = imgPlaceholder(l); layoutLayer(el, l); };
+            } else {
+                el.innerHTML = imgPlaceholder(l);
+            }
+            return;
+        }
+        if (l.type === 'logobadge') {
+            var lbw = l.w * ed.W;
+            var lval = (ed.sample || {})[l.field];
+            el.style.transformOrigin = 'center';
+            applyBadgeBg(el, l.bg);
+            if (lval == null || lval === '') { el.innerHTML = ''; el.style.width = 'auto'; return; }
+            el.style.width = 'auto';
+            var lsrc = '/api/video/overlays/logo/' + encodeURIComponent(l.field) + '/' + encodeURIComponent(String(lval));
+            el.innerHTML = '<img src="' + esc(lsrc) + '" style="width:' + lbw + 'px;height:auto;display:block" draggable="false">';
+            var lim = el.querySelector('img');
+            lim.onload = function () { layoutLayer(el, l); };
+            lim.onerror = function () {   // no pack → styled text fallback
+                var txt = FIELDS[l.field] ? (FIELDS[l.field].fmt(lval) || String(lval)) : String(lval);
+                el.innerHTML = '<span></span>';
+                var sp = el.querySelector('span');
+                sp.textContent = txt;
+                sp.style.color = l.color; sp.style.fontFamily = fontStack(l.font); sp.style.fontWeight = l.weight;
+                sp.style.fontSize = (l.size * ed.H) + 'px'; sp.style.whiteSpace = 'nowrap'; sp.style.lineHeight = '1'; sp.style.display = 'block';
+                layoutLayer(el, l);
+            };
+            return;
+        }
+        if (l.type === 'shape') {
+            var sk = l.shapeKind || 'rect';
+            el.style.width = (l.w * ed.W) + 'px';
+            el.style.height = ((sk === 'line' ? (l.thickness || 0.006) : l.h) * ed.H) + 'px';
+            el.style.background = fillCss(l.fill);
+            el.style.borderRadius = sk === 'ellipse' ? '50%' : sk === 'line' ? '999px' : (l.radius * ed.H) + 'px';
+            var bd = l.border || {};
+            if (bd.enabled && sk !== 'line') {
+                el.style.border = ((bd.w || 0.004) * ed.H) + 'px solid ' + (bd.color || '#ffffff');
+                el.style.boxSizing = 'border-box';
+            } else { el.style.border = 'none'; }
+            return;
+        }
+        if (l.type === 'text') {
+            el.classList.add('voe-layer-text');
+            var txt = l.binding ? resolveBinding(l.binding) : (l.text || '');
+            if (l.upper) txt = txt.toUpperCase();
+            el.textContent = txt;
+            el.style.color = l.color;
+            el.style.fontFamily = fontStack(l.font);
+            el.style.fontWeight = l.weight;
+            var fpx = l.size * ed.H;
+            if (l.maxW > 0 && txt) {                         // auto-fit: shrink to maxW·W (incl. tracking)
+                var twpx = measureTextPx(txt, l, fpx) + (l.tracking ? l.tracking * fpx * Math.max(0, txt.length - 1) : 0);
+                var maxpx = l.maxW * ed.W;
+                if (twpx > maxpx && twpx > 0) fpx = fpx * (maxpx / twpx);
+            }
+            el.style.fontSize = fpx + 'px';
+            el.style.letterSpacing = l.tracking ? (l.tracking * fpx) + 'px' : 'normal';
+            el.style.textAlign = l.align || 'center';
+            el.style.textShadow = l.shadow ? shadowCss(l) : 'none';
+            var st = l.stroke || {};
+            if (st.enabled && st.w > 0) {
+                el.style.webkitTextStrokeWidth = (st.w * fpx) + 'px';
+                el.style.webkitTextStrokeColor = st.color;
+                el.style.paintOrder = 'stroke fill';   // stroke behind the fill → clean outer outline
+            } else {
+                el.style.webkitTextStrokeWidth = '0';
+            }
+            var bg = l.bg || {};
+            if (bg.enabled) {
+                el.style.background = hexToRgba(bg.color, bg.opacity);
+                el.style.padding = (bg.padY * ed.H) + 'px ' + (bg.padX * ed.H) + 'px';
+                el.style.borderRadius = (bg.radius * ed.H) + 'px';
+                el.style.boxShadow = bg.line ? ('inset 0 0 0 ' + (bg.lineW * ed.H) + 'px ' + bg.lineColor) : 'none';
+            } else {
+                el.style.background = 'none'; el.style.padding = '0'; el.style.borderRadius = '3px'; el.style.boxShadow = 'none';
+            }
+        }
+    }
+
+    // Position by the anchor model: (x,y) is the fraction of the stage where the
+    // element's own anchor point sits.
+    function layoutLayer(el, l) {
+        var W = ed.W, H = ed.H;
+        var ew = el.offsetWidth, eh = el.offsetHeight;
+        if (l.type === 'ribbon') {   // filled flag seated flush in a corner, not by the anchor model
+            var rL = l.size * Math.min(W, H);
+            el.style.left = ((l.corner === 'top-left' || l.corner === 'bottom-left') ? 0 : (W - rL)) + 'px';
+            el.style.top = ((l.corner === 'top-left' || l.corner === 'top-right') ? 0 : (H - rL)) + 'px';
+            el.style.transform = 'none';   // triangle via clip-path; text rotates itself
+            return;
+        }
+        var af = anchorFrac(l.anchor);
+        el.style.left = (l.x * W - af[0] * ew) + 'px';
+        el.style.top = (l.y * H - af[1] * eh) + 'px';
+    }
+    function relayoutAll() {
+        if (!ed || !ed.stage) return;
+        ed.stage.querySelectorAll('.voe-layer').forEach(function (el) {
+            var l = layerById(el.getAttribute('data-voe-layer'));
+            if (l) { styleLayerEl(el, l); layoutLayer(el, l); }
+        });
+    }
+    function layerById(id) { for (var i = 0; i < ed.layers.length; i++) if (ed.layers[i].id === id) return ed.layers[i]; return null; }
+
+    // ── select + drag a layer on the stage ──────────────────────────────────────
+    function onStagePointerDown(e) {
+        if (ed.space || e.button === 1) { startPan(e); return; }   // space-drag / middle-drag = pan
+        var node = e.target.closest('.voe-layer');
+        if (!node) { if (!e.shiftKey) select(null); return; }
+        var l = layerById(node.getAttribute('data-voe-layer'));
+        if (!l) return;
+        if (l.locked) { select(l.id); return; }          // locked → select to edit/unlock, no drag
+        if (e.shiftKey) { toggleExtra(l.id); return; }   // shift-click toggles group membership (no drag)
+        if (!inGroup(l.id)) select(l.id);                // plain click on a non-member → single select
+        if (node.getAttribute('contenteditable') === 'true') return;   // editing text, don't drag
+        e.preventDefault();
+        var r = ed.stage.getBoundingClientRect();
+        var members = groupIds().map(function (id) {
+            var m = layerById(id);
+            return m ? { l: m, node: nodeById(id), sx: m.x, sy: m.y } : null;
+        }).filter(Boolean).filter(function (m) { return !m.l.locked; });   // don't move locked members
+        if (!members.length) return;
+        var group = members.length > 1, px = e.clientX, py = e.clientY, moved = false;
+
+        function move(ev) {
+            moved = true;
+            var dnx = (ev.clientX - px) / r.width, dny = (ev.clientY - py) / r.height;
+            if (group) {
+                members.forEach(function (m) {
+                    m.l.x = clamp01(m.sx + dnx); m.l.y = clamp01(m.sy + dny);
+                    if (m.node) layoutLayer(m.node, m.l);
+                });
+                hideGuides();
+            } else {
+                var m0 = members[0];
+                var s = snapToPeers(clamp01(m0.sx + dnx), clamp01(m0.sy + dny), m0.l, m0.node);
+                m0.l.x = s.x; m0.l.y = s.y;
+                if (m0.node) layoutLayer(m0.node, m0.l);
+                showGuides(s.gx, s.gy);
+                syncInspectorPos(m0.l);
+            }
+            updateSelBox();
+        }
+        function up() {
+            document.removeEventListener('pointermove', move);
+            document.removeEventListener('pointerup', up);
+            hideGuides();
+            if (moved) markDirty();
+        }
+        document.addEventListener('pointermove', move);
+        document.addEventListener('pointerup', up);
+    }
+
+    // double-click a text layer to edit its text inline
+    function enableInlineEdit(node, l) {
+        node.setAttribute('contenteditable', 'true');
+        node.style.cursor = 'text';
+        node.focus();
+        document.execCommand && document.getSelection && (function () {
+            var range = document.createRange(); range.selectNodeContents(node);
+            var sel = document.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+        })();
+        function commit() {
+            node.removeAttribute('contenteditable'); node.style.cursor = '';
+            var txt = node.textContent.replace(/\s+$/, '');
+            if (txt !== l.text) { l.text = txt || ' '; markDirty(); renderLayersPanel(); renderInspector(); }
+            layoutLayer(node, l);
+            node.removeEventListener('blur', commit);
+            node.removeEventListener('keydown', key);
+        }
+        function key(ev) {
+            if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); node.blur(); }
+            if (ev.key === 'Escape') { node.textContent = l.text; node.blur(); }
+        }
+        node.addEventListener('blur', commit);
+        node.addEventListener('keydown', key);
+    }
+
+    function select(id) {
+        if (ed.selected === id && !ed.extra.length) return;
+        ed.selected = id;
+        ed.extra = [];                 // a plain select collapses any multi-selection
+        refreshGroupSelection();
+        renderInspector();
+        updateSelBox();
+    }
+
+    // ── multi-selection (shift-click) — additive over the single-select model ────
+    // The group = the primary (ed.selected) + ed.extra. Single-select is the group
+    // of one, so all existing behaviour is unchanged when nothing extra is picked.
+    function groupIds() {
+        if (!ed.selected) return [];
+        return [ed.selected].concat(ed.extra.filter(function (id) { return id !== ed.selected; }));
+    }
+    function inGroup(id) { return groupIds().indexOf(id) > -1; }
+    function nodeById(id) { return ed.stage && ed.stage.querySelector('.voe-layer[data-voe-layer="' + id + '"]'); }
+    function toggleExtra(id) {
+        if (!id) return;
+        if (!ed.selected) { select(id); return; }
+        if (id === ed.selected) {                       // drop the primary; promote an extra if any
+            ed.selected = ed.extra.length ? ed.extra.pop() : null;
+        } else {
+            var i = ed.extra.indexOf(id);
+            if (i > -1) ed.extra.splice(i, 1);          // remove from group
+            else { ed.extra.push(ed.selected); ed.selected = id; }   // add as new primary
+        }
+        refreshGroupSelection();
+        renderInspector();
+        updateSelBox();
+    }
+    function refreshGroupSelection() {
+        if (ed.stage) {
+            var g = groupIds();
+            ed.stage.querySelectorAll('.voe-layer').forEach(function (el) {
+                var id = el.getAttribute('data-voe-layer');
+                el.classList.toggle('voe-layer--sel', id === ed.selected);
+                el.classList.toggle('voe-layer--gsel', id !== ed.selected && g.indexOf(id) > -1);
+            });
+        }
+        syncLayersPanelSelection();
+    }
+    function removeGroup() {
+        var ids = groupIds(); if (!ids.length) return;
+        ed.layers = ed.layers.filter(function (l) { return ids.indexOf(l.id) === -1; });
+        ed.selected = null; ed.extra = [];
+        markDirty(); renderStageLayers(); renderLayersPanel(); renderInspector();
+    }
+    function layerIndex(id) { for (var i = 0; i < ed.layers.length; i++) if (ed.layers[i].id === id) return i; return -1; }
+    // z-order: layers paint in array order (last = front).
+    function reorderLayer(id, mode) {
+        var i = layerIndex(id); if (i < 0) return;
+        var l = ed.layers.splice(i, 1)[0];
+        if (mode === 'front') ed.layers.push(l);
+        else if (mode === 'back') ed.layers.unshift(l);
+        else if (mode === 'fwd') ed.layers.splice(Math.min(ed.layers.length, i + 1), 0, l);
+        else ed.layers.splice(Math.max(0, i - 1), 0, l);   // 'bwd'
+        markDirty(); renderStageLayers(); renderLayersPanel();
+    }
+    function toggleLock(id) {
+        var l = layerById(id); if (!l) return;
+        l.locked = !l.locked;
+        if (l.locked) { ed.extra = ed.extra.filter(function (x) { return x !== id; }); }
+        markDirty(); renderLayersPanel();
+        if (id === ed.selected) renderInspector();
+    }
+    // copy / paste (survives across templates in one session)
+    function copyGroup() {
+        var ids = groupIds(); if (!ids.length) return;
+        _clipboard = ids.map(function (id) { return JSON.parse(JSON.stringify(layerById(id))); }).filter(Boolean);
+        if (_clipboard.length) toast(_clipboard.length + ' layer' + (_clipboard.length > 1 ? 's' : '') + ' copied', 'success');
+    }
+    function pasteClipboard() {
+        if (!_clipboard || !_clipboard.length) return;
+        var pasted = [];
+        _clipboard.forEach(function (src) {
+            var l = normalizeLayer(JSON.parse(JSON.stringify(src)));
+            l.id = uid(); l.locked = false;
+            if (typeof l.x === 'number') l.x = clamp01(l.x + 0.03);
+            if (typeof l.y === 'number') l.y = clamp01(l.y + 0.03);
+            ed.layers.push(l); pasted.push(l.id);
+        });
+        ed.selected = pasted[pasted.length - 1]; ed.extra = pasted.slice(0, -1);
+        markDirty(); renderStageLayers(); renderLayersPanel(); renderInspector();
+    }
+
+    // update just one layer's node in place (no full re-render → keeps inspector focus)
+    // Conditional visibility — must mirror the compositor's _passes_when exactly.
+    function whenPasses(l, sample) {
+        var w = l.when;
+        if (!w || !w.field) return true;
+        var raw = (sample || {})[w.field];
+        var has = raw != null && raw !== '';
+        var op = w.op || 'exists';
+        if (op === 'exists') return has;
+        if (op === 'neq') return !has || String(raw).toLowerCase() !== String(w.value).toLowerCase();
+        if (!has) return false;
+        if (op === 'eq') return String(raw).toLowerCase() === String(w.value).toLowerCase();
+        if (op === 'contains') return String(raw).toLowerCase().indexOf(String(w.value).toLowerCase()) > -1;
+        var a = parseFloat(raw), b = parseFloat(w.value);
+        if (isNaN(a) || isNaN(b)) return false;
+        if (op === 'gt') return a > b;
+        if (op === 'gte') return a >= b;
+        if (op === 'lt') return a < b;
+        if (op === 'lte') return a <= b;
+        return true;
+    }
+    // In the editor a conditional layer stays visible+editable, but is marked when it
+    // wouldn't render for the current sample title (the burn respects the rule).
+    function markConditional(node, l) {
+        node.classList.toggle('voe-layer--cond', !!(l.when && l.when.field) && !whenPasses(l, ed.sample));
+    }
+
+    function refreshLayer(id) {
+        if (!ed.stage) return;
+        var node = ed.stage.querySelector('.voe-layer[data-voe-layer="' + id + '"]');
+        var l = layerById(id);
+        if (node && l) { styleLayerEl(node, l); layoutLayer(node, l); markConditional(node, l); }
+        if (id === ed.selected) updateSelBox();
+    }
+    function updateRowName(id) {
+        var row = overlay && overlay.querySelector('[data-voe-row="' + id + '"] .voe-lr-name');
+        var l = layerById(id);
+        if (row && l) row.textContent = layerName(l);
+    }
+
+    // ── selection frame: corner-drag resize + a rotate handle ───────────────────
+    function updateSelBox() {
+        var stage = ed.stage; if (!stage) return;
+        var old = stage.querySelector('.voe-selbox'); if (old) old.remove();
+        var l = ed.selected ? layerById(ed.selected) : null;
+        if (!l || l.hidden) return;
+        var node = stage.querySelector('.voe-layer[data-voe-layer="' + l.id + '"]'); if (!node) return;
+        var box = document.createElement('div');
+        box.className = 'voe-selbox';
+        box.style.left = node.offsetLeft + 'px';
+        box.style.top = node.offsetTop + 'px';
+        box.style.width = node.offsetWidth + 'px';
+        box.style.height = node.offsetHeight + 'px';
+        box.style.transform = l.rotation ? 'rotate(' + l.rotation + 'deg)' : '';
+        box.innerHTML =
+            '<span class="voe-sel-h voe-sel-h--tl" data-h="c"></span>' +
+            '<span class="voe-sel-h voe-sel-h--tr" data-h="c"></span>' +
+            '<span class="voe-sel-h voe-sel-h--br" data-h="c"></span>' +
+            '<span class="voe-sel-h voe-sel-h--bl" data-h="c"></span>' +
+            '<span class="voe-sel-rot-line"></span>' +
+            '<span class="voe-sel-rot" data-h="rot" title="Rotate (Shift = snap 15°)"></span>';
+        stage.appendChild(box);
+        scaleSelHandles(box);
+        box.querySelectorAll('[data-h]').forEach(function (h) {
+            h.addEventListener('pointerdown', function (e) {
+                e.preventDefault(); e.stopPropagation();
+                if (h.getAttribute('data-h') === 'rot') startHandleRotate(e, l, node);
+                else startHandleResize(e, l, node);
+            });
+        });
+    }
+    // The selbox lives inside the transformed stage, so it scales with zoom. Counter-
+    // scale the handles + border so they stay a constant on-screen size (grabbable at
+    // any zoom). Called on create and re-applied on each zoom/pan without rebuilding
+    // the box (a rebuild would re-trigger its entrance animation → flicker).
+    function scaleSelHandles(box) {
+        var iz = 1 / (ed.zoom || 1);
+        box.style.borderWidth = (1.5 * iz) + 'px';
+        box.querySelectorAll('.voe-sel-h').forEach(function (h) { h.style.transform = 'scale(' + iz + ')'; });
+        var rot = box.querySelector('.voe-sel-rot'), rl = box.querySelector('.voe-sel-rot-line');
+        if (rot) rot.style.transform = 'translateX(-50%) scale(' + iz + ')';
+        if (rl) rl.style.transform = 'translateX(-50%) scaleX(' + iz + ')';
+    }
+    function rescaleSelBox() {
+        var box = ed.stage && ed.stage.querySelector('.voe-selbox');
+        if (box) scaleSelHandles(box);
+    }
+    function _layerCenter(node) { return { cx: node.offsetLeft + node.offsetWidth / 2, cy: node.offsetTop + node.offsetHeight / 2 }; }
+    // Pointer → stage LAYOUT coords (unscaled), matching offsetLeft/offsetWidth that
+    // _layerCenter uses. r is post-transform, so divide the visual offset by zoom.
+    function _stagePt(ev) { var r = ed.stage.getBoundingClientRect(), z = ed.zoom || 1; return { x: (ev.clientX - r.left) / z, y: (ev.clientY - r.top) / z }; }
+
+    // Corner handles do uniform scale-from-centre (rotation-agnostic): the metric
+    // scales with the pointer's distance from the element's centre.
+    function startHandleResize(e, l, node) {
+        var c = _layerCenter(node), p0 = _stagePt(e);
+        var d0 = Math.max(4, Math.hypot(p0.x - c.cx, p0.y - c.cy));
+        var base = { size: (l.type === 'row' ? (l.style && l.style.size) : l.size), w: l.w, h: l.h }, moved = false;
+        function move(ev) {
+            moved = true;
+            var p = _stagePt(ev), scale = Math.max(0.05, Math.hypot(p.x - c.cx, p.y - c.cy) / d0);
+            if (l.type === 'text') l.size = Math.max(0.008, base.size * scale);
+            else if (l.type === 'row') l.style.size = Math.max(0.008, base.size * scale);
+            else if (l.type === 'image') l.w = clamp01(base.w * scale);
+            else if (l.type === 'shape') { l.w = clamp01(base.w * scale); l.h = clamp01(base.h * scale); }
+            refreshLayer(l.id); updateSelBox(); syncInspectorSize(l);
+        }
+        function up() { document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up); if (moved) markDirty(); }
+        document.addEventListener('pointermove', move); document.addEventListener('pointerup', up);
+    }
+    function startHandleRotate(e, l, node) {
+        var c = _layerCenter(node), p0 = _stagePt(e);
+        var a0 = Math.atan2(p0.y - c.cy, p0.x - c.cx), baseRot = l.rotation || 0, moved = false;
+        function move(ev) {
+            moved = true;
+            var p = _stagePt(ev), a = Math.atan2(p.y - c.cy, p.x - c.cx);
+            var deg = baseRot + (a - a0) * 180 / Math.PI;
+            if (ev.shiftKey) deg = Math.round(deg / 15) * 15;
+            l.rotation = Math.round(deg) % 360;
+            refreshLayer(l.id); updateSelBox();
+            var ri = overlay && overlay.querySelector('[data-insp="rotation"]');
+            if (ri && document.activeElement !== ri) ri.value = l.rotation;
+        }
+        function up() { document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up); if (moved) markDirty(); }
+        document.addEventListener('pointermove', move); document.addEventListener('pointerup', up);
+    }
+    function syncInspectorSize(l) {
+        var box = overlay && overlay.querySelector('[data-voe-inspector]'); if (!box) return;
+        function set(key, val) { var i = box.querySelector('[data-insp="' + key + '"]'); if (i && document.activeElement !== i) i.value = pct(val); }
+        if (l.type === 'text') set('size', l.size);
+        else if (l.type === 'row') set('rowSize', l.style.size);
+        else if (l.type === 'image') set('w', l.w);
+        else if (l.type === 'shape') { set('w', l.w); set('h', l.h); }
+    }
+
+    // Snap the selected layer's box to a stage edge/centre (uses the measured box).
+    // Snap the element into a region of the poster: set x/y to a margin inset AND set
+    // the matching anchor so content grows inward — a top-right placement pins the
+    // element's top-right corner at the inset, so "1080p" and "SD" share that corner
+    // and grow left (this is what keeps varying data aligned). The margin is an even
+    // VISUAL inset (equal px on every side) despite the 2:3 poster aspect.
+    function placeAt(anchor) {
+        var l = ed.selected ? layerById(ed.selected) : null; if (!l) return;
+        var m = Math.max(0, Math.min(45, ed.placeMargin != null ? ed.placeMargin : 5)) / 100;
+        var mx = m, my = m * (ed.W / ed.H);
+        l.x = anchor.indexOf('left') >= 0 ? mx : anchor.indexOf('right') >= 0 ? 1 - mx : 0.5;
+        l.y = anchor.indexOf('top') >= 0 ? my : anchor.indexOf('bottom') >= 0 ? 1 - my : 0.5;
+        l.anchor = anchor;
+        refreshLayer(l.id); syncInspectorPos(l); updateSelBox(); markDirty();
+        var box = overlay && overlay.querySelector('[data-voe-inspector]');
+        if (box) {
+            box.querySelectorAll('.voe-anchor-cell').forEach(function (c) {
+                c.classList.toggle('voe-anchor-cell--on', c.getAttribute('data-anchor') === anchor);
+            });
+            box.querySelectorAll('.voe-place-cell').forEach(function (c) {
+                c.classList.toggle('voe-place-cell--on', c.getAttribute('data-place') === anchor);
+            });
+        }
+    }
+
+    // Change a layer's anchor WITHOUT moving it on screen: recompute x,y so the new
+    // anchor point maps to the element's current pixel box.
+    function changeAnchor(l, na) {
+        var node = ed.stage.querySelector('.voe-layer[data-voe-layer="' + l.id + '"]');
+        if (node) {
+            var ew = node.offsetWidth, eh = node.offsetHeight;
+            var o = anchorFrac(l.anchor), n = anchorFrac(na);
+            var tlx = l.x * ed.W - o[0] * ew, tly = l.y * ed.H - o[1] * eh;
+            l.x = clamp01((tlx + n[0] * ew) / ed.W);
+            l.y = clamp01((tly + n[1] * eh) / ed.H);
+        }
+        l.anchor = na;
+        refreshLayer(l.id); markDirty();
+    }
+
+    // ── layers panel (scene list) ───────────────────────────────────────────────
+    function layerIcon(l) {
+        if (l.type === 'row') return I.row;
+        if (l.type === 'rating') return I.star;
+        if (l.type === 'logobadge') return I.logo;
+        if (l.type === 'ribbon') return I.ribbon;
+        if (l.binding) return catIcon((FIELDS[l.binding.field] || {}).cat);
+        if (l.type === 'image') return l.logo ? I.logo : I.image;
+        if (l.type === 'shape') return l.shapeKind === 'ellipse' ? I.ellipse : l.shapeKind === 'line' ? I.line : I.shape;
+        return I.text;
+    }
+    function layerName(l) {
+        if (l.name) return l.name;
+        if (l.type === 'row') return 'Badge row';
+        if (l.type === 'rating') return 'Rating stars';
+        if (l.type === 'logobadge') return (FIELDS[l.field] || {}).label ? (FIELDS[l.field].label + ' logo') : 'Logo badge';
+        if (l.binding) return (FIELDS[l.binding.field] || {}).label;
+        if (l.type === 'image') return l.logo ? 'Logo' : 'Image';
+        if (l.type === 'shape') return 'Shape';
+        return l.text || 'Text';
+    }
+
+    function renderLayersPanel() {
+        var box = overlay && overlay.querySelector('[data-voe-layers]');
+        var count = overlay && overlay.querySelector('[data-voe-count]');
+        if (!box) return;
+        if (count) count.textContent = ed.layers.length ? ed.layers.length : '';
+        if (!ed.layers.length) {
+            box.innerHTML = '<div class="voe-layers-empty">No layers yet.<br>Drag an element from the left to begin.</div>';
+            return;
+        }
+        // front (last painted) at the top of the list
+        var rows = [];
+        for (var i = ed.layers.length - 1; i >= 0; i--) {
+            var l = ed.layers[i];
+            rows.push(
+                '<div class="voe-layer-row' + (l.id === ed.selected ? ' voe-layer-row--sel' : '') + (l.locked ? ' voe-layer-row--locked' : '') + '" data-voe-row="' + l.id + '">' +
+                    '<span class="voe-lr-grip" data-voe-grip title="Drag to reorder">' + I.grip + '</span>' +
+                    '<span class="voe-lr-ic">' + layerIcon(l) + '</span>' +
+                    '<span class="voe-lr-name">' + esc(layerName(l)) + '</span>' +
+                    '<button class="voe-lr-btn' + (l.locked ? ' voe-lr-btn--on' : '') + '" data-voe-lock title="Lock (Ctrl+L)">' + (l.locked ? I.lock : I.unlock) + '</button>' +
+                    '<button class="voe-lr-btn' + (l.hidden ? ' voe-lr-btn--off' : '') + '" data-voe-vis title="Show/Hide">' + (l.hidden ? I.eyeOff : I.eye) + '</button>' +
+                    '<button class="voe-lr-btn" data-voe-dupelayer title="Duplicate (Ctrl+D)">' + I.dupe + '</button>' +
+                    '<button class="voe-lr-btn" data-voe-rmlayer title="Delete layer">' + I.trash + '</button>' +
+                '</div>');
+        }
+        box.innerHTML = rows.join('');
+        box.querySelectorAll('[data-voe-row]').forEach(function (row) {
+            var id = row.getAttribute('data-voe-row');
+            row.addEventListener('click', function (e) {
+                if (e.target.closest('[data-voe-vis],[data-voe-rmlayer],[data-voe-dupelayer],[data-voe-grip],[data-voe-lock]')) return;
+                if (e.shiftKey) toggleExtra(id); else select(id);
+            });
+            row.querySelector('[data-voe-lock]').addEventListener('click', function (e) { e.stopPropagation(); toggleLock(id); });
+            row.querySelector('[data-voe-vis]').addEventListener('click', function (e) { e.stopPropagation(); toggleHidden(id); });
+            row.querySelector('[data-voe-dupelayer]').addEventListener('click', function (e) { e.stopPropagation(); duplicateLayer(id); });
+            row.querySelector('[data-voe-rmlayer]').addEventListener('click', function (e) { e.stopPropagation(); removeLayer(id); });
+            row.querySelector('[data-voe-grip]').addEventListener('pointerdown', function (e) { startRowReorder(e, id); });
+        });
+    }
+    function syncLayersPanelSelection() {
+        if (!overlay) return;
+        var g = groupIds();
+        overlay.querySelectorAll('[data-voe-row]').forEach(function (r) {
+            var id = r.getAttribute('data-voe-row');
+            r.classList.toggle('voe-layer-row--sel', id === ed.selected);
+            r.classList.toggle('voe-layer-row--gsel', id !== ed.selected && g.indexOf(id) > -1);
+        });
+    }
+
+    function toggleHidden(id) {
+        var l = layerById(id); if (!l) return;
+        l.hidden = !l.hidden; markDirty();
+        renderStageLayers(); renderLayersPanel();
+    }
+    function removeLayer(id) {
+        ed.layers = ed.layers.filter(function (l) { return l.id !== id; });
+        if (ed.selected === id) ed.selected = null;
+        ed.extra = ed.extra.filter(function (x) { return x !== id; });   // don't leave a dead id in the group
+        markDirty(); renderStageLayers(); renderLayersPanel(); renderInspector();
+    }
+
+    // drag-to-reorder rows → changes z-order (paint order)
+    function startRowReorder(e, id) {
+        e.preventDefault(); e.stopPropagation();
+        var box = overlay.querySelector('[data-voe-layers]');
+        var srcRow = box.querySelector('[data-voe-row="' + id + '"]');
+        srcRow.classList.add('voe-layer-row--dragging');
+        var targetId = null, before = false;
+
+        function move(ev) {
+            var rows = box.querySelectorAll('[data-voe-row]');
+            box.querySelectorAll('.voe-layer-row--dropbefore,.voe-layer-row--dropafter')
+                .forEach(function (r) { r.classList.remove('voe-layer-row--dropbefore', 'voe-layer-row--dropafter'); });
+            targetId = null;
+            for (var i = 0; i < rows.length; i++) {
+                var rr = rows[i].getBoundingClientRect();
+                if (ev.clientY < rr.top || ev.clientY > rr.bottom) continue;
+                var rid = rows[i].getAttribute('data-voe-row');
+                if (rid === id) return;
+                before = ev.clientY < rr.top + rr.height / 2;
+                targetId = rid;
+                rows[i].classList.add(before ? 'voe-layer-row--dropbefore' : 'voe-layer-row--dropafter');
+                return;
+            }
+        }
+        function up() {
+            document.removeEventListener('pointermove', move);
+            document.removeEventListener('pointerup', up);
+            box.querySelectorAll('.voe-layer-row--dropbefore,.voe-layer-row--dropafter,.voe-layer-row--dragging')
+                .forEach(function (r) { r.classList.remove('voe-layer-row--dropbefore', 'voe-layer-row--dropafter', 'voe-layer-row--dragging'); });
+            if (targetId) reorder(id, targetId, before);
+        }
+        document.addEventListener('pointermove', move);
+        document.addEventListener('pointerup', up);
+    }
+    // Panel is front-first (reversed). Moving row `id` to visually before/after
+    // `targetId` maps to an array splice in paint order.
+    function reorder(id, targetId, before) {
+        var arr = ed.layers;
+        var from = arr.findIndex(function (l) { return l.id === id; });
+        if (from < 0) return;
+        var moved = arr.splice(from, 1)[0];
+        var to = arr.findIndex(function (l) { return l.id === targetId; });
+        if (to < 0) { arr.push(moved); }
+        else {
+            // visual "before" = higher z = later in array (front). Insert after target
+            // for "before", before target for "after".
+            var insert = before ? to + 1 : to;
+            arr.splice(insert, 0, moved);
+        }
+        markDirty(); renderStageLayers(); renderLayersPanel();
+    }
+
+    // ── inspector (selected-layer properties) ───────────────────────────────────
+    var ANCHOR_ORDER = ['top-left', 'top-center', 'top-right', 'mid-left', 'center', 'mid-right',
+        'bottom-left', 'bottom-center', 'bottom-right'];
+    var WEIGHTS = [[400, 'Regular'], [600, 'Semibold'], [700, 'Bold'], [800, 'Extrabold'], [900, 'Black']];
+
+    function pct(frac) { return Math.round(frac * 1000) / 10; }
+    function field(label, control) {
+        return '<div class="voe-field"><div class="voe-field-l">' + label + '</div><div class="voe-field-c">' + control + '</div></div>';
+    }
+    function row2(a, b) { return '<div class="voe-row2">' + a + b + '</div>'; }
+    function inspSection(title, body) {
+        return '<div class="voe-insp-sec"><button class="voe-insp-sec-h" data-voe-sectoggle type="button">' +
+            title + '<span class="voe-insp-chev">' + I.chev + '</span></button><div class="voe-insp-body">' + body + '</div></div>';
+    }
+    function numInput(key, val, unit) {
+        return '<input class="voe-input voe-input--num" type="number" step="0.1" data-insp="' + key + '" value="' + val + '">' +
+            (unit ? '<span class="voe-unit">' + unit + '</span>' : '');
+    }
+    function sliderInput(key, val) {
+        return '<input class="voe-slider" type="range" min="0" max="100" data-insp="' + key + '" value="' + val + '">' +
+            '<span class="voe-unit" data-insp-val="' + key + '">' + val + '%</span>';
+    }
+    function fontSelect(cur, key) {
+        return '<select class="voe-input" data-inspsel="' + (key || 'font') + '">' + FONTS.map(function (f) {
+            return '<option value="' + f.id + '"' + (f.id === cur ? ' selected' : '') + '>' + esc(f.label) + '</option>';
+        }).join('') + '</select>';
+    }
+    function weightSelect(cur, key) {
+        return '<select class="voe-input" data-inspsel="' + (key || 'weight') + '">' + WEIGHTS.map(function (w) {
+            return '<option value="' + w[0] + '"' + (w[0] === cur ? ' selected' : '') + '>' + w[1] + '</option>';
+        }).join('') + '</select>';
+    }
+    function alignSeg(cur) {
+        return '<div class="voe-seg" data-inspseg="align">' + ['left', 'center', 'right'].map(function (a) {
+            return '<button class="voe-seg-btn' + (a === cur ? ' voe-seg-btn--on' : '') + '" data-val="' + a + '" title="' + a + '">' +
+                a.charAt(0).toUpperCase() + '</button>';
+        }).join('') + '</div>';
+    }
+    function colorField(key, val) {
+        return '<div class="voe-color"><input type="color" class="voe-color-sw" data-inspcolor="' + key + '" value="' + esc(val) + '">' +
+            '<input class="voe-input" data-insphex="' + key + '" value="' + esc(val) + '" spellcheck="false"></div>';
+    }
+    function toggle(key, on) { return '<button class="voe-toggle' + (on ? ' voe-toggle--on' : '') + '" data-insptoggle="' + key + '"></button>'; }
+    function dataFieldSelect(cur) {
+        return '<select class="voe-input" data-inspbind>' + FIELD_CATS.map(function (cat) {
+            return '<optgroup label="' + cat + '">' + FIELD_ORDER.filter(function (k) { return FIELDS[k].cat === cat; })
+                .map(function (k) { return '<option value="' + k + '"' + (k === cur ? ' selected' : '') + '>' + esc(FIELDS[k].label) + '</option>'; }).join('') + '</optgroup>';
+        }).join('') + '</select>';
+    }
+    function anchorGrid(l) {
+        return field('Anchor', '<div class="voe-anchor-grid">' + ANCHOR_ORDER.map(function (a) {
+            return '<div class="voe-anchor-cell' + (a === l.anchor ? ' voe-anchor-cell--on' : '') + '" data-anchor="' + a + '" title="' + a + '"></div>';
+        }).join('') + '</div>');
+    }
+    // Quick-place grid: click a region to snap the element there (margin inset +
+    // matching anchor). The inline margin drives the inset for every corner/edge.
+    function placeGrid(l) {
+        var m = (ed.placeMargin != null ? ed.placeMargin : 5);
+        var cells = ANCHOR_ORDER.map(function (a) {
+            return '<button type="button" class="voe-place-cell' + (a === l.anchor ? ' voe-place-cell--on' : '') +
+                '" data-place="' + a + '" title="Place ' + a.replace('-', ' ') + '"><i></i></button>';
+        }).join('');
+        return field('Place',
+            '<div class="voe-place">' +
+                '<div class="voe-place-grid">' + cells + '</div>' +
+                '<label class="voe-place-margin" title="Inset from the poster edge (even on all sides)">' +
+                    '<span>Margin</span>' +
+                    '<input class="voe-input voe-input--num" type="number" step="1" min="0" max="45" data-voe-margin value="' + m + '">' +
+                    '<span class="voe-unit">%</span>' +
+                '</label>' +
+            '</div>');
+    }
+
+    // Badge-row field manager: chips (remove + nudge left to reorder) + an add picker.
+    function rowBadgesUI(l) {
+        var chips = (l.fields || []).map(function (f, i) {
+            return '<span class="voe-rowchip">' +
+                '<button class="voe-rowchip-mv" data-rowmv="' + i + '" title="Move left"' + (i === 0 ? ' disabled' : '') + '>‹</button>' +
+                '<span class="voe-rowchip-t">' + esc((FIELDS[f] || {}).label || f) + '</span>' +
+                '<button class="voe-rowchip-x" data-rowrm="' + i + '" title="Remove">&times;</button></span>';
+        }).join('');
+        var avail = FIELD_ORDER.filter(function (f) { return (l.fields || []).indexOf(f) === -1; });
+        var addSel = '<select class="voe-input voe-rowadd" data-rowadd><option value="">+ Add badge…</option>' +
+            FIELD_CATS.map(function (cat) {
+                var items = avail.filter(function (k) { return FIELDS[k].cat === cat; });
+                return items.length ? '<optgroup label="' + cat + '">' + items.map(function (k) {
+                    return '<option value="' + k + '">' + esc(FIELDS[k].label) + '</option>';
+                }).join('') + '</optgroup>' : '';
+            }).join('') + '</select>';
+        return '<div class="voe-rowchips">' + (chips || '<span class="voe-insp-hint">No badges — add one below.</span>') + '</div>' + addSel;
+    }
+
+    // ── multi-selection inspector: align + distribute ───────────────────────────
+    function groupInspectorHTML() {
+        function gb(dir, label) { return '<button class="voe-seg-btn" data-galign="' + dir + '" title="Align ' + dir + '">' + label + '</button>'; }
+        function gd(axis, label) { return '<button class="voe-seg-btn" data-gdist="' + axis + '">' + label + '</button>'; }
+        return '<div class="voe-insp-sec"><div class="voe-insp-sec-h voe-insp-sec-h--static">Selection · ' + groupIds().length + ' layers</div>' +
+            '<div class="voe-insp-body">' +
+            field('Align', '<div class="voe-seg" data-voe-galign>' + gb('left', 'L') + gb('hcenter', 'C') + gb('right', 'R') + '</div>' +
+                '<div class="voe-seg" data-voe-galign style="margin-left:6px">' + gb('top', 'T') + gb('vmiddle', 'M') + gb('bottom', 'B') + '</div>') +
+            field('Distribute', '<div class="voe-seg" data-voe-gdist>' + gd('h', 'Horizontal') + gd('v', 'Vertical') + '</div>') +
+            '<div class="voe-insp-hint">Shift-click layers to add/remove · drag to move together · arrows nudge all.</div>' +
+            '</div></div>';
+    }
+    // Box metrics (layout px) for each group member from its stage node.
+    function groupBoxes() {
+        return groupIds().map(function (id) {
+            var l = layerById(id), n = nodeById(id);
+            if (!l || !n) return null;
+            var left = n.offsetLeft, top = n.offsetTop, w = n.offsetWidth, h = n.offsetHeight;
+            return { l: l, left: left, top: top, right: left + w, bottom: top + h, cx: left + w / 2, cy: top + h / 2 };
+        }).filter(Boolean);
+    }
+    // Move a member by a pixel delta → its normalized x/y shift by delta/(W|H) (the
+    // anchor offset is constant, so the whole box translates).
+    function _shift(b, dxPx, dyPx) { b.l.x = clamp01(b.l.x + dxPx / ed.W); b.l.y = clamp01(b.l.y + dyPx / ed.H); }
+    function alignGroup(dir) {
+        var bs = groupBoxes(); if (bs.length < 2) return;
+        var minL = Math.min.apply(null, bs.map(function (b) { return b.left; }));
+        var maxR = Math.max.apply(null, bs.map(function (b) { return b.right; }));
+        var minT = Math.min.apply(null, bs.map(function (b) { return b.top; }));
+        var maxB = Math.max.apply(null, bs.map(function (b) { return b.bottom; }));
+        var cx = (minL + maxR) / 2, cy = (minT + maxB) / 2;
+        bs.forEach(function (b) {
+            if (dir === 'left') _shift(b, minL - b.left, 0);
+            else if (dir === 'right') _shift(b, maxR - b.right, 0);
+            else if (dir === 'hcenter') _shift(b, cx - b.cx, 0);
+            else if (dir === 'top') _shift(b, 0, minT - b.top);
+            else if (dir === 'bottom') _shift(b, 0, maxB - b.bottom);
+            else if (dir === 'vmiddle') _shift(b, 0, cy - b.cy);
+            refreshLayer(b.l.id);
+        });
+        updateSelBox(); markDirty();
+    }
+    function distributeGroup(axis) {
+        var bs = groupBoxes(); if (bs.length < 3) return;   // needs ≥3 to space between
+        var key = axis === 'h' ? 'cx' : 'cy';
+        bs.sort(function (a, b) { return a[key] - b[key]; });
+        var first = bs[0][key], last = bs[bs.length - 1][key], step = (last - first) / (bs.length - 1);
+        bs.forEach(function (b, i) {
+            var target = first + step * i;
+            if (axis === 'h') _shift(b, target - b.cx, 0); else _shift(b, 0, target - b.cy);
+            refreshLayer(b.l.id);
+        });
+        updateSelBox(); markDirty();
+    }
+    function wireGroupInspector() {
+        var box = overlay.querySelector('[data-voe-inspector]');
+        box.querySelectorAll('[data-voe-galign]').forEach(function (bar) {
+            bar.addEventListener('click', function (e) {
+                var b = e.target.closest('[data-galign]'); if (b) alignGroup(b.getAttribute('data-galign'));
+            });
+        });
+        var gd = box.querySelector('[data-voe-gdist]');
+        if (gd) gd.addEventListener('click', function (e) {
+            var b = e.target.closest('[data-gdist]'); if (b) distributeGroup(b.getAttribute('data-gdist'));
+        });
+    }
+
+    function renderInspector() {
+        var box = overlay && overlay.querySelector('[data-voe-inspector]');
+        if (!box) return;
+        var l = ed.selected ? layerById(ed.selected) : null;
+        if (!l) {
+            box.innerHTML = '<div class="voe-insp-empty">' +
+                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4l7 16 2-6 6-2z"/></svg>' +
+                '<span>Select a layer to edit its position, size &amp; style.</span></div>';
+            return;
+        }
+        if (groupIds().length >= 2) { box.innerHTML = groupInspectorHTML(); wireGroupInspector(); return; }
+        if (l.type === 'ribbon') {
+            var corners = { 'top-left': 'Top-left', 'top-right': 'Top-right', 'bottom-left': 'Bottom-left', 'bottom-right': 'Bottom-right' };
+            var csel = '<select class="voe-input" data-inspsel="corner">' + Object.keys(corners).map(function (k) {
+                return '<option value="' + k + '"' + (k === l.corner ? ' selected' : '') + '>' + corners[k] + '</option>';
+            }).join('') + '</select>';
+            box.innerHTML =
+                inspSection('Ribbon',
+                    field('Corner', csel) +
+                    field('Size', numInput('size', pct(l.size), '%')) +
+                    field('Color', colorField('color', l.color)) +
+                    field('Opacity', sliderInput('bandOpacity', Math.round(l.bandOpacity * 100)))) +
+                inspSection('Label',
+                    field('Text', '<input class="voe-input" data-insptext value="' + esc(l.text) + '">') +
+                    field('Caps', toggle('upper', l.upper)) +
+                    field('Color', colorField('textColor', l.textColor)) +
+                    field('Size', numInput('textScale', pct(l.textScale), '%')) +
+                    field('Font', fontSelect(l.font)) +
+                    field('Weight', weightSelect(l.weight))) +
+                visibilitySection(l);
+            wireInspector(l);
+            return;
+        }
+        var sizeCtrl = '';
+        if (l.type === 'text') sizeCtrl = field('Size', numInput('size', pct(l.size), '%'));
+        else if (l.type === 'image') sizeCtrl = field('Width', numInput('w', pct(l.w), '%'));
+        else if (l.type === 'shape') sizeCtrl = l.shapeKind === 'line'
+            ? row2(field('Width', numInput('w', pct(l.w), '%')), field('Thickness', numInput('thickness', pct(l.thickness), '%')))
+            : row2(field('Width', numInput('w', pct(l.w), '%')), field('Height', numInput('h', pct(l.h), '%')));
+        else if (l.type === 'row') sizeCtrl = row2(field('Badge size', numInput('rowSize', pct(l.style.size), '%')), field('Gap', numInput('gap', pct(l.gap), '%')));
+        else if (l.type === 'rating') sizeCtrl = row2(field('Star size', numInput('size', pct(l.size), '%')), field('Stars', numInput('stars', l.stars, '')));
+        var html = arrangeBar(l) + inspSection('Transform',
+            placeGrid(l) +
+            anchorGrid(l) +
+            row2(field('X', numInput('x', pct(l.x), '%')), field('Y', numInput('y', pct(l.y), '%'))) +
+            sizeCtrl +
+            row2(field('Rotate', numInput('rotation', l.rotation || 0, '°')),
+                 field('Opacity', sliderInput('opacity', Math.round(l.opacity * 100)))));
+        if (l.type === 'row') {
+            html += inspSection('Badges', rowBadgesUI(l));
+            var rst = l.style;
+            html += inspSection('Badge style',
+                field('Text', colorField('rowColor', rst.color)) +
+                field('Font', fontSelect(rst.font, 'rowFont')) +
+                field('Weight', weightSelect(rst.weight, 'rowWeight')) +
+                row2(field('Caps', toggle('rowUpper', rst.upper)), field('Tracking', numInput('rowTracking', pct(rst.tracking), '%'))) +
+                field('Shadow', toggle('rowShadow', rst.shadow)) +
+                (rst.shadow
+                    ? field('Color', colorField('rowShadowColor', rst.shadowColor)) +
+                      row2(field('Blur', numInput('rowShadowBlur', pct(rst.shadowBlur), '%')), field('Offset', numInput('rowShadowDy', pct(rst.shadowDy), '%'))) +
+                      field('Opacity', sliderInput('rowShadowOpacity', Math.round(rst.shadowOpacity * 100)))
+                    : '') +
+                field('Outline', toggle('rowStrokeEnabled', rst.stroke.enabled)) +
+                (rst.stroke.enabled
+                    ? field('Color', colorField('rowStrokeColor', rst.stroke.color)) +
+                      field('Width', numInput('rowStrokeW', pct(rst.stroke.w), '%'))
+                    : '') +
+                field('Pill', toggle('rowBgEnabled', rst.bg.enabled)) +
+                (rst.bg.enabled
+                    ? field('Color', colorField('rowBgColor', rst.bg.color)) +
+                      field('Fill', sliderInput('rowBgOpacity', Math.round(rst.bg.opacity * 100))) +
+                      field('Radius', numInput('rowRadius', pct(rst.bg.radius), '%')) +
+                      row2(field('Pad X', numInput('rowPadX', pct(rst.bg.padX), '%')), field('Pad Y', numInput('rowPadY', pct(rst.bg.padY), '%')))
+                    : ''));
+        }
+        if (l.type === 'rating') {
+            if (!l.bg) l.bg = { enabled: false, color: '#000000', opacity: 0.6, radius: 0.02, padX: 0.02, padY: 0.012, line: false, lineColor: '#ffffff', lineW: 0.004 };
+            var rlbls = { imdb: 'IMDb', tmdb: 'TMDB', trakt: 'Trakt', tvmaze: 'TVmaze', anilist: 'AniList', rt: 'Rotten Tomatoes', metacritic: 'Metacritic' };
+            var rsel = '<select class="voe-input" data-inspsel="ratingField">' +
+                ['imdb', 'tmdb', 'trakt', 'tvmaze', 'anilist', 'rt', 'metacritic'].map(function (k) {
+                    return '<option value="' + k + '"' + (k === l.field ? ' selected' : '') + '>' + rlbls[k] + '</option>';
+                }).join('') + '</select>';
+            var rv = (ed.sample || {})[l.field];
+            html += inspSection('Rating',
+                field('Source', rsel) +
+                field('Shows', '<span class="voe-data-preview">' + esc(rv == null || rv === '' ? '—' : String(rv) + ' / ' + (l.field === 'rt' || l.field === 'metacritic' || l.field === 'anilist' ? 100 : 10)) + '</span>'));
+            html += inspSection('Style',
+                field('Fill', colorField('color', l.color)) +
+                field('Empty', colorField('emptyColor', l.emptyColor)) +
+                field('Empty α', sliderInput('emptyOpacity', Math.round(l.emptyOpacity * 100))) +
+                field('Gap', numInput('gap', pct(l.gap), '%')));
+            html += inspSection('Background',
+                field('Pill', toggle('bgEnabled', l.bg.enabled)) +
+                (l.bg.enabled
+                    ? field('Color', colorField('bgColor', l.bg.color)) +
+                      field('Fill', sliderInput('bgOpacity', Math.round(l.bg.opacity * 100))) +
+                      field('Radius', numInput('bgRadius', pct(l.bg.radius), '%')) +
+                      row2(field('Pad X', numInput('bgPadX', pct(l.bg.padX), '%')), field('Pad Y', numInput('bgPadY', pct(l.bg.padY), '%'))) +
+                      field('Border', toggle('bgLine', l.bg.line)) +
+                      (l.bg.line
+                          ? field('Color', colorField('bgLineColor', l.bg.lineColor)) +
+                            field('Width', numInput('bgLineW', pct(l.bg.lineW), '%'))
+                          : '')
+                    : ''));
+        }
+        if (l.type === 'logobadge') {
+            if (!l.bg) l.bg = { enabled: false, color: '#000000', opacity: 0.6, radius: 0.02, padX: 0.02, padY: 0.012, line: false, lineColor: '#ffffff', lineW: 0.004 };
+            var lbsel = '<select class="voe-input" data-inspsel="field">' + LOGO_BADGE_FIELDS.map(function (k) {
+                return '<option value="' + k + '"' + (k === l.field ? ' selected' : '') + '>' + esc(FIELDS[k].label) + '</option>';
+            }).join('') + '</select>';
+            var lbv = FIELDS[l.field] ? FIELDS[l.field].fmt((ed.sample || {})[l.field]) : null;
+            html += inspSection('Logo',
+                field('Field', lbsel) +
+                field('Size', numInput('w', pct(l.w), '%')) +
+                field('Shows', '<span class="voe-data-preview">' + esc(lbv || '—') + '</span>') +
+                field('', logoBadgeHint(l.field)));
+            html += inspSection('Fallback text',
+                field('Color', colorField('color', l.color)) +
+                field('Size', numInput('size', pct(l.size), '%')) +
+                field('Font', fontSelect(l.font)) +
+                field('Weight', weightSelect(l.weight)));
+            html += bgInspSection(l);
+        }
+        if (l.type === 'text') {
+            if (l.binding) {
+                html += inspSection('Data',
+                    field('Field', dataFieldSelect(l.binding.field)) +
+                    field('Shows', '<span class="voe-data-preview">' + esc(resolveBinding(l.binding)) + '</span>'));
+            }
+            html += inspSection(l.binding ? 'Style' : 'Text',
+                (l.binding ? '' : field('Text', '<textarea class="voe-input voe-textarea" data-insptext>' + esc(l.text) + '</textarea>')) +
+                field('Font', fontSelect(l.font)) +
+                field('Weight', weightSelect(l.weight)) +
+                row2(field('Caps', toggle('upper', l.upper)), field('Tracking', numInput('tracking', pct(l.tracking), '%'))) +
+                field('Max width', numInput('maxW', pct(l.maxW), '%') + '<span class="voe-field-hint">0 = off</span>') +
+                field('Align', alignSeg(l.align)) +
+                field('Color', colorField('color', l.color)) +
+                field('Shadow', toggle('shadow', l.shadow)) +
+                (l.shadow
+                    ? field('Color', colorField('shadowColor', l.shadowColor)) +
+                      row2(field('Blur', numInput('shadowBlur', pct(l.shadowBlur), '%')), field('Offset', numInput('shadowDy', pct(l.shadowDy), '%'))) +
+                      field('Opacity', sliderInput('shadowOpacity', Math.round(l.shadowOpacity * 100)))
+                    : '') +
+                field('Outline', toggle('strokeEnabled', l.stroke.enabled)) +
+                (l.stroke.enabled
+                    ? field('Color', colorField('strokeColor', l.stroke.color)) +
+                      field('Width', numInput('strokeW', pct(l.stroke.w), '%'))
+                    : ''));
+            html += inspSection('Background',
+                field('Pill', toggle('bgEnabled', l.bg.enabled)) +
+                (l.bg.enabled
+                    ? field('Color', colorField('bgColor', l.bg.color)) +
+                      field('Fill', sliderInput('bgOpacity', Math.round(l.bg.opacity * 100))) +
+                      field('Radius', numInput('bgRadius', pct(l.bg.radius), '%')) +
+                      row2(field('Pad X', numInput('bgPadX', pct(l.bg.padX), '%')), field('Pad Y', numInput('bgPadY', pct(l.bg.padY), '%'))) +
+                      field('Border', toggle('bgLine', l.bg.line)) +
+                      (l.bg.line
+                          ? field('Color', colorField('bgLineColor', l.bg.lineColor)) +
+                            field('Width', numInput('bgLineW', pct(l.bg.lineW), '%'))
+                          : '')
+                    : ''));
+        }
+        if (l.type === 'image') {
+            html += inspSection('Source', l.logo
+                ? '<div class="voe-insp-hint">Uses the previewed title’s logo. Pick a title under “Preview poster” to see it.</div>'
+                : field('URL', '<input class="voe-input" data-inspsrc placeholder="https://…" value="' + esc(l.src || '') + '">') +
+                  field('Upload', '<button class="voe-btn" data-inspupload style="width:100%;justify-content:center">Choose image…</button>'));
+            html += inspSection('Style',
+                field('Corner', numInput('radius', pct(l.radius), '%')) +
+                field('Grayscale', toggle('grayscale', l.grayscale)) +
+                field('Border', toggle('borderEnabled', l.border.enabled)) +
+                (l.border.enabled
+                    ? field('Color', colorField('borderColor', l.border.color)) +
+                      field('Width', numInput('borderW', pct(l.border.w), '%'))
+                    : ''));
+        }
+        if (l.type === 'shape') {
+            html += inspSection('Fill',
+                field('Gradient', toggle('fillGrad', l.fill.grad)) +
+                field('Color', colorField('fillC1', l.fill.c1)) +
+                field('Opacity', sliderInput('fillA1', Math.round(l.fill.a1 * 100))) +
+                (l.fill.grad
+                    ? field('Color 2', colorField('fillC2', l.fill.c2)) +
+                      field('Opacity 2', sliderInput('fillA2', Math.round(l.fill.a2 * 100))) +
+                      field('Angle', numInput('fillDir', l.fill.dir, '°'))
+                    : '') +
+                (l.shapeKind === 'rect' ? field('Radius', numInput('radius', pct(l.radius), '%')) : '') +
+                (l.shapeKind !== 'line'
+                    ? field('Border', toggle('borderEnabled', l.border.enabled)) +
+                      (l.border.enabled
+                        ? field('Color', colorField('borderColor', l.border.color)) +
+                          field('Width', numInput('borderW', pct(l.border.w), '%'))
+                        : '')
+                    : ''));
+        }
+        html += visibilitySection(l);
+        box.innerHTML = html;
+        wireInspector(l);
+    }
+    // z-order + lock toolbar at the top of the inspector.
+    function arrangeBar(l) {
+        function b(a, label, title, on) { return '<button class="voe-seg-btn' + (on ? ' voe-seg-btn--on' : '') + '" data-arrange="' + a + '" title="' + title + '">' + label + '</button>'; }
+        return '<div class="voe-arrange">' +
+            b('front', '⤒', 'To front (Ctrl+])') + b('fwd', '↑', 'Forward (])') +
+            b('bwd', '↓', 'Backward ([)') + b('back', '⤓', 'To back (Ctrl+[)') +
+            '<span class="voe-arrange-sp"></span>' +
+            b('lock', l.locked ? I.lock : I.unlock, 'Lock (Ctrl+L)', l.locked) + '</div>';
+    }
+    // Operators offered per field type: numbers get comparisons, known-value
+    // (enumerated) fields only is / is not, free-text fields get contains.
+    function condOps(fieldKey) {
+        // Genre is multi-valued (a title has several) — membership, not equality.
+        if (fieldKey === 'genre') return [['exists', 'has any value'], ['contains', 'includes']];
+        var f = FIELDS[fieldKey] || {};
+        if (f.num) return [['exists', 'has any value'], ['eq', 'is'], ['neq', 'is not'], ['gte', '≥'], ['gt', '>'], ['lte', '≤'], ['lt', '<']];
+        if (f.opts) return [['exists', 'has any value'], ['eq', 'is'], ['neq', 'is not']];
+        return [['exists', 'has any value'], ['eq', 'is'], ['neq', 'is not'], ['contains', 'contains']];
+    }
+    // Value control: a dropdown of the field's known values, a number box, or
+    // free text — so you can't fat-finger e.g. "PG13" and have it silently never
+    // match. Mirrors sampleRow()'s field-type-aware control.
+    function condValueCtrl(f, w) {
+        // Genre uses its own canonical list (with membership matching); other enum
+        // fields use their own opts and show the friendly formatted label.
+        var isGenre = w.field === 'genre';
+        var vals = isGenre ? GENRES : (f.opts ? f.opts.filter(function (o) { return o !== ''; }) : null);
+        if (vals) {
+            return '<select class="voe-input" data-inspsel="condVal">' +
+                vals.map(function (o) {
+                    var lbl = isGenre ? o : (f.fmt(o) || o);
+                    return '<option value="' + esc(o) + '"' + (String(o) === String(w.value == null ? '' : w.value) ? ' selected' : '') +
+                        '>' + esc(lbl) + '</option>';
+                }).join('') + '</select>';
+        }
+        var t = f.num ? ' type="number" step="any"' : '';
+        return '<input class="voe-input"' + t + ' data-condval value="' + esc(w.value != null ? w.value : '') + '" spellcheck="false">';
+    }
+    // Keep the stored value valid for the current field+op (called on field/op change).
+    function seedCondValue(w) {
+        if (!w.op || w.op === 'exists') return;
+        if (w.field === 'genre') { if (GENRES.indexOf(w.value) < 0) w.value = GENRES[0]; return; }
+        var f = FIELDS[w.field] || {};
+        if (f.opts) {
+            var ov = f.opts.filter(function (o) { return o !== ''; });
+            if (ov.indexOf(w.value) < 0) w.value = ov[0];
+        }
+    }
+    // "Show only when" rule builder — on any standard layer.
+    // The shared 'Background' pill section (fill + radius + padding + border).
+    function bgInspSection(l) {
+        return inspSection('Background',
+            field('Pill', toggle('bgEnabled', l.bg.enabled)) +
+            (l.bg.enabled
+                ? field('Color', colorField('bgColor', l.bg.color)) +
+                  field('Fill', sliderInput('bgOpacity', Math.round(l.bg.opacity * 100))) +
+                  field('Radius', numInput('bgRadius', pct(l.bg.radius), '%')) +
+                  row2(field('Pad X', numInput('bgPadX', pct(l.bg.padX), '%')), field('Pad Y', numInput('bgPadY', pct(l.bg.padY), '%'))) +
+                  field('Border', toggle('bgLine', l.bg.line)) +
+                  (l.bg.line
+                      ? field('Color', colorField('bgLineColor', l.bg.lineColor)) +
+                        field('Width', numInput('bgLineW', pct(l.bg.lineW), '%'))
+                      : '')
+                : ''));
+    }
+    function visibilitySection(l) {
+        var w = l.when || {}, on = !!(l.when && l.when.field);
+        var f = FIELDS[w.field] || FIELDS[FIELD_ORDER[0]];
+        var fieldSel = '<select class="voe-input" data-inspsel="condField">' + FIELD_ORDER.map(function (k) {
+            return '<option value="' + k + '"' + (k === w.field ? ' selected' : '') + '>' + esc(FIELDS[k].label) + '</option>';
+        }).join('') + '</select>';
+        var opSel = '<select class="voe-input" data-inspsel="condOp">' + condOps(w.field).map(function (o) {
+            return '<option value="' + o[0] + '"' + (o[0] === (w.op || 'exists') ? ' selected' : '') + '>' + o[1] + '</option>';
+        }).join('') + '</select>';
+        return inspSection('Show only when',
+            field('Rule', toggle('condOn', on)) +
+            (on
+                ? field('Field', fieldSel) + field('Is', opSel) +
+                  ((w.op && w.op !== 'exists') ? field('Value', condValueCtrl(f, w)) : '')
+                : ''));
+    }
+
+    function setNum(l, key, num) {
+        if (isNaN(num)) return;
+        if (key === 'x') l.x = clamp01(num / 100);
+        else if (key === 'y') l.y = clamp01(num / 100);
+        else if (key === 'size') l.size = Math.max(0.005, num / 100);
+        else if (key === 'rotation') l.rotation = ((Math.round(num) % 360) + 360) % 360;
+        else if (key === 'opacity') l.opacity = clamp01(num / 100);
+        else if (key === 'bgOpacity') l.bg.opacity = clamp01(num / 100);
+        else if (key === 'bgRadius') l.bg.radius = Math.max(0, num / 100);
+        else if (key === 'bgPadX') l.bg.padX = Math.max(0, num / 100);
+        else if (key === 'bgPadY') l.bg.padY = Math.max(0, num / 100);
+        else if (key === 'bgLineW') l.bg.lineW = Math.max(0, num / 100);
+        else if (key === 'strokeW') l.stroke.w = Math.max(0, num / 100);
+        else if (key === 'maxW') l.maxW = Math.max(0, num / 100);
+        else if (key === 'tracking') l.tracking = num / 100;
+        else if (key === 'rowTracking') l.style.tracking = num / 100;
+        else if (key === 'shadowBlur') l.shadowBlur = Math.max(0, num / 100);
+        else if (key === 'shadowDy') l.shadowDy = num / 100;
+        else if (key === 'shadowOpacity') l.shadowOpacity = clamp01(num / 100);
+        else if (key === 'rowShadowBlur') l.style.shadowBlur = Math.max(0, num / 100);
+        else if (key === 'rowShadowDy') l.style.shadowDy = num / 100;
+        else if (key === 'rowShadowOpacity') l.style.shadowOpacity = clamp01(num / 100);
+        else if (key === 'gap') l.gap = Math.max(0, num / 100);
+        else if (key === 'rowSize') l.style.size = Math.max(0.008, num / 100);
+        else if (key === 'rowBgOpacity') l.style.bg.opacity = clamp01(num / 100);
+        else if (key === 'rowRadius') l.style.bg.radius = Math.max(0, num / 100);
+        else if (key === 'rowPadX') l.style.bg.padX = Math.max(0, num / 100);
+        else if (key === 'rowPadY') l.style.bg.padY = Math.max(0, num / 100);
+        else if (key === 'rowStrokeW') l.style.stroke.w = Math.max(0, num / 100);
+        else if (key === 'w') l.w = Math.max(0.02, num / 100);
+        else if (key === 'h') l.h = Math.max(0.02, num / 100);
+        else if (key === 'radius') l.radius = Math.max(0, num / 100);
+        else if (key === 'thickness') l.thickness = Math.max(0.001, num / 100);
+        else if (key === 'borderW') l.border.w = Math.max(0, num / 100);
+        else if (key === 'stars') l.stars = Math.max(1, Math.min(10, Math.round(num)));
+        else if (key === 'emptyOpacity') l.emptyOpacity = clamp01(num / 100);
+        else if (key === 'textScale') l.textScale = Math.max(0.1, num / 100);
+        else if (key === 'bandOpacity') l.bandOpacity = clamp01(num / 100);
+        else if (key === 'fillA1') l.fill.a1 = clamp01(num / 100);
+        else if (key === 'fillA2') l.fill.a2 = clamp01(num / 100);
+        else if (key === 'fillDir') l.fill.dir = num;
+    }
+    function setColor(l, key, val) {
+        if (key === 'color') l.color = val;
+        else if (key === 'bgColor') l.bg.color = val;
+        else if (key === 'bgLineColor') l.bg.lineColor = val;
+        else if (key === 'strokeColor') l.stroke.color = val;
+        else if (key === 'shadowColor') l.shadowColor = val;
+        else if (key === 'rowColor') l.style.color = val;
+        else if (key === 'rowBgColor') l.style.bg.color = val;
+        else if (key === 'rowStrokeColor') l.style.stroke.color = val;
+        else if (key === 'rowShadowColor') l.style.shadowColor = val;
+        else if (key === 'borderColor') l.border.color = val;
+        else if (key === 'emptyColor') l.emptyColor = val;
+        else if (key === 'textColor') l.textColor = val;
+        else if (key === 'fillC1') l.fill.c1 = val;
+        else if (key === 'fillC2') l.fill.c2 = val;
+    }
+
+    function wireInspector(l) {
+        var _ib = overlay.querySelector('[data-voe-inspector]');
+        if (_ib) _ib.querySelectorAll('[data-voe-sectoggle]').forEach(function (h) {
+            h.addEventListener('click', function () { h.parentNode.classList.toggle('voe-sec-collapsed'); });
+        });
+        var box = overlay.querySelector('[data-voe-inspector]');
+        box.querySelectorAll('[data-insp]').forEach(function (inp) {
+            var key = inp.getAttribute('data-insp');
+            inp.addEventListener('input', function () {
+                setNum(l, key, parseFloat(inp.value));
+                var out = box.querySelector('[data-insp-val="' + key + '"]');
+                if (out) out.textContent = Math.round(parseFloat(inp.value)) + '%';
+                refreshLayer(l.id); markDirty();
+            });
+        });
+        var ta = box.querySelector('[data-insptext]');
+        if (ta) ta.addEventListener('input', function () {
+            l.text = ta.value; refreshLayer(l.id); updateRowName(l.id); markDirty();
+        });
+        box.querySelectorAll('[data-arrange]').forEach(function (b) {
+            b.addEventListener('click', function () {
+                var m = b.getAttribute('data-arrange');
+                if (m === 'lock') toggleLock(l.id); else reorderLayer(l.id, m);
+            });
+        });
+        var cval = box.querySelector('[data-condval]');
+        if (cval) cval.addEventListener('input', function () {
+            (l.when = l.when || {}).value = cval.value; refreshLayer(l.id); markDirty();
+        });
+        var bind = box.querySelector('[data-inspbind]');
+        if (bind) bind.addEventListener('change', function () {
+            l.binding.field = bind.value; l.name = FIELDS[bind.value].label;
+            refreshLayer(l.id); updateRowName(l.id); markDirty(); renderInspector();
+        });
+        var srcInp = box.querySelector('[data-inspsrc]');
+        if (srcInp) srcInp.addEventListener('input', function () { l.src = srcInp.value.trim(); refreshLayer(l.id); markDirty(); });
+        var upBtn = box.querySelector('[data-inspupload]');
+        if (upBtn) upBtn.addEventListener('click', function () {
+            var fi = document.createElement('input'); fi.type = 'file'; fi.accept = 'image/*';
+            fi.addEventListener('change', function () {
+                var file = fi.files && fi.files[0]; if (!file) return;
+                upBtn.disabled = true; upBtn.textContent = 'Uploading…';
+                var fd = new FormData(); fd.append('file', file);
+                fetch('/api/video/overlays/upload', { method: 'POST', body: fd })
+                    .then(function (r) { return r.json(); })
+                    .then(function (d) {
+                        upBtn.disabled = false; upBtn.textContent = 'Choose image…';
+                        if (!d || !d.ok) { toast((d && d.error) || 'Upload failed', 'error'); return; }
+                        l.src = d.src; if (srcInp) srcInp.value = d.src; refreshLayer(l.id); markDirty();
+                    })
+                    .catch(function () { upBtn.disabled = false; upBtn.textContent = 'Choose image…'; toast('Upload failed', 'error'); });
+            });
+            fi.click();
+        });
+        box.querySelectorAll('[data-inspsel]').forEach(function (sel) {
+            var key = sel.getAttribute('data-inspsel');
+            sel.addEventListener('change', function () {
+                if (key === 'rowFont') l.style.font = sel.value;
+                else if (key === 'rowWeight') l.style.weight = parseInt(sel.value, 10);
+                else if (key === 'weight') l.weight = parseInt(sel.value, 10);
+                else if (key === 'ratingField') l.field = sel.value;
+                else if (key === 'condField') {
+                    var wf = (l.when = l.when || {});
+                    wf.field = sel.value;
+                    if (condOps(sel.value).map(function (o) { return o[0]; }).indexOf(wf.op) < 0) wf.op = 'exists';
+                    seedCondValue(wf);
+                } else if (key === 'condOp') { var wo = (l.when = l.when || {}); wo.op = sel.value; seedCondValue(wo); }
+                else if (key === 'condVal') (l.when = l.when || {}).value = sel.value;
+                else l[key] = sel.value;
+                refreshLayer(l.id);
+                if (key === 'ratingField' || key === 'field' || key === 'condField' || key === 'condOp') renderInspector();   // swap op list / value control / logo field
+                markDirty();
+            });
+        });
+        box.querySelectorAll('[data-rowrm]').forEach(function (b) {
+            b.addEventListener('click', function (e) {
+                e.stopPropagation();
+                l.fields.splice(parseInt(b.getAttribute('data-rowrm'), 10), 1);
+                refreshLayer(l.id); markDirty(); renderInspector();
+            });
+        });
+        box.querySelectorAll('[data-rowmv]').forEach(function (b) {
+            b.addEventListener('click', function () {
+                var i = parseInt(b.getAttribute('data-rowmv'), 10);
+                if (i > 0) {
+                    var t = l.fields[i - 1]; l.fields[i - 1] = l.fields[i]; l.fields[i] = t;
+                    refreshLayer(l.id); markDirty(); renderInspector();
+                }
+            });
+        });
+        var radd = box.querySelector('[data-rowadd]');
+        if (radd) radd.addEventListener('change', function () {
+            if (radd.value) { l.fields.push(radd.value); refreshLayer(l.id); markDirty(); renderInspector(); }
+        });
+        box.querySelectorAll('[data-place]').forEach(function (cell) {
+            cell.addEventListener('click', function () { placeAt(cell.getAttribute('data-place')); });
+        });
+        var marg = box.querySelector('[data-voe-margin]');
+        if (marg) marg.addEventListener('input', function () {
+            var v = parseFloat(marg.value);
+            if (!isNaN(v)) ed.placeMargin = Math.max(0, Math.min(45, v));
+        });
+        var seg = box.querySelector('[data-inspseg="align"]');
+        if (seg) seg.addEventListener('click', function (e) {
+            var b = e.target.closest('[data-val]'); if (!b) return;
+            l.align = b.getAttribute('data-val');
+            seg.querySelectorAll('.voe-seg-btn').forEach(function (x) { x.classList.toggle('voe-seg-btn--on', x === b); });
+            refreshLayer(l.id); markDirty();
+        });
+        box.querySelectorAll('[data-inspcolor]').forEach(function (c) {
+            var key = c.getAttribute('data-inspcolor');
+            c.addEventListener('input', function () {
+                setColor(l, key, c.value);
+                var hex = box.querySelector('[data-insphex="' + key + '"]'); if (hex) hex.value = c.value;
+                refreshLayer(l.id); markDirty();
+            });
+        });
+        box.querySelectorAll('[data-insphex]').forEach(function (h) {
+            var key = h.getAttribute('data-insphex');
+            h.addEventListener('change', function () {
+                var v = h.value.trim(); if (!/^#?[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(v)) return;
+                if (v[0] !== '#') v = '#' + v;
+                setColor(l, key, v);
+                var sw = box.querySelector('[data-inspcolor="' + key + '"]'); if (sw) sw.value = v;
+                refreshLayer(l.id); markDirty();
+            });
+        });
+        box.querySelectorAll('[data-insptoggle]').forEach(function (t) {
+            var key = t.getAttribute('data-insptoggle');
+            t.addEventListener('click', function () {
+                if (key === 'shadow') l.shadow = !l.shadow;
+                else if (key === 'upper') l.upper = !l.upper;
+                else if (key === 'rowUpper') l.style.upper = !l.style.upper;
+                else if (key === 'bgEnabled') l.bg.enabled = !l.bg.enabled;
+                else if (key === 'bgLine') l.bg.line = !l.bg.line;
+                else if (key === 'strokeEnabled') l.stroke.enabled = !l.stroke.enabled;
+                else if (key === 'fillGrad') l.fill.grad = !l.fill.grad;
+                else if (key === 'borderEnabled') l.border.enabled = !l.border.enabled;
+                else if (key === 'grayscale') l.grayscale = !l.grayscale;
+                else if (key === 'condOn') l.when = (l.when && l.when.field) ? null : { field: (l.binding ? l.binding.field : 'resolution'), op: 'exists', value: '' };
+                else if (key === 'rowShadow') l.style.shadow = !l.style.shadow;
+                else if (key === 'rowBgEnabled') l.style.bg.enabled = !l.style.bg.enabled;
+                else if (key === 'rowStrokeEnabled') l.style.stroke.enabled = !l.style.stroke.enabled;
+                t.classList.toggle('voe-toggle--on');
+                refreshLayer(l.id); markDirty();
+                if (['bgEnabled', 'bgLine', 'fillGrad', 'strokeEnabled', 'rowBgEnabled', 'rowStrokeEnabled', 'shadow', 'rowShadow', 'borderEnabled', 'condOn'].indexOf(key) > -1) renderInspector();   // reveal/hide sub-fields
+            });
+        });
+        box.querySelectorAll('[data-anchor]').forEach(function (cell) {
+            cell.addEventListener('click', function () {
+                changeAnchor(l, cell.getAttribute('data-anchor'));
+                renderInspector();   // anchor change moves x,y → refresh fields + active cell
+            });
+        });
+    }
+
+    // snap the dragged anchor point to the stage's edges/centre (0, .5, 1) and
+    // return which axes snapped so we can flash guide lines.
+    // Snap the dragged layer's box edges (left/centre/right, top/middle/bottom) to the
+    // stage's lines AND to other layers' edges — Figma-style smart guides.
+    function snapToPeers(nx, ny, l, node) {
+        var TH = 6, ew = node.offsetWidth, eh = node.offsetHeight, af = anchorFrac(l.anchor);
+        var L = nx * ed.W - af[0] * ew, T = ny * ed.H - af[1] * eh;
+        var edgesX = [L, L + ew / 2, L + ew], edgesY = [T, T + eh / 2, T + eh];
+        var tx = [0, ed.W / 2, ed.W], ty = [0, ed.H / 2, ed.H];   // stage lines
+        ed.layers.forEach(function (o) {
+            if (o.id === l.id || o.hidden) return;
+            var on = nodeById(o.id); if (!on) return;
+            tx.push(on.offsetLeft, on.offsetLeft + on.offsetWidth / 2, on.offsetLeft + on.offsetWidth);
+            ty.push(on.offsetTop, on.offsetTop + on.offsetHeight / 2, on.offsetTop + on.offsetHeight);
+        });
+        var dx = null, gx = null, dy = null, gy = null, bx = TH + 1, by = TH + 1;
+        edgesX.forEach(function (e) { tx.forEach(function (t) { var d = Math.abs(e - t); if (d < bx) { bx = d; dx = t - e; gx = t; } }); });
+        edgesY.forEach(function (e) { ty.forEach(function (t) { var d = Math.abs(e - t); if (d < by) { by = d; dy = t - e; gy = t; } }); });
+        if (dx !== null) nx += dx / ed.W;
+        if (dy !== null) ny += dy / ed.H;
+        return { x: clamp01(nx), y: clamp01(ny), gx: gx != null ? gx / ed.W : null, gy: gy != null ? gy / ed.H : null };
+    }
+    function showGuides(gx, gy) {
+        var gv = ed.stage.querySelector('[data-voe-gv]'), gh = ed.stage.querySelector('[data-voe-gh]');
+        if (gv) { if (gx == null) gv.style.display = 'none'; else { gv.style.display = 'block'; gv.style.left = (gx * ed.W) + 'px'; } }
+        if (gh) { if (gy == null) gh.style.display = 'none'; else { gh.style.display = 'block'; gh.style.top = (gy * ed.H) + 'px'; } }
+    }
+    function hideGuides() { showGuides(null, null); }
+
+    // keep the inspector's X/Y fields live while dragging on the stage
+    function syncInspectorPos(l) {
+        var box = overlay && overlay.querySelector('[data-voe-inspector]');
+        if (!box) return;
+        var xi = box.querySelector('[data-insp="x"]'), yi = box.querySelector('[data-insp="y"]');
+        if (xi && document.activeElement !== xi) xi.value = pct(l.x);
+        if (yi && document.activeElement !== yi) yi.value = pct(l.y);
+    }
+
+    // ── history (undo / redo) ────────────────────────────────────────────────────
+    // Snapshots of the layer list. Records are debounced so a burst of edits (a
+    // drag, a slider sweep) collapses into one undo step.
+    var histTimer = null;
+    function cloneLayers() { return JSON.parse(JSON.stringify(ed.layers)); }
+    function seedHistory() { ed.history = [cloneLayers()]; ed.histPos = 0; updateUndoRedo(); }
+    function recordHistory() {
+        if (!ed) return;
+        if (histTimer) { clearTimeout(histTimer); histTimer = null; }
+        ed.history = ed.history.slice(0, ed.histPos + 1);
+        ed.history.push(cloneLayers());
+        if (ed.history.length > 60) ed.history.shift();
+        ed.histPos = ed.history.length - 1;
+        updateUndoRedo();
+    }
+    function scheduleRecord() { if (histTimer) clearTimeout(histTimer); histTimer = setTimeout(recordHistory, 350); }
+    function flushHistory() { if (histTimer) { clearTimeout(histTimer); histTimer = null; recordHistory(); } }
+    function restoreHistory() {
+        ed.layers = JSON.parse(JSON.stringify(ed.history[ed.histPos]));
+        if (ed.selected && !layerById(ed.selected)) ed.selected = null;
+        ed.dirty = true; updateSaveState();
+        renderStageLayers(); renderLayersPanel(); renderInspector(); updateUndoRedo();
+    }
+    function undo() { flushHistory(); if (ed && ed.histPos > 0) { ed.histPos--; restoreHistory(); } }
+    function redo() { if (ed && ed.histPos < ed.history.length - 1) { ed.histPos++; restoreHistory(); } }
+    function updateUndoRedo() {
+        var u = overlay && overlay.querySelector('[data-voe-undo]'), r = overlay && overlay.querySelector('[data-voe-redo]');
+        if (u) u.disabled = !(ed && ed.histPos > 0);
+        if (r) r.disabled = !(ed && ed.history && ed.histPos < ed.history.length - 1);
+    }
+
+    function duplicateLayer(id) {
+        var l = layerById(id); if (!l) return;
+        var copy = JSON.parse(JSON.stringify(l));
+        copy.id = uid();
+        copy.x = clamp01(copy.x + 0.03); copy.y = clamp01(copy.y + 0.03);
+        var idx = ed.layers.indexOf(l);
+        ed.layers.splice(idx + 1, 0, copy);
+        ed.selected = copy.id;
+        markDirty(); renderStageLayers(); renderLayersPanel(); renderInspector();
+    }
+
+    // ── dirty + save ────────────────────────────────────────────────────────────
+    function markDirty() { if (ed) { ed.dirty = true; updateSaveState(); scheduleRecord(); } }
+    function updateSaveState() {
+        var s = overlay && overlay.querySelector('[data-voe-savestate]');
+        var btn = overlay && overlay.querySelector('[data-voe-save]');
+        if (s) { s.textContent = ed.dirty ? 'Unsaved changes' : 'All changes saved'; s.classList.toggle('voe-save-state--dirty', ed.dirty); }
+        if (btn) btn.disabled = !ed.dirty;
+    }
+    function definition() {
+        var kind = templateKind();
+        return { version: 1, kind: kind, canvas: { aspect: TEMPLATE_TYPES[kind].aspect }, layers: ed.layers };
+    }
+    function saveTemplate() {
+        if (!ed) return Promise.resolve();
+        return api('PUT', '/api/video/overlays/templates/' + ed.id, { name: ed.name, definition: definition() })
+            .then(function () { ed.dirty = false; updateSaveState(); })
+            .catch(function () { toast('Could not save template', 'error'); });
+    }
+
+    // ── preview poster + sample data (dynamic-badge preview) ────────────────────
+    function refreshBoundLayers() {
+        // Anything that reads sample data must re-render when the sample title changes:
+        // bound badges, the title logo, badge rows (data-bound pills), AND logo badges
+        // (their image + text fallback come from the field's sample value).
+        ed.layers.forEach(function (l) {
+            if (l.binding || l.type === 'row' || l.type === 'rating' || l.type === 'logobadge' || (l.type === 'image' && l.logo) || (l.when && l.when.field)) refreshLayer(l.id);
+        });
+        if (ed.selected) { var s = layerById(ed.selected); if (s && (s.binding || s.type === 'row' || s.type === 'rating' || s.type === 'logobadge')) renderInspector(); }
+    }
+
+    var openPop = null;
+    function closePop() { if (openPop) { openPop.close(); openPop = null; } }
+    function popover(anchor, html) {
+        closePop();
+        var el = document.createElement('div');
+        el.className = 'voe-pop';
+        el.innerHTML = html;
+        document.body.appendChild(el);
+        var r = anchor.getBoundingClientRect();
+        el.style.left = Math.max(12, Math.min(r.left, window.innerWidth - el.offsetWidth - 12)) + 'px';
+        el.style.top = (r.bottom + 8) + 'px';
+        requestAnimationFrame(function () { el.classList.add('voe-pop--on'); });
+        function outside(e) { if (!el.contains(e.target) && !anchor.contains(e.target)) closePop(); }
+        setTimeout(function () { document.addEventListener('pointerdown', outside); }, 0);
+        openPop = { el: el, close: function () {
+            document.removeEventListener('pointerdown', outside);
+            el.classList.remove('voe-pop--on'); setTimeout(function () { if (el.parentNode) el.remove(); }, 160);
+        } };
+        return el;
+    }
+
+    function openPreviewPop(anchor) {
+        var el = popover(anchor,
+            '<div class="voe-pop-h">Preview poster</div>' +
+            '<div class="voe-pop-note">Pick a real title to preview against — it also loads that title’s real values into your badges. Preview only, never saved.</div>' +
+            '<div class="voe-pop-search"><input class="voe-input" data-pop-search placeholder="Search your ' + esc(previewNoun()) + '…" autocomplete="off"></div>' +
+            '<div class="voe-pop-clear"><button class="voe-btn" data-pop-random style="width:100%;justify-content:center">' + I.dice + ' Surprise me</button></div>' +
+            (ed.bg ? '<div class="voe-pop-clear" style="margin-top:0"><button class="voe-btn" data-pop-blank style="width:100%;justify-content:center">Use blank poster</button></div>' : '') +
+            '<div class="voe-pop-body" data-pop-results><div class="voe-pop-empty">Type to search your ' + esc(previewNoun()) + '.</div></div>');
+        var input = el.querySelector('[data-pop-search]');
+        var blank = el.querySelector('[data-pop-blank]');
+        el.querySelector('[data-pop-random]').addEventListener('click', function () { closePop(); loadRandomPreview(); });
+        if (blank) blank.addEventListener('click', function () { ed.bg = null; ed.previewTitle = null; applyStageBg(); updatePreviewName(); closePop(); });
+        var t = null;
+        input.addEventListener('input', function () { clearTimeout(t); var q = input.value.trim(); t = setTimeout(function () { previewSearch(q, el); }, 240); });
+        setTimeout(function () { input.focus(); }, 40);
+    }
+    // What a template previews on, in words (drives the search copy + endpoints).
+    function previewNoun() { var k = templateKind(); return k === 'season' ? 'seasons' : k === 'episode' ? 'episodes' : 'movies & shows'; }
+    function _kindLabel(k) { return k === 'season' ? 'Season' : k === 'episode' ? 'Episode' : k === 'show' ? 'TV' : 'Movie'; }
+    function renderPreviewResults(box, rows) {
+        if (!rows.length) { box.innerHTML = '<div class="voe-pop-empty">No matches in your library.</div>'; return; }
+        box.innerHTML = rows.map(function (it) {
+            var thumb = it.hasPoster ? '/api/video/poster/' + it.kind + '/' + it.id + '?w=60' : '';
+            return '<div class="voe-pop-result" data-pick="' + esc(JSON.stringify(it)) + '">' +
+                (thumb ? '<img src="' + esc(thumb) + '" alt="">' : '<img alt="">') +
+                '<div style="min-width:0"><div class="voe-pop-result-t">' + esc(it.title) + '</div>' +
+                '<div class="voe-pop-result-m">' + _kindLabel(it.kind) + (it.year ? ' · ' + esc(it.year) : '') + '</div></div></div>';
+        }).join('');
+        box.querySelectorAll('[data-pick]').forEach(function (row) {
+            row.addEventListener('click', function () { setPreviewTitle(JSON.parse(row.getAttribute('data-pick'))); });
+        });
+    }
+    function previewSearch(q, el) {
+        var box = el.querySelector('[data-pop-results]');
+        if (q.length < 2) { box.innerHTML = '<div class="voe-pop-empty">Type to search your ' + previewNoun() + '.</div>'; return; }
+        box.innerHTML = '<div class="voe-pop-empty">Searching…</div>';
+        var kind = templateKind();
+        if (kind === 'season' || kind === 'episode') {
+            api('GET', '/api/video/overlays/preview/search?kind=' + kind + '&q=' + encodeURIComponent(q))
+                .then(function (d) {
+                    renderPreviewResults(box, ((d && d.items) || []).map(function (it) {
+                        return { kind: kind, id: it.id, title: it.title, hasPoster: !!it.has_poster };
+                    }));
+                }).catch(function () { box.innerHTML = '<div class="voe-pop-empty">Search failed.</div>'; });
+            return;
+        }
+        function one(k) {
+            return api('GET', '/api/video/library?kind=' + k + '&search=' + encodeURIComponent(q) + '&limit=8')
+                .then(function (d) { return (d && d.items) || []; }).catch(function () { return []; });
+        }
+        Promise.all([one('movies'), one('shows')]).then(function (r) {
+            var rows = [];
+            (r[0] || []).forEach(function (m) { rows.push({ kind: 'movie', id: m.id, title: m.title, year: m.year, hasPoster: m.has_poster, tmdbId: m.tmdb_id }); });
+            (r[1] || []).forEach(function (s) { rows.push({ kind: 'show', id: s.id, title: s.title, year: s.year, hasPoster: s.has_poster, tmdbId: s.tmdb_id }); });
+            renderPreviewResults(box, rows);
+        });
+    }
+    // "Surprise me" — drop a random owned item (matching the template type) into preview.
+    function loadRandomPreview() {
+        api('GET', '/api/video/overlays/preview/random?kind=' + templateKind()).then(function (d) {
+            var it = d && d.item;
+            if (!it) { toast('No ' + previewNoun() + ' with art to preview yet', 'info'); return; }
+            setPreviewTitle({ kind: it.kind, id: it.id, title: it.title, tmdbId: it.tmdb_id });
+            toast('Previewing “' + (it.title || 'a title') + '”', 'success');
+        }).catch(function () { toast('Could not load a random title', 'error'); });
+    }
+
+    function setPreviewTitle(it) {
+        ed.previewTitle = { kind: it.kind, id: it.id, title: it.title };
+        // Prefer the CLEAN TMDB poster for the preview — the server copy may already
+        // carry another tool's burned-in overlays (Kometa), which you'd design over.
+        ed.bg = '/api/video/poster/' + it.kind + '/' + it.id;
+        applyStageBg(); updatePreviewName(); closePop();
+        if (it.tmdbId) {
+            api('GET', '/api/video/poster/options/' + it.kind + '/' + it.tmdbId).then(function (d) {
+                var posters = (d && d.posters) || [];
+                if (posters.length && ed.previewTitle && ed.previewTitle.id === it.id) { ed.bg = posters[0].full; applyStageBg(); }
+            }).catch(function () { /* keep the server proxy fallback */ });
+        }
+        api('GET', '/api/video/overlays/sample/' + it.kind + '/' + it.id).then(function (d) {
+            if (d && d.sample) { ed.sample = mergeSample(d.sample); refreshBoundLayers(); }
+        }).catch(function () { /* keep defaults */ });
+    }
+
+    function openSamplePop(anchor) {
+        var used = [];
+        ed.layers.forEach(function (l) { if (l.binding && used.indexOf(l.binding.field) === -1) used.push(l.binding.field); });
+        var rest = FIELD_ORDER.filter(function (k) { return used.indexOf(k) === -1; });
+        function group(title, keys) {
+            if (!keys.length) return '';
+            return '<div class="voe-pop-grp">' + title + '</div>' + keys.map(sampleRow).join('');
+        }
+        var body = (used.length ? group('In this template', used) : '') + group(used.length ? 'Other fields' : 'All fields', rest);
+        var el = popover(anchor,
+            '<div class="voe-pop-h">Sample data</div>' +
+            '<div class="voe-pop-note">Tweak values to preview how badges react in different cases. Preview only — never changes your library or the template.</div>' +
+            '<div class="voe-pop-body">' + body + '</div>');
+        el.querySelectorAll('[data-sfield]').forEach(function (inp) {
+            var key = inp.getAttribute('data-sfield');
+            inp.addEventListener('input', function () {
+                var f = FIELDS[key], v = inp.value;
+                ed.sample[key] = f.num ? (v === '' ? null : parseFloat(v)) : v;
+                refreshBoundLayers();
+            });
+        });
+    }
+    function sampleRow(key) {
+        var f = FIELDS[key], v = ed.sample[key];
+        var ctrl;
+        if (f.opts) {
+            ctrl = '<select class="voe-input" data-sfield="' + key + '">' + f.opts.map(function (o) {
+                var lbl = o === '' ? '—' : (f.fmt(o) || o);
+                return '<option value="' + esc(o) + '"' + (String(o) === String(v == null ? '' : v) ? ' selected' : '') + '>' + esc(lbl) + '</option>';
+            }).join('') + '</select>';
+        } else if (f.num) {
+            ctrl = '<input class="voe-input voe-input--num" type="number" step="any" data-sfield="' + key + '" value="' + (v == null ? '' : v) + '">';
+        } else {
+            ctrl = '<input class="voe-input" data-sfield="' + key + '" value="' + esc(v == null ? '' : v) + '">';
+        }
+        return '<div class="voe-pop-row"><div class="voe-pop-row-l">' + esc(f.label) + '</div><div class="voe-pop-row-c">' + ctrl + '</div></div>';
+    }
+
+    // ── confirm dialog ──────────────────────────────────────────────────────────
+    // ── logo pack installer popup (opened from the locked Logo badge) ────────────
+    var logoPackPoll = null;
+    function openLogoPackDialog() {
+        var back = document.createElement('div');
+        back.className = 'voe-confirm-back';
+        back.innerHTML = '<div class="voe-lp">' +
+            '<div class="voe-lp-t">' + I.logo + ' Logo badges need an image pack</div>' +
+            '<div class="voe-lp-m">SoulSync doesn’t ship logo art. Install Kometa’s public set — ' +
+                'resolution, audio codec, source, HDR, aspect, plus streaming / network / studio logos — ' +
+                'copied into your own library. Or drop your own PNGs in the logos folder.</div>' +
+            '<div class="voe-lp-prog" data-lp-prog hidden><div class="voe-apply-bar"><div class="voe-apply-bar-fill" data-lp-fill></div></div>' +
+                '<div class="voe-lp-ptxt" data-lp-ptxt></div></div>' +
+            '<details class="voe-lp-help"><summary>Where do these go? (use your own art)</summary>' +
+                '<div class="voe-lp-help-b">Drop images at <code>video_poster_assets/logos/&lt;field&gt;/&lt;value&gt;.png</code> ' +
+                '(also .webp / .jpg). The folder is the field name; the file is the value — lowercased, spaces &amp; symbols as ' +
+                'underscores. e.g. <code>audio_codec/atmos.png</code>, <code>resolution/4k.png</code>, <code>network/hbo.png</code>.</div></details>' +
+            '<div class="voe-lp-row">' +
+                '<button class="voe-btn" data-lp-cancel>Cancel</button>' +
+                '<button class="voe-btn voe-btn--primary" data-lp-go>' + I.apply + ' Install Kometa pack</button>' +
+            '</div></div>';
+        document.body.appendChild(back);
+        requestAnimationFrame(function () { back.classList.add('voe-confirm-back--on'); });
+        function done() { if (logoPackPoll) { clearInterval(logoPackPoll); logoPackPoll = null; } back.classList.remove('voe-confirm-back--on'); setTimeout(function () { back.remove(); }, 180); }
+        back.addEventListener('click', function (e) { if (e.target === back) done(); });
+        back.querySelector('[data-lp-cancel]').addEventListener('click', done);
+        back.querySelector('[data-lp-go]').addEventListener('click', function () { startLogoPackInstall(back); });
+    }
+    function setLPProg(back, s) {
+        var prog = back.querySelector('[data-lp-prog]'); if (!prog) return;
+        prog.hidden = false;
+        var pct = s.total ? Math.round(100 * (s.done || 0) / s.total) : (s.phase === 'done' ? 100 : 6);
+        back.querySelector('[data-lp-fill]').style.width = pct + '%';
+        var txt = s.phase === 'done' ? ('Installed ' + (s.installed || 0) + ' logos') :
+            s.phase === 'error' ? ('Failed: ' + (s.error || 'error')) :
+            ('Downloading… ' + (s.done || 0) + ' / ' + (s.total || '?') + (s.field ? '  ·  ' + s.field : ''));
+        back.querySelector('[data-lp-ptxt]').textContent = txt;
+    }
+    function startLogoPackInstall(back) {
+        var go = back.querySelector('[data-lp-go]'); go.disabled = true;
+        back.querySelector('[data-lp-cancel]').disabled = true;
+        setLPProg(back, { phase: 'starting', done: 0, total: 0 });
+        api('POST', '/api/video/overlays/logopack/install').then(function (r) {
+            if (!r || !r.ok) { toast('Could not start install', 'error'); go.disabled = false; return; }
+            logoPackPoll = setInterval(function () { pollLogoPack(back); }, 800);
+        }).catch(function () { toast('Could not start install', 'error'); go.disabled = false; });
+    }
+    function pollLogoPack(back) {
+        api('GET', '/api/video/overlays/logopack').then(function (d) {
+            if (!document.body.contains(back)) { if (logoPackPoll) { clearInterval(logoPackPoll); logoPackPoll = null; } return; }
+            var s = (d && d.job) || {};
+            setLPProg(back, s);
+            if (s.running || (s.phase !== 'done' && s.phase !== 'error')) return;
+            if (logoPackPoll) { clearInterval(logoPackPoll); logoPackPoll = null; }
+            if (s.phase === 'done') {
+                logoPack = { installed: !!(d && d.installed), counts: (d && d.counts) || {}, loaded: true };
+                refreshPaletteDOM();
+                if (ed && ed.selected) renderInspector();     // refresh any open logo-badge guidance
+                toast('Logo pack installed — ' + (s.installed || 0) + ' logos', 'success');
+                setTimeout(function () { back.classList.remove('voe-confirm-back--on'); setTimeout(function () { back.remove(); }, 180); }, 900);
+            } else {
+                toast('Install failed', 'error');
+                back.querySelector('[data-lp-go]').disabled = false;
+                back.querySelector('[data-lp-cancel]').disabled = false;
+            }
+        }).catch(function () {});
+    }
+
+    function confirmDialog(title, msg, action, onYes) {
+        var back = document.createElement('div');
+        back.className = 'voe-confirm-back';
+        back.innerHTML = '<div class="voe-confirm"><div class="voe-confirm-t">' + esc(title) + '</div>' +
+            '<div class="voe-confirm-m">' + esc(msg) + '</div>' +
+            '<div class="voe-confirm-row"><button class="voe-btn" data-no>Cancel</button>' +
+            '<button class="voe-btn voe-btn--danger" data-yes>' + esc(action) + '</button></div></div>';
+        document.body.appendChild(back);
+        requestAnimationFrame(function () { back.classList.add('voe-confirm-back--on'); });
+        function done() { back.classList.remove('voe-confirm-back--on'); setTimeout(function () { back.remove(); }, 180); }
+        back.addEventListener('click', function (e) {
+            if (e.target === back || e.target.closest('[data-no]')) done();
+            else if (e.target.closest('[data-yes]')) { done(); onYes(); }
+        });
+    }
+
+    // "Get Kometa pack" link inside the logo-badge inspector.
+    document.addEventListener('click', function (e) {
+        if (!overlay) return;
+        var gp = e.target.closest('[data-voe-getpack]');
+        if (gp && overlay.contains(gp)) { e.preventDefault(); openLogoPackDialog(); }
+    });
+    // double-click on stage text → inline edit (bound at overlay level)
+    document.addEventListener('dblclick', function (e) {
+        if (!ed) return;
+        var node = e.target.closest('.voe-layer-text');
+        if (!node || !overlay.contains(node)) return;
+        var l = layerById(node.getAttribute('data-voe-layer'));
+        if (l) enableInlineEdit(node, l);
+    });
+    // Editor keyboard shortcuts (nudge / delete / duplicate / undo / redo / save).
+    function isTyping(t) {
+        if (!t) return false;
+        var tag = t.tagName;
+        return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t.getAttribute('contenteditable') === 'true';
+    }
+    document.addEventListener('keydown', function (e) {
+        if (!ed || !overlay || !overlay.classList.contains('voe-overlay--on')) return;
+        if (isTyping(e.target)) return;
+        var meta = e.ctrlKey || e.metaKey;
+        if (meta && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
+        if (meta && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); redo(); return; }
+        if (meta && (e.key === 's' || e.key === 'S')) { e.preventDefault(); saveTemplate(); return; }
+        if (meta && (e.key === 'd' || e.key === 'D')) { e.preventDefault(); if (ed.selected) duplicateLayer(ed.selected); return; }
+        if (meta && (e.key === 'c' || e.key === 'C')) { e.preventDefault(); copyGroup(); return; }
+        if (meta && (e.key === 'v' || e.key === 'V')) { e.preventDefault(); pasteClipboard(); return; }
+        if (meta && (e.key === 'l' || e.key === 'L')) { e.preventDefault(); if (ed.selected) toggleLock(ed.selected); return; }
+        if ((e.key === ']' || e.key === '}') && ed.selected) { e.preventDefault(); reorderLayer(ed.selected, (meta || e.shiftKey) ? 'front' : 'fwd'); return; }
+        if ((e.key === '[' || e.key === '{') && ed.selected) { e.preventDefault(); reorderLayer(ed.selected, (meta || e.shiftKey) ? 'back' : 'bwd'); return; }
+        if (e.key === '=' || e.key === '+') { e.preventDefault(); zoomBy(1.25); return; }
+        if (e.key === '-' || e.key === '_') { e.preventDefault(); zoomBy(1 / 1.25); return; }
+        if (e.key === '0') { e.preventDefault(); resetView(); return; }
+        if (e.key === ' ' && !ed.space) { e.preventDefault(); ed.space = true; setPanCursor(true); return; }
+        if ((e.key === 'Delete' || e.key === 'Backspace') && ed.selected) { e.preventDefault(); removeGroup(); return; }
+        if (e.key.indexOf('Arrow') === 0 && ed.selected) {
+            e.preventDefault();
+            var step = e.shiftKey ? 10 : 1;
+            var dx = e.key === 'ArrowLeft' ? -step / ed.W : e.key === 'ArrowRight' ? step / ed.W : 0;
+            var dy = e.key === 'ArrowUp' ? -step / ed.H : e.key === 'ArrowDown' ? step / ed.H : 0;
+            groupIds().forEach(function (id) {   // nudge the whole selection
+                var l = layerById(id); if (!l) return;
+                l.x = clamp01(l.x + dx); l.y = clamp01(l.y + dy); refreshLayer(l.id);
+            });
+            var pr = layerById(ed.selected); if (pr) syncInspectorPos(pr);
+            markDirty();
+        }
+    });
+
+    function setPanCursor(on) {
+        var w = overlay && overlay.querySelector('[data-voe-canvaswrap]');
+        if (w) w.classList.toggle('voe-space', on);
+    }
+    // Release space-to-pan on keyup, and defensively if focus leaves the window
+    // mid-hold (else the space flag would stick).
+    document.addEventListener('keyup', function (e) {
+        if (!ed || e.key !== ' ' || !ed.space) return;
+        ed.space = false; setPanCursor(false);
+    });
+    window.addEventListener('blur', function () { if (ed && ed.space) { ed.space = false; setPanCursor(false); } });
+
+    // Esc closes (unless editing text / a confirm is up)
+    document.addEventListener('keydown', function (e) {
+        if (e.key !== 'Escape' || !overlay || !overlay.classList.contains('voe-overlay--on')) return;
+        if (openPop) { closePop(); return; }
+        if (document.querySelector('.voe-confirm-back')) return;
+        if (document.activeElement && document.activeElement.getAttribute('contenteditable') === 'true') return;
+        if (document.activeElement && document.activeElement.classList.contains('voe-name-input')) return;
+        close();
+    });
+
+    // openSettings opens JUST the per-scope overlay-settings modal (standalone —
+    // no Studio shell needed), so the Automations page can configure what the
+    // nightly overlay automation applies, from the same single source of truth.
+    window.VideoOverlayEditor = { open: open, close: close, openSettings: openApplyDialog };
+})();

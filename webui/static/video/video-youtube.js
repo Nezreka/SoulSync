@@ -1,0 +1,344 @@
+/* Shared YouTube-channel helpers for the video side: detect a pasted channel
+ * link, render channel/video cards, and follow/unfollow. Used by the search
+ * page (paste a link → Follow), the wishlist YouTube tab, and the watchlist.
+ * Scoped under window.VideoYoutube; all CSS is .vyt-* (never touches music wl-*).
+ */
+(function () {
+    'use strict';
+
+    function esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+    }
+
+    // A pasted YouTube *channel* reference: a full channel URL or a bare @handle.
+    // Deliberately NOT bare words, so normal title searches don't trigger it.
+    function isChannelRef(q) {
+        q = (q || '').trim();
+        if (/^@[\w.\-]{2,}$/.test(q)) return true;
+        if (!/youtube\.com/i.test(q)) return false;
+        return /youtube\.com\/(@[\w.\-]+|channel\/UC[\w\-]+|c\/[\w.\-]+|user\/[\w.\-]+)/i.test(q);
+    }
+
+    // A pasted YouTube *playlist* link (or bare PL/OL/FL/UU id). Rejects mixes (RD…)
+    // and personal lists (WL/LL) — same rule as the backend parse_playlist_id.
+    function isPlaylistRef(q) {
+        q = (q || '').trim();
+        var m = /[?&]list=([A-Za-z0-9_-]+)/.exec(q);
+        var id = m ? m[1] : (/^(PL|OL|FL|UU)[A-Za-z0-9_-]{8,}$/.test(q) ? q : null);
+        return !!(id && !/^(RD|UL|LL|WL)/.test(id));
+    }
+
+    function fmtDate(iso) {
+        if (!iso) return '';
+        var d = new Date(iso.length <= 10 ? iso + 'T00:00:00' : iso);
+        if (isNaN(d)) return '';
+        return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+    }
+
+    function initials(s) {
+        var w = String(s || '').trim().split(/\s+/).filter(Boolean);
+        return (w.slice(0, 2).map(function (x) { return x[0]; }).join('') || '▶').toUpperCase();
+    }
+
+    // Route YouTube CDN images through our same-origin proxy so hotlink/CORS
+    // policy can't blank them out. Non-YouTube / already-proxied urls pass through.
+    function img(url) {
+        if (!url) return url;
+        if (url.indexOf('//') === 0) url = 'https:' + url;   // protocol-relative
+        if (/^https:\/\/([\w-]+\.)*(ytimg\.com|ggpht\.com|googleusercontent\.com)\//i.test(url))
+            return '/api/video/img?u=' + encodeURIComponent(url);
+        return url;
+    }
+
+    function avatar(ch, cls) {
+        var url = ch && (ch.poster_url || ch.avatar_url);
+        var ini = esc(initials(ch && ch.title));
+        if (url) {
+            // If the image can't load, swap to the initials chip (never an empty circle).
+            return '<img class="' + cls + '" src="' + esc(img(url)) + '" alt="" loading="lazy" ' +
+                'onerror="this.outerHTML=\'<span class=&quot;' + cls + ' vyt-avatar--ph&quot;>' + ini + '</span>\'">';
+        }
+        return '<span class="' + cls + ' vyt-avatar--ph">' + ini + '</span>';
+    }
+
+    // A single wished video tile (thumbnail, title, date, remove).
+    function videoCard(v) {
+        var thumb = v.still_url
+            ? '<img class="vyt-vid-img" src="' + esc(v.still_url) + '" alt="" loading="lazy" ' +
+              'onerror="this.parentNode.classList.add(\'vyt-vid-thumb--none\')">'
+            : '';
+        var date = fmtDate(v.published_at);
+        return '<div class="vyt-vid" data-vyt-vid="' + esc(v.youtube_id) + '">' +
+            '<div class="vyt-vid-thumb' + (v.still_url ? '' : ' vyt-vid-thumb--none') + '">' + thumb +
+                '<button class="vyt-vid-rm" type="button" data-vyt-rm="video" data-id="' + esc(v.youtube_id) +
+                '" title="Remove">&#10005;</button></div>' +
+            '<div class="vyt-vid-body">' +
+                '<span class="vyt-vid-title" title="' + esc(v.title) + '">' + esc(v.title || 'Untitled') + '</span>' +
+                (date ? '<span class="vyt-vid-date">' + esc(date) + '</span>' : '') +
+            '</div></div>';
+    }
+
+    // The search-page result: avatar, title/handle, a strip of recent stills, Follow.
+    function searchCard(ch, following) {
+        var strip = (ch.videos || []).slice(0, 6).map(function (v) {
+            return v.thumbnail_url
+                ? '<span class="vyt-strip-cell"><img src="' + esc(img(v.thumbnail_url)) + '" alt="" loading="lazy" ' +
+                  'onerror="this.parentNode.style.display=\'none\'"></span>'
+                : '';
+        }).join('');
+        var sub = [];
+        if (ch.handle) sub.push(esc(ch.handle));
+        if (ch.video_count != null) sub.push(esc(ch.video_count) + ' videos');
+        return '<div class="vyt-chip" data-vyt-channel="' + esc(ch.youtube_id) + '">' +
+            '<div class="vyt-chip-head">' +
+                avatar(ch, 'vyt-chip-avatar') +
+                '<div class="vyt-chip-meta">' +
+                    '<span class="vyt-chip-badge">YouTube channel</span>' +
+                    '<span class="vyt-chip-title">' + esc(ch.title) + '</span>' +
+                    (sub.length ? '<span class="vyt-chip-sub">' + sub.join(' · ') + '</span>' : '') +
+                '</div>' +
+                followBtn(following) +
+            '</div>' +
+            (strip ? '<div class="vyt-strip">' + strip + '</div>' : '') +
+        '</div>';
+    }
+
+    function followBtn(following) {
+        return '<button class="vyt-follow' + (following ? ' vyt-follow--on' : '') + '" type="button" ' +
+            'data-vyt-follow>' + (following ? '✓ Following' : '+ Follow') + '</button>';
+    }
+
+    // A pasted-playlist result chip (mirrors searchCard): cover, title, owner +
+    // count, and an Add-to-watchlist toggle (data-vyt-follow-playlist).
+    function playlistCard(pl, following) {
+        var cover = pl.thumbnail_url
+            ? '<img class="vyt-chip-avatar" src="' + esc(img(pl.thumbnail_url)) + '" alt="" loading="lazy" ' +
+              'onerror="this.outerHTML=\'<span class=&quot;vyt-chip-avatar vyt-avatar--ph&quot;>▤</span>\'">'
+            : '<span class="vyt-chip-avatar vyt-avatar--ph">▤</span>';
+        var sub = [];
+        if (pl.channel_title) sub.push(esc(pl.channel_title));
+        if (pl.video_count != null) sub.push(esc(pl.video_count) + ' videos');
+        return '<div class="vyt-chip" data-vyt-playlist="' + esc(pl.playlist_id) + '">' +
+            '<div class="vyt-chip-head">' + cover +
+                '<div class="vyt-chip-meta">' +
+                    '<span class="vyt-chip-badge">YouTube playlist</span>' +
+                    '<span class="vyt-chip-title">' + esc(pl.title) + '</span>' +
+                    (sub.length ? '<span class="vyt-chip-sub">' + sub.join(' · ') + '</span>' : '') +
+                '</div>' +
+                '<button class="library-artist-watchlist-btn' + (following ? ' watching' : '') + '" type="button" ' +
+                'data-vyt-follow-playlist>' +
+                    '<span class="watchlist-icon">' + (following ? '✓' : '＋') + '</span>' +
+                    '<span class="watchlist-text">' + (following ? 'In Watchlist' : 'Add to Watchlist') + '</span>' +
+                '</button>' +
+            '</div></div>';
+    }
+
+    function post(url, body) {
+        return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body || {}) }).then(function (r) { return r.ok ? r.json() : null; });
+    }
+
+    // Following a channel WATCHLISTS it (like a show) — it doesn't auto-wish all
+    // its videos, so we send only the channel fields, not its video list.
+    function follow(channel) {
+        var ch = channel || {};
+        return post('/api/video/youtube/follow',
+            { channel: { youtube_id: ch.youtube_id, title: ch.title, avatar_url: ch.avatar_url } });
+    }
+    function unfollow(youtubeId) { return post('/api/video/youtube/unfollow', { youtube_id: youtubeId }); }
+    function followPlaylist(pl) {
+        var p = pl || {};
+        return post('/api/video/youtube/playlist/follow', { playlist: {
+            playlist_id: p.playlist_id, title: p.title, thumbnail_url: p.thumbnail_url, videos: p.videos } });
+    }
+    function unfollowPlaylist(playlistId) {
+        return post('/api/video/youtube/playlist/unfollow', { playlist_id: playlistId });
+    }
+    function removeWish(scope, sourceId) {
+        return post('/api/video/youtube/wishlist/remove', { scope: scope, source_id: sourceId });
+    }
+    function addVideos(channel, videos) {
+        return post('/api/video/youtube/wishlist/add', { channel: channel, videos: videos });
+    }
+
+    // mm:ss / h:mm:ss from a seconds count
+    function fmtDuration(sec) {
+        sec = parseInt(sec, 10);
+        if (!sec || sec < 0) return '';
+        var h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+        var mm = (h && m < 10) ? '0' + m : '' + m, ss = s < 10 ? '0' + s : '' + s;
+        return (h ? h + ':' + mm : m + '') + ':' + ss;
+    }
+    function compactCount(n) {
+        n = parseInt(n, 10);
+        if (!n && n !== 0) return '';
+        if (n >= 1e9) return (n / 1e9).toFixed(1).replace(/\.0$/, '') + 'B';
+        if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+        if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
+        return '' + n;
+    }
+
+    function searchChannels(q) {
+        return fetch('/api/video/youtube/search?q=' + encodeURIComponent(q), { headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; });
+    }
+
+    // A channel card for the search results grid — the SAME .vsr-card poster tile
+    // the movie/TV results use (shared .vsr-grid, hover-lift, peek "i"), so it
+    // sits native alongside them. A channel has only a square avatar (no 2:3
+    // poster), so the tile shows it centered on a YouTube-branded ground with a
+    // 'YouTube' ribbon in the same slot as the In Library / Preview ribbons.
+    function channelResultCard(ch) {
+        var sub = ch.subscriber_count ? compactCount(ch.subscriber_count) + ' subscribers'
+            : (ch.handle ? esc(ch.handle) : '');
+        return '<a class="vsr-card vsr-card--yt" href="#" data-vyt-open-channel="' + esc(ch.youtube_id) + '">' +
+            '<div class="vsr-poster vsr-poster--yt">' +
+                '<span class="vsr-yt-av">' + avatar(ch, 'vsr-yt-avatar') + '</span>' +
+                '<span class="vsr-ribbon vsr-ribbon--yt">YouTube</span>' +
+                '<span class="vsr-peek" aria-hidden="true">i</span>' +
+            '</div>' +
+            '<div class="vsr-info"><span class="vsr-name" title="' + esc(ch.title) + '">' + esc(ch.title) +
+            '</span>' + (sub ? '<span class="vsr-sub">' + sub + '</span>' : '') + '</div></a>';
+    }
+
+    function resolve(ref) {
+        return fetch('/api/video/youtube/resolve?url=' + encodeURIComponent(ref),
+            { headers: { Accept: 'application/json' } }).then(function (r) { return r.ok ? r.json() : (r.status === 404 ? r.json() : null); });
+    }
+
+    // ── Per-channel settings modal (cog on the watchlist Channels tab) ────────
+    // Custom show-name (the $channel folder token used when its videos download) + an
+    // optional quality override that beats the global YouTube quality for this channel.
+    var _RES = ['best', '4320p', '2160p', '1440p', '1080p', '720p', '480p', '360p'];
+    var _COD = ['any', 'av1', 'vp9', 'h264'];
+    var _CON = ['mp4', 'mkv', 'webm'];
+
+    function _opt(list, sel) {
+        return list.map(function (v) {
+            return '<option value="' + v + '"' + (v === sel ? ' selected' : '') + '>' + v + '</option>';
+        }).join('');
+    }
+    function _keepOpt(v, label, sel) {
+        return '<option value="' + v + '"' + ((sel || 'all') === v ? ' selected' : '') + '>' + label + '</option>';
+    }
+
+    function _csetForm(title, s, q, dq, kind) {
+        var on = !!s.quality;                         // a stored override → start enabled
+        var b = (q && q.max_resolution) ? q : dq;     // seed fields from override, else default
+        b = b || {};
+        var noun = kind === 'playlist' ? 'playlist' : 'channel';
+        return '' +
+            '<label class="vyt-cset-lbl">Show name (folder)</label>' +
+            '<input class="vyt-cset-in" data-cset-name type="text" value="' + esc(s.custom_name || '') +
+                '" placeholder="' + esc(title || '') + '">' +
+            '<div class="vyt-cset-hint">Overrides the <code>$channel</code> folder/show name when this ' + noun +
+                '’s videos download. Blank = use the ' + noun + '’s real name.</div>' +
+            '<label class="vyt-cset-toggle"><input type="checkbox" data-cset-qon' + (on ? ' checked' : '') +
+                '> Force a specific quality for this channel</label>' +
+            '<div class="vyt-cset-q" data-cset-q' + (on ? '' : ' hidden') + '>' +
+                '<div class="vyt-cset-row"><span>Max resolution</span><select data-cset-res>' + _opt(_RES, b.max_resolution || '1080p') + '</select></div>' +
+                '<div class="vyt-cset-row"><span>Codec</span><select data-cset-cod>' + _opt(_COD, b.video_codec || 'any') + '</select></div>' +
+                '<div class="vyt-cset-row"><span>Container</span><select data-cset-con>' + _opt(_CON, b.container || 'mp4') + '</select></div>' +
+                '<label class="vyt-cset-ck"><input type="checkbox" data-cset-fps' + (b.prefer_60fps !== false ? ' checked' : '') + '> Prefer 60fps</label>' +
+                '<label class="vyt-cset-ck"><input type="checkbox" data-cset-hdr' + (b.allow_hdr ? ' checked' : '') + '> Allow HDR</label>' +
+            '</div>' +
+            '<div class="vyt-cset-hint">Off = use the global YouTube quality from Settings.</div>' +
+            // content filters + retention — channels only (playlists mirror the whole thing)
+            (kind === 'playlist' ? '' :
+                '<label class="vyt-cset-lbl">Only titles matching (optional)</label>' +
+                '<input class="vyt-cset-in" data-cset-inc type="text" value="' + esc(s.title_include || '') +
+                    '" placeholder="e.g. review, /GN\\d+/">' +
+                '<label class="vyt-cset-lbl">Skip titles matching (optional)</label>' +
+                '<input class="vyt-cset-in" data-cset-exc type="text" value="' + esc(s.title_exclude || '') +
+                    '" placeholder="e.g. #shorts, podcast, /trailer/i-style not needed">' +
+                '<div class="vyt-cset-hint">Comma-separated. Plain text = case-insensitive contains; wrap in <code>/…/</code> for a regex. Applies when the channel scan picks videos to wishlist.</div>' +
+                '<label class="vyt-cset-lbl">Minimum length (minutes, optional)</label>' +
+                '<input class="vyt-cset-in" data-cset-minm type="number" min="0" step="1" value="' + esc(s.min_minutes || '') + '" placeholder="0">' +
+                '<div class="vyt-cset-hint">Skips videos shorter than this (unknown lengths pass). Shorts are already excluded globally.</div>') +
+            (kind === 'playlist' ? '' :
+                '<label class="vyt-cset-lbl">Keep</label>' +
+                '<select class="vyt-cset-in" data-cset-keep>' +
+                    _keepOpt('all', 'Everything', s.retention) +
+                    _keepOpt('count_30', 'Last 30 episodes', s.retention) +
+                    _keepOpt('days_90', 'Last 3 months', s.retention) +
+                    _keepOpt('days_180', 'Last 6 months', s.retention) +
+                '</select>' +
+                '<div class="vyt-cset-hint">The <strong>Auto-Clean Old YouTube Episodes</strong> automation deletes downloaded episodes outside this window (video + sidecars). The history record is kept, so they’re never re-downloaded.</div>');
+    }
+
+    function openChannelSettings(channelId, title, kind) {
+        if (!channelId) return;
+        var heading = (kind === 'playlist' ? 'Playlist' : 'Channel') + ' settings';
+        var prev = document.getElementById('vyt-cset-overlay'); if (prev) prev.remove();
+        var ov = document.createElement('div');
+        ov.id = 'vyt-cset-overlay'; ov.className = 'vyt-cset-overlay';
+        ov.innerHTML = '<div class="vyt-cset" role="dialog" aria-label="' + heading + '">' +
+            '<div class="vyt-cset-head"><span class="vyt-cset-h">' + heading + '</span>' +
+                '<button class="vyt-cset-x" type="button" title="Close">✕</button></div>' +
+            '<div class="vyt-cset-body">Loading…</div>' +
+            '<div class="vyt-cset-foot"><button class="vyt-cset-save" type="button" disabled>Save</button></div></div>';
+        document.body.appendChild(ov);
+        function close() { ov.remove(); }
+        ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
+        ov.querySelector('.vyt-cset-x').addEventListener('click', close);
+        var body = ov.querySelector('.vyt-cset-body'), saveBtn = ov.querySelector('.vyt-cset-save');
+
+        fetch('/api/video/youtube/channel/' + encodeURIComponent(channelId) + '/settings',
+            { headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                var s = (d && d.settings) || {}, dq = (d && d.default_quality) || {};
+                body.innerHTML = _csetForm(title, s, s.quality || {}, dq, kind);
+                saveBtn.disabled = false;
+                var qon = body.querySelector('[data-cset-qon]'), qbox = body.querySelector('[data-cset-q]');
+                if (qon && qbox) qon.addEventListener('change', function () { qbox.hidden = !qon.checked; });
+            })
+            .catch(function () { body.innerHTML = 'Could not load settings.'; });
+
+        saveBtn.addEventListener('click', function () {
+            var nameEl = body.querySelector('[data-cset-name]');
+            var payload = { custom_name: (nameEl ? nameEl.value : '').trim() };
+            var inc = body.querySelector('[data-cset-inc]');
+            var exc = body.querySelector('[data-cset-exc]');
+            var minm = body.querySelector('[data-cset-minm]');
+            if (inc) payload.title_include = inc.value.trim();
+            if (exc) payload.title_exclude = exc.value.trim();
+            if (minm) payload.min_minutes = minm.value.trim();
+            var keepEl = body.querySelector('[data-cset-keep]');
+            // '' for 'Everything' → dropped server-side → keep-all (clears any prior policy)
+            payload.retention = (keepEl && keepEl.value !== 'all') ? keepEl.value : '';
+            var qon = body.querySelector('[data-cset-qon]');
+            if (qon && qon.checked) {
+                payload.quality = {
+                    max_resolution: body.querySelector('[data-cset-res]').value,
+                    video_codec: body.querySelector('[data-cset-cod]').value,
+                    container: body.querySelector('[data-cset-con]').value,
+                    prefer_60fps: body.querySelector('[data-cset-fps]').checked,
+                    allow_hdr: body.querySelector('[data-cset-hdr]').checked,
+                };
+            }
+            saveBtn.disabled = true;
+            fetch('/api/video/youtube/channel/' + encodeURIComponent(channelId) + '/settings',
+                { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                  body: JSON.stringify(payload) })
+                .then(function (r) { return r.json(); })
+                .then(function () {
+                    if (typeof showToast === 'function') showToast('Channel settings saved', 'success');
+                    close();
+                })
+                .catch(function () { saveBtn.disabled = false; if (typeof showToast === 'function') showToast('Save failed', 'error'); });
+        });
+    }
+
+    window.VideoYoutube = {
+        esc: esc, isChannelRef: isChannelRef, isPlaylistRef: isPlaylistRef, fmtDate: fmtDate, avatar: avatar, img: img,
+        fmtDuration: fmtDuration, compactCount: compactCount,
+        videoCard: videoCard, searchCard: searchCard, playlistCard: playlistCard, followBtn: followBtn,
+        follow: follow, unfollow: unfollow, followPlaylist: followPlaylist, unfollowPlaylist: unfollowPlaylist,
+        removeWish: removeWish, addVideos: addVideos, resolve: resolve,
+        searchChannels: searchChannels, channelResultCard: channelResultCard,
+        openChannelSettings: openChannelSettings,
+    };
+})();

@@ -5615,6 +5615,245 @@ const _recentToastKeys = new Map();
 
 const _notifIcons = { success: '✓', error: '✕', warning: '⚠', info: 'ℹ' };
 
+// ── Active overlay-apply task (live via the 'overlay:progress' socket event) ────
+// Surfaced two ways: a working indicator on the bell (visible without opening),
+// and a pinned "Active" card at the top of the notification panel. _JOB on the
+// server is the single source of truth for both manual + automation runs.
+let _overlayTask = null;        // latest job state, or null when idle
+let _overlayClearTimer = null;
+
+function updateOverlayTask(data) {
+    if (!data) return;
+    if (_overlayClearTimer) { clearTimeout(_overlayClearTimer); _overlayClearTimer = null; }
+    const active = data.running || data.phase === 'starting' || data.phase === 'running';
+    if (active) {
+        _overlayTask = data;
+    } else if (data.phase === 'done' || data.phase === 'error') {
+        _overlayTask = data;    // keep the final result on screen briefly, then clear
+        _overlayClearTimer = setTimeout(() => { _overlayTask = null; _updateOverlayBell(); _patchOverlayActive(); }, 6000);
+    } else {
+        _overlayTask = null;    // idle
+    }
+    _updateOverlayBell();
+    _patchOverlayActive();
+}
+
+// Pull current state on demand (panel open / page load) so we're accurate even if
+// a socket event was missed or a job was already running before we connected.
+function _seedOverlayTask() {
+    fetch('/api/video/overlays/apply/status')
+        .then(r => r.ok ? r.json() : null)
+        .then(s => { if (s) updateOverlayTask(s); })
+        .catch(() => {});
+}
+
+function _overlayTaskActive() {
+    return !!(_overlayTask && (_overlayTask.running || _overlayTask.phase === 'starting' || _overlayTask.phase === 'running'));
+}
+
+function _updateOverlayBell() {
+    const btn = document.getElementById('notif-bell-btn');
+    if (btn) btn.classList.toggle('notif-bell-working',
+        _overlayTaskActive() || _colSyncTaskActive() || _colArtTaskActive() || _videoBulkTaskActive());
+    _ensureTaskPolling();
+}
+
+// Insurance while any task is active: re-seed from the status endpoints every
+// 12s so a missed final socket event (tab throttled, socket hiccup) can never
+// strand an Active card in its last "running" state. Stops itself when idle.
+let _taskPollTimer = null;
+function _ensureTaskPolling() {
+    const active = _overlayTaskActive() || _colSyncTaskActive() || _colArtTaskActive() || _videoBulkTaskActive();
+    if (active && !_taskPollTimer) {
+        _taskPollTimer = setInterval(() => {
+            _seedOverlayTask();
+            _seedCollectionSyncTask();
+            _seedCollectionArtTask();
+            _seedVideoBulkTask();
+        }, 12000);
+    } else if (!active && _taskPollTimer) {
+        clearInterval(_taskPollTimer);
+        _taskPollTimer = null;
+    }
+}
+
+// ── Active artwork-refresh task ('collections:artwork' socket event) ───────────
+let _colArtTask = null;
+let _colArtClearTimer = null;
+
+function updateCollectionArtTask(data) {
+    if (!data) return;
+    if (_colArtClearTimer) { clearTimeout(_colArtClearTimer); _colArtClearTimer = null; }
+    const active = data.running || data.phase === 'starting' || data.phase === 'running';
+    if (active) {
+        _colArtTask = data;
+    } else if (data.phase === 'done' || data.phase === 'error') {
+        _colArtTask = data;    // keep the final result on screen briefly, then clear
+        _colArtClearTimer = setTimeout(() => { _colArtTask = null; _updateOverlayBell(); _patchOverlayActive(); }, 6000);
+    } else {
+        _colArtTask = null;    // idle
+    }
+    _updateOverlayBell();
+    _patchOverlayActive();
+}
+
+function _seedCollectionArtTask() {
+    fetch('/api/video/collections/posters/regenerate/status')
+        .then(r => r.ok ? r.json() : null)
+        .then(s => { if (s) updateCollectionArtTask(s); })
+        .catch(() => {});
+}
+
+function _colArtTaskActive() {
+    return !!(_colArtTask && (_colArtTask.running || _colArtTask.phase === 'starting' || _colArtTask.phase === 'running'));
+}
+
+function _colArtActiveHTML() {
+    const t = _colArtTask;
+    if (!t) return '';
+    const total = t.total || 0, done = t.done || 0;
+    const pct = total ? Math.min(100, Math.round(done / total * 100)) : (t.phase === 'done' ? 100 : 4);
+    let line, cls = '';
+    if (t.phase === 'done') { line = `Done · ${t.rendered || 0} rendered` + (t.failed ? `, ${t.failed} failed` : ''); cls = 'done'; }
+    else if (t.phase === 'error') { line = 'Failed: ' + _escToast(t.error || 'error'); cls = 'error'; }
+    else line = `${done} / ${total || '…'}` + (t.name ? ' · ' + _escToast(t.name) : '');
+    return `
+        <div class="notif-active notif-active-${cls}">
+            <div class="notif-active-head"><span class="notif-active-title">Refreshing collection artwork</span><span class="notif-active-pct">${pct}%</span></div>
+            <div class="notif-active-bar"><div class="notif-active-fill" style="width:${pct}%"></div></div>
+            <div class="notif-active-sub">${line}</div>
+        </div>`;
+}
+
+// ── Active bulk-metadata task ('video:bulk' socket event) ──────────────────────
+// The library grid's multi-select bar shows inline progress while you watch;
+// this card covers the job when you navigate away mid-run.
+let _videoBulkTask = null;
+let _videoBulkClearTimer = null;
+
+function updateVideoBulkTask(data) {
+    if (!data) return;
+    if (_videoBulkClearTimer) { clearTimeout(_videoBulkClearTimer); _videoBulkClearTimer = null; }
+    const active = data.running || data.phase === 'starting' || data.phase === 'running';
+    if (active) {
+        _videoBulkTask = data;
+    } else if (data.phase === 'done' || data.phase === 'error') {
+        _videoBulkTask = data;    // keep the final result on screen briefly, then clear
+        _videoBulkClearTimer = setTimeout(() => { _videoBulkTask = null; _updateOverlayBell(); _patchOverlayActive(); }, 6000);
+    } else {
+        _videoBulkTask = null;    // idle
+    }
+    _updateOverlayBell();
+    _patchOverlayActive();
+}
+
+function _seedVideoBulkTask() {
+    fetch('/api/video/bulk/status')
+        .then(r => r.ok ? r.json() : null)
+        .then(s => { if (s) updateVideoBulkTask(s); })
+        .catch(() => {});
+}
+
+function _videoBulkTaskActive() {
+    return !!(_videoBulkTask && (_videoBulkTask.running || _videoBulkTask.phase === 'starting' || _videoBulkTask.phase === 'running'));
+}
+
+function _videoBulkActiveHTML() {
+    const t = _videoBulkTask;
+    if (!t) return '';
+    const total = t.total || 0, done = t.done || 0;
+    const pct = total ? Math.min(100, Math.round(done / total * 100)) : (t.phase === 'done' ? 100 : 4);
+    let line, cls = '';
+    if (t.phase === 'done') { line = `Done · ${t.ok || 0} updated` + (t.failed ? `, ${t.failed} failed` : ''); cls = 'done'; }
+    else if (t.phase === 'error') { line = 'Failed: ' + _escToast(t.error || 'error'); cls = 'error'; }
+    else line = `${done} / ${total || '…'}`;
+    const title = t.label ? _escToast(t.label) : 'Bulk metadata edit';
+    return `
+        <div class="notif-active notif-active-${cls}">
+            <div class="notif-active-head"><span class="notif-active-title">${title}</span><span class="notif-active-pct">${pct}%</span></div>
+            <div class="notif-active-bar"><div class="notif-active-fill" style="width:${pct}%"></div></div>
+            <div class="notif-active-sub">${line}</div>
+        </div>`;
+}
+
+// ── Active collection-sync task ('collections:sync' socket event) ──────────────
+// Same treatment as the overlay job: bell working indicator + a pinned Active
+// card. Covers the studio's "Sync all" AND the nightly automation (one _JOB).
+let _colSyncTask = null;
+let _colSyncClearTimer = null;
+
+function updateCollectionSyncTask(data) {
+    if (!data) return;
+    if (_colSyncClearTimer) { clearTimeout(_colSyncClearTimer); _colSyncClearTimer = null; }
+    const active = data.running || data.phase === 'starting' || data.phase === 'running';
+    if (active) {
+        _colSyncTask = data;
+    } else if (data.phase === 'done' || data.phase === 'error') {
+        _colSyncTask = data;    // keep the final result on screen briefly, then clear
+        _colSyncClearTimer = setTimeout(() => { _colSyncTask = null; _updateOverlayBell(); _patchOverlayActive(); }, 6000);
+    } else {
+        _colSyncTask = null;    // idle
+    }
+    _updateOverlayBell();
+    _patchOverlayActive();
+}
+
+function _seedCollectionSyncTask() {
+    fetch('/api/video/collections/sync/status')
+        .then(r => r.ok ? r.json() : null)
+        .then(s => { if (s) updateCollectionSyncTask(s); })
+        .catch(() => {});
+}
+
+function _colSyncTaskActive() {
+    return !!(_colSyncTask && (_colSyncTask.running || _colSyncTask.phase === 'starting' || _colSyncTask.phase === 'running'));
+}
+
+function _colSyncActiveHTML() {
+    const t = _colSyncTask;
+    if (!t) return '';
+    const total = t.total || 0, done = t.done || 0;
+    const pct = total ? Math.min(100, Math.round(done / total * 100)) : (t.phase === 'done' ? 100 : 4);
+    let line, cls = '';
+    if (t.phase === 'done') {
+        line = `Done · ${t.synced || 0} synced` +
+            ((t.added || t.removed) ? ` (+${t.added || 0} / −${t.removed || 0})` : '') +
+            (t.wishlisted ? `, ${t.wishlisted} wishlisted` : '') +
+            (t.failed ? `, ${t.failed} failed` : '');
+        cls = 'done';
+    } else if (t.phase === 'error') { line = 'Failed: ' + _escToast(t.error || 'error'); cls = 'error'; }
+    else line = `${done} / ${total || '…'}` + (t.name ? ' · ' + _escToast(t.name) : '');
+    return `
+        <div class="notif-active notif-active-${cls}">
+            <div class="notif-active-head"><span class="notif-active-title">Syncing collections</span><span class="notif-active-pct">${pct}%</span></div>
+            <div class="notif-active-bar"><div class="notif-active-fill" style="width:${pct}%"></div></div>
+            <div class="notif-active-sub">${line}</div>
+        </div>`;
+}
+
+function _overlayActiveHTML() {
+    const t = _overlayTask;
+    if (!t) return '';
+    const total = t.total || 0, done = t.done || 0;
+    const pct = total ? Math.min(100, Math.round(done / total * 100)) : (t.phase === 'done' ? 100 : 4);
+    const verb = t.mode === 'remove' ? 'Removing overlays' : t.mode === 'reset' ? 'Resetting posters' : 'Applying overlays';
+    let line, cls = '';
+    if (t.phase === 'done') { line = `Done · ${t.applied || 0} updated, ${t.skipped || 0} unchanged` + (t.failed ? `, ${t.failed} failed` : ''); cls = 'done'; }
+    else if (t.phase === 'error') { line = 'Failed: ' + _escToast(t.error || 'error'); cls = 'error'; }
+    else line = `${done.toLocaleString()} / ${total ? total.toLocaleString() : '…'}` + (t.title ? ' · ' + _escToast(t.title) : '');
+    return `
+        <div class="notif-active notif-active-${cls}">
+            <div class="notif-active-head"><span class="notif-active-title">${verb}</span><span class="notif-active-pct">${pct}%</span></div>
+            <div class="notif-active-bar"><div class="notif-active-fill" style="width:${pct}%"></div></div>
+            <div class="notif-active-sub">${line}</div>
+        </div>`;
+}
+
+function _patchOverlayActive() {
+    const host = document.querySelector('#notif-panel [data-notif-active-host]');
+    if (host) host.innerHTML = _overlayActiveHTML() + _colSyncActiveHTML() + _colArtActiveHTML() + _videoBulkActiveHTML();
+}
+
 function showToast(message, type = 'success', helpSection = null) {
     const toastKey = `${type}:${message}`;
     const now = Date.now();
@@ -5707,6 +5946,7 @@ function _openNotifPanel() {
             <span class="notif-panel-title">Notifications</span>
             ${entries.length > 0 ? '<button class="notif-panel-clear" onclick="_clearNotifHistory()">Clear All</button>' : ''}
         </div>
+        <div class="notif-active-host" data-notif-active-host>${_overlayActiveHTML()}</div>
         <div class="notif-panel-body">
             ${entries.length === 0 ? '<div class="notif-panel-empty">No notifications yet</div>' :
             entries.map(e => {
@@ -5728,6 +5968,10 @@ function _openNotifPanel() {
     `;
 
     document.body.appendChild(panel);
+    _seedOverlayTask();   // refresh the Active cards from the server on open (socket keeps them live after)
+    _seedCollectionSyncTask();
+    _seedCollectionArtTask();
+    _seedVideoBulkTask();
 
     // Position above the bell button
     if (btn) {
@@ -5946,8 +6190,9 @@ let _gsController = null;
             }
         });
 
-        // Keyboard shortcuts
+        // Keyboard shortcuts — never summon the (music-only) global search on the video side.
         document.addEventListener('keydown', e => {
+            if (document.body.getAttribute('data-side') === 'video') return;
             if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); input.focus(); return; }
             if (e.key === '/' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) { e.preventDefault(); input.focus(); }
         });
@@ -5994,13 +6239,29 @@ let _gsController = null;
     else run();
 })();
 
+// On load, seed the overlay-apply + collection-sync tasks so the bell reflects a
+// job that was already running before this page connected (the socket keeps them
+// live thereafter).
+(function _overlayTaskInit() {
+    const run = () => setTimeout(() => {
+        if (typeof _seedOverlayTask === 'function') _seedOverlayTask();
+        if (typeof _seedCollectionSyncTask === 'function') _seedCollectionSyncTask();
+        if (typeof _seedCollectionArtTask === 'function') _seedCollectionArtTask();
+        if (typeof _seedVideoBulkTask === 'function') _seedVideoBulkTask();
+    }, 1200);
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run);
+    else run();
+})();
+
 function _gsUpdateVisibility() {
     const bar = document.getElementById('gsearch-bar');
     const aura = document.getElementById('gsearch-aura');
     if (!bar) return;
-    // Hide on pages where global search doesn't belong.
+    // Hide on pages where global search doesn't belong, and always on the
+    // video side (the global/music search is music-only).
     const _gsHidePages = new Set(['search', 'downloads', 'settings', 'help', 'issues', 'import']);
-    const onHidePage = typeof currentPage !== 'undefined' && _gsHidePages.has(currentPage);
+    const onVideoSide = document.body.getAttribute('data-side') === 'video';
+    const onHidePage = onVideoSide || (typeof currentPage !== 'undefined' && _gsHidePages.has(currentPage));
     bar.style.display = onHidePage ? 'none' : '';
     if (aura) aura.classList.toggle('hidden', onHidePage);
     if (onHidePage && _gsState.active) _gsDeactivate();

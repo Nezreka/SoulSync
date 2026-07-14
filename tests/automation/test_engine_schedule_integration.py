@@ -403,3 +403,164 @@ def test_end_to_end_monthly_schedule_produces_valid_db_string(engine_with_db):
     assert parsed.day == 15
     assert parsed.hour == 9
     assert parsed.minute == 0
+
+
+# ---------------------------------------------------------------------------
+# System-automation seeding — owned_by / action_config (video side).
+# ---------------------------------------------------------------------------
+
+
+def test_ensure_system_automations_seeds_video_with_owned_by_and_mode():
+    """The video post-download chain twins must seed with owned_by='video' so they
+    stay off the music page; the standalone 'Scan Video Library' is NO LONGER seeded
+    (superseded by the chain). Music system automations keep owned_by=None."""
+    db = MagicMock()
+    db.get_system_automation_by_action.return_value = None  # nothing seeded yet
+    created = {}
+
+    def _create(**kw):
+        created[kw['action_type']] = kw
+        return 'id-' + kw['action_type']
+
+    db.create_automation.side_effect = _create
+
+    engine = AutomationEngine(db)
+    engine.ensure_system_automations()
+
+    # The standalone scheduled scan is gone; the chain twins are seeded, video-tagged.
+    assert 'video_scan_library' not in created
+    assert created['video_scan_server']['owned_by'] == 'video'
+    assert created['video_update_database']['owned_by'] == 'video'
+    assert json.loads(created['video_update_database']['action_config']) == {'mode': 'incremental'}
+
+    # Music automations stay owned_by=None (shown on the music page).
+    assert created['scan_library']['owned_by'] is None
+    assert json.loads(created['scan_library']['action_config']) == {}
+
+
+def test_video_scan_library_system_automation_is_cleaned_up():
+    """The obsolete standalone 'Scan Video Library' system automation is deleted when
+    present (superseded by the post-download chain). No stuck flag — it just keys off
+    the lookup, so once the row is gone it no-ops."""
+    # present → deleted (matches only the is_system-seeded row)
+    db = MagicMock()
+    db.get_system_automation_by_action.return_value = {'id': 99, 'is_system': 1}
+    AutomationEngine(db)._fix_video_scan_default()
+    db.delete_automation.assert_any_call(99)
+
+    # absent (already gone) → idempotent no-op, never errors or deletes
+    db2 = MagicMock()
+    db2.get_system_automation_by_action.return_value = None
+    AutomationEngine(db2)._fix_video_scan_default()
+    db2.delete_automation.assert_not_called()
+
+
+def test_airing_automation_migrates_24h_interval_to_daily_1am():
+    """The old rolling-24h 'Auto-Wishlist Episodes Airing Today' row is rewritten to a
+    fixed daily 01:00 (server-local) so it stops drifting with restarts."""
+    db = MagicMock()
+    db.get_system_automation_by_action.return_value = {
+        'id': 42, 'is_system': 1, 'trigger_type': 'schedule',
+        'trigger_config': json.dumps({'interval': 24, 'unit': 'hours'})}
+    eng = AutomationEngine(db)
+    eng._default_tz = 'UTC'
+    eng._fix_airing_automation_schedule()
+
+    db.update_automation.assert_called_once()
+    args, kwargs = db.update_automation.call_args
+    assert args[0] == 42
+    assert kwargs['trigger_type'] == 'daily_time'
+    assert json.loads(kwargs['trigger_config']) == {'time': '01:00'}
+    # next_run is armed for 01:00 UTC (the next occurrence)
+    assert kwargs['next_run'].endswith(' 01:00:00')
+
+
+def test_airing_automation_migration_is_idempotent():
+    """Once the row is already daily_time, re-running the migration is a no-op (it
+    must not rewrite a user's edited time or re-arm next_run every startup)."""
+    db = MagicMock()
+    db.get_system_automation_by_action.return_value = {
+        'id': 42, 'is_system': 1, 'trigger_type': 'daily_time',
+        'trigger_config': json.dumps({'time': '06:30'})}
+    AutomationEngine(db)._fix_airing_automation_schedule()
+    db.update_automation.assert_not_called()
+
+    # absent (fresh install, created straight as daily_time) → no-op, never errors
+    db2 = MagicMock()
+    db2.get_system_automation_by_action.return_value = None
+    AutomationEngine(db2)._fix_airing_automation_schedule()
+    db2.update_automation.assert_not_called()
+
+
+def test_deep_scans_migrate_to_fixed_weekly_times():
+    """The two video deep scans move from a rolling 7-day interval to fixed weekly
+    times — TV Mondays 02:00, Movies Tuesdays 02:00."""
+    rows = {
+        'video_deep_scan_tv': {'id': 7, 'is_system': 1, 'trigger_type': 'schedule',
+                               'trigger_config': json.dumps({'interval': 7, 'unit': 'days'})},
+        'video_deep_scan_movies': {'id': 8, 'is_system': 1, 'trigger_type': 'schedule',
+                                   'trigger_config': json.dumps({'interval': 7, 'unit': 'days'})},
+    }
+    db = MagicMock()
+    db.get_system_automation_by_action.side_effect = lambda a: rows.get(a)
+    eng = AutomationEngine(db)
+    eng._default_tz = 'UTC'
+    eng._fix_deep_scan_schedules()
+
+    by_id = {c.args[0]: c.kwargs for c in db.update_automation.call_args_list}
+    assert json.loads(by_id[7]['trigger_config']) == {'time': '02:00', 'days': ['mon']}   # TV → Mon
+    assert json.loads(by_id[8]['trigger_config']) == {'time': '02:00', 'days': ['tue']}   # Movies → Tue
+    assert by_id[7]['trigger_type'] == 'weekly_time' and by_id[8]['trigger_type'] == 'weekly_time'
+    assert by_id[7]['next_run'].endswith(' 02:00:00') and by_id[8]['next_run'].endswith(' 02:00:00')
+
+
+def test_deep_scan_migration_is_idempotent_and_safe_when_absent():
+    # already weekly_time → no-op (a hand-tuned day/time isn't reverted)
+    db = MagicMock()
+    db.get_system_automation_by_action.side_effect = lambda a: {
+        'id': 7, 'is_system': 1, 'trigger_type': 'weekly_time',
+        'trigger_config': json.dumps({'time': '05:00', 'days': ['sat']})}
+    AutomationEngine(db)._fix_deep_scan_schedules()
+    db.update_automation.assert_not_called()
+
+    # absent (not seeded yet) → no-op, never errors
+    db2 = MagicMock()
+    db2.get_system_automation_by_action.return_value = None
+    AutomationEngine(db2)._fix_deep_scan_schedules()
+    db2.update_automation.assert_not_called()
+
+
+def test_wishlist_processor_rename_removes_orphans_and_renames_youtube():
+    """The Download→Process rename: a DB seeded under the old names has orphaned
+    'Auto-Download Movie/Episode Wishlist' rows (dead action_type) — they're deleted (after
+    lifting the is_system delete-guard); the YouTube row (action_type unchanged) is renamed
+    in place, never deleted."""
+    rows = {
+        'video_download_movie_wishlist': {'id': 10, 'is_system': 1, 'name': 'Auto-Download Movie Wishlist'},
+        'video_download_episode_wishlist': {'id': 11, 'is_system': 1, 'name': 'Auto-Download Episode Wishlist'},
+        'video_process_youtube_wishlist': {'id': 12, 'is_system': 1, 'name': 'Auto-Download YouTube Wishlist'},
+    }
+    db = MagicMock()
+    db.get_system_automation_by_action.side_effect = lambda a: rows.get(a)
+    AutomationEngine(db)._fix_wishlist_processor_rename()
+
+    db.delete_automation.assert_any_call(10)
+    db.delete_automation.assert_any_call(11)
+    # is_system=0 lifted on each orphan before deleting
+    cleared = {c.args[0] for c in db.update_automation.call_args_list if c.kwargs.get('is_system') == 0}
+    assert cleared == {10, 11}
+    # youtube renamed (in place), NOT deleted
+    renamed = [c for c in db.update_automation.call_args_list if c.kwargs.get('name')]
+    assert renamed and renamed[0].args[0] == 12
+    assert renamed[0].kwargs['name'] == 'Auto-Process YouTube Wishlist'
+    assert all(c.args[0] != 12 for c in db.delete_automation.call_args_list)
+
+
+def test_wishlist_processor_rename_is_idempotent_when_clean():
+    # orphans already gone + youtube already renamed → no deletes, no rename
+    rows = {'video_process_youtube_wishlist': {'id': 12, 'is_system': 1, 'name': 'Auto-Process YouTube Wishlist'}}
+    db = MagicMock()
+    db.get_system_automation_by_action.side_effect = lambda a: rows.get(a)
+    AutomationEngine(db)._fix_wishlist_processor_rename()
+    db.delete_automation.assert_not_called()
+    assert not any(c.kwargs.get('name') for c in db.update_automation.call_args_list)

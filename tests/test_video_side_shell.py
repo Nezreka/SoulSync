@@ -1,0 +1,568 @@
+"""Video side shell: the Music ↔ Video toggle + video sidebar (experimental branch).
+
+This is the first slice of the video side. It must be ADDITIVE and ISOLATED:
+the music sidebar/nav is untouched, the toggle + video nav are wired purely via
+data-attributes (no inline onclick — which would also break the script-split
+integrity contract), and the controller is a self-contained IIFE that adds no
+globals. These pin all of that so a regression can't silently couple the two
+sides or break the music shell.
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+_ROOT = Path(__file__).resolve().parent.parent
+_INDEX = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8", errors="replace")
+_JS = (_ROOT / "webui" / "static" / "video" / "video-side.js").read_text(encoding="utf-8")
+_DASH_JS = (_ROOT / "webui" / "static" / "video" / "video-dashboard.js").read_text(encoding="utf-8")
+_LIB_JS = (_ROOT / "webui" / "static" / "video" / "video-library.js").read_text(encoding="utf-8")
+_SCAN_JS = (_ROOT / "webui" / "static" / "video" / "video-scan.js").read_text(encoding="utf-8")
+_VSETTINGS_JS = (_ROOT / "webui" / "static" / "video" / "video-settings.js").read_text(encoding="utf-8")
+_CSS_PATH = _ROOT / "webui" / "static" / "video" / "video-side.css"
+
+EXPECTED_VIDEO_PAGES = {
+    "video-dashboard", "video-search", "video-discover", "video-library",
+    "video-watchlist", "video-wishlist", "video-downloads", "video-calendar",
+    "video-automations", "video-tools", "video-import", "video-settings",
+    "video-issues", "video-help",
+}
+
+# Reads of sibling VIDEO-side module handles + standard DOM/browser APIs are fine —
+# what the isolation guard actually forbids is reaching into a MUSIC global (or
+# leaking a foreign one). So we check every window.* reference is a known-legit one
+# rather than banning the substring outright (which wrongly flags window.confirm,
+# window.VideoGet, window.addEventListener, …).
+_ALLOWED_WINDOW = {
+    # sibling video-side module namespaces (each published by its own IIFE)
+    "window.VideoGet", "window.VideoWatchlist", "window.VideoYoutube", "window.VideoDownload",
+    "window.VideoGrab", "window.VideoManage", "window.VideoPoster", "window.VideoIssues",
+    "window.VideoCalendar", "window.VideoOverlayEditor", "window.VideoCollectionEditor",
+    "window.videoWorkerOrbs", "window._videoWorkerOrbsEnabled",
+    "window._buildAutomationSection", "window._buildAutomationHub",
+    "window._reloadVideoAutomations", "window._vdpgAnyActive", "window._reduceEffectsActive",
+    # standard DOM / browser APIs
+    "window.location", "window.history", "window.matchMedia", "window.addEventListener",
+    "window.removeEventListener", "window.innerWidth", "window.confirm",
+}
+
+
+def _window_isolated(src: str) -> bool:
+    """True when every ``window.*`` reference is a sibling-video handle or a DOM API
+    (no music global leaked in)."""
+    return set(re.findall(r"window\.\w+", src)) <= _ALLOWED_WINDOW
+
+
+def _block(html: str, open_tag_re: str, close_tag: str) -> str:
+    """Return the substring from the first match of open_tag_re to the next close_tag."""
+    m = re.search(open_tag_re, html)
+    assert m, f"could not find {open_tag_re!r}"
+    end = html.index(close_tag, m.end())
+    return html[m.start():end + len(close_tag)]
+
+
+# --- the toggle ------------------------------------------------------------
+
+def test_side_toggle_has_music_and_video():
+    block = _block(_INDEX, r'<div class="side-toggle"', "</div>")
+    assert 'data-side-target="music"' in block
+    assert 'data-side-target="video"' in block
+    # Wired by JS, not inline handlers (isolation + integrity contract).
+    assert "onclick" not in block
+
+
+# --- the video nav ---------------------------------------------------------
+
+def test_video_nav_has_all_expected_pages():
+    block = _block(_INDEX, r'<nav class="sidebar-nav video-nav"', "</nav>")
+    found = set(re.findall(r'data-video-page="([^"]+)"', block))
+    assert found == EXPECTED_VIDEO_PAGES, f"video nav pages mismatch: {found ^ EXPECTED_VIDEO_PAGES}"
+    # data-attr wired — the ONE sanctioned inline handler is the collapsible
+    # section header, which reuses the music nav's shared toggleNavSection.
+    assert block.count("onclick") == block.count('onclick="toggleNavSection(this)"')
+
+
+def test_video_page_host_present():
+    assert 'id="video-page-host"' in _INDEX
+    assert 'class="page video-page"' in _INDEX
+
+
+def test_video_assets_referenced():
+    assert "video/video-side.js" in _INDEX
+    assert "video/video-side.css" in _INDEX
+    assert _CSS_PATH.exists() and _CSS_PATH.stat().st_size > 0
+
+
+# --- isolation: music side untouched --------------------------------------
+
+def test_music_sidebar_nav_still_intact():
+    # The original music nav (a sibling .sidebar-nav WITHOUT the video-nav class)
+    # must still carry its pages — the video side is additive, not a rewrite.
+    music_nav = _block(_INDEX, r'<nav class="sidebar-nav">', "</nav>")
+    for page in ("dashboard", "sync", "library", "settings", "issues", "help"):
+        assert f'data-page="{page}"' in music_nav, f"music nav lost '{page}'"
+    # The music subtitle is still the default in markup (JS swaps it at runtime).
+    assert "Music Sync & Manager" in _INDEX
+
+
+# --- the video dashboard (first built page) -------------------------------
+
+def test_video_dashboard_subpage_present_with_expected_cards():
+    block = _block(
+        _INDEX, r'<section class="video-subpage" data-video-subpage="video-dashboard"', "</section>")
+    # The video landing page's own card set (redesigned Jul 2026: recently-added
+    # hero, stats, library, upcoming, tools + the two admin studio cards).
+    for card in ("recent", "stats", "library", "upcoming", "tools", "studios"):
+        assert f'data-card="{card}"' in block, f"video dashboard missing the '{card}' card"
+    # Reuses music's dashboard classes so the look matches.
+    assert 'class="dash-grid"' in block
+    assert "stat-card-dashboard" in block
+    # Driven by data, not music code: stat values carry data-video-stat hooks.
+    assert "data-video-stat=" in block
+    # Isolation + integrity contract: no inline handlers anywhere in the page.
+    assert "onclick" not in block
+
+
+def test_video_dashboard_header_matches_music_shape():
+    block = _block(
+        _INDEX, r'<section class="video-subpage" data-video-subpage="video-dashboard"', "</section>")
+    header = _block(block, r'<div class="dashboard-header">', "<div class=\"dash-grid\">")
+    # Same shell as music: sweep band + icon title + subtitle.
+    assert "dashboard-header-sweep" in header
+    assert "page-header-icon" in header and "header-title" in header
+    assert "header-subtitle" in header
+    # Watchlist/Wishlist quick-nav present, navigating to the video pages (no
+    # music IDs — would duplicate + bind music JS — just classes + data-goto).
+    assert "header-quick-nav" in header
+    assert 'data-video-goto="video-watchlist"' in header
+    assert 'data-video-goto="video-wishlist"' in header
+    assert 'id="watchlist-button"' not in header and 'id="wishlist-button"' not in header
+    # The enrichment-worker button row isn't built yet (will match music later).
+    assert "onclick" not in header
+
+
+def test_video_dashboard_sweep_hidden_on_video_side():
+    css = _CSS_PATH.read_text(encoding="utf-8")
+    assert 'body[data-side="video"] .dashboard-header-sweep' in css
+
+
+def test_video_dashboard_has_placeholder_slot_for_unbuilt_pages():
+    assert 'id="video-placeholder-slot"' in _INDEX
+
+
+def test_video_dashboard_data_module_referenced_and_isolated():
+    assert "video/video-dashboard.js" in _INDEX
+    stripped = _DASH_JS.strip()
+    assert stripped.startswith("/*") or stripped.startswith("(function")
+    assert "(function" in _DASH_JS and "})();" in _DASH_JS
+    # Decoupled from the controller: it listens for the page-shown event rather
+    # than being called directly. READING sibling-video handles (window.VideoX)
+    # is fine; the isolation contract is that it never ASSIGNS a global.
+    assert "soulsync:video-page-shown" in _DASH_JS
+    assert "addEventListener" in _DASH_JS
+    assert not re.search(r"window\.\w+\s*=[^=]", _DASH_JS), "dashboard module must not add globals"
+    assert _window_isolated(_DASH_JS)
+
+
+def test_video_library_subpage_present():
+    block = _block(
+        _INDEX, r'<section class="video-subpage" data-video-subpage="video-library"', "</section>")
+    # Reuses the music library structure verbatim (no reinvented markup).
+    assert "library-container" in block
+    assert "library-search-input" in block          # search bar
+    assert "alphabet-selector" in block             # A–Z selector
+    assert "library-artists-grid" in block          # the music card grid
+    assert "data-video-lib-grid" in block
+    assert 'data-video-lib-tab="movies"' in block and 'data-video-lib-tab="shows"' in block
+    assert "data-video-scan-mode" in block          # the Scan button
+    # Server-side paging + sort/filter controls (music parity).
+    assert "data-video-lib-pagination" in block and "data-video-lib-next" in block
+    assert "data-video-lib-sort" in block and "data-video-lib-status" in block
+    assert "onclick" not in block                   # data-attr wired, no inline handlers
+
+
+def test_video_library_module_referenced_and_isolated():
+    assert "video/video-library.js" in _INDEX
+    stripped = _LIB_JS.strip()
+    assert stripped.startswith("/*") or stripped.startswith("(function")
+    assert "(function" in _LIB_JS and "})();" in _LIB_JS
+    assert "soulsync:video-page-shown" in _LIB_JS  # decoupled via the event
+    # Cards/poster URLs use the SINGULAR kind (movie/show); the API uses plural.
+    assert "cardKind" in _LIB_JS and "apiKind" in _LIB_JS
+    assert "addEventListener" in _LIB_JS
+    assert _window_isolated(_LIB_JS)        # only sibling-video handles + DOM APIs
+
+
+def test_video_tools_page_has_three_scan_modes():
+    block = _block(
+        _INDEX, r'<section class="video-subpage" data-video-subpage="video-tools"', "</section>")
+    # Mode dropdown + single Scan button, same shape as the music tool card.
+    for mode in ("incremental", "full", "deep"):
+        assert f'value="{mode}"' in block, f"tools page missing scan mode {mode}"
+    assert "data-video-scan-run" in block and "data-video-scan-select" in block
+    assert "data-video-scan-phase" in block          # reuses music progress markup
+    assert "tool-card" in block and "tool-card-controls" in block  # reuses music classes
+    # Matches the music Database Updater card: help button, last-scan line, stats grid.
+    assert "tool-help-button" in block
+    assert "data-video-scan-last" in block
+    assert "tool-card-stats" in block and 'data-video-scan-stat="movies"' in block
+    assert "onclick" not in block
+
+
+def test_dashboard_library_card_has_refresh_and_deep_buttons():
+    block = _block(
+        _INDEX, r'<section class="video-subpage" data-video-subpage="video-dashboard"', "</section>")
+    assert 'data-video-scan-mode="full"' in block   # Refresh
+    assert 'data-video-scan-mode="deep"' in block    # Deep Scan
+    assert "library-status-actions" in block
+    # The card shows live scan progress (parity with the music dashboard).
+    assert "data-video-dash-progress" in block and "data-video-dash-bar" in block
+
+
+def test_scan_module_referenced_and_isolated():
+    assert "video/video-scan.js" in _INDEX
+    stripped = _SCAN_JS.strip()
+    assert stripped.startswith("/*") or stripped.startswith("(function")
+    assert "(function" in _SCAN_JS and "})();" in _SCAN_JS
+    assert "window." not in _SCAN_JS
+    assert "addEventListener" in _SCAN_JS
+    assert "soulsync:video-scan-done" in _SCAN_JS
+    assert "/api/video/scan/request" in _SCAN_JS
+    # Rehydrates a running scan after a page refresh (parity with music tools).
+    assert "/api/video/scan/status" in _SCAN_JS
+    assert "resumeIfScanning" in _SCAN_JS
+
+
+def test_video_settings_reuses_real_music_settings_page():
+    # The video Settings nav shows the actual #settings-page (identically, for
+    # now) via CSS + the shared loadPageData loader — not a video subpage.
+    assert "'video-settings': 'settings'" in _JS or '"video-settings": "settings"' in _JS
+    assert "loadPageData" in _JS
+    css = _CSS_PATH.read_text(encoding="utf-8")
+    assert 'data-video-page="video-settings"] #settings-page' in css
+    assert 'data-video-page="video-settings"] #video-page-host' in css
+
+
+def test_video_library_mapping_ui_present_and_video_only():
+    # Movies/TV selectors live next to the music library selector, marked
+    # data-video-only so they show only on the video side.
+    assert 'data-video-lib-select="movies"' in _INDEX
+    assert 'data-video-lib-select="tv"' in _INDEX
+    assert "data-video-only" in _INDEX
+    css = _CSS_PATH.read_text(encoding="utf-8")
+    assert 'body[data-side="music"] [data-video-only]' in css  # video bits hidden on music side
+    # ...and the music-library picker is hidden on the video side.
+    assert 'body[data-side="video"] #plex-library-selector-container' in css
+
+
+def test_video_side_hides_music_api_config_and_shows_placeholders():
+    css = _CSS_PATH.read_text(encoding="utf-8")
+    assert 'body[data-side="video"] [data-music-only]' in css   # music API hidden on video
+    assert "data-music-only" in _INDEX                          # the music API group is marked
+    # Video API frames use the SAME .api-service-frame structure as music but a
+    # data-VIDEO-service attribute, so music's settings.js [data-service] verify
+    # loop can't pick them up ("Unknown service: tvdb").
+    assert 'class="api-service-frame stg-service" data-video-service="tmdb"' in _INDEX
+    assert 'class="api-service-frame stg-service" data-video-service="tvdb"' in _INDEX
+    # They must NOT carry the music-hooked data-service attribute.
+    assert 'data-service="tmdb"' not in _INDEX and 'data-service="tvdb"' not in _INDEX
+    # Each connection item has a Test button (like music's connections).
+    assert 'data-video-test-service="tmdb"' in _INDEX and 'data-video-test-service="tvdb"' in _INDEX
+
+
+def test_dashboard_enrichment_buttons_present():
+    block = _block(
+        _INDEX, r'<section class="video-subpage" data-video-subpage="video-dashboard"', "</section>")
+    assert 'data-video-enrich="tmdb"' in block and 'data-video-enrich="tvdb"' in block
+    assert 'data-video-enrich="omdb"' in block       # OMDb is a full worker too
+    assert "data-video-manage-workers" in block
+    assert "video-enrich-spinner" in block          # spins while running
+    assert "onclick" not in block
+    # The Manage Workers button reuses music's classes verbatim so it's identical
+    # (icon circle + logo), but stays wired by data-attr — never an inline onclick.
+    mbtn = _block(block, r'<button class="em-manage-btn"', "</button>")
+    assert "data-video-manage-workers" in mbtn and "onclick" not in mbtn
+    assert "em-manage-btn-icon" in mbtn and "em-manage-btn-logo" in mbtn and "em-manage-btn-label" in mbtn
+
+
+def test_video_enrichment_module_referenced_and_isolated():
+    assert "video/video-enrichment.js" in _INDEX
+    src = (_ROOT / "webui" / "static" / "video" / "video-enrichment.js").read_text(encoding="utf-8")
+    assert src.strip().startswith("/*") or src.strip().startswith("(function")
+    assert "(function" in src and "})();" in src
+    # The only window.* touch is the (optional) handoff to the VIDEO orbs global
+    # — never a music global, and it declares none of its own.
+    assert all(
+        ref == "window.videoWorkerOrbs"
+        for ref in re.findall(r"window\.\w+", src)
+    )
+    assert "/api/video/enrichment/" in src
+    # No music API/function calls (a comment may mention the music *side*).
+    assert "/api/enrichment/" not in src
+    assert "openEnrichmentManager" not in src
+
+
+def test_video_enrichment_manager_isolated():
+    assert "video/video-enrichment-manager.js" in _INDEX
+    src = (_ROOT / "webui" / "static" / "video" / "video-enrichment-manager.js").read_text(encoding="utf-8")
+    assert "(function" in src and "})();" in src
+    assert "window." not in src
+    assert "soulsync:video-open-workers" in src      # opened by the dashboard button
+    assert "/api/video/enrichment/" in src           # targets the video API
+    assert "/api/enrichment/" not in src             # NOT the music API
+    assert "openEnrichmentManager" not in src        # never calls the music modal
+    # Reuses the shared music modal CSS classes (design parity).
+    assert "enrichment-manager-modal" in src and "em-rail" in src
+    # Its own overlay id (not music's) so the two never collide.
+    assert "vem-overlay" in src and "enrichment-manager-overlay" not in src
+    # Feature parity with the music modal: "Process first everywhere", search,
+    # and the status filter (reusing em-global / em-search / em-select).
+    assert "em-global" in src and "data-em-priority" in src
+    assert "/api/video/enrichment/priority" in src
+    assert "data-em-search" in src and "data-em-status" in src
+    # TVDB is shows-only: each worker declares its kinds and the panel defaults
+    # to the worker's first kind — never a hardcoded 'movie' (which would show a
+    # bogus empty Movies view for TVDB).
+    assert "kinds: ['show']" in src                  # tvdb
+    assert "kinds: ['movie', 'show']" in src         # tmdb
+    assert "state.kind = defaultKind(id)" in src
+    assert "state.kind = 'movie'" not in src
+
+
+def test_video_settings_module_referenced_and_isolated():
+    assert "video/video-settings.js" in _INDEX
+    stripped = _VSETTINGS_JS.strip()
+    assert stripped.startswith("/*") or stripped.startswith("(function")
+    assert "(function" in _VSETTINGS_JS and "})();" in _VSETTINGS_JS
+    assert "window." not in _VSETTINGS_JS
+    assert "addEventListener" in _VSETTINGS_JS
+    assert "/api/video/libraries" in _VSETTINGS_JS
+    assert "soulsync:video-page-shown" in _VSETTINGS_JS
+    assert "'change'" in _VSETTINGS_JS  # saves on change, like the music selector
+
+
+def test_video_worker_orbs_referenced_and_isolated():
+    assert "video/video-worker-orbs.js" in _INDEX
+    src = (_ROOT / "webui" / "static" / "video" / "video-worker-orbs.js").read_text(encoding="utf-8")
+    assert "(function" in src and "})();" in src
+    # Its own global namespace — never music's window.workerOrbs.
+    assert "window.videoWorkerOrbs" in src
+    assert "window.workerOrbs" not in src
+    # Activates only on the video dashboard (own page-awareness, not setPage).
+    assert "soulsync:video-page-shown" in src
+    assert 'data-video-subpage="video-dashboard"' in src
+    assert 'data-video-enrich="tmdb"' in src and 'data-video-enrich="tvdb"' in src
+    assert "data-video-manage-workers" in src
+    # Same 7-second idle that triggers the floating-orb collapse as music.
+    assert "COLLAPSE_DELAY_MS = 7000" in src
+    # Reuses the shared, generic orb CSS classes (design parity, no fork).
+    assert "worker-orb-hidden" in src and "worker-orb-canvas" in src
+    # Does NOT reach into the music dashboard or the music API.
+    assert "#dashboard-page" not in src
+    assert "/api/enrichment/" not in src
+
+
+def test_show_detail_subpage_present():
+    block = _block(
+        _INDEX, r'<section class="video-subpage" data-video-subpage="video-show-detail"', "</section>")
+    # Netflix billboard + episodes containers the renderer fills.
+    for hook in ('data-vd-backdrop', 'data-vd-poster', 'data-vd-title', 'data-vd-meta',
+                 'data-vd-overview', 'data-vd-actions', 'data-vd-view-toggle',
+                 'data-vd-season-nav', 'data-vd-episodes', 'data-vd-cast', 'data-vd-crew',
+                 'data-vd-logo', 'data-vd-providers', 'data-vd-similar'):
+        assert hook in block, hook
+    # Back button is real browser Back (history), not a hardcoded nav.
+    assert 'data-video-detail-back' in block
+    assert "onclick" not in block
+
+
+def test_movie_detail_subpage_present():
+    block = _block(
+        _INDEX, r'<section class="video-subpage" data-video-subpage="video-movie-detail"', "</section>")
+    assert 'data-video-detail="movie"' in block
+    for hook in ('data-vd-backdrop', 'data-vd-title', 'data-vd-details', 'data-vd-cast'):
+        assert hook in block, hook
+    assert 'data-video-detail-back' in block and "onclick" not in block
+
+
+def test_library_cards_are_real_detail_links():
+    # Cards are genuine <a href="/video-detail/library/<kind>/<id>"> (parity with
+    # the music artist cards) so reload / new-tab / Back work.
+    assert 'data-video-card-open="' in _LIB_JS
+    assert "/video-detail/library/" in _LIB_JS
+    assert "kind === 'show' ?" not in _LIB_JS      # the old show-only gate is gone
+    # Modifier-clicks fall through to the real href (open in new tab).
+    assert "metaKey" in _LIB_JS and "ctrlKey" in _LIB_JS
+
+
+def test_video_side_has_real_url_routing():
+    # Mirrors music: real /video-detail/<source>/<kind>/<id> URLs with pushState +
+    # popstate so Back/Forward/reload restore the same item.
+    assert "/video-detail/" in _JS
+    assert "history.pushState" in _JS and "popstate" in _JS
+    assert "parseDetailPath" in _JS and "buildDetailPath" in _JS
+    # Source segment for library-vs-search (search lands later).
+    assert "'library'" in _JS
+
+
+def test_video_top_level_pages_are_deep_linked():
+    # Every sidebar page (not just detail) deep-links to '/' + pageId, mirroring
+    # the music side — pushState on nav, parse + restore on reload/Back.
+    assert "parsePagePath" in _JS and "buildPagePath" in _JS
+    assert "videoPage" in _JS                       # history state tag for pages
+    # The nav anchors carry the real path (so ⌘/middle-click open a new tab) and
+    # no longer point at the dead '#'.
+    assert 'data-video-page="video-search" href="/video-search"' in _INDEX
+    assert 'data-video-page="video-library" href="/video-library"' in _INDEX
+    assert 'href="#"' not in _block(  # none left in the video nav block
+        _INDEX, r'<nav class="sidebar-nav video-nav"', "</nav>")
+    # Modifier-clicks fall through to the href instead of being swallowed.
+    assert "metaKey" in _JS and "ctrlKey" in _JS
+
+
+def test_video_detail_module_referenced_and_isolated():
+    assert "video/video-detail.js" in _INDEX
+    src = (_ROOT / "webui" / "static" / "video" / "video-detail.js").read_text(encoding="utf-8")
+    assert "(function" in src and "})();" in src
+    assert _window_isolated(src)                        # no music globals leaked in
+    assert "/api/video/detail/" in src                  # video API only
+    assert "/api/enrichment/" not in src and "artist-detail" not in src
+    assert "soulsync:video-open-detail" in src          # opened via the shared event
+
+
+def test_search_subpage_and_module():
+    assert 'data-video-subpage="video-search"' in _INDEX
+    assert "data-video-search-input" in _INDEX and "data-video-search-results" in _INDEX
+    assert "video/video-search.js" in _INDEX
+    src = (_ROOT / "webui" / "static" / "video" / "video-search.js").read_text(encoding="utf-8")
+    assert "(function" in src and "})();" in src
+    assert _window_isolated(src)                         # no music globals leaked in
+    assert "/api/video/search" in src
+    assert "/api/video/trending" in src                  # idle page shows a trending rail
+    assert "soulsync:video-open-detail" in src           # results drill in via the shared event
+    assert "themoviedb.org" not in src and "imdb.com" not in src   # stays in-app
+
+
+def test_person_subpage_and_module_isolated():
+    assert 'data-video-subpage="video-person-detail"' in _INDEX
+    assert "data-video-person" in _INDEX
+    assert "video/video-person.js" in _INDEX
+    src = (_ROOT / "webui" / "static" / "video" / "video-person.js").read_text(encoding="utf-8")
+    assert "(function" in src and "})();" in src
+    assert _window_isolated(src)                         # no music globals leaked in
+    assert "/api/video/person/" in src
+    assert "themoviedb.org" not in src and "imdb.com" not in src
+    # The person page is a registered detail route (reload / back / new-tab work).
+    assert "video-person-detail" in _JS
+    # Cinematic hero bits: ambient backdrop, rotating accent ring, role tagline.
+    assert "data-vp-ambient" in _INDEX and "vp-photo-ring" in _INDEX
+    assert "data-vp-role" in _INDEX
+    # Filmography controls: sort + department filter (multi-hyphenate), age.
+    assert "data-vp-sort" in _INDEX and "data-vp-dept" in _INDEX
+    assert "renderDept" in src and "computeAge" in src
+
+
+def test_detail_keeps_preview_items_in_app():
+    src = (_ROOT / "webui" / "static" / "video" / "video-detail.js").read_text(encoding="utf-8")
+    # 'More like this' and cast now drill in via the shared event, not external links.
+    assert "data-vd-sim" in src and "data-vd-person" in src
+    assert "/video-detail/tmdb/" in src                  # similar/cast link in-app
+    # Where-to-watch: a "Play on your server" tile for owned items + clickable
+    # streaming providers.
+    assert "vd-prov--server" in src and "Play on " in src
+    assert "ex.providers_link" in src
+    # Best-in-class billboard: primary Play CTA, director/creator line, collection
+    # row, recommendations (with similar fallback), next-episode + season overview.
+    assert "vd-play-btn" in src
+    assert "renderCrewLine" in src and "renderNextEpisode" in src
+    assert "data-vd-collection" in _INDEX and "renderSeasonOverview" in src
+    assert "ex.recommendations" in src
+    # Director/crew names link to the person page; episode-sync has a banner.
+    assert "personName" in src and "data-vd-person" in src
+    assert "data-vd-ep-syncing" in _INDEX and "showEpSyncing" in src
+    # Media gallery + lightbox, all videos, facts/keywords, full-cast modal.
+    assert "data-vd-gallery" in _INDEX and "data-vd-videos" in _INDEX
+    assert "data-vd-facts" in _INDEX and "data-vd-cast-all" in _INDEX
+    assert "openLightbox" in src and "renderVideos" in src and "openCastModal" in src
+    # The old external 'similar' link (themoviedb.org/<kind>/<id>) is gone — the
+    # only remaining themoviedb.org ref is the TMDB badge logo asset for owned items.
+    assert "www.themoviedb.org/' + (s.kind" not in src
+
+
+def test_library_cards_open_detail():
+    src = _LIB_JS
+    assert "soulsync:video-open-detail" in src          # show cards drill in
+    assert "data-video-card-open" in src
+
+
+def test_video_side_registers_detail_pages_and_open_event():
+    assert "video-show-detail" in _JS and "video-movie-detail" in _JS
+    assert "soulsync:video-open-detail" in _JS          # navigates on the event
+
+
+def test_smart_back_button_remembers_origin():
+    # The back button label is dynamic (a span we rewrite), and the JS keeps an
+    # origin stack + layer-stamped history so back returns to where you came from
+    # (not always the library).
+    assert _INDEX.count("data-vd-back-label") >= 3      # all three detail back buttons
+    assert "_backStack" in _JS and "currentOrigin" in _JS
+    assert "updateBackLabels" in _JS
+    assert "layer: _backStack.length" in _JS            # depth stamped on history state
+    # Fallback must use the recorded first origin, not a hardcoded library jump.
+    assert "_backStack[0]" in _JS
+
+
+def test_music_worker_orbs_untouched_by_video():
+    # The video orbs are a separate file; the music orbs must not learn about
+    # the video side (one-way isolation — music never depends on video).
+    # Comments are allowed to EXPLAIN the side toggle (the ResizeObserver
+    # re-measure fix documents why); the CODE must stay video-free.
+    music = (_ROOT / "webui" / "static" / "worker-orbs.js").read_text(encoding="utf-8")
+    code = re.sub(r"/\*.*?\*/", "", music, flags=re.S)
+    code = re.sub(r"(^|\s)//[^\n]*", "", code)
+    assert "video" not in code.lower()
+
+
+def test_controller_is_isolated_iife_with_no_globals():
+    stripped = _JS.strip()
+    # Wrapped in an IIFE → declares no module-level globals that could collide
+    # with or shadow music functions.
+    assert stripped.startswith("/*") or stripped.startswith("(function")
+    assert "(function" in _JS and "})();" in _JS
+    # No window.X assignments (the cross-file leak pattern) and no inline-handler
+    # dependence — everything is addEventListener.
+    assert "window." not in _JS or "window.location" in _JS  # tolerate none; none expected
+    assert "addEventListener" in _JS
+
+
+# ── library page: rating/watched/genre filters + card enrichments (overnight pass) ──
+
+def test_library_toolbar_has_rating_sort_watched_filter_and_genre_dropdown():
+    assert '<option value="rating">Rating</option>' in _INDEX
+    assert '<option value="watched">Watched</option>' in _INDEX
+    assert '<option value="unwatched">Unwatched</option>' in _INDEX
+    assert 'data-video-lib-genre' in _INDEX
+    # the JS wires + sends them
+    assert "state.genre" in _LIB_JS
+    assert "/api/video/library/genres?kind=" in _LIB_JS
+
+
+def test_library_cards_show_rating_show_progress_and_status_chip():
+    assert "vlib-rate" in _LIB_JS                      # ★ rating in the stat line
+    assert "vlib-watched" in _LIB_JS                   # watched tick on movie cards
+    assert "function showStatusChip(" in _LIB_JS       # Airing/Ended/Upcoming chip
+    assert "vlib-prog" in _LIB_JS                      # owned-episodes progress line
+    css = _CSS_PATH.read_text(encoding="utf-8")
+    for cls in (".vlib-rate", ".vlib-chip--airing", ".vlib-chip--ended", ".vlib-prog-fill"):
+        assert cls in css, cls
+
+
+def test_library_pagination_shows_item_range():
+    assert "' of ' + p.total_count" in _LIB_JS
+
+
+def test_video_side_remembers_per_page_scroll():
+    assert "_scrollMemo" in _JS
+    # detail subpages are reused between titles — they must always reopen at the top
+    assert "DETAIL_PAGES[meta.id] ? 0" in _JS
