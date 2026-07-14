@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from core.library2 import autolink as A
@@ -214,6 +216,72 @@ def test_retry_track_info_entity_beats_name_heuristics(lib2_enabled, imported_co
     row = imported_conn.execute(
         "SELECT track_id FROM lib2_track_files WHERE id=?", (file_id,)).fetchone()
     assert row["track_id"] == target_track
+
+
+@pytest.mark.parametrize("as_json", [False, True])
+def test_wishlist_source_info_track_id_beats_name_heuristics(
+        lib2_enabled, imported_conn, as_json):
+    """Mirrored Wishlist rows carry lib2 identity in source_info rather than
+    the manual-grab lib2_entity envelope; both must converge on one target."""
+    conn = lib2_enabled._get_connection()
+    artist_id = conn.execute(
+        "SELECT id FROM lib2_artists WHERE name='Drake'"
+    ).fetchone()["id"]
+    conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title, album_type) "
+        "VALUES(?, 'Wishlist Target', 'album')", (artist_id,))
+    album_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    conn.execute(
+        "INSERT INTO lib2_album_artists(album_id, artist_id) VALUES(?,?)",
+        (album_id, artist_id))
+    conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title, track_number, monitored) "
+        "VALUES(?, 'Wishlist Exact Track', 1, 1)", (album_id,))
+    target_track = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    conn.commit()
+    conn.close()
+
+    source_info = {
+        "source": "library_v2",
+        "lib2_track_id": target_track,
+        "lib2_album_id": album_id,
+        "quality_profile_id": 1,
+    }
+    context = _context()
+    context["track_info"]["source_info"] = (
+        json.dumps(source_info) if as_json else source_info
+    )
+    file_id = A.link_download_into_library_v2(context)
+
+    row = imported_conn.execute(
+        "SELECT track_id FROM lib2_track_files WHERE id=?", (file_id,)
+    ).fetchone()
+    assert row["track_id"] == target_track
+    assert imported_conn.execute(
+        "SELECT COUNT(*) FROM lib2_albums WHERE title='Scorpion'"
+    ).fetchone()[0] == 0
+
+
+def test_explicit_entity_wins_over_wishlist_source_info(lib2_enabled, imported_conn):
+    tracks = imported_conn.execute(
+        "SELECT id, album_id FROM lib2_tracks ORDER BY id LIMIT 2"
+    ).fetchall()
+    explicit, wishlist = tracks[0], tracks[1]
+    context = _context(lib2_entity={
+        "track_id": explicit["id"],
+        "album_id": explicit["album_id"],
+    })
+    context["track_info"]["source_info"] = {
+        "lib2_track_id": wishlist["id"],
+        "lib2_album_id": wishlist["album_id"],
+    }
+
+    file_id = A.link_download_into_library_v2(context)
+
+    row = imported_conn.execute(
+        "SELECT track_id FROM lib2_track_files WHERE id=?", (file_id,)
+    ).fetchone()
+    assert row["track_id"] == explicit["id"]
 
 
 def test_direct_album_link_creates_track_inside_that_album(lib2_enabled, imported_conn):

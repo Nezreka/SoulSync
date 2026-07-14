@@ -629,6 +629,7 @@ def test_wishlist_lib2_dispatch_correlates_and_stamps_grab_marker(monkeypatch):
         "prepare", "dispatch", ("bind", "scheduled-x", "dl-1")]
     ctx = matched_downloads_context["user1::wl.flac"]
     assert ctx["_acquisition_grab_download_id"] == "scheduled-x"
+    assert ctx["track_info"]["source_info"]["lib2_track_id"] == 42
 
 
 def test_wishlist_source_info_json_string_is_parsed(monkeypatch):

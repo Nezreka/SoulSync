@@ -155,11 +155,16 @@ def link_download_into_library_v2(context: Dict[str, Any]) -> Optional[int]:
 
         # A grab that started from Library v2 carries the server-resolved
         # entity (audit P1-16) — the file links to that exact row, no
-        # heuristic re-matching. Without it, fall back to name matching.
+        # heuristic re-matching. Scheduled Wishlist downloads carry the same
+        # ids in source_info; that object survives into this pipeline context.
         ti = context.get("track_info") or context.get("search_result") or {}
         lib2_ctx = context.get("lib2_entity") or ti.get("lib2_entity") or {}
-        direct_track_id = lib2_ctx.get("track_id")
-        direct_album_id = lib2_ctx.get("album_id")
+        if not isinstance(lib2_ctx, dict):
+            lib2_ctx = {}
+        from core.downloads.origin import _parse_source_info
+        source_info = _parse_source_info(ti.get("source_info"))
+        direct_track_id = lib2_ctx.get("track_id") or source_info.get("lib2_track_id")
+        direct_album_id = lib2_ctx.get("album_id") or source_info.get("lib2_album_id")
 
         title = _get(ti, "name", "title")
         artist_name = _primary_artist_name(ti)

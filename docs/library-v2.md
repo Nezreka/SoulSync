@@ -1497,14 +1497,16 @@ implementiert und größtenteils solide.
   den kompatiblen Latest-Fallback ohne ID. Der Importjob bleibt bewusst bei
   seinem eigenen exklusiven Import-Slot, weil parallele Full-Imports nicht
   zulässig sind (siehe Abschnitt 7).
-- **A4 — Wishlist→Autolink über `lib2_track_id` schließen.**
+- ~~**A4 — Wishlist→Autolink über `lib2_track_id` schließen.**~~
   `wishlist_mirror` legt `_source_info.lib2_track_id` auf die Wishlist-Row —
-  aber `autolink` matcht den fertigen Download wieder per
-  Namens-Normalisierung. Wenn der Download-Kontext die `source_info` bis in
-  `record_download_provenance` trägt, könnte Autolink deterministisch auf die
-  genaue lib2-Track-Row linken, statt heuristisch zu matchen — eliminiert
-  eine ganze Fehlerklasse (falsches Album, Compilation-Zuordnung,
-  Titelvarianten). **Weiterhin offen.**
+  bisher matchte `autolink` den fertigen Download aber wieder per Namens-
+  Normalisierung. **Umgesetzt 2026-07-14:** Die vorhandene `source_info`
+  überlebt bereits Wishlist → Task → Downloadkontext → Import-Chokepoint;
+  `autolink` liest dort nun über denselben zentralen Parser zuerst
+  `lib2_track_id`/`lib2_album_id`. Explizites server-resolved `lib2_entity`
+  bleibt höher priorisiert; nur fehlende oder stale IDs fallen auf den
+  bestehenden Legacy-Namensmatcher zurück. Damit verschwinden falsche Album-/
+  Compilation-Zuordnungen durch Titelvarianten, ohne einen zweiten Matcher.
 - **A5 — Importer-Skalierung.** Der Importer arbeitet row-by-row mit vielen
   Einzel-SELECTs. Für die 285-Track-Referenzbibliothek egal; für
   100k-Track-Bibliotheken wären es Minuten im Write-Lock. Für Fremdnutzer:
@@ -1907,8 +1909,16 @@ verändert; daher waren Frontend-Typecheck/Vitest/Build nicht erforderlich.
     oder entfernen.~~ **Abgeschlossen in Roadmap-8-Slice 1 am 2026-07-14:**
     validierter Search-State, Loader-Prefetch, eigenständige Detailansicht und
     Navigation aus jeder Albumzeile.
-11. **Wishlist→Autolink über `lib2_track_id`** deterministisch schließen
-    (A4).
+11. ~~**Wishlist→Autolink über `lib2_track_id`** deterministisch schließen
+    (A4).~~ **Abgeschlossen 2026-07-14:** dict- und JSON-`source_info` landen
+    deterministisch auf der gespeicherten Track-Row; explizites
+    `lib2_entity` gewinnt weiterhin, Heuristik bleibt nur Legacy-/stale-ID-
+    Fallback. Ein Downloadkontext-Test pinnt die vollständige Übergabe. 75
+    gezielte Autolink-/Wishlist-Mirror-/Outbox-/Download-/Import-Side-Effect-
+    Tests plus Ruff sind grün. **Nächster logischer Schritt:** Roadmap-Punkt
+    12/A5 — Importer-Skalierung messen und die nachgewiesenen N+1-Hotspots mit
+    vorgeladenen Maps/Batches reduzieren, ohne Progress, Reset-Reconciliation
+    oder die zentrale Importsemantik zu duplizieren.
 12. **Importer-Skalierung** für sehr große Libraries (A5).
 13. **Legacy- vs. lib2-Datenbasis der Repair-Jobs** explizit machen (A6).
 14. **Playlists** (Phase E, bewusst zuletzt).
