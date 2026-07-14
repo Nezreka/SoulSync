@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from core.library2 import queries as Q
+from core.library2.metadata_overrides import clear_field_override, set_field_override
 from core.library2.status import compute_metadata_gaps, file_status, quality_tier
 
 
@@ -108,3 +109,76 @@ def test_get_track_detail(imported_conn):
     track = Q.get_track(imported_conn, tid)
     assert track["album"]["title"] == "Views"
     assert [a["name"] for a in track["artists"]] == ["Drake", "Wizkid"]
+
+
+def test_effective_reads_project_user_metadata_without_rewriting_provider(imported_conn):
+    artist_id = imported_conn.execute(
+        "SELECT id FROM lib2_artists WHERE name='Drake'"
+    ).fetchone()[0]
+    album_id = imported_conn.execute(
+        "SELECT id FROM lib2_albums WHERE title='Views'"
+    ).fetchone()[0]
+    track_id = imported_conn.execute(
+        "SELECT id FROM lib2_tracks WHERE title='One Dance' AND album_id=?",
+        (album_id,),
+    ).fetchone()[0]
+    for entity_type, entity_id, field, value in (
+        ("artist", artist_id, "name", "Drake Corrected"),
+        ("artist", artist_id, "genres", ["Hip-Hop"]),
+        ("release_group", album_id, "title", "Views Corrected"),
+        ("release_group", album_id, "album_type", "ep"),
+        ("release_group", album_id, "year", 2024),
+        ("release_group", album_id, "genres", ["Rap"]),
+        ("track", track_id, "title", "One Dance Corrected"),
+        ("track", track_id, "track_number", 7),
+        ("track", track_id, "duration", 123),
+    ):
+        set_field_override(
+            imported_conn,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            field_name=field,
+            value=value,
+        )
+
+    artists, _total = Q.list_artists(imported_conn)
+    corrected = next(row for row in artists if row["id"] == artist_id)
+    assert corrected["name"] == "Drake Corrected"
+    assert corrected["genres"] == ["Hip-Hop"]
+    assert corrected["user_overrides"]["name"] == "Drake Corrected"
+
+    artist = Q.get_artist(imported_conn, artist_id)
+    assert artist["name"] == "Drake Corrected"
+    assert [row["title"] for row in artist["eps"]] == ["Views Corrected"]
+    assert artist["eps"][0]["user_overrides"]["album_type"] == "ep"
+
+    album = Q.get_album(imported_conn, album_id)
+    assert (album["title"], album["album_type"], album["year"]) == (
+        "Views Corrected", "ep", 2024,
+    )
+    assert album["genres"] == ["Rap"]
+    assert album["primary_artist"]["name"] == "Drake Corrected"
+    track = next(row for row in album["tracks"] if row["id"] == track_id)
+    assert (track["title"], track["track_number"], track["duration"]) == (
+        "One Dance Corrected", 7, 123,
+    )
+    assert [row["name"] for row in track["artists"]] == [
+        "Drake Corrected", "Wizkid",
+    ]
+
+    direct = Q.get_track(imported_conn, track_id)
+    assert direct["title"] == "One Dance Corrected"
+    assert direct["album"]["title"] == "Views Corrected"
+
+    # A provider refresh changes only its baseline; user intent keeps winning.
+    imported_conn.execute(
+        "UPDATE lib2_albums SET title='Provider Refresh' WHERE id=?", (album_id,)
+    )
+    assert Q.get_album(imported_conn, album_id)["title"] == "Views Corrected"
+    clear_field_override(
+        imported_conn,
+        entity_type="release_group",
+        entity_id=album_id,
+        field_name="title",
+    )
+    assert Q.get_album(imported_conn, album_id)["title"] == "Provider Refresh"

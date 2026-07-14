@@ -1683,10 +1683,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
     @app.route("/api/library/v2/albums/<int:album_id>/edit", methods=["POST"])
     def lib2_edit_album(album_id):
-        """Correct album-level metadata. Currently: ``album_type`` — the legacy
-        import classifies by track count, so a 1-track EP lands under Singles
-        and a 5-track album under EPs; this lets the user re-file the release
-        (it moves between the Albums/EPs/Singles sections)."""
+        """Correct the effective album type without rewriting provider data."""
         guard = _guard()
         if guard:
             return guard
@@ -1697,15 +1694,85 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                             "error": f"album_type must be one of {'|'.join(_ALBUM_TYPES)}"}), 400
         conn = _conn()
         try:
-            cur = conn.execute(
-                "UPDATE lib2_albums SET album_type=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                (album_type, album_id))
-            if not cur.rowcount:
-                return jsonify({"success": False, "error": "Album not found"}), 404
+            from core.library2.metadata_overrides import (
+                MetadataOverrideError,
+                set_field_override,
+            )
+            set_field_override(
+                conn,
+                entity_type="release_group",
+                entity_id=album_id,
+                field_name="album_type",
+                value=album_type,
+                profile_id=_profile(),
+                reason="album_type_edit",
+            )
             conn.commit()
+        except MetadataOverrideError as exc:
+            conn.rollback()
+            return jsonify({"success": False, "error": str(exc)}), exc.status
         finally:
             conn.close()
         return jsonify({"success": True, "album_type": album_type})
+
+    @app.route(
+        "/api/library/v2/metadata-overrides/<entity_type>/<int:entity_id>/<field_name>",
+        methods=["PUT", "DELETE"],
+    )
+    def lib2_metadata_override(entity_type, entity_id, field_name):
+        """Set or clear one validated admin metadata correction."""
+        guard = _guard()
+        if guard:
+            return guard
+        from core.library2.metadata_overrides import (
+            MetadataOverrideError,
+            clear_field_override,
+            set_field_override,
+        )
+        conn = _conn()
+        try:
+            if request.method == "DELETE":
+                removed = clear_field_override(
+                    conn,
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    field_name=field_name,
+                    profile_id=_profile(),
+                )
+                conn.commit()
+                return jsonify({"success": True, "removed": removed})
+
+            body = request.get_json(silent=True)
+            if not isinstance(body, dict) or "value" not in body:
+                return jsonify({
+                    "success": False,
+                    "error": "JSON body must contain value",
+                }), 400
+            override = set_field_override(
+                conn,
+                entity_type=entity_type,
+                entity_id=entity_id,
+                field_name=field_name,
+                value=body["value"],
+                profile_id=_profile(),
+                reason=body.get("reason"),
+            )
+            conn.commit()
+            return jsonify({
+                "success": True,
+                "override": {
+                    "entity_type": override.entity_type,
+                    "entity_id": override.entity_id,
+                    "field_name": override.field_name,
+                    "value": override.value,
+                    "reason": override.reason,
+                },
+            })
+        except MetadataOverrideError as exc:
+            conn.rollback()
+            return jsonify({"success": False, "error": str(exc)}), exc.status
+        finally:
+            conn.close()
 
     def _unmonitor_tracks_and_delete(db, conn, *, artist_id: Optional[int] = None,
                                      album_ids: Optional[List[int]] = None) -> Dict[str, int]:

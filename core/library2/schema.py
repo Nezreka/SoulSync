@@ -648,6 +648,13 @@ def ensure_library_v2_schema(connection: Any) -> None:
             logger.info("Backfilled %d Library-v2 entity relationship events", backfilled)
     except Exception as e:  # noqa: BLE001
         logger.error("entity-history migration failed (will retry next start): %s", e)
+    # ADR-06 field-level user overrides stay separate from provider/import
+    # columns; central read projections overlay them without blocking refresh.
+    try:
+        from core.library2.metadata_overrides import ensure_metadata_overrides_schema
+        ensure_metadata_overrides_schema(cursor)
+    except Exception as e:  # noqa: BLE001
+        logger.error("metadata-overrides migration failed (will retry next start): %s", e)
     # The read API falls back to download provenance (track_downloads) for
     # files the importer knew no quality data for — index the lookup column so
     # album views don't table-scan a large history per track. Guarded: the

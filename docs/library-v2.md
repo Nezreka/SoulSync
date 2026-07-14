@@ -1744,9 +1744,19 @@ darauf auf.
    Das append-only Journal speichert nur lokale Typen/IDs und whitelisted
    Kontext, nie Pfade, Titel oder Provider-Payloads. Bestehende Canonical-Links
    erhalten einen idempotenten Baseline-Eintrag. 49 gezielte Manage-Tracks-/
-   Edition-/Importer-/Schema-Tests sind grün. **Noch offen in Punkt 4:**
-   Field-Level-Overrides + Read-Projection und typed Adapter über
-   Discography/Tracklist hinaus.
+   Edition-/Importer-/Schema-Tests sind grün. **Dritte Slice erledigt
+   2026-07-14:** `lib2_metadata_overrides` trennt validierte, feldgenaue
+   Admin-Korrekturen für Artist, Release Group, Track, ReleaseEdition und
+   Recording von den Provider-/Importer-Baselines. Provider-Refreshes können
+   ihre Baseline weiter aktualisieren; effektive Reads aus Artist-Liste,
+   Artist-/Album-/Track-Detail projizieren den Override darüber und geben die
+   angewendeten `user_overrides` transparent mit aus. Die bestehende
+   Album-Type-Edit-Route nutzt denselben Store statt `lib2_albums` umzuschreiben;
+   eine generische admin-only Set/Clear-Route erschließt die weiteren
+   freigegebenen Felder. Entity-Deletes räumen den Current-State auf,
+   Monitoring/Quality/IDs/Pfade sind nicht überschreibbar. 87 gezielte
+   Override-/Query-/API-/Schema-/Snapshot-/Discography-Tests sind grün.
+   **Noch offen in Punkt 4:** typed Adapter über Discography/Tracklist hinaus.
 5. Gestaffelten Wanted-Cutover fertigstellen: Consumer, die noch
    `monitored`-Flags nutzen, müssen nach Drift-Metriken-Beweis der Parität
    auf `lib2_wanted_tracks` wechseln.
@@ -1955,10 +1965,11 @@ wert und wurde bewusst nicht übernommen.
   auch wenn er falsch war). **Status 2026-07-12: Infrastruktur umgesetzt**
   (`library_provider_snapshots` mit Provenance/Completeness/Hash, `c396a4f`;
   typisierte Discography-/Tracklist-Adapter, `bd5d29d`/`16210f5`; gezielte
-  Tracklist-Invalidierung bei Edition-/Providerwechsel) — **Field-Level-
-  User-Overrides selbst (die getrennte Speicherung + Read-Projektion pro
-  Feld) bleiben offen**, ebenso das vollständige Ersetzen der verbliebenen
-  `COALESCE`-Anreicherung.
+  Tracklist-Invalidierung bei Edition-/Providerwechsel). **Field-Level-
+  User-Overrides und zentrale Read-Projektion sind seit 2026-07-14 ebenfalls
+  umgesetzt** (`lib2_metadata_overrides`; Roadmap Punkt 4, dritte Slice).
+  Offen bleibt das vollständige Ersetzen der verbliebenen
+  `COALESCE`-Anreicherung durch typed Adapter.
 - **ADR-07 — Interne Queue vs. Client-Queue. Entschieden: Client ist
   Live-Queue.** Bereits ausführlich in Abschnitt 3 „Phase 4
   Acquisition/Decision" beschrieben (persistente Grab-Korrelation, Adoption
@@ -2057,9 +2068,10 @@ vermerkt, tauchten aber nirgends in diesem Dokument auf:
 - **ADR-05-Umsetzung** — physisches Datei-Löschen mit Preview/Journal/
   Root-Safety ist als Entscheidung getroffen (10.1), aber noch nicht gebaut;
   aktuell löscht Library v2 nur DB-Einträge.
-- **ADR-06-Rest** — Field-Level-User-Overrides (getrennte Speicherung +
-  Read-Projektion pro überschriebenem Provider-Feld) sind noch nicht gebaut,
-  nur die Snapshot-/Provenance-Infrastruktur darunter.
+- ~~**ADR-06-Rest** — Field-Level-User-Overrides (getrennte Speicherung +
+  Read-Projektion pro überschriebenem Provider-Feld).~~ **Erledigt
+  2026-07-14** (Roadmap Punkt 4, dritte Slice): getrennte validierte Speicherung,
+  zentrale effektive Reads und admin-only Set/Clear-API.
 
 **Weitere P2/P3-UX- und Robustheits-Findings ohne Roadmap-Eintrag** (niedrigere
 Priorität, kompakt aufgelistet für spätere Aufnahme):

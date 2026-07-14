@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Optional, Tuple
 
+from .metadata_overrides import project_metadata
 from .status import compute_metadata_gaps, file_status, quality_tier
 
 _SORTS = {
@@ -88,6 +89,8 @@ def _quality_profile_dict(row: Any) -> Optional[Dict[str, Any]]:
 def _json_list(raw: Any) -> List[str]:
     if not raw:
         return []
+    if isinstance(raw, list):
+        return raw
     try:
         val = json.loads(raw)
         return val if isinstance(val, list) else []
@@ -135,13 +138,19 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
 
     artists = []
     for r in rows:
+        effective, overrides = project_metadata(
+            conn,
+            entity_type="artist",
+            entity_id=r["id"],
+            provider_fields=dict(r),
+        )
         track_count = r["track_count"] or 0
         present = r["track_files_present"] or 0
         artists.append({
             "id": r["id"],
-            "name": r["name"],
-            "image_url": r["image_url"],
-            "genres": _json_list(r["genres"]),
+            "name": effective["name"],
+            "image_url": effective["image_url"],
+            "genres": _json_list(effective["genres"]),
             "monitored": bool(r["monitored"]),
             "monitor_new_items": r["monitor_new_items"],
             "quality_profile_id": r["quality_profile_id"],
@@ -151,6 +160,7 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
             "track_count": track_count,
             "tracks_present": present,
             "tracks_missing": max(0, track_count - present),
+            "user_overrides": overrides,
         })
     return artists, total
 
@@ -160,6 +170,12 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
     a = conn.execute("SELECT * FROM lib2_artists WHERE id = ?", (artist_id,)).fetchone()
     if a is None:
         return None
+    artist_effective, artist_overrides = project_metadata(
+        conn,
+        entity_type="artist",
+        entity_id=a["id"],
+        provider_fields=dict(a),
+    )
     qp = conn.execute(
         "SELECT * FROM quality_profiles WHERE id = ?", (a["quality_profile_id"],)
     ).fetchone()
@@ -183,6 +199,12 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
 
     albums, eps, singles = [], [], []
     for r in album_rows:
+        effective, overrides = project_metadata(
+            conn,
+            entity_type="release_group",
+            entity_id=r["id"],
+            provider_fields=dict(r),
+        )
         present = r["files_present"] or 0
         # Total = the metadata's true track count when known, so partial albums
         # show "have / total" and the missing count is visible (Lidarr-style).
@@ -190,11 +212,11 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
                     r["track_count"] or 0, present)
         entry = {
             "id": r["id"],
-            "title": r["title"],
-            "album_type": r["album_type"],
-            "release_date": r["release_date"],
-            "year": r["year"],
-            "image_url": r["image_url"],
+            "title": effective["title"],
+            "album_type": effective["album_type"],
+            "release_date": effective["release_date"],
+            "year": effective["year"],
+            "image_url": effective["image_url"],
             "monitored": bool(r["monitored"]),
             "quality_profile_id": r["quality_profile_id"],
             "origin": r["origin"] or "library",
@@ -202,10 +224,11 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
             "track_count": total,
             "tracks_present": present,
             "tracks_missing": max(0, total - present),
+            "user_overrides": overrides,
         }
-        if r["album_type"] == "single":
+        if effective["album_type"] == "single":
             singles.append(entry)
-        elif r["album_type"] == "ep":
+        elif effective["album_type"] == "ep":
             eps.append(entry)
         else:
             albums.append(entry)
@@ -215,10 +238,10 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
 
     return {
         "id": a["id"],
-        "name": a["name"],
-        "image_url": a["image_url"],
-        "summary": a["summary"],
-        "genres": _json_list(a["genres"]),
+        "name": artist_effective["name"],
+        "image_url": artist_effective["image_url"],
+        "summary": artist_effective["summary"],
+        "genres": _json_list(artist_effective["genres"]),
         "monitored": bool(a["monitored"]),
         "monitor_new_items": a["monitor_new_items"],
         "quality_profile": _quality_profile_dict(qp),
@@ -228,6 +251,7 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
         "album_count": _in_library(albums) + _in_library(eps),
         "single_count": _in_library(singles),
         "discography_count": sum(1 for e in albums + eps + singles if e["origin"] == "discography"),
+        "user_overrides": artist_overrides,
     }
 
 
@@ -242,7 +266,21 @@ def _track_artists(conn, track_id: int) -> List[Dict[str, Any]]:
         """,
         (track_id,),
     ).fetchall()
-    return [{"id": r["id"], "name": r["name"], "role": r["role"]} for r in rows]
+    result = []
+    for r in rows:
+        effective, overrides = project_metadata(
+            conn,
+            entity_type="artist",
+            entity_id=r["id"],
+            provider_fields=dict(r),
+        )
+        result.append({
+            "id": r["id"],
+            "name": effective["name"],
+            "role": r["role"],
+            "user_overrides": overrides,
+        })
+    return result
 
 
 def _download_provenance_for_path(conn, path: Optional[str], *,
@@ -354,10 +392,16 @@ def _serialize_track(conn, t, album=None) -> Dict[str, Any]:
     from core.library2.track_files import primary_file_row
     file_row = primary_file_row(conn, t["id"])
     artists = _track_artists(conn, t["id"])
+    effective, overrides = project_metadata(
+        conn,
+        entity_type="track",
+        entity_id=t["id"],
+        provider_fields=dict(t),
+    )
     track_meta = {
-        "title": t["title"],
-        "track_number": t["track_number"],
-        "disc_number": t["disc_number"],
+        "title": effective["title"],
+        "track_number": effective["track_number"],
+        "disc_number": effective["disc_number"],
         "isrc": t["isrc"],
         "album_title": album["title"] if album else None,
         "album_artist_name": album["primary_artist_name"] if album and "primary_artist_name" in album.keys() else None,
@@ -392,10 +436,10 @@ def _serialize_track(conn, t, album=None) -> Dict[str, Any]:
         }
     return {
         "id": t["id"],
-        "title": t["title"],
-        "track_number": t["track_number"],
-        "disc_number": t["disc_number"],
-        "duration": t["duration"],
+        "title": effective["title"],
+        "track_number": effective["track_number"],
+        "disc_number": effective["disc_number"],
+        "duration": effective["duration"],
         "isrc": t["isrc"],
         "monitored": bool(t["monitored"]),
         "quality_profile_id": t["quality_profile_id"],
@@ -404,6 +448,7 @@ def _serialize_track(conn, t, album=None) -> Dict[str, Any]:
         "file": file_info,
         "file_status": fstat,
         "metadata_gaps": gaps,
+        "user_overrides": overrides,
     }
 
 
@@ -440,6 +485,12 @@ def get_album(conn, album_id: int) -> Optional[Dict[str, Any]]:
     al = conn.execute("SELECT * FROM lib2_albums WHERE id = ?", (album_id,)).fetchone()
     if al is None:
         return None
+    album_effective, album_overrides = project_metadata(
+        conn,
+        entity_type="release_group",
+        entity_id=al["id"],
+        provider_fields=dict(al),
+    )
     qp = conn.execute(
         "SELECT * FROM quality_profiles WHERE id = ?", (al["quality_profile_id"],)
     ).fetchone()
@@ -450,9 +501,15 @@ def get_album(conn, album_id: int) -> Optional[Dict[str, Any]]:
         "SELECT * FROM lib2_tracks WHERE album_id = ? ORDER BY disc_number, track_number, id",
         (album_id,),
     ).fetchall()
-    album_for_tracks = dict(al)
+    album_for_tracks = album_effective
     if artist:
-        album_for_tracks["primary_artist_name"] = artist["name"]
+        artist_effective, _artist_overrides = project_metadata(
+            conn,
+            entity_type="artist",
+            entity_id=artist["id"],
+            provider_fields=dict(artist),
+        )
+        album_for_tracks["primary_artist_name"] = artist_effective["name"]
         album_for_tracks["primary_artist_id"] = artist["id"]
     tracks = [_serialize_track(conn, t, album_for_tracks) for t in track_rows]
     present_count = sum(1 for t in tracks if t["file"] is not None)
@@ -524,16 +581,19 @@ def get_album(conn, album_id: int) -> Optional[Dict[str, Any]]:
 
     return {
         "id": al["id"],
-        "title": al["title"],
-        "album_type": al["album_type"],
-        "release_date": al["release_date"],
-        "year": al["year"],
-        "image_url": al["image_url"],
-        "genres": _json_list(al["genres"]),
+        "title": album_effective["title"],
+        "album_type": album_effective["album_type"],
+        "release_date": album_effective["release_date"],
+        "year": album_effective["year"],
+        "image_url": album_effective["image_url"],
+        "genres": _json_list(album_effective["genres"]),
         "monitored": bool(al["monitored"]),
         "origin": origin,
         "quality_profile": _quality_profile_dict(qp),
-        "primary_artist": {"id": artist["id"], "name": artist["name"]} if artist else None,
+        "primary_artist": {
+            "id": artist["id"],
+            "name": album_for_tracks["primary_artist_name"],
+        } if artist else None,
         "tracks": tracks,
         "track_count": total,
         "tracks_present": present_count,
@@ -545,6 +605,7 @@ def get_album(conn, album_id: int) -> Optional[Dict[str, Any]]:
             "error": al["tracklist_error"],
             "retry_at": al["tracklist_retry_at"],
         },
+        "user_overrides": album_overrides,
     }
 
 
@@ -554,9 +615,21 @@ def get_track(conn, track_id: int) -> Optional[Dict[str, Any]]:
     if t is None:
         return None
     album = conn.execute("SELECT * FROM lib2_albums WHERE id = ?", (t["album_id"],)).fetchone()
-    data = _serialize_track(conn, t, album)
+    album_effective = None
+    album_overrides: Dict[str, Any] = {}
+    if album:
+        album_effective, album_overrides = project_metadata(
+            conn,
+            entity_type="release_group",
+            entity_id=album["id"],
+            provider_fields=dict(album),
+        )
+    data = _serialize_track(conn, t, album_effective)
     data["album"] = {
-        "id": album["id"], "title": album["title"], "album_type": album["album_type"],
+        "id": album["id"],
+        "title": album_effective["title"],
+        "album_type": album_effective["album_type"],
+        "user_overrides": album_overrides,
     } if album else None
     return data
 

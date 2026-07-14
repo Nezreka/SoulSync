@@ -971,6 +971,8 @@ def test_non_admin_profile_writes_are_rejected(api):
         ("post", f"/api/library/v2/artists/{ids['artist']}/quality-profile",
          {"quality_profile_id": 2}),
         ("post", f"/api/library/v2/albums/{ids['single']}/edit", {"album_type": "ep"}),
+        ("put", f"/api/library/v2/metadata-overrides/release_group/"
+                f"{ids['single']}/title", {"value": "Nope"}),
         ("delete", f"/api/library/v2/artists/{ids['artist']}", None),
         ("post", "/api/library/v2/import", {}),
     ):
@@ -1014,11 +1016,55 @@ def test_album_edit_refiles_release_type(api):
                        json={"album_type": "ep"}).get_json()
     assert resp["success"] is True and resp["album_type"] == "ep"
     with _conn(db) as conn:
+        # Provider/import baseline is provenance, not a user-edit scratchpad.
         assert conn.execute("SELECT album_type FROM lib2_albums WHERE id=?",
-                            (ids["single"],)).fetchone()[0] == "ep"
+                            (ids["single"],)).fetchone()[0] == "single"
+        assert conn.execute(
+            "SELECT value_json FROM lib2_metadata_overrides "
+            "WHERE entity_type='release_group' AND entity_id=? "
+            "AND field_name='album_type'",
+            (ids["single"],),
+        ).fetchone()[0] == '"ep"'
+    detail = client.get(f"/api/library/v2/artists/{ids['artist']}").get_json()["artist"]
+    assert ids["single"] in {album["id"] for album in detail["eps"]}
+    assert ids["single"] not in {album["id"] for album in detail["singles"]}
     bad = client.post(f"/api/library/v2/albums/{ids['single']}/edit",
                       json={"album_type": "mixtape"})
     assert bad.status_code == 400
+
+
+def test_generic_metadata_override_set_project_and_clear(api):
+    client, db, ids = api
+    url = f"/api/library/v2/metadata-overrides/release_group/{ids['views']}/title"
+    response = client.put(url, json={
+        "value": "Views (Corrected)",
+        "reason": "admin correction",
+    })
+    assert response.status_code == 200
+    assert response.get_json()["override"]["value"] == "Views (Corrected)"
+    assert client.get(f"/api/library/v2/albums/{ids['views']}").get_json()[
+        "album"
+    ]["title"] == "Views (Corrected)"
+    with _conn(db) as conn:
+        assert conn.execute(
+            "SELECT title FROM lib2_albums WHERE id=?", (ids["views"],)
+        ).fetchone()[0] == "Views"
+
+    assert client.delete(url).get_json() == {"removed": True, "success": True}
+    assert client.get(f"/api/library/v2/albums/{ids['views']}").get_json()[
+        "album"
+    ]["title"] == "Views"
+
+
+def test_generic_metadata_override_validates_payload_and_field(api):
+    client, _db, ids = api
+    base = f"/api/library/v2/metadata-overrides/release_group/{ids['views']}"
+    assert client.put(f"{base}/title", json={}).status_code == 400
+    assert client.put(f"{base}/unknown", json={"value": "x"}).status_code == 400
+    assert client.put(
+        "/api/library/v2/metadata-overrides/track/999999/title",
+        json={"value": "x"},
+    ).status_code == 404
 
 
 def test_refresh_unknown_entity_is_404(api):
