@@ -433,12 +433,22 @@ def _blocked_pairs(db):
         return frozenset()
 
 
+def _blocked_users(db):
+    """Source-wide blocked uploaders — never pick any release from them, even a
+    candidate stored before the block. Best-effort (a read failure = no filter)."""
+    try:
+        return db.blocked_usernames()
+    except Exception:   # noqa: BLE001
+        logger.exception("video blocked-usernames read failed")
+        return frozenset()
+
+
 def _fail_or_retry(db, dl, error_msg) -> None:
     """A download just failed/disappeared. Try the next candidate inline; if none,
     hand off to a requery thread; if nothing left, mark it failed for real — and
     put it back on the wishlist so it isn't silently lost."""
     from core.video.retry import plan_retry
-    plan = plan_retry(dl, blocked=_blocked_pairs(db))
+    plan = plan_retry(dl, blocked=_blocked_pairs(db), blocked_users=_blocked_users(db))
     if plan["action"] == "candidate" and _apply_candidate(db, dl["id"], dl, plan["candidate"], plan["rest"]):
         return
     if plan["action"] in ("candidate", "requery"):
@@ -511,7 +521,7 @@ def _requery_worker(dl_id) -> None:
             row = db.get_video_download(dl_id)
             if not row or row.get("status") != "searching":
                 return
-            plan = plan_retry(row, blocked=_blocked_pairs(db))
+            plan = plan_retry(row, blocked=_blocked_pairs(db), blocked_users=_blocked_users(db))
             if plan["action"] == "candidate":
                 if _apply_candidate(db, dl_id, row, plan["candidate"], plan["rest"]):
                     return
@@ -549,7 +559,7 @@ def _requery_worker(dl_id) -> None:
                 tried_files = json.loads(row2.get("tried_files") or "[]")
             except (ValueError, TypeError):
                 tried_files = []
-            fresh = merge_candidates(accepted, tried_files, blocked=_blocked_pairs(db))
+            fresh = merge_candidates(accepted, tried_files, blocked=_blocked_pairs(db), blocked_users=_blocked_users(db))
             if fresh and _apply_candidate(db, dl_id, row2, fresh[0], fresh[1:]):
                 return
             # this query gave nothing usable → loop tries the next query (or fails)

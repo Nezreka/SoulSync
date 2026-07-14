@@ -147,6 +147,22 @@ def test_merge_candidates_drops_blocked_requery_hits():
     assert [c["filename"] for c in out] == ["good.mkv"]
 
 
+def test_stored_candidate_from_a_blocked_uploader_is_dropped_on_retry():
+    # a candidate stored BEFORE the uploader was blocked must still be skipped
+    from core.video.retry import plan_retry, merge_candidates
+    row = {"attempts": 1,
+           "candidates": json.dumps([{"username": "baduser", "filename": "a.mkv"},
+                                     {"username": "goodpeer", "filename": "b.mkv"}]),
+           "tried_files": "[]", "search_ctx": "{}", "tried_queries": "[]"}
+    plan = plan_retry(row, blocked=set(), blocked_users={"baduser"})
+    assert plan["action"] == "candidate" and plan["candidate"]["filename"] == "b.mkv"
+    # and merging fresh requery hits drops the blocked uploader too
+    hits = [{"username": "baduser", "filename": "a.mkv", "title": "x"},
+            {"username": "goodpeer", "filename": "b.mkv", "title": "y"}]
+    assert [c["filename"] for c in merge_candidates(hits, [], blocked=set(),
+                                                    blocked_users={"baduser"})] == ["b.mkv"]
+
+
 # ── importer tagging: file-is-junk vs fine-release-wrong-context ─────────────
 def test_importer_tags_only_proven_bad_files():
     from core.video.importer import plan_import
