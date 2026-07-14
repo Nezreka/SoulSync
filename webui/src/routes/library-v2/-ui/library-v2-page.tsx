@@ -2453,6 +2453,65 @@ async function awaitBulkJob(
 
 /** Lidarr-style album list: each album is a block whose header expands to reveal
  *  its track table — contained in the block (no fragile nested-table colspans). */
+export function SectionBulkMonitorButton({
+  artistId,
+  scope,
+  title,
+  allMonitored,
+}: {
+  artistId: number;
+  scope: 'albums' | 'eps' | 'singles';
+  title: string;
+  allMonitored: boolean;
+}) {
+  const queryClient = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const targetMonitored = !allMonitored;
+
+  async function apply() {
+    setBusy(true);
+    setError(null);
+    try {
+      const jobId = await bulkMonitorLibraryV2Releases(artistId, scope, targetMonitored);
+      const jobError = await awaitBulkJob(queryClient, jobId);
+      if (jobError) throw new Error(jobError);
+    } catch (caught) {
+      setError(mutationErrorMessage(caught, `Could not update ${title.toLowerCase()}`));
+      await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <span className={styles.sectionBulkControl}>
+      <button
+        type="button"
+        className={styles.sectionBulk}
+        disabled={busy}
+        title={
+          allMonitored
+            ? `Stop monitoring all ${title.toLowerCase()}`
+            : `Monitor all ${title.toLowerCase()} (adds missing tracks to Wanted)`
+        }
+        onClick={() => void apply()}
+      >
+        <SvgIcon name="monitor" filled={allMonitored} />
+        {busy ? 'Working…' : allMonitored ? 'Unmonitor all' : 'Monitor all'}
+      </button>
+      {error ? (
+        <span className={styles.sectionBulkError} role="alert">
+          <span>{error}</span>
+          <button type="button" className={styles.inlineRetry} onClick={() => void apply()}>
+            Retry
+          </button>
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 function AlbumGroup({
   title,
   albums,
@@ -2474,42 +2533,19 @@ function AlbumGroup({
   onRetag: (album: LibraryV2AlbumSummary) => void;
   onEdit: (album: LibraryV2AlbumSummary) => void;
 }) {
-  const queryClient = useQueryClient();
-  const [bulkBusy, setBulkBusy] = useState(false);
   if (albums.length === 0) return null;
   const allMonitored = albums.every((a) => a.monitored);
-
-  async function bulkMonitor(monitored: boolean) {
-    setBulkBusy(true);
-    try {
-      const jobId = await bulkMonitorLibraryV2Releases(artistId, scope, monitored);
-      await awaitBulkJob(queryClient, jobId);
-    } catch {
-      // Job endpoint already logs; refresh so the UI shows the actual state.
-      await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
-    } finally {
-      setBulkBusy(false);
-    }
-  }
 
   return (
     <section className={styles.section}>
       <h2 className={styles.sectionTitle}>
         {title} <span className={styles.sectionCount}>{albums.length}</span>
-        <button
-          type="button"
-          className={styles.sectionBulk}
-          disabled={bulkBusy}
-          title={
-            allMonitored
-              ? `Stop monitoring all ${title.toLowerCase()}`
-              : `Monitor all ${title.toLowerCase()} (adds missing tracks to Wanted)`
-          }
-          onClick={() => void bulkMonitor(!allMonitored)}
-        >
-          <SvgIcon name="monitor" filled={allMonitored} />
-          {bulkBusy ? 'Working…' : allMonitored ? 'Unmonitor all' : 'Monitor all'}
-        </button>
+        <SectionBulkMonitorButton
+          artistId={artistId}
+          scope={scope}
+          title={title}
+          allMonitored={allMonitored}
+        />
       </h2>
       <div className={styles.albumList}>
         {albums.map((album) => (

@@ -2244,7 +2244,16 @@ bekannte Main-Chunk-Hinweis). **Logischer nächster Schritt:** P2-06 als kleinst
     Mutations-Catches in Artist-/Album-Detail, Retag, Search, Delete und
     Playlist-Trigger systematisch klassifizieren; bereits sichtbare Fehler
     nicht umbauen, sondern zuerst den nächsten tatsächlich stillen oder
-    unendlichen Pfad schließen.
+    unendlichen Pfad schließen. **Vierte Slice abgeschlossen 2026-07-14:** Die
+    per Album-/EP-/Singles-Sektion angebotene Bulk-Monitor-Action besitzt nun
+    eine isolierte gemeinsame Komponente, die Start-, Polling- und terminale
+    Job-Fehler sichtbar macht. Der alte Pfad ignorierte insbesondere das von
+    `awaitBulkJob` gelieferte `state.error`. Busy endet in allen Fällen; Retry
+    wiederholt exakt Artist, Release-Scope und Monitor-Ziel. Vier gezielte
+    Monitoring-Vertragstests sind grün. **Nächste Slice:** Artist „Refresh &
+    Scan“ meldet Fehler derzeit nur als abgewiesenes Promise und muss einen
+    sichtbaren Retry erhalten; anschließend Import-Polling-Timeout und
+    Interactive-Grab-Fehlertext prüfen.
 
 **Session-Abschluss-Gate 2026-07-14:** Seit dem vorherigen Full-Gate wurden
 Roadmap 13 sowie 16–23 und Phase E vollständig abgeschlossen und jeweils

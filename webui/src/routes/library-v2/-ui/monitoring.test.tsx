@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { HttpResponse, http, server } from '@/test/msw';
 import { createTestQueryClient } from '@/test/query-client';
 
-import { MonitoringModal, MonitorToggle } from './library-v2-page';
+import { MonitoringModal, MonitorToggle, SectionBulkMonitorButton } from './library-v2-page';
 
 function renderWithQueryClient(node: React.ReactNode) {
   const queryClient = createTestQueryClient();
@@ -111,6 +111,43 @@ describe('library v2 monitoring mutations', () => {
     expect(submitted).toEqual([
       { scope: 'missing', monitored: true },
       { scope: 'missing', monitored: true },
+    ]);
+  });
+
+  it('surfaces a failed release-section monitor job and retries its exact target', async () => {
+    let starts = 0;
+    const submitted: unknown[] = [];
+    server.use(
+      http.post('/api/library/v2/artists/7/releases/monitor', async ({ request }) => {
+        starts += 1;
+        submitted.push(await request.json());
+        return HttpResponse.json({ success: true, job_id: `section-job-${starts}` });
+      }),
+      http.get('/api/library/v2/jobs/status', ({ request }) => {
+        const jobId = new URL(request.url).searchParams.get('job_id');
+        return HttpResponse.json({
+          running: false,
+          error: jobId === 'section-job-1' ? 'Album monitoring failed' : null,
+        });
+      }),
+    );
+
+    renderWithQueryClient(
+      <SectionBulkMonitorButton artistId={7} scope="albums" title="Albums" allMonitored={false} />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Monitor all/ }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Album monitoring failed');
+    expect(screen.getByRole('button', { name: /Monitor all/ })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+    expect(starts).toBe(2);
+    expect(submitted).toEqual([
+      { scope: 'albums', monitored: true },
+      { scope: 'albums', monitored: true },
     ]);
   });
 });

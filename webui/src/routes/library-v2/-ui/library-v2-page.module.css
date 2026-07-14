@@ -883,8 +883,13 @@
 }
 
 /* --- section bulk-monitor button --- */
-.sectionBulk {
+.sectionBulkControl {
+  position: relative;
+  display: inline-flex;
   margin-left: auto;
+}
+
+.sectionBulk {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -912,6 +917,28 @@
 .sectionBulk svg {
   width: 13px;
   height: 13px;
+}
+
+.sectionBulkError {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 5px);
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+  max-width: 280px;
+  padding: 6px 8px;
+  border: 1px solid rgba(239, 68, 68, 0.45);
+  border-radius: 7px;
+  background: #2a1717;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  color: rgb(248, 113, 113);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.25;
+  text-align: left;
 }
 
 .qpManagedHint {
