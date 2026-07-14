@@ -2674,13 +2674,25 @@ function initializeDocsPage() {
             return offset;
         }
 
+        function place() {
+            // Desktop: .docs-content is its own scroll container. The mobile
+            // layout stacks the panels (overflow: visible) so the page
+            // scroller owns the document instead — assigning scrollTop on
+            // .docs-content is a silent no-op there.
+            if (docsContent.scrollHeight > docsContent.clientHeight + 1) {
+                docsContent.scrollTop = calcOffset(target);
+            } else {
+                target.scrollIntoView();
+            }
+        }
+
         // Initial scroll
-        docsContent.scrollTop = calcOffset(target);
+        place();
 
         // Correction pass after lazy images near the target have had time to load
         // and shift layout. Two passes cover most reflow scenarios.
-        setTimeout(() => { docsContent.scrollTop = calcOffset(target); }, 150);
-        setTimeout(() => { docsContent.scrollTop = calcOffset(target); }, 500);
+        setTimeout(place, 150);
+        setTimeout(place, 500);
     }
 
     // Section title click → expand/collapse children + scroll
