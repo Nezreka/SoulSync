@@ -1347,6 +1347,150 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    # ── manual match editor (Manage panel "Matches" section) ──────────────────
+    # Services a user can re-point per kind. tmdb/tvdb have real matchers (the
+    # enrichment workers re-enrich BY the new id); imdb is a plain id the ratings
+    # + several backfills key off.
+    _MATCH_SERVICES = {"movie": ("tmdb", "imdb"), "show": ("tmdb", "tvdb", "imdb")}
+
+    # Textual metadata the old (wrong) match may have gap-filled — cleared on a
+    # re-match (unlocked fields only) so the fresh enrichment can land; gap-fill
+    # never overwrites, so leaving them would keep the wrong show's data. Art
+    # columns (poster/backdrop/logo/…) are deliberately NOT cleared: they may be
+    # server-provided or user-picked (Poster Manager), and wrong art is fixable
+    # there without data loss.
+    _REMATCH_CLEAR_COLS = {
+        "overview", "tagline", "status", "rating", "rating_critic", "content_rating",
+        "network", "studio", "first_air_date", "last_air_date", "airs_time",
+        "release_date", "runtime_minutes", "tmdb_collection_id", "tmdb_collection_name",
+        "trakt_rating", "trakt_votes", "tvmaze_rating", "anilist_score",
+        "wikidata_url", "streaming", "mediastinger", "awards", "subtitle_langs",
+    }
+
+    def item_matches(self, kind: str, item_id: int) -> list | None:
+        """Per-service match state for one movie/show — feeds the Manage panel's
+        Matches section. None for an unknown kind, [] for a missing row."""
+        tbl = self._DETAIL_TBL.get(kind)
+        services = self._MATCH_SERVICES.get(kind)
+        if not tbl or not services:
+            return None
+        conn = self._get_connection()
+        try:
+            row = conn.execute(f"SELECT * FROM {tbl} WHERE id=?", (item_id,)).fetchone()
+            if not row:
+                return []
+            keys = row.keys()
+            out = []
+            for svc in services:
+                if svc == "imdb":
+                    imdb = row["imdb_id"] if "imdb_id" in keys else None
+                    out.append({"service": "imdb", "id": imdb,
+                                "status": "matched" if imdb else None, "attempted": None})
+                    continue
+                idc, sc, ac = f"{svc}_id", f"{svc}_match_status", f"{svc}_last_attempted"
+                out.append({"service": svc,
+                            "id": row[idc] if idc in keys else None,
+                            "status": row[sc] if sc in keys else None,
+                            "attempted": row[ac] if ac in keys else None})
+            return out
+        finally:
+            conn.close()
+
+    def rematch_item(self, kind: str, item_id: int, service: str, external_id) -> bool:
+        """Re-point one service's match to ``external_id`` (or clear it with None)
+        and reset everything DERIVED from the old match so the existing workers
+        re-enrich fresh, by the new id:
+
+        - the service's match_status goes back to NULL (pending) so
+          enrichment_next re-picks the item and enriches BY the new known id —
+          or to 'not_found' on a clear;
+        - textual metadata the old match gap-filled is cleared (unlocked fields
+          only — user edits stay theirs), because gap-fill never overwrites;
+        - details/episodes/ratings sync flags and every backfill service's
+          status reset, so the whole derived pipeline re-runs;
+        - enrichment-sourced credits are dropped (they were the wrong title's).
+
+        Mirrors the music side's "re-match clears the stored id + re-enriches"
+        contract (#868)."""
+        tbl = self._DETAIL_TBL.get(kind)
+        if not tbl or service not in self._MATCH_SERVICES.get(kind, ()):
+            return False
+        conn = self._get_connection()
+        try:
+            if not conn.execute(f"SELECT 1 FROM {tbl} WHERE id=?", (item_id,)).fetchone():
+                return False
+            cols = {r[1] for r in conn.execute(f"PRAGMA table_info({tbl})").fetchall()}
+            locked = self._locked_fields_set(conn, tbl, item_id)
+            sets, params = [], []
+
+            if service == "imdb":
+                # An imdb re-point only feeds the id-keyed pipeline (ratings +
+                # imdb-based backfills) — TMDB-sourced text stays untouched.
+                sets.append("imdb_id=?")
+                params.append(external_id)
+                if "ratings_synced" in cols:
+                    sets.append("ratings_synced=0")
+                for svc, svc_map in _BACKFILL.items():
+                    spec = svc_map.get(kind)
+                    if not spec or spec[0] != tbl or "imdb_id" not in spec[3]:
+                        continue
+                    for c in (spec[1], spec[2]):
+                        if c in cols:
+                            sets.append(f"{c}=NULL")
+                    for c in sorted(_BACKFILL_COLS.get(svc, set()) & cols - locked):
+                        sets.append(f"{c}=NULL")
+            elif service == "tvdb":
+                # TVDB owns the air time + the tvdb-keyed backfills (fanart,
+                # TVmaze); TMDB-sourced text is not its blast radius.
+                sets.append("tvdb_id=?")
+                params.append(external_id)
+                sets.append("tvdb_match_status=" +
+                            ("NULL" if external_id is not None else "'not_found'"))
+                sets.append("tvdb_last_attempted=NULL")
+                if "airs_time" in cols and "airs_time" not in locked:
+                    sets.append("airs_time=NULL")
+                for svc, svc_map in _BACKFILL.items():
+                    spec = svc_map.get(kind)
+                    if not spec or spec[0] != tbl or "tvdb_id" not in spec[3]:
+                        continue
+                    for c in (spec[1], spec[2]):
+                        if c in cols:
+                            sets.append(f"{c}=NULL")
+            else:   # tmdb — the identity match; the whole derived pipeline re-runs
+                sets.append("tmdb_id=?")
+                params.append(external_id)
+                sets.append("tmdb_match_status=" +
+                            ("NULL" if external_id is not None else "'not_found'"))
+                sets.append("tmdb_last_attempted=NULL")
+                # Clear what the old match derived (never a locked field, never art).
+                for col in sorted(self._REMATCH_CLEAR_COLS & cols - locked):
+                    sets.append(f"{col}=NULL")
+                # Re-run everything: detail backfill, episode cascade, OMDb
+                # ratings, and every id-keyed backfill service.
+                for flag in ("details_synced", "episodes_synced", "ratings_synced"):
+                    if flag in cols:
+                        sets.append(f"{flag}=0")
+                for svc_map in _BACKFILL.values():
+                    spec = svc_map.get(kind)
+                    if spec and spec[0] == tbl:
+                        if spec[1] in cols:
+                            sets.append(f"{spec[1]}=NULL")
+                        if spec[2] in cols:
+                            sets.append(f"{spec[2]}=NULL")
+
+            params.append(item_id)
+            conn.execute(f"UPDATE {tbl} SET {', '.join(sets)} WHERE id=?", params)
+            # Credits came from the old TMDB match (gap-filled only-when-empty, so
+            # they'd never self-correct). Dropping them lets the fresh enrichment
+            # refill from the right title. TVDB/imdb don't source credits.
+            if service == "tmdb":
+                oc = "movie_id" if tbl == "movies" else "show_id"
+                conn.execute(f"DELETE FROM credits WHERE {oc}=?", (item_id,))
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+
     def _ratings_breakdown(self) -> dict:
         """OMDb 'coverage' breakdown: matched = ratings present, pending = has an
         imdb_id but not fetched, not_found = fetched but OMDb had no rating."""
