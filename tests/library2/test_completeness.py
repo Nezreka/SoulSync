@@ -313,3 +313,65 @@ def test_persist_tracklist_tracks_trims_surplus_fileless_rows(imported_conn):
         "SELECT COUNT(*) FROM lib2_tracks WHERE id=?",
         (stale_id,),
     ).fetchone()[0] == 0
+
+
+def test_persist_tracklist_does_not_truncate_provider_rows_to_stale_expected_count(
+        imported_conn):
+    views_id = imported_conn.execute(
+        "SELECT id FROM lib2_albums WHERE title='Views'"
+    ).fetchone()[0]
+    imported_conn.execute(
+        "UPDATE lib2_albums SET expected_track_count=2 WHERE id=?", (views_id,)
+    )
+
+    changed = _persist_tracklist_tracks(imported_conn, views_id, [
+        {"track_number": 1, "title": "One Dance"},
+        {"track_number": 2, "title": "Hotline Bling"},
+        {"track_number": 3, "title": "Provider Confirms Third", "spotify_id": "sp-third"},
+    ])
+
+    assert changed == 1
+    assert imported_conn.execute(
+        "SELECT title FROM lib2_tracks WHERE album_id=? AND track_number=3",
+        (views_id,),
+    ).fetchone()[0] == "Provider Confirms Third"
+    assert imported_conn.execute(
+        "SELECT expected_track_count FROM lib2_albums WHERE id=?", (views_id,)
+    ).fetchone()[0] == 3
+
+
+def test_tracklist_trim_preserves_positive_monitor_intent_despite_flag_drift(
+        imported_conn):
+    views_id = imported_conn.execute(
+        "SELECT id FROM lib2_albums WHERE title='Views'"
+    ).fetchone()[0]
+    imported_conn.execute(
+        "UPDATE lib2_albums SET expected_track_count=2 WHERE id=?", (views_id,)
+    )
+    protected_id = imported_conn.execute(
+        """INSERT INTO lib2_tracks(
+               album_id, title, track_number, disc_number, monitored)
+           VALUES(?, 'Explicitly Wanted Extra', 3, 1, 0)""",
+        (views_id,),
+    ).lastrowid
+    from core.library2.monitor_rules import PROVENANCE_WISHLIST, record_rule
+    record_rule(
+        imported_conn,
+        "track",
+        protected_id,
+        True,
+        PROVENANCE_WISHLIST,
+    )
+
+    changed = _persist_tracklist_tracks(imported_conn, views_id, [
+        {"track_number": 1, "title": "One Dance"},
+        {"track_number": 2, "title": "Hotline Bling"},
+    ])
+
+    assert changed == 0
+    assert imported_conn.execute(
+        "SELECT title FROM lib2_tracks WHERE id=?", (protected_id,)
+    ).fetchone()[0] == "Explicitly Wanted Extra"
+    assert imported_conn.execute(
+        "SELECT expected_track_count FROM lib2_albums WHERE id=?", (views_id,)
+    ).fetchone()[0] == 3

@@ -102,8 +102,17 @@ def _trim_excess_fileless_tracks(conn, album_id: int, expected: int,
         return 0
     protect_ids = protect_ids or set()
     rows = conn.execute(
-        """SELECT t.id, t.legacy_track_id,
-                  EXISTS(SELECT 1 FROM lib2_track_files f WHERE f.track_id = t.id) AS has_file
+        """SELECT t.id, t.legacy_track_id, t.monitored,
+                  EXISTS(SELECT 1 FROM lib2_track_files f WHERE f.track_id = t.id) AS has_file,
+                  EXISTS(
+                      SELECT 1 FROM lib2_monitor_rules r
+                       WHERE r.entity_type='track' AND r.entity_id=t.id
+                         AND r.monitored=1
+                  ) AS has_positive_rule,
+                  EXISTS(
+                      SELECT 1 FROM lib2_wanted_tracks w
+                       WHERE w.track_id=t.id AND w.wanted=1
+                  ) AS is_wanted
              FROM lib2_tracks t
             WHERE t.album_id=?
             ORDER BY COALESCE(t.disc_number, 1), t.track_number, t.id""",
@@ -118,11 +127,25 @@ def _trim_excess_fileless_tracks(conn, album_id: int, expected: int,
             continue
         if row["id"] in protect_ids:
             continue
-        if row["legacy_track_id"] is not None or row["has_file"]:
+        if (
+            row["legacy_track_id"] is not None
+            or row["has_file"]
+            or row["monitored"]
+            or row["has_positive_rule"]
+            or row["is_wanted"]
+        ):
             continue
+        conn.execute(
+            "DELETE FROM lib2_monitor_rules WHERE entity_type='track' AND entity_id=?",
+            (row["id"],),
+        )
+        conn.execute("DELETE FROM lib2_wanted_tracks WHERE track_id=?", (row["id"],))
         conn.execute("DELETE FROM lib2_track_artists WHERE track_id=?", (row["id"],))
         conn.execute("DELETE FROM lib2_tracks WHERE id=?", (row["id"],))
         deleted += 1
+    if deleted:
+        from core.library2.editions import prune_orphaned_edition_rows
+        prune_orphaned_edition_rows(conn.cursor())
     return deleted
 
 
@@ -145,8 +168,16 @@ def _persist_tracklist_tracks(conn, album_id: int, tracks: List[dict]) -> int:
         expected = int(al["expected_track_count"] or 0)
     except (TypeError, ValueError):
         expected = 0
-    if expected and len(entries) > expected:
-        entries = entries[:expected]
+    # A provider-confirmed complete list wins over an old undercount. Never
+    # slice real entries to a stale expected_track_count (P1-26).
+    if len(entries) > expected:
+        expected = len(entries)
+        conn.execute(
+            """UPDATE lib2_albums
+                  SET expected_track_count=?, updated_at=CURRENT_TIMESTAMP
+                WHERE id=?""",
+            (expected, album_id),
+        )
     has_explicit_disc = any(e.get("disc_number") not in (None, "", 1, "1") for e in entries)
     inferred_disc = 1
     previous_number: Optional[int] = None
@@ -213,6 +244,19 @@ def _persist_tracklist_tracks(conn, album_id: int, tracks: List[dict]) -> int:
     changed = created + _trim_excess_fileless_tracks(
         conn, album_id, expected, protect_ids=touched_ids
     )
+    # Protected local/wanted rows can legitimately extend beyond the provider
+    # count. Converge the stored expectation so precache does not retry the
+    # same intentional mismatch forever.
+    remaining_count = conn.execute(
+        "SELECT COUNT(*) FROM lib2_tracks WHERE album_id=?", (album_id,)
+    ).fetchone()[0]
+    if remaining_count > expected:
+        conn.execute(
+            """UPDATE lib2_albums
+                  SET expected_track_count=?, updated_at=CURRENT_TIMESTAMP
+                WHERE id=?""",
+            (remaining_count, album_id),
+        )
     # Every newly materialized provider row enters the authoritative wanted
     # projection immediately, even when browsing (not monitoring) created it.
     if touched_ids:

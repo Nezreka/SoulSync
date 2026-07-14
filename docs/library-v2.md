@@ -2050,6 +2050,20 @@ verändert; daher waren Frontend-Typecheck/Vitest/Build nicht erforderlich.
     Wanted-Tests** und Ruff sind grün. **Nächster logischer Schritt:** P1-26 —
     Tracklist-Materialisierung darf überwachte/fileless Rows beim Kürzen nicht
     stumm löschen.
+19. ~~**Verlustfreie Tracklist-Materialisierung (P1-26).**~~ **Abgeschlossen
+    2026-07-14:** Eine vollständige Provider-Tracklist wird nicht mehr auf
+    einen veralteten kleineren `expected_track_count` abgeschnitten; der Count
+    konvergiert stattdessen mindestens auf die bestätigte Liste. Der
+    Surplus-Pruner entfernt nur noch filelose, nicht-Legacy- und wirklich
+    ungewollte Rows: Compatibility-Monitorflag, positive Monitor-Regel und
+    Wanted-Projektion sind jeweils Schutzgründe. Für tatsächlich entfernte
+    Rows werden Monitor-/Wanted- und Edition-Shadowdaten mitbereinigt.
+    Bewusst erhaltene lokale/Wishlist-Zeilen erhöhen den Expected-Count, damit
+    der Precache dieselbe absichtliche Abweichung nicht endlos erneut prüft.
+    **99 gezielte Tests** über Completeness, Queries, Wanted/Monitor, Editions,
+    Provider-Snapshots und API sowie Ruff sind grün. **Nächster logischer
+    Schritt:** P1-28 — Refresh & Scan und Retag müssen den Tag-/Gap-Cache
+    konsistent aktualisieren bzw. invalidieren.
 
 ---
 
@@ -2326,10 +2340,12 @@ vermerkt, tauchten aber nirgends in diesem Dokument auf:
   gegen das neueste bestehende Release — das fehlt hier noch.~~ **Behoben
   2026-07-14:** fester Pre-Sync-Datumscutoff mit konservativer Behandlung
   undatierter Daten; Details in Roadmap-Punkt 18.
-- **P1-26** — Tracklist-Materialisierung: ist `expected_track_count` zu
+- ~~**P1-26** — Tracklist-Materialisierung: ist `expected_track_count` zu
   klein, schneidet der Import Provider-Einträge ab und löscht anschließend
   überzählige fileless Rows, ohne deren Monitor-Zustand zu prüfen — kann
-  bewusst gewishlistete/monitorte Rows stumm entfernen.
+  bewusst gewishlistete/monitorte Rows stumm entfernen.~~ **Behoben
+  2026-07-14:** Provider-Liste bestimmt die Mindestgröße; positive Monitor-/
+  Wanted-Absicht schützt fileless Rows. Details in Roadmap-Punkt 19.
 - **P1-28** — „Refresh & Scan" liest nur Audioqualität/Größe neu ein;
   `tags_json`/`missing_tags_json`/`metadata_gaps_json` werden nicht
   aktualisiert, Retag invalidiert diesen Cache ebenfalls nicht — UI zeigt
