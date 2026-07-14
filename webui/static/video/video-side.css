@@ -98,6 +98,56 @@ body:not(.video-admin) [data-video-overlay-studio] { display: none !important; }
 .video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="upcoming"] { order: 5; grid-column: span 2; }
 .video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="stats"] { order: 6; }
 
+/* ── Dashboard responsive (tablet + phone) ──────────────────────────────────
+   The shared .dash-grid (style.css) collapses 3→2 cols at 1499px and →1 col at
+   699px, but its mobile reset only covers the music helper classes
+   (.dash-card--wide/--full) — NOT the raw span-2 rules above. Without the reset
+   below, the three spanning cards force an IMPLICIT second column into the
+   1-col phone grid (double-width cards, sideways page scroll). */
+@media (max-width: 1499px) and (min-width: 700px) {
+    /* 2-col tablet range: Stats is the last card and sat alone at half width —
+       let it finish the grid full-width (its six stat tiles flow 3-up there). */
+    .video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="stats"] { grid-column: span 2; }
+}
+@media (max-width: 699px) {
+    .video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="recent"],
+    .video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="studios"],
+    .video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="upcoming"],
+    .video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="stats"] { grid-column: auto; }
+    /* The studios "Metadata ready" rings wrap under the title on phones —
+       left-align the wrapped row so it reads cleanly. */
+    .vcov { align-items: flex-start; }
+}
+
+/* Phone enrichment strip — worker orbs are disabled ≤768px (video-worker-orbs.js)
+   so the 13 accent buttons + the Manage Workers pill render as real elements.
+   Mirror music's treatment (style.css scopes it to #dashboard-page, which never
+   reaches this subpage): an even auto-fit grid of the 46px buttons, with the
+   pill on its own full-width row instead of dangling inline. */
+@media (max-width: 768px) {
+    .video-subpage[data-video-subpage="video-dashboard"] .header-actions {
+        width: 100%;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(46px, 1fr));
+        justify-items: center;
+        align-items: center;
+        gap: 12px 10px;
+    }
+    .video-subpage[data-video-subpage="video-dashboard"] .header-actions .em-manage-btn {
+        grid-column: 1 / -1;
+        width: 100%;
+        margin-left: 0;
+        justify-content: center;
+    }
+}
+
+/* Touch devices get no hover — an enrichment tooltip would pop on tap and sit
+   stuck over the buttons. Music hides its worker tooltips at this width
+   (style.css @900px); same for the video workers. */
+@media (max-width: 900px) {
+    .video-enrich-tooltip { display: none !important; }
+}
+
 /* Dashboard "Recently Added" — a single full-width, horizontally-scrolling row. */
 .video-recent-grid { display: flex; align-items: flex-start; gap: 14px; overflow-x: auto; padding-bottom: 8px; scroll-snap-type: x proximity; }
 .video-recent-grid::-webkit-scrollbar { height: 6px; }
@@ -459,6 +509,13 @@ body[data-side="video"] .dashboard-header-sweep {
     justify-content: center;
     margin: 4px 0;
 }
+/* Phones: the centered no-wrap row (3 selects + Select) overflowed BOTH edges
+   — wrap it into a tidy 2-up grid instead. */
+@media (max-width: 640px) {
+    .video-library-filters { flex-wrap: wrap; gap: 8px; }
+    .video-library-filters .library-source-filter-select { flex: 1 1 calc(50% - 4px); min-width: 0; }
+    .video-library-filters .video-lib-select-btn { flex: 1 1 calc(50% - 4px); }
+}
 /* Resolution chip on a poster card (top-left, above the gradient overlay). */
 .library-artist-card .video-card-badge {
     position: absolute;
@@ -760,10 +817,25 @@ body[data-side="video"] .dashboard-header-sweep {
 .vd-ep--missing .vd-ep-index, .vd-ep--missing .vd-ep-title { opacity: 0.7; }
 
 @media (max-width: 820px) {
-    .vd-bb-content { padding-left: 24px; }
+    .vd-bb-content { padding-left: 24px; padding-right: 24px; }
     .vd-body { padding: 24px 22px 60px; }
     .vd-ep { grid-template-columns: 36px 1fr auto; }
     .vd-ep-thumb { display: none; }
+}
+/* The detail page full-bleeds with -40px margins over the .page padding — but
+   mobile.css shrinks that padding to 16px (<=768) / 12px (<=480), so the fixed
+   -40 overhung the viewport by up to 28px per side (billboard, title, actions
+   all clipped at the right edge). Match the bleed to the real padding. */
+@media (max-width: 768px) {
+    .vd-page { margin-left: -16px; margin-right: -16px; }
+}
+@media (max-width: 480px) {
+    .vd-page { margin-left: -12px; margin-right: -12px; }
+    .vd-bb-content { padding-left: 16px; padding-right: 16px; padding-bottom: 34px; }
+    .vd-billboard { min-height: 62vh; }
+    /* Episode rows: the nowrap runtime chip beside the title squeezed titles
+       into one-word-per-line columns — let the top line wrap instead. */
+    .vd-ep-top { flex-wrap: wrap; row-gap: 2px; }
 }
 
 .video-card--clickable { cursor: pointer; }
@@ -1435,16 +1507,27 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 .vst-more-spinner { display: flex; justify-content: center; padding: 26px 0; }
 .vst-more-spinner[hidden] { display: none; }
 
-@media (max-width: 720px) {
-    .vsr-page, .vp-page, .vst-page { margin-left: -20px; margin-right: -20px; }
-    .vsr-hero { padding: 34px 22px 22px; }
-    .vsr-body, .vp-body, .vst-body { padding-left: 22px; padding-right: 22px; }
-    .vp-hero { flex-direction: column; align-items: center; text-align: center; padding: 104px 22px 24px; }
-    .vst-hero { flex-direction: column; align-items: center; text-align: center; padding: 104px 22px 24px; }
+@media (max-width: 768px) {
+    /* Bleed must MATCH mobile.css's .page side padding (16px at <=768, 12px at
+       <=480) — mobile.css flips at 768, so this block must too (at 721-768 the
+       base -40px bleed was overshooting the 16px padding by 24px per side). */
+    .vsr-page, .vp-page, .vst-page { margin-left: -16px; margin-right: -16px; }
+    .vsr-hero { padding: 34px 18px 22px; }
+    .vsr-body, .vp-body, .vst-body { padding-left: 18px; padding-right: 18px; }
+    .vp-hero { flex-direction: column; align-items: center; text-align: center; padding: 104px 18px 24px; }
+    .vst-hero { flex-direction: column; align-items: center; text-align: center; padding: 104px 18px 24px; }
     .vst-meta { justify-content: center; }
     .vp-meta { justify-content: center; }
     .vsr-grid { grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 16px 14px; }
     .vp-photo-wrap { width: 150px; height: 150px; }
+}
+@media (max-width: 480px) {
+    .vsr-page, .vp-page, .vst-page { margin-left: -12px; margin-right: -12px; }
+    .vsr-body, .vp-body, .vst-body { padding-left: 14px; padding-right: 14px; }
+    .vsr-hero { padding: 28px 14px 20px; }
+    .vsr-hero-title { font-size: 26px; }
+    .vsr-searchbar { height: 50px; border-radius: 13px; }
+    .vsr-grid { grid-template-columns: repeat(auto-fill, minmax(108px, 1fr)); gap: 14px 10px; }
 }
 
 /* ── billboard: Play CTA, crew line, next-episode, season overview ────────── */
@@ -2350,6 +2433,13 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
     .vwlp-head, .vwlp-body { padding-left: 18px; padding-right: 18px; }
     .vwlp-grid { grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 18px 14px; }
 }
+@media (max-width: 640px) {
+    /* Four tabs (Shows/People/Studios/Channels + counts) don't fit one row on a
+       phone — the no-wrap row ran the Channels tab clean off-screen. */
+    .vwlp-tabs { flex-wrap: wrap; }
+    .vwlp-tab { padding: 8px 14px; font-size: 13px; }
+    .vwlp-title { font-size: 28px; }
+}
 
 /* Ensure the show poster box is a positioning context for its .vwl-btn
    (scoped to VIDEO cards so the shared music .library-artist-image is untouched). */
@@ -3052,6 +3142,11 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 
 /* ── small screens ────────────────────────────────────────────────────────── */
 @media (max-width: 640px) {
+    /* The Ignore-List pill floats top-right over the page on desktop, where the
+       hero body hugs the bottom-left. On a phone the (shorter) hero's text can
+       reach the top row, so the pill sat ON the hero title — flow it above the
+       hero instead, still right-aligned. */
+    .vdsc-ignore-btn { position: static; display: flex; width: max-content; margin: 4px 0 10px auto; }
     .vdsc-browse { padding: 13px 13px 15px; margin-bottom: 22px; }
     .vdsc-browse-top { gap: 10px; }
     .vdsc-shelf { margin-bottom: 24px; }
@@ -4118,6 +4213,18 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 /* ── Downloads page — reuses the music .adl-* layout; these are the video-only bits ── */
 .vdpg-wrap { padding: 4px 0 40px; }
 .adl-controls-right { display: flex; align-items: center; gap: 10px; }
+/* Phones: the video page adds History + Blocklist to the controls row, which
+   pushed Retry Failed / Clear Finished clean off-screen — wrap the row. And the
+   fixed-width status column starved the row title down to a few characters:
+   let the row wrap so art+title own the first line and status+actions drop to
+   a second line underneath. */
+@media (max-width: 520px) {
+    .vdpg-wrap .adl-controls-right { flex-wrap: wrap; }
+    .vdpg-card.adl-row { flex-wrap: wrap; }
+    .vdpg-card .adl-row-info { flex: 1 1 200px; }
+    .vdpg-card .adl-row-status { min-width: 0; text-align: left; }
+    .vdpg-card .vdpg-rowact { margin-left: auto; }
+}
 .vdpg-art { font-size: 22px; }                       /* emoji inside the .adl-row-art tile */
 .vdpg-art.vdpg-has-poster { background-size: cover; background-position: center; background-repeat: no-repeat; }
 .vdpg-rowact { flex-shrink: 0; display: flex; align-items: center; gap: 2px; }

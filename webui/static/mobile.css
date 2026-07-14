@@ -1859,8 +1859,11 @@
 
     /* Global touch targets - only standalone/action buttons, not inline.
        Round icon buttons (fixed-size circles) are excluded so the min-height
-       can't stretch them into vertical ellipses. */
-    button:not(.watchlist-card-remove):not(.wishlist-delete-btn):not(.wishlist-delete-album-btn):not(.wishlist-delete-btn-small):not(.wishlist-back-btn):not(.alphabet-btn):not(.filter-btn):not(.playlist-modal-close):not(.notif-bell-btn):not(.helper-float-btn):not(.hero-indicator):not(.discover-blacklist-btn):not(.tool-help-button):not([data-import-page-result-row]):not([data-import-page-inline-action]) {
+       can't stretch them into vertical ellipses. The video dashboard's Studios
+       halves (.vst-half) are excluded because this chain's specificity beats
+       their own min-height: 208px — their content is absolutely positioned, so
+       "winning" here collapses each half to a 38px sliver on phones. */
+    button:not(.watchlist-card-remove):not(.wishlist-delete-btn):not(.wishlist-delete-album-btn):not(.wishlist-delete-btn-small):not(.wishlist-back-btn):not(.alphabet-btn):not(.filter-btn):not(.playlist-modal-close):not(.notif-bell-btn):not(.helper-float-btn):not(.hero-indicator):not(.discover-blacklist-btn):not(.tool-help-button):not(.vst-half):not([data-import-page-result-row]):not([data-import-page-inline-action]) {
         min-height: 38px;
     }
 
@@ -3175,6 +3178,22 @@
         font-size: 16px;
     }
 
+    /* Server Activity button — match the bell/helper row (it kept its desktop
+       44px @ bottom 24 / right 136, so it floated bigger and higher than the
+       other two on phones). Same size, same baseline, next slot leftward. */
+    .activity-float-btn {
+        bottom: 16px;
+        right: 108px;
+        width: 38px;
+        height: 38px;
+    }
+
+    .activity-float-badge {
+        font-size: 9px;
+        min-width: 14px;
+        height: 14px;
+    }
+
     /* Global search bar */
     .gsearch-bar {
         width: calc(100vw - 160px);
@@ -3228,6 +3247,13 @@
     .helper-float-btn {
         bottom: 12px;
         right: 10px;
+        width: 34px;
+        height: 34px;
+    }
+
+    .activity-float-btn {
+        bottom: 12px;
+        right: 96px;
         width: 34px;
         height: 34px;
     }

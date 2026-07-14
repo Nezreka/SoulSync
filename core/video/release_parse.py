@@ -59,11 +59,15 @@ _AUDIO = [
 ]
 
 _RANGE = re.compile(r"\bS(\d{1,2})\s*[-–]\s*S?(\d{1,2})\b", re.I)   # S01-S05
-_SXXEXX = re.compile(r"\bS(\d{1,2})[\s.]?E(\d{1,3})\b", re.I)        # S02E03
-_SXX = re.compile(r"\bS(\d{1,2})\b", re.I)                          # S02 (pack)
+# Season allows 3 digits — long-running dailies really do reach S277 (House Hunters).
+_SXXEXX = re.compile(r"\bS(\d{1,3})[\s.]?E(\d{1,3})\b", re.I)        # S02E03 / S277E05
+_SXX = re.compile(r"\bS(\d{1,3})\b", re.I)                          # S02 (pack)
 _SEASON_WORD = re.compile(r"\bseason[\s.]?(\d{1,2})\b", re.I)        # Season 2
 _COMPLETE = re.compile(r"\b(complete|collection|all\s?seasons)\b", re.I)
 _GROUP = re.compile(r"-([A-Za-z0-9]{2,})\s*$")
+# Daily/date-named releases — 'The.Daily.Show.2026.07.08.Guest.1080p...' (Sonarr's
+# daily-series naming). Dots/spaces/dashes between the parts; month/day validated.
+_AIR_DATE = re.compile(r"\b((?:19|20)\d{2})[ ._-](0[1-9]|1[0-2])[ ._-](0[1-9]|[12]\d|3[01])\b")
 
 
 def _first(table, text) -> Any:
@@ -97,12 +101,16 @@ def parse_release(title: Any) -> dict:
         "season": None,
         "season_end": None,
         "episode": None,
+        "air_date": None,
         "is_season_pack": False,
         "is_series_pack": False,
     }
     g = _GROUP.search(t)
     if g:
         out["group"] = g.group(1)
+    ad = _AIR_DATE.search(t)
+    if ad:
+        out["air_date"] = ad.group(1) + "-" + ad.group(2) + "-" + ad.group(3)
 
     rng = _RANGE.search(t)
     m = _SXXEXX.search(t)
@@ -136,7 +144,7 @@ _META_BOUNDARY = re.compile(
     r"\b(?:2160p|1080[pi]|720[pi]|480[pi]|576[pi]|4k|uhd"
     r"|blu-?ray|bdrip|brrip|web-?dl|web-?rip|web|hdtv|dvdrip|dvd|remux|hdcam|cam|telesync|hdts"
     r"|x264|x265|h\.?264|h\.?265|hevc|avc|av1"
-    r"|s\d{1,2}(?:e\d{1,3})?|season)\b", re.I)
+    r"|s\d{1,3}(?:e\d{1,3})?|season)\b", re.I)
 _ARTICLE = re.compile(r"^(?:the|a|an)\s+")
 # Trailing words that are an edition of the SAME film, not a different title.
 _EDITION_TOKENS = frozenset({
@@ -152,9 +160,12 @@ def _spaces(s: Any) -> str:
 
 def extract_title(release_name: Any) -> str:
     """The title portion of a release name — everything before the release year (the
-    LAST year token, so 'Blade Runner 2049 2017 1080p' keeps '2049'), or before the
-    first quality/scope token when there's no trailing year. Returns '' when the title
-    can't be isolated (e.g. a numeric-only title like '2012' with no release year)."""
+    LAST year token, so 'Blade Runner 2049 2017 1080p' keeps '2049') or before the
+    first quality/scope token, whichever comes FIRST. The scope token matters for
+    date-named daily releases ('Show.S277E05.2026.07.08...'): the date's year sits
+    AFTER the SxxExx, and cutting only at the year would leave numbering junk in the
+    title. Returns '' when the title can't be isolated (e.g. a numeric-only title
+    like '2012' with no release year)."""
     t = str(release_name or "").strip()
     if not t:
         return ""
@@ -162,9 +173,11 @@ def extract_title(release_name: Any) -> str:
     years = list(_YEAR_TOKEN.finditer(t))
     if years and _spaces(t[:years[-1].start()]):
         cut = years[-1].start()          # cut at the release year (keeps years IN the title)
+    m = _META_BOUNDARY.search(t)         # first quality/scope token wins if it comes earlier
+    if m and _spaces(t[:m.start()]) and (cut is None or m.start() < cut):
+        cut = m.start()
     if cut is None:
-        m = _META_BOUNDARY.search(t)     # no usable year → cut at the first quality/scope token
-        cut = m.start() if m else len(t)
+        cut = len(t)
     return _spaces(t[:cut])
 
 
@@ -194,24 +207,38 @@ def acceptable_titles(want_title: Any) -> set:
 def titles_match(release_name: Any, want_title: Any) -> bool:
     """True when a release's parsed title matches ANY acceptable title (primary +
     aliases). Exact after normalization, tolerating only trailing edition words
-    ('Paradox Extended' for 'Paradox'). An unknown/unisolable title passes (the year
-    gate still applies) so a numeric title like '2012' is never falsely rejected — we
-    only ever REJECT on a confident mismatch against every acceptable title, never
-    guess a match."""
+    ('Paradox Extended' for 'Paradox') and squeezed spacing ('90DayFiance').
+
+    Soulseek results are share PATHS, not scene one-liners — the show name often
+    lives in a parent folder ('TV/90 Day Fiancé/Season 12/ep.mkv'), so every path
+    SEGMENT is tried as a title candidate, not just the whole string. An
+    unknown/unisolable title passes (the year gate still applies) so a numeric
+    title like '2012' is never falsely rejected — we only ever REJECT on a
+    confident mismatch against every acceptable title, never guess a match."""
     wants = acceptable_titles(want_title)
     if not wants:
         return True
-    got = normalize_title(extract_title(release_name))
-    if not got:
-        return True
-    for want in wants:
-        if got == want:
-            return True
-        if got.startswith(want + " "):
-            rest = got[len(want):].split()
-            if rest and all(tok in _EDITION_TOKENS for tok in rest):
+    raw = str(release_name or "")
+    cands = [raw]
+    segs = [s for s in re.split(r"[\\/]+", raw) if s.strip()]
+    if len(segs) > 1:
+        cands += segs
+    saw_any = False
+    for cand in cands:
+        got = normalize_title(extract_title(cand))
+        if not got:
+            continue
+        saw_any = True
+        for want in wants:
+            if got == want:
                 return True
-    return False
+            if got.replace(" ", "") == want.replace(" ", ""):
+                return True                              # '90DayFiance' == '90 day fiance'
+            if got.startswith(want + " "):
+                rest = got[len(want):].split()
+                if rest and all(tok in _EDITION_TOKENS for tok in rest):
+                    return True
+    return not saw_any
 
 
 __all__ = ["parse_release", "extract_title", "normalize_title",

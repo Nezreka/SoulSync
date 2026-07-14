@@ -71106,7 +71106,7 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
 .sact-empty-ic { font-size: 40px; margin-bottom: 12px; }
 .sact-empty-t { font-size: 15px; font-weight: 700; color: rgba(255,255,255,0.8); }
 .sact-empty-s { font-size: 12.5px; margin-top: 6px; color: rgba(255,255,255,0.45); line-height: 1.5; }
-@media (max-width: 560px) { .sact-drawer { width: 100vw; } .activity-float-btn { right: 136px; } }
+@media (max-width: 560px) { .sact-drawer { width: 100vw; } }
 @media (prefers-reduced-motion: reduce) { .activity-float-btn.activity-live, .sact-live-dot, .sact-st-buffering .sact-prog-fill { animation: none; } }
 
 /* Server Activity — tabs + history rows (Phase 2) */
