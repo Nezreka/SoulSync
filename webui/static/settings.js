@@ -83,6 +83,12 @@ function debouncedAutoSaveSettings() {
     // fields on load — those aren't user edits and must not trigger a full
     // save (which re-initializes every backend service client).
     if (window._suppressSettingsAutoSave) return;
+    // ISOLATION: the video side reuses this shared settings page, so editing a
+    // VIDEO field (TMDB key, region, autoplay…) would otherwise fire this MUSIC
+    // auto-save — which reads the server toggle from the DOM and would persist
+    // active_media_server, letting the video side change the music server. Video
+    // settings save themselves via /api/video/*; never auto-save music here.
+    if (document.body.getAttribute('data-side') === 'video') return;
     // #879: never auto-save while the last settings load failed — the form is
     // showing defaults, not the real config, so saving would wipe it.
     if (window._settingsLoadFailed) return;
@@ -1366,6 +1372,10 @@ async function loadSettingsData() {
 
         // Set active server and toggle visibility
         const activeServer = settings.active_media_server || 'plex';
+        // Remember the persisted music server so a save from the VIDEO side keeps
+        // it unchanged (the toggle there is for opening a config panel, not picking
+        // the music server).
+        window._persistedActiveServer = activeServer;
         toggleServer(activeServer);
 
         // Load Plex music libraries if Plex is the active server
@@ -2241,21 +2251,20 @@ function updateDownloadSourceUI() {
         prowlarrRedirect.style.display = showProwlarr ? 'block' : 'none';
     }
 
-    // Indexers & Downloaders section: only relevant when a torrent or usenet
-    // source is actually selected. Hide the whole intro + Prowlarr/Torrent/Usenet
-    // tiles otherwise (Soulseek/HiFi-only users never see them). The two client
-    // tiles are gated individually on their own source. Selection-based (not the
-    // hybrid expand state) — the tiles are full config sections, not accordion
-    // panels. Tab-gated so it never leaks onto another tab.
+    // Indexers & Downloaders: torrent/usenet setup (Prowlarr + the Torrent and
+    // Usenet client tiles) is shared config — keep it always reachable on the
+    // Downloads tab for BOTH the music and video sides, like the Advanced /
+    // Appearance tabs. (It used to be gated on an active torrent/usenet source,
+    // which hid it from anyone whose source was something else — and from the video
+    // side entirely, whose source lives on a separate dropdown.) Only tab-gated so
+    // it never leaks onto another tab.
     const onDownloadsTab = document.querySelector('.stg-tab.active')?.dataset.tab === 'downloads';
-    const torrentActive = activeSources.has('torrent');
-    const usenetActive = activeSources.has('usenet');
     const indSection = document.getElementById('indexers-downloaders-section');
-    if (indSection) indSection.style.display = (onDownloadsTab && (torrentActive || usenetActive)) ? '' : 'none';
+    if (indSection) indSection.style.display = onDownloadsTab ? '' : 'none';
     const torrentTile = document.getElementById('torrent-tile');
-    if (torrentTile) torrentTile.style.display = torrentActive ? '' : 'none';
+    if (torrentTile) torrentTile.style.display = '';
     const usenetTile = document.getElementById('usenet-tile');
-    if (usenetTile) usenetTile.style.display = usenetActive ? '' : 'none';
+    if (usenetTile) usenetTile.style.display = '';
 
     // Quality profile is now a GLOBAL system — the same ranked-target list
     // drives every source (Soulseek, Tidal, Qobuz, HiFi, Deezer, …), so it is
@@ -4236,6 +4245,14 @@ async function saveSettings(quiet = false) {
         activeServer = 'navidrome';
     } else if (document.getElementById('soulsync-toggle')?.classList.contains('active')) {
         activeServer = 'soulsync';
+    }
+    // ISOLATION: this page is reused on the video side. Connection details (Plex/
+    // Jellyfin creds) ARE shared and save fine — but the video side must NEVER
+    // change the MUSIC active server. So when saving from the video side, keep
+    // active_media_server exactly as it was persisted (the toggle there only opens
+    // a config panel; it does not pick the music server).
+    if (document.body.getAttribute('data-side') === 'video' && window._persistedActiveServer) {
+        activeServer = window._persistedActiveServer;
     }
 
     const metadataSourceSelect = document.getElementById('metadata-fallback-source');
