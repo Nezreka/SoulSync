@@ -537,6 +537,10 @@ def album_process(runtime: ImportRouteRuntime, data: Dict[str, Any]) -> tuple[Di
             )
             if isinstance(context, dict):
                 context['is_local_import'] = True  # user's own file, not an slskd transfer (#804)
+                # Manual import = the user explicitly matched this exact file to this
+                # track, so the quality profile has no veto here (#1017). AcoustID,
+                # integrity and silence guards still run.
+                context['_skip_quarantine_check'] = ['quality', 'bit_depth']
 
             try:
                 runtime.post_process_matched_download(context_key, context, file_path)
@@ -640,6 +644,10 @@ def process_single_import_file(runtime: ImportRouteRuntime, file_info: Dict[str,
         )
         context = runtime.normalize_import_context(resolved["context"])
         context['is_local_import'] = True  # user's own file, not an slskd transfer (#804)
+        # Manual import = the user explicitly matched this exact file to this
+        # track, so the quality profile has no veto here (#1017). AcoustID,
+        # integrity and silence guards still run.
+        context['_skip_quarantine_check'] = ['quality', 'bit_depth']
         artist_data = runtime.get_import_context_artist(context)
         track_data = runtime.get_import_track_info(context)
         final_title = track_data.get("name", title)
