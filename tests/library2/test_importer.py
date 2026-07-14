@@ -54,6 +54,76 @@ def test_import_counts(legacy_db):
     assert stats["linked_duplicates"] == 1
 
 
+def test_import_preloads_row_lookup_maps_instead_of_n_plus_one_selects(legacy_db):
+    """The large-library contract: entity writes remain ordered, but lookup
+    SELECTs must not scale once per legacy album/track/wishlist row."""
+    conn = sqlite3.connect(legacy_db.path)
+    for index in range(20, 50):
+        conn.execute(
+            "INSERT INTO albums VALUES(?,?,?,2024,NULL,NULL,1,NULL)",
+            (index, 1, f"Scale Album {index}"),
+        )
+        conn.execute(
+            "INSERT INTO tracks VALUES(?,?,1,?,1,180000,?,1000,5000,NULL)",
+            (index + 1000, index, f"Scale Track {index}", f"/m/{index}.flac"),
+        )
+    conn.execute("""
+        CREATE TABLE wishlist_tracks(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            spotify_track_id TEXT NOT NULL,
+            spotify_data TEXT NOT NULL,
+            source_type TEXT DEFAULT 'manual',
+            date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    for index in range(30):
+        payload = {
+            "id": f"wishlist-track-{index}",
+            "name": f"Wishlist Track {index}",
+            "artists": [{"id": "wishlist-artist", "name": "Wishlist Artist"}],
+            "album": {
+                "id": f"wishlist-album-{index}",
+                "name": f"Wishlist Album {index}",
+                "album_type": "single",
+                "total_tracks": 1,
+                "artists": [{"id": "wishlist-artist", "name": "Wishlist Artist"}],
+            },
+        }
+        conn.execute(
+            "INSERT INTO wishlist_tracks(spotify_track_id, spotify_data) VALUES(?,?)",
+            (payload["id"], json.dumps(payload)),
+        )
+    conn.commit()
+    conn.close()
+
+    statements = []
+    original_get_connection = legacy_db._get_connection
+
+    def traced_connection():
+        traced = original_get_connection()
+        traced.set_trace_callback(statements.append)
+        return traced
+
+    legacy_db._get_connection = traced_connection
+    stats = import_legacy_library(legacy_db)
+    normalized = [" ".join(statement.upper().split()) for statement in statements]
+
+    assert stats["albums"] == 32
+    assert stats["tracks"] == 33
+    assert stats["wishlist_tracks"] == 30
+    banned_per_row_reads = (
+        "SELECT COUNT(*) AS C FROM TRACKS WHERE ALBUM_ID=",
+        "SELECT ID FROM LIB2_TRACK_FILES WHERE TRACK_ID=",  # paired with AND PATH below
+        "SELECT ID FROM LIB2_ALBUMS WHERE SPOTIFY_ID=",
+        "SELECT ID FROM LIB2_TRACKS WHERE ALBUM_ID=",
+    )
+    for banned in banned_per_row_reads:
+        matches = [statement for statement in normalized if banned in statement]
+        if "LIB2_TRACK_FILES" in banned:
+            matches = [statement for statement in matches if "AND PATH=" in statement]
+        assert not matches, banned
+
+
 def test_album_type_detection(imported_conn):
     rows = {r["title"]: r["album_type"] for r in
             _q(imported_conn, "SELECT title, album_type FROM lib2_albums")}

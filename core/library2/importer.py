@@ -185,7 +185,28 @@ class _ArtistResolver:
         return new_id
 
 
-def _claim_discography_album(cursor, artist_id: int, title: str, album_type: str) -> Optional[int]:
+def _discography_album_index(cursor) -> Dict[Tuple[int, str], List[Dict[str, Any]]]:
+    """Preload claimable provider-only releases for O(1) legacy matching."""
+    rows = cursor.execute(
+        """SELECT id, primary_artist_id, title, album_type FROM lib2_albums
+            WHERE origin='discography' AND legacy_album_id IS NULL"""
+    ).fetchall()
+    index: Dict[Tuple[int, str], List[Dict[str, Any]]] = {}
+    for row in rows:
+        index.setdefault(
+            (int(row["primary_artist_id"]), normalize_name(row["title"])), []
+        ).append(dict(row))
+    return index
+
+
+def _claim_discography_album(
+    cursor,
+    artist_id: int,
+    title: str,
+    album_type: str,
+    *,
+    index: Optional[Dict[Tuple[int, str], List[Dict[str, Any]]]] = None,
+) -> Optional[int]:
     """Find a provider-only (origin='discography') row matching a legacy album.
 
     A discography expansion may have created the release before the user's files
@@ -196,20 +217,20 @@ def _claim_discography_album(cursor, artist_id: int, title: str, album_type: str
     """
     key = normalize_name(title)
     want_single = (album_type or "").lower() == "single"
-    cursor.execute(
-        """SELECT id, title, album_type FROM lib2_albums
-            WHERE primary_artist_id=? AND origin='discography' AND legacy_album_id IS NULL""",
-        (artist_id,),
+    if index is None:
+        index = _discography_album_index(cursor)
+    candidates = index.get((int(artist_id), key), [])
+    if not candidates:
+        return None
+    selected = next(
+        (
+            row for row in candidates
+            if ((row["album_type"] or "").lower() == "single") == want_single
+        ),
+        candidates[0],
     )
-    fallback: Optional[int] = None
-    for row in cursor.fetchall():
-        if normalize_name(row["title"]) != key:
-            continue
-        if ((row["album_type"] or "").lower() == "single") == want_single:
-            return row["id"]
-        if fallback is None:
-            fallback = row["id"]
-    return fallback
+    candidates.remove(selected)
+    return int(selected["id"])
 
 
 def _normalize_genres(raw: Any) -> str:
@@ -288,6 +309,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
         default_profile_id = default_quality_profile_id(conn)
         resolver = _ArtistResolver(cursor, default_profile_id)
         resolver.seed_existing()
+        discography_albums = _discography_album_index(cursor)
 
         # --- Artists -------------------------------------------------------
         cursor.execute("SELECT * FROM artists")
@@ -317,13 +339,18 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
 
         cursor.execute("SELECT * FROM albums")
         album_rows = cursor.fetchall()
+        actual_track_counts = {
+            int(row["album_id"]): int(row["count"])
+            for row in cursor.execute(
+                "SELECT album_id, COUNT(*) AS count FROM tracks GROUP BY album_id"
+            ).fetchall()
+        }
         for i, row in enumerate(album_rows):
             lib2_artist = resolver.get_legacy(row["artist_id"])
             if lib2_artist is None:
                 continue  # orphan album with no artist; skip
             # actual track rows for single-detection
-            cursor.execute("SELECT COUNT(*) AS c FROM tracks WHERE album_id=?", (row["id"],))
-            actual = cursor.fetchone()["c"]
+            actual = actual_track_counts.get(int(row["id"]), 0)
             track_count = _pick(row, "track_count")
             album_type = _normalize_album_type(
                 _pick(row, "album_type", "release_type", "type"),
@@ -346,7 +373,12 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 # A discography expansion may already have created a provider-only
                 # row for this release — claim it instead of inserting a duplicate.
                 existing = _claim_discography_album(
-                    cursor, lib2_artist, row["title"], album_type)
+                    cursor,
+                    lib2_artist,
+                    row["title"],
+                    album_type,
+                    index=discography_albums,
+                )
                 if existing is not None:
                     album_map[row["id"]] = existing
             if existing is not None:
@@ -384,6 +416,13 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
         cursor.execute("SELECT id, legacy_track_id FROM lib2_tracks WHERE legacy_track_id IS NOT NULL")
         for r in cursor.fetchall():
             track_map[r["legacy_track_id"]] = r["id"]
+        existing_files = {
+            (int(row["track_id"]), str(row["path"]))
+            for row in cursor.execute(
+                "SELECT track_id, path FROM lib2_track_files "
+                "WHERE track_id IS NOT NULL AND path IS NOT NULL"
+            ).fetchall()
+        }
 
         cursor.execute("SELECT * FROM tracks")
         track_rows = cursor.fetchall()
@@ -442,19 +481,19 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                     pos += 1
             # Reset this track's junction rows (idempotent re-run) then insert.
             cursor.execute("DELETE FROM lib2_track_artists WHERE track_id=?", (track_id,))
-            for aid, role, position in credits:
-                cursor.execute(
+            if credits:
+                cursor.executemany(
                     "INSERT OR IGNORE INTO lib2_track_artists(track_id, artist_id, role, position) "
-                    "VALUES(?,?,?,?)", (track_id, aid, role, position),
+                    "VALUES(?,?,?,?)",
+                    [(track_id, aid, role, position) for aid, role, position in credits],
                 )
 
             # Track file from legacy file_path.
             file_path = _pick(row, "file_path")
             if file_path:
                 fmt = file_path.rsplit(".", 1)[-1].lower() if "." in file_path else None
-                cursor.execute("SELECT id FROM lib2_track_files WHERE track_id=? AND path=?",
-                               (track_id, file_path))
-                if cursor.fetchone() is None:
+                file_key = (int(track_id), str(file_path))
+                if file_key not in existing_files:
                     cursor.execute(
                         "INSERT INTO lib2_track_files(track_id, path, size, bitrate, sample_rate, "
                         "bit_depth, format, verification_status, import_status) "
@@ -463,6 +502,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                          _pick(row, "sample_rate"), _pick(row, "bit_depth"), fmt,
                          _pick(row, "verification_status")),
                     )
+                    existing_files.add(file_key)
                     stats["files"] += 1
             if progress and i % 200 == 0:
                 progress("tracks", i, len(track_rows))
@@ -629,6 +669,26 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
 
     created_or_updated = 0
     assigned_profiles: Dict[Tuple[int, str], Tuple[int, int]] = {}
+    album_by_spotify: Dict[Tuple[int, str], int] = {}
+    album_by_identity: Dict[Tuple[int, str, str], int] = {}
+    for album_row in cursor.execute(
+        "SELECT id, primary_artist_id, title, album_type, spotify_id FROM lib2_albums"
+    ).fetchall():
+        album_id = int(album_row["id"])
+        artist_id = int(album_row["primary_artist_id"])
+        if album_row["spotify_id"]:
+            album_by_spotify[(artist_id, str(album_row["spotify_id"]))] = album_id
+        album_by_identity[
+            (artist_id, normalize_name(album_row["title"]), album_row["album_type"])
+        ] = album_id
+    track_by_spotify = {
+        (int(track_row["album_id"]), str(track_row["spotify_id"])): int(track_row["id"])
+        for track_row in cursor.execute(
+            "SELECT id, album_id, spotify_id FROM lib2_tracks "
+            "WHERE spotify_id IS NOT NULL AND spotify_id<>''"
+        ).fetchall()
+    }
+    albums_to_recount: Set[int] = set()
 
     for row in rows:
         try:
@@ -678,25 +738,20 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
             (primary_spotify, artist_id),
         )
 
-        album_row = None
-        if album_spotify:
-            album_row = cursor.execute(
-                "SELECT id FROM lib2_albums WHERE spotify_id=? AND primary_artist_id=?",
-                (album_spotify, artist_id),
-            ).fetchone()
-        if album_row is None:
-            album_row = cursor.execute(
-                """SELECT id FROM lib2_albums
-                   WHERE primary_artist_id=? AND lower(title)=lower(?) AND album_type=?""",
-                (artist_id, album_title, album_type),
-            ).fetchone()
+        album_id = (
+            album_by_spotify.get((artist_id, str(album_spotify)))
+            if album_spotify else None
+        )
+        if album_id is None:
+            album_id = album_by_identity.get(
+                (artist_id, normalize_name(album_title), album_type)
+            )
 
         album_fields = (
             artist_id, album_title, album_type, release_date, year,
             album_spotify, album_image, total_tracks, total_tracks,
         )
-        if album_row:
-            album_id = album_row["id"]
+        if album_id is not None:
             cursor.execute(
                 """
                 UPDATE lib2_albums
@@ -722,16 +777,18 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
                 (*album_fields, default_profile_id),
             )
             album_id = cursor.lastrowid
+        album_by_identity[
+            (artist_id, normalize_name(album_title), album_type)
+        ] = album_id
+        if album_spotify:
+            album_by_spotify[(artist_id, str(album_spotify))] = album_id
         cursor.execute(
             "INSERT OR IGNORE INTO lib2_album_artists(album_id, artist_id, role) "
             "VALUES(?,?, 'primary')",
                 (album_id, artist_id),
         )
 
-        existing_track = cursor.execute(
-            "SELECT id FROM lib2_tracks WHERE album_id=? AND spotify_id=?",
-            (album_id, track_id),
-        ).fetchone()
+        existing_track_id = track_by_spotify.get((int(album_id), track_id))
         entity_key = (album_id, track_id)
         previous_assignment = assigned_profiles.get(entity_key)
         if previous_assignment and previous_assignment[0] != quality_profile_id:
@@ -745,8 +802,8 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
         track_number = payload.get("track_number")
         disc_number = payload.get("disc_number") or 1
         duration = payload.get("duration_ms")
-        if existing_track:
-            lib2_track_id = existing_track["id"]
+        if existing_track_id is not None:
+            lib2_track_id = existing_track_id
             cursor.execute(
                 """
                 UPDATE lib2_tracks
@@ -770,6 +827,7 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
                  quality_profile_id),
             )
             lib2_track_id = cursor.lastrowid
+            track_by_spotify[(int(album_id), track_id)] = lib2_track_id
             created_or_updated += 1
 
         # Presence in the admin Wishlist is concrete track-level wanted
@@ -792,28 +850,7 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
         # Discography rows are excluded: their expected_track_count came from the
         # provider catalog, and clamping it here would make the later tracklist
         # materialization truncate the release to the wishlisted tracks.
-        cursor.execute(
-            """
-            UPDATE lib2_albums
-               SET track_count = (
-                       SELECT COUNT(*) FROM lib2_tracks WHERE album_id = ?
-                   ),
-                   expected_track_count = (
-                       SELECT COUNT(*) FROM lib2_tracks WHERE album_id = ?
-                   ),
-                   updated_at = CURRENT_TIMESTAMP
-             WHERE id = ?
-               AND legacy_album_id IS NULL
-               AND COALESCE(origin, 'library') <> 'discography'
-               AND NOT EXISTS (
-                   SELECT 1
-                     FROM lib2_tracks t
-                     JOIN lib2_track_files tf ON tf.track_id = t.id
-                    WHERE t.album_id = ?
-               )
-            """,
-            (album_id, album_id, album_id, album_id),
-        )
+        albums_to_recount.add(int(album_id))
 
         cursor.execute("DELETE FROM lib2_track_artists WHERE track_id=?", (lib2_track_id,))
         linked_artists: Set[int] = set()
@@ -839,6 +876,30 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
                 "VALUES(?,?,?,?)",
                 (lib2_track_id, aid, "primary" if pos == 0 else "featured", pos),
             )
+
+    for album_id in albums_to_recount:
+        cursor.execute(
+            """
+            UPDATE lib2_albums
+               SET track_count = (
+                       SELECT COUNT(*) FROM lib2_tracks WHERE album_id = ?
+                   ),
+                   expected_track_count = (
+                       SELECT COUNT(*) FROM lib2_tracks WHERE album_id = ?
+                   ),
+                   updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?
+               AND legacy_album_id IS NULL
+               AND COALESCE(origin, 'library') <> 'discography'
+               AND NOT EXISTS (
+                   SELECT 1
+                     FROM lib2_tracks t
+                     JOIN lib2_track_files tf ON tf.track_id = t.id
+                    WHERE t.album_id = ?
+               )
+            """,
+            (album_id, album_id, album_id, album_id),
+        )
 
     return created_or_updated
 

@@ -1507,11 +1507,17 @@ implementiert und größtenteils solide.
   bleibt höher priorisiert; nur fehlende oder stale IDs fallen auf den
   bestehenden Legacy-Namensmatcher zurück. Damit verschwinden falsche Album-/
   Compilation-Zuordnungen durch Titelvarianten, ohne einen zweiten Matcher.
-- **A5 — Importer-Skalierung.** Der Importer arbeitet row-by-row mit vielen
+- ~~**A5 — Importer-Skalierung.**~~ Der Importer arbeitete row-by-row mit vielen
   Einzel-SELECTs. Für die 285-Track-Referenzbibliothek egal; für
-  100k-Track-Bibliotheken wären es Minuten im Write-Lock. Für Fremdnutzer:
-  `executemany`-Batches, vorgeladene Count-Maps, Progress-Callback behalten.
-  **Weiterhin offen.**
+  100k-Track-Bibliotheken wären es Minuten im Write-Lock. **Umgesetzt
+  2026-07-14:** Legacy-Album-Trackcounts, claimbare Discography-Releases,
+  bestehende Track-Files sowie Wishlist-Album-/Track-Identitäten werden je
+  Import einmal vorgeladen. Wishlist-Counts werden einmal pro betroffenem
+  Album statt pro Row aktualisiert; Track-Credits verwenden `executemany`.
+  Der Instrumentierungstest mit 63 Legacy-Entities plus 30 Wishlist-Rows
+  verbietet die alten per-row-SELECT-Signaturen. Notwendige ID-/Trigger-
+  abhängige Writes bleiben geordnet in derselben Transaktion; Progress,
+  Reset-Reconciliation, Rules/Provenance und Projektionen sind unverändert.
 - **A6 — Legacy- vs. lib2-Datenbasis der Repair-Jobs explizit machen.** Die
   per-Artist gescopten Jobs (Gap-Fill, Tag-Consistency, Library-Retag)
   scannen Legacy-Tabellen. Solange der Legacy-Import die Quelle ist,
@@ -1919,7 +1925,15 @@ verändert; daher waren Frontend-Typecheck/Vitest/Build nicht erforderlich.
     12/A5 — Importer-Skalierung messen und die nachgewiesenen N+1-Hotspots mit
     vorgeladenen Maps/Batches reduzieren, ohne Progress, Reset-Reconciliation
     oder die zentrale Importsemantik zu duplizieren.
-12. **Importer-Skalierung** für sehr große Libraries (A5).
+12. ~~**Importer-Skalierung** für sehr große Libraries (A5).~~ **Abgeschlossen
+    2026-07-14:** Count-/Discography-/File-/Wishlist-Maps ersetzen die
+    nachgewiesenen N+1-Reads, Credit-Writes sind gebündelt und Album-Recounts
+    dedupliziert. Ein SQL-Trace-Regressionstest pinnt die entfernten Query-
+    Muster. 86 gezielte Importer-/Monitor-Rule-/Wanted-/Edition-/Stable-ID-/
+    Identity-/Override-/Query-Tests plus Ruff sind grün. **Nächster logischer
+    Schritt:** Roadmap-Punkt 13/A6 — Repair-Jobs deklarativ nach Legacy- bzw.
+    lib2-Datenbasis kennzeichnen und diese Basis in API/UI sichtbar machen,
+    bevor einzelne Jobs migriert werden.
 13. **Legacy- vs. lib2-Datenbasis der Repair-Jobs** explizit machen (A6).
 14. **Playlists** (Phase E, bewusst zuletzt).
 15. **Browser-Klick-Verifikation** in Docker für Phase-C/D-Flows, die nur
