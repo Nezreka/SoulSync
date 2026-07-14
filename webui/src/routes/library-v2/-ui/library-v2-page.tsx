@@ -964,13 +964,14 @@ function DeleteConfirmModal({
 /** Correct effective release metadata without rewriting provider baselines. */
 type EditableAlbumMetadata = Pick<
   LibraryV2AlbumSummary | LibraryV2AlbumDetail,
-  'id' | 'title' | 'year' | 'album_type' | 'user_overrides'
+  'id' | 'title' | 'year' | 'album_type' | 'release_date' | 'user_overrides'
 >;
 
 function EditAlbumModal({ album, onClose }: { album: EditableAlbumMetadata; onClose: () => void }) {
   const queryClient = useQueryClient();
   const [title, setTitle] = useState(album.title);
   const [year, setYear] = useState(album.year === null ? '' : String(album.year));
+  const [releaseDate, setReleaseDate] = useState(album.release_date ?? '');
   const [albumType, setAlbumType] = useState<LibraryV2AlbumType>(
     (LIBRARY_V2_ALBUM_TYPES as readonly string[]).includes(album.album_type)
       ? (album.album_type as LibraryV2AlbumType)
@@ -980,11 +981,15 @@ function EditAlbumModal({ album, onClose }: { album: EditableAlbumMetadata; onCl
   const [error, setError] = useState<string | null>(null);
   const normalizedTitle = title.trim();
   const normalizedYear = year.trim() === '' ? null : Number(year);
+  const normalizedReleaseDate = releaseDate.trim();
   const values: Record<string, unknown> = {};
   if (normalizedTitle !== album.title) values.title = normalizedTitle;
   if (normalizedYear !== album.year) values.year = normalizedYear;
   if (albumType !== album.album_type) values.album_type = albumType;
-  const resettable = ['title', 'year', 'album_type'].filter(
+  if (normalizedReleaseDate !== (album.release_date ?? '')) {
+    values.release_date = normalizedReleaseDate || null;
+  }
+  const resettable = ['title', 'year', 'album_type', 'release_date'].filter(
     (field) => field in album.user_overrides,
   );
 
@@ -1024,6 +1029,18 @@ function EditAlbumModal({ album, onClose }: { album: EditableAlbumMetadata; onCl
           value={year}
           disabled={busy}
           onChange={(event) => setYear(event.target.value)}
+        />
+      </div>
+      <div className={styles.editRow}>
+        <label htmlFor="lib2-album-release-date">Release date</label>
+        <input
+          id="lib2-album-release-date"
+          className={styles.searchInput}
+          type="text"
+          placeholder="YYYY-MM-DD"
+          value={releaseDate}
+          disabled={busy}
+          onChange={(event) => setReleaseDate(event.target.value)}
         />
       </div>
       <div className={styles.editRow}>
@@ -1086,19 +1103,24 @@ function EditArtistModal({
   const queryClient = useQueryClient();
   const [name, setName] = useState(artist.name);
   const [genres, setGenres] = useState(artist.genres.join(', '));
+  const [summary, setSummary] = useState(artist.summary ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const normalizedName = name.trim();
+  const normalizedSummary = summary.trim();
   const normalizedGenres = genres
     .split(',')
     .map((genre) => genre.trim())
     .filter(Boolean);
   const values: Record<string, unknown> = {};
   if (normalizedName !== artist.name) values.name = normalizedName;
+  if (normalizedSummary !== (artist.summary ?? '')) values.summary = normalizedSummary || null;
   if (normalizedGenres.join('\u0000') !== artist.genres.join('\u0000')) {
     values.genres = normalizedGenres;
   }
-  const resettable = ['name', 'genres'].filter((field) => field in artist.user_overrides);
+  const resettable = ['name', 'genres', 'summary'].filter(
+    (field) => field in artist.user_overrides,
+  );
 
   async function save(valuesToSet: Record<string, unknown>, clear: string[] = []) {
     setBusy(true);
@@ -1134,6 +1156,18 @@ function EditArtistModal({
           disabled={busy}
           placeholder="Pop, Soul"
           onChange={(event) => setGenres(event.target.value)}
+        />
+      </div>
+      <div className={styles.editRow}>
+        <label htmlFor="lib2-artist-summary">Biography</label>
+        <textarea
+          id="lib2-artist-summary"
+          className={styles.searchInput}
+          rows={4}
+          value={summary}
+          disabled={busy}
+          placeholder="Short biography / summary"
+          onChange={(event) => setSummary(event.target.value)}
         />
       </div>
       {error ? <div className={styles.searchError}>{error}</div> : null}
