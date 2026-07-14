@@ -2261,7 +2261,16 @@ bekannte Main-Chunk-Hinweis). **Logischer nächster Schritt:** P2-06 als kleinst
     zentrale Library-v2-Query. Ein Komponenten-Vertragstest beweist
     Failure→Retry→Success. **Nächste Slice:** Import-Polling muss bei
     ausgeschöpftem Zeitbudget explizit von „Importing…“ auf Timeout wechseln;
-    danach den Interactive-Grab-Fehlergrund sichtbar machen.
+    danach den Interactive-Grab-Fehlergrund sichtbar machen. **Sechste Slice
+    abgeschlossen 2026-07-14:** Der Import-Button nutzt nun einen gemeinsamen
+    endlichen Status-Poller. Ein terminaler Importzustand wird unverändert
+    ausgewertet; bleibt der Job über das 10-Minuten-Budget hinaus `running`,
+    wirft der Poller einen sichtbaren Timeout statt den reaktivierten Button
+    mit dem falschen Dauertext „Importing…“ zurückzulassen. Zwei gezielte
+    Polling-Vertragstests pinnen Timeout und terminalen Fehlerzustand.
+    **Nächste Slice:** Interactive-Grab bewahrt bislang nur den generischen
+    Buttonzustand „Retry“, verwirft aber den konkreten API-Fehler; Grund
+    sichtbar machen und denselben Kandidaten retrybar halten.
 
 **Session-Abschluss-Gate 2026-07-14:** Seit dem vorherigen Full-Gate wurden
 Roadmap 13 sowie 16–23 und Phase E vollständig abgeschlossen und jeweils

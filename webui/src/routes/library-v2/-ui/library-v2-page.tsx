@@ -2826,6 +2826,18 @@ function BackLink({ children, onClick }: { children: ReactNode; onClick: () => v
   );
 }
 
+export async function waitForLibraryV2Import(
+  maxPolls = 600,
+  pollIntervalMs = 1000,
+): Promise<Awaited<ReturnType<typeof fetchLibraryV2ImportStatus>>> {
+  for (let i = 0; i < maxPolls; i += 1) {
+    const state = await fetchLibraryV2ImportStatus();
+    if (!state.running) return state;
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+  }
+  throw new Error('Timed out waiting for the library import');
+}
+
 function ImportButton({ hasArtists, prominent }: { hasArtists: boolean; prominent?: boolean }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -2835,15 +2847,9 @@ function ImportButton({ hasArtists, prominent }: { hasArtists: boolean; prominen
     setMessage('Importing…');
     try {
       await startLibraryV2Import(false);
-      for (let i = 0; i < 600; i += 1) {
-        const state = await fetchLibraryV2ImportStatus();
-        if (!state.running) {
-          setMessage(state.error ? `Failed: ${state.error}` : 'Imported — refreshing…');
-          if (!state.error) window.location.reload();
-          break;
-        }
-        await new Promise((r) => setTimeout(r, 1000));
-      }
+      const state = await waitForLibraryV2Import();
+      setMessage(state.error ? `Failed: ${state.error}` : 'Imported — refreshing…');
+      if (!state.error) window.location.reload();
     } catch (e) {
       setMessage(e instanceof Error ? e.message : 'Import failed');
     } finally {
