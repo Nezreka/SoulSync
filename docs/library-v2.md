@@ -50,12 +50,8 @@ Tests: `tests/library2/`.
 
 - **Jeder** lib2-Dateizugriff läuft über `core/library2/paths.resolve_lib2_path`
   (gespeicherte Pfade sind die Media-Server-Sicht; roher `os.path.exists` bricht
-  path-gemappte Setups). **Bekannte, verifizierte Ausnahme (2026-07-13):**
-  `core/library2/artwork.py::_resolve_abs` (Zeile ~60-63) nutzt weiterhin den
-  Legacy-Resolver `core.library.path_resolver.resolve_library_file_path` statt
-  `resolve_lib2_path` (P2-05 im Audit-Nachtrag, Abschnitt 10.3) — auf
-  path-gemappten Setups kann Artwork-Auflösung daher von Scan/Retag/Skip-Cleanup
-  abweichen. Noch offen.
+  path-gemappte Setups). Die letzte bekannte Ausnahme in Artwork wurde am
+  2026-07-14 geschlossen (Roadmap-Punkt 22 / P2-05).
 - Background-Threads dürfen **nie** `_profile()` aufrufen — das aktive
   Nutzerprofil im Request-Kontext auflösen und explizit in den Thread reichen
   (sonst stiller Fallback auf Profil 1).
@@ -2092,6 +2088,14 @@ verändert; daher waren Frontend-Typecheck/Vitest/Build nicht erforderlich.
     gezielte Schema-/Scan-/Multi-File-/Query-/API-/Wanted-Adapter-Tests** und
     Ruff sind grün. **Nächster logischer Schritt:** P2-05 — Artwork auf den
     verbindlichen `resolve_lib2_path`-Resolver umstellen.
+22. ~~**Artwork-Path-Resolver vereinheitlichen (P2-05).**~~ **Abgeschlossen
+    2026-07-14:** `core/library2/artwork.py::_resolve_abs` delegiert jetzt wie
+    Scan, Retag und Skip-Cleanup an `core.library2.paths.resolve_lib2_path` und
+    reicht denselben Config-Manager durch. Damit gilt die Section-1-Invariante
+    ohne bekannte Ausnahme; Fehler bleiben best-effort (`None`). Zwei gezielte
+    Delegations-/Fehlertests plus Ruff sind grün. **Nächster logischer Schritt:**
+    ADR-05-Umsetzung (physisches Löschen) ist groß und destruktiv; davor den
+    nächsten kleineren offenen Robustheits-/UX-Punkt P2-03 prüfen.
 
 ---
 
@@ -2386,10 +2390,10 @@ vermerkt, tauchten aber nirgends in diesem Dokument auf:
   ADR-03 zusammen — das Schema-Feld existiert, ist aber noch nicht mit dem
   Scan verdrahtet.~~ **Behoben 2026-07-14:** Zwei-Scan-Bestätigung unter
   konservativer Root-Health und Recovery; Details in Roadmap-Punkt 21.
-- **P2-05** — **verifiziert 2026-07-13, weiterhin aktuell** (siehe auch die
-  Ergänzung in Abschnitt 1): `core/library2/artwork.py::_resolve_abs`
-  verletzt den gemeinsamen Path-Resolver-Vertrag (nutzt Legacy-
-  `resolve_library_file_path` statt `resolve_lib2_path`).
+- ~~**P2-05** — `core/library2/artwork.py::_resolve_abs` verletzt den
+  gemeinsamen Path-Resolver-Vertrag (nutzt Legacy-`resolve_library_file_path`
+  statt `resolve_lib2_path`).~~ **Behoben 2026-07-14:** Artwork nutzt den
+  verbindlichen lib2-Resolver; Details in Roadmap-Punkt 22.
 - **ADR-05-Umsetzung** — physisches Datei-Löschen mit Preview/Journal/
   Root-Safety ist als Entscheidung getroffen (10.1), aber noch nicht gebaut;
   aktuell löscht Library v2 nur DB-Einträge.

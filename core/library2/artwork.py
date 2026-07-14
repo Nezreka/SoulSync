@@ -60,8 +60,8 @@ def _write_thumbnail(src: Path, dst: Path, height: int = 256) -> None:
 
 def _resolve_abs(file_path: str, config_manager) -> Optional[str]:
     try:
-        from core.library.path_resolver import resolve_library_file_path
-        return resolve_library_file_path(file_path, config_manager=config_manager)
+        from core.library2.paths import resolve_lib2_path
+        return resolve_lib2_path(file_path, config_manager=config_manager)
     except Exception as e:  # noqa: BLE001
         logger.debug("path resolve failed for %s: %s", file_path, e)
         return None
