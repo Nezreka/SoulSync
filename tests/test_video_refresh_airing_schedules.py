@@ -87,20 +87,73 @@ def test_watchlist_continuing_shows_skips_ended_tmdbonly_and_dupes(tmp_path, mon
     assert [s["library_id"] for s in out] == [1, 4]
 
 
-# ── OMDb quota safety ─────────────────────────────────────────────────────────
-def test_refresh_skips_omdb_ratings(monkeypatch):
-    # the bulk refresh must NOT do the per-show OMDb ratings call (it'd burn the daily quota)
+# ── OMDb quota safety + season scoping ────────────────────────────────────────
+def test_refresh_skips_omdb_and_scopes_to_recent_seasons(monkeypatch):
+    # the nightly refresh must NOT do the per-show OMDb ratings call (burns the daily quota)
+    # AND must scope to the current season(s) only, not re-pull every season every night.
     import core.automation.handlers.video_refresh_airing_schedules as mod
     seen = {}
 
     class _Eng:
-        def refresh_show_art(self, lib, *, with_ratings=True):
-            seen["lib"], seen["with_ratings"] = lib, with_ratings
+        def refresh_show_art(self, lib, *, with_ratings=True, recent_seasons_only=False):
+            seen["lib"] = lib
+            seen["with_ratings"] = with_ratings
+            seen["recent_seasons_only"] = recent_seasons_only
             return {"ok": True}
 
     monkeypatch.setattr("core.video.enrichment.engine.get_video_enrichment_engine", lambda: _Eng())
     assert mod._default_refresh_show(7) == {"ok": True}
-    assert seen == {"lib": 7, "with_ratings": False}
+    assert seen == {"lib": 7, "with_ratings": False, "recent_seasons_only": True}
+
+
+def test_latest_seasons_picks_top_two_regular_seasons():
+    from core.video.enrichment.engine import _latest_seasons
+    assert _latest_seasons([0, 1, 2, 3, 4]) == [4, 3]      # top 2, specials (0) excluded
+    assert _latest_seasons([5, 1, 3, 2, 4]) == [5, 4]      # unsorted input → sorted desc
+    assert _latest_seasons([0, 1]) == [1]                  # only one regular season
+    assert _latest_seasons([0]) == [0]                     # specials-only → fall back to full
+    assert _latest_seasons([]) == []
+    assert _latest_seasons([1, 2, 3], keep=1) == [3]
+
+
+def test_refresh_show_art_recent_only_scopes_seasons_and_leaves_synced_flag():
+    """The nightly airing path cascades ONLY the latest regular seasons and does not
+    mark the show fully synced; the default (on-view / re-match) still pulls every
+    season and marks it synced."""
+    from core.video.enrichment.engine import VideoEnrichmentEngine
+    cap = {}
+
+    class _Client:
+        def match(self, kind, title, year, known_id=None):
+            return {"id": 999, "metadata": {"seasons": [
+                {"season_number": 0}, {"season_number": 1},
+                {"season_number": 2}, {"season_number": 3}]}}
+
+    class _Worker:
+        enabled = True
+        client = _Client()
+
+        def _cascade_episodes(self, show_id, tv_id, season_numbers=None, mark_synced=True):
+            cap["nums"], cap["mark_synced"] = season_numbers, mark_synced
+
+    class _DB:
+        def show_match_info(self, i):
+            return {"title": "S", "year": 2020, "tmdb_id": 999, "tvdb_id": None}
+
+        def enrichment_apply(self, *a, **k):
+            pass
+
+    eng = VideoEnrichmentEngine.__new__(VideoEnrichmentEngine)
+    eng.db, eng.ratings_client = _DB(), None
+    eng.workers = {"tmdb": _Worker()}
+
+    # nightly airing mode: latest 2 regular seasons only, synced flag untouched
+    assert eng.refresh_show_art(7, with_ratings=False, recent_seasons_only=True) == {"ok": True}
+    assert cap["nums"] == [3, 2] and cap["mark_synced"] is False
+
+    # default mode: every season, marks synced (unchanged behavior)
+    assert eng.refresh_show_art(7) == {"ok": True}
+    assert cap["nums"] == [0, 1, 2, 3] and cap["mark_synced"] is True
 
 
 def test_omdb_limit_latches_off_and_stops_hammering():
