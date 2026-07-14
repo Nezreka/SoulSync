@@ -61,19 +61,24 @@ def persist_tag_cache(conn, file_id: int, file_tags: Dict[str, Any]) -> bool:
     return True
 
 
-def read_and_persist_tag_cache(conn, file_id: int, path: str) -> bool:
-    """Read through the canonical tag engine and persist its snapshot."""
+def read_tag_snapshot(path: str) -> Dict[str, Any]:
+    """Read tags through the canonical engine without holding a DB handle."""
     from core.tag_writer import read_file_tags
 
     try:
-        file_tags = read_file_tags(path)
+        return read_file_tags(path)
     except Exception as exc:  # noqa: BLE001
-        file_tags = {"error": str(exc) or exc.__class__.__name__}
-    return persist_tag_cache(conn, file_id, file_tags)
+        return {"error": str(exc) or exc.__class__.__name__}
+
+
+def read_and_persist_tag_cache(conn, file_id: int, path: str) -> bool:
+    """Read through the canonical tag engine and persist its snapshot."""
+    return persist_tag_cache(conn, file_id, read_tag_snapshot(path))
 
 
 __all__ = [
     "normalized_tag_snapshot",
     "persist_tag_cache",
     "read_and_persist_tag_cache",
+    "read_tag_snapshot",
 ]

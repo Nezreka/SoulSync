@@ -116,6 +116,58 @@ def test_rescan_refreshes_tag_and_gap_cache_independently_of_quality(
     assert json.loads(row["metadata_gaps_json"]) == ["genre", "cover"]
 
 
+def test_rescan_closes_snapshot_connection_before_file_io(
+        scoped_conn, tmp_path, monkeypatch):
+    from core.library2.scan import rescan_files
+
+    conn, album_ids = scoped_conn
+    db_path = conn.execute("PRAGMA database_list").fetchone()[2]
+    file_path = tmp_path / "readable.flac"
+    file_path.write_bytes(b"not-real-audio")
+    state = {"active": 0, "opened": 0}
+
+    class _TrackedConnection:
+        def __init__(self):
+            self._conn = sqlite3.connect(db_path)
+            self._conn.row_factory = sqlite3.Row
+            state["active"] += 1
+            state["opened"] += 1
+
+        def __getattr__(self, name):
+            return getattr(self._conn, name)
+
+        def close(self):
+            self._conn.close()
+            state["active"] -= 1
+
+    class _Shim:
+        def _get_connection(self):
+            return _TrackedConnection()
+
+    def _assert_no_connection(_path):
+        assert state["active"] == 0
+        return str(file_path)
+
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path", _assert_no_connection)
+    monkeypatch.setattr(
+        "core.tag_writer.read_file_tags",
+        lambda _path: ({"error": "fake"} if state["active"] == 0 else pytest.fail(
+            "tag read ran with a database connection open"
+        )),
+    )
+    monkeypatch.setattr(
+        "core.imports.file_ops.probe_audio_quality",
+        lambda _path: (None if state["active"] == 0 else pytest.fail(
+            "quality probe ran with a database connection open"
+        )),
+    )
+
+    stats = rescan_files(_Shim(), album_ids=[album_ids[0]])
+
+    assert stats == {"scanned": 1, "updated": 0, "missing": 0}
+    assert state == {"active": 0, "opened": 2}
+
+
 def test_failed_tag_read_invalidates_stale_gap_cache(scoped_conn):
     from core.library2.tag_cache import persist_tag_cache
 

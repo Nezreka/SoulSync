@@ -49,6 +49,98 @@ def _file_rows_in_scope(conn, *, album_ids: Optional[List[int]] = None) -> List[
     ).fetchall()
 
 
+def _persist_missing_observation(database, file_id: int, *, root_healthy: bool) -> None:
+    """Persist one missing-path observation in a short transaction."""
+    if not root_healthy:
+        return
+    from core.library2.track_files import set_file_state
+
+    conn = database._get_connection()
+    try:
+        row = conn.execute(
+            "SELECT file_state, missing_scan_count FROM lib2_track_files WHERE id=?",
+            (int(file_id),),
+        ).fetchone()
+        if not row or row["file_state"] not in (
+            "active", "missing_suspected", "missing_confirmed"
+        ):
+            return
+        misses = int(row["missing_scan_count"] or 0) + 1
+        state = (
+            "missing_confirmed"
+            if misses >= MISSING_CONFIRMATION_SCANS
+            else "missing_suspected"
+        )
+        conn.execute(
+            """UPDATE lib2_track_files
+                  SET missing_scan_count=?,
+                      missing_since=COALESCE(missing_since, CURRENT_TIMESTAMP),
+                      updated_at=CURRENT_TIMESTAMP
+                WHERE id=?""",
+            (misses, int(file_id)),
+        )
+        set_file_state(conn, int(file_id), state)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _persist_present_observation(
+    database,
+    file_id: int,
+    *,
+    file_tags: Dict[str, Any],
+    quality: Any = None,
+    size: Optional[int] = None,
+    tier: Optional[str] = None,
+) -> bool:
+    """Persist one completed file observation in a short transaction."""
+    from core.library2.tag_cache import persist_tag_cache
+    from core.library2.track_files import set_file_state
+
+    conn = database._get_connection()
+    try:
+        row = conn.execute(
+            "SELECT file_state FROM lib2_track_files WHERE id=?", (int(file_id),)
+        ).fetchone()
+        if not row:
+            return False
+        if row["file_state"] in ("missing_suspected", "missing_confirmed"):
+            set_file_state(conn, int(file_id), "active")
+        conn.execute(
+            """UPDATE lib2_track_files
+                  SET missing_scan_count=0, missing_since=NULL
+                WHERE id=? AND (missing_scan_count<>0 OR missing_since IS NOT NULL)""",
+            (int(file_id),),
+        )
+        persist_tag_cache(conn, int(file_id), file_tags)
+        if quality is not None:
+            conn.execute(
+                """UPDATE lib2_track_files SET
+                       format = COALESCE(?, format),
+                       bitrate = COALESCE(?, bitrate),
+                       sample_rate = COALESCE(?, sample_rate),
+                       bit_depth = COALESCE(?, bit_depth),
+                       size = COALESCE(?, size),
+                       quality_tier = ?,
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ?""",
+                (
+                    quality.format,
+                    quality.bitrate,
+                    quality.sample_rate,
+                    quality.bit_depth,
+                    size,
+                    tier,
+                    int(file_id),
+                ),
+            )
+        conn.commit()
+        return quality is not None
+    finally:
+        conn.close()
+
+
 def rescan_files(database, *, album_ids: Optional[List[int]] = None,
                  progress: ProgressCb = None) -> Dict[str, int]:
     """Probe the files in scope and persist their measured audio properties.
@@ -69,81 +161,55 @@ def rescan_files(database, *, album_ids: Optional[List[int]] = None,
         resolve_lib2_path,
     )
     from core.library2.status import quality_tier
-    from core.library2.tag_cache import read_and_persist_tag_cache
+    from core.library2.tag_cache import read_tag_snapshot
 
     stats = {"scanned": 0, "updated": 0, "missing": 0}
     conn = database._get_connection()
     try:
-        rows = _file_rows_in_scope(conn, album_ids=album_ids)
-        total = len(rows)
-        for i, row in enumerate(rows):
-            path = resolve_lib2_path(row["path"])
-            if progress and i % 25 == 0:
-                progress("scan", i, total)
-            if not path:
-                stats["missing"] += 1
-                if (
-                    row["file_state"]
-                    in ("active", "missing_suspected", "missing_confirmed")
-                    and missing_path_root_is_healthy(row["path"])
-                ):
-                    misses = int(row["missing_scan_count"] or 0) + 1
-                    state = (
-                        "missing_confirmed"
-                        if misses >= MISSING_CONFIRMATION_SCANS
-                        else "missing_suspected"
-                    )
-                    conn.execute(
-                        """UPDATE lib2_track_files
-                              SET missing_scan_count=?,
-                                  missing_since=COALESCE(missing_since, CURRENT_TIMESTAMP),
-                                  updated_at=CURRENT_TIMESTAMP
-                            WHERE id=?""",
-                        (misses, row["id"]),
-                    )
-                    from core.library2.track_files import set_file_state
-                    set_file_state(conn, row["id"], state)
-                continue
-            stats["scanned"] += 1
-            if row["file_state"] in ("missing_suspected", "missing_confirmed"):
-                from core.library2.track_files import set_file_state
-                set_file_state(conn, row["id"], "active")
-            conn.execute(
-                """UPDATE lib2_track_files
-                      SET missing_scan_count=0, missing_since=NULL
-                    WHERE id=? AND (missing_scan_count<>0 OR missing_since IS NOT NULL)""",
-                (row["id"],),
+        # sqlite3.Row values remain tied to the result shape, so materialize
+        # plain dicts before closing the read snapshot connection.
+        rows = [dict(row) for row in _file_rows_in_scope(conn, album_ids=album_ids)]
+    finally:
+        conn.close()
+
+    total = len(rows)
+    for i, row in enumerate(rows):
+        if progress and i % 25 == 0:
+            progress("scan", i, total)
+        path = resolve_lib2_path(row["path"])
+        if not path:
+            stats["missing"] += 1
+            _persist_missing_observation(
+                database,
+                row["id"],
+                root_healthy=missing_path_root_is_healthy(row["path"]),
             )
-            read_and_persist_tag_cache(conn, row["id"], path)
-            try:
-                quality = probe_audio_quality(path)
-            except Exception as e:  # noqa: BLE001
-                logger.debug("probe failed (%s): %s", path, e)
-                continue
-            if quality is None:
-                continue
+            continue
+
+        stats["scanned"] += 1
+        file_tags = read_tag_snapshot(path)
+        try:
+            quality = probe_audio_quality(path)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("probe failed (%s): %s", path, e)
+            quality = None
+        size = None
+        tier = None
+        if quality is not None:
             try:
                 size = os.path.getsize(path)
             except OSError:
-                size = None
+                pass
             tier = quality_tier(quality.format, quality.bitrate, quality.bit_depth)
-            conn.execute(
-                """UPDATE lib2_track_files SET
-                       format = COALESCE(?, format),
-                       bitrate = COALESCE(?, bitrate),
-                       sample_rate = COALESCE(?, sample_rate),
-                       bit_depth = COALESCE(?, bit_depth),
-                       size = COALESCE(?, size),
-                       quality_tier = ?,
-                       updated_at = CURRENT_TIMESTAMP
-                   WHERE id = ?""",
-                (quality.format, quality.bitrate, quality.sample_rate,
-                 quality.bit_depth, size, tier, row["id"]),
-            )
+        if _persist_present_observation(
+            database,
+            row["id"],
+            file_tags=file_tags,
+            quality=quality,
+            size=size,
+            tier=tier,
+        ):
             stats["updated"] += 1
-        conn.commit()
-    finally:
-        conn.close()
     logger.info("Library v2 file rescan: %(scanned)d probed, %(updated)d updated, "
                 "%(missing)d paths absent", stats)
     return stats
