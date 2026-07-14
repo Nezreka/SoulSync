@@ -1572,9 +1572,10 @@ P2-05 und eine Reihe P2-UX/Robustheits-Findings).
    Download bleibt ein credentials-abhängiger optionaler Deployment-Smoke.
    Der abschließende Branch-Gate-Lauf ist grün (8085 passed, 2 skipped,
    2 deselected in 211.79s).
-3. Bestehende Interactive-/Wishlist-Consumer auf den Acquisition-Contract
+3. ~~Bestehende Interactive-/Wishlist-Consumer auf den Acquisition-Contract
    umstellen; erst danach global durchsetzen, dass kein Download ohne
-   AcquisitionRequest startet. **Erste Scheibe erledigt 2026-07-14**
+   AcquisitionRequest startet.~~ **Abgeschlossen 2026-07-14.**
+   **Erste Scheibe erledigt 2026-07-14**
    (`e88b3e93`, `core/acquisition/manual_grab.py`): manuelle
    Interactive-Search-Grabs mit lib2-Entity (Track- UND Album-Branch von
    `/api/download`) persistieren Request→Candidate→Gate-Run→Grab→History
@@ -1688,7 +1689,20 @@ P2-05 und eine Reihe P2-UX/Robustheits-Findings).
    Beobachtungsfenster fahren; erst bei 100%/`ready` das opt-in Gate aktivieren
    und Manual+Wishlist smoke-testen. Code-seitig ist Roadmap-Punkt 3 damit bis
    auf diese reale Aktivierungs-Acceptance abgeschlossen; danach Punkt 4
-   (Identity/Provenance) aufnehmen.
+   (Identity/Provenance) aufnehmen. **Neunte/abschließende Scheibe erledigt
+   2026-07-14:** Der opt-in Deployment-Contract
+   `test_contract_enforcement_deployment.py` startet einen frischen Prozess im
+   gebauten `soulsync:dev`-Produktionsimage mit isolierter Config/DB. Er führt
+   die echte `/api/download`-Route und den echten Wishlist-Candidate-Walk mit
+   aktiviertem Strict Gate gegen dieselbe Acquisition-Persistenz aus; nur die
+   credential-/peerabhängige externe Downloader-Grenze ist ein deterministischer
+   Recording-Client. Verifiziert sind Prepare→Dispatch→Bind für beide Consumer,
+   je ein persistierter `manual`-/`scheduled`-Request, zwei
+   `grab_submitted`-Events, 100% Coverage, null
+   `unprepared_dispatched` und der echte Coverage-Endpoint mit
+   `enforced=true`/`ready=true`. Der Docker-Contract ist grün (1 passed); alle
+   sechs angrenzenden Korrelations-/Route-/Candidate-Suiten sind ebenfalls grün
+   (**121 passed**). Damit ist Roadmap-Punkt 3 vollständig abgeschlossen.
 
 **Session-Abschluss-Gate:** volle Python-Suite grün — **8112 passed,
 2 skipped, 2 deselected in 291.41s**. Die zwei Skips sind weiterhin die
@@ -1701,11 +1715,11 @@ Coverage-Slices ist grün: **8132 passed, 2 skipped, 2 deselected, 302 warnings
 in 212.62s**. Die zwei Skips sind weiterhin ausschließlich die bewusst opt-in
 Live-Deployment-Varianten. Frontend-Code wurde in dieser Session nicht
 verändert; daher waren Frontend-Typecheck/Vitest/Build nicht erforderlich.
-**Nächster logischer Schritt:** reale Docker-Coverage-Acceptance für
-`/api/library/v2/acquisition/correlation-coverage` mit Gate aus, danach das
-Gate aktivieren und je einen echten Manual- und Wishlist-Recording-Dispatch
-smoke-testen. Ist `ready=true` ohne `unprepared_dispatched`, Roadmap-Punkt 3
-schließen und mit Punkt 4 (Identity/Provenance) fortfahren.
+**Nächster logischer Schritt:** Roadmap-Punkt 4 (Identity/Provenance): zuerst
+das vorhandene Shadow-Modell und die verbliebenen Identitäts-Schreib-/Read-
+Pfade inventarisieren, dann dedizierte externe-/Old-ID-History als kleinste
+persistente Slice umsetzen. Field-Level-Overrides und Read-Projection bauen
+darauf auf.
 4. Phase-3-Identity/Provenance fertigstellen: dedizierte externe-/
    Old-ID-History, Merge-/Move-History, Field-Level-User-Overrides und
    Read-Projection. Typed Adapters über Discography/Tracklist hinaus

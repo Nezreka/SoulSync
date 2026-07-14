@@ -31,5 +31,6 @@ ignore = [
 addopts = "-m 'not soundcloud_live'"
 markers = [
     "soundcloud_live: live SoundCloud integration test (network-dependent, run with -m soundcloud_live)",
+    "phase3_deployment: opt-in Roadmap-3 acquisition-contract Docker acceptance",
     "phase5_deployment: opt-in real-client/container acceptance for Library-v2 Phase 5",
 ]
