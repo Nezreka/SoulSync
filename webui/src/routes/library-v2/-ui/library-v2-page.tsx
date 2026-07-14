@@ -87,9 +87,9 @@ function formatFileSize(bytes: number): string {
 
 /** Only "Interactive Search" opens the manual results window. */
 const INTERACTIVE_RE = /^Interactive Search\b/;
-/** "Search Monitored" triggers wishlist processing (checked BEFORE the
- *  auto-grab route — its label also starts with "Search"). */
-const SEARCH_MONITORED_RE = /^Search Monitored\b/;
+/** "Automatic Search" triggers wishlist processing (checked BEFORE the
+ *  auto-grab route). */
+const AUTOMATIC_SEARCH_RE = /^Automatic Search\b/;
 /** Per-track "Search" / "Grab Release" auto-search + grab the best result. */
 const AUTO_GRAB_RE = /^(Search|Grab Release)\b/;
 
@@ -113,7 +113,7 @@ const ICON_PATHS = {
   refresh: 'M21 12a9 9 0 0 1-15.3 6.4M3 12A9 9 0 0 1 18.3 5.6M18 3v5h-5M6 21v-5h5',
   search: 'M11 19a8 8 0 1 1 5.7-2.3L21 21',
   interactive:
-    'M12 8c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z',
+    'M12 9c1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3 1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-4.5c0-2.33-4.67-3.5-7-3.5z',
   automatic: 'M11 19a8 8 0 1 1 5.7-2.3L21 21',
   organize: 'M4 7h16M7 7v12M17 7v12M4 19h16',
   retag: 'M20 10l-8.5 8.5a2 2 0 0 1-2.8 0L4 13.8V4h9.8L20 10zM8 8h.01',
@@ -126,7 +126,7 @@ const ICON_PATHS = {
   expand: 'M8 3H3v5M16 3h5v5M8 21H3v-5M21 16v5h-5',
   collapse: 'M9 3v6H3M15 3v6h6M9 21v-6H3M15 21v-6h6',
   download: 'M12 3v12M8 11l4 4 4-4M5 21h14',
-  profile: 'M3 9c0-1 1-2 2-2h14c1 0 2 1 2 2v6c0 1-1 2-2 2H5c-1 0-2-1-2-2V9z',
+  star: 'M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z',
   userProfile:
     'M224 256A128 128 0 1 0 224 0a128 128 0 1 0 0 256zm-45.7 48C79.8 304 0 383.8 0 482.3C0 498.7 13.3 512 29.7 512l388.6 0c16.4 0 29.7-13.3 29.7-29.7C448 383.8 368.2 304 269.7 304l-91.4 0z',
   folder: 'M3 6h7l2 2h9v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z',
@@ -159,7 +159,7 @@ function SvgIcon({
   );
 }
 
-/** Quality display: compact inline format, resolution, bitrate. */
+/** Quality display: compact boxes for format, resolution, bitrate. */
 function QualityDisplay({ file }: { file: LibraryV2Track['file'] | null | undefined }) {
   if (!file) return <span className={styles.qualityMissing}>-</span>;
 
@@ -173,15 +173,15 @@ function QualityDisplay({ file }: { file: LibraryV2Track['file'] | null | undefi
   const sampleRate = file.sample_rate
     ? `${Number((file.sample_rate / 1000).toFixed(file.sample_rate % 1000 === 0 ? 0 : 1))}k`
     : null;
-  const parts = [
-    fmt,
-    bitDepth || sampleRate
-      ? `${bitDepth || ''}${bitDepth && sampleRate ? ' ' : ''}${sampleRate || ''}`.trim()
-      : null,
-    kbps ? `${kbps}k` : null,
-  ].filter(Boolean);
+  const resolution = [bitDepth, sampleRate].filter(Boolean).join(' ');
 
-  return <span className={styles.qualityDisplay}>{parts.join(' · ')}</span>;
+  return (
+    <span className={styles.qualityDisplay}>
+      {fmt && <span className={styles.qualityTag}>{fmt}</span>}
+      {resolution && <span className={styles.qualityTag}>{resolution}</span>}
+      {kbps && <span className={styles.qualityTag}>{kbps} kbps</span>}
+    </span>
+  );
 }
 
 // --- shared building blocks --------------------------------------------------
@@ -1997,7 +1997,7 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
               </p>
               <div className={styles.detailLabels}>
                 <span className={styles.detailLabel}>
-                  <SvgIcon name="profile" />
+                  <SvgIcon name="star" />
                   {album.quality_profile?.name ?? 'No quality profile'}
                 </span>
                 <span className={styles.detailLabel}>
@@ -2128,7 +2128,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
     }
   }
 
-  /** "Search Monitored" = run the wishlist processor. Every monitored missing
+  /** "Automatic Search" = run the wishlist processor. Every monitored missing
    *  or upgradable track is already mirrored into the wishlist, so processing
    *  it searches and downloads exactly those — it must NOT blind-grab the best
    *  result for a bare artist-name query (an arbitrary release). */
@@ -2150,7 +2150,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   }
 
   /** Route a toolbar/row action: Interactive Search opens the window;
-   *  Search Monitored runs the wishlist processor; per-track Search / Grab
+   *  Automatic Search runs the wishlist processor; per-track Search / Grab
    *  auto-searches and downloads the best result for that specific track. */
   function handleAction(action: string, entity?: Lib2EntityRef) {
     if (action === 'Quality Profile' && artist) {
@@ -2166,7 +2166,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
       setModalAction({ action, entity });
       return;
     }
-    if (SEARCH_MONITORED_RE.test(action)) {
+    if (AUTOMATIC_SEARCH_RE.test(action)) {
       searchMonitored();
       return;
     }
@@ -2202,9 +2202,9 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               <ArtistRefreshButton artistId={artistId} />
               <ActionButton
                 icon="automatic"
-                label="Search (global)"
+                label="Automatic Search (global)"
                 title="Global action: process the entire Wishlist and search all monitored missing tracks"
-                onClick={() => handleAction('Search Monitored')}
+                onClick={() => handleAction('Automatic Search')}
               />
               <ActionButton
                 icon="interactive"
@@ -2275,7 +2275,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 onClick={() => setShowMonitoring(true)}
               />
               <ActionButton
-                icon="profile"
+                icon="star"
                 label="Quality Profile"
                 onClick={() => handleAction('Quality Profile')}
               />
@@ -2321,7 +2321,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               </p>
               <div className={styles.detailLabels}>
                 <span className={styles.detailLabel}>
-                  <SvgIcon name="profile" />
+                  <SvgIcon name="star" />
                   {artist.quality_profile?.name ?? 'No quality profile'}
                 </span>
                 <span className={styles.detailLabel}>
@@ -2684,7 +2684,7 @@ function AlbumBlock({
           <IconActionButton
             icon="search"
             title="Search all monitored tracks (global Wishlist action)"
-            onClick={() => onAction(`Search Monitored: ${album.title}`)}
+            onClick={() => onAction(`Automatic Search: ${album.title}`)}
           />
           <IconActionButton
             icon="interactive"
@@ -2697,7 +2697,7 @@ function AlbumBlock({
             }
           />
           <IconActionButton
-            icon="profile"
+            icon="star"
             title="Quality Profile"
             onClick={() =>
               onQualityProfile({

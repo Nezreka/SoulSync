@@ -3163,3 +3163,47 @@ Basierend auf Nutzer-Feedback und real-world Testlauf, aufzunehmend nach Abschlu
 - **Artist Aliasing:** Design + Implementation (Roadmap 40–41)
 
 **Nächste Session:** Entweder Quality-Profile-Frontend-Lookups (schnell), oder eine der Backend-Roadmap-Punkte (38/39 Priorität: Critical).
+
+---
+
+## 14. UI-Improvements Session 2 (2026-07-14, späte Session fortgesetzt)
+
+**Konsolidierte UI-Fixes nach Nutzer-Feedback:**
+
+1. **Quality Display mit Boxen (final)** (`a96410da`):
+   - Format, Resolution, Bitrate jeweils in eigener Box/Umrandung
+   - Kompakt aber deutlich sichtbar (padding 2px 6px, subtle Borders)
+   - CSS: `.qualityTag` mit blaulich getöntem Hintergrund + Border
+   - Gap zwischen Boxen: 0.5rem für Lesbarkeit
+
+2. **Quality Badges (below profile / upgrade / quality unknown)**:
+   - Kompakt: font-size 9px, padding 1px 4px
+   - Inline display, minimales Rauschen
+   - Farben für Unterscheidung (rot/orange/blau)
+
+3. **Icons konsolidiert (final)**:
+   - **Interactive Search**: Mensch-Silhouette (user icon, stroke-basiert, 24x24 viewBox)
+   - **Quality Profile**: ⭐ Stern-Icon (einfach, elegant, stroke-basiert)
+   - Beide auf gleicher Höhe (alignment fixed)
+   - **Automatic Search (global)**: Lupe-Icon (automatic)
+
+4. **Actions Layout**:
+   - albumActions: `flex` + `height: 32px` für konsistente Vertical Alignment
+   - Alle Toolbar-Buttons auf gleicher Höhe
+
+5. **Nomenklatur Lidarr-aligned**:
+   - "Search (global)" → **"Automatic Search (global)"** (überall)
+   - Action-Namen konsistent: `AUTOMATIC_SEARCH_RE` statt `SEARCH_MONITORED_RE`
+   - Interactive Search: Titel + Icon unverändert
+
+**Nicht implementierbar (UI-only Limitation):**
+
+- **"Match via Source" Display:** Die Information, welche Metadaten-Quelle (Spotify vs. Deezer) matched wurde, ist **nicht in der API vorhanden**. Braucht Backend-Schema um zu trackten, welcher Provider die Metadata liefert. Für nächste Session in Roadmap aufnehmen.
+
+**Bekannte Backend-Issues für Roadmap:**
+
+- **Refresh & Scan Missing Files** (Roadmap #21): Dateien, die nach Scan fehlen, sollten als `missing_confirmed` markiert werden (nicht nur ignoriert). Aktuell wird `file_state` nicht korrekt gesetzt.
+- **Managed Tracks Query Bug** (Roadmap #39): GET `/api/library/v2/artists/<id>/duplicates` returnt false negatives.
+- **Update Discovery Instability** (Roadmap #38): Michael Jackson, Hirokyu Samono zeigen nicht alle Releases.
+
+**Frontend:** 121 Tests ✓, TypeCheck ✓, Build ✓. Alle UI-Änderungen sind non-breaking und reuse bestehende Data-Structures.

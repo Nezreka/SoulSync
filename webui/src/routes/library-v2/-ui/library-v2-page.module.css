@@ -472,9 +472,22 @@
 }
 
 .qualityDisplay {
-  color: rgba(255, 255, 255, 0.75);
-  font-size: 0.9em;
+  display: inline-flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.qualityTag {
+  display: inline-block;
+  padding: 2px 6px;
+  background: rgba(100, 150, 200, 0.12);
+  border: 1px solid rgba(150, 180, 220, 0.3);
+  border-radius: 3px;
+  font-size: 0.85em;
+  color: rgba(255, 255, 255, 0.8);
   white-space: nowrap;
+  font-weight: 500;
 }
 
 .qualityMissing {
