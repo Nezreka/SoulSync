@@ -987,6 +987,13 @@ def _build_post_process_context(
         'is_album_download': True,
         'has_clean_spotify_data': True,
         'has_full_spotify_metadata': True,
+        # Reorganize destinations must come from the CURRENT template alone.
+        # The #829 existing-folder reuse would resolve to the folder the album
+        # already lives in — the very folder reorganize is trying to move it
+        # out of — so preview computed "unchanged" for every already-together
+        # album and both the Tools job and Reorganize All silently no-opped
+        # after a template change.
+        '_no_album_folder_reuse': True,
     }
 
 
