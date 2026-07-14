@@ -178,18 +178,31 @@ export async function editLibraryV2Artist(
 export const LIBRARY_V2_ALBUM_TYPES = ['album', 'ep', 'single', 'compilation', 'live'] as const;
 export type LibraryV2AlbumType = (typeof LIBRARY_V2_ALBUM_TYPES)[number];
 
-/** Re-file a release under the correct type (the legacy import classifies by
- *  track count, so EPs/singles are frequently misfiled). */
-export async function editLibraryV2AlbumType(
-  albumId: number,
-  albumType: LibraryV2AlbumType,
-): Promise<void> {
-  const payload = await readJson<{ success: boolean; error?: string }>(
-    apiClient.post(`library/v2/albums/${albumId}/edit`, {
-      json: { album_type: albumType },
+/** Entity names accepted by the central field-level metadata override store. */
+export type LibraryV2MetadataEntity =
+  | 'artist'
+  | 'release_group'
+  | 'track'
+  | 'release_edition'
+  | 'recording';
+
+export async function updateLibraryV2MetadataOverrides(
+  entity: LibraryV2MetadataEntity,
+  entityId: number,
+  values: Record<string, unknown>,
+  clear: string[] = [],
+): Promise<Record<string, unknown>> {
+  const payload = await readJson<{
+    success: boolean;
+    overrides?: Record<string, unknown>;
+    error?: string;
+  }>(
+    apiClient.patch(`library/v2/metadata-overrides/${entity}/${entityId}`, {
+      json: { set: values, clear },
     }),
   );
   if (!payload.success) throw new Error(payload.error || 'Edit failed');
+  return payload.overrides ?? {};
 }
 
 /** Trigger the wishlist processor — the real "Search Monitored": every

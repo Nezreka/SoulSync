@@ -1843,8 +1843,8 @@ verändert; daher waren Frontend-Typecheck/Vitest/Build nicht erforderlich.
    Override-/Read-Projection-Fundament für breiteres Metadaten-Edit und eine
    deep-linkbare Album-Detailansicht nutzen, ohne Provider-Snapshots direkt zu
    überschreiben.
-8. **Breiteres Metadaten-Edit** (Titel/Jahr/Artists) über den
-   Release-Type-Edit hinaus; deep-linkbare Album-Detail-Ansicht. **Erste Slice
+8. ~~**Breiteres Metadaten-Edit** (Titel/Jahr/Artists) über den
+   Release-Type-Edit hinaus; deep-linkbare Album-Detail-Ansicht.~~ **Erste Slice
    2026-07-14 abgeschlossen:** `?album=<id>` ist jetzt ein validierter,
    direkt ladbarer Zustand statt totem Search-Parameter. Der Route-Loader
    prefetcht Albumdaten; eine eigenständige Albumansicht zeigt effektive
@@ -1864,7 +1864,19 @@ verändert; daher waren Frontend-Typecheck/Vitest/Build nicht erforderlich.
    Override-/Query-/API-Tests plus Ruff sind grün. **Nächste Slice:** Titel/
    Jahr und Artist-Metadaten im React-Edit-Modal auf diesen Batch-Command
    setzen, inklusive explizitem Reset auf die Provider-Baseline; Artist-
-   Relationen bleiben unangetastet.
+   Relationen bleiben unangetastet. **Dritte/abschließende Slice 2026-07-14:**
+   Das Release-Modal editiert nun effektiven Titel, Jahr und Release-Typ; das
+   Artist-Modal editiert Name und Genres. Beide senden genau einen Batch-
+   Command, zeigen Validierungsfehler, invalidieren die zentrale Query und
+   bieten für vorhandene `user_overrides` einen expliziten Reset auf die
+   aktuelle Provider-Baseline. Dasselbe Release-Modal ist aus Artist-Detail und
+   deep-linkbarer Albumansicht erreichbar. `user_overrides` ist im Client
+   typisiert; Providerfelder, IDs, Monitoring/Quality und Artist-Relationen
+   werden nicht direkt verändert. Frontend-Check/Typecheck, vier gezielte
+   Schema-/API-Vertragstests und Production-Build sind grün. Damit ist
+   Roadmap-Punkt 8 vollständig abgeschlossen. **Nächster logischer Schritt:**
+   Roadmap-Punkt 9 — Reorganize/Dedup ehrlich auf Artist-Pfade scopen, mit
+   Root-Safety und ohne einen SQL-Filter als Dateisystem-Scope auszugeben.
 9. **Artist-Scope für Reorganize/Dedup** (brauchen Pfad-Scoping, kein
    SQL-Filter — im Maintenance-Modal laufen diese Jobs derzeit ehrlich
    gekennzeichnet library-wide).

@@ -5,7 +5,9 @@ import { type ReactNode, useRef, useState } from 'react';
 import { useReactPageShell } from '@/platform/shell/route-controllers';
 
 import type {
+  LibraryV2AlbumDetail,
   LibraryV2AlbumSummary,
+  LibraryV2ArtistDetail,
   LibraryV2ArtistSummary,
   LibraryV2Track,
 } from '../-library-v2.types';
@@ -14,7 +16,6 @@ import {
   autoGrabBest,
   bulkMonitorLibraryV2Releases,
   deleteLibraryV2Entity,
-  editLibraryV2AlbumType,
   editLibraryV2Artist,
   fetchLibraryV2ArtistDeletePreview,
   fetchLibraryV2ArtistHistory,
@@ -38,6 +39,7 @@ import {
   startLibraryV2Import,
   startLibraryV2UpgradeScan,
   unlinkLibraryV2Duplicate,
+  updateLibraryV2MetadataOverrides,
   type Lib2EntityRef,
   type LibraryV2AlbumType,
 } from '../-library-v2.api';
@@ -526,11 +528,16 @@ function DeleteConfirmModal({
   );
 }
 
-/** Edit a release: re-file it under the correct type. The legacy import
- *  classifies by track count, so 1-track EPs land under Singles etc. —
- *  correcting the type moves the release between the page's sections. */
-function EditAlbumModal({ album, onClose }: { album: LibraryV2AlbumSummary; onClose: () => void }) {
+/** Correct effective release metadata without rewriting provider baselines. */
+type EditableAlbumMetadata = Pick<
+  LibraryV2AlbumSummary | LibraryV2AlbumDetail,
+  'id' | 'title' | 'year' | 'album_type' | 'user_overrides'
+>;
+
+function EditAlbumModal({ album, onClose }: { album: EditableAlbumMetadata; onClose: () => void }) {
   const queryClient = useQueryClient();
+  const [title, setTitle] = useState(album.title);
+  const [year, setYear] = useState(album.year === null ? '' : String(album.year));
   const [albumType, setAlbumType] = useState<LibraryV2AlbumType>(
     (LIBRARY_V2_ALBUM_TYPES as readonly string[]).includes(album.album_type)
       ? (album.album_type as LibraryV2AlbumType)
@@ -538,8 +545,54 @@ function EditAlbumModal({ album, onClose }: { album: LibraryV2AlbumSummary; onCl
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const normalizedTitle = title.trim();
+  const normalizedYear = year.trim() === '' ? null : Number(year);
+  const values: Record<string, unknown> = {};
+  if (normalizedTitle !== album.title) values.title = normalizedTitle;
+  if (normalizedYear !== album.year) values.year = normalizedYear;
+  if (albumType !== album.album_type) values.album_type = albumType;
+  const resettable = ['title', 'year', 'album_type'].filter(
+    (field) => field in album.user_overrides,
+  );
+
+  async function save(valuesToSet: Record<string, unknown>, clear: string[] = []) {
+    setBusy(true);
+    setError(null);
+    try {
+      await updateLibraryV2MetadataOverrides('release_group', album.id, valuesToSet, clear);
+      await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+      onClose();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Edit failed');
+      setBusy(false);
+    }
+  }
+
   return (
     <ModalShell title={`Edit — ${album.title}`} onClose={onClose}>
+      <div className={styles.editRow}>
+        <label htmlFor="lib2-album-title">Title</label>
+        <input
+          id="lib2-album-title"
+          className={styles.searchInput}
+          value={title}
+          disabled={busy}
+          onChange={(event) => setTitle(event.target.value)}
+        />
+      </div>
+      <div className={styles.editRow}>
+        <label htmlFor="lib2-album-year">Year</label>
+        <input
+          id="lib2-album-year"
+          className={styles.searchInput}
+          type="number"
+          min={0}
+          max={9999}
+          value={year}
+          disabled={busy}
+          onChange={(event) => setYear(event.target.value)}
+        />
+      </div>
       <div className={styles.editRow}>
         <label htmlFor="lib2-album-type">Release type</label>
         <select
@@ -558,25 +611,118 @@ function EditAlbumModal({ album, onClose }: { album: LibraryV2AlbumSummary; onCl
       </div>
       {error ? <div className={styles.searchError}>{error}</div> : null}
       <div className={styles.modalActions}>
+        {resettable.length > 0 ? (
+          <button
+            type="button"
+            className={styles.btnGhost}
+            disabled={busy}
+            onClick={() => void save({}, resettable)}
+          >
+            Restore provider values
+          </button>
+        ) : null}
         <button type="button" className={styles.btnGhost} disabled={busy} onClick={onClose}>
           Cancel
         </button>
         <button
           type="button"
           className={styles.btnPrimary}
-          disabled={busy || albumType === album.album_type}
-          onClick={() => {
-            setBusy(true);
-            void editLibraryV2AlbumType(album.id, albumType)
-              .then(async () => {
-                await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
-                onClose();
-              })
-              .catch((e) => {
-                setError(e instanceof Error ? e.message : 'Edit failed');
-                setBusy(false);
-              });
-          }}
+          disabled={
+            busy ||
+            !normalizedTitle ||
+            (normalizedYear !== null &&
+              (!Number.isInteger(normalizedYear) || normalizedYear < 0 || normalizedYear > 9999)) ||
+            Object.keys(values).length === 0
+          }
+          onClick={() => void save(values)}
+        >
+          {busy ? 'Saving…' : 'Save'}
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+function EditArtistModal({
+  artist,
+  onClose,
+}: {
+  artist: LibraryV2ArtistDetail;
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [name, setName] = useState(artist.name);
+  const [genres, setGenres] = useState(artist.genres.join(', '));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const normalizedName = name.trim();
+  const normalizedGenres = genres
+    .split(',')
+    .map((genre) => genre.trim())
+    .filter(Boolean);
+  const values: Record<string, unknown> = {};
+  if (normalizedName !== artist.name) values.name = normalizedName;
+  if (normalizedGenres.join('\u0000') !== artist.genres.join('\u0000')) {
+    values.genres = normalizedGenres;
+  }
+  const resettable = ['name', 'genres'].filter((field) => field in artist.user_overrides);
+
+  async function save(valuesToSet: Record<string, unknown>, clear: string[] = []) {
+    setBusy(true);
+    setError(null);
+    try {
+      await updateLibraryV2MetadataOverrides('artist', artist.id, valuesToSet, clear);
+      await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+      onClose();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Edit failed');
+      setBusy(false);
+    }
+  }
+
+  return (
+    <ModalShell title={`Edit — ${artist.name}`} onClose={onClose}>
+      <div className={styles.editRow}>
+        <label htmlFor="lib2-artist-name">Artist name</label>
+        <input
+          id="lib2-artist-name"
+          className={styles.searchInput}
+          value={name}
+          disabled={busy}
+          onChange={(event) => setName(event.target.value)}
+        />
+      </div>
+      <div className={styles.editRow}>
+        <label htmlFor="lib2-artist-genres">Genres</label>
+        <input
+          id="lib2-artist-genres"
+          className={styles.searchInput}
+          value={genres}
+          disabled={busy}
+          placeholder="Pop, Soul"
+          onChange={(event) => setGenres(event.target.value)}
+        />
+      </div>
+      {error ? <div className={styles.searchError}>{error}</div> : null}
+      <div className={styles.modalActions}>
+        {resettable.length > 0 ? (
+          <button
+            type="button"
+            className={styles.btnGhost}
+            disabled={busy}
+            onClick={() => void save({}, resettable)}
+          >
+            Restore provider values
+          </button>
+        ) : null}
+        <button type="button" className={styles.btnGhost} disabled={busy} onClick={onClose}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          className={styles.btnPrimary}
+          disabled={busy || !normalizedName || Object.keys(values).length === 0}
+          onClick={() => void save(values)}
         >
           {busy ? 'Saving…' : 'Save'}
         </button>
@@ -1116,6 +1262,7 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
     tone: 'busy' | 'ok' | 'err';
     text: string;
   } | null>(null);
+  const [showEdit, setShowEdit] = useState(false);
 
   function handleAction(action: string, entity?: Lib2EntityRef) {
     if (INTERACTIVE_RE.test(action)) {
@@ -1180,6 +1327,11 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
               <div className={styles.detailTitleRow}>
                 <MonitorToggle entity="albums" id={album.id} monitored={album.monitored} />
                 <h1 className={styles.title}>{album.title}</h1>
+                <IconActionButton
+                  icon="edit"
+                  title="Edit metadata"
+                  onClick={() => setShowEdit(true)}
+                />
               </div>
               <p className={styles.subtitle}>
                 {[album.primary_artist?.name, album.album_type, album.release_date ?? album.year]
@@ -1206,6 +1358,7 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
             </div>
           </header>
           <AlbumTrackTable albumId={album.id} onAction={handleAction} />
+          {showEdit ? <EditAlbumModal album={album} onClose={() => setShowEdit(false)} /> : null}
           {modalAction && INTERACTIVE_RE.test(modalAction.action) ? (
             <InteractiveSearchModal
               initialQuery={buildSearchQuery(album.primary_artist?.name ?? '', modalAction.action)}
@@ -1247,6 +1400,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   const [showHistory, setShowHistory] = useState(false);
   const [showMaintenance, setShowMaintenance] = useState(false);
   const [showManageTracks, setShowManageTracks] = useState(false);
+  const [showEditArtist, setShowEditArtist] = useState(false);
   const [retagTarget, setRetagTarget] = useState<{
     entity: 'artists' | 'albums';
     id: number;
@@ -1466,6 +1620,12 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             </div>
             <div className={styles.toolbarGroup}>
               <ActionButton
+                icon="edit"
+                label="Edit Metadata"
+                title="Correct artist metadata without rewriting provider data"
+                onClick={() => setShowEditArtist(true)}
+              />
+              <ActionButton
                 icon="monitor"
                 label="Monitoring"
                 title="Apply a monitoring strategy across this artist's releases"
@@ -1632,6 +1792,9 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
           ) : null}
           {showManageTracks ? (
             <ManageTracksModal artistId={artistId} onClose={() => setShowManageTracks(false)} />
+          ) : null}
+          {showEditArtist ? (
+            <EditArtistModal artist={artist} onClose={() => setShowEditArtist(false)} />
           ) : null}
           {retagTarget ? (
             <RetagModal

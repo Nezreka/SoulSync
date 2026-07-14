@@ -56,6 +56,7 @@ export interface LibraryV2ArtistSummary {
   track_count: number;
   tracks_present: number;
   tracks_missing: number;
+  user_overrides: Record<string, unknown>;
 }
 
 export interface LibraryV2AlbumSummary {
@@ -72,6 +73,7 @@ export interface LibraryV2AlbumSummary {
   track_count: number;
   tracks_present: number;
   tracks_missing: number;
+  user_overrides: Record<string, unknown>;
 }
 
 export interface LibraryV2ArtistDetail {
@@ -90,6 +92,7 @@ export interface LibraryV2ArtistDetail {
   single_count: number;
   /** Provider-only releases currently persisted for this artist. */
   discography_count: number;
+  user_overrides: Record<string, unknown>;
 }
 
 export interface LibraryV2TrackArtist {
@@ -149,6 +152,7 @@ export interface LibraryV2AlbumDetail {
   tracks_present: number;
   tracks_missing: number;
   upgrades_available?: number;
+  user_overrides: Record<string, unknown>;
 }
 
 export interface LibraryV2RankedTarget {
