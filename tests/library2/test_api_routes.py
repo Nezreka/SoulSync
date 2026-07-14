@@ -257,6 +257,24 @@ def test_materialize_missing_track_requires_track_number(api):
     assert response.status_code == 400
 
 
+def test_replaygain_endpoint_requires_ffmpeg(api, monkeypatch):
+    client, _db, ids = api
+    monkeypatch.setattr("core.replaygain.is_ffmpeg_available", lambda: False)
+    response = client.post(f"/api/library/v2/albums/{ids['views']}/replaygain")
+    assert response.status_code == 500
+    assert "ffmpeg" in response.get_json()["error"]
+
+
+def test_replaygain_endpoint_starts_a_background_job(api, monkeypatch):
+    client, _db, ids = api
+    monkeypatch.setattr("core.replaygain.is_ffmpeg_available", lambda: True)
+    response = client.post(f"/api/library/v2/albums/{ids['views']}/replaygain")
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["started"] is True
+    assert body["job_id"]
+
+
 def test_eps_get_local_artwork_urls(api):
     """Every release group — including EPs — must point at the local artwork
     endpoint, never at a raw DB image_url (which may be a media-server URL)."""

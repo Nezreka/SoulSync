@@ -12,6 +12,7 @@ import {
   materializeLibraryV2MissingTrack,
   runLibraryV2PlaylistPipeline,
   runRepairJob,
+  startLibraryV2AlbumReplayGain,
   updateLibraryV2MetadataOverrides,
 } from './-library-v2.api';
 
@@ -163,6 +164,26 @@ describe('library v2 missing-track add api', () => {
     await expect(materializeLibraryV2MissingTrack(42, { track_number: 1 })).rejects.toThrow(
       'Album not found',
     );
+  });
+});
+
+describe('library v2 replaygain api', () => {
+  it('starts an album ReplayGain job and returns the job id', async () => {
+    server.use(
+      http.post('/api/library/v2/albums/42/replaygain', () =>
+        HttpResponse.json({ success: true, started: true, job_id: 'rg-1' }),
+      ),
+    );
+    await expect(startLibraryV2AlbumReplayGain(42)).resolves.toBe('rg-1');
+  });
+
+  it('surfaces a missing ffmpeg error', async () => {
+    server.use(
+      http.post('/api/library/v2/albums/42/replaygain', () =>
+        HttpResponse.json({ success: false, error: 'ffmpeg not found on PATH' }, { status: 500 }),
+      ),
+    );
+    await expect(startLibraryV2AlbumReplayGain(42)).rejects.toThrow('ffmpeg not found on PATH');
   });
 });
 

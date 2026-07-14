@@ -1206,6 +1206,53 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             conn.close()
         return jsonify({"success": True, **result})
 
+    @app.route("/api/library/v2/albums/<int:album_id>/replaygain", methods=["POST"])
+    def lib2_album_replaygain(album_id):
+        """Analyze an album's files and write track+album ReplayGain tags
+        (legacy Enrich→ReplayGain parity). Background job; poll jobs/status."""
+        guard = _guard()
+        if guard:
+            return guard
+        from core.replaygain import is_ffmpeg_available
+        if not is_ffmpeg_available():
+            return jsonify({"success": False, "error": "ffmpeg not found on PATH"}), 500
+        try:
+            job = _job_registry.start("replaygain")
+        except JobAlreadyRunning as exc:
+            return jsonify({
+                "success": False,
+                "error": str(exc),
+                "job_id": exc.state["job_id"],
+            }), 409
+        job_id = job["job_id"]
+
+        def _run():
+            db = get_database()
+            try:
+                conn = db._get_connection()
+                try:
+                    from core.library2.replaygain import analyze_album_replaygain
+
+                    def _progress(current, total, _title):
+                        _job_registry.update(job_id, current=current, total=total)
+
+                    result = analyze_album_replaygain(
+                        conn, album_id,
+                        config_manager=config_manager,
+                        progress=_progress,
+                    )
+                    _job_registry.update(job_id, result=result)
+                finally:
+                    conn.close()
+            except Exception as e:  # noqa: BLE001
+                logger.error("ReplayGain album %s failed: %s", album_id, e, exc_info=True)
+                _job_registry.update(job_id, error=str(e))
+            finally:
+                _job_registry.finish(job_id)
+
+        threading.Thread(target=_run, name="lib2-replaygain", daemon=True).start()
+        return jsonify({"success": True, "started": True, "job_id": job_id})
+
     @app.route("/api/library/v2/quality-profiles/sync", methods=["POST"])
     def lib2_sync_quality_profiles():
         """Compatibility endpoint: profiles are the app-wide ``quality_profiles``

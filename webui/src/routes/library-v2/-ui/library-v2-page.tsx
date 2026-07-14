@@ -47,6 +47,7 @@ import {
   runRepairJob,
   runLibraryV2PlaylistPipeline,
   setLibraryV2Monitored,
+  startLibraryV2AlbumReplayGain,
   startLibraryV2Import,
   startLibraryV2UpgradeScan,
   unlinkLibraryV2Duplicate,
@@ -144,6 +145,7 @@ const ICON_PATHS = {
   folder: 'M3 6h7l2 2h9v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z',
   close: 'M6 6l12 12M18 6L6 18',
   info: 'M12 21a9 9 0 1 1 0-18 9 9 0 0 1 0 18zM12 16v-4M12 8h.01',
+  gain: 'M3 12h3l2-7 3 15 3-11 2 5h5',
 } as const;
 
 type IconName = keyof typeof ICON_PATHS;
@@ -2725,6 +2727,7 @@ function AlbumBlock({
             }
           />
           <IconActionButton icon="retag" title="Preview Retag" onClick={() => onRetag(album)} />
+          <AlbumReplayGainButton albumId={album.id} />
           <IconActionButton
             icon="edit"
             title="Edit release (correct the album/EP/single type)"
@@ -2740,6 +2743,33 @@ function AlbumBlock({
       </div>
       {open ? <AlbumTrackTable albumId={album.id} resolve={unowned} onAction={onAction} /> : null}
     </div>
+  );
+}
+
+/** Legacy Enrich→ReplayGain: analyze the album's files and write track+album
+ *  ReplayGain tags. Runs as a background job and polls it to completion. */
+function AlbumReplayGainButton({ albumId }: { albumId: number }) {
+  const queryClient = useQueryClient();
+  const mutation = useMutation({
+    mutationFn: async () => {
+      const jobId = await startLibraryV2AlbumReplayGain(albumId);
+      const jobError = await awaitBulkJob(queryClient, jobId);
+      if (jobError) throw new Error(jobError);
+    },
+  });
+  return (
+    <IconActionButton
+      icon={mutation.isPending ? 'refresh' : 'gain'}
+      title={
+        mutation.isError
+          ? mutationErrorMessage(mutation.error, 'ReplayGain analysis failed')
+          : mutation.isPending
+            ? 'Analyzing ReplayGain…'
+            : 'Analyze ReplayGain (write track + album loudness tags)'
+      }
+      disabled={mutation.isPending}
+      onClick={() => mutation.mutate()}
+    />
   );
 }
 

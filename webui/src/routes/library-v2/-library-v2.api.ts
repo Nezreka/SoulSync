@@ -526,6 +526,17 @@ export async function startLibraryV2UpgradeScan(): Promise<string> {
   return payload.job_id;
 }
 
+/** Analyze an album's files and write track+album ReplayGain tags. Returns a
+ *  job id to poll via fetchLibraryV2JobStatus (legacy Enrich→ReplayGain). */
+export async function startLibraryV2AlbumReplayGain(albumId: number): Promise<string> {
+  const payload = await readJson<{ success: boolean; job_id?: string; error?: string }>(
+    apiClient.post(`library/v2/albums/${albumId}/replaygain`, { json: {} }),
+  );
+  if (!payload.success) throw new Error(payload.error || 'ReplayGain analysis failed');
+  if (!payload.job_id) throw new Error('ReplayGain did not return a job id');
+  return payload.job_id;
+}
+
 export async function fetchLibraryV2JobStatus(jobId?: string): Promise<LibraryV2JobState> {
   const params = new URLSearchParams();
   if (jobId) params.set('job_id', jobId);
