@@ -11,7 +11,7 @@
 
     var LIMIT = 40;
     var state = { open: false, tab: 'all', search: '', page: 1, loading: false,
-                  counts: { movie: 0, show: 0, total: 0 }, items: [], pages: 1 };
+                  counts: { movie: 0, show: 0, youtube: 0, total: 0 }, items: [], pages: 1 };
     var el = null, searchTimer = null;
 
     function esc(s) {
@@ -68,6 +68,7 @@
                         '<button class="vdh-tab vdh-tab--on" type="button" data-vdh-tab="all">All <span class="vdh-tab-n" data-vdh-c-all>0</span></button>' +
                         '<button class="vdh-tab" type="button" data-vdh-tab="movie">Movies <span class="vdh-tab-n" data-vdh-c-movie>0</span></button>' +
                         '<button class="vdh-tab" type="button" data-vdh-tab="show">TV <span class="vdh-tab-n" data-vdh-c-show>0</span></button>' +
+                        '<button class="vdh-tab" type="button" data-vdh-tab="youtube">YouTube <span class="vdh-tab-n" data-vdh-c-youtube>0</span></button>' +
                     '</div>' +
                     '<div class="vdh-search">' +
                         '<svg class="vdh-search-ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>' +
@@ -121,6 +122,26 @@
                             if (typeof showToast === 'function') showToast((d && d.error) || 'Could not block that release', 'error');
                         }
                     }).catch(function () { blk.disabled = false; });
+                return;
+            }
+            // Block uploader (source-wide): never grab from this peer again.
+            var blks = e.target.closest('[data-vdh-block-src]');
+            if (blks) {
+                e.stopPropagation();
+                blks.disabled = true;
+                fetch('/api/video/downloads/blocklist',
+                    { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                      body: JSON.stringify({ history_id: +blks.getAttribute('data-vdh-block-src'), scope: 'source' }) })
+                    .then(function (r) { return r.json(); })
+                    .then(function (d) {
+                        if (d && d.success) {
+                            if (typeof showToast === 'function') showToast('Uploader blocked — future searches will skip them', 'success');
+                            blks.textContent = 'Uploader blocked';
+                        } else {
+                            blks.disabled = false;
+                            if (typeof showToast === 'function') showToast((d && d.error) || 'Could not block that uploader', 'error');
+                        }
+                    }).catch(function () { blks.disabled = false; });
                 return;
             }
             // Clear all history (guarded — it's permanent).
@@ -193,6 +214,10 @@
                         ? '<button class="vdh-redl vdh-block" type="button" data-vdh-block="' + esc(it.id) +
                           '" title="Never pick this exact release again">&#8856; Block release</button>'
                         : '') +
+                    (it.username && it.source !== 'youtube'
+                        ? '<button class="vdh-redl vdh-block" type="button" data-vdh-block-src="' + esc(it.id) +
+                          '" title="Never grab from this uploader (' + esc(it.username) + ') again">&#8856; Block uploader</button>'
+                        : '') +
                 '</div>' +
             '</div>';
 
@@ -241,9 +266,12 @@
         q('[data-vdh-c-all]').textContent = state.counts.total || 0;
         q('[data-vdh-c-movie]').textContent = state.counts.movie || 0;
         q('[data-vdh-c-show]').textContent = state.counts.show || 0;
+        var yc = q('[data-vdh-c-youtube]');
+        if (yc) yc.textContent = state.counts.youtube || 0;
         var sub = q('[data-vdh-sub]');
         sub.textContent = (state.counts.total || 0) + ' grab' + (state.counts.total === 1 ? '' : 's') +
-            ' · ' + (state.counts.movie || 0) + ' movies · ' + (state.counts.show || 0) + ' episodes';
+            ' · ' + (state.counts.movie || 0) + ' movies · ' + (state.counts.show || 0) + ' episodes · '
+            + (state.counts.youtube || 0) + ' youtube';
         updateBadge(state.counts.total || 0);
     }
 

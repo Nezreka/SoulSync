@@ -33,10 +33,16 @@ def _default_fetch_shows() -> List[Dict[str, Any]]:
 def _default_refresh_show(library_id: Any) -> Dict[str, Any]:
     """Re-pull a library show's TMDB season/episode schedule (the lazy on-view backfill,
     invoked deliberately). Re-matches + cascades episodes, so air dates/stills refresh.
+
     ``with_ratings=False`` — we only need schedules, and the per-show OMDb ratings call
-    would burn the daily quota across a whole watchlist."""
+    would burn the daily quota across a whole watchlist. ``recent_seasons_only=True`` —
+    new episodes only land in the current season, so this pulls just the latest season(s)
+    instead of every season of every airing show every night (one API call per season, per
+    show, on settled history that never changes) — the difference between ~1 and ~5+ calls
+    per show, which matters a lot at hundreds of airing shows."""
     from core.video.enrichment.engine import get_video_enrichment_engine
-    return get_video_enrichment_engine().refresh_show_art(library_id, with_ratings=False) or {}
+    return get_video_enrichment_engine().refresh_show_art(
+        library_id, with_ratings=False, recent_seasons_only=True) or {}
 
 
 def auto_video_refresh_airing_schedules(

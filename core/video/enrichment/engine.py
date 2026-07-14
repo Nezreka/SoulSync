@@ -26,6 +26,16 @@ _DISPLAY = {"tmdb": "TMDB", "tvdb": "TVDB", "omdb": "OMDb"}
 _OMDB_RETRY_SECONDS = 6 * 3600
 
 
+def _latest_seasons(season_nums, keep: int = 2):
+    """The most recent ``keep`` regular seasons (highest season numbers, specials /
+    season 0 excluded) — the only seasons where a still-airing show gains new episodes.
+    The nightly airing refresh scopes to these so it stops re-pulling long-finished
+    seasons every night. Falls back to the full list when there are no regular seasons
+    (a specials-only show)."""
+    regular = sorted({n for n in (season_nums or []) if isinstance(n, int) and n > 0}, reverse=True)
+    return regular[:keep] if regular else list(season_nums or [])
+
+
 class VideoEnrichmentEngine:
     def __init__(self, db, clients: dict, ratings_client=None):
         self.db = db
@@ -63,6 +73,26 @@ class VideoEnrichmentEngine:
 
     def _cache_put(self, key, data, ttl=1800):
         self._cache.put(key, data, ttl=ttl)
+
+    def alt_titles_for(self, kind, tmdb_id) -> list:
+        """Cached AKA titles for a movie/show — the alias set the downloader matches
+        releases against. Cached hard (aliases barely change) so the search path adds
+        no per-grab TMDB latency. Best-effort: [] when TMDB isn't configured."""
+        if not tmdb_id:
+            return []
+        key = ("alt_titles", kind, str(tmdb_id))
+        hit = self._cache_get(key)
+        if hit is not None:
+            return hit
+        out = []
+        w = self.workers.get("tmdb")
+        if w and getattr(w, "enabled", False) and hasattr(w.client, "alternative_titles"):
+            try:
+                out = w.client.alternative_titles(kind, tmdb_id) or []
+            except Exception:   # noqa: BLE001 - a matching assist must never break a grab
+                logger.debug("alt_titles_for failed for %s %s", kind, tmdb_id, exc_info=True)
+        self._cache_put(key, out, ttl=86400)
+        return out
 
     def _omdb_blocked_now(self) -> bool:
         """The OMDb over-quota / bad-key latch — True while ratings should be skipped.
@@ -199,7 +229,8 @@ class VideoEnrichmentEngine:
                         ", ".join(sorted(self._scan_paused)))
         self._scan_paused = set()
 
-    def refresh_show_art(self, show_id, *, with_ratings: bool = True) -> dict:
+    def refresh_show_art(self, show_id, *, with_ratings: bool = True,
+                         recent_seasons_only: bool = False) -> dict:
         """On-demand (lazy) backfill of a show's season posters + episode art from
         TMDB, used when the detail page is opened and art is missing. Works
         regardless of the show's match status (sidesteps 'already matched, never
@@ -207,7 +238,15 @@ class VideoEnrichmentEngine:
 
         ``with_ratings=False`` skips the OMDb ratings backfill — used by the bulk
         'Refresh Airing TV Schedules' automation, which only needs episode schedules and
-        would otherwise burn the daily OMDb quota one call per show."""
+        would otherwise burn the daily OMDb quota one call per show.
+
+        ``recent_seasons_only=True`` cascades ONLY the latest 1–2 regular seasons instead
+        of every season — also for the nightly airing refresh, where new episodes only ever
+        land in the current season and re-pulling long-finished seasons every night (one API
+        call per season, per show) is pure waste since backfill is gap-fill and settled
+        seasons write nothing. It also leaves the episodes-synced flag untouched, so a show
+        that hasn't had its FULL history pulled yet still gets its older seasons filled by
+        the background episode-sync pass rather than being falsely marked complete."""
         w = self.workers.get("tmdb")
         if not w or not w.enabled:
             return {"ok": False, "reason": "tmdb_not_configured"}
@@ -228,7 +267,12 @@ class VideoEnrichmentEngine:
         nums = []
         try:
             nums = [s["season_number"] for s in (result.get("metadata") or {}).get("seasons") or []]
-            w._cascade_episodes(show_id, result["id"], nums)    # full list: owned + missing
+            if recent_seasons_only:
+                nums = _latest_seasons(nums)    # only the current season(s) gain new episodes
+            # mark_synced only when we pulled the FULL season list — a scoped refresh must
+            # not claim the show is fully synced (the background pass finishes the rest).
+            w._cascade_episodes(show_id, result["id"], nums,
+                                mark_synced=not recent_seasons_only)
         except Exception:
             logger.exception("refresh_show_art: episode cascade failed for show %s", show_id)
         # TVDB episode GAP-FILL — TMDB is often slow on just-aired / reality-TV episode
