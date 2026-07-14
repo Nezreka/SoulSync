@@ -252,7 +252,15 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         try:
             limit = int(request.args.get("limit", 200))
         except (TypeError, ValueError):
-            return jsonify({"success": False, "error": "limit must be an integer"}), 400
+            return jsonify({
+                "success": False,
+                "error": "limit must be an integer between 1 and 1000",
+            }), 400
+        if not 1 <= limit <= 1000:
+            return jsonify({
+                "success": False,
+                "error": "limit must be an integer between 1 and 1000",
+            }), 400
         conn = _conn()
         try:
             from core.acquisition.history import list_history_events
@@ -1059,6 +1067,11 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             limit = int(request.args.get("limit", 75))
         except (TypeError, ValueError):
             return jsonify({"success": False, "error": "page/limit must be integers"}), 400
+        if page < 1 or not 1 <= limit <= 500:
+            return jsonify({
+                "success": False,
+                "error": "page must be positive and limit must be between 1 and 500",
+            }), 400
         conn = _conn()
         try:
             artists, total = Q.list_artists(conn, search=search, sort=sort,
@@ -1412,12 +1425,25 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         table = _PROFILE_TABLES.get(entity)
         if not table:
             return jsonify({"success": False, "error": "Unknown entity"}), 400
-        profile_id = int((request.json or {}).get("quality_profile_id") or 0)
-        cascade = bool((request.json or {}).get("cascade", True))
+        body = request.get_json(silent=True) or {}
+        if not isinstance(body, dict):
+            return jsonify({"success": False, "error": "JSON body must be an object"}), 400
+        raw_profile_id = body.get("quality_profile_id")
+        if (
+            isinstance(raw_profile_id, bool)
+            or not isinstance(raw_profile_id, int)
+            or raw_profile_id <= 0
+        ):
+            return jsonify({
+                "success": False,
+                "error": "quality_profile_id must be a positive integer",
+            }), 400
+        profile_id = raw_profile_id
+        cascade = bool(body.get("cascade", True))
         # P1-15: assigning a profile is a QUALITY decision, not a wanted-
         # action. Monitoring existing tracks (and thereby queueing upgrade
         # downloads) only happens on explicit opt-in from the UI.
-        monitor_existing = bool((request.json or {}).get("monitor_existing", False))
+        monitor_existing = bool(body.get("monitor_existing", False))
         db = get_database()
         conn = db._get_connection()
         try:
@@ -1428,6 +1454,16 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             ).fetchone()
             if profile is None:
                 return jsonify({"success": False, "error": "Quality profile not found"}), 404
+            try:
+                settings = json.loads(profile["repair_settings"] or "{}")
+                if not isinstance(settings, dict):
+                    settings = {}
+            except (TypeError, ValueError):
+                logger.warning(
+                    "Ignoring invalid repair_settings JSON for quality profile %s",
+                    profile_id,
+                )
+                settings = {}
             cur = conn.cursor()
             cur.execute(f"UPDATE {table} SET quality_profile_id=? WHERE id=?", (profile_id, eid))
             if not cur.rowcount:
@@ -1514,7 +1550,6 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     auto_monitor_track_ids,
                     profile_id=_profile(),
                 )
-            settings = json.loads(profile["repair_settings"] or "{}")
         finally:
             conn.close()
         return jsonify({
@@ -2305,9 +2340,17 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         if guard:
             return guard
         try:
-            limit = min(int(request.args.get("limit", 50)), 200)
+            limit = int(request.args.get("limit", 50))
         except (TypeError, ValueError):
-            limit = 50
+            return jsonify({
+                "success": False,
+                "error": "limit must be an integer between 1 and 200",
+            }), 400
+        if not 1 <= limit <= 200:
+            return jsonify({
+                "success": False,
+                "error": "limit must be an integer between 1 and 200",
+            }), 400
         conn = _conn()
         try:
             artist = conn.execute(
@@ -2446,11 +2489,28 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         guard = _guard()
         if guard:
             return guard
-        body = request.json or {}
-        track_ids = [int(t) for t in (body.get("track_ids") or []) if t]
+        body = request.get_json(silent=True) or {}
+        if not isinstance(body, dict):
+            return jsonify({"success": False, "error": "JSON body must be an object"}), 400
+        raw_track_ids = body.get("track_ids")
+        if not isinstance(raw_track_ids, list) or any(
+            isinstance(track_id, bool)
+            or not isinstance(track_id, int)
+            or track_id <= 0
+            for track_id in raw_track_ids
+        ):
+            return jsonify({
+                "success": False,
+                "error": "track_ids must be an array of positive integers",
+            }), 400
+        from core.library2 import retag
+        if not raw_track_ids or len(raw_track_ids) > retag.MAX_TRACKS:
+            return jsonify({
+                "success": False,
+                "error": f"track_ids must contain between 1 and {retag.MAX_TRACKS} IDs",
+            }), 400
+        track_ids = list(dict.fromkeys(raw_track_ids))
         embed_cover = bool(body.get("embed_cover", True))
-        if not track_ids:
-            return jsonify({"success": False, "error": "No track_ids"}), 400
         try:
             job = _job_registry.start("retag", total=len(track_ids))
         except JobAlreadyRunning as exc:
@@ -2462,7 +2522,6 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         job_id = job["job_id"]
 
         def _run():
-            from core.library2 import retag
             db = get_database()
             try:
                 def _progress(_stage, current, total):

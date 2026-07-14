@@ -2441,6 +2441,21 @@ bekannte Main-Chunk-Hinweis). **Logischer nächster Schritt:** P2-06 als kleinst
     Schritt:** P2-18 — die inventarisierten Request-Validierungslücken in
     kleinen Endpoint-Gruppen schließen, beginnend mit ungeschützten `int()`-
     Konversionen vor Background- oder Mutation-Starts.
+37. ~~**Request-Validierungsgrenzen schließen (P2-18).**~~ **Abgeschlossen
+    2026-07-14:** Artist-Pagination lehnt nichtpositive Seiten und Limits
+    außerhalb 1–500 ab; Acquisition-History validiert 1–1000 vor jedem
+    Request-Lookup, Artist-History 1–200 vor dem Read. Quality-Profile-
+    Assignment akzeptiert nur positive Integer-IDs und Objekt-JSON, bevor es
+    eine DB-Zeile verändert. Retag-Starts akzeptieren nur ein Objekt mit 1 bis
+    `MAX_TRACKS` positiven Integer-IDs, deduplizieren erst danach und können
+    bei ungültigem Input keinen Job belegen. Persistiertes ungültiges bzw.
+    nichtobjektförmiges `repair_settings`-JSON wird vor der Mutation geloggt und
+    zu `{}` normalisiert, statt erst nach dem Commit einen 500er zu erzeugen.
+    Die bestehenden tieferen Validatoren bleiben erhalten; es entstand kein
+    zweiter Command-Pfad. **76 API-Tests** sowie Ruff sind grün. **Nächster
+    logischer Schritt:** P2-20 — Prozent-/Progresswerte an der gemeinsamen
+    Job-/Import-Statusgrenze auf 0–100 klemmen und Über-/Unterlauf mit
+    Vertrags-Tests pinnen.
 
 **Session-Abschluss-Gate 2026-07-14:** Seit dem vorherigen Full-Gate wurden
 Roadmap 13 sowie 16–23 und Phase E vollständig abgeschlossen und jeweils
@@ -2826,8 +2841,10 @@ Priorität, kompakt aufgelistet für spätere Aufnahme):
   Subqueries — bei großen Libraries sichtbar (verwandt mit A5/Roadmap-Punkt
   12).~~ **Behoben 2026-07-14:** gruppierte Stats und gebündelte Resultset-
   Projektionen/Primary-Files/Provenance (Roadmap-Punkt 36).
-- P2-18: Fehlende Request-Validierung erzeugt vermeidbare 500er (ungeschütztes
-  `int()`, `json.loads` nach Commit, ungeklemmte negative Limits).
+- ~~P2-18: Fehlende Request-Validierung erzeugt vermeidbare 500er
+  (ungeschütztes `int()`, `json.loads` nach Commit, ungeklemmte negative
+  Limits).~~ **Behoben 2026-07-14:** Range-/Shape-/ID-Validierung vor Reads,
+  Mutationen und Jobstarts (Roadmap-Punkt 37).
 - P2-20: Fortschritts-Prozentwerte sind nicht auf 0-100 geklemmt.
 - P2-21: Bundle-Completion kann nach Wartefrist auf einen unvollständigen
   `incomplete_path` zurückfallen statt einen finalen Pfad zu verlangen.

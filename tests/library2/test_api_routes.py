@@ -1229,6 +1229,110 @@ def test_artist_list_rejects_non_numeric_page(api):
     assert resp.status_code == 400
 
 
+@pytest.mark.parametrize("query", ["page=0", "page=-1", "limit=0", "limit=-1", "limit=501"])
+def test_artist_list_rejects_out_of_range_paging(api, query):
+    client, _db, _ids = api
+    response = client.get(f"/api/library/v2/artists?{query}")
+
+    assert response.status_code == 400
+
+
+@pytest.mark.parametrize("value", [None, True, "not-an-id", 2.5, 0, -1])
+def test_quality_profile_assignment_rejects_invalid_ids_before_mutation(api, value):
+    client, db, ids = api
+    with _conn(db) as conn:
+        before = conn.execute(
+            "SELECT quality_profile_id FROM lib2_artists WHERE id=?",
+            (ids["artist"],),
+        ).fetchone()[0]
+
+    response = client.post(
+        f"/api/library/v2/artists/{ids['artist']}/quality-profile",
+        json={"quality_profile_id": value},
+    )
+
+    assert response.status_code == 400
+    with _conn(db) as conn:
+        after = conn.execute(
+            "SELECT quality_profile_id FROM lib2_artists WHERE id=?",
+            (ids["artist"],),
+        ).fetchone()[0]
+    assert after == before
+
+
+def test_quality_profile_assignment_rejects_non_object_json(api):
+    client, _db, ids = api
+    response = client.post(
+        f"/api/library/v2/artists/{ids['artist']}/quality-profile",
+        json=[{"quality_profile_id": 2}],
+    )
+
+    assert response.status_code == 400
+
+
+def test_quality_profile_assignment_handles_invalid_stored_repair_settings(api):
+    client, db, ids = api
+    with _conn(db) as conn:
+        conn.execute(
+            "UPDATE quality_profiles SET repair_settings='not-json' WHERE id=2"
+        )
+        conn.commit()
+
+    response = client.post(
+        f"/api/library/v2/artists/{ids['artist']}/quality-profile",
+        json={"quality_profile_id": 2},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["repair_job"]["settings"] == {}
+    with _conn(db) as conn:
+        assert conn.execute(
+            "SELECT quality_profile_id FROM lib2_artists WHERE id=?",
+            (ids["artist"],),
+        ).fetchone()[0] == 2
+
+
+@pytest.mark.parametrize("limit", ["abc", "0", "-1", "201"])
+def test_artist_history_rejects_invalid_limits(api, limit):
+    client, _db, ids = api
+    response = client.get(
+        f"/api/library/v2/artists/{ids['artist']}/history?limit={limit}"
+    )
+
+    assert response.status_code == 400
+
+
+@pytest.mark.parametrize(
+    "track_ids",
+    [None, "1", [True], ["1"], [0], [-1], [1] * 501],
+)
+def test_retag_write_rejects_invalid_track_ids_before_job_start(api, track_ids):
+    client, _db, _ids = api
+    response = client.post(
+        "/api/library/v2/tags/write",
+        json={"track_ids": track_ids},
+    )
+
+    assert response.status_code == 400
+
+
+def test_retag_write_rejects_non_object_json(api):
+    client, _db, _ids = api
+    response = client.post("/api/library/v2/tags/write", json=[1, 2])
+
+    assert response.status_code == 400
+
+
+@pytest.mark.parametrize("limit", ["abc", "0", "-1", "1001"])
+def test_acquisition_history_rejects_invalid_limits(api, limit):
+    client, _db, _ids = api
+    response = client.get(
+        f"/api/library/v2/acquisition/requests/missing/history?limit={limit}"
+    )
+
+    assert response.status_code == 400
+
+
 def test_album_edit_refiles_release_type(api):
     client, db, ids = api
     resp = client.post(f"/api/library/v2/albums/{ids['single']}/edit",
