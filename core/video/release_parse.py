@@ -14,6 +14,7 @@ imports only re/typing; the music side never imports it.
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Any
 
 # Resolution — first match wins (most specific first).
@@ -123,4 +124,78 @@ def parse_release(title: Any) -> dict:
     return out
 
 
-__all__ = ["parse_release"]
+# ── Title extraction + matching (Radarr/Sonarr-parity title gate) ──────────────
+# The download engine must confirm a hit's TITLE matches the wanted film/show, not
+# just the year — otherwise a text search for "Paradox (2017)" happily accepts
+# "The Cloverfield Paradox 2018" (title is a substring, year is one off). We isolate
+# the title portion of the release name, normalize it, and require a real match.
+
+_YEAR_TOKEN = re.compile(r"\b(?:19|20)\d{2}\b")
+# First "release metadata" token — where the title ends when there's no usable year.
+_META_BOUNDARY = re.compile(
+    r"\b(?:2160p|1080[pi]|720[pi]|480[pi]|576[pi]|4k|uhd"
+    r"|blu-?ray|bdrip|brrip|web-?dl|web-?rip|web|hdtv|dvdrip|dvd|remux|hdcam|cam|telesync|hdts"
+    r"|x264|x265|h\.?264|h\.?265|hevc|avc|av1"
+    r"|s\d{1,2}(?:e\d{1,3})?|season)\b", re.I)
+_ARTICLE = re.compile(r"^(?:the|a|an)\s+")
+# Trailing words that are an edition of the SAME film, not a different title.
+_EDITION_TOKENS = frozenset({
+    "extended", "remastered", "remaster", "unrated", "uncut", "directors", "director",
+    "cut", "edition", "theatrical", "special", "imax", "final", "ultimate", "definitive",
+})
+
+
+def _spaces(s: Any) -> str:
+    """Separators (dots/underscores/dashes) → spaces, whitespace collapsed."""
+    return re.sub(r"\s+", " ", re.sub(r"[._\-]+", " ", str(s or ""))).strip()
+
+
+def extract_title(release_name: Any) -> str:
+    """The title portion of a release name — everything before the release year (the
+    LAST year token, so 'Blade Runner 2049 2017 1080p' keeps '2049'), or before the
+    first quality/scope token when there's no trailing year. Returns '' when the title
+    can't be isolated (e.g. a numeric-only title like '2012' with no release year)."""
+    t = str(release_name or "").strip()
+    if not t:
+        return ""
+    cut = None
+    years = list(_YEAR_TOKEN.finditer(t))
+    if years and _spaces(t[:years[-1].start()]):
+        cut = years[-1].start()          # cut at the release year (keeps years IN the title)
+    if cut is None:
+        m = _META_BOUNDARY.search(t)     # no usable year → cut at the first quality/scope token
+        cut = m.start() if m else len(t)
+    return _spaces(t[:cut])
+
+
+def normalize_title(s: Any) -> str:
+    """Fold a title to a comparable key: strip accents, lowercase, '&'→'and',
+    punctuation → space, drop a single leading article. 'The Dark Knight' and
+    'dark.knight' both fold to 'dark knight'."""
+    s = unicodedata.normalize("NFKD", str(s or "")).encode("ascii", "ignore").decode("ascii")
+    s = s.lower().replace("&", " and ")
+    s = re.sub(r"[^a-z0-9]+", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return _ARTICLE.sub("", s, count=1)
+
+
+def titles_match(release_name: Any, want_title: Any) -> bool:
+    """True when a release's parsed title matches the wanted film/show. Exact after
+    normalization, tolerating only trailing edition words ('Paradox Extended' for
+    'Paradox'). An unknown/unisolable title passes (the year gate still applies) so a
+    numeric title like '2012' is never falsely rejected — we only ever REJECT on a
+    confident mismatch, never guess a match."""
+    want = normalize_title(want_title)
+    if not want:
+        return True
+    got = normalize_title(extract_title(release_name))
+    if not got or got == want:
+        return True
+    if got.startswith(want + " "):
+        rest = got[len(want):].split()
+        if rest and all(tok in _EDITION_TOKENS for tok in rest):
+            return True
+    return False
+
+
+__all__ = ["parse_release", "extract_title", "normalize_title", "titles_match"]
