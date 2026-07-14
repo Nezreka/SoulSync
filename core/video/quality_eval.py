@@ -130,7 +130,8 @@ def tier_key(source, resolution) -> str:
     return (pre + "-" + resolution) if resolution else ""
 
 
-def _scope_ok(parsed, scope, want_season, want_episode, want_year=None, want_title=None):
+def _scope_ok(parsed, scope, want_season, want_episode, want_year=None, want_title=None,
+              want_date=None):
     """Validate a hit actually matches what was searched (Sonarr/Radarr-style): the
     TITLE must match the wanted film/show (not just be a substring — 'The Cloverfield
     Paradox 2018' must NOT satisfy a search for 'Paradox (2017)'), an episode search
@@ -157,10 +158,20 @@ def _scope_ok(parsed, scope, want_season, want_episode, want_year=None, want_tit
         return None, None
     if scope == "episode":
         if episode is None:
+            # Daily series (Sonarr-style): releases are named by AIR DATE, not SxxExx
+            # ('The.Daily.Show.2026.07.08...'). A date match IS the episode identity.
+            if want_date and parsed.get("air_date") == want_date:
+                return None, None
             return None, "Not a single episode"
         if want_season is not None and season != want_season:
+            # A date match trumps a numbering mismatch — scene season numbering for
+            # dailies rarely agrees with TMDB's, but the air date is unambiguous.
+            if want_date and parsed.get("air_date") == want_date:
+                return None, None
             return None, "Wrong season"
         if want_episode is not None and episode != want_episode:
+            if want_date and parsed.get("air_date") == want_date:
+                return None, None
             return None, "Wrong episode"
         return None, None
     if scope == "season":
@@ -175,7 +186,8 @@ def _scope_ok(parsed, scope, want_season, want_episode, want_year=None, want_tit
 
 
 def evaluate_release(parsed, profile, *, scope="movie", want_season=None,
-                     want_episode=None, size_gb=None, want_year=None, want_title=None) -> dict:
+                     want_episode=None, size_gb=None, want_year=None, want_title=None,
+                     want_date=None) -> dict:
     """Judge a parsed search hit against the quality profile + the search scope.
 
     Returns ``{accepted, score, rejected, tier, quality_label}`` — ``accepted`` False
@@ -185,6 +197,19 @@ def evaluate_release(parsed, profile, *, scope="movie", want_season=None,
     res, source = parsed.get("resolution"), parsed.get("source")
     rejects = profile.get("rejects") or []
     rejected = None
+
+    # Resolution inference — Soulseek files (and plenty of loose torrents) often
+    # carry NO resolution token at all ('90.Day.Fiance.S12E09.HEVC.mkv'), which used
+    # to dead-end as 'Unknown / unsupported quality' even when the file was clearly a
+    # real episode. Sonarr rejects those too — but unlike an indexer we always know
+    # the FILE SIZE, so infer a conservative resolution from it (movie/episode only;
+    # packs are cumulative so sizes mean nothing there). ffprobe verifies the true
+    # quality after download (the existing invariant for sourceless names), and the
+    # import rejects fakes — so a wrong guess self-corrects instead of losing a grab.
+    inferred = False
+    if not res and size_gb and scope in ("movie", "episode"):
+        res = _infer_resolution(scope, size_gb)
+        inferred = res is not None
 
     # 1) hard rejects — junk source / 3D / rejected codec
     if source in ("cam", "screener", "workprint") and source in rejects:
@@ -210,7 +235,8 @@ def evaluate_release(parsed, profile, *, scope="movie", want_season=None,
 
     # 4) scope validation (episode vs season pack vs series pack; movie year match)
     if not rejected:
-        _, scope_reason = _scope_ok(parsed, scope, want_season, want_episode, want_year, want_title)
+        _, scope_reason = _scope_ok(parsed, scope, want_season, want_episode, want_year, want_title,
+                                    want_date)
         if scope_reason:
             rejected = scope_reason
 
@@ -231,10 +257,42 @@ def evaluate_release(parsed, profile, *, scope="movie", want_season=None,
     if profile.get("prefer_repack") and (parsed.get("repack") or parsed.get("proper")):
         score += 10
 
-    label = " · ".join([x for x in [resolution_label(res),
+    res_lab = resolution_label(res)
+    if inferred and res_lab:
+        res_lab += "~"          # size-inferred, not from the name — ffprobe confirms on import
+    label = " · ".join([x for x in [res_lab,
                         (source or "").upper() if source else "", fam.upper() if fam else ""] if x])
     return {"accepted": rejected is None, "score": score, "rejected": rejected,
             "tier": tier, "quality_label": label}
+
+
+def _infer_resolution(scope, size_gb):
+    """Conservative size→resolution guess for a release whose NAME carries no
+    resolution token. Thresholds sit at the low edge of each tier's typical size so
+    we under-promise (a 1.4GB episode reads as 1080p web, an 800MB one as 720p) —
+    the post-download ffprobe measures the truth."""
+    try:
+        gb = float(size_gb)
+    except (TypeError, ValueError):
+        return None
+    if gb <= 0:
+        return None
+    if scope == "episode":
+        if gb < 0.25:
+            return "480p"
+        if gb < 0.85:
+            return "720p"
+        if gb < 4.0:
+            return "1080p"
+        return "2160p"
+    # movie
+    if gb < 0.95:
+        return "480p"
+    if gb < 2.5:
+        return "720p"
+    if gb < 12.0:
+        return "1080p"
+    return "2160p"
 
 
 __all__ = ["resolution_rank", "resolution_label", "meets_cutoff", "evaluate_owned",

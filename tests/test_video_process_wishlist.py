@@ -86,7 +86,8 @@ def test_build_record_episode_shape():
     rec = build_download_record(item, best, [best], media_type="episode", target_dir="/tv", query="q")
     assert rec["kind"] == "episode" and rec["media_id"] == "9" and rec["year"] == "2008"
     assert json.loads(rec["search_ctx"]) == {"scope": "episode", "title": "Breaking Bad",
-                                             "season": 1, "episode": 3, "year": "2008"}
+                                             "season": 1, "episode": 3, "year": "2008",
+                                             "air_date": "2008-02-10"}
 
 
 # ── handler ───────────────────────────────────────────────────────────────────
