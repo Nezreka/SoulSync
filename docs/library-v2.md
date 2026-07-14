@@ -1242,6 +1242,19 @@ Wishlist-Consumer schrittweise auf den Acquisition-Contract umstellen, dabei
 weiterhin Source-Auswahl, Retry, Quarantäne und Import ausschließlich aus der
 geteilten Main-Pipeline beziehen.
 
+**Session 2026-07-14 (Fortsetzung):** Der 5.3.1-Code-Rename ist umgesetzt
+(`849a64cc`: `eligibility_gate.py`/`EligibilityGate`, 223 Acquisition-Tests
+grün). Die erste Roadmap-3-Scheibe ist implementiert (`e88b3e93`, Details am
+Roadmap-Punkt selbst): manuelle lib2-Grabs korrelieren observational in den
+Acquisition-Contract; 10 neue Tests in
+`tests/acquisition/test_manual_grab.py`, angrenzend 902 Acquisition-/
+Import-Tests und 198 library2-Tests grün. Frontend unberührt.
+**Logischer nächster Schritt:** zweite Roadmap-3-Scheibe — Wishlist-Worker-
+Downloads mit lib2-Mirror-Kontext (`_source_info.lib2_track_id`) beim
+Dispatch als Acquisition-Request (trigger=scheduled) korrelieren, gleiche
+observational Semantik; dabei prüfen, ob der bestehende Retry-Journal-Hook
+(`attempt_download_with_candidates`) die Grab-Marker mitträgt.
+
 ### 5.6 Verifikation (pro Phase, End-to-End in Docker)
 
 Lokales Image bauen (`docker build -t soulsync:dev .`), mit der realen
@@ -1521,7 +1534,23 @@ P2-05 und eine Reihe P2-UX/Robustheits-Findings).
    2 deselected in 211.79s).
 3. Bestehende Interactive-/Wishlist-Consumer auf den Acquisition-Contract
    umstellen; erst danach global durchsetzen, dass kein Download ohne
-   AcquisitionRequest startet.
+   AcquisitionRequest startet. **Erste Scheibe erledigt 2026-07-14**
+   (`e88b3e93`, `core/acquisition/manual_grab.py`): manuelle
+   Interactive-Search-Grabs mit lib2-Entity (Track- UND Album-Branch von
+   `/api/download`) persistieren Request→Candidate→Gate-Run→Grab→History
+   (trigger=manual) — strikt observational/fail-open, Gate-Ergebnis wird mit
+   `forced=0` protokolliert und nie durchgesetzt (ein manueller Pick ist die
+   User-Entscheidung; die F06-Brücke kann dadurch nichts auto-approven).
+   Shared-Pipeline-Success schließt Grab+Request (Marker
+   `_acquisition_grab_download_id` überlebt Quarantäne-Sidecars); Quarantäne
+   wird als History journaliert, Request bleibt für den Approve-Flow offen;
+   ein Sweep in `advance_open_imports` failt verwaiste manuelle Grabs nach
+   7 Tagen (`failure_kind=runtime`, blocklistet nie). Bundle-Quellen
+   (usenet/torrent/lidarr) bewusst ausgenommen — deren Plugins schreiben
+   eigene Grab-Rows. **Noch offen:** Wishlist-Worker-Downloads korrelieren
+   (trigger=scheduled, vermutlich am `lib2_track_id`-Mirror-Kontext
+   andockend), Grabs ohne lib2-Entity, Cancel-Wiring des
+   Downloads-Cancel-Endpoints, danach erst die globale Durchsetzung.
 4. Phase-3-Identity/Provenance fertigstellen: dedizierte externe-/
    Old-ID-History, Merge-/Move-History, Field-Level-User-Overrides und
    Read-Projection. Typed Adapters über Discography/Tracklist hinaus
