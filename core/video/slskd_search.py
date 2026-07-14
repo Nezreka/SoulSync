@@ -13,6 +13,7 @@ the HTTP poll is thin I/O glue.
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 from typing import Any
@@ -109,13 +110,31 @@ def _is_video(filename: str) -> bool:
     return ext in VIDEO_EXTS
 
 
+# A parent folder that is just a CONTAINER, not a release name — library-style
+# Soulseek shares nest 'Show Name/Season 12/episode.mkv', and keying the hit on
+# 'Season 12' alone loses the show (the title gate then rejects every candidate)
+# and collides different shows' same-named season folders into one hit.
+_GENERIC_DIR = re.compile(
+    r"^(?:season[ ._-]?\d{1,4}|s\d{1,3}|series[ ._-]?\d{1,3}|specials?|extras?"
+    r"|disc[ ._-]?\d+|disk[ ._-]?\d+|cd[ ._-]?\d+|subs?|subtitles|samples?|\d{1,4})$", re.I)
+
+
 def _release_name(filename: str) -> str:
     """The release a file belongs to — its parent folder (where scene/p2p put the
-    quality), falling back to the bare filename (sans extension)."""
+    quality). When the parent is a generic container ('Season 12', 'Specials'),
+    the grandparent (the show folder) is prepended so the hit keeps its identity:
+    'TV/90 Day Fiancé/Season 12/ep.mkv' → '90 Day Fiancé/Season 12'. Falls back
+    to the bare filename (sans extension) for root-level files."""
     fn = str(filename or "").replace("\\", "/").strip("/")
     parts = [p for p in fn.split("/") if p]
     if len(parts) >= 2:
-        return parts[-2]
+        parent = parts[-2]
+        if len(parts) >= 3 and _GENERIC_DIR.match(parent.strip()):
+            gp = parts[-3]
+            # slskd share roots look like '@@abcdef' — never a show name.
+            if gp and not gp.startswith("@@"):
+                return gp + "/" + parent
+        return parent
     base = parts[-1] if parts else ""
     return base.rsplit(".", 1)[0] if "." in base else base
 
