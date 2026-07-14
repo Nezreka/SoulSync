@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -40,6 +41,38 @@ def artwork_file(database, kind: str, entity_id: int) -> Path:
 
 def thumb_file(database, kind: str, entity_id: int) -> Path:
     return artwork_dir(database) / f"{kind}_{int(entity_id)}_t.jpg"
+
+
+def is_cached_jpeg(path: Path) -> bool:
+    """Cheap fast-path guard for old caches that stored PNG/WEBP as .jpg."""
+    try:
+        with path.open("rb") as handle:
+            return handle.read(3) == b"\xff\xd8\xff"
+    except OSError:
+        return False
+
+
+def _normalize_jpeg(data: bytes) -> Optional[bytes]:
+    """Validate arbitrary image bytes and encode the one cache format: JPEG."""
+    try:
+        from PIL import Image, ImageOps
+
+        with Image.open(BytesIO(data)) as image:
+            image.load()
+            image = ImageOps.exif_transpose(image)
+            if image.mode in ("RGBA", "LA") or "transparency" in image.info:
+                rgba = image.convert("RGBA")
+                background = Image.new("RGB", rgba.size, "white")
+                background.paste(rgba, mask=rgba.getchannel("A"))
+                image = background
+            else:
+                image = image.convert("RGB")
+            output = BytesIO()
+            image.save(output, "JPEG", quality=90, optimize=True)
+            return output.getvalue()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("artwork image validation failed: %s", exc)
+        return None
 
 
 def _write_thumbnail(src: Path, dst: Path, height: int = 256) -> None:
@@ -194,7 +227,16 @@ def build_artwork(database, conn, config_manager, kind: str, entity_id: int,
     """
     out = artwork_file(database, kind, entity_id)
     if out.exists() and not force:
-        return str(out)
+        if is_cached_jpeg(out):
+            return str(out)
+        # Self-heal caches created before artwork bytes were normalized.
+        try:
+            out.unlink()
+            old_thumb = thumb_file(database, kind, entity_id)
+            if old_thumb.exists():
+                old_thumb.unlink()
+        except OSError:
+            return None
     if force and out.exists():
         try:
             out.unlink()
@@ -228,6 +270,9 @@ def build_artwork(database, conn, config_manager, kind: str, entity_id: int,
             except Exception as e:  # noqa: BLE001
                 logger.debug("provider image download failed: %s", e)
 
+    if not data:
+        return None
+    data = _normalize_jpeg(data)
     if not data:
         return None
     try:
@@ -277,4 +322,11 @@ def precache_all_artwork(database, config_manager, *, progress=None) -> Dict[str
     return counts
 
 
-__all__ = ["build_artwork", "artwork_file", "thumb_file", "artwork_dir", "precache_all_artwork"]
+__all__ = [
+    "build_artwork",
+    "artwork_file",
+    "thumb_file",
+    "artwork_dir",
+    "is_cached_jpeg",
+    "precache_all_artwork",
+]

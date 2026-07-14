@@ -2181,6 +2181,23 @@ verändert; daher waren Frontend-Typecheck/Vitest/Build nicht erforderlich.
     logischer Schritt:** P2-04 — Artwork-Bytes/Dateiendung/Response-MIME
     konsistent machen, ohne die bereits funktionierende Cache-Invalidierung
     oder die bewusst noch ungeklärte Artist-vs.-Album-Priorität zu verändern.
+26. ~~**Artwork-Cacheformat/MIME konsistent machen (P2-04).**~~ **Abgeschlossen
+    2026-07-14:** Embedded- und Provider-Bytes queren vor dem atomaren
+    Cache-Write genau eine Pillow-Grenze: Image-Decode validiert den Inhalt,
+    EXIF-Orientierung wird angewendet, Transparenz auf Weiß komponiert und das
+    Ergebnis als RGB-JPEG gespeichert. Ungültige Bytes erzeugen keine
+    Cachedatei. Der `.jpg`-Cache und seine Thumbnails enthalten damit
+    garantiert JPEG; alte PNG/WEBP-Rohbytes unter `.jpg` werden per Magic-Guard
+    im Build- und HTTP-Fastpath erkannt, entfernt und beim nächsten Zugriff
+    normal neu aufgebaut. Der HTTP-Vertrag bleibt dadurch korrekt
+    `image/jpeg`; ein Routentest öffnet die gelieferten Bytes zusätzlich als
+    echtes JPEG. Cache-Control, Refresh/Retag/Delete-Invalidierung und die
+    vorhandene Embedded→Provider-Quellenengine wurden nicht verändert. Ebenso
+    bleibt die separate Produktfrage, ob Artist-Art künftig Provider-Photos vor
+    Embedded-Albumcovers priorisieren soll, bewusst unentschieden. 51 gezielte
+    Artwork-/API-Tests, Compile und Ruff sind grün. **Nächster logischer
+    Schritt:** P2-06 — UI-Mutationen müssen sichtbare, endliche Fehlerzustände
+    statt stillem Scheitern oder Dauer-Loading liefern.
 
 **Session-Abschluss-Gate 2026-07-14:** Seit dem vorherigen Full-Gate wurden
 Roadmap 13 sowie 16–23 und Phase E vollständig abgeschlossen und jeweils
@@ -2513,9 +2530,12 @@ Priorität, kompakt aufgelistet für spätere Aufnahme):
   versprochene Wirkung „spätere Jobs respektieren den Override" tritt nicht
   ein.~~ **Behoben 2026-07-14:** zweiphasige Finalpfad-Bindung plus Consumer in
   Upgrade-Auswahl und AcoustID-Repair; Details in Roadmap-Punkt 23.
-- P2-04: Artwork-Bytes werden ungeprüft als `.jpg` gespeichert, Response-MIME
-  ist immer `image/jpeg`, Cache-Control/Invalidierung und Artist- vs.
-  Album-Art-Strategie sind unsauber.
+- ~~P2-04: Artwork-Bytes werden ungeprüft als `.jpg` gespeichert und der
+  Response-MIME ist immer `image/jpeg`.~~ **Behoben 2026-07-14:** zentrale
+  Validierung/JPEG-Normalisierung plus Self-Healing alter Caches; Details in
+  Roadmap-Punkt 26. Cache-Control/Invalidierung waren bereits korrekt. Die
+  Artist-vs.-Album-Art-Priorität bleibt als bewusste Produktentscheidung
+  getrennt offen (Abschnitt 11.2), nicht als Formatbug.
 - P2-06: UI-Fehlerzustände bleiben oft als Dauer-Loading oder ganz unsichtbar
   (Monitor-Mutation ohne sichtbare Fehlerbehandlung, `monitor_new_items`-Save
   kann still scheitern).
@@ -2592,17 +2612,11 @@ vermutet** — das Dokument war zum Zeitpunkt dieser Prüfung bereits überholt.
 
 ### 11.2 Was am externen Dokument weiterhin zutrifft
 
-- **P2-04 bleibt real offen** (stand schon in Abschnitt 10.3, hier gegen den
-  Code verifiziert statt nur behauptet): `api/library_v2.py`s Artwork-Route
-  setzt hart `mimetype="image/jpeg"` (Zeile ~1180) unabhängig vom
-  tatsächlichen Byte-Format; `core/library2/artwork.py::build_artwork`
-  schreibt rohe Provider-/Embedded-Bytes ungeprüft nach `<kind>_<id>.jpg`
-  (kein Pillow-Reencode, keine Format-Erkennung, Zeile ~231-238) — ein
-  PNG/WEBP landet unter `.jpg` mit falschem Content-Type. Cache-Control
-  (`public, max-age=604800, immutable`) und Invalidierung (Refresh/Retag
-  bustet Album- und Artist-Art, Delete räumt auf) sind entgegen der
-  Doku-Behauptung **bereits sauber** — nur der MIME-/Format-Teil von P2-04
-  ist noch real.
+- **P2-04 ist seit 2026-07-14 geschlossen** (Roadmap-Punkt 26): rohe
+  Provider-/Embedded-Bytes werden validiert und als echtes JPEG normalisiert;
+  alte falsch benannte Cachedateien heilen sich selbst. Damit stimmen `.jpg`,
+  Bytes und `image/jpeg` überein. Cache-Control und Invalidierung waren bereits
+  vorher sauber und blieben unverändert.
 - **Artist- vs. Album-Art-Strategie ist tatsächlich uneindeutig**, aber
   anders gelagert als im externen Dokument vermutet: `build_artwork`
   bevorzugt für `kind == "artist"` HEUTE das Embedded-Cover eines beliebigen

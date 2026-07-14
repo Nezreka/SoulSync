@@ -1189,7 +1189,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         if kind not in ("artist", "album"):
             return "", 404
         from core.library2.artwork import (
-            artwork_file, build_artwork, thumb_file, _write_thumbnail,
+            artwork_file, build_artwork, is_cached_jpeg, thumb_file, _write_thumbnail,
         )
         db = get_database()
         want_thumb = request.args.get("size") == "thumb"
@@ -1207,13 +1207,23 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         # Fast path: serve the cached file directly with NO database/resolve work.
         if not force:
             target = thumb_file(db, kind, eid) if want_thumb else artwork_file(db, kind, eid)
-            if target.exists():
+            if target.exists() and is_cached_jpeg(target):
                 return _send_art(target)
+            if target.exists():
+                try:
+                    target.unlink()
+                except OSError:
+                    pass
             full = artwork_file(db, kind, eid)
-            if want_thumb and full.exists():
+            if want_thumb and full.exists() and is_cached_jpeg(full):
                 _write_thumbnail(full, target)
                 if target.exists():
                     return _send_art(target)
+            elif full.exists() and not is_cached_jpeg(full):
+                try:
+                    full.unlink()
+                except OSError:
+                    pass
         # Slow path: resolve + cache (opens a DB connection). Serialized per
         # entity so concurrent first-views don't stampede the providers; the
         # second waiter finds the file cached and returns without resolving.

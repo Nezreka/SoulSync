@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
+from io import BytesIO
 
 import pytest
 
@@ -1325,3 +1326,19 @@ def test_refresh_busts_full_artwork_and_thumbnails(api):
     assert resp["success"] is True
     for f in files:
         assert not f.exists(), f"{f.name} must be invalidated by refresh"
+
+
+def test_artwork_route_serves_real_jpeg_with_matching_mime(api):
+    client, db, ids = api
+    from PIL import Image
+    from core.library2.artwork import artwork_file
+
+    cached = artwork_file(db, "album", ids["views"])
+    Image.new("RGB", (3, 2), "blue").save(cached, "JPEG")
+
+    response = client.get(f"/api/library/v2/artwork/album/{ids['views']}")
+
+    assert response.status_code == 200
+    assert response.mimetype == "image/jpeg"
+    with Image.open(BytesIO(response.data)) as image:
+        assert image.format == "JPEG"
