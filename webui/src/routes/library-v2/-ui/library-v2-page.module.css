@@ -554,6 +554,48 @@
   text-transform: capitalize;
 }
 
+.albumHeadBadges {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 3px;
+}
+
+.albumTypeBadge,
+.albumDateBadge,
+.albumProfileBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  border-radius: 6px;
+  padding: 1px 7px;
+  white-space: nowrap;
+}
+
+.albumTypeBadge {
+  text-transform: capitalize;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.albumDateBadge {
+  background: rgba(59, 130, 246, 0.14);
+  color: rgb(147, 197, 253);
+}
+
+.albumProfileBadge {
+  background: rgba(168, 85, 247, 0.16);
+  color: rgb(196, 156, 250);
+}
+
+.albumProfileBadge svg {
+  width: 11px;
+  height: 11px;
+}
+
 .albumProgress {
   display: flex;
   align-items: center;

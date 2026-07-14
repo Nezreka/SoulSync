@@ -2811,6 +2811,10 @@ function AlbumBlock({
 }) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
+  const profilesQuery = useQuery(libraryV2QualityProfilesQueryOptions());
+  const profileName =
+    (profilesQuery.data ?? []).find((p) => p.id === album.quality_profile_id)?.name ?? null;
+  const releaseDate = album.release_date || (album.year ? String(album.year) : null);
   const complete = album.tracks_missing === 0 && album.track_count > 0;
   const pct = album.track_count
     ? clampPercent((100 * album.tracks_present) / album.track_count)
@@ -2829,10 +2833,19 @@ function AlbumBlock({
         />
         <div className={styles.albumHeadMeta}>
           <span className={styles.albumHeadTitle}>{album.title}</span>
-          <span className={styles.albumHeadSub}>
-            {[album.album_type, album.release_date || (album.year ? String(album.year) : null)]
-              .filter(Boolean)
-              .join(' · ')}
+          <span className={styles.albumHeadBadges}>
+            <span className={styles.albumTypeBadge}>{album.album_type}</span>
+            {releaseDate ? (
+              <span className={styles.albumDateBadge} title="Release date">
+                {releaseDate}
+              </span>
+            ) : null}
+            {profileName ? (
+              <span className={styles.albumProfileBadge} title="Quality profile">
+                <SvgIcon name="star" />
+                {profileName}
+              </span>
+            ) : null}
           </span>
         </div>
         <div className={styles.albumProgress}>
