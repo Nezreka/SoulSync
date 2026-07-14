@@ -11,6 +11,7 @@ from core.acquisition.manual_grab import (
     correlate_manual_grab,
     correlate_scheduled_grab,
     fail_stale_correlated_grabs,
+    prepare_scheduled_grab,
     try_correlate_scheduled_grab,
 )
 from core.acquisition.pipeline_callback import (
@@ -135,6 +136,35 @@ def test_wishlist_dispatch_without_lib2_entity_uses_task_target(legacy_db):
         assert run["accepted"] == 0
         event = list_history_events(conn, request_id=request.id)[-1]
         assert "artist_mismatch" in event.payload["rejections"]
+    finally:
+        conn.close()
+
+
+def test_scheduled_grab_can_be_persisted_before_client_dispatch(legacy_db):
+    conn = _prepared_conn(legacy_db)
+    try:
+        markers = prepare_scheduled_grab(
+            conn,
+            target_context={
+                "id": "spotify-track-prepare",
+                "name": "One Dance",
+                "artist": "Drake",
+                "quality_profile_id": 1,
+            },
+            search_result=_search_result(),
+            source="soulseek",
+            task_id="task-prepare",
+            config_get=_CONFIG_GET,
+        )
+
+        request = get_request(conn, markers["request_id"])
+        grab = conn.execute(
+            "SELECT status, context_json FROM acquisition_grabs WHERE download_id=?",
+            (markers["download_id"],),
+        ).fetchone()
+        assert request.status == "grabbing"
+        assert grab["status"] == "submitting"
+        assert '"legacy_download_id": null' in grab["context_json"]
     finally:
         conn.close()
 

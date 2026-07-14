@@ -105,9 +105,11 @@ def _acquisition_task_ref(task):
         return None
 
 
-def _correlate_scheduled_acquisition(
-        task_id, batch_id, profile_id, track_info, candidate, download_id, deps):
-    """Roadmap 3 slice 2 (docs/library-v2.md §5.5): a wishlist-worker dispatch
+def _prepare_scheduled_acquisition(
+        task_id, batch_id, profile_id, track_info, candidate, deps):
+    """Prepare a wishlist-worker correlation before its client dispatch.
+
+    Roadmap 3 (docs/library-v2.md §5.5): a wishlist-worker dispatch
     correlates observationally into the acquisition contract
     (trigger=scheduled). A lib2 mirror keeps its exact entity; an ordinary
     wishlist task gets an explicitly namespaced legacy-shadow identity.
@@ -137,7 +139,7 @@ def _correlate_scheduled_acquisition(
         except Exception:
             pass
         from core.acquisition import manual_grab
-        return manual_grab.try_correlate_scheduled_grab(
+        return manual_grab.try_prepare_scheduled_grab(
             lib2_context={
                 'track_id': source_info.get('lib2_track_id'),
                 'album_id': source_info.get('lib2_album_id'),
@@ -159,7 +161,6 @@ def _correlate_scheduled_acquisition(
             source=source,
             task_id=task_id,
             batch_id=batch_id,
-            legacy_download_id=download_id,
         )
     except Exception as exc:  # noqa: BLE001 - observational bookkeeping only
         logger.debug("scheduled grab correlation skipped: %s", exc)
@@ -397,18 +398,23 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
 
             # Initiate download
             logger.info(f"[Modal Worker] Starting download: {username} / {os.path.basename(filename)}")
-            download_id = deps.run_async(deps.download_orchestrator.download(username, filename, size))
+            acq_markers = None
+            if not user_manual_pick:
+                acq_markers = _prepare_scheduled_acquisition(
+                    task_id, batch_id, task_profile_id, track_info,
+                    candidate, deps)
+            try:
+                download_id = deps.run_async(
+                    deps.download_orchestrator.download(username, filename, size))
+            except Exception:
+                from core.acquisition.manual_grab import fail_prepared_correlated_grab
+                fail_prepared_correlated_grab(
+                    acq_markers, "legacy client dispatch raised")
+                raise
 
             if download_id:
-                # Scheduled acquisition correlation (roadmap 3 slice 2): a
-                # wishlist-worker dispatch with lib2 mirror context gets a
-                # persistent request/grab/history trail. Manual picks are the
-                # interactive route's concern (slice 1), not this walk's.
-                acq_markers = None
-                if not user_manual_pick:
-                    acq_markers = _correlate_scheduled_acquisition(
-                        task_id, batch_id, task_profile_id, track_info,
-                        candidate, download_id, deps)
+                from core.acquisition.manual_grab import bind_correlated_grab_transfer
+                bind_correlated_grab_transfer(acq_markers, download_id)
                 # Store context for post-processing with complete Spotify metadata (GUI PARITY)
                 context_key = deps.make_context_key(username, filename)
                 with matched_context_lock:
@@ -539,6 +545,8 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                                 )
                                 deps.run_async(deps.download_orchestrator.cancel_download(download_id, username, remove=True))
                                 logger.warning(f"Successfully cancelled active download {download_id}")
+                                from core.acquisition.pipeline_callback import notify_correlated_grab_cancelled
+                                notify_correlated_grab_cancelled(download_id)
                             except Exception as cancel_error:
                                 logger.error(f"Failed to cancel active download {download_id}: {cancel_error}")
                         else:
@@ -560,6 +568,9 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                 logger.info(f"[Modal Worker] Download started successfully for '{filename}'. Download ID: {download_id}")
                 return True  # Success!
             else:
+                from core.acquisition.manual_grab import fail_prepared_correlated_grab
+                fail_prepared_correlated_grab(
+                    acq_markers, "legacy client rejected the dispatch")
                 logger.error(f"[Modal Worker] Failed to start download for '{filename}'")
                 # Reset status back to searching for next attempt
                 with tasks_lock:

@@ -1645,7 +1645,20 @@ P2-05 und eine Reihe P2-UX/Robustheits-Findings).
    hergestellt. **Logischer nächster Schritt:** denselben zweiphasigen
    Prepare→Dispatch→Bind-Vertrag im Wishlist-Candidate-Walk nutzen; erst wenn
    beide Legacy-Consumer vorab persistieren, ein opt-in Fail-closed-Gate
-   hinzufügen.
+   hinzufügen. **Sechste Scheibe erledigt 2026-07-14:** Auch der Wishlist-
+   Candidate-Walk persistiert seine scheduled Request-/Grab-Kette jetzt vor
+   `download_orchestrator.download`, bindet danach die echte Transfer-ID und
+   schließt eindeutige None-/Exception-Dispatches als Runtime-Failure. Der
+   bestehende Same-/Next-Candidate-Walk bleibt unverändert die einzige Retry-
+   Engine; jeder tatsächliche Dispatch erhält weiterhin seinen eigenen
+   observational Request. Die Cancellation-Race direkt nach Client-Start
+   meldet einen erfolgreich entfernten Transfer nun ebenfalls an den
+   vorhandenen Correlation-Cancel-Callback statt den Request dem TTL-Sweep zu
+   überlassen. Gezielte Tests beweisen Prepare→Dispatch→Bind-Reihenfolge,
+   abgelehnten Dispatch, native-/Manual-/Fremdprofil-Ausnahmen und Cancel.
+   **Logischer nächster Schritt:** ein default-off Fail-closed-Gate für die
+   beiden jetzt vorab persistierenden Legacy-Consumer hinzufügen und dabei
+   Bundle-/native Acquisition sowie Nicht-Admin-Profile explizit ausnehmen.
 
 **Session-Abschluss-Gate:** volle Python-Suite grün — **8112 passed,
 2 skipped, 2 deselected in 291.41s**. Die zwei Skips sind weiterhin die

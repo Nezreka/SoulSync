@@ -517,6 +517,48 @@ def correlate_scheduled_grab(
     )
 
 
+def prepare_scheduled_grab(
+    conn: Any,
+    *,
+    lib2_context: Optional[Mapping[str, Any]] = None,
+    target_context: Optional[Mapping[str, Any]] = None,
+    search_result: Mapping[str, Any],
+    source: str,
+    task_id: str,
+    batch_id: Optional[str] = None,
+    config_get: Optional[Callable[..., Any]] = None,
+    now: Optional[float] = None,
+) -> Optional[Dict[str, str]]:
+    """Persist a scheduled correlation before the external dispatch."""
+    download_id = "scheduled-" + str(uuid.uuid4())
+    dispatch_options: Dict[str, Any] = {"legacy_task_id": str(task_id)}
+    if batch_id:
+        dispatch_options["legacy_batch_id"] = str(batch_id)
+    return _correlate_grab(
+        conn,
+        lib2_context=lib2_context,
+        target_context=target_context,
+        search_result=search_result,
+        source=source,
+        trigger="scheduled",
+        download_id=download_id,
+        idempotency_key=SCHEDULED_GRAB_KEY_PREFIX + download_id,
+        shadow_source="legacy_wishlist_worker",
+        dispatch_options=dispatch_options,
+        legacy_download_id=None,
+        grab_context_extra={
+            "manual_pick": False,
+            "legacy_task_id": str(task_id),
+            "legacy_batch_id": str(batch_id) if batch_id else None,
+        },
+        history_event="scheduled_grab_correlated",
+        rejection_reason_code="gate_rejections_observed_not_enforced",
+        grab_status="submitting",
+        config_get=config_get,
+        now=now,
+    )
+
+
 def _try_correlate(
     correlate: Callable[..., Optional[Dict[str, str]]],
     *,
@@ -623,6 +665,31 @@ def try_correlate_scheduled_grab(
         task_id=task_id,
         batch_id=batch_id,
         legacy_download_id=legacy_download_id,
+        config_get=config_get,
+    )
+
+
+def try_prepare_scheduled_grab(
+    *,
+    lib2_context: Optional[Mapping[str, Any]],
+    target_context: Optional[Mapping[str, Any]] = None,
+    search_result: Mapping[str, Any],
+    source: str,
+    task_id: str,
+    batch_id: Optional[str] = None,
+    connection_factory: Optional[Callable[[], Any]] = None,
+    config_get: Optional[Callable[..., Any]] = None,
+) -> Optional[Dict[str, str]]:
+    """Fail-open preparation before one wishlist-worker dispatch."""
+    return _try_correlate(
+        prepare_scheduled_grab,
+        lib2_context=lib2_context,
+        target_context=target_context,
+        connection_factory=connection_factory,
+        search_result=search_result,
+        source=source,
+        task_id=task_id,
+        batch_id=batch_id,
         config_get=config_get,
     )
 
@@ -788,7 +855,9 @@ __all__ = [
     "fail_prepared_correlated_grab",
     "fail_stale_correlated_grabs",
     "prepare_manual_grab",
+    "prepare_scheduled_grab",
     "try_correlate_manual_grab",
     "try_correlate_scheduled_grab",
     "try_prepare_manual_grab",
+    "try_prepare_scheduled_grab",
 ]

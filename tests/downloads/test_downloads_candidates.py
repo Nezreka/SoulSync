@@ -270,9 +270,16 @@ def test_active_download_id_skips_new_download():
     assert deps.download_orchestrator.download_calls == []
 
 
-def test_cancellation_after_download_starts_calls_cancel_and_lifecycle():
+def test_cancellation_after_download_starts_calls_cancel_and_lifecycle(monkeypatch):
     """If task is cancelled after download_id assigned, cancel_download fires + on_complete(False)."""
     completion_calls = []
+    acquisition_cancels = []
+    from core.acquisition import pipeline_callback
+    monkeypatch.setattr(
+        pipeline_callback,
+        "notify_correlated_grab_cancelled",
+        lambda download_id: acquisition_cancels.append(download_id),
+    )
     deps = _build_deps(on_complete=lambda batch_id, task_id, success=None: completion_calls.append((batch_id, task_id, success)))
     _seed_task("t7")
     candidates = [_Candidate()]
@@ -296,6 +303,7 @@ def test_cancellation_after_download_starts_calls_cancel_and_lifecycle():
     assert result is False
     # cancel_download was called for the in-flight transfer
     assert deps.download_orchestrator.cancel_calls
+    assert acquisition_cancels == ["dl-1"]
     # on_download_completed fired with success=False to free the worker slot
     assert completion_calls == [("b7", "t7", False)]
 
@@ -569,22 +577,41 @@ _LIB2_SOURCE_INFO = {
 }
 
 
-def _capture_scheduled_correlation(monkeypatch, markers=None):
+def _capture_scheduled_correlation(monkeypatch, markers=None, order=None):
     calls = []
 
     def _fake(**kwargs):
+        if order is not None:
+            order.append("prepare")
         calls.append(kwargs)
         return markers
 
     from core.acquisition import manual_grab
-    monkeypatch.setattr(manual_grab, "try_correlate_scheduled_grab", _fake)
+    monkeypatch.setattr(manual_grab, "try_prepare_scheduled_grab", _fake)
     return calls
 
 
 def test_wishlist_lib2_dispatch_correlates_and_stamps_grab_marker(monkeypatch):
+    order = []
     calls = _capture_scheduled_correlation(
-        monkeypatch, markers={"download_id": "scheduled-x", "request_id": "arq1-x"})
-    deps = _build_deps()
+        monkeypatch,
+        markers={"download_id": "scheduled-x", "request_id": "arq1-x"},
+        order=order,
+    )
+
+    class _OrderedSoulseek(_FakeSoulseek):
+        async def download(self, username, filename, size):
+            order.append("dispatch")
+            return await super().download(username, filename, size)
+
+    from core.acquisition import manual_grab
+    monkeypatch.setattr(
+        manual_grab,
+        "bind_correlated_grab_transfer",
+        lambda markers, transfer_id: order.append(
+            ("bind", markers["download_id"], transfer_id)),
+    )
+    deps = _build_deps(soulseek=_OrderedSoulseek())
     _seed_task("t_wl", track_info={"source_info": dict(_LIB2_SOURCE_INFO)})
 
     result = dc.attempt_download_with_candidates(
@@ -598,6 +625,8 @@ def test_wishlist_lib2_dispatch_correlates_and_stamps_grab_marker(monkeypatch):
     assert calls[0]["batch_id"] == "b_wl"
     assert calls[0]["source"] == "soulseek"
     assert calls[0]["search_result"]["filename"] == "wl.flac"
+    assert order == [
+        "prepare", "dispatch", ("bind", "scheduled-x", "dl-1")]
     ctx = matched_downloads_context["user1::wl.flac"]
     assert ctx["_acquisition_grab_download_id"] == "scheduled-x"
 
@@ -687,7 +716,7 @@ def test_failed_correlation_never_blocks_the_download(monkeypatch):
         raise RuntimeError("correlation exploded")
 
     from core.acquisition import manual_grab
-    monkeypatch.setattr(manual_grab, "try_correlate_scheduled_grab", _boom)
+    monkeypatch.setattr(manual_grab, "try_prepare_scheduled_grab", _boom)
     deps = _build_deps()
     _seed_task("t_boom", track_info={"source_info": dict(_LIB2_SOURCE_INFO)})
 
@@ -697,6 +726,29 @@ def test_failed_correlation_never_blocks_the_download(monkeypatch):
     assert result is True
     ctx = matched_downloads_context["user1::boom.flac"]
     assert "_acquisition_grab_download_id" not in ctx
+
+
+def test_rejected_scheduled_dispatch_closes_prepared_correlation(monkeypatch):
+    markers = {"download_id": "scheduled-rejected", "request_id": "arq1-r"}
+    _capture_scheduled_correlation(monkeypatch, markers=markers)
+    failures = []
+    from core.acquisition import manual_grab
+    monkeypatch.setattr(
+        manual_grab,
+        "fail_prepared_correlated_grab",
+        lambda prepared, error: failures.append((prepared, error)),
+    )
+    deps = _build_deps(soulseek=_FakeSoulseek(download_id=None))
+    _seed_task(
+        "t_rejected",
+        track_info={"id": "spotify-track-r", "name": "Song Title"},
+    )
+
+    result = dc.attempt_download_with_candidates(
+        "t_rejected", [_Candidate(filename="rejected.flac")], _Track(), deps=deps)
+
+    assert result is False
+    assert failures == [(markers, "legacy client rejected the dispatch")]
 
 
 def test_equal_confidence_candidates_prefer_better_peer_quality():
