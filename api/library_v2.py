@@ -1281,6 +1281,26 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         threading.Thread(target=_run, name="lib2-replaygain", daemon=True).start()
         return jsonify({"success": True, "started": True, "job_id": job_id})
 
+    @app.route("/api/library/v2/tracks/<int:track_id>/replaygain", methods=["POST"])
+    def lib2_track_replaygain(track_id):
+        """Analyze one track and write its track-level ReplayGain tags
+        (synchronous — a single track runs in ~1-3s)."""
+        guard = _guard()
+        if guard:
+            return guard
+        from core.replaygain import is_ffmpeg_available
+        if not is_ffmpeg_available():
+            return jsonify({"success": False, "error": "ffmpeg not found on PATH"}), 500
+        from core.library2.replaygain import analyze_track_replaygain
+        conn = _conn()
+        try:
+            result = analyze_track_replaygain(conn, track_id, config_manager=config_manager)
+        finally:
+            conn.close()
+        if not result["analyzed"]:
+            return jsonify({"success": False, "error": result["error"] or "Analysis failed"}), 400
+        return jsonify({"success": True, **result})
+
     @app.route("/api/library/v2/quality-profiles/sync", methods=["POST"])
     def lib2_sync_quality_profiles():
         """Compatibility endpoint: profiles are the app-wide ``quality_profiles``

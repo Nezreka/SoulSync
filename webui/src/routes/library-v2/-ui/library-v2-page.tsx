@@ -17,6 +17,7 @@ import type {
 } from '../-library-v2.types';
 
 import {
+  analyzeLibraryV2TrackReplayGain,
   autoGrabBest,
   blacklistLibraryV2Source,
   bulkMonitorLibraryV2Releases,
@@ -40,6 +41,7 @@ import {
   libraryV2MirrorStatusQueryOptions,
   libraryV2PlaylistQueryOptions,
   libraryV2PlaylistsQueryOptions,
+  libraryV2QualityProfilesQueryOptions,
   libraryV2TrackSourceInfoQueryOptions,
   manualMatchLibraryV2Entity,
   materializeLibraryV2MissingTrack,
@@ -2946,12 +2948,14 @@ function AlbumTrackTable({
 }) {
   const albumQuery = useQuery(libraryV2AlbumQueryOptions(albumId, { resolve }));
   const matchQuery = useQuery(libraryV2AlbumMatchStatusQueryOptions(albumId));
+  const profilesQuery = useQuery(libraryV2QualityProfilesQueryOptions());
   const album = albumQuery.data;
   if (albumQuery.isLoading || !album) {
     return <div className={styles.inlineLoading}>Loading tracks…</div>;
   }
   const albumMatch = matchQuery.data?.album ?? [];
   const trackMatch = matchQuery.data?.tracks ?? {};
+  const profileNameById = new Map((profilesQuery.data ?? []).map((p) => [p.id, p.name]));
   return (
     <div className={styles.trackTableWrap}>
       {albumMatch.length > 0 ? (
@@ -2980,6 +2984,7 @@ function AlbumTrackTable({
               albumTitle={album.title}
               entityBase={{ albumId: album.id, qualityProfileId: album.quality_profile?.id }}
               matchServices={track.id ? (trackMatch[track.id] ?? []) : []}
+              profileName={profileNameById.get(track.quality_profile_id) ?? null}
               onAction={onAction}
             />
           ))}
@@ -2994,12 +2999,14 @@ function TrackRow({
   albumTitle,
   entityBase,
   matchServices,
+  profileName,
   onAction,
 }: {
   track: LibraryV2Track;
   albumTitle: string;
   entityBase: Lib2EntityRef;
   matchServices: LibraryV2MatchService[];
+  profileName: string | null;
   onAction: ActionHandler;
 }) {
   const missing = track.file_status === 'missing';
@@ -3031,6 +3038,11 @@ function TrackRow({
       <td className={styles.qualityText}>
         <QualityDisplay file={track.file} />
         <TrackQualityProfileBadge track={track} />
+        {profileName ? (
+          <span className={styles.trackProfileName} title="Quality profile for this track">
+            {profileName}
+          </span>
+        ) : null}
       </td>
       <td>
         {track.id ? (
@@ -3066,12 +3078,79 @@ function TrackRow({
           disabled={!track.id}
           onClick={() => onAction(`Interactive Search: ${label} (${albumTitle})`, entity)}
         />
+        {track.id ? (
+          <TrackQualityProfileButton
+            track={track}
+            profileName={profileName}
+            albumTitle={albumTitle}
+          />
+        ) : null}
         {track.id ? <TrackEditButton track={track} /> : null}
+        {!missing && track.file ? <TrackReplayGainButton track={track} /> : null}
         {!missing && track.file ? (
           <TrackSourceInfoButton track={track} albumTitle={albumTitle} />
         ) : null}
       </td>
     </tr>
+  );
+}
+
+/** Per-track quality-profile picker (the endpoint already supports tracks). */
+function TrackQualityProfileButton({
+  track,
+  profileName,
+  albumTitle,
+}: {
+  track: LibraryV2Track;
+  profileName: string | null;
+  albumTitle: string;
+}) {
+  const [open, setOpen] = useState(false);
+  if (!track.id) return null;
+  return (
+    <>
+      <IconActionButton
+        icon="star"
+        title={
+          profileName
+            ? `Quality profile: ${profileName} — click to change for this track`
+            : 'Set a quality profile for this track'
+        }
+        onClick={() => setOpen(true)}
+      />
+      {open ? (
+        <QualityProfileModal
+          entity="tracks"
+          id={track.id}
+          currentProfileId={track.quality_profile_id}
+          title={track.title ?? albumTitle}
+          onClose={() => setOpen(false)}
+        />
+      ) : null}
+    </>
+  );
+}
+
+/** Per-track ReplayGain: analyze this one file and write track-level tags. */
+function TrackReplayGainButton({ track }: { track: LibraryV2Track }) {
+  const [done, setDone] = useState(false);
+  const mutation = useMutation({
+    mutationFn: () => analyzeLibraryV2TrackReplayGain(track.id as number),
+    onSuccess: () => setDone(true),
+  });
+  return (
+    <IconActionButton
+      icon={mutation.isPending ? 'refresh' : 'gain'}
+      title={
+        mutation.isError
+          ? mutationErrorMessage(mutation.error, 'ReplayGain analysis failed')
+          : done
+            ? 'ReplayGain written'
+            : 'Analyze ReplayGain for this track'
+      }
+      disabled={mutation.isPending || !track.id}
+      onClick={() => mutation.mutate()}
+    />
   );
 }
 

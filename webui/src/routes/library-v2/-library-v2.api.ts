@@ -616,6 +616,18 @@ export async function startLibraryV2AlbumReplayGain(albumId: number): Promise<st
   return payload.job_id;
 }
 
+/** Analyze one track and write its track-level ReplayGain tags (synchronous).
+ *  Returns the track gain in dB. */
+export async function analyzeLibraryV2TrackReplayGain(trackId: number): Promise<number | null> {
+  const payload = await readJson<{
+    success: boolean;
+    track_gain_db?: number | null;
+    error?: string;
+  }>(apiClient.post(`library/v2/tracks/${trackId}/replaygain`, { json: {} }));
+  if (!payload.success) throw new Error(payload.error || 'ReplayGain analysis failed');
+  return payload.track_gain_db ?? null;
+}
+
 export async function fetchLibraryV2JobStatus(jobId?: string): Promise<LibraryV2JobState> {
   const params = new URLSearchParams();
   if (jobId) params.set('job_id', jobId);

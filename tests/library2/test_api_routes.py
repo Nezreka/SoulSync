@@ -275,6 +275,27 @@ def test_replaygain_endpoint_starts_a_background_job(api, monkeypatch):
     assert body["job_id"]
 
 
+def test_track_replaygain_requires_ffmpeg(api, monkeypatch):
+    client, _db, ids = api
+    monkeypatch.setattr("core.replaygain.is_ffmpeg_available", lambda: False)
+    response = client.post(f"/api/library/v2/tracks/{ids['album_track']}/replaygain")
+    assert response.status_code == 500
+
+
+def test_track_replaygain_analyzes_synchronously(api, monkeypatch):
+    client, _db, ids = api
+    monkeypatch.setattr("core.replaygain.is_ffmpeg_available", lambda: True)
+    monkeypatch.setattr(
+        "core.library2.replaygain.analyze_track_replaygain",
+        lambda conn, track_id, config_manager=None: {
+            "analyzed": True, "track_gain_db": 2.5, "error": None,
+        },
+    )
+    response = client.post(f"/api/library/v2/tracks/{ids['album_track']}/replaygain")
+    assert response.status_code == 200
+    assert response.get_json()["track_gain_db"] == 2.5
+
+
 def test_match_status_endpoints_return_service_chips(api, monkeypatch):
     client, db, ids = api
     # The api fixture's lib2 rows have no legacy back-reference, so stub the

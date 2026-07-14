@@ -31,7 +31,7 @@ export function QualityProfileModal({
   title,
   onClose,
 }: {
-  entity: 'artists' | 'albums';
+  entity: 'artists' | 'albums' | 'tracks';
   id: number;
   currentProfileId: number;
   title: string;
@@ -45,7 +45,8 @@ export function QualityProfileModal({
   const [monitorExisting, setMonitorExisting] = useState(false);
   const mutation = useMutation({
     mutationFn: (profileId: number) =>
-      setLibraryV2QualityProfile(entity, id, profileId, true, monitorExisting),
+      // A track has no children to cascade to.
+      setLibraryV2QualityProfile(entity, id, profileId, entity !== 'tracks', monitorExisting),
     onSettled: () => queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY }),
     onSuccess: () => onClose(),
   });
@@ -67,7 +68,7 @@ export function QualityProfileModal({
         </div>
         <div className={styles.qpHeadRow}>
           <p className={styles.qpSubtitle}>
-            {entity === 'artists' ? 'Artist' : 'Album'}: {title}
+            {entity === 'artists' ? 'Artist' : entity === 'albums' ? 'Album' : 'Track'}: {title}
             {entity === 'artists' ? ' — applies to all its albums' : ''}
           </p>
           <span className={styles.qpManagedHint}>Profiles are managed in Settings → Quality</span>

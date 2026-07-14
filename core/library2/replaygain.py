@@ -138,4 +138,55 @@ def analyze_album_replaygain(
     return stats
 
 
-__all__ = ["analyze_album_replaygain"]
+def analyze_track_replaygain(
+    conn,
+    track_id: int,
+    *,
+    config_manager: Any = None,
+    analyze_fn: Optional[AnalyzeFn] = None,
+    write_fn: Optional[WriteFn] = None,
+    resolve_fn: Optional[ResolveFn] = None,
+) -> Dict[str, Any]:
+    """Analyze one track's file and write track-level ReplayGain tags.
+
+    No album gain is computed (single track). Returns
+    ``{analyzed: bool, track_gain_db: float|None, error: str|None}``.
+    """
+    from core.replaygain import RG_REFERENCE_LUFS, analyze_track as _default_analyze
+    from core.replaygain import write_replaygain_tags as _default_write
+
+    analyze = analyze_fn or _default_analyze
+    write = write_fn or _default_write
+    if resolve_fn is not None:
+        resolve = resolve_fn
+    else:
+        from core.library2.paths import resolve_lib2_path
+
+        def resolve(path: str) -> Optional[str]:
+            return resolve_lib2_path(path, config_manager)
+
+    from core.library2.track_files import primary_file_row
+
+    file_row = primary_file_row(conn, track_id)
+    stored_path = file_row["path"] if file_row and file_row.get("path") else None
+    if not stored_path:
+        return {"analyzed": False, "track_gain_db": None, "error": "Track has no file"}
+    resolved = resolve(stored_path)
+    if not resolved:
+        return {"analyzed": False, "track_gain_db": None, "error": "File not found on disk"}
+    try:
+        lufs, peak_dbfs = analyze(resolved)
+    except Exception as e:  # noqa: BLE001
+        return {"analyzed": False, "track_gain_db": None, "error": str(e)}
+    track_gain_db = RG_REFERENCE_LUFS - lufs
+    from core.metadata.common import get_file_lock
+
+    try:
+        with get_file_lock(resolved):
+            write(resolved, track_gain_db, peak_dbfs, None, None)
+    except Exception as e:  # noqa: BLE001
+        return {"analyzed": False, "track_gain_db": None, "error": str(e)}
+    return {"analyzed": True, "track_gain_db": track_gain_db, "error": None}
+
+
+__all__ = ["analyze_album_replaygain", "analyze_track_replaygain"]

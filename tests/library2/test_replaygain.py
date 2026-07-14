@@ -132,6 +132,60 @@ def test_album_replaygain_no_present_files(imported_conn):
     assert result["album_gain_db"] is None
 
 
+def test_single_track_replaygain_writes_track_gain(imported_conn):
+    track_id = imported_conn.execute(
+        "SELECT id FROM lib2_tracks WHERE legacy_track_id=100"
+    ).fetchone()[0]
+    writes = []
+
+    result = RG.analyze_track_replaygain(
+        imported_conn,
+        track_id,
+        analyze_fn=lambda p: (-14.0, -0.5),
+        write_fn=lambda path, tg, tp, ag, ap: writes.append((path, tg, ag)) or True,
+        resolve_fn=lambda p: p,
+    )
+
+    assert result["analyzed"] is True
+    assert result["track_gain_db"] == RG_REFERENCE_LUFS - (-14.0)
+    # A single track has no album gain.
+    assert writes[0][2] is None
+
+
+def test_single_track_replaygain_reports_missing_file(imported_conn):
+    track_id = imported_conn.execute(
+        "SELECT id FROM lib2_tracks WHERE legacy_track_id=100"
+    ).fetchone()[0]
+
+    result = RG.analyze_track_replaygain(
+        imported_conn,
+        track_id,
+        analyze_fn=lambda p: (-14.0, -0.5),
+        write_fn=lambda *a: True,
+        resolve_fn=lambda p: None,
+    )
+
+    assert result["analyzed"] is False
+    assert result["error"]
+
+
+def test_single_track_replaygain_fileless_track(imported_conn):
+    # Legacy seed track 101 has no file.
+    track_id = imported_conn.execute(
+        "SELECT id FROM lib2_tracks WHERE legacy_track_id=101"
+    ).fetchone()[0]
+
+    result = RG.analyze_track_replaygain(
+        imported_conn,
+        track_id,
+        analyze_fn=lambda p: (-14.0, -0.5),
+        write_fn=lambda *a: True,
+        resolve_fn=lambda p: p,
+    )
+
+    assert result["analyzed"] is False
+
+
 def test_album_replaygain_reports_progress(imported_conn):
     _seed_two_present_files(imported_conn)
     seen = []

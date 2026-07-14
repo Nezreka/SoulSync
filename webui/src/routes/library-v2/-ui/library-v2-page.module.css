@@ -1538,6 +1538,16 @@
   font-family: var(--font-mono, monospace);
 }
 
+.trackProfileName {
+  display: inline-block;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.55);
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  padding: 1px 6px;
+}
+
 /* --- inline present/missing (right after the track title) --- */
 .trackTitleCell {
   display: inline-flex;

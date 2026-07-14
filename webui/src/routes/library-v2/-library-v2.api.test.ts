@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { HttpResponse, http, server } from '@/test/msw';
 
 import {
+  analyzeLibraryV2TrackReplayGain,
   blacklistLibraryV2Source,
   deleteLibraryV2Files,
   fetchLibraryV2AlbumMatchStatus,
@@ -259,6 +260,15 @@ describe('library v2 replaygain api', () => {
       ),
     );
     await expect(startLibraryV2AlbumReplayGain(42)).rejects.toThrow('ffmpeg not found on PATH');
+  });
+
+  it('analyzes a single track synchronously and returns its gain', async () => {
+    server.use(
+      http.post('/api/library/v2/tracks/12/replaygain', () =>
+        HttpResponse.json({ success: true, analyzed: true, track_gain_db: -3.2 }),
+      ),
+    );
+    await expect(analyzeLibraryV2TrackReplayGain(12)).resolves.toBe(-3.2);
   });
 });
 
