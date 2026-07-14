@@ -2253,7 +2253,15 @@ bekannte Main-Chunk-Hinweis). **Logischer nächster Schritt:** P2-06 als kleinst
     Monitoring-Vertragstests sind grün. **Nächste Slice:** Artist „Refresh &
     Scan“ meldet Fehler derzeit nur als abgewiesenes Promise und muss einen
     sichtbaren Retry erhalten; anschließend Import-Polling-Timeout und
-    Interactive-Grab-Fehlertext prüfen.
+    Interactive-Grab-Fehlertext prüfen. **Fünfte Slice abgeschlossen
+    2026-07-14:** Artist „Refresh & Scan“ läuft nun durch einen isolierten
+    React-Query-Mutationsvertrag. Backend-/Scan-Fehler erscheinen sichtbar am
+    Toolbar-Control, Pending endet garantiert und derselbe Button wird zu
+    „Retry Refresh & Scan“; Erfolg invalidiert weiterhin ausschließlich die
+    zentrale Library-v2-Query. Ein Komponenten-Vertragstest beweist
+    Failure→Retry→Success. **Nächste Slice:** Import-Polling muss bei
+    ausgeschöpftem Zeitbudget explizit von „Importing…“ auf Timeout wechseln;
+    danach den Interactive-Grab-Fehlergrund sichtbar machen.
 
 **Session-Abschluss-Gate 2026-07-14:** Seit dem vorherigen Full-Gate wurden
 Roadmap 13 sowie 16–23 und Phase E vollständig abgeschlossen und jeweils

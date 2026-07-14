@@ -333,6 +333,37 @@ function IconActionButton({
   );
 }
 
+export function ArtistRefreshButton({ artistId }: { artistId: number }) {
+  const queryClient = useQueryClient();
+  const mutation = useMutation({
+    mutationFn: () => refreshLibraryV2('artists', artistId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY }),
+  });
+
+  return (
+    <span className={styles.toolbarMutationControl}>
+      <ActionButton
+        icon="refresh"
+        label={
+          mutation.isPending
+            ? 'Refreshing...'
+            : mutation.isError
+              ? 'Retry Refresh & Scan'
+              : 'Refresh & Scan'
+        }
+        title="Refresh information and scan disk"
+        busy={mutation.isPending}
+        onClick={() => mutation.mutate()}
+      />
+      {mutation.isError ? (
+        <span className={styles.toolbarMutationError} role="alert">
+          {mutationErrorMessage(mutation.error, 'Refresh & Scan failed')}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 function ModalShell({
   title,
   wide,
@@ -1984,7 +2015,6 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   const releasesMode = search.releases;
   const artistQuery = useQuery(libraryV2ArtistQueryOptions(artistId));
   const artist = artistQuery.data;
-  const [refreshing, setRefreshing] = useState(false);
   const [discographyBusy, setDiscographyBusy] = useState(false);
   const [upgradeScanBusy, setUpgradeScanBusy] = useState(false);
   const [modalAction, setModalAction] = useState<{
@@ -2033,16 +2063,6 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
       setGrabBanner({ tone: 'err', text: e instanceof Error ? e.message : 'Upgrade scan failed' });
     } finally {
       setUpgradeScanBusy(false);
-    }
-  }
-
-  async function refresh() {
-    setRefreshing(true);
-    try {
-      await refreshLibraryV2('artists', artistId);
-      await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
-    } finally {
-      setRefreshing(false);
     }
   }
 
@@ -2145,13 +2165,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
         <>
           <div className={styles.pageToolbar}>
             <div className={styles.toolbarGroup}>
-              <ActionButton
-                icon="refresh"
-                label={refreshing ? 'Refreshing...' : 'Refresh & Scan'}
-                title="Refresh information and scan disk"
-                busy={refreshing}
-                onClick={() => void refresh()}
-              />
+              <ArtistRefreshButton artistId={artistId} />
               <ActionButton
                 icon="search"
                 label="Search Monitored"
