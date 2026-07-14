@@ -2070,7 +2070,10 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
 
   async function searchUpgrades() {
     setUpgradeScanBusy(true);
-    setGrabBanner({ tone: 'busy', text: 'Scanning monitored tracks for quality upgrades…' });
+    setGrabBanner({
+      tone: 'busy',
+      text: 'Running a global scan of all monitored tracks for quality upgrades…',
+    });
     try {
       const jobId = await startLibraryV2UpgradeScan();
       const error = await awaitBulkJob(queryClient, jobId);
@@ -2079,7 +2082,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
           ? { tone: 'err', text: `Upgrade scan failed: ${error}` }
           : {
               tone: 'ok',
-              text: 'Upgrade scan finished — genuine upgrade candidates were queued to the wishlist.',
+              text: 'Global upgrade scan finished — genuine candidates from the whole Library v2 catalog were queued to the wishlist.',
             },
       );
     } catch (e) {
@@ -2122,12 +2125,12 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
    *  it searches and downloads exactly those — it must NOT blind-grab the best
    *  result for a bare artist-name query (an arbitrary release). */
   function searchMonitored() {
-    setGrabBanner({ tone: 'busy', text: 'Starting wishlist processing…' });
+    setGrabBanner({ tone: 'busy', text: 'Starting global Wishlist processing…' });
     void processWishlist()
       .then((message) =>
         setGrabBanner({
           tone: 'ok',
-          text: `${message} — monitored missing tracks are searched through the normal pipeline (progress on the Wishlist page).`,
+          text: `${message} — all monitored missing tracks in the Wishlist are searched through the normal pipeline (progress on the Wishlist page).`,
         }),
       )
       .catch((e) =>
@@ -2191,8 +2194,8 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               <ArtistRefreshButton artistId={artistId} />
               <ActionButton
                 icon="search"
-                label="Search Monitored"
-                title="Process the wishlist: search + download all monitored missing tracks"
+                label="Search All Monitored (global)"
+                title="Global action: process the entire Wishlist and search all monitored missing tracks"
                 onClick={() => handleAction('Search Monitored')}
               />
               <ActionButton
@@ -2212,8 +2215,8 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             <div className={styles.toolbarGroup}>
               <ActionButton
                 icon="download"
-                label={upgradeScanBusy ? 'Scanning…' : 'Search Upgrades'}
-                title="Queue monitored tracks whose files are below their quality profile's cutoff"
+                label={upgradeScanBusy ? 'Scanning all…' : 'Search All Upgrades (global)'}
+                title="Global action: scan the entire Library v2 catalog and queue monitored tracks below their quality-profile cutoff"
                 busy={upgradeScanBusy}
                 onClick={() => void searchUpgrades()}
               />
@@ -2669,7 +2672,7 @@ function AlbumBlock({
           />
           <IconActionButton
             icon="search"
-            title="Search Monitored"
+            title="Search all monitored tracks (global Wishlist action)"
             onClick={() => onAction(`Search Monitored: ${album.title}`)}
           />
           <IconActionButton

@@ -2311,6 +2311,20 @@ bekannte Main-Chunk-Hinweis). **Logischer nächster Schritt:** P2-06 als kleinst
     „Search Monitored“-/„Search Upgrades“-Actions nicht länger optisch als
     Artist-/Album-Scope darstellen; Scope im Label und Bestätigungs-/Status-
     Text unmissverständlich machen, ohne eine zweite Suchpipeline zu bauen.
+29. ~~**Globale Search-Actions ehrlich beschriften (P2-08).**~~ **Abgeschlossen
+    2026-07-14:** Die Artist-Toolbar sagt jetzt sichtbar „Search All Monitored
+    (global)“ und „Search All Upgrades (global)“; Pending-, Success- und
+    Tooltip-Texte benennen ausdrücklich die gesamte Wishlist bzw. den ganzen
+    Library-v2-Katalog. Das albumlokal platzierte Such-Icon kennzeichnet sich
+    ebenfalls als globale Wishlist-Action. Die Implementierung bleibt
+    unverändert bei `POST /api/wishlist/process` und dem einen bestehenden
+    `lib2_upgrade_scan`; es entstand kein scheinbarer Artist-/Album-Filter und
+    keine zweite Search-/Upgrade-Pipeline. 21 Library-v2-Vitests,
+    Frontend-Format/Lint/Typecheck und Production-Build sind grün. **Nächster
+    logischer Schritt:** P2-09 — Interactive Search muss die vorhandene
+    Source-Auswahl ehrlich nutzen bzw. anzeigen; zuerst den bestehenden
+    `/api/search/sources`-Vertrag und die Main-Pipeline-Modi inventarisieren,
+    ohne eine parallele Source-Decision zu bauen.
 
 **Session-Abschluss-Gate 2026-07-14:** Seit dem vorherigen Full-Gate wurden
 Roadmap 13 sowie 16–23 und Phase E vollständig abgeschlossen und jeweils
@@ -2658,8 +2672,11 @@ Priorität, kompakt aufgelistet für spätere Aufnahme):
   Button (die Karte selbst) — ungültiges HTML, unzuverlässiges Keyboard-/
   Click-Verhalten.~~ **Behoben 2026-07-14:** Card-Navigation und Monitor-
   Toggle sind semantische Geschwister-Buttons (Roadmap-Punkt 28).
-- P2-08: „Search Monitored"/„Search Upgrades" wirken auf Artist-/Album-Ebene
-  positioniert, laufen aber global über die ganze Wishlist/Library.
+- ~~P2-08: „Search Monitored"/„Search Upgrades" wirken auf Artist-/Album-Ebene
+  positioniert, laufen aber global über die ganze Wishlist/Library.~~ **Behoben
+  2026-07-14:** Labels, Tooltips und Status benennen den globalen Scope
+  ausdrücklich; die bestehenden globalen Pipelines bleiben alleinige
+  Ausführung (Roadmap-Punkt 29).
 - P2-09: Interactive-Search-Modal nutzt die vorhandene Source-Auswahl
   (`/api/search/sources`) nicht; „Searching all configured sources" stimmt
   nur im `best_quality`-Modus.
