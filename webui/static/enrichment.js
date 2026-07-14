@@ -2013,6 +2013,12 @@ async function loadRepairJobs() {
             const statusClass = job.is_running ? 'running' : (job.enabled ? 'idle' : 'disabled');
             const dotClass = job.is_running ? 'running' : (job.enabled ? 'enabled' : 'disabled');
             const cardClass = job.is_running ? 'running' : (!job.enabled ? 'disabled' : '');
+            const basisMeta = {
+                legacy: ['Legacy catalog', 'Scans the legacy artists/albums/tracks catalogue'],
+                lib2: ['Library v2', 'Scans the Library v2 catalogue'],
+                filesystem: ['Filesystem / ops', 'Scans files, directories, or operational caches rather than a music catalogue'],
+                mixed: ['Legacy + files', 'Scans the legacy catalogue and files on disk'],
+            }[job.data_basis] || ['Unknown basis', 'The job did not declare its data basis'];
 
             // Build flow badges
             const flowParts = [];
@@ -2112,7 +2118,11 @@ async function loadRepairJobs() {
                 <div class="repair-job-main">
                     <div class="repair-job-status ${dotClass}"></div>
                     <div class="repair-job-info">
-                        <div class="repair-job-name">${job.display_name}</div>
+                        <div class="repair-job-name-row">
+                            <div class="repair-job-name">${job.display_name}</div>
+                            <span class="repair-job-basis repair-job-basis-${job.data_basis || 'unknown'}"
+                                  title="${basisMeta[1]}">${basisMeta[0]}</span>
+                        </div>
                         <div class="repair-job-desc">${job.description || ''}</div>
                         <div class="repair-job-flow">${flowParts.join('')}</div>
                         <div class="repair-job-meta">${metaParts.join(' &middot; ')}</div>
@@ -4336,4 +4346,3 @@ if (document.readyState === 'loading') {
 }
 
 // ===================================================================
-

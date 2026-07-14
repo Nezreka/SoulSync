@@ -203,6 +203,9 @@ class RepairJob(ABC):
     description: str = ''
     help_text: str = ''  # Extended explanation shown in the info modal
     icon: str = ''
+    # Authoritative data source used by the scan. Assigned by the registry's
+    # exhaustive manifest so a newly registered job cannot silently omit it.
+    data_basis: str = ''
     default_enabled: bool = False
     default_interval_hours: int = 24
     default_settings: Dict[str, Any] = {}

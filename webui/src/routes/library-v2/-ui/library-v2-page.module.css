@@ -1140,6 +1140,17 @@
   padding: 1px 6px;
 }
 
+.qpBasis {
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 999px;
+  color: #94a3b8;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  text-transform: uppercase;
+}
+
 .qpDesc {
   font-size: 12px;
   color: rgba(255, 255, 255, 0.55);

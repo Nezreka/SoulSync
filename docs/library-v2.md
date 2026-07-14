@@ -1518,13 +1518,21 @@ implementiert und größtenteils solide.
   verbietet die alten per-row-SELECT-Signaturen. Notwendige ID-/Trigger-
   abhängige Writes bleiben geordnet in derselben Transaktion; Progress,
   Reset-Reconciliation, Rules/Provenance und Projektionen sind unverändert.
-- **A6 — Legacy- vs. lib2-Datenbasis der Repair-Jobs explizit machen.** Die
+- ~~**A6 — Legacy- vs. lib2-Datenbasis der Repair-Jobs explizit machen.**~~ Die
   per-Artist gescopten Jobs (Gap-Fill, Tag-Consistency, Library-Retag)
   scannen Legacy-Tabellen. Solange der Legacy-Import die Quelle ist,
   deckungsgleich — aber autolink-erzeugte lib2-Rows ohne Legacy-Pendant sieht
   keiner dieser Jobs. Mittelfristig brauchen die Jobs eine lib2-Datenquelle
-  oder lib2 einen Rück-Sync. **Weiterhin offen, als bekannte Grenze
-  festzuhalten.**
+  oder lib2 einen Rück-Sync. **Explizit gemacht 2026-07-14:** Ein vollständiges
+  Registry-Manifest klassifiziert jeden Repair-Job als `legacy`, `lib2`,
+  `filesystem` oder `mixed`; Registrierung ohne gültige Zuordnung schlägt
+  sofort fehl. Der Worker liefert `data_basis` über die bestehende Repair-API,
+  Stats → Repair zeigt sie auf jeder Jobkarte und das Library-v2-Maintenance-
+  Modal an jedem angebotenen Job. Das migriert bewusst keine Scanlogik und
+  macht insbesondere die noch legacy-basierten Artist-Jobs sichtbar. Drei
+  neue Registry/API-Vertragstests (18 Repair-Worker-Tests insgesamt),
+  Frontend-Check/Typecheck, fünf gezielte Vitests und Production-Build sind
+  grün.
 - **A7 — `until_top`-Wording im Code vereinheitlichen.** `is_upgrade_policy`
   akzeptiert beide, `evaluate_file` behandelt `until_top` als Cutoff 0 —
   korrekt, aber Docstrings/API-Doku nennen nur eine Variante. Kosmetik.
@@ -1934,7 +1942,18 @@ verändert; daher waren Frontend-Typecheck/Vitest/Build nicht erforderlich.
     Schritt:** Roadmap-Punkt 13/A6 — Repair-Jobs deklarativ nach Legacy- bzw.
     lib2-Datenbasis kennzeichnen und diese Basis in API/UI sichtbar machen,
     bevor einzelne Jobs migriert werden.
-13. **Legacy- vs. lib2-Datenbasis der Repair-Jobs** explizit machen (A6).
+13. ~~**Legacy- vs. lib2-Datenbasis der Repair-Jobs** explizit machen (A6).~~
+    **Abgeschlossen 2026-07-14:** Das exhaustive Registry-Manifest erzwingt
+    für alle 32 Jobs eine der vier Datenbasen `legacy`, `lib2`, `filesystem`
+    oder `mixed`; `RepairWorker.get_all_job_info()` exponiert sie und sowohl
+    die globale Stats-/Repair-UI als auch Library-v2-Maintenance zeigen sie
+    sichtbar an. Damit bleibt Legacy weiterhin die ehrliche Basis der noch
+    nicht migrierten Jobs, statt durch einen impliziten lib2-Scope kaschiert zu
+    werden. 18 gezielte Python-Tests, Frontend-Check/Typecheck, fünf Vitests
+    und Production-Build sind grün. **Nächster logischer Schritt:** Roadmap-
+    Punkt 14 / Phase E — Playlists zuletzt über die vorhandene Wishlist-/
+    Acquisition-Pipeline anbinden, ohne zweiten Importer oder zweite
+    Decision-Engine.
 14. **Playlists** (Phase E, bewusst zuletzt).
 15. **Browser-Klick-Verifikation** in Docker für Phase-C/D-Flows, die nur
     code-/curl-verified sind.

@@ -10,11 +10,56 @@ logger = get_logger("repair_jobs")
 # Registry populated at import time by each job module
 JOB_REGISTRY: dict[str, type[RepairJob]] = {}
 
+# Exhaustive, reviewable declaration of which catalogue/data source each job
+# scans. ``mixed`` means the legacy catalogue plus files on disk; provider
+# lookups do not change a job's catalogue basis. Operational cache/directory
+# jobs are classified as ``filesystem`` because they do not scan either music
+# catalogue. Registration fails when a new job has no deliberate entry here.
+REPAIR_DATA_BASES = frozenset({'legacy', 'lib2', 'filesystem', 'mixed'})
+JOB_DATA_BASIS: dict[str, str] = {
+    'track_number_repair': 'mixed',
+    'cache_evictor': 'filesystem',
+    'orphan_file_detector': 'mixed',
+    'dead_file_cleaner': 'mixed',
+    'duplicate_detector': 'legacy',
+    'acoustid_scanner': 'mixed',
+    'missing_cover_art': 'mixed',
+    'missing_lyrics': 'mixed',
+    'replaygain_filler': 'mixed',
+    'empty_folder_cleaner': 'filesystem',
+    'expired_download_cleaner': 'mixed',
+    'metadata_gap_filler': 'legacy',
+    'album_completeness': 'legacy',
+    'fake_lossless_detector': 'filesystem',
+    'quality_upgrade_scanner': 'mixed',
+    'library_reorganize': 'mixed',
+    'mbid_mismatch_detector': 'mixed',
+    'single_album_dedup': 'legacy',
+    'lossy_converter': 'mixed',
+    'album_tag_consistency': 'mixed',
+    'live_commentary_cleaner': 'legacy',
+    'unknown_artist_fixer': 'mixed',
+    'discography_backfill': 'legacy',
+    'canonical_version_resolve': 'legacy',
+    'library_retag': 'mixed',
+    'quality_upgrade': 'mixed',
+    'short_preview_track': 'legacy',
+    'lib2_upgrade_scan': 'lib2',
+    'lib2_skips_cleanup': 'lib2',
+    'lib2_discography_refresh': 'lib2',
+    'lib2_mirror_reconcile': 'lib2',
+    'audio_corruption_detector': 'mixed',
+}
+
 _imports_done = False
 
 
 def register_job(cls: type[RepairJob]) -> type[RepairJob]:
     """Decorator to register a RepairJob subclass."""
+    basis = JOB_DATA_BASIS.get(cls.job_id)
+    if basis not in REPAIR_DATA_BASES:
+        raise ValueError(f"Repair job {cls.job_id!r} has no valid data-basis declaration")
+    cls.data_basis = basis
     JOB_REGISTRY[cls.job_id] = cls
     return cls
 

@@ -734,46 +734,67 @@ function EditArtistModal({
 /** Maintenance jobs (the existing repair workers), runnable from the artist
  *  page like Lidarr's Tasks. Jobs with `scoped: true` honor an artist scope
  *  when triggered from here; the rest scan the whole library. */
-const MAINTENANCE_JOBS: Array<{ id: string; label: string; desc: string; scoped?: boolean }> = [
+type MaintenanceDataBasis = 'legacy' | 'lib2' | 'mixed';
+
+const MAINTENANCE_BASIS_LABEL: Record<MaintenanceDataBasis, string> = {
+  legacy: 'legacy catalog',
+  lib2: 'Library v2',
+  mixed: 'legacy + files',
+};
+
+const MAINTENANCE_JOBS: Array<{
+  id: string;
+  label: string;
+  desc: string;
+  basis: MaintenanceDataBasis;
+  scoped?: boolean;
+}> = [
   {
     id: 'metadata_gap_filler',
     label: 'Metadata Gap Fill',
     desc: 'Fill missing metadata identifiers (ISRC, MusicBrainz) from providers.',
+    basis: 'legacy',
     scoped: true,
   },
   {
     id: 'unknown_artist_fixer',
     label: 'Fix Unknown Artist',
     desc: 'Resolve tracks filed under Unknown/placeholder artists (always library-wide).',
+    basis: 'mixed',
   },
   {
     id: 'album_tag_consistency',
     label: 'Album Tag Consistency',
     desc: 'Align album-level tags (album artist, year, art) across each album.',
+    basis: 'mixed',
     scoped: true,
   },
   {
     id: 'library_reorganize',
     label: 'Rename / Reorganize Files',
     desc: 'Move this artist’s allowlisted files into the configured folder/name scheme.',
+    basis: 'mixed',
     scoped: true,
   },
   {
     id: 'single_album_dedup',
     label: 'Single/Album Dedup',
     desc: 'Find redundant single files for this artist (review under Stats → Repair).',
+    basis: 'legacy',
     scoped: true,
   },
   {
     id: 'library_retag',
     label: 'Library Retag',
     desc: 'Rewrite tags from library metadata.',
+    basis: 'mixed',
     scoped: true,
   },
   {
     id: 'lib2_upgrade_scan',
     label: 'Library v2 Upgrade Scan',
     desc: 'Queue monitored tracks below their quality profile cutoff (also schedulable under Stats → Repair).',
+    basis: 'lib2',
   },
 ];
 
@@ -809,6 +830,7 @@ function MaintenanceModal({
           >
             <span className={styles.qpName}>
               {job.label}
+              <span className={styles.qpBasis}>{MAINTENANCE_BASIS_LABEL[job.basis]}</span>
               {job.scoped ? <span className={styles.qpCurrent}>this artist</span> : null}
               {state[job.id] === 'queued' ? <span className={styles.statusOk}>queued</span> : null}
               {state[job.id] === 'error' ? (

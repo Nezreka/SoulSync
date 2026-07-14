@@ -398,6 +398,7 @@ class RepairWorker:
                 'description': job.description,
                 'help_text': job.help_text,
                 'icon': job.icon,
+                'data_basis': job.data_basis,
                 'auto_fix': job.auto_fix,
                 'enabled': config['enabled'],
                 'interval_hours': config['interval_hours'],
