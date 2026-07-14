@@ -19,10 +19,12 @@ import {
   autoGrabBest,
   bulkMonitorLibraryV2Releases,
   deleteLibraryV2Entity,
+  deleteLibraryV2Files,
   editLibraryV2Artist,
   fetchLibraryV2ArtistDeletePreview,
   fetchLibraryV2ArtistHistory,
   fetchLibraryV2Duplicates,
+  fetchLibraryV2FileDeletePreview,
   fetchLibraryV2ImportStatus,
   fetchLibraryV2JobStatus,
   LIBRARY_V2_ALBUM_TYPES,
@@ -69,6 +71,18 @@ type ActionHandler = (action: string, entity?: Lib2EntityRef) => void;
 
 function trackProgress(present: number, total: number): string {
   return `${present}/${total}`;
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let value = bytes / 1024;
+  let unit = units[0];
+  for (let i = 1; i < units.length && value >= 1024; i += 1) {
+    value /= 1024;
+    unit = units[i];
+  }
+  return `${value.toFixed(value >= 10 ? 1 : 2)} ${unit}`;
 }
 
 /** Only "Interactive Search" opens the manual results window. */
@@ -463,7 +477,7 @@ function HistoryModal({ artistId, onClose }: { artistId: number; onClose: () => 
   );
 }
 
-/** Confirm + delete a library entity. Files on disk are never touched. */
+/** Keep catalog removal and ADR-05 physical deletion visibly separate. */
 function DeleteConfirmModal({
   entity,
   id,
@@ -480,14 +494,24 @@ function DeleteConfirmModal({
   const queryClient = useQueryClient();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fileBusy, setFileBusy] = useState(false);
+  const [fileError, setFileError] = useState<string | null>(null);
+  const [fileResult, setFileResult] = useState<string | null>(null);
+  const [confirmFileDelete, setConfirmFileDelete] = useState(false);
   // Show the real blast radius before the user commits: only releases the
   // artist OWNS are removed; featured appearances on other artists' releases
   // survive (they are merely detached).
   const preview = useQuery({
-    queryKey: [...LIBRARY_V2_QUERY_KEY, 'delete-preview', id],
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'delete-preview', entity, id],
     queryFn: () => fetchLibraryV2ArtistDeletePreview(id),
     enabled: entity === 'artists',
   });
+  const filePreview = useQuery({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'file-delete-preview', entity, id],
+    queryFn: () => fetchLibraryV2FileDeletePreview(entity, id),
+  });
+  const physical = filePreview.data;
+  const physicalReady = Boolean(physical && physical.file_count > 0 && physical.unsafe_count === 0);
   return (
     <ModalShell title={`Delete ${entity === 'artists' ? 'Artist' : 'Album'}`} onClose={onClose}>
       <p>
@@ -507,13 +531,18 @@ function DeleteConfirmModal({
       ) : null}
       {error ? <div className={styles.searchError}>{error}</div> : null}
       <div className={styles.modalActions}>
-        <button type="button" className={styles.btnGhost} disabled={busy} onClick={onClose}>
+        <button
+          type="button"
+          className={styles.btnGhost}
+          disabled={busy || fileBusy}
+          onClick={onClose}
+        >
           Cancel
         </button>
         <button
           type="button"
           className={styles.btnDanger}
-          disabled={busy}
+          disabled={busy || fileBusy}
           onClick={() => {
             setBusy(true);
             void deleteLibraryV2Entity(entity, id)
@@ -527,9 +556,106 @@ function DeleteConfirmModal({
               });
           }}
         >
-          {busy ? 'Deleting…' : 'Delete'}
+          {busy ? 'Removing…' : 'Remove from library'}
         </button>
       </div>
+
+      <section className={styles.fileDeletePanel}>
+        <h4>Delete physical files</h4>
+        <p>
+          This is a separate, irreversible command. It keeps the artist, release, and tracks in
+          Library v2 and marks their file records as deleted.
+        </p>
+        {filePreview.isLoading ? <p className={styles.muted}>Checking file roots…</p> : null}
+        {filePreview.error ? (
+          <div className={styles.searchError}>{filePreview.error.message}</div>
+        ) : null}
+        {physical ? (
+          <>
+            <p>
+              {physical.file_count} physical file{physical.file_count === 1 ? '' : 's'} ·{' '}
+              {formatFileSize(physical.total_size)}
+              {physical.configured_roots.length > 0
+                ? ` · ${physical.configured_roots.length} configured library root${
+                    physical.configured_roots.length === 1 ? '' : 's'
+                  }`
+                : ' · no configured library root'}
+            </p>
+            {physical.files.length > 0 ? (
+              <ul className={styles.fileDeleteList}>
+                {physical.files.map((file) => (
+                  <li key={file.path ?? file.file_ids.join('-')}>
+                    <span>{file.path ?? file.stored_paths[0] ?? 'Unresolved file'}</span>
+                    <small>
+                      {file.deletable
+                        ? `${formatFileSize(file.size ?? 0)} · ${file.root}`
+                        : `Blocked: ${file.reason ?? 'unsafe path'}`}
+                    </small>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className={styles.muted}>No linked physical files remain.</p>
+            )}
+            {physical.unsafe_count > 0 ? (
+              <div className={styles.searchError}>
+                Physical deletion is blocked because {physical.unsafe_count} file
+                {physical.unsafe_count === 1 ? ' is' : 's are'} unresolved or outside a configured
+                library root.
+              </div>
+            ) : null}
+          </>
+        ) : null}
+        {fileError ? <div className={styles.searchError}>{fileError}</div> : null}
+        {fileResult ? <p>{fileResult}</p> : null}
+        <label className={styles.fileDeleteConfirm}>
+          <input
+            type="checkbox"
+            checked={confirmFileDelete}
+            disabled={!physicalReady || fileBusy}
+            onChange={(event) => setConfirmFileDelete(event.target.checked)}
+          />
+          I understand these files will be permanently deleted from disk.
+        </label>
+        <div className={styles.modalActions}>
+          <button
+            type="button"
+            className={styles.btnDanger}
+            disabled={!physicalReady || !confirmFileDelete || fileBusy || busy}
+            onClick={() => {
+              if (!physical) return;
+              setFileBusy(true);
+              setFileError(null);
+              setFileResult(null);
+              void deleteLibraryV2Files(entity, id, physical.preview_token)
+                .then(async (operation) => {
+                  const deleted = operation.items.filter(
+                    (item) => item.status === 'deleted',
+                  ).length;
+                  const failed = operation.items.filter((item) => item.status === 'failed').length;
+                  setFileResult(
+                    failed > 0
+                      ? `Deleted ${deleted} file${deleted === 1 ? '' : 's'}; ${failed} failed. Journal ${operation.id}.`
+                      : `Deleted ${deleted} physical file${deleted === 1 ? '' : 's'}. Journal ${operation.id}.`,
+                  );
+                  setConfirmFileDelete(false);
+                  await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+                  await filePreview.refetch();
+                })
+                .catch((e) => {
+                  setFileError(e instanceof Error ? e.message : 'Physical file deletion failed');
+                })
+                .finally(() => setFileBusy(false));
+            }}
+          >
+            {fileBusy
+              ? 'Deleting files…'
+              : `Permanently delete ${physical?.deletable_count ?? 0} file${
+                  physical?.deletable_count === 1 ? '' : 's'
+                }`}
+          </button>
+        </div>
+      </section>
     </ModalShell>
   );
 }

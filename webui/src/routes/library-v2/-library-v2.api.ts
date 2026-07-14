@@ -249,6 +249,77 @@ export async function fetchLibraryV2ArtistDeletePreview(
   return payload;
 }
 
+export interface LibraryV2FileDeletePreviewItem {
+  file_ids: number[];
+  track_ids: number[];
+  stored_paths: string[];
+  path: string | null;
+  root: string | null;
+  size: number | null;
+  deletable: boolean;
+  reason: string | null;
+  album_title: string | null;
+  track_titles: string[];
+}
+
+export interface LibraryV2FileDeletePreview {
+  entity: 'artists' | 'albums';
+  entity_id: number;
+  title: string;
+  configured_roots: string[];
+  files: LibraryV2FileDeletePreviewItem[];
+  file_count: number;
+  deletable_count: number;
+  unsafe_count: number;
+  total_size: number;
+  preview_token: string;
+}
+
+export interface LibraryV2FileDeleteOperation {
+  id: string;
+  status: 'planned' | 'executing' | 'completed' | 'partial';
+  file_count: number;
+  total_size: number;
+  items: Array<{
+    id: number;
+    status: 'planned' | 'deleting' | 'deleted' | 'failed';
+    error: string | null;
+    resolved_path: string;
+    file_ids: number[];
+  }>;
+}
+
+export async function fetchLibraryV2FileDeletePreview(
+  entity: 'artists' | 'albums',
+  id: number,
+): Promise<LibraryV2FileDeletePreview> {
+  const payload = await readJson<{ success: boolean; error?: string } & LibraryV2FileDeletePreview>(
+    apiClient.get(`library/v2/${entity}/${id}/file-delete-preview`),
+  );
+  if (!payload.success) throw new Error(payload.error || 'File delete preview failed');
+  return payload;
+}
+
+export async function deleteLibraryV2Files(
+  entity: 'artists' | 'albums',
+  id: number,
+  previewToken: string,
+): Promise<LibraryV2FileDeleteOperation> {
+  const payload = await readJson<{
+    success: boolean;
+    error?: string;
+    operation?: LibraryV2FileDeleteOperation;
+  }>(
+    apiClient.post(`library/v2/${entity}/${id}/file-delete`, {
+      json: { preview_token: previewToken },
+    }),
+  );
+  if (!payload.success || !payload.operation) {
+    throw new Error(payload.error || 'Physical file deletion failed');
+  }
+  return payload.operation;
+}
+
 export interface LibraryV2HistoryEntry {
   title: string | null;
   album: string | null;
