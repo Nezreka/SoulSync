@@ -1280,6 +1280,22 @@ der Downloads-Cancel-Endpoint soll korrelierte Grabs (manual + scheduled)
 als `cancelled` schließen statt sie dem 7-Tage-Sweep zu überlassen; danach
 Grabs ohne lib2-Entity betrachten, erst dann globale Durchsetzung.
 
+**Session 2026-07-14 (vierte Etappe):** Die dritte Roadmap-3-Scheibe ist
+implementiert: Der bestehende Einzel-Downloads-Cancel-Endpoint schließt
+korrelierte `manual`- und `scheduled`-Grabs nach erfolgreichem Client-Cancel
+persistent als `cancelled`. Die Korrelation speichert dazu die bereits vom
+Endpoint verwendete Legacy-Transfer-ID im bestehenden Grab-Kontext; der neue
+fail-open Pipeline-Callback sucht ausschließlich offene Roadmap-3-Grabs und
+setzt über `record_grab_cancelled` den vorhandenen Acquisition-Workflow samt
+append-only `cancelled`-History in Gang. Bereits abgeschlossene, native
+Acquisition- und unkorrelierte Legacy-Downloads bleiben No-ops; ein DB- oder
+Callback-Fehler kann den normalen Cancel-Erfolg nie ändern. Gezielte Tests
+für manual, scheduled, bereits completed, unbekannt und den fail-open
+Endpoint liefen grün (48 passed). Die relevante Python-Fullsuite steht als
+Session-Gate noch aus. Frontend unberührt.
+**Logischer nächster Schritt:** Roadmap-Punkt 3 mit Grabs ohne lib2-Entity
+fortsetzen; erst danach die globale Durchsetzung betrachten.
+
 ### 5.6 Verifikation (pro Phase, End-to-End in Docker)
 
 Lokales Image bauen (`docker build -t soulsync:dev .`), mit der realen
@@ -1593,8 +1609,17 @@ P2-05 und eine Reihe P2-UX/Robustheits-Findings).
    den Matched-Context/Sidecar. Bewusste Grenze: requeued Walks derselben
    Legacy-Task erzeugen pro Dispatch einen eigenen Request; der vorherige
    bleibt bis Approve-Erfolg oder 7-Tage-Sweep `grabbing` (identisch zur
-   Manual-Semantik). **Noch offen:** Grabs ohne lib2-Entity, Cancel-Wiring
-   des Downloads-Cancel-Endpoints, danach erst die globale Durchsetzung.
+   Manual-Semantik). **Dritte Scheibe erledigt 2026-07-14:** Der bestehende
+   Einzel-Downloads-Cancel-Endpoint speichert nach erfolgreichem
+   Client-Cancel korrelierte `manual`- und `scheduled`-Grabs über den
+   bestehenden Workflow als `cancelled` samt History (`record_grab_cancelled`),
+   statt sie dem 7-Tage-Sweep zu überlassen. Die persistierte
+   `legacy_download_id` im Grab-Kontext verbindet die externe Transfer-ID
+   mit dem synthetischen Correlation-ID; der Callback ist fail-open und
+   ignoriert completed, native Acquisition- und normale Legacy-Downloads.
+   Gezielte Tests: manual, scheduled, completed, unbekannt sowie Callback-
+   Fehler am Endpoint (48 passed). **Noch offen:** Grabs ohne lib2-Entity,
+   danach erst die globale Durchsetzung.
 4. Phase-3-Identity/Provenance fertigstellen: dedizierte externe-/
    Old-ID-History, Merge-/Move-History, Field-Level-User-Overrides und
    Read-Projection. Typed Adapters über Discography/Tracklist hinaus

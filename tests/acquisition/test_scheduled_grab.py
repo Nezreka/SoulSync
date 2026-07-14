@@ -13,7 +13,10 @@ from core.acquisition.manual_grab import (
     fail_stale_correlated_grabs,
     try_correlate_scheduled_grab,
 )
-from core.acquisition.pipeline_callback import notify_manual_grab_import_success
+from core.acquisition.pipeline_callback import (
+    notify_correlated_grab_cancelled,
+    notify_manual_grab_import_success,
+)
 from core.acquisition.requests import get_request
 from core.library2.importer import import_legacy_library
 
@@ -244,3 +247,92 @@ def test_try_wrapper_fails_open(legacy_db):
         task_id="task-83",
         connection_factory=_broken_factory,
     ) is None
+
+
+def test_cancel_closes_manual_correlated_grab(legacy_db):
+    conn = _prepared_conn(legacy_db)
+    try:
+        markers = correlate_manual_grab(
+            conn,
+            lib2_context=_track_context(conn),
+            search_result=_search_result(),
+            source="soulseek",
+            legacy_download_id="legacy-manual-1",
+            config_get=_CONFIG_GET,
+        )
+        conn.commit()
+
+        assert notify_correlated_grab_cancelled(
+            "legacy-manual-1", connection_factory=legacy_db._get_connection)
+        assert get_request(conn, markers["request_id"]).status == "cancelled"
+        grab = conn.execute(
+            "SELECT status, last_client_state FROM acquisition_grabs WHERE download_id=?",
+            (markers["download_id"],),
+        ).fetchone()
+        assert dict(grab) == {
+            "status": "cancelled", "last_client_state": "cancelled_by_user"}
+        event = list_history_events(conn, download_id=markers["download_id"])[-1]
+        assert event.event_type == "cancelled"
+        assert event.reason_code == "client_job_removed"
+    finally:
+        conn.close()
+
+
+def test_cancel_closes_scheduled_correlated_grab(legacy_db):
+    conn = _prepared_conn(legacy_db)
+    try:
+        markers = correlate_scheduled_grab(
+            conn,
+            lib2_context=_track_context(conn),
+            search_result=_search_result(),
+            source="soulseek",
+            task_id="task-cancel-scheduled",
+            legacy_download_id="legacy-scheduled-1",
+            config_get=_CONFIG_GET,
+        )
+        conn.commit()
+
+        assert notify_correlated_grab_cancelled(
+            "legacy-scheduled-1", connection_factory=legacy_db._get_connection)
+        assert get_request(conn, markers["request_id"]).status == "cancelled"
+        assert conn.execute(
+            "SELECT status FROM acquisition_grabs WHERE download_id=?",
+            (markers["download_id"],),
+        ).fetchone()["status"] == "cancelled"
+    finally:
+        conn.close()
+
+
+def test_cancel_preserves_completed_correlated_grab(legacy_db):
+    conn = _prepared_conn(legacy_db)
+    try:
+        markers = correlate_manual_grab(
+            conn,
+            lib2_context=_track_context(conn),
+            search_result=_search_result(),
+            source="soulseek",
+            legacy_download_id="legacy-completed-1",
+            config_get=_CONFIG_GET,
+        )
+        conn.commit()
+        assert notify_manual_grab_import_success(
+            {GRAB_MARKER: markers["download_id"]},
+            connection_factory=legacy_db._get_connection)
+
+        assert not notify_correlated_grab_cancelled(
+            "legacy-completed-1", connection_factory=legacy_db._get_connection)
+        assert get_request(conn, markers["request_id"]).status == "completed"
+        events = list_history_events(conn, download_id=markers["download_id"])
+        assert [event.event_type for event in events].count("cancelled") == 0
+    finally:
+        conn.close()
+
+
+def test_cancel_unknown_download_is_a_noop(legacy_db):
+    conn = _prepared_conn(legacy_db)
+    try:
+        assert not notify_correlated_grab_cancelled(
+            "not-correlated", connection_factory=legacy_db._get_connection)
+        assert conn.execute("SELECT COUNT(*) FROM acquisition_history").fetchone()[0] == 0
+    finally:
+        conn.close()

@@ -104,6 +104,7 @@ def _correlate_grab(
     shadow_source: str,
     dispatch_options: Mapping[str, Any],
     grab_context_extra: Mapping[str, Any],
+    legacy_download_id: Optional[str],
     history_event: str,
     rejection_reason_code: str,
     config_get: Optional[Callable[..., Any]] = None,
@@ -216,6 +217,11 @@ def _correlate_grab(
             "quality_profile_id": request.quality_profile_id,
             "scope": request.scope,
             "entity_id": request.entity_id,
+            # The legacy client transfer has its own id.  Keep it only as
+            # correlation data: the Downloads cancel endpoint receives this
+            # value, whereas the acquisition grab uses its durable synthetic
+            # id above.
+            "legacy_download_id": str(legacy_download_id) if legacy_download_id else None,
             **grab_context_extra,
         },
         status=STATUS_DOWNLOADING,
@@ -246,6 +252,7 @@ def correlate_manual_grab(
     search_result: Mapping[str, Any],
     source: str,
     batch_id: Optional[str] = None,
+    legacy_download_id: Optional[str] = None,
     config_get: Optional[Callable[..., Any]] = None,
     now: Optional[float] = None,
 ) -> Optional[Dict[str, str]]:
@@ -264,6 +271,7 @@ def correlate_manual_grab(
         idempotency_key=MANUAL_GRAB_KEY_PREFIX + download_id,
         shadow_source="legacy_interactive",
         dispatch_options=dispatch_options,
+        legacy_download_id=legacy_download_id,
         grab_context_extra={
             "manual_pick": True,
             "manual_batch_id": str(batch_id) if batch_id else None,
@@ -283,6 +291,7 @@ def correlate_scheduled_grab(
     source: str,
     task_id: str,
     batch_id: Optional[str] = None,
+    legacy_download_id: Optional[str] = None,
     config_get: Optional[Callable[..., Any]] = None,
     now: Optional[float] = None,
 ) -> Optional[Dict[str, str]]:
@@ -308,6 +317,7 @@ def correlate_scheduled_grab(
         idempotency_key=SCHEDULED_GRAB_KEY_PREFIX + download_id,
         shadow_source="legacy_wishlist_worker",
         dispatch_options=dispatch_options,
+        legacy_download_id=legacy_download_id,
         grab_context_extra={
             "manual_pick": False,
             "legacy_task_id": str(task_id),
@@ -355,6 +365,7 @@ def try_correlate_manual_grab(
     search_result: Mapping[str, Any],
     source: str,
     batch_id: Optional[str] = None,
+    legacy_download_id: Optional[str] = None,
     connection_factory: Optional[Callable[[], Any]] = None,
     config_get: Optional[Callable[..., Any]] = None,
 ) -> Optional[Dict[str, str]]:
@@ -366,6 +377,7 @@ def try_correlate_manual_grab(
         search_result=search_result,
         source=source,
         batch_id=batch_id,
+        legacy_download_id=legacy_download_id,
         config_get=config_get,
     )
 
@@ -377,6 +389,7 @@ def try_correlate_scheduled_grab(
     source: str,
     task_id: str,
     batch_id: Optional[str] = None,
+    legacy_download_id: Optional[str] = None,
     connection_factory: Optional[Callable[[], Any]] = None,
     config_get: Optional[Callable[..., Any]] = None,
 ) -> Optional[Dict[str, str]]:
@@ -389,6 +402,7 @@ def try_correlate_scheduled_grab(
         source=source,
         task_id=task_id,
         batch_id=batch_id,
+        legacy_download_id=legacy_download_id,
         config_get=config_get,
     )
 

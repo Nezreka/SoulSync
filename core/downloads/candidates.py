@@ -105,7 +105,8 @@ def _acquisition_task_ref(task):
         return None
 
 
-def _correlate_scheduled_acquisition(task_id, batch_id, track_info, candidate, deps):
+def _correlate_scheduled_acquisition(
+        task_id, batch_id, track_info, candidate, download_id, deps):
     """Roadmap 3 slice 2 (docs/library-v2.md §5.5): a wishlist-worker dispatch
     whose ``track_info.source_info`` rides the lib2 mirror context correlates
     observationally into the acquisition contract (trigger=scheduled).
@@ -154,6 +155,7 @@ def _correlate_scheduled_acquisition(task_id, batch_id, track_info, candidate, d
             source=source,
             task_id=task_id,
             batch_id=batch_id,
+            legacy_download_id=download_id,
         )
     except Exception as exc:  # noqa: BLE001 - observational bookkeeping only
         logger.debug("scheduled grab correlation skipped: %s", exc)
@@ -399,7 +401,7 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                 acq_markers = None
                 if not user_manual_pick:
                     acq_markers = _correlate_scheduled_acquisition(
-                        task_id, batch_id, track_info, candidate, deps)
+                        task_id, batch_id, track_info, candidate, download_id, deps)
                 # Store context for post-processing with complete Spotify metadata (GUI PARITY)
                 context_key = deps.make_context_key(username, filename)
                 with matched_context_lock:

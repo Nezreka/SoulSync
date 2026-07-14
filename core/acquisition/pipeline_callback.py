@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any, Callable, Mapping, Optional
 
 from utils.logging_config import get_logger
@@ -399,6 +400,69 @@ def notify_manual_grab_quarantined(
         conn.close()
 
 
+def notify_correlated_grab_cancelled(
+    legacy_download_id: str,
+    *,
+    connection_factory: Optional[Callable[[], Any]] = None,
+) -> bool:
+    """Close a cancelled legacy manual/scheduled grab, without affecting it.
+
+    The Downloads endpoint calls this only after its existing client cancel
+    succeeded.  The callback intentionally looks up only Roadmap-3
+    correlations and delegates the actual state/history transition to the
+    established acquisition cancellation workflow.  It is therefore safe to
+    call for ordinary or already-terminal downloads as a no-op.
+    """
+    transfer_id = str(legacy_download_id or "").strip()
+    if not transfer_id:
+        return False
+    if connection_factory is None:
+        from database.music_database import get_database
+        connection_factory = get_database()._get_connection
+
+    conn = connection_factory()
+    try:
+        rows = conn.execute(
+            """SELECT g.download_id, g.context_json
+                 FROM acquisition_grabs g
+                 JOIN acquisition_requests r ON r.id=g.acquisition_request_id
+                WHERE r.trigger IN ('manual', 'scheduled')
+                  AND r.status='grabbing'
+                  AND g.status NOT IN ('completed', 'failed', 'cancelled')"""
+        ).fetchall()
+        grab_id = None
+        for row in rows:
+            try:
+                context = json.loads(row[1] or "{}")
+            except (TypeError, ValueError):
+                continue
+            if context.get("legacy_download_id") == transfer_id:
+                grab_id = str(row[0])
+                break
+        if not grab_id:
+            return False
+
+        from core.acquisition.grabs import STATUS_CANCEL_PENDING, update_grab
+        from core.acquisition.workflow import record_grab_cancelled
+
+        update_grab(
+            conn,
+            grab_id,
+            status=STATUS_CANCEL_PENDING,
+            last_client_state="cancelled_by_user",
+        )
+        record_grab_cancelled(
+            conn, grab_id, client_state="cancelled_by_user")
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        logger.exception("Correlated grab cancellation failed for %s", transfer_id)
+        return False
+    finally:
+        conn.close()
+
+
 def notify_quarantine_approved(
     context: Mapping[str, Any],
     *,
@@ -433,6 +497,7 @@ def notify_task_retry_cancelled(
 __all__ = [
     "notify_manual_grab_import_success",
     "notify_manual_grab_quarantined",
+    "notify_correlated_grab_cancelled",
     "notify_pipeline_import_quarantined",
     "notify_pipeline_import_success",
     "notify_pipeline_retry_exhausted",

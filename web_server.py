@@ -7072,7 +7072,9 @@ def _audit_manual_skip(context_key, title, artist, skip_checks):
         logger.debug("manual-skip audit write failed: %s", _se)
 
 
-def _correlate_lib2_manual_grab(username, search_result, lib2_ctx, batch_id=None):
+def _correlate_lib2_manual_grab(
+        username, search_result, lib2_ctx, batch_id=None,
+        legacy_download_id=None):
     """Acquisition correlation for a dispatched lib2 manual grab (roadmap 3).
 
     Entirely fail-open: correlation is observational bookkeeping and must
@@ -7091,6 +7093,7 @@ def _correlate_lib2_manual_grab(username, search_result, lib2_ctx, batch_id=None
             search_result=search_result,
             source=source,
             batch_id=batch_id,
+            legacy_download_id=legacy_download_id,
         )
     except Exception as _acq_err:
         logger.debug("manual grab correlation skipped: %s", _acq_err)
@@ -7190,6 +7193,7 @@ def start_download():
                             },
                             _lib2_ctx,
                             batch_id=_album_batch_id,
+                            legacy_download_id=download_id,
                         )
                         # Register download for post-processing (simple transfer to /Transfer)
                         context_key = _make_context_key(username, filename)
@@ -7284,6 +7288,7 @@ def start_download():
                         'bitrate': data.get('bitrate'),
                     },
                     _lib2_ctx,
+                    legacy_download_id=download_id,
                 )
                 # Register download for post-processing (simple transfer to /Transfer)
                 context_key = _make_context_key(username, filename)
