@@ -1542,8 +1542,13 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             return guard
         db = get_database()
         try:
-            from core.library2.discography import expand_artist_discography
-            stats = expand_artist_discography(db, artist_id)
+            from core.library2.discography import refresh_artist_discography
+            stats, mirrored = refresh_artist_discography(
+                db,
+                artist_id,
+                config_manager,
+                wishlist_profile_id=_profile(),
+            )
         except ValueError:
             return jsonify({"success": False, "error": "Artist not found"}), 404
         except Exception as e:  # noqa: BLE001
@@ -1554,11 +1559,6 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         # real track rows and mirror those into the wishlist (shared helper,
         # also used by the periodic lib2_discography_refresh repair job).
         auto_ids = stats.pop("auto_monitor_album_ids", []) or []
-        mirrored = 0
-        if auto_ids:
-            from core.library2.discography import auto_monitor_releases
-            mirrored = auto_monitor_releases(db, config_manager, auto_ids,
-                                             wishlist_profile_id=_profile())
         return jsonify({"success": True, **stats,
                         "auto_monitored_releases": len(auto_ids),
                         "auto_monitor_mirrored": mirrored})

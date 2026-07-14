@@ -27,6 +27,7 @@ Persistence rules:
 
 from __future__ import annotations
 
+import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -39,6 +40,19 @@ logger = get_logger("library2.discography")
 # Buckets for matching provider releases against library rows whose
 # album_type came from the legacy one-track heuristic ('single' vs rest).
 _SINGLE_TYPES = {"single"}
+_sync_locks: Dict[tuple[str, int], threading.RLock] = {}
+_sync_locks_guard = threading.Lock()
+
+
+def _sync_lock(database, artist_id: int) -> threading.RLock:
+    """One in-process refresh sequence per database + artist."""
+    database_key = str(getattr(database, "database_path", id(database)))
+    key = (database_key, int(artist_id))
+    with _sync_locks_guard:
+        lock = _sync_locks.get(key)
+        if lock is None:
+            lock = _sync_locks.setdefault(key, threading.RLock())
+        return lock
 
 
 def _bucket(album_type: str) -> str:
@@ -162,6 +176,12 @@ def _match_existing(index: Dict[str, List[Dict[str, Any]]], *, title: str,
 
 
 def expand_artist_discography(database, artist_id: int) -> Dict[str, Any]:
+    """Fetch and persist one artist catalog under the shared sync boundary."""
+    with _sync_lock(database, artist_id):
+        return _expand_artist_discography(database, artist_id)
+
+
+def _expand_artist_discography(database, artist_id: int) -> Dict[str, Any]:
     """Fetch + persist the artist's full discography. Returns stats.
 
     Safe to re-run: existing rows are enriched, not duplicated; pruning only
@@ -474,4 +494,30 @@ def auto_monitor_releases(db, config_manager, album_ids: List[int],
     return mirrored
 
 
-__all__ = ["expand_artist_discography", "auto_monitor_releases"]
+def refresh_artist_discography(
+    database,
+    artist_id: int,
+    config_manager,
+    *,
+    wishlist_profile_id: int = 1,
+) -> tuple[Dict[str, Any], int]:
+    """Run snapshot refresh and its auto-monitor side effects as one sequence."""
+    with _sync_lock(database, artist_id):
+        stats = _expand_artist_discography(database, artist_id)
+        album_ids = stats.get("auto_monitor_album_ids") or []
+        mirrored = 0
+        if album_ids:
+            mirrored = auto_monitor_releases(
+                database,
+                config_manager,
+                album_ids,
+                wishlist_profile_id=wishlist_profile_id,
+            )
+        return stats, mirrored
+
+
+__all__ = [
+    "auto_monitor_releases",
+    "expand_artist_discography",
+    "refresh_artist_discography",
+]

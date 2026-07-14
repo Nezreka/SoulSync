@@ -78,10 +78,7 @@ class Lib2DiscographyRefreshJob(RepairJob):
         except Exception:
             return result
 
-        from core.library2.discography import (
-            auto_monitor_releases,
-            expand_artist_discography,
-        )
+        from core.library2.discography import refresh_artist_discography
 
         conn = context.db._get_connection()
         try:
@@ -96,13 +93,15 @@ class Lib2DiscographyRefreshJob(RepairJob):
             if context.check_stop() or context.wait_if_paused():
                 break
             try:
-                stats = expand_artist_discography(context.db, artist_id)
+                stats, artist_mirrored = refresh_artist_discography(
+                    context.db,
+                    artist_id,
+                    context.config_manager,
+                    wishlist_profile_id=1,
+                )
                 auto_ids = stats.get("auto_monitor_album_ids") or []
                 discovered += len(auto_ids)
-                if auto_ids:
-                    mirrored += auto_monitor_releases(
-                        context.db, context.config_manager, auto_ids,
-                        wishlist_profile_id=1)
+                mirrored += artist_mirrored
             except Exception as e:  # noqa: BLE001
                 logger.debug("discography refresh failed (artist %s): %s", artist_id, e)
                 result.errors += 1

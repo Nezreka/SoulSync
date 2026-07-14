@@ -2368,6 +2368,22 @@ bekannte Main-Chunk-Hinweis). **Logischer nächster Schritt:** P2-06 als kleinst
     Production-Build sind grün. **Nächster logischer Schritt:** P2-13 —
     gleichzeitigen manuellen und periodischen Discography-Sync pro Artist
     serialisieren und Snapshot-/Auto-Monitor-Folgen deterministisch halten.
+33. ~~**Per-Artist-Discography-Sync-Serialisierung (P2-13).**~~ **Abgeschlossen
+    2026-07-14:** Eine gemeinsame reentrante In-Process-Grenze keyed nach
+    Datenbank und Artist serialisiert den kompletten Provider-Snapshot-/
+    Katalog-Refresh. Der neue gemeinsame `refresh_artist_discography`-Helper
+    hält dieselbe Grenze zusätzlich über die anschließende Tracklist-
+    Materialisierung und Wishlist-Mirroring neu auto-monitorierter Releases.
+    Manueller API-Endpoint und periodischer Repair-Job rufen beide exakt diese
+    Sequenz; ein zweiter Consumer-Workflow entstand nicht. Verschiedene Artists
+    behalten getrennte Locks. Ein Zwei-Thread-Regressionstest blockiert den
+    ersten Providerlauf kontrolliert und beweist `max_active == 1` für denselben
+    Artist. Ein zweiter Regressionstest hält die Auto-Monitor-Phase gezielt
+    offen und weist nach, dass auch sie Teil derselben Grenze ist; alle 18
+    Discography-Tests sowie Ruff sind grün. **Nächster
+    logischer Schritt:** P2-15 — den providerlosen Deezer-Tracklist-Fallback
+    mit vorhandenen Jahr-/Trackcount-/External-ID-Fakten gegen falsche
+    Editions absichern, weiterhin innerhalb des typed Provider-Adapters.
 
 **Session-Abschluss-Gate 2026-07-14:** Seit dem vorherigen Full-Gate wurden
 Roadmap 13 sowie 16–23 und Phase E vollständig abgeschlossen und jeweils
@@ -2736,8 +2752,10 @@ Priorität, kompakt aufgelistet für spätere Aufnahme):
   Backkatalog zu monitoren.~~ **Behoben 2026-07-14:** sichtbare Release-ID-
   Allowlist wird fail-closed im bestehenden Bulk-Worker angewendet
   (Roadmap-Punkt 32).
-- P2-13: Discography-Sync hat keine Concurrency-/Snapshot-Garantie
-  (gleichzeitiger manueller + periodischer Refresh, kein Artist-Sync-Lock).
+- ~~P2-13: Discography-Sync hat keine Concurrency-/Snapshot-Garantie
+  (gleichzeitiger manueller + periodischer Refresh, kein Artist-Sync-Lock).~~
+  **Behoben 2026-07-14:** gemeinsame per-DB/per-Artist Refresh→Auto-Monitor-
+  Sequenz für API und Repair-Job (Roadmap-Punkt 33).
 - P2-15: Tracklist-Fallback ohne Spotify-ID kann bei Deezer die falsche
   Edition wählen (kein Jahr-/Trackcount-/UPC-Abgleich).
 - P2-16: `quality_eval.py` behandelt fehlende/ungültige Qualität als

@@ -483,6 +483,94 @@ def test_failed_auto_monitor_tracklist_is_persisted_and_retried(
         legacy_db, artist_id)["auto_monitor_album_ids"] == []
 
 
+def test_same_artist_discography_refreshes_are_serialized(
+    legacy_db, imported_conn, fake_discography, monkeypatch
+):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from core.library2 import provider_adapters
+
+    artist_id = _artist_id(imported_conn)
+    original_fetch = provider_adapters.fetch_artist_discography
+    first_entered = threading.Event()
+    release_first = threading.Event()
+    state_lock = threading.Lock()
+    calls = 0
+    active = 0
+    max_active = 0
+
+    def blocking_fetch(*args, **kwargs):
+        nonlocal calls, active, max_active
+        with state_lock:
+            calls += 1
+            call_number = calls
+            active += 1
+            max_active = max(max_active, active)
+        try:
+            if call_number == 1:
+                first_entered.set()
+                assert release_first.wait(timeout=2)
+            return original_fetch(*args, **kwargs)
+        finally:
+            with state_lock:
+                active -= 1
+
+    monkeypatch.setattr(provider_adapters, "fetch_artist_discography", blocking_fetch)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(D.expand_artist_discography, legacy_db, artist_id)
+        assert first_entered.wait(timeout=2)
+        second = pool.submit(D.expand_artist_discography, legacy_db, artist_id)
+        assert not second.done()
+        release_first.set()
+        first.result(timeout=2)
+        second.result(timeout=2)
+
+    assert calls == 2
+    assert max_active == 1
+
+
+def test_refresh_holds_artist_lock_through_auto_monitor(
+    legacy_db, imported_conn, monkeypatch
+):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    artist_id = _artist_id(imported_conn)
+    auto_monitor_entered = threading.Event()
+    release_auto_monitor = threading.Event()
+    expand_calls = []
+
+    def fake_expand(_database, target_artist_id):
+        expand_calls.append(target_artist_id)
+        return {"auto_monitor_album_ids": [91]}
+
+    def blocking_auto_monitor(*_args, **_kwargs):
+        auto_monitor_entered.set()
+        assert release_auto_monitor.wait(timeout=2)
+        return 1
+
+    monkeypatch.setattr(D, "_expand_artist_discography", fake_expand)
+    monkeypatch.setattr(D, "auto_monitor_releases", blocking_auto_monitor)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        refresh = pool.submit(
+            D.refresh_artist_discography,
+            legacy_db,
+            artist_id,
+            None,
+        )
+        assert auto_monitor_entered.wait(timeout=2)
+        expansion = pool.submit(D.expand_artist_discography, legacy_db, artist_id)
+        assert not expansion.done()
+        assert expand_calls == [artist_id]
+        release_auto_monitor.set()
+        assert refresh.result(timeout=2) == ({"auto_monitor_album_ids": [91]}, 1)
+        assert expansion.result(timeout=2) == {"auto_monitor_album_ids": [91]}
+
+    assert expand_calls == [artist_id, artist_id]
+
+
 def test_reimport_claims_discography_row(legacy_db, imported_conn, fake_discography):
     """When files for a discography-only release get imported later, the importer
     claims the existing row instead of duplicating the release."""
