@@ -646,3 +646,26 @@ textarea.vce-input { resize: vertical; min-height: 58px; }
 
 /* Admin-only launcher (parity with the overlay studio card). */
 body:not(.video-admin) [data-video-collection-studio] { display: none !important; }
+
+/* ── Mobile / tablet (<=768px): make the Studio usable on phones ───────────
+   The fixed 60px topbar couldn't hold brand + section nav + actions + close
+   on a phone — the pieces overlapped and the action cluster (Sync all / New
+   collection / close) was pushed clean off-screen. Wrap it into rows: brand +
+   actions/close first, the section nav on its own full-width scrollable row.
+   The page body (stats, gallery, editor panels) already stacked fine.
+   Desktop (>768px) untouched. */
+@media (max-width: 768px) {
+    .vce-topbar { flex-wrap: wrap; height: auto; padding: 8px 12px 0; row-gap: 0; gap: 10px; }
+    .vce-brand { order: 1; }
+    .vce-top-spacer { order: 2; }
+    .vce-top-actions { order: 3; }
+    .vce-x { order: 4; }
+    .vce-nav {
+        order: 5; flex: 1 1 100%; margin-left: 0; align-self: auto;
+        overflow-x: auto; scrollbar-width: none; height: 44px;
+    }
+    .vce-nav::-webkit-scrollbar { display: none; }
+    .vce-page { padding: 18px 14px 70px; }
+    .vce-stat { padding: 12px 16px; }
+    .vce-gallery { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+}
