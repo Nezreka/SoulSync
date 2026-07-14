@@ -3178,6 +3178,22 @@
         font-size: 16px;
     }
 
+    /* Server Activity button — match the bell/helper row (it kept its desktop
+       44px @ bottom 24 / right 136, so it floated bigger and higher than the
+       other two on phones). Same size, same baseline, next slot leftward. */
+    .activity-float-btn {
+        bottom: 16px;
+        right: 108px;
+        width: 38px;
+        height: 38px;
+    }
+
+    .activity-float-badge {
+        font-size: 9px;
+        min-width: 14px;
+        height: 14px;
+    }
+
     /* Global search bar */
     .gsearch-bar {
         width: calc(100vw - 160px);
@@ -3231,6 +3247,13 @@
     .helper-float-btn {
         bottom: 12px;
         right: 10px;
+        width: 34px;
+        height: 34px;
+    }
+
+    .activity-float-btn {
+        bottom: 12px;
+        right: 96px;
         width: 34px;
         height: 34px;
     }
