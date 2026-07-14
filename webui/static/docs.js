@@ -2835,9 +2835,21 @@ function navigateToDocsSection(sectionId) {
                 }
                 return offset;
             }
-            docsContent.scrollTop = calcOffset(target);
-            setTimeout(() => { docsContent.scrollTop = calcOffset(target); }, 150);
-            setTimeout(() => { docsContent.scrollTop = calcOffset(target); }, 500);
+            function place() {
+                // Desktop: .docs-content is its own scroll container. The mobile
+                // layout stacks the panels (overflow: visible) so the page scroller
+                // owns the document — assigning scrollTop on .docs-content is a
+                // silent no-op there, so fall back to scrollIntoView (same fix as
+                // scrollDocTarget). Reached from "Learn more →" links / notifications.
+                if (docsContent.scrollHeight > docsContent.clientHeight + 1) {
+                    docsContent.scrollTop = calcOffset(target);
+                } else {
+                    target.scrollIntoView();
+                }
+            }
+            place();
+            setTimeout(place, 150);
+            setTimeout(place, 500);
         }
     }, 300);
 }
