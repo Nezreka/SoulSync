@@ -1485,16 +1485,27 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 .vst-more-spinner { display: flex; justify-content: center; padding: 26px 0; }
 .vst-more-spinner[hidden] { display: none; }
 
-@media (max-width: 720px) {
-    .vsr-page, .vp-page, .vst-page { margin-left: -20px; margin-right: -20px; }
-    .vsr-hero { padding: 34px 22px 22px; }
-    .vsr-body, .vp-body, .vst-body { padding-left: 22px; padding-right: 22px; }
-    .vp-hero { flex-direction: column; align-items: center; text-align: center; padding: 104px 22px 24px; }
-    .vst-hero { flex-direction: column; align-items: center; text-align: center; padding: 104px 22px 24px; }
+@media (max-width: 768px) {
+    /* Bleed must MATCH mobile.css's .page side padding (16px at <=768, 12px at
+       <=480) — mobile.css flips at 768, so this block must too (at 721-768 the
+       base -40px bleed was overshooting the 16px padding by 24px per side). */
+    .vsr-page, .vp-page, .vst-page { margin-left: -16px; margin-right: -16px; }
+    .vsr-hero { padding: 34px 18px 22px; }
+    .vsr-body, .vp-body, .vst-body { padding-left: 18px; padding-right: 18px; }
+    .vp-hero { flex-direction: column; align-items: center; text-align: center; padding: 104px 18px 24px; }
+    .vst-hero { flex-direction: column; align-items: center; text-align: center; padding: 104px 18px 24px; }
     .vst-meta { justify-content: center; }
     .vp-meta { justify-content: center; }
     .vsr-grid { grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 16px 14px; }
     .vp-photo-wrap { width: 150px; height: 150px; }
+}
+@media (max-width: 480px) {
+    .vsr-page, .vp-page, .vst-page { margin-left: -12px; margin-right: -12px; }
+    .vsr-body, .vp-body, .vst-body { padding-left: 14px; padding-right: 14px; }
+    .vsr-hero { padding: 28px 14px 20px; }
+    .vsr-hero-title { font-size: 26px; }
+    .vsr-searchbar { height: 50px; border-radius: 13px; }
+    .vsr-grid { grid-template-columns: repeat(auto-fill, minmax(108px, 1fr)); gap: 14px 10px; }
 }
 
 /* ── billboard: Play CTA, crew line, next-episode, season overview ────────── */
