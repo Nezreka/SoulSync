@@ -1248,7 +1248,16 @@ grün). Die erste Roadmap-3-Scheibe ist implementiert (`e88b3e93`, Details am
 Roadmap-Punkt selbst): manuelle lib2-Grabs korrelieren observational in den
 Acquisition-Contract; 10 neue Tests in
 `tests/acquisition/test_manual_grab.py`, angrenzend 902 Acquisition-/
-Import-Tests und 198 library2-Tests grün. Frontend unberührt.
+Import-Tests und 198 library2-Tests grün. Der bestehende App-Level-Test
+`test_library_v2_profile_reaches_download_pipeline` fand dabei einen echten
+Fehler im ersten Route-Wiring (Registry-Lookup außerhalb der Fail-open-
+Grenze konnte den Download mit 500 failen); behoben in `3a417590` — beide
+`/api/download`-Branches laufen durch einen komplett abgesicherten Helper,
+der bei nicht identifizierbarer Quelle die Korrelation überspringt statt
+eine Source-Familie zu raten (ADR-08). Frontend unberührt.
+**Session-Abschluss-Gate:** volle Python-Suite grün — **8095 passed,
+2 skipped, 2 deselected in 211.41s** (Skips = die opt-in
+Live-Deployment-Varianten).
 **Logischer nächster Schritt:** zweite Roadmap-3-Scheibe — Wishlist-Worker-
 Downloads mit lib2-Mirror-Kontext (`_source_info.lib2_track_id`) beim
 Dispatch als Acquisition-Request (trigger=scheduled) korrelieren, gleiche
