@@ -639,6 +639,15 @@ def ensure_library_v2_schema(connection: Any) -> None:
             logger.info("Backfilled %d Library-v2 external identifier events", backfilled)
     except Exception as e:  # noqa: BLE001
         logger.error("external-id-history migration failed (will retry next start): %s", e)
+    # Merge/move/link history (Roadmap 4): relationship triggers capture the
+    # existing Manage-Tracks, file move and ADR-04 shadow mutation paths.
+    try:
+        from core.library2.entity_history import ensure_entity_history_schema
+        backfilled = ensure_entity_history_schema(cursor)
+        if backfilled:
+            logger.info("Backfilled %d Library-v2 entity relationship events", backfilled)
+    except Exception as e:  # noqa: BLE001
+        logger.error("entity-history migration failed (will retry next start): %s", e)
     # The read API falls back to download provenance (track_downloads) for
     # files the importer knew no quality data for — index the lookup column so
     # album views don't table-scan a large history per track. Guarded: the

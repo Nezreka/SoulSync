@@ -1735,9 +1735,18 @@ darauf auf.
    DB-Guards verbieten UPDATE/DELETE der History. Der Read-Helper liefert
    validierte, newest-first Events; aktuelle Katalogspalten bleiben bis zum
    späteren Read-Projection-Cutover die Write-Source-of-Truth. 58 gezielte
-   Schema-/Importer-/Edition-/Snapshot-Tests sind grün. **Noch offen in Punkt
-   4:** Merge-/Move-History, Field-Level-Overrides + Read-Projection und typed
-   Adapter über Discography/Tracklist hinaus.
+   Schema-/Importer-/Edition-/Snapshot-Tests sind grün. **Zweite Slice erledigt
+   2026-07-14:** `lib2_entity_history` journalisiert Canonical-Link/Relink/
+   Unlink, Track-File-Moves und ADR-04-ReleaseTrack-Moves zwischen Recording
+   bzw. ReleaseEdition über DB-Trigger. Explizite transaktionsneutrale
+   `record_entity_merge`-/`record_entity_move`-Helper stehen für kommende
+   atomare Commands bereit; sie führen die Operation bewusst nicht selbst aus.
+   Das append-only Journal speichert nur lokale Typen/IDs und whitelisted
+   Kontext, nie Pfade, Titel oder Provider-Payloads. Bestehende Canonical-Links
+   erhalten einen idempotenten Baseline-Eintrag. 49 gezielte Manage-Tracks-/
+   Edition-/Importer-/Schema-Tests sind grün. **Noch offen in Punkt 4:**
+   Field-Level-Overrides + Read-Projection und typed Adapter über
+   Discography/Tracklist hinaus.
 5. Gestaffelten Wanted-Cutover fertigstellen: Consumer, die noch
    `monitored`-Flags nutzen, müssen nach Drift-Metriken-Beweis der Parität
    auf `lib2_wanted_tracks` wechseln.

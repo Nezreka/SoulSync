@@ -14,6 +14,7 @@ _EXPECTED_TABLES = {
     "lib2_manual_skips", "lib2_mirror_outbox", "lib2_monitor_rules",
     "lib2_release_editions", "lib2_recordings", "lib2_release_tracks",
     "lib2_recording_review", "lib2_wanted_tracks", "lib2_external_id_history",
+    "lib2_entity_history",
 }
 
 
