@@ -1774,6 +1774,13 @@ darauf auf.
    **Nächster logischer Schritt nach dem Phase-3-Meilenstein-Gate:** Roadmap-
    Punkt 5, den gestaffelten Wanted-Cutover anhand der vorhandenen Drift-
    Metriken und verbliebenen `monitored`-Consumer aufnehmen.
+
+**Phase-3-Meilenstein-Gate 2026-07-14:** Die volle Python-Suite nach External-
+ID-History, Merge-/Move-Journal, Field-Level-Overrides/Read-Projection und der
+vollständigen typed Provider-Boundary ist grün: **8164 passed, 3 skipped,
+2 deselected, 335 warnings in 234.76s**. Die drei Skips sind die bewusst
+opt-in markierten Docker-/Live-Deployment-Varianten. Frontend-Code wurde nicht
+verändert; daher waren Frontend-Typecheck/Vitest/Build nicht erforderlich.
 5. Gestaffelten Wanted-Cutover fertigstellen: Consumer, die noch
    `monitored`-Flags nutzen, müssen nach Drift-Metriken-Beweis der Parität
    auf `lib2_wanted_tracks` wechseln.
