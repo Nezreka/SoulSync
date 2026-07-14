@@ -2189,15 +2189,15 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             <div className={styles.toolbarGroup}>
               <ArtistRefreshButton artistId={artistId} />
               <ActionButton
-                icon="search"
-                label="Search All Monitored (global)"
+                icon="automatic"
+                label="Search (global)"
                 title="Global action: process the entire Wishlist and search all monitored missing tracks"
                 onClick={() => handleAction('Search Monitored')}
               />
               <ActionButton
                 icon="interactive"
                 label="Interactive Search"
-                title="Search all SoulSync sources manually"
+                title="Manually select from search results across all configured sources"
                 onClick={() => handleAction('Interactive Search')}
               />
               <ActionButton
@@ -2211,7 +2211,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             <div className={styles.toolbarGroup}>
               <ActionButton
                 icon="download"
-                label={upgradeScanBusy ? 'Scanning all…' : 'Search All Upgrades (global)'}
+                label={upgradeScanBusy ? 'Scanning…' : 'Search Upgrades (global)'}
                 title="Global action: scan the entire Library v2 catalog and queue monitored tracks below their quality-profile cutoff"
                 busy={upgradeScanBusy}
                 onClick={() => void searchUpgrades()}
