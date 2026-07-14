@@ -7072,6 +7072,31 @@ def _audit_manual_skip(context_key, title, artist, skip_checks):
         logger.debug("manual-skip audit write failed: %s", _se)
 
 
+def _correlate_lib2_manual_grab(username, search_result, lib2_ctx, batch_id=None):
+    """Acquisition correlation for a dispatched lib2 manual grab (roadmap 3).
+
+    Entirely fail-open: correlation is observational bookkeeping and must
+    never fail or delay the download it describes. When the plugin registry
+    cannot identify the source, correlation is skipped instead of guessing a
+    source family from the username (ADR-08).
+    """
+    try:
+        if not lib2_ctx:
+            return None
+        spec = download_orchestrator.registry.get_spec(username) if username else None
+        source = spec.name if spec else 'soulseek'
+        from core.acquisition.manual_grab import try_correlate_manual_grab
+        return try_correlate_manual_grab(
+            lib2_context=lib2_ctx,
+            search_result=search_result,
+            source=source,
+            batch_id=batch_id,
+        )
+    except Exception as _acq_err:
+        logger.debug("manual grab correlation skipped: %s", _acq_err)
+        return None
+
+
 @app.route('/api/download', methods=['POST'])
 def start_download():
     """Simple download route"""
@@ -7151,25 +7176,21 @@ def start_download():
                             file_size
                         ))
                     if download_id:
-                        _acq_markers = None
-                        if _lib2_ctx:
-                            from core.acquisition.manual_grab import try_correlate_manual_grab
-                            _acq_spec = download_orchestrator.registry.get_spec(username) if username else None
-                            _acq_markers = try_correlate_manual_grab(
-                                lib2_context=_lib2_ctx,
-                                search_result={
-                                    'username': username,
-                                    'filename': filename,
-                                    'size': file_size,
-                                    'title': track_data.get('title'),
-                                    'artist': track_data.get('artist'),
-                                    'album': data.get('album_name'),
-                                    'quality': track_data.get('quality'),
-                                    'bitrate': track_data.get('bitrate'),
-                                },
-                                source=(_acq_spec.name if _acq_spec else 'soulseek'),
-                                batch_id=_album_batch_id,
-                            )
+                        _acq_markers = _correlate_lib2_manual_grab(
+                            username,
+                            {
+                                'username': username,
+                                'filename': filename,
+                                'size': file_size,
+                                'title': track_data.get('title'),
+                                'artist': track_data.get('artist'),
+                                'album': data.get('album_name'),
+                                'quality': track_data.get('quality'),
+                                'bitrate': track_data.get('bitrate'),
+                            },
+                            _lib2_ctx,
+                            batch_id=_album_batch_id,
+                        )
                         # Register download for post-processing (simple transfer to /Transfer)
                         context_key = _make_context_key(username, filename)
                         with matched_context_lock:
@@ -7250,24 +7271,20 @@ def start_download():
             if download_id:
                 # Acquisition correlation (roadmap 3): a grab that names a
                 # lib2 entity gets a persistent request/grab/history trail.
-                _acq_markers = None
-                if _lib2_ctx:
-                    from core.acquisition.manual_grab import try_correlate_manual_grab
-                    _acq_spec = download_orchestrator.registry.get_spec(username) if username else None
-                    _acq_markers = try_correlate_manual_grab(
-                        lib2_context=_lib2_ctx,
-                        search_result={
-                            'username': username,
-                            'filename': filename,
-                            'size': file_size,
-                            'title': data.get('title'),
-                            'artist': data.get('artist'),
-                            'album': data.get('album_name'),
-                            'quality': data.get('quality'),
-                            'bitrate': data.get('bitrate'),
-                        },
-                        source=(_acq_spec.name if _acq_spec else 'soulseek'),
-                    )
+                _acq_markers = _correlate_lib2_manual_grab(
+                    username,
+                    {
+                        'username': username,
+                        'filename': filename,
+                        'size': file_size,
+                        'title': data.get('title'),
+                        'artist': data.get('artist'),
+                        'album': data.get('album_name'),
+                        'quality': data.get('quality'),
+                        'bitrate': data.get('bitrate'),
+                    },
+                    _lib2_ctx,
+                )
                 # Register download for post-processing (simple transfer to /Transfer)
                 context_key = _make_context_key(username, filename)
                 is_streaming_source = username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud', 'amazon')
