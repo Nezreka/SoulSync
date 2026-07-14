@@ -15,7 +15,12 @@
 > 2026-07-13 Abschnitt 8 (Retry-Persistenz) von Spec auf implementiert
 > gestellt (F07 geschlossen bis auf Deployment-Acceptance); am 2026-07-13
 > die Force-Grab↔Quarantäne-Brücke aus 5.3.2 umgesetzt (F06 geschlossen,
-> Commit `6ea7f3e2`).
+> Commit `6ea7f3e2`); am 2026-07-14 ergänzt um Abschnitt 11 (Playlist-
+> Quality-Profile-Konfliktauflösung — bewusst zurückgestellt; korrigiert
+> nebenbei ein separat vom User eingebrachtes, veraltetes externes
+> Findings-Dokument zu Playlists/Artwork, dessen Kernannahmen — Playlists
+> unbegonnen, P2-05 offen — beim Gegenprüfen gegen den Code bereits
+> überholt waren).
 
 Opt-in, Lidarr-style Library-Manager auf SoulSyncs eigener
 Such-/Download-/Processing-/Tagging-Pipeline. Gated hinter
@@ -2479,3 +2484,156 @@ Priorität, kompakt aufgelistet für spätere Aufnahme):
   bisher unbekannten Bandnamen (nicht nur beim M1-Fixfall) weiterhin
   Phantom-Artists erzeugen, wenn der volle Credit-String noch nicht als
   Artist bekannt ist.
+
+---
+
+## 11. Playlists Phase 2 — Quality-Profile-Konfliktauflösung (zurückgestellt, niedrige Priorität)
+
+**Anlass:** Am 2026-07-14 brachte der User ein separat verfasstes externes
+Findings-Dokument ein ("Library v2 Playlists & Artwork Strategy — Findings &
+Design Decisions"), das von einem noch unbegonnenen Playlists-Feature und
+einer ungeklärten Artwork-Strategie ausging, mit der Vermutung, es sei
+inzwischen veraltet. Gegen den Code geprüft: **größtenteils richtig
+vermutet** — das Dokument war zum Zeitpunkt dieser Prüfung bereits überholt.
+
+### 11.1 Was am externen Dokument veraltet war
+
+- **Playlists (Roadmap-Punkt 14 / Phase E) sind bereits umgesetzt**, entgegen
+  der Doku-Annahme "Completely unstarted". Siehe Abschnitt 7, Punkt 14 sowie
+  Commits `c7c26688` ("Add Library v2 playlist API boundary") und
+  `7d06a0ac` ("Integrate playlists into Library v2"), beide Vorfahren von
+  HEAD auf diesem Branch. Library v2 hat einen Playlist-Index + Detail-View
+  (Header-Toggle Artists/Playlists), der ausschließlich die **vorhandenen**
+  `mirrored-playlists`-Endpoints liest (`GET mirrored-playlists`,
+  `GET mirrored-playlists/<id>`, `POST mirrored-playlists/<id>/pipeline/run`)
+  — ein reiner Read-/Trigger-Client
+  (`webui/src/routes/library-v2/-library-v2.api.ts:479-528`), verifiziert im
+  Code: **kein** `lib2_playlists`-Schema, kein zweiter Importer, keine
+  zweite Decision-Engine. Mirroring/Quellenauswahl bleibt bewusst auf der
+  etablierten Playlists-Seite. Damit sind die Design-Fragen 1.1
+  (UI-Platzierung: Header-Toggle, eigene Sektion) und 1.5 (Quellen: was auch
+  immer die bestehende Mirrored-Playlist-Pipeline unterstützt) faktisch
+  bereits entschieden.
+- **P2-05** (Artwork-Path-Resolver nutzte den Legacy-Resolver statt
+  `resolve_lib2_path`) ist seit 2026-07-14 behoben — verifiziert:
+  `core/library2/artwork.py::_resolve_abs` delegiert jetzt an
+  `core.library2.paths.resolve_lib2_path`.
+
+### 11.2 Was am externen Dokument weiterhin zutrifft
+
+- **P2-04 bleibt real offen** (stand schon in Abschnitt 10.3, hier gegen den
+  Code verifiziert statt nur behauptet): `api/library_v2.py`s Artwork-Route
+  setzt hart `mimetype="image/jpeg"` (Zeile ~1180) unabhängig vom
+  tatsächlichen Byte-Format; `core/library2/artwork.py::build_artwork`
+  schreibt rohe Provider-/Embedded-Bytes ungeprüft nach `<kind>_<id>.jpg`
+  (kein Pillow-Reencode, keine Format-Erkennung, Zeile ~231-238) — ein
+  PNG/WEBP landet unter `.jpg` mit falschem Content-Type. Cache-Control
+  (`public, max-age=604800, immutable`) und Invalidierung (Refresh/Retag
+  bustet Album- und Artist-Art, Delete räumt auf) sind entgegen der
+  Doku-Behauptung **bereits sauber** — nur der MIME-/Format-Teil von P2-04
+  ist noch real.
+- **Artist- vs. Album-Art-Strategie ist tatsächlich uneindeutig**, aber
+  anders gelagert als im externen Dokument vermutet: `build_artwork`
+  bevorzugt für `kind == "artist"` HEUTE das Embedded-Cover eines beliebigen
+  Alben des Artists (Priorität: kein Single, dann neuestes Jahr) und fällt
+  erst danach auf ein Provider-Artist-Photo zurück
+  (`core/library2/artwork.py:205-221`) — bewusst so gebaut ("fast, local").
+  Der externe Vorschlag "Artist-Bild IMMER vom Provider, nie embedded" wäre
+  also eine bewusste Verhaltensänderung, kein reiner Bugfix — vor Umsetzung
+  explizit mit dem User klären (Trade-off: Konsistenz/Lidarr-Parität vs.
+  Provider-Coverage/Rate-Limits für Nischen-Artists ohne
+  Fanart-/Deezer-Artist-Photo).
+
+### 11.3 Die eigentliche offene Anforderung: Quality-Profile-Konfliktauflösung
+
+Das externe Dokument stellte 1.3 ("Quality Profile Assignment for
+Playlists") als offene Frage mit drei Optionen dar. Der User hat sie in der
+anschließenden Voice-Session konkretisiert, und diese Konkretisierung — nicht
+das ursprüngliche Dokument — ist der Teil, der tatsächlich noch fehlt und
+implementiert werden muss:
+
+Sobald Playlist-Tracks mehr als einen Read-Only-View bekommen und
+tatsächlich in die Wishlist gemirrort/monitored werden können, entsteht ein
+Prioritätskonflikt, den es bei reinem Artist-/Album-Monitoring so nicht gab:
+ein Track kann gleichzeitig über mehrere Pfade "wanted" werden — als Teil
+einer Playlist (mit Playlist-Default-Profil), als Teil eines
+Artist-Monitorings (mit Artist-Profil), und/oder individuell manuell gesetzt
+(Track-spezifisches Profil). Nutzer-Erwartung (Voice-Session
+2026-07-14): **das spezifischste Profil gewinnt**, in dieser Reihenfolge:
+
+1. **Track-spezifisch** gesetztes Profil (höchste Priorität) — der User hat
+   für genau diesen Song explizit ein Profil gewählt.
+2. **Artist-spezifisches** Profil, falls für den Artist bereits eines gesetzt
+   ist (`lib2_artists.quality_profile_id`, s.
+   `core/library2/profile_lookup.py:58-69`).
+3. **Playlist-Default-Profil** (niedrigste Priorität) — greift nur, wenn
+   weder 1 noch 2 zutrifft.
+
+Das ist kein neues Konzept, sondern eine Erweiterung des bereits
+bestehenden Fallback-Musters: `profile_lookup.default_quality_profile_id`
+löst heute schon Artist- vor Global-Default auf; jeder Wishlist-Mirror-Call
+trägt bereits ein Per-Item `quality_profile_id` (s. Abschnitt 1,
+Designregel "Quality-Profile"; `wishlist_mirror.py`). Für Playlists fehlt
+lediglich die dritte, niedrigste Stufe in dieser Kette (Playlist-Default)
+UND ein Ort, an dem ein Playlist-Default überhaupt gespeichert wird — es
+gibt aktuell **kein** Playlist-Datenmodell in Library v2 (kein
+`lib2_playlists`), das ein Default-Profil tragen könnte; Playlist-Daten
+kommen bislang rein aus den bestehenden `mirrored_playlists`-Tabellen
+(`core/playlists/*`), die keinerlei Quality-Profile-Spalte haben. Verifiziert
+per Grep: `core/playlists/pipeline.py` und
+`core/playlists/materialize_service.py` haben aktuell keinerlei
+Quality-Profile-Bezug.
+
+### 11.4 Weitere offene Punkte aus der Voice-Session
+
+- **UI-Redundanz:** Es existieren bereits mehrere Playlist-Verwaltungsseiten
+  (die klassische Playlists-Seite für Mirror/Sync zum Mediaserver, jetzt auch
+  der neue Library-v2-Read-View, s. 11.1). Ein Playlist-Default-Profil-Picker
+  MUSS klar einer dieser Seiten zugeordnet werden, sonst entsteht doppelte,
+  widersprüchliche Konfiguration. Tendenz aus der Session: eher in der
+  bestehenden Playlists-Seite ansiedeln (dort wo Mirroring/Sync ohnehin
+  konfiguriert wird), NICHT als Duplikat in Library v2 — konsistent mit der
+  bereits gewählten Architektur (Library-v2-Playlist-View ist bewusst reiner
+  Read-/Trigger-Client, keine eigene Konfigurationsoberfläche).
+- **Reorder-Frage (ungeklärt):** Was passiert mit bereits gemirrorten/
+  heruntergeladenen Tracks, wenn sich die Track-Reihenfolge der
+  Quell-Playlist ändert (z.B. eine Spotify-Playlist wird umsortiert)?
+  Aktuell nicht spezifiziert — vermutlich irrelevant für Wishlist-Zwecke
+  (Reihenfolge ist kein Wanted-Kriterium), aber potenziell relevant für
+  Media-Server-Sync (bestehende Pipeline, außerhalb Library v2). Hier nur
+  festgehalten, nicht weiter untersucht.
+- **Playlists als First-Class-Entity vs. Read-Through:** Um ein
+  Playlist-Default-Profil zu speichern, wird zwingend irgendeine Persistenz
+  gebraucht — entweder eine schlanke neue Spalte an der bestehenden
+  `mirrored_playlists`-Tabelle (kein neues `lib2_playlists`, näher an der
+  Architekturregel "keine Parallelstruktur"/"kein zweiter Importer") oder ein
+  minimales `lib2_playlists` (nur `id`, `mirrored_playlist_id`,
+  `quality_profile_id`). Beide Varianten sind mit den Nicht-verhandelbaren
+  Designregeln (Abschnitt 1) vereinbar; welche gewählt wird, sollte im
+  Implementierungs-Chat explizit neu entschieden werden, nicht hier
+  vorentschieden.
+
+### 11.5 Priorität — bewusst zurückgestellt
+
+**Das hier ist explizit NICHT der nächste Schritt.** Der User hat in der
+Voice-Session ausdrücklich gesagt, dass Playlist-Quality-Profile-Konflikte
+kompliziert und nicht ganz intuitiv sind (mehrere existierende
+Playlist-Seiten sorgen schon für Verwirrung) und dass zuerst "das Richtige"
+fertig werden soll, bevor das hier angegangen wird. Diese Sektion existiert
+NUR, damit die Idee nicht verloren geht — nicht als Auftrag, sie als
+Nächstes umzusetzen. Der tatsächliche nächste Schritt bleibt wie in
+Abschnitt 7 vermerkt: **P2-01** (Scan/Retag SQLite-Lock-Dauer über lange
+Dateisystem-I/O).
+
+Falls dieser Punkt später aufgegriffen wird, sind die Voraussetzungen dafür:
+1. Persistenzentscheidung für das Playlist-Default-Profil (11.4, letzter
+   Punkt).
+2. Playlist-Track → Wishlist-Mirror-Pfad um die 3-stufige Profil-Kette
+   (Track > Artist > Playlist-Default) erweitern — ansetzend dort, wo der
+   Playlist→Wishlist-Mirror-Call real passiert. Aktuell triggert Library v2
+   nur die bestehende Pipeline (`run_mirrored_playlist_pipeline`,
+   s. `core/playlists/pipeline.py`); dort ist noch kein
+   Quality-Profile-Bezug vorhanden (verifiziert per Grep) — die Kette müsste
+   dort oder im nachgelagerten Wishlist-Mirror-Schritt ansetzen.
+3. UI-Entscheidung, wo der Playlist-Default-Profil-Picker sitzt (11.4,
+   erster Punkt).
