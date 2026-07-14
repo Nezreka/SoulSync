@@ -482,6 +482,9 @@ def test_album_process_posts_valid_files_and_records_side_effects(tmp_path):
     assert context["artist_context"] == {"name": "Artist"}
     assert context["total_discs"] == 2
     assert context["source"] == "deezer"
+    assert context["is_local_import"] is True
+    # explicit user match — quality profile has no veto (#1017)
+    assert context["_skip_quarantine_check"] == ["quality", "bit_depth"]
     assert path == str(good_file)
     assert activity == [("", "Album Imported", "Album by Artist (1/2 tracks)", "Now")]
     assert refresh_calls == ["refresh"]
@@ -581,7 +584,9 @@ def test_process_single_import_file_resolves_and_posts_context(tmp_path):
     assert len(post_calls) == 1
     assert post_calls[0][0].startswith("import_single_")
     assert post_calls[0][1] == {"track": {"name": "Song"}, "artist": {"name": "Artist"},
-                                "is_local_import": True}
+                                "is_local_import": True,
+                                # explicit user match — quality profile has no veto (#1017)
+                                "_skip_quarantine_check": ["quality", "bit_depth"]}
     assert post_calls[0][2] == str(audio_file)
 
 

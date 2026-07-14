@@ -54,8 +54,23 @@ _SLSKD_KEYS = {
 }
 
 
+def _parse_text(hit) -> str:
+    """What the release parser should read for a hit. Soulseek hits are grouped by
+    FOLDER — the folder title carries the show/release name, but on library-style
+    shares the episode number, date and quality live in the FILENAME. Join both so
+    one parse sees everything ('90 Day Fiancé/Season 12' + '90.Day.Fiance.S12E09.
+    1080p.mkv'). Prowlarr/torrent hits have no meaningful filename beyond the title,
+    and the join is a no-op when the basename is already the title."""
+    title = str((hit or {}).get("title") or "")
+    fn = str((hit or {}).get("filename") or "").replace("\\", "/").rstrip("/")
+    base = fn.rsplit("/", 1)[-1]
+    if base and base.lower() not in title.lower():
+        return (title + "/" + base) if title else base
+    return title
+
+
 def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None, want_year=None,
-                   want_title=None, blocked_users=None) -> list:
+                   want_title=None, blocked_users=None, want_date=None) -> list:
     """Parse → evaluate → rank a list of raw indexer hits against the quality profile.
     Shared by the mock search and the live slskd start/poll endpoints.
 
@@ -79,11 +94,11 @@ def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None,
             blocked_users = blocked_users or frozenset()
     results = []
     for hit in raw:
-        parsed = parse_release(hit.get("title"))
+        parsed = parse_release(_parse_text(hit))
         size_gb = round((hit.get("size_bytes") or 0) / (1024 ** 3), 1)
         verdict = evaluate_release(parsed, profile, scope=scope, want_season=want_season,
                                    want_episode=want_episode, size_gb=size_gb, want_year=want_year,
-                                   want_title=want_title)
+                                   want_title=want_title, want_date=want_date)
         user = hit.get("username")
         is_blocked = bool(user and user in blocked_users) or (user, hit.get("filename")) in blocked
         if user and user in blocked_users:

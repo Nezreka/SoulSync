@@ -3404,15 +3404,16 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Convention: keep only the CURRENT release here, plus a single brief
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '3.0.1': [
-        { date: 'July 2026 — 3.0.1' },
-        { title: 'New: the entire video side (movies, tv & youtube)', desc: 'soulsync isn\'t just music anymore. a whole isolated video app: library scanning for plex/jellyfin, tmdb/tvdb/omdb enrichment plus 10 background backfill workers, a tv calendar, and a follow-to-wishlist-to-download pipeline for shows, actors, directors, studios, and youtube channels. its own database and dashboard, never touches the music side.' },
-        { title: 'Video: overlays & collections (kometa-style)', desc: 'an overlay studio that paints template overlays onto your plex/jellyfin posters, and a collection manager that builds plex collections / jellyfin boxsets from smart filters and ranked lists (imdb, tmdb, trakt, mdblist) in true rank order. both with nightly automations.' },
-        { title: 'New: Server Activity (tautulli-style)', desc: 'a live now-playing view for plex + jellyfin in a slide-out drawer: live streams over websocket, click one to open it inside soulsync, a history tab, a stats tab, and terminate-a-stream-with-a-message.', page: 'dashboard' },
-        { title: 'Smarter video downloads (Radarr/Sonarr-parity matching)', desc: 'the download search now checks the release TITLE, not just the year — so a search for "Paradox (2017)" can no longer grab "The Cloverfield Paradox (2018)". and it matches TMDB alternate/original-language titles too, so a release named by a known aka still gets found. wrong grabs out, missed grabs out.' },
-        { title: 'Faster nightly TV refresh', desc: 'the airing-schedule refresh only re-pulls the current season now instead of every season of every airing show every night — a big drop in api calls if you follow a lot of shows.' },
-        { title: 'Mobile docs nav fixed', desc: 'the help/docs sidebar was untappable on phones (a sticky header ate the tap area, and the scroll target was a no-op on the stacked mobile layout). fixed in both spots. thanks @bluejorts for the characterization tests that caught it.', page: 'help' },
-        { title: 'Earlier versions', desc: '2.8.9 fixed multi-disc downloads (#1009), sped up the Server Playlists page (#1005), and added a prefer-explicit-versions setting (#923). 2.8.8 stopped a tag write from corrupting FLAC audio (#1000) and added the Corrupt File Detector. 2.8.7 made discovery playlists first-class Auto-Sync items. 2.8.4 added Artist Web + Quality Profiles; 2.7.0 made multi-user real.' },
+    '3.0.2': [
+        { date: 'July 2026 — 3.0.2' },
+        { title: 'Video downloads: daily shows + smarter searching', desc: 'daily series match by air date now ("The Daily Show 2026.07.08" style releases), soulseek results parse their share paths the way the music matcher does, releases with no quality token get size-inferred quality, and the wishlist run log names any source that was skipped (like prowlarr not being configured) instead of silently degrading.' },
+        { title: 'Download history: TV + YouTube, and uploader blacklisting', desc: 'tv episode and youtube grabs now show in the download history modal (youtube gets its own tab), and you can blacklist an uploader straight from a completed download — searches, retries and requeries all skip them from then on.' },
+        { title: 'The whole video side works on your phone', desc: 'full mobile/tablet pass: dashboard, search, discover, library, watchlist, wishlist, downloads, calendar, detail pages, and both studios (overlay + collection). desktop unchanged.' },
+        { title: 'Library Reorganize actually moves files', desc: 'after a template change, reorganize reported every album as "already organized" and moved nothing — the keep-albums-together folder reuse was answering with the very folder you were moving out of. destinations now come from your current template alone. thanks TheHomeGuy for the report.' },
+        { title: 'Manual imports skip the quality profile (#1017)', desc: 'a file you hand-match on the import page is your call — the quality profile no longer vetoes it. acoustid, integrity and silence checks still run.' },
+        { title: 'Basic search results no longer vanish (#1024)', desc: 'the results area could get starved to zero height on short or zoomed-out windows. it has a real minimum height now.' },
+        { title: 'Canonical version findings apply now (#1022)', desc: 'the album version repair job could flag canonical-version mismatches but the apply button did nothing (the fix handler was missing). thanks @sam-coodu.' },
+        { title: 'Earlier versions', desc: '3.0.1 shipped the entire video side (movies, tv & youtube): library scanning, enrichment, a tv calendar, kometa-style overlays & collections, Server Activity (tautulli-style), and radarr/sonarr-parity download matching. before that: 2.8.9 fixed multi-disc downloads (#1009), 2.8.8 stopped a tag write from corrupting FLAC audio (#1000), 2.8.4 added Artist Web + Quality Profiles, and 2.7.0 made multi-user real.' },
     ],
 };
 
@@ -3443,7 +3444,19 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "3.0.1 — soulsync does video now",
+        title: "3.0.2 — the follow-up polish release",
+        description: "video downloading gets sonarr-parity round 2, the entire video side goes mobile, and three music-side bugs are dead (library reorganize works again).",
+        features: [
+            "smarter video searching: daily shows match by air date ('The Daily Show 2026.07.08' style releases), soulseek results parse their share paths the way the music matcher does, releases with no quality token get size-inferred quality, and the wishlist run log now names any source that was skipped (like prowlarr not being configured) instead of silently degrading",
+            "download history now tracks tv episodes and youtube grabs (youtube gets its own tab), and you can blacklist an uploader straight from a completed download — searches, retries and requeries all skip them from then on",
+            "the entire video side is responsive: dashboard, search, discover, library, watchlist, wishlist, downloads, calendar, detail pages, and both studios (overlay + collection) work on phones and tablets. desktop unchanged",
+            "library reorganize actually reorganizes: after a template change it reported every album as 'already organized' — the keep-albums-together folder reuse was answering with the very folder you were moving out of. destinations now come from your current template alone. thanks TheHomeGuy for the report",
+            "manual imports skip the quality profile (#1017): a hand-matched file is your call — acoustid, integrity and silence checks still run, but the profile no longer vetoes it",
+            "basic search results no longer vanish on short or zoomed-out windows (#1024), and canonical-version repair findings can actually be applied now (#1022, thanks @sam-coodu)",
+        ],
+    },
+    {
+        title: "Earlier in 3.0.1 — soulsync does video now",
         description: "the big one: a whole video side (movies, tv, youtube) plus a tautulli-style live server activity view, with Radarr/Sonarr-parity download matching.",
         features: [
             "the video side is a fully isolated app (its own database, dashboard, search, calendar and download pipeline) for plex and jellyfin that never touches the music side. library scanning, tmdb/tvdb/omdb enrichment plus 10 backfill workers, source-agnostic movie/show/person/studio detail pages, and a progressive netflix-feel search",
