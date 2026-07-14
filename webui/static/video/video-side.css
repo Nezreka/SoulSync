@@ -509,6 +509,13 @@ body[data-side="video"] .dashboard-header-sweep {
     justify-content: center;
     margin: 4px 0;
 }
+/* Phones: the centered no-wrap row (3 selects + Select) overflowed BOTH edges
+   — wrap it into a tidy 2-up grid instead. */
+@media (max-width: 640px) {
+    .video-library-filters { flex-wrap: wrap; gap: 8px; }
+    .video-library-filters .library-source-filter-select { flex: 1 1 calc(50% - 4px); min-width: 0; }
+    .video-library-filters .video-lib-select-btn { flex: 1 1 calc(50% - 4px); }
+}
 /* Resolution chip on a poster card (top-left, above the gradient overlay). */
 .library-artist-card .video-card-badge {
     position: absolute;
