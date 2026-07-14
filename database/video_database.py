@@ -2038,12 +2038,48 @@ class VideoDatabase:
             conn.close()
 
     def video_blocklist_pairs(self) -> set:
-        """{(username, filename)} for candidate filtering — cheap enough to read
-        per search/retry pass (the table stays small)."""
+        """{(username, filename)} for per-release candidate filtering — cheap enough to
+        read per search/retry pass (the table stays small). Excludes the source-wide
+        ('' filename) sentinels — those are matched by ``blocked_usernames`` instead."""
         conn = self._get_connection()
         try:
             return {(r["username"], r["filename"]) for r in conn.execute(
-                "SELECT username, filename FROM video_blocklist")}
+                "SELECT username, filename FROM video_blocklist WHERE COALESCE(filename,'') <> ''")}
+        finally:
+            conn.close()
+
+    def block_video_source(self, username, reason=None) -> int:
+        """Block a whole uploader/peer: every release from this username is skipped by
+        future searches (a SOURCE-wide block, stored with the '' filename sentinel so it
+        dedupes on (username,'')). Returns the row id, 0 on an empty username."""
+        username = (username or "").strip()
+        if not username:
+            return 0
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                "INSERT INTO video_blocklist (username, filename, reason) VALUES (?, '', ?) "
+                "ON CONFLICT(username, filename) DO UPDATE SET "
+                "reason=COALESCE(excluded.reason, video_blocklist.reason)",
+                (username, reason or "Uploader blocked"))
+            conn.commit()
+            r = conn.execute("SELECT id FROM video_blocklist WHERE username=? AND filename=''",
+                             (username,)).fetchone()
+            return r["id"] if r else 0
+        except sqlite3.Error:
+            logger.exception("block_video_source failed")
+            return 0
+        finally:
+            conn.close()
+
+    def blocked_usernames(self) -> set:
+        """Uploaders blocked source-wide (the '' filename sentinel) — every release from
+        them is filtered out of search, on top of the per-release (username,filename)
+        blocks. Read per search pass alongside ``video_blocklist_pairs``."""
+        conn = self._get_connection()
+        try:
+            return {r["username"] for r in conn.execute(
+                "SELECT username FROM video_blocklist WHERE COALESCE(filename,'') = '' AND username IS NOT NULL")}
         finally:
             conn.close()
 

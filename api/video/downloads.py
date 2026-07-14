@@ -55,22 +55,28 @@ _SLSKD_KEYS = {
 
 
 def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None, want_year=None,
-                   want_title=None) -> list:
+                   want_title=None, blocked_users=None) -> list:
     """Parse → evaluate → rank a list of raw indexer hits against the quality profile.
     Shared by the mock search and the live slskd start/poll endpoints.
 
-    ``blocked`` = the release blocklist as {(username, filename)} (None = look it
-    up). Blocked releases stay VISIBLE in manual search (greyed, with the reason —
-    the Sonarr behaviour) but are never `accepted`, so every auto-picker skips
-    them; a manual grab of one is a deliberate user override."""
+    ``blocked`` = the per-release blocklist as {(username, filename)}; ``blocked_users``
+    = uploaders blocked source-wide (every release from them skipped). Both None = look
+    them up. Blocked hits stay VISIBLE in manual search (greyed, with the reason — the
+    Sonarr behaviour) but are never `accepted`, so every auto-picker skips them; a manual
+    grab of one is a deliberate user override."""
     from core.video.quality_eval import evaluate_release
     from core.video.release_parse import parse_release
-    if blocked is None:
+    if blocked is None or blocked_users is None:
         try:
             from . import get_video_db
-            blocked = get_video_db().video_blocklist_pairs()
+            db = get_video_db()
+            if blocked is None:
+                blocked = db.video_blocklist_pairs()
+            if blocked_users is None:
+                blocked_users = db.blocked_usernames()
         except Exception:   # noqa: BLE001 - filtering is an assist, never a 500
-            blocked = frozenset()
+            blocked = blocked or frozenset()
+            blocked_users = blocked_users or frozenset()
     results = []
     for hit in raw:
         parsed = parse_release(hit.get("title"))
@@ -78,8 +84,12 @@ def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None,
         verdict = evaluate_release(parsed, profile, scope=scope, want_season=want_season,
                                    want_episode=want_episode, size_gb=size_gb, want_year=want_year,
                                    want_title=want_title)
-        is_blocked = (hit.get("username"), hit.get("filename")) in blocked
-        if is_blocked:
+        user = hit.get("username")
+        is_blocked = bool(user and user in blocked_users) or (user, hit.get("filename")) in blocked
+        if user and user in blocked_users:
+            verdict = {**verdict, "accepted": False,
+                       "rejected": (verdict.get("rejected") or []) + ["Uploader blocklisted"]}
+        elif (user, hit.get("filename")) in blocked:
             verdict = {**verdict, "accepted": False,
                        "rejected": (verdict.get("rejected") or []) + ["Blocklisted release"]}
         # Availability = how downloadable the source is (slskd: free slot/queue/speed score
@@ -225,6 +235,14 @@ def register_routes(bp):
                                             "season_number", "episode_number", "username",
                                             "filename", "release_title", "reason")}
             row.setdefault("reason", "Blocked by user")
+        # scope='source' → block the whole UPLOADER (peer), so every future search skips
+        # them, not just this one file (Boulder: 'blacklist a source on a completed download').
+        if str(body.get("scope") or "").lower() == "source":
+            username = (row or {}).get("username") or body.get("username")
+            if not username:
+                return jsonify({"success": False, "error": "That row has no uploader to block."}), 400
+            rid = db.block_video_source(username, reason=body.get("reason") or "Uploader blocked")
+            return jsonify({"success": bool(rid), "id": rid, "scope": "source", "username": username})
         if not row or not row.get("username") or not row.get("filename"):
             return jsonify({"success": False,
                             "error": "That row has no release to block."}), 400
