@@ -2234,6 +2234,17 @@ bekannte Main-Chunk-Hinweis). **Logischer nächster Schritt:** P2-06 als kleinst
     Monitoring-Komponenten-Vertragstests sind grün. **Nächste Slice:** die
     Quality-Profile-Mutation mit derselben sichtbaren Error/Retry-Grenze
     absichern; danach die verbliebenen Artist-/Album-Mutationen inventarisieren.
+    **Dritte Slice abgeschlossen 2026-07-14:** Eine abgelehnte Artist-/Album-
+    Quality-Profile-Zuweisung bleibt jetzt im offenen Modal sichtbar und kann
+    mit exakt derselben serverseitigen Profil-ID, Cascade- und
+    `monitor_existing`-Entscheidung wiederholt werden. Erfolg schließt wie
+    bisher erst nach Query-Invalidierung; der bestehende app-weite Profile-
+    und Pipeline-Vertrag bleibt unverändert. Ein neuer Komponenten-
+    Vertragstest pinnt Failure→Retry→Success. **Nächste Slice:** die übrigen
+    Mutations-Catches in Artist-/Album-Detail, Retag, Search, Delete und
+    Playlist-Trigger systematisch klassifizieren; bereits sichtbare Fehler
+    nicht umbauen, sondern zuerst den nächsten tatsächlich stillen oder
+    unendlichen Pfad schließen.
 
 **Session-Abschluss-Gate 2026-07-14:** Seit dem vorherigen Full-Gate wurden
 Roadmap 13 sowie 16–23 und Phase E vollständig abgeschlossen und jeweils

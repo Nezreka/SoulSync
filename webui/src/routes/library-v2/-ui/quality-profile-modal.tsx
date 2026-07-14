@@ -105,6 +105,22 @@ export function QualityProfileModal({
             })
           )}
         </div>
+        {mutation.isError && typeof mutation.variables === 'number' ? (
+          <div className={styles.mutationError} role="alert">
+            <span>
+              {mutation.error instanceof Error && mutation.error.message.trim()
+                ? mutation.error.message
+                : 'Quality profile could not be saved'}
+            </span>
+            <button
+              type="button"
+              className={styles.inlineRetry}
+              onClick={() => mutation.mutate(mutation.variables)}
+            >
+              Retry
+            </button>
+          </div>
+        ) : null}
       </div>
     </div>
   );
