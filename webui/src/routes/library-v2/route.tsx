@@ -1,6 +1,10 @@
 import { createFileRoute } from '@tanstack/react-router';
 
-import { libraryV2ArtistsQueryOptions, libraryV2EnabledQueryOptions } from './-library-v2.api';
+import {
+  libraryV2AlbumQueryOptions,
+  libraryV2ArtistsQueryOptions,
+  libraryV2EnabledQueryOptions,
+} from './-library-v2.api';
 import { libraryV2SearchSchema } from './-library-v2.types';
 import { LibraryV2Page } from './-ui/library-v2-page';
 
@@ -11,6 +15,7 @@ export const Route = createFileRoute('/library-v2')({
     sort: search.sort,
     page: search.page,
     monitored: search.monitored,
+    album: search.album,
   }),
   loader: async ({ context, deps }) => {
     // Warm the feature-flag check + first page of artists; never block on a
@@ -18,7 +23,11 @@ export const Route = createFileRoute('/library-v2')({
     await context.queryClient
       .ensureQueryData(libraryV2EnabledQueryOptions())
       .catch(() => undefined);
-    void context.queryClient.prefetchQuery(libraryV2ArtistsQueryOptions(deps));
+    if (deps.album) {
+      void context.queryClient.prefetchQuery(libraryV2AlbumQueryOptions(deps.album));
+    } else {
+      void context.queryClient.prefetchQuery(libraryV2ArtistsQueryOptions(deps));
+    }
   },
   component: LibraryV2Page,
 });

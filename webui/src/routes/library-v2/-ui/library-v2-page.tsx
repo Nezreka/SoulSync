@@ -836,7 +836,13 @@ export function LibraryV2Page() {
   return (
     <>
       <MirrorStatusBanner />
-      {search.artist ? <ArtistDetailView artistId={search.artist} /> : <ArtistIndexView />}
+      {search.album ? (
+        <AlbumDetailView albumId={search.album} />
+      ) : search.artist ? (
+        <ArtistDetailView artistId={search.artist} />
+      ) : (
+        <ArtistIndexView />
+      )}
     </>
   );
 }
@@ -1097,6 +1103,122 @@ function ArtistTable({ artists }: { artists: LibraryV2ArtistSummary[] }) {
 }
 
 // --- artist detail (Lidarr-style: expandable album/single tables) ------------
+
+function AlbumDetailView({ albumId }: { albumId: number }) {
+  const navigate = useNavigate();
+  const albumQuery = useQuery(libraryV2AlbumQueryOptions(albumId));
+  const album = albumQuery.data;
+  const [modalAction, setModalAction] = useState<{
+    action: string;
+    entity?: Lib2EntityRef;
+  } | null>(null);
+  const [grabBanner, setGrabBanner] = useState<{
+    tone: 'busy' | 'ok' | 'err';
+    text: string;
+  } | null>(null);
+
+  function handleAction(action: string, entity?: Lib2EntityRef) {
+    if (INTERACTIVE_RE.test(action)) {
+      setModalAction({ action, entity });
+      return;
+    }
+    if (!AUTO_GRAB_RE.test(action) || !album) return;
+    const query = buildSearchQuery(album.primary_artist?.name ?? '', action);
+    setGrabBanner({ tone: 'busy', text: `Searching "${query}"…` });
+    void autoGrabBest(query, {}, entity)
+      .then((best) => {
+        if (!best) {
+          setGrabBanner({ tone: 'err', text: `No results for "${query}".` });
+          return;
+        }
+        const title = best.result_type === 'album' ? best.album_title : best.title;
+        setGrabBanner({ tone: 'ok', text: `Grabbing "${title}" from ${best.username}.` });
+      })
+      .catch((error) =>
+        setGrabBanner({
+          tone: 'err',
+          text: error instanceof Error ? error.message : 'Search failed',
+        }),
+      );
+  }
+
+  const goBack = () =>
+    navigate({
+      search: (previous) => ({
+        ...previous,
+        album: undefined,
+        artist: album?.primary_artist?.id ?? previous.artist,
+      }),
+    });
+
+  return (
+    <div className={styles.page}>
+      <BackLink onClick={() => void goBack()}>
+        ← {album?.primary_artist ? album.primary_artist.name : 'Library'}
+      </BackLink>
+      {albumQuery.isError ? (
+        <div className={styles.emptyState}>Album not found.</div>
+      ) : albumQuery.isLoading || !album ? (
+        <div className={styles.loading}>Loading…</div>
+      ) : (
+        <>
+          {grabBanner ? (
+            <div className={`${styles.grabBanner} ${styles[`grab_${grabBanner.tone}`]}`}>
+              <span>{grabBanner.text}</span>
+              <button
+                type="button"
+                className={styles.grabBannerClose}
+                onClick={() => setGrabBanner(null)}
+              >
+                ✕
+              </button>
+            </div>
+          ) : null}
+          <header className={styles.detailHeader}>
+            <Artwork src={album.image_url ?? ''} alt={album.title} className={styles.detailThumb} />
+            <div className={styles.detailMeta}>
+              <div className={styles.detailTitleRow}>
+                <MonitorToggle entity="albums" id={album.id} monitored={album.monitored} />
+                <h1 className={styles.title}>{album.title}</h1>
+              </div>
+              <p className={styles.subtitle}>
+                {[album.primary_artist?.name, album.album_type, album.release_date ?? album.year]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </p>
+              <div className={styles.detailLabels}>
+                <span className={styles.detailLabel}>
+                  <SvgIcon name="profile" />
+                  {album.quality_profile?.name ?? 'No quality profile'}
+                </span>
+                <span className={styles.detailLabel}>
+                  <SvgIcon name="tracks" />
+                  {trackProgress(album.tracks_present, album.track_count)} tracks
+                </span>
+                <span className={styles.detailLabel}>
+                  <SvgIcon name={album.monitored ? 'monitor' : 'close'} />
+                  {album.monitored ? 'Monitored' : 'Unmonitored'}
+                </span>
+              </div>
+              {album.genres.length > 0 ? (
+                <p className={styles.genres}>{album.genres.join(', ')}</p>
+              ) : null}
+            </div>
+          </header>
+          <AlbumTrackTable albumId={album.id} onAction={handleAction} />
+          {modalAction && INTERACTIVE_RE.test(modalAction.action) ? (
+            <InteractiveSearchModal
+              initialQuery={buildSearchQuery(album.primary_artist?.name ?? '', modalAction.action)}
+              qualityProfile={album.quality_profile}
+              entity={modalAction.entity}
+              onClose={() => setModalAction(null)}
+            />
+          ) : null}
+        </>
+      )}
+    </div>
+  );
+}
 
 /** Filter for the release toggle: "My Library" keeps owned or wanted releases;
  *  "All Releases" shows the full provider discography. */
@@ -1659,6 +1781,7 @@ function AlbumBlock({
   onRetag: (album: LibraryV2AlbumSummary) => void;
   onEdit: (album: LibraryV2AlbumSummary) => void;
 }) {
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const complete = album.tracks_missing === 0 && album.track_count > 0;
   const pct = album.track_count ? Math.round((100 * album.tracks_present) / album.track_count) : 0;
@@ -1702,6 +1825,13 @@ function AlbumBlock({
           </span>
         )}
         <span className={styles.albumActions}>
+          <IconActionButton
+            icon="expand"
+            title="Open album detail"
+            onClick={() =>
+              void navigate({ search: (previous) => ({ ...previous, album: album.id }) })
+            }
+          />
           <IconActionButton
             icon="search"
             title="Search Monitored"

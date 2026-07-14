@@ -1844,12 +1844,25 @@ verändert; daher waren Frontend-Typecheck/Vitest/Build nicht erforderlich.
    deep-linkbare Album-Detailansicht nutzen, ohne Provider-Snapshots direkt zu
    überschreiben.
 8. **Breiteres Metadaten-Edit** (Titel/Jahr/Artists) über den
-   Release-Type-Edit hinaus; deep-linkbare Album-Detail-Ansicht.
+   Release-Type-Edit hinaus; deep-linkbare Album-Detail-Ansicht. **Erste Slice
+   2026-07-14 abgeschlossen:** `?album=<id>` ist jetzt ein validierter,
+   direkt ladbarer Zustand statt totem Search-Parameter. Der Route-Loader
+   prefetcht Albumdaten; eine eigenständige Albumansicht zeigt effektive
+   Metadaten, Monitoring, Quality-Profil, Vollständigkeit und die bestehende
+   Tracktabelle. Track-Suche und Interactive Search verwenden dort dieselben
+   bestehenden Handler samt lib2-Entity-/Profilkontext; jede Release-Zeile
+   verlinkt explizit in die Ansicht und zurück zum Primary Artist. Frontend-
+   Check/Typecheck, zwei gezielte Schema-Tests und Production-Build sind grün.
+   **Nächste Slice:** Titel/Jahr und Artist-Metadaten im Edit-Modal über die
+   bestehende generische Override-API Set/Clear-fähig machen; Provider-
+   Baselines und Artist-Relationen nicht direkt überschreiben.
 9. **Artist-Scope für Reorganize/Dedup** (brauchen Pfad-Scoping, kein
    SQL-Filter — im Maintenance-Modal laufen diese Jobs derzeit ehrlich
    gekennzeichnet library-wide).
-10. **Album-Detail-Deep-Link** (`search.album`-Parameter, M14) implementieren
-    oder entfernen.
+10. ~~**Album-Detail-Deep-Link** (`search.album`-Parameter, M14) implementieren
+    oder entfernen.~~ **Abgeschlossen in Roadmap-8-Slice 1 am 2026-07-14:**
+    validierter Search-State, Loader-Prefetch, eigenständige Detailansicht und
+    Navigation aus jeder Albumzeile.
 11. **Wishlist→Autolink über `lib2_track_id`** deterministisch schließen
     (A4).
 12. **Importer-Skalierung** für sehr große Libraries (A5).
