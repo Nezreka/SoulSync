@@ -3404,11 +3404,13 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Convention: keep only the CURRENT release here, plus a single brief
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '3.0.0': [
-        { date: 'July 2026 — 3.0.0' },
+    '3.0.1': [
+        { date: 'July 2026 — 3.0.1' },
         { title: 'New: the entire video side (movies, tv & youtube)', desc: 'soulsync isn\'t just music anymore. a whole isolated video app: library scanning for plex/jellyfin, tmdb/tvdb/omdb enrichment plus 10 background backfill workers, a tv calendar, and a follow-to-wishlist-to-download pipeline for shows, actors, directors, studios, and youtube channels. its own database and dashboard, never touches the music side.' },
         { title: 'Video: overlays & collections (kometa-style)', desc: 'an overlay studio that paints template overlays onto your plex/jellyfin posters, and a collection manager that builds plex collections / jellyfin boxsets from smart filters and ranked lists (imdb, tmdb, trakt, mdblist) in true rank order. both with nightly automations.' },
         { title: 'New: Server Activity (tautulli-style)', desc: 'a live now-playing view for plex + jellyfin in a slide-out drawer: live streams over websocket, click one to open it inside soulsync, a history tab, a stats tab, and terminate-a-stream-with-a-message.', page: 'dashboard' },
+        { title: 'Smarter video downloads (Radarr/Sonarr-parity matching)', desc: 'the download search now checks the release TITLE, not just the year — so a search for "Paradox (2017)" can no longer grab "The Cloverfield Paradox (2018)". and it matches TMDB alternate/original-language titles too, so a release named by a known aka still gets found. wrong grabs out, missed grabs out.' },
+        { title: 'Faster nightly TV refresh', desc: 'the airing-schedule refresh only re-pulls the current season now instead of every season of every airing show every night — a big drop in api calls if you follow a lot of shows.' },
         { title: 'Mobile docs nav fixed', desc: 'the help/docs sidebar was untappable on phones (a sticky header ate the tap area, and the scroll target was a no-op on the stacked mobile layout). fixed in both spots. thanks @bluejorts for the characterization tests that caught it.', page: 'help' },
         { title: 'Earlier versions', desc: '2.8.9 fixed multi-disc downloads (#1009), sped up the Server Playlists page (#1005), and added a prefer-explicit-versions setting (#923). 2.8.8 stopped a tag write from corrupting FLAC audio (#1000) and added the Corrupt File Detector. 2.8.7 made discovery playlists first-class Auto-Sync items. 2.8.4 added Artist Web + Quality Profiles; 2.7.0 made multi-user real.' },
     ],
@@ -3441,14 +3443,15 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "3.0.0 — soulsync does video now",
-        description: "the big one: a whole video side (movies, tv, youtube) plus a tautulli-style live server activity view, on top of the usual pile of fixes.",
+        title: "3.0.1 — soulsync does video now",
+        description: "the big one: a whole video side (movies, tv, youtube) plus a tautulli-style live server activity view, with Radarr/Sonarr-parity download matching.",
         features: [
             "the video side is a fully isolated app (its own database, dashboard, search, calendar and download pipeline) for plex and jellyfin that never touches the music side. library scanning, tmdb/tvdb/omdb enrichment plus 10 backfill workers, source-agnostic movie/show/person/studio detail pages, and a progressive netflix-feel search",
             "follow shows, actors, directors, studios (with family presets like disney = pixar + marvel + lucasfilm) and youtube channels/playlists, then let the wishlist-to-download pipeline grab them: soulseek + prowlarr + yt-dlp, with radarr/sonarr-class quality profiles, a download history, a recycle bin and a release blocklist",
+            "smarter download matching: the search now gates on the release TITLE (not just the year), so 'Paradox (2017)' can't grab 'The Cloverfield Paradox (2018)' anymore — and it matches TMDB alternate/original-language titles too, so an aka-named release still gets found. wrong grabs out, missed grabs out",
             "kometa-style overlay studio (paint template overlays onto your posters) and collection manager (build plex collections / jellyfin boxsets from imdb/tmdb/trakt/mdblist ranked lists in true rank order), both with nightly automations",
             "Server Activity: a tautulli-style live now-playing drawer for plex + jellyfin, with websocket streams, click-to-open-inside-soulsync, a history tab, a stats tab, and terminate-a-stream-with-a-message",
-            "music-side: the help/docs sidebar nav works on mobile again (thanks @bluejorts for the characterization tests that caught it), the dashboard header reads 'music dashboard', and there's a github sponsor button now",
+            "the nightly TV refresh only re-pulls the current season now (not every season of every airing show, every night), the help/docs mobile nav works again (thanks @bluejorts), the dashboard header reads 'music dashboard', and there's a github sponsor button",
         ],
     },
     {
