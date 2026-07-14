@@ -126,7 +126,7 @@ const ICON_PATHS = {
   expand: 'M8 3H3v5M16 3h5v5M8 21H3v-5M21 16v5h-5',
   collapse: 'M9 3v6H3M15 3v6h6M9 21v-6H3M15 21v-6h6',
   download: 'M12 3v12M8 11l4 4 4-4M5 21h14',
-  profile: 'M5 6h14M5 12h14M5 18h9',
+  profile: 'M3 9c0-1 1-2 2-2h14c1 0 2 1 2 2v6c0 1-1 2-2 2H5c-1 0-2-1-2-2V9z',
   userProfile:
     'M224 256A128 128 0 1 0 224 0a128 128 0 1 0 0 256zm-45.7 48C79.8 304 0 383.8 0 482.3C0 498.7 13.3 512 29.7 512l388.6 0c16.4 0 29.7-13.3 29.7-29.7C448 383.8 368.2 304 269.7 304l-91.4 0z',
   folder: 'M3 6h7l2 2h9v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z',
@@ -159,7 +159,7 @@ function SvgIcon({
   );
 }
 
-/** Quality display component: renders format, resolution, and bitrate as separate visual blocks. */
+/** Quality display: compact inline format, resolution, bitrate. */
 function QualityDisplay({ file }: { file: LibraryV2Track['file'] | null | undefined }) {
   if (!file) return <span className={styles.qualityMissing}>-</span>;
 
@@ -169,20 +169,19 @@ function QualityDisplay({ file }: { file: LibraryV2Track['file'] | null | undefi
       ? Math.round(file.bitrate / 1000)
       : file.bitrate
     : null;
-  const bitDepth = file.bit_depth ? `${file.bit_depth}-bit` : null;
+  const bitDepth = file.bit_depth ? `${file.bit_depth}b` : null;
   const sampleRate = file.sample_rate
-    ? `${Number((file.sample_rate / 1000).toFixed(file.sample_rate % 1000 === 0 ? 0 : 1))} kHz`
+    ? `${Number((file.sample_rate / 1000).toFixed(file.sample_rate % 1000 === 0 ? 0 : 1))}k`
     : null;
-  const resolution = [bitDepth, sampleRate].filter(Boolean).join(' / ') || null;
+  const parts = [
+    fmt,
+    bitDepth || sampleRate
+      ? `${bitDepth || ''}${bitDepth && sampleRate ? ' ' : ''}${sampleRate || ''}`.trim()
+      : null,
+    kbps ? `${kbps}k` : null,
+  ].filter(Boolean);
 
-  return (
-    <div className={styles.qualityDisplay}>
-      {fmt && <span className={styles.qualityBlock}>{fmt}</span>}
-      {resolution && <span className={styles.qualityBlock}>{resolution}</span>}
-      {kbps && <span className={styles.qualityBlock}>{kbps} kbps</span>}
-      {!fmt && !resolution && !kbps && <span className={styles.qualityMissing}>unknown</span>}
-    </div>
-  );
+  return <span className={styles.qualityDisplay}>{parts.join(' · ')}</span>;
 }
 
 // --- shared building blocks --------------------------------------------------
@@ -2276,7 +2275,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 onClick={() => setShowMonitoring(true)}
               />
               <ActionButton
-                icon="userProfile"
+                icon="profile"
                 label="Quality Profile"
                 onClick={() => handleAction('Quality Profile')}
               />
@@ -2698,7 +2697,7 @@ function AlbumBlock({
             }
           />
           <IconActionButton
-            icon="userProfile"
+            icon="profile"
             title="Quality Profile"
             onClick={() =>
               onQualityProfile({
