@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS lib2_artists (
     monitor_new_items TEXT NOT NULL DEFAULT 'all',   -- 'all' | 'none' | 'new'
     quality_profile_id INTEGER REFERENCES quality_profiles(id) ON DELETE RESTRICT,
     legacy_artist_id INTEGER,                         -- source row in legacy `artists`
+    legacy_import_run_id TEXT,                        -- last complete legacy snapshot that saw it
     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )
@@ -99,6 +100,7 @@ CREATE TABLE IF NOT EXISTS lib2_albums (
     monitored INTEGER NOT NULL DEFAULT 1,
     quality_profile_id INTEGER REFERENCES quality_profiles(id) ON DELETE RESTRICT,
     legacy_album_id INTEGER,                           -- source row in legacy `albums`
+    legacy_import_run_id TEXT,                         -- last complete legacy snapshot that saw it
     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (primary_artist_id) REFERENCES lib2_artists(id) ON DELETE CASCADE
@@ -138,6 +140,7 @@ CREATE TABLE IF NOT EXISTS lib2_tracks (
     quality_profile_id INTEGER REFERENCES quality_profiles(id) ON DELETE RESTRICT,
     canonical_track_id INTEGER,                       -- self-ref; NULL = canonical
     legacy_track_id INTEGER,                          -- source row in legacy `tracks`
+    legacy_import_run_id TEXT,                        -- last complete legacy snapshot that saw it
     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (album_id) REFERENCES lib2_albums(id) ON DELETE CASCADE,
@@ -188,6 +191,8 @@ CREATE TABLE IF NOT EXISTS lib2_track_files (
     content_hash TEXT,                                -- for dedup / single-vs-album
     is_primary INTEGER NOT NULL DEFAULT 0,            -- exactly one per track (ADR-03)
     file_state TEXT NOT NULL DEFAULT 'active',        -- 'active'|'missing_suspected'|'missing_confirmed'|'quarantined'|'deleted'
+    legacy_track_id INTEGER,                          -- non-NULL only for legacy-import-owned files
+    legacy_import_run_id TEXT,                        -- last complete legacy snapshot that saw it
     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (track_id) REFERENCES lib2_tracks(id) ON DELETE SET NULL
@@ -327,6 +332,19 @@ _ADDED_COLUMNS = (
      "ALTER TABLE lib2_track_files ADD COLUMN is_primary INTEGER NOT NULL DEFAULT 0"),
     ("lib2_track_files", "file_state",
      "ALTER TABLE lib2_track_files ADD COLUMN file_state TEXT NOT NULL DEFAULT 'active'"),
+    # Snapshot ownership (audit P1-02): a complete import marks every row it
+    # observed. Only rows with explicit legacy ownership are reconciled away;
+    # provider/manual rows and secondary files remain outside that boundary.
+    ("lib2_artists", "legacy_import_run_id",
+     "ALTER TABLE lib2_artists ADD COLUMN legacy_import_run_id TEXT"),
+    ("lib2_albums", "legacy_import_run_id",
+     "ALTER TABLE lib2_albums ADD COLUMN legacy_import_run_id TEXT"),
+    ("lib2_tracks", "legacy_import_run_id",
+     "ALTER TABLE lib2_tracks ADD COLUMN legacy_import_run_id TEXT"),
+    ("lib2_track_files", "legacy_track_id",
+     "ALTER TABLE lib2_track_files ADD COLUMN legacy_track_id INTEGER"),
+    ("lib2_track_files", "legacy_import_run_id",
+     "ALTER TABLE lib2_track_files ADD COLUMN legacy_import_run_id TEXT"),
 )
 
 

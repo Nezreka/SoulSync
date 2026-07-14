@@ -183,6 +183,99 @@ def test_idempotent_rerun(legacy_db):
     assert second["files"] == 0   # nothing new to insert the second time
 
 
+def test_rerun_reconciles_legacy_file_path_without_touching_secondary_file(legacy_db):
+    import_legacy_library(legacy_db)
+    conn = legacy_db._get_connection()
+    track_id = conn.execute(
+        "SELECT id FROM lib2_tracks WHERE legacy_track_id=100"
+    ).fetchone()[0]
+    conn.execute(
+        "INSERT INTO lib2_track_files(track_id, path, source) VALUES(?, ?, ?)",
+        (track_id, "/m/manual-secondary.flac", "manual"),
+    )
+    conn.execute("UPDATE tracks SET file_path='/m/renamed.flac' WHERE id=100")
+    conn.commit()
+    conn.close()
+
+    stats = import_legacy_library(legacy_db)
+
+    conn = legacy_db._get_connection()
+    files = conn.execute(
+        """SELECT path, legacy_track_id, legacy_import_run_id
+             FROM lib2_track_files WHERE track_id=? ORDER BY path""",
+        (track_id,),
+    ).fetchall()
+    conn.close()
+    assert [row["path"] for row in files] == [
+        "/m/manual-secondary.flac",
+        "/m/renamed.flac",
+    ]
+    assert files[0]["legacy_track_id"] is None
+    assert files[0]["legacy_import_run_id"] is None
+    assert files[1]["legacy_track_id"] == 100
+    assert files[1]["legacy_import_run_id"]
+    assert stats["files"] == 1
+    assert stats["reconciled_files"] == 1
+
+
+def test_rerun_removes_deleted_legacy_snapshot_rows(legacy_db):
+    import_legacy_library(legacy_db)
+    conn = legacy_db._get_connection()
+    conn.execute("DELETE FROM tracks WHERE album_id=11")
+    conn.execute("DELETE FROM albums WHERE id=11")
+    conn.commit()
+    conn.close()
+
+    stats = import_legacy_library(legacy_db)
+
+    conn = legacy_db._get_connection()
+    assert conn.execute(
+        "SELECT 1 FROM lib2_tracks WHERE legacy_track_id=102"
+    ).fetchone() is None
+    assert conn.execute(
+        "SELECT 1 FROM lib2_albums WHERE legacy_album_id=11"
+    ).fetchone() is None
+    assert conn.execute(
+        "SELECT 1 FROM lib2_track_files WHERE path='/m/single.flac'"
+    ).fetchone() is None
+    conn.close()
+    assert stats["reconciled_files"] == 1
+    assert stats["reconciled_tracks"] == 1
+    assert stats["reconciled_albums"] == 1
+
+
+def test_reconcile_detaches_provider_identity_instead_of_deleting_it(legacy_db):
+    import_legacy_library(legacy_db)
+    conn = legacy_db._get_connection()
+    conn.execute(
+        "UPDATE lib2_albums SET spotify_id='provider-album' WHERE legacy_album_id=11"
+    )
+    conn.execute(
+        "UPDATE lib2_tracks SET spotify_id='provider-track' WHERE legacy_track_id=102"
+    )
+    conn.execute("DELETE FROM tracks WHERE album_id=11")
+    conn.execute("DELETE FROM albums WHERE id=11")
+    conn.commit()
+    conn.close()
+
+    import_legacy_library(legacy_db)
+
+    conn = legacy_db._get_connection()
+    album = conn.execute(
+        "SELECT legacy_album_id, origin FROM lib2_albums WHERE spotify_id='provider-album'"
+    ).fetchone()
+    track = conn.execute(
+        "SELECT legacy_track_id FROM lib2_tracks WHERE spotify_id='provider-track'"
+    ).fetchone()
+    file_row = conn.execute(
+        "SELECT 1 FROM lib2_track_files WHERE path='/m/single.flac'"
+    ).fetchone()
+    conn.close()
+    assert dict(album) == {"legacy_album_id": None, "origin": "discography"}
+    assert track["legacy_track_id"] is None
+    assert file_row is None
+
+
 def test_reset_rebuilds(legacy_db):
     import_legacy_library(legacy_db)
     stats = import_legacy_library(legacy_db, reset=True)

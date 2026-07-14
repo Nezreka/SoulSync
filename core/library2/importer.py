@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import re
+import uuid
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from utils.logging_config import get_logger
@@ -157,27 +158,29 @@ class _ArtistResolver:
         self._by_name[key] = new_id
         return new_id
 
-    def upsert_legacy(self, legacy_id: int, fields: Dict[str, Any]) -> int:
+    def upsert_legacy(
+        self, legacy_id: int, fields: Dict[str, Any], run_id: str
+    ) -> int:
         """Insert or update a lib2 artist mirrored from a legacy artist row."""
         existing = self._by_legacy.get(legacy_id)
         if existing is not None:
             self.cursor.execute(
                 "UPDATE lib2_artists SET name=?, sort_name=?, spotify_id=?, "
                 "musicbrainz_id=?, image_url=?, genres=?, summary=?, "
-                "updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                "legacy_import_run_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
                 (fields["name"], fields["sort_name"], fields["spotify_id"],
                  fields["musicbrainz_id"], fields["image_url"], fields["genres"],
-                 fields["summary"], existing),
+                 fields["summary"], run_id, existing),
             )
             self._by_name.setdefault(normalize_name(fields["name"]), existing)
             return existing
         self.cursor.execute(
             "INSERT INTO lib2_artists(name, sort_name, spotify_id, musicbrainz_id, "
-            "image_url, genres, summary, legacy_artist_id, quality_profile_id) "
-            "VALUES(?,?,?,?,?,?,?,?,?)",
+            "image_url, genres, summary, legacy_artist_id, quality_profile_id, "
+            "legacy_import_run_id) VALUES(?,?,?,?,?,?,?,?,?,?)",
             (fields["name"], fields["sort_name"], fields["spotify_id"],
              fields["musicbrainz_id"], fields["image_url"], fields["genres"],
-             fields["summary"], legacy_id, self.default_profile_id),
+             fields["summary"], legacy_id, self.default_profile_id, run_id),
         )
         new_id = self.cursor.lastrowid
         self._by_legacy[legacy_id] = new_id
@@ -247,6 +250,141 @@ def _normalize_genres(raw: Any) -> str:
     return json.dumps(parts)
 
 
+def _has_preserved_intent(cursor, entity_type: str, entity_id: int) -> bool:
+    """Whether a stale legacy row has an independent user-owned reason to live."""
+    return cursor.execute(
+        """SELECT 1 FROM lib2_monitor_rules
+            WHERE entity_type=? AND entity_id=?
+              AND provenance IN ('user_explicit', 'wishlist_import')
+            LIMIT 1""",
+        (entity_type, entity_id),
+    ).fetchone() is not None
+
+
+def _reconcile_legacy_snapshot(cursor, run_id: str) -> Dict[str, int]:
+    """Reconcile importer-owned rows not observed in the current snapshot.
+
+    Legacy-owned files are removed first. Metadata that also has a provider
+    identity, explicit user/wishlist intent, or a non-legacy file is detached
+    from the legacy source instead of deleted. This keeps snapshot semantics
+    without letting the importer erase independently managed Library v2 state.
+    """
+    stats = {
+        "reconciled_files": 0,
+        "reconciled_tracks": 0,
+        "reconciled_albums": 0,
+        "reconciled_artists": 0,
+    }
+
+    cursor.execute(
+        """DELETE FROM lib2_track_files
+            WHERE legacy_track_id IS NOT NULL
+              AND (legacy_import_run_id IS NULL OR legacy_import_run_id<>?)""",
+        (run_id,),
+    )
+    stats["reconciled_files"] = cursor.rowcount
+
+    stale_tracks = cursor.execute(
+        """SELECT id FROM lib2_tracks
+            WHERE legacy_track_id IS NOT NULL
+              AND (legacy_import_run_id IS NULL OR legacy_import_run_id<>?)""",
+        (run_id,),
+    ).fetchall()
+    for row in stale_tracks:
+        track_id = int(row["id"])
+        independently_backed = cursor.execute(
+            """SELECT 1 FROM lib2_tracks t
+                WHERE t.id=? AND (
+                    NULLIF(t.spotify_id, '') IS NOT NULL
+                    OR NULLIF(t.musicbrainz_id, '') IS NOT NULL
+                    OR NULLIF(t.isrc, '') IS NOT NULL
+                    OR EXISTS (
+                        SELECT 1 FROM lib2_track_files f
+                         WHERE f.track_id=t.id AND f.legacy_track_id IS NULL
+                    )
+                )""",
+            (track_id,),
+        ).fetchone()
+        if independently_backed or _has_preserved_intent(cursor, "track", track_id):
+            cursor.execute(
+                """UPDATE lib2_tracks
+                      SET legacy_track_id=NULL, legacy_import_run_id=NULL,
+                          updated_at=CURRENT_TIMESTAMP
+                    WHERE id=?""",
+                (track_id,),
+            )
+        else:
+            cursor.execute("DELETE FROM lib2_tracks WHERE id=?", (track_id,))
+        stats["reconciled_tracks"] += 1
+
+    stale_albums = cursor.execute(
+        """SELECT id FROM lib2_albums
+            WHERE legacy_album_id IS NOT NULL
+              AND (legacy_import_run_id IS NULL OR legacy_import_run_id<>?)""",
+        (run_id,),
+    ).fetchall()
+    for row in stale_albums:
+        album_id = int(row["id"])
+        independently_backed = cursor.execute(
+            """SELECT 1 FROM lib2_albums al
+                WHERE al.id=? AND (
+                    NULLIF(al.spotify_id, '') IS NOT NULL
+                    OR NULLIF(al.musicbrainz_id, '') IS NOT NULL
+                    OR EXISTS (SELECT 1 FROM lib2_tracks t WHERE t.album_id=al.id)
+                )""",
+            (album_id,),
+        ).fetchone()
+        if independently_backed or _has_preserved_intent(cursor, "album", album_id):
+            cursor.execute(
+                """UPDATE lib2_albums
+                      SET legacy_album_id=NULL, legacy_import_run_id=NULL,
+                          origin='discography', updated_at=CURRENT_TIMESTAMP
+                    WHERE id=?""",
+                (album_id,),
+            )
+        else:
+            cursor.execute("DELETE FROM lib2_albums WHERE id=?", (album_id,))
+        stats["reconciled_albums"] += 1
+
+    stale_artists = cursor.execute(
+        """SELECT id FROM lib2_artists
+            WHERE legacy_artist_id IS NOT NULL
+              AND (legacy_import_run_id IS NULL OR legacy_import_run_id<>?)""",
+        (run_id,),
+    ).fetchall()
+    for row in stale_artists:
+        artist_id = int(row["id"])
+        independently_backed = cursor.execute(
+            """SELECT 1 FROM lib2_artists ar
+                WHERE ar.id=? AND (
+                    NULLIF(ar.spotify_id, '') IS NOT NULL
+                    OR NULLIF(ar.musicbrainz_id, '') IS NOT NULL
+                    OR EXISTS (SELECT 1 FROM lib2_albums al
+                                WHERE al.primary_artist_id=ar.id)
+                    OR EXISTS (SELECT 1 FROM lib2_album_artists aa
+                                WHERE aa.artist_id=ar.id)
+                    OR EXISTS (SELECT 1 FROM lib2_track_artists ta
+                                WHERE ta.artist_id=ar.id)
+                )""",
+            (artist_id,),
+        ).fetchone()
+        if independently_backed or _has_preserved_intent(cursor, "artist", artist_id):
+            cursor.execute(
+                """UPDATE lib2_artists
+                      SET legacy_artist_id=NULL, legacy_import_run_id=NULL,
+                          updated_at=CURRENT_TIMESTAMP
+                    WHERE id=?""",
+                (artist_id,),
+            )
+        else:
+            cursor.execute("DELETE FROM lib2_artists WHERE id=?", (artist_id,))
+        stats["reconciled_artists"] += 1
+
+    from core.library2.monitor_rules import prune_orphaned_rules
+    prune_orphaned_rules(cursor)
+    return stats
+
+
 def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb = None,
                           profile_id: Optional[int] = None) -> Dict[str, int]:
     """Populate ``lib2_*`` from the legacy library. Returns a stats dict.
@@ -277,11 +415,16 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
         "files": 0,
         "wishlist_tracks": 0,
         "linked_duplicates": 0,
+        "reconciled_files": 0,
+        "reconciled_tracks": 0,
+        "reconciled_albums": 0,
+        "reconciled_artists": 0,
     }
     conn = database._get_connection()
     try:
         ensure_library_v2_schema(conn)
         cursor = conn.cursor()
+        run_id = uuid.uuid4().hex
 
         preserved_album_intent = {}
 
@@ -326,7 +469,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 "image_url": _pick(row, "thumb_url", "banner_url"),
                 "genres": _normalize_genres(_pick(row, "genres")),
                 "summary": _pick(row, "summary"),
-            })
+            }, run_id)
             stats["artists"] += 1
             if progress and i % 200 == 0:
                 progress("artists", i, len(artist_rows))
@@ -388,9 +531,9 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                     "musicbrainz_id=COALESCE(?, musicbrainz_id), "
                     "image_url=COALESCE(?, image_url), "
                     "genres=?, track_count=?, expected_track_count=?, "
-                    "origin='library', legacy_album_id=?, "
+                    "origin='library', legacy_album_id=?, legacy_import_run_id=?, "
                     "updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                    (*fields, row["id"], existing),
+                    (*fields, row["id"], run_id, existing),
                 )
                 album_id = existing
             else:
@@ -398,8 +541,9 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                     "INSERT INTO lib2_albums(primary_artist_id, title, album_type, "
                     "release_date, year, spotify_id, musicbrainz_id, image_url, genres, "
                     "track_count, expected_track_count, legacy_album_id, "
-                    "quality_profile_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (*fields, row["id"], default_profile_id),
+                    "quality_profile_id, legacy_import_run_id) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (*fields, row["id"], default_profile_id, run_id),
                 )
                 album_id = cursor.lastrowid
                 album_map[row["id"]] = album_id
@@ -417,9 +561,9 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
         for r in cursor.fetchall():
             track_map[r["legacy_track_id"]] = r["id"]
         existing_files = {
-            (int(row["track_id"]), str(row["path"]))
+            (int(row["track_id"]), str(row["path"])): int(row["id"])
             for row in cursor.execute(
-                "SELECT track_id, path FROM lib2_track_files "
+                "SELECT id, track_id, path FROM lib2_track_files "
                 "WHERE track_id IS NOT NULL AND path IS NOT NULL"
             ).fetchall()
         }
@@ -442,16 +586,16 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 cursor.execute(
                     "UPDATE lib2_tracks SET album_id=?, title=?, track_number=?, "
                     "disc_number=?, duration=?, isrc=?, musicbrainz_id=?, spotify_id=?, "
-                    "updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                    (*tfields, existing),
+                    "legacy_import_run_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                    (*tfields, run_id, existing),
                 )
                 track_id = existing
             else:
                 cursor.execute(
                     "INSERT INTO lib2_tracks(album_id, title, track_number, disc_number, "
                     "duration, isrc, musicbrainz_id, spotify_id, legacy_track_id, "
-                    "quality_profile_id) VALUES(?,?,?,?,?,?,?,?,?,?)",
-                    (*tfields, row["id"], default_profile_id),
+                    "quality_profile_id, legacy_import_run_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                    (*tfields, row["id"], default_profile_id, run_id),
                 )
                 track_id = cursor.lastrowid
                 track_map[row["id"]] = track_id
@@ -493,20 +637,35 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
             if file_path:
                 fmt = file_path.rsplit(".", 1)[-1].lower() if "." in file_path else None
                 file_key = (int(track_id), str(file_path))
-                if file_key not in existing_files:
+                file_id = existing_files.get(file_key)
+                if file_id is None:
                     cursor.execute(
                         "INSERT INTO lib2_track_files(track_id, path, size, bitrate, sample_rate, "
-                        "bit_depth, format, verification_status, import_status) "
-                        "VALUES(?,?,?,?,?,?,?,?, 'imported')",
+                        "bit_depth, format, verification_status, import_status, legacy_track_id, "
+                        "legacy_import_run_id) VALUES(?,?,?,?,?,?,?,?, 'imported',?,?)",
                         (track_id, file_path, _pick(row, "file_size"), _pick(row, "bitrate"),
                          _pick(row, "sample_rate"), _pick(row, "bit_depth"), fmt,
-                         _pick(row, "verification_status")),
+                         _pick(row, "verification_status"), row["id"], run_id),
                     )
-                    existing_files.add(file_key)
+                    existing_files[file_key] = int(cursor.lastrowid)
                     stats["files"] += 1
+                else:
+                    # Adopt pre-P1-02 rows when their exact current path matches;
+                    # unrelated secondary files stay unowned and are never pruned.
+                    cursor.execute(
+                        """UPDATE lib2_track_files
+                              SET size=?, bitrate=?, sample_rate=?, bit_depth=?, format=?,
+                                  verification_status=?, legacy_track_id=?,
+                                  legacy_import_run_id=?, updated_at=CURRENT_TIMESTAMP
+                            WHERE id=?""",
+                        (_pick(row, "file_size"), _pick(row, "bitrate"),
+                         _pick(row, "sample_rate"), _pick(row, "bit_depth"), fmt,
+                         _pick(row, "verification_status"), row["id"], run_id, file_id),
+                    )
             if progress and i % 200 == 0:
                 progress("tracks", i, len(track_rows))
 
+        stats.update(_reconcile_legacy_snapshot(cursor, run_id))
         stats["wishlist_tracks"] = seed_wishlist_tracks(cursor, resolver, profile_id)
         stats["linked_duplicates"] = link_single_album_duplicates(cursor)
         apply_monitoring_from_watchlist_wishlist(cursor, profile_id)

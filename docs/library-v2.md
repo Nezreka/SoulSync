@@ -2003,6 +2003,22 @@ verändert; daher waren Frontend-Typecheck/Vitest/Build nicht erforderlich.
     Schritt:** nach dem ebenfalls geschlossenen 5.4-Finding A7 ist P1-02 aus
     10.3 der oberste offene Punkt: Legacy-Import per Run-Snapshot gegen
     gelöschte/geänderte Quellzeilen reconciliieren.
+16. ~~**Legacy-Import Snapshot-Reconciliation (P1-02).**~~ **Abgeschlossen
+    2026-07-14:** Jeder vollständige Legacy-Import prägt Artist-, Album-,
+    Track- und importer-eigenen File-Zeilen eine eindeutige Run-ID auf. Nach
+    dem Einlesen werden nicht mehr gesehene Legacy-Files gelöscht und
+    entfernte Tracks/Alben/Artists bottom-up reconciliert; ein geänderter
+    `file_path` ersetzt dadurch die alte Importer-Datei, statt eine zweite
+    Phantom-Datei stehen zu lassen. Die Ownership-Grenze ist explizit:
+    manuelle/sekundäre Files werden nie vom Snapshot-Pruner berührt. Entfallene
+    Metadaten mit Provider-ID, expliziter Nutzer-/Wishlist-Absicht oder
+    unabhängigem File werden von der Legacy-ID gelöst (Album zurück auf
+    `origin='discography'`) statt gelöscht. Additive Spaltenmigrationen nehmen
+    bestehende Installationen mit; exakt passende Alt-Files werden beim ersten
+    Lauf sicher adoptiert. **96 gezielte Tests** über Import, Schema,
+    Monitor-Regeln, Wanted-Projektion, Editions, Multi-File, Provider-Snapshots
+    und Metadata-Overrides sowie Ruff sind grün. **Nächster logischer Schritt:**
+    P1-06 — Canonical-/Move-Validierung und Multi-File-Move-Semantik härten.
 
 ---
 
@@ -2261,10 +2277,12 @@ vermerkt, tauchten aber nirgends in diesem Dokument auf:
 
 **Aus dem Audit übernommene, weiterhin offene Findings:**
 
-- **P1-02** — Legacy-Import reconciliert Löschungen/Pfadänderungen nicht:
+- ~~**P1-02** — Legacy-Import reconciliert Löschungen/Pfadänderungen nicht:
   entfernte Legacy-Zeilen bleiben als Phantom-Lib2-Zeilen bestehen, ein
   geänderter `file_path` erzeugt eine neue File-Zeile statt die alte zu
-  ersetzen. Braucht Snapshot-Reconciliation mit Run-ID.
+  ersetzen. Braucht Snapshot-Reconciliation mit Run-ID.~~ **Behoben
+  2026-07-14:** Run-ID-basierte, ownership-sichere Snapshot-Reconciliation;
+  Details und Testumfang in Roadmap-Punkt 16.
 - **P1-06** — Canonical-/Move-API validieren Artist/Recording/Titel/Dauer
   nicht; ein bereits-Canonical-Track kann selbst zum Duplicate gemacht
   werden (Ketten möglich); Move-File bewegt nur die erste Source-Datei und
