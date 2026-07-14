@@ -130,12 +130,20 @@ def tier_key(source, resolution) -> str:
     return (pre + "-" + resolution) if resolution else ""
 
 
-def _scope_ok(parsed, scope, want_season, want_episode, want_year=None):
-    """Validate a hit actually matches what was searched (Sonarr-style): an episode
-    search wants SxxExx, a season search wants the whole season PACK, a show search
-    wants a complete-series pack. For a movie, the release YEAR must match the wanted
-    year (±1 for production-vs-release slop) — otherwise a text search for 'The Odyssey
-    (2026)' happily matches 'Troy The Odyssey 2017', a different film."""
+def _scope_ok(parsed, scope, want_season, want_episode, want_year=None, want_title=None):
+    """Validate a hit actually matches what was searched (Sonarr/Radarr-style): the
+    TITLE must match the wanted film/show (not just be a substring — 'The Cloverfield
+    Paradox 2018' must NOT satisfy a search for 'Paradox (2017)'), an episode search
+    wants SxxExx, a season search wants the whole season PACK, a show search wants a
+    complete-series pack, and a movie's release YEAR must match the wanted year (±1 for
+    production-vs-release slop)."""
+    # Title gate first — applies to every scope. Rejects a confident title mismatch;
+    # an unknown/unisolable title passes through to the scope/year checks below.
+    if want_title:
+        from core.video.release_parse import extract_title, titles_match
+        if not titles_match(parsed.get("title"), want_title):
+            return None, "Wrong title (%s — wanted %s)" % (
+                extract_title(parsed.get("title")) or "?", want_title)
     season, episode = parsed.get("season"), parsed.get("episode")
     if scope == "movie":
         if season is not None:
@@ -167,7 +175,7 @@ def _scope_ok(parsed, scope, want_season, want_episode, want_year=None):
 
 
 def evaluate_release(parsed, profile, *, scope="movie", want_season=None,
-                     want_episode=None, size_gb=None, want_year=None) -> dict:
+                     want_episode=None, size_gb=None, want_year=None, want_title=None) -> dict:
     """Judge a parsed search hit against the quality profile + the search scope.
 
     Returns ``{accepted, score, rejected, tier, quality_label}`` — ``accepted`` False
@@ -202,7 +210,7 @@ def evaluate_release(parsed, profile, *, scope="movie", want_season=None,
 
     # 4) scope validation (episode vs season pack vs series pack; movie year match)
     if not rejected:
-        _, scope_reason = _scope_ok(parsed, scope, want_season, want_episode, want_year)
+        _, scope_reason = _scope_ok(parsed, scope, want_season, want_episode, want_year, want_title)
         if scope_reason:
             rejected = scope_reason
 

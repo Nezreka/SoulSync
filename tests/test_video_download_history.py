@@ -38,6 +38,32 @@ def _episode(**over):
     return row
 
 
+def _youtube(**over):
+    row = {"id": 3, "kind": "youtube", "title": "Some Video", "status": "completed",
+           "source": "youtube", "media_source": "youtube", "username": None,
+           "release_title": "Some Video", "completed_at": "2026-06-22 00:00:00"}
+    row.update(over)
+    return row
+
+
+def test_history_tabs_classify_real_episode_and_youtube_kinds(db):
+    # Production stores TV grabs as kind='episode' (not 'show') and YouTube as
+    # source/kind='youtube'. The tabs must classify BOTH — the bug was the TV tab
+    # filtering kind='show' and the counts summing only movie+show (TV + YT vanished).
+    db.record_download_history(_movie(id=1))
+    db.record_download_history(_episode(id=2, kind="episode"))
+    db.record_download_history(_youtube(id=3))
+
+    assert db.download_history_counts() == {"movie": 1, "show": 1, "youtube": 1, "total": 3}
+
+    def kinds(tab):
+        return sorted(r["kind"] for r in db.query_download_history(kind=tab)["items"])
+    assert kinds("movie") == ["movie"]
+    assert kinds("show") == ["episode"]      # TV tab now catches kind='episode'
+    assert kinds("youtube") == ["youtube"]   # YouTube gets its own tab
+    assert len(db.query_download_history(kind=None)["items"]) == 3   # 'All'
+
+
 def test_records_a_completed_movie_with_parsed_quality(db):
     hid = db.record_download_history(_movie())
     assert hid > 0
@@ -76,7 +102,7 @@ def test_counts_only_count_completed(db):
     db.record_download_history(_movie(id=3, status="failed", dest_path=None,
                                       error="no release found"))
     c = db.download_history_counts()
-    assert c == {"movie": 1, "show": 0, "total": 1}   # the failed one isn't counted
+    assert c == {"movie": 1, "show": 0, "youtube": 0, "total": 1}   # the failed one isn't counted
 
 
 def test_latest_completed_download_is_the_probe_target(db):

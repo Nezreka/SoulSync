@@ -274,10 +274,14 @@ class VideoEnrichmentWorker:
             self.stats["errors"] += 1
         return True
 
-    def _cascade_episodes(self, show_id, tv_id, season_numbers=None) -> None:
-        """Backfill a show's FULL episode list from the provider (one call per
-        season) — owned + missing. Best-effort: a season failure never aborts the
-        show's enrichment. Falls back to the known seasons if none are passed."""
+    def _cascade_episodes(self, show_id, tv_id, season_numbers=None, mark_synced=True) -> None:
+        """Backfill a show's episode list from the provider (one call per season) —
+        owned + missing. Best-effort: a season failure never aborts the show's
+        enrichment. Falls back to the known seasons if none are passed.
+
+        ``mark_synced=False`` skips flagging the show episodes-synced — for a scoped
+        refresh (e.g. the nightly airing job pulling only the current season), which
+        must not claim the FULL history was pulled."""
         seasons = season_numbers
         if not seasons:
             try:
@@ -293,10 +297,11 @@ class VideoEnrichmentWorker:
                                               data.get("overview"), data.get("poster_url"))
             except Exception:
                 logger.exception("episode backfill failed: show %s season %s", show_id, snum)
-        try:
-            self.db.mark_episodes_synced(show_id)
-        except Exception:
-            logger.exception("episode backfill: could not mark synced for show %s", show_id)
+        if mark_synced:
+            try:
+                self.db.mark_episodes_synced(show_id)
+            except Exception:
+                logger.exception("episode backfill: could not mark synced for show %s", show_id)
 
     # ── status (same shape the music enrichment API returns) ──────────────────
     def get_stats(self) -> dict:

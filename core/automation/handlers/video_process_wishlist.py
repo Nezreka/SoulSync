@@ -121,13 +121,42 @@ def active_download_keys(active: Iterable[Dict[str, Any]]) -> set:
     return keys
 
 
+def _acceptable_titles(primary: Any, kind: str, tmdb_id: Any) -> List[str]:
+    """[primary title, *TMDB alternative titles] — deduped, primary first. The alias
+    set the release-title gate matches against (so a release named by a known aka still
+    matches). Best-effort: just the primary when TMDB is unavailable."""
+    aliases: List[str] = []
+    if tmdb_id:
+        try:
+            from core.video.enrichment.engine import get_video_enrichment_engine
+            aliases = get_video_enrichment_engine().alt_titles_for(kind, tmdb_id) or []
+        except Exception:   # noqa: BLE001 - a matching assist must never break a grab
+            aliases = []
+    out, seen = [], set()
+    for t in [primary, *aliases]:
+        t = str(t or "").strip()
+        if t and t.lower() not in seen:
+            seen.add(t.lower())
+            out.append(t)
+    return out
+
+
 def search_context(item: Dict[str, Any], media_type: str) -> Dict[str, Any]:
-    """The ``search_ctx`` the download row carries (drives the monitor's requery)."""
+    """The ``search_ctx`` the download row carries (drives the monitor's requery).
+    Carries ``titles`` — the primary title plus TMDB aliases — so both the initial pick
+    and every retry gate releases against the full alias set."""
     if media_type == "movie":
-        return {"scope": "movie", "title": item.get("title"), "year": item.get("year")}
-    return {"scope": "episode", "title": item.get("show_title"),
-            "season": item.get("season_number"), "episode": item.get("episode_number"),
-            "year": (str(item.get("air_date") or "")[:4] or None)}
+        ctx = {"scope": "movie", "title": item.get("title"), "year": item.get("year")}
+        tmdb_id, kind = item.get("tmdb_id"), "movie"
+    else:
+        ctx = {"scope": "episode", "title": item.get("show_title"),
+               "season": item.get("season_number"), "episode": item.get("episode_number"),
+               "year": (str(item.get("air_date") or "")[:4] or None)}
+        tmdb_id, kind = item.get("show_tmdb_id"), "show"
+    titles = _acceptable_titles(ctx["title"], kind, tmdb_id)
+    if len(titles) > 1:
+        ctx["titles"] = titles
+    return ctx
 
 
 def build_download_record(item: Dict[str, Any], best: Dict[str, Any], candidates: List[Dict[str, Any]],
@@ -241,7 +270,8 @@ def _search_one_source(source: str, item: Dict[str, Any], media_type: str):
     else:
         return None, "unsupported source %r" % source
     cands = _evaluate_hits(hits, profile, ctx["scope"], ctx.get("season"), ctx.get("episode"),
-                           want_year=ctx.get("year"))
+                           want_year=ctx.get("year"),
+                           want_title=ctx.get("titles") or ctx.get("title"))
     for c in cands:
         c["source"] = source
     return cands, None

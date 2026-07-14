@@ -1029,11 +1029,50 @@ class RepairWorker:
             'library_retag': self._fix_library_retag,
             'short_preview_track': self._fix_short_preview_track,
             'corrupt_audio': self._fix_corrupt_audio,
+            'canonical_version': self._fix_canonical_version,
         }
         handler = handlers.get(finding_type)
         if not handler:
             return {'success': False, 'error': f'No fix available for finding type: {finding_type}'}
         return handler(entity_type, entity_id, file_path, details)
+
+    def _fix_canonical_version(self, entity_type, entity_id, file_path, details):
+        """Apply a canonical-version finding — pin the release the resolver chose
+        (source, release id and score, straight from the finding) onto the album
+        so the Reorganizer and Track Number Repair resolve the same edition (#765).
+
+        Writes an AUTO pin (``locked=False``), like the resolve job's dry-run-OFF
+        path and the Reorganizer — a later resolve can still self-heal it. A
+        LOCKED manual pin is a deliberate album-view edition choice (#758), so
+        accepting the resolver's suggestion here stays unlocked.
+        """
+        source = details.get('source')
+        canonical_album_id = details.get('album_id')
+        if not source or not canonical_album_id:
+            return {'success': False,
+                    'error': 'Finding is missing the canonical source/release id'}
+        try:
+            score = float(details.get('score') or 0.0)
+        except (TypeError, ValueError):
+            score = 0.0
+        try:
+            updated = self.db.set_album_canonical(
+                entity_id, source, str(canonical_album_id), score,
+            )
+        except Exception as e:
+            return {'success': False, 'error': f'Failed to store canonical pin: {e}'}
+        if not updated:
+            return {
+                'success': False,
+                'error': ('Album not updated — it may be manually locked to a '
+                          'different edition, or the album row is missing'),
+            }
+        label = details.get('album_title') or details.get('artist_name') or entity_id
+        return {
+            'success': True,
+            'action': 'pinned_canonical',
+            'message': f'Pinned {source} release {canonical_album_id} as canonical for "{label}"',
+        }
 
     def _fix_discography_backfill(self, entity_type, entity_id, file_path, details):
         """Add missing discography track to wishlist."""
