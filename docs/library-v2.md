@@ -1853,9 +1853,18 @@ verändert; daher waren Frontend-Typecheck/Vitest/Build nicht erforderlich.
    bestehenden Handler samt lib2-Entity-/Profilkontext; jede Release-Zeile
    verlinkt explizit in die Ansicht und zurück zum Primary Artist. Frontend-
    Check/Typecheck, zwei gezielte Schema-Tests und Production-Build sind grün.
-   **Nächste Slice:** Titel/Jahr und Artist-Metadaten im Edit-Modal über die
-   bestehende generische Override-API Set/Clear-fähig machen; Provider-
-   Baselines und Artist-Relationen nicht direkt überschreiben.
+   **Zweite Slice 2026-07-14 abgeschlossen:** Die bestehende generische
+   Override-API besitzt zusätzlich einen transaktionalen Batch-Command pro
+   Entity. Ein Request kann mehrere validierte Felder atomar über die
+   vorhandenen `set_field_override`-/`clear_field_override`-Helper setzen und
+   löschen; ein ungültiges Feld rollt die gesamte Änderung zurück. Shape,
+   Set/Clear-Überlappung, Entity-Existenz und Admin-only-Grenze werden
+   serverseitig erzwungen. Damit braucht ein Metadaten-Modal keine partiellen
+   Einzelrequests und es entsteht keine zweite Override-Logik. 61 gezielte
+   Override-/Query-/API-Tests plus Ruff sind grün. **Nächste Slice:** Titel/
+   Jahr und Artist-Metadaten im React-Edit-Modal auf diesen Batch-Command
+   setzen, inklusive explizitem Reset auf die Provider-Baseline; Artist-
+   Relationen bleiben unangetastet.
 9. **Artist-Scope für Reorganize/Dedup** (brauchen Pfad-Scoping, kein
    SQL-Filter — im Maintenance-Modal laufen diese Jobs derzeit ehrlich
    gekennzeichnet library-wide).

@@ -1039,6 +1039,8 @@ def test_non_admin_profile_writes_are_rejected(api):
         ("post", f"/api/library/v2/albums/{ids['single']}/edit", {"album_type": "ep"}),
         ("put", f"/api/library/v2/metadata-overrides/release_group/"
                 f"{ids['single']}/title", {"value": "Nope"}),
+        ("patch", f"/api/library/v2/metadata-overrides/release_group/"
+                  f"{ids['single']}", {"set": {"title": "Nope"}}),
         ("delete", f"/api/library/v2/artists/{ids['artist']}", None),
         ("post", "/api/library/v2/import", {}),
     ):
@@ -1131,6 +1133,53 @@ def test_generic_metadata_override_validates_payload_and_field(api):
         "/api/library/v2/metadata-overrides/track/999999/title",
         json={"value": "x"},
     ).status_code == 404
+
+
+def test_metadata_override_batch_is_atomic_and_can_clear(api):
+    client, db, ids = api
+    base = f"/api/library/v2/metadata-overrides/release_group/{ids['views']}"
+    baseline = client.get(
+        f"/api/library/v2/albums/{ids['views']}"
+    ).get_json()["album"]
+    response = client.patch(base, json={
+        "set": {"title": "Views (Deluxe)", "year": 2024},
+    })
+    assert response.status_code == 200
+    assert response.get_json()["overrides"] == {
+        "title": "Views (Deluxe)",
+        "year": 2024,
+    }
+    album = client.get(f"/api/library/v2/albums/{ids['views']}").get_json()["album"]
+    assert (album["title"], album["year"]) == ("Views (Deluxe)", 2024)
+
+    failed = client.patch(base, json={
+        "set": {"album_type": "ep", "not_editable": "x"},
+    })
+    assert failed.status_code == 400
+    with _conn(db) as conn:
+        assert conn.execute(
+            "SELECT 1 FROM lib2_metadata_overrides "
+            "WHERE entity_type='release_group' AND entity_id=? "
+            "AND field_name='album_type'",
+            (ids["views"],),
+        ).fetchone() is None
+
+    cleared = client.patch(base, json={"clear": ["title", "year"]})
+    assert cleared.status_code == 200
+    assert cleared.get_json()["overrides"] == {}
+    album = client.get(f"/api/library/v2/albums/{ids['views']}").get_json()["album"]
+    assert (album["title"], album["year"]) == (baseline["title"], baseline["year"])
+
+
+def test_metadata_override_batch_validates_shape_and_overlap(api):
+    client, _db, ids = api
+    base = f"/api/library/v2/metadata-overrides/artist/{ids['artist']}"
+    assert client.patch(base, json={}).status_code == 400
+    assert client.patch(base, json={"set": [], "clear": []}).status_code == 400
+    assert client.patch(base, json={
+        "set": {"name": "Corrected"},
+        "clear": ["name"],
+    }).status_code == 400
 
 
 def test_refresh_unknown_entity_is_404(api):

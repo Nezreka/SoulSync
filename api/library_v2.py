@@ -1787,6 +1787,81 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         return jsonify({"success": True, "album_type": album_type})
 
     @app.route(
+        "/api/library/v2/metadata-overrides/<entity_type>/<int:entity_id>",
+        methods=["PATCH"],
+    )
+    def lib2_metadata_overrides_batch(entity_type, entity_id):
+        """Atomically set and clear validated metadata corrections."""
+        guard = _guard()
+        if guard:
+            return guard
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict):
+            return jsonify({"success": False, "error": "JSON body is required"}), 400
+        values = body.get("set", {})
+        clear = body.get("clear", [])
+        if not isinstance(values, dict) or not isinstance(clear, list) or not all(
+            isinstance(field, str) for field in clear
+        ):
+            return jsonify({
+                "success": False,
+                "error": "set must be an object and clear must be a string array",
+            }), 400
+        overlap = set(values).intersection(clear)
+        if overlap:
+            return jsonify({
+                "success": False,
+                "error": "fields cannot be both set and cleared: " + ",".join(sorted(overlap)),
+            }), 400
+        if not values and not clear:
+            return jsonify({"success": False, "error": "no metadata changes supplied"}), 400
+
+        from core.library2.metadata_overrides import (
+            MetadataOverrideError,
+            clear_field_override,
+            get_field_overrides,
+            set_field_override,
+        )
+        conn = _conn()
+        try:
+            for field_name, value in values.items():
+                set_field_override(
+                    conn,
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    field_name=field_name,
+                    value=value,
+                    profile_id=_profile(),
+                    reason="metadata_edit",
+                )
+            for field_name in clear:
+                clear_field_override(
+                    conn,
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    field_name=field_name,
+                    profile_id=_profile(),
+                )
+            overrides = get_field_overrides(
+                conn,
+                entity_type=entity_type,
+                entity_id=entity_id,
+            )
+            conn.commit()
+        except MetadataOverrideError as exc:
+            conn.rollback()
+            return jsonify({"success": False, "error": str(exc)}), exc.status
+        finally:
+            conn.close()
+        return jsonify({
+            "success": True,
+            "overrides": {
+                field_name: override.value
+                for field_name, override in overrides.items()
+            },
+        })
+
+    @app.route(
         "/api/library/v2/metadata-overrides/<entity_type>/<int:entity_id>/<field_name>",
         methods=["PUT", "DELETE"],
     )
