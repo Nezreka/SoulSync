@@ -218,8 +218,12 @@ function useMonitorMutation() {
   });
 }
 
+function mutationErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message.trim() ? error.message : fallback;
+}
+
 /** Lidarr-style monitor toggle (filled bookmark = monitored). */
-function MonitorToggle({
+export function MonitorToggle({
   entity,
   id,
   monitored,
@@ -229,21 +233,43 @@ function MonitorToggle({
   monitored: boolean;
 }) {
   const mutation = useMonitorMutation();
+  const nextMonitored = !monitored;
   return (
-    <button
-      type="button"
-      className={`${styles.monitorBtn} ${monitored ? styles.monitorOn : ''}`}
-      title={monitored ? 'Monitored — click to stop' : 'Not monitored — click to monitor'}
-      disabled={mutation.isPending}
-      onClick={(e) => {
-        e.stopPropagation();
-        mutation.mutate({ entity, id, monitored: !monitored });
-      }}
-    >
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d={BOOKMARK_PATH} strokeLinejoin="round" />
-      </svg>
-    </button>
+    <span className={styles.monitorControl} onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        className={`${styles.monitorBtn} ${monitored ? styles.monitorOn : ''}`}
+        aria-label={
+          mutation.isPending
+            ? 'Updating monitoring'
+            : monitored
+              ? 'Stop monitoring'
+              : 'Start monitoring'
+        }
+        title={
+          mutation.isError
+            ? 'Monitoring update failed — click to retry'
+            : monitored
+              ? 'Monitored — click to stop'
+              : 'Not monitored — click to monitor'
+        }
+        disabled={mutation.isPending}
+        onClick={() => mutation.mutate({ entity, id, monitored: nextMonitored })}
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d={BOOKMARK_PATH} strokeLinejoin="round" />
+        </svg>
+      </button>
+      {mutation.isError ? (
+        <span
+          className={styles.monitorError}
+          role="alert"
+          title={mutationErrorMessage(mutation.error, 'Monitoring update failed')}
+        >
+          Update failed — click bookmark to retry
+        </span>
+      ) : null}
+    </span>
   );
 }
 
@@ -338,7 +364,7 @@ function ModalShell({
 
 /** Lidarr-style artist monitoring options: one click applies a monitoring
  *  strategy across the artist's releases (runs as a background bulk job). */
-function MonitoringModal({
+export function MonitoringModal({
   artistId,
   monitorNewItems,
   onClose,
@@ -349,7 +375,18 @@ function MonitoringModal({
 }) {
   const queryClient = useQueryClient();
   const [busy, setBusy] = useState<string | null>(null);
-  const [newItems, setNewItems] = useState(monitorNewItems || 'all');
+  const initialNewItems =
+    monitorNewItems === 'none' || monitorNewItems === 'new' ? monitorNewItems : 'all';
+  const [newItems, setNewItems] = useState<'all' | 'none' | 'new'>(initialNewItems);
+  const futureReleasesMutation = useMutation({
+    mutationFn: (value: 'all' | 'none' | 'new') => editLibraryV2Artist(artistId, value),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY }),
+  });
+
+  function saveFutureReleases(value: 'all' | 'none' | 'new') {
+    setNewItems(value);
+    futureReleasesMutation.mutate(value);
+  }
 
   async function apply(scope: 'all' | 'missing', monitored: boolean, label: string) {
     setBusy(label);
@@ -403,12 +440,10 @@ function MonitoringModal({
           id="lib2-monitor-new"
           className={styles.select}
           value={newItems}
+          disabled={futureReleasesMutation.isPending}
           onChange={(e) => {
             const value = e.target.value as 'all' | 'none' | 'new';
-            setNewItems(value);
-            void editLibraryV2Artist(artistId, value)
-              .then(() => queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY }))
-              .catch(() => undefined);
+            saveFutureReleases(value);
           }}
         >
           <option value="all">Monitor new releases</option>
@@ -416,6 +451,31 @@ function MonitoringModal({
           <option value="none">Don't monitor new releases</option>
         </select>
       </div>
+      {futureReleasesMutation.isPending ? (
+        <div className={styles.mutationFeedback} role="status">
+          Saving future-release monitoring…
+        </div>
+      ) : futureReleasesMutation.isError ? (
+        <div className={styles.mutationError} role="alert">
+          <span>
+            {mutationErrorMessage(
+              futureReleasesMutation.error,
+              'Future-release monitoring could not be saved',
+            )}
+          </span>
+          <button
+            type="button"
+            className={styles.inlineRetry}
+            onClick={() => futureReleasesMutation.mutate(newItems)}
+          >
+            Retry
+          </button>
+        </div>
+      ) : futureReleasesMutation.isSuccess ? (
+        <div className={styles.mutationSuccess} role="status">
+          Future-release monitoring saved.
+        </div>
+      ) : null}
     </ModalShell>
   );
 }

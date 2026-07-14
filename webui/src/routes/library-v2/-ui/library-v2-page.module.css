@@ -380,6 +380,12 @@
 }
 
 /* --- monitor toggle (bookmark icon, Lidarr-style) --- */
+.monitorControl {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
 .monitorBtn {
   width: 26px;
   height: 26px;
@@ -414,6 +420,24 @@
 .monitorOn svg {
   fill: currentColor;
   stroke: none;
+}
+
+.monitorError {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  right: 0;
+  width: max-content;
+  max-width: 220px;
+  padding: 5px 7px;
+  border: 1px solid rgba(239, 68, 68, 0.45);
+  border-radius: 6px;
+  background: #2a1717;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  color: rgb(248, 113, 113);
+  font-size: 11px;
+  line-height: 1.25;
+  text-align: left;
 }
 
 .qualityText {
@@ -925,6 +949,44 @@
   font-size: 12px;
   color: rgba(255, 255, 255, 0.6);
   white-space: nowrap;
+}
+
+.mutationFeedback,
+.mutationError,
+.mutationSuccess {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-height: 24px;
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.mutationFeedback {
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.mutationError {
+  color: rgb(248, 113, 113);
+}
+
+.mutationSuccess {
+  color: rgb(52, 211, 153);
+}
+
+.inlineRetry {
+  border: 1px solid rgba(239, 68, 68, 0.45);
+  border-radius: 6px;
+  background: rgba(239, 68, 68, 0.12);
+  color: rgb(248, 113, 113);
+  padding: 3px 8px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.inlineRetry:hover {
+  background: rgba(239, 68, 68, 0.2);
 }
 
 /* --- sortable search-result headers --- */

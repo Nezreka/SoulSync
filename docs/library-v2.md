@@ -2211,10 +2211,24 @@ die drei Skips sind weiterhin ausschließlich opt-in Deployment-Contracts.
 Frontend Format/Lint/Typecheck liefen ohne Fehler oder Warnungen, **18
 Testdateien / 105 Vitests passed**, Production-Build erfolgreich (nur der
 bekannte Main-Chunk-Hinweis). **Logischer nächster Schritt:** P2-06 als kleinste
-Mutation-für-Mutation-Slices beginnen — zuerst Monitor-Toggle und
-`monitor_new_items`-Save mit sichtbarem Fehler/Retry und garantiertem Ende des
-Loading-Zustands; anschließend dieselbe Fehlergrenze auf die restlichen
-Library-v2-Mutationen ausrollen.
+    Mutation-für-Mutation-Slices beginnen — zuerst Monitor-Toggle und
+    `monitor_new_items`-Save mit sichtbarem Fehler/Retry und garantiertem Ende des
+    Loading-Zustands; anschließend dieselbe Fehlergrenze auf die restlichen
+    Library-v2-Mutationen ausrollen.
+27. **Endliche, sichtbare UI-Mutationsfehler (P2-06). Erste Slice abgeschlossen
+    2026-07-14:** Der Bookmark-Monitor-Toggle zeigt einen fehlgeschlagenen
+    Artist-/Album-/Track-Write jetzt als sichtbaren Alert mit dem redigiert vom
+    API-Client gelieferten Fehler und bleibt danach für denselben Klick als
+    Retry bedienbar. Der `monitor_new_items`-Select besitzt explizite
+    Pending-/Success-/Error-Zustände, hält den fehlgeschlagenen Zielwert
+    sichtbar und bietet einen eigenen Retry, der exakt diesen Wert erneut
+    sendet. Beide Controls verlassen Pending bei Erfolg und Fehler; die
+    Monitoring-/Wishlist-Backendsemantik wurde nicht verändert. Zwei neue
+    Komponenten-Vertragstests, alle 11 Library-v2-Vitests, Frontend-Format/
+    Lint/Typecheck und Production-Build sind grün. **Nächste Slice:** die noch
+    still fehlschlagenden Bulk-Monitor-, Quality-Profile- und übrigen
+    Artist-/Album-Mutationen inventarisieren und dieselbe endliche
+    Error/Retry-Grenze zuerst auf den Bulk-Monitor-Job anwenden.
 
 **Session-Abschluss-Gate 2026-07-14:** Seit dem vorherigen Full-Gate wurden
 Roadmap 13 sowie 16–23 und Phase E vollständig abgeschlossen und jeweils
@@ -2553,9 +2567,11 @@ Priorität, kompakt aufgelistet für spätere Aufnahme):
   Roadmap-Punkt 26. Cache-Control/Invalidierung waren bereits korrekt. Die
   Artist-vs.-Album-Art-Priorität bleibt als bewusste Produktentscheidung
   getrennt offen (Abschnitt 11.2), nicht als Formatbug.
-- P2-06: UI-Fehlerzustände bleiben oft als Dauer-Loading oder ganz unsichtbar
-  (Monitor-Mutation ohne sichtbare Fehlerbehandlung, `monitor_new_items`-Save
-  kann still scheitern).
+- P2-06: UI-Fehlerzustände bleiben bei mehreren Mutationen als Dauer-Loading
+  oder ganz unsichtbar. **Teilweise behoben 2026-07-14:** Bookmark-Monitor-
+  Mutation und `monitor_new_items`-Save besitzen sichtbare endliche Zustände
+  und Retry (Roadmap-Punkt 27); die übrigen Library-v2-Mutationen werden in
+  weiteren kleinen Slices nachgezogen.
 - P2-07: Artist-Karten verschachteln einen Button (MonitorToggle) in einem
   Button (die Karte selbst) — ungültiges HTML, unzuverlässiges Keyboard-/
   Click-Verhalten.
