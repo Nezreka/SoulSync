@@ -2199,6 +2199,23 @@ verändert; daher waren Frontend-Typecheck/Vitest/Build nicht erforderlich.
     Schritt:** P2-06 — UI-Mutationen müssen sichtbare, endliche Fehlerzustände
     statt stillem Scheitern oder Dauer-Loading liefern.
 
+**Session-Abschluss-Gate 2026-07-14 (Roadmap 24–26):** P2-01 wurde in zwei
+kleinen Slices geschlossen (`7aea92f9` Scan, `388f375e` Retag); DB-Snapshots
+und lange Datei-I/O sind getrennt. ADR-05 wurde als drei getrennte Etappen
+geliefert (`f37526e8` sichere Preview, `0eb79e7d` Journal/Execute/Recovery,
+`b706ef93` explizite UI) und bleibt strikt unabhängig vom bestehenden
+Entity-Delete. P2-04 normalisiert den Artwork-Cache auf echte JPEG-Bytes und
+heilt alte Format-Mismatches (`6ad10fe7`). Das einmalige Session-End-Gate ist
+grün: Python **8235 passed, 3 skipped, 2 deselected, 343 warnings in 240.34s**;
+die drei Skips sind weiterhin ausschließlich opt-in Deployment-Contracts.
+Frontend Format/Lint/Typecheck liefen ohne Fehler oder Warnungen, **18
+Testdateien / 105 Vitests passed**, Production-Build erfolgreich (nur der
+bekannte Main-Chunk-Hinweis). **Logischer nächster Schritt:** P2-06 als kleinste
+Mutation-für-Mutation-Slices beginnen — zuerst Monitor-Toggle und
+`monitor_new_items`-Save mit sichtbarem Fehler/Retry und garantiertem Ende des
+Loading-Zustands; anschließend dieselbe Fehlergrenze auf die restlichen
+Library-v2-Mutationen ausrollen.
+
 **Session-Abschluss-Gate 2026-07-14:** Seit dem vorherigen Full-Gate wurden
 Roadmap 13 sowie 16–23 und Phase E vollständig abgeschlossen und jeweils
 gezielt getestet, dokumentiert, committet und gepusht. Der abschließende
