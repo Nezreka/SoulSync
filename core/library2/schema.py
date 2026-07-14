@@ -629,6 +629,16 @@ def ensure_library_v2_schema(connection: Any) -> None:
         ensure_provider_snapshot_schema(cursor)
     except Exception as e:  # noqa: BLE001
         logger.error("provider-snapshot migration failed (will retry next start): %s", e)
+    # External/old-ID history (Roadmap 4): DB triggers cover every current
+    # import/provider/edition writer and preserve identifier changes after an
+    # entity is deleted. This is an audit/read source, never a second resolver.
+    try:
+        from core.library2.identity_history import ensure_external_id_history_schema
+        backfilled = ensure_external_id_history_schema(cursor)
+        if backfilled:
+            logger.info("Backfilled %d Library-v2 external identifier events", backfilled)
+    except Exception as e:  # noqa: BLE001
+        logger.error("external-id-history migration failed (will retry next start): %s", e)
     # The read API falls back to download provenance (track_downloads) for
     # files the importer knew no quality data for — index the lookup column so
     # album views don't table-scan a large history per track. Guarded: the

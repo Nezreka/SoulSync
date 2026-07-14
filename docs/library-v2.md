@@ -1723,7 +1723,21 @@ darauf auf.
 4. Phase-3-Identity/Provenance fertigstellen: dedizierte externe-/
    Old-ID-History, Merge-/Move-History, Field-Level-User-Overrides und
    Read-Projection. Typed Adapters über Discography/Tracklist hinaus
-   erweitern.
+   erweitern. **Erste Slice erledigt 2026-07-14:**
+   `lib2_external_id_history` ist eine append-only History für alle heutigen
+   skalaren Provider-/Legacy-IDs auf Artist, Release Group, Track,
+   ReleaseEdition und Recording sowie die Long-Tail-`external_ids`-JSONs.
+   Trigger an der gemeinsamen DB-Grenze erfassen Assign/Replace/Remove und
+   Entity-Delete unabhängig davon, ob Importer, Discography, Edition-Backfill
+   oder ein späterer Adapter schreibt; dadurch musste kein zweiter
+   Identity-Resolver entstehen. Ein idempotenter Baseline-Backfill nimmt
+   bestehende Installationen auf, alte IDs überleben Entity-Löschungen, und
+   DB-Guards verbieten UPDATE/DELETE der History. Der Read-Helper liefert
+   validierte, newest-first Events; aktuelle Katalogspalten bleiben bis zum
+   späteren Read-Projection-Cutover die Write-Source-of-Truth. 58 gezielte
+   Schema-/Importer-/Edition-/Snapshot-Tests sind grün. **Noch offen in Punkt
+   4:** Merge-/Move-History, Field-Level-Overrides + Read-Projection und typed
+   Adapter über Discography/Tracklist hinaus.
 5. Gestaffelten Wanted-Cutover fertigstellen: Consumer, die noch
    `monitored`-Flags nutzen, müssen nach Drift-Metriken-Beweis der Parität
    auf `lib2_wanted_tracks` wechseln.
