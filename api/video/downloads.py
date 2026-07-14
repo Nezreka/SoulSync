@@ -243,14 +243,14 @@ def register_routes(bp):
 
     @bp.route("/downloads/history", methods=["GET"])
     def video_downloads_history():
-        """Paged permanent history of grabs (movies + episodes). ?kind=movie|show,
-        ?search=, ?outcome=, ?page=, ?limit=. Always returns counts for the tabs."""
+        """Paged permanent history of grabs (movies + episodes + YouTube). ?kind=
+        movie|show|youtube, ?search=, ?outcome=, ?page=, ?limit=. Always returns counts."""
         from . import get_video_db
         try:
             db = get_video_db()
             kind = request.args.get("kind")
             res = db.query_download_history(
-                kind=kind if kind in ("movie", "show") else None,
+                kind=kind if kind in ("movie", "show", "youtube") else None,
                 search=request.args.get("search", ""),
                 outcome=request.args.get("outcome") or None,
                 page=request.args.get("page", 1), limit=request.args.get("limit", 40))
