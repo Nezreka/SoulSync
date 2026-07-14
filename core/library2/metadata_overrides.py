@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, Iterable, Mapping, Optional
 
 
 LIB2_METADATA_OVERRIDES_DDL = """
@@ -313,6 +313,61 @@ def get_field_overrides(
     return {row["field_name"]: _row_to_override(row) for row in rows}
 
 
+def get_field_overrides_many(
+    conn: Any, *, entity_type: str, entity_ids: Iterable[int]
+) -> Dict[int, Dict[str, MetadataOverride]]:
+    """Load overrides for a result set in one query."""
+    entity_type = _entity_type(entity_type)
+    normalized_ids = set()
+    for entity_id in entity_ids:
+        try:
+            normalized = int(entity_id)
+        except (TypeError, ValueError):
+            continue
+        if normalized > 0:
+            normalized_ids.add(normalized)
+    ids = sorted(normalized_ids)
+    if not ids:
+        return {}
+    marks = ",".join("?" for _ in ids)
+    rows = conn.execute(
+        f"""SELECT * FROM lib2_metadata_overrides
+              WHERE entity_type=? AND entity_id IN ({marks})
+              ORDER BY entity_id, field_name""",
+        (entity_type, *ids),
+    ).fetchall()
+    result: Dict[int, Dict[str, MetadataOverride]] = {}
+    for row in rows:
+        result.setdefault(int(row["entity_id"]), {})[row["field_name"]] = (
+            _row_to_override(row)
+        )
+    return result
+
+
+def project_metadata_many(
+    conn: Any,
+    *,
+    entity_type: str,
+    provider_fields: Mapping[int, Mapping[str, Any]],
+) -> Dict[int, tuple[Dict[str, Any], Dict[str, Any]]]:
+    """Project a result set without one override query per entity."""
+    overrides = get_field_overrides_many(
+        conn,
+        entity_type=entity_type,
+        entity_ids=provider_fields,
+    )
+    projected = {}
+    for entity_id, fields in provider_fields.items():
+        values = {
+            field: override.value
+            for field, override in overrides.get(int(entity_id), {}).items()
+        }
+        effective = dict(fields)
+        effective.update(values)
+        projected[int(entity_id)] = (effective, values)
+    return projected
+
+
 def project_metadata(
     conn: Any,
     *,
@@ -337,6 +392,8 @@ __all__ = [
     "clear_field_override",
     "ensure_metadata_overrides_schema",
     "get_field_overrides",
+    "get_field_overrides_many",
     "project_metadata",
+    "project_metadata_many",
     "set_field_override",
 ]

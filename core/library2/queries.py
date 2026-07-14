@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Optional, Tuple
 
-from .metadata_overrides import project_metadata
+from .metadata_overrides import project_metadata, project_metadata_many
 from .status import compute_metadata_gaps, file_status, quality_tier
 
 _SORTS = {
@@ -21,38 +21,6 @@ _SORTS = {
     "albums": "album_count DESC, a.name COLLATE NOCASE",
     "tracks": "track_count DESC, a.name COLLATE NOCASE",
 }
-
-# Index stats count releases that are "mine": in the library, or provider-only
-# rows the user explicitly monitors (= wanted). Unmonitored discography rows are
-# browsable in the artist detail but don't inflate the overview counts.
-_ARTIST_STATS = """
-    (SELECT COUNT(DISTINCT al.id) FROM lib2_album_artists aa
-       JOIN lib2_albums al ON al.id = aa.album_id
-       WHERE aa.artist_id = a.id AND al.album_type <> 'single'
-         AND (al.origin = 'library' OR al.monitored = 1)) AS album_count,
-    (SELECT COUNT(DISTINCT al.id) FROM lib2_album_artists aa
-       JOIN lib2_albums al ON al.id = aa.album_id
-       WHERE aa.artist_id = a.id AND al.album_type = 'single'
-         AND (al.origin = 'library' OR al.monitored = 1)) AS single_count,
-    (SELECT COUNT(DISTINCT ta.track_id) FROM lib2_track_artists ta
-       JOIN lib2_tracks t ON t.id = ta.track_id
-       WHERE ta.artist_id = a.id
-         AND (COALESCE((SELECT wt.wanted FROM lib2_wanted_tracks wt
-                         WHERE wt.track_id=t.id AND wt.profile_id=1),
-                       t.monitored) = 1
-              OR EXISTS(SELECT 1 FROM lib2_track_files tf
-                        WHERE tf.track_id = t.id))) AS track_count,
-    (SELECT COUNT(DISTINCT ta.track_id) FROM lib2_track_artists ta
-       JOIN lib2_track_files tf ON tf.track_id = ta.track_id
-       WHERE ta.artist_id = a.id
-         AND COALESCE(tf.file_state, 'active') NOT IN ('missing_confirmed','deleted'))
-       AS track_files_present
-"""
-# track_count deliberately counts only tracks that are wanted (monitored) or
-# owned (have a file): merely BROWSING an unowned discography release
-# materializes fileless provider rows, and those must not inflate the
-# overview's "missing" badge.
-
 
 def _json_dict(raw: Any) -> Dict[str, Any]:
     if not raw:
@@ -129,10 +97,46 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
 
     rows = conn.execute(
         f"""
+        WITH album_stats AS (
+            SELECT aa.artist_id,
+                   COUNT(DISTINCT CASE
+                       WHEN al.album_type <> 'single'
+                        AND (al.origin='library' OR al.monitored=1)
+                       THEN al.id END) AS album_count,
+                   COUNT(DISTINCT CASE
+                       WHEN al.album_type = 'single'
+                        AND (al.origin='library' OR al.monitored=1)
+                       THEN al.id END) AS single_count
+              FROM lib2_album_artists aa
+              JOIN lib2_albums al ON al.id=aa.album_id
+             GROUP BY aa.artist_id
+        ),
+        track_stats AS (
+            SELECT ta.artist_id,
+                   COUNT(DISTINCT CASE
+                       WHEN COALESCE(w.wanted, t.monitored)=1 OR tf.id IS NOT NULL
+                       THEN t.id END) AS track_count,
+                   COUNT(DISTINCT CASE
+                       WHEN tf.id IS NOT NULL
+                        AND COALESCE(tf.file_state, 'active')
+                            NOT IN ('missing_confirmed','deleted')
+                       THEN t.id END) AS track_files_present
+              FROM lib2_track_artists ta
+              JOIN lib2_tracks t ON t.id=ta.track_id
+              LEFT JOIN lib2_wanted_tracks w
+                     ON w.track_id=t.id AND w.profile_id=1
+              LEFT JOIN lib2_track_files tf ON tf.track_id=t.id
+             GROUP BY ta.artist_id
+        )
         SELECT a.id, a.name, a.sort_name, a.image_url, a.genres,
                a.monitored, a.monitor_new_items, a.quality_profile_id, a.added_at,
-               {_ARTIST_STATS}
+               COALESCE(als.album_count, 0) AS album_count,
+               COALESCE(als.single_count, 0) AS single_count,
+               COALESCE(ts.track_count, 0) AS track_count,
+               COALESCE(ts.track_files_present, 0) AS track_files_present
         FROM lib2_artists a
+        LEFT JOIN album_stats als ON als.artist_id=a.id
+        LEFT JOIN track_stats ts ON ts.artist_id=a.id
         {where}
         ORDER BY {order}
         LIMIT :limit OFFSET :offset
@@ -140,14 +144,14 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
         {**params, "limit": limit, "offset": offset},
     ).fetchall()
 
+    projected = project_metadata_many(
+        conn,
+        entity_type="artist",
+        provider_fields={int(row["id"]): dict(row) for row in rows},
+    )
     artists = []
     for r in rows:
-        effective, overrides = project_metadata(
-            conn,
-            entity_type="artist",
-            entity_id=r["id"],
-            provider_fields=dict(r),
-        )
+        effective, overrides = projected[int(r["id"])]
         track_count = r["track_count"] or 0
         present = r["track_files_present"] or 0
         artists.append({
@@ -186,31 +190,34 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
 
     album_rows = conn.execute(
         """
-        SELECT DISTINCT al.id, al.title, al.album_type, al.release_date, al.year,
+        SELECT al.id, al.title, al.album_type, al.release_date, al.year,
                al.image_url, al.monitored, al.quality_profile_id, al.track_count,
                al.expected_track_count, al.origin, al.spotify_id,
-               (SELECT COUNT(*) FROM lib2_tracks t WHERE t.album_id = al.id) AS db_track_count,
-               (SELECT COUNT(DISTINCT t.id) FROM lib2_tracks t
-                  JOIN lib2_track_files tf ON tf.track_id = t.id
-                  WHERE t.album_id = al.id
+               COUNT(DISTINCT t.id) AS db_track_count,
+               COUNT(DISTINCT CASE
+                   WHEN tf.id IS NOT NULL
                     AND COALESCE(tf.file_state, 'active')
-                        NOT IN ('missing_confirmed','deleted')) AS files_present
+                        NOT IN ('missing_confirmed','deleted')
+                   THEN t.id END) AS files_present
         FROM lib2_album_artists aa
         JOIN lib2_albums al ON al.id = aa.album_id
+        LEFT JOIN lib2_tracks t ON t.album_id=al.id
+        LEFT JOIN lib2_track_files tf ON tf.track_id=t.id
         WHERE aa.artist_id = ?
+        GROUP BY al.id
         ORDER BY al.year DESC, al.title COLLATE NOCASE
         """,
         (artist_id,),
     ).fetchall()
 
+    projected_albums = project_metadata_many(
+        conn,
+        entity_type="release_group",
+        provider_fields={int(row["id"]): dict(row) for row in album_rows},
+    )
     albums, eps, singles = [], [], []
     for r in album_rows:
-        effective, overrides = project_metadata(
-            conn,
-            entity_type="release_group",
-            entity_id=r["id"],
-            provider_fields=dict(r),
-        )
+        effective, overrides = projected_albums[int(r["id"])]
         present = r["files_present"] or 0
         # Total = the metadata's true track count when known, so partial albums
         # show "have / total" and the missing count is visible (Lidarr-style).

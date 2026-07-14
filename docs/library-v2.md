@@ -2418,6 +2418,20 @@ bekannte Main-Chunk-Hinweis). **Logischer nächster Schritt:** P2-06 als kleinst
     Albumdetail-/Index-Queries mit realistischen Row-Counts profilieren und
     zunächst die belegten N+1-/korrelierten Hotspots in den bestehenden Query-
     Helpern bündeln.
+36. **Query-Skalierung für Index und Details (P2-17, begonnen 2026-07-14).**
+    **Erste Slice abgeschlossen:** Die vier korrelierten Artist-Index-
+    Statistiksubqueries sind durch zwei gruppierte CTEs für Album-/Single- und
+    wanted-or-owned Track-/Present-Zähler ersetzt. Artist-Detail zählt Tracks
+    und vorhandene Files in demselben gruppierten Release-Read statt über zwei
+    korrelierte Subqueries je Release. Der bestehende Metadata-Override-Store
+    bietet einen Batch-Read, sodass Artist- und Release-Resultsets ihre
+    effektiven Felder mit einer Abfrage statt N Entity-Abfragen projizieren.
+    Ein SQL-Trace-Regressionstest ergänzt je 20 Artists und Releases und pinnt
+    für beide Read-Pfade eine konstante Statement-Zahl. **70 gezielte Query-/
+    Override-/API-Tests** sowie Ruff sind grün. P2-17 bleibt bewusst offen:
+    **nächste Slice** ist die Albumdetail-Track-Serialisierung (Primary File,
+    Credits, Track-Overrides und Legacy-Download-Provenance heute noch pro
+    Track), gebündelt in denselben bestehenden Query-/Projection-Helpern.
 
 **Session-Abschluss-Gate 2026-07-14:** Seit dem vorherigen Full-Gate wurden
 Roadmap 13 sowie 16–23 und Phase E vollständig abgeschlossen und jeweils

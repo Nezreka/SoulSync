@@ -55,6 +55,50 @@ def test_list_artists_stats(imported_conn):
     assert by_name["Wizkid"]["track_count"] == 1
 
 
+def test_artist_index_and_detail_query_counts_do_not_scale_with_rows(imported_conn):
+    def select_count(call):
+        statements = []
+        imported_conn.set_trace_callback(statements.append)
+        try:
+            call()
+        finally:
+            imported_conn.set_trace_callback(None)
+        return sum(
+            statement.lstrip().upper().startswith(("SELECT", "WITH"))
+            for statement in statements
+        )
+
+    drake_id = imported_conn.execute(
+        "SELECT id FROM lib2_artists WHERE name='Drake'"
+    ).fetchone()[0]
+    index_before = select_count(lambda: Q.list_artists(imported_conn, limit=500))
+    detail_before = select_count(lambda: Q.get_artist(imported_conn, drake_id))
+
+    for number in range(20):
+        artist_id = imported_conn.execute(
+            "INSERT INTO lib2_artists(name) VALUES(?)",
+            (f"Scale Artist {number}",),
+        ).lastrowid
+        album_id = imported_conn.execute(
+            "INSERT INTO lib2_albums(primary_artist_id, title) VALUES(?, ?)",
+            (drake_id, f"Scale Album {number}"),
+        ).lastrowid
+        imported_conn.execute(
+            "INSERT INTO lib2_album_artists(album_id, artist_id) VALUES(?, ?)",
+            (album_id, drake_id),
+        )
+        imported_conn.execute(
+            "INSERT INTO lib2_album_artists(album_id, artist_id) VALUES(?, ?)",
+            (album_id, artist_id),
+        )
+
+    index_after = select_count(lambda: Q.list_artists(imported_conn, limit=500))
+    detail_after = select_count(lambda: Q.get_artist(imported_conn, drake_id))
+
+    assert index_before == index_after
+    assert detail_before == detail_after
+
+
 def test_get_artist_groups_albums_and_singles(imported_conn):
     drake_id = imported_conn.execute(
         "SELECT id FROM lib2_artists WHERE name='Drake'").fetchone()[0]
