@@ -1291,8 +1291,7 @@ append-only `cancelled`-History in Gang. Bereits abgeschlossene, native
 Acquisition- und unkorrelierte Legacy-Downloads bleiben No-ops; ein DB- oder
 Callback-Fehler kann den normalen Cancel-Erfolg nie ändern. Gezielte Tests
 für manual, scheduled, bereits completed, unbekannt und den fail-open
-Endpoint liefen grün (48 passed). Die relevante Python-Fullsuite steht als
-Session-Gate noch aus. Frontend unberührt.
+Endpoint liefen grün (48 passed). Frontend unberührt.
 **Logischer nächster Schritt:** Roadmap-Punkt 3 mit Grabs ohne lib2-Entity
 fortsetzen; erst danach die globale Durchsetzung betrachten.
 
@@ -1620,6 +1619,11 @@ P2-05 und eine Reihe P2-UX/Robustheits-Findings).
    Gezielte Tests: manual, scheduled, completed, unbekannt sowie Callback-
    Fehler am Endpoint (48 passed). **Noch offen:** Grabs ohne lib2-Entity,
    danach erst die globale Durchsetzung.
+
+**Session-Abschluss-Gate:** volle Python-Suite grün — **8112 passed,
+2 skipped, 2 deselected in 291.41s**. Die zwei Skips sind weiterhin die
+bewusst opt-in markierten Live-Deployment-Varianten. Frontend unberührt;
+daher keine Frontend-Gates erforderlich.
 4. Phase-3-Identity/Provenance fertigstellen: dedizierte externe-/
    Old-ID-History, Merge-/Move-History, Field-Level-User-Overrides und
    Read-Projection. Typed Adapters über Discography/Tracklist hinaus
