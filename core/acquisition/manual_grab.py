@@ -401,6 +401,9 @@ def _correlate_grab(
             **dispatch_options,
         },
     )
+    if grab_status == "submitting":
+        from core.acquisition.correlation_coverage import record_correlation_outcome
+        record_correlation_outcome(conn, trigger, "prepared")
     return {"download_id": download_id, "request_id": request.id}
 
 

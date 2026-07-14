@@ -221,6 +221,13 @@ def test_manual_enforcement_blocks_dispatch_when_preparation_fails(
     from core.acquisition import manual_grab
     monkeypatch.setattr(
         manual_grab, 'correlation_enforcement_enabled', lambda: True)
+    outcomes = []
+    from core.acquisition import correlation_coverage
+    monkeypatch.setattr(
+        correlation_coverage,
+        'record_correlation_outcome_fail_open',
+        lambda consumer, outcome: outcomes.append((consumer, outcome)),
+    )
 
     response = client.post('/api/download', json={
         'username': 'user',
@@ -233,6 +240,7 @@ def test_manual_enforcement_blocks_dispatch_when_preparation_fails(
     assert response.get_json()['error'].startswith(
         'Acquisition preparation unavailable')
     assert download_calls == []
+    assert outcomes == [('manual', 'blocked')]
 
 
 def test_manual_enforcement_exempts_non_recording_sources(monkeypatch):

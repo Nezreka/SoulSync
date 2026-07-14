@@ -7125,6 +7125,16 @@ def _manual_acquisition_dispatch_blocked(username, markers):
     )
 
 
+def _record_manual_acquisition_gap(username, markers, *, blocked):
+    if markers or not _manual_acquisition_preparation_required(username):
+        return
+    from core.acquisition.correlation_coverage import (
+        record_correlation_outcome_fail_open,
+    )
+    record_correlation_outcome_fail_open(
+        "manual", "blocked" if blocked else "unprepared_dispatched")
+
+
 @app.route('/api/download', methods=['POST'])
 def start_download():
     """Simple download route"""
@@ -7214,6 +7224,8 @@ def start_download():
                     )
                     if _manual_acquisition_dispatch_blocked(
                             username, _acq_markers):
+                        _record_manual_acquisition_gap(
+                            username, _acq_markers, blocked=True)
                         logger.error(
                             "Manual album dispatch blocked: acquisition "
                             "preparation is required")
@@ -7221,6 +7233,8 @@ def start_download():
                             "success": False,
                             "error": "Acquisition preparation unavailable; download not started.",
                         }), 503
+                    _record_manual_acquisition_gap(
+                        username, _acq_markers, blocked=False)
                     try:
                         with _cand_scope():
                             download_id = run_async(download_orchestrator.download(
@@ -7326,12 +7340,16 @@ def start_download():
             _acq_markers = _prepare_manual_grab(
                 username, _manual_result, _lib2_ctx)
             if _manual_acquisition_dispatch_blocked(username, _acq_markers):
+                _record_manual_acquisition_gap(
+                    username, _acq_markers, blocked=True)
                 logger.error(
                     "Manual dispatch blocked: acquisition preparation is required")
                 return jsonify({
                     "success": False,
                     "error": "Acquisition preparation unavailable; download not started.",
                 }), 503
+            _record_manual_acquisition_gap(
+                username, _acq_markers, blocked=False)
             try:
                 with _cand_scope():
                     download_id = run_async(download_orchestrator.download(

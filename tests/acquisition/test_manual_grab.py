@@ -167,6 +167,10 @@ def test_manual_grab_prepares_before_dispatch_then_binds_transfer(legacy_db):
         ).fetchone()
         assert before["status"] == "submitting"
         assert get_request(conn, markers["request_id"]).status == "grabbing"
+        assert conn.execute(
+            """SELECT count FROM acquisition_correlation_coverage
+                WHERE consumer='manual' AND outcome='prepared'"""
+        ).fetchone()["count"] == 1
 
         assert bind_correlated_grab_transfer(
             markers,

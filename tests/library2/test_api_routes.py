@@ -180,6 +180,38 @@ def test_acquisition_request_resolves_server_owned_profiles_and_is_idempotent(ap
         "request_created"]
 
 
+def test_acquisition_correlation_coverage_endpoint_is_redacted(api):
+    client, db, _ids = api
+    conn = db._get_connection()
+    try:
+        from core.acquisition.correlation_coverage import record_correlation_outcome
+        record_correlation_outcome(conn, "manual", "prepared")
+        record_correlation_outcome(conn, "scheduled", "blocked")
+        conn.commit()
+    finally:
+        conn.close()
+
+    response = client.get(
+        "/api/library/v2/acquisition/correlation-coverage?days=7")
+
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["success"] is True
+    assert data["enforced"] is False
+    assert data["enforcement_key"] == "features.acquisition_contract_enforce"
+    assert data["coverage"]["consumers"]["manual"]["prepared"] == 1
+    assert data["coverage"]["consumers"]["scheduled"]["blocked"] == 1
+    assert "path" not in str(data).lower()
+
+
+@pytest.mark.parametrize("days", ["abc", "0", "91"])
+def test_acquisition_correlation_coverage_validates_window(api, days):
+    client, _db, _ids = api
+    response = client.get(
+        f"/api/library/v2/acquisition/correlation-coverage?days={days}")
+    assert response.status_code == 400
+
+
 def test_public_acquisition_request_rejects_browser_owned_search_options(api):
     client, _db, ids = api
 

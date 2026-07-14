@@ -410,7 +410,15 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                 and int(task_profile_id or 1) == 1
             ):
                 from core.acquisition.manual_grab import correlation_enforcement_enabled
-                if correlation_enforcement_enabled():
+                enforced = correlation_enforcement_enabled()
+                from core.acquisition.correlation_coverage import (
+                    record_correlation_outcome_fail_open,
+                )
+                record_correlation_outcome_fail_open(
+                    "scheduled",
+                    "blocked" if enforced else "unprepared_dispatched",
+                )
+                if enforced:
                     logger.error(
                         "[Modal Worker] Acquisition preparation is required; "
                         "candidate dispatch blocked for task %s",

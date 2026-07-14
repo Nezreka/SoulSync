@@ -1673,6 +1673,22 @@ P2-05 und eine Reihe P2-UX/Robustheits-Findings).
    Failure-Observability für die Vorab-Persistenz ergänzen und das Gate in
    echter Docker-Nutzung erst nach null ungeklärten Recording-Dispatches
    aktivieren; danach kann Roadmap-Punkt 3 als global durchgesetzt gelten.
+   **Achte Scheibe erledigt 2026-07-14:**
+   `acquisition_correlation_coverage` hält ausschließlich tägliche Aggregate
+   pro Consumer (`manual`/`scheduled`) und Outcome (`prepared`,
+   `unprepared_dispatched`, `blocked`) — keine Entity, Dateinamen, Pfade oder
+   Client-IDs. Erfolgreiche Prepare-Events werden in derselben Transaktion wie
+   Request/Grab gezählt; fail-open-/blocked-Lücken werden best-effort am
+   Consumer erfasst und zusätzlich strukturiert geloggt, falls selbst die
+   Diagnose-DB nicht erreichbar ist. Der redigierte Endpoint
+   `GET /api/library/v2/acquisition/correlation-coverage?days=7` liefert
+   Manual-/Scheduled-Coverage, Strict-Gate-Status und `ready=true` erst bei
+   beobachteten Prepares ohne ungeklärten Dispatch in beiden Consumern.
+   **Logischer nächster Schritt:** in echter Docker-Nutzung mit Gate aus ein
+   Beobachtungsfenster fahren; erst bei 100%/`ready` das opt-in Gate aktivieren
+   und Manual+Wishlist smoke-testen. Code-seitig ist Roadmap-Punkt 3 damit bis
+   auf diese reale Aktivierungs-Acceptance abgeschlossen; danach Punkt 4
+   (Identity/Provenance) aufnehmen.
 
 **Session-Abschluss-Gate:** volle Python-Suite grün — **8112 passed,
 2 skipped, 2 deselected in 291.41s**. Die zwei Skips sind weiterhin die

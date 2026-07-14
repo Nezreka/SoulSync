@@ -686,6 +686,40 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         finally:
             conn.close()
 
+    @app.route("/api/library/v2/acquisition/correlation-coverage")
+    def lib2_acquisition_correlation_coverage():
+        guard = _guard()
+        if guard:
+            return guard
+        try:
+            days = int(request.args.get("days", 7))
+        except (TypeError, ValueError):
+            return jsonify({
+                "success": False,
+                "error": "days must be an integer between 1 and 90",
+            }), 400
+        conn = _conn()
+        try:
+            from core.acquisition.correlation_coverage import (
+                correlation_coverage_summary,
+            )
+            from core.acquisition.manual_grab import (
+                CORRELATION_ENFORCEMENT_KEY,
+            )
+            try:
+                coverage = correlation_coverage_summary(conn, days=days)
+            except ValueError as exc:
+                return jsonify({"success": False, "error": str(exc)}), 400
+            return jsonify({
+                "success": True,
+                "enforcement_key": CORRELATION_ENFORCEMENT_KEY,
+                "enforced": config_get(
+                    CORRELATION_ENFORCEMENT_KEY, False) is True,
+                "coverage": coverage,
+            })
+        finally:
+            conn.close()
+
     @app.route("/api/library/v2/acquisition/imports/<import_id>")
     def lib2_get_acquisition_import(import_id):
         guard = _guard()

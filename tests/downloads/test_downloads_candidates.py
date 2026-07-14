@@ -719,6 +719,13 @@ def test_enforcement_blocks_scheduled_dispatch_without_preparation(monkeypatch):
     from core.acquisition import manual_grab
     monkeypatch.setattr(
         manual_grab, "correlation_enforcement_enabled", lambda: True)
+    outcomes = []
+    from core.acquisition import correlation_coverage
+    monkeypatch.setattr(
+        correlation_coverage,
+        "record_correlation_outcome_fail_open",
+        lambda consumer, outcome: outcomes.append((consumer, outcome)),
+    )
     soulseek = _FakeSoulseek()
     deps = _build_deps(soulseek=soulseek)
     _seed_task(
@@ -731,6 +738,7 @@ def test_enforcement_blocks_scheduled_dispatch_without_preparation(monkeypatch):
 
     assert result is False
     assert soulseek.download_calls == []
+    assert outcomes == [("scheduled", "blocked")]
 
 
 def test_failed_correlation_never_blocks_the_download(monkeypatch):
@@ -739,6 +747,13 @@ def test_failed_correlation_never_blocks_the_download(monkeypatch):
 
     from core.acquisition import manual_grab
     monkeypatch.setattr(manual_grab, "try_prepare_scheduled_grab", _boom)
+    outcomes = []
+    from core.acquisition import correlation_coverage
+    monkeypatch.setattr(
+        correlation_coverage,
+        "record_correlation_outcome_fail_open",
+        lambda consumer, outcome: outcomes.append((consumer, outcome)),
+    )
     deps = _build_deps()
     _seed_task("t_boom", track_info={"source_info": dict(_LIB2_SOURCE_INFO)})
 
@@ -748,6 +763,7 @@ def test_failed_correlation_never_blocks_the_download(monkeypatch):
     assert result is True
     ctx = matched_downloads_context["user1::boom.flac"]
     assert "_acquisition_grab_download_id" not in ctx
+    assert outcomes == [("scheduled", "unprepared_dispatched")]
 
 
 def test_rejected_scheduled_dispatch_closes_prepared_correlation(monkeypatch):
