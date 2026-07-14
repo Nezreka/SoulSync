@@ -1272,6 +1272,9 @@ tests/wishlist+imports: 834 passed). Frontend unberührt. Der im letzten
 Status offene Prüfauftrag zum Retry-Journal ist beantwortet (siehe
 Roadmap-Punkt 3): Journal-Hook bleibt exklusiv nativ, Marker reist über
 Matched-Context/Sidecar.
+**Session-Abschluss-Gate:** volle Python-Suite grün — **8107 passed,
+2 skipped, 2 deselected in 213.40s** (Skips = die opt-in
+Live-Deployment-Varianten).
 **Logischer nächster Schritt:** dritte Roadmap-3-Scheibe — Cancel-Wiring:
 der Downloads-Cancel-Endpoint soll korrelierte Grabs (manual + scheduled)
 als `cancelled` schließen statt sie dem 7-Tage-Sweep zu überlassen; danach
