@@ -3,7 +3,7 @@
 Search adapters return provider-specific payloads. Parsers turn those payloads
 into this source-explicit shape before persistence or policy evaluation. Keeping
 the boundary here prevents provider quirks and source inference from leaking into
-the Decision Engine (audit section 9.4 and ADR-08).
+the Entity Eligibility Gate (audit section 9.4 and ADR-08).
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from core.acquisition.candidates import (
     register_candidate,
 )
 from core.acquisition.capabilities import require_source_capabilities
-from core.acquisition.decision_engine import CatalogContext
+from core.acquisition.eligibility_gate import CatalogContext
 from core.acquisition.requests import AcquisitionRequest
 
 

@@ -1,7 +1,7 @@
 import sqlite3
 
 from core.acquisition import ensure_acquisition_schema
-from core.acquisition.decision_engine import CandidateDecision, DecisionReason
+from core.acquisition.eligibility_gate import CandidateDecision, DecisionReason
 from core.acquisition.decisions import record_decision
 from core.acquisition.history import list_history_events
 from core.acquisition.pipeline_callback import (

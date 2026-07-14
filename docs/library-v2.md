@@ -562,13 +562,13 @@ Server-Pfade preiszugeben. **Das gibt es heute nirgends** unter
 Health-Check-Oberfläche dafür. Zero Library-v2-Kopplung (nur Config +
 Resolver) → 1:1 portierbar als neuer Diagnose-Endpoint/Settings-Check.
 
-**2. Usenet-Age/Retention-Guard (aus `core/acquisition/decision_engine.py:385-396`) — kleinster, sicherster Fix**
+**2. Usenet-Age/Retention-Guard (aus `core/acquisition/eligibility_gate.py:395-406`, vor dem 2026-07-14-Rename `decision_engine.py`) — kleinster, sicherster Fix**
 Lehnt Usenet-Kandidaten ab, die jünger als eine konfigurierte
 Propagation-Delay-Schwelle oder älter als eine konfigurierte
 Retention-Schwelle sind. Feldnamen im Prototyp:
 `policy.minimum_age_seconds` (Default `0` = deaktiviert) und
 `policy.maximum_age_seconds` (Default `None` = unlimitiert) —
-`decision_engine.py:74-75`. **Das gibt es aktuell gar nicht** in der
+`eligibility_gate.py:84-85`. **Das gibt es aktuell gar nicht** in der
 Legacy-Pipeline: Usenet-Kandidaten werden nicht nach Alter/Retention
 gefiltert. Für den Main-Pipeline-Port vorgeschlagene neue Config-Keys
 (analog zu Lidarrs Indexer-Settings „Minimum Age"/„Retention"):
@@ -845,8 +845,13 @@ danach irreführend, weil er eine zweite Entscheidungsinstanz suggeriert —
 genau das Muster, das F01 als Fehler markiert hat. Der Modulname wird daher
 konzeptionell (und bei der nächsten Implementierung auch im Code:
 `core/acquisition/decision_engine.py` → `core/acquisition/eligibility_gate.py`)
-umbenannt zu **`Entity-Eligibility-Gate`**. Sein tatsächlicher, schmaler Scope
-nach der Korrektur ist nur noch:
+umbenannt zu **`Entity-Eligibility-Gate`**. **Code-Rename umgesetzt
+2026-07-14:** Modul + Klasse (`DecisionEngine` → `EligibilityGate`) + alle
+Imports/Tests/Fehlertexte; `test_decision_engine.py` →
+`test_eligibility_gate.py`. Bewusst NICHT umbenannt: das persistierte
+`candidate_decisions.engine_version`-Datum (`acquisition-decision/1`) und die
+Persistenz-Module `decisions.py`/`requests.py`/`history.py` (siehe unten).
+Sein tatsächlicher, schmaler Scope nach der Korrektur ist nur noch:
 
 1. **Edition/Entity-Match** — passt ein von der geteilten Pipeline bereits
    nach Quelle/Qualität akzeptierter Kandidat zur *genau* angefragten Edition

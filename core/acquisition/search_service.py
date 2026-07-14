@@ -2,7 +2,7 @@
 
 Source calls run concurrently without holding a SQLite transaction. Their typed
 results can then be persisted in one short transaction and evaluated through the
-shared Decision Engine.
+shared Entity Eligibility Gate.
 """
 
 from __future__ import annotations

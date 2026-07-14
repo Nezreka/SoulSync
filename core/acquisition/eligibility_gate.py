@@ -1,4 +1,12 @@
-"""Source-agnostic acquisition Decision Engine (audit chapter 12)."""
+"""Entity Eligibility Gate — edition/entity match plus audited admin force.
+
+Formerly named "Decision Engine" (audit chapter 12). After the LIB2-F01
+correction this module no longer decides source or quality — the shared
+main-pipeline source-policy resolver and quality-profile gate own those
+decisions. What remains is what the main pipeline cannot know: does an
+already-accepted candidate match the exact requested entity/edition, and may
+an admin force past an explicitly overridable policy reason.
+"""
 
 from __future__ import annotations
 
@@ -15,6 +23,8 @@ from core.quality.selection import targets_from_profile
 from core.downloads.source_policy import SourcePolicy
 
 
+# Persisted in candidate_decisions.engine_version; the value intentionally
+# survives the decision_engine -> eligibility_gate rename.
 ENGINE_VERSION = "acquisition-decision/1"
 
 
@@ -176,7 +186,7 @@ def _quality(candidate: ReleaseCandidate) -> Optional[AudioQuality]:
     )
 
 
-class DecisionEngine:
+class EligibilityGate:
     """Pure evaluator. Persistence is handled by ``core.acquisition.decisions``."""
 
     @classmethod
@@ -466,7 +476,7 @@ __all__ = [
     "ENGINE_VERSION",
     "CandidateDecision",
     "CatalogContext",
-    "DecisionEngine",
+    "EligibilityGate",
     "DecisionReason",
     "EffectivePolicy",
     "RuntimeContext",

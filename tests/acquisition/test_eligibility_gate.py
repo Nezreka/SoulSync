@@ -8,10 +8,10 @@ import pytest
 
 from core.acquisition import ensure_acquisition_schema
 from core.acquisition.candidates import register_candidate
-from core.acquisition.decision_engine import (
+from core.acquisition.eligibility_gate import (
     ENGINE_VERSION,
     CatalogContext,
-    DecisionEngine,
+    EligibilityGate,
     EffectivePolicy,
     RuntimeContext,
 )
@@ -110,7 +110,7 @@ def _policy(**overrides):
 
 
 def _evaluate(request, candidate, *, catalog=None, runtime=None, policy=None, **kwargs):
-    return DecisionEngine.evaluate(
+    return EligibilityGate.evaluate(
         request,
         candidate,
         catalog or _catalog(),
@@ -157,7 +157,7 @@ def test_request_ownership_and_expiry_are_non_overridable(conn):
     candidate = _candidate(conn, first)
 
     mismatch = _evaluate(second, candidate, force=True, is_admin=True)
-    expired = DecisionEngine.evaluate(
+    expired = EligibilityGate.evaluate(
         first, candidate, _catalog(), RuntimeContext(), _policy(),
         now=candidate.expires_at, force=True, is_admin=True,
     )

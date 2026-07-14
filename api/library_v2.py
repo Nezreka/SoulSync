@@ -377,7 +377,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         conn = _conn()
         try:
             from core.acquisition.catalog import resolve_request_context
-            from core.acquisition.decision_engine import RuntimeContext
+            from core.acquisition.eligibility_gate import RuntimeContext
             from core.acquisition.requests import get_request
             from core.acquisition.workflow import evaluate_request_candidates
             acquisition_request = get_request(conn, request_id)
@@ -430,7 +430,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             import uuid
 
             from core.acquisition.catalog import resolve_request_context
-            from core.acquisition.decision_engine import RuntimeContext
+            from core.acquisition.eligibility_gate import RuntimeContext
             from core.acquisition.grabs import (
                 find_request_candidate_grab,
                 public_grab,
@@ -908,7 +908,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         write_conn = _conn()
         try:
             from core.acquisition.catalog import resolve_request_context
-            from core.acquisition.decision_engine import RuntimeContext
+            from core.acquisition.eligibility_gate import RuntimeContext
             from core.acquisition.requests import get_request
             from core.acquisition.search_service import persist_search_results
             from core.acquisition.workflow import evaluate_request_candidates

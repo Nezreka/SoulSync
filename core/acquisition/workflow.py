@@ -12,10 +12,10 @@ from core.acquisition.candidates import (
     redact_sensitive_text,
     resolve_candidate,
 )
-from core.acquisition.decision_engine import (
+from core.acquisition.eligibility_gate import (
     CandidateDecision,
     CatalogContext,
-    DecisionEngine,
+    EligibilityGate,
     EffectivePolicy,
     RuntimeContext,
 )
@@ -115,7 +115,7 @@ def evaluate_request_candidates(
     candidates = list_request_candidates(conn, request.id, now=now)
     evaluated = []
     for candidate in candidates:
-        decision = DecisionEngine.evaluate(
+        decision = EligibilityGate.evaluate(
             request, candidate, catalog, runtime, policy, now=now)
         evaluated.append(EvaluatedCandidate(
             candidate, record_decision(conn, decision)))
@@ -138,7 +138,7 @@ def evaluate_request_candidates(
             request.id,
             "no_candidate",
             expected_status="candidates_ready",
-            error="No candidate passed the Decision Engine",
+            error="No candidate passed the Entity Eligibility Gate",
         )
     record_history_event(
         conn,
@@ -207,7 +207,7 @@ def prepare_candidate_grab(
         profile_id=profile_id, now=now)
     if candidate is None:
         raise ValueError("candidate is unknown, expired, or not owned by this request")
-    decision = DecisionEngine.evaluate(
+    decision = EligibilityGate.evaluate(
         request,
         candidate,
         catalog,
@@ -219,7 +219,7 @@ def prepare_candidate_grab(
     )
     run = record_decision(conn, decision)
     if not decision.accepted:
-        raise ValueError("candidate was rejected by the Decision Engine")
+        raise ValueError("candidate was rejected by the Entity Eligibility Gate")
 
     request = transition_request(
         conn, request.id, "grabbing", expected_status="candidates_ready")

@@ -9,7 +9,7 @@ import pytest
 from core.acquisition import ensure_acquisition_schema
 from core.acquisition.candidates import register_candidate
 from core.acquisition.blocklist import active_blocklisted_dedupe_keys
-from core.acquisition.decision_engine import (
+from core.acquisition.eligibility_gate import (
     CatalogContext,
     EffectivePolicy,
     RuntimeContext,
@@ -205,7 +205,7 @@ def test_prepare_grab_rejects_changed_runtime_before_submit(conn):
         conn, request.id, catalog=CATALOG, runtime=RUNTIME,
         policy=POLICY, automatic=False, now=1001.0)
 
-    with pytest.raises(ValueError, match="Decision Engine"):
+    with pytest.raises(ValueError, match="Eligibility Gate"):
         prepare_candidate_grab(
             conn, request.id, candidate.id, download_id="download-1",
             catalog=CATALOG,

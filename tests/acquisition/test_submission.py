@@ -10,7 +10,7 @@ import pytest
 
 from core.acquisition import ensure_acquisition_schema
 from core.acquisition.candidates import register_candidate
-from core.acquisition.decision_engine import (
+from core.acquisition.eligibility_gate import (
     CatalogContext,
     EffectivePolicy,
     RuntimeContext,

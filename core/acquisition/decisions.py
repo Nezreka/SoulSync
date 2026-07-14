@@ -1,4 +1,4 @@
-"""Append-only persistence for acquisition Decision Engine runs."""
+"""Append-only persistence for Entity-Eligibility-Gate decision runs."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import secrets
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
-from core.acquisition.decision_engine import CandidateDecision, DecisionReason
+from core.acquisition.eligibility_gate import CandidateDecision, DecisionReason
 
 
 DECISION_RUN_ID_PREFIX = "adr1-"

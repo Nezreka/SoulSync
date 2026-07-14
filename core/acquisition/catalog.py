@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, Optional, Tuple
 
-from core.acquisition.decision_engine import CatalogContext, EffectivePolicy
+from core.acquisition.eligibility_gate import CatalogContext, EffectivePolicy
 from core.acquisition.requests import AcquisitionRequest
 
 

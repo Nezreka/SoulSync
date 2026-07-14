@@ -7,7 +7,7 @@ import sqlite3
 import pytest
 
 from core.acquisition import ensure_acquisition_schema
-from core.acquisition.decision_engine import CatalogContext
+from core.acquisition.eligibility_gate import CatalogContext
 from core.acquisition.requests import create_request, transition_request
 from core.acquisition.search_contract import (
     CandidateParseError,
