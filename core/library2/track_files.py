@@ -29,7 +29,7 @@ from the schema-ensure step and repairs installs that predate the columns.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterable, Optional
 
 from utils.logging_config import get_logger
 
@@ -73,6 +73,28 @@ def primary_file_row(conn, track_id: int) -> Optional[Dict[str, Any]]:
         (int(track_id),),
     ).fetchone()
     return dict(row) if row else None
+
+
+def primary_file_rows(conn, track_ids: Iterable[int]) -> Dict[int, Dict[str, Any]]:
+    """Load each track's ADR-03 primary file in one query."""
+    ids = sorted({int(track_id) for track_id in track_ids})
+    if not ids:
+        return {}
+    marks = ",".join("?" for _ in ids)
+    rows = conn.execute(
+        f"""SELECT * FROM (
+                SELECT tf.*,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY tf.track_id
+                           ORDER BY {primary_order('tf')}
+                       ) AS lib2_primary_rank
+                  FROM lib2_track_files tf
+                 WHERE tf.track_id IN ({marks})
+            ) ranked
+            WHERE lib2_primary_rank=1""",
+        ids,
+    ).fetchall()
+    return {int(row["track_id"]): dict(row) for row in rows}
 
 
 def set_primary_file(conn, track_id: int, file_id: int) -> bool:

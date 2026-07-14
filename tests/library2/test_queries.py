@@ -124,6 +124,92 @@ def test_get_album_track_status(imported_conn):
     assert by_title["Hotline Bling"]["file_status"] == "missing"
 
 
+def test_album_detail_query_count_does_not_scale_with_tracks(imported_conn):
+    views_id = imported_conn.execute(
+        "SELECT id FROM lib2_albums WHERE title='Views'"
+    ).fetchone()[0]
+    drake_id = imported_conn.execute(
+        "SELECT id FROM lib2_artists WHERE name='Drake'"
+    ).fetchone()[0]
+
+    def select_count():
+        statements = []
+        imported_conn.set_trace_callback(statements.append)
+        try:
+            Q.get_album(imported_conn, views_id)
+        finally:
+            imported_conn.set_trace_callback(None)
+        return sum(
+            statement.lstrip().upper().startswith(("SELECT", "WITH"))
+            for statement in statements
+        )
+
+    before = select_count()
+    for number in range(20):
+        track_id = imported_conn.execute(
+            """INSERT INTO lib2_tracks(
+                   album_id, title, track_number, monitored, quality_profile_id)
+               VALUES(?, ?, ?, 1, 1)""",
+            (views_id, f"Scale Track {number}", number + 10),
+        ).lastrowid
+        imported_conn.execute(
+            "INSERT INTO lib2_track_artists(track_id, artist_id) VALUES(?, ?)",
+            (track_id, drake_id),
+        )
+        imported_conn.execute(
+            """INSERT INTO lib2_track_files(
+                   track_id, path, format, bitrate, sample_rate, bit_depth)
+               VALUES(?, ?, 'flac', 1000, 44100, 16)""",
+            (track_id, f"/m/scale-{number}.flac"),
+        )
+
+    after = select_count()
+
+    assert before == after
+
+
+def test_album_detail_batches_legacy_download_provenance(imported_conn):
+    imported_conn.execute(
+        """CREATE TABLE track_downloads(
+               id INTEGER PRIMARY KEY,
+               file_path TEXT,
+               source_service TEXT,
+               spotify_track_id TEXT,
+               musicbrainz_recording_id TEXT,
+               isrc TEXT,
+               track_title TEXT,
+               track_artist TEXT,
+               track_album TEXT,
+               bitrate INTEGER,
+               sample_rate INTEGER,
+               bit_depth INTEGER)"""
+    )
+    imported_conn.execute(
+        """INSERT INTO track_downloads(
+               id, file_path, source_service, track_title, track_artist,
+               track_album, sample_rate, bit_depth)
+           VALUES(1, '/other/01.flac', 'wrong-suffix', 'One Dance', 'Drake',
+                  'Views', 48000, 24)"""
+    )
+    imported_conn.execute(
+        """INSERT INTO track_downloads(
+               id, file_path, source_service, track_title, track_artist,
+               track_album, sample_rate, bit_depth)
+           VALUES(2, '/m/01.flac', 'exact-source', 'One Dance', 'Drake',
+                  'Views', 96000, 24)"""
+    )
+    views_id = imported_conn.execute(
+        "SELECT id FROM lib2_albums WHERE title='Views'"
+    ).fetchone()[0]
+
+    album = Q.get_album(imported_conn, views_id)
+    track = next(item for item in album["tracks"] if item["title"] == "One Dance")
+
+    assert track["file"]["source"] == "exact-source"
+    assert track["file"]["sample_rate"] == 96000
+    assert track["file"]["bit_depth"] == 24
+
+
 def test_confirmed_missing_file_is_not_counted_as_present(imported_conn):
     album_id = imported_conn.execute(
         "SELECT id FROM lib2_albums WHERE title='Views'"

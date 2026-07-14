@@ -2418,8 +2418,8 @@ bekannte Main-Chunk-Hinweis). **Logischer nächster Schritt:** P2-06 als kleinst
     Albumdetail-/Index-Queries mit realistischen Row-Counts profilieren und
     zunächst die belegten N+1-/korrelierten Hotspots in den bestehenden Query-
     Helpern bündeln.
-36. **Query-Skalierung für Index und Details (P2-17, begonnen 2026-07-14).**
-    **Erste Slice abgeschlossen:** Die vier korrelierten Artist-Index-
+36. ~~**Query-Skalierung für Index und Details (P2-17).**~~ **Abgeschlossen
+    2026-07-14. Erste Slice:** Die vier korrelierten Artist-Index-
     Statistiksubqueries sind durch zwei gruppierte CTEs für Album-/Single- und
     wanted-or-owned Track-/Present-Zähler ersetzt. Artist-Detail zählt Tracks
     und vorhandene Files in demselben gruppierten Release-Read statt über zwei
@@ -2427,11 +2427,20 @@ bekannte Main-Chunk-Hinweis). **Logischer nächster Schritt:** P2-06 als kleinst
     bietet einen Batch-Read, sodass Artist- und Release-Resultsets ihre
     effektiven Felder mit einer Abfrage statt N Entity-Abfragen projizieren.
     Ein SQL-Trace-Regressionstest ergänzt je 20 Artists und Releases und pinnt
-    für beide Read-Pfade eine konstante Statement-Zahl. **70 gezielte Query-/
-    Override-/API-Tests** sowie Ruff sind grün. P2-17 bleibt bewusst offen:
-    **nächste Slice** ist die Albumdetail-Track-Serialisierung (Primary File,
-    Credits, Track-Overrides und Legacy-Download-Provenance heute noch pro
-    Track), gebündelt in denselben bestehenden Query-/Projection-Helpern.
+    für beide Read-Pfade eine konstante Statement-Zahl. **Zweite/abschließende
+    Slice:** Albumdetail lädt Primary Files in einem Window-Read nach der
+    bestehenden ADR-03-Reihenfolge und bündelt Track-Credits sowie Artist-/
+    Track-Overrides über dieselbe Batch-Projektion. Fehlende Audiofakten werden
+    aus einem gemeinsamen Legacy-`track_downloads`-Candidate-Read aufgelöst;
+    die bisherige Priorität (exakter Pfad, Filename, Hard IDs, danach
+    Titel/Artist/Album) bleibt erhalten. Der Einzeltrack-Read nutzt weiterhin
+    dieselben kompatiblen Helper. Zwei SQL-Trace-Verträge pinnen konstante
+    Statement-Zahlen nach je 20 zusätzlichen Artists/Releases bzw. Tracks;
+    Primary- und Provenance-Priorität besitzen eigene Regressionstests.
+    **316 Library-v2-Tests** sowie Ruff sind grün. **Nächster logischer
+    Schritt:** P2-18 — die inventarisierten Request-Validierungslücken in
+    kleinen Endpoint-Gruppen schließen, beginnend mit ungeschützten `int()`-
+    Konversionen vor Background- oder Mutation-Starts.
 
 **Session-Abschluss-Gate 2026-07-14:** Seit dem vorherigen Full-Gate wurden
 Roadmap 13 sowie 16–23 und Phase E vollständig abgeschlossen und jeweils
@@ -2813,8 +2822,10 @@ Priorität, kompakt aufgelistet für spätere Aufnahme):
   dritten `unknown`-Zustands.~~ **Behoben 2026-07-14:** Tri-State-Auswertung
   bleibt von Backend über Wishlist-Consumer bis zur UI erhalten
   (Roadmap-Punkt 35).
-- P2-17: Albumdetail/Index-Stats skalieren mit N+1-Queries und korrelierten
-  Subqueries — bei großen Libraries sichtbar (verwandt mit A5/Roadmap-Punkt 12).
+- ~~P2-17: Albumdetail/Index-Stats skalieren mit N+1-Queries und korrelierten
+  Subqueries — bei großen Libraries sichtbar (verwandt mit A5/Roadmap-Punkt
+  12).~~ **Behoben 2026-07-14:** gruppierte Stats und gebündelte Resultset-
+  Projektionen/Primary-Files/Provenance (Roadmap-Punkt 36).
 - P2-18: Fehlende Request-Validierung erzeugt vermeidbare 500er (ungeschütztes
   `int()`, `json.loads` nach Commit, ungeklemmte negative Limits).
 - P2-20: Fortschritts-Prozentwerte sind nicht auf 0-100 geklemmt.

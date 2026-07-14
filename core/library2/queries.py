@@ -10,7 +10,7 @@ shows under both, but is stored once).
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from .metadata_overrides import project_metadata, project_metadata_many
 from .status import compute_metadata_gaps, file_status, quality_tier
@@ -296,6 +296,40 @@ def _track_artists(conn, track_id: int) -> List[Dict[str, Any]]:
     return result
 
 
+def _track_artists_many(
+    conn, track_ids: List[int],
+) -> Dict[int, List[Dict[str, Any]]]:
+    """Load and project track credits once for an album result set."""
+    if not track_ids:
+        return {}
+    marks = ",".join("?" for _ in track_ids)
+    rows = conn.execute(
+        f"""SELECT ta.track_id, ar.id, ar.name, ta.role, ta.position
+              FROM lib2_track_artists ta
+              JOIN lib2_artists ar ON ar.id=ta.artist_id
+             WHERE ta.track_id IN ({marks})
+             ORDER BY ta.track_id, ta.position""",
+        track_ids,
+    ).fetchall()
+    projected = project_metadata_many(
+        conn,
+        entity_type="artist",
+        provider_fields={int(row["id"]): dict(row) for row in rows},
+    )
+    result: Dict[int, List[Dict[str, Any]]] = {
+        int(track_id): [] for track_id in track_ids
+    }
+    for row in rows:
+        effective, overrides = projected[int(row["id"])]
+        result[int(row["track_id"])].append({
+            "id": row["id"],
+            "name": effective["name"],
+            "role": row["role"],
+            "user_overrides": overrides,
+        })
+    return result
+
+
 def _download_provenance_for_path(conn, path: Optional[str], *,
                                   track: Any = None,
                                   album: Optional[Dict[str, Any]] = None,
@@ -381,6 +415,154 @@ def _download_provenance_for_path(conn, path: Optional[str], *,
         return {}
 
 
+def _download_provenance_many(
+    conn,
+    tracks: List[Any],
+    files: Mapping[int, Dict[str, Any]],
+    album: Optional[Dict[str, Any]],
+    artists: Mapping[int, List[Dict[str, Any]]],
+) -> Dict[int, Dict[str, Any]]:
+    """Resolve legacy provenance candidates once for an album track set."""
+    if not tracks:
+        return {}
+
+    def _values(column: str) -> List[str]:
+        values = []
+        for track in tracks:
+            if column in track.keys() and track[column] not in (None, ""):
+                values.append(str(track[column]))
+        return sorted(set(values))
+
+    paths = sorted({
+        str(file_row["path"])
+        for file_row in files.values()
+        if file_row.get("path")
+    })
+    filenames = sorted({
+        path.replace("\\", "/").rsplit("/", 1)[-1]
+        for path in paths
+        if path.replace("\\", "/").rsplit("/", 1)[-1]
+    })
+    predicates: List[str] = []
+    params: List[Any] = []
+
+    def _in(column: str, values: List[str], *, lower: bool = False) -> None:
+        if not values:
+            return
+        marks = ",".join("?" for _ in values)
+        predicates.append(
+            f"lower({column}) IN ({marks})" if lower else f"{column} IN ({marks})"
+        )
+        params.extend(value.lower() if lower else value for value in values)
+
+    _in("file_path", paths)
+    for filename in filenames:
+        predicates.append("(file_path LIKE ? OR file_path LIKE ?)")
+        params.extend((f"%/{filename}", f"%\\{filename}"))
+    _in("spotify_track_id", _values("spotify_id"))
+    _in("musicbrainz_recording_id", _values("musicbrainz_id"))
+    _in("isrc", _values("isrc"))
+    _in("track_title", _values("title"), lower=True)
+    if album and album.get("title"):
+        predicates.append("lower(track_album)=lower(?)")
+        params.append(album["title"])
+    if not predicates:
+        return {}
+    try:
+        candidates = [dict(row) for row in conn.execute(
+            "SELECT * FROM track_downloads WHERE "
+            + " OR ".join(predicates)
+            + " ORDER BY id DESC",
+            params,
+        ).fetchall()]
+    except Exception:
+        return {}
+
+    def _fold(value: Any) -> str:
+        return str(value or "").casefold()
+
+    result: Dict[int, Dict[str, Any]] = {}
+    for track in tracks:
+        track_id = int(track["id"])
+        file_row = files.get(track_id) or {}
+        path = str(file_row.get("path") or "")
+        filename = path.replace("\\", "/").rsplit("/", 1)[-1]
+        match = next(
+            (row for row in candidates if path and row.get("file_path") == path),
+            None,
+        )
+        if match is None and filename:
+            match = next(
+                (
+                    row for row in candidates
+                    if str(row.get("file_path") or "").replace("\\", "/").endswith(
+                        f"/{filename}"
+                    )
+                ),
+                None,
+            )
+        if match is None:
+            for track_column, download_column in (
+                ("spotify_id", "spotify_track_id"),
+                ("musicbrainz_id", "musicbrainz_recording_id"),
+                ("isrc", "isrc"),
+            ):
+                value = track[track_column] if track_column in track.keys() else None
+                if value:
+                    match = next(
+                        (
+                            row for row in candidates
+                            if str(row.get(download_column) or "") == str(value)
+                        ),
+                        None,
+                    )
+                if match is not None:
+                    break
+        if match is None:
+            title = _fold(track["title"] if "title" in track.keys() else None)
+            album_title = _fold(album.get("title") if album else None)
+            artist_names = []
+            for artist in artists.get(track_id, []):
+                if artist.get("name"):
+                    artist_names.append(_fold(artist["name"]))
+            if album and album.get("primary_artist_name"):
+                artist_names.append(_fold(album["primary_artist_name"]))
+            artist_names = list(dict.fromkeys(artist_names))
+            for artist_name in artist_names:
+                match = next(
+                    (
+                        row for row in candidates
+                        if _fold(row.get("track_title")) == title
+                        and _fold(row.get("track_artist")) == artist_name
+                        and _fold(row.get("track_album")) == album_title
+                    ),
+                    None,
+                ) if album_title else None
+                if match is None:
+                    match = next(
+                        (
+                            row for row in candidates
+                            if _fold(row.get("track_title")) == title
+                            and _fold(row.get("track_artist")) == artist_name
+                        ),
+                        None,
+                    )
+                if match is not None:
+                    break
+            if match is None and album_title:
+                match = next(
+                    (
+                        row for row in candidates
+                        if _fold(row.get("track_title")) == title
+                        and _fold(row.get("track_album")) == album_title
+                    ),
+                    None,
+                )
+        if match is not None:
+            result[track_id] = match
+    return result
+
+
 def _first_present(*values: Any) -> Any:
     for value in values:
         if value not in (None, "", 0):
@@ -400,17 +582,33 @@ def _bitrate_kbps(value: Any) -> Any:
     return int(round(numeric))
 
 
-def _serialize_track(conn, t, album=None) -> Dict[str, Any]:
+_NOT_LOADED = object()
+
+
+def _serialize_track(
+    conn,
+    t,
+    album=None,
+    *,
+    file_row: Any = _NOT_LOADED,
+    artists: Optional[List[Dict[str, Any]]] = None,
+    projection: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None,
+    provenance: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """Build a track dict with linked artists, primary file, and computed status."""
-    from core.library2.track_files import primary_file_row
-    file_row = primary_file_row(conn, t["id"])
-    artists = _track_artists(conn, t["id"])
-    effective, overrides = project_metadata(
-        conn,
-        entity_type="track",
-        entity_id=t["id"],
-        provider_fields=dict(t),
-    )
+    if file_row is _NOT_LOADED:
+        from core.library2.track_files import primary_file_row
+        file_row = primary_file_row(conn, t["id"])
+    if artists is None:
+        artists = _track_artists(conn, t["id"])
+    if projection is None:
+        projection = project_metadata(
+            conn,
+            entity_type="track",
+            entity_id=t["id"],
+            provider_fields=dict(t),
+        )
+    effective, overrides = projection
     keys = set(t.keys())
     if "effective_wanted" in keys:
         wanted = bool(t["effective_wanted"])
@@ -436,8 +634,12 @@ def _serialize_track(conn, t, album=None) -> Dict[str, Any]:
     fstat = file_status(file_row, t["canonical_track_id"])
     file_info = None
     if file_row:
-        prov = {}
-        if not file_row["bitrate"] or not file_row["sample_rate"] or not file_row["bit_depth"]:
+        prov = provenance or {}
+        if provenance is None and (
+            not file_row["bitrate"]
+            or not file_row["sample_rate"]
+            or not file_row["bit_depth"]
+        ):
             prov = _download_provenance_for_path(
                 conn, file_row["path"], track=t, album=album, artists=artists
             )
@@ -474,6 +676,49 @@ def _serialize_track(conn, t, album=None) -> Dict[str, Any]:
         "metadata_gaps": gaps,
         "user_overrides": overrides,
     }
+
+
+def _serialize_tracks(conn, tracks: List[Any], album=None) -> List[Dict[str, Any]]:
+    """Serialize an album track set with bounded shared reads."""
+    if not tracks:
+        return []
+    track_ids = [int(track["id"]) for track in tracks]
+    from core.library2.track_files import primary_file_rows
+    files = primary_file_rows(conn, track_ids)
+    artists = _track_artists_many(conn, track_ids)
+    projections = project_metadata_many(
+        conn,
+        entity_type="track",
+        provider_fields={int(track["id"]): dict(track) for track in tracks},
+    )
+    needs_provenance = [
+        track for track in tracks
+        if (file_row := files.get(int(track["id"])))
+        and (
+            not file_row.get("bitrate")
+            or not file_row.get("sample_rate")
+            or not file_row.get("bit_depth")
+        )
+    ]
+    provenance = _download_provenance_many(
+        conn,
+        needs_provenance,
+        files,
+        album,
+        artists,
+    )
+    return [
+        _serialize_track(
+            conn,
+            track,
+            album,
+            file_row=files.get(int(track["id"])),
+            artists=artists.get(int(track["id"]), []),
+            projection=projections[int(track["id"])],
+            provenance=provenance.get(int(track["id"]), {}),
+        )
+        for track in tracks
+    ]
 
 
 def _missing_track_placeholder(track_number: int, *, disc_number: int = 1,
@@ -540,7 +785,7 @@ def get_album(conn, album_id: int) -> Optional[Dict[str, Any]]:
         )
         album_for_tracks["primary_artist_name"] = artist_effective["name"]
         album_for_tracks["primary_artist_id"] = artist["id"]
-    tracks = [_serialize_track(conn, t, album_for_tracks) for t in track_rows]
+    tracks = _serialize_tracks(conn, track_rows, album_for_tracks)
     present_count = sum(1 for t in tracks if t["file_status"] != "missing")
 
     # Evaluate each present file against the album's quality profile (meets /

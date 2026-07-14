@@ -10,6 +10,7 @@ from __future__ import annotations
 from core.library2.track_files import (
     backfill_primary_flags,
     primary_file_row,
+    primary_file_rows,
     set_file_state,
     set_primary_file,
 )
@@ -172,6 +173,27 @@ def test_primary_file_row_returns_primary_not_oldest(imported_conn):
     assert set_primary_file(conn, track, flac)
     row = primary_file_row(conn, track)
     assert row is not None and row["id"] == flac
+
+
+def test_primary_file_rows_preserves_primary_strategy_for_batch(imported_conn):
+    first_track = _seed_track(imported_conn, "First")
+    second_track = _seed_track(imported_conn, "Second")
+    first_primary = _add_file(imported_conn, first_track, "/m/first.mp3")
+    _add_file(imported_conn, first_track, "/m/first.flac", fmt="flac")
+    _add_file(imported_conn, second_track, "/m/second.mp3")
+    second_primary = _add_file(
+        imported_conn,
+        second_track,
+        "/m/second.flac",
+        fmt="flac",
+        bit_depth=24,
+    )
+    assert set_primary_file(imported_conn, second_track, second_primary)
+
+    rows = primary_file_rows(imported_conn, [first_track, second_track])
+
+    assert rows[first_track]["id"] == first_primary
+    assert rows[second_track]["id"] == second_primary
 
 
 def test_importer_backfill_marks_legacy_single_files(imported_conn):
