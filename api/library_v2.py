@@ -1153,6 +1153,20 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             return jsonify({"success": False, "error": "Track not found"}), 404
         return jsonify({"success": True, "track": data})
 
+    @app.route("/api/library/v2/tracks/<int:track_id>/source-info")
+    def lib2_track_source_info(track_id):
+        """Download provenance for a track (legacy 'Source Info' popover parity)."""
+        guard = _guard()
+        if guard:
+            return guard
+        from core.library2.source_info import track_source_info
+        conn = _conn()
+        try:
+            downloads = track_source_info(conn, track_id)
+        finally:
+            conn.close()
+        return jsonify({"success": True, "downloads": downloads})
+
     @app.route("/api/library/v2/quality-profiles/sync", methods=["POST"])
     def lib2_sync_quality_profiles():
         """Compatibility endpoint: profiles are the app-wide ``quality_profiles``

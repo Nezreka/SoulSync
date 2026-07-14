@@ -16,6 +16,7 @@ import type {
   LibraryV2QualityProfile,
   LibraryV2Search,
   LibraryV2Track,
+  LibraryV2TrackDownload,
 } from './-library-v2.types';
 
 export const LIBRARY_V2_QUERY_KEY = ['library-v2'] as const;
@@ -136,6 +137,38 @@ export async function fetchLibraryV2Album(
   );
   if (!payload.success || !payload.album) throw new Error(payload.error || 'Album not found');
   return payload.album;
+}
+
+interface SourceInfoResponse {
+  success: boolean;
+  downloads: LibraryV2TrackDownload[];
+  error?: string;
+}
+
+/** Download provenance for a track (legacy "Source Info" popover parity). */
+export async function fetchLibraryV2TrackSourceInfo(
+  trackId: number,
+): Promise<LibraryV2TrackDownload[]> {
+  const payload = await readJson<SourceInfoResponse>(
+    apiClient.get(`library/v2/tracks/${trackId}/source-info`),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Failed to load source info');
+  return payload.downloads ?? [];
+}
+
+/** Blacklist a download source so the pipeline skips it (reuses the app-wide route). */
+export async function blacklistLibraryV2Source(input: {
+  track_title: string;
+  track_artist?: string;
+  blocked_filename: string;
+  blocked_username: string;
+}): Promise<void> {
+  const payload = await readJson<{ success: boolean; error?: string }>(
+    apiClient.post('library/blacklist', {
+      json: { reason: 'user_rejected', track_artist: '', ...input },
+    }),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Failed to blacklist source');
 }
 
 export async function refreshLibraryV2Discography(
@@ -537,6 +570,15 @@ export function libraryV2AlbumQueryOptions(albumId: number, options: { resolve?:
     queryKey: [...LIBRARY_V2_QUERY_KEY, 'album', albumId, options.resolve ?? false],
     queryFn: () => fetchLibraryV2Album(albumId, options),
     enabled: albumId > 0,
+  });
+}
+
+export function libraryV2TrackSourceInfoQueryOptions(trackId: number, enabled: boolean) {
+  return queryOptions({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'track-source-info', trackId],
+    queryFn: () => fetchLibraryV2TrackSourceInfo(trackId),
+    enabled: enabled && trackId > 0,
+    staleTime: 30_000,
   });
 }
 

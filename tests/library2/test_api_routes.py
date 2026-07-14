@@ -197,6 +197,38 @@ def test_canonical_api_validates_pair_and_links_compatible_tracks(api):
     conn.close()
 
 
+def test_source_info_endpoint_returns_provenance_for_track(api):
+    client, db, ids = api
+    conn = _conn(db)
+    conn.execute(
+        """CREATE TABLE track_downloads(
+               id INTEGER PRIMARY KEY, file_path TEXT, source_service TEXT,
+               source_username TEXT, source_filename TEXT, status TEXT)"""
+    )
+    conn.execute(
+        "INSERT INTO track_downloads(id, file_path, source_service, source_username, "
+        "source_filename, status) VALUES(1, '/m/one-dance.flac', 'soulseek', "
+        "'someuser', 'One Dance.flac', 'completed')"
+    )
+    conn.commit()
+    conn.close()
+
+    response = client.get(f"/api/library/v2/tracks/{ids['album_track']}/source-info")
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["success"] is True
+    assert len(body["downloads"]) == 1
+    assert body["downloads"][0]["source_username"] == "someuser"
+
+
+def test_source_info_endpoint_empty_without_provenance(api):
+    client, _db, ids = api
+    response = client.get(f"/api/library/v2/tracks/{ids['ep_track']}/source-info")
+    assert response.status_code == 200
+    assert response.get_json() == {"success": True, "downloads": []}
+
+
 def test_eps_get_local_artwork_urls(api):
     """Every release group — including EPs — must point at the local artwork
     endpoint, never at a raw DB image_url (which may be a media-server URL)."""

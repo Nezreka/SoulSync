@@ -3,10 +3,12 @@ import { describe, expect, it } from 'vitest';
 import { HttpResponse, http, server } from '@/test/msw';
 
 import {
+  blacklistLibraryV2Source,
   deleteLibraryV2Files,
   fetchLibraryV2FileDeletePreview,
   fetchLibraryV2Playlist,
   fetchLibraryV2Playlists,
+  fetchLibraryV2TrackSourceInfo,
   runLibraryV2PlaylistPipeline,
   runRepairJob,
   updateLibraryV2MetadataOverrides,
@@ -56,6 +58,55 @@ describe('library v2 metadata api', () => {
 
     await expect(
       runRepairJob('library_reorganize', { id: 17, name: 'Corrected Artist' }),
+    ).resolves.toBeUndefined();
+  });
+});
+
+describe('library v2 source info api', () => {
+  it('returns the download provenance rows for a track', async () => {
+    server.use(
+      http.get('/api/library/v2/tracks/55/source-info', () =>
+        HttpResponse.json({
+          success: true,
+          downloads: [
+            {
+              id: 2,
+              source_service: 'soulseek',
+              source_username: 'user',
+              source_filename: 'a.flac',
+            },
+            { id: 1, source_service: 'deezer' },
+          ],
+        }),
+      ),
+    );
+
+    const rows = await fetchLibraryV2TrackSourceInfo(55);
+    expect(rows).toHaveLength(2);
+    expect(rows[0].source_username).toBe('user');
+  });
+
+  it('blacklists a source through the app-wide route', async () => {
+    server.use(
+      http.post('/api/library/blacklist', async ({ request }) => {
+        expect(await request.json()).toEqual({
+          reason: 'user_rejected',
+          track_artist: 'Drake',
+          track_title: 'One Dance',
+          blocked_filename: 'a.flac',
+          blocked_username: 'user',
+        });
+        return HttpResponse.json({ success: true });
+      }),
+    );
+
+    await expect(
+      blacklistLibraryV2Source({
+        track_title: 'One Dance',
+        track_artist: 'Drake',
+        blocked_filename: 'a.flac',
+        blocked_username: 'user',
+      }),
     ).resolves.toBeUndefined();
   });
 });

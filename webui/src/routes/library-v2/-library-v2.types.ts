@@ -118,6 +118,23 @@ export interface LibraryV2TrackFile {
   source: string | null;
 }
 
+/** One row from the legacy `track_downloads` provenance table (Source Info popover). */
+export interface LibraryV2TrackDownload {
+  id: number;
+  source_service: string | null;
+  source_username: string | null;
+  source_filename: string | null;
+  source_size: number | null;
+  audio_quality: string | null;
+  bitrate: number | null;
+  sample_rate: number | null;
+  bit_depth: number | null;
+  status: string | null;
+  track_title: string | null;
+  track_artist: string | null;
+  created_at: string | null;
+}
+
 export interface LibraryV2Track {
   /** null for a "missing" placeholder row (an expected track we don't have yet). */
   id: number | null;

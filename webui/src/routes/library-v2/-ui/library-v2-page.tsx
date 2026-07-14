@@ -17,6 +17,7 @@ import type {
 
 import {
   autoGrabBest,
+  blacklistLibraryV2Source,
   bulkMonitorLibraryV2Releases,
   deleteLibraryV2Entity,
   deleteLibraryV2Files,
@@ -36,6 +37,7 @@ import {
   libraryV2MirrorStatusQueryOptions,
   libraryV2PlaylistQueryOptions,
   libraryV2PlaylistsQueryOptions,
+  libraryV2TrackSourceInfoQueryOptions,
   moveLibraryV2TrackFile,
   processWishlist,
   refreshLibraryV2,
@@ -139,6 +141,7 @@ const ICON_PATHS = {
     'M224 256A128 128 0 1 0 224 0a128 128 0 1 0 0 256zm-45.7 48C79.8 304 0 383.8 0 482.3C0 498.7 13.3 512 29.7 512l388.6 0c16.4 0 29.7-13.3 29.7-29.7C448 383.8 368.2 304 269.7 304l-91.4 0z',
   folder: 'M3 6h7l2 2h9v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z',
   close: 'M6 6l12 12M18 6L6 18',
+  info: 'M12 21a9 9 0 1 1 0-18 9 9 0 0 1 0 18zM12 16v-4M12 8h.01',
 } as const;
 
 type IconName = keyof typeof ICON_PATHS;
@@ -2847,8 +2850,182 @@ function TrackRow({
           disabled={!track.id}
           onClick={() => onAction(`Grab Release: ${label} (${albumTitle})`, entity)}
         />
+        {!missing && track.file ? (
+          <TrackSourceInfoButton track={track} albumTitle={albumTitle} />
+        ) : null}
       </td>
     </tr>
+  );
+}
+
+const SOURCE_SERVICE_LABELS: Record<string, string> = {
+  soulseek: 'Soulseek',
+  youtube: 'YouTube',
+  tidal: 'Tidal',
+  qobuz: 'Qobuz',
+  hifi: 'HiFi',
+  deezer: 'Deezer',
+  lidarr: 'Lidarr',
+  amazon: 'Amazon Music',
+  soundcloud: 'SoundCloud',
+  auto_import: 'Auto-Import',
+  staging: 'Staging',
+  torrent: 'Torrent',
+  usenet: 'Usenet',
+};
+
+function sourceServiceLabel(service: string | null): string {
+  if (!service) return 'Unknown';
+  return SOURCE_SERVICE_LABELS[service] ?? service;
+}
+
+function baseFileName(name: string | null): string {
+  if (!name) return 'Unknown';
+  return name.replace(/\\/g, '/').split('/').pop() || name;
+}
+
+/** Per-track "Source Info" popover trigger: legacy download-provenance parity. */
+function TrackSourceInfoButton({
+  track,
+  albumTitle,
+}: {
+  track: LibraryV2Track;
+  albumTitle: string;
+}) {
+  const [open, setOpen] = useState(false);
+  if (!track.id) return null;
+  return (
+    <>
+      <IconActionButton
+        icon="info"
+        title="Source info — where this file was downloaded from"
+        onClick={() => setOpen(true)}
+      />
+      {open ? (
+        <SourceInfoModal
+          trackId={track.id}
+          trackTitle={track.title ?? albumTitle}
+          trackArtist={track.artists.map((a) => a.name).join(', ')}
+          onClose={() => setOpen(false)}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function SourceInfoRow({
+  label,
+  value,
+  mono,
+  danger,
+}: {
+  label: string;
+  value: ReactNode;
+  mono?: boolean;
+  danger?: boolean;
+}) {
+  return (
+    <div className={styles.sourceInfoRow}>
+      <span className={styles.sourceInfoLabel}>{label}</span>
+      <span
+        className={`${styles.sourceInfoValue} ${mono ? styles.sourceInfoMono : ''}`}
+        style={danger ? { color: 'rgb(248, 113, 113)' } : undefined}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function SourceInfoModal({
+  trackId,
+  trackTitle,
+  trackArtist,
+  onClose,
+}: {
+  trackId: number;
+  trackTitle: string;
+  trackArtist: string;
+  onClose: () => void;
+}) {
+  const query = useQuery(libraryV2TrackSourceInfoQueryOptions(trackId, true));
+  const rows = query.data ?? [];
+  const dl = rows[0];
+  const blacklist = useMutation({
+    mutationFn: () =>
+      blacklistLibraryV2Source({
+        track_title: dl?.track_title || trackTitle,
+        track_artist: dl?.track_artist || trackArtist,
+        blocked_filename: dl?.source_filename || '',
+        blocked_username: dl?.source_username || '',
+      }),
+  });
+
+  const audioParts = dl
+    ? [
+        dl.bit_depth ? `${dl.bit_depth}-bit` : null,
+        dl.sample_rate ? `${(dl.sample_rate / 1000).toFixed(1)} kHz` : null,
+        dl.bitrate ? `${Math.round(dl.bitrate / 1000)} kbps` : null,
+      ].filter(Boolean)
+    : [];
+
+  return (
+    <ModalShell title="Source Info" onClose={onClose}>
+      {query.isLoading ? (
+        <div className={styles.inlineLoading}>Loading source info…</div>
+      ) : !dl ? (
+        <p>
+          No download source data for this track yet. Source tracking starts with new downloads.
+        </p>
+      ) : (
+        <div className={styles.sourceInfoBody}>
+          <SourceInfoRow label="Service" value={sourceServiceLabel(dl.source_service)} />
+          {dl.source_service === 'soulseek' && dl.source_username ? (
+            <SourceInfoRow label="User" value={dl.source_username} mono />
+          ) : null}
+          <SourceInfoRow label="Original File" value={baseFileName(dl.source_filename)} mono />
+          {dl.source_size ? (
+            <SourceInfoRow label="Size" value={`${(dl.source_size / 1048576).toFixed(1)} MB`} />
+          ) : null}
+          {dl.audio_quality ? <SourceInfoRow label="Quality" value={dl.audio_quality} /> : null}
+          {audioParts.length ? (
+            <SourceInfoRow label="Audio" value={audioParts.join(' · ')} />
+          ) : null}
+          {dl.created_at ? (
+            <SourceInfoRow
+              label="Downloaded"
+              value={dl.created_at.slice(0, 16).replace('T', ' ')}
+            />
+          ) : null}
+          {dl.status && dl.status !== 'completed' ? (
+            <SourceInfoRow label="Status" value={dl.status} danger />
+          ) : null}
+          {dl.source_username && dl.source_filename ? (
+            <div className={styles.modalActions}>
+              <ActionButton
+                icon="delete"
+                tone="danger"
+                busy={blacklist.isPending}
+                disabled={blacklist.isSuccess}
+                label={blacklist.isSuccess ? 'Blacklisted' : 'Blacklist This Source'}
+                title="Skip this source in future downloads"
+                onClick={() => blacklist.mutate()}
+              />
+            </div>
+          ) : null}
+          {blacklist.isError ? (
+            <p className={styles.sourceInfoError} role="alert">
+              {mutationErrorMessage(blacklist.error, 'Failed to blacklist source')}
+            </p>
+          ) : null}
+          {rows.length > 1 ? (
+            <p className={styles.sourceInfoHistory}>
+              {rows.length} download records for this track
+            </p>
+          ) : null}
+        </div>
+      )}
+    </ModalShell>
   );
 }
 
