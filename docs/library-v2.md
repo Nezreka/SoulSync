@@ -2325,6 +2325,22 @@ bekannte Main-Chunk-Hinweis). **Logischer nächster Schritt:** P2-06 als kleinst
     Source-Auswahl ehrlich nutzen bzw. anzeigen; zuerst den bestehenden
     `/api/search/sources`-Vertrag und die Main-Pipeline-Modi inventarisieren,
     ohne eine parallele Source-Decision zu bauen.
+30. ~~**Interactive-Search-Sourceauswahl ehrlich verdrahten (P2-09).**~~
+    **Abgeschlossen 2026-07-14:** Der bestehende `/api/search/sources`-
+    Vertrag wird nun typisiert mit Modus, interner Source-ID und Displayname
+    gelesen. Interactive Search zeigt die konfigurierte Default-/erste
+    Priority-Source ehrlich statt „Searching all configured sources“ und
+    bietet jede vom Server gelieferte Source zur expliziten Auswahl an. Ein
+    Pick wird ausschließlich als vorhandener `source`-Parameter an
+    `/api/search` gereicht; ohne Pick entscheidet weiterhin der bestehende
+    Backend-Orchestrator. Es gibt weder Client-Fan-out noch clientseitiges
+    Ranking oder eine zweite Source-Decision. Zwei Interactive-Search-
+    Komponententests pinnen identischen Candidate-Retry und den exakten
+    Default-/expliziten Source-Request. 22 Library-v2-Vitests,
+    Frontend-Format/Lint/Typecheck und Production-Build sind grün. **Nächster
+    logischer Schritt:** P2-11 — unbekannte Publish-Daten beim Descending-Age-
+    Sort stabil hinter bekannte Releases stellen, ohne die Source-Daten oder
+    Ranking-Defaults zu erfinden.
 
 **Session-Abschluss-Gate 2026-07-14:** Seit dem vorherigen Full-Gate wurden
 Roadmap 13 sowie 16–23 und Phase E vollständig abgeschlossen und jeweils
@@ -2677,9 +2693,12 @@ Priorität, kompakt aufgelistet für spätere Aufnahme):
   2026-07-14:** Labels, Tooltips und Status benennen den globalen Scope
   ausdrücklich; die bestehenden globalen Pipelines bleiben alleinige
   Ausführung (Roadmap-Punkt 29).
-- P2-09: Interactive-Search-Modal nutzt die vorhandene Source-Auswahl
+- ~~P2-09: Interactive-Search-Modal nutzt die vorhandene Source-Auswahl
   (`/api/search/sources`) nicht; „Searching all configured sources" stimmt
-  nur im `best_quality`-Modus.
+  nur im `best_quality`-Modus.~~ **Behoben 2026-07-14:** typisierte
+  Server-Sourceauswahl plus ehrliches Default-/Selected-Source-Label;
+  Ausführung bleibt beim vorhandenen `/api/search`-Orchestrator
+  (Roadmap-Punkt 30).
 - P2-11: Fehlendes Publish-Datum wird beim Descending-Age-Sort als unendlich
   behandelt und kann vor bekannten Releases einsortiert werden.
 - P2-12: „My Library"-Ansicht zeigt nur monitorierte/library Releases, aber

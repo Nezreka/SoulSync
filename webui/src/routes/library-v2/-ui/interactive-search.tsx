@@ -5,6 +5,7 @@ import type { LibraryV2QualityProfile, LibraryV2RankedTarget } from '../-library
 
 import {
   libraryV2QualityProfilesQueryOptions,
+  listSearchSources,
   searchSources,
   startSourceDownload,
   type Lib2EntityRef,
@@ -286,12 +287,18 @@ export function InteractiveSearchModal({
   onClose: () => void;
 }) {
   const [query, setQuery] = useState(initialQuery);
+  const [selectedSource, setSelectedSource] = useState('');
   // Album/track actions use the ALBUM's own profile for the preview badge,
   // not the artist's (audit P1-17). The authoritative profile is resolved
   // server-side from the entity ids on grab either way.
   const profilesQuery = useQuery({
     ...libraryV2QualityProfilesQueryOptions(),
     enabled: entity?.qualityProfileId != null,
+  });
+  const searchSourcesQuery = useQuery({
+    queryKey: ['library-v2', 'download-search-sources'],
+    queryFn: listSearchSources,
+    staleTime: 60_000,
   });
   const effectiveProfile =
     entity?.qualityProfileId != null
@@ -340,13 +347,13 @@ export function InteractiveSearchModal({
     );
   }
 
-  async function run(q: string) {
+  async function run(q: string, source = selectedSource) {
     if (!q.trim()) return;
     setLoading(true);
     setError(null);
     setResults([]);
     try {
-      const all = await searchSources(q);
+      const all = await searchSources(q, source || undefined);
       setResults(all);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Search failed');
@@ -357,7 +364,7 @@ export function InteractiveSearchModal({
 
   // Auto-run once with the prefilled context query.
   useEffect(() => {
-    void run(initialQuery);
+    void run(initialQuery, '');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -409,6 +416,24 @@ export function InteractiveSearchModal({
               if (e.key === 'Enter') void run(query);
             }}
           />
+          <select
+            className={`${styles.select} ${styles.searchSourceSelect}`}
+            aria-label="Download source"
+            value={selectedSource}
+            disabled={loading || searchSourcesQuery.isLoading}
+            onChange={(e) => setSelectedSource(e.target.value)}
+          >
+            <option value="">
+              {searchSourcesQuery.data?.sources[0]
+                ? `Configured default — ${searchSourcesQuery.data.sources[0].display_name}`
+                : 'Configured default source'}
+            </option>
+            {searchSourcesQuery.data?.sources.map((source) => (
+              <option key={source.name} value={source.name}>
+                {source.display_name}
+              </option>
+            ))}
+          </select>
           <button
             type="button"
             className={styles.btnPrimary}
@@ -443,7 +468,17 @@ export function InteractiveSearchModal({
 
         <div className={styles.resultsWrap}>
           {loading ? (
-            <div className={styles.inlineLoading}>Searching all configured sources…</div>
+            <div className={styles.inlineLoading}>
+              {selectedSource
+                ? `Searching ${
+                    searchSourcesQuery.data?.sources.find(
+                      (source) => source.name === selectedSource,
+                    )?.display_name ?? selectedSource
+                  }…`
+                : searchSourcesQuery.data?.sources[0]
+                  ? `Searching configured default (${searchSourcesQuery.data.sources[0].display_name})…`
+                  : 'Searching configured default source…'}
+            </div>
           ) : results.length === 0 ? (
             <div className={styles.inlineLoading}>
               {error ? 'Search failed.' : 'No results — refine the query and search again.'}

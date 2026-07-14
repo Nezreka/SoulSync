@@ -710,15 +710,36 @@ export async function searchSources(query: string, source?: string): Promise<Sou
   return payload.results ?? [];
 }
 
-export async function listSearchSources(): Promise<string[]> {
+export interface DownloadSearchSource {
+  name: string;
+  display_name: string;
+}
+
+export interface DownloadSearchSources {
+  mode: string;
+  sources: DownloadSearchSource[];
+}
+
+export async function listSearchSources(): Promise<DownloadSearchSources> {
   try {
-    const payload = await readJson<{ sources?: { name?: string }[] | string[] }>(
-      apiClient.get('search/sources'),
-    );
+    const payload = await readJson<{
+      mode?: string;
+      sources?: Array<{ name?: string; display_name?: string } | string>;
+    }>(apiClient.get('search/sources'));
     const raw = payload.sources ?? [];
-    return raw.map((s) => (typeof s === 'string' ? s : (s.name ?? ''))).filter(Boolean);
+    return {
+      mode: payload.mode ?? 'unknown',
+      sources: raw
+        .map((source) => {
+          const name = typeof source === 'string' ? source : (source.name ?? '');
+          const displayName =
+            typeof source === 'string' ? source : (source.display_name ?? source.name ?? '');
+          return { name, display_name: displayName };
+        })
+        .filter((source) => source.name),
+    };
   } catch {
-    return [];
+    return { mode: 'unknown', sources: [] };
   }
 }
 

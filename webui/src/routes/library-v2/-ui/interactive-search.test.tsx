@@ -12,6 +12,15 @@ describe('library v2 interactive grab', () => {
     let attempts = 0;
     const submitted: unknown[] = [];
     server.use(
+      http.get('/api/search/sources', () =>
+        HttpResponse.json({
+          mode: 'hybrid',
+          sources: [
+            { name: 'soulseek', display_name: 'Soulseek' },
+            { name: 'usenet', display_name: 'Usenet' },
+          ],
+        }),
+      ),
       http.post('/api/search', () =>
         HttpResponse.json({
           results: [
@@ -61,5 +70,40 @@ describe('library v2 interactive grab', () => {
     expect(screen.getByRole('button', { name: 'Grabbed ✓' })).toBeDisabled();
     expect(attempts).toBe(2);
     expect(submitted[1]).toEqual(submitted[0]);
+  });
+
+  it('passes an explicitly selected configured source to the shared search endpoint', async () => {
+    const searches: unknown[] = [];
+    server.use(
+      http.get('/api/search/sources', () =>
+        HttpResponse.json({
+          mode: 'hybrid',
+          sources: [
+            { name: 'soulseek', display_name: 'Soulseek' },
+            { name: 'usenet', display_name: 'Usenet' },
+          ],
+        }),
+      ),
+      http.post('/api/search', async ({ request }) => {
+        searches.push(await request.json());
+        return HttpResponse.json({ results: [] });
+      }),
+    );
+
+    const queryClient = createTestQueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <InteractiveSearchModal initialQuery="Artist Selected" onClose={vi.fn()} />
+      </QueryClientProvider>,
+    );
+
+    const source = await screen.findByLabelText('Download source');
+    await waitFor(() => expect(source).toHaveTextContent('Usenet'));
+    fireEvent.change(source, { target: { value: 'usenet' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+
+    await waitFor(() => expect(searches).toHaveLength(2));
+    expect(searches[0]).toEqual({ query: 'Artist Selected' });
+    expect(searches[1]).toEqual({ query: 'Artist Selected', source: 'usenet' });
   });
 });

@@ -143,6 +143,10 @@
   min-width: 220px;
 }
 
+.searchSourceSelect {
+  max-width: 220px;
+}
+
 .searchInput:focus,
 .select:focus {
   outline: none;
