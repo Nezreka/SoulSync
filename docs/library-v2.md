@@ -1534,9 +1534,16 @@ implementiert und größtenteils solide.
   neue Registry/API-Vertragstests (18 Repair-Worker-Tests insgesamt),
   Frontend-Check/Typecheck, fünf gezielte Vitests und Production-Build sind
   grün.
-- **A7 — `until_top`-Wording im Code vereinheitlichen.** `is_upgrade_policy`
+- ~~**A7 — `until_top`-Wording im Code vereinheitlichen.**~~ `is_upgrade_policy`
   akzeptiert beide, `evaluate_file` behandelt `until_top` als Cutoff 0 —
-  korrekt, aber Docstrings/API-Doku nennen nur eine Variante. Kosmetik.
+  korrekt. **Abgeschlossen 2026-07-14:** Quality-Evaluator, Library-v2-
+  Quality-API, globale Quality-Profile-API und Frontend-Typ dokumentieren nun
+  denselben Vertrag: `acceptable` stoppt am ersten akzeptierten Target,
+  `until_cutoff` am konfigurierten `upgrade_cutoff_index`, `until_top` als
+  persistenter Legacy-Alias ausschließlich bei Index 0. Keine Runtime-
+  Semantik oder gespeicherte Row wurde verändert. 36 gezielte Quality-/
+  Library-v2-/Legacy-Parity-Tests plus Ruff, Frontend-Check/Typecheck, drei
+  Vitests und Production-Build sind grün.
 
 ### 6.4 Positives (bewusst festgehalten, Stand 2026-07-06)
 
@@ -1993,9 +2000,9 @@ verändert; daher waren Frontend-Typecheck/Vitest/Build nicht erforderlich.
     `/usr/bin/chromium`, sondern nutzt optional `PLAYWRIGHT_CHROMIUM_PATH` und
     sonst Playwrights gepinnten Browser. Destruktive Bestätigungen sowie echte
     Such-/Downloadstarts wurden bewusst nicht ausgelöst. **Nächster logischer
-    Schritt:** das verbliebene kleine 5.4-Finding A7 (`until_top`-Wording in
-    Code-/API-Dokumentation vereinheitlichen), danach das nächste priorisierte
-    Finding aus 10.3.
+    Schritt:** nach dem ebenfalls geschlossenen 5.4-Finding A7 ist P1-02 aus
+    10.3 der oberste offene Punkt: Legacy-Import per Run-Snapshot gegen
+    gelöschte/geänderte Quellzeilen reconciliieren.
 
 ---
 

@@ -5119,7 +5119,11 @@ def reset_quality_preset(preset_name):
 
 @app.route('/api/quality-profile/custom', methods=['GET'])
 def list_custom_quality_profiles():
-    """List every quality profile (built-ins + user-created), default first."""
+    """List every quality profile (built-ins + user-created), default first.
+
+    ``upgrade_policy`` values are ``acceptable``, ``until_cutoff`` and the
+    persisted compatibility alias ``until_top`` (implicit cutoff index 0).
+    """
     try:
         from database.music_database import MusicDatabase
         db = MusicDatabase()
@@ -5131,7 +5135,12 @@ def list_custom_quality_profiles():
 
 @app.route('/api/quality-profile/custom', methods=['POST'])
 def create_custom_quality_profile():
-    """Save the current Quality-page settings as a new named profile."""
+    """Save the current Quality-page settings as a new named profile.
+
+    New UI writes use ``acceptable`` or ``until_cutoff``; ``until_top`` stays
+    accepted on existing/imported profiles as the top-target compatibility
+    alias.
+    """
     try:
         from database.music_database import MusicDatabase
         db = MusicDatabase()

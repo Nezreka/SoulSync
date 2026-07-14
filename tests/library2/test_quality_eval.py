@@ -1,4 +1,4 @@
-"""Quality evaluation against app-wide profiles (acceptable / until_cutoff)."""
+"""Quality evaluation for acceptable / until_cutoff / until_top policies."""
 
 from __future__ import annotations
 

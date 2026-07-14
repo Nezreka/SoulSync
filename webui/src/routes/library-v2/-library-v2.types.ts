@@ -33,6 +33,8 @@ export type LibraryV2Search = z.infer<typeof libraryV2SearchSchema>;
  *  collapsing the union (would trip no-redundant-type-constituents). */
 export type LibraryV2AlbumOrigin = 'library' | 'discography' | (string & {});
 
+/** `until_top` is the persisted compatibility alias for `until_cutoff` with
+ *  `upgrade_cutoff_index = 0`; it remains a first-class API read value. */
 export type LibraryV2UpgradePolicy = 'acceptable' | 'until_cutoff' | 'until_top' | (string & {});
 
 export interface LibraryV2Pagination {
@@ -170,7 +172,7 @@ export interface LibraryV2QualityProfile {
   name: string;
   description: string | null;
   upgrade_policy: LibraryV2UpgradePolicy;
-  /** For 'until_cutoff': index into ranked_targets that counts as "done" (0 = top). */
+  /** For `until_cutoff`: target that counts as done. `until_top` always uses 0. */
   upgrade_cutoff_index: number;
   ranked_targets: LibraryV2RankedTarget[];
   repair_job_id: string;

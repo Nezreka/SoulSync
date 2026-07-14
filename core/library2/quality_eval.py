@@ -42,12 +42,23 @@ def audio_quality_from_file(file_row: Optional[Dict[str, Any]]):
 
 
 def is_upgrade_policy(policy: Optional[str]) -> bool:
-    """Whether a profile keeps searching after an acceptable file exists."""
+    """Whether a profile keeps searching after an acceptable file exists.
+
+    Both persisted upgrade modes are valid: ``until_cutoff`` uses the
+    configured ``upgrade_cutoff_index``; legacy ``until_top`` means the same
+    thing with an implicit cutoff index of 0. ``acceptable`` never upgrades a
+    file that already matches any ranked target.
+    """
     return (policy or "") in ("until_top", "until_cutoff")
 
 
 def profile_targets(profile_row: Optional[Dict[str, Any]]) -> Tuple[List[Any], str, int]:
-    """Return ``(targets, upgrade_policy, cutoff_index)`` for a ``quality_profiles`` row."""
+    """Return ``(targets, upgrade_policy, cutoff_index)`` for a profile row.
+
+    ``upgrade_policy`` is ``acceptable``, ``until_cutoff`` or the persisted
+    compatibility alias ``until_top``. Consumers must preserve the alias;
+    :func:`evaluate_file` gives it the explicit top-target cutoff of 0.
+    """
     if not profile_row:
         return [], "acceptable", 0
     try:
@@ -67,7 +78,12 @@ def profile_targets(profile_row: Optional[Dict[str, Any]]) -> Tuple[List[Any], s
 
 def evaluate_file(file_row: Optional[Dict[str, Any]], targets: List[Any],
                   upgrade_policy: str, cutoff_index: int = 0) -> Dict[str, Any]:
-    """Return ``{meets_profile, upgrade_candidate}`` for one file against targets."""
+    """Return ``{meets_profile, upgrade_candidate}`` for one file.
+
+    Policy contract: ``acceptable`` stops at any matching target,
+    ``until_cutoff`` stops at ``cutoff_index`` or better, and legacy
+    ``until_top`` stops only at target 0.
+    """
     if not targets:
         return {"meets_profile": True, "upgrade_candidate": False}
     aq = audio_quality_from_file(file_row)

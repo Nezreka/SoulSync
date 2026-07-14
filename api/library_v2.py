@@ -1157,6 +1157,12 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
     @app.route("/api/library/v2/quality-profiles")
     def lib2_quality_profiles():
+        """List app-wide profiles with the canonical upgrade-policy contract.
+
+        ``upgrade_policy`` is one of ``acceptable``, ``until_cutoff`` or the
+        persisted legacy alias ``until_top``. For ``until_cutoff``, clients
+        use ``upgrade_cutoff_index``; ``until_top`` always means index 0.
+        """
         guard = _guard()
         if guard:
             return guard
@@ -1384,6 +1390,12 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
     @app.route("/api/library/v2/<entity>/<int:eid>/quality-profile", methods=["POST"])
     def lib2_set_quality_profile(entity, eid):
+        """Assign a profile without changing its upgrade-policy semantics.
+
+        Explicit ``monitor_existing`` applies to both upgrade modes:
+        ``until_cutoff`` and legacy ``until_top``. ``acceptable`` assignment
+        alone never turns existing tracks into wanted upgrades.
+        """
         guard = _guard()
         if guard:
             return guard
