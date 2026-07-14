@@ -15,10 +15,12 @@ Persistence rules:
   ``monitored=0`` — pure metadata, no wishlist side effects. Monitoring stays an
   explicit user action (the monitor endpoint materializes the tracklist and
   mirrors to the wishlist). ONE exception: on a *re*-expansion of a monitored
-  artist whose ``monitor_new_items`` is 'all'/'new', newly DISCOVERED releases
-  are auto-monitored (their ids come back in ``auto_monitor_album_ids`` so the
-  caller can materialize + mirror them). The first expansion never does this —
-  it would queue the whole back catalog in one click.
+  artist, newly DISCOVERED releases are auto-monitored according to
+  ``monitor_new_items``: 'all' accepts every discovery, while 'new' accepts
+  only a dated release newer than the newest release known before this sync.
+  Their ids come back in ``auto_monitor_album_ids`` so the caller can
+  materialize + mirror them. The first expansion never does this — it would
+  queue the whole back catalog in one click.
 - Releases that disappeared from the provider are pruned again, but only when
   they are still pristine (no tracks, not monitored, origin='discography').
 """
@@ -56,7 +58,7 @@ def _existing_release_index(conn, artist_id: int) -> Dict[str, List[Dict[str, An
     """Index the artist's current lib2 releases by normalized title."""
     rows = conn.execute(
         """SELECT al.id, al.title, al.album_type, al.origin, al.spotify_id,
-                  al.external_ids, al.monitored,
+                  al.external_ids, al.monitored, al.release_date, al.year,
                   (SELECT COUNT(*) FROM lib2_tracks t WHERE t.album_id = al.id) AS track_rows
              FROM lib2_album_artists aa JOIN lib2_albums al ON al.id = aa.album_id
             WHERE aa.artist_id = ?""",
@@ -91,6 +93,49 @@ def _merge_external_id(raw: Any, source: Optional[str], provider_id: str) -> str
     if source and provider_id:
         values[str(source).strip().lower()] = str(provider_id).strip()
     return json.dumps(values, sort_keys=True, separators=(",", ":"))
+
+
+def _release_date_key(release_date: Any, year: Any = None) -> Optional[tuple[int, int, int]]:
+    """Normalize provider/legacy partial dates for deterministic age ordering."""
+    import re
+
+    text = str(release_date or "").strip()
+    match = re.match(r"^(\d{4})(?:-(\d{1,2}))?(?:-(\d{1,2}))?", text)
+    if match:
+        candidate = (
+            int(match.group(1)),
+            int(match.group(2) or 1),
+            int(match.group(3) or 1),
+        )
+    else:
+        try:
+            candidate = (int(year), 1, 1)
+        except (TypeError, ValueError):
+            return None
+    try:
+        datetime(*candidate)
+    except ValueError:
+        return None
+    return candidate
+
+
+def _should_auto_monitor(
+    policy: str,
+    *,
+    eligible_reexpansion: bool,
+    release_date: Any,
+    year: Any,
+    newest_existing: Optional[tuple[int, int, int]],
+) -> bool:
+    """Apply the single monitor-new-items policy for one discovered release."""
+    if not eligible_reexpansion or policy == "none":
+        return False
+    if policy == "all":
+        return True
+    if policy != "new" or newest_existing is None:
+        return False
+    candidate = _release_date_key(release_date, year)
+    return candidate is not None and candidate > newest_existing
 
 
 def _match_existing(index: Dict[str, List[Dict[str, Any]]], *, title: str,
@@ -208,11 +253,17 @@ def expand_artist_discography(database, artist_id: int) -> Dict[str, Any]:
             row["origin"] == "discography"
             for rows in index.values() for row in rows
         )
-        auto_monitor_new = bool(
-            had_discography
-            and artist["monitored"]
-            and (artist["monitor_new_items"] or "all") in ("all", "new")
-        )
+        monitor_new_policy = artist["monitor_new_items"] or "all"
+        eligible_reexpansion = bool(had_discography and artist["monitored"])
+        existing_dates = [
+            key
+            for rows in index.values()
+            for row in rows
+            if (key := _release_date_key(row["release_date"], row["year"])) is not None
+        ]
+        # Fixed pre-sync cutoff: provider ordering must not decide whether two
+        # releases discovered in the same snapshot count as new.
+        newest_existing = max(existing_dates) if existing_dates else None
         from core.library2.profile_lookup import default_quality_profile_id
         fallback_profile = default_quality_profile_id(conn)
         seen_ids: set = set()
@@ -228,6 +279,13 @@ def expand_artist_discography(database, artist_id: int) -> Dict[str, Any]:
             image_url = release.image_url
             spotify_id = provider_id if source == "spotify" else None
             external_ids = json.dumps({source: provider_id}) if (source and provider_id) else "{}"
+            auto_monitor_release = _should_auto_monitor(
+                monitor_new_policy,
+                eligible_reexpansion=eligible_reexpansion,
+                release_date=release_date,
+                year=year,
+                newest_existing=newest_existing,
+            )
 
             existing = _match_existing(index, title=title, album_type=album_type,
                                        provider_id=provider_id, source=source)
@@ -260,12 +318,12 @@ def expand_artist_discography(database, artist_id: int) -> Dict[str, Any]:
                    VALUES(?,?,?,?,?,?,?,?,?,?, 'discography', ?, ?)""",
                 (artist_id, title, album_type, release_date, year, spotify_id,
                  external_ids, image_url, track_count, track_count,
-                 1 if auto_monitor_new else 0,
+                 1 if auto_monitor_release else 0,
                  artist["quality_profile_id"] or fallback_profile),
             )
             new_id = cursor.lastrowid
             seen_ids.add(new_id)
-            if auto_monitor_new:
+            if auto_monitor_release:
                 cursor.execute(
                     "UPDATE lib2_albums SET tracklist_status='pending', "
                     "tracklist_error=NULL, tracklist_retry_at=NULL WHERE id=?",
@@ -283,6 +341,7 @@ def expand_artist_discography(database, artist_id: int) -> Dict[str, Any]:
                 "id": new_id, "title": title, "album_type": album_type,
                 "origin": "discography", "spotify_id": spotify_id,
                 "external_ids": external_ids, "monitored": 0, "track_rows": 0,
+                "release_date": release_date, "year": year,
             })
             stats["added"] += 1
 

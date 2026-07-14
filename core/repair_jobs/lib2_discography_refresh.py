@@ -1,7 +1,7 @@
 """Periodic Library-v2 discography re-expansion (monitor_new_items enforcement).
 
-``monitor_new_items`` ('all'/'new') promises that newly published releases of a
-monitored artist become wanted automatically — but the enforcement lives in the
+``monitor_new_items`` promises that newly discovered ('all') or genuinely newer
+('new') releases of a monitored artist become wanted automatically — but the enforcement lives in the
 discography *re-expansion* path, which used to run only when the user pressed
 "Update Discography". This job runs that same re-expansion on a schedule for
 every artist whose catalog was already expanded once, so the promise holds
@@ -38,7 +38,8 @@ class Lib2DiscographyRefreshJob(RepairJob):
         "Re-expands the provider discography of every monitored Library v2 "
         "artist whose catalog was already fetched once. Releases discovered "
         "since the last expansion are auto-monitored when the artist's "
-        "'monitor new items' setting is 'all' or 'new': their tracklist is "
+        "'monitor new items' setting is 'all'; 'new' only accepts a dated "
+        "release newer than the previously newest known release. Their tracklist is "
         "materialized and mirrored into the Wishlist, so the normal download "
         "pipeline picks them up. Artists never expanded stay untouched (the "
         "first expansion remains an explicit user action). Does nothing when "
@@ -91,7 +92,7 @@ class Lib2DiscographyRefreshJob(RepairJob):
         total = len(artist_ids)
         discovered = 0
         mirrored = 0
-        for i, artist_id in enumerate(artist_ids):
+        for _i, artist_id in enumerate(artist_ids):
             if context.check_stop() or context.wait_if_paused():
                 break
             try:

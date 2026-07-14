@@ -258,7 +258,10 @@ weiteren Acquisition-Features zuerst geschlossen werden muss. Phase E
 
 ### monitor_new_items-Enforcement
 - Bei einer *Re*-Expansion eines monitored Artists mit `monitor_new_items`
-  'all'/'new' werden neu ENTDECKTE Releases auto-monitored: der
+  `all` werden alle neu ENTDECKTEN Releases auto-monitored; `new` akzeptiert
+  nur Releases mit bekanntem Datum, das strikt nach dem neuesten bereits vor
+  dem Sync bekannten Release liegt. Undatierte Releases und spät gelieferte
+  Backkatalog-Einträge bleiben bei `new` unmonitored. Der
   Discography-Endpoint materialisiert deren Tracklists und mirrort sie in die
   Wishlist. Die ERSTE Expansion auto-monitored nie (das würde den ganzen
   Backkatalog mit einem Klick queuen).
@@ -2034,6 +2037,19 @@ verändert; daher waren Frontend-Typecheck/Vitest/Build nicht erforderlich.
     und Production-Build sind grün. **Nächster logischer Schritt:** P1-24 —
     `monitor_new_items='new'` anhand des Release-Datums wirklich von `all`
     unterscheiden.
+18. ~~**Echte `monitor_new_items='new'`-Semantik (P1-24).**~~
+    **Abgeschlossen 2026-07-14:** Discography-Refresh berechnet vor dem Sync
+    einen festen Cutoff aus dem neuesten datierten, bereits bekannten Release.
+    `all` auto-monitort weiterhin jede neue Entdeckung; `new` ausschließlich
+    Entdeckungen mit Datum strikt nach diesem Cutoff. Spät gelieferter
+    Backkatalog und undatierte Releases bleiben unmonitored, und ein fehlender
+    datierter Baseline-Bestand wird konservativ nicht als Freigabe behandelt.
+    Der Cutoff bleibt pro Snapshot konstant, sodass Provider-Sortierung das
+    Ergebnis nicht beeinflusst; API und periodischer Repair-Job verwenden
+    weiterhin denselben Discography-Pfad. **33 gezielte Discography-/Monitor-/
+    Wanted-Tests** und Ruff sind grün. **Nächster logischer Schritt:** P1-26 —
+    Tracklist-Materialisierung darf überwachte/fileless Rows beim Kürzen nicht
+    stumm löschen.
 
 ---
 
@@ -2304,10 +2320,12 @@ vermerkt, tauchten aber nirgends in diesem Dokument auf:
   kann den Track fälschlich unmonitored setzen, wenn mehrere Files existieren.~~
   **Behoben 2026-07-14:** gemeinsamer Pair-Validator, kettenfreie Canonical-
   Semantik und atomarer Multi-File-Move; Details in Roadmap-Punkt 17.
-- **P1-24** — `monitor_new_items='new'` verhält sich identisch zu `'all'`
+- ~~**P1-24** — `monitor_new_items='new'` verhält sich identisch zu `'all'`
   (beide auto-monitoren jedes neu entdeckte Release, auch alte
   Backkatalog-Einträge). Lidarr vergleicht für „New" das Release-Datum
-  gegen das neueste bestehende Release — das fehlt hier noch.
+  gegen das neueste bestehende Release — das fehlt hier noch.~~ **Behoben
+  2026-07-14:** fester Pre-Sync-Datumscutoff mit konservativer Behandlung
+  undatierter Daten; Details in Roadmap-Punkt 18.
 - **P1-26** — Tracklist-Materialisierung: ist `expected_track_count` zu
   klein, schneidet der Import Provider-Einträge ab und löscht anschließend
   überzählige fileless Rows, ohne deren Monitor-Zustand zu prüfen — kann

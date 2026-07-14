@@ -345,6 +345,72 @@ def test_reexpansion_respects_monitor_new_items_none(legacy_db, imported_conn, f
         "SELECT monitored FROM lib2_albums WHERE title='For All The Dogs'").fetchone()["monitored"] == 0
 
 
+def test_reexpansion_new_policy_only_monitors_after_latest_known_release(
+        legacy_db, imported_conn, fake_discography, monkeypatch):
+    aid = _artist_id(imported_conn)
+    conn = legacy_db._get_connection()
+    conn.execute(
+        "UPDATE lib2_artists SET monitored=1, monitor_new_items='new' WHERE id=?",
+        (aid,),
+    )
+    conn.commit()
+    conn.close()
+
+    D.expand_artist_discography(legacy_db, aid)  # cutoff becomes Scorpion (2018-06-29)
+    grown = _cards(
+        ("albums", {"id": "sp-views", "title": "Views", "album_type": "album",
+                    "release_date": "2016-04-29", "track_count": 20}),
+        ("albums", {"id": "sp-scorpion", "title": "Scorpion", "album_type": "album",
+                    "release_date": "2018-06-29", "track_count": 25}),
+        ("albums", {"id": "sp-old", "title": "Late Backfill", "album_type": "album",
+                    "release_date": "2017-12-01", "track_count": 10}),
+        ("albums", {"id": "sp-undated", "title": "Unknown Date", "album_type": "album",
+                    "track_count": 8}),
+        ("albums", {"id": "sp-new", "title": "For All The Dogs", "album_type": "album",
+                    "release_date": "2023-10-06", "track_count": 23}),
+        ("singles", {"id": "sp-onedance", "title": "One Dance", "album_type": "single",
+                     "release_date": "2016-04-05", "track_count": 1}),
+    )
+    monkeypatch.setattr(
+        "core.metadata.discography.get_artist_detail_discography",
+        lambda artist_id, artist_name="", options=None: grown,
+    )
+
+    stats = D.expand_artist_discography(legacy_db, aid)
+
+    auto_titles = {
+        row["title"] for row in imported_conn.execute(
+            "SELECT title FROM lib2_albums WHERE id IN ({})".format(
+                ",".join("?" for _ in stats["auto_monitor_album_ids"])
+            ),
+            stats["auto_monitor_album_ids"],
+        )
+    }
+    monitored = {
+        row["title"]: row["monitored"]
+        for row in imported_conn.execute(
+            """SELECT title, monitored FROM lib2_albums
+                WHERE title IN ('Late Backfill', 'Unknown Date', 'For All The Dogs')"""
+        )
+    }
+    assert auto_titles == {"For All The Dogs"}
+    assert monitored == {
+        "Late Backfill": 0,
+        "Unknown Date": 0,
+        "For All The Dogs": 1,
+    }
+
+
+def test_new_policy_without_a_dated_baseline_is_conservative():
+    assert D._should_auto_monitor(
+        "new",
+        eligible_reexpansion=True,
+        release_date="2026-01-01",
+        year=2026,
+        newest_existing=None,
+    ) is False
+
+
 def test_failed_auto_monitor_tracklist_is_persisted_and_retried(
         legacy_db, imported_conn, monkeypatch):
     from core.library2 import queries as Q
