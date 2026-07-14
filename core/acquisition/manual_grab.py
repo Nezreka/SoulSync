@@ -45,10 +45,28 @@ GRAB_MARKER = "_acquisition_grab_download_id"
 
 MANUAL_GRAB_KEY_PREFIX = "manual-grab:"
 SCHEDULED_GRAB_KEY_PREFIX = "scheduled-grab:"
+CORRELATION_ENFORCEMENT_KEY = "features.acquisition_contract_enforce"
 
 # Mirrors retry_state.RETRY_STATE_TTL_SECONDS: a correlated grab whose
 # download never reached a pipeline outcome must not stay "grabbing" forever.
 MANUAL_GRAB_TTL_SECONDS = 7 * 24 * 60 * 60
+
+
+def correlation_enforcement_enabled(
+    config_get: Optional[Callable[..., Any]] = None,
+) -> bool:
+    """Whether converted legacy consumers must prepare before dispatch.
+
+    Default-off is deliberate: operators can observe the correlation path
+    before turning bookkeeping availability into an admission requirement.
+    """
+    if config_get is None:
+        from config.settings import config_manager
+        config_get = config_manager.get
+    try:
+        return config_get(CORRELATION_ENFORCEMENT_KEY, False) is True
+    except Exception:
+        return False
 
 
 def _resolve_lib2_scope_entity(
@@ -846,11 +864,13 @@ def fail_stale_correlated_grabs(
 
 __all__ = [
     "GRAB_MARKER",
+    "CORRELATION_ENFORCEMENT_KEY",
     "MANUAL_GRAB_KEY_PREFIX",
     "MANUAL_GRAB_TTL_SECONDS",
     "SCHEDULED_GRAB_KEY_PREFIX",
     "correlate_manual_grab",
     "correlate_scheduled_grab",
+    "correlation_enforcement_enabled",
     "bind_correlated_grab_transfer",
     "fail_prepared_correlated_grab",
     "fail_stale_correlated_grabs",

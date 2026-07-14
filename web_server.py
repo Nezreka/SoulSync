@@ -7099,6 +7099,32 @@ def _prepare_manual_grab(username, search_result, lib2_ctx, batch_id=None):
         return None
 
 
+def _manual_acquisition_preparation_required(username):
+    """Whether this route dispatch is covered by the opt-in strict gate."""
+    try:
+        from core.library2 import ADMIN_PROFILE_ID
+        if get_current_profile_id() != ADMIN_PROFILE_ID:
+            return False
+        spec = download_orchestrator.registry.get_spec(username) if username else None
+        source = spec.name if spec else 'soulseek'
+        from core.acquisition.capabilities import get_source_capabilities
+        capabilities = get_source_capabilities(source)
+        return bool(capabilities and capabilities.recording_download)
+    except Exception:
+        # The normal username-based route is Soulseek when no explicit plugin
+        # spec exists. Unknown bookkeeping state is in-scope under strict mode.
+        return True
+
+
+def _manual_acquisition_dispatch_blocked(username, markers):
+    from core.acquisition.manual_grab import correlation_enforcement_enabled
+    return (
+        not markers
+        and correlation_enforcement_enabled()
+        and _manual_acquisition_preparation_required(username)
+    )
+
+
 @app.route('/api/download', methods=['POST'])
 def start_download():
     """Simple download route"""
@@ -7186,6 +7212,15 @@ def start_download():
                         _lib2_ctx,
                         batch_id=_album_batch_id,
                     )
+                    if _manual_acquisition_dispatch_blocked(
+                            username, _acq_markers):
+                        logger.error(
+                            "Manual album dispatch blocked: acquisition "
+                            "preparation is required")
+                        return jsonify({
+                            "success": False,
+                            "error": "Acquisition preparation unavailable; download not started.",
+                        }), 503
                     try:
                         with _cand_scope():
                             download_id = run_async(download_orchestrator.download(
@@ -7290,6 +7325,13 @@ def start_download():
             }
             _acq_markers = _prepare_manual_grab(
                 username, _manual_result, _lib2_ctx)
+            if _manual_acquisition_dispatch_blocked(username, _acq_markers):
+                logger.error(
+                    "Manual dispatch blocked: acquisition preparation is required")
+                return jsonify({
+                    "success": False,
+                    "error": "Acquisition preparation unavailable; download not started.",
+                }), 503
             try:
                 with _cand_scope():
                     download_id = run_async(download_orchestrator.download(

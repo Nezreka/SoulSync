@@ -697,6 +697,9 @@ def test_wishlist_without_lib2_context_uses_legacy_shadow_correlation(monkeypatc
 
 def test_nonadmin_wishlist_dispatch_stays_outside_admin_acquisition(monkeypatch):
     calls = _capture_scheduled_correlation(monkeypatch)
+    from core.acquisition import manual_grab
+    monkeypatch.setattr(
+        manual_grab, "correlation_enforcement_enabled", lambda: True)
     deps = _build_deps()
     _seed_task(
         "t_other_profile",
@@ -709,6 +712,25 @@ def test_nonadmin_wishlist_dispatch_stays_outside_admin_acquisition(monkeypatch)
 
     assert result is True
     assert calls == []
+
+
+def test_enforcement_blocks_scheduled_dispatch_without_preparation(monkeypatch):
+    _capture_scheduled_correlation(monkeypatch, markers=None)
+    from core.acquisition import manual_grab
+    monkeypatch.setattr(
+        manual_grab, "correlation_enforcement_enabled", lambda: True)
+    soulseek = _FakeSoulseek()
+    deps = _build_deps(soulseek=soulseek)
+    _seed_task(
+        "t_enforced",
+        track_info={"id": "spotify-track-e", "name": "Song Title"},
+    )
+
+    result = dc.attempt_download_with_candidates(
+        "t_enforced", [_Candidate(filename="enforced.flac")], _Track(), deps=deps)
+
+    assert result is False
+    assert soulseek.download_calls == []
 
 
 def test_failed_correlation_never_blocks_the_download(monkeypatch):

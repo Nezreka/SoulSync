@@ -202,3 +202,44 @@ def test_admin_manual_download_without_lib2_context_is_correlated(client, monkey
     assert calls[0][1]['title'] == 'Shadow Track'
     context = web_server.matched_downloads_context.pop(key)
     assert context['_acquisition_grab_download_id'] == 'manual-shadow'
+
+
+def test_manual_enforcement_blocks_dispatch_when_preparation_fails(
+        client, monkeypatch):
+    download_calls = []
+
+    class _DownloadOrchestrator:
+        @staticmethod
+        def download(*args):
+            download_calls.append(args)
+            return object()
+
+    monkeypatch.setattr(web_server, 'download_orchestrator', _DownloadOrchestrator())
+    monkeypatch.setattr(web_server, '_prepare_manual_grab', lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        web_server, '_manual_acquisition_preparation_required', lambda _u: True)
+    from core.acquisition import manual_grab
+    monkeypatch.setattr(
+        manual_grab, 'correlation_enforcement_enabled', lambda: True)
+
+    response = client.post('/api/download', json={
+        'username': 'user',
+        'filename': 'folder/not-started.flac',
+        'title': 'Not Started',
+        'artist': 'Artist',
+    })
+
+    assert response.status_code == 503
+    assert response.get_json()['error'].startswith(
+        'Acquisition preparation unavailable')
+    assert download_calls == []
+
+
+def test_manual_enforcement_exempts_non_recording_sources(monkeypatch):
+    from core.acquisition import manual_grab
+    monkeypatch.setattr(
+        manual_grab, 'correlation_enforcement_enabled', lambda: True)
+    monkeypatch.setattr(
+        web_server, '_manual_acquisition_preparation_required', lambda _u: False)
+
+    assert not web_server._manual_acquisition_dispatch_blocked('usenet', None)

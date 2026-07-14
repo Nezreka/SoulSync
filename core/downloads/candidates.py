@@ -403,6 +403,23 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                 acq_markers = _prepare_scheduled_acquisition(
                     task_id, batch_id, task_profile_id, track_info,
                     candidate, deps)
+            if (
+                not acq_markers
+                and not user_manual_pick
+                and not acquisition_walk_ref
+                and int(task_profile_id or 1) == 1
+            ):
+                from core.acquisition.manual_grab import correlation_enforcement_enabled
+                if correlation_enforcement_enabled():
+                    logger.error(
+                        "[Modal Worker] Acquisition preparation is required; "
+                        "candidate dispatch blocked for task %s",
+                        task_id,
+                    )
+                    with tasks_lock:
+                        if task_id in download_tasks:
+                            download_tasks[task_id]['status'] = 'searching'
+                    continue
             try:
                 download_id = deps.run_async(
                     deps.download_orchestrator.download(username, filename, size))

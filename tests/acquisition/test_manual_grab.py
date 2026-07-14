@@ -10,6 +10,7 @@ from core.acquisition.manual_grab import (
     GRAB_MARKER,
     bind_correlated_grab_transfer,
     correlate_manual_grab,
+    correlation_enforcement_enabled,
     fail_prepared_correlated_grab,
     fail_stale_correlated_grabs,
     prepare_manual_grab,
@@ -24,6 +25,12 @@ from core.library2.importer import import_legacy_library
 
 
 _CONFIG_GET = lambda key, default=None: default  # noqa: E731 - test stub
+
+
+def test_correlation_enforcement_is_explicit_and_default_off():
+    assert not correlation_enforcement_enabled(_CONFIG_GET)
+    assert correlation_enforcement_enabled(
+        lambda key, default=None: key == "features.acquisition_contract_enforce")
 
 
 def _prepared_conn(legacy_db):

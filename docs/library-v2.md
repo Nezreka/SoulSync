@@ -1659,6 +1659,20 @@ P2-05 und eine Reihe P2-UX/Robustheits-Findings).
    **Logischer nächster Schritt:** ein default-off Fail-closed-Gate für die
    beiden jetzt vorab persistierenden Legacy-Consumer hinzufügen und dabei
    Bundle-/native Acquisition sowie Nicht-Admin-Profile explizit ausnehmen.
+   **Siebte Scheibe erledigt 2026-07-14:** Das opt-in Gate
+   `features.acquisition_contract_enforce=true` blockiert in den zwei
+   konvertierten Legacy-Consumern einen Admin-Recording-Dispatch, wenn dessen
+   Request/Grab-Vorbereitung keinen Marker liefern konnte. Default ist
+   bewusst `false`, sodass bestehende Installationen zunächst unverändert
+   fail-open beobachten können. Ausgenommen bleiben native Acquisition-Walks,
+   Bundle-Quellen mit eigener Grab-Persistenz, User-Manual-Picks aus dem
+   Candidate-Modal und Nicht-Admin-Profile (ADR-01). Tests beweisen, dass im
+   Strict-Modus weder der manuelle Route-Client noch der Wishlist-Candidate-
+   Client aufgerufen wird, wenn die Vorbereitung fehlt, während die
+   Ausnahmen weiter dispatchen. **Logischer nächster Schritt:** Coverage/
+   Failure-Observability für die Vorab-Persistenz ergänzen und das Gate in
+   echter Docker-Nutzung erst nach null ungeklärten Recording-Dispatches
+   aktivieren; danach kann Roadmap-Punkt 3 als global durchgesetzt gelten.
 
 **Session-Abschluss-Gate:** volle Python-Suite grün — **8112 passed,
 2 skipped, 2 deselected in 291.41s**. Die zwei Skips sind weiterhin die
