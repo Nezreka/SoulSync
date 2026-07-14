@@ -1,0 +1,822 @@
+-- ============================================================================
+-- SoulSync — VIDEO side schema  (database/video_library.db)
+--
+-- ISOLATION: this is a SEPARATE SQLite file from the music library. The video
+-- code owns it exclusively; music never opens it and it never references music
+-- tables. A bug, migration, or reset here cannot touch music data, and the two
+-- never contend for the same write lock.
+--
+-- DESIGN PRINCIPLES (deliberately avoiding the music DB's known pain points):
+--   * No polymorphic (entity_type, entity_id) keys. Where a row can belong to a
+--     movie OR an episode OR a youtube video, we use separate nullable FKs with
+--     a CHECK that exactly one is set — real foreign keys, real cascades.
+--   * No "source id" blob / naming spaghetti. External ids are a few explicit,
+--     well-named, indexed columns (tmdb_id, tvdb_id, imdb_id, youtube_id).
+--   * No metadata dumping-ground column. Structured config that is genuinely a
+--     list (quality profile contents) is small, ordered JSON; everything else
+--     is a real column.
+--   * Watchlist / Wishlist / Calendar are DERIVED VIEWS over monitored + file
+--     state, not standalone tables — so they can't drift out of sync with the
+--     library the way a duplicated table does. (See note in design summary.)
+--
+-- Run order matters (FKs reference earlier tables). The init module executes
+-- this whole file inside one transaction with foreign_keys ON.
+-- ============================================================================
+
+-- ── Meta ────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+);
+
+-- ── Configuration ───────────────────────────────────────────────────────────
+-- Root folders: where each kind of library content is stored on disk.
+CREATE TABLE IF NOT EXISTS root_folders (
+    id           INTEGER PRIMARY KEY,
+    path         TEXT NOT NULL UNIQUE,
+    content_kind TEXT NOT NULL CHECK (content_kind IN ('movie', 'show', 'youtube')),
+    created_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Quality profiles: an ordered, named acceptance ladder (Radarr/Sonarr-style).
+-- `items` is a small JSON array of allowed quality names, best-first; `cutoff`
+-- is the name we stop upgrading at. JSON is appropriate here — it is genuinely
+-- an ordered list of config, not a metadata grab-bag.
+CREATE TABLE IF NOT EXISTS quality_profiles (
+    id         INTEGER PRIMARY KEY,
+    name       TEXT NOT NULL UNIQUE,
+    cutoff     TEXT,
+    items      TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Video-side settings. KEY/VALUE for now; at the end-of-branch settings.db
+-- consolidation these migrate into the shared config store. Value is JSON.
+CREATE TABLE IF NOT EXISTS video_settings (
+    key        TEXT PRIMARY KEY,
+    value      TEXT,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ── Content: Movies ─────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS movies (
+    id                   INTEGER PRIMARY KEY,
+    server_source        TEXT,            -- 'plex' | 'jellyfin' (NULL = not on a server yet, e.g. wishlist)
+    server_id            TEXT,            -- media server native id (Plex ratingKey / Jellyfin Item Id)
+    tmdb_id              INTEGER,         -- not unique: same film can sit in >1 library
+    imdb_id              TEXT,
+    tmdb_match_status    TEXT,            -- enrichment: NULL=pending | matched | not_found | error
+    tmdb_last_attempted  TEXT,
+    title                TEXT NOT NULL,
+    sort_title           TEXT,
+    year                 INTEGER,
+    overview             TEXT,
+    runtime_minutes      INTEGER,
+    status               TEXT,            -- announced | in_production | released
+    release_date         TEXT,            -- primary/theatrical (ISO date)
+    digital_release_date TEXT,
+    studio               TEXT,
+    content_rating       TEXT,            -- e.g. PG-13
+    tagline              TEXT,
+    tmdb_collection_id   INTEGER,         -- TMDB belongs_to_collection id (franchise); for "complete your collections" gaps
+    tmdb_collection_name TEXT,            -- collection display name (e.g. "The Matrix Collection")
+    rating               REAL,            -- TMDB audience score (0-10)
+    rating_critic        REAL,            -- critic score (0-100) when offered
+    imdb_rating          REAL,            -- IMDb (0-10, via OMDb)
+    rt_rating            INTEGER,         -- Rotten Tomatoes (0-100)
+    metacritic           INTEGER,         -- Metacritic (0-100)
+    ratings_synced       INTEGER NOT NULL DEFAULT 0,   -- OMDb ratings fetched?
+    poster_url           TEXT,
+    backdrop_url         TEXT,
+    logo_url             TEXT,            -- transparent title logo (clearlogo)
+    monitored            INTEGER NOT NULL DEFAULT 1,   -- tracked for acquisition
+    has_file             INTEGER NOT NULL DEFAULT 0,   -- owned? (denormalized)
+    quality_profile_id   INTEGER REFERENCES quality_profiles(id) ON DELETE SET NULL,
+    root_folder_id       INTEGER REFERENCES root_folders(id)     ON DELETE SET NULL,
+    path                 TEXT,            -- folder on disk once owned
+    added_at             TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at           TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    play_count       INTEGER,                         -- server watch state (viewCount)
+    last_viewed_at   TEXT,                             -- server last-watched stamp (Plex lastViewedAt / JF LastPlayedDate)
+    locked_fields    TEXT                             -- JSON list of user-edited (scan/enrichment-immune) fields
+);
+CREATE INDEX IF NOT EXISTS idx_movies_tmdb       ON movies(tmdb_id);
+CREATE INDEX IF NOT EXISTS idx_movies_monitored  ON movies(monitored, has_file);
+-- NOTE: idx on tmdb_collection_id (a migration-added column) lives in _POST_INDEXES,
+-- not here — this schema runs BEFORE the ALTER that adds the column on upgraded DBs.
+CREATE INDEX IF NOT EXISTS idx_movies_release    ON movies(release_date);
+-- Upsert/stale-removal key: the server's native id. Multiple NULLs are allowed
+-- (wishlist items not yet on a server), so this never blocks non-server rows.
+CREATE UNIQUE INDEX IF NOT EXISTS ux_movies_server ON movies(server_source, server_id);
+
+-- ── Content: TV (shows → seasons → episodes) ────────────────────────────────
+CREATE TABLE IF NOT EXISTS shows (
+    id                 INTEGER PRIMARY KEY,
+    server_source      TEXT,             -- 'plex' | 'jellyfin' (NULL = not on a server yet)
+    server_id          TEXT,             -- media server native id
+    tvdb_id            INTEGER,          -- not unique (same series can sit in >1 library)
+    tmdb_id            INTEGER,
+    imdb_id            TEXT,
+    tmdb_match_status  TEXT,             -- enrichment match state per source
+    tmdb_last_attempted TEXT,
+    tvdb_match_status  TEXT,
+    tvdb_last_attempted TEXT,
+    title              TEXT NOT NULL,
+    sort_title         TEXT,
+    year               INTEGER,
+    overview           TEXT,
+    status             TEXT,             -- continuing | ended | upcoming
+    network            TEXT,
+    airs_time          TEXT,             -- TVDB show air time, e.g. "21:00" (network local)
+    runtime_minutes    INTEGER,
+    content_rating     TEXT,
+    tagline            TEXT,
+    rating             REAL,             -- TMDB audience score (0-10)
+    imdb_rating        REAL,             -- IMDb (0-10, via OMDb)
+    rt_rating          INTEGER,          -- Rotten Tomatoes (0-100)
+    metacritic         INTEGER,          -- Metacritic (0-100)
+    ratings_synced     INTEGER NOT NULL DEFAULT 0,   -- OMDb ratings fetched?
+    first_air_date     TEXT,
+    last_air_date      TEXT,
+    poster_url         TEXT,
+    backdrop_url       TEXT,
+    logo_url           TEXT,             -- transparent title logo (clearlogo)
+    episodes_synced    INTEGER NOT NULL DEFAULT 0,   -- full episode list pulled from metadata?
+    monitored          INTEGER NOT NULL DEFAULT 1,   -- "following" (watchlist)
+    quality_profile_id INTEGER REFERENCES quality_profiles(id) ON DELETE SET NULL,
+    root_folder_id     INTEGER REFERENCES root_folders(id)     ON DELETE SET NULL,
+    path               TEXT,
+    added_at           TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at         TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    watched_episodes INTEGER,                         -- server watch state (viewed leaf count)
+    locked_fields    TEXT                             -- JSON list of user-edited (scan/enrichment-immune) fields
+);
+CREATE INDEX IF NOT EXISTS idx_shows_tvdb      ON shows(tvdb_id);
+CREATE INDEX IF NOT EXISTS idx_shows_monitored ON shows(monitored);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_shows_server ON shows(server_source, server_id);
+
+CREATE TABLE IF NOT EXISTS seasons (
+    id            INTEGER PRIMARY KEY,
+    show_id       INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+    server_id     TEXT,             -- media server native id (for reference/refresh)
+    season_number INTEGER NOT NULL,
+    title         TEXT,
+    overview      TEXT,
+    poster_url    TEXT,
+    monitored     INTEGER NOT NULL DEFAULT 1,
+    UNIQUE (show_id, season_number)
+);
+CREATE INDEX IF NOT EXISTS idx_seasons_show ON seasons(show_id);
+
+CREATE TABLE IF NOT EXISTS episodes (
+    id              INTEGER PRIMARY KEY,
+    show_id         INTEGER NOT NULL REFERENCES shows(id)   ON DELETE CASCADE,
+    season_id       INTEGER NOT NULL REFERENCES seasons(id) ON DELETE CASCADE,
+    server_source   TEXT,             -- 'plex' | 'jellyfin'
+    server_id       TEXT,             -- media server native id
+    season_number   INTEGER NOT NULL,
+    episode_number  INTEGER NOT NULL,
+    title           TEXT,
+    overview        TEXT,
+    air_date        TEXT,             -- ISO date — drives the Calendar
+    runtime_minutes INTEGER,
+    still_url       TEXT,             -- per-episode thumbnail (server image path)
+    rating          REAL,             -- audience score (0-10)
+    tvdb_id         INTEGER,
+    monitored       INTEGER NOT NULL DEFAULT 1,
+    has_file        INTEGER NOT NULL DEFAULT 0,
+    UNIQUE (show_id, season_number, episode_number)
+);
+CREATE INDEX IF NOT EXISTS idx_episodes_show     ON episodes(show_id);
+CREATE INDEX IF NOT EXISTS idx_episodes_air      ON episodes(air_date);
+CREATE INDEX IF NOT EXISTS idx_episodes_wanted   ON episodes(monitored, has_file);
+
+-- ── Genres (normalised many-to-many; no comma-blob) ─────────────────────────
+CREATE TABLE IF NOT EXISTS genres (
+    id   INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE COLLATE NOCASE
+);
+CREATE TABLE IF NOT EXISTS movie_genres (
+    movie_id INTEGER NOT NULL REFERENCES movies(id) ON DELETE CASCADE,
+    genre_id INTEGER NOT NULL REFERENCES genres(id) ON DELETE CASCADE,
+    PRIMARY KEY (movie_id, genre_id)
+);
+CREATE TABLE IF NOT EXISTS show_genres (
+    show_id  INTEGER NOT NULL REFERENCES shows(id)  ON DELETE CASCADE,
+    genre_id INTEGER NOT NULL REFERENCES genres(id) ON DELETE CASCADE,
+    PRIMARY KEY (show_id, genre_id)
+);
+CREATE INDEX IF NOT EXISTS idx_movie_genres_genre ON movie_genres(genre_id);
+CREATE INDEX IF NOT EXISTS idx_show_genres_genre  ON show_genres(genre_id);
+
+-- ── Studios / Networks (normalised many-to-many) ────────────────────────────
+-- TMDB lists SEVERAL production companies per movie / networks per show; the old
+-- single studio/network scalar columns kept only the first, so studio/network
+-- collections only matched a title's primary company. These link tables hold ALL
+-- of them (same shape as genres above); the scalar columns stay for display.
+CREATE TABLE IF NOT EXISTS studios (
+    id   INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE COLLATE NOCASE
+);
+CREATE TABLE IF NOT EXISTS movie_studios (
+    movie_id  INTEGER NOT NULL REFERENCES movies(id)  ON DELETE CASCADE,
+    studio_id INTEGER NOT NULL REFERENCES studios(id) ON DELETE CASCADE,
+    PRIMARY KEY (movie_id, studio_id)
+);
+CREATE TABLE IF NOT EXISTS networks (
+    id   INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE COLLATE NOCASE
+);
+CREATE TABLE IF NOT EXISTS show_networks (
+    show_id    INTEGER NOT NULL REFERENCES shows(id)    ON DELETE CASCADE,
+    network_id INTEGER NOT NULL REFERENCES networks(id) ON DELETE CASCADE,
+    PRIMARY KEY (show_id, network_id)
+);
+CREATE INDEX IF NOT EXISTS idx_movie_studios_studio  ON movie_studios(studio_id);
+CREATE INDEX IF NOT EXISTS idx_show_networks_network ON show_networks(network_id);
+
+-- ── People + credits (cast & crew; normalised, no blob) ─────────────────────
+-- A person appears in many titles; deduped by their provider id. Each credit
+-- belongs to exactly one movie OR show (separate nullable FKs + CHECK, no
+-- polymorphic id), mirroring the media_files/downloads pattern.
+CREATE TABLE IF NOT EXISTS people (
+    id        INTEGER PRIMARY KEY,
+    name      TEXT NOT NULL,
+    tmdb_id   INTEGER UNIQUE,
+    photo_url TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_people_name ON people(name);
+
+CREATE TABLE IF NOT EXISTS credits (
+    id         INTEGER PRIMARY KEY,
+    person_id  INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+    movie_id   INTEGER REFERENCES movies(id) ON DELETE CASCADE,
+    show_id    INTEGER REFERENCES shows(id)  ON DELETE CASCADE,
+    department TEXT NOT NULL,        -- 'cast' | 'crew'
+    job        TEXT,                 -- Director | Writer | Creator (crew); 'Actor' (cast)
+    character  TEXT,                 -- the role played (cast)
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    CHECK ((movie_id IS NOT NULL) + (show_id IS NOT NULL) = 1)
+);
+CREATE INDEX IF NOT EXISTS idx_credits_movie  ON credits(movie_id);
+CREATE INDEX IF NOT EXISTS idx_credits_show   ON credits(show_id);
+CREATE INDEX IF NOT EXISTS idx_credits_person ON credits(person_id);
+
+-- ── Discover: "Not interested" / ignore list ────────────────────────────────
+-- Titles the user has hidden from Discover (movie/show level only — episodes can't be
+-- individually ignored). Keyed by (kind, tmdb_id); a denormalised title/poster snapshot so
+-- the manage-modal renders without a TMDB round-trip.
+CREATE TABLE IF NOT EXISTS video_ignored (
+    kind       TEXT    NOT NULL,           -- 'movie' | 'show'
+    tmdb_id    INTEGER NOT NULL,
+    title      TEXT,
+    year       INTEGER,
+    poster_url TEXT,
+    added_at   TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (kind, tmdb_id)
+);
+
+-- ── Content: YouTube (channels → videos) ────────────────────────────────────
+CREATE TABLE IF NOT EXISTS channels (
+    id                 INTEGER PRIMARY KEY,
+    youtube_id         TEXT NOT NULL UNIQUE,    -- channel id
+    title              TEXT NOT NULL,
+    handle             TEXT,                    -- @handle
+    description        TEXT,
+    avatar_url         TEXT,
+    banner_url         TEXT,
+    monitored          INTEGER NOT NULL DEFAULT 1,   -- "subscribed" (watchlist)
+    quality_profile_id INTEGER REFERENCES quality_profiles(id) ON DELETE SET NULL,
+    root_folder_id     INTEGER REFERENCES root_folders(id)     ON DELETE SET NULL,
+    path               TEXT,
+    added_at           TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at         TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_channels_monitored ON channels(monitored);
+
+CREATE TABLE IF NOT EXISTS channel_videos (
+    id               INTEGER PRIMARY KEY,
+    channel_id       INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    youtube_id       TEXT NOT NULL UNIQUE,      -- video id
+    title            TEXT NOT NULL,
+    description      TEXT,
+    published_at     TEXT,             -- ISO datetime — drives feed/Calendar
+    duration_seconds INTEGER,
+    thumbnail_url    TEXT,
+    monitored        INTEGER NOT NULL DEFAULT 1,
+    has_file         INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_channel_videos_channel   ON channel_videos(channel_id);
+CREATE INDEX IF NOT EXISTS idx_channel_videos_published ON channel_videos(published_at);
+CREATE INDEX IF NOT EXISTS idx_channel_videos_wanted    ON channel_videos(monitored, has_file);
+
+-- Cheap persistent cache of YouTube video upload dates (the flat listing omits
+-- them). Filled from the channel RSS feed + any per-video metadata fetch, so the
+-- channel page's year-seasons fill in over time without re-fetching. Standalone
+-- (no channels FK) since the bridge stores channels in video_watchlist.
+CREATE TABLE IF NOT EXISTS youtube_video_dates (
+    youtube_id   TEXT PRIMARY KEY,
+    published_at TEXT,
+    cached_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Tracks which followed channels have had their full upload dates fetched (by the
+-- background enricher) so we don't re-sweep them constantly.
+CREATE TABLE IF NOT EXISTS youtube_channel_enrichment (
+    channel_id  TEXT PRIMARY KEY,
+    enriched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    date_count  INTEGER NOT NULL DEFAULT 0,
+    method      TEXT                        -- 'innertube' | 'fallback'; NULL = legacy → re-enrich once
+);
+
+-- Remembered per-channel catalog so re-opening a channel (especially a watchlisted
+-- one) is instant: served cache-first, then a background re-stream refreshes it.
+-- Upload dates stay in youtube_video_dates (merged on read); this holds the list.
+CREATE TABLE IF NOT EXISTS youtube_channel_videos (
+    channel_id    TEXT NOT NULL,
+    youtube_id    TEXT NOT NULL,
+    title         TEXT,
+    thumbnail_url TEXT,
+    duration      TEXT,                  -- overlay badge, e.g. "12:34"
+    view_count    INTEGER,               -- approximate (parsed from "2.6M views")
+    cached_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (channel_id, youtube_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ycv_channel ON youtube_channel_videos(channel_id);
+
+-- Remembered channel metadata (avatar/subs/tags/banner) so the header renders
+-- instantly on re-open without a yt-dlp re-fetch.
+CREATE TABLE IF NOT EXISTS youtube_channel_meta (
+    channel_id       TEXT PRIMARY KEY,
+    title            TEXT,
+    handle           TEXT,
+    description      TEXT,
+    avatar_url       TEXT,
+    banner_url       TEXT,
+    subscriber_count INTEGER,
+    view_count       INTEGER,
+    tags             TEXT,                  -- JSON array
+    cached_at        TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Per-video supplementary stats from the no-key YouTube enrichers (keyed by
+-- youtube_id, NOT by channel, so a video shared across playlists is enriched
+-- once). Merged onto the cached catalog on read.
+--   ryd_*  Return YouTube Dislike  -> like/dislike estimates
+--   sb_*   SponsorBlock            -> crowd-sourced segments (in youtube_video_segments)
+-- status columns: NULL = pending, 'ok' | 'not_found' | 'error'.
+CREATE TABLE IF NOT EXISTS youtube_video_stats (
+    youtube_id      TEXT PRIMARY KEY,
+    like_count      INTEGER,
+    dislike_count   INTEGER,
+    ryd_status      TEXT,
+    ryd_attempted   TEXT,
+    sb_status       TEXT,
+    sb_attempted    TEXT,
+    dearrow_title   TEXT,                  -- DeArrow crowd-sourced better title
+    dearrow_status  TEXT,
+    dearrow_attempted TEXT
+);
+
+-- SponsorBlock crowd segments (sponsor/intro/outro/selfpromo/…) for a video.
+CREATE TABLE IF NOT EXISTS youtube_video_segments (
+    youtube_id TEXT NOT NULL,
+    category   TEXT NOT NULL,           -- sponsor | intro | outro | selfpromo | interaction | music_offtopic | preview | filler | poi_highlight | chapter
+    start_sec  REAL NOT NULL,
+    end_sec    REAL NOT NULL,
+    votes      INTEGER,
+    uuid       TEXT NOT NULL,
+    PRIMARY KEY (youtube_id, uuid)
+);
+CREATE INDEX IF NOT EXISTS idx_yvseg_video ON youtube_video_segments(youtube_id);
+
+-- ── Owned media files (the Library = content that has a file) ────────────────
+-- Exactly one owner FK is set (no polymorphic id). 1 row per physical file;
+-- usually 1:1 with its content, but the table allows history/extras.
+CREATE TABLE IF NOT EXISTS media_files (
+    id             INTEGER PRIMARY KEY,
+    movie_id       INTEGER REFERENCES movies(id)         ON DELETE CASCADE,
+    episode_id     INTEGER REFERENCES episodes(id)       ON DELETE CASCADE,
+    video_id       INTEGER REFERENCES channel_videos(id) ON DELETE CASCADE,
+    relative_path  TEXT NOT NULL,
+    size_bytes     INTEGER,
+    resolution     TEXT,             -- 480p | 720p | 1080p | 2160p
+    video_codec    TEXT,
+    audio_codec    TEXT,
+    release_source TEXT,             -- bluray | web-dl | webrip | hdtv | youtube
+    quality        TEXT,             -- resolved quality name
+    runtime_seconds INTEGER,
+    added_at       TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK ((movie_id IS NOT NULL) + (episode_id IS NOT NULL) + (video_id IS NOT NULL) = 1)
+);
+CREATE INDEX IF NOT EXISTS idx_media_files_movie   ON media_files(movie_id);
+CREATE INDEX IF NOT EXISTS idx_media_files_episode ON media_files(episode_id);
+CREATE INDEX IF NOT EXISTS idx_media_files_video   ON media_files(video_id);
+
+-- ── Downloads (active queue + history) ──────────────────────────────────────
+-- One target per row: a movie, a single episode, a whole season (pack), or a
+-- youtube video. Exactly one FK set (CHECK), no polymorphic id.
+CREATE TABLE IF NOT EXISTS downloads (
+    id                 INTEGER PRIMARY KEY,
+    movie_id           INTEGER REFERENCES movies(id)         ON DELETE SET NULL,
+    episode_id         INTEGER REFERENCES episodes(id)       ON DELETE SET NULL,
+    season_id          INTEGER REFERENCES seasons(id)        ON DELETE SET NULL,
+    video_id           INTEGER REFERENCES channel_videos(id) ON DELETE SET NULL,
+    title              TEXT NOT NULL,        -- display label
+    release_title      TEXT,                 -- actual release / nzb / torrent name
+    source             TEXT,                 -- torrent | usenet | youtube
+    client             TEXT,                 -- qbittorrent | sabnzbd | yt-dlp ...
+    client_download_id TEXT,                 -- hash / nzo_id to poll the client
+    indexer            TEXT,
+    status             TEXT NOT NULL DEFAULT 'queued'
+                       CHECK (status IN ('queued','downloading','importing',
+                                         'completed','failed','paused')),
+    quality            TEXT,
+    size_bytes         INTEGER,
+    downloaded_bytes   INTEGER NOT NULL DEFAULT 0,
+    progress           REAL    NOT NULL DEFAULT 0,   -- 0..100
+    download_speed_bps INTEGER NOT NULL DEFAULT 0,
+    eta_seconds        INTEGER,
+    error_message      TEXT,
+    added_at           TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    started_at         TEXT,
+    completed_at       TEXT,
+    CHECK ((movie_id IS NOT NULL) + (episode_id IS NOT NULL)
+         + (season_id IS NOT NULL) + (video_id IS NOT NULL) = 1)
+);
+CREATE INDEX IF NOT EXISTS idx_downloads_status    ON downloads(status);
+CREATE INDEX IF NOT EXISTS idx_downloads_completed ON downloads(completed_at);
+
+-- ── Activity feed (dashboard "Recent Activity") ─────────────────────────────
+CREATE TABLE IF NOT EXISTS activity (
+    id         INTEGER PRIMARY KEY,
+    event_type TEXT NOT NULL,        -- added | grabbed | imported | failed | renamed
+    message    TEXT NOT NULL,
+    movie_id   INTEGER REFERENCES movies(id)         ON DELETE SET NULL,
+    episode_id INTEGER REFERENCES episodes(id)       ON DELETE SET NULL,
+    video_id   INTEGER REFERENCES channel_videos(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_activity_created ON activity(created_at);
+
+-- ── User watchlist (curated follow-list: shows + people) ────────────────────
+-- DISTINCT from the library-derived v_watchlist below: this is the user's
+-- explicit follow-list and may include shows/people that are NOT in the library
+-- yet (the whole point of following someone). Keyed on the stable cross-context
+-- tmdb_id that both shows and people carry. The monitoring/discovery engine is a
+-- later phase — this table just records membership + enough to render + link.
+CREATE TABLE IF NOT EXISTS video_watchlist (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind        TEXT NOT NULL,             -- 'show' | 'person' | 'channel' (youtube)
+    tmdb_id     INTEGER NOT NULL,          -- tmdb id; for non-tmdb sources a stable surrogate of source_id
+    title       TEXT NOT NULL,             -- show title / person name / channel title
+    poster_url  TEXT,                      -- poster (show) / photo (person) / avatar (channel)
+    library_id  INTEGER,                   -- shows.id when owned (else NULL)
+    -- generic source bridge: 'tmdb' (default) or 'youtube'; source_id = native id
+    -- (channel youtube id) for non-tmdb rows. One table, both worlds.
+    source      TEXT NOT NULL DEFAULT 'tmdb',
+    source_id   TEXT,
+    -- 'follow' = explicit user follow. 'mute' = a TOMBSTONE: the user
+    -- un-followed something that is on the watchlist by default (an actively
+    -- airing library show), so the default must not re-add it. Library shows
+    -- that are still airing are watched by default WITHOUT a row here.
+    state       TEXT NOT NULL DEFAULT 'follow',
+    date_added  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(kind, tmdb_id)
+);
+CREATE INDEX IF NOT EXISTS idx_video_watchlist_kind ON video_watchlist(kind);
+
+-- WISHLIST (curated 'get this') — atomic units are MOVIES and EPISODES. Adding a
+-- whole show or a season just expands into episode rows. Upcoming (un-aired)
+-- episodes do NOT live here; the watchlist/calendar promote them once they air,
+-- so the wishlist only ever holds things you can actually acquire right now.
+CREATE TABLE IF NOT EXISTS video_wishlist (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind           TEXT NOT NULL,            -- 'movie' | 'episode' | 'video' (youtube)
+    tmdb_id        INTEGER NOT NULL,         -- movie's tmdb id | the SHOW's tmdb id (episode) | channel surrogate (video)
+    title          TEXT NOT NULL,            -- movie title | show title | channel title (video rows)
+    poster_url     TEXT,                     -- movie/show poster | channel avatar (video rows)
+    year           INTEGER,                  -- movie year (movie rows)
+    season_number  INTEGER,                  -- episode rows
+    episode_number INTEGER,                  -- episode rows
+    episode_title  TEXT,                     -- episode rows | video title (video rows)
+    still_url      TEXT,                     -- episode still | video thumbnail (video rows)
+    episode_overview  TEXT,                  -- episode synopsis | video description (video rows)
+    season_poster_url TEXT,                  -- the episode's SEASON poster (episode rows)
+    air_date       TEXT,                     -- episode air date | video published_at (video rows)
+    status         TEXT NOT NULL DEFAULT 'wanted',  -- wanted|searching|downloading|downloaded|failed
+    library_id     INTEGER,                  -- owned movies.id/shows.id when re-downloading
+    server_source  TEXT,                     -- server context that added it (informational)
+    -- generic source bridge (mirrors video_watchlist). For 'video' rows:
+    -- source='youtube', source_id=video youtube id, parent_source_id=channel youtube id.
+    source         TEXT NOT NULL DEFAULT 'tmdb',
+    source_id      TEXT,
+    parent_source_id TEXT,                   -- owning channel's youtube id (video rows)
+    date_added     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+-- one row per movie, one per (show, season, episode), one per youtube video —
+-- partial uniques so the shapes don't collide and re-adding is an idempotent upsert.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_video_wishlist_movie
+    ON video_wishlist(tmdb_id) WHERE kind = 'movie';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_video_wishlist_episode
+    ON video_wishlist(tmdb_id, season_number, episode_number) WHERE kind = 'episode';
+CREATE INDEX IF NOT EXISTS idx_video_wishlist_show ON video_wishlist(tmdb_id) WHERE kind = 'episode';
+-- NOTE: the source_id / parent_source_id partial indexes are created in code
+-- (VideoDatabase._ensure_indexes) AFTER the column migrations run — they can't
+-- live here because this script runs via executescript() BEFORE the ALTERs, so
+-- on an upgraded DB the columns wouldn't exist yet.
+
+-- ── Derived views: Watchlist / Wishlist / Calendar ──────────────────────────
+-- WATCHLIST = things you follow for NEW content: monitored shows + channels.
+CREATE VIEW IF NOT EXISTS v_watchlist AS
+    SELECT 'show'    AS kind, id, title, status, poster_url, monitored
+      FROM shows    WHERE monitored = 1
+    UNION ALL
+    SELECT 'channel' AS kind, id, title, NULL AS status, avatar_url AS poster_url, monitored
+      FROM channels WHERE monitored = 1;
+
+-- WISHLIST = wanted-but-missing: monitored movies without a file + monitored
+-- episodes that have aired but aren't owned.
+CREATE VIEW IF NOT EXISTS v_wishlist AS
+    SELECT 'movie'   AS kind, m.id AS ref_id, m.title AS title,
+           NULL AS parent_title, m.release_date AS due_date
+      FROM movies m
+     WHERE m.monitored = 1 AND m.has_file = 0
+    UNION ALL
+    SELECT 'episode' AS kind, e.id AS ref_id,
+           e.title AS title, s.title AS parent_title, e.air_date AS due_date
+      FROM episodes e
+      JOIN shows s ON s.id = e.show_id
+     WHERE e.monitored = 1 AND e.has_file = 0
+       AND e.air_date IS NOT NULL AND e.air_date <= date('now');
+
+-- CALENDAR = dated items (episode air dates, movie releases, channel uploads).
+CREATE VIEW IF NOT EXISTS v_calendar AS
+    SELECT 'episode' AS kind, e.id AS ref_id, e.air_date AS date,
+           e.title AS title, s.title AS parent_title
+      FROM episodes e JOIN shows s ON s.id = e.show_id
+     WHERE e.air_date IS NOT NULL
+    UNION ALL
+    SELECT 'movie' AS kind, m.id AS ref_id, m.release_date AS date,
+           m.title AS title, NULL AS parent_title
+      FROM movies m WHERE m.release_date IS NOT NULL
+    UNION ALL
+    SELECT 'video' AS kind, v.id AS ref_id, v.published_at AS date,
+           v.title AS title, c.title AS parent_title
+      FROM channel_videos v JOIN channels c ON c.id = v.channel_id
+     WHERE v.published_at IS NOT NULL;
+
+-- DOWNLOADS — every grab initiated from the video side lands here (movies/tv/youtube).
+-- The pipeline starts the download, watches it, and on completion moves the file to the
+-- per-type library folder and marks it completed. Status: queued|downloading|completed|failed.
+CREATE TABLE IF NOT EXISTS video_downloads (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind          TEXT NOT NULL,                 -- movie | show | youtube
+    title         TEXT,                          -- human title (e.g. the movie name)
+    release_title TEXT,                          -- the release/file being grabbed
+    source        TEXT,                          -- soulseek | torrent | usenet
+    username      TEXT,                          -- slskd uploader (for the grab + status)
+    filename      TEXT,                          -- slskd remote filename (full path)
+    size_bytes    INTEGER DEFAULT 0,
+    quality_label TEXT,
+    media_id      TEXT,                          -- the movie/show id (for the detail-page link)
+    media_source  TEXT,                          -- library | tmdb
+    year          INTEGER,
+    poster_url    TEXT,                          -- poster for the Downloads card
+    target_dir    TEXT,                          -- destination library folder
+    dest_path     TEXT,                          -- final moved path (set on completion)
+    status        TEXT NOT NULL DEFAULT 'downloading',
+    progress      REAL DEFAULT 0,
+    error         TEXT,
+    candidates    TEXT,                          -- JSON: remaining best-first hits to retry
+    search_ctx    TEXT,                          -- JSON: {scope,title,year,season,episode}
+    tried_queries TEXT,                          -- JSON: slskd queries already searched
+    tried_files   TEXT,                          -- JSON: release filenames already attempted
+    attempts      INTEGER DEFAULT 0,
+    created_at    TEXT DEFAULT (datetime('now')),
+    updated_at    TEXT DEFAULT (datetime('now')),
+    completed_at  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_video_downloads_status ON video_downloads(status);
+
+-- video_blocklist — releases (exact remote files) that must never be grabbed
+-- again (Sonarr-style). Auto-added when an imported file PROVES bad (sample /
+-- corrupt / fake), or by hand from a failed row. Identity = (username,
+-- filename): the slskd path is per-user, so this blocks the exact bad file
+-- without punishing other users' copies of the same release. Media fields are
+-- display-only context.
+CREATE TABLE IF NOT EXISTS video_blocklist (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind           TEXT,                          -- movie | show (what the grab was for)
+    title          TEXT,                          -- media title, for the management modal
+    media_id       TEXT,
+    media_source   TEXT,
+    season_number  INTEGER,
+    episode_number INTEGER,
+    username       TEXT NOT NULL,                 -- slskd uploader
+    filename       TEXT NOT NULL,                 -- full remote path = release identity
+    release_title  TEXT,
+    reason         TEXT,                          -- why it was blocked
+    created_at     TEXT DEFAULT (datetime('now')),
+    UNIQUE(username, filename)
+);
+CREATE INDEX IF NOT EXISTS idx_video_blocklist_file ON video_blocklist(filename);
+
+-- video_download_history — a PERMANENT record of every grab SoulSync completed
+-- (movies + episodes). video_downloads is the transient working queue (cleaned when
+-- finished); this is the archive that powers the Download History modal AND the
+-- smart post-download scan (newest completed item per library → probe the server).
+CREATE TABLE IF NOT EXISTS video_download_history (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    download_id    INTEGER,                       -- original video_downloads.id (transient)
+    kind           TEXT NOT NULL,                 -- movie | show
+    media_type     TEXT,                          -- movie | show (normalized; the scan scope)
+    title          TEXT,                          -- movie/show title
+    year           INTEGER,
+    season_number  INTEGER,                       -- episodes only
+    episode_number INTEGER,
+    episode_title  TEXT,
+    release_title  TEXT,                          -- the release/file grabbed
+    source         TEXT,                          -- soulseek | torrent | usenet
+    username       TEXT,                          -- uploader (soulseek)
+    filename       TEXT,                          -- remote filename grabbed
+    dest_path      TEXT,                          -- final placed path
+    size_bytes     INTEGER DEFAULT 0,
+    quality_label  TEXT,                          -- e.g. "1080p", "2160p HDR"
+    resolution     TEXT,                          -- parsed from the release name, best-effort
+    video_codec    TEXT,
+    media_id       TEXT,                          -- movie/show id for the detail deep-link
+    media_source   TEXT,                          -- library | tmdb
+    poster_url     TEXT,
+    outcome        TEXT NOT NULL DEFAULT 'completed', -- completed | import_failed | failed | cancelled
+    error          TEXT,                          -- failure reason (non-completed)
+    grabbed_at     TEXT,                          -- when the download started
+    completed_at   TEXT,                          -- terminal time
+    created_at     TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_vdl_history_kind ON video_download_history(kind);
+CREATE INDEX IF NOT EXISTS idx_vdl_history_completed ON video_download_history(completed_at);
+-- one history row per terminal download (idempotent re-persist / restart-safe)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_vdl_history_dedup
+    ON video_download_history(download_id, outcome, dest_path);
+
+-- ─── Overlay templates (Artwork Studio) ──────────────────────────────────────
+-- A saved, reusable overlay design: a named scene of positioned "layers" (badges,
+-- text, logos, images, shapes) that later gets composited onto poster art. This
+-- table stores only the DESIGN — the layer list + canvas meta as a JSON blob in
+-- `definition`; the actual poster compositing/apply lives elsewhere. Positions in
+-- the JSON are normalized (0..1) + anchored so one template fits every poster.
+CREATE TABLE IF NOT EXISTS overlay_templates (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL,
+    definition  TEXT NOT NULL DEFAULT '{}',       -- JSON: {version, canvas:{...}, layers:[...]}
+    thumbnail   TEXT,                              -- optional data-URL preview for the gallery card
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_overlay_templates_updated ON overlay_templates(updated_at DESC);
+
+-- Which template applies to which library scope (one per movie/show scope). The
+-- apply pipeline reads this to know what to burn onto each poster.
+CREATE TABLE IF NOT EXISTS overlay_assignment (
+    scope       TEXT PRIMARY KEY,                -- 'movie' | 'show' | 'season' | 'episode'
+    template_id INTEGER,                          -- overlay_templates.id (NULL = none)
+    enabled     INTEGER NOT NULL DEFAULT 0,
+    filter      TEXT,                             -- optional smart-rule JSON: only matching items
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Ledger: what we last burned onto each item, so re-runs render from the clean
+-- base (no stacking) and reconcile can spot staleness (template or data changed).
+CREATE TABLE IF NOT EXISTS overlay_apply (
+    kind        TEXT NOT NULL,                    -- 'movie' | 'show'
+    item_id     INTEGER NOT NULL,
+    template_id INTEGER,
+    base_sha    TEXT,                             -- sha1 of the clean base we composited
+    values_sig  TEXT,                             -- signature of the data that drove the badges
+    applied_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (kind, item_id)
+);
+
+-- ── Collections (Kometa parity): SoulSync-managed movie/show collections ─────
+-- A definition resolves (per run) to a set of OWNED library items and is synced
+-- to the server as a Plex Collection / Jellyfin BoxSet. Two builder kinds:
+--   'smart' — filter rules over the owned library (definition.rules, AND/OR)
+--   'list'  — a TMDB franchise/list or Trakt list, intersected with what's owned
+-- SoulSync resolves membership itself and pushes an explicit member list (it does
+-- NOT use native Plex smart collections), so the same definition works on Plex and
+-- Jellyfin and can feed the wishlist with the members you don't own yet.
+CREATE TABLE IF NOT EXISTS collection_definitions (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    name             TEXT NOT NULL,
+    kind             TEXT NOT NULL DEFAULT 'smart',   -- 'smart' | 'list'
+    media_type       TEXT NOT NULL DEFAULT 'movie',   -- 'movie' | 'show'
+    definition       TEXT NOT NULL DEFAULT '{}',      -- JSON: smart rules OR list source
+    poster_url       TEXT,                            -- collection art (server path or URL)
+    summary          TEXT,
+    sort_order       TEXT NOT NULL DEFAULT 'release', -- release | alpha | rating | added | custom
+    sync_mode        TEXT NOT NULL DEFAULT 'sync',    -- 'sync' (add+remove) | 'append' (add only)
+    pinned           INTEGER NOT NULL DEFAULT 0,      -- promote to home/library
+    wishlist_missing INTEGER NOT NULL DEFAULT 0,      -- 'list' kind: wishlist unowned members
+    enabled          INTEGER NOT NULL DEFAULT 1,      -- included in the daily sync
+    window_start     TEXT,                            -- seasonal window 'MM-DD' (with window_end):
+    window_end       TEXT,                            --   in-window syncs; out-of-window removes ours
+    collection_mode  TEXT,                            -- Plex library behavior: default|hide|hideItems|showItems (NULL = leave alone)
+    created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_collection_defs_updated ON collection_definitions(updated_at DESC);
+
+-- IMDb tt-id → TMDB id map (fed by the keyless IMDb chart/list sources).
+-- The mapping never changes, so persisting it makes an IMDb chart cost its
+-- 250 /find lookups exactly ONCE ever, not once per process restart.
+CREATE TABLE IF NOT EXISTS imdb_tmdb_map (
+    imdb_id      TEXT PRIMARY KEY,
+    movie_tmdb   INTEGER,
+    show_tmdb    INTEGER,
+    movie_poster TEXT,             -- TMDB poster URL (missing-browser art)
+    show_poster  TEXT,
+    updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- The server object we created for a definition + a signature of the last synced
+-- state. Keyed per definition (collections sync to the one active video server).
+-- Lets us update the right collection, never touch a user's manual collections,
+-- and skip a definition whose resolved members + settings are unchanged.
+CREATE TABLE IF NOT EXISTS collection_sync (
+    definition_id  INTEGER PRIMARY KEY REFERENCES collection_definitions(id) ON DELETE CASCADE,
+    server_source  TEXT,                             -- 'plex' | 'jellyfin' the collection lives on
+    server_id      TEXT,                             -- native collection / BoxSet id we manage
+    members_sig    TEXT,                             -- signature of resolved members + settings
+    member_count   INTEGER NOT NULL DEFAULT 0,
+    synced_at      TEXT
+);
+
+-- ── Library Maintenance: jobs & findings (mirrors the music repair standard) ──
+-- Jobs are code-defined (core/video/repair); these tables hold what a scan
+-- FOUND (pending → resolved|dismissed; approve == fix == resolved) and each
+-- run's tallies. Dedup treats every status as "already seen" — a re-scan never
+-- resurrects a dismissed or fixed finding.
+CREATE TABLE IF NOT EXISTS video_repair_findings (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id        TEXT NOT NULL,
+    finding_type  TEXT NOT NULL,
+    severity      TEXT NOT NULL DEFAULT 'info',      -- info | warning | critical
+    status        TEXT NOT NULL DEFAULT 'pending',   -- pending | resolved | dismissed
+    entity_type   TEXT,                              -- 'show' | 'movie' | 'episode' | 'file'
+    entity_id     TEXT,
+    file_path     TEXT,
+    title         TEXT NOT NULL,
+    description   TEXT,
+    details_json  TEXT DEFAULT '{}',                 -- per-finding-type payload (fix input)
+    user_action   TEXT,                              -- what the fix did (badge label)
+    resolved_at   TIMESTAMP,
+    created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_vrf_job     ON video_repair_findings(job_id);
+CREATE INDEX IF NOT EXISTS idx_vrf_status  ON video_repair_findings(status);
+CREATE INDEX IF NOT EXISTS idx_vrf_type    ON video_repair_findings(finding_type);
+CREATE INDEX IF NOT EXISTS idx_vrf_created ON video_repair_findings(created_at);
+
+CREATE TABLE IF NOT EXISTS video_repair_job_runs (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id            TEXT NOT NULL,
+    started_at        TIMESTAMP NOT NULL,
+    finished_at       TIMESTAMP,
+    duration_seconds  REAL,
+    items_scanned     INTEGER DEFAULT 0,
+    findings_created  INTEGER DEFAULT 0,
+    auto_fixed        INTEGER DEFAULT 0,
+    errors            INTEGER DEFAULT 0,
+    status            TEXT NOT NULL DEFAULT 'running'   -- running | completed
+);
+CREATE INDEX IF NOT EXISTS idx_vrjr_job ON video_repair_job_runs(job_id);
+
+-- ── Issues: user-reported problems on library items (the music standard) ─────
+-- Any profile reports; admins triage. entity = movie | show | episode with the
+-- library row id; snapshot_data denormalizes the item's state at report time
+-- so the report stays meaningful even if the item changes/vanishes. Reporter
+-- name is captured at create (profiles live in the music DB — isolation).
+CREATE TABLE IF NOT EXISTS video_issues (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_id     INTEGER NOT NULL DEFAULT 1,
+    reporter_name  TEXT,
+    entity_type    TEXT NOT NULL,                  -- movie | show | episode
+    entity_id      TEXT NOT NULL,                  -- library row id (string)
+    category       TEXT NOT NULL,
+    title          TEXT NOT NULL,
+    description    TEXT,
+    snapshot_data  TEXT DEFAULT '{}',
+    status         TEXT NOT NULL DEFAULT 'open',   -- open | in_progress | resolved | dismissed
+    priority       TEXT NOT NULL DEFAULT 'normal', -- low | normal | high
+    admin_response TEXT,
+    resolved_by    INTEGER,
+    resolved_at    TIMESTAMP,
+    created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_vissues_profile ON video_issues(profile_id);
+CREATE INDEX IF NOT EXISTS idx_vissues_status  ON video_issues(status);
+CREATE INDEX IF NOT EXISTS idx_vissues_entity  ON video_issues(entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_vissues_created ON video_issues(created_at);

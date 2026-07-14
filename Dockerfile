@@ -139,6 +139,11 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 ENV DATABASE_PATH=/app/data/music_library.db
+# The video side's DB + its poster-asset store (assets.default_root derives from
+# this path) MUST live in the persisted volume too — without it, every container
+# recreate wiped video_library.db (watchlists, collections, overlays, issues,
+# the YouTube ownership ledger).
+ENV VIDEO_DATABASE_PATH=/app/data/video_library.db
 ENV PUID=1000
 ENV PGID=1000
 ENV UMASK=022

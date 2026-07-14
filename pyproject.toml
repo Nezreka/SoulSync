@@ -16,6 +16,12 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # Tests can use assert, magic values, etc.
 "tests/**" = ["B", "F", "S110"]
+# The video subsystem predates the S110 (try/except/pass) rule being enforced;
+# its best-effort swallows in enrichment/import paths aren't held to it yet.
+# Scoped like tests/ above — revisit if we want to convert them to
+# contextlib.suppress and drop this exemption.
+"core/video/**" = ["S110"]
+"api/video/**" = ["S110"]
 
 [tool.pytest.ini_options]
 # Live/network integration tests are OPT-IN only. A `@pytest.mark.soundcloud_live`

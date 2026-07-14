@@ -475,6 +475,26 @@ socketio = SocketIO(app, async_mode='threading', cors_allowed_origins=_socketio_
 _log_socketio_startup_status(_socketio_cors_origins, logger)
 _socketio_rejection_logger = _SocketIORejectionLogger(logger)
 set_activity_toast_emitter(socketio.emit)
+# Live overlay-apply progress → 'overlay:progress' socket events (bell + panel).
+from core.video.overlays.service import set_overlay_progress_emitter as _set_overlay_emit
+_set_overlay_emit(socketio.emit)
+# Live collection-cleanup progress → 'collections:cleanup' socket events (studio).
+from core.video.collections.server_cleanup import set_cleanup_progress_emitter as _set_cleanup_emit
+_set_cleanup_emit(socketio.emit)
+# Live collection-sync progress → 'collections:sync' socket events (bell + studio).
+from core.video.collections.sync_job import set_sync_progress_emitter as _set_colsync_emit
+_set_colsync_emit(socketio.emit)
+# Live artwork-refresh progress → 'collections:artwork' socket events (bell + studio).
+from core.video.collections.poster_gen import set_artwork_progress_emitter as _set_colart_emit
+_set_colart_emit(socketio.emit)
+# Live bulk-metadata progress → 'video:bulk' socket events (bell + library bar).
+from core.video.bulk_ops import set_bulk_progress_emitter as _set_bulk_emit
+_set_bulk_emit(socketio.emit)
+# Video Library Maintenance (jobs & findings): live 'video:repair:progress'
+# socket events + the scheduler thread (force-runs work even when disabled).
+from core.video.repair.worker import get_video_repair_worker as _get_video_repair
+_get_video_repair().set_emitter(socketio.emit)
+_get_video_repair().start()
 
 # Plex PIN auth requests stored in memory for polling
 _plex_pin_requests = {}
@@ -609,8 +629,14 @@ def _set_profile_context():
 
     pid = session.get('profile_id', 1)
 
-    # Validate session profile still exists (handles deleted profiles)
+    # Validate session profile still exists (handles deleted profiles), and stash
+    # download permission on g so isolated blueprints (video) can gate without a
+    # music-DB read. Admin (1) is always allowed.
+    g.can_download = True
+    g.profile_name = "Admin"   # display name for isolated blueprints (video issues reporter)
+    g.is_admin = True          # profile 1 is always admin; others per their is_admin flag
     if pid != 1 and 'profile_id' in session:
+        g.is_admin = False
         try:
             database = get_database()
             profile = database.get_profile(pid)
@@ -618,6 +644,9 @@ def _set_profile_context():
                 session.pop('profile_id', None)
                 from flask import jsonify as _jsonify
                 return _jsonify({"error": "profile_required", "message": "Profile no longer exists"}), 401
+            g.can_download = bool((profile or {}).get('can_download', True))
+            g.profile_name = (profile or {}).get('name') or ("Profile %s" % pid)
+            g.is_admin = bool((profile or {}).get('is_admin', False))
         except Exception as e:
             logger.debug("profile session validate: %s", e)
 
@@ -843,6 +872,17 @@ VALID_PAGE_IDS = {
     'help',
     'hydrabase',
     'issues',
+    # Video side — per-profile page toggles (admin-only surfaces are gated separately,
+    # not via allowed_pages: overlay studio, video-import, video-settings, video-automations).
+    'video-dashboard',
+    'video-search',
+    'video-discover',
+    'video-library',
+    'video-watchlist',
+    'video-wishlist',
+    'video-downloads',
+    'video-calendar',
+    'video-tools',
 }
 
 def check_download_permission():
@@ -1394,6 +1434,18 @@ def _register_automation_handlers():
     )
     _register_extracted_handlers(_automation_deps)
 
+    # Bridge the isolated video download monitor's batch-complete signal into the
+    # automation engine (core/video can't import the engine). Mirrors how the music
+    # web_scan_manager forwards library_scan_completed. ONE forwarder relays EVERY
+    # published video event (batch complete, download completed/failed, repair
+    # findings, wishlist/watchlist changes, ...) to its same-named event trigger.
+    if automation_engine is not None:
+        try:
+            from core.video.download_events import register_event_forwarder
+            register_event_forwarder(
+                lambda etype, data: automation_engine.emit(etype, data or {}))
+        except Exception:
+            logger.exception("Could not wire video events -> automation engine")
 
     logger.info("Automation action handlers registered")
 
@@ -3099,6 +3151,79 @@ def get_system_stats():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/server-activity')
+def get_server_activity():
+    """Live Tautulli-style activity — every active Plex stream (music + video):
+    who's playing what, direct play vs transcode, bandwidth, progress. App-wide;
+    never raises (an unconfigured/down server is a normal state the UI shows)."""
+    try:
+        from core.server_activity import get_activity
+        return jsonify(get_activity())
+    except Exception:
+        logger.exception("server activity failed")
+        return jsonify({"ok": False, "reason": "error", "sessions": [],
+                        "summary": {"streams": 0}})
+
+
+@app.route('/api/server-activity/history')
+def get_server_activity_history():
+    """Recent watch/listen history (Tautulli's History) — app-wide."""
+    try:
+        from core.server_activity import get_history
+        limit = request.args.get("limit", default=40, type=int) or 40
+        return jsonify(get_history(limit=limit))
+    except Exception:
+        logger.exception("server activity history failed")
+        return jsonify({"ok": False, "reason": "error", "history": []})
+
+
+@app.route('/api/server-activity/stats')
+def get_server_activity_stats():
+    """Dashboard stats — most-watched, most-active users, plays over time, top
+    devices (Tautulli's Statistics). App-wide; cached; never raises."""
+    try:
+        from core.server_activity import get_stats
+        days = request.args.get("days", default=30, type=int) or 30
+        return jsonify(get_stats(days=days))
+    except Exception:
+        logger.exception("server activity stats failed")
+        return jsonify({"ok": False, "reason": "error"})
+
+
+@app.route('/api/server-activity/stop', methods=['POST'])
+def stop_server_activity_stream():
+    """Terminate an active stream with a message (Tautulli's kill move).
+    Admin-only — a shared server shouldn't let anyone end others' streams."""
+    try:
+        if not getattr(g, 'is_admin', False):
+            return jsonify({"ok": False, "error": "Admin only."}), 403
+        body = request.get_json(silent=True) or {}
+        from core.server_activity import stop_session
+        res = stop_session(str(body.get("session_key") or ""), str(body.get("message") or ""))
+        return jsonify(res), (200 if res.get("ok") else 400)
+    except Exception:
+        logger.exception("stop stream failed")
+        return jsonify({"ok": False, "error": "Failed to stop the stream."}), 500
+
+
+@app.route('/api/server-activity/image')
+def get_server_activity_image():
+    """Proxy a Plex image (poster/art) for the activity view so the token never
+    reaches the browser. ?path=/library/metadata/.../thumb/..."""
+    from flask import Response
+    try:
+        from core.server_activity import fetch_image
+        got = fetch_image(request.args.get("path") or "")
+        if not got:
+            return ("", 404)
+        content, ctype = got
+        return Response(content, mimetype=ctype,
+                        headers={"Cache-Control": "public, max-age=300"})
+    except Exception:
+        logger.exception("server activity image proxy failed")
+        return ("", 404)
+
+
 from core.debug_info import (
     _safe_check,
     get_debug_info as _debug_info_get,
@@ -4062,13 +4187,14 @@ def list_available_scripts():
 
 @app.route('/api/automations/blocks', methods=['GET'])
 def get_automation_blocks():
-    """Return available block types for the automation builder sidebar."""
-    return jsonify({
-        'triggers': _auto_blocks.TRIGGERS,
-        'actions': _auto_blocks.ACTIONS,
-        'notifications': _auto_blocks.NOTIFICATIONS,
-        'known_signals': _collect_known_signals(),
-    })
+    """Return available block types for the automation builder sidebar.
+
+    Music builder only — video-only blocks (scope='video') are filtered out
+    so the music builder never offers a video action. The video side fetches
+    its own scope via /api/video/automations/blocks."""
+    scoped = _auto_blocks.blocks_for_scope('music')
+    scoped['known_signals'] = _collect_known_signals()
+    return jsonify(scoped)
 
 @app.route('/api/mirrored-playlists/list', methods=['GET'])
 def get_mirrored_playlists_list():
@@ -39378,6 +39504,27 @@ def _emit_download_status_loop():
         except Exception as e:
             logger.debug(f"Error in download status emit loop: {e}")
 
+# --- Server Activity (Tautulli replacement) live push ---
+# Subscriber-gated: one Plex/Jellyfin poll per tick broadcast to EVERY open drawer
+# (the multi-client dedup win — N users watching = 1 upstream poll, not N), and the
+# loop idles completely when nobody has the drawer open.
+_activity_sids = set()
+_activity_sids_lock = threading.Lock()
+
+def _emit_server_activity_loop():
+    """Push live server activity to subscribed drawers every 3s. Skips the upstream
+    poll entirely when no client is subscribed, so it costs nothing at rest."""
+    while not globals().get('IS_SHUTTING_DOWN', False):
+        socketio.sleep(3)
+        try:
+            with _activity_sids_lock:
+                if not _activity_sids:
+                    continue
+            from core.server_activity import get_activity
+            socketio.emit('activity:update', get_activity(), room='activity:live')
+        except Exception as e:
+            logger.debug(f"Error in server activity emit loop: {e}")
+
 # --- Socket.IO event handlers ---
 
 def _ws_connection_blocked():
@@ -39417,7 +39564,29 @@ def handle_connect():
 
 @socketio.on('disconnect')
 def handle_disconnect():
+    # Drop this client from the server-activity live set so the push loop goes
+    # idle again once the last drawer closes / navigates away.
+    try:
+        with _activity_sids_lock:
+            _activity_sids.discard(request.sid)
+    except Exception:   # noqa: BLE001, S110 - cleanup only; a missing sid is fine
+        pass
     logger.info("WebSocket client disconnected")
+
+@socketio.on('activity:subscribe')
+def handle_activity_subscribe():
+    """A drawer opened → join the live room so the push loop starts feeding it."""
+    join_room('activity:live')
+    with _activity_sids_lock:
+        _activity_sids.add(request.sid)
+    logger.debug("activity: client subscribed (%d live)", len(_activity_sids))
+
+@socketio.on('activity:unsubscribe')
+def handle_activity_unsubscribe():
+    """A drawer closed / left the Activity tab → stop feeding this client."""
+    leave_room('activity:live')
+    with _activity_sids_lock:
+        _activity_sids.discard(request.sid)
 
 @socketio.on('downloads:subscribe')
 def handle_download_subscribe(data):
@@ -39665,6 +39834,20 @@ _configure_enrichment_api(
 
 app.register_blueprint(_create_enrichment_blueprint())
 
+# Video side API (isolated: reads database/video_library.db only, never music)
+from api.video import create_video_blueprint as _create_video_blueprint
+app.register_blueprint(_create_video_blueprint(), url_prefix='/api/video')
+
+# Resume video downloads at boot: without this the monitor only starts on a grab or
+# when the Downloads page opens, so in-flight downloads (and orphaned 'searching' rows)
+# after a restart would sit untracked until the user happened to visit the page.
+try:
+    from core.video.download_monitor import ensure_started as _ensure_video_download_monitor
+    from api.video import get_video_db as _get_video_db
+    _ensure_video_download_monitor(_get_video_db)
+except Exception:
+    logger.warning("could not start the video download monitor at boot", exc_info=True)
+
 
 def _emit_rate_monitor_loop():
     """Background thread that pushes API call rate data every 1 second for speedometer gauges.
@@ -39803,6 +39986,36 @@ def _emit_enrichment_status_loop():
                 socketio.emit(f'enrichment:{name}', status)
             except Exception as e:
                 logger.debug(f"Error emitting {name} status: {e}")
+
+def _emit_video_enrichment_status_loop():
+    """Push the VIDEO enrichment worker statuses over the socket every 2s, exactly
+    like the music enrichment loop — so the video dashboard listens instead of
+    polling /api/video/enrichment/<svc>/status (that browser polling was flooding
+    the access log). No-op until the video engine is actually running, so this
+    never spins it up on the music side."""
+    from core.video.enrichment.engine import peek_video_enrichment_engine
+    while not globals().get('IS_SHUTTING_DOWN', False):
+        socketio.sleep(2)
+        eng = peek_video_enrichment_engine()
+        if eng is None:
+            continue
+        # Emit for EVERY registered worker (matchers + backfill: fanart / opensubtitles
+        # / ryd / sponsorblock) so new dashboard buttons get live status with no extra
+        # wiring here.
+        for svc, w in (eng.workers or {}).items():
+            try:
+                socketio.emit(f'enrichment:{svc}', w.get_stats())
+            except Exception as e:
+                logger.debug(f"Error emitting video {svc} status: {e}")
+        # The YouTube date enricher is a standalone daemon (not an engine worker),
+        # but it reports the SAME stats shape — push it on the same socket so its
+        # dashboard orb listens like the others (no /enrichment/youtube/status poll).
+        try:
+            from core.video.youtube_enrichment import get_youtube_date_enricher
+            socketio.emit('enrichment:youtube', get_youtube_date_enricher().stats())
+        except Exception as e:
+            logger.debug(f"Error emitting video youtube status: {e}")
+
 
 def _emit_tool_progress_loop():
     """Background thread that pushes all tool progress statuses every 1 second."""
@@ -40326,6 +40539,8 @@ def start_runtime_services():
         socketio.start_background_task(_emit_service_status_loop)
         socketio.start_background_task(_emit_watchlist_count_loop)
         socketio.start_background_task(_emit_download_status_loop)
+        # Server Activity — subscriber-gated live push (idle when no drawer open)
+        socketio.start_background_task(_emit_server_activity_loop)
         # Phase 2: Dashboard pollers
         socketio.start_background_task(_emit_system_stats_loop)
         socketio.start_background_task(_emit_activity_feed_loop)
@@ -40333,6 +40548,9 @@ def start_runtime_services():
         socketio.start_background_task(_emit_wishlist_count_loop)
         # Phase 3: Enrichment sidebar workers
         socketio.start_background_task(_emit_enrichment_status_loop)
+        # Phase 3 (video): push video enrichment status so the video dashboard
+        # listens instead of polling (matches music; no access-log flood).
+        socketio.start_background_task(_emit_video_enrichment_status_loop)
         # Phase 4: Tool progress pollers
         socketio.start_background_task(_emit_tool_progress_loop)
         # Phase 5: Sync/discovery progress + scans

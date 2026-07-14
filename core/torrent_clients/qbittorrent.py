@@ -307,6 +307,7 @@ class QBittorrentAdapter:
             peers=int(item.get('num_leechs') or 0),
             eta=item.get('eta') if isinstance(item.get('eta'), int) and item.get('eta', 0) > 0 else None,
             save_path=item.get('save_path'),
+            content_path=item.get('content_path'),   # exact path to this torrent's file/folder
         )
 
     async def remove(self, torrent_id: str, delete_files: bool = False) -> bool:

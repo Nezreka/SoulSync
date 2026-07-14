@@ -1402,6 +1402,21 @@ function updateProfileIndicator() {
         }
     });
 
+    // Video side — same model. Control surfaces (Import, Settings, Automations) are
+    // admin-only; the Overlay Studio launcher is admin-only via a body class (robust
+    // to the dashboard re-rendering it); everything else is a per-profile page toggle
+    // sharing the same allowed_pages list. Help/Issues always visible.
+    const VIDEO_ADMIN_ONLY = ['video-import', 'video-settings', 'video-automations'];
+    document.querySelectorAll('.video-nav .nav-button[data-video-page]').forEach(btn => {
+        const page = btn.getAttribute('data-video-page');
+        if (page === 'video-help' || page === 'video-issues') { btn.style.display = ''; return; }
+        if (VIDEO_ADMIN_ONLY.includes(page)) { btn.style.display = currentProfile.is_admin ? '' : 'none'; return; }
+        if (currentProfile.id === 1) { btn.style.display = ''; return; }
+        const ap = currentProfile.allowed_pages;
+        btn.style.display = (!ap || ap.includes(page)) ? '' : 'none';
+    });
+    document.body.classList.toggle('video-admin', !!currentProfile.is_admin);
+
     // Toggle download capability
     if (canDownload()) {
         document.body.classList.remove('downloads-disabled');
@@ -1942,6 +1957,15 @@ const PROFILE_PAGE_LABELS = {
     help: 'Help & Docs',
     settings: 'Settings',
     'artist-detail': 'Artist Detail',
+    'video-dashboard': 'Video · Dashboard',
+    'video-search': 'Video · Search',
+    'video-discover': 'Video · Discover',
+    'video-library': 'Video · Library',
+    'video-watchlist': 'Video · Watchlist',
+    'video-wishlist': 'Video · Wishlist',
+    'video-downloads': 'Video · Downloads',
+    'video-calendar': 'Video · Calendar',
+    'video-tools': 'Video · Tools',
 };
 
 function getProfilePageLabel(pageId) {
@@ -1989,7 +2013,10 @@ function getProfilePageAccessOptions(profileSettings = {}) {
             if (seen.has(cb.value)) return;
             options.push({
                 value: cb.value,
-                label: cb.parentElement?.textContent?.trim() || getProfilePageLabel(cb.value),
+                // Use the canonical label (keeps the 'Video · …' prefix) so the edit
+                // form's FLAT list stays unambiguous; the create modal groups them
+                // under Music/Video dividers with plain labels instead.
+                label: getProfilePageLabel(cb.value),
                 checked: cb.disabled ? true : (allowedSet ? allowedSet.has(cb.value) : true),
                 disabled: cb.disabled,
             });

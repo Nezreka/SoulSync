@@ -26,6 +26,7 @@ from core.automation.handlers.maintenance import (
     auto_cleanup_wishlist,
     auto_update_discovery_pool,
     auto_backup_database,
+    auto_backup_video_database,
     auto_refresh_beatport_cache,
 )
 from core.automation.handlers.download_cleanup import (
@@ -35,6 +36,23 @@ from core.automation.handlers.download_cleanup import (
 )
 from core.automation.handlers.run_script import auto_run_script
 from core.automation.handlers.search_and_download import auto_search_and_download
+from core.automation.handlers.video_auto_wishlist_airing import auto_video_add_airing_episodes
+from core.automation.handlers.video_refresh_airing_schedules import auto_video_refresh_airing_schedules
+from core.automation.handlers.video_reenrich_stale import auto_video_reenrich_stale
+from core.automation.handlers.video_clean_youtube import auto_video_clean_youtube_episodes
+from core.automation.handlers.video_scan_watchlist_people import auto_video_scan_watchlist_people
+from core.automation.handlers.video_scan_watchlist_studios import auto_video_scan_watchlist_studios
+from core.automation.handlers.video_scan_watchlist_channels import auto_video_scan_watchlist_channels
+from core.automation.handlers.video_process_youtube_wishlist import auto_video_process_youtube_wishlist
+from core.automation.handlers.video_scan_watchlist_playlists import auto_video_scan_watchlist_playlists
+from core.automation.handlers.video_process_wishlist import auto_video_process_wishlist, is_running
+from core.automation.handlers.video_apply_overlays import auto_video_apply_overlays
+from core.automation.handlers.video_clean_plex_images import auto_video_clean_plex_images
+from core.automation.handlers.video_sync_collections import auto_video_sync_collections
+from core.automation.handlers.video_run_repair import auto_video_run_repair_job
+from core.automation.handlers.video_scan_library import (
+    auto_video_scan_library, auto_video_scan_server, auto_video_update_database,
+)
 from core.automation.handlers.progress_callbacks import (
     progress_init,
     progress_finish,
@@ -150,6 +168,25 @@ def register_all(deps: AutomationDeps) -> None:
         'clean_search_history',
         lambda config: auto_clean_search_history(config, deps),
     )
+    # Video twin — same handler, distinct action_type so the system seeder
+    # (keyed on action_type) creates a separate video-owned row.
+    engine.register_action_handler(
+        'video_clean_search_history',
+        lambda config: auto_clean_search_history(config, deps),
+    )
+    engine.register_action_handler(
+        'video_clean_completed_downloads',
+        lambda config: auto_clean_completed_downloads(config, deps),
+    )
+    engine.register_action_handler(
+        'video_full_cleanup',
+        lambda config: auto_full_cleanup(config, deps),
+    )
+    # Video DB backup — its OWN handler (video_library.db, not the music DB).
+    engine.register_action_handler(
+        'video_backup_database',
+        lambda config: auto_backup_video_database(config, deps),
+    )
     engine.register_action_handler(
         'clean_completed_downloads',
         lambda config: auto_clean_completed_downloads(config, deps),
@@ -165,6 +202,133 @@ def register_all(deps: AutomationDeps) -> None:
     engine.register_action_handler(
         'search_and_download',
         lambda config: auto_search_and_download(config, deps),
+    )
+
+    # Video side (isolated app, shared engine). The video twins are tagged
+    # owned_by='video' on their automation rows so they never surface on the
+    # music automations page; the handlers bridge into core.video.
+    engine.register_action_handler(
+        'video_scan_library',
+        lambda config: auto_video_scan_library(config, deps),
+    )
+    # Per-library deep scans (the video twin of music's 'Auto-Deep Scan Library',
+    # split because Movies and TV are independent libraries). A deep scan READS the
+    # server's current state into video.db + prunes what's gone (a full reconcile) —
+    # it does NOT tell Plex to rescan its disk, so it runs through the read-only
+    # update-database handler in 'deep' mode, not the nudge+read scan-library one.
+    # Distinct action types so the seeder (which keys on action_type) sees two
+    # separate automations; both reuse the one handler, scoped via media_type.
+    engine.register_action_handler(
+        'video_deep_scan_movies',
+        lambda config: auto_video_update_database({**config, 'media_type': 'movie', 'mode': config.get('mode') or 'deep'}, deps),
+    )
+    engine.register_action_handler(
+        'video_deep_scan_tv',
+        lambda config: auto_video_update_database({**config, 'media_type': 'show', 'mode': config.get('mode') or 'deep'}, deps),
+    )
+    # Post-download chain: scan the server, then (on the scan-done event) update the DB.
+    engine.register_action_handler(
+        'video_scan_server',
+        lambda config: auto_video_scan_server(config, deps),
+    )
+    engine.register_action_handler(
+        'video_update_database',
+        lambda config: auto_video_update_database(config, deps),
+    )
+    # Same incremental update, but on an hourly SCHEDULE (not just after a SoulSync scan) —
+    # so manual library additions (which Plex auto-scans) show up within the hour instead of
+    # waiting for the weekly deep scan. A distinct action_type because the seeder keys on it.
+    engine.register_action_handler(
+        'video_update_database_hourly',
+        lambda config: auto_video_update_database({'mode': 'incremental', **config}, deps),
+    )
+    # Sonarr-style: wishlist every episode airing today (for followed shows).
+    engine.register_action_handler(
+        'video_add_airing_episodes',
+        lambda config: auto_video_add_airing_episodes(config, deps),
+    )
+    # Keep the calendar honest: re-pull TMDB episode schedules for still-airing watchlist
+    # shows (the airing automation above reads the LOCAL calendar, so it needs this fresh).
+    engine.register_action_handler(
+        'video_refresh_airing_schedules',
+        lambda config: auto_video_refresh_airing_schedules(config, deps),
+    )
+    # Freshness: rolling re-enrichment of the stalest matched library items (oldest-refreshed
+    # first, skipping anything already fresh) so ratings/overviews/art never go out of date.
+    engine.register_action_handler(
+        'video_reenrich_stale',
+        lambda config: auto_video_reenrich_stale(config, deps),
+    )
+    # YouTube retention: delete channel episodes outside each channel's keep window (opt-in
+    # per channel; default keeps everything). The history row stays so it's not re-downloaded.
+    engine.register_action_handler(
+        'video_clean_youtube_episodes',
+        lambda config: auto_video_clean_youtube_episodes(config, deps),
+    )
+    # ── Watchlist → Wishlist pipeline ─────────────────────────────────────────
+    # Stage 1 — SCANS that fill the wishlist from what you follow.
+    # People: wishlist every un-owned movie followed actors/directors made (catalog + upcoming).
+    engine.register_action_handler(
+        'video_scan_watchlist_people',
+        lambda config: auto_video_scan_watchlist_people(config, deps),
+    )
+    # Studios: wishlist every un-owned movie a followed studio produced (catalog + upcoming).
+    engine.register_action_handler(
+        'video_scan_watchlist_studios',
+        lambda config: auto_video_scan_watchlist_studios(config, deps),
+    )
+    # Channels: new long-form uploads from followed YouTube channels (forward + last-N net).
+    engine.register_action_handler(
+        'video_scan_watchlist_channels',
+        lambda config: auto_video_scan_watchlist_channels(config, deps),
+    )
+    # Playlists: mirror followed YouTube playlists (whole list + new additions; playlist-as-show).
+    engine.register_action_handler(
+        'video_scan_watchlist_playlists',
+        lambda config: auto_video_scan_watchlist_playlists(config, deps),
+    )
+    # Stage 2 — PROCESSORS that drain the wishlist by downloading. Movie/episode go through
+    # slskd (search → pick best → grab); the guard skips an hourly tick while a drain is still
+    # working. YouTube goes through yt-dlp (queue all, a few concurrent).
+    engine.register_action_handler(
+        'video_process_movie_wishlist',
+        lambda config: auto_video_process_wishlist(config, deps, media_type='movie'),
+        lambda: is_running('movie'),
+    )
+    engine.register_action_handler(
+        'video_process_episode_wishlist',
+        lambda config: auto_video_process_wishlist(config, deps, media_type='episode'),
+        lambda: is_running('episode'),
+    )
+    engine.register_action_handler(
+        'video_process_youtube_wishlist',
+        lambda config: auto_video_process_youtube_wishlist(config, deps),
+    )
+    # Daily overlay refresh — reads the per-scope overlay settings and re-applies
+    # only enabled scopes, skipping unchanged items. Guarded so it can't overlap a
+    # manual Apply run (shared singleton job).
+    engine.register_action_handler(
+        'video_apply_overlays',
+        lambda config: auto_video_apply_overlays(config, deps),
+        lambda: __import__('core.video.overlays.service', fromlist=['status']).status().get('running'),
+    )
+    # Plex image cleanup (ImageMaid-style, API-only) — reclaims overlay-upload bloat.
+    engine.register_action_handler(
+        'video_clean_plex_images',
+        lambda config: auto_video_clean_plex_images(config, deps),
+        lambda: __import__('core.video.overlays.cleanup', fromlist=['status']).status().get('running'),
+    )
+    # Daily: sync SoulSync-managed collections to the server (add/remove members,
+    # art/sort/pin), skipping unchanged; list collections feed missing to wishlist.
+    engine.register_action_handler(
+        'video_sync_collections',
+        lambda config: auto_video_sync_collections(config, deps),
+    )
+    # Library Maintenance from an automation — queues onto the repair worker's
+    # force-run queue (one job at a time; overlap-safe by construction).
+    engine.register_action_handler(
+        'video_run_repair_job',
+        lambda config: auto_video_run_repair_job(config, deps),
     )
 
     # Progress + history callbacks: the engine invokes these around
