@@ -20,7 +20,10 @@ MAX_ATTEMPTS = 6   # total tries (candidate hops + requeries) before giving up
 def next_query(ctx: dict, tried: Any) -> str | None:
     """The next alternate slskd query to try for a search context, or None when
     exhausted. Movie: 'Title Year' then 'Title'. TV keeps the SxxExx/Sxx identity but
-    offers a couple of numbering variants."""
+    offers a couple of numbering variants, then — when the episode has an air date —
+    DATE-form queries (Sonarr's daily-series naming: 'Title 2026 07 08'), since daily
+    shows (late night / soaps / House Hunters) release by date, not SxxExx. The ranker
+    accepts a date match as the episode identity, so these are safe to try last."""
     ctx = ctx or {}
     triedset = set(tried or [])
     scope = str(ctx.get("scope") or "movie").lower()
@@ -34,6 +37,10 @@ def next_query(ctx: dict, tried: Any) -> str | None:
         s, e = int(ctx["season"]), int(ctx["episode"])
         cands.append("%s S%02dE%02d" % (title, s, e))
         cands.append("%s %dx%02d" % (title, s, e))
+        ad = str(ctx.get("air_date") or "")[:10]
+        if len(ad) == 10:
+            cands.append("%s %s" % (title, ad.replace("-", " ")))   # Title 2026 07 08
+            cands.append("%s %s" % (title, ad.replace("-", ".")))   # Title 2026.07.08
     elif scope == "season" and ctx.get("season") is not None:
         s = int(ctx["season"])
         cands.append("%s S%02d" % (title, s))

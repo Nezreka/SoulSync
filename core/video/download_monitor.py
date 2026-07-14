@@ -548,7 +548,9 @@ def _requery_worker(dl_id) -> None:
                                      scope=ctx.get("scope") or "movie",
                                      want_season=ctx.get("season"), want_episode=ctx.get("episode"),
                                      want_year=ctx.get("year"),
-                                     want_title=ctx.get("titles") or ctx.get("title"))
+                                     want_title=ctx.get("titles") or ctx.get("title"),
+                                     want_date=ctx.get("air_date"),
+                                     size_gb=round((hit.get("size_bytes") or 0) / (1024 ** 3), 1))
                 if v["accepted"]:
                     accepted.append(hit)
             row2 = db.get_video_download(dl_id)

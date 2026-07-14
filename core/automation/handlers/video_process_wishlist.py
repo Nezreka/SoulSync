@@ -151,7 +151,10 @@ def search_context(item: Dict[str, Any], media_type: str) -> Dict[str, Any]:
     else:
         ctx = {"scope": "episode", "title": item.get("show_title"),
                "season": item.get("season_number"), "episode": item.get("episode_number"),
-               "year": (str(item.get("air_date") or "")[:4] or None)}
+               "year": (str(item.get("air_date") or "")[:4] or None),
+               # full air date — daily series (Daily Show / Kimmel / soaps) release by
+               # DATE, not SxxExx; the ranker + retry queries key off this.
+               "air_date": (str(item.get("air_date") or "")[:10] or None)}
         tmdb_id, kind = item.get("show_tmdb_id"), "show"
     titles = _acceptable_titles(ctx["title"], kind, tmdb_id)
     if len(titles) > 1:
@@ -271,7 +274,8 @@ def _search_one_source(source: str, item: Dict[str, Any], media_type: str):
         return None, "unsupported source %r" % source
     cands = _evaluate_hits(hits, profile, ctx["scope"], ctx.get("season"), ctx.get("episode"),
                            want_year=ctx.get("year"),
-                           want_title=ctx.get("titles") or ctx.get("title"))
+                           want_title=ctx.get("titles") or ctx.get("title"),
+                           want_date=ctx.get("air_date"))
     for c in cands:
         c["source"] = source
     return cands, None
