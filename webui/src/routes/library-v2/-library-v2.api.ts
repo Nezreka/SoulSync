@@ -10,6 +10,9 @@ import type {
   LibraryV2ImportState,
   LibraryV2JobState,
   LibraryV2Pagination,
+  LibraryV2PlaylistDetail,
+  LibraryV2PlaylistPipelineState,
+  LibraryV2PlaylistSummary,
   LibraryV2QualityProfile,
   LibraryV2Search,
   LibraryV2Track,
@@ -469,6 +472,62 @@ export function libraryV2QualityProfilesQueryOptions() {
   return queryOptions({
     queryKey: [...LIBRARY_V2_QUERY_KEY, 'quality-profiles'],
     queryFn: fetchLibraryV2QualityProfiles,
+  });
+}
+
+// --- Playlists (Phase E) -----------------------------------------------------
+// These are intentionally thin clients for the existing mirrored-playlist
+// domain and its one shared lifecycle pipeline. Library v2 must not grow a
+// second playlist decision engine or importer.
+
+export async function fetchLibraryV2Playlists(): Promise<LibraryV2PlaylistSummary[]> {
+  const payload = await readJson<LibraryV2PlaylistSummary[] | { error?: string }>(
+    apiClient.get('mirrored-playlists'),
+  );
+  if (!Array.isArray(payload)) throw new Error(payload.error || 'Failed to load playlists');
+  return payload;
+}
+
+export async function fetchLibraryV2Playlist(playlistId: number): Promise<LibraryV2PlaylistDetail> {
+  const payload = await readJson<LibraryV2PlaylistDetail | { error?: string }>(
+    apiClient.get(`mirrored-playlists/${playlistId}`),
+  );
+  if ('error' in payload && payload.error) throw new Error(payload.error);
+  return payload as LibraryV2PlaylistDetail;
+}
+
+export async function runLibraryV2PlaylistPipeline(
+  playlistId: number,
+): Promise<LibraryV2PlaylistPipelineState> {
+  const payload = await readJson<{
+    success?: boolean;
+    state?: LibraryV2PlaylistPipelineState;
+    error?: string;
+  }>(apiClient.post(`mirrored-playlists/${playlistId}/pipeline/run`, { json: {} }));
+  if (!payload.success || !payload.state) {
+    throw new Error(payload.error || 'Playlist pipeline failed to start');
+  }
+  return payload.state;
+}
+
+export function libraryV2PlaylistsQueryOptions() {
+  return queryOptions({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'playlists'],
+    queryFn: fetchLibraryV2Playlists,
+    refetchInterval: (query) =>
+      query.state.data?.some((playlist) => playlist.pipeline_state?.status === 'running')
+        ? 2_000
+        : false,
+  });
+}
+
+export function libraryV2PlaylistQueryOptions(playlistId: number) {
+  return queryOptions({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'playlist', playlistId],
+    queryFn: () => fetchLibraryV2Playlist(playlistId),
+    enabled: playlistId > 0,
+    refetchInterval: (query) =>
+      query.state.data?.pipeline_state?.status === 'running' ? 2_000 : false,
   });
 }
 

@@ -13,6 +13,7 @@ export const LIBRARY_V2_MONITOR_FILTERS = ['all', 'monitored', 'unmonitored'] as
 export type LibraryV2MonitorFilter = (typeof LIBRARY_V2_MONITOR_FILTERS)[number];
 
 export const libraryV2SearchSchema = z.object({
+  section: z.enum(['artists', 'playlists']).default('artists').catch('artists'),
   q: z.string().default('').catch(''),
   sort: z.enum(LIBRARY_V2_SORTS).default('name').catch('name'),
   view: z.enum(['table', 'cards']).default('cards').catch('cards'),
@@ -20,6 +21,7 @@ export const libraryV2SearchSchema = z.object({
   page: z.coerce.number().int().positive().default(1).catch(1),
   artist: z.coerce.number().int().positive().optional().catch(undefined),
   album: z.coerce.number().int().positive().optional().catch(undefined),
+  playlist: z.coerce.number().int().positive().optional().catch(undefined),
   /** Artist detail: show only owned releases or the full provider discography. */
   releases: z.enum(['library', 'all']).default('library').catch('library'),
 });
@@ -205,4 +207,47 @@ export interface LibraryV2DiscographyStats {
   removed: number;
   total: number;
   source: string | null;
+}
+
+export interface LibraryV2PlaylistPipelineState {
+  run_id: string;
+  playlist_id: number;
+  status: 'idle' | 'running' | 'finished' | 'error' | 'skipped' | (string & {});
+  progress: number;
+  phase: string;
+  error?: string | null;
+}
+
+export interface LibraryV2PlaylistSummary {
+  id: number;
+  source: string;
+  source_playlist_id: string;
+  name: string;
+  display_name: string;
+  description: string | null;
+  owner: string | null;
+  image_url: string | null;
+  track_count: number;
+  total_count: number;
+  discovered_count: number;
+  wishlisted_count: number;
+  in_library_count: number;
+  updated_at: string | null;
+  pipeline_state: LibraryV2PlaylistPipelineState | null;
+}
+
+export interface LibraryV2PlaylistTrack {
+  id: number;
+  position: number;
+  track_name: string;
+  artist_name: string;
+  album_name: string;
+  duration_ms: number;
+  image_url: string | null;
+  source_track_id: string | null;
+  extra_data: string | null;
+}
+
+export interface LibraryV2PlaylistDetail extends LibraryV2PlaylistSummary {
+  tracks: LibraryV2PlaylistTrack[];
 }

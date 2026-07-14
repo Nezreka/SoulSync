@@ -780,7 +780,8 @@ Confirmation. (Status: teilweise — siehe Abschnitt 7 TODO.)
 (`POST /api/wishlist/process`) + Watchlist-Scan
 (`core/watchlist_scanner.py`). Playlists-Integration zuletzt. (Status:
 Search Monitored korrekt implementiert seit 2026-07-07-Pass; Playlists
-unbegonnen.)
+seit 2026-07-14 begonnen; typisierte Library-v2-Route/API-Grenze steht,
+Darstellung folgt in Roadmap-Punkt 14.)
 
 ### 5.3 Architektur-Korrektur — bestehende Main-Pipeline wiederverwenden
 
@@ -1954,7 +1955,17 @@ verändert; daher waren Frontend-Typecheck/Vitest/Build nicht erforderlich.
     Punkt 14 / Phase E — Playlists zuletzt über die vorhandene Wishlist-/
     Acquisition-Pipeline anbinden, ohne zweiten Importer oder zweite
     Decision-Engine.
-14. **Playlists** (Phase E, bewusst zuletzt).
+14. **Playlists** (Phase E, bewusst zuletzt). **Erste Slice 2026-07-14:**
+    Library v2 hat jetzt typisierte List-/Detail-Reads auf die vorhandenen
+    `mirrored_playlists`-Endpoints und einen dünnen Start-Client für exakt die
+    bestehende `run_mirrored_playlist_pipeline`-Kette (Refresh → Discovery →
+    Server-Sync → Wishlist). Route/Search-State tragen `section=playlists`
+    und stabile Playlist-Deep-Links; Loader prefetchten nur die jeweilige
+    bestehende Query. Keine neue Playlist-Decision-Engine, kein Importpfad.
+    Frontend-Check/Typecheck, acht gezielte API-/Schema-Vitests und Production-
+    Build sind grün. **Nächste Slice:** Playlist-Index und -Detail mit Track-/
+    Pipeline-Status auf der Library-Seite darstellen und den vorhandenen
+    Pipeline-Start sichtbar verdrahten.
 15. **Browser-Klick-Verifikation** in Docker für Phase-C/D-Flows, die nur
     code-/curl-verified sind.
 
