@@ -4198,6 +4198,18 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 /* ── Downloads page — reuses the music .adl-* layout; these are the video-only bits ── */
 .vdpg-wrap { padding: 4px 0 40px; }
 .adl-controls-right { display: flex; align-items: center; gap: 10px; }
+/* Phones: the video page adds History + Blocklist to the controls row, which
+   pushed Retry Failed / Clear Finished clean off-screen — wrap the row. And the
+   fixed-width status column starved the row title down to a few characters:
+   let the row wrap so art+title own the first line and status+actions drop to
+   a second line underneath. */
+@media (max-width: 520px) {
+    .vdpg-wrap .adl-controls-right { flex-wrap: wrap; }
+    .vdpg-card.adl-row { flex-wrap: wrap; }
+    .vdpg-card .adl-row-info { flex: 1 1 200px; }
+    .vdpg-card .adl-row-status { min-width: 0; text-align: left; }
+    .vdpg-card .vdpg-rowact { margin-left: auto; }
+}
 .vdpg-art { font-size: 22px; }                       /* emoji inside the .adl-row-art tile */
 .vdpg-art.vdpg-has-poster { background-size: cover; background-position: center; background-repeat: no-repeat; }
 .vdpg-rowact { flex-shrink: 0; display: flex; align-items: center; gap: 2px; }
