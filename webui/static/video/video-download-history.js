@@ -11,7 +11,7 @@
 
     var LIMIT = 40;
     var state = { open: false, tab: 'all', search: '', page: 1, loading: false,
-                  counts: { movie: 0, show: 0, total: 0 }, items: [], pages: 1 };
+                  counts: { movie: 0, show: 0, youtube: 0, total: 0 }, items: [], pages: 1 };
     var el = null, searchTimer = null;
 
     function esc(s) {
@@ -68,6 +68,7 @@
                         '<button class="vdh-tab vdh-tab--on" type="button" data-vdh-tab="all">All <span class="vdh-tab-n" data-vdh-c-all>0</span></button>' +
                         '<button class="vdh-tab" type="button" data-vdh-tab="movie">Movies <span class="vdh-tab-n" data-vdh-c-movie>0</span></button>' +
                         '<button class="vdh-tab" type="button" data-vdh-tab="show">TV <span class="vdh-tab-n" data-vdh-c-show>0</span></button>' +
+                        '<button class="vdh-tab" type="button" data-vdh-tab="youtube">YouTube <span class="vdh-tab-n" data-vdh-c-youtube>0</span></button>' +
                     '</div>' +
                     '<div class="vdh-search">' +
                         '<svg class="vdh-search-ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>' +
@@ -241,9 +242,12 @@
         q('[data-vdh-c-all]').textContent = state.counts.total || 0;
         q('[data-vdh-c-movie]').textContent = state.counts.movie || 0;
         q('[data-vdh-c-show]').textContent = state.counts.show || 0;
+        var yc = q('[data-vdh-c-youtube]');
+        if (yc) yc.textContent = state.counts.youtube || 0;
         var sub = q('[data-vdh-sub]');
         sub.textContent = (state.counts.total || 0) + ' grab' + (state.counts.total === 1 ? '' : 's') +
-            ' · ' + (state.counts.movie || 0) + ' movies · ' + (state.counts.show || 0) + ' episodes';
+            ' · ' + (state.counts.movie || 0) + ' movies · ' + (state.counts.show || 0) + ' episodes · '
+            + (state.counts.youtube || 0) + ' youtube';
         updateBadge(state.counts.total || 0);
     }
 

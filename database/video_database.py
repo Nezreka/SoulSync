@@ -1948,8 +1948,16 @@ class VideoDatabase:
             page, limit = 1, 40
         # Cleared ledger rows are hidden from the modal (the facts live on).
         where, args = ["cleared_at IS NULL"], []
-        if kind in ("movie", "show"):
-            where.append("kind = ?"); args.append(kind)
+        # Tabs classify by kind+source, not raw kind: episodes store kind='episode'
+        # (not 'show'), and YouTube grabs carry source='youtube'. So 'TV' = anything
+        # that isn't a movie or a YouTube grab; 'youtube' = source/kind youtube.
+        _yt = "(COALESCE(source,'') = 'youtube' OR kind = 'youtube')"
+        if kind == "movie":
+            where.append("kind = 'movie' AND NOT " + _yt)
+        elif kind in ("show", "tv"):
+            where.append("kind <> 'movie' AND NOT " + _yt)
+        elif kind == "youtube":
+            where.append(_yt)
         if outcome:
             where.append("outcome = ?"); args.append(outcome)
         s = (search or "").strip()
@@ -1981,15 +1989,22 @@ class VideoDatabase:
             conn.close()
 
     def download_history_counts(self) -> dict:
-        """{movie, show, total} of completed grabs (for the modal tabs/badge)."""
+        """{movie, show(=TV: episodes + show/season packs), youtube, total} of completed
+        grabs (for the modal tabs/badge). Classifies by kind+source so episodes (kind=
+        'episode') land under TV and YouTube (source='youtube') gets its own bucket —
+        the old version counted only kind='movie'/'show', so TV + YouTube vanished."""
         conn = self._get_connection()
         try:
-            rows = conn.execute(
-                "SELECT kind, COUNT(*) c FROM video_download_history "
-                "WHERE outcome='completed' AND cleared_at IS NULL GROUP BY kind").fetchall()
-            by = {r["kind"]: r["c"] for r in rows}
-            movie, show = by.get("movie", 0), by.get("show", 0)
-            return {"movie": movie, "show": show, "total": movie + show}
+            _yt = "(COALESCE(source,'') = 'youtube' OR kind = 'youtube')"
+            row = conn.execute(
+                "SELECT "
+                "SUM(CASE WHEN " + _yt + " THEN 1 ELSE 0 END) AS yt, "
+                "SUM(CASE WHEN kind = 'movie' AND NOT " + _yt + " THEN 1 ELSE 0 END) AS mv, "
+                "SUM(CASE WHEN kind <> 'movie' AND NOT " + _yt + " THEN 1 ELSE 0 END) AS tv, "
+                "COUNT(*) AS total FROM video_download_history "
+                "WHERE outcome='completed' AND cleared_at IS NULL").fetchone()
+            return {"movie": row["mv"] or 0, "show": row["tv"] or 0,
+                    "youtube": row["yt"] or 0, "total": row["total"] or 0}
         finally:
             conn.close()
 
