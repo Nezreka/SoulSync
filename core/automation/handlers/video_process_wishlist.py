@@ -285,28 +285,34 @@ def _default_search(item: Dict[str, Any], media_type: str):
     """Ranked candidates for a wished item, honoring the download mode/order. In hybrid mode the
     sources are tried IN ORDER — the first that yields an ACCEPTED release wins (mirrors the
     music per-item quality-fallback). Returns [] for a real empty result across all sources, or
-    **None** (with the error) if no source's search could even run."""
+    **None** (with the error) if no source's search could even run.
+
+    When SOME source in the chain couldn't run (e.g. torrent is first but Prowlarr
+    isn't configured), that skip rides back in the error slot alongside the surviving
+    results — silent degradation to a weaker source misled a whole run once ('why
+    can't it find what's plainly on TPB?'), so the run log must say it every time."""
     from core.video import download_config
     from api.video import get_video_db
     cfg = download_config.load(get_video_db())
     mode = str(cfg.get("download_mode") or "soulseek")
     chain = (cfg.get("hybrid_order") or ["soulseek"]) if mode == "hybrid" else [mode]
-    last_err = None
+    skips: List[str] = []
     fallback = None      # hits that didn't pass the profile — kept so the caller can say 'rejected'
     for src in chain:
         cands, err = _search_one_source(src, item, media_type)
         if cands is None:
-            last_err = err
+            skips.append("%s skipped — %s" % (src, err or "search didn't run"))
             continue
         if any(c.get("accepted") for c in cands):
             return cands, None                       # first source with a usable release wins
         if cands:
             fallback = cands
+    note = "; ".join(skips) or None
     if fallback is not None:
-        return fallback, None                        # → 'rejected' (hits, none accepted)
-    if last_err is not None:
-        return None, last_err                        # → 'search didn't run'
-    return [], None                                  # → 'source empty'
+        return fallback, note                        # → 'rejected' (hits, none accepted)
+    if len(skips) == len(chain):
+        return None, note                            # → 'search didn't run' (nothing ran at all)
+    return [], note                                  # → 'source empty' (+ any skip note)
 
 
 def _default_enqueue(item: Dict[str, Any], best: Dict[str, Any], candidates: List[Dict[str, Any]],
@@ -432,14 +438,19 @@ def auto_video_process_wishlist(
                 name = "%s S%02dE%02d" % (name, int(it.get('season_number') or 0),
                                           int(it.get('episode_number') or 0))
             # tell apart: grabbed / search-didn't-run / source-empty / hits-but-all-rejected.
+            # `err` alongside RESULTS is a non-fatal note (a chain source was skipped,
+            # e.g. 'torrent skipped — Prowlarr not configured') — always show it, or a
+            # mis-configured first source silently degrades every search.
             if ok:
                 msg, lt = "Grabbed '%s'" % name, 'success'
             elif didnt_run:
-                msg = ("Search didn't run for '%s' — slskd error: %s" % (name, err)) if err \
+                msg = ("Search didn't run for '%s' — %s" % (name, err)) if err \
                     else ("Search didn't run for '%s' — slskd not responding?" % name)
                 lt = 'warning'
             elif not cands:
                 msg, lt = "No search results for '%s'" % name, 'info'
+                if err:
+                    msg, lt = msg + " · " + str(err), 'warning'
             elif it.get('_min_rank'):
                 msg = ("%d result(s) for '%s', none better than your current copy — "
                        "still watching for an upgrade" % (len(cands), name))
@@ -447,6 +458,8 @@ def auto_video_process_wishlist(
             else:
                 why = (cands[0].get('rejected') or 'none met your quality profile')
                 msg, lt = "%d result(s) for '%s', none accepted — %s" % (len(cands), name, why), 'info'
+                if err:
+                    msg, lt = msg + " · " + str(err), 'warning'
             with lock:
                 searched[0] += 1
                 if ok:

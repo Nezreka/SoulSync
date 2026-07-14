@@ -194,3 +194,46 @@ def test_titles_match_squeezed_spacing_and_segments():
     assert titles_match("90DayFiance.S12E09.1080p.mkv", "90 Day Fiancé") is True
     assert titles_match(r"TV/90 Day Fiancé/Season 12/ep.mkv", ["90 Day Fiancé"]) is True
     assert titles_match(r"TV/Little House/Season 12/ep.mkv", ["House Hunters"]) is False
+
+
+# ── silent source degradation (torrent skipped: Prowlarr not configured) ──────
+def test_default_search_reports_skipped_chain_sources(monkeypatch):
+    """Boulder's run: hybrid [torrent, soulseek] with Prowlarr unconfigured — every
+    search silently degraded to Soulseek-only and the run log never said so. The
+    skip must ride back with the results so the log shows it every time."""
+    import core.automation.handlers.video_process_wishlist as mod
+
+    monkeypatch.setattr("core.video.download_config.load",
+                        lambda db: {"download_mode": "hybrid",
+                                    "hybrid_order": ["torrent", "soulseek"]})
+    monkeypatch.setattr("api.video.get_video_db", lambda: object())
+
+    def fake_source(src, item, media_type):
+        if src == "torrent":
+            return None, "Prowlarr not configured"
+        return [{"accepted": False, "rejected": "Wrong title", "filename": "x.mkv"}], None
+
+    monkeypatch.setattr(mod, "_search_one_source", fake_source)
+    cands, note = mod._default_search({"title": "X"}, "episode")
+    assert len(cands) == 1
+    assert "torrent skipped — Prowlarr not configured" in note
+
+    # empty soulseek result still carries the note
+    monkeypatch.setattr(mod, "_search_one_source",
+                        lambda src, item, mt: (None, "Prowlarr not configured")
+                        if src == "torrent" else ([], None))
+    cands2, note2 = mod._default_search({"title": "X"}, "episode")
+    assert cands2 == [] and "torrent skipped" in note2
+
+    # every source down -> didn't run at all
+    monkeypatch.setattr(mod, "_search_one_source",
+                        lambda src, item, mt: (None, "down"))
+    cands3, note3 = mod._default_search({"title": "X"}, "episode")
+    assert cands3 is None and "torrent skipped" in note3 and "soulseek skipped" in note3
+
+    # an accepted release means no note needed (the grab happened)
+    monkeypatch.setattr(mod, "_search_one_source",
+                        lambda src, item, mt: (None, "Prowlarr not configured")
+                        if src == "torrent" else ([{"accepted": True, "filename": "y.mkv"}], None))
+    cands4, note4 = mod._default_search({"title": "X"}, "episode")
+    assert cands4[0]["accepted"] and note4 is None
