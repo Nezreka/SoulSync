@@ -2024,7 +2024,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
     @app.route("/api/library/v2/<entity>/<int:eid>/file-delete-preview")
     def lib2_file_delete_preview(entity, eid):
-        """ADR-05 preview for the separate physical-file delete command."""
+        """ADR-05 preview for the separate physical-file command."""
         guard = _guard()
         if guard:
             return guard
@@ -2034,6 +2034,44 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 get_database(), entity=entity, entity_id=eid
             )
             return jsonify({"success": True, **preview})
+        except FileDeleteError as exc:
+            return jsonify({"success": False, "error": str(exc)}), exc.status
+
+    @app.route(
+        "/api/library/v2/<entity>/<int:eid>/file-delete",
+        methods=["POST"],
+    )
+    def lib2_file_delete(entity, eid):
+        """Execute a fresh-token-validated, journaled ADR-05 delete."""
+        guard = _guard()
+        if guard:
+            return guard
+        from core.library2.file_delete import FileDeleteError, delete_entity_files
+        try:
+            body = request.get_json(silent=True)
+            if not isinstance(body, dict):
+                raise FileDeleteError("JSON body is required")
+            operation = delete_entity_files(
+                get_database(),
+                entity=entity,
+                entity_id=eid,
+                preview_token=body.get("preview_token"),
+            )
+            return jsonify({"success": True, "operation": operation})
+        except FileDeleteError as exc:
+            return jsonify({"success": False, "error": str(exc)}), exc.status
+
+    @app.route("/api/library/v2/file-delete-operations/<operation_id>")
+    def lib2_file_delete_operation(operation_id):
+        guard = _guard()
+        if guard:
+            return guard
+        from core.library2.file_delete import FileDeleteError, get_delete_operation
+        try:
+            return jsonify({
+                "success": True,
+                "operation": get_delete_operation(get_database(), operation_id),
+            })
         except FileDeleteError as exc:
             return jsonify({"success": False, "error": str(exc)}), exc.status
 

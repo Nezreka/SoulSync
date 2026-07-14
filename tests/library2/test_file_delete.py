@@ -6,7 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from core.library2.file_delete import FileDeleteError, preview_entity_files
+from core.library2.file_delete import (
+    FileDeleteError,
+    delete_entity_files,
+    preview_entity_files,
+    reconcile_incomplete_deletes,
+)
 
 
 class _Config:
@@ -118,3 +123,155 @@ def test_preview_missing_entity_is_controlled(imported_conn, legacy_db):
     with pytest.raises(FileDeleteError) as exc:
         preview_entity_files(legacy_db, entity="albums", entity_id=999999)
     assert exc.value.status == 404
+
+
+def test_execute_journals_before_unlink_and_preserves_entity(
+        imported_conn, legacy_db, tmp_path):
+    root = tmp_path / "music"
+    root.mkdir()
+    path = root / "delete.flac"
+    path.write_bytes(b"audio")
+    track = imported_conn.execute("SELECT id, album_id FROM lib2_tracks LIMIT 1").fetchone()
+    file_id = _set_track_path(imported_conn, track["id"], path)
+    config = _Config([str(root)])
+    preview = preview_entity_files(
+        legacy_db, entity="albums", entity_id=track["album_id"], config_manager=config
+    )
+    observed = {}
+
+    def _unlink(resolved):
+        with legacy_db._get_connection() as check:
+            observed["operation"] = check.execute(
+                "SELECT status FROM lib2_file_delete_operations"
+            ).fetchone()[0]
+            observed["item"] = check.execute(
+                "SELECT status FROM lib2_file_delete_items"
+            ).fetchone()[0]
+        Path(resolved).unlink()
+
+    operation = delete_entity_files(
+        legacy_db,
+        entity="albums",
+        entity_id=track["album_id"],
+        preview_token=preview["preview_token"],
+        config_manager=config,
+        unlink=_unlink,
+    )
+
+    assert observed == {"operation": "executing", "item": "deleting"}
+    assert operation["status"] == "completed"
+    assert operation["items"][0]["status"] == "deleted"
+    assert not path.exists()
+    row = imported_conn.execute(
+        "SELECT file_state FROM lib2_track_files WHERE id=?", (file_id,)
+    ).fetchone()
+    assert row["file_state"] == "deleted"
+    assert imported_conn.execute(
+        "SELECT 1 FROM lib2_albums WHERE id=?", (track["album_id"],)
+    ).fetchone(), "physical delete must not remove the library entity"
+
+
+def test_execute_rejects_stale_preview_without_journal(
+        imported_conn, legacy_db, tmp_path):
+    root = tmp_path / "music"
+    root.mkdir()
+    path = root / "changed.flac"
+    path.write_bytes(b"one")
+    track = imported_conn.execute("SELECT id, album_id FROM lib2_tracks LIMIT 1").fetchone()
+    _set_track_path(imported_conn, track["id"], path)
+    config = _Config([str(root)])
+    preview = preview_entity_files(
+        legacy_db, entity="albums", entity_id=track["album_id"], config_manager=config
+    )
+    path.write_bytes(b"changed-size")
+
+    with pytest.raises(FileDeleteError) as exc:
+        delete_entity_files(
+            legacy_db,
+            entity="albums",
+            entity_id=track["album_id"],
+            preview_token=preview["preview_token"],
+            config_manager=config,
+        )
+
+    assert exc.value.status == 409
+    assert path.exists()
+    assert imported_conn.execute(
+        "SELECT COUNT(*) FROM lib2_file_delete_operations"
+    ).fetchone()[0] == 0
+
+
+def test_execute_deletes_duplicate_linked_path_once(
+        imported_conn, legacy_db, tmp_path):
+    root = tmp_path / "music"
+    root.mkdir()
+    path = root / "shared.flac"
+    path.write_bytes(b"same")
+    track = imported_conn.execute("SELECT id, album_id FROM lib2_tracks LIMIT 1").fetchone()
+    first_id = _set_track_path(imported_conn, track["id"], path)
+    second_id = imported_conn.execute(
+        "INSERT INTO lib2_track_files(track_id, path) VALUES(?,?)",
+        (track["id"], str(path)),
+    ).lastrowid
+    imported_conn.commit()
+    config = _Config([str(root)])
+    preview = preview_entity_files(
+        legacy_db, entity="albums", entity_id=track["album_id"], config_manager=config
+    )
+    calls = []
+
+    operation = delete_entity_files(
+        legacy_db,
+        entity="albums",
+        entity_id=track["album_id"],
+        preview_token=preview["preview_token"],
+        config_manager=config,
+        unlink=lambda resolved: (calls.append(resolved), Path(resolved).unlink())[1],
+    )
+
+    assert calls == [str(path)]
+    assert operation["items"][0]["file_ids"] == [first_id, second_id]
+    states = imported_conn.execute(
+        "SELECT file_state FROM lib2_track_files WHERE id IN (?,?) ORDER BY id",
+        (first_id, second_id),
+    ).fetchall()
+    assert [row["file_state"] for row in states] == ["deleted", "deleted"]
+
+
+def test_reconcile_finishes_unlink_completed_before_process_crash(
+        imported_conn, legacy_db, tmp_path):
+    root = tmp_path / "music"
+    root.mkdir()
+    path = root / "crash.flac"
+    path.write_bytes(b"audio")
+    track = imported_conn.execute("SELECT id, album_id FROM lib2_tracks LIMIT 1").fetchone()
+    file_id = _set_track_path(imported_conn, track["id"], path)
+    config = _Config([str(root)])
+    preview = preview_entity_files(
+        legacy_db, entity="albums", entity_id=track["album_id"], config_manager=config
+    )
+
+    def _crash_after_unlink(resolved):
+        Path(resolved).unlink()
+        raise KeyboardInterrupt("simulated process death")
+
+    with pytest.raises(KeyboardInterrupt):
+        delete_entity_files(
+            legacy_db,
+            entity="albums",
+            entity_id=track["album_id"],
+            preview_token=preview["preview_token"],
+            config_manager=config,
+            unlink=_crash_after_unlink,
+        )
+
+    assert imported_conn.execute(
+        "SELECT status FROM lib2_file_delete_items"
+    ).fetchone()[0] == "deleting"
+    assert reconcile_incomplete_deletes(legacy_db) == 1
+    assert imported_conn.execute(
+        "SELECT file_state FROM lib2_track_files WHERE id=?", (file_id,)
+    ).fetchone()[0] == "deleted"
+    assert imported_conn.execute(
+        "SELECT status FROM lib2_file_delete_operations"
+    ).fetchone()[0] == "completed"

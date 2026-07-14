@@ -681,6 +681,13 @@ def ensure_library_v2_schema(connection: Any) -> None:
         ensure_metadata_overrides_schema(cursor)
     except Exception as e:  # noqa: BLE001
         logger.error("metadata-overrides migration failed (will retry next start): %s", e)
+    # ADR-05 physical deletion is a separate, journaled command. The journal
+    # is durable before any filesystem mutation and retains crash evidence.
+    try:
+        from core.library2.file_delete import ensure_file_delete_schema
+        ensure_file_delete_schema(cursor)
+    except Exception as e:  # noqa: BLE001
+        logger.error("file-delete journal migration failed (will retry next start): %s", e)
     # The read API falls back to download provenance (track_downloads) for
     # files the importer knew no quality data for — index the lookup column so
     # album views don't table-scan a large history per track. Guarded: the

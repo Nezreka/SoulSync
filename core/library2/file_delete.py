@@ -12,14 +12,56 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+import uuid
+from typing import Any, Callable, Dict, List, Optional
+
+
+FILE_DELETE_OPERATIONS_DDL = """
+CREATE TABLE IF NOT EXISTS lib2_file_delete_operations (
+    id TEXT PRIMARY KEY,
+    entity_type TEXT NOT NULL,
+    entity_id INTEGER NOT NULL,
+    preview_token TEXT NOT NULL,
+    status TEXT NOT NULL,
+    file_count INTEGER NOT NULL,
+    total_size INTEGER NOT NULL DEFAULT 0,
+    error TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP
+)
+"""
+FILE_DELETE_ITEMS_DDL = """
+CREATE TABLE IF NOT EXISTS lib2_file_delete_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    operation_id TEXT NOT NULL,
+    file_ids_json TEXT NOT NULL,
+    stored_paths_json TEXT NOT NULL,
+    resolved_path TEXT NOT NULL,
+    root_path TEXT NOT NULL,
+    size INTEGER,
+    mtime_ns INTEGER,
+    status TEXT NOT NULL,
+    error TEXT,
+    deleted_at TIMESTAMP,
+    FOREIGN KEY (operation_id) REFERENCES lib2_file_delete_operations(id) ON DELETE RESTRICT
+)
+"""
 
 
 class FileDeleteError(ValueError):
     def __init__(self, message: str, status: int = 400):
         super().__init__(message)
         self.status = status
+
+
+def ensure_file_delete_schema(cursor) -> None:
+    """Create the durable ADR-05 operation/item journal."""
+    cursor.execute(FILE_DELETE_OPERATIONS_DDL)
+    cursor.execute(FILE_DELETE_ITEMS_DDL)
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_lib2_file_delete_items_operation "
+        "ON lib2_file_delete_items(operation_id, status)"
+    )
 
 
 def _library_roots(config_manager: Any = None) -> List[str]:
@@ -196,4 +238,261 @@ def preview_entity_files(
     }
 
 
-__all__ = ["FileDeleteError", "preview_entity_files"]
+def _operation_snapshot(conn, operation_id: str) -> Dict[str, Any]:
+    operation = conn.execute(
+        "SELECT * FROM lib2_file_delete_operations WHERE id=?", (operation_id,)
+    ).fetchone()
+    if not operation:
+        raise FileDeleteError("File-delete operation not found", 404)
+    items = conn.execute(
+        "SELECT * FROM lib2_file_delete_items WHERE operation_id=? ORDER BY id",
+        (operation_id,),
+    ).fetchall()
+    return {
+        **dict(operation),
+        "items": [
+            {
+                **dict(item),
+                "file_ids": json.loads(item["file_ids_json"]),
+                "stored_paths": json.loads(item["stored_paths_json"]),
+            }
+            for item in items
+        ],
+    }
+
+
+def get_delete_operation(database, operation_id: str) -> Dict[str, Any]:
+    conn = database._get_connection()
+    try:
+        return _operation_snapshot(conn, operation_id)
+    finally:
+        conn.close()
+
+
+def _mark_file_rows_deleted(conn, file_ids: List[int]) -> None:
+    from core.library2.track_files import set_file_state
+
+    for file_id in file_ids:
+        set_file_state(conn, int(file_id), "deleted")
+
+
+def _finish_operation(conn, operation_id: str) -> None:
+    counts = {
+        row["status"]: int(row["count"])
+        for row in conn.execute(
+            """SELECT status, COUNT(*) AS count
+                 FROM lib2_file_delete_items WHERE operation_id=? GROUP BY status""",
+            (operation_id,),
+        )
+    }
+    pending = sum(
+        counts.get(status, 0) for status in ("planned", "deleting")
+    )
+    failed = counts.get("failed", 0)
+    status = "executing" if pending else ("partial" if failed else "completed")
+    conn.execute(
+        """UPDATE lib2_file_delete_operations
+               SET status=?,
+                   completed_at=CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE NULL END
+             WHERE id=?""",
+        (status, int(not pending), operation_id),
+    )
+
+
+def reconcile_incomplete_deletes(database) -> int:
+    """Recover items left ``deleting`` by a process crash.
+
+    The state is persisted immediately before unlink. If the path is now gone,
+    finish the DB lifecycle; if it still exists, fail closed and require a new
+    preview/command instead of deleting automatically after restart.
+    """
+    read_conn = database._get_connection()
+    try:
+        rows = [dict(row) for row in read_conn.execute(
+            """SELECT id, operation_id, file_ids_json, resolved_path
+                 FROM lib2_file_delete_items WHERE status='deleting'"""
+        ).fetchall()]
+    finally:
+        read_conn.close()
+
+    observations = [(row, os.path.exists(row["resolved_path"])) for row in rows]
+    conn = database._get_connection()
+    try:
+        operation_ids = {row["operation_id"] for row in rows}
+        recovered = 0
+        for row, still_exists in observations:
+            if still_exists:
+                conn.execute(
+                    """UPDATE lib2_file_delete_items
+                          SET status='failed', error='interrupted_before_delete'
+                        WHERE id=?""",
+                    (row["id"],),
+                )
+                continue
+            _mark_file_rows_deleted(conn, json.loads(row["file_ids_json"]))
+            conn.execute(
+                """UPDATE lib2_file_delete_items
+                      SET status='deleted', error=NULL, deleted_at=CURRENT_TIMESTAMP
+                    WHERE id=?""",
+                (row["id"],),
+            )
+            recovered += 1
+        for operation_id in operation_ids:
+            _finish_operation(conn, operation_id)
+        conn.commit()
+        return recovered
+    finally:
+        conn.close()
+
+
+def delete_entity_files(
+    database,
+    *,
+    entity: str,
+    entity_id: int,
+    preview_token: str,
+    config_manager: Any = None,
+    unlink: Callable[[str], None] = os.unlink,
+) -> Dict[str, Any]:
+    """Execute an ADR-05 delete after revalidating the exact preview."""
+    if not isinstance(preview_token, str) or not preview_token:
+        raise FileDeleteError("preview_token is required")
+    reconcile_incomplete_deletes(database)
+    preview = preview_entity_files(
+        database,
+        entity=entity,
+        entity_id=entity_id,
+        config_manager=config_manager,
+    )
+    if preview_token != preview["preview_token"]:
+        raise FileDeleteError("File-delete preview is stale; review the files again", 409)
+    if not preview["files"]:
+        raise FileDeleteError("No physical files to delete", 409)
+    if preview["unsafe_count"]:
+        raise FileDeleteError(
+            "Physical delete blocked: one or more files are outside a safe library root",
+            409,
+        )
+
+    operation_id = uuid.uuid4().hex
+    conn = database._get_connection()
+    try:
+        ensure_file_delete_schema(conn.cursor())
+        conn.execute(
+            """INSERT INTO lib2_file_delete_operations(
+                   id, entity_type, entity_id, preview_token, status,
+                   file_count, total_size)
+               VALUES(?,?,?,?, 'planned', ?,?)""",
+            (
+                operation_id,
+                entity,
+                int(entity_id),
+                preview_token,
+                preview["file_count"],
+                preview["total_size"],
+            ),
+        )
+        for item in preview["files"]:
+            conn.execute(
+                """INSERT INTO lib2_file_delete_items(
+                       operation_id, file_ids_json, stored_paths_json,
+                       resolved_path, root_path, size, mtime_ns, status)
+                   VALUES(?,?,?,?,?,?,?, 'planned')""",
+                (
+                    operation_id,
+                    json.dumps(item["file_ids"]),
+                    json.dumps(item["stored_paths"]),
+                    item["path"],
+                    item["root"],
+                    item["size"],
+                    item["mtime_ns"],
+                ),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    for item in preview["files"]:
+        try:
+            stat = os.stat(item["path"])
+            root = _containing_root(item["path"], _library_roots(config_manager))
+            unchanged = (
+                root == item["root"]
+                and os.path.isfile(item["path"])
+                and int(stat.st_size) == item["size"]
+                and int(stat.st_mtime_ns) == item["mtime_ns"]
+            )
+        except OSError as exc:
+            unchanged = False
+            validation_error = str(exc) or exc.__class__.__name__
+        else:
+            validation_error = "file_changed_after_preview"
+
+        conn = database._get_connection()
+        try:
+            if not unchanged:
+                conn.execute(
+                    """UPDATE lib2_file_delete_items SET status='failed', error=?
+                         WHERE operation_id=? AND resolved_path=?""",
+                    (validation_error, operation_id, item["path"]),
+                )
+                conn.commit()
+                continue
+            conn.execute(
+                "UPDATE lib2_file_delete_operations SET status='executing' WHERE id=?",
+                (operation_id,),
+            )
+            conn.execute(
+                """UPDATE lib2_file_delete_items SET status='deleting', error=NULL
+                     WHERE operation_id=? AND resolved_path=?""",
+                (operation_id, item["path"]),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        try:
+            unlink(item["path"])
+        except Exception as exc:  # noqa: BLE001
+            conn = database._get_connection()
+            try:
+                conn.execute(
+                    """UPDATE lib2_file_delete_items SET status='failed', error=?
+                         WHERE operation_id=? AND resolved_path=?""",
+                    (str(exc) or exc.__class__.__name__, operation_id, item["path"]),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+            continue
+
+        conn = database._get_connection()
+        try:
+            _mark_file_rows_deleted(conn, item["file_ids"])
+            conn.execute(
+                """UPDATE lib2_file_delete_items
+                      SET status='deleted', deleted_at=CURRENT_TIMESTAMP, error=NULL
+                    WHERE operation_id=? AND resolved_path=?""",
+                (operation_id, item["path"]),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    conn = database._get_connection()
+    try:
+        _finish_operation(conn, operation_id)
+        conn.commit()
+        return _operation_snapshot(conn, operation_id)
+    finally:
+        conn.close()
+
+
+__all__ = [
+    "FileDeleteError",
+    "delete_entity_files",
+    "ensure_file_delete_schema",
+    "get_delete_operation",
+    "preview_entity_files",
+    "reconcile_incomplete_deletes",
+]

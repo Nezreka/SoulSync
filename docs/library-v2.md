@@ -2152,11 +2152,26 @@ verändert; daher waren Frontend-Typecheck/Vitest/Build nicht erforderlich.
     unauflösbare Pfade, Nicht-Dateien und Symlink-Escapes werden fail-closed
     abgewiesen. Die Route mutiert weder DB noch Filesystem; der bestehende
     Entity-Delete bleibt unverändert ein reines Unlink/Unmonitor-Command.
-    48 gezielte File-Delete-/API-Tests, Compile und Ruff sind grün. **Nächste
-    Slice:** den Snapshot-Token beim Execute erneut validieren, Operation und
-    Items vor Filesystem-Arbeit journalisieren und erst dann ein File nach dem
-    anderen löschen/als `file_state='deleted'` markieren; Crash-Zustände
-    müssen aus dem Journal rekonstruierbar bleiben.
+    48 gezielte File-Delete-/API-Tests, Compile und Ruff sind grün. **Zweite
+    Slice abgeschlossen 2026-07-14:** Der separate
+    `POST /api/library/v2/<artists|albums>/<id>/file-delete`-Command akzeptiert
+    ausschließlich den exakten Preview-Token und vergleicht ihn unmittelbar
+    vor Ausführung mit Größe, MTime, Realpath, Root und File-ID-Snapshot.
+    `lib2_file_delete_operations` und `lib2_file_delete_items` journalisieren
+    Operation und jedes physische File vor dem ersten `unlink`; unmittelbar
+    davor wird `deleting` committed. Erfolg setzt alle auf denselben Pfad
+    zeigenden DB-File-Zeilen über den vorhandenen ADR-03-Lifecycle auf
+    `file_state='deleted'`, ohne Artist/Album/Track zu entfernen. Teilerfolge
+    bleiben als `partial` mit Item-Fehlern lesbar; ein Prozessabbruch nach
+    `unlink`, aber vor DB-Abschluss wird beim nächsten Execute aus dem
+    persistenten `deleting`-Zustand abgeschlossen, während ein noch vorhandenes
+    File fail-closed auf `failed` geht und nie nach Neustart automatisch
+    gelöscht wird. Ein Read-Endpoint exponiert das Journal. Es werden keine
+    Verzeichnisse entfernt. 71 gezielte Journal-/Schema-/Track-File-/API-Tests
+    und Ruff sind grün. **Nächste/abschließende Slice:** Die vorhandene
+    Delete-UI muss beide getrennten Commands klar darstellen, Files/Root/Größe
+    aus der Preview zeigen und den irreversiblen File-Command mit einer eigenen
+    expliziten Bestätigung auslösen; Entity-Delete bleibt separat.
 
 **Session-Abschluss-Gate 2026-07-14:** Seit dem vorherigen Full-Gate wurden
 Roadmap 13 sowie 16–23 und Phase E vollständig abgeschlossen und jeweils
@@ -2344,8 +2359,8 @@ wert und wurde bewusst nicht übernommen.
   sofortigem `unlink()`. Physisches Löschen wird bewusst erst freigeschaltet,
   wenn Preview/Journal/Root-Safety produktiv stehen — **Status 2026-07-14:
   Umsetzung begonnen.** Der separate, fail-closed Preview-/Root-Safety-
-  Vertrag steht (Roadmap-Punkt 25); Journal und Execute bleiben die nächste
-  Slice.
+  Vertrag sowie Journal/Execute/Crash-Recovery stehen (Roadmap-Punkt 25); die
+  explizite UI-Freischaltung bleibt die letzte Slice.
 - **ADR-06 — Providerpriorität und User Overrides. Entschieden: getrennt
   speichern, Override gewinnt.** Providerfelder tragen eigene Provenance
   (`provider_updated_at`, Snapshot-Version) und werden bei Refresh
@@ -2468,9 +2483,10 @@ vermerkt, tauchten aber nirgends in diesem Dokument auf:
   statt `resolve_lib2_path`).~~ **Behoben 2026-07-14:** Artwork nutzt den
   verbindlichen lib2-Resolver; Details in Roadmap-Punkt 22.
 - **ADR-05-Umsetzung** — physisches Datei-Löschen mit Preview/Journal/
-  Root-Safety. **Teilweise umgesetzt 2026-07-14:** separate sichere Preview
-  steht; Journal/Execute sind noch offen (Roadmap-Punkt 25). Der bestehende
-  Entity-Delete löscht weiterhin nur DB-Einträge.
+  Root-Safety. **Weitgehend umgesetzt 2026-07-14:** sichere Preview,
+  Snapshot-Token, Journal, Execute und Crash-Recovery stehen; die explizite UI
+  ist noch offen (Roadmap-Punkt 25). Der bestehende Entity-Delete löscht
+  weiterhin nur DB-Einträge.
 - ~~**ADR-06-Rest** — Field-Level-User-Overrides (getrennte Speicherung +
   Read-Projektion pro überschriebenem Provider-Feld).~~ **Erledigt
   2026-07-14** (Roadmap Punkt 4, dritte Slice): getrennte validierte Speicherung,

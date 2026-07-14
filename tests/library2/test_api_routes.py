@@ -1111,6 +1111,22 @@ def test_physical_file_delete_preview_is_separate_and_root_safe(api, tmp_path, m
     assert preview["files"][0]["path"] == str(path)
     assert path.exists(), "preview must never mutate the filesystem"
 
+    executed = client.post(
+        f"/api/library/v2/albums/{ids['views']}/file-delete",
+        json={"preview_token": preview["preview_token"]},
+    ).get_json()
+    assert executed["success"] is True
+    assert executed["operation"]["status"] == "completed"
+    assert not path.exists()
+    with _conn(db) as conn:
+        assert conn.execute(
+            "SELECT file_state FROM lib2_track_files WHERE track_id=?",
+            (ids["album_track"],),
+        ).fetchone()[0] == "deleted"
+        assert conn.execute(
+            "SELECT 1 FROM lib2_albums WHERE id=?", (ids["views"],)
+        ).fetchone()
+
 
 def test_non_admin_profile_writes_are_rejected(api):
     """ADR-01 (admin-only, technically enforced): lib2 mutations from any
