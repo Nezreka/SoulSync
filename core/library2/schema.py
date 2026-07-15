@@ -88,6 +88,9 @@ CREATE TABLE IF NOT EXISTS lib2_albums (
     external_ids TEXT NOT NULL DEFAULT '{}',
     image_url TEXT,
     genres TEXT NOT NULL DEFAULT '[]',
+    explicit INTEGER,
+    label TEXT,
+    upc TEXT,                                          -- barcode; provider-neutral identifier like isrc on tracks
     track_count INTEGER,
     expected_track_count INTEGER,                      -- true total from metadata (for have/missing)
     tracklist_json TEXT,                               -- cached canonical tracklist (missing-track titles)
@@ -135,6 +138,9 @@ CREATE TABLE IF NOT EXISTS lib2_tracks (
     isrc TEXT,
     musicbrainz_id TEXT,
     spotify_id TEXT,                                  -- for wishlist mirroring
+    external_ids TEXT NOT NULL DEFAULT '{}',           -- long-tail provider ids (deezer/tidal/qobuz/itunes/...); isrc/mbid/spotify keep their own columns above
+    bpm REAL,
+    explicit INTEGER,
     stable_id TEXT,                                   -- provider-less identity (audit P1-12); minted once, survives reset+reimport
     monitored INTEGER NOT NULL DEFAULT 1,
     quality_profile_id INTEGER REFERENCES quality_profiles(id) ON DELETE RESTRICT,
@@ -353,6 +359,15 @@ _ADDED_COLUMNS = (
      "ALTER TABLE lib2_track_files ADD COLUMN missing_since TIMESTAMP"),
     ("lib2_track_files", "missing_scan_count",
      "ALTER TABLE lib2_track_files ADD COLUMN missing_scan_count INTEGER NOT NULL DEFAULT 0"),
+    # §17.7: importer metadata parity — long-tail provider ids + fields that
+    # exist on the legacy row but previously had no lib2 destination column.
+    ("lib2_tracks", "external_ids",
+     "ALTER TABLE lib2_tracks ADD COLUMN external_ids TEXT NOT NULL DEFAULT '{}'"),
+    ("lib2_tracks", "bpm", "ALTER TABLE lib2_tracks ADD COLUMN bpm REAL"),
+    ("lib2_tracks", "explicit", "ALTER TABLE lib2_tracks ADD COLUMN explicit INTEGER"),
+    ("lib2_albums", "explicit", "ALTER TABLE lib2_albums ADD COLUMN explicit INTEGER"),
+    ("lib2_albums", "label", "ALTER TABLE lib2_albums ADD COLUMN label TEXT"),
+    ("lib2_albums", "upc", "ALTER TABLE lib2_albums ADD COLUMN upc TEXT"),
 )
 
 

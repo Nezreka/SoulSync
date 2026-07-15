@@ -317,6 +317,132 @@ def test_import_captures_album_provider_ids_into_external_ids(legacy_db):
         conn.close()
 
 
+def test_import_captures_album_long_tail_provider_ids_into_external_ids(legacy_db):
+    """§17.7 step 3: albums must also capture the long-tail providers beyond
+    Spotify/Deezer/MusicBrainz/Tidal/Qobuz — iTunes/AudioDB/Discogs/Amazon/
+    JioSaavn/Bandcamp ids existed on the legacy row but had no importer path."""
+    import json
+    conn = sqlite3.connect(legacy_db.path)
+    for col in ("itunes_album_id", "audiodb_id", "discogs_id", "amazon_id",
+                "jiosaavn_id", "bandcamp_url"):
+        conn.execute(f"ALTER TABLE albums ADD COLUMN {col} TEXT")
+    conn.execute(
+        "UPDATE albums SET itunes_album_id='it_views', audiodb_id='adb_views', "
+        "discogs_id='dg_views', amazon_id='am_views', jiosaavn_id='js_views', "
+        "bandcamp_url='https://drake.bandcamp.com/album/views' WHERE id=10")
+    conn.commit()
+    conn.close()
+
+    import_legacy_library(legacy_db, reset=True)
+
+    conn = legacy_db._get_connection()
+    try:
+        ext = json.loads(
+            conn.execute("SELECT external_ids FROM lib2_albums WHERE title='Views'")
+            .fetchone()["external_ids"] or "{}")
+        assert ext.get("itunes") == "it_views"
+        assert ext.get("audiodb") == "adb_views"
+        assert ext.get("discogs") == "dg_views"
+        assert ext.get("amazon") == "am_views"
+        assert ext.get("jiosaavn") == "js_views"
+        assert ext.get("bandcamp") == "https://drake.bandcamp.com/album/views"
+    finally:
+        conn.close()
+
+
+def test_import_captures_track_provider_ids_into_external_ids(legacy_db):
+    """§17.7 step 1: ``lib2_tracks`` had no ``external_ids`` column at all, so
+    every provider id beyond isrc/musicbrainz/spotify (which keep dedicated
+    columns) was silently dropped on import."""
+    import json
+    conn = sqlite3.connect(legacy_db.path)
+    for col in ("deezer_id", "tidal_id", "qobuz_id", "itunes_track_id",
+                "audiodb_id", "genius_id", "amazon_id", "jiosaavn_id",
+                "bandcamp_url", "lastfm_url"):
+        conn.execute(f"ALTER TABLE tracks ADD COLUMN {col} TEXT")
+    conn.execute(
+        "UPDATE tracks SET deezer_id='dz_t100', tidal_id='td_t100', "
+        "qobuz_id='qb_t100', itunes_track_id='it_t100', audiodb_id='adb_t100', "
+        "genius_id='gn_t100', amazon_id='am_t100', jiosaavn_id='js_t100', "
+        "bandcamp_url='https://x.bandcamp.com/track/one-dance', "
+        "lastfm_url='https://last.fm/one-dance' WHERE id=100")
+    conn.commit()
+    conn.close()
+
+    import_legacy_library(legacy_db, reset=True)
+
+    conn = legacy_db._get_connection()
+    try:
+        ext = json.loads(
+            conn.execute(
+                "SELECT external_ids FROM lib2_tracks WHERE title='One Dance' "
+                "AND legacy_track_id=100"
+            ).fetchone()["external_ids"] or "{}")
+        assert ext.get("deezer") == "dz_t100"
+        assert ext.get("tidal") == "td_t100"
+        assert ext.get("qobuz") == "qb_t100"
+        assert ext.get("itunes") == "it_t100"
+        assert ext.get("audiodb") == "adb_t100"
+        assert ext.get("genius") == "gn_t100"
+        assert ext.get("amazon") == "am_t100"
+        assert ext.get("jiosaavn") == "js_t100"
+        assert ext.get("bandcamp") == "https://x.bandcamp.com/track/one-dance"
+        assert ext.get("lastfm") == "https://last.fm/one-dance"
+    finally:
+        conn.close()
+
+
+def test_import_captures_track_bpm_and_explicit(legacy_db):
+    """§17.7 step 2: ``bpm``/``explicit`` exist on the legacy ``tracks`` row but
+    had no lib2 destination column, so they were permanently lost on import."""
+    conn = sqlite3.connect(legacy_db.path)
+    conn.execute("ALTER TABLE tracks ADD COLUMN bpm REAL")
+    conn.execute("ALTER TABLE tracks ADD COLUMN explicit INTEGER")
+    conn.execute("UPDATE tracks SET bpm=104.5, explicit=1 WHERE id=100")
+    conn.commit()
+    conn.close()
+
+    import_legacy_library(legacy_db, reset=True)
+
+    conn = legacy_db._get_connection()
+    try:
+        row = conn.execute(
+            "SELECT bpm, explicit FROM lib2_tracks WHERE title='One Dance' "
+            "AND legacy_track_id=100"
+        ).fetchone()
+        assert row["bpm"] == 104.5
+        assert row["explicit"] == 1
+    finally:
+        conn.close()
+
+
+def test_import_captures_album_explicit_label_upc(legacy_db):
+    """§17.7 step 2: ``explicit``/``label``/``upc`` (barcode) exist on the
+    legacy ``albums`` row but had no lib2 destination column."""
+    conn = sqlite3.connect(legacy_db.path)
+    conn.execute("ALTER TABLE albums ADD COLUMN explicit INTEGER")
+    conn.execute("ALTER TABLE albums ADD COLUMN label TEXT")
+    conn.execute("ALTER TABLE albums ADD COLUMN upc TEXT")
+    conn.execute(
+        "UPDATE albums SET explicit=1, label='OVO Sound', upc='00602557546317' "
+        "WHERE id=10")
+    conn.commit()
+    conn.close()
+
+    import_legacy_library(legacy_db, reset=True)
+
+    conn = legacy_db._get_connection()
+    try:
+        row = conn.execute(
+            "SELECT explicit, label, upc FROM lib2_albums WHERE title='Views'"
+        ).fetchone()
+        assert row["explicit"] == 1
+        assert row["label"] == "OVO Sound"
+        assert row["upc"] == "00602557546317"
+    finally:
+        conn.close()
+
+
 def test_import_captures_real_schema_artist_provider_ids(legacy_db):
     """#38 root cause: the REAL legacy schema names the artist provider ids
     ``deezer_id``/``tidal_id``/``qobuz_id`` — NOT ``deezer_artist_id`` etc. The

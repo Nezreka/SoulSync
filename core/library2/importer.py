@@ -149,10 +149,11 @@ def _normalize_album_type(raw: Any, track_count: Optional[int], actual_tracks: i
     return "single" if _detect_single(track_count, actual_tracks) else "album"
 
 
-def _merge_album_external_ids(cursor, album_id: int, ids: Dict[str, Any]) -> None:
-    """Merge {source: id} into an album's ``external_ids`` (never overwrites an
-    existing source, so a discography-claimed row keeps its provider ids). Used
-    to import EVERY provider album id (Deezer default), not only Spotify."""
+def _merge_external_ids(cursor, table: str, entity_id: int, ids: Dict[str, Any]) -> None:
+    """Merge {source: id} into an entity's ``external_ids`` JSON column (never
+    overwrites an existing source, so a discography-claimed row keeps its
+    provider ids). Shared by albums and tracks — used to import EVERY provider
+    id the legacy row carries, not only the ones with a dedicated column."""
     clean = {
         str(source).strip().lower(): str(value).strip()
         for source, value in ids.items()
@@ -161,7 +162,7 @@ def _merge_album_external_ids(cursor, album_id: int, ids: Dict[str, Any]) -> Non
     if not clean:
         return
     row = cursor.connection.execute(
-        "SELECT external_ids FROM lib2_albums WHERE id=?", (album_id,)).fetchone()
+        f"SELECT external_ids FROM {table} WHERE id=?", (entity_id,)).fetchone()
     try:
         current = json.loads((row["external_ids"] if row else None) or "{}")
         if not isinstance(current, dict):
@@ -173,8 +174,34 @@ def _merge_album_external_ids(cursor, album_id: int, ids: Dict[str, Any]) -> Non
         merged.setdefault(source, value)
     if merged != current:
         cursor.execute(
-            "UPDATE lib2_albums SET external_ids=? WHERE id=?",
-            (json.dumps(merged, sort_keys=True, separators=(",", ":")), album_id))
+            f"UPDATE {table} SET external_ids=? WHERE id=?",
+            (json.dumps(merged, sort_keys=True, separators=(",", ":")), entity_id))
+
+
+def _merge_album_external_ids(cursor, album_id: int, ids: Dict[str, Any]) -> None:
+    _merge_external_ids(cursor, "lib2_albums", album_id, ids)
+
+
+def _merge_track_external_ids(cursor, track_id: int, ids: Dict[str, Any]) -> None:
+    _merge_external_ids(cursor, "lib2_tracks", track_id, ids)
+
+
+def _extra_provider_ids(row: Any, entity_type: str, exclude: Set[str]) -> Dict[str, Any]:
+    """Provider ids for ``entity_type`` ('album'|'track') from the legacy row,
+    keyed by source, for every service ``match_status.SERVICES`` maps to a
+    column on this entity type — except ``exclude`` (services already handled
+    by the caller's own dedicated-column ``_pick`` logic). This is the same
+    service->column mapping the match-status chips already trust, so a new
+    provider only needs to be added there to be picked up here too."""
+    from .match_status import SERVICES
+    out: Dict[str, Any] = {}
+    for service, _label, id_cols in SERVICES:
+        if service in exclude:
+            continue
+        col = id_cols.get(entity_type)
+        if col:
+            out[service] = _pick(row, col)
+    return out
 
 
 class _ArtistResolver:
@@ -724,6 +751,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 _pick(row, "spotify_album_id"), _pick(row, "musicbrainz_release_id"),
                 _pick(row, "thumb_url"), _normalize_genres(_pick(row, "genres")),
                 track_count, expected,
+                _pick(row, "explicit"), _pick(row, "label"), _pick(row, "upc"),
             )
             existing = album_map.get(_legacy_key(row["id"]))
             if existing is None:
@@ -745,6 +773,8 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                     "musicbrainz_id=COALESCE(?, musicbrainz_id), "
                     "image_url=COALESCE(?, image_url), "
                     "genres=?, track_count=?, expected_track_count=?, "
+                    "explicit=COALESCE(?, explicit), label=COALESCE(?, label), "
+                    "upc=COALESCE(?, upc), "
                     "origin='library', legacy_album_id=?, legacy_import_run_id=?, "
                     "updated_at=CURRENT_TIMESTAMP WHERE id=?",
                     (*fields, row["id"], run_id, existing),
@@ -764,21 +794,28 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 cursor.execute(
                     "INSERT INTO lib2_albums(primary_artist_id, title, album_type, "
                     "release_date, year, spotify_id, musicbrainz_id, image_url, genres, "
-                    "track_count, expected_track_count, legacy_album_id, "
-                    "quality_profile_id, monitored, legacy_import_run_id) "
-                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "track_count, expected_track_count, explicit, label, upc, "
+                    "legacy_album_id, quality_profile_id, monitored, legacy_import_run_id) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (*fields, row["id"], default_profile_id, album_monitored, run_id),
                 )
                 album_id = cursor.lastrowid
                 album_map[_legacy_key(row["id"])] = album_id
             # Real legacy albums carry deezer_id/tidal_id/qobuz_id; accept the
             # *_album_id aliases too (see the artist provider_ids note above).
+            # Beyond those five, capture the long tail (iTunes/AudioDB/Discogs/
+            # Amazon/JioSaavn/Bandcamp/…) from match_status.SERVICES so a new
+            # provider only needs to be added there, not re-derived here (§17.7).
             _merge_album_external_ids(cursor, album_id, {
                 "spotify": _pick(row, "spotify_album_id"),
                 "deezer": _pick(row, "deezer_album_id", "deezer_id"),
                 "musicbrainz": _pick(row, "musicbrainz_release_id"),
                 "tidal": _pick(row, "tidal_album_id", "tidal_id"),
                 "qobuz": _pick(row, "qobuz_album_id", "qobuz_id"),
+                **_extra_provider_ids(
+                    row, "album",
+                    exclude={"spotify", "deezer", "musicbrainz", "tidal", "qobuz"},
+                ),
             })
             cursor.execute(
                 "INSERT OR IGNORE INTO lib2_album_artists(album_id, artist_id, role) "
@@ -826,12 +863,14 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 _pick(row, "disc_number") or 1, _pick(row, "duration"),
                 _pick(row, "isrc"), _pick(row, "musicbrainz_recording_id"),
                 _pick(row, "spotify_track_id"),
+                _pick(row, "bpm"), _pick(row, "explicit"),
             )
             existing = track_map.get(_legacy_key(row["id"]))
             if existing is not None:
                 cursor.execute(
                     "UPDATE lib2_tracks SET album_id=?, title=?, track_number=?, "
                     "disc_number=?, duration=?, isrc=?, musicbrainz_id=?, spotify_id=?, "
+                    "bpm=COALESCE(?, bpm), explicit=COALESCE(?, explicit), "
                     "legacy_import_run_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
                     (*tfields, run_id, existing),
                 )
@@ -840,13 +879,21 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 track_monitored = album_monitored_by_id.get(album_id, 1)
                 cursor.execute(
                     "INSERT INTO lib2_tracks(album_id, title, track_number, disc_number, "
-                    "duration, isrc, musicbrainz_id, spotify_id, legacy_track_id, "
-                    "quality_profile_id, monitored, legacy_import_run_id) "
-                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "duration, isrc, musicbrainz_id, spotify_id, bpm, explicit, "
+                    "legacy_track_id, quality_profile_id, monitored, legacy_import_run_id) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (*tfields, row["id"], default_profile_id, track_monitored, run_id),
                 )
                 track_id = cursor.lastrowid
                 track_map[_legacy_key(row["id"])] = track_id
+            # Long-tail provider ids beyond isrc/musicbrainz/spotify (which keep
+            # dedicated columns above) — deezer/tidal/qobuz/itunes/audiodb/genius/
+            # amazon/jiosaavn/bandcamp/lastfm — via the same match_status.SERVICES
+            # mapping the album/track match-status chips already trust (§17.7).
+            _merge_track_external_ids(
+                cursor, track_id,
+                _extra_provider_ids(row, "track", exclude={"spotify", "musicbrainz"}),
+            )
             stats["tracks"] += 1
 
             # Artist credits: primary = album artist; plus track_artist + title feats.
