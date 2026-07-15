@@ -22,7 +22,7 @@ from __future__ import annotations
 import re
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, Iterator, List, Optional
 from urllib.parse import urljoin
 
@@ -204,6 +204,7 @@ class T2TunesSearchItem:
     album_asin: str = ""
     duration_seconds: int = 0
     isrc: str = ""
+    artist_asins: List[str] = field(default_factory=list)
 
     @property
     def is_album(self) -> bool:
@@ -730,28 +731,102 @@ class AmazonClient:
             raise AmazonClientError(
                 f"Unexpected search response type: {type(response).__name__}"
             )
-        for result in response.get("results") or []:
-            if not isinstance(result, dict):
-                continue
-            for hit in result.get("hits") or []:
-                if not isinstance(hit, dict):
+
+        def _yield_from_edges(edges: Any, item_type: str = "track") -> Iterator[T2TunesSearchItem]:
+            if not isinstance(edges, list):
+                return
+            for edge in edges:
+                if not isinstance(edge, dict):
                     continue
-                doc = hit.get("document")
+                doc = edge.get("node")
                 if not isinstance(doc, dict):
                     continue
-                asin = str(doc.get("asin") or "")
+                asin = str(doc.get("id") or doc.get("asin") or "")
                 if not asin:
                     continue
+
+                album = doc.get("album") if isinstance(doc.get("album"), dict) else {}
+                contributing_artists = doc.get("contributingArtists") if isinstance(doc.get("contributingArtists"), dict) else {}
+                artist_edges = contributing_artists.get("edges") if isinstance(contributing_artists.get("edges"), list) else []
+                artist_names: List[str] = []
+                artist_asins: List[str] = []
+                for artist_edge in artist_edges:
+                    if not isinstance(artist_edge, dict):
+                        continue
+                    artist_node = artist_edge.get("node")
+                    if not isinstance(artist_node, dict):
+                        continue
+                    artist_name = str(artist_node.get("name") or "")
+                    if artist_name:
+                        artist_names.append(artist_name)
+                    artist_id = str(artist_node.get("id") or "")
+                    if artist_id:
+                        artist_asins.append(artist_id)
+
+                artist_name = str(
+                    contributing_artists.get("concatenatedName")
+                    or (artist_names[0] if artist_names else doc.get("artistName") or "")
+                    or ""
+                )
                 yield T2TunesSearchItem(
                     asin=asin,
-                    title=str(doc.get("title") or ""),
-                    artist_name=str(doc.get("artistName") or ""),
-                    item_type=str(doc.get("__type") or ""),
-                    album_name=str(doc.get("albumName") or ""),
-                    album_asin=str(doc.get("albumAsin") or ""),
+                    title=str(doc.get("shortTitle") or doc.get("title") or ""),
+                    artist_name=artist_name,
+                    item_type=item_type,
+                    album_name=str(album.get("title") or doc.get("albumName") or doc.get("album", {}).get("title") or ""),
+                    album_asin=str(album.get("id") or doc.get("albumAsin") or ""),
                     duration_seconds=int(doc.get("duration") or 0),
-                    isrc=str(doc.get("isrc") or ""),
+                    isrc=str(doc.get("isrc") or doc.get("uri") or ""),
+                    artist_asins=artist_asins,
                 )
+
+        data = response.get("data") if isinstance(response.get("data"), dict) else None
+        if data is not None:
+            for container_name in ("searchTracks", "searchAlbums", "searchItems"):
+                container = data.get(container_name)
+                if not isinstance(container, dict):
+                    continue
+                edges = container.get("edges")
+                if not isinstance(edges, list):
+                    continue
+                yield from _yield_from_edges(edges, item_type="album" if "album" in container_name.lower() else "track")
+                return
+
+        results = response.get("results")
+        if isinstance(results, list):
+            for result in results:
+                if not isinstance(result, dict):
+                    continue
+                hits = result.get("hits")
+                if not isinstance(hits, list):
+                    continue
+                for hit in hits:
+                    if not isinstance(hit, dict):
+                        continue
+                    doc = hit.get("document")
+                    if not isinstance(doc, dict):
+                        continue
+                    kind = str(doc.get("__type") or doc.get("type") or "").lower()
+                    item_type = "album" if "album" in kind else "track" if "track" in kind else "track"
+                    asin = str(doc.get("asin") or doc.get("albumAsin") or doc.get("id") or "")
+                    if not asin:
+                        continue
+                    yield T2TunesSearchItem(
+                        asin=asin,
+                        title=str(doc.get("title") or ""),
+                        artist_name=str(doc.get("artistName") or ""),
+                        item_type=item_type,
+                        album_name=str(doc.get("albumName") or ""),
+                        album_asin=str(doc.get("albumAsin") or ""),
+                        duration_seconds=int(doc.get("duration") or 0),
+                        isrc=str(doc.get("isrc") or ""),
+                        artist_asins=[],
+                    )
+            return
+
+        edges = response.get("edges")
+        if isinstance(edges, list):
+            yield from _yield_from_edges(edges)
 
     @staticmethod
     def _parse_stream_info(item: Dict[str, Any]) -> T2TunesStreamInfo:
@@ -764,12 +839,30 @@ class AmazonClient:
         raw_key = item.get("decryptionKey")
         decryption_key = str(raw_key) if raw_key else None
 
-        def _int_tag(key: str) -> Optional[int]:
-            v = tags.get(key)
-            try:
-                return int(v) if v is not None else None
-            except (TypeError, ValueError):
-                return None
+        def _int_from_candidates(mapping: Dict[str, Any], keys: List[str]) -> Optional[int]:
+            for key in keys:
+                value = mapping.get(key)
+                if value is None:
+                    continue
+                try:
+                    return int(value)
+                except (TypeError, ValueError):
+                    continue
+            return None
+
+        def _first_text(mapping: Dict[str, Any], keys: List[str]) -> str:
+            for key in keys:
+                value = mapping.get(key)
+                if value is not None:
+                    return str(value)
+            return ""
+
+        track_number = _int_from_candidates(tags, ["trackNumber", "track", "track_num", "track_number"])
+        if track_number is None:
+            track_number = _int_from_candidates(item, ["trackNumber", "track", "track_num", "track_number"])
+        disc_number = _int_from_candidates(tags, ["discNumber", "disc", "disc_num", "disc_number"])
+        if disc_number is None:
+            disc_number = _int_from_candidates(item, ["discNumber", "disc", "disc_num", "disc_number"])
 
         return T2TunesStreamInfo(
             asin=str(item.get("asin") or ""),
@@ -787,10 +880,10 @@ class AmazonClient:
             artist=str(tags.get("artist") or ""),
             album=str(tags.get("album") or ""),
             isrc=str(tags.get("isrc") or ""),
-            cover_url=str(item.get("coverUrl") or ""),
-            track_number=_int_tag("trackNumber"),
-            disc_number=_int_tag("discNumber"),
+            cover_url=str(item.get("coverUrl") or item.get("templateCoverUrl") or ""),
+            track_number=track_number,
+            disc_number=disc_number,
             genre=str(tags.get("genre") or ""),
             label=str(tags.get("label") or ""),
-            date=str(tags.get("date") or ""),
+            date=str(tags.get("date") or tags.get("releaseDate") or item.get("releaseDate") or ""),
         )
