@@ -9307,6 +9307,9 @@ def _build_source_only_artist_detail(artist_id, artist_name, source):
     ``jsonify``.
     """
     from core.artist_source_detail import build_source_only_artist_detail
+    from core.metadata_service import (
+        get_artist_detail_discography as _get_artist_detail_discography,
+    )
 
     # Resolve the per-source clients defensively — the original inline code
     # wrapped the whole source-side lookup in try/except so a failing
@@ -9376,6 +9379,7 @@ def _build_source_only_artist_detail(artist_id, artist_name, source):
         jiosaavn_client=js,
         bandcamp_client=bc,
         lastfm_api_key=lastfm_api_key,
+        discography_loader=_get_artist_detail_discography,
     )
     return jsonify(payload), status
 
@@ -9530,6 +9534,16 @@ def get_artist_detail(artist_id):
                     artist_source_ids=artist_source_ids,
                 ),
             )
+
+            if artist_detail_discography.get('state') == 'error':
+                return jsonify({
+                    "success": False,
+                    "state": "error",
+                    "error": artist_detail_discography.get(
+                        "error", "Could not access the discography provider"
+                    ),
+                    "source": artist_detail_discography.get("source", "unknown"),
+                }), int(artist_detail_discography.get("status_code") or 502)
 
             if artist_detail_discography['success']:
                 logger.debug(
@@ -10018,7 +10032,7 @@ def get_artist_discography(artist_id):
         # gets the SAME release-type split (albums / eps / singles) the Artist
         # Detail view shows — EPs were being lumped into singles before, leaving
         # the modal's EPs toggle dead.
-        from core.metadata.discography import get_artist_detail_discography as _get_artist_discography
+        from core.metadata_service import get_artist_detail_discography as _get_artist_discography
 
         # Server-side per-source ID resolution. Look up the library row
         # by ANY of the IDs the frontend might send: library DB id,
@@ -10094,6 +10108,16 @@ def get_artist_discography(artist_id):
                 artist_source_ids=artist_source_ids or None,
             ),
         )
+
+        if discography.get('state') == 'error':
+            return jsonify({
+                "success": False,
+                "state": "error",
+                "error": discography.get(
+                    "error", "Could not access the discography provider"
+                ),
+                "source": discography.get("source", "unknown"),
+            }), int(discography.get("status_code") or 502)
 
         album_list = discography['albums']
         eps_list = discography.get('eps', [])
