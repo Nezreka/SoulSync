@@ -3896,3 +3896,61 @@ Playwright-Screenshots, zwei Research-Agents), keine Implementierung in dieser
 Session außer dem Dev-Umgebungs-Neustart (17.0). Nächster Schritt: mit dem Nutzer
 Priorität bestätigen, dann jeder Punkt als eigene TDD-Slice wie bei den bisherigen
 Roadmap-Punkten.
+
+---
+
+## 18. Gewünschte Erweiterungen & Feature-Roadmap (Vom Nutzer angefordert — 2026-07-15)
+
+In der Session vom 15.07.2026 hat der Nutzer eine konkrete Liste an UI-Verbesserungen und funktionalen Erweiterungen für die Library v2 vorgegeben. Diese Anforderungen dienen dazu, die Detailtiefe des Legacy-Download-Inspektors (Quarantäne/History) direkt in die Library v2 zu übertragen und die Darstellung konsistenter zu gestalten.
+
+### 18.1 Live-Inspektor für Tags & Lyrics im Track-Edit-Modal
+- **Problem/Wunsch:** Klickt man in Library v2 auf das Stift-Icon (Edit) eines Tracks, soll man analog zum Quarantäne-„Inspect“-Modal die tatsächlich eingebetteten Tags und Songtexte (Lyrics) live aus der Datei auslesen und anzeigen können.
+- **Backend-Implementierung:**
+  - Route in `api/library_v2.py`: `GET /api/library/v2/tracks/<int:track_id>/file-tags`
+  - Ablauf: Pfad des aktiven Files über `lib2_track_files` holen, mit `paths.resolve_lib2_path` auflösen, `core.tag_writer.read_file_tags` aufrufen und die uniformen Tags zurückgeben.
+- **Frontend-Implementierung:**
+  - In `library-v2-page.tsx` das `TrackDetailModal` um zwei Tabs erweitern: „Tags“ (zeigt das Grid mit den freundlichen Labels aus `_AUDIT_TAG_LABELS` an) und „Lyrics“ (rendert den LRC/Lyrics-Text über einen analog zu `_renderLyricsBody` gebauten Container).
+
+### 18.2 Manueller Schreibvorgang ("Write Tags to File")
+- **Problem/Wunsch:** Es soll eine manuelle Funktion geben, um die Metadaten der Datenbank direkt wieder in die physische Musikdatei zu schreiben (analog zum Legacy-Feature `col-writetag`).
+- **Backend-Implementierung:**
+  - Route in `api/library_v2.py`: `POST /api/library/v2/tracks/<int:track_id>/write-tags`
+  - Ablauf: Ruft im Hintergrund (oder direkt, da Single-Track-Operation) `core.library2.retag.py::write_tags` für die entsprechende Datei auf und invalidiert den Cache.
+- **Frontend-Implementierung:**
+  - Im „Metadata“-Tab des `TrackDetailModal` wird ein Button „Write Tags to File“ (mit Lade-Spinner und Toast-Meldung) integriert.
+
+### 18.3 Detaillierter Lifecycle-Log / Prüfungs-Historie (Info-Tab)
+- **Problem/Wunsch:** Der Nutzer möchte genau nachvollziehen können, welche Checks (AcoustID, Qualität etc.) die Datei durchlaufen hat, ob sie je in der Quarantäne war, warum und welche Schritte manuell übersprungen wurden.
+- **Backend-Implementierung:**
+  - Über `/api/library/v2/tracks/<int:track_id>/source-info` werden die Historien- und Provenienz-Einträge der Downloads geliefert.
+- **Frontend-Implementierung:**
+  - Das `TrackInfoPanel` wird um eine übersichtliche Visualisierung (z. B. einen Stepper oder Lifecycle-Einträge) erweitert. Diese zeigt:
+    - Ob die Datei in der Quarantäne war und warum (`quarantine_reason`).
+    - Ob Bypasses vorgenommen wurden (z. B. `force_imported` wg. Version-Mismatch oder `skip_acoustid`).
+    - Das AcoustID-Ergebnis (`pass`, `skip` oder `fail`).
+
+### 18.4 ReplayGain-Präsenz darstellen
+- **Problem/Wunsch:** Anzeige, ob für den Track eine ReplayGain-Analyse durchgeführt wurde und entsprechende Tags vorliegen.
+- **Implementierung:**
+  - Die ReplayGain-Tags (Track Gain, Track Peak, Album Gain, Album Peak) werden im neuen „Tags“-Tab des Track-Edit-Modals aufgeführt.
+  - Optional wird in der Spalte „Quality“ oder als Tooltip ein kleiner Indikator (z. B. `RG`) eingeblendet.
+
+### 18.5 Kompaktes, zusammenhängendes Qualitäts-Badge (Cohesive Badge)
+- **Problem/Wunsch:** Auf der Downloads-Seite werden Format, Bit-Tiefe und Frequenz in einem gemeinsamen Badge dargestellt (z. B. `FLAC 16-bit 44.1kHz`). In der Library v2 sind dies momentan drei separate Badges. Die Bitrate (kbps) soll jedoch ein eigenständiges Badge bleiben.
+- **Frontend-Implementierung:**
+  - Anpassung der `QualityDisplay`-Komponente in `library-v2-page.tsx`. Die Werte für Format, Bittiefe und Sample-Rate werden in einem einzigen `<span className={styles.qualityTag}>` zusammengefasst (z. B. mit Trennzeichen `·`), während die Bitrate als separates Badge gerendert wird.
+
+### 18.6 Hover-Tooltip für Metadaten-Status (Tag-Details)
+- **Problem/Wunsch:** Beim Bewegen der Maus über `tags ✓` oder `X tag gaps` soll eine Liste aller in der Datei vorhandenen Tags angezeigt werden.
+- **Frontend-Implementierung:**
+  - In `TrackRow` wird dem Metadaten-Status-Span ein `title`-Attribut mitgegeben, das basierend auf `track.file.tags_json` (bzw. den gaps) die vorhandenen und fehlenden Tags auflistet (z. B. *Present: Title, Artist, Album... / Missing: Genre*).
+
+### 18.7 Normalisierung der Release-Datumsangaben
+- **Problem/Wunsch:** Manche Releasetermine (besonders bei library-Herkunft) enthalten unerwünschte Zeitstempel (z. B. `1982-11-29T08:00:00Z` oder `1994-06-21 00:00:00`). Es soll nur das reine Datum (`YYYY-MM-DD`) oder das Jahr angezeigt werden.
+- **Frontend-Implementierung:**
+  - Eine Hilfsfunktion `formatReleaseDate(value: string | null): string` in `library-v2-page.tsx` einbauen, die das Datum sauber abschneidet (z. B. `value.slice(0, 10)`), um einheitliche Datumsanzeigen zu gewährleisten.
+
+### 18.8 Korrektur: Metadaten-Status bei missing Tracks
+- **Problem/Wunsch:** Tracks, die als fehlend (`missing`, rot markiert) eingetragen sind, zeigen fälschlicherweise den Status `tags ✓` (oder `0 tag gaps`), obwohl gar keine Datei vorliegt.
+- **Frontend-Implementierung:**
+  - In der `TrackRow` der Tabellenzelle für Metadaten die Abfrage erweitern: Nur wenn `track.id` vorhanden ist **UND** der Track nicht missing ist (`!missing`), wird der Tag-Prüfungsstatus gerendert. Andernfalls wird `—` (dash) angezeigt.
