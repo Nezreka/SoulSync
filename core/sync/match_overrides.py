@@ -44,9 +44,15 @@ def resolve_match_overrides(
         - cache_lookup returns a server_track_id
         - that server_track_id exists in server_tracks (no stale cache
           entries pointing at deleted tracks)
-        - the server_track hasn't already been claimed by an earlier
-          override (defensive — UNIQUE on the cache table prevents this
-          in practice)
+
+    TWO source rows MAY share one server track. The cache's UNIQUE
+    constraint is per (source_track_id, server_source) — it stops one
+    source having two servers, NOT two sources (a playlist carrying the
+    same song twice under different provider ids, both hand-matched to
+    the user's single library copy) sharing one server track. The old
+    first-wins rule silently dropped the second pairing, so that row
+    stayed "missing" forever no matter how many times the user re-ran
+    Find & Add (wolf39us). Both pairings are user-confirmed — honor both.
 
     Caller uses the returned dict to short-circuit the per-source
     matching loop: indices in the dict skip the exact/fuzzy passes.
@@ -63,7 +69,6 @@ def resolve_match_overrides(
                 server_id_to_idx[key] = j
 
     overrides: Dict[int, int] = {}
-    used_server: set[int] = set()
 
     for i, src in enumerate(source_tracks):
         if not isinstance(src, dict):
@@ -78,10 +83,9 @@ def resolve_match_overrides(
         if not cached_server_id:
             continue
         j = server_id_to_idx.get(str(cached_server_id))
-        if j is None or j in used_server:
+        if j is None:
             continue
         overrides[i] = j
-        used_server.add(j)
 
     return overrides
 
@@ -227,6 +231,16 @@ def build_bulk_override_lookup(
             if new_id and str(new_id) in valid_server_ids:
                 _self_heal_match_id(db, match, str(new_id))
                 return str(new_id)
+        # Every path exhausted — the user's confirmed match CANNOT apply. Say
+        # exactly why, or this renders as a bare "missing" row and looks like
+        # the match was never saved (the wolf39us report shape).
+        logger.warning(
+            "Manual match for source %s (%s) cannot apply: library track %s is not "
+            "in this playlist and the file-path fallback %s. The track likely needs "
+            "re-adding to the playlist (Find & Add), or the library row was re-keyed.",
+            sid, server_source, lib_id,
+            ("resolved nothing for %r" % (file_path,)) if file_path else "is empty (no stored path)",
+        )
         return None
 
     return _lookup
@@ -280,6 +294,13 @@ def resolve_durable_match_server_id(
         if new_id and str(new_id) in valid_server_ids:
             _self_heal_match_id(db, match, str(new_id))
             return str(new_id)
+    logger.warning(
+        "Manual match for source %s (%s) cannot apply: library track %s is not "
+        "in this playlist and the file-path fallback %s. The track likely needs "
+        "re-adding to the playlist (Find & Add), or the library row was re-keyed.",
+        source_track_id, server_source, lib_id,
+        ("resolved nothing for %r" % (file_path,)) if file_path else "is empty (no stored path)",
+    )
     return None
 
 
