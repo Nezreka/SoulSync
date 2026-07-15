@@ -26,11 +26,23 @@ logger = get_logger("video_api.discover")
 def register_routes(bp):
     @bp.route("/discover/hero", methods=["GET"])
     def video_discover_hero():
-        """A few trending titles that have a backdrop — drives the hero slideshow."""
+        """A few trending titles that have a backdrop — drives the hero billboard.
+        Each item is enriched with its TMDB title-logo (the Netflix wordmark art);
+        day-cached per title, fetched concurrently so a cold cache costs one
+        round-trip, not six. Logo-less titles fall back to the text title."""
         from core.video.enrichment.engine import get_video_enrichment_engine
         try:
-            items = [x for x in (get_video_enrichment_engine().trending() or [])
-                     if x.get("backdrop")][:6]
+            eng = get_video_enrichment_engine()
+            items = [x for x in (eng.trending() or []) if x.get("backdrop")][:6]
+            try:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=6) as ex:
+                    logos = list(ex.map(
+                        lambda x: eng.title_logo(x.get("kind"), x.get("tmdb_id")), items))
+                for x, lg in zip(items, logos):
+                    if lg:
+                        x["logo"] = lg
+            except Exception:
+                logger.exception("hero logo enrichment failed")
         except Exception:
             logger.exception("discover hero failed")
             items = []
@@ -358,6 +370,13 @@ def register_routes(bp):
                     items.append(it)
                 return True
 
+            # Honest pagination contract: `has_more` + `next_page` in the response,
+            # so the client never guesses from item counts. (The old client heuristic
+            # — "another page exists if this one had ≥18 items" — broke the moment
+            # server-side filtering shrank a page: See-all stopped paging while TMDB
+            # had plenty more.)
+            has_more, next_page = False, page
+
             # When filtering (hide-owned or language), page DEEPER and drop items server-side
             # so a heavy library's rail still fills to ~target instead of showing 4 cards. We
             # fetch the extra pages in concurrent WAVES (TTLCache + the TMDB client are
@@ -367,9 +386,14 @@ def register_routes(bp):
             if key in ("trending", "trending_today", "trending_movies_today", "trending_tv_today"):
                 consume(fetch(page))   # a single fixed chart; never paged
             elif not need_fill:
+                ran_out = False
+                last = page - 1
                 for offset in range(pages):           # no filtering: respect requested page count
-                    if not consume(fetch(page + offset)):
+                    last = page + offset
+                    if not consume(fetch(last)):
+                        ran_out = True
                         break
+                has_more, next_page = not ran_out, last + 1
             else:
                 MAX_PAGES, WAVE = 20, 5
                 offset, ran_out = 0, False
@@ -380,7 +404,9 @@ def register_routes(bp):
                             if not consume(batch):
                                 ran_out = True       # an empty page = TMDB has no more
                         offset += WAVE
-            return jsonify({"items": items, "page": page})
+                has_more, next_page = not ran_out, page + offset
+            return jsonify({"items": items, "page": page,
+                            "has_more": has_more, "next_page": next_page})
         except Exception:
             logger.exception("discover list failed (key=%s)", key)
-            return jsonify({"items": [], "page": page})
+            return jsonify({"items": [], "page": page, "has_more": False, "next_page": page})
