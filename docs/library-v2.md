@@ -4534,3 +4534,8 @@ des Implementierungsplans nicht erneut aufgerollt werden müssen:
   - Führt automatische Upgrades durch, sofern das Quality Profile dies erlaubt.
   - Eine globale Suche ("Automatic Search (Global)") soll weiterhin existieren, jedoch nur im globalen Dashboard bzw. der Wishlist-Ansicht, nicht auf Artist-/Album-Ebene.
 - **Scope:** Backend-Erweiterung (Einschränkung des Such-Job-Scopes auf den spezifischen Artist/Album) + UI-Verdrahtung.
+
+### 25.2 Korrekter Import von Track-Features (ReplayGain, Lyrics) aus der Legacy-Library
+- **Problem:** Beim Importieren aus der alten/legacy Bibliothek (`import_legacy_library`) werden die Track-Feature-Flags (wie `has_replaygain` und `has_lyrics` auf den Track-Dateien) nicht direkt übernommen. Sie werden erst erkannt und in der UI sichtbar, wenn ein manueller "Refresh & Scan" auf dem Artist/Album ausgeführt wird.
+- **Ziel:** Der Import-Prozess soll diese Metadaten-Flags direkt aus den Legacy-Tabellen (`track_files` / `tracks`) auslesen und in die entsprechenden `lib2_*` Tabellen mappen.
+- **Scope:** Importer-Backend (`core/library2/importer.py`).

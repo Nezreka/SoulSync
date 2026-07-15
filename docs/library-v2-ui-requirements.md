@@ -154,6 +154,11 @@
 - **Ziel:** Ähnlich Plex — bei Match-Fehlern manuell beheben; spezifisch pro Metadaten-Source.
 - **Scope:** Backend-Funktion + UI Modal.
 
+### 8.5 Legacy-Import von Dateieigenschaften (ReplayGain, Lyrics)
+- **Status:** **Offen / Ausstehend**
+- **Ziel:** Beim Importieren aus der alten Bibliothek (`import_legacy_library`) werden die Track-Feature-Flags (`has_replaygain` / `has_lyrics`) der Dateien nicht direkt übernommen. Sie werden erst nach einem manuellen "Refresh & Scan" in der UI sichtbar.
+- **Scope:** Importer-Backend (`core/library2/importer.py`).
+
 ---
 
 ## 9. Current Status & Notes
@@ -177,3 +182,4 @@
 7. **Backend-Findings** (5.2, 8.3, 8.4 etc.): Roadmap-Punkte für zukünftige Sitzungen.
 8. **Artist-spezifische automatische Suche** (6.4): **Offen / Ausstehend** (Aufteilung in artist-spezifisch vs. global benötigt Backend-Erweiterung).
 9. **Verification Flow, Match-Quelle und ReplayGain** (7.1, 8.1, 8.2): **Abgeschlossen** (Badges, Chips und ReplayGain-Aktionen sind voll funktionsfähig).
+10. **Legacy-Import von Dateieigenschaften** (8.5): **Offen / Ausstehend** (muss in `core/library2/importer.py` ergänzt werden).
