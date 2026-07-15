@@ -3404,16 +3404,17 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Convention: keep only the CURRENT release here, plus a single brief
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '3.0.2': [
-        { date: 'July 2026 — 3.0.2' },
-        { title: 'Video downloads: daily shows + smarter searching', desc: 'daily series match by air date now ("The Daily Show 2026.07.08" style releases), soulseek results parse their share paths the way the music matcher does, releases with no quality token get size-inferred quality, and the wishlist run log names any source that was skipped (like prowlarr not being configured) instead of silently degrading.' },
-        { title: 'Download history: TV + YouTube, and uploader blacklisting', desc: 'tv episode and youtube grabs now show in the download history modal (youtube gets its own tab), and you can blacklist an uploader straight from a completed download — searches, retries and requeries all skip them from then on.' },
-        { title: 'The whole video side works on your phone', desc: 'full mobile/tablet pass: dashboard, search, discover, library, watchlist, wishlist, downloads, calendar, detail pages, and both studios (overlay + collection). desktop unchanged.' },
-        { title: 'Library Reorganize actually moves files', desc: 'after a template change, reorganize reported every album as "already organized" and moved nothing — the keep-albums-together folder reuse was answering with the very folder you were moving out of. destinations now come from your current template alone. thanks TheHomeGuy for the report.' },
-        { title: 'Manual imports skip the quality profile (#1017)', desc: 'a file you hand-match on the import page is your call — the quality profile no longer vetoes it. acoustid, integrity and silence checks still run.' },
-        { title: 'Basic search results no longer vanish (#1024)', desc: 'the results area could get starved to zero height on short or zoomed-out windows. it has a real minimum height now.' },
-        { title: 'Canonical version findings apply now (#1022)', desc: 'the album version repair job could flag canonical-version mismatches but the apply button did nothing (the fix handler was missing). thanks @sam-coodu.' },
-        { title: 'Earlier versions', desc: '3.0.1 shipped the entire video side (movies, tv & youtube): library scanning, enrichment, a tv calendar, kometa-style overlays & collections, Server Activity (tautulli-style), and radarr/sonarr-parity download matching. before that: 2.8.9 fixed multi-disc downloads (#1009), 2.8.8 stopped a tag write from corrupting FLAC audio (#1000), 2.8.4 added Artist Web + Quality Profiles, and 2.7.0 made multi-user real.' },
+    '3.0.3': [
+        { date: 'July 2026 — 3.0.3' },
+        { title: 'Video: wishlist a whole show in one click', desc: 'a "Wishlist Missing" button on the show detail page adds every missing aired episode across ALL seasons (loading the ones you never browsed), and the Get Missing modal gets a matching "Select all missing" button. both were season-at-a-time before.' },
+        { title: 'Video: fix a wrong match from the Manage panel', desc: 'a new Matches section on movie/show Manage panels — per-service rows (TMDB, TVDB, IMDb) with a search to re-point a wrong match to the right title. re-pointing clears what the old match filled in and re-enriches by the new id in the background; your locked fields and art are never touched.' },
+        { title: 'Video: shows stuck with no status heal themselves', desc: 'some shows had no airing info and no watchlist button because their TMDB status never landed (an old bug marked them done even when the call failed). a one-time migration re-queues them — status, watchlist button and airing refresh come back on their own.' },
+        { title: 'Automations: a global pause per side', desc: 'both automations pages get a master toggle. it never touches your individual switches — it just gates whether anything RUNS on that side. scheduled slots skip but keep their schedule, manual Run still works. music defaults on, video defaults off.' },
+        { title: 'Corrupt File Detector actually finds files (#1000)', desc: 'the scan silently skipped every file on docker/nas setups (the path resolver was called with no search directories). it resolves properly now, says what it actually decoded, and shouts when no paths resolve at all. flac is in the docker image so the md5-verifying check works out of the box.' },
+        { title: 'Manual match no longer refuses to stick', desc: 'when two playlist entries pointed at the same server track, the second match was silently dropped forever — no matter how many times you re-matched it. both count now, and every remaining failure in that flow logs exactly why.' },
+        { title: 'Reorganize no longer quarantines your own files', desc: 'a library file that\'s a different master than the metadata source\'s tracklist (a long version, say) got flagged as a "wrong file" during reorganize. it\'s your file — the download-oriented duration check no longer applies. real corruption checks still run.' },
+        { title: 'Player modal fix', desc: 'the now-playing modal clipped its controls on short or zoomed-in windows. the body scrolls now; larger screens are pixel-identical.' },
+        { title: 'Earlier versions', desc: '3.0.2 made video downloads smarter (daily shows, soulseek path parsing, uploader blacklisting), took the whole video side mobile, and fixed Library Reorganize ignoring template changes. 3.0.1 shipped the entire video side: movies, tv & youtube, kometa-style overlays & collections, Server Activity, and radarr/sonarr-parity download matching. before that: 2.8.9 fixed multi-disc downloads, 2.8.8 stopped a tag write from corrupting FLAC audio, 2.8.4 added Artist Web + Quality Profiles.' },
     ],
 };
 
@@ -3444,7 +3445,20 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "3.0.2 — the follow-up polish release",
+        title: "3.0.3 — quality of life across both sides",
+        description: "whole-show wishlisting + a match editor on video, global automation pause toggles, and four reported music bugs dead — including the corrupt file detector that scanned nothing.",
+        features: [
+            "wishlist a whole show in one click: 'Wishlist Missing' on the show detail page grabs every missing aired episode across all seasons (loading ones you never browsed), and the Get Missing modal gets a matching 'Select all missing' button",
+            "fix a wrong match without deleting anything: movie/show Manage panels get a Matches section — per-service rows (TMDB, TVDB, IMDb) with search, re-point, and clear. re-pointing wipes what the wrong match filled in and re-enriches by the new id; locked fields and art are never touched",
+            "shows stuck with no status heal themselves: an old bug could mark a show's TMDB details done even when the call failed, leaving it with no airing info and no watchlist button forever (the 90 Day Fiancé report). a one-time migration re-queues them",
+            "a global automation pause per side: one master toggle on each Automations page that gates whether anything runs without touching your individual switches. music defaults on, video defaults off — flip it on once if you use video automations",
+            "Corrupt File Detector actually finds files (#1000): the scan silently skipped every file on docker/NAS setups because the path resolver had no search directories. fixed (ReplayGain Filler had the same hole), the summary reports what was really decoded, and flac ships in the docker image for the md5-verifying check",
+            "manual match sticks now: two playlist entries matched to the same server track no longer silently lose the second pairing forever, and reorganize no longer quarantines your own files for being a different master than the metadata source's tracklist",
+            "the now-playing modal no longer clips its controls on short/zoomed windows, and unresolvable-path warnings now repeat and name the actual filesystem error — so a dead NFS/bind mount diagnoses itself instead of masquerading as missing files",
+        ],
+    },
+    {
+        title: "Earlier in 3.0.2 — the follow-up polish release",
         description: "video downloading gets sonarr-parity round 2, the entire video side goes mobile, and three music-side bugs are dead (library reorganize works again).",
         features: [
             "smarter video searching: daily shows match by air date ('The Daily Show 2026.07.08' style releases), soulseek results parse their share paths the way the music matcher does, releases with no quality token get size-inferred quality, and the wishlist run log now names any source that was skipped (like prowlarr not being configured) instead of silently degrading",
