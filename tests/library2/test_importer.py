@@ -317,6 +317,115 @@ def test_import_captures_album_provider_ids_into_external_ids(legacy_db):
         conn.close()
 
 
+def test_import_captures_real_schema_artist_provider_ids(legacy_db):
+    """#38 root cause: the REAL legacy schema names the artist provider ids
+    ``deezer_id``/``tidal_id``/``qobuz_id`` — NOT ``deezer_artist_id`` etc. The
+    importer must read the real columns into external_ids, otherwise a
+    Deezer-primary artist (Deezer is SoulSync's default source) lands with
+    external_ids='{}' and ``expand_artist_discography`` has no provider id to
+    fetch the catalog with → "Update Discography finds only singles"."""
+    import json
+    conn = sqlite3.connect(legacy_db.path)
+    for col in ("deezer_id", "tidal_id", "qobuz_id"):
+        conn.execute(f"ALTER TABLE artists ADD COLUMN {col} TEXT")
+    conn.execute(
+        "UPDATE artists SET deezer_id='259', tidal_id='tid1', qobuz_id='qob1' WHERE id=1")
+    conn.commit()
+    conn.close()
+
+    import_legacy_library(legacy_db, reset=True)
+
+    conn = legacy_db._get_connection()
+    try:
+        ext = json.loads(conn.execute(
+            "SELECT external_ids FROM lib2_artists WHERE name='Drake'"
+        ).fetchone()["external_ids"] or "{}")
+        assert ext.get("deezer") == "259"
+        assert ext.get("tidal") == "tid1"
+        assert ext.get("qobuz") == "qob1"
+    finally:
+        conn.close()
+
+
+def test_reimport_matches_artist_with_text_legacy_id_no_duplicate(tmp_path):
+    """#38/#40: an artist whose legacy ``artists.id`` is TEXT (soulsync/Deezer-
+    generated, e.g. '476516869' — the common case for Deezer-primary libraries)
+    must MATCH its existing lib2 row on re-import. ``_by_legacy`` was keyed by the
+    INTEGER ``legacy_artist_id`` on re-seed but looked up with the TEXT legacy id
+    → str-vs-int miss → a duplicate artist row every re-import, the original
+    orphaned (legacy link nulled, external_ids left empty). Coercing the key to
+    str fixes it. Directly compounds #38: the orphaned original keeps
+    external_ids='{}' so the discography sync never gets a provider id."""
+    import sqlite3, json
+    path = str(tmp_path / "legacy_text_id.db")
+    conn = sqlite3.connect(path)
+    conn.executescript("""
+        CREATE TABLE artists(id TEXT PRIMARY KEY, name TEXT, thumb_url TEXT,
+            genres TEXT, summary TEXT, spotify_artist_id TEXT, musicbrainz_id TEXT,
+            deezer_id TEXT);
+        CREATE TABLE albums(id INTEGER PRIMARY KEY, artist_id TEXT, title TEXT,
+            year INTEGER, thumb_url TEXT, genres TEXT, track_count INTEGER,
+            release_date TEXT);
+        CREATE TABLE tracks(id INTEGER PRIMARY KEY, album_id INTEGER, artist_id TEXT,
+            title TEXT, track_number INTEGER, duration INTEGER, file_path TEXT,
+            bitrate INTEGER, file_size INTEGER, track_artist TEXT);
+    """)
+    conn.execute("INSERT INTO artists VALUES('476516869','Michael Jackson',NULL,NULL,"
+                 "NULL,NULL,'f27ec8db','259')")
+    conn.execute("INSERT INTO albums VALUES(10,'476516869','Thriller',1982,NULL,NULL,9,NULL)")
+    conn.execute("INSERT INTO tracks VALUES(100,10,'476516869','Beat It',1,258000,"
+                 "'/m/beatit.flac',1000,5000,NULL)")
+    conn.commit()
+    conn.close()
+
+    class _Shim:
+        def __init__(self, p): self.path = p
+        def _get_connection(self):
+            c = sqlite3.connect(self.path); c.row_factory = sqlite3.Row
+            c.execute("PRAGMA foreign_keys=ON"); return c
+    db = _Shim(path)
+
+    import_legacy_library(db)   # first import creates the lib2 artist row
+    import_legacy_library(db)   # re-import must MATCH the existing row, not duplicate
+
+    conn = sqlite3.connect(path); conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        "SELECT id, legacy_artist_id, external_ids FROM lib2_artists "
+        "WHERE name='Michael Jackson'").fetchall()
+    conn.close()
+
+    assert len(rows) == 1, f"re-import duplicated the artist ({len(rows)} rows)"
+    assert rows[0]["legacy_artist_id"] is not None, "original row was orphaned"
+    ext = json.loads(rows[0]["external_ids"] or "{}")
+    assert ext.get("deezer") == "259", f"external_ids not populated: {ext}"
+
+
+def test_import_captures_real_schema_album_provider_ids(legacy_db):
+    """Album counterpart of the artist fix: real legacy albums carry
+    ``deezer_id``/``tidal_id``/``qobuz_id`` (not ``*_album_id``)."""
+    import json
+    conn = sqlite3.connect(legacy_db.path)
+    for col in ("deezer_id", "tidal_id", "qobuz_id"):
+        conn.execute(f"ALTER TABLE albums ADD COLUMN {col} TEXT")
+    conn.execute(
+        "UPDATE albums SET deezer_id='dz10', tidal_id='td10', qobuz_id='qb10' WHERE id=10")
+    conn.commit()
+    conn.close()
+
+    import_legacy_library(legacy_db, reset=True)
+
+    conn = legacy_db._get_connection()
+    try:
+        ext = json.loads(conn.execute(
+            "SELECT external_ids FROM lib2_albums WHERE title='Views'"
+        ).fetchone()["external_ids"] or "{}")
+        assert ext.get("deezer") == "dz10"
+        assert ext.get("tidal") == "td10"
+        assert ext.get("qobuz") == "qb10"
+    finally:
+        conn.close()
+
+
 def test_import_prefers_explicit_album_type_over_one_track_heuristic(legacy_db):
     conn = sqlite3.connect(legacy_db.path)
     conn.execute("ALTER TABLE albums ADD COLUMN album_type TEXT")

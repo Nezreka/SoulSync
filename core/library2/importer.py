@@ -175,7 +175,7 @@ class _ArtistResolver:
         self.cursor = cursor
         self.default_profile_id = default_profile_id
         self._by_name: Dict[str, int] = {}
-        self._by_legacy: Dict[int, int] = {}
+        self._by_legacy: Dict[str, int] = {}
         # provider-id VALUE -> artist id. Source-agnostic on purpose: SoulSync
         # is multi-source (Deezer is the DEFAULT), so identity must key on ANY
         # provider id — Deezer/MusicBrainz/Spotify/… — not just Spotify. The
@@ -241,7 +241,7 @@ class _ArtistResolver:
         for row in self.cursor.fetchall():
             self._by_name.setdefault(normalize_name(row["name"]), row["id"])
             if row["legacy_artist_id"] is not None:
-                self._by_legacy[row["legacy_artist_id"]] = row["id"]
+                self._by_legacy[self._legacy_key(row["legacy_artist_id"])] = row["id"]
             ids: Dict[str, str] = {}
             try:
                 raw = json.loads(row["external_ids"] or "{}")
@@ -255,8 +255,17 @@ class _ArtistResolver:
                 ids.setdefault("musicbrainz", str(row["musicbrainz_id"]))
             self._register(row["id"], ids)
 
-    def get_legacy(self, legacy_id: int) -> Optional[int]:
-        return self._by_legacy.get(legacy_id)
+    @staticmethod
+    def _legacy_key(legacy_id: Any) -> Optional[str]:
+        """Normalize a legacy row id to a stable dict key. The legacy ``artists.id``
+        can be TEXT (soulsync/Deezer-generated, e.g. '476516869') while lib2's
+        ``legacy_artist_id`` is INTEGER-affinity, so the same id round-trips as int
+        vs str. Coercing to str on both sides keeps re-imports matching the same
+        row instead of creating a duplicate (#38/#40)."""
+        return None if legacy_id is None else str(legacy_id)
+
+    def get_legacy(self, legacy_id: Any) -> Optional[int]:
+        return self._by_legacy.get(self._legacy_key(legacy_id))
 
     def known_name(self, name: str) -> bool:
         """Whether an artist with exactly this (normalized) name already exists."""
@@ -334,7 +343,7 @@ class _ArtistResolver:
             ids.setdefault("musicbrainz", str(fields["musicbrainz_id"]).strip())
         external_json = json.dumps(ids, sort_keys=True, separators=(",", ":")) if ids else "{}"
         spotify_col, mbid_col = ids.get("spotify"), ids.get("musicbrainz")
-        existing = self._by_legacy.get(legacy_id)
+        existing = self._by_legacy.get(self._legacy_key(legacy_id))
         if existing is not None:
             self.cursor.execute(
                 "UPDATE lib2_artists SET name=?, sort_name=?, spotify_id=?, "
@@ -356,7 +365,7 @@ class _ArtistResolver:
              self.default_profile_id, run_id),
         )
         new_id = self.cursor.lastrowid
-        self._by_legacy[legacy_id] = new_id
+        self._by_legacy[self._legacy_key(legacy_id)] = new_id
         self._by_name.setdefault(normalize_name(fields["name"]), new_id)
         self._register(new_id, ids)
         return new_id
@@ -642,12 +651,17 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 "musicbrainz_id": _pick(row, "musicbrainz_artist_id", "musicbrainz_id"),
                 # Import EVERY provider id the legacy row carries (SoulSync's
                 # default source is Deezer, not Spotify) into external_ids.
+                # The real legacy schema names these deezer_id/tidal_id/qobuz_id
+                # (only Spotify/MusicBrainz carry the *_artist_id suffix). Accept
+                # both so a Deezer-primary artist keeps its id in external_ids —
+                # without it, expand_artist_discography has no id to fetch with
+                # and "Update Discography" returns only a stray single (#38).
                 "provider_ids": {
                     "spotify": _pick(row, "spotify_artist_id"),
-                    "deezer": _pick(row, "deezer_artist_id"),
+                    "deezer": _pick(row, "deezer_artist_id", "deezer_id"),
                     "musicbrainz": _pick(row, "musicbrainz_artist_id", "musicbrainz_id"),
-                    "tidal": _pick(row, "tidal_artist_id"),
-                    "qobuz": _pick(row, "qobuz_artist_id"),
+                    "tidal": _pick(row, "tidal_artist_id", "tidal_id"),
+                    "qobuz": _pick(row, "qobuz_artist_id", "qobuz_id"),
                 },
                 "image_url": _pick(row, "thumb_url", "banner_url"),
                 "genres": _normalize_genres(_pick(row, "genres")),
@@ -752,12 +766,14 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 )
                 album_id = cursor.lastrowid
                 album_map[row["id"]] = album_id
+            # Real legacy albums carry deezer_id/tidal_id/qobuz_id; accept the
+            # *_album_id aliases too (see the artist provider_ids note above).
             _merge_album_external_ids(cursor, album_id, {
                 "spotify": _pick(row, "spotify_album_id"),
-                "deezer": _pick(row, "deezer_album_id"),
+                "deezer": _pick(row, "deezer_album_id", "deezer_id"),
                 "musicbrainz": _pick(row, "musicbrainz_release_id"),
-                "tidal": _pick(row, "tidal_album_id"),
-                "qobuz": _pick(row, "qobuz_album_id"),
+                "tidal": _pick(row, "tidal_album_id", "tidal_id"),
+                "qobuz": _pick(row, "qobuz_album_id", "qobuz_id"),
             })
             cursor.execute(
                 "INSERT OR IGNORE INTO lib2_album_artists(album_id, artist_id, role) "
