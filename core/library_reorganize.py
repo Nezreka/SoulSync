@@ -987,6 +987,14 @@ def _build_post_process_context(
         'is_album_download': True,
         'has_clean_spotify_data': True,
         'has_full_spotify_metadata': True,
+        # A reorganize processes the user's OWN library files, not slskd
+        # transfers — same as the Import page (#804). Skips the integrity
+        # check's duration-agreement leg: the re-resolved API tracklist can
+        # legitimately disagree with the user's copy (a different master /
+        # long version), and that mismatch was QUARANTINING a copy of a file
+        # that stayed happily in the library (TheHomeGuy: 'Through Glass'
+        # 283s vs Discogs' 241s). Size + parse corruption legs still run.
+        'is_local_import': True,
         # Reorganize destinations must come from the CURRENT template alone.
         # The #829 existing-folder reuse would resolve to the folder the album
         # already lives in — the very folder reorganize is trying to move it
