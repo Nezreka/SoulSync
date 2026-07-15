@@ -234,6 +234,89 @@ def test_artist_resolver_name_only_and_id_adoption(legacy_db):
         conn.close()
 
 
+def test_artist_resolver_matches_across_providers_via_external_ids(legacy_db):
+    """§16.3(b), provider-neutral: identity keys on ANY provider id (Deezer is
+    the DEFAULT source), not Spotify. The same Deezer id resolves to the same
+    artist even under a different display name; a different id for the same name
+    is distinct; the source→id map persists in external_ids."""
+    import json
+    conn, resolver = _fresh_resolver(legacy_db)
+    try:
+        a = resolver.get_or_create_by_name("Nova", provider_ids={"deezer": "dz1"})
+        # Same Deezer id, different display name → same artist (id beats name).
+        assert resolver.get_or_create_by_name(
+            "Nova (Live)", provider_ids={"deezer": "dz1"}) == a
+        # Different Deezer id, same name → distinct artist.
+        b = resolver.get_or_create_by_name("Nova", provider_ids={"deezer": "dz2"})
+        assert a != b
+        # Cross-source: an artist known by Deezer id, later referenced by a
+        # MusicBrainz id, is adopted (not duplicated) when the name also matches.
+        ext = json.loads(
+            conn.execute("SELECT external_ids FROM lib2_artists WHERE id=?", (a,))
+            .fetchone()["external_ids"] or "{}")
+        assert ext.get("deezer") == "dz1"
+    finally:
+        conn.close()
+
+
+def test_import_captures_all_provider_ids_into_external_ids(legacy_db):
+    """§16.3(b) / import-parity: the main legacy import must capture EVERY
+    provider id the legacy row has (Deezer + MusicBrainz + Spotify), not only
+    Spotify — otherwise a Deezer-primary user loses all provider identity in
+    lib2 and disambiguation / tracklist fetches can't use it."""
+    import json
+    conn = sqlite3.connect(legacy_db.path)
+    conn.execute("ALTER TABLE artists ADD COLUMN deezer_artist_id TEXT")
+    conn.execute("ALTER TABLE artists ADD COLUMN musicbrainz_artist_id TEXT")
+    conn.execute(
+        "UPDATE artists SET deezer_artist_id='dz_drake', "
+        "musicbrainz_artist_id='mb_drake' WHERE id=1")
+    conn.commit()
+    conn.close()
+
+    import_legacy_library(legacy_db, reset=True)
+
+    conn = legacy_db._get_connection()
+    try:
+        row = conn.execute(
+            "SELECT spotify_id, musicbrainz_id, external_ids FROM lib2_artists "
+            "WHERE name='Drake'").fetchone()
+        ext = json.loads(row["external_ids"] or "{}")
+        assert ext.get("deezer") == "dz_drake"
+        assert ext.get("spotify") == "sp1"          # conftest spotify_artist_id
+        assert ext.get("musicbrainz") == "mb_drake"
+        assert row["musicbrainz_id"] == "mb_drake"  # well-known column also filled
+    finally:
+        conn.close()
+
+
+def test_import_captures_album_provider_ids_into_external_ids(legacy_db):
+    """Import-parity for albums: capture Deezer/Spotify/MusicBrainz album ids
+    into external_ids so completeness.resolve_tracklist can fetch the EXACT
+    provider release (Deezer users, §16.3(b)) instead of only a name search."""
+    import json
+    conn = sqlite3.connect(legacy_db.path)
+    conn.execute("ALTER TABLE albums ADD COLUMN deezer_album_id TEXT")
+    conn.execute("ALTER TABLE albums ADD COLUMN spotify_album_id TEXT")
+    conn.execute(
+        "UPDATE albums SET deezer_album_id='dz_views', spotify_album_id='sp_views' "
+        "WHERE id=10")
+    conn.commit()
+    conn.close()
+
+    import_legacy_library(legacy_db, reset=True)
+
+    conn = legacy_db._get_connection()
+    try:
+        ext = json.loads(
+            conn.execute("SELECT external_ids FROM lib2_albums WHERE title='Views'")
+            .fetchone()["external_ids"] or "{}")
+        assert ext.get("deezer") == "dz_views"
+        assert ext.get("spotify") == "sp_views"
+    finally:
+        conn.close()
+
+
 def test_import_prefers_explicit_album_type_over_one_track_heuristic(legacy_db):
     conn = sqlite3.connect(legacy_db.path)
     conn.execute("ALTER TABLE albums ADD COLUMN album_type TEXT")

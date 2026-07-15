@@ -116,6 +116,34 @@ def _normalize_album_type(raw: Any, track_count: Optional[int], actual_tracks: i
     return "single" if _detect_single(track_count, actual_tracks) else "album"
 
 
+def _merge_album_external_ids(cursor, album_id: int, ids: Dict[str, Any]) -> None:
+    """Merge {source: id} into an album's ``external_ids`` (never overwrites an
+    existing source, so a discography-claimed row keeps its provider ids). Used
+    to import EVERY provider album id (Deezer default), not only Spotify."""
+    clean = {
+        str(source).strip().lower(): str(value).strip()
+        for source, value in ids.items()
+        if value not in (None, "") and str(value).strip()
+    }
+    if not clean:
+        return
+    row = cursor.connection.execute(
+        "SELECT external_ids FROM lib2_albums WHERE id=?", (album_id,)).fetchone()
+    try:
+        current = json.loads((row["external_ids"] if row else None) or "{}")
+        if not isinstance(current, dict):
+            current = {}
+    except (TypeError, ValueError):
+        current = {}
+    merged = dict(current)
+    for source, value in clean.items():
+        merged.setdefault(source, value)
+    if merged != current:
+        cursor.execute(
+            "UPDATE lib2_albums SET external_ids=? WHERE id=?",
+            (json.dumps(merged, sort_keys=True, separators=(",", ":")), album_id))
+
+
 class _ArtistResolver:
     """Resolves artist names to ``lib2_artists`` ids, creating rows on demand.
 
@@ -129,21 +157,84 @@ class _ArtistResolver:
         self.default_profile_id = default_profile_id
         self._by_name: Dict[str, int] = {}
         self._by_legacy: Dict[int, int] = {}
-        self._by_spotify: Dict[str, int] = {}
-        self._by_mbid: Dict[str, int] = {}
+        # provider-id VALUE -> artist id. Source-agnostic on purpose: SoulSync
+        # is multi-source (Deezer is the DEFAULT), so identity must key on ANY
+        # provider id — Deezer/MusicBrainz/Spotify/… — not just Spotify. The
+        # source→id map is persisted in the app-wide ``external_ids`` column
+        # exactly like ``discography.py`` already uses it.
+        self._by_provider: Dict[str, int] = {}
+
+    @staticmethod
+    def _clean_ids(ids: Optional[Dict[str, Any]]) -> Dict[str, str]:
+        out: Dict[str, str] = {}
+        for source, value in (ids or {}).items():
+            src = str(source).strip().lower()
+            val = str(value).strip() if value not in (None, "") else ""
+            if src and val:
+                out[src] = val
+        return out
+
+    def _register(self, artist_id: int, ids: Dict[str, str]) -> None:
+        for value in ids.values():
+            self._by_provider.setdefault(value, artist_id)
+
+    def _stored_ids(self, artist_id: int) -> Dict[str, str]:
+        """The artist's current source→id map (external_ids + the two columns)."""
+        row = self.cursor.connection.execute(
+            "SELECT spotify_id, musicbrainz_id, external_ids FROM lib2_artists WHERE id=?",
+            (artist_id,)).fetchone()
+        if not row:
+            return {}
+        ids: Dict[str, str] = {}
+        try:
+            raw = json.loads(row["external_ids"] or "{}")
+            if isinstance(raw, dict):
+                ids.update(self._clean_ids(raw))
+        except (TypeError, ValueError):
+            pass
+        if row["spotify_id"]:
+            ids.setdefault("spotify", str(row["spotify_id"]))
+        if row["musicbrainz_id"]:
+            ids.setdefault("musicbrainz", str(row["musicbrainz_id"]))
+        return ids
+
+    def _merge_ids(self, artist_id: int, ids: Dict[str, str]) -> None:
+        """Adopt any NEW provider ids onto an existing artist (never overwrite)."""
+        stored = self._stored_ids(artist_id)
+        merged = dict(stored)
+        for source, value in ids.items():
+            merged.setdefault(source, value)
+        if merged != stored:
+            self.cursor.execute(
+                "UPDATE lib2_artists SET external_ids=?, "
+                "spotify_id=COALESCE(NULLIF(spotify_id,''), ?), "
+                "musicbrainz_id=COALESCE(NULLIF(musicbrainz_id,''), ?), "
+                "updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (json.dumps(merged, sort_keys=True, separators=(",", ":")),
+                 merged.get("spotify"), merged.get("musicbrainz"), artist_id),
+            )
+        self._register(artist_id, merged)
 
     def seed_existing(self) -> None:
         self.cursor.execute(
-            "SELECT id, name, legacy_artist_id, spotify_id, musicbrainz_id "
-            "FROM lib2_artists")
+            "SELECT id, name, legacy_artist_id, spotify_id, musicbrainz_id, "
+            "external_ids FROM lib2_artists")
         for row in self.cursor.fetchall():
             self._by_name.setdefault(normalize_name(row["name"]), row["id"])
             if row["legacy_artist_id"] is not None:
                 self._by_legacy[row["legacy_artist_id"]] = row["id"]
+            ids: Dict[str, str] = {}
+            try:
+                raw = json.loads(row["external_ids"] or "{}")
+                if isinstance(raw, dict):
+                    ids.update(self._clean_ids(raw))
+            except (TypeError, ValueError):
+                pass
             if row["spotify_id"]:
-                self._by_spotify.setdefault(str(row["spotify_id"]), row["id"])
+                ids.setdefault("spotify", str(row["spotify_id"]))
             if row["musicbrainz_id"]:
-                self._by_mbid.setdefault(str(row["musicbrainz_id"]), row["id"])
+                ids.setdefault("musicbrainz", str(row["musicbrainz_id"]))
+            self._register(row["id"], ids)
 
     def get_legacy(self, legacy_id: int) -> Optional[int]:
         return self._by_legacy.get(legacy_id)
@@ -152,103 +243,103 @@ class _ArtistResolver:
         """Whether an artist with exactly this (normalized) name already exists."""
         return normalize_name(name) in self._by_name
 
-    def _stored_ids(self, artist_id: int) -> Tuple[Optional[str], Optional[str]]:
-        row = self.cursor.connection.execute(
-            "SELECT spotify_id, musicbrainz_id FROM lib2_artists WHERE id=?",
-            (artist_id,)).fetchone()
-        if not row:
-            return None, None
-        return (
-            str(row["spotify_id"]) if row["spotify_id"] else None,
-            str(row["musicbrainz_id"]) if row["musicbrainz_id"] else None,
-        )
-
-    def get_or_create_by_name(self, name: str, *, spotify_id: Optional[str] = None,
+    def get_or_create_by_name(self, name: str, *,
+                              provider_ids: Optional[Dict[str, Any]] = None,
+                              spotify_id: Optional[str] = None,
                               musicbrainz_id: Optional[str] = None) -> int:
         """Resolve an artist name to a lib2 id, disambiguating by provider id.
 
-        A provider id (Spotify, then MusicBrainz) is the authoritative key
-        (§16.3(b)): two artists sharing a display name but carrying DIFFERENT ids
-        are distinct entities, and the same id always resolves to the same row
-        even under a different display name — this is what stops an album from
-        being hung on the wrong same-named artist (and its real tracklist never
-        being fetchable). Only when no id matches do we fall back to the
-        normalized-name key. A same-named row whose stored id CONFLICTS with a
-        requested id forces a new row; a same-named row with no id adopts the id.
+        A provider id (from ANY source — Deezer, MusicBrainz, Spotify, …) is the
+        authoritative key (§16.3(b)): two artists sharing a display name but
+        carrying DIFFERENT ids are distinct entities, and the same id always
+        resolves to the same row even under a different display name — this is
+        what stops an album from being hung on the wrong same-named artist (and
+        its real tracklist never being fetchable). Only when no id matches do we
+        fall back to the normalized-name key. A same-named row whose stored id
+        CONFLICTS for the same source forces a new row; otherwise any new ids are
+        adopted. ``spotify_id`` / ``musicbrainz_id`` are convenience aliases for
+        ``provider_ids={'spotify': …, 'musicbrainz': …}``.
         """
-        spotify_id = str(spotify_id).strip() if spotify_id else None
-        musicbrainz_id = str(musicbrainz_id).strip() if musicbrainz_id else None
+        ids = self._clean_ids(provider_ids)
+        if spotify_id:
+            ids.setdefault("spotify", str(spotify_id).strip())
+        if musicbrainz_id:
+            ids.setdefault("musicbrainz", str(musicbrainz_id).strip())
+        ids = self._clean_ids(ids)
 
-        # 1) authoritative provider-id match (id beats the name key)
-        if spotify_id and spotify_id in self._by_spotify:
-            return self._by_spotify[spotify_id]
-        if musicbrainz_id and musicbrainz_id in self._by_mbid:
-            return self._by_mbid[musicbrainz_id]
+        # 1) authoritative provider-id VALUE match (any source beats the name key)
+        for value in ids.values():
+            hit = self._by_provider.get(value)
+            if hit is not None:
+                self._merge_ids(hit, ids)
+                return hit
 
-        # 2) name match — reuse unless a stored id conflicts with a requested one
+        # 2) name match — reuse unless a stored id conflicts for the same source
         key = normalize_name(name)
         existing = self._by_name.get(key)
         if existing is not None:
-            stored_spotify, stored_mbid = self._stored_ids(existing)
-            conflict = (
-                (spotify_id and stored_spotify and spotify_id != stored_spotify)
-                or (musicbrainz_id and stored_mbid and musicbrainz_id != stored_mbid)
-            )
+            stored = self._stored_ids(existing)
+            conflict = any(src in stored and stored[src] != val
+                           for src, val in ids.items())
             if not conflict:
-                # Same artist under a name we already know — adopt any new id.
-                if spotify_id and not stored_spotify:
-                    self.cursor.execute(
-                        "UPDATE lib2_artists SET spotify_id=? WHERE id=?",
-                        (spotify_id, existing))
-                    self._by_spotify.setdefault(spotify_id, existing)
-                if musicbrainz_id and not stored_mbid:
-                    self.cursor.execute(
-                        "UPDATE lib2_artists SET musicbrainz_id=? WHERE id=?",
-                        (musicbrainz_id, existing))
-                    self._by_mbid.setdefault(musicbrainz_id, existing)
+                self._merge_ids(existing, ids)  # adopt any new ids
                 return existing
 
         # 3) create a fresh row (may share a name but is id-distinct)
         self.cursor.execute(
             "INSERT INTO lib2_artists(name, sort_name, spotify_id, musicbrainz_id, "
-            "quality_profile_id) VALUES(?,?,?,?,?)",
-            (name, name, spotify_id, musicbrainz_id, self.default_profile_id),
+            "external_ids, quality_profile_id) VALUES(?,?,?,?,?,?)",
+            (name, name, ids.get("spotify"), ids.get("musicbrainz"),
+             json.dumps(ids, sort_keys=True, separators=(",", ":")) if ids else "{}",
+             self.default_profile_id),
         )
         new_id = self.cursor.lastrowid
         self._by_name.setdefault(key, new_id)  # keep first-seen for name-only lookups
-        if spotify_id:
-            self._by_spotify.setdefault(spotify_id, new_id)
-        if musicbrainz_id:
-            self._by_mbid.setdefault(musicbrainz_id, new_id)
+        self._register(new_id, ids)
         return new_id
 
     def upsert_legacy(
         self, legacy_id: int, fields: Dict[str, Any], run_id: str
     ) -> int:
-        """Insert or update a lib2 artist mirrored from a legacy artist row."""
+        """Insert or update a lib2 artist mirrored from a legacy artist row.
+
+        Captures EVERY provider id the legacy row carries (``fields['provider_ids']``
+        = source→id, e.g. spotify/deezer/musicbrainz) into ``external_ids`` so a
+        non-Spotify (e.g. Deezer-primary) library keeps its full identity — not
+        just the two well-known columns.
+        """
+        ids = self._clean_ids(fields.get("provider_ids"))
+        if fields.get("spotify_id"):
+            ids.setdefault("spotify", str(fields["spotify_id"]).strip())
+        if fields.get("musicbrainz_id"):
+            ids.setdefault("musicbrainz", str(fields["musicbrainz_id"]).strip())
+        external_json = json.dumps(ids, sort_keys=True, separators=(",", ":")) if ids else "{}"
+        spotify_col, mbid_col = ids.get("spotify"), ids.get("musicbrainz")
         existing = self._by_legacy.get(legacy_id)
         if existing is not None:
             self.cursor.execute(
                 "UPDATE lib2_artists SET name=?, sort_name=?, spotify_id=?, "
-                "musicbrainz_id=?, image_url=?, genres=?, summary=?, "
+                "musicbrainz_id=?, external_ids=?, image_url=?, genres=?, summary=?, "
                 "legacy_import_run_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                (fields["name"], fields["sort_name"], fields["spotify_id"],
-                 fields["musicbrainz_id"], fields["image_url"], fields["genres"],
+                (fields["name"], fields["sort_name"], spotify_col, mbid_col,
+                 external_json, fields["image_url"], fields["genres"],
                  fields["summary"], run_id, existing),
             )
             self._by_name.setdefault(normalize_name(fields["name"]), existing)
+            self._register(existing, ids)
             return existing
         self.cursor.execute(
             "INSERT INTO lib2_artists(name, sort_name, spotify_id, musicbrainz_id, "
-            "image_url, genres, summary, legacy_artist_id, quality_profile_id, "
-            "legacy_import_run_id) VALUES(?,?,?,?,?,?,?,?,?,?)",
-            (fields["name"], fields["sort_name"], fields["spotify_id"],
-             fields["musicbrainz_id"], fields["image_url"], fields["genres"],
-             fields["summary"], legacy_id, self.default_profile_id, run_id),
+            "external_ids, image_url, genres, summary, legacy_artist_id, "
+            "quality_profile_id, legacy_import_run_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            (fields["name"], fields["sort_name"], spotify_col, mbid_col, external_json,
+             fields["image_url"], fields["genres"], fields["summary"], legacy_id,
+             self.default_profile_id, run_id),
         )
         new_id = self.cursor.lastrowid
         self._by_legacy[legacy_id] = new_id
         self._by_name.setdefault(normalize_name(fields["name"]), new_id)
+        self._register(new_id, ids)
         return new_id
 
 
@@ -529,7 +620,16 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 "name": name,
                 "sort_name": name,
                 "spotify_id": _pick(row, "spotify_artist_id"),
-                "musicbrainz_id": _pick(row, "musicbrainz_id"),
+                "musicbrainz_id": _pick(row, "musicbrainz_artist_id", "musicbrainz_id"),
+                # Import EVERY provider id the legacy row carries (SoulSync's
+                # default source is Deezer, not Spotify) into external_ids.
+                "provider_ids": {
+                    "spotify": _pick(row, "spotify_artist_id"),
+                    "deezer": _pick(row, "deezer_artist_id"),
+                    "musicbrainz": _pick(row, "musicbrainz_artist_id", "musicbrainz_id"),
+                    "tidal": _pick(row, "tidal_artist_id"),
+                    "qobuz": _pick(row, "qobuz_artist_id"),
+                },
                 "image_url": _pick(row, "thumb_url", "banner_url"),
                 "genres": _normalize_genres(_pick(row, "genres")),
                 "summary": _pick(row, "summary"),
@@ -633,6 +733,13 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 )
                 album_id = cursor.lastrowid
                 album_map[row["id"]] = album_id
+            _merge_album_external_ids(cursor, album_id, {
+                "spotify": _pick(row, "spotify_album_id"),
+                "deezer": _pick(row, "deezer_album_id"),
+                "musicbrainz": _pick(row, "musicbrainz_release_id"),
+                "tidal": _pick(row, "tidal_album_id"),
+                "qobuz": _pick(row, "qobuz_album_id"),
+            })
             cursor.execute(
                 "INSERT OR IGNORE INTO lib2_album_artists(album_id, artist_id, role) "
                 "VALUES(?,?, 'primary')", (album_id, lib2_artist),
