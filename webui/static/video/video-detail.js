@@ -652,8 +652,13 @@
         var yr = s.year ? '<span class="vd-sim-year">' + esc(s.year) + '</span>' : '';
         var cb = window.VideoGet ? VideoGet.cardButton({ kind: simKind, tmdbId: s.tmdb_id,
             title: s.title, poster: s.poster, status: s.status, source: 'tmdb' }) : '';
+        // Ownership arrives stamped from the engine; wishlist state hydrates
+        // after render (VideoWishState) — owned wins and skips the wish check.
+        var owned = s.library_id != null;
+        var chip = owned ? '<span class="vd-sim-wishchip vd-sim-wishchip--owned">In Library</span>' : '';
         return '<a class="vd-sim-card" href="/video-detail/tmdb/' + simKind + '/' + s.tmdb_id +
-            '" data-vd-sim="' + simKind + '" data-vd-sim-id="' + s.tmdb_id + '">' + cb +
+            '" data-vd-sim="' + simKind + '" data-vd-sim-id="' + s.tmdb_id + '"' +
+            (owned ? ' data-vd-sim-owned="1"' : '') + '>' + chip + cb +
             poster + '<span class="vd-sim-title">' + esc(s.title) + '</span>' + yr + '</a>';
     }
     function renderRow(sectionSel, hostSel, items) {

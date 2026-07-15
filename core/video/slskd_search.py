@@ -14,55 +14,38 @@ the HTTP poll is thin I/O glue.
 from __future__ import annotations
 
 import re
-import threading
 import time
 from typing import Any
 
 import requests
 
-# slskd rate-limits search CREATION and returns 429 when exceeded. The music side caps at
-# ~35 searches / 220s; we mirror that, plus a small min-gap between creations (the auto-grab
-# fires from a thread pool, so without it a burst — or a 429 that returns instantly — storms
-# slskd). A 429 sets a cooldown so we back off instead of hammering.
-_SEARCH_LOCK = threading.Lock()
-_SEARCH_TIMES: list = []          # reserved creation times (monotonic), pruned to the window
-_COOLDOWN_UNTIL = [0.0]
-_MAX_PER_WINDOW = 35
-_WINDOW_SECONDS = 220.0
+# slskd rate-limits search CREATION and returns 429 when exceeded. The budget lives in
+# core.slskd_throttle and is SHARED with the music side — one slskd instance, one window.
+# Video adds a small min-gap between creations (the auto-grab fires from a thread pool,
+# so without it a burst — or a 429 that returns instantly — storms slskd).
+from core.slskd_throttle import note_rate_limited as _note_rate_limited  # noqa: F401 (re-export for callers/tests)
+from core.slskd_throttle import reserve_search_slot
+
 _MIN_GAP_SECONDS = 2.0
+# How long an HTTP request handler may wait on the shared budget before giving
+# up: a user's manual search shouldn't hang for minutes (and trip gunicorn's
+# 120s worker timeout) because background sync has the window drained.
+_INTERACTIVE_MAX_WAIT_SECONDS = 20.0
 
 
-def _reserve_search_slot() -> float:
-    """Reserve the next allowed search-creation time under the rate limit; returns it."""
-    with _SEARCH_LOCK:
-        now = time.monotonic()
-        while _SEARCH_TIMES and _SEARCH_TIMES[0] <= now - _WINDOW_SECONDS:
-            _SEARCH_TIMES.pop(0)
-        at = now
-        if _SEARCH_TIMES:
-            at = max(at, _SEARCH_TIMES[-1] + _MIN_GAP_SECONDS)              # space from last
-        if len(_SEARCH_TIMES) >= _MAX_PER_WINDOW:
-            at = max(at, _SEARCH_TIMES[0] + _WINDOW_SECONDS)               # window full → wait
-        at = max(at, _COOLDOWN_UNTIL[0])                                    # honor a 429 cooldown
-        _SEARCH_TIMES.append(at)
-        return at
-
-
-def _throttle_search() -> None:
-    """Block until we're allowed to create the next slskd search."""
-    wait = _reserve_search_slot() - time.monotonic()
+def _throttle_search(max_wait: float | None = None) -> bool:
+    """Block until the shared budget allows the next slskd search creation.
+    With ``max_wait``, give up (returning False, consuming nothing) instead of
+    blocking longer — for interactive callers."""
+    slot = reserve_search_slot(_MIN_GAP_SECONDS, max_wait_seconds=max_wait)
+    if slot is None:
+        return False
+    wait = slot - time.monotonic()
     if wait > 0:
         time.sleep(wait)
+    return True
 
-
-def _note_rate_limited(retry_after: Any = None) -> None:
-    """slskd returned 429 — back off before the next search."""
-    try:
-        secs = float(retry_after) if retry_after else 30.0
-    except (TypeError, ValueError):
-        secs = 30.0
-    with _SEARCH_LOCK:
-        _COOLDOWN_UNTIL[0] = time.monotonic() + max(5.0, min(secs, 120.0))
+_RATE_LIMIT_BUSY_MSG = "search rate limit reached (shared slskd budget) — try again in a moment"
 
 # Container extensions we treat as the actual video (everything else — subs, nfo,
 # art, samples — is ignored for quality purposes).
@@ -236,9 +219,11 @@ def search_timeout_ms() -> int:
     return max(10, min(120, secs)) * 1000
 
 
-def start_search(query: str) -> dict:
+def start_search(query: str, *, max_throttle_wait: float | None = None) -> dict:
     """Kick off a slskd search (don't wait). Returns {configured[, id][, error]}.
     The caller polls ``poll_responses(id)`` until satisfied (like the music side).
+    ``max_throttle_wait`` bounds the shared-rate-limit wait for interactive
+    callers (HTTP handlers); background callers leave it None and wait their turn.
 
     We generate the search id OURSELVES and pass it to slskd — it honors a client-supplied
     ``id`` — so we never depend on parsing it back out of the POST response. Some slskd builds
@@ -248,7 +233,8 @@ def start_search(query: str) -> dict:
     base, headers = _conn()
     if not base:
         return {"configured": False}
-    _throttle_search()                     # stay under slskd's search-creation rate limit
+    if not _throttle_search(max_throttle_wait):   # stay under slskd's search-creation rate limit
+        return {"configured": True, "error": _RATE_LIMIT_BUSY_MSG}
     search_id = str(uuid.uuid4())
     payload = {"id": search_id, "searchText": query, "timeout": search_timeout_ms(),
                "filterResponses": True, "minimumResponseFileCount": 1,
@@ -332,8 +318,15 @@ def slskd_search(query: str, *, max_seconds: int = 8, slskd_timeout_ms: int = 45
         min_mbps = 0
     payload = {"searchText": query, "timeout": slskd_timeout_ms, "filterResponses": True,
                "minimumResponseFileCount": 1, "minimumPeerUploadSpeed": min_mbps * 125000}
+    # Same shared search-creation budget as start_search. This function only
+    # serves the synchronous search endpoint (a user is waiting) → bounded wait.
+    if not _throttle_search(_INTERACTIVE_MAX_WAIT_SECONDS):
+        return {"configured": True, "hits": [], "error": _RATE_LIMIT_BUSY_MSG}
     try:
         r = requests.post(base + "/api/v0/searches", json=payload, headers=headers, timeout=10)
+        if r.status_code == 429:           # rate limited — back off, don't cascade
+            _note_rate_limited(r.headers.get("Retry-After"))
+            return {"configured": True, "hits": [], "error": "429 rate limited (backing off)"}
         r.raise_for_status()
         data = r.json()
     except Exception as e:   # noqa: BLE001 - surface any slskd/network failure to the UI

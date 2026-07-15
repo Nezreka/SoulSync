@@ -40,7 +40,8 @@ def grab_torrent(url_or_magnet: str, *, save_path: Optional[str] = None) -> dict
     if adapter is None or not adapter.is_configured():
         return {"ok": False, "error": "No torrent client configured — set it on Settings → Downloads."}
     try:
-        ref = _run(adapter.add_torrent(url_or_magnet, category=_torrent_category(), save_path=save_path))
+        from core.torrent_clients.base import add_torrent_smart
+        ref = _run(add_torrent_smart(adapter, url_or_magnet, category=_torrent_category(), save_path=save_path))
     except Exception as e:   # noqa: BLE001 - surface the client error to the grab handler
         logger.warning("torrent add failed: %s", e, exc_info=True)
         return {"ok": False, "error": "Torrent client: " + str(e)}

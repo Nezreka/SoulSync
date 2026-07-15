@@ -63,6 +63,12 @@ def create_video_blueprint() -> Blueprint:
         # keeps the old convention when g wasn't populated (tests, edge callers).
         is_admin = bool(getattr(g, "is_admin", getattr(g, "profile_id", 1) == 1))
 
+        # Per-profile side access: a music-only profile gets NOTHING from the
+        # video blueprint (its whole UI is hidden for them — any request here is
+        # a deep link or a probe). Admins always have both sides.
+        if not is_admin and getattr(g, "allowed_sides", "both") == "music":
+            return jsonify({"error": "Video access is disabled for this profile."}), 403
+
         # Management surfaces + credential/settings-only endpoints — admin for ANY
         # method (their GETs leak raw tokens/keys or expose server config, and are
         # only ever hit by the admin-only Settings page).

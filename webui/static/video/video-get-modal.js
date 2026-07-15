@@ -332,6 +332,12 @@
             if (cnt) cnt.textContent = '';
             if (addLbl) addLbl.textContent = 'Re-download';
             if (add) add.disabled = false;
+        } else if (modalState && modalState.kind === 'movie' && modalState.wished) {
+            // Already on the wishlist — adding again would be a silent no-op,
+            // so say so instead of offering it (the no-feedback complaint).
+            if (cnt) cnt.textContent = '';
+            if (addLbl) addLbl.textContent = '✓ Already in Wishlist';
+            if (add) add.disabled = true;
         } else {
             if (cnt) cnt.textContent = '';
             if (addLbl) addLbl.textContent = '+ Add to Wishlist';
@@ -343,13 +349,17 @@
         var st = epState(e, today);
         var key = snum + '_' + e.episode_number;
         var date = e.air_date ? fmtDate(e.air_date) : '';
+        // Already-wishlisted episodes render badged and UN-checked — re-adding
+        // is a silent no-op, so don't pre-select them into the Add count.
+        var wished = st === 'missing' && !!(modalState && modalState.wishedEps && modalState.wishedEps[key]);
         // missing-aired -> pre-checked; owned -> selectable for re-download (not
         // pre-checked); upcoming -> locked (can't grab what hasn't aired).
         var ctrl = (st === 'upcoming')
             ? '<span class="vgm-ep-lock">◷</span>'
-            : '<input type="checkbox" class="vgm-ep-cb" data-vgm-ep="' + esc(key) + '"' + (st === 'missing' ? ' checked' : '') + '>';
+            : '<input type="checkbox" class="vgm-ep-cb" data-vgm-ep="' + esc(key) + '"' + (st === 'missing' && !wished ? ' checked' : '') + '>';
         var badge = st === 'owned' ? '<span class="vgm-ep-badge vgm-ep-badge--owned">In library</span>'
             : st === 'upcoming' ? '<span class="vgm-ep-badge vgm-ep-badge--soon">' + (date || 'Upcoming') + '</span>'
+            : wished ? '<span class="vgm-ep-badge vgm-ep-badge--wish">Wishlisted</span>'
             : '<span class="vgm-ep-badge vgm-ep-badge--missing">Missing</span>';
         return '<label class="vgm-ep vgm-ep--' + st + '">' +
             '<span class="vgm-ep-ctrl">' + ctrl + '</span>' +
@@ -465,6 +475,29 @@
             .catch(function () { btn.disabled = false; btn.textContent = label; });
     }
 
+    // Patch pass for episodes rendered BEFORE the wishlist state arrived:
+    // un-check + badge every already-wishlisted row (owned rows win), then
+    // re-derive the season checkboxes and the footer count.
+    function applyWishedEpisodes(ov) {
+        var set = (modalState && modalState.wishedEps) || {};
+        var seasons = {};
+        Object.keys(set).forEach(function (key) {
+            var cb = ov.querySelector('.vgm-ep-cb[data-vgm-ep="' + key + '"]');
+            if (!cb) return;
+            var row = cb.closest('.vgm-ep');
+            if (row && row.classList.contains('vgm-ep--owned')) return;
+            if (cb.checked) { cb.checked = false; modalState.sel.delete(key); }
+            var badge = row && row.querySelector('.vgm-ep-badge');
+            if (badge && !badge.classList.contains('vgm-ep-badge--wish')) {
+                badge.className = 'vgm-ep-badge vgm-ep-badge--wish';
+                badge.textContent = 'Wishlisted';
+            }
+            seasons[key.split('_')[0]] = 1;
+        });
+        Object.keys(seasons).forEach(function (sn) { syncSeasonCheck(ov, sn); });
+        updateFooter();
+    }
+
     function prefetchFirstSeason(wrap) {
         var lazies = wrap.querySelectorAll('.vgm-season[data-vgm-lazy="1"]');
         var pick = null, pickN = Infinity;
@@ -495,9 +528,12 @@
                 if (b) b.innerHTML = eps.map(function (e) { return epRow(sn, e, today); }).join('');
                 modalState.epMeta = modalState.epMeta || {};
                 eps.forEach(function (e) {
-                    modalState.epMeta[sn + '_' + e.episode_number] = { title: e.title, air_date: e.air_date,
+                    var k = sn + '_' + e.episode_number;
+                    modalState.epMeta[k] = { title: e.title, air_date: e.air_date,
                         overview: e.overview, still: e.still_url || null };
-                    if (epState(e, today) === 'missing') modalState.sel.add(sn + '_' + e.episode_number);
+                    // Already-wishlisted episodes stay un-selected (badged by epRow).
+                    if (epState(e, today) === 'missing' &&
+                            !(modalState.wishedEps && modalState.wishedEps[k])) modalState.sel.add(k);
                 });
                 var all = seasonEl.querySelector('[data-vgm-season-all]');
                 if (all) all.disabled = false;
@@ -573,6 +609,25 @@
             renderOwned(d);
         }
         updateFooter();
+        // Wishlist state — a movie already on the wishlist flips the footer
+        // button to '✓ Already in Wishlist'; a show's wishlisted episodes get
+        // badged + de-selected (re-adding them is a silent no-op).
+        if (d.tmdb_id) {
+            postJSON('/api/video/wishlist/check',
+                o.kind === 'movie' ? { movie_ids: [d.tmdb_id] } : { show_tmdb_id: d.tmdb_id })
+                .then(function (res) {
+                    if (!res || !res.success || !modalState || !modalEl) return;
+                    if (o.kind === 'movie') {
+                        modalState.wished = (res.movies || []).indexOf(Number(d.tmdb_id)) > -1;
+                        updateFooter();
+                    } else {
+                        var set = {};
+                        (res.episodes || []).forEach(function (k) { set[k] = 1; });
+                        modalState.wishedEps = set;
+                        applyWishedEpisodes(modalEl);
+                    }
+                }).catch(function () { /* the state chip is a nicety */ });
+        }
         // "Get Missing" (show detail page) asks to land straight in the download
         // view — the season/episode grab tree — rather than the details step.
         // Only meaningful for shows; the detail (_detail) it needs is set above.

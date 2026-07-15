@@ -219,11 +219,19 @@ class TidalDownloadClient(DownloadSourcePlugin):
         self.shutdown_check = None
 
         self.session: Optional['tidalapi.Session'] = None
+        # THE Netti93 restart bug: these MUST be initialized BEFORE
+        # _init_session() — during a boot-phase construction _init_session
+        # stashes the saved tokens in _boot_session_tokens for deferred
+        # verification, and this initializer used to run AFTER it, silently
+        # wiping the stash. Every Docker/gunicorn restart then came up
+        # unauthenticated with no error anywhere, while the config still held
+        # perfectly valid tokens.
+        self._boot_session_tokens: Optional[dict] = None
+        self._next_restore_retry_at: float = 0.0
         self._init_session()
 
         self._device_auth_future = None
         self._device_auth_link = None
-        self._boot_session_tokens: Optional[dict] = None
         # Cache for the live check_login() so is_authenticated() (polled for the download-source
         # status) doesn't hit Tidal on every call.
         self._last_login_check_at: float = 0.0
@@ -258,16 +266,40 @@ class TidalDownloadClient(DownloadSourcePlugin):
 
         if token_type and access_token:
             from core.boot_phase import is_boot_phase
+            self._boot_session_tokens = saved
             if is_boot_phase():
-                self._boot_session_tokens = saved
                 logger.info(
                     "Loaded Tidal download session from config (verification deferred until after boot)"
                 )
                 return
 
-            self._restore_and_verify(token_type, access_token, refresh_token, expiry_time)
+            # Not booting — restore eagerly, through the same pending/retry
+            # mechanism so a transient failure here is retried too instead of
+            # silently dropping a valid saved session.
+            self._complete_deferred_session()
 
-    def _restore_and_verify(self, token_type, access_token, refresh_token, expiry_time) -> bool:
+    @staticmethod
+    def _is_transient_error(exc: Exception) -> bool:
+        """Failures that say nothing about token VALIDITY (network down, DNS,
+        Tidal 5xx/429) — the saved tokens may be perfectly good, so they must
+        be kept and retried, never dropped. Unknown errors count as transient:
+        wrongly retrying a dead session costs a poll; wrongly dropping a good
+        one costs the user their login (the Netti93 restart loop)."""
+        name = type(exc).__name__.lower()
+        if 'authenticationerror' in name:
+            return False
+        status = getattr(getattr(exc, 'response', None), 'status_code', None)
+        if isinstance(status, int):
+            return status >= 500 or status == 429
+        if any(t in name for t in ('connectionerror', 'connecttimeout', 'readtimeout',
+                                   'timeout', 'sslerror', 'maxretryerror')):
+            return True
+        text = str(exc).lower()
+        if any(t in text for t in ('401', 'unauthorized', 'invalid_grant')):
+            return False
+        return True
+
+    def _restore_and_verify(self, token_type, access_token, refresh_token, expiry_time) -> Optional[bool]:
         """Load saved OAuth tokens into the session and confirm they work.
 
         After a restart the saved access token is almost always EXPIRED, and
@@ -277,10 +309,18 @@ class TidalDownloadClient(DownloadSourcePlugin):
         is stale, explicitly refresh it with the stored refresh token before
         giving up.
 
-        Safe by construction: it only ADDS a recovery attempt to a path that
-        would otherwise fail. It saves the (refreshed) session ONLY on confirmed
+        Tri-state result: ``True`` = restored; ``False`` = the tokens are
+        DEFINITIVELY invalid (Tidal rejected them); ``None`` = the attempt was
+        TRANSIENT (network/DNS/5xx — common right after a container boot) and
+        says nothing about the tokens, so the caller must keep them and retry.
+        Collapsing that third state into False was the Netti93 restart loop:
+        one bad moment at boot dropped a valid session for the container's
+        whole life, the UI read it as unauthenticated, and the hybrid list
+        deselected Tidal persistently.
+
+        Safe by construction: it saves the (refreshed) session ONLY on confirmed
         success; on any failure the saved config tokens are left untouched so the
-        next restart can retry. Never raises."""
+        next attempt can retry. Never raises."""
         try:
             expiry_dt = datetime.fromtimestamp(expiry_time, tz=timezone.utc) if expiry_time else None
             restored = self.session.load_oauth_session(
@@ -305,19 +345,37 @@ class TidalDownloadClient(DownloadSourcePlugin):
                         self._save_session()
                         return True
                 except Exception as e:
+                    if self._is_transient_error(e):
+                        logger.warning(f"Tidal download token refresh hit a transient error, will retry: {e}")
+                        return None
                     logger.warning(f"Tidal download token refresh failed: {e}")
             logger.warning("Saved Tidal session tokens are invalid/expired")
             return False
         except Exception as e:
+            if self._is_transient_error(e):
+                logger.warning(f"Could not reach Tidal to restore the session, will retry: {e}")
+                return None
             logger.warning(f"Could not restore Tidal session: {e}")
             return False
 
     def _complete_deferred_session(self) -> bool:
-        """Finish restoring a session that was deferred during boot."""
+        """Finish restoring a session that was deferred during boot.
+
+        A TRANSIENT failure (network/DNS not up yet, Tidal 5xx) keeps the
+        pending tokens and reports authenticated=True optimistically — the
+        config still holds a session that was valid when saved, and the next
+        call retries (throttled). Only a DEFINITIVE rejection from Tidal drops
+        the pending tokens. Without this, one bad moment right after a
+        container boot un-authenticated the source for the container's whole
+        life and the hybrid list deselected it persistently."""
         pending = getattr(self, '_boot_session_tokens', None)
         if not pending or tidalapi is None:
             self._boot_session_tokens = None
             return False
+
+        now = time.time()
+        if now < getattr(self, '_next_restore_retry_at', 0.0):
+            return True                     # throttled — optimistic until the retry
 
         if not self.session:
             self.session = tidalapi.Session()
@@ -326,9 +384,13 @@ class TidalDownloadClient(DownloadSourcePlugin):
         access_token = pending.get('access_token', '')
         refresh_token = pending.get('refresh_token', '')
         expiry_time = pending.get('expiry_time', 0)
-        self._boot_session_tokens = None
 
-        return self._restore_and_verify(token_type, access_token, refresh_token, expiry_time)
+        result = self._restore_and_verify(token_type, access_token, refresh_token, expiry_time)
+        if result is None:                  # transient — keep tokens, retry later
+            self._next_restore_retry_at = now + 60.0
+            return True
+        self._boot_session_tokens = None
+        return result
 
     def _save_session(self):
         if not self.session:

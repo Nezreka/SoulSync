@@ -305,6 +305,79 @@ def test_discover_list_trending_fetches_once_despite_pages(tmp_path, monkeypatch
     assert [it["tmdb_id"] for it in r.get_json()["items"]] == [9]
 
 
+def test_discover_list_reports_honest_pagination(tmp_path, monkeypatch):
+    """has_more/next_page come from the SERVER (did TMDB actually run out), not
+    from the old client heuristic 'another page exists if this one had ≥18
+    items' — which stopped See-all paging the moment filtering shrank a page."""
+    client, _ = _make_client(tmp_path)
+    import core.video.enrichment.engine as eng_mod
+
+    class FakeEng:
+        def discover_curated(self, key, page=1):
+            # Three real pages, then TMDB runs out.
+            return ([{"kind": "movie", "tmdb_id": page * 10 + i} for i in range(3)]
+                    if page <= 3 else [])
+    monkeypatch.setattr(eng_mod, "get_video_enrichment_engine", lambda: FakeEng())
+
+    d = client.get("/api/video/discover/list?key=popular_movies&lang=any&pages=2").get_json()
+    assert d["has_more"] is True and d["next_page"] == 3
+    d = client.get("/api/video/discover/list?key=popular_movies&lang=any&pages=2&page=3").get_json()
+    assert d["has_more"] is False          # page 4 came back empty — genuinely out
+
+
+def test_discover_list_filtered_pages_still_report_more(tmp_path, monkeypatch):
+    """The See-all early-stop bug: with hide_owned on, a page can shrink to a
+    handful of items while TMDB has plenty more — has_more must stay True and
+    next_page must skip the pages the server already consumed."""
+    client, _ = _make_client(tmp_path)
+    import core.video.enrichment.engine as eng_mod
+
+    class FakeEng:
+        def discover_curated(self, key, page=1):
+            if page > 40:
+                return []
+            # 10 per page, half owned — filtering halves every page.
+            return [{"kind": "movie", "tmdb_id": page * 100 + i,
+                     "library_id": (1 if i % 2 else None)} for i in range(10)]
+    monkeypatch.setattr(eng_mod, "get_video_enrichment_engine", lambda: FakeEng())
+
+    d = client.get("/api/video/discover/list?key=popular_movies&lang=any&hide_owned=1").get_json()
+    assert len(d["items"]) >= 20                         # server target-filled past the shrinkage
+    assert all(it.get("library_id") is None for it in d["items"])
+    assert d["has_more"] is True
+    assert d["next_page"] > 1                            # skips the consumed pages
+
+
+def test_discover_list_trending_never_has_more(tmp_path, monkeypatch):
+    client, _ = _make_client(tmp_path)
+    import core.video.enrichment.engine as eng_mod
+
+    class FakeEng:
+        def trending(self):
+            return [{"kind": "movie", "tmdb_id": 9}]
+    monkeypatch.setattr(eng_mod, "get_video_enrichment_engine", lambda: FakeEng())
+    d = client.get("/api/video/discover/list?key=trending&lang=any").get_json()
+    assert d["has_more"] is False          # a fixed chart — nothing to page
+
+
+def test_discover_hero_carries_title_logos(tmp_path, monkeypatch):
+    """Hero items are enriched with the TMDB wordmark logo when one exists;
+    logo-less titles simply don't get the key (frontend falls back to text)."""
+    client, _ = _make_client(tmp_path)
+    import core.video.enrichment.engine as eng_mod
+
+    class FakeEng:
+        def trending(self):
+            return [{"kind": "movie", "tmdb_id": 1, "backdrop": "b1", "title": "A"},
+                    {"kind": "show", "tmdb_id": 2, "backdrop": "b2", "title": "B"}]
+        def title_logo(self, kind, tmdb_id):
+            return "https://img/logo-a.png" if tmdb_id == 1 else None
+    monkeypatch.setattr(eng_mod, "get_video_enrichment_engine", lambda: FakeEng())
+    items = client.get("/api/video/discover/hero").get_json()["items"]
+    assert items[0]["logo"] == "https://img/logo-a.png"
+    assert "logo" not in items[1]
+
+
 def test_img_proxy_rejects_non_tmdb(tmp_path):
     client, _ = _make_client(tmp_path)
     assert client.get("/api/video/img?u=https://evil.example.com/x.jpg").status_code == 404

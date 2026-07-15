@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.0.3"
+_SOULSYNC_BASE_VERSION = "3.0.4"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -635,6 +635,7 @@ def _set_profile_context():
     g.can_download = True
     g.profile_name = "Admin"   # display name for isolated blueprints (video issues reporter)
     g.is_admin = True          # profile 1 is always admin; others per their is_admin flag
+    g.allowed_sides = 'both'   # per-profile side access (music|video|both); admins always both
     if pid != 1 and 'profile_id' in session:
         g.is_admin = False
         try:
@@ -647,6 +648,9 @@ def _set_profile_context():
             g.can_download = bool((profile or {}).get('can_download', True))
             g.profile_name = (profile or {}).get('name') or ("Profile %s" % pid)
             g.is_admin = bool((profile or {}).get('is_admin', False))
+            # get_profile resolves defaults (non-admin NULL → 'music'), so the
+            # video blueprint can gate off g without a second music-DB read.
+            g.allowed_sides = (profile or {}).get('allowed_sides') or 'music'
         except Exception as e:
             logger.debug("profile session validate: %s", e)
 
@@ -9503,6 +9507,16 @@ def get_artist_detail(artist_id):
                 artist_id,
                 artist_name=artist_info['name'],
                 options=MetadataLookupOptions(
+                    # The user navigated here FROM a specific source's artist
+                    # card — show THAT source's catalog, not the primary's
+                    # (#1026, QT3496): when the artist was already owned, the
+                    # library upgrade discarded the clicked source, so an
+                    # Apple Music card rendered Deezer's 2-album view. The
+                    # override puts the clicked source at the head of the
+                    # chain; the normal priority still backstops it when that
+                    # source has nothing. Library-page opens carry no source
+                    # param → primary as before.
+                    source_override=source_param or None,
                     allow_fallback=True,
                     skip_cache=False,
                     max_pages=0,
@@ -27659,10 +27673,15 @@ def create_profile():
                             'error': 'Login mode is on — give this profile a login '
                                      'password so they can sign in.'}), 400
 
-        # Profile settings: home_page, allowed_pages, can_download
+        # Profile settings: home_page, allowed_pages, can_download, allowed_sides
         home_page = data.get('home_page') or None
         allowed_pages = data.get('allowed_pages')  # list or None
         can_download = data.get('can_download', True)
+        # Side access — music | video | both, never nothing. Anything else
+        # falls back to the shipped default (music-only for non-admins).
+        allowed_sides = data.get('allowed_sides')
+        if allowed_sides not in ('music', 'video', 'both'):
+            allowed_sides = None
 
         # Validate page IDs
         if home_page and home_page not in VALID_PAGE_IDS:
@@ -27678,7 +27697,8 @@ def create_profile():
 
         profile_id = database.create_profile(
             name, avatar_color, pin_hash, is_admin=False, avatar_url=avatar_url,
-            home_page=home_page, allowed_pages=allowed_pages, can_download=bool(can_download)
+            home_page=home_page, allowed_pages=allowed_pages, can_download=bool(can_download),
+            allowed_sides=allowed_sides
         )
         if profile_id is None:
             return jsonify({'success': False, 'error': 'Profile name already exists'}), 409
@@ -27755,6 +27775,13 @@ def update_profile(profile_id):
                 kwargs['allowed_pages'] = ap
             if 'can_download' in data:
                 kwargs['can_download'] = int(bool(data['can_download']))
+            if 'allowed_sides' in data:
+                # music | video | both, never nothing — invalid values reset to
+                # NULL (the shipped music-only default for non-admins). Stored
+                # values on ADMIN profiles are inert: the read side always
+                # resolves admins to 'both'.
+                sides = data['allowed_sides']
+                kwargs['allowed_sides'] = sides if sides in ('music', 'video', 'both') else None
 
         success = database.update_profile(profile_id, **kwargs)
         return jsonify({'success': success})
@@ -39526,19 +39553,38 @@ def _hydrabase_reconnect_loop():
         except Exception as e:
             logger.debug("hydrabase monitor loop: %s", e)
 
+# --- Global connected-client tracking (gates idle broadcast loops below) ---
+# Same pattern as _activity_sids, but for "is anyone listening at all" rather
+# than a specific room: dashboard-wide push loops have no per-client work to
+# skip, only an all-or-nothing "does this broadcast have an audience".
+_connected_sids = set()
+_connected_sids_lock = threading.Lock()
+
+
+def _has_connected_clients() -> bool:
+    with _connected_sids_lock:
+        return bool(_connected_sids)
+
+
 def _emit_service_status_loop():
-    """Background thread that pushes service status every 5 seconds."""
+    """Background thread that pushes service status every 5 seconds.
+    Skipped entirely while no client is connected."""
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(5)
+        if not _has_connected_clients():
+            continue
         try:
             socketio.emit('status:update', _build_status_payload())
         except Exception as e:
             logger.debug(f"Error emitting service status: {e}")
 
 def _emit_watchlist_count_loop():
-    """Background thread that pushes watchlist count every 10 seconds to each profile room."""
+    """Background thread that pushes watchlist count every 10 seconds to each profile room.
+    Skipped entirely while no client is connected."""
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(10)
+        if not _has_connected_clients():
+            continue
         try:
             database = get_database()
             profiles = database.get_all_profiles()
@@ -39549,9 +39595,15 @@ def _emit_watchlist_count_loop():
             logger.debug(f"Error emitting watchlist count: {e}")
 
 def _emit_download_status_loop():
-    """Background thread that pushes download batch status every 2 seconds to subscribed rooms."""
+    """Background thread that pushes download batch status every 2 seconds to subscribed rooms.
+    Skipped entirely while no client is connected — the transfer fetch below is a real
+    slskd API call (TTL-cached), so at idle this loop polled slskd every ~2s for nobody.
+    Download progression doesn't depend on it (the workers poll transfers themselves);
+    this cache is populated on demand by its other callers."""
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(2)
+        if not _has_connected_clients():
+            continue
         try:
             live_transfers_lookup = get_cached_transfer_data()
             with tasks_lock:
@@ -39625,6 +39677,8 @@ def handle_connect():
     if _ws_connection_blocked():
         logger.warning("Rejected WebSocket connection — access gate active, session not verified (#852)")
         return False
+    with _connected_sids_lock:
+        _connected_sids.add(request.sid)
     logger.info("WebSocket client connected")
 
 @socketio.on('disconnect')
@@ -39636,6 +39690,8 @@ def handle_disconnect():
             _activity_sids.discard(request.sid)
     except Exception:   # noqa: BLE001, S110 - cleanup only; a missing sid is fine
         pass
+    with _connected_sids_lock:
+        _connected_sids.discard(request.sid)
     logger.info("WebSocket client disconnected")
 
 @socketio.on('activity:subscribe')
@@ -39684,18 +39740,24 @@ def handle_profile_join(data):
 # --- Phase 2: Dashboard emitters ---
 
 def _emit_system_stats_loop():
-    """Background thread that pushes system stats every 10 seconds."""
+    """Background thread that pushes system stats every 10 seconds.
+    Skipped entirely while no client is connected."""
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(10)
+        if not _has_connected_clients():
+            continue
         try:
             socketio.emit('dashboard:stats', _build_system_stats())
         except Exception as e:
             logger.debug(f"Error emitting system stats: {e}")
 
 def _emit_activity_feed_loop():
-    """Background thread that pushes activity feed every 2 seconds."""
+    """Background thread that pushes activity feed every 2 seconds.
+    Skipped entirely while no client is connected."""
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(2)
+        if not _has_connected_clients():
+            continue
         try:
             with activity_feed_lock:
                 activities = activity_feed[-10:][::-1]
@@ -39704,9 +39766,12 @@ def _emit_activity_feed_loop():
             logger.debug(f"Error emitting activity feed: {e}")
 
 def _emit_db_stats_loop():
-    """Background thread that pushes database stats every 10 seconds."""
+    """Background thread that pushes database stats every 10 seconds.
+    Skipped entirely while no client is connected."""
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(10)
+        if not _has_connected_clients():
+            continue
         try:
             db = get_database()
             stats = db.get_database_info_for_server()
@@ -39715,9 +39780,12 @@ def _emit_db_stats_loop():
             logger.debug(f"Error emitting db stats: {e}")
 
 def _emit_wishlist_count_loop():
-    """Background thread that pushes wishlist count every 10 seconds to each profile room."""
+    """Background thread that pushes wishlist count every 10 seconds to each profile room.
+    Skipped entirely while no client is connected."""
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(10)
+        if not _has_connected_clients():
+            continue
         try:
             from core.wishlist_service import get_wishlist_service
             ws = get_wishlist_service()
@@ -39928,6 +39996,8 @@ def _emit_rate_monitor_loop():
 
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(1)
+        if not _has_connected_clients():
+            continue
         try:
             from core.api_call_tracker import api_call_tracker
             payload = api_call_tracker.get_all_rates()
@@ -40039,6 +40109,11 @@ def _emit_enrichment_status_loop():
         except Exception as e:
             logger.debug(f"Error in download-yield check: {e}")
 
+        # Auto-pause/resume above must run regardless of listeners; the stats
+        # gather + broadcast below is pure UI and costs nothing to skip.
+        if not _has_connected_clients():
+            continue
+
         for name, get_worker in workers.items():
             try:
                 worker = get_worker()
@@ -40093,6 +40168,16 @@ def _emit_tool_progress_loop():
         # (which skipped HTTP polling while the socket was up) never learned
         # its stream was ready. Each client polls /api/stream/status instead,
         # which resolves its own session from the cookie.
+        # Self-heal a hung DB-update job (#859) — functional, must run even
+        # when nobody's watching the broadcast below.
+        try:
+            _check_db_update_stall()
+        except Exception as e:
+            logger.debug(f"Error in db update stall self-heal: {e}")
+
+        if not _has_connected_clients():
+            continue
+
         # Duplicate Cleaner (add computed space_freed_mb)
         try:
             with duplicate_cleaner_lock:
@@ -40103,7 +40188,6 @@ def _emit_tool_progress_loop():
             logger.debug(f"Error emitting duplicate cleaner status: {e}")
         # DB Update
         try:
-            _check_db_update_stall()  # self-heal a hung job, then broadcast (#859)
             with db_update_lock:
                 socketio.emit('tool:db-update', dict(db_update_state))
         except Exception as e:
@@ -40286,9 +40370,13 @@ def _emit_sync_progress_loop():
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(1)
         try:
-            # Reconcile stuck 'syncing' discovery states BEFORE emitting, so the
-            # sync:progress event we push already carries the terminal status.
+            # Reconcile stuck 'syncing' discovery states — this is a functional
+            # self-heal (#972), not just UI push, so it must run even when no
+            # client is connected to see the emit below.
             _reconcile_discovery_sync_phases()
+
+            if not _has_connected_clients():
+                continue
 
             with sync_lock:
                 for pid, state in list(sync_states.items()):

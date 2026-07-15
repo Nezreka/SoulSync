@@ -345,6 +345,12 @@ class VideoEnrichmentEngine:
                         logger.exception("item_extras failed for %s %s", kind, item_id)
                         cached = {}
                 out = dict(cached)          # copy — the per-item server link isn't cached
+                # Ownership is stamped FRESH per call (never baked into the cache):
+                # the More-like-this cards show In Library / Wishlisted states like
+                # every other card surface.
+                for rail in ("similar", "recommendations"):
+                    if out.get(rail):
+                        out[rail] = self._stamp_owned(list(out[rail]))
         srv = self._server_watch_link(kind, item_id)
         if srv:
             out["server"] = srv
@@ -590,6 +596,27 @@ class VideoEnrichmentEngine:
                 return None
         return hit or None
 
+    def title_logo(self, kind, tmdb_id) -> str | None:
+        """A title's logo/wordmark art for the Discover hero — day-cached
+        ('' = cached miss so a logo-less title doesn't re-fetch every load)."""
+        if not tmdb_id:
+            return None
+        try:
+            ck = ("titlelogo", kind, int(tmdb_id))
+        except (TypeError, ValueError):
+            return None
+        hit = self._cache_get(ck)
+        if hit is None:
+            w = self.workers.get("tmdb")
+            hit = ""
+            if w and getattr(w, "enabled", False) and hasattr(w.client, "title_logo"):
+                try:
+                    hit = w.client.title_logo(kind, tmdb_id) or ""
+                except Exception:   # noqa: BLE001 - hero chrome must never break the page
+                    logger.debug("title logo lookup failed (%s %s)", kind, tmdb_id, exc_info=True)
+            self._cache_put(ck, hit, ttl=86400)
+        return hit or None
+
     def company_logo(self, name) -> str | None:
         """A studio's TMDB logo URL by name, day-cached."""
         w = self.workers.get("tmdb")
@@ -800,7 +827,12 @@ class VideoEnrichmentEngine:
         region = self._region()
         cached = self._cache_get(("detail", kind, tmdb_id, region))
         if cached is not None:
-            return dict(cached)
+            d = dict(cached)
+            # Fresh ownership on the similar rails, cached path included.
+            for rail in ("similar", "recommendations"):
+                if d.get(rail):
+                    d[rail] = self._stamp_owned(list(d[rail]))
+            return d
         try:
             d = w.client.full_detail(kind, tmdb_id, region=region)
         except Exception:
@@ -832,6 +864,11 @@ class VideoEnrichmentEngine:
             d["episode_owned"] = 0
         self._fill_tmdb_ratings(d)
         self._cache_put(("detail", kind, tmdb_id, region), d)
+        # Stamp ownership AFTER caching so library state is never baked in —
+        # the cached-hit path above re-stamps the same rails per call.
+        for rail in ("similar", "recommendations"):
+            if d.get(rail):
+                d[rail] = self._stamp_owned(list(d[rail]))
         return d
 
     def poster_options(self, kind, tmdb_id) -> list:

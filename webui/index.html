@@ -28,6 +28,17 @@
         window._workerOrbsEnabled = {{ initial_worker_orbs_enabled|tojson }};
         window._reduceEffectsActive = {{ initial_reduce_effects|tojson }};
         window._maxPerfActive = {{ initial_max_performance|tojson }};
+        // Side-access flash guard: the profile arrives over fetch, so on a
+        // reload the Music↔Video switcher would render for a beat before the
+        // single-side hiding kicks in. The last profile-apply cached its sides
+        // here — hide the switcher PRE-PAINT and let the real profile data
+        // settle it (updateProfileIndicator owns the authoritative state).
+        try {
+            var _sides = localStorage.getItem('ss_allowed_sides');
+            if (_sides === 'music' || _sides === 'video') {
+                document.documentElement.classList.add('side-locked');
+            }
+        } catch (e) { /* no localStorage → default (show) */ }
     </script>
     {{ vite_assets('head')|safe }}
 </head>
@@ -166,6 +177,12 @@
                             <option value="import">Import</option>
                             <option value="help">Help & Docs</option>
                         </select>
+                        <label class="profile-settings-label">Side Access</label>
+                        <div id="new-profile-sides" class="profile-sides-picker" role="radiogroup" aria-label="Side access">
+                            <label><input type="radio" name="new-profile-sides" value="music" checked> Music only</label>
+                            <label><input type="radio" name="new-profile-sides" value="video"> Video only</label>
+                            <label><input type="radio" name="new-profile-sides" value="both"> Music + Video</label>
+                        </div>
                         <label class="profile-settings-label">Page Access</label>
                         <div id="new-profile-allowed-pages" class="profile-page-checkboxes">
                             <div class="profile-page-group-label profile-page-group-label--first">Music</div>
@@ -181,8 +198,8 @@
                             <label><input type="checkbox" value="stats" checked> Listening Stats</label>
                             <label><input type="checkbox" value="playlist-explorer" checked> Playlist Explorer</label>
                             <label><input type="checkbox" value="import" checked> Import</label>
-                            <label><input type="checkbox" value="help" checked disabled> Help & Docs</label>
-                            <label><input type="checkbox" value="issues" checked disabled> Issues</label>
+                            <label><input type="checkbox" value="help" checked disabled data-always-on="1"> Help & Docs</label>
+                            <label><input type="checkbox" value="issues" checked disabled data-always-on="1"> Issues</label>
                             <div class="profile-page-group-label">Video<span class="profile-page-group-note">Import, Settings &amp; Automations stay admin-only</span></div>
                             <label><input type="checkbox" value="video-dashboard" checked> Dashboard</label>
                             <label><input type="checkbox" value="video-search" checked> Search</label>
@@ -1139,103 +1156,72 @@
                 <section class="video-subpage" data-video-subpage="video-discover" hidden>
                     <div class="vdsc-page" data-vdsc-page>
                         <div class="vdsc-amb" data-vdsc-amb aria-hidden="true"></div>
-                        <button class="vdsc-ignore-btn" type="button" data-vdsc-ignore-open title="Manage your Not-interested list"><span aria-hidden="true">🚫</span> Ignore List</button>
                         <div class="vdsc-hero hidden" data-vdsc-hero></div>
 
-                        <!-- Page-wide controls — these affect the WHOLE Discover page (every rail),
-                             not just the "Browse all" grid below. Kept out of the browse panel so
-                             that's clear. -->
-                        <div class="vdsc-global">
-                            <span class="vdsc-global-label">Across Discover</span>
-                            <label class="vdsc-toggle">
-                                <input type="checkbox" data-vdsc-hideowned>
-                                <span>Hide owned</span>
-                            </label>
-                            <div class="vdsc-langs" data-vdsc-langs aria-label="Rail languages" title="Which original languages show in the rails">
-                                <span class="vdsc-langs-label">🌐</span>
-                                <button class="vdsc-lang vdsc-lang--on" type="button" data-lang="en">EN</button>
-                                <button class="vdsc-lang" type="button" data-lang="ko">KO</button>
-                                <button class="vdsc-lang" type="button" data-lang="ja">JA</button>
-                                <button class="vdsc-lang" type="button" data-lang="es">ES</button>
-                                <button class="vdsc-lang" type="button" data-lang="fr">FR</button>
-                                <button class="vdsc-lang" type="button" data-lang="hi">HI</button>
-                                <button class="vdsc-lang" type="button" data-lang="de">DE</button>
-                                <button class="vdsc-lang" type="button" data-lang="it">IT</button>
+                        <!-- ONE control row. Everything preference-shaped lives inside the
+                             Preferences popover; browsing lives in the tile strip below. -->
+                        <div class="vdsc-bar">
+                            <div class="vdsc-bar-titles">
+                                <h1 class="vdsc-bar-title">Discover</h1>
+                                <p class="vdsc-bar-sub">Movies &amp; shows you don't have yet</p>
+                            </div>
+                            <div class="vdsc-bar-actions">
+                                <button class="vdsc-btn vdsc-btn--ghost" type="button" data-vdsc-prefs-open aria-expanded="false"><span aria-hidden="true">⚙</span> Preferences</button>
+                                <button class="vdsc-btn vdsc-btn--ghost" type="button" data-vdsc-ignore-open title="Manage your Not-interested list"><span aria-hidden="true">🚫</span> Ignore List</button>
                             </div>
                         </div>
 
-                        <!-- NOT page-wide: this builds the optional "On your streaming services"
-                             rail only. Kept out of the "Across Discover" bar so it doesn't read as
-                             a global filter (it isn't one). -->
-                        <div class="vdsc-provrail">
-                            <div class="vdsc-provrail-text">
-                                <span class="vdsc-provrail-title">📺 Your streaming services</span>
-                                <span class="vdsc-provrail-sub">pick what you subscribe to — adds an “On your streaming services” rail to your feed</span>
+                        <!-- Preferences popover — page-wide settings (every rail + the endless
+                             feed). Same input hooks as before so the JS wiring is unchanged. -->
+                        <div class="vdsc-prefs hidden" data-vdsc-prefs>
+                            <div class="vdsc-prefs-row">
+                                <span class="vdsc-prefs-label">Library</span>
+                                <label class="vdsc-toggle">
+                                    <input type="checkbox" data-vdsc-hideowned>
+                                    <span>Hide titles I own</span>
+                                </label>
                             </div>
-                            <div class="vdsc-langs" data-vdsc-myprov aria-label="My streaming services">
-                                <button class="vdsc-lang" type="button" data-prov="8">Netflix</button>
-                                <button class="vdsc-lang" type="button" data-prov="9">Prime</button>
-                                <button class="vdsc-lang" type="button" data-prov="337">Disney+</button>
-                                <button class="vdsc-lang" type="button" data-prov="1899">Max</button>
-                                <button class="vdsc-lang" type="button" data-prov="350">Apple TV+</button>
-                                <button class="vdsc-lang" type="button" data-prov="15">Hulu</button>
-                                <button class="vdsc-lang" type="button" data-prov="531">Paramount+</button>
-                                <button class="vdsc-lang" type="button" data-prov="386">Peacock</button>
+                            <div class="vdsc-prefs-row">
+                                <span class="vdsc-prefs-label">Languages <span class="vdsc-prefs-hint">shown in the feed</span></span>
+                                <div class="vdsc-langs" data-vdsc-langs aria-label="Rail languages">
+                                    <button class="vdsc-lang vdsc-lang--on" type="button" data-lang="en">EN</button>
+                                    <button class="vdsc-lang" type="button" data-lang="ko">KO</button>
+                                    <button class="vdsc-lang" type="button" data-lang="ja">JA</button>
+                                    <button class="vdsc-lang" type="button" data-lang="es">ES</button>
+                                    <button class="vdsc-lang" type="button" data-lang="fr">FR</button>
+                                    <button class="vdsc-lang" type="button" data-lang="hi">HI</button>
+                                    <button class="vdsc-lang" type="button" data-lang="de">DE</button>
+                                    <button class="vdsc-lang" type="button" data-lang="it">IT</button>
+                                </div>
+                            </div>
+                            <div class="vdsc-prefs-row">
+                                <span class="vdsc-prefs-label">My services <span class="vdsc-prefs-hint">adds an “On your streaming services” rail</span></span>
+                                <div class="vdsc-langs" data-vdsc-myprov aria-label="My streaming services">
+                                    <button class="vdsc-lang" type="button" data-prov="8">Netflix</button>
+                                    <button class="vdsc-lang" type="button" data-prov="9">Prime</button>
+                                    <button class="vdsc-lang" type="button" data-prov="337">Disney+</button>
+                                    <button class="vdsc-lang" type="button" data-prov="1899">Max</button>
+                                    <button class="vdsc-lang" type="button" data-prov="350">Apple TV+</button>
+                                    <button class="vdsc-lang" type="button" data-prov="15">Hulu</button>
+                                    <button class="vdsc-lang" type="button" data-prov="531">Paramount+</button>
+                                    <button class="vdsc-lang" type="button" data-prov="386">Peacock</button>
+                                </div>
                             </div>
                         </div>
 
-                        <div class="vdsc-browse">
-                            <div class="vdsc-browse-label">Browse the full catalog</div>
-                            <div class="vdsc-browse-top">
-                                <div class="vdsc-seg" data-vdsc-seg="kind" role="group" aria-label="Type">
-                                    <button class="vdsc-seg-btn vdsc-seg-btn--on" type="button" data-val="movie">Movies</button>
-                                    <button class="vdsc-seg-btn" type="button" data-val="show">TV Shows</button>
-                                </div>
-                                <div class="vdsc-seg" data-vdsc-seg="sort" role="group" aria-label="Sort">
-                                    <button class="vdsc-seg-btn vdsc-seg-btn--on" type="button" data-val="popularity.desc">Popular</button>
-                                    <button class="vdsc-seg-btn" type="button" data-val="vote_average.desc">Top Rated</button>
-                                    <button class="vdsc-seg-btn" type="button" data-val="vote_count.desc">Most Voted</button>
-                                </div>
-                            </div>
-                            <div class="vdsc-chips" data-vdsc-chipset="genre" aria-label="Genre">
-                                <button class="vdsc-chip vdsc-chip--on" type="button" data-val="">All genres</button>
-                            </div>
-                            <div class="vdsc-chips" data-vdsc-chipset="providers" aria-label="Streaming service">
-                                <button class="vdsc-chip vdsc-chip--reset vdsc-chip--on" type="button" data-val="">Any service</button>
-                                <button class="vdsc-chip" type="button" data-val="8" style="--c: 229, 9, 20;">Netflix</button>
-                                <button class="vdsc-chip" type="button" data-val="9" style="--c: 0, 168, 225;">Prime Video</button>
-                                <button class="vdsc-chip" type="button" data-val="337" style="--c: 37, 99, 235;">Disney+</button>
-                                <button class="vdsc-chip" type="button" data-val="1899" style="--c: 139, 92, 246;">Max</button>
-                                <button class="vdsc-chip" type="button" data-val="350" style="--c: 200, 200, 210;">Apple TV+</button>
-                                <button class="vdsc-chip" type="button" data-val="15" style="--c: 28, 231, 131;">Hulu</button>
-                                <button class="vdsc-chip" type="button" data-val="531" style="--c: 14, 116, 240;">Paramount+</button>
-                                <button class="vdsc-chip" type="button" data-val="386" style="--c: 147, 112, 219;">Peacock</button>
-                            </div>
-                            <div class="vdsc-chips" data-vdsc-chipset="lang" aria-label="Language">
-                                <button class="vdsc-chip vdsc-chip--reset vdsc-chip--on" type="button" data-val="">Any language</button>
-                                <button class="vdsc-chip" type="button" data-val="en">English</button>
-                                <button class="vdsc-chip" type="button" data-val="ko">Korean</button>
-                                <button class="vdsc-chip" type="button" data-val="ja">Japanese</button>
-                                <button class="vdsc-chip" type="button" data-val="es">Spanish</button>
-                                <button class="vdsc-chip" type="button" data-val="fr">French</button>
-                                <button class="vdsc-chip" type="button" data-val="hi">Hindi</button>
-                                <button class="vdsc-chip" type="button" data-val="de">German</button>
-                                <button class="vdsc-chip" type="button" data-val="it">Italian</button>
-                            </div>
-                            <div class="vdsc-browse-bottom">
-                                <div class="vdsc-chips vdsc-chips--era" data-vdsc-chipset="decade" aria-label="Decade">
-                                    <button class="vdsc-chip vdsc-chip--reset vdsc-chip--on" type="button" data-val="">Any era</button>
-                                    <button class="vdsc-chip" type="button" data-val="2020">2020s</button>
-                                    <button class="vdsc-chip" type="button" data-val="2010">2010s</button>
-                                    <button class="vdsc-chip" type="button" data-val="2000">2000s</button>
-                                    <button class="vdsc-chip" type="button" data-val="1990">1990s</button>
-                                    <button class="vdsc-chip" type="button" data-val="1980">1980s</button>
-                                    <button class="vdsc-chip" type="button" data-val="1970">1970s</button>
-                                </div>
-                                <button class="vdsc-btn vdsc-browse-go" type="button" data-vdsc-apply>Browse all &rarr;</button>
-                            </div>
-                        </div>
+                        <!-- Browse strip: gradient genre tiles + Browse-all. Clicking anything
+                             opens the endless filter grid (where the full filter bar lives). -->
+                        <div class="vdsc-browse-strip" data-vdsc-browse-strip></div>
+
                         <div class="vdsc-shelves" data-vdsc-shelves></div>
+
+                        <!-- Endless catalog feed — fills forever below the last rail group. -->
+                        <section class="vdsc-explore" data-vdsc-explore hidden>
+                            <h2 class="vdsc-group-head">Keep exploring</h2>
+                            <div class="vsr-grid vdsc-grid" data-vdsc-explore-grid></div>
+                            <div class="vsr-loading hidden" data-vdsc-explore-loading><div class="loading-spinner"></div></div>
+                            <div class="vdsc-sentinel" data-vdsc-explore-sentinel aria-hidden="true"></div>
+                        </section>
                         <div class="vdsc-empty hidden" data-vdsc-empty>
                             <div class="vdsc-empty-ic">&#127909;</div>
                             <div class="vdsc-empty-title">Discover needs TMDB</div>
@@ -1245,6 +1231,58 @@
                             <div class="vdsc-grid-head">
                                 <button class="vdsc-btn vdsc-btn--ghost" type="button" data-vdsc-clear>&larr; Discover</button>
                                 <h2 class="vdsc-grid-title" data-vdsc-grid-title></h2>
+                            </div>
+                            <!-- Live filter bar — only shown for Browse (tiles / Browse all); a
+                                 rail's See-all keeps its fixed query. Every change re-queries
+                                 immediately: no Apply button, the grid IS the result. -->
+                            <div class="vdsc-filterbar hidden" data-vdsc-filterbar>
+                                <div class="vdsc-filter-row">
+                                    <div class="vdsc-seg" data-vdsc-seg="kind" role="group" aria-label="Type">
+                                        <button class="vdsc-seg-btn vdsc-seg-btn--on" type="button" data-val="movie">Movies</button>
+                                        <button class="vdsc-seg-btn" type="button" data-val="show">TV Shows</button>
+                                    </div>
+                                    <div class="vdsc-seg" data-vdsc-seg="sort" role="group" aria-label="Sort">
+                                        <button class="vdsc-seg-btn vdsc-seg-btn--on" type="button" data-val="popularity.desc">Popular</button>
+                                        <button class="vdsc-seg-btn" type="button" data-val="vote_average.desc">Top Rated</button>
+                                        <button class="vdsc-seg-btn" type="button" data-val="vote_count.desc">Most Voted</button>
+                                    </div>
+                                </div>
+                                <div class="vdsc-chips" data-vdsc-chipset="genre" aria-label="Genre">
+                                    <button class="vdsc-chip vdsc-chip--on" type="button" data-val="">All genres</button>
+                                </div>
+                                <div class="vdsc-chips" data-vdsc-chipset="providers" aria-label="Streaming service">
+                                    <button class="vdsc-chip vdsc-chip--reset vdsc-chip--on" type="button" data-val="">Any service</button>
+                                    <button class="vdsc-chip" type="button" data-val="8" style="--c: 229, 9, 20;">Netflix</button>
+                                    <button class="vdsc-chip" type="button" data-val="9" style="--c: 0, 168, 225;">Prime Video</button>
+                                    <button class="vdsc-chip" type="button" data-val="337" style="--c: 37, 99, 235;">Disney+</button>
+                                    <button class="vdsc-chip" type="button" data-val="1899" style="--c: 139, 92, 246;">Max</button>
+                                    <button class="vdsc-chip" type="button" data-val="350" style="--c: 200, 200, 210;">Apple TV+</button>
+                                    <button class="vdsc-chip" type="button" data-val="15" style="--c: 28, 231, 131;">Hulu</button>
+                                    <button class="vdsc-chip" type="button" data-val="531" style="--c: 14, 116, 240;">Paramount+</button>
+                                    <button class="vdsc-chip" type="button" data-val="386" style="--c: 147, 112, 219;">Peacock</button>
+                                </div>
+                                <div class="vdsc-filter-row">
+                                    <div class="vdsc-chips vdsc-chips--era" data-vdsc-chipset="decade" aria-label="Decade">
+                                        <button class="vdsc-chip vdsc-chip--reset vdsc-chip--on" type="button" data-val="">Any era</button>
+                                        <button class="vdsc-chip" type="button" data-val="2020">2020s</button>
+                                        <button class="vdsc-chip" type="button" data-val="2010">2010s</button>
+                                        <button class="vdsc-chip" type="button" data-val="2000">2000s</button>
+                                        <button class="vdsc-chip" type="button" data-val="1990">1990s</button>
+                                        <button class="vdsc-chip" type="button" data-val="1980">1980s</button>
+                                        <button class="vdsc-chip" type="button" data-val="1970">1970s</button>
+                                    </div>
+                                    <div class="vdsc-chips vdsc-chips--lang" data-vdsc-chipset="lang" aria-label="Language">
+                                        <button class="vdsc-chip vdsc-chip--reset vdsc-chip--on" type="button" data-val="">Any language</button>
+                                        <button class="vdsc-chip" type="button" data-val="en">English</button>
+                                        <button class="vdsc-chip" type="button" data-val="ko">Korean</button>
+                                        <button class="vdsc-chip" type="button" data-val="ja">Japanese</button>
+                                        <button class="vdsc-chip" type="button" data-val="es">Spanish</button>
+                                        <button class="vdsc-chip" type="button" data-val="fr">French</button>
+                                        <button class="vdsc-chip" type="button" data-val="hi">Hindi</button>
+                                        <button class="vdsc-chip" type="button" data-val="de">German</button>
+                                        <button class="vdsc-chip" type="button" data-val="it">Italian</button>
+                                    </div>
+                                </div>
                             </div>
                             <div class="vsr-loading hidden" data-vdsc-grid-loading>
                                 <div class="loading-spinner"></div>
@@ -11540,6 +11578,7 @@
     <script src="{{ url_for('static', filename='video/video-service-status.js', v=static_v) }}"></script>
     <!-- Video watchlist button (shared; the add-to-watchlist control used by every
          show-poster + person card — must load before the card renderers) -->
+    <script src="{{ url_for('static', filename='video/video-wish-state.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='video/video-watchlist-btn.js', v=static_v) }}"></script>
     <!-- Video "get" button + detail/download modal (shared; movies + ended shows) -->
     <script src="{{ url_for('static', filename='video/video-get-modal.js', v=static_v) }}"></script>

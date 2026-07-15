@@ -1103,6 +1103,15 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 }
 .vsr-ribbon--owned { background: rgba(34, 197, 94, 0.95); }
 .vsr-ribbon--preview { background: rgba(255, 255, 255, 0.16); border: 1px solid rgba(255, 255, 255, 0.28); }
+/* Already on the wishlist — the third state between Preview and In Library. */
+.vsr-ribbon--wish { background: rgba(var(--accent-rgb, 88 101 242), 0.92); border: none; }
+/* Same states on the detail page's compact "More like this" cards. */
+.vd-sim-card { position: relative; }
+.vd-sim-wishchip { position: absolute; top: 6px; left: 6px; z-index: 2; padding: 2px 8px;
+    border-radius: 999px; font-size: 9px; font-weight: 800; text-transform: uppercase;
+    letter-spacing: 0.04em; background: rgba(var(--accent-rgb, 88 101 242), 0.92); color: #fff;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4); pointer-events: none; }
+.vd-sim-wishchip--owned { background: rgba(34, 197, 94, 0.95); }
 .vsr-rating {
     position: absolute; top: 10px; right: 10px; z-index: 2;
     display: inline-flex; align-items: center; gap: 3px;
@@ -2656,6 +2665,7 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 .vgm-ep-badge { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em; padding: 2px 8px; border-radius: 6px; margin-left: 8px; flex-shrink: 0; }
 .vgm-ep-badge--owned { background: rgba(108, 211, 145, 0.16); color: #6cd391; }
 .vgm-ep-badge--missing { background: rgba(var(--accent-rgb, 88 101 242), 0.18); color: #c4cbff; }
+.vgm-ep-badge--wish { background: rgba(var(--accent-rgb, 88 101 242), 0.85); color: #fff; }
 .vgm-ep-badge--soon { background: rgba(255, 255, 255, 0.08); color: rgba(255, 255, 255, 0.5); }
 
 /* footer */
@@ -2763,7 +2773,7 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 .vdsc-page { padding: 0 0 60px; }
 
 /* ── hero slideshow ───────────────────────────────────────────────────────── */
-.vdsc-hero { position: relative; height: 520px; border-radius: 20px; overflow: hidden;
+.vdsc-hero { position: relative; height: clamp(480px, 62vh, 640px); border-radius: 20px; overflow: hidden;
     margin: 4px 0 26px; background: #0d0d12; isolation: isolate; }
 .vdsc-hero.hidden { display: none; }
 .vdsc-slides { position: absolute; inset: 0; }
@@ -2794,7 +2804,75 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 .vdsc-dots { position: absolute; right: 26px; bottom: 26px; z-index: 3; display: flex; gap: 8px; }
 .vdsc-dot { width: 9px; height: 9px; border-radius: 50%; border: none; cursor: pointer; padding: 0;
     background: rgba(255, 255, 255, 0.32); transition: all 0.2s ease; }
-.vdsc-dot--on { background: hsl(var(--vgm-h, 230), 85%, 65%); width: 26px; border-radius: 5px; }
+.vdsc-dot--on { background: hsl(var(--vgm-h, 230), 85%, 65%); width: 26px; border-radius: 5px;
+    position: relative; overflow: hidden; }
+/* Rotation progress: the active dot fills over the slide interval (6.5s). */
+.vdsc-dot--on::after { content: ''; position: absolute; inset: 0; border-radius: 5px; transform-origin: left;
+    background: rgba(255, 255, 255, 0.55); animation: vdscDotFill 6.5s linear forwards; }
+@keyframes vdscDotFill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+.vdsc-hero:hover .vdsc-dot--on::after { animation-play-state: paused; }   /* hover pauses rotation */
+@media (prefers-reduced-motion: reduce) { .vdsc-dot--on::after { animation: none; } }
+/* The billboard wordmark (TMDB title logo) — sized like Netflix's, text-shadowed
+   container so it pops off any backdrop. Falls back to .vdsc-hero-title text. */
+.vdsc-hero-logo { display: block; max-width: min(420px, 82%); max-height: 148px; width: auto; height: auto;
+    filter: drop-shadow(0 6px 26px rgba(0, 0, 0, 0.75)); }
+.vdsc-hero-add { margin-left: 0; }
+.vdsc-hero-add--on { border-color: rgba(var(--accent-rgb, 88 101 242), 0.65);
+    background: rgba(var(--accent-rgb, 88 101 242), 0.22); color: #fff; }
+
+/* ── Discover header bar (title + Preferences / Ignore List) ─────────────── */
+.vdsc-bar { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px;
+    flex-wrap: wrap; margin: 0 0 14px; }
+.vdsc-bar.hidden { display: none; }
+.vdsc-bar-title { font-size: 24px; font-weight: 900; letter-spacing: -0.02em; color: #fff; margin: 0; }
+.vdsc-bar-sub { font-size: 12.5px; color: rgba(255, 255, 255, 0.45); margin: 3px 0 0; }
+.vdsc-bar-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.vdsc-btn--active { border-color: rgba(var(--accent-rgb, 88 101 242), 0.55);
+    background: rgba(var(--accent-rgb, 88 101 242), 0.16); color: #fff; }
+
+/* ── Preferences popover panel ────────────────────────────────────────────── */
+.vdsc-prefs { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px; margin: 0 0 16px;
+    border-radius: 14px; background: rgba(255, 255, 255, 0.035); border: 1px solid rgba(var(--accent-rgb, 88 101 242), 0.28);
+    animation: vdscRise 0.25s ease both; }
+.vdsc-prefs.hidden { display: none; }
+.vdsc-prefs-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.vdsc-prefs-label { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em;
+    color: rgba(255, 255, 255, 0.45); min-width: 96px; }
+.vdsc-prefs-hint { display: block; font-size: 10px; font-weight: 500; text-transform: none; letter-spacing: 0;
+    color: rgba(255, 255, 255, 0.3); margin-top: 2px; }
+
+/* ── Browse strip: gradient genre tiles ───────────────────────────────────── */
+.vdsc-browse-strip { margin: 0 0 8px; }
+.vdsc-browse-strip.hidden { display: none; }
+.vdsc-strip-head { margin-bottom: 2px; }
+.vdsc-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.vdsc-tile { position: relative; height: 74px; border: none; border-radius: 12px; cursor: pointer;
+    overflow: hidden; text-align: left; padding: 0 14px; display: flex; align-items: flex-end;
+    background: linear-gradient(135deg, rgba(var(--c, 99, 102, 241), 0.85), rgba(var(--c, 99, 102, 241), 0.3) 130%);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 6px 18px rgba(0, 0, 0, 0.3);
+    transition: transform 0.16s ease, filter 0.16s ease; }
+.vdsc-tile::after { content: ''; position: absolute; inset: 0;
+    background: radial-gradient(120% 120% at 100% 0%, rgba(255, 255, 255, 0.16), transparent 50%); }
+.vdsc-tile:hover { transform: translateY(-3px) scale(1.02); filter: brightness(1.1); }
+.vdsc-tile-name { position: relative; z-index: 1; font-size: 14.5px; font-weight: 900; letter-spacing: -0.01em;
+    color: #fff; text-shadow: 0 2px 10px rgba(0, 0, 0, 0.45); padding-bottom: 11px; }
+.vdsc-tile--all { background: linear-gradient(135deg, rgba(var(--accent-rgb, 88 101 242), 0.85),
+    rgba(var(--accent-rgb, 88 101 242), 0.35) 130%); }
+
+/* ── Grid-mode live filter bar ────────────────────────────────────────────── */
+.vdsc-filterbar { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; margin: 0 0 16px;
+    border-radius: 14px; background: rgba(16, 16, 22, 0.92); border: 1px solid rgba(255, 255, 255, 0.08);
+    position: sticky; top: 8px; z-index: 5; backdrop-filter: blur(10px); }
+.vdsc-filterbar.hidden { display: none; }
+.vdsc-filter-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* ── Endless "Keep exploring" feed ────────────────────────────────────────── */
+.vdsc-explore { margin-top: 26px; }
+.vdsc-explore[hidden] { display: none; }
+
+/* Perf: don't render offscreen rail groups at all — the page is a deep stack,
+   and this keeps scrolling silky no matter how many groups fill in. */
+.vdsc-group { content-visibility: auto; contain-intrinsic-size: auto 760px; }
 
 /* ── Browse button (shared by the Browse panel + grid header) ─────────────── */
 .vdsc-btn { padding: 10px 18px; border-radius: 10px; font-size: 13px; font-weight: 800; cursor: pointer;

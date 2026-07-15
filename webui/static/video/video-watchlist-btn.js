@@ -118,6 +118,10 @@
     // Batch-check watched state for every un-painted button under `root`.
     function hydrate(root) {
         root = root || document;
+        // Piggyback: every card surface already calls this after a render, so
+        // it's the one hook that reaches ALL cards — hydrate wishlist ribbons
+        // in the same pass (separate module; one batched POST of its own).
+        if (window.VideoWishState) VideoWishState.hydrate(root);
         ['show', 'person', 'studio'].forEach(function (kind) {
             var nodes = root.querySelectorAll('.vwl-btn[data-vwl-kind="' + kind + '"]');
             if (!nodes.length) return;

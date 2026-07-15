@@ -46238,6 +46238,51 @@ div.artist-hero-badge {
     margin-top: 4px;
 }
 
+/* Side-access flash guard: seeded pre-paint by the inline <head> script from
+   the cached last-known sides, so a single-side profile never sees the
+   Music↔Video switcher flash in on reload. updateProfileIndicator keeps the
+   class (and the cache) in sync once the real profile arrives. */
+html.side-locked .side-toggle {
+    display: none !important;
+}
+
+/* Side access picker (music | video | both) — sits above Page Access in the
+   create + edit profile forms. */
+.profile-sides-picker {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 10px;
+}
+.profile-sides-picker label {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 7px 10px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.6);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    user-select: none;
+}
+.profile-sides-picker label:hover {
+    border-color: rgba(255, 255, 255, 0.18);
+}
+.profile-sides-picker label:has(input:checked) {
+    background: rgba(var(--accent-rgb), 0.14);
+    border-color: rgba(var(--accent-rgb), 0.5);
+    color: #fff;
+}
+.profile-sides-picker input {
+    accent-color: rgb(var(--accent-rgb));
+    margin: 0;
+}
+
 .profile-page-checkboxes {
     display: grid;
     grid-template-columns: 1fr 1fr;
