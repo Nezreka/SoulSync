@@ -164,13 +164,18 @@ def shape_channel(info, limit=30):
 
 
 def _cookie_opts():
-    """The music client's cookie convention so age/region-gated content works."""
+    """The music client's cookie convention so age/region-gated content works —
+    INCLUDING the 'Paste cookies.txt' mode. This used to skip the paste sentinel
+    entirely, so headless/Docker users (who CAN'T use a browser mode — llovi's
+    report) got cookie-less video-side YouTube while the music side worked."""
     try:
+        import os
         from config.settings import config_manager
-        cb = config_manager.get("youtube.cookies_browser", "")
-        # 'custom' = the paste-cookies.txt sentinel (not a yt-dlp browser); skip it here.
-        if cb and cb != "custom":
-            return {"cookiesfrombrowser": (cb,)}
+        from core.youtube_cookies import build_youtube_cookie_opts
+        mode = config_manager.get("youtube.cookies_browser", "")
+        cookiefile = config_manager.get("youtube.cookies_file", "")
+        exists = bool(cookiefile) and os.path.exists(cookiefile)
+        return build_youtube_cookie_opts(mode, cookiefile, cookiefile_exists=exists)
     except Exception:  # noqa: S110 - cookie config is best-effort; extraction still works without it
         pass
     return {}
