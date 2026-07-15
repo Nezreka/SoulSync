@@ -3418,6 +3418,8 @@ Vertieft Punkt 47 (Abschnitt 15). Bestätigter Root Cause, keine Vermutung mehr:
 
 **Fix-Richtung (für spätere Umsetzung):** `source_info.py` soll zuerst `track_downloads WHERE track_id = lib2_track.legacy_track_id` (bzw. `lib2_track_files.legacy_track_id`) probieren — analog zur Legacy-Route — und nur bei `legacy_track_id IS NULL` (reine Autolink-Neuanlage ohne Legacy-Pendant) auf die bestehende Pfad-/Dateiname-Suche zurückfallen.
 
+**✅ Umgesetzt (2026-07-15, Commit `ff6edb10`):** genau wie oben — `track_source_info` löst jetzt zuerst über `lib2_tracks.legacy_track_id` (dann den Primary-File-Link) auf und fällt nur bei fehlender Legacy-ID auf die Pfad-/Suffix-Kette zurück. Tests in `tests/library2/test_source_info.py` (Datei verschoben → nur noch via Legacy-ID auffindbar; Suffix-Kollision wird nicht mehr fälschlich mitgezogen; Autolink-only Track fällt weiterhin auf den Pfad zurück).
+
 **Priorität:** Hoch genug, um vor den generischen Roadmap-Punkten 45–51 behandelt zu werden — es ist ein Bug mit klarer Lokalisierung, kein offenes Feature-Gap.
 
 ---
@@ -3436,6 +3438,11 @@ Der Fehler pflanzt sich fort:
 Die Album-Monitor-Intent-Snapshot/Restore-Logik (`snapshot_album_monitor_intent`/`restore_album_monitor_intent`, `monitor_rules.py:55-102`, `importer.py:434-439,680-682`) bewahrt NUR Album-Entity-Regeln über Re-Importe hinweg — sie leitet den initialen Album-Flag nie aus „wie viele/welche Tracks waren gewollt" ab. Track-Ebene ist an sich korrekt (`_has_preserved_intent`/`_reconcile_legacy_snapshot`, `importer.py:253-264`), das Album-Flag selbst ist der Bug.
 
 **Fix-Richtung:** Album-INSERT im Haupt-Loop (`importer.py:539-548`) sollte `monitored` aus der tatsächlichen Track-Datenlage ableiten (z.B. `monitored=1` nur wenn ALLE oder eine konfigurierbare Mehrheit der bekannten Tracks lokal vorhanden/gewishlistet sind), statt den Schema-Default durchzureichen — analog zur bereits vorhandenen Sorgfalt in `seed_wishlist_tracks`.
+
+**✅ Umgesetzt (2026-07-15):**
+- Album-Flag (Commit `15742513`): der Haupt-Loop-INSERT leitet `monitored` jetzt aus der Ownership ab — `1` nur wenn das Album voll vorhanden ist (present ≥ bekannte Rows und ≥ dem Metadaten-`expected_track_count`), sonst `0`. Ein Teil-Album startet damit unmonitored; nur die konkret gewollten Tracks (`wishlist_import`-Regeln, die die Album-Regel überstimmen) bleiben `wanted`. Fully-owned Alben behalten `monitored=1`. Missing Tracks bleiben in der Album-Detail-Ansicht sichtbar (über `expected_track_count`).
+- Track-Flag-Folgefix (Commit `d76a8222`): der Track-INSERT setzt `monitored` jetzt konsistent aus dem Album-Flag, damit die Roh-Flag-Spalte nicht mehr von der `wanted`-Projektion abweicht (ein Missing-Track eines Teil-Albums liest damit auch als Flag `0`, nicht mehr Schema-Default `1`).
+- Zwei Tests, die das alte Blanket-Monitoring kodierten, wurden auf die korrigierte Semantik aktualisiert (`test_queries.py`, `test_wanted_projection.py`); neuer Regressionstest `test_partial_album_is_not_blanket_monitored_on_import`.
 
 **Priorität:** Hoch — verfälscht das Monitoring-Verhalten für jeden Nutzer, der nur Teile eines Albums wollte, und führt zu ungewollten Auto-Downloads/Upgrade-Scans für nie gewünschte Tracks.
 
@@ -3468,6 +3475,10 @@ Zwei unabhängige Root Causes in verschiedenen Modulen:
 - `_ArtistResolver.get_or_create_by_name`: Disambiguierung über Provider-IDs vor reinem Namens-Match, deckt sich mit Roadmap-Punkt 40 (Artist-Aliasing).
 - `completeness.py::_persist_tracklist_tracks`: Titel-basierten Abgleich (zusätzlich zu disc+number) einziehen, damit ein korrekt gematchter Re-Fetch auch kollidierende/duplizierte Nummern reparieren kann statt sie nur zu bestätigen.
 
+**Umsetzungsstand (2026-07-15):**
+- **✅ Titel-basierte Heilung (Commit `eca36caa`):** `_persist_tracklist_tracks` bevorzugt jetzt einen eindeutigen, noch nicht in diesem Lauf berührten lokalen Row mit gleichem (normalisiertem) Titel über den `(disc, number)`-Schlüssel und schreibt dessen `disc`/`number` in-place um. Ein doppelter Titel heilt nie (Eindeutigkeits-Guard → Remixe/Intros bleiben sicher). Damit repariert ein korrekt gefetchter Re-Fetch kollabierte/vertauschte Nummern, statt Duplikate anzulegen — genau der Grund, warum „Update Discography" es vorher nie reparierte. Regressionstest `test_persist_tracklist_heals_duplicated_track_numbers_by_title`.
+- **⏳ Bewusst zurückgestellt (eigene, spätere Slice):** die **Prävention** der Erstkorruption — (a) der Main-Pipeline-`floor-to-1` (`pipeline.py:892-904`) und (b) die reine Namens-Disambiguierung im `_ArtistResolver`. (a) gehört als generischer Main-Pipeline-Fix in einen eigenen, früheren PR (Reuse-First-Philosophie, Abschnitt 4.5) und braucht Batch-Kontext, den die Per-File-Pipeline an dieser Stelle nicht hat; (b) ist ein querschnittlicher Identitäts-Umbau, der sich mit Roadmap-Punkt 40 (Artist-Aliasing) deckt. Beide sind höher-riskant als die lib2-lokale Heilung und werden nicht unter Parallel-Arbeit blind mitgezogen. Die Titel-Heilung deckt bereits den „swag"-Fall (korrekter Artist, nur Nummern korrupt) ab; „Thriller 40" braucht zusätzlich (b).
+
 **Priorität:** Hoch — führt zu sichtbarem Datenverlust in der UI (Tracks als "missing" trotz vorhandener Datei) und ist durch normale Nutzer-Aktionen ("Update Discography") nicht selbst-heilend.
 
 ---
@@ -3479,3 +3490,27 @@ Zwei unabhängige Root Causes in verschiedenen Modulen:
 3. **16.1 (Source-Info-Query-Bug)** — Hoch-genug-lokalisiert, um vor Roadmap 45–51 behandelt zu werden, aber kein Datenverlust — nur fehlende Anzeige bereits vorhandener Daten.
 
 **Status:** Reine Dokumentation (zwei Explore-Agents, Datei:Zeile-verifiziert), keine Implementierung in dieser Session.
+
+---
+
+### 16.5 Umsetzungsstand (2026-07-15)
+
+Abschnitt 16 wurde am 2026-07-15 in mehreren fokussierten, TDD-getriebenen
+Commits (jeder mit eigenem Regressionstest, `pytest tests/library2` durchgängig
+grün — 387 Tests) angegangen:
+
+| Punkt | Stand | Commit(s) |
+|-------|-------|-----------|
+| **16.1** Source-Info-Query-Bug | ✅ vollständig | `ff6edb10` |
+| **16.2** Über-breites Album-Monitoring (Album-Flag) | ✅ vollständig | `15742513` |
+| **16.2** Track-Flag-Konsistenz-Folgefix | ✅ vollständig | `d76a8222` |
+| **16.3** Titel-basierte Nummern-Heilung (lib2) | ✅ vollständig | `eca36caa` |
+| **16.3(a)** Main-Pipeline-`floor-to-1`-Prävention | ⏳ zurückgestellt | — (eigener Main-Pipeline-PR, Abschnitt 4.5) |
+| **16.3(b)** `_ArtistResolver`-Provider-ID-Disambiguierung | ⏳ zurückgestellt | — (querschnittlich, deckt sich mit Roadmap-Punkt 40) |
+
+Die zurückgestellten Punkte sind bewusst getrennt: der `floor-to-1`-Fix ist ein
+generischer Main-Pipeline-Gewinn (gehört nach 4.5 in einen eigenen, früheren
+PR und braucht Batch-Kontext, den `pipeline.py` an der Stelle nicht hat), und
+die Artist-Disambiguierung ist ein Identitäts-Umbau (Roadmap 40) — beide zu
+riskant, um unter paralleler Arbeit blind mitzuziehen. Die drei geschlossenen
+Bugs sind alle lib2-lokal, additiv und mit ihren eigenen Tests abgesichert.
