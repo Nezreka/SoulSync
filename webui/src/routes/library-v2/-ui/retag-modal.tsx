@@ -45,8 +45,30 @@ export function RetagModal({
     queryFn: () => fetchLibraryV2TagPreview(entity, id),
     staleTime: 0,
   });
-  const tracks = useMemo(() => previewQuery.data?.tracks ?? [], [previewQuery.data]);
+  const tracks = useMemo(() => {
+    const raw = previewQuery.data?.tracks ?? [];
+    return raw.filter(
+      (t) => t.file_path && t.error !== 'No file' && t.error !== 'File not found on disk'
+    );
+  }, [previewQuery.data]);
   const changed = useMemo(() => tracks.filter((t) => t.has_changes), [tracks]);
+
+  const grouped = useMemo(() => {
+    const groups: { albumTitle: string; tracks: LibraryV2TagPreviewTrack[] }[] = [];
+    for (const t of tracks) {
+      const titleStr = t.album_title ?? 'Unknown Album';
+      const last = groups[groups.length - 1];
+      if (last && last.albumTitle === titleStr) {
+        last.tracks.push(t);
+      } else {
+        groups.push({
+          albumTitle: titleStr,
+          tracks: [t],
+        });
+      }
+    }
+    return groups;
+  }, [tracks]);
 
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [phase, setPhase] = useState<'idle' | 'writing' | 'done' | 'error'>('idle');
@@ -142,38 +164,40 @@ export function RetagModal({
                   <th>Changes (file → library)</th>
                 </tr>
               </thead>
-              <tbody>
-                {tracks.map((t) => (
-                  <tr key={t.track_id} className={t.has_changes ? '' : styles.staticRow}>
-                    <td>
-                      {t.has_changes ? (
-                        <input
-                          type="checkbox"
-                          checked={selected.has(t.track_id)}
-                          disabled={phase === 'writing'}
-                          onChange={() => toggle(t.track_id)}
-                        />
-                      ) : null}
-                    </td>
-                    <td className={styles.colNum}>{t.track_number ?? '—'}</td>
-                    <td title={t.file_path ?? undefined}>
-                      {t.title ?? '—'}
-                      {entity === 'artists' && t.album_title ? (
-                        <span className={styles.muted}> — {t.album_title}</span>
-                      ) : null}
-                    </td>
-                    <td className={styles.qualityText}>
-                      {t.error ? (
-                        <span className={styles.statusWarn}>{t.error}</span>
-                      ) : t.has_changes ? (
-                        diffSummary(t)
-                      ) : (
-                        <span className={styles.statusOk}>tags match</span>
-                      )}
+              {grouped.map((group) => (
+                <tbody key={group.albumTitle}>
+                  <tr className={styles.albumGroupHeaderRow}>
+                    <td colSpan={4} className={styles.albumGroupHeader}>
+                      {group.albumTitle}
                     </td>
                   </tr>
-                ))}
-              </tbody>
+                  {group.tracks.map((t) => (
+                    <tr key={t.track_id} className={t.has_changes ? '' : styles.staticRow}>
+                      <td>
+                        {t.has_changes ? (
+                          <input
+                            type="checkbox"
+                            checked={selected.has(t.track_id)}
+                            disabled={phase === 'writing'}
+                            onChange={() => toggle(t.track_id)}
+                          />
+                        ) : null}
+                      </td>
+                      <td className={styles.colNum}>{t.track_number ?? '—'}</td>
+                      <td title={t.file_path ?? undefined}>{t.title ?? '—'}</td>
+                      <td className={styles.qualityText}>
+                        {t.error ? (
+                          <span className={styles.statusWarn}>{t.error}</span>
+                        ) : t.has_changes ? (
+                          diffSummary(t)
+                        ) : (
+                          <span className={styles.statusOk}>tags match</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              ))}
             </table>
           )}
         </div>

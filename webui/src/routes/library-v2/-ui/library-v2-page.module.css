@@ -2214,3 +2214,16 @@
   padding: 1px 6px;
   white-space: nowrap;
 }
+
+.albumGroupHeaderRow {
+  background: rgba(255, 255, 255, 0.03) !important;
+}
+
+.albumGroupHeader {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: rgba(255, 255, 255, 0.92);
+  padding: 8px 12px !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  text-align: left;
+}
