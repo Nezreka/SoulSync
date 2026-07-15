@@ -3875,21 +3875,27 @@ dokumentierter Bug in diesem Bereich.
 
 ### Priorisierung Abschnitt 17
 
-1. **17.2 (Track-Nummer-Heilung für Bestandsalben)** — Kritisch: sichtbarer
+1. ~~**17.2 (Track-Nummer-Heilung für Bestandsalben)**~~ — Kritisch: sichtbarer
    Datenverlust, betrifft jeden Nutzer mit vor dem Fix importierten Alben, kein
-   Workaround außer manuellem DB-Fix.
-2. **17.6 (Import-Performance)** — Hoch: blockiert die Migration großer
+   Workaround außer manuellem DB-Fix. **Gefixt, siehe Abschnitt 19.**
+2. ~~**17.6 (Import-Performance)**~~ — Hoch: blockiert die Migration großer
    Bibliotheken praktisch nutzbar zu machen; Fix ist ein bekanntes, bereits im
-   Code vorhandenes Muster (ThreadPoolExecutor), kein Neubau.
-3. **17.5 (falsches „tags ✓" bei fehlender Datei)** — Hoch: irreführend, verdeckt
-   fehlende Downloads als „vollständig".
-4. **17.4 (All-Releases-Tab lädt nicht)** — Mittel: UX-Bug mit bekanntem
+   Code vorhandenes Muster (ThreadPoolExecutor), kein Neubau. **Gefixt, siehe
+   Abschnitt 20.**
+3. ~~**17.5 (falsches „tags ✓" bei fehlender Datei)**~~ — Hoch: irreführend,
+   verdeckt fehlende Downloads als „vollständig". **Gefixt, identisch mit 18.8
+   (siehe Abschnitt 18).**
+4. ~~**17.4 (All-Releases-Tab lädt nicht)**~~ — Mittel: UX-Bug mit bekanntem
    Workaround (hin- und zurückklicken), kleine, gut lokalisierte Änderung.
-5. **17.3 (rohes ISO-Datum)** — Mittel: kosmetisch, aber sichtbar bei jedem
-   library-origin Release mit historisch unsauberem Legacy-Datum.
+   **Gefixt, siehe Abschnitt 21.**
+5. ~~**17.3 (rohes ISO-Datum)**~~ — Mittel: kosmetisch, aber sichtbar bei jedem
+   library-origin Release mit historisch unsauberem Legacy-Datum. **Gefixt,
+   identisch mit 18.7 (siehe Abschnitt 18).**
 6. **17.7 (Importer-Datenverlust)** — Mittel: größerer Scope (Schema-Änderungen),
    aber additiv/risikoarm; kein akuter Datenverlust im Sinne von „Datei nicht
-   auffindbar", sondern „Metadaten dauerhaft nicht verfügbar".
+   auffindbar", sondern „Metadaten dauerhaft nicht verfügbar". **Fix-Richtung
+   (1)–(3) gefixt, siehe Abschnitt 22; Artist-Anreicherung/Hörstatistik/
+   per-Track-Profil bleiben offen.**
 7. **17.1 / 17.8** — Kein Implementierungsbedarf, nur zur Kenntnisnahme.
 8. **17.0 (Dev-Umgebung)** — Bereits behoben für diese Session; als Prozess-Hinweis
    für künftige Sessions/den Nutzer festgehalten, keine Code-Änderung nötig.
@@ -3957,3 +3963,247 @@ In der Session vom 15.07.2026 hat der Nutzer eine konkrete Liste an UI-Verbesser
 - **Problem/Wunsch:** Tracks, die als fehlend (`missing`, rot markiert) eingetragen sind, zeigen fälschlicherweise den Status `tags ✓` (oder `0 tag gaps`), obwohl gar keine Datei vorliegt.
 - **Frontend-Implementierung:**
   - In der `TrackRow` der Tabellenzelle für Metadaten die Abfrage erweitern: Nur wenn `track.id` vorhanden ist **UND** der Track nicht missing ist (`!missing`), wird der Tag-Prüfungsstatus gerendert. Andernfalls wird `—` (dash) angezeigt.
+
+### Umsetzungsstand (2026-07-15, Fortsetzungs-Session)
+
+Alle acht Punkte (18.1–18.8) sind implementiert, no-Docker-verifiziert (`npm run check`, `vitest run`, gezielte `pytest`-Läufe) und noch nicht committed:
+
+- **18.1 (Live Tags/Lyrics):** Neue Route `GET /api/library/v2/tracks/<id>/file-tags` (`api/library_v2.py`) — löst die primäre Datei über `lib2_track_files`/`resolve_lib2_path` auf und liest sie mit `core.library.file_tags.read_embedded_tags` (nicht `tag_writer.read_file_tags` — dieser Reader ist bereits die Grundlage des Legacy-Audit-Trail-Modals und liefert Lyrics + das volle Tag-Set inkl. ReplayGain mit). `TrackDetailModal` bekommt zwei neue Tabs „Tags" (kategorisiertes Grid: Track/Album/ReplayGain/Source-IDs/Other, ein einziger Live-Read für beide Tabs) und „Lyrics" (Klartext-Render mit Zeilenumbrüchen).
+- **18.2 (Write Tags to File):** Kein neuer Endpunkt nötig — der bereits vorhandene Bulk-Endpunkt `POST /api/library/v2/tags/write` (den `RetagModal` für Album/Artist nutzt) wird jetzt auch von einem neuen `TrackWriteTagsButton` im Metadata-Tab mit `track_ids: [id]` aufgerufen, inkl. Job-Polling über den bestehenden `awaitBulkJob`-Helper.
+- **18.3 (Lifecycle-Log):** `quarantine_reason` existiert nur als Sidecar-Datei während der Quarantäne selbst und wird nach dem Import nicht persistiert — daher stützt sich der Info-Tab stattdessen auf zwei bereits vorhandene, aber bisher ungenutzte DB-Facts: `lib2_track_files.verification_status` (bereits über die existierende `TrackVerificationBadge`-Komponente mit guten Tooltips abgedeckt, jetzt auch im Info-Tab gerendert) und die `lib2_manual_skips`-Audit-Tabelle (neue Funktion `skip_history_for_path` in `core/library2/manual_skips.py`, verdrahtet in die `/source-info`-Route als zusätzliches `manual_skips`-Feld). `lib2_track_files.acoustid_status` existiert zwar im Schema, wird aber im gesamten Code nie beschrieben (immer `NULL`) — bewusst NICHT verdrahtet, um keine tote UI zu bauen.
+- **18.4 (ReplayGain-Präsenz):** Durch 18.1 abgedeckt — die vier ReplayGain-Tags erscheinen automatisch im neuen Tags-Tab. Der optionale „RG"-Badge in der Quality-Spalte wurde bewusst ausgelassen: er bräuchte einen zusätzlichen Cache-Fetch pro Zeile (oder eine Erweiterung von `tags_json`/`metadata_gaps` um RG-Präsenz), was für ein als „optional" markiertes Nice-to-have nicht im Verhältnis stand.
+- **18.5 (Cohesive Badge):** `QualityDisplay` fasst Format+Auflösung jetzt in einem `qualityTag`-Span zusammen (`·`-getrennt), kbps bleibt eigenes Badge.
+- **18.6 (Hover-Tooltip):** Neue `metadataGapsTooltip()`-Hilfsfunktion (mirrored `EXPECTED_TAGS`-Reihenfolge aus `core/library2/status.py`) liefert „Present: … / Missing: …" als `title` für beide Zustände (✓ und N gaps).
+- **18.7 (Datums-Normalisierung):** `formatReleaseDate()` schneidet auf die ersten 10 Zeichen; angewendet auf Album-Subtitle und Album-Head-Datum-Badge.
+- **18.8 (Missing-Track-Tags-Fix):** War bereits in einem vorherigen Commit (`b1e49b0b`) umgesetzt — verifiziert, keine Änderung nötig.
+
+Reuse-Bilanz: kein einziger neuer Backend-Endpunkt für 18.2 (bestehende Bulk-Route reicht); 18.1 nutzt den bereits für den Legacy-Audit-Trail gebauten `read_embedded_tags`-Reader 1:1 statt eines neuen Parsers; 18.3 fördert zwei DB-Spalten zutage, die bereits existierten aber nirgends im UI ankamen, statt neue Tracking-Logik zu bauen.
+
+---
+
+## 19. §17.2 Track-Nummer-Kollision auf Bestandsalben — gefixt (2026-07-15, Fortsetzungs-Session 2)
+
+TDD, `pytest tests/library2` 408/408 grün (war 404). Zwei Teil-Fixes, beide nötig,
+damit der live-reproduzierte SWAG-Fall tatsächlich heilt:
+
+- **Invocation-Gap (der in §17.2 dokumentierte Root Cause):** neue Funktion
+  `core/library2/discography.py::repair_track_number_collisions()` findet
+  `origin='library'`-Alben des Artists mit einer `(disc_number, track_number)`-
+  Kollision (billige `EXISTS(...GROUP BY...HAVING COUNT(*)>1)`-Subquery) und
+  ruft für sie direkt `resolve_tracklist` auf — **nicht** über
+  `auto_monitor_releases`, denn das würde zusätzlich alle Tracks monitored=1
+  setzen und eine `new_release`-Provenance-Regel stempeln, was bei einem
+  bereits vorhandenen Album falsch wäre. Verdrahtet in
+  `refresh_artist_discography()` (läuft also sowohl über den "Update
+  Discography"-Button als auch über den wöchentlichen
+  `lib2_discography_refresh`-Repair-Job, ohne Code-Duplikation). Neues Stats-
+  Feld `repaired_track_number_collisions` (Liste im Backend, Anzahl in der
+  API-Response).
+- **Zweiter, beim Root-Cause-Audit nicht erkannter Gap in der Heilungslogik
+  selbst:** `_unique_untouched_title_match` (§16.3, `eca36caa`) verlangt EINE
+  eindeutige Titel-Übereinstimmung. Genau der vom Nutzer gemeldete Fall
+  ("DAISIES bei Nummer 1 UND Nummer 2") erzeugt aber ZWEI Kandidaten mit
+  demselben Titel: die echte, heruntergeladene Datei (falsch bei Nummer 1) UND
+  einen fileless Platzhalter, der von einem früheren `resolve_tracklist`-Lauf
+  bereits an der korrekten Nummer angelegt wurde. Die alte Eindeutigkeitsregel
+  gab in diesem Fall `None` zurück (ambig) → die echte Zeile blieb korrupt,
+  der Platzhalter blieb als sichtbares Duplikat stehen. Fix: bei mehreren
+  Titel-Kandidaten wird jetzt geprüft, ob GENAU EINER eine Datei hat
+  (`lib2_track_files`) und alle übrigen gefahrlos löschbare Platzhalter sind
+  (kein `legacy_track_id`, nicht monitored, keine positive Monitor-Regel,
+  nicht wanted — dieselben Kriterien wie `_trim_excess_fileless_tracks`); dann
+  wird die echte Zeile geheilt (umnummeriert) und der/die Platzhalter gelöscht
+  (neuer gemeinsamer Helper `_delete_track_row`). Ohne diesen zweiten Fix hätte
+  die reine Invocation-Reparatur den gemeldeten Fall NICHT tatsächlich gelöst.
+- Tests: `test_persist_tracklist_heals_real_track_over_its_own_placeholder_duplicate`
+  (test_completeness.py) für die Matching-Lücke;
+  `test_refresh_repairs_track_number_collision_on_existing_library_album` +
+  `test_refresh_track_number_repair_does_not_touch_clean_library_albums` +
+  `test_refresh_track_number_repair_does_not_remonitor_or_reprovenance`
+  (test_discography.py) für Erkennung/Verdrahtung + die bewusste Abgrenzung
+  zu `auto_monitor_releases`'s Nebenwirkungen.
+- Nicht angefasst: die eigentliche Live-DB-Verifikation gegen die reale SWAG-
+  Album-Instanz des Nutzers (siehe [[local-realdb-verify-workflow]]) — diese
+  Session hat nur gegen die synthetische Test-DB verifiziert.
+
+---
+
+## 20. §17.6 Import-Performance — Artwork-/Tracklist-Precache parallelisiert (2026-07-15, Fortsetzungs-Session 3)
+
+TDD, `pytest tests/library2` 413/413 grün (war 408). Genau der in §17.6 vorgeschlagene
+Fix: der bereits etablierte `ThreadPoolExecutor`-Pattern aus
+`core/auto_import_worker.py` (Config-Key `auto_import.max_workers`, Default 3)
+wiederverwendet statt neu gebaut.
+
+- **`core/library2/artwork.py::precache_all_artwork`**: liest zunächst nur
+  `artist_ids`/`album_ids` über eine kurzlebige Verbindung, schließt sie, baut
+  daraus die Liste der noch nicht gecachten Einträge (`artwork_file(...).exists()`-
+  Check bleibt im Hauptthread, ist reiner Filesystem-Stat) und verteilt genau
+  diese Pending-Liste über einen `ThreadPoolExecutor` an `build_artwork` — jeder
+  Pool-Worker öffnet dafür seine **eigene** `database._get_connection()`
+  (Kommentar am Original bestätigt bereits "Get a NEW database connection for
+  each operation (thread-safe)", `database/music_database.py:239`), da
+  `sqlite3.Connection`-Objekte nicht threadübergreifend geteilt werden dürfen.
+  Fortschritts-Callback (`progress(...)`) bleibt erhalten, jetzt hinter einem
+  `threading.Lock` um den gemeinsamen Zähler. Zählung pro Art (`artists`/
+  `albums`) unverändert.
+- **`core/library2/completeness.py::precache_tracklists`**: gleiches Muster,
+  neuer gemeinsamer Helper `_resolve_stage()` führt jede der beiden bestehenden
+  Phasen (erst `cached=True` ohne Provider-Calls, dann `cached=False` mit
+  Provider-Calls) als eigenen bounded-Pool-Durchlauf aus — jeder Worker ruft
+  `resolve_tracklist(config_manager, thread_conn, album_id)` mit einer eigenen
+  Verbindung auf. Reihenfolge der beiden Phasen (erst Cache, dann Provider)
+  bleibt erhalten, nur die Parallelität innerhalb jeder Phase ist neu.
+- Neuer gemeinsamer (aber pro Modul dupliziert, um keine Cross-Import-Kopplung
+  zwischen `artwork.py` und `completeness.py` einzuführen) 8-Zeilen-Helper
+  `_precache_max_workers(config_manager, default=3)` — liest denselben
+  Config-Key wie `AutoImportWorker`, floort bei 1, fällt bei fehlendem/kaputtem
+  `config_manager` sauber auf 3 zurück.
+- Aufrufer (`api/library_v2.py:2836,2843`, der bereits vorhandene
+  Import-Hintergrundthread) unverändert — Signatur beider Funktionen ist
+  identisch geblieben, kein API-Bruch.
+- Tests (neu, beide Module nach demselben Muster wie
+  `tests/imports/test_auto_import_executor.py::test_pool_runs_candidates_in_parallel`
+  / `test_executor_max_workers_caps_concurrency`): mit einem
+  Sperr-geschützten In-Flight-Zähler + `threading.Event` wird bewiesen, dass
+  (a) mit mehr Pending-Items als `max_workers` die Spitzenparallelität exakt
+  `max_workers` erreicht (Default 3) — belegt, dass die alte serielle Schleife
+  tatsächlich seriell WAR (RED-Phase schlug mit Peak=1 fehl), und (b) ein
+  konfigurierter `auto_import.max_workers=2` die Parallelität hart deckelt.
+  Zusätzlich ein reiner Korrektheitstest für `precache_all_artwork`, der
+  beweist, dass ein bereits gecachtes Element übersprungen (nicht neu gebaut)
+  wird und die Kind-Zähler (`artists`/`albums`) nach dem Wechsel auf den Pool
+  weiterhin exakt stimmen. Neue Fixture `legacy_db_factory` (in
+  `tests/library2/conftest.py`) erzeugt eine Legacy-DB mit N Alben unter einem
+  Artist — genug unabhängige Arbeitseinheiten, um echte Nebenläufigkeit statt
+  zufälligem Timing zu beweisen; `LegacyDBShim` bekam zusätzlich eine
+  `database_path`-Property (Alias auf `.path`), damit `artwork.py`s
+  Pfad-Helper auch gegen den Test-Shim funktionieren.
+- Nicht angefasst: `precache_tracklists`s `cached=True`-Phase wird in den neuen
+  Tests nur strukturell (über eine gemockte `resolve_tracklist`) auf
+  Nebenläufigkeit geprüft, nicht mit einer echten JSON-Cache-Fixture — die
+  bereits bestehenden `resolve_tracklist`-Tests decken die inhaltliche Logik
+  dieser Phase weiterhin ab und liefen unverändert grün. Der zweite Teil von
+  §17.6 (Vorschlag, die beiden Precache-Stufen als niedrig priorisierten
+  Hintergrund-Job zu queuen statt den Import darauf warten zu lassen) wurde
+  NICHT umgesetzt — bewusst zurückgestellt, da bereits Hintergrundthread +
+  jetzt Parallelität den ursprünglich gemeldeten "dauert ewig"-Fall adressieren
+  sollten; bei Bedarf (Bibliotheken mit vielen Tausend Alben) eigenständig
+  nachrüstbar.
+
+---
+
+## 21. §17.4 "All Releases"-Tab lädt nicht automatisch — gefixt (2026-07-15, Fortsetzungs-Session 3)
+
+TDD, `vitest run` 149/149 grün (war 144), `npm run check` (oxfmt+oxlint --type-check)
+sauber. Exakt der in §17.4 vorgeschlagene Fix: die Fetch-Bedingung aus dem
+Klick-Handler in einen `useEffect` verschoben, der auch beim initialen Mount
+mit `releasesMode==='all'` aus der URL feuert.
+
+- **Neue reine Entscheidungsfunktion** `shouldAutoFetchDiscography()`
+  (`library-v2-page.tsx`, direkt neben `visibleReleases`, `export`iert für
+  Tests) kapselt die Logik isoliert von React/Router — testbar ohne die große
+  `ArtistDetailView`-Komponente zu mounten (die `useNavigate`/
+  `Route.useSearch()` aus TanStack Router braucht).
+- **Wichtiger, in der ursprünglichen §17.4-Analyse nicht erwähnter Fallstrick:**
+  eine naive Umsetzung der vorgeschlagenen Dependency-Liste
+  `[releasesMode, artist?.discography_count, discographyBusy]` hätte für einen
+  Artist mit einer *echt leeren* Provider-Discography (Count bleibt nach dem
+  Fetch bei 0) eine Endlosschleife erzeugt: jeder `discographyBusy`-Übergang
+  `true→false` erfüllt die Bedingung erneut, ruft `updateDiscography()` erneut
+  auf, setzt `discographyBusy` erneut auf `true`, usw. Fix: `alreadyAttempted`-
+  Parameter (gespeichert in einem `useRef`, das beim Verlassen von
+  `releasesMode==='all'` zurückgesetzt wird) — genau ein Fetch-Versuch pro
+  Tab-Wechsel zu "All Releases", nicht pro Render.
+- `setReleasesMode()` vereinfacht auf reines Navigieren; der `useEffect`
+  besitzt jetzt die alleinige Fetch-Entscheidung für BEIDE Auslöser (Klick und
+  Mount-mit-URL-State).
+- Tests: 5 neue Fälle in `webui/src/routes/library-v2/-ui/releases-mode.test.ts` (lädt/
+  wartet/hat schon Daten/läuft bereits/Endlosschleifen-Regressionswächter) für
+  die reine Funktion — deckt exakt den Bug UND den beim Entwurf gefundenen
+  Zweitbug in einem Rutsch ab.
+- **Live-Verifikation gegen die echte Dev-DB (no Docker, `dev.py`,
+  Playwright+CDP gegen headless Chromium, siehe [[local-realdb-verify-workflow]]-
+  Pattern):** direkter Aufruf von `/library-v2?artist=<id>&releases=all` (kein
+  Klick!) für zwei Artists mit `discography_count===0`:
+  - Artist 24 (Justin Bieber, "SWAG" — der in §17.2/§19 bereits als Repro-Fall
+    genutzte Artist): Auto-Fetch feuerte beim Mount, `discography_count` ging
+    von 0 → 55, UI zeigte danach "All Releases 55" mit vollem Albenkatalog.
+  - Artist 23 (VØJ): Netzwerk-Log bestätigt **genau ein** POST auf
+    `/api/library/v2/artists/23/discography/refresh` in einem 6-Sekunden-
+    Beobachtungsfenster (kein Loop), `discography_count` ging von 0 → 93.
+  - Keine Konsolenfehler durch die Änderung (ein einzelner unabhängiger 404 zu
+    `docs.brandfetch.com/logo-api/overview` ist ein bereits vorhandener
+    externer Artist-Image-Fallback, nicht durch diese Änderung verursacht).
+
+---
+
+## 22. §17.7 Importer-Datenverlust — Fix-Richtung (1)-(3) umgesetzt (2026-07-15, Fortsetzungs-Session 4)
+
+TDD, `pytest tests/library2` 417/417 grün (war 413, +4 neue Regressionstests).
+Genau die drei in §17.7 vorgeschlagenen Schritte, in Prioritätsreihenfolge:
+
+- **Schritt 1 — `lib2_tracks.external_ids`:** neue Spalte (`core/library2/schema.py`,
+  `LIB2_TRACKS_DDL` + `_ADDED_COLUMNS`-Migrationseintrag für bestehende
+  Installationen), analog zu `lib2_artists`/`lib2_albums`. `isrc`/
+  `musicbrainz_id`/`spotify_id` behalten ihre eigenen Spalten; `external_ids`
+  trägt jetzt den Long Tail (Deezer/Tidal/Qobuz/iTunes/AudioDB/Genius/Amazon/
+  JioSaavn/Bandcamp/Last.fm).
+- **Schritt 2 — `bpm`/`explicit` (Tracks), `explicit`/`label`/`upc` (Albums):**
+  neue Spalten (gleiches DDL+Migration-Muster), `tfields`/`fields`-Tupel und die
+  zugehörigen INSERT/UPDATE-Statements in `import_legacy_library`
+  (`core/library2/importer.py`) entsprechend erweitert. Die UPDATE-Zweige
+  nutzen `COALESCE(?, spalte)` (wie bereits bei `spotify_id`/`image_url`), damit
+  ein Re-Import von einer DB ohne diese Legacy-Spalten einen zuvor gesetzten
+  Wert nicht mit `NULL` überschreibt.
+- **Schritt 3 — Long-Tail-Provider-IDs für Alben:** `_merge_album_external_ids`s
+  Dict um iTunes/AudioDB/Discogs/Amazon/JioSaavn/Bandcamp erweitert.
+- **Über den Plan hinaus (Reuse statt manuellem Nacherfinden):** Schritt 1 und 3
+  hätten laut Audit ~9 einzelne `_pick`-Paare pro Entity gebraucht — genau das
+  Muster, das schon zweimal (Artist- und Album-Provider-IDs) von Hand gepflegt
+  wird. Stattdessen nutzt ein neuer Helper `_extra_provider_ids(row, entity_type,
+  exclude)` die bereits existierende, geprüfte Service→Spalten-Tabelle
+  `match_status.SERVICES` (dieselbe Tabelle, die die Provider-Chips in der UI
+  speist) und liest daraus automatisch jede Spalte, die es für `'album'`/
+  `'track'` gibt. Ein neuer Provider muss dadurch nur noch einmal (in
+  `match_status.py`) eingetragen werden, nicht mehr zusätzlich im Importer.
+  `_merge_album_external_ids`/eine neue `_merge_track_external_ids` sind jetzt
+  dünne Wrapper um einen gemeinsamen `_merge_external_ids(cursor, table, id,
+  ids)`-Helper (vorher war die Album-Variante eigenständiger, fast identischer
+  Code) — reine Konsolidierung, kein Verhaltensunterschied für Alben.
+- Alle Provider-Spaltennamen (`deezer_id`/`tidal_id`/`itunes_track_id`/
+  `audiodb_id`/`genius_id`/`amazon_id`/`jiosaavn_id`/`bandcamp_url`/
+  `lastfm_url` usw.) wurden gegen die echten Migrationsschritte in
+  `database/music_database.py` verifiziert (nicht geraten) — exakt die Spalten,
+  die `match_status.SERVICES` bereits referenziert.
+- Tests (`tests/library2/test_importer.py`): `test_import_captures_track_
+  provider_ids_into_external_ids` (alle 10 Long-Tail-Provider auf einem
+  Track), `test_import_captures_track_bpm_and_explicit`,
+  `test_import_captures_album_explicit_label_upc`,
+  `test_import_captures_album_long_tail_provider_ids_into_external_ids`
+  (iTunes/AudioDB/Discogs/Amazon/JioSaavn/Bandcamp auf einem Album). Migration-
+  Pfad (ALTER auf eine simulierte alte Installation ohne die neuen Spalten) und
+  Idempotenz (`ensure_library_v2_schema` zweimal aufgerufen) manuell gegen eine
+  In-Memory-DB verifiziert, nicht Teil der `pytest`-Suite (kein bestehendes
+  Testmuster dafür in `tests/library2` — die vorhandenen Migrationstests decken
+  bereits andere Spalten mit demselben Mechanismus ab).
+- **Nicht angefasst (bewusst außerhalb der 3 Fix-Richtung-Schritte, im Audit nur
+  als weitere Lücken genannt, nicht priorisiert):** Artist-Anreicherungsfelder
+  (`style`/`mood`/`label`/`aliases`/`banner_url`, Last.fm-/Genius-/Discogs-
+  Bio/Listeners/Similar-Artists/Tags) haben weiterhin keine lib2-Zielspalte;
+  `genius_lyrics` (echter Songtext), `copyright`, `play_count`/`last_played`
+  (Hörstatistik) auf Tracks ebenso nicht; das per-Track `quality_profile_id`
+  aus der Legacy-Zeile wird weiterhin nie gelesen (neue Tracks bekommen immer
+  `default_profile_id`). Größerer Scope, eigene Priorisierung nötig — siehe
+  §17.7-Originaltext für die vollständige Lückenliste.
+
+### Priorisierung Abschnitt 17 — Update
+
+Punkt 6 (17.7) ist damit **teilweise** gefixt (die drei benannten
+Fix-Richtung-Schritte), nicht vollständig — die oben aufgeführten
+Artist-Anreicherungs- und Hörstatistik-Felder bleiben offen. Verbleibend aus
+der ursprünglichen Liste: **17.5** (falsches „tags ✓" bei fehlender Datei) und
+**17.3** (rohes ISO-Datum) sind inhaltlich bereits durch **18.8** bzw. **18.7**
+gefixt (identische Problembeschreibung, im Vorgänger-Abschnitt nur nicht als
+„gefixt" markiert) — die Priorisierungsliste oben wurde entsprechend
+nachgezogen.
