@@ -38,7 +38,7 @@ def register_routes(bp):
                 with concurrent.futures.ThreadPoolExecutor(max_workers=6) as ex:
                     logos = list(ex.map(
                         lambda x: eng.title_logo(x.get("kind"), x.get("tmdb_id")), items))
-                for x, lg in zip(items, logos):
+                for x, lg in zip(items, logos, strict=True):
                     if lg:
                         x["logo"] = lg
             except Exception:
