@@ -32,6 +32,14 @@ if not _os.environ.get('SOULSYNC_TEST_DB_READY'):
     _TEST_DB_DIR = _tempfile.mkdtemp(prefix='soulsync-testdb-')
     _os.environ['DATABASE_PATH'] = _os.path.join(_TEST_DB_DIR, 'test_music_library.db')
     _os.environ['VIDEO_DATABASE_PATH'] = _os.path.join(_TEST_DB_DIR, 'test_video_library.db')
+    # The REAL config/config.json has the same hazard as the real DBs: with the
+    # test music DB empty, config_manager "migrates" from config.json — so the
+    # developer's live Plex/Jellyfin/slskd credentials leak into the suite and
+    # tests that resolve the active video server CONNECT TO THE REAL PLEX
+    # (caught live: collections sync ran against it; it also makes local runs
+    # diverge from CI, which has no config.json). Point config resolution at a
+    # path that doesn't exist → pure defaults, exactly like CI.
+    _os.environ['SOULSYNC_CONFIG_PATH'] = _os.path.join(_TEST_DB_DIR, 'test_config.json')
     _os.environ['SOULSYNC_TEST_DB_READY'] = '1'
     _atexit.register(lambda: _shutil.rmtree(_TEST_DB_DIR, ignore_errors=True))
 
