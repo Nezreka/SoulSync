@@ -4207,3 +4207,108 @@ der ursprünglichen Liste: **17.5** (falsches „tags ✓" bei fehlender Datei) 
 gefixt (identische Problembeschreibung, im Vorgänger-Abschnitt nur nicht als
 „gefixt" markiert) — die Priorisierungsliste oben wurde entsprechend
 nachgezogen.
+
+---
+
+## 23. §17.7 Importer-Datenverlust — Restliche Lücken geschlossen (2026-07-15, Fortsetzungs-Session 5)
+
+TDD, `pytest tests/library2` 425/425 grün (war 417, +8 neue Regressionstests).
+Schließt exakt die drei am Ende von §22 als „nicht angefasst" benannten
+Lücken: Artist-Anreicherungsfelder, Track-Hörstatistik/-Lyrics, und das
+per-Track `quality_profile_id` aus der Legacy-Zeile.
+
+- **Artist-Anreicherung, Teil 1 — flache Felder:** `style`/`mood`/`label`
+  (AudioDB-Herkunft), `aliases` (MusicBrainz, JSON-Array) und `banner_url`
+  sind jetzt eigene `lib2_artists`-Spalten. `aliases` wird über den
+  bestehenden `_normalize_genres()`-Helper normalisiert (JSON-Array-ODER-CSV-
+  String → JSON-Array-String) — der ist bereits exakt diese Logik für
+  `genres`, eine neue Funktion wäre reine Duplikation gewesen. Die UPDATE-
+  Seite von `_ArtistResolver.upsert_legacy` nutzt für die vier Skalarfelder
+  `COALESCE(?, spalte)` (wie `bpm`/`explicit` in §22), damit ein Re-Import von
+  einer DB ohne diese Migrationsspalten einen zuvor gesetzten Wert nicht
+  nullt. `aliases` folgt dagegen bewusst demselben Muster wie `genres` (reines
+  Overwrite ohne COALESCE) — beides sind JSON-Array-Spiegelfelder derselben
+  Legacy-Kategorie, kein neuer Sonderfall.
+- **Artist-Anreicherung, Teil 2 — Last.fm/Genius/Discogs:** bio/listeners/
+  tags/similar/url (Last.fm), description/alt_names/url (Genius), bio/
+  members/urls (Discogs) landen in einer neuen `lib2_artists.enrichment`-
+  JSON-Spalte, provider-verschachtelt (`{"lastfm": {...}, "genius": {...},
+  "discogs": {...}}`) statt als ~11 einzelne Spalten — das sind Anreicherungs-
+  *Inhalte* unterschiedlicher Quellen (eine Last.fm-Bio und eine Genius-
+  Beschreibung sind verschiedener Text, kein Fall für eine gemeinsame Spalte
+  wie bei den Provider-*IDs*). Neuer `_merge_artist_enrichment()`-Helper
+  spiegelt die Nie-überschreiben-Semantik von `_merge_external_ids()`: pro
+  Provider UND pro Feld wird nur befüllt, was noch nicht gesetzt ist, damit
+  ein dünnerer Re-Import nie eine bereits eingefangene reichhaltigere Bio
+  überschreibt. Es gibt in der echten Legacy-Spalte KEIN `genius_bio` — das
+  Genius-Äquivalent heißt `genius_description` (per Grep gegen
+  `database/music_database.py` verifiziert, nicht geraten).
+- **Tracks — Hörstatistik/Lyrics:** `genius_lyrics` (echter Songtext, nicht zu
+  verwechseln mit `genius_description` auf Artist-Ebene), `copyright`,
+  `play_count`, `last_played` sind neue `lib2_tracks`-Spalten, `tfields`/UPDATE
+  folgen demselben `COALESCE(?, spalte)`-Muster wie `bpm`/`explicit`.
+  `play_count INTEGER NOT NULL DEFAULT 0` erzwingt beim INSERT einen
+  expliziten Fallback auf `0` (der Schema-Default greift nur, wenn die Spalte
+  im INSERT ausgelassen wird, nicht bei einem expliziten `NULL`) — die UPDATE-
+  Seite nutzt weiterhin `COALESCE`, damit ein Re-Import ohne Legacy-Wert einen
+  bereits akkumulierten Zähler nicht auf 0 zurücksetzt.
+- **Per-Track `quality_profile_id`:** wurde laut Audit „weiterhin nie
+  gelesen" — neue Tracks bekamen ausschließlich das lauf-weite
+  `default_profile_id`. Fix beschränkt sich bewusst auf den INSERT-Zweig
+  (neue Tracks); der UPDATE-Zweig (bestehende Tracks) bleibt unverändert, weil
+  der Audit-Satz explizit nur „neue Tracks" nennt und ein blindes Überschreiben
+  bei jedem Re-Import einen in der Library-v2-UI absichtlich geänderten
+  Profil-Wert riskieren würde (außerhalb des auditierten Scopes). Der Legacy-
+  Wert wird gegen die tatsächlich existierenden `quality_profiles`-Zeilen
+  validiert (einmal VOR der Track-Schleife geladen, nicht pro Zeile — die in
+  §20 gerade erst behobene Import-Performance sollte nicht durch ein neues
+  Per-Track-SELECT wieder verlangsamt werden) und fällt bei einer
+  baumelnden/gelöschten Profil-Referenz auf `default_profile_id` zurück statt
+  sie unvalidiert zu übernehmen. Die `quality_profiles`-Tabelle gehört
+  `core/quality/schema.py`, nicht lib2, und existiert in einer minimalen/
+  Test-DB u. U. gar nicht — der Ladeversuch ist deshalb fail-open (leeres Set
+  bei fehlender Tabelle), exakt wie `default_quality_profile_id()` es für den
+  Default-Fall bereits vormacht.
+- Schema: alle neuen Spalten sowohl in `LIB2_ARTISTS_DDL`/`LIB2_TRACKS_DDL`
+  (Neuinstallationen) als auch in `_ADDED_COLUMNS` (bestehende Installationen,
+  idempotente `ALTER TABLE`) — dasselbe Doppel-Muster wie die bereits
+  vorhandenen §22-Spalten.
+- Tests (`tests/library2/test_importer.py`, alle gegen die synthetische
+  `legacy_db`-Fixture mit `ALTER TABLE`-Spalten wie die bestehenden §17.7-
+  Tests): Capture-Test für die fünf flachen Artist-Felder; ein COALESCE-
+  Regressionstest, der beweist, dass ein Re-Import ohne die Migrationsspalte
+  einen zuvor gesetzten Wert NICHT nullt; Capture-Test für alle drei Provider-
+  Enrichment-Blöcke; ein Merge-Regressionstest, der beweist, dass ein
+  dünnerer Re-Import eine bereits eingefangene Bio nicht überschreibt;
+  Capture-Test für die vier Track-Felder; ein Regressionstest, der beweist,
+  dass ein fehlendes `play_count` beim INSERT nicht gegen die NOT-NULL-
+  Constraint crasht (die eigentliche Motivation für den `tfields[:-2]`-Split
+  zwischen INSERT und UPDATE); zwei Tests für `quality_profile_id` — ein
+  gültiger Legacy-Wert wird übernommen (ein Geschwister-Track ohne Legacy-Wert
+  bekommt weiterhin den Default), ein baumelnder Legacy-Wert (Profil-Id
+  existiert nicht in `quality_profiles`) fällt auf den Default zurück statt
+  übernommen zu werden. Zusätzlich gegen `tests/repair_jobs/
+  test_lib2_upgrade_scan.py`, `tests/quality/test_quality_profiles_crud.py`,
+  `tests/acquisition/test_{wanted_adapter,main_pipeline_bridge,
+  scheduled_grab,manual_grab}.py`, `tests/repair/test_file_scope.py`,
+  `tests/test_admin_gating.py` verifiziert (84/84 grün) — alle anderen
+  Konsumenten von `lib2_artists`/`lib2_tracks` außerhalb von
+  `tests/library2/`, um auszuschließen, dass die neuen Spalten dortige INSERT/
+  SELECT-Annahmen brechen.
+- **Nicht angefasst:** keine Live-Verifikation gegen die echte DB des Nutzers
+  (reiner Importer-Schema-Fix, dieselbe Einschränkung wie schon in §22 — die
+  synthetische Test-DB deckt die Spalten-Mechanik ab, nicht ob die echten
+  Legacy-Werte in der Praxis wie erwartet aussehen). Kein UI für die neuen
+  Felder — weder Anzeige noch Edit; nur die Datenerhaltung beim Import war der
+  auditierte Scope. `lib2_albums`/`lib2_artists` erhalten weiterhin
+  IMMER `default_profile_id` (nur Tracks waren im Audit als betroffen
+  benannt).
+
+### Priorisierung Abschnitt 17 — Update 2
+
+§17.7 ist damit vollständig gefixt (alle drei ursprünglichen Schritte aus §22
+plus die drei in §22 als „nicht angefasst" benannten Lücken). Von der
+ursprünglichen §17-Liste (17.1–17.8) ist damit alles entweder gefixt oder als
+„kein Implementierungsbedarf" markiert — siehe [[open-issues-tracker]] für den
+verbleibenden Gesamt-Backlog (§12 Punkte 40–44, Alias-Design, Manual-Matching-
+UI, Preview-Retag).
