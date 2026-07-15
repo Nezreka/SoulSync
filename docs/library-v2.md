@@ -4315,12 +4315,45 @@ UI, Preview-Retag).
 
 ---
 
-## 24. §40 Artist-Alias-Registry — Design (2026-07-15, Fortsetzungs-Session 6)
+## 24. §40 Artist-Alias-Registry — Design + Umsetzung (2026-07-15/16, Fortsetzungs-Session 6)
 
-Reines Design-Dokument (noch NICHT implementiert), durch Brainstorming mit dem
-Nutzer erarbeitet und abschnittsweise freigegeben. Nächster Schritt ist ein
-Implementierungsplan (superpowers:writing-plans) und TDD-Umsetzung in einer
-Folgesession, nach demselben Muster wie §16–§23.
+Durch Brainstorming mit dem Nutzer erarbeitet und abschnittsweise freigegeben,
+danach direkt (ohne separate writing-plans-Zwischenstation, auf expliziten
+Nutzerwunsch) mit TDD umgesetzt. **Status: implementiert, committed
+(`67a2dac3`).** `pytest tests/library2 tests/repair_jobs` grün (+38 neue Tests),
+`vitest`/`oxfmt`/`oxlint` clean.
+
+- Schema: `lib2_artists.canonical_artist_id` (Selbstreferenz, NULL = kanonisch),
+  analog `canonical_track_id` aus §39; in `LIB2_ARTISTS_DDL` UND
+  `_ADDED_COLUMNS`/Index für Bestandsinstallationen.
+- `core/library2/artist_aliases.py`: `link_artist_alias`/`unlink_artist_alias`
+  (Validierung: kein Self-Link, keine Ketten, kein Gruppen-Merge in v1) +
+  `resolve_alias_group` — beweisbar max. 1 Ebene tief.
+- `discography.py`: `expand_artist_discography`/`refresh_artist_discography`
+  fächern über die volle Alias-Gruppe auf (jede Zeile behält ihre eigenen
+  `lib2_albums`-Zeilen); der Standalone-Fall (keine Aliase) ist
+  byte-identisch zum alten Einzel-Artist-Pfad — keine Verhaltensänderung für
+  den Normalfall.
+- `lib2_discography_refresh`-Sweep-Job: Root-Auswahl überspringt
+  Alias-Zeilen (deren Gruppe deckt der Fan-out der kanonischen Zeile ab) —
+  verhindert N²-Refetches pro Durchlauf bei einer N-köpfigen Gruppe.
+- `queries.py`: `list_artists` blendet Alias-Zeilen aus; `get_artist` merged
+  Alben/EPs/Singles über die Gruppe (Header bleibt die kanonische Zeile),
+  funktioniert für kanonische UND Alias-IDs gleichermaßen.
+- `api/library_v2.py`: `GET/POST/DELETE .../artists/<id>/link-alias` +
+  `.../aliases`. Defensive `canonical_artist_id`-Bereinigung an beiden
+  Artist-Delete-Pfaden (API-Delete + Importer-Reconcile) ergänzt, weil
+  ALTER-migrierte Installationen nie die FK-Constraint der Spalte bekommen
+  (nur Neuinstallationen) — App-seitige Bereinigung passend zum bestehenden
+  Muster aller anderen Artist-Delete-Nebenwirkungen in dieser Datei.
+- Minimal-UI: Alias-Chips + „Link alias"-Modal, das den bestehenden
+  Artist-Such-Endpoint wiederverwendet (keine neue Such-Infrastruktur) —
+  die volle Recovery-UI mit Match-Vorschlägen bleibt §41.
+
+**Nicht angefasst:** keine Live-Verifikation gegen die echte DB des Nutzers
+(reiner Schema-/Backend-/UI-Fix, synthetische Test-DBs decken die Mechanik ab).
+Automatische Erkennungs-Heuristik und Gruppen-Merges bleiben bewusst out of
+scope (siehe 24.1) — genau wie geplant.
 
 ### 24.1 Scope-Klärung gegenüber §38/§41
 
