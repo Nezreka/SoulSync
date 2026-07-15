@@ -217,6 +217,18 @@ def guard_placeholder_overwrite(db_val: Any, file_val: Any) -> Any:
     return db_val
 
 
+def _normalize_date_str(s: str) -> str:
+    """Normalize date/time strings (strip 'T', 'Z', seconds, offsets) to compare values."""
+    import re
+    if not s:
+        return ''
+    s = s.replace('T', ' ').replace('Z', '').split('+')[0].strip()
+    match = re.match(r'^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})(:\d{2})?(\.\d+)?$', s)
+    if match:
+        return match.group(1)
+    return s
+
+
 def build_tag_diff(file_tags: Dict[str, Any], db_data: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     Compare file tags against DB metadata. Returns a list of diffs:
@@ -274,6 +286,20 @@ def build_tag_diff(file_tags: Dict[str, Any], db_data: Dict[str, Any]) -> List[D
         # Only mark as changed if DB has a value AND it differs from file
         # (writer skips fields where DB value is empty, so don't show them as diffs)
         changed = bool(db_str) and file_str != db_str
+
+        if changed and db_key == 'year':
+            # Check if normalized date/time matches to avoid false format-only mismatches
+            if _normalize_date_str(file_str) == _normalize_date_str(db_str):
+                changed = False
+
+        if changed and db_key == 'genres' and db_val:
+            # If the file genres contain the database genres, do not flag as changed
+            # (prevents overwriting a rich genre list with a generic parent genre like Pop)
+            import re
+            file_genres = [g.strip().lower() for g in re.split(r'[,;]+', file_str) if g.strip()]
+            db_genres = [g.strip().lower() for g in re.split(r'[,;]+', db_str) if g.strip()]
+            if all(g in file_genres for g in db_genres):
+                changed = False
 
         # #800 — if the change would replace a real file value with a
         # placeholder (Various Artists / [Unknown Album] / …), hold it back:
@@ -527,8 +553,11 @@ def _date_to_write(existing: Optional[str], year) -> str:
     year_str = str(year)
     if existing:
         existing = str(existing).strip()
-        if len(existing) > 4 and existing[:4] == year_str:
-            return existing
+        if len(existing) >= 4 and len(year_str) >= 4 and existing[:4] == year_str[:4]:
+            if _normalize_date_str(existing) == _normalize_date_str(year_str):
+                return existing
+            if len(existing) > len(year_str):
+                return existing
     return year_str
 
 
