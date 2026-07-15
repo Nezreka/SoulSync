@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
+from unittest.mock import MagicMock
 
+from core.library2 import completeness
 from core.library2.completeness import (
     _persist_tracklist_tracks,
     precache_tracklists,
@@ -537,3 +541,117 @@ def test_tracklist_trim_preserves_positive_monitor_intent_despite_flag_drift(
     assert imported_conn.execute(
         "SELECT expected_track_count FROM lib2_albums WHERE id=?", (views_id,)
     ).fetchone()[0] == 3
+
+
+# ---------------------------------------------------------------------------
+# docs/library-v2.md §17.6 — precache_tracklists must resolve partial albums
+# through a bounded ThreadPoolExecutor instead of one album at a time. Each
+# uncached album triggers a synchronous provider network call
+# (fetch_album_tracklist), so a serial loop is a real bottleneck for a
+# first-time migration of thousands of albums. Same config-key contract as
+# core.auto_import_worker (default 3, auto_import.max_workers).
+# ---------------------------------------------------------------------------
+
+
+def _mark_all_albums_partial(conn, expected_track_count: int = 2) -> list:
+    album_ids = [r[0] for r in conn.execute("SELECT id FROM lib2_albums").fetchall()]
+    for album_id in album_ids:
+        conn.execute(
+            "UPDATE lib2_albums SET expected_track_count=?, tracklist_json=NULL WHERE id=?",
+            (expected_track_count, album_id),
+        )
+    conn.commit()
+    return album_ids
+
+
+def test_precache_tracklists_runs_resolves_concurrently(legacy_db_factory):
+    """6 partial albums, default pool size 3 — peak in-flight resolves must
+    reach 3, proving real concurrency rather than a one-at-a-time loop."""
+    from core.library2.importer import import_legacy_library
+
+    legacy_db = legacy_db_factory(n_albums=6)
+    import_legacy_library(legacy_db)
+    conn = legacy_db._get_connection()
+    _mark_all_albums_partial(conn)
+    conn.close()
+
+    in_flight = [0]
+    peak = [0]
+    lock = threading.Lock()
+    proceed = threading.Event()
+
+    def slow_resolve(_config_manager, _conn, _album_id):
+        with lock:
+            in_flight[0] += 1
+            peak[0] = max(peak[0], in_flight[0])
+        proceed.wait(timeout=2)
+        with lock:
+            in_flight[0] -= 1
+        return None
+
+    orig = completeness.resolve_tracklist
+    completeness.resolve_tracklist = slow_resolve
+    try:
+        result = {}
+
+        def run():
+            result["resolved"] = precache_tracklists(legacy_db, None)
+
+        t = threading.Thread(target=run)
+        t.start()
+        time.sleep(0.3)
+        assert peak[0] == 3, (
+            f"Expected 3 concurrent tracklist resolves (default max_workers), "
+            f"peaked at {peak[0]} — precache_tracklists looks serial."
+        )
+        proceed.set()
+        t.join(timeout=5)
+    finally:
+        completeness.resolve_tracklist = orig
+
+
+def test_precache_tracklists_max_workers_caps_concurrency(legacy_db_factory, monkeypatch):
+    """config auto_import.max_workers=2 must cap concurrent resolves at 2,
+    even with more than 2 pending partial albums."""
+    from core.library2.importer import import_legacy_library
+
+    legacy_db = legacy_db_factory(n_albums=6)
+    import_legacy_library(legacy_db)
+    conn = legacy_db._get_connection()
+    _mark_all_albums_partial(conn)
+    conn.close()
+
+    in_flight = [0]
+    peak = [0]
+    lock = threading.Lock()
+    proceed = threading.Event()
+
+    def slow_resolve(_config_manager, _conn, _album_id):
+        with lock:
+            in_flight[0] += 1
+            peak[0] = max(peak[0], in_flight[0])
+        proceed.wait(timeout=2)
+        with lock:
+            in_flight[0] -= 1
+        return None
+
+    monkeypatch.setattr(completeness, "resolve_tracklist", slow_resolve)
+
+    config = MagicMock()
+    config.get = MagicMock(
+        side_effect=lambda key, default: 2 if key == "auto_import.max_workers" else default
+    )
+
+    result = {}
+
+    def run():
+        result["resolved"] = precache_tracklists(legacy_db, config)
+
+    t = threading.Thread(target=run)
+    t.start()
+    time.sleep(0.3)
+    assert peak[0] == 2, (
+        f"auto_import.max_workers=2 should cap concurrency at 2, peaked at {peak[0]}"
+    )
+    proceed.set()
+    t.join(timeout=5)

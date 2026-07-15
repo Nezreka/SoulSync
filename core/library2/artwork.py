@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -286,13 +288,27 @@ def build_artwork(database, conn, config_manager, kind: str, entity_id: int,
         return None
 
 
+def _precache_max_workers(config_manager, default: int = 3) -> int:
+    """Shared pool-size knob with ``core.auto_import_worker`` — same config
+    key, same default, so one setting controls all background lib2 workers."""
+    if config_manager is None:
+        return default
+    try:
+        return max(1, int(config_manager.get("auto_import.max_workers", default)))
+    except Exception:  # noqa: BLE001
+        return default
+
+
 def precache_all_artwork(database, config_manager, *, progress=None) -> Dict[str, int]:
     """Resolve + cache artwork for every artist and album to local disk.
 
     Runs in the background after an import so the UI serves covers from disk
     (fast) instead of resolving on first view (Lidarr-style). Embedded covers are
-    cheap; provider lookups are the slow part, so artists/albums already cached are
-    skipped. Returns counts. Never raises.
+    cheap; provider lookups are the slow part (one network call per uncached
+    entity), so this dispatches to a bounded ``ThreadPoolExecutor`` — same
+    pattern/config key as ``core.auto_import_worker`` — instead of resolving
+    one artist/album at a time. Artists/albums already cached are skipped.
+    Returns counts. Never raises.
     """
     counts = {"artists": 0, "albums": 0}
     try:
@@ -302,22 +318,53 @@ def precache_all_artwork(database, config_manager, *, progress=None) -> Dict[str
     try:
         artist_ids = [r[0] for r in conn.execute("SELECT id FROM lib2_artists")]
         album_ids = [r[0] for r in conn.execute("SELECT id FROM lib2_albums")]
-        total = len(artist_ids) + len(album_ids)
-        done = 0
-        for kind, ids in (("album", album_ids), ("artist", artist_ids)):
-            for eid in ids:
-                if artwork_file(database, kind, eid).exists():
-                    done += 1
-                    continue
-                if build_artwork(database, conn, config_manager, kind, eid):
-                    counts[kind + "s"] += 1
-                done += 1
-                if progress and done % 25 == 0:
-                    progress("artwork", done, total)
     except Exception as e:  # noqa: BLE001
         logger.debug("artwork precache error: %s", e)
+        return counts
     finally:
         conn.close()
+
+    total = len(artist_ids) + len(album_ids)
+    pending = [
+        (kind, eid)
+        for kind, ids in (("album", album_ids), ("artist", artist_ids))
+        for eid in ids
+        if not artwork_file(database, kind, eid).exists()
+    ]
+    progress_lock = threading.Lock()
+    done = [total - len(pending)]
+
+    def _build_one(kind: str, eid: int) -> bool:
+        try:
+            thread_conn = database._get_connection()
+        except Exception:  # noqa: BLE001
+            return False
+        try:
+            return bool(build_artwork(database, thread_conn, config_manager, kind, eid))
+        except Exception as e:  # noqa: BLE001
+            logger.debug("artwork precache build failed (%s %s): %s", kind, eid, e)
+            return False
+        finally:
+            thread_conn.close()
+
+    try:
+        if pending:
+            max_workers = _precache_max_workers(config_manager)
+            with ThreadPoolExecutor(
+                max_workers=max_workers, thread_name_prefix="Lib2Artwork"
+            ) as executor:
+                futures = {
+                    executor.submit(_build_one, kind, eid): kind for kind, eid in pending
+                }
+                for future in as_completed(futures):
+                    if future.result():
+                        counts[futures[future] + "s"] += 1
+                    with progress_lock:
+                        done[0] += 1
+                        if progress and done[0] % 25 == 0:
+                            progress("artwork", done[0], total)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("artwork precache error: %s", e)
     logger.info("Library v2 artwork precache: %s", counts)
     return counts
 

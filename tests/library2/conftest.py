@@ -21,6 +21,12 @@ class LegacyDBShim:
     def __init__(self, path: str):
         self.path = path
 
+    @property
+    def database_path(self) -> str:
+        """Alias so lib2 helpers that key off ``database.database_path``
+        (e.g. ``core.library2.artwork``) work against this shim too."""
+        return self.path
+
     def _get_connection(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path)
         conn.row_factory = sqlite3.Row
@@ -67,6 +73,38 @@ def legacy_db(tmp_path):
     conn.commit()
     conn.close()
     yield LegacyDBShim(path)
+
+
+@pytest.fixture
+def legacy_db_factory(tmp_path):
+    """Factory for a legacy DB with N single-track albums under one artist —
+    enough distinct work items to exercise bounded-concurrency precache pools
+    (see tests/library2/test_artwork_precache_parallel.py, precache_tracklists
+    concurrency tests in test_completeness.py)."""
+
+    def _make(n_albums: int = 6, filename: str = "legacy_multi.db") -> LegacyDBShim:
+        path = str(tmp_path / filename)
+        conn = sqlite3.connect(path)
+        conn.executescript(_LEGACY_DDL)
+        conn.execute(
+            "INSERT INTO artists VALUES(1,'Many','http://img',NULL,NULL,'sp1',NULL)"
+        )
+        for i in range(n_albums):
+            album_id = 10 + i
+            track_id = 100 + i
+            conn.execute(
+                "INSERT INTO albums VALUES(?,1,?,2020,NULL,NULL,1,NULL)",
+                (album_id, f"Album {i}"),
+            )
+            conn.execute(
+                "INSERT INTO tracks VALUES(?,?,1,?,1,200000,?,1000000,5000,NULL)",
+                (track_id, album_id, f"Track {i}", f"/m/{i}.flac"),
+            )
+        conn.commit()
+        conn.close()
+        return LegacyDBShim(path)
+
+    return _make
 
 
 @pytest.fixture

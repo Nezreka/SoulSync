@@ -13,6 +13,8 @@ the UI falls back to numbered missing slots.
 from __future__ import annotations
 
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from utils.logging_config import get_logger
@@ -499,12 +501,62 @@ def _partial_album_rows(conn, *, cached: Optional[bool] = None) -> List[Any]:
     ).fetchall()
 
 
+def _precache_max_workers(config_manager, default: int = 3) -> int:
+    """Shared pool-size knob with ``core.auto_import_worker`` — same config
+    key, same default, so one setting controls all background lib2 workers."""
+    if config_manager is None:
+        return default
+    try:
+        return max(1, int(config_manager.get("auto_import.max_workers", default)))
+    except Exception:  # noqa: BLE001
+        return default
+
+
+def _resolve_stage(database, config_manager, album_ids: List[int], *,
+                    stage: str, progress=None) -> int:
+    """Resolve one precache stage's albums via a bounded ThreadPoolExecutor,
+    each worker opening its own connection. Returns count resolved."""
+    if not album_ids:
+        return 0
+    resolved = 0
+    done = 0
+    lock = threading.Lock()
+
+    def _resolve_one(album_id: int) -> bool:
+        try:
+            thread_conn = database._get_connection()
+        except Exception:  # noqa: BLE001
+            return False
+        try:
+            return bool(resolve_tracklist(config_manager, thread_conn, album_id))
+        except Exception as e:  # noqa: BLE001
+            logger.debug("tracklist precache resolve failed (%s): %s", album_id, e)
+            return False
+        finally:
+            thread_conn.close()
+
+    max_workers = _precache_max_workers(config_manager)
+    with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="Lib2Tracklist") as executor:
+        futures = [executor.submit(_resolve_one, album_id) for album_id in album_ids]
+        for future in as_completed(futures):
+            if future.result():
+                resolved += 1
+            with lock:
+                done += 1
+                if progress and done % 20 == 0:
+                    progress(stage, done, len(album_ids))
+    return resolved
+
+
 def precache_tracklists(database, config_manager, *, progress=None) -> int:
     """Resolve tracklists for every partial album (expected > present). Background.
 
     Cached tracklists are materialized first and without provider calls, so rows
     that already have canonical titles immediately become real, monitorable
-    missing tracks in Library v2.
+    missing tracks in Library v2. Each stage's albums resolve through a bounded
+    ThreadPoolExecutor (same pattern/config key as ``core.auto_import_worker``)
+    instead of one album at a time — the provider-lookup stage in particular
+    makes one network call per uncached album.
     """
     resolved = 0
     try:
@@ -512,23 +564,21 @@ def precache_tracklists(database, config_manager, *, progress=None) -> int:
     except Exception:  # noqa: BLE001
         return 0
     try:
-        cached_rows = _partial_album_rows(conn, cached=True)
-        for i, r in enumerate(cached_rows):
-            if resolve_tracklist(config_manager, conn, r[0]):
-                resolved += 1
-            if progress and i % 20 == 0:
-                progress("tracklists", i, len(cached_rows))
-
-        rows = _partial_album_rows(conn, cached=False)
-        for i, r in enumerate(rows):
-            if resolve_tracklist(config_manager, conn, r[0]):
-                resolved += 1
-            if progress and i % 20 == 0:
-                progress("tracklists", i, len(rows))
+        cached_ids = [r[0] for r in _partial_album_rows(conn, cached=True)]
+        uncached_ids = [r[0] for r in _partial_album_rows(conn, cached=False)]
     except Exception as e:  # noqa: BLE001
         logger.debug("tracklist precache error: %s", e)
+        return 0
     finally:
         conn.close()
+
+    try:
+        resolved += _resolve_stage(database, config_manager, cached_ids,
+                                    stage="tracklists", progress=progress)
+        resolved += _resolve_stage(database, config_manager, uncached_ids,
+                                    stage="tracklists", progress=progress)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("tracklist precache error: %s", e)
     logger.info("Library v2 tracklist precache: %d resolved", resolved)
     return resolved
 
