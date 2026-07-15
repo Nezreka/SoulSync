@@ -351,26 +351,51 @@
         var owned = it.library_id != null;
         var source = owned ? 'library' : 'tmdb';
         var id = owned ? it.library_id : it.tmdb_id;
-        var pills = [it.kind === 'movie' ? 'Movie' : 'TV', it.year,
+        var pills = [it.kind === 'movie' ? 'Movie' : 'TV Series', it.year,
             it.rating ? '★ ' + (Math.round(it.rating * 10) / 10) : null,
             owned ? 'In Library' : null].filter(Boolean);
         var hue = hueOf(it.title);
         body.style.setProperty('--vgm-h', hue);
         var pageEl = $('[data-vdsc-page]'); if (pageEl) pageEl.style.setProperty('--vdsc-amb', hue);   // ambient bleed
+        // Netflix-style billboard: the TMDB wordmark logo when the title has
+        // one (backend enriches hero items), text falls back. Alt carries the
+        // title so a broken logo image still reads.
+        var titleHtml = it.logo
+            ? '<img class="vdsc-hero-logo" src="' + esc(it.logo) + '" alt="' + esc(it.title) + '" ' +
+              'onerror="this.outerHTML=\'<h2 class=&quot;vdsc-hero-title&quot;>' + esc(it.title) + '</h2>\'">'
+            : '<h2 class="vdsc-hero-title">' + esc(it.title) + '</h2>';
         body.innerHTML =
-            '<div class="vdsc-hero-eyebrow">' + (owned ? 'In your library' : 'Trending now') + '</div>' +
-            '<h2 class="vdsc-hero-title">' + esc(it.title) + '</h2>' +
+            '<div class="vdsc-hero-eyebrow">' + (owned ? 'In your library' : '#' + (state.hero.idx + 1) + ' Trending now') + '</div>' +
+            titleHtml +
             '<div class="vdsc-hero-pills">' + pills.map(function (p) {
                 return '<span class="vdsc-hero-pill">' + esc(p) + '</span>'; }).join('') + '</div>' +
             (it.overview ? '<p class="vdsc-hero-ov">' + esc(it.overview) + '</p>' : '') +
             '<div class="vdsc-hero-actions">' +
             '<button class="discog-submit-btn vdsc-hero-cta" type="button" ' +
             'data-vsr-open="' + it.kind + '" data-vsr-source="' + source + '" data-vsr-id="' + id + '">' +
-            '<span class="discog-submit-text">View ' + (it.kind === 'movie' ? 'movie' : 'show') + ' →</span></button>' +
+            '<span class="discog-submit-text">More info</span></button>' +
             '<button class="vdsc-hero-trailer" type="button" data-vdsc-trailer ' +
             'data-kind="' + it.kind + '" data-tmdb="' + it.tmdb_id + '" data-title="' + esc(it.title) + '">' +
             '<span class="vdsc-tr-ic" aria-hidden="true">▶</span> Trailer</button>' +
+            (!owned && window.VideoGet
+                ? '<button class="vdsc-hero-trailer vdsc-hero-add" type="button" data-vdsc-hero-add ' +
+                  'data-kind="' + it.kind + '" data-tmdb="' + it.tmdb_id + '" data-title="' + esc(it.title) + '">' +
+                  '<span aria-hidden="true">＋</span> Wishlist</button>'
+                : '') +
             '</div>';
+        preloadNextHero();
+    }
+    // Decode the NEXT slide's backdrop while the current one shows, so the
+    // crossfade never lands on an un-loaded image.
+    function preloadNextHero() {
+        var items = state.hero.items;
+        if (items.length < 2) return;
+        var next = items[(state.hero.idx + 1) % items.length];
+        if (next && next.backdrop && !next._pre) {
+            next._pre = 1;
+            var img = new Image();
+            img.src = next.backdrop;
+        }
     }
     function goHero(i) {
         var items = state.hero.items; if (!items.length) return;
@@ -510,6 +535,7 @@
         loadMoreLike();
         loadGaps();
         loadForYou();
+        resetExplore();   // the endless feed honours the same prefs — rebuild it too
     }
     // Coalesce rapid chip toggles (e.g. picking 3 services) into a single rebuild.
     var _reloadTimer;
@@ -662,11 +688,23 @@
     }
 
     // ── category / filter grid (paged) ────────────────────────────────────────
-    function openCategory(title, q) {
+    // `browse` = opened from the tiles / Browse-all (shows the live filter bar);
+    // a rail's See-all keeps its fixed query and hides the bar. Every grid
+    // honours the page-wide Hide-owned preference (rails already do).
+    function openCategory(title, q, browse) {
         state.mode = 'grid';
-        state.cat = { title: title, q: q, page: 1, paginates: !/key=trending/.test(q), busy: false, hasMore: false };
+        if (isHideOwned() && q.indexOf('hide_owned=') === -1) q += '&hide_owned=1';
+        state.cat = { title: title, q: q, page: 1, nextPage: 2, browse: !!browse,
+                      paginates: !/key=trending/.test(q), busy: false, hasMore: false };
         $('[data-vdsc-shelves]').classList.add('hidden');
         var hero = $('[data-vdsc-hero]'); if (hero) hero.classList.add('hidden');
+        var strip = $('[data-vdsc-browse-strip]'); if (strip) strip.classList.add('hidden');
+        var bar = $('.vdsc-bar'); if (bar) bar.classList.add('hidden');
+        var prefs = $('[data-vdsc-prefs]'); if (prefs) prefs.classList.add('hidden');
+        var pbtn = $('[data-vdsc-prefs-open]');
+        if (pbtn) { pbtn.setAttribute('aria-expanded', 'false'); pbtn.classList.remove('vdsc-btn--active'); }
+        var ex = $('[data-vdsc-explore]'); if (ex) ex.hidden = true;
+        var fb = $('[data-vdsc-filterbar]'); if (fb) fb.classList.toggle('hidden', !browse);
         var wrap = $('[data-vdsc-grid-wrap]'); wrap.classList.remove('hidden');
         var ttl = $('[data-vdsc-grid-title]'); if (ttl) ttl.textContent = title;
         $('[data-vdsc-grid]').innerHTML = '';
@@ -677,17 +715,21 @@
         state.mode = 'shelves';
         $('[data-vdsc-grid-wrap]').classList.add('hidden');
         $('[data-vdsc-shelves]').classList.remove('hidden');
+        var strip = $('[data-vdsc-browse-strip]'); if (strip) strip.classList.remove('hidden');
+        var bar = $('.vdsc-bar'); if (bar) bar.classList.remove('hidden');
+        var ex = $('[data-vdsc-explore]');
+        if (ex && ex.getAttribute('data-started')) ex.hidden = false;
         if (state.hero.items.length) { var h = $('[data-vdsc-hero]'); if (h) h.classList.remove('hidden'); }
     }
     function loadGrid(reset) {
         var c = state.cat;
         if (c.busy) return;
         c.busy = true;
-        if (!reset) c.page++;                                   // advance to the next page here
+        var pageToLoad = reset ? 1 : c.nextPage;
         var more = $('[data-vdsc-more]'); if (more && !reset) { more.disabled = true; more.textContent = 'Loading…'; }
         var ld = reset ? $('[data-vdsc-grid-loading]') : $('[data-vdsc-more-loading]');
         if (ld) ld.classList.remove('hidden');
-        cachedFetch(LIST_URL + '?' + c.q + '&page=' + c.page)
+        cachedFetch(LIST_URL + '?' + c.q + '&page=' + pageToLoad)
             .then(function (d) {
                 c.busy = false;
                 if (ld) ld.classList.add('hidden');
@@ -696,7 +738,12 @@
                 if (grid) { grid.insertAdjacentHTML('beforeend', items.map(card).join('')); hydrateGet(grid); }
                 var empty = $('[data-vdsc-grid-empty]');
                 if (empty) empty.classList.toggle('hidden', !(reset && !items.length));
-                c.hasMore = c.paginates && items.length >= 18;
+                // Honest pagination: the SERVER says whether more exists and which
+                // page it consumed up to (filtered fetches burn several TMDB pages
+                // per response). No more ≥18-items guessing — that stopped paging
+                // the moment filtering shrank a page.
+                c.hasMore = c.paginates && !!(d && d.has_more);
+                c.nextPage = (d && d.next_page) || (pageToLoad + 1);
                 // Button is always the reliable control; the sentinel auto-loads on top.
                 if (more) { more.textContent = 'Load more'; more.disabled = false; more.classList.toggle('hidden', !c.hasMore); }
                 maybeAutoLoad();                                // keep filling while the sentinel stays in view
@@ -731,8 +778,117 @@
         // inherits the rail language preference. 'any' = show every language; a code filters.
         q.push('lang=' + (s.lang || 'any'));
         if (s.lang) { var ln = activeChipText('lang'); if (ln) bits.push(ln); }
-        openCategory(bits.join(' · '), q.join('&'));
+        openCategory(bits.join(' · '), q.join('&'), true);
     }
+    // Live filters: in Browse grid mode a chip/seg change re-queries immediately
+    // (debounced so rapid taps coalesce) — the grid IS the result, no Apply step.
+    var _filterTimer;
+    function applyFilterSoon() {
+        if (!(state.mode === 'grid' && state.cat.browse)) return;
+        clearTimeout(_filterTimer);
+        _filterTimer = setTimeout(applyFilter, 250);
+    }
+
+    // ── browse strip: gradient genre tiles + Browse all ───────────────────────
+    function renderBrowseStrip() {
+        var strip = $('[data-vdsc-browse-strip]'); if (!strip) return;
+        var tiles = GENRE_RAILS.map(function (name) {
+            var gm = idMap(state.genres.movie);
+            var id = gm[name.toLowerCase()];
+            if (id == null) return '';
+            var c = GENRE_COLORS[name.toLowerCase()] || '99, 102, 241';
+            return '<button class="vdsc-tile" type="button" data-vdsc-tile-genre="' + id + '" ' +
+                'data-vdsc-tile-name="' + esc(name) + '" style="--c:' + c + '">' +
+                '<span class="vdsc-tile-name">' + esc(name) + '</span></button>';
+        }).join('');
+        strip.innerHTML =
+            '<div class="vdsc-strip-head"><h2 class="vdsc-group-head">Browse</h2></div>' +
+            '<div class="vdsc-tiles">' + tiles +
+            '<button class="vdsc-tile vdsc-tile--all" type="button" data-vdsc-apply>' +
+            '<span class="vdsc-tile-name">Browse all →</span></button></div>';
+    }
+    // Reflect state.sel onto the grid filter bar (used when a tile pre-selects a
+    // genre, so the bar shows what the grid is actually filtered to).
+    function syncFilterBar() {
+        ['genre', 'providers', 'lang', 'decade'].forEach(function (cs) {
+            var box = $('[data-vdsc-chipset="' + cs + '"]'); if (!box) return;
+            var val = String(state.sel[cs] || '');
+            box.querySelectorAll('.vdsc-chip').forEach(function (ch) {
+                ch.classList.toggle('vdsc-chip--on', String(ch.getAttribute('data-val') || '') === val);
+            });
+        });
+        ['kind', 'sort'].forEach(function (sg) {
+            var box = $('[data-vdsc-seg="' + sg + '"]'); if (!box) return;
+            var val = String(state.sel[sg] || '');
+            box.querySelectorAll('.vdsc-seg-btn').forEach(function (b) {
+                b.classList.toggle('vdsc-seg-btn--on', b.getAttribute('data-val') === val);
+            });
+        });
+    }
+
+    // ── endless "Keep exploring" feed (below the last rail group) ─────────────
+    // Interleaved movie/show popularity pages, deduped across loads, honouring
+    // the page-wide language + hide-owned preferences server-side. Driven by the
+    // honest has_more/next_page contract, so it genuinely never stops until TMDB
+    // does. IO sentinel with a big margin = it fills before you reach it.
+    var explore = { mNext: 1, sNext: 1, mMore: true, sMore: true, busy: false, seen: {}, gen: 0 };
+    function resetExplore() {
+        explore = { mNext: 1, sNext: 1, mMore: true, sMore: true, busy: false,
+                    seen: {}, gen: explore.gen + 1 };
+        var grid = $('[data-vdsc-explore-grid]'); if (grid) grid.innerHTML = '';
+    }
+    function startExplore() {
+        var sec = $('[data-vdsc-explore]'); if (!sec) return;
+        sec.hidden = false;
+        sec.setAttribute('data-started', '1');
+        if (!sec._io && AUTO) {
+            sec._io = new IntersectionObserver(function (entries) {
+                sec._vis = entries[0].isIntersecting;
+                if (sec._vis) loadExplore();
+            }, { rootMargin: '800px 0px' });
+            sec._io.observe($('[data-vdsc-explore-sentinel]'));
+        }
+    }
+    function loadExplore() {
+        var ex = explore;
+        if (ex.busy || (!ex.mMore && !ex.sMore) || state.mode !== 'shelves') return;
+        ex.busy = true;
+        var gen = ex.gen;
+        var hide = isHideOwned() ? '&hide_owned=1' : '';
+        var ld = $('[data-vdsc-explore-loading]'); if (ld) ld.classList.remove('hidden');
+        var jobs = [];
+        if (ex.mMore) jobs.push(cachedFetch(LIST_URL + '?kind=movie&sort=popularity.desc&page=' + ex.mNext + hide)
+            .then(function (d) { return { k: 'm', d: d }; }));
+        if (ex.sMore) jobs.push(cachedFetch(LIST_URL + '?kind=show&sort=popularity.desc&page=' + ex.sNext + hide)
+            .then(function (d) { return { k: 's', d: d }; }));
+        Promise.all(jobs).then(function (res) {
+            if (gen !== explore.gen) return;   // a prefs rebuild superseded this load
+            ex.busy = false;
+            if (ld) ld.classList.add('hidden');
+            var mItems = [], sItems = [];
+            res.forEach(function (r) {
+                var d = r.d || {}; var items = d.items || [];
+                if (r.k === 'm') { ex.mMore = !!d.has_more; ex.mNext = d.next_page || (ex.mNext + 1); mItems = items; }
+                else { ex.sMore = !!d.has_more; ex.sNext = d.next_page || (ex.sNext + 1); sItems = items; }
+            });
+            var out = [];
+            var n = Math.max(mItems.length, sItems.length);
+            for (var i = 0; i < n; i++) {
+                [mItems[i], sItems[i]].forEach(function (it) {
+                    if (!it) return;
+                    var k = it.kind + ':' + it.tmdb_id;
+                    if (explore.seen[k]) return;
+                    explore.seen[k] = 1;
+                    out.push(it);
+                });
+            }
+            var grid = $('[data-vdsc-explore-grid]');
+            if (grid && out.length) { grid.insertAdjacentHTML('beforeend', out.map(card).join('')); hydrateGet(grid); }
+            var sec = $('[data-vdsc-explore]');
+            if (sec && sec._vis && (ex.mMore || ex.sMore)) requestAnimationFrame(loadExplore);   // keep filling
+        }).catch(function () { ex.busy = false; if (ld) ld.classList.add('hidden'); });
+    }
+
     function genreName(kind, id) {
         var list = state.genres[kind] || [];
         for (var i = 0; i < list.length; i++) if (String(list[i].id) === String(id)) return list[i].name;
@@ -777,6 +933,34 @@
                 openTrailer(trbtn.getAttribute('data-kind'), trbtn.getAttribute('data-tmdb'), trbtn.getAttribute('data-title'));
                 return;
             }
+            var heroAdd = e.target.closest('[data-vdsc-hero-add]');
+            if (heroAdd) {
+                if (window.VideoGet) VideoGet.open({
+                    kind: heroAdd.getAttribute('data-kind'), source: 'tmdb',
+                    id: parseInt(heroAdd.getAttribute('data-tmdb'), 10),
+                    title: heroAdd.getAttribute('data-title') || '' });
+                return;
+            }
+            var prefsBtn = e.target.closest('[data-vdsc-prefs-open]');
+            if (prefsBtn) {
+                var pp = $('[data-vdsc-prefs]');
+                if (pp) {
+                    var open = pp.classList.toggle('hidden');
+                    prefsBtn.setAttribute('aria-expanded', open ? 'false' : 'true');
+                    prefsBtn.classList.toggle('vdsc-btn--active', !open);
+                }
+                return;
+            }
+            var tile = e.target.closest('[data-vdsc-tile-genre]');
+            if (tile) {
+                // A genre tile = Browse pre-filtered to that genre (movies by default).
+                state.sel.genre = tile.getAttribute('data-vdsc-tile-genre');
+                applyFilter();
+                syncFilterBar();
+                return;
+            }
+            var applyBtn = e.target.closest('[data-vdsc-apply]');
+            if (applyBtn) { applyFilter(); syncFilterBar(); return; }
             var seeall = e.target.closest('[data-vdsc-seeall]');
             if (seeall) {
                 var shelf = seeall.closest('.vdsc-shelf');
@@ -790,6 +974,7 @@
                 setActive(sbox, seg, '.vdsc-seg-btn', 'vdsc-seg-btn--on');
                 state.sel[which] = seg.getAttribute('data-val');
                 if (which === 'kind') renderGenreChips();   // genres differ by kind
+                applyFilterSoon();                          // live in Browse grid mode
                 return;
             }
             var chip = e.target.closest('.vdsc-chip');
@@ -797,6 +982,7 @@
                 var cbox = chip.closest('[data-vdsc-chipset]');
                 setActive(cbox, chip, '.vdsc-chip', 'vdsc-chip--on');
                 state.sel[cbox.getAttribute('data-vdsc-chipset')] = chip.getAttribute('data-val');
+                applyFilterSoon();                          // live in Browse grid mode
                 return;
             }
             var arrow = e.target.closest('[data-vdsc-scroll]');
@@ -814,7 +1000,6 @@
 
         var igBtn = $('[data-vdsc-ignore-open]'); if (igBtn && !igBtn._wired) { igBtn._wired = 1; igBtn.addEventListener('click', openIgnoreModal); }
         wireNotInterested();
-        var apply = $('[data-vdsc-apply]'); if (apply) apply.addEventListener('click', applyFilter);
         var clear = $('[data-vdsc-clear]'); if (clear) clear.addEventListener('click', closeCategory);
         var more = $('[data-vdsc-more]'); if (more) more.addEventListener('click', function () { loadGrid(false); });
 
@@ -911,17 +1096,21 @@
                 // Genres are a static TMDB endpoint — empty means TMDB isn't set up.
                 if (!state.genres.movie.length && !state.genres.show.length) { showEmpty(); return; }
                 renderGenreChips();
+                renderBrowseStrip();   // gradient genre tiles + Browse all
                 renderShelves();
                 loadMoreLike();   // prepend personalized 'More like…' rails when ready
                 loadGaps();       // prepend 'what am I missing' (franchise + person) gap rails
                 loadForYou();     // prepend the blended 'Recommended for you' wall (sits on top)
+                startExplore();   // the endless feed below the last group
             });
     }
     function showEmpty() {
         var e = $('[data-vdsc-empty]'); if (e) e.classList.remove('hidden');
-        var b = $('[data-video-subpage="' + PAGE_ID + '"] .vdsc-browse'); if (b) b.classList.add('hidden');
+        var b = $('[data-vdsc-browse-strip]'); if (b) b.classList.add('hidden');
+        var bar = $('[data-video-subpage="' + PAGE_ID + '"] .vdsc-bar'); if (bar) bar.classList.add('hidden');
         var sh = $('[data-vdsc-shelves]'); if (sh) sh.classList.add('hidden');
         var h = $('[data-vdsc-hero]'); if (h) h.classList.add('hidden');
+        var ex = $('[data-vdsc-explore]'); if (ex) ex.hidden = true;
     }
     function load() {
         if (state.loaded) return;
