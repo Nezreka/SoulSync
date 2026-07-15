@@ -226,7 +226,49 @@ def test_source_info_endpoint_empty_without_provenance(api):
     client, _db, ids = api
     response = client.get(f"/api/library/v2/tracks/{ids['ep_track']}/source-info")
     assert response.status_code == 200
-    assert response.get_json() == {"success": True, "downloads": []}
+    assert response.get_json() == {"success": True, "downloads": [], "manual_skips": []}
+
+
+def test_source_info_endpoint_includes_manual_skip_history(api):
+    client, db, ids = api
+    conn = _conn(db)
+    conn.execute(
+        """INSERT INTO lib2_manual_skips(
+               content_key, file_path, title, artist, skipped_checks, reason)
+           VALUES('user::one-dance.flac', '/m/one-dance.flac', 'One Dance', 'Drake',
+                  '["acoustid"]', 'manual_download')"""
+    )
+    conn.commit()
+    conn.close()
+
+    response = client.get(f"/api/library/v2/tracks/{ids['album_track']}/source-info")
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["manual_skips"][0]["skipped_checks"] == ["acoustid"]
+    assert body["manual_skips"][0]["acknowledged"] is False
+
+
+def test_file_tags_endpoint_reports_no_file_row(api):
+    client, _db, ids = api
+    response = client.get(f"/api/library/v2/tracks/{ids['ep_track']}/file-tags")
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["success"] is True
+    assert body["available"] is False
+    assert "No file on this track" in body["reason"]
+
+
+def test_file_tags_endpoint_reports_file_row_not_on_disk(api):
+    # album_track has a lib2_track_files row, but nothing actually exists at
+    # that path in the test environment — the route must still degrade to
+    # `available: False` (via read_embedded_tags) rather than raising.
+    client, _db, ids = api
+    response = client.get(f"/api/library/v2/tracks/{ids['album_track']}/file-tags")
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["success"] is True
+    assert body["available"] is False
 
 
 def test_materialize_missing_track_creates_a_real_row(api):
