@@ -147,3 +147,35 @@ def test_meta_release_date_converts_epochs():
     assert _meta_release_date({"originalReleaseDate": 1572516000}) == "2019-10-31"
     assert _meta_release_date({"originalReleaseDate": "1572516000"}) == "2019-10-31"
     assert _meta_release_date({"originalReleaseDate": 1572516000000}) == "2019-10-31"  # millis
+
+
+def test_stream_info_parses_current_backend_tags():
+    """The new backend tags track/disc as 'track'/'disc' and moved the cover to
+    templateCoverUrl (caught by Madhu0 in PR #1034); legacy keys still win."""
+    item = {
+        "asin": "B08QDQF8CL",
+        "streamable": True,
+        "templateCoverUrl": "https://m.media-amazon.com/images/I/cover.jpg",
+        "streamInfo": {"codec": "flac", "format": "FLAC", "sampleRate": 44100,
+                       "streamUrl": "https://example/stream"},
+        "tags": {"title": "Hello", "artist": "Adele", "album": "25",
+                 "track": "1", "disc": "1", "isrc": "GBBKS1500214",
+                 "date": "2015-11-20"},
+    }
+    s = AmazonClient._parse_stream_info(item)
+    assert s.track_number == 1 and s.disc_number == 1
+    assert s.cover_url.endswith("cover.jpg")
+    assert s.date == "2015-11-20"
+
+
+def test_stream_info_legacy_keys_still_parse():
+    item = {
+        "asin": "A1", "streamable": True, "coverUrl": "https://x/c.jpg",
+        "streamInfo": {"codec": "flac", "format": "FLAC", "sampleRate": 44100,
+                       "streamUrl": "https://x/s"},
+        "tags": {"title": "T", "artist": "A", "album": "B",
+                 "trackNumber": 7, "discNumber": 2},
+    }
+    s = AmazonClient._parse_stream_info(item)
+    assert s.track_number == 7 and s.disc_number == 2
+    assert s.cover_url == "https://x/c.jpg"
