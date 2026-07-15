@@ -4312,3 +4312,183 @@ ursprünglichen §17-Liste (17.1–17.8) ist damit alles entweder gefixt oder al
 „kein Implementierungsbedarf" markiert — siehe [[open-issues-tracker]] für den
 verbleibenden Gesamt-Backlog (§12 Punkte 40–44, Alias-Design, Manual-Matching-
 UI, Preview-Retag).
+
+---
+
+## 24. §40 Artist-Alias-Registry — Design (2026-07-15, Fortsetzungs-Session 6)
+
+Reines Design-Dokument (noch NICHT implementiert), durch Brainstorming mit dem
+Nutzer erarbeitet und abschnittsweise freigegeben. Nächster Schritt ist ein
+Implementierungsplan (superpowers:writing-plans) und TDD-Umsetzung in einer
+Folgesession, nach demselben Muster wie §16–§23.
+
+### 24.1 Scope-Klärung gegenüber §38/§41
+
+§38 hat die Fälle bereits geschlossen, in denen zwei Legacy-/lib2-Artist-Zeilen
+über eine GEMEINSAME Provider-ID (Deezer/MusicBrainz/Spotify/…) zusammengeführt
+werden können — `_ArtistResolver` (`importer.py`) matcht bereits source-agnostisch
+auf jede vorhandene Provider-ID. Der in §40 verbleibende Kernfall ist der Fall
+OHNE gemeinsamen Schlüssel: dieselbe reale Person tritt bei den Providern unter
+zwei GETRENNTEN Katalog-Einträgen auf (Beispiel Hirokyu Samono: Kanji- und
+Romaji-Namensvariante sind bei Deezer/Spotify eigenständige Artist-IDs — kein
+automatischer Match möglich). Symptome laut §40-Beobachtung:
+(a) Artist-Watchlist zeigt beide Zeilen getrennt, (b) „Update Discography" auf
+einer Zeile findet nie den Katalog der anderen, (c) der Importer legt bei
+Re-Importen weiterhin zwei Zeilen an, weil es strukturell keinen gemeinsamen
+Schlüssel gibt, den er finden könnte.
+
+Explizit NICHT Teil dieses Designs (bewusst abgegrenzt, siehe Brainstorming-
+Antworten):
+- **Automatische Erkennungs-Heuristik** (Fuzzy-/Transliterations-Namensvergleich,
+  der Alias-Kandidaten selbst vorschlägt). §40 liefert nur die Verknüpfungs-
+  Mechanik; das Verknüpfen selbst bleibt ein manueller, expliziter Schritt.
+- **Gruppen-Merges** (zwei bereits-kanonische Zeilen mit jeweils eigenen Aliasen
+  zusammenführen). v1 erlaubt nur das Einhängen einer einzelnen, alias-freien
+  Zeile in eine bestehende Gruppe.
+- **Volle Fehler-Recovery-UI** mit Vorschlägen/Diff-Ansicht — das ist §41
+  („Manual Artist Matching UI"), ein separates, größeres Ticket. §40 liefert nur
+  die minimale Verknüpfungs-UI, die §41 später aufgreifen/ersetzen kann.
+
+### 24.2 Schema & Verknüpfungs-Semantik
+
+Neue Spalte:
+
+```sql
+ALTER TABLE lib2_artists ADD COLUMN canonical_artist_id INTEGER
+    REFERENCES lib2_artists(id) ON DELETE SET NULL;
+```
+
+`NULL` = diese Zeile ist kanonisch (oder eigenständig, keine bekannten Aliase).
+Gesetzt = Alias der referenzierten Zeile. Kein separates Junction-Table nötig —
+eine 1:n-Beziehung (eine kanonische Zeile, beliebig viele Alias-Zeilen zeigen auf
+sie) reicht, analog zum bereits etablierten `canonical_track_id`-Muster aus §39
+(`link_single_album_duplicates`/`duplicate_relationship.py`). Schema-Eintrag
+sowohl in `LIB2_ARTISTS_DDL` (Neuinstallationen) als auch `_ADDED_COLUMNS`
+(bestehende Installationen, idempotente ALTER) — dasselbe Doppel-Muster wie alle
+bisherigen lib2-Schema-Erweiterungen (§22/§23).
+
+Neues Modul `core/library2/artist_aliases.py`, strukturelles Pendant zu
+`duplicate_relationship.py`:
+
+- `link_artist_alias(conn, artist_id, alias_of_id)` — validiert + schreibt.
+  Regeln (jede Verletzung wirft `AliasLinkError(message, status)`, analog
+  `DuplicateRelationshipError`):
+  - Kein Self-Link (`artist_id == alias_of_id`).
+  - `alias_of_id` muss selbst kanonisch sein (`canonical_artist_id IS NULL`) —
+    verhindert Ketten.
+  - `artist_id` darf nicht bereits kanonische Wurzel einer eigenen Alias-Gruppe
+    sein (keine Gruppen-Merges in v1, siehe 24.1).
+  - Beide IDs müssen existieren (sonst 404 auf API-Ebene).
+
+  Durch diese drei Regeln ist die Struktur beweisbar maximal eine Ebene tief —
+  keine Rekursion beim Auflösen nötig.
+- `unlink_artist_alias(conn, artist_id)` — setzt `canonical_artist_id` dieser
+  EINEN Zeile zurück auf `NULL`. Der Rest der Gruppe bleibt unangetastet. Voll
+  reversibel.
+- `resolve_alias_group(conn, artist_id) -> List[int]` — kanonische ID zuerst,
+  danach alle Alias-IDs (sortiert). Nimmt sowohl eine kanonische als auch eine
+  Alias-ID entgegen und liefert in beiden Fällen dieselbe Gruppe. Zentrale
+  Wiederverwendung durch Discography-Fetch UND Anzeige-Queries (24.3/24.4).
+
+### 24.3 Discography-Fetch (Fan-out) & Scheduled-Sweep
+
+`expand_artist_discography` / `refresh_artist_discography` (`discography.py`)
+lösen künftig zuerst `resolve_alias_group(conn, artist_id)` auf und rufen die
+HEUTIGE, unveränderte Einzel-Fetch-Logik (`_expand_artist_discography` inkl.
+Monitor-/Track-Repair-Schritten) für JEDES Gruppenmitglied einzeln auf — jede
+Zeile behält weiterhin ihre eigenen `lib2_albums`-Zeilen wie heute, kein Umbau
+von `primary_artist_id`/`lib2_album_artists`. Ein Klick auf die kanonische Zeile
+ODER auf eine Alias-Zeile aktualisiert immer die ganze Gruppe. Stats werden pro
+Mitglied gesammelt und zu Summen aggregiert (`added`/`enriched`/`removed`/
+`total`) für die Rückgabe; scheitert der Fetch für ein Mitglied (z. B.
+Rate-Limit), läuft der Fan-out für die restlichen Mitglieder weiter (per-Member
+`try`/`except`, wie es `repair_track_number_collisions` bereits für seine
+Album-Schleife macht) statt die gesamte Operation abzubrechen — der Fehler wird
+pro Mitglied in den aggregierten Stats reportet.
+
+Der geplante Sweep-Job (`core/repair_jobs/lib2_discography_refresh.py`, iteriert
+aktuell ALLE monitored Artists) bekommt einen Filter `AND canonical_artist_id
+IS NULL` auf seine Root-Auswahl. Ohne diesen Filter würde eine 3er-Gruppe pro
+Sweep-Durchlauf 9 statt 3 Fetches auslösen (jedes Mitglied fächert beim eigenen
+Sweep-Aufruf erneut in die ganze Gruppe auf) — Alias-Zeilen werden also nicht
+mehr als eigener Sweep-Start behandelt, weil sie durch den Fan-out ihrer
+kanonischen Zeile bereits mit-aktualisiert werden.
+
+### 24.4 Anzeige (Listing & Artist-Detail)
+
+`Q.list_artists` (`core/library2/queries.py`) bekommt zusätzlich
+`AND a.canonical_artist_id IS NULL` im WHERE — Alias-Zeilen verschwinden aus
+Watchlist/Grid, nur die kanonische Zeile bleibt als ein Eintrag sichtbar.
+
+`Q.get_artist` löst beim Aufruf zuerst `resolve_alias_group` auf (funktioniert
+also gleichermaßen, wenn man die kanonische ODER eine Alias-ID öffnet, z. B.
+über einen alten Deep-Link) und ersetzt in der Album-Query
+`WHERE aa.artist_id = ?` durch `WHERE aa.artist_id IN (<Gruppen-IDs>)` — die
+Detailseite zeigt dann Alben/Singles/EPs aus ALLEN Gruppenmitgliedern gemergt,
+das Artist-Header selbst (Bio, Bild, Genres, …) bleibt das der kanonischen
+Zeile.
+
+### 24.5 API-Endpoints
+
+Neu in `api/library_v2.py`:
+
+- `POST /api/library/v2/artists/<id>/link-alias` — Body `{"alias_of": <id>}`.
+  400 bei Regelverstoß (24.2), 404 wenn eine der beiden IDs nicht existiert.
+- `DELETE /api/library/v2/artists/<id>/link-alias` — löst nur diese eine Zeile
+  aus ihrer Gruppe.
+- `GET /api/library/v2/artists/<id>/aliases` — liefert kanonische ID + volle
+  Mitgliederliste (id/name/image) für die UI.
+
+### 24.6 Minimal-UI
+
+Auf dem Artist-Header ein schlichter „Aliases"-Bereich (Chips mit Namen, ✕ zum
+Lösen) + Button „Als Alias verknüpfen" → Modal mit Textsuche, die den bereits
+existierenden `/api/library/v2/artists?search=`-Endpoint wiederverwendet (keine
+neue Such-Infrastruktur nötig, keine Duplikation). Klick auf ein Suchergebnis
+ruft `link-alias` auf. Bewusst schlicht gehalten — die vollwertige
+Recovery-UI mit Fehlererkennung/Vorschlägen ist §41 und kann diese Modal-Basis
+später ersetzen oder erweitern.
+
+### 24.7 Edge Cases & Error Handling
+
+- Self-Link → 400.
+- `alias_of` ist selbst bereits Alias (`canonical_artist_id NOT NULL`) → 400
+  „must link to a canonical artist" (keine Ketten).
+- `artist_id` ist selbst bereits kanonische Wurzel einer eigenen Gruppe → 400
+  (kein Gruppen-Merge in v1, siehe 24.1).
+- `artist_id`/`alias_of` existiert nicht → 404.
+- Kanonische Zeile wird gelöscht (Artist-Delete) → `ON DELETE SET NULL` macht
+  alle bisherigen Alias-Zeilen automatisch wieder zu eigenständigen kanonischen
+  Zeilen — kein Datenverlust, keine verwaisten FKs.
+- Provider-Fetch für ein Gruppenmitglied schlägt fehl → Fan-out läuft für die
+  restlichen Mitglieder weiter (24.3).
+
+### 24.8 Testing-Plan (TDD, ein Commit pro Baustein)
+
+- `tests/library2/test_artist_aliases.py` — alle Validierungsregeln aus
+  `link_artist_alias`/`unlink_artist_alias`; `resolve_alias_group` für
+  Standalone-Fall, Gruppe mit 1 und mit 2+ Aliasen.
+- `tests/library2/test_discography.py` (erweitert) — Fan-out mit 2 gemockten
+  Provider-IDs, Trigger von JEDER Gruppen-ID liefert dasselbe Gesamtergebnis;
+  Teil-Fehler-Test (ein Mitglied schlägt fehl, Rest läuft durch).
+- `tests/repair_jobs/…` (lib2-Discography-Sweep-Test) — Sweep überspringt
+  Alias-Zeilen als eigenen Root.
+- `tests/library2/test_queries.py` — `list_artists` blendet Alias-Zeilen aus;
+  `get_artist` merged Alben über die Gruppe, auch beim Öffnen einer Alias-ID.
+- API-Contract-Tests für die drei neuen Endpoints (dort, wo die bestehenden
+  lib2-Endpoint-Tests liegen).
+
+### 24.9 Entscheidungs-Log (aus dem Brainstorming)
+
+Kurzfassung der im Dialog getroffenen Entscheidungen, damit sie beim Schreiben
+des Implementierungsplans nicht erneut aufgerollt werden müssen:
+
+1. Kernfall = „gleiche Person, verschiedene Provider-Identität" (nicht die
+   bereits gefixten Importer-Duplikate über gemeinsame Provider-ID).
+2. Verknüpfung wird nur manuell ausgelöst, kein Vorschlags-Algorithmus in v1.
+3. Soft-Link (beide Zeilen bleiben bestehen) statt hartem Merge — reversibel,
+   kein FK-Umbau bei bestehenden Alben/Tracks.
+4. Architektur = Gruppentabelle/-spalte + Fan-out-Fetch + gemergte Anzeige
+   (nicht: kanonisches Re-Attachment mit Datenmigration; nicht: reine
+   Lese-Zeit-Union ohne Auto-Fetch — Letzteres hätte Symptom (b) nur teilweise
+   gelöst).
