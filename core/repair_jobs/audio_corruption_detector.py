@@ -44,11 +44,22 @@ _CORRUPT_CHECK_EXTS = {'.flac'}
 _DECODE_TIMEOUT_S = 600
 
 
-def _resolve(file_path: str) -> Optional[str]:
-    """Resolve a stored library path to one this process can read, falling back
-    to the raw path when it's already a real file (mirrors replaygain_filler)."""
-    resolved = resolve_library_file_path(file_path) if file_path else None
-    if not resolved and file_path and os.path.isfile(file_path):
+def _resolve(file_path: str, context: JobContext) -> Optional[str]:
+    """Resolve a stored library path to one this process can read.
+
+    MUST pass the context's transfer folder + config_manager — a bare
+    ``resolve_library_file_path(path)`` has no base directories to suffix-walk,
+    so for Docker/NAS users (whose DB paths are the MEDIA SERVER's view) every
+    single file silently resolved to None and the whole scan was skips (#1000
+    follow-up: '6741 FLAC files decode-tested, 0 corrupt, 6741 skipped' in 0.1s)."""
+    if not file_path:
+        return None
+    resolved = resolve_library_file_path(
+        file_path,
+        transfer_folder=context.transfer_folder,
+        config_manager=context.config_manager,
+    )
+    if not resolved and os.path.isfile(file_path):
         resolved = file_path
     return resolved
 
@@ -186,6 +197,9 @@ class AudioCorruptionDetectorJob(RepairJob):
         if context.report_progress:
             context.report_progress(phase=f'Decode-testing {total} FLAC files...', total=total)
 
+        tested = 0
+        unresolved = 0
+        outside_window = 0
         for i, row in enumerate(rows):
             if context.check_stop():
                 return result
@@ -195,9 +209,10 @@ class AudioCorruptionDetectorJob(RepairJob):
             result.scanned += 1
             title = row['title'] or 'Unknown'
             artist = row['artist_name'] or 'Unknown'
-            resolved = _resolve(row['file_path'])
+            resolved = _resolve(row['file_path'], context)
 
             if not resolved:
+                unresolved += 1
                 result.skipped += 1
                 continue
 
@@ -205,6 +220,7 @@ class AudioCorruptionDetectorJob(RepairJob):
             if cutoff_mtime is not None:
                 try:
                     if os.path.getmtime(resolved) < cutoff_mtime:
+                        outside_window += 1
                         result.skipped += 1
                         continue
                 except OSError:
@@ -217,6 +233,7 @@ class AudioCorruptionDetectorJob(RepairJob):
                     phase=f'Decode-testing {i + 1}/{total}...',
                     log_line=f'{artist} — {title}', log_type='info')
 
+            tested += 1
             try:
                 ok, reason = check_flac_integrity(resolved)
             except Exception as e:
@@ -272,8 +289,23 @@ class AudioCorruptionDetectorJob(RepairJob):
 
         if context.update_progress:
             context.update_progress(total, total)
-        logger.info("[Corrupt File Detector] %d FLAC files decode-tested, %d corrupt, %d skipped",
-                    result.scanned, result.findings_created, result.skipped)
+        # An honest summary: 'decode-tested' means DECODED, not merely seen —
+        # the old line reported every skip as tested, which hid the path-
+        # resolution failure completely ('6741 decode-tested ... in 0.1s').
+        logger.info(
+            "[Corrupt File Detector] %d of %d FLAC files decode-tested, %d corrupt, "
+            "%d path-unresolved, %d outside the modified window",
+            tested, total, result.findings_created, unresolved, outside_window)
+        if total and unresolved == total:
+            # Every single path failed to resolve — that's a mapping problem,
+            # not a healthy library. Say so where the user is looking.
+            msg = ("No library paths could be resolved to readable files — the DB "
+                   "stores your media server's paths. Check Settings → Library → "
+                   "Music Paths (or your Docker mounts) so SoulSync can reach them.")
+            logger.warning("[Corrupt File Detector] %s", msg)
+            if context.report_progress:
+                context.report_progress(phase='No library paths resolved',
+                                        log_line=msg, log_type='error')
         return result
 
     def estimate_scope(self, context: JobContext) -> int:
