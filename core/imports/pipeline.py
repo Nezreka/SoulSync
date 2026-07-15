@@ -939,7 +939,11 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
         # See ``core/imports/track_number.py`` for the resolution
         # chain — pure function, unit-tested in isolation, single
         # place to fix the rule.
-        from core.imports.track_number import resolve_track_number, read_embedded_track_number
+        from core.imports.track_number import (
+            resolve_track_number,
+            read_embedded_track_number,
+            track_number_from_directory_order,
+        )
         track_info_for_resolve = context.get('track_info') if isinstance(context, dict) else None
         # "Track 01" bug: a single Deezer track is matched via an endpoint
         # that omits track_position, so the context never carried the real
@@ -957,8 +961,23 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             track_number,
         )
         if not isinstance(track_number, int) or track_number < 1:
-            logger.error(f"Invalid track number ({track_number}), defaulting to 1")
-            track_number = 1
+            # §16.3(a): before collapsing the WHOLE album onto track 1, fall back
+            # to this file's sorted position among its audio siblings on disk
+            # (album bundles stage all files into one directory together). This
+            # only ever replaces the constant-1 default, so it can never override
+            # a number a real source produced — it just stops every un-numbered
+            # track claiming position 1 and all-but-one showing as "missing".
+            scan_order = track_number_from_directory_order(file_path)
+            if scan_order is not None:
+                logger.warning(
+                    "No per-track number from any source; using scan-order "
+                    "position %s from directory siblings (avoids album collapse "
+                    "onto track 1)", scan_order,
+                )
+                track_number = scan_order
+            else:
+                logger.error(f"Invalid track number ({track_number}), defaulting to 1")
+                track_number = 1
 
         logger.debug(f"FINAL track_number used for filename: {track_number}")
         album_info['track_number'] = track_number
