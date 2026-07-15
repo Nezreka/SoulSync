@@ -13215,12 +13215,15 @@ def _resolve_library_file_path(file_path):
             if found:
                 return found
 
-    # Couldn't resolve — log the bases we searched ONCE so a path/mount mismatch
-    # is diagnosable (e.g. files live under a dir that isn't transfer/download/
-    # a configured library path).
+    # Couldn't resolve — log the bases we searched, throttled to once per 10
+    # minutes. The old once-per-PROCESS guard self-silenced forever, which hid
+    # intermittent failures completely (TheHomeGuy: an NFS mount that drops and
+    # comes back reads as 'occasionally get this error' with no pattern —
+    # because all the other occurrences were swallowed).
     global _resolve_library_diag_logged
-    if not _resolve_library_diag_logged:
-        _resolve_library_diag_logged = True
+    _now = time.monotonic()
+    if not isinstance(_resolve_library_diag_logged, float) or _now - _resolve_library_diag_logged > 600:
+        _resolve_library_diag_logged = _now
         logger.warning(
             "[PathResolve] Could not resolve %r — tried direct-join + suffix-scan under %r (cwd=%r). "
             "If files live elsewhere, set soulseek.transfer_path to the absolute mount or add "
