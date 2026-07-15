@@ -54,6 +54,12 @@ CREATE TABLE IF NOT EXISTS lib2_artists (
     image_url TEXT,
     genres TEXT NOT NULL DEFAULT '[]',
     summary TEXT,
+    style TEXT,
+    mood TEXT,
+    label TEXT,
+    aliases TEXT NOT NULL DEFAULT '[]',
+    banner_url TEXT,
+    enrichment TEXT NOT NULL DEFAULT '{}',            -- provider-keyed extra bio/stats (lastfm/genius/discogs; see importer._artist_enrichment_payload)
     monitored INTEGER NOT NULL DEFAULT 1,
     monitor_new_items TEXT NOT NULL DEFAULT 'all',   -- 'all' | 'none' | 'new'
     quality_profile_id INTEGER REFERENCES quality_profiles(id) ON DELETE RESTRICT,
@@ -141,6 +147,10 @@ CREATE TABLE IF NOT EXISTS lib2_tracks (
     external_ids TEXT NOT NULL DEFAULT '{}',           -- long-tail provider ids (deezer/tidal/qobuz/itunes/...); isrc/mbid/spotify keep their own columns above
     bpm REAL,
     explicit INTEGER,
+    genius_lyrics TEXT,
+    copyright TEXT,
+    play_count INTEGER NOT NULL DEFAULT 0,
+    last_played TIMESTAMP,
     stable_id TEXT,                                   -- provider-less identity (audit P1-12); minted once, survives reset+reimport
     monitored INTEGER NOT NULL DEFAULT 1,
     quality_profile_id INTEGER REFERENCES quality_profiles(id) ON DELETE RESTRICT,
@@ -368,6 +378,22 @@ _ADDED_COLUMNS = (
     ("lib2_albums", "explicit", "ALTER TABLE lib2_albums ADD COLUMN explicit INTEGER"),
     ("lib2_albums", "label", "ALTER TABLE lib2_albums ADD COLUMN label TEXT"),
     ("lib2_albums", "upc", "ALTER TABLE lib2_albums ADD COLUMN upc TEXT"),
+    # §17.7 remainder: artist enrichment + track listening/lyrics fields, and
+    # per-track quality_profile_id sourced from the legacy row (previously
+    # only the run-wide default was ever written).
+    ("lib2_artists", "style", "ALTER TABLE lib2_artists ADD COLUMN style TEXT"),
+    ("lib2_artists", "mood", "ALTER TABLE lib2_artists ADD COLUMN mood TEXT"),
+    ("lib2_artists", "label", "ALTER TABLE lib2_artists ADD COLUMN label TEXT"),
+    ("lib2_artists", "aliases",
+     "ALTER TABLE lib2_artists ADD COLUMN aliases TEXT NOT NULL DEFAULT '[]'"),
+    ("lib2_artists", "banner_url", "ALTER TABLE lib2_artists ADD COLUMN banner_url TEXT"),
+    ("lib2_artists", "enrichment",
+     "ALTER TABLE lib2_artists ADD COLUMN enrichment TEXT NOT NULL DEFAULT '{}'"),
+    ("lib2_tracks", "genius_lyrics", "ALTER TABLE lib2_tracks ADD COLUMN genius_lyrics TEXT"),
+    ("lib2_tracks", "copyright", "ALTER TABLE lib2_tracks ADD COLUMN copyright TEXT"),
+    ("lib2_tracks", "play_count",
+     "ALTER TABLE lib2_tracks ADD COLUMN play_count INTEGER NOT NULL DEFAULT 0"),
+    ("lib2_tracks", "last_played", "ALTER TABLE lib2_tracks ADD COLUMN last_played TIMESTAMP"),
 )
 
 
