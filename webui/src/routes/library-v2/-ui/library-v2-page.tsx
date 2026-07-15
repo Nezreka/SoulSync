@@ -69,8 +69,11 @@ import styles from './library-v2-page.module.css';
 import { QualityProfileModal, QualityProfilePicker } from './quality-profile-modal';
 import { RetagModal } from './retag-modal';
 
+/** Artist-level quality-profile target only — albums/EPs/singles use the
+ *  self-contained, consolidated AlbumDetailModal instead (per user request:
+ *  merge Quality+Edit at album level, but keep artist-level actions separate). */
 interface QpTarget {
-  entity: 'artists' | 'albums';
+  entity: 'artists';
   id: number;
   currentProfileId: number;
   title: string;
@@ -397,18 +400,22 @@ export function ArtistRefreshButton({ artistId }: { artistId: number }) {
 function ModalShell({
   title,
   wide,
+  detail,
   onClose,
   children,
 }: {
   title: string;
   wide?: boolean;
+  /** Fixed width+height (tab body scrolls internally) so tabbed content
+   *  (track/album detail modals) doesn't resize/jump when switching tabs. */
+  detail?: boolean;
   onClose: () => void;
   children: ReactNode;
 }) {
   return (
     <div className={styles.modalBackdrop} role="presentation" onClick={onClose}>
       <div
-        className={`${styles.modal} ${wide ? styles.modalWide : ''}`}
+        className={`${styles.modal} ${wide ? styles.modalWide : ''} ${detail ? styles.modalDetail : ''}`}
         role="dialog"
         aria-modal="true"
         onClick={(e) => e.stopPropagation()}
@@ -967,7 +974,80 @@ type EditableAlbumMetadata = Pick<
   'id' | 'title' | 'year' | 'album_type' | 'release_date' | 'user_overrides'
 >;
 
-function EditAlbumModal({ album, onClose }: { album: EditableAlbumMetadata; onClose: () => void }) {
+/** Album/EP/single detail, consolidated behind one Edit button (same pattern
+ *  as the per-track detail modal, per user request — keep it uniform across
+ *  album/EP/single; artist-level Quality Profile / Edit stay separate). */
+interface AlbumDetailTarget extends EditableAlbumMetadata {
+  quality_profile_id: number;
+}
+
+function AlbumDetailButton({ album }: { album: LibraryV2AlbumSummary }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <IconActionButton
+        icon="edit"
+        title="Album details — quality profile, metadata"
+        onClick={() => setOpen(true)}
+      />
+      {open ? (
+        <AlbumDetailModal
+          album={{
+            id: album.id,
+            title: album.title,
+            year: album.year,
+            album_type: album.album_type,
+            release_date: album.release_date,
+            user_overrides: album.user_overrides,
+            quality_profile_id: album.quality_profile_id,
+          }}
+          onClose={() => setOpen(false)}
+        />
+      ) : null}
+    </>
+  );
+}
+
+type AlbumDetailTab = 'quality' | 'metadata';
+
+function AlbumDetailModal({ album, onClose }: { album: AlbumDetailTarget; onClose: () => void }) {
+  const [tab, setTab] = useState<AlbumDetailTab>('quality');
+  return (
+    <ModalShell title={album.title} detail onClose={onClose}>
+      <div className={styles.detailTabs}>
+        {(['quality', 'metadata'] as const).map((t) => (
+          <button
+            key={t}
+            type="button"
+            className={`${styles.detailTab} ${tab === t ? styles.detailTabActive : ''}`}
+            onClick={() => setTab(t)}
+          >
+            {t === 'quality' ? 'Quality' : 'Metadata'}
+          </button>
+        ))}
+      </div>
+      <div className={styles.tabBody}>
+        {tab === 'quality' ? (
+          <QualityProfilePicker
+            entity="albums"
+            id={album.id}
+            currentProfileId={album.quality_profile_id}
+            onSaved={onClose}
+          />
+        ) : null}
+        {tab === 'metadata' ? <AlbumMetadataForm album={album} onSaved={onClose} /> : null}
+      </div>
+    </ModalShell>
+  );
+}
+
+function AlbumMetadataForm({
+  album,
+  onSaved,
+}: {
+  album: EditableAlbumMetadata;
+  onSaved: () => void;
+}) {
   const queryClient = useQueryClient();
   const [title, setTitle] = useState(album.title);
   const [year, setYear] = useState(album.year === null ? '' : String(album.year));
@@ -999,7 +1079,7 @@ function EditAlbumModal({ album, onClose }: { album: EditableAlbumMetadata; onCl
     try {
       await updateLibraryV2MetadataOverrides('release_group', album.id, valuesToSet, clear);
       await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
-      onClose();
+      onSaved();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Edit failed');
       setBusy(false);
@@ -1007,7 +1087,7 @@ function EditAlbumModal({ album, onClose }: { album: EditableAlbumMetadata; onCl
   }
 
   return (
-    <ModalShell title={`Edit — ${album.title}`} onClose={onClose}>
+    <>
       <div className={styles.editRow}>
         <label htmlFor="lib2-album-title">Title</label>
         <input
@@ -1071,9 +1151,6 @@ function EditAlbumModal({ album, onClose }: { album: EditableAlbumMetadata; onCl
             Restore provider values
           </button>
         ) : null}
-        <button type="button" className={styles.btnGhost} disabled={busy} onClick={onClose}>
-          Cancel
-        </button>
         <button
           type="button"
           className={styles.btnPrimary}
@@ -1089,7 +1166,7 @@ function EditAlbumModal({ album, onClose }: { album: EditableAlbumMetadata; onCl
           {busy ? 'Saving…' : 'Save'}
         </button>
       </div>
-    </ModalShell>
+    </>
   );
 }
 
@@ -2227,7 +2304,20 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
             </div>
           </header>
           <AlbumTrackTable albumId={album.id} onAction={handleAction} />
-          {showEdit ? <EditAlbumModal album={album} onClose={() => setShowEdit(false)} /> : null}
+          {showEdit ? (
+            <AlbumDetailModal
+              album={{
+                id: album.id,
+                title: album.title,
+                year: album.year,
+                album_type: album.album_type,
+                release_date: album.release_date,
+                user_overrides: album.user_overrides,
+                quality_profile_id: album.quality_profile?.id ?? 1,
+              }}
+              onClose={() => setShowEdit(false)}
+            />
+          ) : null}
           {modalAction && INTERACTIVE_RE.test(modalAction.action) ? (
             <InteractiveSearchModal
               initialQuery={buildSearchQuery(album.primary_artist?.name ?? '', modalAction.action)}
@@ -2274,7 +2364,6 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
     id: number;
     title: string;
   } | null>(null);
-  const [editAlbumTarget, setEditAlbumTarget] = useState<LibraryV2AlbumSummary | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{
     entity: 'artists' | 'albums';
     id: number;
@@ -2586,14 +2675,12 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             artistId={artistId}
             scope="albums"
             onAction={handleAction}
-            onQualityProfile={setQpTarget}
             onDelete={(album) =>
               setDeleteTarget({ entity: 'albums', id: album.id, title: album.title })
             }
             onRetag={(album) =>
               setRetagTarget({ entity: 'albums', id: album.id, title: album.title })
             }
-            onEdit={setEditAlbumTarget}
           />
           <AlbumGroup
             title="EPs"
@@ -2601,14 +2688,12 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             artistId={artistId}
             scope="eps"
             onAction={handleAction}
-            onQualityProfile={setQpTarget}
             onDelete={(album) =>
               setDeleteTarget({ entity: 'albums', id: album.id, title: album.title })
             }
             onRetag={(album) =>
               setRetagTarget({ entity: 'albums', id: album.id, title: album.title })
             }
-            onEdit={setEditAlbumTarget}
           />
           <AlbumGroup
             title="Singles"
@@ -2616,14 +2701,12 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             artistId={artistId}
             scope="singles"
             onAction={handleAction}
-            onQualityProfile={setQpTarget}
             onDelete={(album) =>
               setDeleteTarget({ entity: 'albums', id: album.id, title: album.title })
             }
             onRetag={(album) =>
               setRetagTarget({ entity: 'albums', id: album.id, title: album.title })
             }
-            onEdit={setEditAlbumTarget}
           />
           {modalAction && INTERACTIVE_RE.test(modalAction.action) ? (
             <InteractiveSearchModal
@@ -2663,9 +2746,6 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               title={retagTarget.title}
               onClose={() => setRetagTarget(null)}
             />
-          ) : null}
-          {editAlbumTarget ? (
-            <EditAlbumModal album={editAlbumTarget} onClose={() => setEditAlbumTarget(null)} />
           ) : null}
           {deleteTarget ? (
             <DeleteConfirmModal
@@ -2781,20 +2861,16 @@ function AlbumGroup({
   artistId,
   scope,
   onAction,
-  onQualityProfile,
   onDelete,
   onRetag,
-  onEdit,
 }: {
   title: string;
   albums: LibraryV2AlbumSummary[];
   artistId: number;
   scope: 'albums' | 'eps' | 'singles';
   onAction: ActionHandler;
-  onQualityProfile: (target: QpTarget) => void;
   onDelete: (album: LibraryV2AlbumSummary) => void;
   onRetag: (album: LibraryV2AlbumSummary) => void;
-  onEdit: (album: LibraryV2AlbumSummary) => void;
 }) {
   if (albums.length === 0) return null;
   const allMonitored = albums.every((a) => a.monitored);
@@ -2817,10 +2893,8 @@ function AlbumGroup({
             key={album.id}
             album={album}
             onAction={onAction}
-            onQualityProfile={onQualityProfile}
             onDelete={onDelete}
             onRetag={onRetag}
-            onEdit={onEdit}
           />
         ))}
       </div>
@@ -2831,17 +2905,13 @@ function AlbumGroup({
 function AlbumBlock({
   album,
   onAction,
-  onQualityProfile,
   onDelete,
   onRetag,
-  onEdit,
 }: {
   album: LibraryV2AlbumSummary;
   onAction: ActionHandler;
-  onQualityProfile: (target: QpTarget) => void;
   onDelete: (album: LibraryV2AlbumSummary) => void;
   onRetag: (album: LibraryV2AlbumSummary) => void;
-  onEdit: (album: LibraryV2AlbumSummary) => void;
 }) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
@@ -2924,25 +2994,9 @@ function AlbumBlock({
               })
             }
           />
-          <IconActionButton
-            icon="star"
-            title="Quality Profile"
-            onClick={() =>
-              onQualityProfile({
-                entity: 'albums',
-                id: album.id,
-                currentProfileId: album.quality_profile_id,
-                title: album.title,
-              })
-            }
-          />
           <IconActionButton icon="retag" title="Preview Retag" onClick={() => onRetag(album)} />
           <AlbumReplayGainButton albumId={album.id} />
-          <IconActionButton
-            icon="edit"
-            title="Edit release (correct the album/EP/single type)"
-            onClick={() => onEdit(album)}
-          />
+          <AlbumDetailButton album={album} />
           <IconActionButton
             icon="delete"
             title="Remove album from library (files stay on disk)"
@@ -3083,14 +3137,16 @@ function TrackRow({
       </td>
       <td>{track.artists.map((a) => a.name).join(', ')}</td>
       <td className={styles.qualityText}>
-        <QualityDisplay file={track.file} />
-        <TrackQualityProfileBadge track={track} />
-        {profileName ? (
-          <span className={styles.qualityProfileBadge} title="Quality profile for this track">
-            <SvgIcon name="star" />
-            {profileName}
-          </span>
-        ) : null}
+        <span className={styles.qualityCellRow}>
+          <QualityDisplay file={track.file} />
+          <TrackQualityProfileBadge track={track} />
+          {profileName ? (
+            <span className={styles.qualityProfileBadge} title="Quality profile for this track">
+              <SvgIcon name="star" />
+              {profileName}
+            </span>
+          ) : null}
+        </span>
       </td>
       <td>
         {track.id ? (
@@ -3242,35 +3298,37 @@ function TrackDetailModal({
   const [tab, setTab] = useState<TrackDetailTab>('quality');
   const trackId = track.id as number; // TrackDetailButton only renders when track.id is set
   return (
-    <ModalShell title={track.title ?? albumTitle} onClose={onClose}>
-      <div className={styles.trackDetailTabs}>
+    <ModalShell title={track.title ?? albumTitle} detail onClose={onClose}>
+      <div className={styles.detailTabs}>
         {(['quality', 'metadata', 'info'] as const).map((t) => (
           <button
             key={t}
             type="button"
-            className={`${styles.trackDetailTab} ${tab === t ? styles.trackDetailTabActive : ''}`}
+            className={`${styles.detailTab} ${tab === t ? styles.detailTabActive : ''}`}
             onClick={() => setTab(t)}
           >
             {t === 'quality' ? 'Quality' : t === 'metadata' ? 'Metadata' : 'Info'}
           </button>
         ))}
       </div>
-      {tab === 'quality' ? (
-        <QualityProfilePicker
-          entity="tracks"
-          id={trackId}
-          currentProfileId={track.quality_profile_id}
-          onSaved={onClose}
-        />
-      ) : null}
-      {tab === 'metadata' ? <TrackMetadataForm track={track} onSaved={onClose} /> : null}
-      {tab === 'info' ? (
-        <TrackInfoPanel
-          trackId={trackId}
-          trackTitle={track.title ?? albumTitle}
-          trackArtist={track.artists.map((a) => a.name).join(', ')}
-        />
-      ) : null}
+      <div className={styles.tabBody}>
+        {tab === 'quality' ? (
+          <QualityProfilePicker
+            entity="tracks"
+            id={trackId}
+            currentProfileId={track.quality_profile_id}
+            onSaved={onClose}
+          />
+        ) : null}
+        {tab === 'metadata' ? <TrackMetadataForm track={track} onSaved={onClose} /> : null}
+        {tab === 'info' ? (
+          <TrackInfoPanel
+            trackId={trackId}
+            trackTitle={track.title ?? albumTitle}
+            trackArtist={track.artists.map((a) => a.name).join(', ')}
+          />
+        ) : null}
+      </div>
     </ModalShell>
   );
 }

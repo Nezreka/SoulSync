@@ -471,6 +471,13 @@
   color: rgba(255, 255, 255, 0.8);
 }
 
+.qualityCellRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .qualityDisplay {
   display: inline-flex;
   gap: 0.5rem;
@@ -1224,6 +1231,23 @@
   padding: 18px;
 }
 
+/* Fixed width+height for tabbed detail modals (track/album) so switching
+ * tabs never resizes/jumps the modal — only the tab body scrolls. */
+.modalDetail {
+  width: min(640px, 94vw);
+  height: 620px;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.tabBody {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
 .modalHeader {
   display: flex;
   align-items: center;
@@ -1583,15 +1607,16 @@
   font-family: var(--font-mono, monospace);
 }
 
-/* --- track detail modal tabs (Quality / Metadata / Info) --- */
-.trackDetailTabs {
+/* --- detail modal tabs (Quality / Metadata / Info) — shared by the
+ * per-track AND per-album/EP/single detail modals for a consistent look --- */
+.detailTabs {
   display: flex;
   gap: 4px;
   margin-bottom: 14px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-.trackDetailTab {
+.detailTab {
   appearance: none;
   background: none;
   border: none;
@@ -1603,11 +1628,11 @@
   cursor: pointer;
 }
 
-.trackDetailTab:hover {
+.detailTab:hover {
   color: rgba(255, 255, 255, 0.8);
 }
 
-.trackDetailTabActive {
+.detailTabActive {
   color: #fff;
   border-bottom-color: rgb(196, 156, 250);
 }
