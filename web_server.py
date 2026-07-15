@@ -39553,19 +39553,38 @@ def _hydrabase_reconnect_loop():
         except Exception as e:
             logger.debug("hydrabase monitor loop: %s", e)
 
+# --- Global connected-client tracking (gates idle broadcast loops below) ---
+# Same pattern as _activity_sids, but for "is anyone listening at all" rather
+# than a specific room: dashboard-wide push loops have no per-client work to
+# skip, only an all-or-nothing "does this broadcast have an audience".
+_connected_sids = set()
+_connected_sids_lock = threading.Lock()
+
+
+def _has_connected_clients() -> bool:
+    with _connected_sids_lock:
+        return bool(_connected_sids)
+
+
 def _emit_service_status_loop():
-    """Background thread that pushes service status every 5 seconds."""
+    """Background thread that pushes service status every 5 seconds.
+    Skipped entirely while no client is connected."""
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(5)
+        if not _has_connected_clients():
+            continue
         try:
             socketio.emit('status:update', _build_status_payload())
         except Exception as e:
             logger.debug(f"Error emitting service status: {e}")
 
 def _emit_watchlist_count_loop():
-    """Background thread that pushes watchlist count every 10 seconds to each profile room."""
+    """Background thread that pushes watchlist count every 10 seconds to each profile room.
+    Skipped entirely while no client is connected."""
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(10)
+        if not _has_connected_clients():
+            continue
         try:
             database = get_database()
             profiles = database.get_all_profiles()
@@ -39652,6 +39671,8 @@ def handle_connect():
     if _ws_connection_blocked():
         logger.warning("Rejected WebSocket connection — access gate active, session not verified (#852)")
         return False
+    with _connected_sids_lock:
+        _connected_sids.add(request.sid)
     logger.info("WebSocket client connected")
 
 @socketio.on('disconnect')
@@ -39663,6 +39684,8 @@ def handle_disconnect():
             _activity_sids.discard(request.sid)
     except Exception:   # noqa: BLE001, S110 - cleanup only; a missing sid is fine
         pass
+    with _connected_sids_lock:
+        _connected_sids.discard(request.sid)
     logger.info("WebSocket client disconnected")
 
 @socketio.on('activity:subscribe')
@@ -39711,18 +39734,24 @@ def handle_profile_join(data):
 # --- Phase 2: Dashboard emitters ---
 
 def _emit_system_stats_loop():
-    """Background thread that pushes system stats every 10 seconds."""
+    """Background thread that pushes system stats every 10 seconds.
+    Skipped entirely while no client is connected."""
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(10)
+        if not _has_connected_clients():
+            continue
         try:
             socketio.emit('dashboard:stats', _build_system_stats())
         except Exception as e:
             logger.debug(f"Error emitting system stats: {e}")
 
 def _emit_activity_feed_loop():
-    """Background thread that pushes activity feed every 2 seconds."""
+    """Background thread that pushes activity feed every 2 seconds.
+    Skipped entirely while no client is connected."""
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(2)
+        if not _has_connected_clients():
+            continue
         try:
             with activity_feed_lock:
                 activities = activity_feed[-10:][::-1]
@@ -39731,9 +39760,12 @@ def _emit_activity_feed_loop():
             logger.debug(f"Error emitting activity feed: {e}")
 
 def _emit_db_stats_loop():
-    """Background thread that pushes database stats every 10 seconds."""
+    """Background thread that pushes database stats every 10 seconds.
+    Skipped entirely while no client is connected."""
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(10)
+        if not _has_connected_clients():
+            continue
         try:
             db = get_database()
             stats = db.get_database_info_for_server()
@@ -39742,9 +39774,12 @@ def _emit_db_stats_loop():
             logger.debug(f"Error emitting db stats: {e}")
 
 def _emit_wishlist_count_loop():
-    """Background thread that pushes wishlist count every 10 seconds to each profile room."""
+    """Background thread that pushes wishlist count every 10 seconds to each profile room.
+    Skipped entirely while no client is connected."""
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(10)
+        if not _has_connected_clients():
+            continue
         try:
             from core.wishlist_service import get_wishlist_service
             ws = get_wishlist_service()
@@ -39955,6 +39990,8 @@ def _emit_rate_monitor_loop():
 
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(1)
+        if not _has_connected_clients():
+            continue
         try:
             from core.api_call_tracker import api_call_tracker
             payload = api_call_tracker.get_all_rates()
@@ -40066,6 +40103,11 @@ def _emit_enrichment_status_loop():
         except Exception as e:
             logger.debug(f"Error in download-yield check: {e}")
 
+        # Auto-pause/resume above must run regardless of listeners; the stats
+        # gather + broadcast below is pure UI and costs nothing to skip.
+        if not _has_connected_clients():
+            continue
+
         for name, get_worker in workers.items():
             try:
                 worker = get_worker()
@@ -40120,6 +40162,16 @@ def _emit_tool_progress_loop():
         # (which skipped HTTP polling while the socket was up) never learned
         # its stream was ready. Each client polls /api/stream/status instead,
         # which resolves its own session from the cookie.
+        # Self-heal a hung DB-update job (#859) — functional, must run even
+        # when nobody's watching the broadcast below.
+        try:
+            _check_db_update_stall()
+        except Exception as e:
+            logger.debug(f"Error in db update stall self-heal: {e}")
+
+        if not _has_connected_clients():
+            continue
+
         # Duplicate Cleaner (add computed space_freed_mb)
         try:
             with duplicate_cleaner_lock:
@@ -40130,7 +40182,6 @@ def _emit_tool_progress_loop():
             logger.debug(f"Error emitting duplicate cleaner status: {e}")
         # DB Update
         try:
-            _check_db_update_stall()  # self-heal a hung job, then broadcast (#859)
             with db_update_lock:
                 socketio.emit('tool:db-update', dict(db_update_state))
         except Exception as e:
@@ -40313,9 +40364,13 @@ def _emit_sync_progress_loop():
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(1)
         try:
-            # Reconcile stuck 'syncing' discovery states BEFORE emitting, so the
-            # sync:progress event we push already carries the terminal status.
+            # Reconcile stuck 'syncing' discovery states — this is a functional
+            # self-heal (#972), not just UI push, so it must run even when no
+            # client is connected to see the emit below.
             _reconcile_discovery_sync_phases()
+
+            if not _has_connected_clients():
+                continue
 
             with sync_lock:
                 for pid, state in list(sync_states.items()):
