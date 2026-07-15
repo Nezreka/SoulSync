@@ -470,9 +470,11 @@ def register_routes(bp):
         want_season, want_episode, season_end = _search_ints(body)
 
         if source == "soulseek":
-            from core.video.slskd_search import build_query, search_timeout_ms, start_search
+            from core.video.slskd_search import (
+                _INTERACTIVE_MAX_WAIT_SECONDS, build_query, search_timeout_ms, start_search)
             res = start_search(build_query(scope, title, year=body.get("year"),
-                                           season=want_season, episode=want_episode))
+                                           season=want_season, episode=want_episode),
+                               max_throttle_wait=_INTERACTIVE_MAX_WAIT_SECONDS)
             if not res.get("configured"):
                 return jsonify({"error": "slskd isn't configured — set its URL on Settings → Downloads."})
             if res.get("error"):

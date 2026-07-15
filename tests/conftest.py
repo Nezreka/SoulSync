@@ -1011,6 +1011,14 @@ def shared_state():
 @pytest.fixture(autouse=True)
 def reset_state():
     """Reset all mutable state between tests."""
+    # slskd search throttle: ONE process-wide reservation window shared by the
+    # music + video sides (core.slskd_throttle). Left alone, reservations
+    # accumulate across the whole pytest session — once 35 pile up, every
+    # later test that touches a search path sleeps REAL minutes waiting for
+    # its slot (the suite appears to hang around the test_v* files). Wipe it
+    # between tests like any other module-global.
+    from core.slskd_throttle import _reset_for_tests
+    _reset_for_tests()
     # Reset to defaults
     _status_cache.clear()
     _status_cache.update(copy.deepcopy(_DEFAULT_STATUS_CACHE))
