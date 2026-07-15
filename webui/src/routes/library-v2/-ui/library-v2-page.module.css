@@ -1821,6 +1821,59 @@
   padding: 1px 4px;
 }
 
+/* --- §40 artist alias chips (docs/library-v2.md §24) --- */
+.aliasChips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.aliasChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 2px 4px 2px 7px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.aliasChipRemove {
+  border: none;
+  background: transparent;
+  color: inherit;
+  opacity: 0.6;
+  cursor: pointer;
+  font-size: 10px;
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.aliasChipRemove:hover {
+  opacity: 1;
+}
+
+.aliasLinkButton {
+  font-size: 10.5px;
+  font-weight: 600;
+  border: 1px dashed rgba(255, 255, 255, 0.25);
+  border-radius: 8px;
+  padding: 2px 7px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+}
+
+.aliasLinkButton:hover {
+  color: rgba(255, 255, 255, 0.9);
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
 .verificationBadge {
   font-size: 9.5px;
   font-weight: 600;

@@ -51,11 +51,17 @@ class Lib2DiscographyRefreshJob(RepairJob):
     auto_fix = True  # queueing IS the fix; there is nothing to review
 
     def _artist_ids(self, conn) -> list:
+        # §40: alias-member rows (canonical_artist_id set) are skipped as
+        # sweep roots — refresh_artist_discography fans out across the whole
+        # alias group when it processes the CANONICAL row, so an alias row
+        # would otherwise get its group refreshed again on its own turn too
+        # (an N-member group would cost N^2 fetches per sweep instead of N).
         return [r[0] for r in conn.execute(
             """SELECT id FROM lib2_artists
                 WHERE monitored = 1
                   AND COALESCE(monitor_new_items, 'all') <> 'none'
                   AND discography_synced_at IS NOT NULL
+                  AND canonical_artist_id IS NULL
                 ORDER BY id"""
         )]
 

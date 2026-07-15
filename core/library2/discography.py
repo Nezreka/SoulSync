@@ -175,10 +175,66 @@ def _match_existing(index: Dict[str, List[Dict[str, Any]]], *, title: str,
     return candidates[0] if candidates else None
 
 
+def _resolve_group(database, artist_id: int) -> List[int]:
+    from core.library2.artist_aliases import resolve_alias_group
+    conn = database._get_connection()
+    try:
+        return resolve_alias_group(conn, artist_id)
+    finally:
+        conn.close()
+
+
+def _aggregate_group_stats(requested_id: int, per_member: Dict[int, Dict[str, Any]]) -> Dict[str, Any]:
+    """Combine per-member stats into one dict, keyed on the requested member's
+    own scalar fields (source/is_complete/...) so its meaning is unambiguous —
+    a group can legitimately span different providers per member."""
+    base = per_member.get(requested_id) or next(iter(per_member.values()), {})
+    aggregate = dict(base)
+    for key in ("added", "enriched", "removed", "total"):
+        aggregate[key] = sum(int(s.get(key) or 0) for s in per_member.values())
+    aggregate["auto_monitor_album_ids"] = [
+        album_id
+        for s in per_member.values()
+        for album_id in (s.get("auto_monitor_album_ids") or [])
+    ]
+    aggregate["group"] = list(per_member.keys())
+    aggregate["members"] = per_member
+    return aggregate
+
+
 def expand_artist_discography(database, artist_id: int) -> Dict[str, Any]:
-    """Fetch and persist one artist catalog under the shared sync boundary."""
-    with _sync_lock(database, artist_id):
-        return _expand_artist_discography(database, artist_id)
+    """Fetch and persist one artist catalog under the shared sync boundary.
+
+    §40: a standalone artist (no linked aliases — the overwhelming common
+    case) behaves exactly as before: one lock, one fetch, the original stats
+    shape untouched. A linked alias group (docs §24) fans out instead — every
+    member gets its own unchanged fetch+persist call (its own ``lib2_albums``
+    rows, no ``primary_artist_id`` reassignment), because a member is only
+    ever linked when its provider catalog is NOT reachable through any other
+    member's own external ids; a click on any one member must refresh all of
+    them or "Update Discography" would keep missing the other alias's
+    releases (see docs §24.3 for why the sweep job must NOT do this same
+    fan-out per group member — that would multiply fetches by group size).
+    """
+    members = _resolve_group(database, artist_id)
+    if len(members) == 1:
+        with _sync_lock(database, artist_id):
+            return _expand_artist_discography(database, artist_id)
+
+    per_member: Dict[int, Dict[str, Any]] = {}
+    for member_id in members:
+        with _sync_lock(database, member_id):
+            try:
+                per_member[member_id] = _expand_artist_discography(database, member_id)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(
+                    "Alias-group discography fetch failed for artist %s "
+                    "(group requested via %s): %s", member_id, artist_id, e)
+                per_member[member_id] = {
+                    "added": 0, "enriched": 0, "removed": 0, "total": 0,
+                    "auto_monitor_album_ids": [], "error": str(e),
+                }
+    return _aggregate_group_stats(artist_id, per_member)
 
 
 def _expand_artist_discography(database, artist_id: int) -> Dict[str, Any]:
@@ -539,14 +595,11 @@ def repair_track_number_collisions(database, config_manager, artist_id: int) -> 
     return repaired
 
 
-def refresh_artist_discography(
-    database,
-    artist_id: int,
-    config_manager,
-    *,
-    wishlist_profile_id: int = 1,
+def _refresh_one_artist(
+    database, artist_id: int, config_manager, *, wishlist_profile_id: int,
 ) -> tuple[Dict[str, Any], int]:
-    """Run snapshot refresh and its auto-monitor side effects as one sequence."""
+    """The original single-artist refresh sequence, unchanged: one lock held
+    across fetch + auto-monitor + track-number-collision repair."""
     with _sync_lock(database, artist_id):
         stats = _expand_artist_discography(database, artist_id)
         album_ids = stats.get("auto_monitor_album_ids") or []
@@ -561,6 +614,51 @@ def refresh_artist_discography(
         stats["repaired_track_number_collisions"] = repair_track_number_collisions(
             database, config_manager, artist_id)
         return stats, mirrored
+
+
+def refresh_artist_discography(
+    database,
+    artist_id: int,
+    config_manager,
+    *,
+    wishlist_profile_id: int = 1,
+) -> tuple[Dict[str, Any], int]:
+    """Run snapshot refresh and its auto-monitor side effects as one sequence.
+
+    §40: a standalone artist runs the exact single-artist sequence as before
+    (same lock scope, same return shape). A linked alias group (docs §24)
+    fans out — every member runs its own unchanged refresh sequence (fetch +
+    auto-monitor + track-number-collision repair), and the results are
+    aggregated the same way ``expand_artist_discography`` does.
+    """
+    members = _resolve_group(database, artist_id)
+    if len(members) == 1:
+        return _refresh_one_artist(
+            database, artist_id, config_manager, wishlist_profile_id=wishlist_profile_id)
+
+    per_member: Dict[int, Dict[str, Any]] = {}
+    total_mirrored = 0
+    total_repaired: List[int] = []
+    for member_id in members:
+        try:
+            member_stats, member_mirrored = _refresh_one_artist(
+                database, member_id, config_manager, wishlist_profile_id=wishlist_profile_id)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "Alias-group discography refresh failed for artist %s "
+                "(group requested via %s): %s", member_id, artist_id, e)
+            member_stats, member_mirrored = {
+                "added": 0, "enriched": 0, "removed": 0, "total": 0,
+                "auto_monitor_album_ids": [], "repaired_track_number_collisions": [],
+                "error": str(e),
+            }, 0
+        per_member[member_id] = member_stats
+        total_mirrored += member_mirrored
+        total_repaired.extend(member_stats.get("repaired_track_number_collisions") or [])
+
+    stats = _aggregate_group_stats(artist_id, per_member)
+    stats["repaired_track_number_collisions"] = total_repaired
+    return stats, total_mirrored
 
 
 __all__ = [

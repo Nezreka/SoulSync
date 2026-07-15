@@ -99,6 +99,14 @@ export interface LibraryV2ArtistDetail {
   user_overrides: Record<string, unknown>;
 }
 
+/** One member of an artist's §40 alias group (docs/library-v2.md §24) — the
+ *  same real artist under a different, unlinked provider identity. */
+export interface LibraryV2ArtistAliasMember {
+  id: number;
+  name: string;
+  image_url: string | null;
+}
+
 export interface LibraryV2TrackArtist {
   id: number;
   name: string;

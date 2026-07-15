@@ -4,6 +4,7 @@ import { apiClient, readJson } from '@/app/api-client';
 
 import type {
   LibraryV2AlbumDetail,
+  LibraryV2ArtistAliasMember,
   LibraryV2ArtistDetail,
   LibraryV2ArtistSummary,
   LibraryV2DiscographyStats,
@@ -189,6 +190,46 @@ export async function fetchLibraryV2AlbumMatchStatus(
   }>(apiClient.get(`library/v2/albums/${albumId}/match-status`));
   if (!payload.success) throw new Error(payload.error || 'Failed to load match status');
   return { album: payload.album ?? [], tracks: payload.tracks ?? {} };
+}
+
+/** §40 — the artist's full alias group (canonical + linked aliases). Works
+ *  whether ``artistId`` is itself the canonical row or one of its aliases.
+ *  See docs/library-v2.md §24. */
+export async function fetchLibraryV2ArtistAliases(
+  artistId: number,
+): Promise<{ canonicalArtistId: number; aliases: LibraryV2ArtistAliasMember[] }> {
+  const payload = await readJson<{
+    success: boolean;
+    canonical_artist_id?: number;
+    aliases?: LibraryV2ArtistAliasMember[];
+    error?: string;
+  }>(apiClient.get(`library/v2/artists/${artistId}/aliases`));
+  if (!payload.success) throw new Error(payload.error || 'Failed to load aliases');
+  return {
+    canonicalArtistId: payload.canonical_artist_id ?? artistId,
+    aliases: payload.aliases ?? [],
+  };
+}
+
+/** §40: mark ``artistId`` as an alias of ``aliasOfId`` — the same real artist
+ *  under a different, unlinked provider identity. Both rows keep their own
+ *  albums/tracks (soft link, nothing is reassigned or deleted). */
+export async function linkLibraryV2ArtistAlias(artistId: number, aliasOfId: number): Promise<void> {
+  const payload = await readJson<{ success: boolean; error?: string }>(
+    apiClient.post(`library/v2/artists/${artistId}/link-alias`, {
+      json: { alias_of: aliasOfId },
+    }),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Link failed');
+}
+
+/** §40: detach ``artistId`` from its canonical artist, if any — it becomes a
+ *  standalone entry again (its own albums are untouched either way). */
+export async function unlinkLibraryV2ArtistAlias(artistId: number): Promise<void> {
+  const payload = await readJson<{ success: boolean; error?: string }>(
+    apiClient.delete(`library/v2/artists/${artistId}/link-alias`),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Unlink failed');
 }
 
 /** Manually match an entity to a provider id, reusing the app-wide legacy
@@ -707,6 +748,14 @@ export function libraryV2ArtistMatchStatusQueryOptions(artistId: number) {
     queryFn: () => fetchLibraryV2ArtistMatchStatus(artistId),
     enabled: artistId > 0,
     staleTime: 30_000,
+  });
+}
+
+export function libraryV2ArtistAliasesQueryOptions(artistId: number) {
+  return queryOptions({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'artist-aliases', artistId],
+    queryFn: () => fetchLibraryV2ArtistAliases(artistId),
+    enabled: artistId > 0,
   });
 }
 

@@ -1288,6 +1288,161 @@ def test_delete_featured_artist_keeps_owner_album(api):
     assert not db.wishlist_removes
 
 
+# --- §40 alias registry -------------------------------------------------------
+
+def _new_artist(db, name: str) -> int:
+    with _conn(db) as conn:
+        cur = conn.execute("INSERT INTO lib2_artists(name) VALUES(?)", (name,))
+        conn.commit()
+        return cur.lastrowid
+
+
+def test_link_alias_happy_path_and_aliases_endpoint(api):
+    client, db, ids = api
+    alias_id = _new_artist(db, "Drake (Alias)")
+
+    resp = client.post(
+        f"/api/library/v2/artists/{alias_id}/link-alias",
+        json={"alias_of": ids["artist"]},
+    )
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["success"] is True
+    assert body["canonical_artist_id"] == ids["artist"]
+
+    listing = client.get(f"/api/library/v2/artists/{ids['artist']}/aliases").get_json()
+    assert listing["success"] is True
+    assert listing["canonical_artist_id"] == ids["artist"]
+    member_ids = {m["id"] for m in listing["aliases"]}
+    assert member_ids == {ids["artist"], alias_id}
+
+    # Same result whether queried from the alias id or the canonical id.
+    listing_via_alias = client.get(f"/api/library/v2/artists/{alias_id}/aliases").get_json()
+    assert listing_via_alias == listing
+
+
+def test_link_alias_rejects_self_chain_and_unknown_ids(api):
+    client, db, ids = api
+    alias_id = _new_artist(db, "Drake (Alias)")
+
+    resp = client.post(
+        f"/api/library/v2/artists/{ids['artist']}/link-alias",
+        json={"alias_of": ids["artist"]},
+    )
+    assert resp.status_code == 400
+
+    resp = client.post(
+        f"/api/library/v2/artists/{alias_id}/link-alias",
+        json={"alias_of": 999999},
+    )
+    assert resp.status_code == 404
+
+    resp = client.post(
+        "/api/library/v2/artists/999999/link-alias",
+        json={"alias_of": ids["artist"]},
+    )
+    assert resp.status_code == 404
+
+    resp = client.post(
+        f"/api/library/v2/artists/{alias_id}/link-alias",
+        json={"alias_of": "nope"},
+    )
+    assert resp.status_code == 400
+    assert "integer" in resp.get_json()["error"]
+
+    # No chains: link alias_id under artist, then try linking a third row
+    # onto the now-non-canonical alias_id.
+    client.post(f"/api/library/v2/artists/{alias_id}/link-alias",
+                json={"alias_of": ids["artist"]})
+    third_id = _new_artist(db, "Third")
+    resp = client.post(
+        f"/api/library/v2/artists/{third_id}/link-alias",
+        json={"alias_of": alias_id},
+    )
+    assert resp.status_code == 400
+
+
+def test_unlink_alias_detaches_one_row_only(api):
+    client, db, ids = api
+    alias_1 = _new_artist(db, "Alias 1")
+    alias_2 = _new_artist(db, "Alias 2")
+    client.post(f"/api/library/v2/artists/{alias_1}/link-alias",
+                json={"alias_of": ids["artist"]})
+    client.post(f"/api/library/v2/artists/{alias_2}/link-alias",
+                json={"alias_of": ids["artist"]})
+
+    resp = client.delete(f"/api/library/v2/artists/{alias_1}/link-alias")
+    assert resp.status_code == 200
+    assert resp.get_json()["success"] is True
+
+    listing = client.get(f"/api/library/v2/artists/{ids['artist']}/aliases").get_json()
+    member_ids = {m["id"] for m in listing["aliases"]}
+    assert member_ids == {ids["artist"], alias_2}
+
+
+def test_unlink_alias_unknown_artist_is_404(api):
+    client, _db, _ids = api
+    resp = client.delete("/api/library/v2/artists/999999/link-alias")
+    assert resp.status_code == 404
+
+
+def test_aliases_endpoint_unknown_artist_is_404(api):
+    client, _db, _ids = api
+    resp = client.get("/api/library/v2/artists/999999/aliases")
+    assert resp.status_code == 404
+
+
+def test_deleting_canonical_artist_unlinks_its_aliases(api):
+    """§40/§24.7: deleting a canonical row must not leave alias rows pointing
+    at a now-deleted artist — they become standalone again."""
+    client, db, ids = api
+    alias_id = _new_artist(db, "Drake (Alias)")
+    client.post(f"/api/library/v2/artists/{alias_id}/link-alias",
+                json={"alias_of": ids["artist"]})
+
+    resp = client.delete(f"/api/library/v2/artists/{ids['artist']}")
+    assert resp.get_json()["success"] is True
+
+    with _conn(db) as conn:
+        row = conn.execute(
+            "SELECT canonical_artist_id FROM lib2_artists WHERE id=?", (alias_id,)
+        ).fetchone()
+    assert row["canonical_artist_id"] is None
+
+
+def test_list_artists_hides_alias_rows_via_api(api):
+    client, db, ids = api
+    alias_id = _new_artist(db, "Drake (Alias)")
+    client.post(f"/api/library/v2/artists/{alias_id}/link-alias",
+                json={"alias_of": ids["artist"]})
+
+    listing = client.get("/api/library/v2/artists").get_json()
+    listed_ids = {a["id"] for a in listing["artists"]}
+    assert ids["artist"] in listed_ids
+    assert alias_id not in listed_ids
+
+
+def test_get_artist_merges_alias_albums_via_api(api):
+    client, db, ids = api
+    alias_id = _new_artist(db, "Drake (Alias)")
+    with _conn(db) as conn:
+        cur = conn.execute(
+            "INSERT INTO lib2_albums(primary_artist_id, title, album_type) "
+            "VALUES(?, 'Alias-Only Album', 'album')", (alias_id,))
+        alias_album = cur.lastrowid
+        conn.execute(
+            "INSERT INTO lib2_album_artists(album_id, artist_id) VALUES(?,?)",
+            (alias_album, alias_id))
+        conn.commit()
+    client.post(f"/api/library/v2/artists/{alias_id}/link-alias",
+                json={"alias_of": ids["artist"]})
+
+    detail = client.get(f"/api/library/v2/artists/{ids['artist']}").get_json()
+    titles = {a["title"] for a in detail["artist"]["albums"]}
+    assert "Views" in titles
+    assert "Alias-Only Album" in titles
+
+
 def test_artist_delete_preview_for_primary_artist(api):
     client, _db, ids = api
     preview = client.get(f"/api/library/v2/artists/{ids['artist']}/delete-preview").get_json()

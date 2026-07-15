@@ -30,6 +30,7 @@ import {
   editTrackFileTag,
   fetchLibraryV2ArtistDeletePreview,
   fetchLibraryV2ArtistHistory,
+  fetchLibraryV2Artists,
   fetchLibraryV2Duplicates,
   fetchLibraryV2FileDeletePreview,
   fetchLibraryV2ImportStatus,
@@ -38,6 +39,7 @@ import {
   LIBRARY_V2_QUERY_KEY,
   libraryV2AlbumMatchStatusQueryOptions,
   libraryV2AlbumQueryOptions,
+  libraryV2ArtistAliasesQueryOptions,
   libraryV2ArtistMatchStatusQueryOptions,
   libraryV2ArtistQueryOptions,
   libraryV2ArtistsQueryOptions,
@@ -48,6 +50,7 @@ import {
   libraryV2QualityProfilesQueryOptions,
   libraryV2TrackFileTagsQueryOptions,
   libraryV2TrackSourceInfoQueryOptions,
+  linkLibraryV2ArtistAlias,
   manualMatchLibraryV2Entity,
   materializeLibraryV2MissingTrack,
   moveLibraryV2TrackFile,
@@ -62,6 +65,7 @@ import {
   startLibraryV2AlbumReplayGain,
   startLibraryV2Import,
   startLibraryV2UpgradeScan,
+  unlinkLibraryV2ArtistAlias,
   unlinkLibraryV2Duplicate,
   updateLibraryV2MetadataOverrides,
   writeLibraryV2Tags,
@@ -667,6 +671,137 @@ function ArtistMatchChips({ artistId, artistName }: { artistId: number; artistNa
   const query = useQuery(libraryV2ArtistMatchStatusQueryOptions(artistId));
   if (!query.data?.length) return null;
   return <MatchChips entityType="artist" entityName={artistName} services={query.data} />;
+}
+
+/** §40: alias-group chips on the artist header + a "Link alias" action.
+ *  ``artistId`` is always the CANONICAL id here (get_artist redirects an
+ *  alias id's detail response to its canonical — see docs §24.4), so the
+ *  rendered chips are exactly its linked aliases. Deliberately minimal (no
+ *  suggestion/recovery UX) — that is §41's separate, larger scope. */
+function ArtistAliases({ artistId, artistName }: { artistId: number; artistName: string }) {
+  const queryClient = useQueryClient();
+  const [linking, setLinking] = useState(false);
+  const query = useQuery(libraryV2ArtistAliasesQueryOptions(artistId));
+  const unlink = useMutation({
+    mutationFn: (aliasId: number) => unlinkLibraryV2ArtistAlias(aliasId),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+    },
+  });
+  const aliases = (query.data?.aliases ?? []).filter((m) => m.id !== artistId);
+  return (
+    <div className={styles.aliasChips}>
+      {aliases.map((m) => (
+        <span key={m.id} className={styles.aliasChip}>
+          {m.name}
+          <button
+            type="button"
+            className={styles.aliasChipRemove}
+            title={`Unlink ${m.name} (it becomes a standalone artist again)`}
+            disabled={unlink.isPending}
+            onClick={() => unlink.mutate(m.id)}
+          >
+            ✕
+          </button>
+        </span>
+      ))}
+      <button
+        type="button"
+        className={styles.aliasLinkButton}
+        title="Link another artist row in your library as an alias of this one (same real artist, different provider identity)"
+        onClick={() => setLinking(true)}
+      >
+        + Link alias
+      </button>
+      {linking ? (
+        <LinkArtistAliasModal
+          artistId={artistId}
+          artistName={artistName}
+          onClose={() => setLinking(false)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/** Search the local library for the OTHER artist row to link as an alias —
+ *  reuses the existing artist search endpoint (no new search infra). */
+function LinkArtistAliasModal({
+  artistId,
+  artistName,
+  onClose,
+}: {
+  artistId: number;
+  artistName: string;
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [query, setQuery] = useState('');
+  const search = useMutation({
+    mutationFn: (q: string) =>
+      fetchLibraryV2Artists({ q, sort: 'name', page: 1, monitored: 'all' }),
+  });
+  const link = useMutation({
+    mutationFn: (aliasOfId: number) => linkLibraryV2ArtistAlias(artistId, aliasOfId),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+      onClose();
+    },
+  });
+  const results = (search.data?.artists ?? []).filter((a) => a.id !== artistId);
+  return (
+    <ModalShell title={`Link an alias of ${artistName}`} onClose={onClose}>
+      <div className={styles.matchSearchRow}>
+        <input
+          className={styles.searchInput}
+          value={query}
+          disabled={link.isPending}
+          placeholder="Search your library for the other artist row…"
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') search.mutate(query);
+          }}
+        />
+        <button
+          type="button"
+          className={styles.btnPrimary}
+          disabled={search.isPending || !query.trim()}
+          onClick={() => search.mutate(query)}
+        >
+          {search.isPending ? 'Searching…' : 'Search'}
+        </button>
+      </div>
+      {search.isError ? (
+        <div className={styles.searchError}>
+          {mutationErrorMessage(search.error, 'Search failed')}
+        </div>
+      ) : null}
+      {link.isError ? (
+        <div className={styles.searchError}>{mutationErrorMessage(link.error, 'Link failed')}</div>
+      ) : null}
+      <div className={styles.matchResults}>
+        {search.isSuccess && results.length === 0 ? (
+          <div className={styles.inlineLoading}>No matching artists in your library.</div>
+        ) : null}
+        {results.map((a) => (
+          <div key={a.id} className={styles.matchResultRow}>
+            <div className={styles.matchResultInfo}>
+              <span className={styles.matchResultName}>{a.name}</span>
+              <span className={styles.matchResultId}>ID: {a.id}</span>
+            </div>
+            <button
+              type="button"
+              className={styles.btnPrimary}
+              disabled={link.isPending}
+              onClick={() => link.mutate(a.id)}
+            >
+              {link.isPending ? 'Linking…' : 'Link'}
+            </button>
+          </div>
+        ))}
+      </div>
+    </ModalShell>
+  );
 }
 
 /** Lidarr-style artist monitoring options: one click applies a monitoring
@@ -2381,7 +2516,9 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
                   <SvgIcon name="tracks" />
                   {trackProgress(album.tracks_present, album.track_count)} tracks
                 </span>
-                <span className={`${styles.detailLabel} ${album.monitored ? styles.labelMonitored : styles.labelUnmonitored}`}>
+                <span
+                  className={`${styles.detailLabel} ${album.monitored ? styles.labelMonitored : styles.labelUnmonitored}`}
+                >
                   <SvgIcon name={album.monitored ? 'monitor' : 'close'} />
                   {album.monitored ? 'Monitored' : 'Unmonitored'}
                 </span>
@@ -2749,7 +2886,9 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                   <SvgIcon name="star" />
                   {artist.quality_profile?.name ?? 'No quality profile'}
                 </span>
-                <span className={`${styles.detailLabel} ${artist.monitored ? styles.labelMonitored : styles.labelUnmonitored}`}>
+                <span
+                  className={`${styles.detailLabel} ${artist.monitored ? styles.labelMonitored : styles.labelUnmonitored}`}
+                >
                   <SvgIcon name={artist.monitored ? 'monitor' : 'close'} />
                   {artist.monitored ? 'Monitored' : 'Unmonitored'}
                 </span>
@@ -2763,6 +2902,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 <p className={styles.genres}>{artist.genres.join(', ')}</p>
               ) : null}
               <ArtistMatchChips artistId={artist.id} artistName={artist.name} />
+              <ArtistAliases artistId={artist.id} artistName={artist.name} />
             </div>
           </header>
 

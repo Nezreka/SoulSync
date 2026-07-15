@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS lib2_artists (
     monitored INTEGER NOT NULL DEFAULT 1,
     monitor_new_items TEXT NOT NULL DEFAULT 'all',   -- 'all' | 'none' | 'new'
     quality_profile_id INTEGER REFERENCES quality_profiles(id) ON DELETE RESTRICT,
+    canonical_artist_id INTEGER REFERENCES lib2_artists(id) ON DELETE SET NULL, -- self-ref; NULL = canonical/standalone. Set = alias of that row (§40 registry: same real artist under a different, unlinked provider identity — see core/library2/artist_aliases.py)
     legacy_artist_id INTEGER,                         -- source row in legacy `artists`
     legacy_import_run_id TEXT,                        -- last complete legacy snapshot that saw it
     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -394,6 +395,11 @@ _ADDED_COLUMNS = (
     ("lib2_tracks", "play_count",
      "ALTER TABLE lib2_tracks ADD COLUMN play_count INTEGER NOT NULL DEFAULT 0"),
     ("lib2_tracks", "last_played", "ALTER TABLE lib2_tracks ADD COLUMN last_played TIMESTAMP"),
+    # §40: alias registry — soft-link two artist rows that are the same real
+    # artist under a different, unlinked provider identity (e.g. a kanji vs.
+    # romaji name with distinct Deezer/Spotify catalog entries).
+    ("lib2_artists", "canonical_artist_id",
+     "ALTER TABLE lib2_artists ADD COLUMN canonical_artist_id INTEGER"),
 )
 
 
@@ -624,6 +630,15 @@ def ensure_library_v2_schema(connection: Any) -> None:
                 logger.debug("column migration %s.%s: %s", table, column, e)
     _migrate_lib2_profiles_to_app_wide(cursor)
     _migrate_quality_profile_constraints(cursor)
+    # §40 alias registry index — runs AFTER the additive column migration
+    # above so it also works on installs that predate canonical_artist_id.
+    try:
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_lib2_artists_canonical "
+            "ON lib2_artists(canonical_artist_id)"
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.debug("idx_lib2_artists_canonical create skipped: %s", e)
     # Provider-less stable ids (audit P1-12). Index + backfill run AFTER the
     # additive column migration above so they also work on installs that
     # predate the stable_id columns.

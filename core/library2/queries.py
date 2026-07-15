@@ -81,7 +81,9 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
     page = max(1, int(page))
     limit = max(1, min(int(limit), 500))
     offset = (page - 1) * limit
-    clauses, params = [], {}
+    # §40: alias-member rows are folded into their canonical artist's entry
+    # (get_artist merges their albums in) and never listed on their own.
+    clauses, params = ["a.canonical_artist_id IS NULL"], {}
     if search:
         clauses.append("a.name LIKE :like")
         params["like"] = f"%{search}%"
@@ -174,8 +176,19 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
 
 
 def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
-    """Artist detail: header + albums and singles grouped separately."""
-    a = conn.execute("SELECT * FROM lib2_artists WHERE id = ?", (artist_id,)).fetchone()
+    """Artist detail: header + albums and singles grouped separately.
+
+    §40: resolves ``artist_id``'s alias group first — works whether it is the
+    canonical row or one of its linked aliases, so an old deep link to an
+    alias id still resolves. Albums/EPs/singles are the UNION of every group
+    member's own releases (each keeps its own ``lib2_albums`` rows, nothing
+    is reassigned); the header fields (bio/image/genres/...) always come from
+    the CANONICAL row.
+    """
+    from core.library2.artist_aliases import resolve_alias_group
+    group = resolve_alias_group(conn, artist_id)
+    canonical_id = group[0]
+    a = conn.execute("SELECT * FROM lib2_artists WHERE id = ?", (canonical_id,)).fetchone()
     if a is None:
         return None
     artist_effective, artist_overrides = project_metadata(
@@ -189,7 +202,7 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
     ).fetchone()
 
     album_rows = conn.execute(
-        """
+        f"""
         SELECT al.id, al.title, al.album_type, al.release_date, al.year,
                al.image_url, al.monitored, al.quality_profile_id, al.track_count,
                al.expected_track_count, al.origin, al.spotify_id,
@@ -203,11 +216,11 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
         JOIN lib2_albums al ON al.id = aa.album_id
         LEFT JOIN lib2_tracks t ON t.album_id=al.id
         LEFT JOIN lib2_track_files tf ON tf.track_id=t.id
-        WHERE aa.artist_id = ?
+        WHERE aa.artist_id IN ({",".join("?" for _ in group)})
         GROUP BY al.id
         ORDER BY al.year DESC, al.title COLLATE NOCASE
         """,
-        (artist_id,),
+        tuple(group),
     ).fetchall()
 
     projected_albums = project_metadata_many(

@@ -111,6 +111,66 @@ def test_get_artist_groups_albums_and_singles(imported_conn):
     assert [s["title"] for s in data["singles"]] == ["One Dance"]
 
 
+# --- §40 alias registry -------------------------------------------------------
+
+def _link_alias(conn, artist_id: int, alias_of_id: int) -> None:
+    from core.library2.artist_aliases import link_artist_alias
+    link_artist_alias(conn, artist_id, alias_of_id)
+
+
+def test_list_artists_hides_alias_member_rows(imported_conn):
+    drake_id = imported_conn.execute(
+        "SELECT id FROM lib2_artists WHERE name='Drake'").fetchone()[0]
+    cur = imported_conn.execute("INSERT INTO lib2_artists(name) VALUES('Drake (Alias)')")
+    alias_id = cur.lastrowid
+    _link_alias(imported_conn, alias_id, drake_id)
+
+    artists, total = Q.list_artists(imported_conn)
+
+    names = {a["name"] for a in artists}
+    assert "Drake" in names
+    assert "Drake (Alias)" not in names
+    assert alias_id not in {a["id"] for a in artists}
+    assert total == 2  # Drake + Wizkid, same as before linking — alias not counted twice
+
+
+def test_get_artist_merges_albums_across_alias_group(imported_conn):
+    drake_id = imported_conn.execute(
+        "SELECT id FROM lib2_artists WHERE name='Drake'").fetchone()[0]
+    cur = imported_conn.execute("INSERT INTO lib2_artists(name) VALUES('Drake (Alias)')")
+    alias_id = cur.lastrowid
+    cur = imported_conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title, album_type) "
+        "VALUES(?, 'Alias-Only Album', 'album')", (alias_id,))
+    alias_album_id = cur.lastrowid
+    imported_conn.execute(
+        "INSERT INTO lib2_album_artists(album_id, artist_id) VALUES(?,?)",
+        (alias_album_id, alias_id))
+    _link_alias(imported_conn, alias_id, drake_id)
+
+    data = Q.get_artist(imported_conn, drake_id)
+
+    titles = {a["title"] for a in data["albums"]}
+    assert "Views" in titles          # canonical's own album
+    assert "Alias-Only Album" in titles  # merged in from the linked alias
+
+
+def test_get_artist_on_alias_id_resolves_to_canonical_header(imported_conn):
+    drake_id = imported_conn.execute(
+        "SELECT id FROM lib2_artists WHERE name='Drake'").fetchone()[0]
+    cur = imported_conn.execute("INSERT INTO lib2_artists(name) VALUES('Drake (Alias)')")
+    alias_id = cur.lastrowid
+    _link_alias(imported_conn, alias_id, drake_id)
+
+    data = Q.get_artist(imported_conn, alias_id)
+
+    # Opening an old deep link to the alias id shows the CANONICAL header...
+    assert data["id"] == drake_id
+    assert data["name"] == "Drake"
+    # ...but still the merged album set.
+    assert [a["title"] for a in data["albums"]] == ["Views"]
+
+
 def test_get_album_track_status(imported_conn):
     views_id = imported_conn.execute(
         "SELECT id FROM lib2_albums WHERE title='Views'").fetchone()[0]

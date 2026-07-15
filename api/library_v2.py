@@ -1109,6 +1109,89 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             _apply_artwork_urls(entry, "album")
         return jsonify({"success": True, "artist": data})
 
+    @app.route("/api/library/v2/artists/<int:artist_id>/aliases")
+    def lib2_get_artist_aliases(artist_id):
+        """§40: the artist's full alias group (canonical + linked aliases —
+        works whether ``artist_id`` is itself the canonical row or one of its
+        aliases). See docs/library-v2.md §24."""
+        guard = _guard()
+        if guard:
+            return guard
+        from core.library2.artist_aliases import resolve_alias_group
+        conn = _conn()
+        try:
+            if not conn.execute(
+                    "SELECT 1 FROM lib2_artists WHERE id=?", (artist_id,)).fetchone():
+                return jsonify({"success": False, "error": "Artist not found"}), 404
+            group = resolve_alias_group(conn, artist_id)
+            rows = conn.execute(
+                f"SELECT id, name, image_url FROM lib2_artists "
+                f"WHERE id IN ({','.join('?' for _ in group)})",
+                tuple(group),
+            ).fetchall()
+        finally:
+            conn.close()
+        by_id = {int(r["id"]): dict(r) for r in rows}
+        members = [by_id[i] for i in group if i in by_id]
+        for m in members:
+            _apply_artwork_urls(m, "artist")
+        return jsonify({
+            "success": True,
+            "canonical_artist_id": group[0],
+            "aliases": members,
+        })
+
+    @app.route("/api/library/v2/artists/<int:artist_id>/link-alias", methods=["POST"])
+    def lib2_link_artist_alias(artist_id):
+        """§40: mark ``artist_id`` as an alias of another artist row — the same
+        real artist under a different, unlinked provider identity. Body
+        ``{"alias_of": <artist_id>}``. Both rows keep their own albums/tracks
+        (soft link); see docs/library-v2.md §24."""
+        guard = _guard()
+        if guard:
+            return guard
+        body = request.json or {}
+        try:
+            alias_of = int(body.get("alias_of"))
+        except (TypeError, ValueError):
+            return jsonify({
+                "success": False,
+                "error": "alias_of must be an integer artist id",
+            }), 400
+        from core.library2.artist_aliases import AliasLinkError, link_artist_alias
+        conn = _conn()
+        try:
+            try:
+                link_artist_alias(conn, artist_id, alias_of)
+            except AliasLinkError as exc:
+                return jsonify({"success": False, "error": str(exc)}), exc.status
+            conn.commit()
+        finally:
+            conn.close()
+        return jsonify({
+            "success": True,
+            "artist_id": artist_id,
+            "canonical_artist_id": alias_of,
+        })
+
+    @app.route("/api/library/v2/artists/<int:artist_id>/link-alias", methods=["DELETE"])
+    def lib2_unlink_artist_alias(artist_id):
+        """§40: detach ``artist_id`` from its canonical artist, if any."""
+        guard = _guard()
+        if guard:
+            return guard
+        from core.library2.artist_aliases import AliasLinkError, unlink_artist_alias
+        conn = _conn()
+        try:
+            try:
+                unlink_artist_alias(conn, artist_id)
+            except AliasLinkError as exc:
+                return jsonify({"success": False, "error": str(exc)}), exc.status
+            conn.commit()
+        finally:
+            conn.close()
+        return jsonify({"success": True, "artist_id": artist_id})
+
     @app.route("/api/library/v2/albums/<int:album_id>")
     def lib2_get_album(album_id):
         guard = _guard()
@@ -2384,6 +2467,14 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             cur = conn.execute("DELETE FROM lib2_album_artists WHERE artist_id=?", (artist_id,))
             stats["detached_albums"] = cur.rowcount
             conn.execute("DELETE FROM lib2_track_artists WHERE artist_id=?", (artist_id,))
+            # §40: if this row was someone's canonical artist, its alias rows
+            # become standalone again instead of pointing at a deleted row —
+            # explicit, since ALTER-migrated installs never got the column's
+            # FK constraint (only fresh installs did; see docs §24.7).
+            conn.execute(
+                "UPDATE lib2_artists SET canonical_artist_id=NULL, "
+                "updated_at=CURRENT_TIMESTAMP WHERE canonical_artist_id=?",
+                (artist_id,))
             conn.execute("DELETE FROM lib2_artists WHERE id=?", (artist_id,))
             conn.commit()
             drain_mirror_outbox(db)

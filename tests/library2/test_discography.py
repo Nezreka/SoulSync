@@ -712,3 +712,150 @@ def test_refresh_track_number_repair_does_not_remonitor_or_reprovenance(
         (swag_id,),
     ).fetchone()[0]
     assert rule == 0
+
+
+# --- §40 alias-group fan-out --------------------------------------------------
+
+def _fake_discography_by_name(monkeypatch, catalog_by_name):
+    """Like ``fake_discography`` but returns a DIFFERENT catalog per artist
+    name — proves a group fan-out fetches EACH member's own provider catalog,
+    not just the requested member's."""
+    def fake(artist_id, artist_name="", options=None):
+        return catalog_by_name.get(artist_name, _cards())
+
+    monkeypatch.setattr("core.metadata.discography.get_artist_detail_discography", fake)
+
+
+def _new_artist(conn, name: str) -> int:
+    cur = conn.execute("INSERT INTO lib2_artists(name) VALUES(?)", (name,))
+    return cur.lastrowid
+
+
+def test_expand_fans_out_across_alias_group(legacy_db, imported_conn, monkeypatch):
+    from core.library2.artist_aliases import link_artist_alias
+
+    drake_id = _artist_id(imported_conn)
+    alias_id = _new_artist(imported_conn, "Drake (Alias)")
+    imported_conn.commit()
+    link_artist_alias(imported_conn, alias_id, drake_id)
+    imported_conn.commit()
+
+    _fake_discography_by_name(monkeypatch, {
+        "Drake": _cards(("albums", {
+            "id": "sp-scorpion", "title": "Scorpion", "album_type": "album",
+            "release_date": "2018-06-29", "year": "2018", "track_count": 25,
+            "image_url": None,
+        })),
+        "Drake (Alias)": _cards(("albums", {
+            "id": "sp-alias-only", "title": "Alias-Only Release", "album_type": "album",
+            "release_date": "2020-01-01", "year": "2020", "track_count": 10,
+            "image_url": None,
+        })),
+    })
+
+    # Triggering the CANONICAL row's discography still reaches the alias's
+    # own provider catalog — the whole point of the group (§40/§24.3).
+    stats = D.expand_artist_discography(legacy_db, drake_id)
+
+    assert stats["group"] == [drake_id, alias_id]
+    assert stats["total"] == 2  # 1 from each member's own catalog
+    alias_only = imported_conn.execute(
+        "SELECT al.id FROM lib2_albums al JOIN lib2_album_artists aa ON aa.album_id=al.id "
+        "WHERE aa.artist_id=? AND al.title='Alias-Only Release'", (alias_id,),
+    ).fetchone()
+    assert alias_only is not None
+
+
+def test_expand_fans_out_regardless_of_which_member_id_is_used(
+        legacy_db, imported_conn, monkeypatch):
+    from core.library2.artist_aliases import link_artist_alias
+
+    drake_id = _artist_id(imported_conn)
+    alias_id = _new_artist(imported_conn, "Drake (Alias)")
+    imported_conn.commit()
+    link_artist_alias(imported_conn, alias_id, drake_id)
+    imported_conn.commit()
+
+    _fake_discography_by_name(monkeypatch, {
+        "Drake": _cards(("albums", {"id": "sp-a", "title": "A", "album_type": "album"})),
+        "Drake (Alias)": _cards(("albums", {"id": "sp-b", "title": "B", "album_type": "album"})),
+    })
+
+    # Clicking "Update Discography" from the ALIAS row must refresh the
+    # canonical row's catalog too, not just its own.
+    stats = D.expand_artist_discography(legacy_db, alias_id)
+
+    assert sorted(stats["group"]) == sorted([drake_id, alias_id])
+    canonical_album = imported_conn.execute(
+        "SELECT 1 FROM lib2_albums al JOIN lib2_album_artists aa ON aa.album_id=al.id "
+        "WHERE aa.artist_id=? AND al.title='A'", (drake_id,),
+    ).fetchone()
+    assert canonical_album is not None
+
+
+def test_expand_group_partial_failure_still_persists_the_other_member(
+        legacy_db, imported_conn, monkeypatch):
+    from core.library2.artist_aliases import link_artist_alias
+
+    drake_id = _artist_id(imported_conn)
+    alias_id = _new_artist(imported_conn, "Drake (Alias)")
+    imported_conn.commit()
+    link_artist_alias(imported_conn, alias_id, drake_id)
+    imported_conn.commit()
+
+    def fake(artist_id, artist_name="", options=None):
+        if artist_name == "Drake (Alias)":
+            raise RuntimeError("simulated provider failure")
+        return _cards(("albums", {"id": "sp-a", "title": "A", "album_type": "album"}))
+
+    monkeypatch.setattr("core.metadata.discography.get_artist_detail_discography", fake)
+
+    stats = D.expand_artist_discography(legacy_db, drake_id)
+
+    assert stats["members"][alias_id]["error"]
+    assert "error" not in stats["members"][drake_id]
+    canonical_album = imported_conn.execute(
+        "SELECT 1 FROM lib2_albums al JOIN lib2_album_artists aa ON aa.album_id=al.id "
+        "WHERE aa.artist_id=? AND al.title='A'", (drake_id,),
+    ).fetchone()
+    assert canonical_album is not None
+
+
+def test_expand_group_stays_untouched_for_standalone_artist(
+        legacy_db, imported_conn, fake_discography):
+    """No aliases linked => identical shape/behavior to pre-§40 code (no
+    'group'/'members' keys leaking into the common single-artist case)."""
+    stats = D.expand_artist_discography(legacy_db, _artist_id(imported_conn))
+    assert "group" not in stats
+    assert "members" not in stats
+
+
+def test_refresh_fans_out_auto_monitor_and_repair_across_group(
+        legacy_db, imported_conn, monkeypatch):
+    from core.library2.artist_aliases import link_artist_alias
+
+    drake_id = _artist_id(imported_conn)
+    alias_id = _new_artist(imported_conn, "Drake (Alias)")
+    imported_conn.commit()
+    link_artist_alias(imported_conn, alias_id, drake_id)
+    imported_conn.commit()
+    imported_conn.execute(
+        "UPDATE lib2_artists SET discography_synced_at=CURRENT_TIMESTAMP, "
+        "monitor_new_items='all' WHERE id IN (?,?)", (drake_id, alias_id))
+    imported_conn.commit()
+
+    _fake_discography_by_name(monkeypatch, {
+        "Drake": _cards(("albums", {
+            "id": "sp-new-a", "title": "New A", "album_type": "album",
+            "release_date": "2030-01-01", "year": "2030",
+        })),
+        "Drake (Alias)": _cards(("albums", {
+            "id": "sp-new-b", "title": "New B", "album_type": "album",
+            "release_date": "2030-01-01", "year": "2030",
+        })),
+    })
+
+    stats, mirrored = D.refresh_artist_discography(legacy_db, drake_id, None)
+
+    assert len(stats["auto_monitor_album_ids"]) == 2
+    assert "repaired_track_number_collisions" in stats

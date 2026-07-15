@@ -669,6 +669,12 @@ def _reconcile_legacy_snapshot(cursor, run_id: str) -> Dict[str, int]:
                 (artist_id,),
             )
         else:
+            # §40: if this row was someone's canonical artist, its alias rows
+            # become standalone again instead of pointing at a deleted row.
+            cursor.execute(
+                "UPDATE lib2_artists SET canonical_artist_id=NULL, "
+                "updated_at=CURRENT_TIMESTAMP WHERE canonical_artist_id=?",
+                (artist_id,))
             cursor.execute("DELETE FROM lib2_artists WHERE id=?", (artist_id,))
         stats["reconciled_artists"] += 1
 
