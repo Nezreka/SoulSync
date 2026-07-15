@@ -155,9 +155,10 @@
 - **Scope:** Backend-Funktion + UI Modal.
 
 ### 8.5 Legacy-Import von Dateieigenschaften (ReplayGain, Lyrics)
-- **Status:** **Offen / Ausstehend**
+- **Status:** **Abgeschlossen** (2026-07-16, siehe docs/library-v2.md §25.2)
 - **Ziel:** Beim Importieren aus der alten Bibliothek (`import_legacy_library`) werden die Track-Feature-Flags (`has_replaygain` / `has_lyrics`) der Dateien nicht direkt übernommen. Sie werden erst nach einem manuellen "Refresh & Scan" in der UI sichtbar.
-- **Scope:** Importer-Backend (`core/library2/importer.py`).
+- **Fix:** Neue `precache_tag_cache()`-Stage (`core/library2/tag_cache.py`) liest die Tags direkt nach dem Import (bounded ThreadPoolExecutor, gleiches Muster wie Artwork-/Tracklist-Precache).
+- **Scope:** `core/library2/tag_cache.py`, `api/library_v2.py`.
 
 ---
 
@@ -182,4 +183,4 @@
 7. **Backend-Findings** (5.2, 8.3, 8.4 etc.): Roadmap-Punkte für zukünftige Sitzungen.
 8. **Artist-spezifische automatische Suche** (6.4): **Offen / Ausstehend** (Aufteilung in artist-spezifisch vs. global benötigt Backend-Erweiterung).
 9. **Verification Flow, Match-Quelle und ReplayGain** (7.1, 8.1, 8.2): **Abgeschlossen** (Badges, Chips und ReplayGain-Aktionen sind voll funktionsfähig).
-10. **Legacy-Import von Dateieigenschaften** (8.5): **Offen / Ausstehend** (muss in `core/library2/importer.py` ergänzt werden).
+10. **Legacy-Import von Dateieigenschaften** (8.5): **Abgeschlossen** (`precache_tag_cache()` liest Tags direkt nach dem Import, siehe §25.2).

@@ -2928,6 +2928,13 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 except Exception as e:  # noqa: BLE001
                     logger.debug("tracklist precache failed: %s", e)
 
+                _import_state.update(stage="tags")
+                try:
+                    from core.library2.tag_cache import precache_tag_cache
+                    precache_tag_cache(get_database(), config_manager, progress=_progress)
+                except Exception as e:  # noqa: BLE001
+                    logger.debug("tag cache precache failed: %s", e)
+
                 _import_state.update(stage="artwork")
                 try:
                     from core.library2.artwork import precache_all_artwork
