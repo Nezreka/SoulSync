@@ -13224,11 +13224,30 @@ def _resolve_library_file_path(file_path):
     _now = time.monotonic()
     if not isinstance(_resolve_library_diag_logged, float) or _now - _resolve_library_diag_logged > 600:
         _resolve_library_diag_logged = _now
+        # Name the FAILURE MODE, not just the miss: a genuinely absent file
+        # stats as ENOENT, while a broken NFS/bind mount surfaces ESTALE or
+        # EIO — and a base dir that suddenly lists 0 entries is an unmounted
+        # mountpoint. Turns "file not found, shrug" into "the mount under it
+        # is broken" (TheHomeGuy's Proxmox LXC bind-of-NFS).
+        import errno as _errno
+        _stat_err = 'ENOENT (plain not-found)'
+        try:
+            os.stat(file_path)
+        except OSError as _se:
+            _stat_err = '%s (errno=%s)' % (_errno.errorcode.get(_se.errno, type(_se).__name__), _se.errno)
+        _base_counts = []
+        for _b in abs_bases:
+            try:
+                _base_counts.append('%s: %d entries' % (_b, len(os.listdir(_b))))
+            except OSError as _le:
+                _base_counts.append('%s: UNLISTABLE (%s)' % (_b, _errno.errorcode.get(_le.errno, type(_le).__name__)))
         logger.warning(
             "[PathResolve] Could not resolve %r — tried direct-join + suffix-scan under %r (cwd=%r). "
+            "Raw-path stat: %s. Base dirs: %s. "
             "If files live elsewhere, set soulseek.transfer_path to the absolute mount or add "
-            "the dir under Settings > Library music paths.",
-            file_path, abs_bases, os.getcwd(),
+            "the dir under Settings > Library music paths. A base showing 0 entries or "
+            "ESTALE/EIO means the mount under it is broken (remount / restart the container).",
+            file_path, abs_bases, os.getcwd(), _stat_err, '; '.join(_base_counts) or 'none',
         )
     return None
 
