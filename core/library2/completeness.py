@@ -167,6 +167,34 @@ def _trim_excess_fileless_tracks(conn, album_id: int, expected: int,
     return deleted
 
 
+def _norm_title(value: Any) -> str:
+    """Casefold + collapse whitespace — a forgiving key for title matching."""
+    return " ".join(str(value or "").split()).casefold()
+
+
+def _unique_untouched_title_match(conn, album_id: int, title: str,
+                                  touched_ids: set) -> Optional[int]:
+    """A single not-yet-touched local track of this album with the same title.
+
+    Returns its id only when EXACTLY ONE such row exists, so a duplicate title
+    (remix/intro/outro name reused) never triggers a wrong heal. Used to repair
+    corrupted track NUMBERS (§16.3): the title is the stable identity, the number
+    is the field that got collapsed/duplicated, so matching on it re-keys the
+    right row instead of confirming the corruption or inserting a duplicate.
+    """
+    norm = _norm_title(title)
+    if not norm:
+        return None
+    matches = [
+        r["id"]
+        for r in conn.execute(
+            "SELECT id, title FROM lib2_tracks WHERE album_id=?", (album_id,)
+        ).fetchall()
+        if _norm_title(r["title"]) == norm and r["id"] not in touched_ids
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
 def _persist_tracklist_tracks(conn, album_id: int, tracks: List[dict]) -> int:
     """Persist provider tracklist entries as fileless lib2 track rows.
 
@@ -223,12 +251,32 @@ def _persist_tracklist_tracks(conn, album_id: int, tracks: List[dict]) -> int:
         duration = entry.get("duration_ms")
         spotify_id = entry.get("spotify_id")
 
-        existing = conn.execute(
+        # §16.3 heal: prefer a unique, not-yet-touched local row with the SAME
+        # title over the (disc, number) key. When track numbers got corrupted
+        # (e.g. a whole album collapsed onto number 1, or duplicated), that key
+        # IS the corrupt field, so it could only re-confirm the collapse or add
+        # duplicate rows — which is exactly why "Update Discography" never
+        # repaired it. Matching on the stable title lets a correctly-fetched
+        # tracklist rewrite the numbers IN PLACE.
+        heal_id = _unique_untouched_title_match(conn, album_id, title, touched_ids)
+        existing = None if heal_id is not None else conn.execute(
             """SELECT id FROM lib2_tracks
                WHERE album_id=? AND COALESCE(disc_number, 1)=? AND track_number=?""",
             (album_id, disc, number),
         ).fetchone()
-        if existing:
+        if heal_id is not None:
+            conn.execute(
+                """UPDATE lib2_tracks
+                      SET track_number=?, disc_number=?,
+                          spotify_id=COALESCE(NULLIF(spotify_id, ''), ?),
+                          duration=COALESCE(duration, ?),
+                          updated_at=CURRENT_TIMESTAMP
+                    WHERE id=?""",
+                (number, disc, spotify_id, duration, heal_id),
+            )
+            track_id = heal_id
+            touched_ids.add(track_id)
+        elif existing:
             conn.execute(
                 """UPDATE lib2_tracks
                       SET title=COALESCE(NULLIF(title, ''), ?),

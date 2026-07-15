@@ -327,6 +327,54 @@ def test_persist_tracklist_tracks_infers_discs_when_numbers_reset(imported_conn)
     ]
 
 
+def test_persist_tracklist_heals_duplicated_track_numbers_by_title(imported_conn):
+    """§16.3: when local track numbers got corrupted (a whole album collapsed
+    onto number 1), a correctly-fetched provider tracklist must HEAL the numbers
+    by matching on TITLE — updating the existing rows in place — not insert
+    duplicate rows keyed on the corrupt number. The old (disc, number)-only match
+    is exactly why "Update Discography" never repaired the collapse: the match
+    key WAS the corrupt field, so it could only re-confirm it.
+    """
+    artist_id = imported_conn.execute(
+        "SELECT id FROM lib2_artists WHERE name='Drake'"
+    ).fetchone()[0]
+    album_id = imported_conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title, expected_track_count) "
+        "VALUES(?, 'swag', 3)",
+        (artist_id,),
+    ).lastrowid
+    # All three local tracks collapsed onto track_number=1 (the corruption).
+    for title in ("Alpha", "Bravo", "Charlie"):
+        imported_conn.execute(
+            "INSERT INTO lib2_tracks(album_id, title, track_number, disc_number, monitored) "
+            "VALUES(?,?,1,1,1)",
+            (album_id, title),
+        )
+    original_ids = {
+        r["title"]: r["id"] for r in imported_conn.execute(
+            "SELECT id, title FROM lib2_tracks WHERE album_id=?", (album_id,))
+    }
+
+    created = _persist_tracklist_tracks(imported_conn, album_id, [
+        {"track_number": 1, "title": "Alpha"},
+        {"track_number": 2, "title": "Bravo"},
+        {"track_number": 3, "title": "Charlie"},
+    ])
+
+    # Healed in place: no new rows, same ids, corrected numbers.
+    assert created == 0
+    healed = {
+        r["title"]: (r["id"], r["track_number"]) for r in imported_conn.execute(
+            "SELECT id, title, track_number FROM lib2_tracks WHERE album_id=?",
+            (album_id,))
+    }
+    assert healed == {
+        "Alpha": (original_ids["Alpha"], 1),
+        "Bravo": (original_ids["Bravo"], 2),
+        "Charlie": (original_ids["Charlie"], 3),
+    }
+
+
 def test_persist_tracklist_tracks_trims_surplus_fileless_rows(imported_conn):
     views_id = imported_conn.execute(
         "SELECT id FROM lib2_albums WHERE title='Views'"
