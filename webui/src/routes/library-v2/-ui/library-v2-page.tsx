@@ -2430,6 +2430,23 @@ function visibleReleases(
   return entries.filter((e) => e.origin !== 'discography' || e.monitored);
 }
 
+/** Decides whether the "All Releases" tab should trigger a discography
+ *  fetch. Shared by both the explicit toggle click and the mount-time case
+ *  (URL already has `releases=all`, e.g. from a bookmark/back-navigation) so
+ *  the fetch isn't tied to a click event that may never fire. `alreadyAttempted`
+ *  is a per-mode-switch guard: without it, a genuinely-empty provider
+ *  discography (count stays 0 after a completed fetch) would re-trigger on
+ *  every `discographyBusy` false-transition — an infinite fetch loop. */
+export function shouldAutoFetchDiscography(params: {
+  discographyCount: number | undefined;
+  discographyBusy: boolean;
+  alreadyAttempted: boolean;
+}): boolean {
+  const { discographyCount, discographyBusy, alreadyAttempted } = params;
+  if (alreadyAttempted || discographyBusy) return false;
+  return discographyCount === 0;
+}
+
 function ArtistDetailView({ artistId }: { artistId: number }) {
   const navigate = useNavigate();
   const search = Route.useSearch();
@@ -2464,6 +2481,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   const [qpTarget, setQpTarget] = useState<QpTarget | null>(null);
   const queryClient = useQueryClient();
   const artistName = artist?.name ?? '';
+  const attemptedDiscographyFetchRef = useRef(false);
 
   async function searchUpgrades() {
     setUpgradeScanBusy(true);
@@ -2511,11 +2529,28 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
 
   function setReleasesMode(mode: 'library' | 'all') {
     void navigate({ search: (p) => ({ ...p, releases: mode }) });
-    // First switch to "All Releases" with nothing persisted yet → fetch it.
-    if (mode === 'all' && artist && artist.discography_count === 0 && !discographyBusy) {
+  }
+
+  // Auto-fetches the discography for "All Releases" — on an explicit toggle
+  // click AND on mount when the URL already has `releases=all` (bookmark,
+  // back-navigation), which a click-only handler would never see.
+  useEffect(() => {
+    if (releasesMode !== 'all') {
+      attemptedDiscographyFetchRef.current = false;
+      return;
+    }
+    if (
+      shouldAutoFetchDiscography({
+        discographyCount: artist?.discography_count,
+        discographyBusy,
+        alreadyAttempted: attemptedDiscographyFetchRef.current,
+      })
+    ) {
+      attemptedDiscographyFetchRef.current = true;
       void updateDiscography();
     }
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [releasesMode, artist?.discography_count, discographyBusy]);
 
   /** "Automatic Search" = run the wishlist processor. Every monitored missing
    *  or upgradable track is already mirrored into the wishlist, so processing
