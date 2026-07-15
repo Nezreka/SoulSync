@@ -48,9 +48,13 @@ def test_list_artists_stats(imported_conn):
     drake = by_name["Drake"]
     assert drake["album_count"] == 1
     assert drake["single_count"] == 1
-    assert drake["track_count"] == 3
+    # §16.2: 'Views' is only partially owned (Hotline Bling has no file), so the
+    # album is no longer blanket-monitored and its missing track is not wanted —
+    # the index stat therefore counts only owned-or-wanted tracks (both present
+    # 'One Dance' cuts), not the un-wanted missing one.
+    assert drake["track_count"] == 2
     assert drake["tracks_present"] == 2
-    assert drake["tracks_missing"] == 1
+    assert drake["tracks_missing"] == 0
     # Wizkid shows the one track it's credited on (multi-artist via junction).
     assert by_name["Wizkid"]["track_count"] == 1
 

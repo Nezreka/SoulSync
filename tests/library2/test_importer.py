@@ -131,6 +131,38 @@ def test_album_type_detection(imported_conn):
     assert rows["One Dance"] == "single"   # single-track legacy album
 
 
+def test_partial_album_is_not_blanket_monitored_on_import(legacy_db):
+    """§16.2: an album whose known tracks aren't all present must NOT default to
+    monitored=1 — otherwise every un-owned track of a partially-downloaded album
+    is projected wanted and auto-grabbed, even though the user only wanted some.
+
+    'Views' (track_count=2) has only one track with a file ('One Dance'); its
+    other known track ('Hotline Bling') has none → partial → unmonitored. The
+    'One Dance' single is fully present → stays monitored (owned → upgradeable).
+    """
+    import_legacy_library(legacy_db)
+    conn = legacy_db._get_connection()
+    try:
+        monitored = {
+            r["title"]: r["monitored"] for r in conn.execute(
+                "SELECT title, monitored FROM lib2_albums")
+        }
+        assert monitored["Views"] == 0
+        assert monitored["One Dance"] == 1
+
+        # The un-owned, un-wishlisted track of the partial album is NOT wanted.
+        hotline_id = conn.execute(
+            "SELECT id FROM lib2_tracks WHERE legacy_track_id=101"
+        ).fetchone()[0]
+        wanted = conn.execute(
+            "SELECT wanted FROM lib2_wanted_tracks WHERE track_id=? AND profile_id=1",
+            (hotline_id,),
+        ).fetchone()
+        assert wanted is not None and wanted["wanted"] == 0
+    finally:
+        conn.close()
+
+
 def test_import_prefers_explicit_album_type_over_one_track_heuristic(legacy_db):
     conn = sqlite3.connect(legacy_db.path)
     conn.execute("ALTER TABLE albums ADD COLUMN album_type TEXT")

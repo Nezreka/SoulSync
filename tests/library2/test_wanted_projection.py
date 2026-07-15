@@ -166,18 +166,29 @@ def test_scoped_recompute_by_entity(imported_conn):
 
 def test_importer_populates_projection(imported_conn):
     """The import fixture ends with a full projection over the legacy rules:
-    every track has a row and the projection agrees with the flags."""
+    every track has a row at the current version.
+
+    §16.2: the compatibility ``monitored`` flag and the wanted projection may
+    legitimately DIVERGE. 'Hotline Bling' is a missing track of the partially
+    owned (hence unmonitored) 'Views' album: its default track flag is still on,
+    but the parent album rule overrides it to not-wanted — exactly the P1-13
+    "monitored heißt nicht gesucht" gap the projection exists to express.
+    """
     conn = imported_conn
     rows = conn.execute(
-        """SELECT t.id, t.monitored, w.wanted, w.projection_version
+        """SELECT t.id, t.title, t.monitored, w.wanted, w.projection_version
              FROM lib2_tracks t
              LEFT JOIN lib2_wanted_tracks w ON w.track_id = t.id AND w.profile_id=1
         """).fetchall()
     assert rows
     for r in rows:
         assert r["wanted"] is not None, f"track {r['id']} missing projection"
-        assert bool(r["wanted"]) == bool(r["monitored"])
         assert r["projection_version"] == PROJECTION_VERSION
+    # The fully-present 'One Dance' single is wanted; the missing 'Hotline Bling'
+    # of the partial 'Views' album is not.
+    assert any(r["title"] == "One Dance" and r["wanted"] == 1 for r in rows)
+    hotline = [r for r in rows if r["title"] == "Hotline Bling"]
+    assert hotline and all(r["wanted"] == 0 for r in hotline)
 
 
 def test_ensure_rebuilds_on_version_bump(imported_conn):

@@ -488,6 +488,18 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 "SELECT album_id, COUNT(*) AS count FROM tracks GROUP BY album_id"
             ).fetchall()
         }
+        # Files actually present per legacy album — used to derive the initial
+        # album monitor flag (§16.2). An album is only auto-monitored when it is
+        # fully owned; a partially-downloaded album must NOT be blanket-monitored
+        # (that would project every un-owned track wanted and auto-grab it).
+        present_track_counts = {
+            int(row["album_id"]): int(row["count"])
+            for row in cursor.execute(
+                "SELECT album_id, COUNT(*) AS count FROM tracks "
+                "WHERE file_path IS NOT NULL AND TRIM(file_path) <> '' "
+                "GROUP BY album_id"
+            ).fetchall()
+        }
         for i, row in enumerate(album_rows):
             lib2_artist = resolver.get_legacy(row["artist_id"])
             if lib2_artist is None:
@@ -537,13 +549,23 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 )
                 album_id = existing
             else:
+                # Derive the initial album monitor flag from ownership (§16.2)
+                # instead of taking the schema default of 1. Fully owned (every
+                # known track present, and at least as many as the metadata
+                # expects) → monitored; anything partial → unmonitored, so only
+                # the concretely-wanted tracks (wishlist rules) stay wanted.
+                present = present_track_counts.get(int(row["id"]), 0)
+                album_monitored = (
+                    1 if present and present >= actual and present >= (expected or 0)
+                    else 0
+                )
                 cursor.execute(
                     "INSERT INTO lib2_albums(primary_artist_id, title, album_type, "
                     "release_date, year, spotify_id, musicbrainz_id, image_url, genres, "
                     "track_count, expected_track_count, legacy_album_id, "
-                    "quality_profile_id, legacy_import_run_id) "
-                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (*fields, row["id"], default_profile_id, run_id),
+                    "quality_profile_id, monitored, legacy_import_run_id) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (*fields, row["id"], default_profile_id, album_monitored, run_id),
                 )
                 album_id = cursor.lastrowid
                 album_map[row["id"]] = album_id
