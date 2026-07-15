@@ -1103,6 +1103,15 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 }
 .vsr-ribbon--owned { background: rgba(34, 197, 94, 0.95); }
 .vsr-ribbon--preview { background: rgba(255, 255, 255, 0.16); border: 1px solid rgba(255, 255, 255, 0.28); }
+/* Already on the wishlist — the third state between Preview and In Library. */
+.vsr-ribbon--wish { background: rgba(var(--accent-rgb, 88 101 242), 0.92); border: none; }
+/* Same states on the detail page's compact "More like this" cards. */
+.vd-sim-card { position: relative; }
+.vd-sim-wishchip { position: absolute; top: 6px; left: 6px; z-index: 2; padding: 2px 8px;
+    border-radius: 999px; font-size: 9px; font-weight: 800; text-transform: uppercase;
+    letter-spacing: 0.04em; background: rgba(var(--accent-rgb, 88 101 242), 0.92); color: #fff;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4); pointer-events: none; }
+.vd-sim-wishchip--owned { background: rgba(34, 197, 94, 0.95); }
 .vsr-rating {
     position: absolute; top: 10px; right: 10px; z-index: 2;
     display: inline-flex; align-items: center; gap: 3px;
@@ -2656,6 +2665,7 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 .vgm-ep-badge { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em; padding: 2px 8px; border-radius: 6px; margin-left: 8px; flex-shrink: 0; }
 .vgm-ep-badge--owned { background: rgba(108, 211, 145, 0.16); color: #6cd391; }
 .vgm-ep-badge--missing { background: rgba(var(--accent-rgb, 88 101 242), 0.18); color: #c4cbff; }
+.vgm-ep-badge--wish { background: rgba(var(--accent-rgb, 88 101 242), 0.85); color: #fff; }
 .vgm-ep-badge--soon { background: rgba(255, 255, 255, 0.08); color: rgba(255, 255, 255, 0.5); }
 
 /* footer */
@@ -2807,6 +2817,8 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 .vdsc-hero-logo { display: block; max-width: min(420px, 82%); max-height: 148px; width: auto; height: auto;
     filter: drop-shadow(0 6px 26px rgba(0, 0, 0, 0.75)); }
 .vdsc-hero-add { margin-left: 0; }
+.vdsc-hero-add--on { border-color: rgba(var(--accent-rgb, 88 101 242), 0.65);
+    background: rgba(var(--accent-rgb, 88 101 242), 0.22); color: #fff; }
 
 /* ── Discover header bar (title + Preferences / Ignore List) ─────────────── */
 .vdsc-bar { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px;

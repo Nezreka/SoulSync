@@ -345,6 +345,12 @@ class VideoEnrichmentEngine:
                         logger.exception("item_extras failed for %s %s", kind, item_id)
                         cached = {}
                 out = dict(cached)          # copy — the per-item server link isn't cached
+                # Ownership is stamped FRESH per call (never baked into the cache):
+                # the More-like-this cards show In Library / Wishlisted states like
+                # every other card surface.
+                for rail in ("similar", "recommendations"):
+                    if out.get(rail):
+                        out[rail] = self._stamp_owned(list(out[rail]))
         srv = self._server_watch_link(kind, item_id)
         if srv:
             out["server"] = srv
@@ -821,7 +827,12 @@ class VideoEnrichmentEngine:
         region = self._region()
         cached = self._cache_get(("detail", kind, tmdb_id, region))
         if cached is not None:
-            return dict(cached)
+            d = dict(cached)
+            # Fresh ownership on the similar rails, cached path included.
+            for rail in ("similar", "recommendations"):
+                if d.get(rail):
+                    d[rail] = self._stamp_owned(list(d[rail]))
+            return d
         try:
             d = w.client.full_detail(kind, tmdb_id, region=region)
         except Exception:
@@ -853,6 +864,11 @@ class VideoEnrichmentEngine:
             d["episode_owned"] = 0
         self._fill_tmdb_ratings(d)
         self._cache_put(("detail", kind, tmdb_id, region), d)
+        # Stamp ownership AFTER caching so library state is never baked in —
+        # the cached-hit path above re-stamps the same rails per call.
+        for rail in ("similar", "recommendations"):
+            if d.get(rail):
+                d[rail] = self._stamp_owned(list(d[rail]))
         return d
 
     def poster_options(self, kind, tmdb_id) -> list:
