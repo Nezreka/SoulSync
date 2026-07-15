@@ -412,6 +412,25 @@
   background: rgba(255, 255, 255, 0.055);
   color: rgba(255, 255, 255, 0.72);
   font-size: 12px;
+  border: 1px solid transparent;
+}
+
+.detailLabel.labelProfile {
+  background: rgba(168, 85, 247, 0.12);
+  color: rgb(216, 180, 254);
+  border-color: rgba(168, 85, 247, 0.3);
+}
+
+.detailLabel.labelMonitored {
+  background: rgba(34, 197, 94, 0.12);
+  color: rgb(134, 239, 172);
+  border-color: rgba(34, 197, 94, 0.3);
+}
+
+.detailLabel.labelUnmonitored {
+  background: rgba(239, 68, 68, 0.12);
+  color: rgb(252, 165, 165);
+  border-color: rgba(239, 68, 68, 0.3);
 }
 
 /* --- monitor toggle (bookmark icon, Lidarr-style) --- */
@@ -509,6 +528,38 @@
 .qualityMissing {
   color: rgba(255, 255, 255, 0.4);
   font-style: italic;
+}
+
+.colFeatures {
+  width: 90px;
+}
+
+.featuresDisplay {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.featureTag {
+  display: inline-block;
+  padding: 2px 5px;
+  border-radius: 3px;
+  font-size: 0.75rem;
+  font-weight: bold;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+
+.featureRg {
+  background: rgba(34, 197, 94, 0.12);
+  color: rgb(134, 239, 172);
+  border-color: rgba(34, 197, 94, 0.25);
+}
+
+.featureLr {
+  background: rgba(59, 130, 246, 0.12);
+  color: rgb(147, 197, 253);
+  border-color: rgba(59, 130, 246, 0.25);
 }
 
 /* --- album blocks (Lidarr-style, expandable) --- */

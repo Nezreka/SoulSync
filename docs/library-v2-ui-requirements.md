@@ -18,9 +18,8 @@
 - **Scope:** UI-only.
 
 ### 1.3 Quality Profile Icon
-- **Aktuell:** Icon gefällt nicht.
-- **Ziel:** Visuelle Hervorhebung — klarere, repräsentativere Grafik.
-- **Anwendung:** Album-/Single-Details, Track-Rows, Quality-Profile-Picker.
+- **Status:** **Abgeschlossen & Festgelegt** (Beibehalten)
+- **Entscheidung:** Das **Stern-Icon** (`star`) wird beibehalten. Es gefällt dem Nutzer sehr gut und wird weiterhin als Quality Profile Icon verwendet. Keine Änderungen vornehmen.
 - **Scope:** UI-only.
 
 ### 1.4 Action-Buttons ("Grab", "Search", "Download")
@@ -52,13 +51,9 @@
 - **Anwendung:** Badges/Tags statt nur Text; Farbkodierung oder Symbole.
 - **Scope:** UI CSS/Component-Styling.
 
-### 2.4 Quality-Darstellung einheitlich formatieren
-- **Aktuell:** `Flag / 16 Bit 44 kHz / 935 kbps` (Schrägstrich-Trennung visuell unschön).
-- **Ziel:** Visuelle Gruppierung in 3 getrennte Komponenten/Blöcke:
-  1. **Flag** (Quality Tier, z.B. "Lossless")
-  2. **Audio Specs** (Bit Depth + Sample Rate, z.B. "16 Bit 44 kHz")
-  3. **Bitrate** (z.B. "935 kbps")
-  - Getrennte visuelle Einheiten statt Schrägstrich-Kette.
+### 2.4 Quality-Darstellung formatieren
+- **Status:** **Abgeschlossen & Festgelegt** (Beibehalten)
+- **Entscheidung:** Die ursprüngliche Formatierung (z.B. `FLAC · 24bit/96kHz` und Bitrate getrennt) ist optimal und wird komplett beibehalten. Keine Änderungen am Layout oder Trennung vornehmen.
 - **Scope:** UI CSS/Layout.
 
 ---
@@ -82,8 +77,8 @@
 ## 4. Release/Album-Detail Metadaten-Spalten
 
 ### 4.1 Quality Profile Spalte hinzufügen
-- **Aktuell:** Release-Übersicht zeigt: Title, Artist, Quality, File, Metadata, Actions.
-- **Ziel:** Zusätzliche Spalte **"Quality Profile"** — zeigt assigned Profile pro Release.
+- **Status:** **Abgeschlossen & Festgelegt** (Beibehalten)
+- **Entscheidung:** Das Quality Profile wird wie ursprünglich direkt in der "Quality"-Zelle dargestellt und nicht in eine separate Spalte ausgelagert. Das Layout ist so optimal.
 - **Scope:** UI/Query (bei Album-Detail laden).
 
 ### 4.2 Quality Profile pro Track änderbar machen
@@ -120,6 +115,14 @@
 - **Ziel:** Bei globalen Actions verwenden (konsistent mit Track-Level Actions).
 - **Scope:** UI Label + Icon.
 
+### 6.4 Artist-spezifische automatische Suche (Lidarr-Style)
+- **Status:** **Offen / Ausstehend** (Ausführliches Konzept erfasst)
+- **Ziel:** Der "Automatic Search"-Button in der Artist-Detailansicht (und entsprechend bei Alben) darf **nicht** die gesamte globale Wishlist verarbeiten. Er soll sich wie in Lidarr verhalten:
+  - Sucht **ausschließlich** nach gemonitorten Titeln des **spezifischen Künstlers/Albums**.
+  - Führt automatische Upgrades durch, sofern das Quality Profile dies erlaubt.
+  - Eine globale Suche ("Automatic Search (Global)") soll weiterhin existieren, jedoch nur im globalen Dashboard bzw. der Wishlist-Ansicht, nicht auf Artist-/Album-Ebene.
+- **Scope:** Backend-Erweiterung (Einschränkung des Such-Job-Scopes auf den spezifischen Artist/Album) + UI-Verdrahtung.
+
 ---
 
 ## 7. Quality Checks & Verification
@@ -155,23 +158,21 @@
 
 ## 9. Current Status & Notes
 
-- **Priorität:** Die Icons (1.1–1.3) und Nomenklatur (1.4) sollten zuerst gehen (schnell, hoher Impact).
-- **Dann:** Visuelle Hierarchie (2.1–2.4) für bessere Lesbarkeit.
-- **Backend-Findings parallelize:**
-  - Managed Tracks funktioniert nicht → Roadmap
-  - Update Discovery (Michael Jackson, Hirokyu Samono) → Roadmap
-  - Artist Aliasing/Matching Fehler → Roadmap
-  - Manual Matching UI → Roadmap
-  - ReplayGain/Enrich → Roadmap
+- **Ergebnisse der Design-Finalisierung:**
+  - **Quality Profile Icon (1.3):** Festgelegt auf das **Stern-Icon** (`star`) – keine weiteren Änderungen.
+  - **Quality Profile Position (4.1):** Bleibt integriert in der **Quality-Spalte** – keine separate Spalte erstellen.
+  - **Quality-Darstellung (2.4):** Bleibt in der ursprünglichen Form (z.B. `FLAC · 24bit/96kHz` und Bitrate getrennt) – keine Änderungen am Layout oder Trennung vornehmen.
+  - **Zustand:** Diese UI-Fragen sind damit **abgeschlossen** und müssen in Folgesitzungen nicht erneut angefasst werden.
 
 ---
 
-## 10. Implementation Order (empfohlen)
+## 10. Status der Implementierung
 
-1. **Icons umbenennen/ersetzen** (1.1–1.3): Quick Win
-2. **Quality-Darstellung reformatieren** (2.4): UI-only
-3. **Quality Profile vor Expand anzeigen** (2.1–2.2): leichte Query-Ergänzung
-4. **Badges/Tags für Metadata** (2.3): CSS/Component-Styling
-5. **Action-Button-Sematik** (1.4, 6.1–6.3): Label + Icon Konsistenz
-6. **Quality Profile Spalte** (4.1): Query + UI
-7. **Backend-Findings durcharbeiten** (Preview Retag, Managed Tracks, Update Discovery, etc.)
+1. **Icons & Nomenklatur** (1.1, 1.2, 1.4, 6.1–6.3): **Abgeschlossen** (Lidarr-Konventionen für Suche und Icons sind aktiv).
+2. **Quality Profile Icon** (1.3): **Abgeschlossen** (Entscheidung: Stern-Icon beibehalten).
+3. **Quality Profile vor Expand** (2.1–2.2): **Abgeschlossen** (Wird in AlbumBlock mit dem Stern-Icon gerendert).
+4. **Metadata-Tags** (2.3): **Abgeschlossen** (detailLabel-Styling ist aktiv).
+5. **Quality-Darstellung** (2.4): **Abgeschlossen** (Entscheidung: Ursprüngliches Layout beibehalten).
+6. **Quality Profile Spalte** (4.1): **Abgeschlossen** (Entscheidung: In Quality-Spalte belassen).
+7. **Backend-Findings** (5.2, 8.2, 8.3 etc.): Roadmap-Punkte für zukünftige Sitzungen.
+8. **Artist-spezifische automatische Suche** (6.4): **Offen / Ausstehend** (Aufteilung in artist-spezifisch vs. global benötigt Backend-Erweiterung).

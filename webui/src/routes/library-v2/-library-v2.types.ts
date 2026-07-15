@@ -117,6 +117,8 @@ export interface LibraryV2TrackFile {
   verification_status: string | null;
   source: string | null;
   file_state: string | null;
+  has_replaygain?: boolean;
+  has_lyrics?: boolean;
 }
 
 /** One provider's match state for an entity (legacy Enhanced-View match chips). */

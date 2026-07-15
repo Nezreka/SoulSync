@@ -647,6 +647,23 @@ def _serialize_track(
         sample_rate = _first_present(file_row["sample_rate"], prov.get("sample_rate"))
         bit_depth = _first_present(file_row["bit_depth"], prov.get("bit_depth"))
         source = _first_present(file_row["source"], prov.get("source_service"))
+        has_rg = False
+        has_lyrics = False
+        if file_row.get("tags_json"):
+            try:
+                tags_data = json.loads(file_row["tags_json"]) or {}
+                has_rg = any(
+                    k in tags_data
+                    for k in (
+                        "replaygain_track_gain",
+                        "replaygain_track_peak",
+                        "replaygain_album_gain",
+                        "replaygain_album_peak",
+                    )
+                )
+                has_lyrics = bool(tags_data.get("lyrics"))
+            except Exception:
+                pass
         file_info = {
             "path": file_row["path"],
             "format": file_row["format"],
@@ -659,6 +676,8 @@ def _serialize_track(
             "verification_status": file_row["verification_status"],
             "source": source,
             "file_state": file_row["file_state"],
+            "has_replaygain": has_rg,
+            "has_lyrics": has_lyrics,
         }
     return {
         "id": t["id"],

@@ -14,7 +14,7 @@ def _present(value: Any) -> bool:
 
 def normalized_tag_snapshot(file_tags: Dict[str, Any]) -> Dict[str, Any]:
     """Map ``core.tag_writer.read_file_tags`` output to the UI cache shape."""
-    return {
+    res = {
         "title": file_tags.get("title"),
         "artist": file_tags.get("artist"),
         "album": file_tags.get("album"),
@@ -25,6 +25,16 @@ def normalized_tag_snapshot(file_tags: Dict[str, Any]) -> Dict[str, Any]:
         "genre": file_tags.get("genre"),
         "cover": bool(file_tags.get("has_cover_art")),
     }
+    for k in (
+        "lyrics",
+        "replaygain_track_gain",
+        "replaygain_track_peak",
+        "replaygain_album_gain",
+        "replaygain_album_peak",
+    ):
+        if file_tags.get(k) is not None:
+            res[k] = file_tags[k]
+    return res
 
 
 def persist_tag_cache(conn, file_id: int, file_tags: Dict[str, Any]) -> bool:

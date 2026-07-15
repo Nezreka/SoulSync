@@ -209,12 +209,12 @@ function QualityDisplay({ file }: { file: LibraryV2Track['file'] | null | undefi
       ? Math.round(file.bitrate / 1000)
       : file.bitrate
     : null;
-  const bitDepth = file.bit_depth ? `${file.bit_depth}b` : null;
+  const bitDepth = file.bit_depth ? `${file.bit_depth}bit` : null;
   const sampleRate = file.sample_rate
-    ? `${Number((file.sample_rate / 1000).toFixed(file.sample_rate % 1000 === 0 ? 0 : 1))}k`
+    ? `${Number((file.sample_rate / 1000).toFixed(file.sample_rate % 1000 === 0 ? 0 : 1))}kHz`
     : null;
-  const resolution = [bitDepth, sampleRate].filter(Boolean).join(' ');
-  // Format + resolution share one badge (e.g. "FLAC · 16b 44.1k"); bitrate
+  const resolution = [bitDepth, sampleRate].filter(Boolean).join('/');
+  // Format + resolution share one badge (e.g. "FLAC · 16bit/44.1kHz"); bitrate
   // stays its own badge since it's independently meaningful for lossy files.
   const formatBadge = [fmt, resolution || null].filter(Boolean).join(' · ');
 
@@ -2373,7 +2373,7 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
                   .join(' · ')}
               </p>
               <div className={styles.detailLabels}>
-                <span className={styles.detailLabel}>
+                <span className={`${styles.detailLabel} ${styles.labelProfile}`}>
                   <SvgIcon name="star" />
                   {album.quality_profile?.name ?? 'No quality profile'}
                 </span>
@@ -2381,7 +2381,7 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
                   <SvgIcon name="tracks" />
                   {trackProgress(album.tracks_present, album.track_count)} tracks
                 </span>
-                <span className={styles.detailLabel}>
+                <span className={`${styles.detailLabel} ${album.monitored ? styles.labelMonitored : styles.labelUnmonitored}`}>
                   <SvgIcon name={album.monitored ? 'monitor' : 'close'} />
                   {album.monitored ? 'Monitored' : 'Unmonitored'}
                 </span>
@@ -2626,7 +2626,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               <ArtistRefreshButton artistId={artistId} />
               <ActionButton
                 icon="automatic"
-                label="Search"
+                label="Automatic Search"
                 title="Search entire monitored wishlist for missing tracks"
                 onClick={() => handleAction('Automatic Search')}
               />
@@ -2700,7 +2700,8 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               />
               <ActionButton
                 icon="star"
-                label="Quality Profile"
+                label={`Profile: ${artist.quality_profile?.name ?? 'None'}`}
+                title="Change default quality profile for this artist"
                 onClick={() => handleAction('Quality Profile')}
               />
               <ActionButton
@@ -2744,11 +2745,11 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 {artist.monitored ? ' · Monitored (watchlist)' : ''}
               </p>
               <div className={styles.detailLabels}>
-                <span className={styles.detailLabel}>
+                <span className={`${styles.detailLabel} ${styles.labelProfile}`}>
                   <SvgIcon name="star" />
                   {artist.quality_profile?.name ?? 'No quality profile'}
                 </span>
-                <span className={styles.detailLabel}>
+                <span className={`${styles.detailLabel} ${artist.monitored ? styles.labelMonitored : styles.labelUnmonitored}`}>
                   <SvgIcon name={artist.monitored ? 'monitor' : 'close'} />
                   {artist.monitored ? 'Monitored' : 'Unmonitored'}
                 </span>
@@ -3104,8 +3105,8 @@ function AlbumBlock({
             }
           />
           <IconActionButton
-            icon="search"
-            title="Search all monitored tracks (global Wishlist action)"
+            icon="automatic"
+            title="Automatic Search — find & grab the best source (global Wishlist action)"
             onClick={() => onAction(`Automatic Search: ${album.title}`)}
           />
           <IconActionButton
@@ -3198,6 +3199,7 @@ function AlbumTrackTable({
             <th>Artists</th>
             <th>Match</th>
             <th>Quality</th>
+            <th className={styles.colFeatures}>Features</th>
             <th>Metadata</th>
             <th className={styles.colActions}>Actions</th>
           </tr>
@@ -3302,6 +3304,33 @@ function TrackRow({
           ) : null}
           <TrackVerificationBadge file={track.file} />
         </span>
+      </td>
+      <td>
+        {!missing && track.file ? (
+          <span className={styles.featuresDisplay}>
+            {track.file.has_replaygain && (
+              <span
+                className={`${styles.featureTag} ${styles.featureRg}`}
+                title="ReplayGain is written to this track"
+              >
+                RG
+              </span>
+            )}
+            {track.file.has_lyrics && (
+              <span
+                className={`${styles.featureTag} ${styles.featureLr}`}
+                title="Lyrics are embedded in this track"
+              >
+                LR
+              </span>
+            )}
+            {!track.file.has_replaygain && !track.file.has_lyrics && (
+              <span className={styles.muted}>—</span>
+            )}
+          </span>
+        ) : (
+          <span className={styles.muted}>—</span>
+        )}
       </td>
       <td>
         {track.id && !missing ? (

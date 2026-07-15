@@ -127,6 +127,16 @@ def analyze_album_replaygain(
             with get_file_lock(path):
                 write(path, track_gain_db, peak_dbfs, album_gain_db, album_peak_dbfs)
             stats["analyzed"] += 1
+
+            # Rescan tags into database cache
+            try:
+                from core.library2.tag_cache import read_and_persist_tag_cache
+                row = conn.execute("SELECT id FROM lib2_track_files WHERE path=?", (path,)).fetchone()
+                if row:
+                    read_and_persist_tag_cache(conn, row["id"], path)
+                    conn.commit()
+            except Exception as scan_err:
+                logger.debug("Failed to rescan file tags after album ReplayGain write for %s: %s", path, scan_err)
         except Exception as e:  # noqa: BLE001
             stats["failed"] += 1
             stats["errors"].append({"track": path, "error": str(e)})
@@ -184,6 +194,14 @@ def analyze_track_replaygain(
     try:
         with get_file_lock(resolved):
             write(resolved, track_gain_db, peak_dbfs, None, None)
+
+        # Rescan tags into database cache
+        try:
+            from core.library2.tag_cache import read_and_persist_tag_cache
+            read_and_persist_tag_cache(conn, file_row["id"], resolved)
+            conn.commit()
+        except Exception as scan_err:
+            logger.debug("Failed to rescan file tags after track ReplayGain write for %s: %s", resolved, scan_err)
     except Exception as e:  # noqa: BLE001
         return {"analyzed": False, "track_gain_db": None, "error": str(e)}
     return {"analyzed": True, "track_gain_db": track_gain_db, "error": None}
