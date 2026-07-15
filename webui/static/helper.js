@@ -3404,17 +3404,19 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Convention: keep only the CURRENT release here, plus a single brief
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '3.0.3': [
-        { date: 'July 2026 — 3.0.3' },
-        { title: 'Video: wishlist a whole show in one click', desc: 'a "Wishlist Missing" button on the show detail page adds every missing aired episode across ALL seasons (loading the ones you never browsed), and the Get Missing modal gets a matching "Select all missing" button. both were season-at-a-time before.' },
-        { title: 'Video: fix a wrong match from the Manage panel', desc: 'a new Matches section on movie/show Manage panels — per-service rows (TMDB, TVDB, IMDb) with a search to re-point a wrong match to the right title. re-pointing clears what the old match filled in and re-enriches by the new id in the background; your locked fields and art are never touched.' },
-        { title: 'Video: shows stuck with no status heal themselves', desc: 'some shows had no airing info and no watchlist button because their TMDB status never landed (an old bug marked them done even when the call failed). a one-time migration re-queues them — status, watchlist button and airing refresh come back on their own.' },
-        { title: 'Automations: a global pause per side', desc: 'both automations pages get a master toggle. it never touches your individual switches — it just gates whether anything RUNS on that side. scheduled slots skip but keep their schedule, manual Run still works. music defaults on, video defaults off.' },
-        { title: 'Corrupt File Detector actually finds files (#1000)', desc: 'the scan silently skipped every file on docker/nas setups (the path resolver was called with no search directories). it resolves properly now, says what it actually decoded, and shouts when no paths resolve at all. flac is in the docker image so the md5-verifying check works out of the box.' },
-        { title: 'Manual match no longer refuses to stick', desc: 'when two playlist entries pointed at the same server track, the second match was silently dropped forever — no matter how many times you re-matched it. both count now, and every remaining failure in that flow logs exactly why.' },
-        { title: 'Reorganize no longer quarantines your own files', desc: 'a library file that\'s a different master than the metadata source\'s tracklist (a long version, say) got flagged as a "wrong file" during reorganize. it\'s your file — the download-oriented duration check no longer applies. real corruption checks still run.' },
-        { title: 'Player modal fix', desc: 'the now-playing modal clipped its controls on short or zoomed-in windows. the body scrolls now; larger screens are pixel-identical.' },
-        { title: 'Earlier versions', desc: '3.0.2 made video downloads smarter (daily shows, soulseek path parsing, uploader blacklisting), took the whole video side mobile, and fixed Library Reorganize ignoring template changes. 3.0.1 shipped the entire video side: movies, tv & youtube, kometa-style overlays & collections, Server Activity, and radarr/sonarr-parity download matching. before that: 2.8.9 fixed multi-disc downloads, 2.8.8 stopped a tag write from corrupting FLAC audio, 2.8.4 added Artist Web + Quality Profiles.' },
+    '3.0.4': [
+        { date: 'July 2026 — 3.0.4' },
+        { title: 'Video: Discover 2.0', desc: 'the discover page rebuilt top to bottom — a billboard hero with real title logo art, one clean header with a preferences popover, browse-by-genre tiles, live filters in grid views, and a feed that\'s actually endless. view more pages forever now, grids respect hide-owned, and it lazy-renders so it stays fast.' },
+        { title: 'Profiles: music, video, or both', desc: 'each profile can be music-only, video-only, or both (new profiles default to music-only). single-side profiles never see the music/video switcher, blocked-side page options disable automatically, and there\'s no toggle flash on reload.' },
+        { title: 'Video: wishlist state on every card', desc: 'search results, discover cards, the hero button, more-like-this cards and the get modal all show wishlisted / in-library state now, instead of offering to add something you already have.' },
+        { title: 'Tidal download source survives restarts (#1002)', desc: 'a startup ordering bug wiped the saved session from memory on every docker boot before it could be verified — which is why the logs showed nothing and the earlier fix never seemed to take. boot network blips retry now instead of dropping a valid session. re-add tidal to your hybrid order once after updating.' },
+        { title: 'Torrent grabs work in split-container setups', desc: 'soulsync downloads the .torrent itself and hands your client the file (like sonarr/radarr) instead of passing a prowlarr url the client may not be able to resolve. all four clients, music and video.' },
+        { title: 'Amazon Music works again (#1033)', desc: 't2tunes changed their api format. search, downloads and file tags (track/disc numbers, covers, dates) all read the new format; the old format still parses for self-hosted instances.' },
+        { title: 'Owned artists respect the source you clicked (#1026)', desc: 'opening an owned artist from a deezer/itunes/tidal card shows that source\'s catalog instead of snapping back to your primary source.' },
+        { title: 'Playlist sync same-artist mismatch (#769)', desc: '"Dani California" could match "Californication" with high confidence — same artist plus a shared substring was enough. title similarity actually has to earn it now.' },
+        { title: 'One shared slskd search budget', desc: 'music and video each had their own rate limiter, so together they could double slskd\'s search limit and eat 429s. one shared budget now, and a manual search says the window is busy instead of hanging.' },
+        { title: 'Idle CPU drop', desc: 'the dashboard websocket push loops (including one that polled slskd every 2 seconds) skip entirely while no browser is connected. thanks thegabriele97 (#1030).' },
+        { title: 'Earlier versions', desc: '3.0.3 added whole-show wishlisting, a per-service match editor, per-side automation pause, and fixed the Corrupt File Detector scanning nothing. 3.0.2 made video downloads smarter and took the video side mobile. 3.0.1 shipped the entire video side: movies, tv & youtube, kometa-style overlays & collections, Server Activity, and radarr/sonarr-parity download matching.' },
     ],
 };
 
@@ -3445,7 +3447,20 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "3.0.3 — quality of life across both sides",
+        title: "3.0.4 — discover 2.0 + profile side access",
+        description: "the video discover page becomes a netflix-class browse, profiles can be scoped to one side of the app, and a stack of reported bugs die — including the tidal restart loss that survived two releases.",
+        features: [
+            "discover 2.0: a billboard hero with real title logo art, one clean header with a preferences popover, browse-by-genre tiles, live filters, and a feed that's actually endless — view more pages forever, grids respect hide-owned, and the page lazy-renders so it stays fast",
+            "profile side access: each profile can be music-only, video-only, or both (new profiles default to music-only). single-side profiles never see the music/video switcher and blocked-side page options disable automatically",
+            "wishlist state on every card: search results, discover cards, the hero button, more-like-this cards and the get modal all show wishlisted / in-library state instead of offering to re-add",
+            "tidal download source survives restarts (#1002): a startup ordering bug wiped the saved session from memory on every docker boot before verification could run — nothing failed, so nothing logged. boot network blips retry now instead of dropping a valid session. re-add tidal to your hybrid order once after updating",
+            "torrent grabs work in split-container setups: soulsync downloads the .torrent itself and hands your client the file (like sonarr/radarr) instead of passing a prowlarr url the client may not resolve — all four clients, music and video",
+            "amazon music works again (#1033): t2tunes changed their api format — search, downloads and file tags (track/disc numbers, covers, dates) all read the new format, old format still supported",
+            "owned artists respect the source you clicked (#1026), playlist sync no longer matches the wrong same-artist track with high confidence (#769), music + video share one slskd search budget instead of doubling it, and the websocket push loops idle completely when no browser is open (thanks thegabriele97, #1030)",
+        ],
+    },
+    {
+        title: "Earlier in 3.0.3 — quality of life across both sides",
         description: "whole-show wishlisting + a match editor on video, global automation pause toggles, and four reported music bugs dead — including the corrupt file detector that scanned nothing.",
         features: [
             "wishlist a whole show in one click: 'Wishlist Missing' on the show detail page grabs every missing aired episode across all seasons (loading ones you never browsed), and the Get Missing modal gets a matching 'Select all missing' button",
