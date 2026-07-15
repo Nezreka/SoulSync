@@ -289,7 +289,8 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
             return
 
         try:
-            torrent_hash = run_async(adapter.add_torrent(download_url))
+            from core.torrent_clients.base import add_torrent_smart
+            torrent_hash = run_async(add_torrent_smart(adapter, download_url))
         except Exception as e:
             self._mark_error(download_id, f"add_torrent failed: {e}")
             return
@@ -583,9 +584,11 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
                     picked.title, picked.size / 1_048_576, picked.seeders, picked.indexer_name)
         _emit('queued', release=picked.title, size=picked.size, seeders=picked.seeders)
 
-        # Phase 2: hand to adapter.
+        # Phase 2: hand to adapter. Fetch the .torrent server-side first —
+        # the client often can't reach Prowlarr itself (split containers).
         try:
-            torrent_id = run_async(adapter.add_torrent(download_url))
+            from core.torrent_clients.base import add_torrent_smart
+            torrent_id = run_async(add_torrent_smart(adapter, download_url))
         except Exception as e:
             result['error'] = f'Torrent client refused the release: {e}'
             return result
