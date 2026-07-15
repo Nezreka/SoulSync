@@ -1432,6 +1432,11 @@ function updateProfileIndicator() {
     const sides = profileAllowedSides();
     const sideToggle = document.querySelector('.side-toggle');
     if (sideToggle) sideToggle.style.display = sides === 'both' ? '' : 'none';
+    // Keep the pre-paint flash guard in sync: the html-level class (seeded from
+    // this cache by the inline <head> script) hides the switcher on the NEXT
+    // reload before the profile has even been fetched.
+    document.documentElement.classList.toggle('side-locked', sides !== 'both');
+    try { localStorage.setItem('ss_allowed_sides', sides); } catch (e) { /* ignore */ }
     if (sides !== 'both' &&
             document.body.getAttribute('data-side') !== sides &&
             typeof window._switchAppSide === 'function') {
