@@ -1449,7 +1449,7 @@ class VideoDatabase:
                 sets.append("tvdb_last_attempted=NULL")
                 if "airs_time" in cols and "airs_time" not in locked:
                     sets.append("airs_time=NULL")
-                for svc, svc_map in _BACKFILL.items():
+                for svc_map in _BACKFILL.values():
                     spec = svc_map.get(kind)
                     if not spec or spec[0] != tbl or "tvdb_id" not in spec[3]:
                         continue
