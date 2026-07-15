@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Optional
 
 from core.metadata import registry as metadata_registry
@@ -100,6 +101,53 @@ def _lookup_artist_image_by_name(name: str) -> Optional[str]:
     return None
 
 
+# mbid -> (fetched_at, url|None). The MB lookup is a real API call behind a
+# 1 rps limiter; the search page lazy-loads several cards at once and re-runs
+# on every search, so repeats must be free. None results cache too (an artist
+# with no relations shouldn't be re-asked every render).
+_MB_RELATION_IMAGE_CACHE: dict = {}
+_MB_RELATION_IMAGE_TTL_S = 6 * 3600
+
+_MB_URL_REL_PATTERNS = (
+    ('deezer', re.compile(r'deezer\.com/(?:[a-z]{2}/)?artist/(\d+)', re.I)),
+    ('spotify', re.compile(r'open\.spotify\.com/artist/([A-Za-z0-9]+)', re.I)),
+    ('itunes', re.compile(r'music\.apple\.com/.+?/(?:artist/)?(?:[^/]*/)?(\d+)', re.I)),
+)
+
+
+def _image_from_musicbrainz_relations(mbid: str) -> Optional[str]:
+    """Resolve an MB artist's image via its url relations (exact per-source
+    artist ids), never by name. Cached; returns None when MB has no usable
+    streaming relation or the lookup fails."""
+    import time as _time
+    now = _time.time()
+    hit = _MB_RELATION_IMAGE_CACHE.get(mbid)
+    if hit and now - hit[0] < _MB_RELATION_IMAGE_TTL_S:
+        return hit[1]
+
+    url = None
+    try:
+        from core.musicbrainz_client import MusicBrainzClient
+        artist = MusicBrainzClient("SoulSync", "2").get_artist(mbid, includes=['url-rels'])
+        for rel in ((artist or {}).get('relations') or []):
+            resource = str(((rel or {}).get('url') or {}).get('resource') or '')
+            if not resource:
+                continue
+            for source, pattern in _MB_URL_REL_PATTERNS:
+                m = pattern.search(resource)
+                if m:
+                    url = _get_artist_image_from_source(source, m.group(1))
+                    if url:
+                        break
+            if url:
+                break
+    except Exception as exc:
+        logger.debug("MB url-relation image lookup failed for %s: %s", mbid, exc)
+
+    _MB_RELATION_IMAGE_CACHE[mbid] = (now, url)
+    return url
+
+
 def get_artist_image_url(
     artist_id: str,
     source_override: Optional[str] = None,
@@ -124,6 +172,16 @@ def get_artist_image_url(
         return None
 
     if source_override == 'musicbrainz':
+        # MB stores no artist images, but it DOES store url relations to the
+        # artist's exact Deezer/Spotify/Apple pages. Resolve through those
+        # FIRST: the name fallback takes the first source's top hit for the
+        # name, and a same-named artist can hijack the photo (#1036 — the MB
+        # "Korn" card wore a Thai pop duo's art while opening the metal
+        # band's discography). Only when MB has no usable relation does the
+        # name lookup run.
+        image_url = _image_from_musicbrainz_relations(artist_id)
+        if image_url:
+            return image_url
         if not artist_name:
             return None
         return _lookup_artist_image_by_name(artist_name)
