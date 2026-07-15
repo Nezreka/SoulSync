@@ -28,6 +28,17 @@
         window._workerOrbsEnabled = {{ initial_worker_orbs_enabled|tojson }};
         window._reduceEffectsActive = {{ initial_reduce_effects|tojson }};
         window._maxPerfActive = {{ initial_max_performance|tojson }};
+        // Side-access flash guard: the profile arrives over fetch, so on a
+        // reload the Music↔Video switcher would render for a beat before the
+        // single-side hiding kicks in. The last profile-apply cached its sides
+        // here — hide the switcher PRE-PAINT and let the real profile data
+        // settle it (updateProfileIndicator owns the authoritative state).
+        try {
+            var _sides = localStorage.getItem('ss_allowed_sides');
+            if (_sides === 'music' || _sides === 'video') {
+                document.documentElement.classList.add('side-locked');
+            }
+        } catch (e) { /* no localStorage → default (show) */ }
     </script>
     {{ vite_assets('head')|safe }}
 </head>

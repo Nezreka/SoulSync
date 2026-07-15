@@ -46238,6 +46238,14 @@ div.artist-hero-badge {
     margin-top: 4px;
 }
 
+/* Side-access flash guard: seeded pre-paint by the inline <head> script from
+   the cached last-known sides, so a single-side profile never sees the
+   Music↔Video switcher flash in on reload. updateProfileIndicator keeps the
+   class (and the cache) in sync once the real profile arrives. */
+html.side-locked .side-toggle {
+    display: none !important;
+}
+
 /* Side access picker (music | video | both) — sits above Page Access in the
    create + edit profile forms. */
 .profile-sides-picker {
