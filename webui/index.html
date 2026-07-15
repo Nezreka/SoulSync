@@ -166,6 +166,12 @@
                             <option value="import">Import</option>
                             <option value="help">Help & Docs</option>
                         </select>
+                        <label class="profile-settings-label">Side Access</label>
+                        <div id="new-profile-sides" class="profile-sides-picker" role="radiogroup" aria-label="Side access">
+                            <label><input type="radio" name="new-profile-sides" value="music" checked> Music only</label>
+                            <label><input type="radio" name="new-profile-sides" value="video"> Video only</label>
+                            <label><input type="radio" name="new-profile-sides" value="both"> Music + Video</label>
+                        </div>
                         <label class="profile-settings-label">Page Access</label>
                         <div id="new-profile-allowed-pages" class="profile-page-checkboxes">
                             <div class="profile-page-group-label profile-page-group-label--first">Music</div>
@@ -181,8 +187,8 @@
                             <label><input type="checkbox" value="stats" checked> Listening Stats</label>
                             <label><input type="checkbox" value="playlist-explorer" checked> Playlist Explorer</label>
                             <label><input type="checkbox" value="import" checked> Import</label>
-                            <label><input type="checkbox" value="help" checked disabled> Help & Docs</label>
-                            <label><input type="checkbox" value="issues" checked disabled> Issues</label>
+                            <label><input type="checkbox" value="help" checked disabled data-always-on="1"> Help & Docs</label>
+                            <label><input type="checkbox" value="issues" checked disabled data-always-on="1"> Issues</label>
                             <div class="profile-page-group-label">Video<span class="profile-page-group-note">Import, Settings &amp; Automations stay admin-only</span></div>
                             <label><input type="checkbox" value="video-dashboard" checked> Dashboard</label>
                             <label><input type="checkbox" value="video-search" checked> Search</label>

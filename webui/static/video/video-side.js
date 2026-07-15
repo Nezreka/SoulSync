@@ -289,7 +289,16 @@
     // / boot) so don't touch history.
     // Same permission model as the sidebar gating (init.js): admin-only control
     // pages + per-profile allowed_pages. Guards direct-URL access, not just the nav.
+    // Per-profile side access — mirrors init.js's profileAllowedSides(), local
+    // so this module keeps working if load order ever changes.
+    function sideAllowed(side) {
+        var cp = (typeof currentProfile !== 'undefined') ? currentProfile : null;
+        if (!cp || cp.is_admin || cp.id === 1) return true;
+        var s = (cp.allowed_sides === 'video' || cp.allowed_sides === 'both') ? cp.allowed_sides : 'music';
+        return s === 'both' || s === side;
+    }
     function videoPageAllowed(pageId) {
+        if (!sideAllowed('video')) return false;   // whole side is off for this profile
         var cp = (typeof currentProfile !== 'undefined') ? currentProfile : null;
         if (!cp || cp.is_admin || cp.id === 1) return true;
         if (pageId === 'video-help' || pageId === 'video-issues' || DETAIL_PAGES[pageId]) return true;
@@ -298,6 +307,9 @@
         return !ap || ap.indexOf(pageId) > -1;
     }
     function navigate(pageId, mode) {
+        // Music-only profile: there is no video page to fall back to — punt the
+        // whole navigation back to the music side instead.
+        if (!sideAllowed('video')) { switchSide('music', { force: true }); return; }
         if (!videoPageAllowed(pageId)) { pageId = DEFAULT_VIDEO_PAGE; mode = 'replace'; }
         setActiveNav(pageId);
         showPage(pageId);
@@ -328,8 +340,12 @@
         if (typeof _gsUpdateVisibility === 'function') _gsUpdateVisibility();
     }
 
-    function switchSide(side) {
+    function switchSide(side, opts) {
         if (side !== 'music' && side !== 'video') return;
+        // Per-profile side access: a profile locked to one side can't switch
+        // away from it. `force` is the profile-apply path (init.js) moving the
+        // user ONTO their allowed side — that's the one caller that must win.
+        if (!(opts && opts.force) && !sideAllowed(side)) return;
         persistSide(side);
         applySide(side);
         if (side === 'video') {
@@ -341,6 +357,8 @@
             try { history.replaceState(null, '', '/'); } catch (e) { /* ignore */ }
         }
     }
+    // init.js's profile-apply uses this to land single-side profiles on their side.
+    window._switchAppSide = switchSide;
 
     function init() {
         // Deep-linked detail OR page path captured at eval time (music may already
@@ -444,6 +462,10 @@
         if (defaultNav) defaultNav.classList.add('active');
 
         var bootSide = (bootDetail || bootPage) ? 'video' : readSide();
+        // Side access: if the profile is already known at boot (fast path),
+        // land straight on the allowed side. When the profile loads later, the
+        // profile-apply in init.js force-switches — this just avoids the flash.
+        if (!sideAllowed(bootSide)) bootSide = bootSide === 'video' ? 'music' : 'video';
         applySide(bootSide);
 
         // On the video side without a detail deep link, show the initial page (the

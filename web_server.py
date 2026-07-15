@@ -635,6 +635,7 @@ def _set_profile_context():
     g.can_download = True
     g.profile_name = "Admin"   # display name for isolated blueprints (video issues reporter)
     g.is_admin = True          # profile 1 is always admin; others per their is_admin flag
+    g.allowed_sides = 'both'   # per-profile side access (music|video|both); admins always both
     if pid != 1 and 'profile_id' in session:
         g.is_admin = False
         try:
@@ -647,6 +648,9 @@ def _set_profile_context():
             g.can_download = bool((profile or {}).get('can_download', True))
             g.profile_name = (profile or {}).get('name') or ("Profile %s" % pid)
             g.is_admin = bool((profile or {}).get('is_admin', False))
+            # get_profile resolves defaults (non-admin NULL → 'music'), so the
+            # video blueprint can gate off g without a second music-DB read.
+            g.allowed_sides = (profile or {}).get('allowed_sides') or 'music'
         except Exception as e:
             logger.debug("profile session validate: %s", e)
 
@@ -27659,10 +27663,15 @@ def create_profile():
                             'error': 'Login mode is on — give this profile a login '
                                      'password so they can sign in.'}), 400
 
-        # Profile settings: home_page, allowed_pages, can_download
+        # Profile settings: home_page, allowed_pages, can_download, allowed_sides
         home_page = data.get('home_page') or None
         allowed_pages = data.get('allowed_pages')  # list or None
         can_download = data.get('can_download', True)
+        # Side access — music | video | both, never nothing. Anything else
+        # falls back to the shipped default (music-only for non-admins).
+        allowed_sides = data.get('allowed_sides')
+        if allowed_sides not in ('music', 'video', 'both'):
+            allowed_sides = None
 
         # Validate page IDs
         if home_page and home_page not in VALID_PAGE_IDS:
@@ -27678,7 +27687,8 @@ def create_profile():
 
         profile_id = database.create_profile(
             name, avatar_color, pin_hash, is_admin=False, avatar_url=avatar_url,
-            home_page=home_page, allowed_pages=allowed_pages, can_download=bool(can_download)
+            home_page=home_page, allowed_pages=allowed_pages, can_download=bool(can_download),
+            allowed_sides=allowed_sides
         )
         if profile_id is None:
             return jsonify({'success': False, 'error': 'Profile name already exists'}), 409
@@ -27755,6 +27765,13 @@ def update_profile(profile_id):
                 kwargs['allowed_pages'] = ap
             if 'can_download' in data:
                 kwargs['can_download'] = int(bool(data['can_download']))
+            if 'allowed_sides' in data:
+                # music | video | both, never nothing — invalid values reset to
+                # NULL (the shipped music-only default for non-admins). Stored
+                # values on ADMIN profiles are inert: the read side always
+                # resolves admins to 'both'.
+                sides = data['allowed_sides']
+                kwargs['allowed_sides'] = sides if sides in ('music', 'video', 'both') else None
 
         success = database.update_profile(profile_id, **kwargs)
         return jsonify({'success': success})

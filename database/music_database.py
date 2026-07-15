@@ -509,6 +509,7 @@ class MusicDatabase:
             self._add_profile_support_v3(cursor)
             self._add_profile_support_v4(cursor)
             self._add_profile_settings(cursor)
+            self._add_profile_sides(cursor)
             self._add_profile_listenbrainz_support(cursor)
             self._add_profile_password_support(cursor)
             self._add_profile_recovery_support(cursor)
@@ -4066,6 +4067,38 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error in profile support v4 migration: {e}")
 
+    def _add_profile_sides(self, cursor):
+        """Add the allowed_sides column ('music'|'video'|'both') to profiles.
+
+        NULL is meaningful: it reads as 'music' for non-admin profiles (the
+        shipped default — most installs predate the video side) and 'both'
+        for admins (they manage everything; never lockable). Only an explicit
+        admin grant stores 'video'/'both' on a non-admin row."""
+        try:
+            cursor.execute("SELECT value FROM metadata WHERE key = 'profiles_migration_sides' LIMIT 1")
+            if cursor.fetchone():
+                return  # Already migrated
+            try:
+                cursor.execute("ALTER TABLE profiles ADD COLUMN allowed_sides TEXT DEFAULT NULL")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+            cursor.execute("""
+                INSERT OR REPLACE INTO metadata (key, value) VALUES ('profiles_migration_sides', '1')
+            """)
+            logger.info("Profile sides migration completed successfully")
+        except Exception as e:
+            logger.error(f"Error in profile sides migration: {e}")
+
+    @staticmethod
+    def _profile_sides(row, columns, is_admin: bool) -> str:
+        """Resolve a profile row's allowed_sides with the shipped defaults:
+        admins always 'both'; non-admins default 'music' unless explicitly
+        granted 'video'/'both'. Never empty."""
+        if is_admin:
+            return 'both'
+        raw = row['allowed_sides'] if 'allowed_sides' in columns else None
+        return raw if raw in ('music', 'video', 'both') else 'music'
+
     def _add_profile_settings(self, cursor):
         """Add home_page, allowed_pages, can_download columns to profiles table"""
         try:
@@ -5686,6 +5719,7 @@ class MusicDatabase:
                         'recovery_question': row['recovery_question'] if 'recovery_question' in columns else None,
                         'home_page': row['home_page'] if 'home_page' in columns else None,
                         'allowed_pages': json.loads(ap_raw) if ap_raw else None,
+                        'allowed_sides': self._profile_sides(row, columns, bool(row['is_admin'])),
                         'can_download': bool(row['can_download']) if 'can_download' in columns else True,
                         'has_listenbrainz': row['listenbrainz_token'] is not None if 'listenbrainz_token' in columns else False,
                         'listenbrainz_username': row['listenbrainz_username'] if 'listenbrainz_username' in columns else None,
@@ -5719,6 +5753,7 @@ class MusicDatabase:
                         'recovery_question': row['recovery_question'] if 'recovery_question' in columns else None,
                         'home_page': row['home_page'] if 'home_page' in columns else None,
                         'allowed_pages': json.loads(ap_raw) if ap_raw else None,
+                        'allowed_sides': self._profile_sides(row, columns, bool(row['is_admin'])),
                         'can_download': bool(row['can_download']) if 'can_download' in columns else True,
                         'has_listenbrainz': row['listenbrainz_token'] is not None if 'listenbrainz_token' in columns else False,
                         'listenbrainz_username': row['listenbrainz_username'] if 'listenbrainz_username' in columns else None,
@@ -5733,16 +5768,19 @@ class MusicDatabase:
     def create_profile(self, name: str, avatar_color: str = '#6366f1',
                        pin_hash: Optional[str] = None, is_admin: bool = False,
                        avatar_url: Optional[str] = None, home_page: Optional[str] = None,
-                       allowed_pages: Optional[list] = None, can_download: bool = True) -> Optional[int]:
+                       allowed_pages: Optional[list] = None, can_download: bool = True,
+                       allowed_sides: Optional[str] = None) -> Optional[int]:
         """Create a new profile. Returns new profile ID or None on error."""
+        if allowed_sides not in ('music', 'video', 'both'):
+            allowed_sides = None   # NULL = the shipped default (music for non-admin)
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 ap_json = json.dumps(allowed_pages) if allowed_pages is not None else None
                 cursor.execute("""
-                    INSERT INTO profiles (name, avatar_color, pin_hash, is_admin, avatar_url, home_page, allowed_pages, can_download)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (name, avatar_color, pin_hash, int(is_admin), avatar_url, home_page, ap_json, int(can_download)))
+                    INSERT INTO profiles (name, avatar_color, pin_hash, is_admin, avatar_url, home_page, allowed_pages, can_download, allowed_sides)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (name, avatar_color, pin_hash, int(is_admin), avatar_url, home_page, ap_json, int(can_download), allowed_sides))
                 conn.commit()
                 return cursor.lastrowid
         except sqlite3.IntegrityError:
@@ -5754,12 +5792,16 @@ class MusicDatabase:
 
     def update_profile(self, profile_id: int, **kwargs) -> bool:
         """Update profile fields. Accepts: name, avatar_color, avatar_url, pin_hash, is_admin, home_page, allowed_pages, can_download."""
-        allowed = {'name', 'avatar_color', 'avatar_url', 'pin_hash', 'is_admin', 'home_page', 'allowed_pages', 'can_download'}
+        allowed = {'name', 'avatar_color', 'avatar_url', 'pin_hash', 'is_admin', 'home_page', 'allowed_pages', 'can_download', 'allowed_sides'}
         updates = {k: v for k, v in kwargs.items() if k in allowed}
         # Serialize allowed_pages list to JSON string for storage
         if 'allowed_pages' in updates:
             v = updates['allowed_pages']
             updates['allowed_pages'] = json.dumps(v) if v is not None else None
+        # Sides: only the three valid values are ever stored; anything else
+        # resets to NULL (= the shipped music-only default for non-admins).
+        if 'allowed_sides' in updates and updates['allowed_sides'] not in ('music', 'video', 'both'):
+            updates['allowed_sides'] = None
         if not updates:
             return False
         try:
