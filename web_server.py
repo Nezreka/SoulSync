@@ -10331,6 +10331,147 @@ def set_album_art(album_id):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/artist/<artist_id>/art-options', methods=['GET'])
+def get_artist_art_options(artist_id):
+    """Candidate artist photos for the artist image picker (read-only).
+
+    One candidate per CONNECTED metadata source (Spotify/Deezer/iTunes/AudioDB/
+    Discogs/…), resolved concurrently: the artist's stored per-source id when
+    the library row has one (exact), otherwise a name search on that source.
+    Mirrors the album art-options endpoint."""
+    try:
+        db = get_database()
+        artist_row = db.get_artist(int(artist_id))
+        if artist_row is None:
+            return jsonify({"error": "Artist not found"}), 404
+        name = getattr(artist_row, 'name', '') or ''
+
+        cache_key = ('artist', name.lower())
+        now = time.time()
+        with _ART_OPTIONS_CACHE_LOCK:
+            hit = _ART_OPTIONS_CACHE.get(cache_key)
+            if hit and now - hit[0] < _ART_OPTIONS_TTL_S:
+                return jsonify({"artist_id": artist_id, "count": len(hit[1]),
+                                "candidates": hit[1], "cached": True})
+
+        source_ids = {col: getattr(artist_row, col, None)
+                      for col in ('spotify_artist_id', 'deezer_id', 'itunes_artist_id',
+                                  'audiodb_id', 'discogs_id')}
+        from core.metadata.artist_image import gather_artist_image_candidates
+        candidates = gather_artist_image_candidates(name, source_ids)
+        with _ART_OPTIONS_CACHE_LOCK:
+            _ART_OPTIONS_CACHE[cache_key] = (now, candidates)
+        return jsonify({"artist_id": artist_id, "count": len(candidates), "candidates": candidates})
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid artist id"}), 400
+    except Exception as e:
+        logger.error("[artist-art-options] failed for %s: %s", artist_id, e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/artist/<artist_id>/art', methods=['POST'])
+def set_artist_art(artist_id):
+    """Apply a photo chosen in the artist image picker — everywhere:
+
+    1. SoulSync DB (``artists.thumb_url``; a non-empty value pins it, the
+       enrichment workers only fill empty thumbs)
+    2. the active media server (Plex/Jellyfin poster upload; Navidrome has no
+       API and is covered by step 3)
+    3. ``artist.jpg`` in the artist's folder on disk (what Navidrome reads;
+       Plex/Jellyfin also honor it as a fallback) + a Navidrome scan nudge
+
+    Steps 2 and 3 are best-effort — the response reports each target so the
+    UI can say exactly what happened. Body: ``{"url": "<image url>"}``."""
+    try:
+        data = request.get_json(silent=True) or {}
+        url = (data.get('url') or '').strip()
+        if not url:
+            return jsonify({"error": "url is required"}), 400
+
+        db = get_database()
+        artist_row = db.get_artist(int(artist_id))
+        if artist_row is None:
+            return jsonify({"error": "Artist not found"}), 404
+        artist_name = getattr(artist_row, 'name', '') or ''
+
+        if not db.set_artist_thumb_url(int(artist_id), url):
+            return jsonify({"error": "Could not update artist"}), 500
+
+        # Download once; server upload + disk write share the bytes.
+        image_bytes = None
+        try:
+            import urllib.request
+            req = urllib.request.Request(url, headers={"User-Agent": "SoulSync/1.0",
+                                                       "Accept": "image/*"})
+            with urllib.request.urlopen(req, timeout=15) as resp:   # noqa: S310 (user-chosen art URL)
+                image_bytes = resp.read() or None
+        except Exception as exc:
+            logger.warning("[set-artist-art] image download failed: %s", exc)
+
+        # 2. Active media server poster (Plex/Jellyfin have APIs; Navidrome's
+        #    update_artist_poster is a documented no-op — disk write covers it).
+        server_updated = False
+        if image_bytes and media_server_engine:
+            try:
+                active = config_manager.get_active_media_server()
+                client = media_server_engine.client(active)
+                if client and hasattr(client, 'update_artist_poster'):
+                    server_artist = None
+                    if hasattr(client, '_search_artists_by_name'):        # Plex
+                        matches = client._search_artists_by_name(title=artist_name, limit=1)
+                        server_artist = matches[0] if matches else None
+                    elif hasattr(client, 'get_artist_by_id'):             # Jellyfin
+                        server_artist = client.get_artist_by_id(str(artist_id))
+                    if server_artist is not None:
+                        server_updated = bool(client.update_artist_poster(server_artist, image_bytes))
+            except Exception as exc:
+                logger.warning("[set-artist-art] server poster update failed: %s", exc)
+
+        # 3. artist.jpg on disk (Navidrome's mechanism) + scan nudge.
+        disk_written = False
+        try:
+            from core.library.artist_image import derive_artist_folder, write_artist_jpg
+            albums = db.get_albums_by_artist(int(artist_id)) or []
+            artist_folder = None
+            for album in albums:
+                for tr in (db.get_tracks_by_album(album.id) or []):
+                    raw = getattr(tr, 'file_path', None)
+                    if not raw:
+                        continue
+                    resolved = _resolve_library_file_path(raw) or raw
+                    if resolved and os.path.exists(resolved):
+                        artist_folder = derive_artist_folder(os.path.dirname(resolved))
+                        break
+                if artist_folder:
+                    break
+            if artist_folder and image_bytes:
+                ok, detail = write_artist_jpg(artist_folder, image_bytes, overwrite=True)
+                disk_written = bool(ok)
+                if not ok:
+                    logger.warning("[set-artist-art] artist.jpg write failed: %s", detail)
+                elif media_server_engine:
+                    nav = media_server_engine.client('navidrome')
+                    if nav and config_manager.get_active_media_server() == 'navidrome':
+                        try:
+                            nav.trigger_library_scan()
+                        except Exception:
+                            logger.debug("[set-artist-art] navidrome scan nudge failed", exc_info=True)
+        except Exception as exc:
+            logger.warning("[set-artist-art] disk write failed: %s", exc)
+
+        # Invalidate the candidates cache so a re-open reflects reality.
+        with _ART_OPTIONS_CACHE_LOCK:
+            _ART_OPTIONS_CACHE.pop(('artist', artist_name.lower()), None)
+
+        return jsonify({"success": True, "artist_id": artist_id, "thumb_url": url,
+                        "server_updated": server_updated, "disk_written": disk_written})
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid artist id"}), 400
+    except Exception as e:
+        logger.error("[set-artist-art] failed for %s: %s", artist_id, e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/graph/library', methods=['GET'])
 def get_library_graph():
     """Library "Taste Map": EVERY library artist as a node, grouped by genre + wired by similarity.

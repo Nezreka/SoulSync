@@ -71371,3 +71371,28 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
     vertical-align: 2px; transition: all 0.15s ease; }
 .sact-open::after { content: 'Open ↗'; }
 .sact-card--link:hover .sact-open { background: rgba(var(--vd-accent-rgb, 88 101 242), 0.3); }
+
+/* ── Artist photo picker (hover overlay on the artist-detail hero image) ─── */
+/* Mirrors .enhanced-art-edit-overlay: invisible until hover, click opens the
+   per-source photo picker (openArtistArtPicker). Container already clips. */
+.artist-image-container { cursor: pointer; }
+.artist-image-edit-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: .02em;
+    background: linear-gradient(to top, rgba(0,0,0,.78), rgba(0,0,0,.28));
+    opacity: 0;
+    transition: opacity .18s ease;
+    border-radius: inherit;
+    z-index: 2;
+}
+.artist-image-container:hover .artist-image-edit-overlay { opacity: 1; }
+.artist-image-edit-overlay svg { opacity: .95; }
