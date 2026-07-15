@@ -145,18 +145,29 @@ function firstTrackNumber(
   return null;
 }
 
-function resultQuality(r: SourceSearchResult): string {
+function resultQuality(r: SourceSearchResult) {
   const fmt = ((r.result_type === 'album' ? r.dominant_quality : r.quality) ?? '').toUpperCase();
   const bitrate = r.bitrate ?? firstTrackNumber(r, 'bitrate');
   const rawSampleRate = r.sample_rate ?? firstTrackNumber(r, 'sample_rate');
   const rawBitDepth = r.bit_depth ?? firstTrackNumber(r, 'bit_depth');
   const kbps = bitrate ? (bitrate > 5000 ? Math.round(bitrate / 1000) : bitrate) : null;
-  const bitDepth = rawBitDepth ? `${rawBitDepth}-bit` : null;
+  const bitDepth = rawBitDepth ? `${rawBitDepth} Bit` : null;
   const sampleRate = rawSampleRate
     ? `${Number((rawSampleRate / 1000).toFixed(rawSampleRate % 1000 === 0 ? 0 : 1))} kHz`
     : null;
-  const resolution = [bitDepth, sampleRate].filter(Boolean).join('/');
-  return [fmt, resolution || null, kbps ? `${kbps} kbps` : null].filter(Boolean).join(' / ') || '—';
+  const resolution = [bitDepth, sampleRate].filter(Boolean).join(' ');
+
+  if (!fmt && !resolution && !kbps) {
+    return <span className={styles.qualityMissing}>—</span>;
+  }
+
+  return (
+    <span className={styles.qualityDisplay}>
+      {fmt && <span className={styles.qualityTag}>{fmt}</span>}
+      {resolution && <span className={styles.qualityTag}>{resolution}</span>}
+      {kbps && <span className={styles.qualityTag}>{kbps} kbps</span>}
+    </span>
+  );
 }
 
 function resultKey(r: SourceSearchResult): string {
@@ -539,8 +550,10 @@ export function InteractiveSearchModal({
                       </td>
                       <td>{r.artist ?? '—'}</td>
                       <td className={styles.qualityText}>
-                        {resultQuality(r)}
-                        <ProfileBadge result={r} profile={effectiveProfile} />
+                        <span className={styles.qualityCellRow}>
+                          {resultQuality(r)}
+                          <ProfileBadge result={r} profile={effectiveProfile} />
+                        </span>
                       </td>
                       <td className={styles.colNum}>{fmtBytes(resultSize(r))}</td>
                       <td className={styles.colNum} title={effMeta(r).publish_date ?? undefined}>

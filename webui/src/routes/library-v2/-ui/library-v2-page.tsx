@@ -136,8 +136,7 @@ const ICON_PATHS = {
   back: 'M15 18l-6-6 6-6M9 12h12',
   refresh: 'M21 12a9 9 0 0 1-15.3 6.4M3 12A9 9 0 0 1 18.3 5.6M18 3v5h-5M6 21v-5h5',
   search: 'M11 19a8 8 0 1 1 5.7-2.3L21 21',
-  interactive:
-    'M12 9c1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3 1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-4.5c0-2.33-4.67-3.5-7-3.5z',
+  interactive: 'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2 M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
   automatic: 'M11 19a8 8 0 1 1 5.7-2.3L21 21',
   organize: 'M4 7h16M7 7v12M17 7v12M4 19h16',
   retag: 'M20 10l-8.5 8.5a2 2 0 0 1-2.8 0L4 13.8V4h9.8L20 10zM8 8h.01',
@@ -150,6 +149,7 @@ const ICON_PATHS = {
   expand: 'M8 3H3v5M16 3h5v5M8 21H3v-5M21 16v5h-5',
   collapse: 'M9 3v6H3M15 3v6h6M9 21v-6H3M15 21v-6h6',
   download: 'M12 3v12M8 11l4 4 4-4M5 21h14',
+  quality: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z',
   star: 'M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z',
   userProfile:
     'M224 256A128 128 0 1 0 224 0a128 128 0 1 0 0 256zm-45.7 48C79.8 304 0 383.8 0 482.3C0 498.7 13.3 512 29.7 512l388.6 0c16.4 0 29.7-13.3 29.7-29.7C448 383.8 368.2 304 269.7 304l-91.4 0z',
@@ -2571,8 +2571,8 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               <ArtistRefreshButton artistId={artistId} />
               <ActionButton
                 icon="automatic"
-                label="Automatic Search (global)"
-                title="Global action: process the entire Wishlist and search all monitored missing tracks"
+                label="Search"
+                title="Search entire monitored wishlist for missing tracks"
                 onClick={() => handleAction('Automatic Search')}
               />
               <ActionButton
@@ -2591,9 +2591,9 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             </div>
             <div className={styles.toolbarGroup}>
               <ActionButton
-                icon="download"
-                label={upgradeScanBusy ? 'Scanning…' : 'Search Upgrades (global)'}
-                title="Global action: scan the entire Library v2 catalog and queue monitored tracks below their quality-profile cutoff"
+                icon="automatic"
+                label={upgradeScanBusy ? 'Scanning…' : 'Search Upgrades'}
+                title="Scan the entire Library v2 catalog and queue monitored tracks below their quality-profile cutoff"
                 busy={upgradeScanBusy}
                 onClick={() => void searchUpgrades()}
               />
@@ -3224,7 +3224,7 @@ function TrackRow({
         </span>
       </td>
       <td>
-        {track.id ? (
+        {track.id && !missing ? (
           track.metadata_gaps.length === 0 ? (
             <span className={styles.statusOk} title="All expected metadata tags present">
               tags ✓
