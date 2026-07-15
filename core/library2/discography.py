@@ -494,6 +494,51 @@ def auto_monitor_releases(db, config_manager, album_ids: List[int],
     return mirrored
 
 
+def repair_track_number_collisions(database, config_manager, artist_id: int) -> List[int]:
+    """Re-resolve the tracklist of already-owned albums whose tracks collide
+    on (disc_number, track_number) — the §16.3/§17.2 "SWAG" symptom.
+
+    ``auto_monitor_releases`` (and its ``resolve_tracklist`` call, which carries
+    the §16.3 title-healing fix) only ever runs for ``auto_monitor_album_ids``:
+    newly discovered releases, or discography-origin rows stuck mid-materialize.
+    An ``origin='library'`` album imported before the healing fix existed never
+    appears in that list, so its corrupted track numbers never get a healing
+    pass no matter how often "Update Discography" is clicked. This runs
+    ``resolve_tracklist`` directly for such albums instead — deliberately NOT
+    through ``auto_monitor_releases``, since that also force-monitors every
+    track and stamps a "new_release" provenance rule, which would misrepresent
+    why an already-owned album is monitored.
+    """
+    from core.library2.completeness import resolve_tracklist
+
+    conn = database._get_connection()
+    repaired: List[int] = []
+    try:
+        album_ids = [row["id"] for row in conn.execute(
+            """SELECT al.id FROM lib2_albums al
+                WHERE al.primary_artist_id=? AND al.origin='library'
+                  AND EXISTS (
+                      SELECT 1 FROM lib2_tracks t
+                       WHERE t.album_id = al.id
+                       GROUP BY COALESCE(t.disc_number, 1), t.track_number
+                      HAVING COUNT(*) > 1
+                  )
+                ORDER BY al.id""",
+            (artist_id,),
+        ).fetchall()]
+        for album_id in album_ids:
+            try:
+                if resolve_tracklist(config_manager, conn, album_id):
+                    repaired.append(album_id)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(
+                    "Track-number collision repair failed for album %s: %s",
+                    album_id, e)
+    finally:
+        conn.close()
+    return repaired
+
+
 def refresh_artist_discography(
     database,
     artist_id: int,
@@ -513,6 +558,8 @@ def refresh_artist_discography(
                 album_ids,
                 wishlist_profile_id=wishlist_profile_id,
             )
+        stats["repaired_track_number_collisions"] = repair_track_number_collisions(
+            database, config_manager, artist_id)
         return stats, mirrored
 
 

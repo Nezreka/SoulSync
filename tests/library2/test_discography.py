@@ -565,7 +565,8 @@ def test_refresh_holds_artist_lock_through_auto_monitor(
         assert not expansion.done()
         assert expand_calls == [artist_id]
         release_auto_monitor.set()
-        assert refresh.result(timeout=2) == ({"auto_monitor_album_ids": [91]}, 1)
+        assert refresh.result(timeout=2) == (
+            {"auto_monitor_album_ids": [91], "repaired_track_number_collisions": []}, 1)
         assert expansion.result(timeout=2) == {"auto_monitor_album_ids": [91]}
 
     assert expand_calls == [artist_id, artist_id]
@@ -594,3 +595,120 @@ def test_reimport_claims_discography_row(legacy_db, imported_conn, fake_discogra
     assert len(rows) == 1
     assert rows[0]["origin"] == "library"
     assert rows[0]["legacy_album_id"] == 12
+
+
+def _make_colliding_library_album(conn, artist_id: int, title: str) -> int:
+    """An already-owned album with a (disc, track_number) collision — the
+    §17.2 "SWAG" symptom: every real track collapsed onto number 1, one of
+    them ALSO duplicated by a fileless placeholder at its true number."""
+    album_id = conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title, origin, expected_track_count) "
+        "VALUES(?, ?, 'library', 3)",
+        (artist_id, title),
+    ).lastrowid
+    for track_title in ("Alpha", "Bravo", "Charlie"):
+        conn.execute(
+            "INSERT INTO lib2_tracks(album_id, title, track_number, disc_number, monitored) "
+            "VALUES(?,?,1,1,1)",
+            (album_id, track_title),
+        )
+        tid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        conn.execute(
+            "INSERT INTO lib2_track_files(track_id, path) VALUES(?, ?)",
+            (tid, f"/m/{track_title.lower()}.flac"),
+        )
+    conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title, track_number, disc_number, monitored) "
+        "VALUES(?, 'Bravo', 2, 1, 0)",
+        (album_id,),
+    )
+    # Pre-seed the canonical tracklist cache so resolve_tracklist can heal
+    # from cache alone — no provider/network call needed in these tests.
+    conn.execute(
+        "UPDATE lib2_albums SET tracklist_json=? WHERE id=?",
+        (json.dumps([
+            {"track_number": 1, "title": "Alpha"},
+            {"track_number": 2, "title": "Bravo"},
+            {"track_number": 3, "title": "Charlie"},
+        ]), album_id),
+    )
+    conn.commit()
+    return album_id
+
+
+def test_refresh_repairs_track_number_collision_on_existing_library_album(
+        legacy_db, imported_conn, fake_discography, monkeypatch):
+    """§17.2: 'Update Discography' must repair track-number collisions on
+    ALREADY-OWNED albums too, not only newly discovered ones — the title
+    healing (§16.3, eca36caa) only ever fires through auto_monitor_releases,
+    which is scoped to auto_monitor_album_ids (new releases). SWAG-style
+    corruption on an existing album never gets a resolve_tracklist call at
+    all, no matter how many times the button is clicked."""
+    aid = _artist_id(imported_conn)
+    swag_id = _make_colliding_library_album(imported_conn, aid, "swag")
+
+    import core.library2.completeness as completeness_module
+    real_resolve = completeness_module.resolve_tracklist
+    calls = []
+
+    def spy_resolve(config_manager, conn, album_id):
+        calls.append(album_id)
+        return real_resolve(config_manager, conn, album_id)
+
+    monkeypatch.setattr(
+        "core.library2.completeness.resolve_tracklist", spy_resolve)
+
+    stats, _mirrored = D.refresh_artist_discography(legacy_db, aid, None)
+
+    assert swag_id in calls
+    assert swag_id in stats["repaired_track_number_collisions"]
+    healed = {
+        r["title"]: r["track_number"] for r in imported_conn.execute(
+            "SELECT title, track_number FROM lib2_tracks WHERE album_id=?",
+            (swag_id,))
+    }
+    assert healed == {"Alpha": 1, "Bravo": 2, "Charlie": 3}
+
+
+def test_refresh_track_number_repair_does_not_touch_clean_library_albums(
+        legacy_db, imported_conn, fake_discography, monkeypatch):
+    """A library album with no (disc, number) collision must not be
+    re-resolved by the new repair pass — only actually-corrupted albums."""
+    aid = _artist_id(imported_conn)
+    calls = []
+    monkeypatch.setattr(
+        "core.library2.completeness.resolve_tracklist",
+        lambda _config, _conn, album_id: calls.append(album_id),
+    )
+
+    D.refresh_artist_discography(legacy_db, aid, None)
+
+    views_id = imported_conn.execute(
+        "SELECT id FROM lib2_albums WHERE title='Views'"
+    ).fetchone()[0]
+    assert views_id not in calls
+
+
+def test_refresh_track_number_repair_does_not_remonitor_or_reprovenance(
+        legacy_db, imported_conn, fake_discography):
+    """The repair pass fixes numbering only — it must not flip the album/track
+    monitored flags or stamp a 'new_release' monitor-rule provenance the way
+    auto_monitor_releases does for genuinely new releases; SWAG is already
+    owned, re-labeling it as a new release would misrepresent why it's
+    monitored."""
+    aid = _artist_id(imported_conn)
+    swag_id = _make_colliding_library_album(imported_conn, aid, "swag")
+    imported_conn.execute(
+        "UPDATE lib2_albums SET monitored=0 WHERE id=?", (swag_id,))
+    imported_conn.commit()
+
+    D.refresh_artist_discography(legacy_db, aid, None)
+
+    assert imported_conn.execute(
+        "SELECT monitored FROM lib2_albums WHERE id=?", (swag_id,)
+    ).fetchone()["monitored"] == 0
+    rule = imported_conn.execute(
+        "SELECT COUNT(*) FROM lib2_monitor_rules WHERE entity_type='album' AND entity_id=?",
+        (swag_id,),
+    ).fetchone()[0]
+    assert rule == 0

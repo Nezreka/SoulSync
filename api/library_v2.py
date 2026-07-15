@@ -1803,9 +1803,14 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         # real track rows and mirror those into the wishlist (shared helper,
         # also used by the periodic lib2_discography_refresh repair job).
         auto_ids = stats.pop("auto_monitor_album_ids", []) or []
+        # §17.2: already-owned albums whose track numbers collided got
+        # re-resolved (title-healed) in the same call, see
+        # discography.repair_track_number_collisions.
+        repaired_ids = stats.pop("repaired_track_number_collisions", []) or []
         return jsonify({"success": True, **stats,
                         "auto_monitored_releases": len(auto_ids),
-                        "auto_monitor_mirrored": mirrored})
+                        "auto_monitor_mirrored": mirrored,
+                        "repaired_track_number_collisions": len(repaired_ids)})
 
     def _bulk_track_ids_for_albums(conn, album_ids: List[int]) -> List[int]:
         if not album_ids:

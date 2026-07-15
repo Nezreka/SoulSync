@@ -375,6 +375,76 @@ def test_persist_tracklist_heals_duplicated_track_numbers_by_title(imported_conn
     }
 
 
+def test_persist_tracklist_heals_real_track_over_its_own_placeholder_duplicate(
+        imported_conn):
+    """§17.2 (SWAG case): a REAL, downloaded track collapsed onto the wrong
+    number can ALSO have a fileless placeholder row already sitting at its
+    correct number with the identical title (created by an earlier resolve
+    before the file existed). ``_unique_untouched_title_match`` alone sees two
+    untouched same-title rows and refuses to heal (ambiguous) — the real row
+    stays corrupted and the redundant placeholder survives, i.e. exactly the
+    "DAISIES at number 1 AND number 2" duplication the user reported. When one
+    of the ambiguous candidates has a file and the rest are safe-to-drop
+    placeholders (no file, not monitored, no positive rule, not wanted), the
+    real row must be healed to the correct number and the placeholder dropped.
+    """
+    artist_id = imported_conn.execute(
+        "SELECT id FROM lib2_artists WHERE name='Drake'"
+    ).fetchone()[0]
+    album_id = imported_conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title, origin, expected_track_count) "
+        "VALUES(?, 'swag', 'library', 3)",
+        (artist_id,),
+    ).lastrowid
+    for title in ("Alpha", "Bravo", "Charlie"):
+        imported_conn.execute(
+            "INSERT INTO lib2_tracks(album_id, title, track_number, disc_number, monitored) "
+            "VALUES(?,?,1,1,1)",
+            (album_id, title),
+        )
+    real_ids = {
+        r["title"]: r["id"] for r in imported_conn.execute(
+            "SELECT id, title FROM lib2_tracks WHERE album_id=?", (album_id,))
+    }
+    for title, tid in real_ids.items():
+        imported_conn.execute(
+            "INSERT INTO lib2_track_files(track_id, path) VALUES(?, ?)",
+            (tid, f"/m/{title.lower()}.flac"),
+        )
+    # A stale placeholder for "Bravo" already sits at its correct number 2 —
+    # created by an earlier resolve, before the real file existed.
+    bravo_placeholder_id = imported_conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title, track_number, disc_number, monitored) "
+        "VALUES(?, 'Bravo', 2, 1, 0)",
+        (album_id,),
+    ).lastrowid
+
+    created = _persist_tracklist_tracks(imported_conn, album_id, [
+        {"track_number": 1, "title": "Alpha"},
+        {"track_number": 2, "title": "Bravo"},
+        {"track_number": 3, "title": "Charlie"},
+    ])
+
+    assert created == 0
+    healed = {
+        r["title"]: r["track_number"] for r in imported_conn.execute(
+            "SELECT title, track_number FROM lib2_tracks WHERE album_id=?",
+            (album_id,))
+    }
+    # The real "Bravo" track (has a file) is healed to number 2, in place.
+    assert healed == {"Alpha": 1, "Bravo": 2, "Charlie": 3}
+    assert imported_conn.execute(
+        "SELECT track_number FROM lib2_tracks WHERE id=?", (real_ids["Bravo"],)
+    ).fetchone()["track_number"] == 2
+    # The redundant fileless placeholder is gone, not left as a duplicate.
+    assert imported_conn.execute(
+        "SELECT COUNT(*) FROM lib2_tracks WHERE id=?", (bravo_placeholder_id,)
+    ).fetchone()[0] == 0
+    assert imported_conn.execute(
+        "SELECT COUNT(*) FROM lib2_tracks WHERE album_id=?", (album_id,)
+    ).fetchone()[0] == 3
+
+
 def test_persist_tracklist_tracks_trims_surplus_fileless_rows(imported_conn):
     views_id = imported_conn.execute(
         "SELECT id FROM lib2_albums WHERE title='Views'"

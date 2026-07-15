@@ -107,6 +107,17 @@ def _snapshot_tracks(snapshot: Any, reference: Mapping[str, Any]) -> Optional[Li
     return [track for track in tracks if isinstance(track, dict)] or None
 
 
+def _delete_track_row(conn, track_id: int) -> None:
+    """Remove one track row and its dependent rows (not the edition prune)."""
+    conn.execute(
+        "DELETE FROM lib2_monitor_rules WHERE entity_type='track' AND entity_id=?",
+        (track_id,),
+    )
+    conn.execute("DELETE FROM lib2_wanted_tracks WHERE track_id=?", (track_id,))
+    conn.execute("DELETE FROM lib2_track_artists WHERE track_id=?", (track_id,))
+    conn.execute("DELETE FROM lib2_tracks WHERE id=?", (track_id,))
+
+
 def _trim_excess_fileless_tracks(conn, album_id: int, expected: int,
                                   protect_ids: Optional[set] = None) -> int:
     """Drop surplus provider-only rows when an old import over-materialized them.
@@ -153,13 +164,7 @@ def _trim_excess_fileless_tracks(conn, album_id: int, expected: int,
             or row["is_wanted"]
         ):
             continue
-        conn.execute(
-            "DELETE FROM lib2_monitor_rules WHERE entity_type='track' AND entity_id=?",
-            (row["id"],),
-        )
-        conn.execute("DELETE FROM lib2_wanted_tracks WHERE track_id=?", (row["id"],))
-        conn.execute("DELETE FROM lib2_track_artists WHERE track_id=?", (row["id"],))
-        conn.execute("DELETE FROM lib2_tracks WHERE id=?", (row["id"],))
+        _delete_track_row(conn, row["id"])
         deleted += 1
     if deleted:
         from core.library2.editions import prune_orphaned_edition_rows
@@ -176,23 +181,64 @@ def _unique_untouched_title_match(conn, album_id: int, title: str,
                                   touched_ids: set) -> Optional[int]:
     """A single not-yet-touched local track of this album with the same title.
 
-    Returns its id only when EXACTLY ONE such row exists, so a duplicate title
-    (remix/intro/outro name reused) never triggers a wrong heal. Used to repair
-    corrupted track NUMBERS (§16.3): the title is the stable identity, the number
-    is the field that got collapsed/duplicated, so matching on it re-keys the
-    right row instead of confirming the corruption or inserting a duplicate.
+    Returns its id only when the title unambiguously identifies ONE track to
+    heal, so a duplicate title (remix/intro/outro name reused) never triggers
+    a wrong heal. Used to repair corrupted track NUMBERS (§16.3): the title is
+    the stable identity, the number is the field that got collapsed/
+    duplicated, so matching on it re-keys the right row instead of confirming
+    the corruption or inserting a duplicate.
+
+    A title can also collide between a real (has-file) row and one or more
+    fileless placeholders: an earlier resolve created the placeholder at the
+    correct number before the file existed, then the file's own row got its
+    number corrupted into colliding with something else (§17.2 — "DAISIES at
+    number 1 AND 2"). Plain uniqueness would refuse to heal here (ambiguous),
+    leaving the real row corrupted and the placeholder as a visible duplicate.
+    When exactly one candidate has a file and the rest are safe-to-drop
+    placeholders (no legacy link, not monitored, no positive monitor rule, not
+    wanted), the real row is the one to heal and the redundant placeholder(s)
+    are removed.
     """
     norm = _norm_title(title)
     if not norm:
         return None
-    matches = [
-        r["id"]
-        for r in conn.execute(
-            "SELECT id, title FROM lib2_tracks WHERE album_id=?", (album_id,)
+    rows = [
+        r for r in conn.execute(
+            """SELECT t.id, t.title, t.legacy_track_id, t.monitored,
+                      EXISTS(SELECT 1 FROM lib2_track_files f WHERE f.track_id=t.id) AS has_file,
+                      EXISTS(
+                          SELECT 1 FROM lib2_monitor_rules r
+                           WHERE r.entity_type='track' AND r.entity_id=t.id
+                             AND r.monitored=1
+                      ) AS has_positive_rule,
+                      EXISTS(
+                          SELECT 1 FROM lib2_wanted_tracks w
+                           WHERE w.track_id=t.id AND w.wanted=1
+                      ) AS is_wanted
+                 FROM lib2_tracks t WHERE t.album_id=?""",
+            (album_id,),
         ).fetchall()
         if _norm_title(r["title"]) == norm and r["id"] not in touched_ids
     ]
-    return matches[0] if len(matches) == 1 else None
+    if len(rows) == 1:
+        return rows[0]["id"]
+    if len(rows) < 2:
+        return None
+    with_file = [r for r in rows if r["has_file"]]
+    without_file = [r for r in rows if not r["has_file"]]
+    if len(with_file) != 1 or not without_file:
+        return None
+    if any(
+        r["legacy_track_id"] is not None or r["monitored"]
+        or r["has_positive_rule"] or r["is_wanted"]
+        for r in without_file
+    ):
+        return None
+    for r in without_file:
+        _delete_track_row(conn, r["id"])
+    from core.library2.editions import prune_orphaned_edition_rows
+    prune_orphaned_edition_rows(conn.cursor())
+    return with_file[0]["id"]
 
 
 def _persist_tracklist_tracks(conn, album_id: int, tracks: List[dict]) -> int:
