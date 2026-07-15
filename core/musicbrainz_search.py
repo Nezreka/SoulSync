@@ -190,9 +190,18 @@ class MusicBrainzSearchClient:
             # Jackson" — the singer + poet + photographer + didgeridoo
             # player + ...), all scoring 80+ on exact-name match. Rendered
             # as identical cards since the fallback image lookup hits the
-            # same fallback-source result for each. Keep the highest-
-            # scoring entry per normalized name so the user sees one card
-            # per distinct artist.
+            # same fallback-source result for each. Keep ONE entry per
+            # normalized name — but pick it by (score, TAG WEIGHT), not
+            # score alone: every same-named artist ties at 100 on an exact
+            # match, and MB's ordering among ties is arbitrary, so "Korn"
+            # was surfacing a Thai pop duo and silently dropping the metal
+            # band (#1036). Community tag counts are a reliable fame proxy:
+            # the artist people actually search for has hundreds, the
+            # namesakes have none.
+            def _tag_weight(entry) -> int:
+                return sum(int(t.get('count') or 0) for t in (entry.get('tags') or [])
+                           if isinstance(t, dict))
+
             seen = {}
             for a in raw:
                 score = a.get('score', 0) or 0
@@ -203,12 +212,15 @@ class MusicBrainzSearchClient:
                 if not mbid or not name:
                     continue
                 key = name.lower().strip()
-                if key not in seen or (seen[key].get('score', 0) or 0) < score:
+                if key not in seen or \
+                        (score, _tag_weight(a)) > ((seen[key].get('score', 0) or 0), _tag_weight(seen[key])):
                     seen[key] = a
 
-            # Sort the survivors score-descending and cap at the caller's
-            # limit. `seen` only holds top-per-name, so ordering is stable.
-            top = sorted(seen.values(), key=lambda r: -(r.get('score', 0) or 0))[:limit]
+            # Sort the survivors by the same (score, tag weight) key and cap
+            # at the caller's limit. `seen` only holds top-per-name, so
+            # ordering is stable.
+            top = sorted(seen.values(),
+                         key=lambda r: (-(r.get('score', 0) or 0), -_tag_weight(r)))[:limit]
 
             artists = []
             for a in top:

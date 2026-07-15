@@ -28658,12 +28658,19 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
 .artist-image-container {
     position: relative;
     flex-shrink: 0;
+    /* Bound relative to the PARENT, not the viewport: the old 40vw cap let a
+       huge source image (Deezer ships up to 1000px) out-muscle its flex
+       siblings whenever the hero was narrower than the viewport — the info
+       column collapsed ("KISS" clipped to "KIS") and overlapped the fixed
+       280px Top Tracks sidebar (#1036). 38% + sidebar + gaps always leaves
+       the info column real room. */
+    max-width: min(38%, 460px);
 }
 
 #artist-hero-section #artist-detail-image {
     width: 100%;
     height: auto;
-    max-width: 40vw;
+    max-width: 100%;
 }
 
 .artist-detail-image {
