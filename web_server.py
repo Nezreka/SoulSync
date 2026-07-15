@@ -21310,6 +21310,13 @@ def _persist_find_and_add_match(source_track_id, server_source, server_track_id,
        Find & Add now also records a manual library match (one-way; the manual
        match tool has no playlist to act on, so it doesn't reverse-create)."""
     if not source_track_id:
+        # Nothing to key the override by — the pairing will NOT survive a
+        # reload. Loud, because to the user this looks like "matched it, then
+        # it unmatched itself" (the wolf39us report shape).
+        logger.warning(
+            "[ServerPlaylist] Find & Add match for '%s' NOT persisted — the source row "
+            "carries no source_track_id, so the pairing can't be stored and will "
+            "revert on the next compare load.", server_track_title or source_title or server_track_id)
         return
     db = get_database()
     try:
