@@ -128,8 +128,8 @@
 ## 7. Quality Checks & Verification
 
 ### 7.1 Verification Flow nach Interactive Search Download
-- **Aktuell:** Download wird durchgewunken, Quality Checks bestätigt, aber nicht explizit als "verified" gekennzeichnet.
-- **Ziel:** Nach erfolgreichem Interactive Search Download sollte der Verification-Status klar sein.
+- **Status:** **Abgeschlossen**
+- **Details:** Der Verification-Status ist über `TrackVerificationBadge` voll integriert (Anzeige von `AcoustID ✓`, `AcoustID Human`, `AcoustID Bypassed` und `AcoustID Unverified`).
 - **Scope:** UI Feedback/Status-Anzeige.
 
 ---
@@ -137,13 +137,13 @@
 ## 8. Comparison mit alter Library (Enhanced View)
 
 ### 8.1 Fehlende Metadaten-Anzeige
-- **Aktuell:** Alte Library zeigte "Match" (welche Metadaten-Source gematch wurde).
-- **Ziel:** Sollte Library V2 auch anzeigen (z.B. "Matched via Spotify" / "Matched via Deezer").
+- **Status:** **Abgeschlossen**
+- **Details:** Match-Chips (z. B. *"Matched via Spotify"*, *"Deezer"* etc.) werden für Tracks und Alben vollständig gerendert.
 - **Scope:** UI Display (Backend trägt bereits Provenance).
 
 ### 8.2 ReplayGain-Funktion
-- **Aktuell:** Fehlt in Library V2.
-- **Ziel:** Enrich Album/Track mit ReplayGain-Werten (benutzerinitiierte Action).
+- **Status:** **Abgeschlossen**
+- **Details:** Sowohl auf Album- als auch auf Track-Ebene sind Buttons zur ReplayGain-Analyse und Tag-Schreibung implementiert und mit dem Backend verdrahtet.
 - **Scope:** Backend-Funktion (nicht UI-only).
 
 ### 8.3 Enrich Album/Track Funktion
@@ -174,5 +174,6 @@
 4. **Metadata-Tags** (2.3): **Abgeschlossen** (detailLabel-Styling ist aktiv).
 5. **Quality-Darstellung** (2.4): **Abgeschlossen** (Entscheidung: Ursprüngliches Layout beibehalten).
 6. **Quality Profile Spalte** (4.1): **Abgeschlossen** (Entscheidung: In Quality-Spalte belassen).
-7. **Backend-Findings** (5.2, 8.2, 8.3 etc.): Roadmap-Punkte für zukünftige Sitzungen.
+7. **Backend-Findings** (5.2, 8.3, 8.4 etc.): Roadmap-Punkte für zukünftige Sitzungen.
 8. **Artist-spezifische automatische Suche** (6.4): **Offen / Ausstehend** (Aufteilung in artist-spezifisch vs. global benötigt Backend-Erweiterung).
+9. **Verification Flow, Match-Quelle und ReplayGain** (7.1, 8.1, 8.2): **Abgeschlossen** (Badges, Chips und ReplayGain-Aktionen sind voll funktionsfähig).
