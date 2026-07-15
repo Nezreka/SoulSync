@@ -159,6 +159,25 @@ def test_partial_album_is_not_blanket_monitored_on_import(legacy_db):
             (hotline_id,),
         ).fetchone()
         assert wanted is not None and wanted["wanted"] == 0
+
+        # The album rule always decides a track's wanted state over an
+        # unranked/legacy_import track rule (wanted.py's documented priority),
+        # so a track's own raw ``monitored`` flag must inherit its album's
+        # value at import time — exactly like the runtime album-monitor
+        # cascade does for every non-explicit child track (api/library_v2.py
+        # lib2_set_monitored, "albums" branch). Otherwise the flag lies about
+        # what the projection actually decided. This holds regardless of
+        # whether the individual track already has a file (One Dance/Views is
+        # present but still inherits the partial album's unmonitored state).
+        def _monitored(legacy_track_id: int) -> int:
+            return conn.execute(
+                "SELECT monitored FROM lib2_tracks WHERE legacy_track_id=?",
+                (legacy_track_id,),
+            ).fetchone()["monitored"]
+
+        assert _monitored(101) == 0  # Hotline Bling, Views (partial album)
+        assert _monitored(100) == 0  # One Dance, Views (same partial album)
+        assert _monitored(102) == 1  # One Dance, single (fully-owned album)
     finally:
         conn.close()
 

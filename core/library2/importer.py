@@ -589,6 +589,19 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 "WHERE track_id IS NOT NULL AND path IS NOT NULL"
             ).fetchall()
         }
+        # A newly-created track's own ``monitored`` flag must agree with its
+        # album's (§16.2 follow-up): the wanted projection's album rule always
+        # decides an un-ruled track's wanted state over its own flag (see
+        # wanted.py's priority order — album rule outranks a mere legacy_import
+        # track rule), and the runtime album-monitor cascade already applies
+        # this same album-wins convention to every non-explicit child track
+        # (api/library_v2.py ``lib2_set_monitored``, "albums" branch). Reading
+        # it fresh here (not the local per-album loop var) also covers
+        # existing/updated albums, whose monitored flag isn't recomputed above.
+        album_monitored_by_id = {
+            int(r["id"]): int(r["monitored"])
+            for r in cursor.execute("SELECT id, monitored FROM lib2_albums").fetchall()
+        }
 
         cursor.execute("SELECT * FROM tracks")
         track_rows = cursor.fetchall()
@@ -613,11 +626,13 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 )
                 track_id = existing
             else:
+                track_monitored = album_monitored_by_id.get(album_id, 1)
                 cursor.execute(
                     "INSERT INTO lib2_tracks(album_id, title, track_number, disc_number, "
                     "duration, isrc, musicbrainz_id, spotify_id, legacy_track_id, "
-                    "quality_profile_id, legacy_import_run_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                    (*tfields, row["id"], default_profile_id, run_id),
+                    "quality_profile_id, monitored, legacy_import_run_id) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (*tfields, row["id"], default_profile_id, track_monitored, run_id),
                 )
                 track_id = cursor.lastrowid
                 track_map[row["id"]] = track_id
