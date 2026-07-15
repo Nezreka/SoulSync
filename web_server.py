@@ -9507,6 +9507,16 @@ def get_artist_detail(artist_id):
                 artist_id,
                 artist_name=artist_info['name'],
                 options=MetadataLookupOptions(
+                    # The user navigated here FROM a specific source's artist
+                    # card — show THAT source's catalog, not the primary's
+                    # (#1026, QT3496): when the artist was already owned, the
+                    # library upgrade discarded the clicked source, so an
+                    # Apple Music card rendered Deezer's 2-album view. The
+                    # override puts the clicked source at the head of the
+                    # chain; the normal priority still backstops it when that
+                    # source has nothing. Library-page opens carry no source
+                    # param → primary as before.
+                    source_override=source_param or None,
                     allow_fallback=True,
                     skip_cache=False,
                     max_pages=0,
