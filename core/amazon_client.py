@@ -844,12 +844,18 @@ class AmazonClient:
         raw_key = item.get("decryptionKey")
         decryption_key = str(raw_key) if raw_key else None
 
-        def _int_tag(key: str) -> Optional[int]:
-            v = tags.get(key)
-            try:
-                return int(v) if v is not None else None
-            except (TypeError, ValueError):
-                return None
+        def _int_tag(*keys: str) -> Optional[int]:
+            # The current T2Tunes backend tags these as 'track'/'disc'; the
+            # legacy one used 'trackNumber'/'discNumber' (#1034, Madhu0).
+            for key in keys:
+                v = tags.get(key)
+                if v is None:
+                    continue
+                try:
+                    return int(v)
+                except (TypeError, ValueError):
+                    continue
+            return None
 
         return T2TunesStreamInfo(
             asin=str(item.get("asin") or ""),
@@ -867,10 +873,10 @@ class AmazonClient:
             artist=str(tags.get("artist") or ""),
             album=str(tags.get("album") or ""),
             isrc=str(tags.get("isrc") or ""),
-            cover_url=str(item.get("coverUrl") or ""),
-            track_number=_int_tag("trackNumber"),
-            disc_number=_int_tag("discNumber"),
+            cover_url=str(item.get("coverUrl") or item.get("templateCoverUrl") or ""),
+            track_number=_int_tag("trackNumber", "track"),
+            disc_number=_int_tag("discNumber", "disc"),
             genre=str(tags.get("genre") or ""),
             label=str(tags.get("label") or ""),
-            date=str(tags.get("date") or ""),
+            date=str(tags.get("date") or tags.get("releaseDate") or ""),
         )
