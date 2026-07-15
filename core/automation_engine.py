@@ -432,6 +432,56 @@ class AutomationEngine:
             'monthly_time': self._setup_monthly_time_trigger,
         }
 
+    # --- Global per-side pause (the Automations pages' master toggles) ---
+    # One switch per side. It does NOT touch individual automations' enabled
+    # flags — those stay exactly as the user set them — it just gates whether
+    # anything RUNS: scheduled slots are skipped (schedule stays alive) and
+    # event triggers are dropped while the side is paused. Manual "Run now"
+    # still executes — an explicit click outranks the pause.
+
+    # Stored in the engine DB's `metadata` KV (music_library.db — the same DB
+    # the automations themselves live in), NOT config.json.
+    MASTER_KEYS = {'music': 'automation_master_music_enabled',
+                   'video': 'automation_master_video_enabled'}
+    # Video ships paused: most installs predate the video side and only asked
+    # for music automation. Music keeps its historic always-on behaviour.
+    MASTER_DEFAULTS = {'music': True, 'video': False}
+
+    @staticmethod
+    def automation_side(auto) -> str:
+        """Which side an automation belongs to — 'video' when the system row is
+        video-owned or a custom automation uses a video trigger/action."""
+        auto = auto or {}
+        if auto.get('owned_by') == 'video':
+            return 'video'
+        if str(auto.get('action_type') or '').startswith('video_'):
+            return 'video'
+        if str(auto.get('trigger_type') or '').startswith('video_'):
+            return 'video'
+        return 'music'
+
+    def master_enabled(self, side: str) -> bool:
+        """Live DB read — flipping the toggle applies to the very next run.
+        An absent/unreadable key means the side's shipped default."""
+        key = self.MASTER_KEYS.get(side)
+        if not key:
+            return True
+        try:
+            raw = self.db.get_metadata(key)
+        except Exception:
+            raw = None
+        if raw is None or str(raw).strip() == '':
+            return self.MASTER_DEFAULTS.get(side, True)
+        return str(raw).strip().lower() in ('1', 'true', 'yes', 'on')
+
+    def set_master_enabled(self, side: str, enabled: bool) -> bool:
+        """Persist one side's master state to the engine DB. False on bad side."""
+        key = self.MASTER_KEYS.get(side)
+        if not key:
+            return False
+        self.db.set_metadata(key, '1' if enabled else '0')
+        return True
+
     # --- Action Handler Registration ---
 
     def register_action_handler(self, action_type, handler_fn, guard_fn=None):
@@ -743,7 +793,10 @@ class AutomationEngine:
             for aid in self._event_automations.get(event_type, []):
                 auto = self.db.get_automation(aid)
                 if auto and auto.get('enabled') and auto.get('action_type') == action_type:
-                    return True
+                    # Direct-effect callers honor the per-side master pause too —
+                    # otherwise a paused side's effects would still fire through
+                    # the code paths that never route via _run_event_automation.
+                    return self.master_enabled(self.automation_side(auto))
             return False
         except Exception as e:
             logger.debug(f"is_event_action_enabled({event_type}, {action_type}) failed: {e}")
@@ -858,6 +911,14 @@ class AutomationEngine:
 
     def _run_event_automation(self, auto, automation_id, event_data):
         """Execute action for an event-triggered automation."""
+        # Global per-side pause — event triggers are simply dropped while the
+        # side is paused (nothing to reschedule; the next event fires normally
+        # once the master is back on).
+        side = self.automation_side(auto)
+        if not self.master_enabled(side):
+            logger.info(f"Event automation '{auto.get('name')}' skipped — {side} automations are paused")
+            return
+
         action_type = auto.get('action_type')
 
         # Check for action delay
@@ -978,6 +1039,19 @@ class AutomationEngine:
         auto = self.db.get_automation(automation_id)
         if not auto or not auto.get('enabled'):
             return
+
+        # Global per-side pause: a scheduled slot is skipped but the schedule
+        # stays alive (_finish_run computes the next natural slot), so flipping
+        # the master back on resumes at the normal cadence — no restart, no
+        # burst of catch-up runs. Manual run_now (skip_delay=True) bypasses.
+        if not skip_delay:
+            side = self.automation_side(auto)
+            if not self.master_enabled(side):
+                logger.info(f"Automation '{auto.get('name')}' skipped — {side} automations are paused")
+                self._finish_run(auto, automation_id,
+                                 {'status': 'skipped', 'reason': f'{side} automations are paused'},
+                                 error=None)
+                return
 
         action_type = auto.get('action_type')
 

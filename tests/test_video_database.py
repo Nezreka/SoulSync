@@ -60,6 +60,49 @@ def test_health_check_ok(db):
     assert db.health_check() is True
 
 
+def test_v41_heal_requeues_statusless_burned_details(tmp_path):
+    """v41 data migration: the old details backfill swallowed failed TMDB calls
+    and still marked details_synced=1 — permanently, since the queue only picks
+    details_synced=0. Rows left matched-but-status-less (no watchlist button,
+    no airing refresh — the 90 Day Fiancé report) must be re-queued exactly
+    once on upgrade; rows whose status DID land stay synced."""
+    import database.video_database as vdb
+
+    path = str(tmp_path / "video_library.db")
+    db = VideoDatabase(database_path=path)
+    burned = db.upsert_show_tree("plex", {"server_id": "s1", "title": "Burned", "tmdb_id": 61575, "seasons": []})
+    healthy = db.upsert_show_tree("plex", {"server_id": "s2", "title": "Healthy", "tmdb_id": 73319, "seasons": []})
+    movie = db.upsert_movie("plex", {"server_id": "m1", "title": "Burned Movie", "tmdb_id": 500})
+    with db.connect() as conn:
+        conn.execute("UPDATE shows SET details_synced=1, status=NULL")
+        conn.execute("UPDATE shows SET status='Returning Series' WHERE id=?", (healthy,))
+        conn.execute("UPDATE movies SET details_synced=1, status=NULL")
+        conn.execute("PRAGMA user_version = 40")   # pre-heal era
+
+    # Re-init the same file as a fresh process would (drop the once-per-process guard).
+    vdb._initialized_paths.discard(str(Path(path).resolve()))
+    db2 = VideoDatabase(database_path=path)
+    with db2.connect() as conn:
+        synced = {row["id"]: row["details_synced"] for row in
+                  conn.execute("SELECT id, details_synced FROM shows")}
+        movie_synced = conn.execute(
+            "SELECT details_synced FROM movies WHERE id=?", (movie,)).fetchone()[0]
+    assert synced[burned] == 0        # re-queued for one fresh attempt
+    assert synced[healthy] == 1       # status landed → left alone
+    assert movie_synced == 0
+    assert db2.schema_version == SCHEMA_VERSION
+
+    # One-time: at the current version the heal doesn't run again, so a row
+    # re-marked synced (the worker's fresh attempt) stays synced on next boot.
+    with db2.connect() as conn:
+        conn.execute("UPDATE shows SET details_synced=1 WHERE id=?", (burned,))
+    vdb._initialized_paths.discard(str(Path(path).resolve()))
+    db3 = VideoDatabase(database_path=path)
+    with db3.connect() as conn:
+        assert conn.execute("SELECT details_synced FROM shows WHERE id=?",
+                            (burned,)).fetchone()[0] == 1
+
+
 # ── no-polymorphic-id CHECK constraints ──────────────────────────────────────
 
 def test_media_file_requires_exactly_one_owner(db):

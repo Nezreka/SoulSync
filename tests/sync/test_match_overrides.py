@@ -79,14 +79,19 @@ def test_server_id_str_int_coercion():
     assert result == {0: 0}
 
 
-def test_two_sources_pointing_at_same_server_track_only_first_wins():
-    # Defensive — UNIQUE constraint prevents this in production but
-    # cache_lookup is injectable so we verify the safety.
+def test_two_sources_pointing_at_same_server_track_both_win():
+    # Two DIFFERENT source ids sharing one server track is legitimate (a
+    # playlist carrying the same song twice under different provider ids,
+    # both hand-matched to the user's single library copy). The old
+    # first-wins rule silently dropped the second pairing, so that row read
+    # "missing" forever no matter how many times Find & Add was re-run
+    # (wolf39us). The cache's UNIQUE is per (source_track_id, server_source)
+    # — it never prevented this case. Both are user-confirmed: honor both.
     sources = [{"source_track_id": "a"}, {"source_track_id": "b"}]
     servers = [{"id": 5001, "title": "Iron Man"}]
     cache = {"a": 5001, "b": 5001}
     result = resolve_match_overrides(sources, servers, lambda sid: cache.get(sid))
-    assert result == {0: 0}
+    assert result == {0: 0, 1: 0}
 
 
 def test_cache_lookup_raising_treated_as_miss():

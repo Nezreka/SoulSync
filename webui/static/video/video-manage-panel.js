@@ -103,6 +103,41 @@
                 'background:#fff;transition:transform .16s;}' +
             '.vmg-toggle--on .vmg-sw{background:rgb(' + A + ');}' +
             '.vmg-toggle--on .vmg-sw::after{transform:translateX(15px);}' +
+            // matches (per-service re-match editor)
+            '.vmg-matches{display:flex;flex-direction:column;gap:8px;}' +
+            '.vmg-match-row{display:flex;align-items:center;gap:9px;padding:9px 12px;border-radius:11px;' +
+                'background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.07);font-size:12.5px;}' +
+            '.vmg-match-svc{font-weight:800;color:#eef1f7;min-width:44px;}' +
+            '.vmg-match-chip{padding:2px 9px;border-radius:999px;font-size:10px;font-weight:800;text-transform:uppercase;' +
+                'letter-spacing:.05em;border:1px solid transparent;}' +
+            '.vmg-match-chip--ok{background:rgba(76,207,133,.14);border-color:rgba(76,207,133,.4);color:#6fdd9d;}' +
+            '.vmg-match-chip--no{background:rgba(255,99,99,.12);border-color:rgba(255,99,99,.38);color:#ff8484;}' +
+            '.vmg-match-chip--wait{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.16);color:rgba(255,255,255,.55);}' +
+            '.vmg-match-id{color:rgba(255,255,255,.45);font-size:11.5px;overflow:hidden;text-overflow:ellipsis;' +
+                'white-space:nowrap;flex:1;min-width:0;}' +
+            '.vmg-match-btn{all:unset;cursor:pointer;padding:4px 11px;border-radius:999px;font-size:11px;font-weight:800;' +
+                'border:1px solid rgba(' + A + ',.4);background:rgba(' + A + ',.12);color:rgb(' + A + ');transition:background .13s;}' +
+            '.vmg-match-btn:hover{background:rgba(' + A + ',.24);}' +
+            '.vmg-match-btn--danger{border-color:rgba(255,99,99,.35);background:rgba(255,99,99,.08);color:#ff8484;}' +
+            '.vmg-match-btn--danger:hover{background:rgba(255,99,99,.18);}' +
+            '.vmg-match-imdb-in{width:118px;padding:5px 9px;border-radius:8px;font-size:12px;font-family:inherit;' +
+                'background:rgba(0,0,0,.3);border:1px solid rgba(255,255,255,.12);color:#eef1f7;outline:none;}' +
+            '.vmg-match-imdb-in:focus{border-color:rgba(' + A + ',.6);}' +
+            // matches: inline search sub-view
+            '.vmg-msearch{display:flex;flex-direction:column;gap:9px;padding:11px;border-radius:12px;' +
+                'background:rgba(255,255,255,.035);border:1px solid rgba(' + A + ',.3);}' +
+            '.vmg-msearch-row{display:flex;gap:8px;}' +
+            '.vmg-msearch-in{flex:1;min-width:0;padding:8px 11px;border-radius:9px;font-size:12.5px;font-family:inherit;' +
+                'background:rgba(0,0,0,.3);border:1px solid rgba(255,255,255,.12);color:#eef1f7;outline:none;}' +
+            '.vmg-msearch-in:focus{border-color:rgba(' + A + ',.6);}' +
+            '.vmg-mresult{display:flex;gap:10px;align-items:flex-start;padding:8px;border-radius:10px;' +
+                'background:rgba(0,0,0,.22);border:1px solid rgba(255,255,255,.06);}' +
+            '.vmg-mresult img{width:38px;aspect-ratio:2/3;border-radius:5px;object-fit:cover;background:#1b1b22;flex:0 0 auto;}' +
+            '.vmg-mresult-tt{font-size:12.5px;font-weight:800;color:#fff;}' +
+            '.vmg-mresult-ov{font-size:11px;color:rgba(255,255,255,.45);line-height:1.4;display:-webkit-box;' +
+                '-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}' +
+            '.vmg-mresult-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px;}' +
+            '.vmg-msearch-hint{font-size:11.5px;color:rgba(255,255,255,.4);}' +
             // save (in the header, clear of the app's floating bell/help orbs)
             '.vmg-hint{font-size:11.5px;color:rgba(255,255,255,.4);line-height:1.5;' +
                 'padding:2px 0 30px;}' +
@@ -183,10 +218,152 @@
                 '<div class="vmg-toggle' + (d.monitored ? ' vmg-toggle--on' : '') + '" data-vmg-monitored role="switch" ' +
                     'aria-checked="' + (d.monitored ? 'true' : 'false') + '" tabindex="0"><span>Monitored</span><span class="vmg-sw"></span></div>' +
             '</div>' +
+            '<div class="vmg-sect">Matches</div>' +
+            '<div class="vmg-matches" data-vmg-matches>' +
+                '<div class="vmg-msearch-hint">Loading matches…</div>' +
+            '</div>' +
             (window.VideoIssues
                 ? '<button class="vmg-btn-ghost vmg-report" type="button" data-vmg-report>⚑ Report an issue</button>'
                 : '')
         );
+    }
+
+    // ── matches (per-service re-match editor) ────────────────────────────────
+    var MATCH_LABELS = { tmdb: 'TMDB', tvdb: 'TVDB', imdb: 'IMDb' };
+
+    function matchChip(status) {
+        if (status === 'matched') return '<span class="vmg-match-chip vmg-match-chip--ok">matched</span>';
+        if (status === 'not_found') return '<span class="vmg-match-chip vmg-match-chip--no">not found</span>';
+        if (status === 'error') return '<span class="vmg-match-chip vmg-match-chip--no">error</span>';
+        return '<span class="vmg-match-chip vmg-match-chip--wait">pending</span>';
+    }
+
+    function renderMatches(matches) {
+        var host = state && state.overlay.querySelector('[data-vmg-matches]');
+        if (!host) return;
+        state.matches = matches;
+        host.innerHTML = matches.map(function (m) {
+            var label = MATCH_LABELS[m.service] || m.service;
+            if (m.service === 'imdb') {
+                return '<div class="vmg-match-row"><span class="vmg-match-svc">' + label + '</span>' +
+                    matchChip(m.status) +
+                    '<input class="vmg-match-imdb-in" data-vmg-imdb-in value="' + esc(m.id || '') + '" ' +
+                        'placeholder="tt0944947" spellcheck="false">' +
+                    '<button class="vmg-match-btn" type="button" data-vmg-imdb-save>Set</button>' +
+                    (m.id ? '<button class="vmg-match-btn vmg-match-btn--danger" type="button" ' +
+                        'data-vmg-match-clear="imdb">Clear</button>' : '') +
+                '</div>';
+            }
+            return '<div class="vmg-match-row"><span class="vmg-match-svc">' + label + '</span>' +
+                matchChip(m.status) +
+                '<span class="vmg-match-id">' + (m.id != null ? '#' + esc(m.id) : '—') + '</span>' +
+                '<button class="vmg-match-btn" type="button" data-vmg-match-fix="' + esc(m.service) + '">' +
+                    (m.id != null ? 'Fix…' : 'Find…') + '</button>' +
+                (m.id != null ? '<button class="vmg-match-btn vmg-match-btn--danger" type="button" ' +
+                    'data-vmg-match-clear="' + esc(m.service) + '">Clear</button>' : '') +
+            '</div>';
+        }).join('') +
+        '<div class="vmg-msearch-hint">Re-pointing a match clears the old data and re-enriches in the background.</div>';
+    }
+
+    function loadMatches() {
+        if (!state) return;
+        fetch('/api/video/enrichment/matches/' + state.kind + '/' + state.id)
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (res) {
+                if (!state) return;
+                if (res && res.matches && res.matches.length) renderMatches(res.matches);
+                else { var h = state.overlay.querySelector('[data-vmg-matches]'); if (h) h.innerHTML = ''; }
+            })
+            .catch(function () { /* section is a nicety — leave the loading hint */ });
+    }
+
+    function applyMatch(service, externalId, doneLabel) {
+        return fetch('/api/video/enrichment/matches/' + state.kind + '/' + state.id + '/apply', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ service: service, external_id: externalId }),
+        }).then(function (r) { return r.json().then(function (b) { return { ok: r.ok, body: b }; }); })
+        .then(function (res) {
+            if (!res.ok || !res.body || !res.body.success) {
+                throw new Error((res.body && res.body.error) || 'update failed');
+            }
+            toast(doneLabel || 'Match updated — re-enriching in the background', 'success');
+            loadMatches();
+            document.dispatchEvent(new CustomEvent('soulsync:video-meta-changed', {
+                detail: { kind: state.kind, id: state.id },
+            }));
+        }).catch(function (e) {
+            toast(e && e.message ? e.message : 'Couldn’t update the match', 'error');
+        });
+    }
+
+    function clearMatch(service) {
+        var label = MATCH_LABELS[service] || service;
+        confirmDlg({
+            title: 'Clear ' + label + ' match?',
+            message: service === 'imdb'
+                ? 'Removes the IMDb id — ratings and IMDb-based extras will re-resolve when a new id lands.'
+                : 'The item reverts to "not found" on ' + label + ' and its data from that match is cleared.',
+            confirmText: 'Clear', cancelText: 'Keep', destructive: true,
+        }).then(function (yes) {
+            if (!yes || !state) return;
+            applyMatch(service, null, label + ' match cleared');
+        });
+    }
+
+    function openMatchSearch(service) {
+        var host = state && state.overlay.querySelector('[data-vmg-matches]');
+        if (!host) return;
+        var label = MATCH_LABELS[service] || service;
+        host.innerHTML =
+            '<div class="vmg-msearch" data-vmg-msearch="' + esc(service) + '">' +
+                '<div class="vmg-msearch-row">' +
+                    '<input class="vmg-msearch-in" data-vmg-msearch-in value="' + esc(state.data.title || '') + '" ' +
+                        'placeholder="Search ' + esc(label) + '…" spellcheck="false">' +
+                    '<button class="vmg-match-btn" type="button" data-vmg-msearch-go>Search</button>' +
+                    '<button class="vmg-match-btn" type="button" data-vmg-msearch-back>Back</button>' +
+                '</div>' +
+                '<div data-vmg-msearch-results><div class="vmg-msearch-hint">Pick the correct title — its metadata replaces the current match.</div></div>' +
+            '</div>';
+        var input = host.querySelector('[data-vmg-msearch-in]');
+        if (input) { input.focus(); input.select(); }
+        runMatchSearch(service);   // auto-search with the item's own title
+    }
+
+    function runMatchSearch(service) {
+        var host = state && state.overlay.querySelector('[data-vmg-matches]');
+        if (!host) return;
+        var input = host.querySelector('[data-vmg-msearch-in]');
+        var results = host.querySelector('[data-vmg-msearch-results]');
+        var q = input ? input.value.trim() : '';
+        if (!q || !results) return;
+        results.innerHTML = '<div class="vmg-msearch-hint">Searching…</div>';
+        fetch('/api/video/enrichment/matches/' + state.kind + '/' + state.id + '/search', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ service: service, query: q }),
+        }).then(function (r) { return r.json().then(function (b) { return { ok: r.ok, body: b }; }); })
+        .then(function (res) {
+            if (!state) return;
+            if (!res.ok) throw new Error((res.body && res.body.error) || 'search failed');
+            var items = (res.body && res.body.results) || [];
+            if (!items.length) {
+                results.innerHTML = '<div class="vmg-msearch-hint">No results — try another spelling.</div>';
+                return;
+            }
+            results.innerHTML = items.map(function (it) {
+                return '<div class="vmg-mresult">' +
+                    (it.poster_url ? '<img src="' + esc(it.poster_url) + '" alt="" loading="lazy">' : '<img alt="">') +
+                    '<div class="vmg-mresult-body">' +
+                        '<div class="vmg-mresult-tt">' + esc(it.title) + (it.year ? ' (' + it.year + ')' : '') + '</div>' +
+                        (it.overview ? '<div class="vmg-mresult-ov">' + esc(it.overview) + '</div>' : '') +
+                    '</div>' +
+                    '<button class="vmg-match-btn" type="button" data-vmg-muse="' + esc(it.id) + '">Use</button>' +
+                '</div>';
+            }).join('');
+        }).catch(function (e) {
+            if (results) results.innerHTML = '<div class="vmg-msearch-hint">' +
+                esc(e && e.message ? e.message : 'Search failed') + '</div>';
+        });
     }
 
     function panelHtml(d) {
@@ -406,6 +583,35 @@
                 }
                 return;
             }
+            // Matches section (re-match editor)
+            var mfix = e.target.closest('[data-vmg-match-fix]');
+            if (mfix) { openMatchSearch(mfix.getAttribute('data-vmg-match-fix')); return; }
+            var mclear = e.target.closest('[data-vmg-match-clear]');
+            if (mclear) { clearMatch(mclear.getAttribute('data-vmg-match-clear')); return; }
+            var mgo = e.target.closest('[data-vmg-msearch-go]');
+            if (mgo) {
+                var msv = state.overlay.querySelector('[data-vmg-msearch]');
+                if (msv) runMatchSearch(msv.getAttribute('data-vmg-msearch'));
+                return;
+            }
+            if (e.target.closest('[data-vmg-msearch-back]')) { loadMatches(); return; }
+            var muse = e.target.closest('[data-vmg-muse]');
+            if (muse) {
+                var ms2 = state.overlay.querySelector('[data-vmg-msearch]');
+                if (ms2) {
+                    muse.disabled = true;
+                    applyMatch(ms2.getAttribute('data-vmg-msearch'),
+                               parseInt(muse.getAttribute('data-vmg-muse'), 10));
+                }
+                return;
+            }
+            if (e.target.closest('[data-vmg-imdb-save]')) {
+                var iin = state.overlay.querySelector('[data-vmg-imdb-in]');
+                var iv = iin ? iin.value.trim() : '';
+                if (!/^tt\d{5,10}$/.test(iv)) { toast('An IMDb id looks like tt0944947', 'error'); return; }
+                applyMatch('imdb', iv, 'IMDb id set — ratings will refresh');
+                return;
+            }
             var tw = e.target.closest('[data-vmg-watched]');
             if (tw) { toggle('watched', tw); return; }
             var tm = e.target.closest('[data-vmg-monitored]');
@@ -417,6 +623,13 @@
             if (e.target.closest('[data-vmg-f]')) markDirty();
         });
         ov.addEventListener('keydown', function (e) {
+            var msin = e.target.closest('[data-vmg-msearch-in]');
+            if (msin && e.key === 'Enter') {
+                e.preventDefault();
+                var msv = state.overlay.querySelector('[data-vmg-msearch]');
+                if (msv) runMatchSearch(msv.getAttribute('data-vmg-msearch'));
+                return;
+            }
             var ci = e.target.closest('[data-vmg-chip-in]');
             if (ci) {
                 if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addGenre(ci.value); ci.value = ''; }
@@ -457,6 +670,7 @@
                 renderChips();
                 wire();
                 loadGenreSuggestions(d.kind);
+                loadMatches();
                 requestAnimationFrame(function () { ov.classList.add('vmg-open'); });
             })
             .catch(function () { toast('Couldn’t load item', 'error'); });

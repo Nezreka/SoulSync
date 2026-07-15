@@ -56,10 +56,13 @@ WORKDIR /app
 
 # Install runtime-only system dependencies (no gcc/build tools).
 # unzip is needed by the Deno installer below.
+# flac: the Corrupt File Detector's preferred decode test (`flac -t` also
+# verifies the STREAMINFO MD5 — catches damage that still decodes; #1000).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     gosu \
     ffmpeg \
+    flac \
     libchromaprint-tools \
     unzip \
     && rm -rf /var/lib/apt/lists/*
