@@ -85,7 +85,10 @@ def test_library_api_channels_kind(tmp_path):
     app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
     try:
         d = app.test_client().get("/api/video/library?kind=channels").get_json()
-        assert d["pagination"]["total_count"] == 1
+        # Diagnostic assert: this has flaked CI-only with total 0 and no local
+        # repro — when it fires again, the body says what the endpoint saw.
+        assert d.get("pagination", {}).get("total_count") == 1, \
+            f"channels tab wrong, got: {d}"
         assert d["items"][0] == {"kind": "channel", "id": "UC1", "title": "Kurzgesagt",
                                  "poster_url": "https://yt/av.jpg", "followed": True,
                                  "video_count": 0, "owned_count": 1}
