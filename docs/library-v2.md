@@ -4492,3 +4492,12 @@ des Implementierungsplans nicht erneut aufgerollt werden müssen:
    (nicht: kanonisches Re-Attachment mit Datenmigration; nicht: reine
    Lese-Zeit-Union ohne Auto-Fetch — Letzteres hätte Symptom (b) nur teilweise
    gelöst).
+
+## 25. Zukünftige UI/UX Roadmap-Punkte (Lidarr-Alignment)
+
+### 25.1 Artist-spezifische automatische Suche
+- **Ziel:** Der "Automatic Search"-Button in der Artist-Detailansicht (und entsprechend bei Alben) darf nicht die gesamte globale Wishlist verarbeiten. Er soll sich wie in Lidarr verhalten:
+  - Sucht ausschließlich nach gemonitorten Titeln des spezifischen Künstlers/Albums.
+  - Führt automatische Upgrades durch, sofern das Quality Profile dies erlaubt.
+  - Eine globale Suche ("Automatic Search (Global)") soll weiterhin existieren, jedoch nur im globalen Dashboard bzw. der Wishlist-Ansicht, nicht auf Artist-/Album-Ebene.
+- **Scope:** Backend-Erweiterung (Einschränkung des Such-Job-Scopes auf den spezifischen Artist/Album) + UI-Verdrahtung.
