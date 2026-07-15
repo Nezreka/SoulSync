@@ -181,3 +181,35 @@ def test_sync_progress_loop_reconcile_runs_with_no_clients(monkeypatch):
 
     assert reconcile_called == [True]
     fake_emit.assert_not_called()
+
+
+def test_download_status_loop_skips_slskd_poll_with_no_clients(monkeypatch):
+    """Follow-up to the original gating PR: this loop's get_cached_transfer_data()
+    is a REAL slskd transfers API call (TTL-cached) made every 2s even with zero
+    batches — the worst idle offender. With no clients it must not poll slskd or
+    emit; download progression doesn't depend on it (workers poll transfers
+    themselves)."""
+    fake_fetch = MagicMock()
+    monkeypatch.setattr(web_server, "get_cached_transfer_data", fake_fetch)
+
+    fake_emit = MagicMock()
+    monkeypatch.setattr(web_server.socketio, "emit", fake_emit)
+
+    assert web_server._has_connected_clients() is False
+    _run_one_tick(web_server._emit_download_status_loop)
+
+    fake_fetch.assert_not_called()
+    fake_emit.assert_not_called()
+
+
+def test_download_status_loop_fetches_with_a_connected_client(monkeypatch):
+    fake_fetch = MagicMock(return_value={})
+    monkeypatch.setattr(web_server, "get_cached_transfer_data", fake_fetch)
+
+    fake_emit = MagicMock()
+    monkeypatch.setattr(web_server.socketio, "emit", fake_emit)
+
+    web_server._connected_sids.add("sid-1")
+    _run_one_tick(web_server._emit_download_status_loop)
+
+    fake_fetch.assert_called_once()
