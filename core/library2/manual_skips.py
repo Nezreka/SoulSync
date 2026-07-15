@@ -98,9 +98,40 @@ def check_is_skipped(
     ))
 
 
+def skip_history_for_path(conn, file_path: Any) -> list[dict]:
+    """Every recorded manual-skip audit row bound to this exact file path,
+    newest first — including already-acknowledged ones, since this powers a
+    lifecycle/history view rather than an enforcement check."""
+    path = str(file_path or "").strip()
+    if not path:
+        return []
+    rows = conn.execute(
+        """SELECT id, skipped_checks, reason, acknowledged, created_at
+             FROM lib2_manual_skips
+            WHERE file_path=?
+            ORDER BY id DESC""",
+        (path,),
+    ).fetchall()
+    out = []
+    for row in rows:
+        try:
+            checks = json.loads(row["skipped_checks"] or "[]")
+        except (TypeError, ValueError):
+            checks = []
+        out.append({
+            "id": row["id"],
+            "skipped_checks": checks if isinstance(checks, list) else [],
+            "reason": row["reason"],
+            "acknowledged": bool(row["acknowledged"]),
+            "created_at": row["created_at"],
+        })
+    return out
+
+
 __all__ = [
     "active_skip_paths",
     "attach_manual_skip_file",
     "check_is_skipped",
     "record_manual_skip",
+    "skip_history_for_path",
 ]

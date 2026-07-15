@@ -65,8 +65,8 @@ describe('library v2 quality-profile mutation', () => {
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
     expect(attempts).toBe(2);
     expect(submitted).toEqual([
-      { quality_profile_id: 9, cascade: true, monitor_existing: false },
-      { quality_profile_id: 9, cascade: true, monitor_existing: false },
+      { quality_profile_id: 9, cascade: true, monitor_existing: true },
+      { quality_profile_id: 9, cascade: true, monitor_existing: true },
     ]);
   });
 });

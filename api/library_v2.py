@@ -1160,12 +1160,73 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         if guard:
             return guard
         from core.library2.source_info import track_source_info
+        from core.library2.manual_skips import skip_history_for_path
+        from core.library2.track_files import primary_file_row
         conn = _conn()
         try:
             downloads = track_source_info(conn, track_id)
+            file_row = primary_file_row(conn, track_id)
+            manual_skips = skip_history_for_path(conn, file_row["path"]) if file_row else []
         finally:
             conn.close()
-        return jsonify({"success": True, "downloads": downloads})
+        return jsonify({"success": True, "downloads": downloads, "manual_skips": manual_skips})
+
+    @app.route("/api/library/v2/tracks/<int:track_id>/file-tags")
+    def lib2_track_file_tags(track_id):
+        """Live embedded tags + lyrics read straight from the file (§18.1).
+
+        Reuses ``core.library.file_tags.read_embedded_tags`` — the same
+        pure-mutagen reader backing the legacy Audit Trail modal — instead of
+        ``core.tag_writer.read_file_tags`` (that one is shaped for DB-diffing
+        and doesn't surface lyrics or the full tag set).
+        """
+        guard = _guard()
+        if guard:
+            return guard
+        from core.library2.paths import resolve_lib2_path
+        from core.library2.track_files import primary_file_row
+        conn = _conn()
+        try:
+            file_row = primary_file_row(conn, track_id)
+        finally:
+            conn.close()
+        if not file_row or not file_row.get("path"):
+            return jsonify({"success": True, "available": False, "reason": "No file on this track."})
+        abs_path = resolve_lib2_path(file_row["path"])
+        from core.library.file_tags import read_embedded_tags
+        result = read_embedded_tags(abs_path or file_row["path"])
+        return jsonify({"success": True, **result})
+
+    @app.route("/api/library/v2/tracks/<int:track_id>/file-tags/edit", methods=["POST"])
+    def lib2_track_file_tags_edit(track_id):
+        """Edit or delete a single embedded tag in a track's file."""
+        guard = _guard()
+        if guard:
+            return guard
+        body = request.get_json(silent=True) or {}
+        if not isinstance(body, dict) or "key" not in body:
+            return jsonify({"success": False, "error": "JSON body must contain 'key'"}), 400
+        key = body["key"].strip()
+        value = body.get("value")
+        if value is not None and not isinstance(value, str):
+            value = str(value)
+        elif value is not None:
+            value = value.strip()
+
+        from core.library2.paths import resolve_lib2_path
+        from core.library2.track_files import primary_file_row
+        conn = _conn()
+        try:
+            file_row = primary_file_row(conn, track_id)
+        finally:
+            conn.close()
+        if not file_row or not file_row.get("path"):
+            return jsonify({"success": False, "error": "No file on this track."}), 400
+        abs_path = resolve_lib2_path(file_row["path"])
+
+        from core.library.file_tags import write_embedded_tag
+        res = write_embedded_tag(abs_path or file_row["path"], key, value)
+        return jsonify(res)
 
     @app.route("/api/library/v2/artists/<int:artist_id>/match-status")
     def lib2_artist_match_status(artist_id):

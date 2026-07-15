@@ -1,6 +1,6 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { useNavigate as useRouterNavigate } from '@tanstack/react-router';
-import { type ReactNode, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 
 import { useReactPageShell } from '@/platform/shell/route-controllers';
 
@@ -9,6 +9,8 @@ import type {
   LibraryV2AlbumSummary,
   LibraryV2ArtistDetail,
   LibraryV2ArtistSummary,
+  LibraryV2FileTags,
+  LibraryV2ManualSkip,
   LibraryV2MatchService,
   LibraryV2PlaylistPipelineState,
   LibraryV2PlaylistSummary,
@@ -25,6 +27,7 @@ import {
   deleteLibraryV2Entity,
   deleteLibraryV2Files,
   editLibraryV2Artist,
+  editTrackFileTag,
   fetchLibraryV2ArtistDeletePreview,
   fetchLibraryV2ArtistHistory,
   fetchLibraryV2Duplicates,
@@ -43,6 +46,7 @@ import {
   libraryV2PlaylistQueryOptions,
   libraryV2PlaylistsQueryOptions,
   libraryV2QualityProfilesQueryOptions,
+  libraryV2TrackFileTagsQueryOptions,
   libraryV2TrackSourceInfoQueryOptions,
   manualMatchLibraryV2Entity,
   materializeLibraryV2MissingTrack,
@@ -60,6 +64,7 @@ import {
   startLibraryV2UpgradeScan,
   unlinkLibraryV2Duplicate,
   updateLibraryV2MetadataOverrides,
+  writeLibraryV2Tags,
   type Lib2EntityRef,
   type LibraryV2AlbumType,
 } from '../-library-v2.api';
@@ -107,6 +112,15 @@ function formatFileSize(bytes: number): string {
     unit = units[i];
   }
   return `${value.toFixed(value >= 10 ? 1 : 2)} ${unit}`;
+}
+
+/** Release dates from library-origin metadata sometimes carry a full
+ *  timestamp (e.g. "1982-11-29T08:00:00Z" or "1994-06-21 00:00:00"); the UI
+ *  only ever wants the calendar date. */
+function formatReleaseDate(value: string | number | null | undefined): string | null {
+  if (value === null || value === undefined || value === '') return null;
+  const str = String(value);
+  return str.length >= 10 ? str.slice(0, 10) : str;
 }
 
 /** Only "Interactive Search" opens the manual results window. */
@@ -200,11 +214,13 @@ function QualityDisplay({ file }: { file: LibraryV2Track['file'] | null | undefi
     ? `${Number((file.sample_rate / 1000).toFixed(file.sample_rate % 1000 === 0 ? 0 : 1))}k`
     : null;
   const resolution = [bitDepth, sampleRate].filter(Boolean).join(' ');
+  // Format + resolution share one badge (e.g. "FLAC · 16b 44.1k"); bitrate
+  // stays its own badge since it's independently meaningful for lossy files.
+  const formatBadge = [fmt, resolution || null].filter(Boolean).join(' · ');
 
   return (
     <span className={styles.qualityDisplay}>
-      {fmt && <span className={styles.qualityTag}>{fmt}</span>}
-      {resolution && <span className={styles.qualityTag}>{resolution}</span>}
+      {formatBadge && <span className={styles.qualityTag}>{formatBadge}</span>}
       {kbps && <span className={styles.qualityTag}>{kbps} kbps</span>}
     </span>
   );
@@ -2348,7 +2364,11 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
                 />
               </div>
               <p className={styles.subtitle}>
-                {[album.primary_artist?.name, album.album_type, album.release_date ?? album.year]
+                {[
+                  album.primary_artist?.name,
+                  album.album_type,
+                  formatReleaseDate(album.release_date) ?? album.year,
+                ]
                   .filter(Boolean)
                   .join(' · ')}
               </p>
@@ -2986,7 +3006,8 @@ function AlbumBlock({
   const profilesQuery = useQuery(libraryV2QualityProfilesQueryOptions());
   const profileName =
     (profilesQuery.data ?? []).find((p) => p.id === album.quality_profile_id)?.name ?? null;
-  const releaseDate = album.release_date || (album.year ? String(album.year) : null);
+  const releaseDate =
+    formatReleaseDate(album.release_date) || (album.year ? String(album.year) : null);
   const complete = album.tracks_missing === 0 && album.track_count > 0;
   const pct = album.track_count
     ? clampPercent((100 * album.tracks_present) / album.track_count)
@@ -3164,6 +3185,30 @@ function AlbumTrackTable({
   );
 }
 
+/** Mirrors core/library2/status.py EXPECTED_TAGS (order = display order). */
+const METADATA_TAG_LABELS: Record<string, string> = {
+  title: 'Title',
+  artist: 'Artist',
+  album: 'Album',
+  albumartist: 'Album Artist',
+  track_number: 'Track #',
+  disc_number: 'Disc #',
+  year: 'Year',
+  genre: 'Genre',
+  cover: 'Cover Art',
+};
+const METADATA_TAG_ORDER = Object.keys(METADATA_TAG_LABELS);
+
+function metadataGapsTooltip(gaps: string[]): string {
+  const present = METADATA_TAG_ORDER.filter((tag) => !gaps.includes(tag)).map(
+    (tag) => METADATA_TAG_LABELS[tag],
+  );
+  const missing = gaps.map((tag) => METADATA_TAG_LABELS[tag] ?? tag);
+  const parts = [`Present: ${present.length ? present.join(', ') : 'none'}`];
+  if (missing.length) parts.push(`Missing: ${missing.join(', ')}`);
+  return parts.join(' / ');
+}
+
 function TrackRow({
   track,
   albumTitle,
@@ -3226,14 +3271,11 @@ function TrackRow({
       <td>
         {track.id && !missing ? (
           track.metadata_gaps.length === 0 ? (
-            <span className={styles.statusOk} title="All expected metadata tags present">
+            <span className={styles.statusOk} title={metadataGapsTooltip(track.metadata_gaps)}>
               tags ✓
             </span>
           ) : (
-            <span
-              className={styles.statusWarn}
-              title={`Missing: ${track.metadata_gaps.join(', ')}`}
-            >
+            <span className={styles.statusWarn} title={metadataGapsTooltip(track.metadata_gaps)}>
               {track.metadata_gaps.length} tag gaps
             </span>
           )
@@ -3359,7 +3401,15 @@ function TrackDetailButton({ track, albumTitle }: { track: LibraryV2Track; album
   );
 }
 
-type TrackDetailTab = 'quality' | 'metadata' | 'info';
+type TrackDetailTab = 'quality' | 'metadata' | 'tags' | 'lyrics' | 'info';
+
+const TRACK_DETAIL_TAB_LABELS: Record<TrackDetailTab, string> = {
+  quality: 'Quality',
+  metadata: 'Metadata',
+  tags: 'Tags',
+  lyrics: 'Lyrics',
+  info: 'Info',
+};
 
 function TrackDetailModal({
   track,
@@ -3372,17 +3422,22 @@ function TrackDetailModal({
 }) {
   const [tab, setTab] = useState<TrackDetailTab>('quality');
   const trackId = track.id as number; // TrackDetailButton only renders when track.id is set
+  // Tags + Lyrics share one live file read; fetch once, lazily, on first visit
+  // to either tab (avoids a mutagen file read for every track detail open).
+  const fileTagsQuery = useQuery(
+    libraryV2TrackFileTagsQueryOptions(trackId, tab === 'tags' || tab === 'lyrics'),
+  );
   return (
     <ModalShell title={track.title ?? albumTitle} detail onClose={onClose}>
       <div className={styles.detailTabs}>
-        {(['quality', 'metadata', 'info'] as const).map((t) => (
+        {(['quality', 'metadata', 'tags', 'lyrics', 'info'] as const).map((t) => (
           <button
             key={t}
             type="button"
             className={`${styles.detailTab} ${tab === t ? styles.detailTabActive : ''}`}
             onClick={() => setTab(t)}
           >
-            {t === 'quality' ? 'Quality' : t === 'metadata' ? 'Metadata' : 'Info'}
+            {TRACK_DETAIL_TAB_LABELS[t]}
           </button>
         ))}
       </div>
@@ -3396,11 +3451,14 @@ function TrackDetailModal({
           />
         ) : null}
         {tab === 'metadata' ? <TrackMetadataForm track={track} onSaved={onClose} /> : null}
+        {tab === 'tags' ? <TrackTagsPanel query={fileTagsQuery} trackId={trackId} /> : null}
+        {tab === 'lyrics' ? <TrackLyricsPanel query={fileTagsQuery} /> : null}
         {tab === 'info' ? (
           <TrackInfoPanel
             trackId={trackId}
             trackTitle={track.title ?? albumTitle}
             trackArtist={track.artists.map((a) => a.name).join(', ')}
+            file={track.file}
           />
         ) : null}
       </div>
@@ -3498,8 +3556,430 @@ function TrackMetadataForm({ track, onSaved }: { track: LibraryV2Track; onSaved:
           {busy ? 'Saving…' : 'Save'}
         </button>
       </div>
+      {track.id && track.file ? <TrackWriteTagsButton trackId={track.id} /> : null}
     </>
   );
+}
+
+/** §18.2: write this track's library metadata into its file tags on demand
+ *  (legacy `col-writetag` parity). Reuses the same bulk write endpoint +
+ *  polling helper as RetagModal, scoped to a single track. */
+function TrackWriteTagsButton({ trackId }: { trackId: number }) {
+  const queryClient = useQueryClient();
+  const [message, setMessage] = useState<string | null>(null);
+  const mutation = useMutation({
+    mutationFn: async () => {
+      setMessage('Writing tags…');
+      const jobId = await writeLibraryV2Tags([trackId]);
+      const jobError = await awaitBulkJob(queryClient, jobId);
+      if (jobError) throw new Error(jobError);
+    },
+    onSuccess: () => setMessage('Tags written to file.'),
+    onError: (err) => setMessage(mutationErrorMessage(err, 'Write failed')),
+  });
+  return (
+    <div className={styles.formDivider}>
+      <ActionButton
+        icon="retag"
+        label={mutation.isPending ? 'Writing…' : 'Write Tags to File'}
+        title="Write this track's library metadata into the audio file's tags"
+        busy={mutation.isPending}
+        onClick={() => mutation.mutate()}
+      />
+      {message ? (
+        <span className={mutation.isError ? styles.sourceInfoError : styles.muted}>{message}</span>
+      ) : null}
+    </div>
+  );
+}
+
+// --- Tags + Lyrics tabs: live embedded-tag inspector (§18.1) ---------------
+// Mirrors the legacy Audit Trail modal's tag grid/lyrics render
+// (webui/static/wishlist-tools.js: _renderEmbeddedTagsGrid / _renderLyricsBody)
+// against the same `read_embedded_tags` shape, ported to React.
+
+const FILE_TAG_LABELS: Record<string, string> = {
+  title: 'Title',
+  artist: 'Artist',
+  artists: 'All Artists',
+  albumartist: 'Album Artist',
+  album_artist: 'Album Artist',
+  album: 'Album',
+  date: 'Date',
+  year: 'Year',
+  originaldate: 'Original Date',
+  genre: 'Genre',
+  mood: 'Mood',
+  style: 'Style',
+  tracknumber: 'Track #',
+  tracktotal: 'Total Tracks',
+  discnumber: 'Disc #',
+  totaldiscs: 'Total Discs',
+  bpm: 'BPM',
+  isrc: 'ISRC',
+  barcode: 'Barcode',
+  catalognumber: 'Catalog #',
+  asin: 'ASIN',
+  copyright: 'Copyright',
+  publisher: 'Publisher',
+  language: 'Language',
+  script: 'Script',
+  media: 'Media',
+  releasetype: 'Release Type',
+  releasestatus: 'Release Status',
+  releasecountry: 'Country',
+  composer: 'Composer',
+  performer: 'Performer',
+  quality: 'Quality',
+  replaygain_track_gain: 'Track Gain',
+  replaygain_track_peak: 'Track Peak',
+  replaygain_album_gain: 'Album Gain',
+  replaygain_album_peak: 'Album Peak',
+};
+
+const FILE_TAG_TRACK_KEYS = [
+  'title',
+  'artist',
+  'artists',
+  'tracknumber',
+  'tracktotal',
+  'discnumber',
+  'totaldiscs',
+  'bpm',
+  'isrc',
+];
+const FILE_TAG_ALBUM_KEYS = [
+  'album',
+  'album_artist',
+  'albumartist',
+  'date',
+  'year',
+  'originaldate',
+  'genre',
+  'mood',
+  'style',
+  'copyright',
+  'publisher',
+  'language',
+  'script',
+  'media',
+  'releasetype',
+  'releasestatus',
+  'releasecountry',
+  'barcode',
+  'catalognumber',
+  'asin',
+];
+const FILE_TAG_REPLAYGAIN_KEYS = [
+  'replaygain_track_gain',
+  'replaygain_track_peak',
+  'replaygain_album_gain',
+  'replaygain_album_peak',
+];
+const FILE_TAG_LYRICS_KEYS = ['lyrics', 'unsyncedlyrics'];
+const FILE_TAG_SOURCE_SERVICES = [
+  { name: 'MusicBrainz', prefix: 'musicbrainz_' },
+  { name: 'Spotify', prefix: 'spotify_' },
+  { name: 'Tidal', prefix: 'tidal_' },
+  { name: 'Deezer', prefix: 'deezer_' },
+  { name: 'AudioDB', prefix: 'audiodb_' },
+  { name: 'iTunes', prefix: 'itunes_' },
+  { name: 'JioSaavn', prefix: 'jiosaavn_' },
+  { name: 'Genius', prefix: 'genius_' },
+  { name: 'Last.fm', prefix: 'lastfm_' },
+];
+
+function fileTagLabel(key: string): string {
+  if (FILE_TAG_LABELS[key]) return FILE_TAG_LABELS[key];
+  return key
+    .split('_')
+    .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
+    .join(' ');
+}
+
+function isSourceIdTagKey(key: string): boolean {
+  return /(_id|_url)$/.test(key) || key.startsWith('musicbrainz_');
+}
+
+type FileTagsQuery = UseQueryResult<LibraryV2FileTags>;
+
+function TrackTagsPanel({ query, trackId }: { query: FileTagsQuery; trackId: number }) {
+  const queryClient = useQueryClient();
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [editingValue, setEditingValue] = useState<string>('');
+  const [isAdding, setIsAdding] = useState(false);
+  const [newKey, setNewKey] = useState('');
+  const [newValue, setNewValue] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const editMutation = useMutation({
+    mutationFn: ({ key, value }: { key: string; value: string }) =>
+      editTrackFileTag(trackId, key, value),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: [...LIBRARY_V2_QUERY_KEY, 'track-file-tags', trackId],
+      });
+      setEditingKey(null);
+      setIsAdding(false);
+      setNewKey('');
+      setNewValue('');
+      setError(null);
+    },
+    onError: (err) => {
+      setError(err instanceof Error ? err.message : 'Failed to save tag');
+    },
+  });
+
+  if (query.isLoading) {
+    return <div className={styles.inlineLoading}>Reading tags from file…</div>;
+  }
+  if (query.isError) {
+    return (
+      <p className={styles.sourceInfoError}>
+        {query.error instanceof Error ? query.error.message : 'Could not read file tags.'}
+      </p>
+    );
+  }
+  const data = query.data;
+  if (!data || data.available === false) {
+    return <p>{data?.reason || 'File tags not available.'}</p>;
+  }
+  const tags = data.tags ?? {};
+  const buckets: {
+    track: [string, string][];
+    album: [string, string][];
+    replaygain: [string, string][];
+    source: Record<string, [string, string][]>;
+    other: [string, string][];
+  } = {
+    track: [],
+    album: [],
+    replaygain: [],
+    source: {},
+    other: [],
+  };
+  Object.keys(tags)
+    .sort()
+    .forEach((key) => {
+      const value = tags[key];
+      if (!value || FILE_TAG_LYRICS_KEYS.includes(key)) return;
+      if (FILE_TAG_TRACK_KEYS.includes(key)) buckets.track.push([key, value]);
+      else if (FILE_TAG_ALBUM_KEYS.includes(key)) buckets.album.push([key, value]);
+      else if (FILE_TAG_REPLAYGAIN_KEYS.includes(key)) buckets.replaygain.push([key, value]);
+      else if (isSourceIdTagKey(key)) {
+        const svc = FILE_TAG_SOURCE_SERVICES.find((s) => key.startsWith(s.prefix));
+        const slot = svc ? svc.name : 'Other Sources';
+        (buckets.source[slot] ??= []).push([key, value]);
+      } else {
+        buckets.other.push([key, value]);
+      }
+    });
+
+  const handleStartEdit = (key: string, value: string) => {
+    setEditingKey(key);
+    setEditingValue(value);
+    setError(null);
+  };
+
+  const handleSave = (key: string, value: string) => {
+    const k = key.trim();
+    if (!k) {
+      setError('Tag key cannot be empty');
+      return;
+    }
+    editMutation.mutate({ key: k, value });
+  };
+
+  const section = (title: string, entries: [string, string][]) =>
+    entries.length === 0 ? null : (
+      <div key={title}>
+        <p className={styles.sourceInfoHistory}>{title}</p>
+        <div className={styles.sourceInfoBody}>
+          {entries.map(([key, value]) => {
+            const isEditing = editingKey === key;
+            if (isEditing) {
+              return (
+                <div key={key} className={styles.tagEditInline}>
+                  <div className={styles.tagEditHeader}>
+                    <span className={styles.tagEditLabel}>{fileTagLabel(key)}</span>
+                  </div>
+                  <div className={styles.tagEditForm}>
+                    <input
+                      type="text"
+                      className={styles.tagEditInput}
+                      value={editingValue}
+                      onChange={(e) => setEditingValue(e.target.value)}
+                      disabled={editMutation.isPending}
+                      autoFocus
+                    />
+                    <div className={styles.tagEditActions}>
+                      <button
+                        type="button"
+                        className={styles.btnTagSave}
+                        disabled={editMutation.isPending}
+                        onClick={() => handleSave(key, editingValue)}
+                      >
+                        {editMutation.isPending ? 'Saving…' : 'Save'}
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.btnTagCancel}
+                        disabled={editMutation.isPending}
+                        onClick={() => setEditingKey(null)}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.btnTagDelete}
+                        disabled={editMutation.isPending}
+                        onClick={() => handleSave(key, '')}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+            return (
+              <div
+                key={key}
+                className={`${styles.sourceInfoRow} ${styles.tagRowClickable}`}
+                title="Click to edit tag"
+                onClick={() => handleStartEdit(key, value)}
+              >
+                <span className={styles.sourceInfoLabel}>{fileTagLabel(key)}</span>
+                <span className={styles.sourceInfoValue}>
+                  {value}
+                  <span className={styles.editIndicator}>
+                    <SvgIcon name="edit" />
+                  </span>
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+
+  return (
+    <div className={styles.sourceInfoBody}>
+      {error ? (
+        <div className={styles.searchError} style={{ margin: '8px 0' }}>
+          {error}
+        </div>
+      ) : null}
+      <SourceInfoRow label="Format" value={data.format ?? '—'} />
+      {data.bitrate ? (
+        <SourceInfoRow label="Bitrate" value={`${Math.round(data.bitrate / 1000)} kbps`} />
+      ) : null}
+      {data.duration ? (
+        <SourceInfoRow
+          label="Duration"
+          value={`${Math.floor(data.duration / 60)}:${String(Math.round(data.duration % 60)).padStart(2, '0')}`}
+        />
+      ) : null}
+      <SourceInfoRow label="Cover Art" value={data.has_picture ? 'Embedded' : 'None'} />
+      {section('Track', buckets.track)}
+      {section('Album', buckets.album)}
+      {section('ReplayGain', buckets.replaygain)}
+      {[...FILE_TAG_SOURCE_SERVICES.map((s) => s.name), 'Other Sources'].map((name) =>
+        section(name, buckets.source[name] ?? []),
+      )}
+      {section('Other', buckets.other)}
+      {buckets.track.length +
+        buckets.album.length +
+        buckets.replaygain.length +
+        buckets.other.length ===
+        0 && Object.keys(buckets.source).length === 0 ? (
+        <p className={styles.muted}>No readable tags embedded in this file.</p>
+      ) : null}
+
+      {isAdding ? (
+        <div className={styles.tagAddPanel}>
+          <div className={styles.tagAddTitle}>Add Custom Tag</div>
+          <div className={styles.tagAddInputs}>
+            <input
+              type="text"
+              placeholder="Tag name (e.g. genre, bpm)"
+              className={`${styles.tagEditInput} ${styles.tagAddInputKey}`}
+              value={newKey}
+              onChange={(e) => setNewKey(e.target.value)}
+              disabled={editMutation.isPending}
+            />
+            <input
+              type="text"
+              placeholder="Value"
+              className={`${styles.tagEditInput} ${styles.tagAddInputValue}`}
+              value={newValue}
+              onChange={(e) => setNewValue(e.target.value)}
+              disabled={editMutation.isPending}
+            />
+          </div>
+          <div
+            className={styles.tagEditActions}
+            style={{ justifyContent: 'flex-end', marginTop: '4px' }}
+          >
+            <button
+              type="button"
+              className={styles.btnTagSave}
+              disabled={editMutation.isPending || !newKey.trim() || !newValue.trim()}
+              onClick={() => handleSave(newKey, newValue)}
+            >
+              {editMutation.isPending ? 'Adding…' : 'Add Tag'}
+            </button>
+            <button
+              type="button"
+              className={styles.btnTagCancel}
+              disabled={editMutation.isPending}
+              onClick={() => {
+                setIsAdding(false);
+                setError(null);
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className={styles.tagAddBtnContainer}>
+          <button
+            type="button"
+            className={styles.btnTagAdd}
+            onClick={() => {
+              setIsAdding(true);
+              setError(null);
+            }}
+          >
+            <span>+</span> Add Custom Tag
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TrackLyricsPanel({ query }: { query: FileTagsQuery }) {
+  if (query.isLoading) {
+    return <div className={styles.inlineLoading}>Reading lyrics from file…</div>;
+  }
+  if (query.isError) {
+    return (
+      <p className={styles.sourceInfoError}>
+        {query.error instanceof Error ? query.error.message : 'Could not read file tags.'}
+      </p>
+    );
+  }
+  const data = query.data;
+  if (!data || data.available === false) {
+    return <p>{data?.reason || 'File tags not available.'}</p>;
+  }
+  const text = data.tags?.lyrics || data.tags?.unsyncedlyrics || '';
+  if (!text.trim()) {
+    return <p className={styles.muted}>No lyrics embedded in this file.</p>;
+  }
+  return <div className={styles.lyricsText}>{text}</div>;
 }
 
 const SOURCE_SERVICE_LABELS: Record<string, string> = {
@@ -3552,19 +4032,56 @@ function SourceInfoRow({
   );
 }
 
-/** Info tab: current source (with blacklist) + the full download history —
- *  every past provenance record for this track, not just the latest. */
+const MANUAL_SKIP_CHECK_LABELS: Record<string, string> = {
+  acoustid: 'AcoustID',
+  quality: 'Quality gate',
+};
+
+/** §18.3: what checks this file went through — the verification badge's own
+ *  tooltip already spells out the AcoustID pass/skip/bypass result, so this
+ *  panel adds the piece the badge can't show: which checks were explicitly,
+ *  manually overridden, when, and why. */
+function TrackLifecycleSection({
+  file,
+  manualSkips,
+}: {
+  file: LibraryV2TrackFile | null | undefined;
+  manualSkips: LibraryV2ManualSkip[];
+}) {
+  if (!file?.verification_status && manualSkips.length === 0) return null;
+  return (
+    <div className={styles.sourceInfoBody}>
+      {file?.verification_status ? (
+        <SourceInfoRow label="Verification" value={<TrackVerificationBadge file={file} />} />
+      ) : null}
+      {manualSkips.map((skip) => (
+        <SourceInfoRow
+          key={skip.id}
+          label="Manual override"
+          value={`${skip.skipped_checks.map((c) => MANUAL_SKIP_CHECK_LABELS[c] ?? c).join(', ') || 'unknown check'} skipped${skip.created_at ? ` — ${skip.created_at.slice(0, 16).replace('T', ' ')}` : ''}`}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** Info tab: verification/lifecycle summary + current source (with blacklist)
+ *  + the full download history — every past provenance record for this
+ *  track, not just the latest. */
 function TrackInfoPanel({
   trackId,
   trackTitle,
   trackArtist,
+  file,
 }: {
   trackId: number;
   trackTitle: string;
   trackArtist: string;
+  file: LibraryV2TrackFile | null | undefined;
 }) {
   const query = useQuery(libraryV2TrackSourceInfoQueryOptions(trackId, true));
-  const rows = query.data ?? [];
+  const rows = query.data?.downloads ?? [];
+  const manualSkips = query.data?.manual_skips ?? [];
   const dl = rows[0];
   const blacklist = useMutation({
     mutationFn: () =>
@@ -3576,12 +4093,24 @@ function TrackInfoPanel({
       }),
   });
 
+  const lifecycle = <TrackLifecycleSection file={file} manualSkips={manualSkips} />;
+
   if (query.isLoading) {
-    return <div className={styles.inlineLoading}>Loading source info…</div>;
+    return (
+      <>
+        {lifecycle}
+        <div className={styles.inlineLoading}>Loading source info…</div>
+      </>
+    );
   }
   if (!dl) {
     return (
-      <p>No download source data for this track yet. Source tracking starts with new downloads.</p>
+      <>
+        {lifecycle}
+        <p>
+          No download source data for this track yet. Source tracking starts with new downloads.
+        </p>
+      </>
     );
   }
 
@@ -3593,6 +4122,7 @@ function TrackInfoPanel({
 
   return (
     <div className={styles.sourceInfoBody}>
+      {lifecycle}
       <SourceInfoRow label="Service" value={sourceServiceLabel(dl.source_service)} />
       {dl.source_service === 'soulseek' && dl.source_username ? (
         <SourceInfoRow label="User" value={dl.source_username} mono />

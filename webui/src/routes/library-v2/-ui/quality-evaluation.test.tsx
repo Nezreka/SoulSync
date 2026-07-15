@@ -28,6 +28,7 @@ function track(overrides: Partial<LibraryV2Track> = {}): LibraryV2Track {
       verification_status: null,
       import_status: null,
       source: null,
+      file_state: null,
     },
     file_status: 'present',
     metadata_gaps: [],

@@ -7,12 +7,14 @@ import type {
   LibraryV2ArtistDetail,
   LibraryV2ArtistSummary,
   LibraryV2DiscographyStats,
+  LibraryV2FileTags,
   LibraryV2ImportState,
   LibraryV2JobState,
   LibraryV2Pagination,
   LibraryV2PlaylistDetail,
   LibraryV2PlaylistPipelineState,
   LibraryV2PlaylistSummary,
+  LibraryV2ManualSkip,
   LibraryV2MatchService,
   LibraryV2QualityProfile,
   LibraryV2Search,
@@ -238,18 +240,25 @@ export async function searchLibraryV2MatchService(input: {
 interface SourceInfoResponse {
   success: boolean;
   downloads: LibraryV2TrackDownload[];
+  manual_skips?: LibraryV2ManualSkip[];
   error?: string;
 }
 
-/** Download provenance for a track (legacy "Source Info" popover parity). */
+export interface LibraryV2TrackSourceInfo {
+  downloads: LibraryV2TrackDownload[];
+  manual_skips: LibraryV2ManualSkip[];
+}
+
+/** Download provenance + manual check-skip audit for a track (legacy
+ *  "Source Info" popover parity, extended with the §18.3 lifecycle log). */
 export async function fetchLibraryV2TrackSourceInfo(
   trackId: number,
-): Promise<LibraryV2TrackDownload[]> {
+): Promise<LibraryV2TrackSourceInfo> {
   const payload = await readJson<SourceInfoResponse>(
     apiClient.get(`library/v2/tracks/${trackId}/source-info`),
   );
   if (!payload.success) throw new Error(payload.error || 'Failed to load source info');
-  return payload.downloads ?? [];
+  return { downloads: payload.downloads ?? [], manual_skips: payload.manual_skips ?? [] };
 }
 
 /** Blacklist a download source so the pipeline skips it (reuses the app-wide route). */
@@ -714,6 +723,38 @@ export function libraryV2TrackSourceInfoQueryOptions(trackId: number, enabled: b
   return queryOptions({
     queryKey: [...LIBRARY_V2_QUERY_KEY, 'track-source-info', trackId],
     queryFn: () => fetchLibraryV2TrackSourceInfo(trackId),
+    enabled: enabled && trackId > 0,
+    staleTime: 30_000,
+  });
+}
+
+interface FileTagsResponse extends LibraryV2FileTags {
+  success: boolean;
+  error?: string;
+}
+
+/** Live embedded tags + lyrics read straight from the file (§18.1). */
+export async function fetchLibraryV2TrackFileTags(trackId: number): Promise<LibraryV2FileTags> {
+  const payload = await readJson<FileTagsResponse>(
+    apiClient.get(`library/v2/tracks/${trackId}/file-tags`),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Failed to read file tags');
+  return payload;
+}
+
+export async function editTrackFileTag(trackId: number, key: string, value: string): Promise<void> {
+  const payload = await readJson<{ success: boolean; error?: string }>(
+    apiClient.post(`library/v2/tracks/${trackId}/file-tags/edit`, {
+      json: { key, value },
+    }),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Failed to edit tag');
+}
+
+export function libraryV2TrackFileTagsQueryOptions(trackId: number, enabled: boolean) {
+  return queryOptions({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'track-file-tags', trackId],
+    queryFn: () => fetchLibraryV2TrackFileTags(trackId),
     enabled: enabled && trackId > 0,
     staleTime: 30_000,
   });

@@ -116,6 +116,7 @@ export interface LibraryV2TrackFile {
   import_status: string | null;
   verification_status: string | null;
   source: string | null;
+  file_state: string | null;
 }
 
 /** One provider's match state for an entity (legacy Enhanced-View match chips). */
@@ -145,6 +146,29 @@ export interface LibraryV2TrackDownload {
   track_title: string | null;
   track_artist: string | null;
   created_at: string | null;
+}
+
+/** One `lib2_manual_skips` audit row — a user-approved check override
+ *  (e.g. AcoustID or quality skipped) bound to this track's file. */
+export interface LibraryV2ManualSkip {
+  id: number;
+  skipped_checks: string[];
+  reason: string | null;
+  acknowledged: boolean;
+  created_at: string | null;
+}
+
+/** Live embedded tags read straight from the file via mutagen (§18.1),
+ *  backing the Track Detail modal's Tags + Lyrics tabs. `tags` is a flat
+ *  lowercase-key → string map (matches `core.library.file_tags`). */
+export interface LibraryV2FileTags {
+  available: boolean;
+  reason?: string;
+  format?: string;
+  bitrate?: number;
+  duration?: number;
+  has_picture?: boolean;
+  tags?: Record<string, string>;
 }
 
 export interface LibraryV2Track {

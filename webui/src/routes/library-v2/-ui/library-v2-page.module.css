@@ -1243,7 +1243,7 @@
 /* Fixed width+height for tabbed detail modals (track/album) so switching
  * tabs never resizes/jumps the modal — only the tab body scrolls. */
 .modalDetail {
-  width: min(640px, 94vw);
+  width: min(880px, 94vw);
   height: 620px;
   max-height: 88vh;
   display: flex;
@@ -1254,7 +1254,7 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding-right: 4px;
+  padding-right: 18px;
 }
 
 .modalHeader {
@@ -1467,9 +1467,10 @@
 
 .sourceInfoRow {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
-  gap: 16px;
+  gap: 8px 16px;
   padding: 7px 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   font-size: 13px;
@@ -1487,6 +1488,192 @@
   color: rgba(255, 255, 255, 0.85);
 }
 
+/* --- tag editing UI --- */
+.tagRowClickable {
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.tagRowClickable:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom-color: rgba(var(--accent-rgb), 0.3);
+}
+
+.editIndicator {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  opacity: 0.35;
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease,
+    color 0.15s ease;
+  vertical-align: middle;
+}
+
+.editIndicator svg {
+  width: 11px;
+  height: 11px;
+}
+
+.tagRowClickable:hover .editIndicator {
+  opacity: 0.95;
+  color: rgba(var(--accent-rgb), 0.9);
+  transform: scale(1.15);
+}
+
+.tagEditInline {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  margin: 4px 0;
+}
+
+.tagEditHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.tagEditLabel {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.tagEditForm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tagEditInput {
+  flex: 1;
+  min-width: 150px;
+  background: #0d0d0d;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: #fff;
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.tagEditInput:focus {
+  outline: none;
+  border-color: rgba(var(--accent-rgb), 0.5);
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.15);
+}
+
+.tagEditActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btnTagSave,
+.btnTagCancel,
+.btnTagDelete {
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.btnTagSave {
+  background: rgba(var(--accent-rgb), 0.9);
+  color: #06140b;
+}
+
+.btnTagCancel {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+
+.btnTagDelete {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: rgb(248, 113, 113);
+}
+
+.btnTagDelete:hover {
+  background: rgba(239, 68, 68, 0.25);
+}
+
+.tagAddBtnContainer {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.08);
+  display: flex;
+  justify-content: flex-start;
+}
+
+.btnTagAdd {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.7);
+  transition: all 0.15s ease;
+}
+
+.btnTagAdd:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(var(--accent-rgb), 0.4);
+  color: #fff;
+}
+
+.tagAddPanel {
+  margin-top: 14px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tagAddTitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.tagAddInputs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tagAddInputKey {
+  flex: 1;
+  min-width: 140px;
+}
+
+.tagAddInputValue {
+  flex: 2;
+  min-width: 200px;
+}
+
 .sourceInfoMono {
   font-family: var(--font-mono, monospace);
   font-size: 12px;
@@ -1502,6 +1689,25 @@
   margin-top: 12px;
   font-size: 11.5px;
   color: rgba(255, 255, 255, 0.4);
+}
+
+/* --- write-tags-to-file action (§18.2) --- */
+.formDivider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 12.5px;
+}
+
+/* --- lyrics tab (§18.1) --- */
+.lyricsText {
+  white-space: pre-wrap;
+  line-height: 1.6;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.85);
 }
 
 /* --- metadata match chips (legacy Enhanced-View parity) --- */

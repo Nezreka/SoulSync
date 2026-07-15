@@ -1,5 +1,4 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
 
 import type { LibraryV2QualityProfile } from '../-library-v2.types';
 
@@ -36,10 +35,7 @@ export function QualityProfilePicker({
 }) {
   const profilesQuery = useQuery(libraryV2QualityProfilesQueryOptions());
   const queryClient = useQueryClient();
-  // Assigning a profile is a quality decision. Monitoring existing track(s)
-  // for upgrades (queueing downloads) is a separate wanted-action — explicit
-  // opt-in, default off (audit P1-15).
-  const [monitorExisting, setMonitorExisting] = useState(false);
+  const monitorExisting = true;
   const mutation = useMutation({
     mutationFn: (profileId: number) =>
       // A track has no children to cascade to.
@@ -51,16 +47,6 @@ export function QualityProfilePicker({
 
   return (
     <>
-      <label className={styles.checkOption}>
-        <input
-          type="checkbox"
-          checked={monitorExisting}
-          onChange={(e) => setMonitorExisting(e.target.checked)}
-        />
-        {entity === 'tracks'
-          ? 'Also monitor this track for upgrades (may queue a download)'
-          : 'Also monitor existing tracks for upgrades (adds them to Wanted and may queue downloads)'}
-      </label>
       <div className={styles.qpList}>
         {profilesQuery.isLoading ? (
           <div className={styles.inlineLoading}>Loading profiles…</div>

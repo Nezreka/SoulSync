@@ -107,9 +107,10 @@ describe('library v2 source info api', () => {
       ),
     );
 
-    const rows = await fetchLibraryV2TrackSourceInfo(55);
-    expect(rows).toHaveLength(2);
-    expect(rows[0].source_username).toBe('user');
+    const info = await fetchLibraryV2TrackSourceInfo(55);
+    expect(info.downloads).toHaveLength(2);
+    expect(info.downloads[0].source_username).toBe('user');
+    expect(info.manual_skips).toEqual([]);
   });
 
   it('blacklists a source through the app-wide route', async () => {
