@@ -4031,6 +4031,42 @@ def list_automations():
         logger.error(f"Error listing automations: {e}")
         return jsonify({"error": str(e)}), 500
 
+
+@app.route('/api/automations/master', methods=['GET'])
+def get_automations_master():
+    """The per-side global pause state ({music: bool, video: bool}).
+    It gates whether ANY automation runs on that side — individual enabled
+    flags are untouched, so un-pausing restores exactly what the user had."""
+    try:
+        from core.automation_engine import AutomationEngine
+        return jsonify({side: (automation_engine.master_enabled(side) if automation_engine
+                               else AutomationEngine.MASTER_DEFAULTS[side])
+                        for side in ('music', 'video')})
+    except Exception as e:
+        logger.error(f"Error reading automations master state: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/automations/master', methods=['POST'])
+@admin_only
+def set_automations_master():
+    """Flip one side's global automation pause. Body: {side, enabled}.
+    Admin-only — it silences every automation on a side, not just yours."""
+    try:
+        data = request.get_json(silent=True) or {}
+        side = (data.get('side') or '').strip().lower()
+        if side not in ('music', 'video'):
+            return jsonify({"success": False, "error": "side must be music or video"}), 400
+        if automation_engine is None:
+            return jsonify({"success": False, "error": "Automation engine unavailable"}), 503
+        enabled = bool(data.get('enabled'))
+        automation_engine.set_master_enabled(side, enabled)   # persists to the engine DB
+        logger.info("Automations master for %s side set to %s", side, 'ON' if enabled else 'PAUSED')
+        return jsonify({"success": True, "side": side, "enabled": enabled})
+    except Exception as e:
+        logger.error(f"Error setting automations master state: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @app.route('/api/automations', methods=['POST'])
 def create_automation():
     """Create a new automation."""

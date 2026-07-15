@@ -47168,6 +47168,61 @@ body.downloads-disabled [onclick*="DownloadMissing"]:not([onclick*="close"]) {
     color: rgb(var(--accent-light-rgb));
 }
 
+/* --- Global per-side master pause toggle (music + video automations pages) --- */
+.auto-master-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    padding: 5px 14px 5px 8px;
+    border-radius: 999px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 800;
+    border: 1px solid rgba(255, 99, 99, 0.4);
+    background: rgba(255, 99, 99, 0.08);
+    color: #ff8484;
+    transition: all 0.15s ease;
+}
+.auto-master-toggle.on {
+    border-color: rgba(76, 207, 133, 0.4);
+    background: rgba(76, 207, 133, 0.08);
+    color: #6fdd9d;
+}
+.auto-master-toggle:hover:not(:disabled) {
+    filter: brightness(1.15);
+}
+.auto-master-toggle:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+.auto-master-sw {
+    position: relative;
+    width: 34px;
+    height: 19px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.14);
+    transition: background 0.16s;
+    flex: 0 0 auto;
+}
+.auto-master-sw::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    background: #fff;
+    transition: transform 0.16s;
+}
+.auto-master-toggle.on .auto-master-sw {
+    background: #4ccf85;
+}
+.auto-master-toggle.on .auto-master-sw::after {
+    transform: translateX(15px);
+}
+
 /* --- Automation Card --- */
 .automation-card {
     background: rgba(22, 22, 22, 0.95);
