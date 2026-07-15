@@ -663,19 +663,49 @@ class TidalClient:
             headers = self.session.headers.copy()
             headers['accept'] = 'application/vnd.api+json'
 
-            response = requests.get(endpoint, params=params, headers=headers, timeout=15)
-
-            if response.status_code != 200:
-                logger.error(f"Failed to fetch V2 playlists: {response.status_code} - {response.text}")
-                return []
-
-            data = response.json()
             playlists = []
 
-            # Step 3: Process the playlists from the main 'data' array.
-            # Only extract metadata — tracks are fetched on-demand when the user
-            # selects a playlist to sync/mirror, not during the listing step.
-            for playlist_data in data.get('data', []):
+            # Step 3: Walk EVERY page. The V2 API returns ~20 playlists per page
+            # with a links.next cursor; this used to read a single page, silently
+            # capping users at ~20 playlists (i-byrana: 21 shown, 20+ missing —
+            # deleting playlists in Tidal just rotated different ones into the
+            # one page we read). 50 pages = ~1000 playlists, a generous ceiling.
+            api_host = self.base_url.split('/v2')[0]
+            next_url, next_params = endpoint, params
+            for _page in range(50):
+                response = requests.get(next_url, params=next_params, headers=headers, timeout=15)
+
+                if response.status_code != 200:
+                    logger.error(f"Failed to fetch V2 playlists: {response.status_code} - {response.text}")
+                    break
+
+                data = response.json()
+                self._collect_v2_playlist_page(data, playlists)
+
+                nxt = str((data.get('links') or {}).get('next') or '').strip()
+                if not nxt:
+                    break
+                # links.next is relative to the API base ("/playlists?page[cursor]=…"
+                # or "/v2/playlists?…" depending on the deployment) — normalize both.
+                if nxt.startswith('http'):
+                    next_url = nxt
+                elif nxt.startswith('/v2/'):
+                    next_url = api_host + nxt
+                else:
+                    next_url = self.base_url + (nxt if nxt.startswith('/') else '/' + nxt)
+                next_params = None      # the cursor URL carries all query params
+
+            logger.info(f"Successfully retrieved {len(playlists)} playlists (metadata only) with the V2 filter method.")
+            return playlists
+
+        except Exception as e:
+            logger.error(f"A critical error occurred while fetching Tidal V2 playlists: {e}")
+            return []
+
+    def _collect_v2_playlist_page(self, data, playlists):
+        """Append one V2 /playlists page's rows to ``playlists`` (metadata only —
+        tracks are fetched on-demand when the user selects a playlist)."""
+        for playlist_data in data.get('data', []):
                 attributes = playlist_data.get('attributes', {})
                 playlist_id = playlist_data.get('id')
 
@@ -714,13 +744,6 @@ class TidalClient:
 
                 playlists.append(new_playlist)
 
-            logger.info(f"Successfully retrieved {len(playlists)} playlists (metadata only) with the V2 filter method.")
-            return playlists
-
-        except Exception as e:
-            logger.error(f"A critical error occurred while fetching Tidal V2 playlists: {e}")
-            return []
-    
     def _try_direct_playlist_endpoints(self):
         """Fallback method to try direct playlist endpoints without user ID"""
         playlists = []
