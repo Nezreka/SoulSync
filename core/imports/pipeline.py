@@ -690,6 +690,8 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
 
             safe_move_file(file_path, destination)
             logger.info(f"Moved simple download to: {destination}")
+            from core.imports.file_ops import move_companion_sidecars
+            move_companion_sidecars(file_path, destination)
             cleanup_slskd_dedup_siblings(file_path)
 
             with matched_context_lock:
@@ -1008,6 +1010,8 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             raise FileNotFoundError(f"Source file vanished before move and destination does not exist: {file_path}")
 
         safe_move_file(file_path, final_path)
+        from core.imports.file_ops import move_companion_sidecars
+        move_companion_sidecars(file_path, final_path)
         cleanup_slskd_dedup_siblings(file_path)
 
         if is_enhance_download and _enhance_source_info.get('original_file_path'):
