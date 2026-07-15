@@ -50919,12 +50919,36 @@ textarea.enhanced-meta-field-input {
 }
 
 /* Layout */
+/* Short-viewport safety (the #1024 bug class): the modal is clamped to 85vh
+   with overflow:hidden, so on zoomed-in / short windows everything below the
+   fold (controls, progress bar, the lyrics/queue headers) was CLIPPED with no
+   way to reach it. Flex-column + an internally scrolling body keeps every
+   control reachable — the close button (absolute) and the panel headers stay
+   pinned, the body scrolls. Tall viewports fit as before: no scrollbar, no
+   visual change. Mobile already does this (np-body scrolls at ≤768px). */
+.np-modal {
+    display: flex;
+    flex-direction: column;
+}
 .np-body {
     display: flex;
     flex-direction: row;
     padding: 48px 40px 36px;
     gap: 48px;
     align-items: flex-start;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+}
+.np-body::-webkit-scrollbar {
+    width: 8px;
+}
+.np-body::-webkit-scrollbar-track {
+    background: transparent;
+}
+.np-body::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 4px;
 }
 .np-left {
     flex: 0 0 auto;
