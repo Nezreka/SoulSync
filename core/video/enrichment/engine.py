@@ -590,6 +590,27 @@ class VideoEnrichmentEngine:
                 return None
         return hit or None
 
+    def title_logo(self, kind, tmdb_id) -> str | None:
+        """A title's logo/wordmark art for the Discover hero — day-cached
+        ('' = cached miss so a logo-less title doesn't re-fetch every load)."""
+        if not tmdb_id:
+            return None
+        try:
+            ck = ("titlelogo", kind, int(tmdb_id))
+        except (TypeError, ValueError):
+            return None
+        hit = self._cache_get(ck)
+        if hit is None:
+            w = self.workers.get("tmdb")
+            hit = ""
+            if w and getattr(w, "enabled", False) and hasattr(w.client, "title_logo"):
+                try:
+                    hit = w.client.title_logo(kind, tmdb_id) or ""
+                except Exception:   # noqa: BLE001 - hero chrome must never break the page
+                    logger.debug("title logo lookup failed (%s %s)", kind, tmdb_id, exc_info=True)
+            self._cache_put(ck, hit, ttl=86400)
+        return hit or None
+
     def company_logo(self, name) -> str | None:
         """A studio's TMDB logo URL by name, day-cached."""
         w = self.workers.get("tmdb")

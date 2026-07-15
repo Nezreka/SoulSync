@@ -262,6 +262,21 @@ class TMDBClient:
         out.sort(key=lambda x: (0 if x["lang"] == "en" else 1 if not x["lang"] else 2, -x["vote"]))
         return out[:40]
 
+    def title_logo(self, kind, tmdb_id):
+        """The best English/textless title-logo URL for a movie/show (the
+        Netflix-style billboard wordmark), or None. One light /images call."""
+        if not self.api_key or tmdb_id is None:
+            return None
+        import requests
+        path = ("/movie/" if kind == "movie" else "/tv/") + str(tmdb_id) + "/images"
+        r = requests.get(self.BASE + path,
+                         params={"api_key": self.api_key,
+                                 "include_image_language": "en,null"},
+                         timeout=15)
+        r.raise_for_status()
+        logo = self._pick_logo((r.json() or {}).get("logos") or [])
+        return (self.LOGO + logo) if logo else None
+
     def _fill_collection(self, out):
         """Second call: pull the films of a movie collection (franchise)."""
         coll = out.get("collection")
