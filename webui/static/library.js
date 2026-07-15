@@ -3769,6 +3769,125 @@ function openAlbumArtPicker(album) {
     };
 }
 
+function openArtistArtPicker() {
+    // Artist twin of openAlbumArtPicker: candidates from every CONNECTED
+    // metadata source; applying writes the pick to the SoulSync DB, the
+    // active media server, and artist.jpg on disk (what Navidrome reads) —
+    // so a wrong photo from an old mis-match gets corrected everywhere.
+    const artistId = artistDetailPageState.currentArtistId;
+    const artistName = artistDetailPageState.currentArtistName || '';
+    if (!artistId) {
+        if (typeof showToast === 'function') showToast('No artist selected', 'error');
+        return;
+    }
+
+    const _closeSvg = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+    const _checkSvg = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+
+    const old = document.getElementById('art-picker-overlay');
+    if (old) old.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'art-picker-overlay';
+    overlay.className = 'art-picker-overlay';
+    let skeleton = '';
+    for (let i = 0; i < 8; i++) skeleton += '<div class="art-picker-skel"></div>';
+    overlay.innerHTML =
+        '<div class="art-picker-modal" role="dialog" aria-modal="true">' +
+          '<div class="art-picker-header">' +
+            '<div class="art-picker-titles">' +
+              '<div class="art-picker-title">Choose artist photo</div>' +
+              '<div class="art-picker-subtitle">' + _esc(artistName) + ' · applies to SoulSync, your server, and artist.jpg on disk</div>' +
+            '</div>' +
+            '<button class="art-picker-close" aria-label="Close">' + _closeSvg + '</button>' +
+          '</div>' +
+          '<div class="art-picker-body"><div class="art-picker-grid loading">' + skeleton + '</div></div>' +
+          '<div class="art-picker-footer">' +
+            '<div class="art-picker-count"></div>' +
+            '<div class="art-picker-actions">' +
+              '<button class="art-picker-btn art-picker-cancel">Cancel</button>' +
+              '<button class="art-picker-btn art-picker-apply" disabled>Apply</button>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('visible'));
+
+    const close = () => { overlay.classList.remove('visible'); setTimeout(() => overlay.remove(), 200); };
+    const onEsc = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onEsc); } };
+    document.addEventListener('keydown', onEsc);
+    overlay.querySelector('.art-picker-close').onclick = close;
+    overlay.querySelector('.art-picker-cancel').onclick = close;
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+    const body = overlay.querySelector('.art-picker-body');
+    const applyBtn = overlay.querySelector('.art-picker-apply');
+    const countEl = overlay.querySelector('.art-picker-count');
+    let selectedUrl = null;
+
+    fetch('/api/artist/' + encodeURIComponent(artistId) + '/art-options')
+        .then(r => r.json())
+        .then(data => {
+            const cands = (data && data.candidates) || [];
+            if (!cands.length) {
+                body.innerHTML = '<div class="art-picker-empty">No photos found on your connected sources for this artist.</div>';
+                return;
+            }
+            countEl.textContent = cands.length + ' source' + (cands.length === 1 ? '' : 's');
+            const grid = document.createElement('div');
+            grid.className = 'art-picker-grid';
+            cands.forEach(c => {
+                const tile = document.createElement('button');
+                tile.className = 'art-picker-tile';
+                tile.innerHTML =
+                    '<img loading="lazy" src="' + _esc(c.url) + '" alt="">' +
+                    '<span class="art-picker-badge">' + _esc(c.source) + '</span>' +
+                    '<span class="art-picker-check">' + _checkSvg + '</span>';
+                tile.querySelector('img').onerror = () => tile.remove();
+                tile.onclick = () => {
+                    grid.querySelectorAll('.art-picker-tile.selected').forEach(t => t.classList.remove('selected'));
+                    tile.classList.add('selected');
+                    selectedUrl = c.url;
+                    applyBtn.disabled = false;
+                };
+                grid.appendChild(tile);
+            });
+            body.innerHTML = '';
+            body.appendChild(grid);
+        })
+        .catch(() => { body.innerHTML = '<div class="art-picker-empty">Couldn\'t load photo options.</div>'; });
+
+    applyBtn.onclick = () => {
+        if (!selectedUrl) return;
+        applyBtn.disabled = true;
+        applyBtn.classList.add('loading');
+        applyBtn.textContent = 'Applying…';
+        fetch('/api/artist/' + encodeURIComponent(artistId) + '/art', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: selectedUrl })
+        }).then(r => r.json()).then(res => {
+            if (res && res.success) {
+                const heroImg = document.getElementById('artist-detail-image');
+                if (heroImg) { heroImg.src = selectedUrl; heroImg.style.display = ''; }
+                const fallback = document.getElementById('artist-detail-image-fallback');
+                if (fallback) fallback.style.display = 'none';
+                const parts = [];
+                if (res.server_updated) parts.push('server');
+                if (res.disk_written) parts.push('artist.jpg');
+                const extra = parts.length ? ' (also updated: ' + parts.join(', ') + ')' : '';
+                if (typeof showToast === 'function') showToast('Artist photo updated' + extra, 'success');
+                close();
+            } else {
+                applyBtn.disabled = false; applyBtn.classList.remove('loading'); applyBtn.textContent = 'Apply';
+                if (typeof showToast === 'function') showToast((res && res.error) || 'Failed to update photo', 'error');
+            }
+        }).catch(() => {
+            applyBtn.disabled = false; applyBtn.classList.remove('loading'); applyBtn.textContent = 'Apply';
+            if (typeof showToast === 'function') showToast('Failed to update photo', 'error');
+        });
+    };
+}
+
 function renderExpandedAlbumHeader(album) {
     const header = document.createElement('div');
     header.className = 'enhanced-expanded-header';

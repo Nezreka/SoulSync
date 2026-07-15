@@ -12,6 +12,7 @@ logger = get_logger("metadata.artist_image")
 
 __all__ = [
     "get_artist_image_url",
+    "gather_artist_image_candidates",
 ]
 
 
@@ -136,3 +137,66 @@ def get_artist_image_url(
             return image_url
 
     return None
+
+
+# Which artists-table column holds each source's artist id (for direct, exact
+# lookups in the candidate gather — beats a name search when we have it).
+_SOURCE_ID_COLUMNS = {
+    'spotify': 'spotify_artist_id',
+    'deezer': 'deezer_id',
+    'itunes': 'itunes_artist_id',
+    'audiodb': 'audiodb_id',
+    'discogs': 'discogs_id',
+}
+
+# Sources that can't produce an artist photo (or aren't image services at all).
+_CANDIDATE_SKIP_SOURCES = {'musicbrainz', 'soulseek', 'youtube_videos', 'hydrabase'}
+
+
+def gather_artist_image_candidates(artist_name: str, source_ids: Optional[dict] = None) -> list:
+    """One candidate photo per CONNECTED metadata source, for the artist
+    image picker (mirrors ``gather_album_art_candidates``).
+
+    For each source in the configured priority chain: use the artist's stored
+    per-source id when the library row has one (exact), otherwise search the
+    source by name and take its top hit's image. Sources fan out concurrently;
+    a failing source contributes nothing. Returns ``[{source, url}, ...]``
+    deduped by URL, in chain order.
+    """
+    name = (artist_name or '').strip()
+    ids = source_ids or {}
+    sources = [s for s in metadata_registry.get_source_priority(metadata_registry.get_primary_source())
+               if s not in _CANDIDATE_SKIP_SOURCES]
+
+    def _one(source: str):
+        try:
+            client = metadata_registry.get_client_for_source(source)
+            if not client:
+                return None
+            sid = str(ids.get(_SOURCE_ID_COLUMNS.get(source, '')) or '').strip()
+            url = _get_artist_image_from_source(source, sid) if sid else None
+            if not url and name and hasattr(client, 'search_artists'):
+                results = client.search_artists(name, limit=1) or []
+                if results:
+                    top = results[0]
+                    url = getattr(top, 'image_url', None) or (
+                        top.get('image_url') if isinstance(top, dict) else None)
+            return (source, url) if url else None
+        except Exception as exc:
+            logger.debug("artist image candidate failed for %s: %s", source, exc)
+            return None
+
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=min(len(sources), 6) or 1) as pool:
+        results = list(pool.map(_one, sources))
+
+    candidates, seen = [], set()
+    for entry in results:
+        if not entry:
+            continue
+        source, url = entry
+        if url in seen:
+            continue
+        seen.add(url)
+        candidates.append({'source': source, 'url': url})
+    return candidates
