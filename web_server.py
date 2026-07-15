@@ -39595,9 +39595,15 @@ def _emit_watchlist_count_loop():
             logger.debug(f"Error emitting watchlist count: {e}")
 
 def _emit_download_status_loop():
-    """Background thread that pushes download batch status every 2 seconds to subscribed rooms."""
+    """Background thread that pushes download batch status every 2 seconds to subscribed rooms.
+    Skipped entirely while no client is connected — the transfer fetch below is a real
+    slskd API call (TTL-cached), so at idle this loop polled slskd every ~2s for nobody.
+    Download progression doesn't depend on it (the workers poll transfers themselves);
+    this cache is populated on demand by its other callers."""
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(2)
+        if not _has_connected_clients():
+            continue
         try:
             live_transfers_lookup = get_cached_transfer_data()
             with tasks_lock:
