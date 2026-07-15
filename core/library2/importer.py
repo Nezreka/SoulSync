@@ -38,6 +38,10 @@ ProgressCb = Optional[Callable[[str, int, int], None]]
 # Credit separators: "feat."/"ft."/"featuring"/"with" plus list separators.
 _FEAT_RE = re.compile(r"\b(?:feat|ft|featuring|with)\b\.?", re.IGNORECASE)
 _FEAT_IN_TITLE_RE = re.compile(r"[\(\[]\s*(?:feat\.?|ft\.?|featuring|with)\s+([^)\]]+)[\)\]]", re.IGNORECASE)
+# A bare (un-parenthesized) trailing featured-artist credit, e.g. "Song feat. X".
+# "with" is intentionally excluded here — bare "with" is too ambiguous (e.g.
+# "Dancing With Myself"); only the parenthesized form above strips a "with" credit.
+_FEAT_TITLE_TAIL_RE = re.compile(r"\s+(?:featuring|feat|ft)\b\.?\s+\S.*$", re.IGNORECASE)
 _LIST_SEP_RE = re.compile(r"\s*(?:,|;|/|&|\bx\b|\band\b|\bvs\.?\b|×|\+)\s*", re.IGNORECASE)
 
 
@@ -77,6 +81,21 @@ def featured_from_title(title: str) -> List[str]:
     for match in _FEAT_IN_TITLE_RE.finditer(title or ""):
         names.extend(split_artist_credits(match.group(1)))
     return names
+
+
+def dedup_title_key(title: str) -> str:
+    """Grouping key for single↔album duplicate detection.
+
+    Drops a featured-artist annotation (``(feat. …)`` / ``[ft. …]`` /
+    ``featuring …``) so the same recording links across releases even when only
+    one side spells out the guests — the common real-world reason a single and
+    its album cut carry different raw titles (#39). Version qualifiers (Remix,
+    Live, Remastered, Acoustic, …) are deliberately preserved: those are distinct
+    recordings and must not be collapsed into one canonical row.
+    """
+    text = _FEAT_IN_TITLE_RE.sub("", title or "")   # drop "(feat. …)"/"(with …)" groups
+    text = _FEAT_TITLE_TAIL_RE.sub("", text)         # drop a bare trailing "feat. …"
+    return normalize_name(text)
 
 
 def _existing_columns(cursor, table: str) -> Set[str]:
@@ -929,7 +948,7 @@ def link_single_album_duplicates(cursor) -> int:
     )
     groups: Dict[Tuple[str, str], List[Tuple[int, str]]] = {}
     for row in cursor.fetchall():
-        key = (normalize_name(row["artist_name"]), normalize_name(row["title"]))
+        key = (normalize_name(row["artist_name"]), dedup_title_key(row["title"]))
         groups.setdefault(key, []).append((row["track_id"], row["album_type"]))
 
     linked = 0

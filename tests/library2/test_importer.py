@@ -356,6 +356,65 @@ def test_single_album_linkage(imported_conn):
     assert single["canonical_track_id"] == album_track["id"]
 
 
+def test_single_album_linkage_survives_feat_suffix_on_album_cut(legacy_db):
+    """#39: a genuine single↔album duplicate must still link when the album cut
+    spells out the guests in its title (``(feat. …)``) and the single does not.
+    Otherwise ``link_single_album_duplicates`` groups them apart and the Manage
+    Tracks modal wrongly reports "No duplicates found"."""
+    conn = sqlite3.connect(legacy_db.path)
+    conn.execute(
+        "UPDATE tracks SET title='One Dance (feat. Wizkid & Kyla)' WHERE id=100")
+    conn.commit()
+    conn.close()
+
+    import_legacy_library(legacy_db, reset=True)
+
+    conn = sqlite3.connect(legacy_db.path)
+    conn.row_factory = sqlite3.Row
+    single = conn.execute(
+        "SELECT id, canonical_track_id FROM lib2_tracks WHERE legacy_track_id=102"
+    ).fetchone()
+    album_track = conn.execute(
+        "SELECT id FROM lib2_tracks WHERE legacy_track_id=100").fetchone()
+    conn.close()
+    assert single["canonical_track_id"] == album_track["id"]
+
+
+def test_single_album_linkage_survives_feat_suffix_on_single(legacy_db):
+    """Mirror of the above: the annotation may sit on the single instead."""
+    conn = sqlite3.connect(legacy_db.path)
+    conn.execute(
+        "UPDATE tracks SET title='One Dance (feat. Wizkid & Kyla)' WHERE id=102")
+    conn.commit()
+    conn.close()
+
+    import_legacy_library(legacy_db, reset=True)
+
+    conn = sqlite3.connect(legacy_db.path)
+    conn.row_factory = sqlite3.Row
+    single = conn.execute(
+        "SELECT id, canonical_track_id FROM lib2_tracks WHERE legacy_track_id=102"
+    ).fetchone()
+    album_track = conn.execute(
+        "SELECT id FROM lib2_tracks WHERE legacy_track_id=100").fetchone()
+    conn.close()
+    assert single["canonical_track_id"] == album_track["id"]
+
+
+def test_dedup_title_key_strips_only_featured_annotations():
+    """The dedup key drops featured-artist tails but preserves version qualifiers
+    (Remix/Live/Remastered are distinct recordings and must not be collapsed)."""
+    from core.library2.importer import dedup_title_key
+
+    assert dedup_title_key("One Dance (feat. Wizkid & Kyla)") == dedup_title_key("One Dance")
+    assert dedup_title_key("One Dance [ft. Wizkid]") == dedup_title_key("One Dance")
+    assert dedup_title_key("One Dance feat. Wizkid") == dedup_title_key("One Dance")
+    # Not a credit annotation — must stay distinct:
+    assert dedup_title_key("One Dance - Live") != dedup_title_key("One Dance")
+    assert dedup_title_key("One Dance (Remix)") != dedup_title_key("One Dance")
+    assert dedup_title_key("Feature Presentation") == "feature presentation"
+
+
 def test_idempotent_rerun(legacy_db):
     first = import_legacy_library(legacy_db)
     second = import_legacy_library(legacy_db)
