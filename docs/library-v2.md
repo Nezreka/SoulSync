@@ -3477,7 +3477,8 @@ Zwei unabhängige Root Causes in verschiedenen Modulen:
 
 **Umsetzungsstand (2026-07-15):**
 - **✅ Titel-basierte Heilung (Commit `eca36caa`):** `_persist_tracklist_tracks` bevorzugt jetzt einen eindeutigen, noch nicht in diesem Lauf berührten lokalen Row mit gleichem (normalisiertem) Titel über den `(disc, number)`-Schlüssel und schreibt dessen `disc`/`number` in-place um. Ein doppelter Titel heilt nie (Eindeutigkeits-Guard → Remixe/Intros bleiben sicher). Damit repariert ein korrekt gefetchter Re-Fetch kollabierte/vertauschte Nummern, statt Duplikate anzulegen — genau der Grund, warum „Update Discography" es vorher nie reparierte. Regressionstest `test_persist_tracklist_heals_duplicated_track_numbers_by_title`.
-- **⏳ Bewusst zurückgestellt (eigene, spätere Slice):** die **Prävention** der Erstkorruption — (a) der Main-Pipeline-`floor-to-1` (`pipeline.py:892-904`) und (b) die reine Namens-Disambiguierung im `_ArtistResolver`. (a) gehört als generischer Main-Pipeline-Fix in einen eigenen, früheren PR (Reuse-First-Philosophie, Abschnitt 4.5) und braucht Batch-Kontext, den die Per-File-Pipeline an dieser Stelle nicht hat; (b) ist ein querschnittlicher Identitäts-Umbau, der sich mit Roadmap-Punkt 40 (Artist-Aliasing) deckt. Beide sind höher-riskant als die lib2-lokale Heilung und werden nicht unter Parallel-Arbeit blind mitgezogen. Die Titel-Heilung deckt bereits den „swag"-Fall (korrekter Artist, nur Nummern korrupt) ab; „Thriller 40" braucht zusätzlich (b).
+- **✅ Prävention (a) Main-Pipeline Scan-Order-Fallback (Commit `dbb3b84e`):** statt jeden nicht auflösbaren `track_number` konstant auf `1` zu floren, nimmt `pipeline.py` jetzt die 1-basierte Sortier-Position der Datei unter ihren Audio-Geschwistern im selben Verzeichnis (`track_number.py::track_number_from_directory_order`, reine Funktion, unit-getestet). Album-Bundles stagen alle Dateien eines Albums gemeinsam in ein Verzeichnis → stabile, DISTINKTE Fallback-Reihenfolge statt Kollaps auf 1. Greift ausschließlich, wenn keine Quelle eine Nummer lieferte → kann nie eine echte Nummer überschreiben. Generischer Main-Pipeline-Gewinn (§4.5), unabhängig von Library v2.
+- **✅ Prävention (b) Provider-NEUTRALE Artist-/Album-Disambiguierung (Commits `c5f3828c` + `610482f6`):** `_ArtistResolver` matcht jetzt über die **ID EINER BELIEBIGEN Quelle** — Deezer (SoulSyncs *Default*-Quelle!), MusicBrainz, Spotify, Tidal, Qobuz — nicht mehr Spotify-hardcoded. Der Schlüssel ist der app-weite `external_ids`-Source→ID-Map (genau der, den `discography.py` schon nutzt): ID-Match schlägt den Namensschlüssel, gleiche ID → gleiche Entity (auch unter anderem Anzeigenamen), KONFLIKT pro Quelle (gleiche Quelle, andere ID) → eigener Row, sonst werden neue IDs adoptiert. **Wichtig (Nutzer-Feedback):** der Importer importiert jetzt AUCH ALLE Provider-IDs — `upsert_legacy` schreibt `deezer_artist_id`/`musicbrainz_artist_id`/`spotify_artist_id`/tidal/qobuz in `external_ids`, und der Album-Import schreibt `deezer_album_id`/`spotify_album_id`/`musicbrainz_release_id` (+ tidal/qobuz) in Album-`external_ids`, die `completeness.resolve_tracklist` bereits liest. Damit verliert ein Deezer-Nutzer seine Identität nicht mehr, ein Album landet nicht an der falschen gleichnamigen Entity, und die EXAKTE Provider-Release ist holbar → Titel-Heilung repariert die Nummern (deckt auch „Thriller 40" ab). Grenze: die Legacy-Wishlist bleibt Spotify-Schema (`spotify_track_id`/`spotify_data`); Value-basiertes Matching vereint ihre Rows trotzdem mit den Library-IDs. Beschränkte Slice von Roadmap-Punkt 40 (Artist-Aliasing).
 
 **Priorität:** Hoch — führt zu sichtbarem Datenverlust in der UI (Tracks als "missing" trotz vorhandener Datei) und ist durch normale Nutzer-Aktionen ("Update Discography") nicht selbst-heilend.
 
@@ -3496,8 +3497,8 @@ Zwei unabhängige Root Causes in verschiedenen Modulen:
 ### 16.5 Umsetzungsstand (2026-07-15)
 
 Abschnitt 16 wurde am 2026-07-15 in mehreren fokussierten, TDD-getriebenen
-Commits (jeder mit eigenem Regressionstest, `pytest tests/library2` durchgängig
-grün — 387 Tests) angegangen:
+Commits (jeder mit eigenem Regressionstest, `pytest tests/library2` grün — 392
+Tests, `tests/imports` grün — 676 Tests) **vollständig** abgeschlossen:
 
 | Punkt | Stand | Commit(s) |
 |-------|-------|-----------|
@@ -3505,12 +3506,15 @@ grün — 387 Tests) angegangen:
 | **16.2** Über-breites Album-Monitoring (Album-Flag) | ✅ vollständig | `15742513` |
 | **16.2** Track-Flag-Konsistenz-Folgefix | ✅ vollständig | `d76a8222` |
 | **16.3** Titel-basierte Nummern-Heilung (lib2) | ✅ vollständig | `eca36caa` |
-| **16.3(a)** Main-Pipeline-`floor-to-1`-Prävention | ⏳ zurückgestellt | — (eigener Main-Pipeline-PR, Abschnitt 4.5) |
-| **16.3(b)** `_ArtistResolver`-Provider-ID-Disambiguierung | ⏳ zurückgestellt | — (querschnittlich, deckt sich mit Roadmap-Punkt 40) |
+| **16.3(a)** Main-Pipeline Scan-Order-Fallback (statt `floor-to-1`) | ✅ vollständig | `dbb3b84e` |
+| **16.3(b)** Provider-neutrale Artist-/Album-Disambiguierung + Import ALLER Provider-IDs (Deezer/MB/Spotify/…) | ✅ vollständig | `c5f3828c` + `610482f6` |
 
-Die zurückgestellten Punkte sind bewusst getrennt: der `floor-to-1`-Fix ist ein
-generischer Main-Pipeline-Gewinn (gehört nach 4.5 in einen eigenen, früheren
-PR und braucht Batch-Kontext, den `pipeline.py` an der Stelle nicht hat), und
-die Artist-Disambiguierung ist ein Identitäts-Umbau (Roadmap 40) — beide zu
-riskant, um unter paralleler Arbeit blind mitzuziehen. Die drei geschlossenen
-Bugs sind alle lib2-lokal, additiv und mit ihren eigenen Tests abgesichert.
+**Alle drei Bugs sind vollständig geschlossen — inkl. Prävention der
+Erstkorruption.** Die zwei zuvor bewusst zurückgestellten Präventions-Teile
+wurden auf ausdrücklichen Nutzerwunsch nachgezogen: 16.3(a) ist ein generischer
+Main-Pipeline-Gewinn (§4.5, unabhängig von Library v2 — Scan-Order-Fallback nur
+als letzter Ausweg, überschreibt nie eine echte Nummer), 16.3(b) ist die
+beschränkte Slice von Roadmap-Punkt 40 (Artist-Aliasing), die 16.3 braucht:
+korrekt gematchter Artist → korrekter Tracklist-Fetch → Titel-Heilung repariert
+die Nummern (auch der „Thriller 40"-Fall). Alle Fixes sind additiv und mit
+eigenen Tests abgesichert.
