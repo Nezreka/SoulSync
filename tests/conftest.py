@@ -1046,9 +1046,45 @@ def _inert_youtube_date_enricher():
     yield
 
 
+@pytest.fixture(autouse=True, scope='session')
+def _inert_video_enrichment_engine():
+    """Pre-build the video enrichment engine singleton WITHOUT starting its
+    worker threads.
+
+    get_video_enrichment_engine() lazily constructs the engine AND
+    start_all()s its whole daemon fleet (TMDB/TVDB matcher workers + the
+    RYD/SponsorBlock/fanart/OpenSubtitles/... backfill workers) on first use.
+    The first test to touch any enrichment-adjacent endpoint therefore spawned
+    background threads that ran for the REST of the suite: real network
+    calls, writes to the shared default video DB, and stray time.sleep calls
+    + ERROR logs that failed completely unrelated tests (CI: 'video backfill
+    opensubtitles loop error' erupting inside test_config_save_retry).
+    Same hermeticity rule as the YouTube date enricher above.
+
+    The singleton becomes a REAL engine bound to the isolated session temp DB
+    — every status/breakdown endpoint keeps working — just never started.
+    Tests that want a specific engine still monkeypatch the getter or set
+    engine._engine themselves; reset_state below re-installs this one between
+    tests so a test-local engine can't leak forward.
+    """
+    import core.video.enrichment.engine as eng_mod
+    from core.video.enrichment.clients import build_clients
+    from database.video_database import VideoDatabase
+
+    db = VideoDatabase()          # env-redirected isolated session temp DB
+    engine = eng_mod.VideoEnrichmentEngine(db, build_clients(db))
+    with eng_mod._lock:
+        eng_mod._engine = engine
+    yield engine
+
+
 @pytest.fixture(autouse=True)
-def reset_state():
+def reset_state(_inert_video_enrichment_engine):
     """Reset all mutable state between tests."""
+    # Video enrichment engine: re-install the inert (never-started) singleton
+    # so an engine a previous test set never leaks into the next one.
+    import core.video.enrichment.engine as _eng_mod
+    _eng_mod._engine = _inert_video_enrichment_engine
     # slskd search throttle: ONE process-wide reservation window shared by the
     # music + video sides (core.slskd_throttle). Left alone, reservations
     # accumulate across the whole pytest session — once 35 pile up, every

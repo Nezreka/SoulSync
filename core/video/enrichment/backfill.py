@@ -216,6 +216,14 @@ class VideoBackfillWorker:
         item = self.next_item()
         if not item:
             return False
+        if item.get("id") is None:
+            # A malformed queue row must never crash-loop: record_* needs the id
+            # to mark the item, so an exception here re-served the SAME item
+            # every 5s forever (seen live as endless
+            # "video backfill <service> loop error: KeyError 'id'").
+            logger.warning("video backfill %s got an item without an id (%r) — idling",
+                           self.service, item.get("title"))
+            return False
         self.current_item = {"type": item.get("kind"), "name": item.get("title")}
         try:
             data = self.fetch(item)
