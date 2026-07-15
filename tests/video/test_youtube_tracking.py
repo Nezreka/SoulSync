@@ -143,10 +143,15 @@ def test_channel_detail_marks_downloaded_vs_wished(tmp_path, monkeypatch):
 
     monkeypatch.setattr("core.video.youtube_enrichment.get_youtube_date_enricher",
                         lambda: _StubEnricher())
+    # Belt AND suspenders: this test is about the cache-first path, so a cache
+    # miss is a bug — fail loudly on the flag instead of KeyError'ing on the 404
+    # body, and make sure even that bug path can never reach the real YouTube.
+    monkeypatch.setattr("core.video.youtube.resolve_channel", lambda *a, **k: None)
     app = Flask(__name__)
     app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
     try:
         d = app.test_client().get("/api/video/youtube/channel/UC1").get_json()
+        assert d.get("from_cache") is True, f"expected cache-first hit, got: {d}"
         vids = {v["youtube_id"]: v for v in d["channel"]["videos"]}
         assert vids["vGot"]["downloaded"] is True and vids["vGot"]["wished"] is False
         assert vids["vWish"]["downloaded"] is False and vids["vWish"]["wished"] is True
