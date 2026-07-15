@@ -1016,6 +1016,36 @@ def shared_state():
     }
 
 
+@pytest.fixture(autouse=True, scope='session')
+def _inert_youtube_date_enricher():
+    """Neuter the YouTube date-enricher SINGLETON for the whole suite.
+
+    Several video endpoints fire-and-forget `get_youtube_date_enricher().enqueue(...)`
+    on every channel/follow request. Any endpoint test that doesn't stub it spawns
+    the REAL background thread, which then makes LIVE yt-dlp/InnerTube requests to
+    YouTube for the test's fake channel ids and writes to the shared default video
+    DB — concurrently with whatever test runs next (caught live: CI stderr full of
+    'ERROR: [youtube:tab] UC1/videos', and order-dependent KeyError failures in
+    tests/video/test_youtube_tracking.py). Tests are not allowed to reach the
+    network or share background writers — same rule as the DB/config isolation
+    above.
+
+    The singleton becomes a real enricher whose enqueue is a no-op (never spawns
+    the thread), so pause()/resume()/stats() keep their real shapes for the
+    status endpoints. Tests that exercise real enrichment construct
+    YoutubeDateEnricher(db_factory=...) directly and are unaffected.
+    """
+    import core.video.youtube_enrichment as yt_enrich
+
+    class _InertYoutubeEnricher(yt_enrich.YoutubeDateEnricher):
+        def enqueue(self, channel_id, title=None):
+            return None
+
+    with yt_enrich._enricher_lock:
+        yt_enrich._enricher = _InertYoutubeEnricher()
+    yield
+
+
 @pytest.fixture(autouse=True)
 def reset_state():
     """Reset all mutable state between tests."""
