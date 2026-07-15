@@ -40863,6 +40863,7 @@ _register_library_v2_routes(
     config_manager=config_manager,
     profile_id_getter=get_current_profile_id,
     acquisition_submission_adapter_getter=_library_v2_submission_adapter,
+    run_enrichment=_run_single_enrichment,
 )
 
 

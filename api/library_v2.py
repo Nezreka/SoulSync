@@ -94,12 +94,17 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                                acquisition_runtime_getter: Optional[Callable[..., Any]] = None,
                                acquisition_search_adapters_getter: Optional[Callable[..., Any]] = None,
                                acquisition_async_runner: Optional[Callable[..., Any]] = None,
-                               acquisition_submission_adapter_getter: Optional[Callable[..., Any]] = None) -> None:
+                               acquisition_submission_adapter_getter: Optional[Callable[..., Any]] = None,
+                               run_enrichment: Optional[Callable[..., Dict[str, Any]]] = None) -> None:
     """Attach the Library v2 routes to ``app``.
 
     ``get_database`` → shared ``MusicDatabase``; ``config_get(key, default)`` reads
     config (feature flag); ``config_manager`` is passed to the artwork/path resolver;
     ``profile_id_getter`` resolves the active profile (defaults to 1).
+    ``run_enrichment(service, entity_type, legacy_id, name, artist_name) -> dict``
+    delegates to ``web_server._run_single_enrichment`` (the same per-provider
+    workers the legacy Enhanced View's Enrich dropdown uses) — injected rather
+    than imported to avoid a circular import back into ``web_server.py``.
     """
 
     def _enabled() -> bool:
@@ -2889,6 +2894,104 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             logger.debug("file rescan failed (%s %s): %s", entity, eid, e)
         return jsonify({"success": True, "refreshed_albums": len(album_ids),
                         "scan": scan_stats})
+
+    @app.route("/api/library/v2/<entity>/<int:eid>/enrich", methods=["POST"])
+    def lib2_enrich(entity, eid):
+        """Re-query ONE metadata provider for one entity (docs §44).
+
+        Enrichment workers only know the LEGACY schema (see
+        ``web_server._run_single_enrichment``) — they write into
+        legacy ``artists``/``albums``/``tracks``, not ``lib2_*``. This
+        endpoint resolves the lib2 entity's legacy back-ref, delegates to the
+        same worker the legacy Enhanced View uses (no new provider
+        integration), then resyncs the refreshed fields onto the lib2 row via
+        ``core.library2.enrich.resync_entity_from_legacy`` so the UI reflects
+        it without a full re-import.
+        """
+        guard = _guard()
+        if guard:
+            return guard
+        if entity not in ("artists", "albums", "tracks"):
+            return jsonify({"success": False, "error": "Unsupported entity"}), 400
+        if run_enrichment is None:
+            return jsonify({"success": False, "error": "Enrichment is not available"}), 503
+
+        data = request.get_json(silent=True) or {}
+        service = data.get("service")
+        if not service:
+            return jsonify({"success": False, "error": "service is required"}), 400
+
+        singular = entity[:-1]
+        from core.library2.match_status import SERVICES
+        valid_services = {s for s, _label, cols in SERVICES if singular in cols}
+        if service not in valid_services:
+            return jsonify({
+                "success": False,
+                "error": f"{service} does not support {singular} enrichment",
+            }), 400
+
+        conn = _conn()
+        try:
+            if singular == "artist":
+                row = conn.execute(
+                    "SELECT id, name, legacy_artist_id AS legacy_id FROM lib2_artists WHERE id=?",
+                    (eid,),
+                ).fetchone()
+                artist_name = ""
+            elif singular == "album":
+                row = conn.execute(
+                    """SELECT al.id, al.title AS name, al.legacy_album_id AS legacy_id,
+                              ar.name AS artist_name
+                         FROM lib2_albums al JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                        WHERE al.id=?""",
+                    (eid,),
+                ).fetchone()
+                artist_name = row["artist_name"] if row else ""
+            else:
+                row = conn.execute(
+                    """SELECT t.id, t.title AS name, t.legacy_track_id AS legacy_id,
+                              ar.name AS artist_name
+                         FROM lib2_tracks t
+                         JOIN lib2_albums al ON al.id = t.album_id
+                         JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                        WHERE t.id=?""",
+                    (eid,),
+                ).fetchone()
+                artist_name = row["artist_name"] if row else ""
+            if row is None:
+                return jsonify({"success": False,
+                                "error": f"{singular.capitalize()} {eid} not found"}), 404
+            legacy_id = row["legacy_id"]
+            name = row["name"]
+        finally:
+            conn.close()
+
+        if legacy_id is None:
+            return jsonify({
+                "success": False,
+                "error": ("This entry has no legacy library record to enrich "
+                          "(it was added via Update Discography)."),
+            }), 409
+
+        result = run_enrichment(service, singular, int(legacy_id), name, artist_name)
+
+        resynced = False
+        if result.get("success"):
+            conn = _conn()
+            try:
+                from core.library2.enrich import resync_entity_from_legacy
+                resynced = resync_entity_from_legacy(conn, singular, eid, int(legacy_id))
+                conn.commit()
+            except Exception as e:  # noqa: BLE001
+                logger.debug("enrich resync failed (%s %s): %s", entity, eid, e)
+            finally:
+                conn.close()
+
+        return jsonify({
+            "success": bool(result.get("success")),
+            "message": result.get("message") or result.get("error"),
+            "resynced": resynced,
+        })
 
     # -- importer -------------------------------------------------------------
 

@@ -3178,7 +3178,7 @@ Basierend auf Nutzer-Feedback und real-world Testlauf, aufzunehmend nach Abschlu
 
 ---
 
-### 44. Enrich Album/Track-Funktion fehlt
+### 44. Enrich Album/Track-Funktion fehlt — ✅ gefixt (2026-07-16)
 
 **Beobachtung:** Die alte Library bot Enrich: gezielt zusätzliche Metadaten für ein Album/Track abfragen und einzufügen (z.B. Year, Genre, Labels).
 
@@ -3192,6 +3192,13 @@ Basierend auf Nutzer-Feedback und real-world Testlauf, aufzunehmend nach Abschlu
 - Legacy `Enrich ▾`-Dropdown (Artist: `library.js:3250-3289`; Album: `:3907-3940`) listet bis zu 12 Provider **einzeln** auf: Spotify, MusicBrainz, Deezer, JioSaavn, Discogs, AudioDB, iTunes, Last.fm, Genius, Bandcamp, Tidal, Qobuz — je nach Entity-Typ eingeschränkt (Genius kein Album, Discogs kein Track, Bandcamp kein Artist). Klick auf einen Eintrag enriched **nur von dieser einen Quelle**.
 - `POST /api/library/enrich` (`web_server.py:13629`) → `_run_single_enrichment()` (`:13721-13859`) dispatcht an die bereits initialisierten Background-Enrichment-Worker (`spotify_enrichment_worker`, `deezer_worker`, `mb_worker`, `audiodb_worker`, `itunes_enrichment_worker`, `lastfm_worker`, `genius_worker`, `tidal_enrichment_worker`, `qobuz_enrichment_worker`, `discogs_worker`, `bandcamp_worker`, `jiosaavn_worker`) — eine echte Provider-Re-Query (Genres, Bilder, externe IDs, Bio), kein reines Re-Matching. Per-Service-Concurrency-Lock (`_enrichment_locks`) verhindert Overlap.
 - **Für Library v2 reduziert sich der Scope auf:** dünne `lib2`-Endpoints, die an dieselben bestehenden Worker-Methoden delegieren (ID-Mapping auf `lib2_artist_id`/`lib2_album_id`/`lib2_track_id`) + UI-Dropdown analog zu Legacy. Keine neue Provider-Integration nötig.
+
+**Umsetzung (2026-07-16):** Die Enrichment-Worker (`_run_single_enrichment` in `web_server.py`) kennen NUR das Legacy-Schema — sie schreiben direkt in `artists`/`albums`/`tracks`, nie in `lib2_*`. Da lib2-Zeilen ein zeitpunktbezogener Spiegel der Legacy-Library sind (siehe `core/library2/importer.py`), wäre das Ergebnis eines Enrich-Aufrufs ohne einen Re-Sync-Schritt bis zum nächsten vollständigen Re-Import unsichtbar geblieben.
+  - `POST /api/library/v2/<entity>/<id>/enrich` (`api/library_v2.py`) löst den `legacy_{artist,album,track}_id`-Back-ref auf (derselbe Mechanismus wie `core/library2/match_status.py`), validiert den Service gegen dessen `SERVICES`-Spaltenmap (Genius kein Album, Discogs kein Track, Bandcamp kein Artist), und delegiert an den per Dependency-Injection übergebenen `run_enrichment`-Callable (`web_server.py` reicht `_run_single_enrichment` direkt durch — kein zirkulärer Import nötig, gleiches DI-Muster wie `acquisition_submission_adapter_getter`).
+  - Ein Discography-only-Release (nie aus der Legacy-Library importiert) hat keinen Legacy-Back-ref → `409` mit einer klaren Fehlermeldung statt eines stillen No-Ops.
+  - Neues Modul `core/library2/enrich.py::resync_entity_from_legacy` liest nach einem erfolgreichen Worker-Aufruf die jetzt aktualisierte Legacy-Zeile neu ein und überschreibt NUR die deskriptiven Provider-Felder der lib2-Zeile (genres/summary/style/mood/label/banner_url/image_url für Artist; genres/label/explicit/upc/image_url für Album; bpm/explicit/genius_lyrics/copyright für Track) — mit `COALESCE`, damit ein von einem ANDEREN, nicht angefragten Provider unberührtes NULL-Feld nichts Vorhandenes überschreibt. Identitätsfelder (Name/Titel) werden bewusst nicht angefasst. User-Overrides (`metadata_overrides`) liegen in einer separaten Tabelle und werden zur Lesezeit projiziert — ein Overwrite der Basis-Zeile ist daher immer sicher.
+  - UI: `EnrichModal` (analog `ManualMatchModal`) + "Enrich"-Action im Artist-Toolbar und ein Icon-Button in der Album-Zeile (Track-Ebene bewusst ausgelassen, um den UI-Umfang zu begrenzen — der Endpoint ist generisch und track-fähig, falls später gewünscht).
+  - Tests: `pytest tests/library2/test_enrich_resync.py tests/library2/test_enrich_endpoint.py` (16 neue Tests) + `pytest tests/library2 tests/imports` grün (1153); `vitest`/`oxfmt`/`oxlint --type-check`/`tsc --noEmit` clean.
 
 ---
 

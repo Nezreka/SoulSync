@@ -678,6 +678,24 @@ export async function analyzeLibraryV2TrackReplayGain(trackId: number): Promise<
   return payload.track_gain_db ?? null;
 }
 
+/** Re-query one metadata provider for one entity (legacy Enrich parity, §44).
+ *  Delegates to the same per-provider worker the legacy Enhanced View's
+ *  Enrich dropdown uses, then resyncs the refreshed fields onto the lib2 row. */
+export async function enrichLibraryV2Entity(
+  entity: 'artists' | 'albums' | 'tracks',
+  id: number,
+  service: string,
+): Promise<{ message?: string; resynced: boolean }> {
+  const payload = await readJson<{
+    success: boolean;
+    message?: string;
+    error?: string;
+    resynced: boolean;
+  }>(apiClient.post(`library/v2/${entity}/${id}/enrich`, { json: { service } }));
+  if (!payload.success) throw new Error(payload.error || payload.message || 'Enrichment failed');
+  return { message: payload.message, resynced: payload.resynced };
+}
+
 export async function fetchLibraryV2JobStatus(jobId?: string): Promise<LibraryV2JobState> {
   const params = new URLSearchParams();
   if (jobId) params.set('job_id', jobId);

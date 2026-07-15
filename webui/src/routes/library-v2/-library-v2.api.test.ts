@@ -6,6 +6,7 @@ import {
   analyzeLibraryV2TrackReplayGain,
   blacklistLibraryV2Source,
   deleteLibraryV2Files,
+  enrichLibraryV2Entity,
   fetchLibraryV2AlbumMatchStatus,
   fetchLibraryV2ArtistMatchStatus,
   fetchLibraryV2FileDeletePreview,
@@ -270,6 +271,43 @@ describe('library v2 replaygain api', () => {
       ),
     );
     await expect(analyzeLibraryV2TrackReplayGain(12)).resolves.toBe(-3.2);
+  });
+});
+
+describe('library v2 enrich api', () => {
+  it('sends the chosen service and returns whether the row was resynced', async () => {
+    server.use(
+      http.post('/api/library/v2/artists/7/enrich', async ({ request }) => {
+        expect(await request.json()).toEqual({ service: 'lastfm' });
+        return HttpResponse.json({
+          success: true,
+          message: 'lastfm lookup complete for artist',
+          resynced: true,
+        });
+      }),
+    );
+    await expect(enrichLibraryV2Entity('artists', 7, 'lastfm')).resolves.toEqual({
+      message: 'lastfm lookup complete for artist',
+      resynced: true,
+    });
+  });
+
+  it('surfaces the "no legacy record" error', async () => {
+    server.use(
+      http.post('/api/library/v2/albums/9/enrich', () =>
+        HttpResponse.json(
+          {
+            success: false,
+            error:
+              'This entry has no legacy library record to enrich (it was added via Update Discography).',
+          },
+          { status: 409 },
+        ),
+      ),
+    );
+    await expect(enrichLibraryV2Entity('albums', 9, 'deezer')).rejects.toThrow(
+      'no legacy library record',
+    );
   });
 });
 
