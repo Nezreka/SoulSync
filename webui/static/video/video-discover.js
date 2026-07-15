@@ -383,6 +383,9 @@
                   '<span aria-hidden="true">＋</span> Wishlist</button>'
                 : '') +
             '</div>';
+        // The CTA needs to know if this title is ALREADY wishlisted ("✓ In
+        // Wishlist" instead of offering an add that would no-op).
+        if (window.VideoWishState) VideoWishState.hydrate(body);
         preloadNextHero();
     }
     // Decode the NEXT slide's backdrop while the current one shows, so the
