@@ -94,10 +94,13 @@
 - **Anwendung:** Separate "Managed Tracks" Sektion mit Tabelle (Path | Quality | Monitor | Actions).
 - **Scope:** Größerer UI-Refactor; Backend-Query (`GET /api/library/v2/artists/<id>/managed-tracks`) notwendig.
 
-### 5.2 Preview Retag — "File not found" Fehler fixen
-- **Aktuell:** Zeigt "No File" oder "File not found on disk" obwohl Download vorhanden.
-- **Ziel:** Path-Resolver oder File-State-Lookup korrekt verdrahten.
-- **Scope:** Backend-Bug (Roadmap Backend-Findings).
+### 5.2 Preview Retag — "File not found" Fehler beheben & UI-Gruppierung
+- **Status:** **Abgeschlossen**
+- **Details:** 
+  - Tracks ohne Datei (`No file` oder `File not found on disk`) werden im Preview-Retag-Modal ausgeblendet, sodass nur vorhandene Dateien gelistet werden.
+  - Die verbleibenden Tracks werden im Modal dezent nach Alben gruppiert dargestellt.
+  - Fehlerhafte Änderungsalarme bei Datumsangaben (z.B. Mismatch wegen Sekunden `08:00` vs. `08:00:00`) und Genres (keine Überschreibung von detaillierten Genres durch generische Provider-Genres) wurden behoben.
+- **Scope:** Backend-Bug (tag_writer.py) + UI (retag-modal.tsx).
 
 ---
 
@@ -180,7 +183,8 @@
 4. **Metadata-Tags** (2.3): **Abgeschlossen** (detailLabel-Styling ist aktiv).
 5. **Quality-Darstellung** (2.4): **Abgeschlossen** (Entscheidung: Ursprüngliches Layout beibehalten).
 6. **Quality Profile Spalte** (4.1): **Abgeschlossen** (Entscheidung: In Quality-Spalte belassen).
-7. **Backend-Findings** (5.2, 8.3, 8.4 etc.): Roadmap-Punkte für zukünftige Sitzungen.
+7. **Backend-Findings** (8.3, 8.4 etc.): Roadmap-Punkte für zukünftige Sitzungen.
 8. **Artist-spezifische automatische Suche** (6.4): **Offen / Ausstehend** (Aufteilung in artist-spezifisch vs. global benötigt Backend-Erweiterung).
 9. **Verification Flow, Match-Quelle und ReplayGain** (7.1, 8.1, 8.2): **Abgeschlossen** (Badges, Chips und ReplayGain-Aktionen sind voll funktionsfähig).
 10. **Legacy-Import von Dateieigenschaften** (8.5): **Abgeschlossen** (`precache_tag_cache()` liest Tags direkt nach dem Import, siehe §25.2).
+11. **Preview Retag** (5.2): **Abgeschlossen** (Tracks ohne Datei ausgeblendet, dezent nach Alben gruppiert, falsche Änderungsalarme behoben).
