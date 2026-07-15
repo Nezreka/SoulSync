@@ -14,6 +14,7 @@ import type {
   LibraryV2PlaylistSummary,
   LibraryV2PlaylistTrack,
   LibraryV2Track,
+  LibraryV2TrackFile,
 } from '../-library-v2.types';
 
 import {
@@ -438,39 +439,69 @@ function matchChipClass(status: string): string {
   return styles.matchPending;
 }
 
+function getServiceAbbreviation(service: string): string {
+  switch (service.toLowerCase()) {
+    case 'spotify':
+      return 'SP';
+    case 'musicbrainz':
+      return 'MB';
+    case 'deezer':
+      return 'Dz';
+    case 'jiosaavn':
+      return 'JS';
+    case 'audiodb':
+      return 'ADB';
+    case 'itunes':
+      return 'iT';
+    case 'lastfm':
+      return 'LFM';
+    case 'genius':
+      return 'Gen';
+    case 'bandcamp':
+      return 'BC';
+    case 'amazon':
+      return 'Amz';
+    default:
+      return service.substring(0, 3);
+  }
+}
+
 /** A row of provider match chips. Clicking a chip opens the manual-match modal
  *  (reuses the app-wide match endpoints via the legacy entity id). */
 function MatchChips({
   entityType,
   entityName,
   services,
+  abbreviated = false,
 }: {
   entityType: 'artist' | 'album' | 'track';
   entityName: string;
   services: LibraryV2MatchService[];
+  abbreviated?: boolean;
 }) {
   const [active, setActive] = useState<LibraryV2MatchService | null>(null);
   if (!services.length) return null;
   return (
-    <div className={styles.matchChips}>
+    <div className={abbreviated ? styles.trackMatchChips : styles.matchChips}>
       {services.map((s) => {
-        const tip = [
+        const details = [
           s.external_id ? `id: ${s.external_id}` : 'no id',
           s.last_attempted ? `last: ${s.last_attempted.slice(0, 16).replace('T', ' ')}` : null,
           s.legacy_entity_id != null ? 'click to (re)match' : null,
         ]
           .filter(Boolean)
           .join(' · ');
+        const tip = `${s.label}: ${s.status} (${details})`;
         return (
           <button
             key={s.service}
             type="button"
-            className={`${styles.matchChip} ${matchChipClass(s.status)}`}
+            className={`${styles.matchChip} ${abbreviated ? styles.trackMatchChip : ''} ${matchChipClass(s.status)}`}
             title={tip}
             disabled={s.legacy_entity_id == null}
             onClick={() => setActive(s)}
           >
-            {s.label}: {s.status}
+            {abbreviated ? getServiceAbbreviation(s.service) : `${s.label}: ${s.status}`}
           </button>
         );
       })}
@@ -483,6 +514,43 @@ function MatchChips({
         />
       ) : null}
     </div>
+  );
+}
+
+function TrackVerificationBadge({ file }: { file: LibraryV2TrackFile | null }) {
+  if (!file || !file.verification_status) return null;
+  const status = file.verification_status;
+  let className = '';
+  let label = '';
+  let tooltip = '';
+  switch (status) {
+    case 'verified':
+      className = styles.verificationVerified;
+      label = 'AcoustID ✓';
+      tooltip = 'AcoustID fingerprint matched the expected track';
+      break;
+    case 'human_verified':
+      className = styles.verificationHuman;
+      label = 'AcoustID Human';
+      tooltip = 'Human verified: you approved this file, skipping AcoustID';
+      break;
+    case 'force_imported':
+      className = styles.verificationForced;
+      label = 'AcoustID Bypassed';
+      tooltip = 'Force-imported: AcoustID check bypassed (accepted version-mismatch fallback)';
+      break;
+    case 'unverified':
+      className = styles.verificationUnverified;
+      label = 'AcoustID Unverified';
+      tooltip = 'Imported but not hard-confirmed: AcoustID could not verify this file';
+      break;
+    default:
+      return null;
+  }
+  return (
+    <span className={`${styles.verificationBadge} ${className}`} title={tooltip}>
+      {label}
+    </span>
   );
 }
 
@@ -3072,6 +3140,7 @@ function AlbumTrackTable({
             <th className={styles.colNum}>#</th>
             <th>Title</th>
             <th>Artists</th>
+            <th>Match</th>
             <th>Quality</th>
             <th>Metadata</th>
             <th className={styles.colActions}>Actions</th>
@@ -3127,15 +3196,20 @@ function TrackRow({
           <span className={missing ? styles.muted : undefined}>{label}</span>
           <InlineFileStatus status={track.file_status} />
         </span>
+      </td>
+      <td>{track.artists.map((a) => a.name).join(', ')}</td>
+      <td>
         {matchServices.length > 0 ? (
           <MatchChips
             entityType="track"
             entityName={`${track.artists.map((a) => a.name).join(' ')} ${track.title ?? ''}`.trim()}
             services={matchServices}
+            abbreviated
           />
-        ) : null}
+        ) : (
+          <span className={styles.muted}>—</span>
+        )}
       </td>
-      <td>{track.artists.map((a) => a.name).join(', ')}</td>
       <td className={styles.qualityText}>
         <span className={styles.qualityCellRow}>
           <QualityDisplay file={track.file} />
@@ -3146,6 +3220,7 @@ function TrackRow({
               {profileName}
             </span>
           ) : null}
+          <TrackVerificationBadge file={track.file} />
         </span>
       </td>
       <td>

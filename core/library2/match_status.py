@@ -105,9 +105,9 @@ def _chips_for_row(canonical: str, legacy_row, columns: set, legacy_id: int) -> 
 def entity_match_status(conn, entity_type: str, entity_id: int) -> List[Dict[str, Any]]:
     """Per-provider match status for one lib2 entity, read from its legacy row.
 
-    Returns ``[]`` when the entity has no legacy source row (e.g. a
-    discography-only release) or the legacy tables are absent. Each entry is
-    ``{service, label, status, external_id, last_attempted, legacy_entity_id}``
+    If the entity has no legacy source row (e.g. a discography-only release,
+    or a new direct-import), synthesizes chips from its own columns.
+    Each entry is ``{service, label, status, external_id, last_attempted, legacy_entity_id}``
     where ``status`` is ``matched`` / ``not_found`` / ``pending``.
     """
     canonical = _NORMALIZE.get(str(entity_type))
@@ -115,22 +115,57 @@ def entity_match_status(conn, entity_type: str, entity_id: int) -> List[Dict[str
         raise ValueError(f"Unknown entity type: {entity_type}")
     lib2_table, legacy_col, legacy_table = _LIB2[canonical]
 
-    ref = conn.execute(
-        f"SELECT {legacy_col} AS legacy_id FROM {lib2_table} WHERE id=?", (entity_id,)
+    row = conn.execute(
+        f"SELECT * FROM {lib2_table} WHERE id=?", (entity_id,)
     ).fetchone()
-    if ref is None or ref["legacy_id"] is None:
+    if row is None:
         return []
-    legacy_id = ref["legacy_id"]
 
+    legacy_id = row[legacy_col]
     columns = _table_columns(conn, legacy_table)
-    if not columns:  # legacy tables not present in this DB
-        return []
-    legacy_row = conn.execute(
-        f"SELECT * FROM {legacy_table} WHERE id=?", (legacy_id,)
-    ).fetchone()
-    if legacy_row is None:
-        return []
-    return _chips_for_row(canonical, legacy_row, columns, legacy_id)
+
+    if legacy_id is not None and columns:
+        legacy_row = conn.execute(
+            f"SELECT * FROM {legacy_table} WHERE id=?", (legacy_id,)
+        ).fetchone()
+        if legacy_row is not None:
+            return _chips_for_row(canonical, legacy_row, columns, legacy_id)
+
+    # Fallback: synthesize chips from lib2 row columns
+    import json
+    row_keys = set(row.keys())
+    out: List[Dict[str, Any]] = []
+
+    ext_ids = {}
+    if "external_ids" in row_keys and row["external_ids"]:
+        try:
+            ext_ids = json.loads(row["external_ids"])
+        except Exception:
+            pass
+
+    for service, label, id_cols in SERVICES:
+        id_col = id_cols.get(canonical)
+        if not id_col:
+            continue
+
+        external_id = None
+        if service == "spotify":
+            external_id = row["spotify_id"] if "spotify_id" in row_keys else None
+        elif service == "musicbrainz":
+            external_id = row["musicbrainz_id"] if "musicbrainz_id" in row_keys else None
+        else:
+            external_id = ext_ids.get(service)
+
+        status = "matched" if external_id else "pending"
+        out.append({
+            "service": service,
+            "label": label,
+            "status": status,
+            "external_id": external_id,
+            "last_attempted": None,
+            "legacy_entity_id": None,
+        })
+    return out
 
 
 def album_match_bundle(conn, album_id: int) -> Dict[str, Any]:
@@ -138,26 +173,27 @@ def album_match_bundle(conn, album_id: int) -> Dict[str, Any]:
 
     Returns ``{"album": [...chips], "tracks": {lib2_track_id: [...chips]}}``.
     Computes the legacy column sets once for the whole album (cheap for a
-    detail view). Tracks/albums without a legacy back-reference simply get an
-    empty chip list.
+    detail view). Tracks/albums without a legacy back-reference synthesize
+    chips based on their own columns.
     """
     result: Dict[str, Any] = {"album": entity_match_status(conn, "album", album_id), "tracks": {}}
     track_columns = _table_columns(conn, "tracks")
-    if not track_columns:
-        return result
+
     rows = conn.execute(
-        "SELECT id, legacy_track_id FROM lib2_tracks WHERE album_id=?", (album_id,)
+        "SELECT id, legacy_track_id, spotify_id, musicbrainz_id FROM lib2_tracks WHERE album_id=?", (album_id,)
     ).fetchall()
+
     legacy_ids = {int(r["legacy_track_id"]) for r in rows if r["legacy_track_id"] is not None}
-    if not legacy_ids:
-        return result
-    marks = ",".join("?" for _ in legacy_ids)
-    legacy_rows = {
-        int(r["id"]): r
-        for r in conn.execute(
-            f"SELECT * FROM tracks WHERE id IN ({marks})", tuple(legacy_ids)
-        )
-    }
+    legacy_rows = {}
+    if legacy_ids and track_columns:
+        marks = ",".join("?" for _ in legacy_ids)
+        legacy_rows = {
+            int(r["id"]): r
+            for r in conn.execute(
+                f"SELECT * FROM tracks WHERE id IN ({marks})", tuple(legacy_ids)
+            )
+        }
+
     for row in rows:
         lid = row["legacy_track_id"]
         legacy_row = legacy_rows.get(int(lid)) if lid is not None else None
@@ -165,6 +201,29 @@ def album_match_bundle(conn, album_id: int) -> Dict[str, Any]:
             result["tracks"][int(row["id"])] = _chips_for_row(
                 "track", legacy_row, track_columns, int(lid)
             )
+        else:
+            # Synthetic chips for track without legacy row
+            chips = []
+            for service, label, id_cols in SERVICES:
+                id_col = id_cols.get("track")
+                if not id_col:
+                    continue
+                external_id = None
+                if service == "spotify":
+                    external_id = row["spotify_id"]
+                elif service == "musicbrainz":
+                    external_id = row["musicbrainz_id"]
+
+                status = "matched" if external_id else "pending"
+                chips.append({
+                    "service": service,
+                    "label": label,
+                    "status": status,
+                    "external_id": external_id,
+                    "last_attempted": None,
+                    "legacy_entity_id": None,
+                })
+            result["tracks"][int(row["id"])] = chips
     return result
 
 

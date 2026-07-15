@@ -45,15 +45,24 @@ def test_explicit_match_status_column_wins_when_present(imported_conn):
     assert deezer["external_id"] == "dz9"
 
 
-def test_entity_without_legacy_backref_returns_empty(imported_conn):
-    # A discography-origin row has no legacy source row → no legacy match data.
+def test_entity_without_legacy_backref_returns_synthetic_pending_chips(imported_conn):
+    # A row without legacy source row returns synthetic chips matching its own columns.
     new_id = imported_conn.execute(
-        "INSERT INTO lib2_artists(name, sort_name, quality_profile_id) "
-        "VALUES('Ghost', 'Ghost', 1)"
+        "INSERT INTO lib2_artists(name, sort_name, quality_profile_id, spotify_id) "
+        "VALUES('Ghost', 'Ghost', 1, 'ghost_sp')"
     ).lastrowid
     imported_conn.commit()
 
-    assert MS.entity_match_status(imported_conn, "artist", new_id) == []
+    rows = MS.entity_match_status(imported_conn, "artist", new_id)
+    assert len(rows) > 0
+
+    by_service = {r["service"]: r for r in rows}
+    assert by_service["spotify"]["status"] == "matched"
+    assert by_service["spotify"]["external_id"] == "ghost_sp"
+    assert by_service["spotify"]["legacy_entity_id"] is None
+
+    assert by_service["musicbrainz"]["status"] == "pending"
+    assert by_service["musicbrainz"]["legacy_entity_id"] is None
 
 
 def test_track_match_reads_legacy_track_row(imported_conn):

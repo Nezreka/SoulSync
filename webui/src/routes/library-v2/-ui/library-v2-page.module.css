@@ -138,6 +138,15 @@
   font-size: 14px;
 }
 
+.select {
+  color-scheme: dark;
+}
+
+.select option {
+  background: #171717;
+  color: #fff;
+}
+
 .searchInput {
   flex: 1;
   min-width: 220px;
@@ -1541,6 +1550,53 @@
   background: rgba(255, 255, 255, 0.06);
   color: rgba(255, 255, 255, 0.5);
   border-color: rgba(255, 255, 255, 0.12);
+}
+
+.trackMatchChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.trackMatchChip {
+  font-size: 9px;
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+
+.verificationBadge {
+  font-size: 9.5px;
+  font-weight: 600;
+  border-radius: 4px;
+  padding: 1px 5px;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.verificationVerified {
+  background: rgba(74, 222, 128, 0.12);
+  color: #4ade80;
+  border: 1px solid rgba(74, 222, 128, 0.25);
+}
+
+.verificationHuman {
+  background: rgba(52, 152, 219, 0.12);
+  color: #3498db;
+  border: 1px solid rgba(52, 152, 219, 0.25);
+}
+
+.verificationForced {
+  background: rgba(230, 126, 34, 0.12);
+  color: #e67e22;
+  border: 1px solid rgba(230, 126, 34, 0.25);
+}
+
+.verificationUnverified {
+  background: rgba(241, 196, 15, 0.12);
+  color: #f1c40f;
+  border: 1px solid rgba(241, 196, 15, 0.25);
 }
 
 .albumMatchRow {

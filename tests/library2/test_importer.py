@@ -400,6 +400,73 @@ def test_reimport_matches_artist_with_text_legacy_id_no_duplicate(tmp_path):
     assert ext.get("deezer") == "259", f"external_ids not populated: {ext}"
 
 
+def test_reimport_keeps_stable_album_and_track_ids_with_text_legacy_ids(tmp_path):
+    """#38/#40 (albums/EPs/singles): the same TEXT-vs-INTEGER legacy-id mismatch
+    that duplicated artists also duplicated albums and tracks. ``album_map`` and
+    ``track_map`` were seeded by the INTEGER ``legacy_*_id`` but looked up with the
+    TEXT legacy id, so a re-import NEVER matched an existing album/track — it
+    re-inserted a fresh row (its id churns) and ``_reconcile_legacy_snapshot`` then
+    detached the orphaned original into an ``origin='discography'`` twin (visible
+    "Thriller 40 twice under Michael Jackson") when it had a provider identity, or
+    deleted it otherwise. The invariant the importer promises is idempotency: a
+    re-import must reconcile the SAME row, so its lib2 id stays stable and no twin
+    appears. The album carries a provider id (deezer) to exercise the detach path."""
+    import sqlite3
+    path = str(tmp_path / "legacy_text_ids.db")
+    conn = sqlite3.connect(path)
+    conn.executescript("""
+        CREATE TABLE artists(id TEXT PRIMARY KEY, name TEXT, thumb_url TEXT,
+            genres TEXT, summary TEXT, spotify_artist_id TEXT, musicbrainz_id TEXT,
+            deezer_id TEXT);
+        CREATE TABLE albums(id TEXT PRIMARY KEY, artist_id TEXT, title TEXT,
+            year INTEGER, thumb_url TEXT, genres TEXT, track_count INTEGER,
+            release_date TEXT, deezer_id TEXT);
+        CREATE TABLE tracks(id TEXT PRIMARY KEY, album_id TEXT, artist_id TEXT,
+            title TEXT, track_number INTEGER, duration INTEGER, file_path TEXT,
+            bitrate INTEGER, file_size INTEGER, track_artist TEXT);
+    """)
+    conn.execute("INSERT INTO artists VALUES('476516869','Michael Jackson',NULL,NULL,"
+                 "NULL,NULL,'f27ec8db','259')")
+    conn.execute("INSERT INTO albums VALUES('630009860','476516869','Thriller 40',2022,"
+                 "NULL,NULL,1,NULL,'375513297')")
+    conn.execute("INSERT INTO tracks VALUES('700','630009860','476516869','Thriller',1,"
+                 "357000,'/m/thriller.flac',1000,5000,NULL)")
+    conn.commit()
+    conn.close()
+
+    class _Shim:
+        def __init__(self, p): self.path = p
+        def _get_connection(self):
+            c = sqlite3.connect(self.path); c.row_factory = sqlite3.Row
+            c.execute("PRAGMA foreign_keys=ON"); return c
+    db = _Shim(path)
+
+    import_legacy_library(db)
+    conn = sqlite3.connect(path); conn.row_factory = sqlite3.Row
+    album_id = conn.execute(
+        "SELECT id FROM lib2_albums WHERE title='Thriller 40'").fetchone()["id"]
+    track_id = conn.execute(
+        "SELECT id FROM lib2_tracks WHERE title='Thriller'").fetchone()["id"]
+    conn.close()
+
+    import_legacy_library(db)   # re-import must reconcile the SAME rows, not re-create
+
+    conn = sqlite3.connect(path); conn.row_factory = sqlite3.Row
+    album_ids = [r["id"] for r in conn.execute(
+        "SELECT id FROM lib2_albums WHERE title='Thriller 40'")]
+    track_ids = [r["id"] for r in conn.execute(
+        "SELECT id FROM lib2_tracks WHERE title='Thriller'")]
+    # no discography twin was spawned by the detach path
+    twins = conn.execute(
+        "SELECT COUNT(*) FROM lib2_albums WHERE title='Thriller 40' "
+        "AND origin='discography'").fetchone()[0]
+    conn.close()
+
+    assert album_ids == [album_id], f"album id churned/duplicated on re-import: {album_ids} != [{album_id}]"
+    assert track_ids == [track_id], f"track id churned/duplicated on re-import: {track_ids} != [{track_id}]"
+    assert twins == 0, "re-import spawned an origin='discography' twin album"
+
+
 def test_import_captures_real_schema_album_provider_ids(legacy_db):
     """Album counterpart of the artist fix: real legacy albums carry
     ``deezer_id``/``tidal_id``/``qobuz_id`` (not ``*_album_id``)."""

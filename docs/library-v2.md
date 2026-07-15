@@ -3525,3 +3525,374 @@ beschränkte Slice von Roadmap-Punkt 40 (Artist-Aliasing), die 16.3 braucht:
 korrekt gematchter Artist → korrekter Tracklist-Fetch → Titel-Heilung repariert
 die Nummern (auch der „Thriller 40"-Fall). Alle Fixes sind additiv und mit
 eigenen Tests abgesichert.
+
+> **Korrektur (2026-07-15, siehe §17.2): diese „vollständig geschlossen"-Aussage
+> ist zu optimistisch.** Die Heilungslogik selbst ist korrekt, wird aber für
+> bereits vorhandene, bereits korrumpierte Alben **nie aufgerufen** — live in der
+> Dev-DB reproduziert (SWAG-Album, Nutzer-Report). Siehe §17.2 für den
+> Root-Cause und Fix-Scope.
+
+---
+
+## 17. Nutzer-Bug-Report-Session (2026-07-15) — Live-Verifikation + Root-Cause-Audit
+
+**Auslöser:** Nutzer meldete eine lange Liste von vermeintlichen Regressionen/fehlenden
+Features in Library v2 gegenüber der Legacy-Enhanced-View, teils Wiederholungen von
+Dingen, die dieses Dokument bereits als „gelöst" markiert hatte. Diese Session hat
+JEDEN Punkt gegen den echten laufenden Dev-Server + die echte Dev-DB verifiziert
+(nicht nur Code gelesen) — inklusive zweier dedizierter Research-Agents für die
+größeren Audits (Import-Performance, Importer-Datenverlust). **Reine Dokumentation —
+keine Implementierung in dieser Session**, mit einer Ausnahme: die lokale Dev-Umgebung
+wurde neu gestartet (siehe §17.0), weil sie einen Großteil der gemeldeten Probleme
+verursacht hat.
+
+### 17.0 KRITISCH: Lokale Dev-Umgebung lief nicht über `dev.py` — erklärt einen Großteil der gemeldeten „fehlenden" Features
+
+**Befund:** Der laufende Backend-Prozess war ein nackter `python web_server.py`
+(gestartet 2026-07-14 20:31 Uhr), nicht über `dev.py` orchestriert. Das bedeutet zwei
+unabhängige Staleness-Probleme gleichzeitig:
+
+1. **Backend 19+ Stunden veraltet:** zwischen 20:31 Uhr und dem Zeitpunkt dieser
+   Session landeten ~15 Commits auf diesem Branch, darunter **genau die Commits, die
+   der Nutzer als „fehlend" meldete** — u.a. `1733ed74` (Match-Chips + manueller
+   Re-Match, §46, 23:33 Uhr), `eca36caa`/`dbb3b84e`/`c5f3828c`/`610482f6` (§16.3-Fixes,
+   heute Vormittag/Mittag). Der Prozess kannte diese Routen/Fixes schlicht nicht.
+2. **Frontend wurde aus einem vorgebauten statischen Bundle serviert, nicht per Vite-HMR:**
+   `webui/static/dist/assets/main-tMy59lLz.js` (Build-Zeitstempel 2026-07-14 21:00 Uhr)
+   enthält **null** Vorkommen des Strings `match-status` — der Match-Chip-Code war zum
+   Build-Zeitpunkt noch gar nicht geschrieben. Ein separat laufender, aber vom Backend
+   entkoppelter `vite --port 5173`-Prozess änderte daran nichts, weil `web_server.py`
+   ohne die von `dev.py` gesetzten Env-Vars startet und deshalb NICHT auf den
+   Vite-Dev-Server proxied, sondern den statischen Build ausliefert
+   (`core/webui.py::should_serve_webui_spa`/`build_webui_vite_assets`).
+
+**Fix für diese Session:** beide Prozesse gestoppt, sauber über
+`.venv/bin/python dev.py` neu gestartet. Verifiziert: die Seite lädt jetzt
+`http://127.0.0.1:5173/static/dist/@vite/client` + `main.tsx` direkt (echtes HMR)
+statt eines gehashten Bundles.
+
+**Für den Nutzer wichtig:** Bitte **immer `dev.py` verwenden**, nie `web_server.py`
+direkt starten — sonst driftet die laufende Instanz unbemerkt von main auseinander und
+neue Features/Fixes wirken „fehlend", obwohl sie längst im Code sind. Ein guter Teil
+der unten als „bereits erledigt" markierten Punkte (17.1) war exakt aus diesem Grund
+als Bug gemeldet worden. Die verbleibenden Punkte (17.2–17.5) wurden NACH dem Neustart
+gegen den aktuellen Code erneut verifiziert und sind echte, weiterhin offene Bugs.
+
+---
+
+### 17.1 §46 Match-Status-Chips — bereits vollständig implementiert, war nur die Umgebung (17.0)
+
+Nach dem Neustart live verifiziert (Playwright, headless): `GET
+/api/library/v2/artists/21/match-status` liefert die vollen Legacy-Match-Daten, und
+die UI rendert sie korrekt im Artist-Header:
+
+```html
+<button class="_matchChip..." title="no id · click to (re)match">Spotify: pending</button>
+<button class="_matchChip..." title="id: 259 · last: 2026-07-14 19:26 · click to (re)match">Deezer: matched</button>
+```
+
+— exakt das vom Nutzer gewünschte Verhalten (Spotify: pending, anklickbar, öffnet
+manuelles Re-Match). Album-/Track-Ebene nutzt denselben Mechanismus
+(`album_match_bundle`, `core/library2/match_status.py:129-158`) und ist nach demselben
+Muster verdrahtet (`library-v2-page.tsx:3130-3136` für Track-Zeilen). **Kein weiterer
+Implementierungsbedarf** — der Nutzer sollte dies nach einem `dev.py`-Neustart
+(17.0) direkt sehen können.
+
+---
+
+### 17.2 §16.3 Track-Nummer-Korruption ist NICHT vollständig geschlossen — Heilungspfad wird für Bestandsalben nie aufgerufen
+
+**Live reproduziert (2026-07-15, nach dem Neustart, also gegen aktuellen Code) mit
+genau dem vom Nutzer genannten Fall — Justin Bieber, Album „SWAG":**
+
+```
+lib2_tracks WHERE album_id=574 (SWAG):
+  13 Zeilen mit disc=1, track_number=1  (ALLE mit legacy_track_id gesetzt = echte, heruntergeladene Dateien)
+  20 Zeilen mit disc=1, track_number=2..21  (KEIN legacy_track_id = Missing-Platzhalter)
+```
+
+Mehrere Titel existieren doppelt — einmal als „present" bei `track_number=1`, einmal
+als „missing"-Platzhalter bei der korrekten Nummer (z.B. „DAISIES" bei Nummer 1 UND
+Nummer 2, „YUKON" bei 1 UND 3, „GO BABY" bei 1 UND 4, „ZUMA HOUSE" bei 1 UND 19, …).
+Die API zeigt entsprechend `1/34` present, `33 missing` — genau das vom Nutzer
+beschriebene Symptom.
+
+**Das ist exakt der Fall, den die Titel-Heilung (`eca36caa`, §16.3) reparieren
+sollte.** Test: `POST /api/library/v2/artists/19/discography/refresh` (= der
+„Update Discography"-Button) ausgeführt — **vorher und nachher per SQL verglichen,
+keine einzige Zeile hat sich verändert.** Response: `{"added":0, "enriched":56,
+"snapshot_changed":false}`.
+
+**Root Cause (Code-Trace):** `resolve_tracklist`/`_persist_tracklist_tracks`
+(die Funktion mit der Titel-Heilung) wird **ausschließlich** über
+`auto_monitor_releases(album_ids=...)` aufgerufen
+(`core/library2/discography.py:402-416`), und diese Liste kommt aus
+`stats["auto_monitor_album_ids"]` — das sind **nur neu entdeckte Releases** dieses
+Laufs (`refresh_artist_discography`, `discography.py:497-516`). SWAG ist bereits
+bekannt (`origin='library'`, physische Dateien vorhanden) → landet nie in dieser
+Liste → `resolve_tracklist` wird für dieses Album **nie erneut aufgerufen** →
+die Titel-Heilung kommt nie zum Zug, egal wie oft „Update Discography" geklickt wird.
+
+Auch der periodische Reparatur-Sweep (`precache_tracklists`,
+`core/library2/completeness.py:456-487`, iteriert `_partial_album_rows`) greift
+hier nicht: dessen Kriterium ist `expected_track_count <> COUNT(*)`
+(`completeness.py:440-453`) — bei SWAG ist das bereits `33 == 33` (13 echte + 20
+Platzhalter-Zeilen ergeben zusammen die erwartete Zahl), das Album sieht für diesen
+Zähler also fälschlich „vollständig" aus, obwohl 13 Zeilen kollidieren und 20 davon
+unnötige Duplikate sind.
+
+**Fix-Richtung:** „Update Discography" (bzw. ein neuer expliziter „Repair Track
+Numbers"-Button) muss `resolve_tracklist` zusätzlich für **bereits vorhandene**
+`origin='library'`-Alben des Artists aufrufen — mindestens für solche mit erkennbarer
+Track-Number-Kollision (mehrere Zeilen mit gleichem `(disc_number, track_number)`)
+oder Titel-Duplikaten zwischen present/missing. Am einfachsten: die
+`auto_monitor_album_ids`-Liste in `refresh_artist_discography`
+(`discography.py:507`) um die Album-IDs des Artists erweitern, die eine
+`(disc,number)`-Kollision haben (billige SQL-Aggregation), statt nur neu entdeckte
+IDs zu nehmen.
+
+---
+
+### 17.3 Rohes ISO-Datumsformat bei „Thriller 40" — kein Matching-Problem, sondern fehlende Datums-Normalisierung
+
+Nutzer-Hypothese war „liegt am nicht gematchten Artist" — **live widerlegt:**
+Michael Jackson ist über Deezer/MusicBrainz/iTunes/AudioDB/Discogs vollständig
+gematcht (nur Spotify pending, siehe §17.1), UND derselbe Artist hat parallel ein
+sauber formatiertes Release („Run It Up! (Remix)": `release_date: "2023-04-14"`)
+sowie das kaputte („Thriller 40": `release_date: "1982-11-29T08:00:00Z"`).
+Der Unterschied ist nicht der Artist, sondern die **Herkunft** des Release
+(`origin='library'` vs. `origin='discography'`).
+
+**Root Cause:** Der Rohwert steckt bereits so in der LEGACY-Tabelle:
+`sqlite3 database/music_library.db "SELECT release_date FROM albums WHERE id=630009860"`
+→ `1982-11-29T08:00:00Z`. Der lib2-Importer kopiert ihn 1:1 verbatim
+(`_pick(row, "release_date")`, `core/library2/importer.py:709`, sowie
+UPDATE-Pfad `:730`) — keine Normalisierung, keine Formatierung. Das Frontend
+rendert den Rohwert ebenfalls ungefiltert (`library-v2-page.tsx:2283`:
+`album.release_date ?? album.year`; `:2921`: `album.release_date ||
+album.year`) — an keiner Stelle im gesamten Anzeige-Pfad existiert eine
+Datums-Parse-/Format-Funktion.
+
+**Fix-Richtung:** eine kleine `formatReleaseDate(value)`-Hilfsfunktion im Frontend
+(oder alternativ zentral bei der Serialisierung in `core/library2/queries.py`), die
+sowohl `YYYY-MM-DD` als auch volle ISO-8601-Strings mit Zeitanteil robust auf ein
+einheitliches Anzeigeformat normalisiert (z.B. nur den Datumsteil extrahieren,
+dann lokalisiert formatieren). **Nutzer hat ein konfigurierbares EU/US-Datumsformat
+explizit als „später, nicht jetzt" zurückgestellt** — für diese Session reicht ein
+festes, konsistentes Format; die Konfigurierbarkeit kann eine spätere Iteration
+sein.
+
+---
+
+### 17.4 „All Releases"-Tab lädt nicht automatisch, wenn er der Startzustand ist (nur bei explizitem Klick)
+
+Bereits als Design in §3 dokumentiert („Der erste Wechsel zu All Releases fetcht
+automatisch") — aber genau das Wort „Wechsel" ist der Bug. Code:
+
+```tsx
+// library-v2-page.tsx:2348
+const releasesMode = search.releases;   // direkt aus dem URL-Search-Param, kein useState
+
+// library-v2-page.tsx:2424-2430
+function setReleasesMode(mode: 'library' | 'all') {
+  void navigate({ search: (p) => ({ ...p, releases: mode }) });
+  if (mode === 'all' && artist && artist.discography_count === 0 && !discographyBusy) {
+    void updateDiscography();
+  }
+}
+```
+
+`setReleasesMode` ist **nur** an die `onClick`-Handler der Toggle-Buttons gebunden
+(`:2650`, `:2657`). Wenn `releasesMode` aber schon beim Mount `'all'` ist (URL-Param
+aus vorheriger Navigation/Browser-Persistenz/Bookmark), wird dieser Handler nie
+aufgerufen — es gab ja keinen Klick, der Tab war schon aktiv — und
+`updateDiscography()` feuert nie. Erst ein Wechsel weg und zurück löst den
+`onClick`-Pfad tatsächlich aus, was exakt das vom Nutzer beschriebene Workaround-
+Verhalten erklärt.
+
+**Fix-Richtung:** die Fetch-Bedingung aus dem Klick-Handler in einen `useEffect`
+verschieben, der auf `[releasesMode, artist?.discography_count, discographyBusy]`
+lauscht — dann feuert er sowohl bei einem echten Klick als auch beim initialen
+Mount mit `releasesMode==='all'` aus der URL.
+
+---
+
+### 17.5 „All expected tags are present" wird fälschlich für nicht heruntergeladene/fehlende Tracks angezeigt
+
+Root Cause in `core/library2/status.py::compute_metadata_gaps` (Zeilen 78-118):
+
+```python
+if not file_row or not file_row.get("path"):
+    return []   # ← "keine Lücken" statt "kann nicht geprüft werden"
+```
+
+Ein Track ohne Datei (kein `file_row`, kein `path`) bekommt eine **leere**
+Gap-Liste zurück — das Frontend interpretiert `metadata_gaps.length === 0` als
+„tags ✓ / All expected metadata tags present" (`library-v2-page.tsx:3153-3156`),
+obwohl schlicht nichts geprüft werden konnte, weil keine Datei existiert. Diese
+Kollision von „nichts fehlt" und „nichts prüfbar" ist der Bug.
+
+**Fix-Richtung:**
+1. `compute_metadata_gaps` (oder der Aufrufer in `core/library2/queries.py:633`)
+   muss den „keine Datei"-Fall separat signalisieren (z.B. `None` statt `[]`
+   zurückgeben, oder ein zusätzliches `has_file`-Flag), damit das Frontend zwischen
+   „✓ vollständig" und „— nicht heruntergeladen" unterscheiden kann. Der
+   File-Status ist ohnehin schon separat verfügbar (`file_status()`, gleiche
+   Datei, Zeile 121-133) — das Frontend könnte ersatzweise einfach zusätzlich auf
+   `track.file_status === 'missing'` prüfen, bevor es den „tags ✓"-Badge zeigt.
+2. **Zusätzlicher Nutzerwunsch:** Hover-Tooltip soll auch im OK-Fall die erwarteten
+   Tags auflisten (aktuell nur der Lücken-Fall tut das, `:3160`:
+   `title={\`Missing: ${track.metadata_gaps.join(', ')}\`}`). Der OK-Fall hat nur den
+   statischen String `"All expected metadata tags present"` (`:3154`) ohne Aufzählung.
+   Fix: Tooltip im OK-Fall auf `` `Present: ${EXPECTED_TAGS.join(', ')}` `` o.ä.
+   erweitern (Liste kommt aus `core/library2/status.py:17-20`,
+   `EXPECTED_TAGS`, muss dem Frontend mitgegeben oder dort dupliziert werden).
+
+---
+
+### 17.6 Import-Performance bei Tausenden Songs (Research-Agent-Audit)
+
+Zwei unterschiedliche Importpfade, unterschiedlich betroffen:
+
+**Pfad A — Legacy→lib2-Migration** (`import_legacy_library`,
+`core/library2/importer.py:562-936`, `POST /api/library/v2/import`,
+`api/library_v2.py:2738-2789`): Der eigentliche Zeilen-Kopiervorgang ist reines
+SQLite-zu-SQLite (`_pick()`, `importer.py:106-115`) — **keine einzige
+Netzwerk-Anfrage** in dieser Kernfunktion; bereits bekannte Provider-IDs werden
+wiederverwendet, nicht neu abgefragt (`importer.py:641-656`, `:762-768`). Läuft
+bereits im Hintergrund-Thread mit Poll-Status (`GET
+/api/library/v2/import/status`, `_import_state`-Dict alle 200 Zeilen
+aktualisiert, `importer.py:662,774,899`) statt Websocket-Push — für die
+Nutzer-Wahrnehmung "hängt scheinbar" ist das ok, solange das UI tatsächlich pollt.
+
+**Der eigentliche Flaschenhals:** derselbe Hintergrund-Thread hängt danach zwei
+weitere Stufen an, beide **seriell, ohne Concurrency**:
+- `precache_tracklists` (`completeness.py:456-487`) — nur für „partielle" Alben,
+  sollte bei einer voll besessenen Bibliothek meist übersprungen werden.
+- `precache_all_artwork` (`core/library2/artwork.py:289-320`) — iteriert **jeden**
+  Artist/jedes Album einzeln (`:307-316`); bei einer Erstmigration ist noch nichts
+  gecacht, jedes Cover ohne brauchbares Embedded-Artwork löst einen synchronen
+  Netzwerk-Call aus (`_provider_art_url`, `:125-204`) — **ein Request nach dem
+  anderen, ein Thread**. Das ist der wahrscheinlichste Grund für „dauert ewig" bei
+  Tausenden Tracks.
+
+Kein `time.sleep`/Rate-Limit in importer.py/completeness.py/artwork.py — die
+Langsamkeit kommt rein aus fehlender Parallelität, nicht aus bewusstem Throttling.
+
+**Pfad B — Erstimport aus Staging-Ordner** (`core/auto_import_worker.py`) ist
+bereits vernünftig gebaut: `ThreadPoolExecutor(max_workers=3)`
+(`:186-201,393`), günstige Identifikations-Strategien zuerst (Tags → Ordnername →
+erst dann AcoustID-Fingerprinting), AcoustID-Rate-Limit (`time.sleep(1)`, `:1326`)
+ist bewusst und lokal begrenzt (max. 3 Files/Kandidat).
+
+**Fix-Richtung:** `precache_all_artwork` und `precache_tracklists` mit einem
+kleinen `ThreadPoolExecutor` parallelisieren — exakt das bereits in
+`auto_import_worker.py` etablierte Muster (`max_workers=3`, Config-Key
+`auto_import.max_workers`) wiederverwenden. Für eine Migration von Tausenden
+Items zusätzlich erwägen, diese zwei Stufen als niedrig priorisierten
+Hintergrund-Job zu queuen, auf den die UI nicht wartet — `lib2_*`-Zeilen sind
+auch ohne gecachtes Artwork bereits voll nutzbar.
+
+---
+
+### 17.7 Importer verliert Metadaten gegenüber Legacy (Research-Agent-Audit, über §16.3(b) hinaus)
+
+§16.3(b) hat bereits das Spotify-Hardcoding bei Provider-IDs auf Artist-/Album-Ebene
+gefixt. Der Audit fand **weitere, andersartige** Lücken — Felder, die in der Legacy-DB
+existieren, aber in KEINER lib2-Spalte landen (echter Datenverlust, nicht nur
+fehlende Edit-UI wie in §48 bereits dokumentiert):
+
+- **Artists** (`upsert_legacy`, `importer.py:320-362`): kopiert nur
+  `name/sort_name/spotify_id/musicbrainz_id/external_ids/image_url/genres/summary`.
+  `lib2_artists` (`schema.py:47-65`) hat **keine Spalte** für `style`, `mood`,
+  `label`, `aliases`, `banner_url`, oder jegliche Last.fm-/Genius-/Discogs-
+  Anreicherungsfelder (Bio-Text, Listeners, Similar-Artists, Tags).
+- **Albums** (`fields`-Tupel, `importer.py:707-713`): `_merge_album_external_ids`
+  (`:138-164`) deckt nur Spotify/Deezer/MusicBrainz/Tidal/Qobuz ab — iTunes/AudioDB/
+  Discogs/Amazon/JioSaavn/Bandcamp-IDs fehlen (gleiche Klasse Bug wie das bereits
+  gefixte Spotify-Hardcoding, nur nicht auf die volle Provider-Liste gezogen).
+  Keine Spalte für `explicit`, `label`, **`upc`** (Barcode — echter
+  Identifier-Verlust, analog zu `isrc` bei Tracks), `style`, `mood`.
+- **Tracks — die tiefste Lücke:** `lib2_tracks` (`schema.py:127-149`) hat **gar
+  keine `external_ids`-Spalte** (im Gegensatz zu Artists/Albums). `tfields`
+  (`importer.py:810-815`) kopiert nur `isrc/musicbrainz_id/spotify_id` — Deezer-,
+  Tidal-, Qobuz-, iTunes-, AudioDB-, Genius-, Amazon-, JioSaavn-, Bandcamp-Track-IDs
+  sind auf Track-Ebene in lib2 nicht abbildbar. Ebenfalls ohne Zielspalte
+  verloren: `bpm`, `explicit`, `style`, `mood`, `copyright`, **`genius_lyrics`**
+  (echter Songtext!), Last.fm-Statistiken, sowie **`play_count`/`last_played`**
+  (Hörstatistik). Zusätzlich: das per-Track `quality_profile_id` aus der Legacy-Zeile
+  wird nie gelesen — neue lib2-Tracks bekommen immer `default_profile_id`
+  (`importer.py:826-833`), eine in Legacy manuell gesetzte Profil-Zuordnung wird
+  beim Import stillschweigend verworfen.
+
+**Wichtiger Unterschied zu §48:** §48 dokumentiert fehlende Edit-UI für Felder wie
+BPM/Style/Mood — die Empfehlung dort war, sie ins bestehende
+`lib2_metadata_overrides`-Overlay-System aufzunehmen. Dieser Audit zeigt: für die
+meisten dieser Felder gibt es noch **gar keinen Rohwert**, den man overlayen
+könnte — der Importer muss zuerst neue Zielspalten bekommen, bevor ein
+Override-System dort überhaupt etwas zu überschreiben hätte.
+
+**Fix-Richtung (höchster Impact zuerst):**
+1. `lib2_tracks.external_ids` (neue Spalte, analog zu Artists/Albums) +
+   `_merge_track_external_ids`-Helper (Vorbild: `_merge_album_external_ids`,
+   `importer.py:138-164`), aufgerufen beim Track-Insert/Update
+   (`importer.py:816-834`) mit allen 9 Provider-IDs via `_pick`.
+2. `bpm`, `explicit` auf `lib2_tracks`; `explicit`, `label`, `upc` auf
+   `lib2_albums` — `tfields`/`fields`-Tupel entsprechend erweitern
+   (`importer.py:810-815` bzw. `:707-713`).
+3. `_merge_album_external_ids`s ID-Dict (`importer.py:762-768`) um
+   itunes/audiodb/discogs/amazon/jiosaavn/bandcamp erweitern (analog zum bereits
+   vorhandenen Artist-Pattern bei `:650-656`).
+
+---
+
+### 17.8 „Write All Tags" — Status-Check (Research-Agent-Audit)
+
+**Nicht fehlend, in beiden UIs vorhanden und funktional verdrahtet:**
+- **Legacy:** `_build_library_tag_db_data` (`web_server.py:11874`) baut den
+  Payload, Endpoints `/api/library/track/<id>/write-tags` +
+  `/tracks/write-tags-batch(/status)`, UI in `webui/static/library.js:7097-7463`.
+- **Library v2:** `core/library2/retag.py::write_tags` (`:195-261`), Endpoint
+  `POST /api/library/v2/tags/write` (`api/library_v2.py:2629-2681`,
+  Hintergrund-Job via `_job_registry`), UI: „Library Retag"
+  (`library-v2-page.tsx:1331-1333`) + „Preview Retag" pro Artist/Album
+  (`:2533-2537`, `:2681`) — im Live-Screenshot dieser Session als Toolbar-Button
+  sichtbar bestätigt.
+
+**Aber:** begrenzt durch §17.7 — `_db_data_for_row` (`retag.py:91-113`) kann nur
+Felder emittieren, die überhaupt in `lib2_tracks` existieren
+(`title/artist_name/track_artist/album_title/year/release_date/genres/
+track_number/disc_number/track_count/spotify_track_id/
+musicbrainz_recording_id`). Kein BPM, kein iTunes-Track-ID — nicht weil der
+Tag-Writer das nicht könnte, sondern weil die DB den Wert nie bekommen hat. §42
+(Preview Retag zeigt falsches „File not found") bleibt ein separater, bereits
+dokumentierter Bug in diesem Bereich.
+
+---
+
+### Priorisierung Abschnitt 17
+
+1. **17.2 (Track-Nummer-Heilung für Bestandsalben)** — Kritisch: sichtbarer
+   Datenverlust, betrifft jeden Nutzer mit vor dem Fix importierten Alben, kein
+   Workaround außer manuellem DB-Fix.
+2. **17.6 (Import-Performance)** — Hoch: blockiert die Migration großer
+   Bibliotheken praktisch nutzbar zu machen; Fix ist ein bekanntes, bereits im
+   Code vorhandenes Muster (ThreadPoolExecutor), kein Neubau.
+3. **17.5 (falsches „tags ✓" bei fehlender Datei)** — Hoch: irreführend, verdeckt
+   fehlende Downloads als „vollständig".
+4. **17.4 (All-Releases-Tab lädt nicht)** — Mittel: UX-Bug mit bekanntem
+   Workaround (hin- und zurückklicken), kleine, gut lokalisierte Änderung.
+5. **17.3 (rohes ISO-Datum)** — Mittel: kosmetisch, aber sichtbar bei jedem
+   library-origin Release mit historisch unsauberem Legacy-Datum.
+6. **17.7 (Importer-Datenverlust)** — Mittel: größerer Scope (Schema-Änderungen),
+   aber additiv/risikoarm; kein akuter Datenverlust im Sinne von „Datei nicht
+   auffindbar", sondern „Metadaten dauerhaft nicht verfügbar".
+7. **17.1 / 17.8** — Kein Implementierungsbedarf, nur zur Kenntnisnahme.
+8. **17.0 (Dev-Umgebung)** — Bereits behoben für diese Session; als Prozess-Hinweis
+   für künftige Sessions/den Nutzer festgehalten, keine Code-Änderung nötig.
+
+**Status:** Reine Dokumentation + Live-Verifikation (DB-Queries, API-Calls,
+Playwright-Screenshots, zwei Research-Agents), keine Implementierung in dieser
+Session außer dem Dev-Umgebungs-Neustart (17.0). Nächster Schritt: mit dem Nutzer
+Priorität bestätigen, dann jeder Punkt als eigene TDD-Slice wie bei den bisherigen
+Roadmap-Punkten.

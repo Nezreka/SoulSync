@@ -115,6 +115,20 @@ def _pick(row: Any, *keys: str) -> Optional[Any]:
     return None
 
 
+def _legacy_key(legacy_id: Any) -> Optional[str]:
+    """Normalize a legacy row id to a stable dict key.
+
+    A legacy ``artists``/``albums``/``tracks`` id can be TEXT (soulsync/Deezer-
+    generated, e.g. '630009860') while the lib2 back-reference columns
+    (``legacy_artist_id``/``legacy_album_id``/``legacy_track_id``) are
+    INTEGER-affinity, so the SAME id round-trips as int on re-seed but str on
+    lookup. Without coercion the re-import maps (``_by_legacy``/``album_map``/
+    ``track_map``) miss the existing row and INSERT a duplicate every run
+    (#38/#40 — duplicate artists AND albums/EPs/singles on re-import). Coerce to
+    str on both write and read so re-imports always match the same row."""
+    return None if legacy_id is None else str(legacy_id)
+
+
 def _detect_single(track_count: Optional[int], actual_tracks: int) -> bool:
     """A legacy album with a single track is treated as a 'single'."""
     count = track_count if track_count else actual_tracks
@@ -241,7 +255,7 @@ class _ArtistResolver:
         for row in self.cursor.fetchall():
             self._by_name.setdefault(normalize_name(row["name"]), row["id"])
             if row["legacy_artist_id"] is not None:
-                self._by_legacy[self._legacy_key(row["legacy_artist_id"])] = row["id"]
+                self._by_legacy[_legacy_key(row["legacy_artist_id"])] = row["id"]
             ids: Dict[str, str] = {}
             try:
                 raw = json.loads(row["external_ids"] or "{}")
@@ -255,17 +269,8 @@ class _ArtistResolver:
                 ids.setdefault("musicbrainz", str(row["musicbrainz_id"]))
             self._register(row["id"], ids)
 
-    @staticmethod
-    def _legacy_key(legacy_id: Any) -> Optional[str]:
-        """Normalize a legacy row id to a stable dict key. The legacy ``artists.id``
-        can be TEXT (soulsync/Deezer-generated, e.g. '476516869') while lib2's
-        ``legacy_artist_id`` is INTEGER-affinity, so the same id round-trips as int
-        vs str. Coercing to str on both sides keeps re-imports matching the same
-        row instead of creating a duplicate (#38/#40)."""
-        return None if legacy_id is None else str(legacy_id)
-
     def get_legacy(self, legacy_id: Any) -> Optional[int]:
-        return self._by_legacy.get(self._legacy_key(legacy_id))
+        return self._by_legacy.get(_legacy_key(legacy_id))
 
     def known_name(self, name: str) -> bool:
         """Whether an artist with exactly this (normalized) name already exists."""
@@ -343,7 +348,7 @@ class _ArtistResolver:
             ids.setdefault("musicbrainz", str(fields["musicbrainz_id"]).strip())
         external_json = json.dumps(ids, sort_keys=True, separators=(",", ":")) if ids else "{}"
         spotify_col, mbid_col = ids.get("spotify"), ids.get("musicbrainz")
-        existing = self._by_legacy.get(self._legacy_key(legacy_id))
+        existing = self._by_legacy.get(_legacy_key(legacy_id))
         if existing is not None:
             self.cursor.execute(
                 "UPDATE lib2_artists SET name=?, sort_name=?, spotify_id=?, "
@@ -365,7 +370,7 @@ class _ArtistResolver:
              self.default_profile_id, run_id),
         )
         new_id = self.cursor.lastrowid
-        self._by_legacy[self._legacy_key(legacy_id)] = new_id
+        self._by_legacy[_legacy_key(legacy_id)] = new_id
         self._by_name.setdefault(normalize_name(fields["name"]), new_id)
         self._register(new_id, ids)
         return new_id
@@ -672,10 +677,10 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 progress("artists", i, len(artist_rows))
 
         # --- Albums (map legacy album id -> lib2 album id) -----------------
-        album_map: Dict[int, int] = {}
+        album_map: Dict[str, int] = {}
         cursor.execute("SELECT id, legacy_album_id FROM lib2_albums WHERE legacy_album_id IS NOT NULL")
         for r in cursor.fetchall():
-            album_map[r["legacy_album_id"]] = r["id"]
+            album_map[_legacy_key(r["legacy_album_id"])] = r["id"]
 
         cursor.execute("SELECT * FROM albums")
         album_rows = cursor.fetchall()
@@ -720,7 +725,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 _pick(row, "thumb_url"), _normalize_genres(_pick(row, "genres")),
                 track_count, expected,
             )
-            existing = album_map.get(row["id"])
+            existing = album_map.get(_legacy_key(row["id"]))
             if existing is None:
                 # A discography expansion may already have created a provider-only
                 # row for this release — claim it instead of inserting a duplicate.
@@ -732,7 +737,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                     index=discography_albums,
                 )
                 if existing is not None:
-                    album_map[row["id"]] = existing
+                    album_map[_legacy_key(row["id"])] = existing
             if existing is not None:
                 cursor.execute(
                     "UPDATE lib2_albums SET primary_artist_id=?, title=?, album_type=?, "
@@ -765,7 +770,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                     (*fields, row["id"], default_profile_id, album_monitored, run_id),
                 )
                 album_id = cursor.lastrowid
-                album_map[row["id"]] = album_id
+                album_map[_legacy_key(row["id"])] = album_id
             # Real legacy albums carry deezer_id/tidal_id/qobuz_id; accept the
             # *_album_id aliases too (see the artist provider_ids note above).
             _merge_album_external_ids(cursor, album_id, {
@@ -784,10 +789,10 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 progress("albums", i, len(album_rows))
 
         # --- Tracks + track files + track-artist junctions -----------------
-        track_map: Dict[int, int] = {}
+        track_map: Dict[str, int] = {}
         cursor.execute("SELECT id, legacy_track_id FROM lib2_tracks WHERE legacy_track_id IS NOT NULL")
         for r in cursor.fetchall():
-            track_map[r["legacy_track_id"]] = r["id"]
+            track_map[_legacy_key(r["legacy_track_id"])] = r["id"]
         existing_files = {
             (int(row["track_id"]), str(row["path"])): int(row["id"])
             for row in cursor.execute(
@@ -812,7 +817,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
         cursor.execute("SELECT * FROM tracks")
         track_rows = cursor.fetchall()
         for i, row in enumerate(track_rows):
-            album_id = album_map.get(row["album_id"])
+            album_id = album_map.get(_legacy_key(row["album_id"]))
             if album_id is None:
                 continue
             title = row["title"]
@@ -822,7 +827,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 _pick(row, "isrc"), _pick(row, "musicbrainz_recording_id"),
                 _pick(row, "spotify_track_id"),
             )
-            existing = track_map.get(row["id"])
+            existing = track_map.get(_legacy_key(row["id"]))
             if existing is not None:
                 cursor.execute(
                     "UPDATE lib2_tracks SET album_id=?, title=?, track_number=?, "
@@ -841,7 +846,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                     (*tfields, row["id"], default_profile_id, track_monitored, run_id),
                 )
                 track_id = cursor.lastrowid
-                track_map[row["id"]] = track_id
+                track_map[_legacy_key(row["id"])] = track_id
             stats["tracks"] += 1
 
             # Artist credits: primary = album artist; plus track_artist + title feats.
