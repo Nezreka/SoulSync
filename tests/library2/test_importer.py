@@ -182,6 +182,58 @@ def test_partial_album_is_not_blanket_monitored_on_import(legacy_db):
         conn.close()
 
 
+def _fresh_resolver(legacy_db):
+    from core.library2.schema import ensure_library_v2_schema
+    from core.library2.importer import _ArtistResolver
+    from core.library2.profile_lookup import default_quality_profile_id
+    conn = legacy_db._get_connection()
+    ensure_library_v2_schema(conn)
+    resolver = _ArtistResolver(conn.cursor(), default_quality_profile_id(conn))
+    resolver.seed_existing()
+    return conn, resolver
+
+
+def test_artist_resolver_disambiguates_same_name_by_provider_id(legacy_db):
+    """§16.3(b): two different artists that share a name must NOT collapse into
+    one lib2 entity when their provider ids differ — otherwise an album gets
+    hung on the wrong artist and its real tracklist can never be fetched."""
+    conn, resolver = _fresh_resolver(legacy_db)
+    try:
+        a1 = resolver.get_or_create_by_name("Nova", spotify_id="sp_1")
+        a2 = resolver.get_or_create_by_name("Nova", spotify_id="sp_2")
+        a1_again = resolver.get_or_create_by_name("Nova", spotify_id="sp_1")
+
+        assert a1 != a2          # different spotify id → distinct artists
+        assert a1 == a1_again    # same spotify id → reused despite name clash
+        # Provider id beats the name key: a different display name but the same
+        # id resolves back to the id's artist.
+        assert resolver.get_or_create_by_name("Nova (Deluxe)", spotify_id="sp_1") == a1
+        # MusicBrainz id disambiguates the same way.
+        m1 = resolver.get_or_create_by_name("Orion", musicbrainz_id="mb_a")
+        m2 = resolver.get_or_create_by_name("Orion", musicbrainz_id="mb_b")
+        assert m1 != m2
+    finally:
+        conn.close()
+
+
+def test_artist_resolver_name_only_and_id_adoption(legacy_db):
+    """Backwards compat: a name-only lookup still reuses by name; adding an id
+    to a same-named artist that had none is adoption, not a conflict."""
+    conn, resolver = _fresh_resolver(legacy_db)
+    try:
+        x1 = resolver.get_or_create_by_name("Solo")
+        x2 = resolver.get_or_create_by_name("Solo")
+        assert x1 == x2
+
+        y1 = resolver.get_or_create_by_name("Adopt")                       # no id
+        y2 = resolver.get_or_create_by_name("Adopt", spotify_id="sp_adopt")  # adopt id
+        assert y1 == y2
+        # The adopted id is now a resolution key.
+        assert resolver.get_or_create_by_name("Adopt", spotify_id="sp_adopt") == y1
+    finally:
+        conn.close()
+
+
 def test_import_prefers_explicit_album_type_over_one_track_heuristic(legacy_db):
     conn = sqlite3.connect(legacy_db.path)
     conn.execute("ALTER TABLE albums ADD COLUMN album_type TEXT")

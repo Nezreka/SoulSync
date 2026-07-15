@@ -129,13 +129,21 @@ class _ArtistResolver:
         self.default_profile_id = default_profile_id
         self._by_name: Dict[str, int] = {}
         self._by_legacy: Dict[int, int] = {}
+        self._by_spotify: Dict[str, int] = {}
+        self._by_mbid: Dict[str, int] = {}
 
     def seed_existing(self) -> None:
-        self.cursor.execute("SELECT id, name, legacy_artist_id FROM lib2_artists")
+        self.cursor.execute(
+            "SELECT id, name, legacy_artist_id, spotify_id, musicbrainz_id "
+            "FROM lib2_artists")
         for row in self.cursor.fetchall():
             self._by_name.setdefault(normalize_name(row["name"]), row["id"])
             if row["legacy_artist_id"] is not None:
                 self._by_legacy[row["legacy_artist_id"]] = row["id"]
+            if row["spotify_id"]:
+                self._by_spotify.setdefault(str(row["spotify_id"]), row["id"])
+            if row["musicbrainz_id"]:
+                self._by_mbid.setdefault(str(row["musicbrainz_id"]), row["id"])
 
     def get_legacy(self, legacy_id: int) -> Optional[int]:
         return self._by_legacy.get(legacy_id)
@@ -144,18 +152,74 @@ class _ArtistResolver:
         """Whether an artist with exactly this (normalized) name already exists."""
         return normalize_name(name) in self._by_name
 
-    def get_or_create_by_name(self, name: str) -> int:
+    def _stored_ids(self, artist_id: int) -> Tuple[Optional[str], Optional[str]]:
+        row = self.cursor.connection.execute(
+            "SELECT spotify_id, musicbrainz_id FROM lib2_artists WHERE id=?",
+            (artist_id,)).fetchone()
+        if not row:
+            return None, None
+        return (
+            str(row["spotify_id"]) if row["spotify_id"] else None,
+            str(row["musicbrainz_id"]) if row["musicbrainz_id"] else None,
+        )
+
+    def get_or_create_by_name(self, name: str, *, spotify_id: Optional[str] = None,
+                              musicbrainz_id: Optional[str] = None) -> int:
+        """Resolve an artist name to a lib2 id, disambiguating by provider id.
+
+        A provider id (Spotify, then MusicBrainz) is the authoritative key
+        (§16.3(b)): two artists sharing a display name but carrying DIFFERENT ids
+        are distinct entities, and the same id always resolves to the same row
+        even under a different display name — this is what stops an album from
+        being hung on the wrong same-named artist (and its real tracklist never
+        being fetchable). Only when no id matches do we fall back to the
+        normalized-name key. A same-named row whose stored id CONFLICTS with a
+        requested id forces a new row; a same-named row with no id adopts the id.
+        """
+        spotify_id = str(spotify_id).strip() if spotify_id else None
+        musicbrainz_id = str(musicbrainz_id).strip() if musicbrainz_id else None
+
+        # 1) authoritative provider-id match (id beats the name key)
+        if spotify_id and spotify_id in self._by_spotify:
+            return self._by_spotify[spotify_id]
+        if musicbrainz_id and musicbrainz_id in self._by_mbid:
+            return self._by_mbid[musicbrainz_id]
+
+        # 2) name match — reuse unless a stored id conflicts with a requested one
         key = normalize_name(name)
         existing = self._by_name.get(key)
         if existing is not None:
-            return existing
+            stored_spotify, stored_mbid = self._stored_ids(existing)
+            conflict = (
+                (spotify_id and stored_spotify and spotify_id != stored_spotify)
+                or (musicbrainz_id and stored_mbid and musicbrainz_id != stored_mbid)
+            )
+            if not conflict:
+                # Same artist under a name we already know — adopt any new id.
+                if spotify_id and not stored_spotify:
+                    self.cursor.execute(
+                        "UPDATE lib2_artists SET spotify_id=? WHERE id=?",
+                        (spotify_id, existing))
+                    self._by_spotify.setdefault(spotify_id, existing)
+                if musicbrainz_id and not stored_mbid:
+                    self.cursor.execute(
+                        "UPDATE lib2_artists SET musicbrainz_id=? WHERE id=?",
+                        (musicbrainz_id, existing))
+                    self._by_mbid.setdefault(musicbrainz_id, existing)
+                return existing
+
+        # 3) create a fresh row (may share a name but is id-distinct)
         self.cursor.execute(
-            "INSERT INTO lib2_artists(name, sort_name, quality_profile_id) "
-            "VALUES(?, ?, ?)",
-            (name, name, self.default_profile_id),
+            "INSERT INTO lib2_artists(name, sort_name, spotify_id, musicbrainz_id, "
+            "quality_profile_id) VALUES(?,?,?,?,?)",
+            (name, name, spotify_id, musicbrainz_id, self.default_profile_id),
         )
         new_id = self.cursor.lastrowid
-        self._by_name[key] = new_id
+        self._by_name.setdefault(key, new_id)  # keep first-seen for name-only lookups
+        if spotify_id:
+            self._by_spotify.setdefault(spotify_id, new_id)
+        if musicbrainz_id:
+            self._by_mbid.setdefault(musicbrainz_id, new_id)
         return new_id
 
     def upsert_legacy(
@@ -922,7 +986,7 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
         # monitored=0 here is safe only because apply_monitoring_from_watchlist_
         # wishlist() runs AFTER seeding and re-derives artist flags from the
         # watchlist — a wishlisted song must never monitor the whole artist.
-        artist_id = resolver.get_or_create_by_name(primary_name)
+        artist_id = resolver.get_or_create_by_name(primary_name, spotify_id=primary_spotify)
         cursor.execute(
             """
             UPDATE lib2_artists
@@ -1054,11 +1118,11 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
             name = _artist_name_from_payload(artist_payload)
             if not name:
                 continue
-            aid = resolver.get_or_create_by_name(name)
+            spotify_id = _artist_spotify_from_payload(artist_payload)
+            aid = resolver.get_or_create_by_name(name, spotify_id=spotify_id)
             if aid in linked_artists:
                 continue
             linked_artists.add(aid)
-            spotify_id = _artist_spotify_from_payload(artist_payload)
             if spotify_id:
                 cursor.execute(
                     "UPDATE lib2_artists SET spotify_id=COALESCE(NULLIF(spotify_id, ''), ?), "
