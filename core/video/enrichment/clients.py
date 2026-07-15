@@ -151,6 +151,32 @@ class TMDBClient:
     PROFILE = "https://image.tmdb.org/t/p/w185"
     LOGO = "https://image.tmdb.org/t/p/w500"
 
+    def search_candidates(self, kind, query, limit=8):
+        """Title-search candidates for the Manage panel's match editor —
+        id/title/year/overview/poster only, no detail fetch. Raises on a failed
+        call (429/5xx) so the route reports an error instead of 'no results'."""
+        if not self.api_key or not (query or "").strip():
+            return []
+        import requests
+        path = "/search/movie" if kind == "movie" else "/search/tv"
+        r = requests.get(self.BASE + path,
+                         params={"api_key": self.api_key, "query": query.strip()}, timeout=15)
+        r.raise_for_status()
+        out = []
+        for it in ((r.json() or {}).get("results") or [])[:limit]:
+            if it.get("id") is None:
+                continue
+            date = it.get("release_date") if kind == "movie" else it.get("first_air_date")
+            year = None
+            if date and str(date)[:4].isdigit():
+                year = int(str(date)[:4])
+            out.append({"id": it["id"],
+                        "title": it.get("title") or it.get("name") or "",
+                        "year": year,
+                        "overview": it.get("overview") or "",
+                        "poster_url": (self.POSTER_W + it["poster_path"]) if it.get("poster_path") else None})
+        return out
+
     @staticmethod
     def _pick_logo(logos):
         """Prefer an English title logo, then a language-neutral one, then any."""
@@ -1093,6 +1119,25 @@ class TVDBClient:
         if tvdb_id is None:
             return None
         return {"id": tvdb_id, "metadata": {k: v for k, v in meta.items() if v}}
+
+    def search_candidates(self, kind, query, limit=8):
+        """Series-search candidates for the Manage panel's match editor. TVDB v4
+        search ids can be 'series-123' strings — normalized to the bare int."""
+        if kind != "show" or not self.api_key or not (query or "").strip():
+            return []
+        r = self._authed_get("/search", {"query": query.strip(), "type": "series"})
+        out = []
+        for it in ((r or {}).get("data") or [])[:limit]:
+            tid = _int(it.get("tvdb_id") or it.get("id"))
+            if tid is None:
+                raw = str(it.get("id") or "")
+                tid = _int(raw.rsplit("-", 1)[-1]) if "-" in raw else None
+            if tid is None:
+                continue
+            out.append({"id": tid, "title": it.get("name") or "", "year": _int(it.get("year")),
+                        "overview": it.get("overview") or "",
+                        "poster_url": it.get("image_url") or None})
+        return out
 
     def season_episodes(self, series_id, season_number):
         """A TVDB series+season's episodes (v4) → [{episode_number, title, overview, air_date,

@@ -3253,6 +3253,49 @@ async function _bulkToggleGroup(groupName, currentlyAllEnabled) {
     } catch (err) { showToast('Error: ' + err.message, 'error'); }
 }
 
+// --- Global per-side automations master toggle (the big pause switch) ---
+// It gates whether ANYTHING runs on a side: scheduled slots are skipped (their
+// schedule stays alive) and event triggers are dropped. Individual enabled
+// switches are untouched, so un-pausing restores exactly what the user had.
+// Manual "Run now" still executes. Shared by the music page (side='music')
+// and the video automations page (side='video', video-automations.js).
+async function renderAutomationsMasterToggle(host, side) {
+    if (!host) return;
+    let enabled = side !== 'video';   // optimistic defaults: music on, video off
+    try {
+        const res = await fetch('/api/automations/master');
+        const data = await res.json();
+        if (data && typeof data[side] === 'boolean') enabled = data[side];
+    } catch (e) { /* keep the default */ }
+    const old = host.querySelector('.auto-master-toggle');
+    if (old) old.remove();
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'auto-master-toggle' + (enabled ? ' on' : '');
+    btn.title = enabled
+        ? 'Automations are live. Click to pause every scheduled and event run on this side — individual switches keep their state, and manual Run still works.'
+        : 'Automations are paused: nothing runs on a schedule or event. Individual switches keep their state, and manual Run still works.';
+    btn.innerHTML = '<span class="auto-master-sw"></span><span class="auto-master-label">' +
+        (enabled ? 'Automations on' : 'Automations paused') + '</span>';
+    btn.onclick = async () => {
+        btn.disabled = true;
+        try {
+            const res = await fetch('/api/automations/master', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ side, enabled: !enabled }),
+            });
+            const data = await res.json();
+            if (!data || !data.success) throw new Error((data && data.error) || 'failed');
+            showToast((side === 'video' ? 'Video' : 'Music') + ' automations ' +
+                (!enabled ? 'resumed' : 'paused'), !enabled ? 'success' : 'info');
+        } catch (e) {
+            showToast('Couldn’t update the master switch' + (e && e.message ? ': ' + e.message : ''), 'error');
+        }
+        renderAutomationsMasterToggle(host, side);
+    };
+    host.prepend(btn);
+}
+
 async function loadAutomations() {
     const list = document.getElementById('automations-list');
     const empty = document.getElementById('automations-empty');
@@ -3268,7 +3311,7 @@ async function loadAutomations() {
         const automations = (Array.isArray(payload) ? payload : []).filter(a => a.owned_by !== 'video');
         if (!automations.length) {
             list.innerHTML = ''; empty.style.display = '';
-            if (statsBar) statsBar.innerHTML = '';
+            if (statsBar) { statsBar.innerHTML = ''; renderAutomationsMasterToggle(statsBar, 'music'); }
             return;
         }
         empty.style.display = 'none';
@@ -3308,6 +3351,7 @@ async function loadAutomations() {
                 <span class="auto-stat"><strong>${sys}</strong> System</span>
                 <span class="auto-stat"><strong>${custom}</strong> Custom</span>
             `;
+            renderAutomationsMasterToggle(statsBar, 'music');
         }
 
         // Filter bar — show when 6+ automations

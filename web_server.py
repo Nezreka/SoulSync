@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.0.2"
+_SOULSYNC_BASE_VERSION = "3.0.3"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -4030,6 +4030,42 @@ def list_automations():
     except Exception as e:
         logger.error(f"Error listing automations: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/automations/master', methods=['GET'])
+def get_automations_master():
+    """The per-side global pause state ({music: bool, video: bool}).
+    It gates whether ANY automation runs on that side — individual enabled
+    flags are untouched, so un-pausing restores exactly what the user had."""
+    try:
+        from core.automation_engine import AutomationEngine
+        return jsonify({side: (automation_engine.master_enabled(side) if automation_engine
+                               else AutomationEngine.MASTER_DEFAULTS[side])
+                        for side in ('music', 'video')})
+    except Exception as e:
+        logger.error(f"Error reading automations master state: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/automations/master', methods=['POST'])
+@admin_only
+def set_automations_master():
+    """Flip one side's global automation pause. Body: {side, enabled}.
+    Admin-only — it silences every automation on a side, not just yours."""
+    try:
+        data = request.get_json(silent=True) or {}
+        side = (data.get('side') or '').strip().lower()
+        if side not in ('music', 'video'):
+            return jsonify({"success": False, "error": "side must be music or video"}), 400
+        if automation_engine is None:
+            return jsonify({"success": False, "error": "Automation engine unavailable"}), 503
+        enabled = bool(data.get('enabled'))
+        automation_engine.set_master_enabled(side, enabled)   # persists to the engine DB
+        logger.info("Automations master for %s side set to %s", side, 'ON' if enabled else 'PAUSED')
+        return jsonify({"success": True, "side": side, "enabled": enabled})
+    except Exception as e:
+        logger.error(f"Error setting automations master state: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/automations', methods=['POST'])
 def create_automation():
@@ -13179,17 +13215,39 @@ def _resolve_library_file_path(file_path):
             if found:
                 return found
 
-    # Couldn't resolve — log the bases we searched ONCE so a path/mount mismatch
-    # is diagnosable (e.g. files live under a dir that isn't transfer/download/
-    # a configured library path).
+    # Couldn't resolve — log the bases we searched, throttled to once per 10
+    # minutes. The old once-per-PROCESS guard self-silenced forever, which hid
+    # intermittent failures completely (TheHomeGuy: an NFS mount that drops and
+    # comes back reads as 'occasionally get this error' with no pattern —
+    # because all the other occurrences were swallowed).
     global _resolve_library_diag_logged
-    if not _resolve_library_diag_logged:
-        _resolve_library_diag_logged = True
+    _now = time.monotonic()
+    if not isinstance(_resolve_library_diag_logged, float) or _now - _resolve_library_diag_logged > 600:
+        _resolve_library_diag_logged = _now
+        # Name the FAILURE MODE, not just the miss: a genuinely absent file
+        # stats as ENOENT, while a broken NFS/bind mount surfaces ESTALE or
+        # EIO — and a base dir that suddenly lists 0 entries is an unmounted
+        # mountpoint. Turns "file not found, shrug" into "the mount under it
+        # is broken" (TheHomeGuy's Proxmox LXC bind-of-NFS).
+        import errno as _errno
+        _stat_err = 'ENOENT (plain not-found)'
+        try:
+            os.stat(file_path)
+        except OSError as _se:
+            _stat_err = '%s (errno=%s)' % (_errno.errorcode.get(_se.errno, type(_se).__name__), _se.errno)
+        _base_counts = []
+        for _b in abs_bases:
+            try:
+                _base_counts.append('%s: %d entries' % (_b, len(os.listdir(_b))))
+            except OSError as _le:
+                _base_counts.append('%s: UNLISTABLE (%s)' % (_b, _errno.errorcode.get(_le.errno, type(_le).__name__)))
         logger.warning(
             "[PathResolve] Could not resolve %r — tried direct-join + suffix-scan under %r (cwd=%r). "
+            "Raw-path stat: %s. Base dirs: %s. "
             "If files live elsewhere, set soulseek.transfer_path to the absolute mount or add "
-            "the dir under Settings > Library music paths.",
-            file_path, abs_bases, os.getcwd(),
+            "the dir under Settings > Library music paths. A base showing 0 entries or "
+            "ESTALE/EIO means the mount under it is broken (remount / restart the container).",
+            file_path, abs_bases, os.getcwd(), _stat_err, '; '.join(_base_counts) or 'none',
         )
     return None
 
@@ -21274,6 +21332,13 @@ def _persist_find_and_add_match(source_track_id, server_source, server_track_id,
        Find & Add now also records a manual library match (one-way; the manual
        match tool has no playlist to act on, so it doesn't reverse-create)."""
     if not source_track_id:
+        # Nothing to key the override by — the pairing will NOT survive a
+        # reload. Loud, because to the user this looks like "matched it, then
+        # it unmatched itself" (the wolf39us report shape).
+        logger.warning(
+            "[ServerPlaylist] Find & Add match for '%s' NOT persisted — the source row "
+            "carries no source_track_id, so the pairing can't be stored and will "
+            "revert on the next compare load.", server_track_title or source_title or server_track_id)
         return
     db = get_database()
     try:

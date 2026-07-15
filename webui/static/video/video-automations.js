@@ -135,11 +135,17 @@
     function renderStats(sys, user) {
         var el = document.querySelector('[data-vauto-stats]'); if (!el) return;
         var all = sys.concat(user || []);
-        if (!all.length) { el.innerHTML = ''; return; }
         var active = all.filter(function (a) { return a.enabled; }).length;
-        el.innerHTML = '<span class="auto-stat"><strong>' + active + '</strong> Active</span>' +
-            '<span class="auto-stat"><strong>' + sys.length + '</strong> System</span>' +
-            '<span class="auto-stat"><strong>' + (user || []).length + '</strong> Custom</span>';
+        el.innerHTML = all.length
+            ? '<span class="auto-stat"><strong>' + active + '</strong> Active</span>' +
+              '<span class="auto-stat"><strong>' + sys.length + '</strong> System</span>' +
+              '<span class="auto-stat"><strong>' + (user || []).length + '</strong> Custom</span>'
+            : '';
+        // The global pause switch for the VIDEO side (shared helper from
+        // stats-automations.js; defaults OFF — most installs predate video).
+        if (typeof renderAutomationsMasterToggle === 'function') {
+            renderAutomationsMasterToggle(el, 'video');
+        }
     }
 
     var _lastSig = null;

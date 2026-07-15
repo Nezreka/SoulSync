@@ -1436,6 +1436,26 @@ def test_reorganize_context_disables_folder_reuse():
     assert context['_no_album_folder_reuse'] is True
 
 
+def test_reorganize_context_is_a_local_import():
+    """Reorganize handles the user's OWN library files — the integrity check's
+    duration-agreement leg must not apply (#804 semantics). Without this flag,
+    a file whose duration drifts from the re-resolved API tracklist (a
+    different master / long version) got a copy QUARANTINED during reorganize
+    (TheHomeGuy: 'Through Glass' 283s vs Discogs' 241s → quarantine + failed)."""
+    context = library_reorganize._build_post_process_context(
+        {'id': 'dz-1', 'name': 'Come What(ever) May'},
+        {'id': 'a1', 'name': 'Through Glass', 'track_number': 8, 'duration_ms': 241000},
+        'Stone Sour', 'Come What(ever) May', 1,
+    )
+    assert context['is_local_import'] is True
+
+    # And the pipeline seam this flag drives: a local import never carries an
+    # expected duration into the integrity check.
+    from core.imports.file_integrity import expected_duration_for_check
+    assert expected_duration_for_check(241000, True) is None
+    assert expected_duration_for_check(241000, False) == 241000
+
+
 def test_preview_uses_same_logic_as_apply(monkeypatch, tmpdirs):
     """Sanity check: a multi-disc album previewed and then applied
     should show the same destinations. If preview drift creeps in

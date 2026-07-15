@@ -1399,3 +1399,113 @@ def test_retry_all_failed_requeues_across_all_services(db):
     assert conn.execute("SELECT trakt_status FROM shows WHERE server_id='s1'").fetchone()[0] is None
     assert conn.execute("SELECT dearrow_status FROM youtube_video_stats WHERE youtube_id='v1'").fetchone()[0] is None
     conn.close()
+
+
+# ── manual match editor (Manage panel "Matches" section) ─────────────────────
+
+def test_tmdb_search_candidates_parses_results(monkeypatch):
+    class _Resp:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self):
+            return {"results": [
+                {"id": 61575, "name": "90 Day Fiancé", "first_air_date": "2014-01-12",
+                 "overview": "Couples.", "poster_path": "/p.jpg"},
+                {"id": None, "name": "ghost"},                       # no id → dropped
+                {"id": 7, "name": "No Date"},                        # missing date → year None
+            ]}
+    urls = []
+    fake = types.SimpleNamespace(get=lambda url, **kw: (urls.append(url), _Resp())[1])
+    monkeypatch.setitem(sys.modules, "requests", fake)
+
+    out = TMDBClient("KEY").search_candidates("show", "90 day fiance")
+    assert any("/search/tv" in u for u in urls)
+    assert out[0] == {"id": 61575, "title": "90 Day Fiancé", "year": 2014,
+                      "overview": "Couples.",
+                      "poster_url": TMDBClient.POSTER_W + "/p.jpg"}
+    assert out[1]["year"] is None
+    assert len(out) == 2
+
+
+def test_tvdb_search_candidates_normalizes_string_ids(monkeypatch):
+    c = TVDBClient("KEY")
+    monkeypatch.setattr(c, "_authed_get", lambda path, params=None: {
+        "data": [
+            {"id": "series-392256", "name": "90 Day: The Last Resort", "year": "2023",
+             "overview": "Spinoff.", "image_url": "https://art/x.jpg"},
+            {"tvdb_id": 279121, "name": "Plain Int"},
+        ]})
+    out = c.search_candidates("show", "90 day")
+    assert out[0]["id"] == 392256          # 'series-392256' → 392256
+    assert out[1]["id"] == 279121
+    assert c.search_candidates("movie", "90 day") == []   # TVDB is shows-only
+
+
+def test_item_matches_reports_per_service_state(db):
+    sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "tmdb_id": 61575, "seasons": []})
+    with db.connect() as conn:
+        conn.execute("UPDATE shows SET tmdb_match_status='matched', imdb_id='tt2237392' WHERE id=?", (sid,))
+    matches = {m["service"]: m for m in db.item_matches("show", sid)}
+    assert matches["tmdb"]["id"] == 61575 and matches["tmdb"]["status"] == "matched"
+    assert matches["tvdb"]["id"] is None
+    assert matches["imdb"]["id"] == "tt2237392" and matches["imdb"]["status"] == "matched"
+    assert db.item_matches("movie", sid) == []            # wrong kind → no row
+    assert db.item_matches("weird", sid) is None          # unknown kind
+
+
+def test_rematch_tmdb_resets_the_derived_pipeline(db):
+    sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "tmdb_id": 111, "seasons": []})
+    with db.connect() as conn:
+        conn.execute(
+            "UPDATE shows SET tmdb_match_status='matched', details_synced=1, episodes_synced=1, "
+            "ratings_synced=1, status='Ended', overview='wrong show', tagline='nope', "
+            "trakt_status='ok', trakt_rating=7.5, poster_url='https://art/keep.jpg', "
+            "locked_fields='[\"overview\"]' WHERE id=?", (sid,))
+        conn.execute("INSERT INTO people (name) VALUES ('Wrong Actor')")
+        pid = conn.execute("SELECT id FROM people").fetchone()[0]
+        conn.execute("INSERT INTO credits (show_id, person_id, department) VALUES (?, ?, 'cast')", (sid, pid))
+
+    assert db.rematch_item("show", sid, "tmdb", 61575) is True
+    with db.connect() as conn:
+        row = conn.execute("SELECT * FROM shows WHERE id=?", (sid,)).fetchone()
+        credits = conn.execute("SELECT COUNT(*) FROM credits WHERE show_id=?", (sid,)).fetchone()[0]
+    assert row["tmdb_id"] == 61575
+    assert row["tmdb_match_status"] is None               # worker re-picks, enriches BY the new id
+    assert row["status"] is None and row["tagline"] is None    # old match's text cleared
+    assert row["overview"] == "wrong show"                # locked field stays the user's
+    assert row["poster_url"] == "https://art/keep.jpg"    # art is never cleared
+    assert (row["details_synced"], row["episodes_synced"], row["ratings_synced"]) == (0, 0, 0)
+    assert row["trakt_status"] is None and row["trakt_rating"] is None
+    assert credits == 0                                   # wrong title's credits dropped
+
+
+def test_rematch_clear_reverts_to_not_found(db):
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "M", "tmdb_id": 9})
+    with db.connect() as conn:
+        conn.execute("UPDATE movies SET tmdb_match_status='matched' WHERE id=?", (mid,))
+    assert db.rematch_item("movie", mid, "tmdb", None) is True
+    with db.connect() as conn:
+        row = conn.execute("SELECT tmdb_id, tmdb_match_status FROM movies WHERE id=?", (mid,)).fetchone()
+    assert row["tmdb_id"] is None and row["tmdb_match_status"] == "not_found"
+
+
+def test_rematch_imdb_only_touches_the_id_keyed_pipeline(db):
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "M", "tmdb_id": 9})
+    with db.connect() as conn:
+        conn.execute(
+            "UPDATE movies SET overview='right movie', details_synced=1, ratings_synced=1, "
+            "awards_status='ok', awards='Won 1 Oscar', imdb_id='tt0000001' WHERE id=?", (mid,))
+    assert db.rematch_item("movie", mid, "imdb", "tt7286456") is True
+    with db.connect() as conn:
+        row = conn.execute("SELECT * FROM movies WHERE id=?", (mid,)).fetchone()
+    assert row["imdb_id"] == "tt7286456"
+    assert row["overview"] == "right movie"       # TMDB text untouched
+    assert row["details_synced"] == 1             # TMDB pipeline untouched
+    assert row["ratings_synced"] == 0             # ratings re-fetch with the new id
+    assert row["awards_status"] is None and row["awards"] is None
+
+
+def test_rematch_rejects_unknown_service_or_item(db):
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "M"})
+    assert db.rematch_item("movie", mid, "tvdb", 5) is False    # tvdb is shows-only
+    assert db.rematch_item("movie", 99999, "tmdb", 5) is False  # no such row
