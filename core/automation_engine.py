@@ -373,6 +373,14 @@ SYSTEM_AUTOMATIONS = [
         'initial_delay': 1500,
         'owned_by': 'video',
     },
+    {
+        'name': 'RSS Sync (Instant Grabs)',            # indexers' newest releases vs the wishlist
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 15, 'unit': 'minutes'},
+        'action_type': 'video_rss_sync',
+        'initial_delay': 900,
+        'owned_by': 'video',
+    },
     # YouTube retention: delete channel episodes outside each channel's keep window. No-op
     # unless a channel opts in (cog modal → Keep); default keeps everything, so safe to seed.
     {

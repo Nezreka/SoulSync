@@ -46,6 +46,7 @@ from core.automation.handlers.video_scan_watchlist_channels import auto_video_sc
 from core.automation.handlers.video_process_youtube_wishlist import auto_video_process_youtube_wishlist
 from core.automation.handlers.video_scan_watchlist_playlists import auto_video_scan_watchlist_playlists
 from core.automation.handlers.video_process_wishlist import auto_video_process_wishlist, is_running
+from core.automation.handlers.video_rss_sync import auto_video_rss_sync
 from core.automation.handlers.video_apply_overlays import auto_video_apply_overlays
 from core.automation.handlers.video_clean_plex_images import auto_video_clean_plex_images
 from core.automation.handlers.video_sync_collections import auto_video_sync_collections
@@ -303,6 +304,13 @@ def register_all(deps: AutomationDeps) -> None:
     engine.register_action_handler(
         'video_process_youtube_wishlist',
         lambda config: auto_video_process_youtube_wishlist(config, deps),
+    )
+    # RSS-speed grabbing: match the indexers' LATEST releases against the wishlist
+    # every few minutes — no per-item searching (that stays the drain's job).
+    engine.register_action_handler(
+        'video_rss_sync',
+        lambda config: auto_video_rss_sync(config, deps),
+        lambda: __import__('core.video.rss_sync', fromlist=['is_running']).is_running(),
     )
     # Daily overlay refresh — reads the per-scope overlay settings and re-applies
     # only enabled scopes, skipping unchanged items. Guarded so it can't overlap a
