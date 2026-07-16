@@ -37,10 +37,22 @@ class WishlistAuditJob(VideoRepairJob):
 
     def scan(self, context: JobContext) -> JobResult:
         from core.video.quality_eval import resolution_rank
-        from core.video.quality_profile import load as load_profile
+        from core.video.quality_profile import profile_by_id
         result = JobResult()
-        cutoff_rank = resolution_rank(
-            (load_profile(context.db) or {}).get("cutoff_resolution"))
+        _memo: dict = {}
+
+        def _cutoff_rank_for(row):
+            """Per-title cutoff (P2): the row's title profile, memoized per id."""
+            try:
+                kind = "movie" if row.get("kind") == "movie" else "show"
+                pid = context.db.quality_profile_id_for(kind, tmdb_id=row.get("tmdb_id")) or 0
+            except Exception:   # noqa: BLE001
+                pid = 0
+            if pid not in _memo:
+                _memo[pid] = resolution_rank(
+                    (profile_by_id(context.db, pid) or {}).get("cutoff_resolution"))
+            return _memo[pid]
+
         rows = context.db.repair_stale_wishlist()
         context.report(total=len(rows), phase="auditing wishlist")
         valid = []
@@ -51,6 +63,7 @@ class WishlistAuditJob(VideoRepairJob):
             rks = [resolution_rank(x) for x in str(r.get("owned_resolutions") or "").split(",")
                    if x.strip()]
             cur = max(rks, default=0)
+            cutoff_rank = _cutoff_rank_for(r)
             if cur and (not cutoff_rank or cur < cutoff_rank):
                 continue   # below the cutoff (or chasing 'always best') — a live upgrade watch
             reason = ("already at your quality cutoff" if cur

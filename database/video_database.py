@@ -213,6 +213,14 @@ _COLUMN_MIGRATIONS = [
     # refreshed by the monitor each poll while a row is downloading
     ("video_downloads", "speed_bps", "INTEGER"),
     ("video_downloads", "eta_seconds", "INTEGER"),
+    # per-title quality profiles (arr-parity P2): NULL/0 = the Default profile;
+    # >=1 = a named profile in video_settings['quality_profiles']. The download
+    # row carries the id it was GRABBED under so the monitor's cutoff/requery
+    # judgments match the grab even if the title is reassigned mid-flight.
+    ("movies", "quality_profile_id", "INTEGER"),
+    ("shows", "quality_profile_id", "INTEGER"),
+    ("video_wishlist", "quality_profile_id", "INTEGER"),
+    ("video_downloads", "quality_profile_id", "INTEGER"),
     ("video_watchlist", "lookback_years", "INTEGER"),   # per-person back-catalog window: NULL/0=forward-only, N=years, -1=everything
     ("video_wishlist", "still_url", "TEXT"),   # episode still thumbnail (captured at add time)
     ("video_wishlist", "season_poster_url", "TEXT"),   # the episode's season poster
@@ -1789,7 +1797,8 @@ class VideoDatabase:
                   "size_bytes", "quality_label", "target_dir", "status",
                   "media_id", "media_source", "year", "poster_url",
                   "candidates", "search_ctx", "tried_queries", "tried_files", "attempts",
-                  "client_ref")   # torrent/usenet client tracking id
+                  "client_ref",   # torrent/usenet client tracking id
+                  "quality_profile_id")   # the profile the grab was judged under (P2)
 
     def add_video_download(self, rec: dict) -> int:
         """Insert a download row (status defaults to 'downloading'); returns its id."""
@@ -4198,6 +4207,7 @@ class VideoDatabase:
         return {
             "kind": "show", "id": show["id"], "title": show["title"], "year": show["year"],
             "sort_title": show["sort_title"],
+            "quality_profile_id": show["quality_profile_id"] or 0,
             "locked_fields": sorted(self._parse_locked(show["locked_fields"])),
             "watched": (show["watched_episodes"] or 0) >= total > 0,
             "overview": show["overview"], "status": show["status"], "network": show["network"],
@@ -5310,7 +5320,9 @@ class VideoDatabase:
                 "  AS owned, "
                 "(SELECT GROUP_CONCAT(f.resolution) FROM movies m "
                 "  JOIN media_files f ON f.movie_id=m.id "
-                "  WHERE m.tmdb_id=w.tmdb_id AND m.has_file=1) AS owned_resolutions "
+                "  WHERE m.tmdb_id=w.tmdb_id AND m.has_file=1) AS owned_resolutions, "
+                "COALESCE(w.quality_profile_id, (SELECT m.quality_profile_id FROM movies m "
+                "  WHERE m.tmdb_id=w.tmdb_id)) AS quality_profile_id "
                 "FROM video_wishlist w "
                 "WHERE w.kind='movie' AND w.status='wanted' AND w.tmdb_id IS NOT NULL "
                 # release-window gate: only search once within a week of release (early scene
@@ -5388,7 +5400,9 @@ class VideoDatabase:
                 "  JOIN media_files f ON f.episode_id = e.id "
                 "  WHERE s.tmdb_id = w.tmdb_id AND e.season_number = w.season_number "
                 "  AND e.episode_number = w.episode_number AND e.has_file = 1) "
-                "  AS owned_resolutions "
+                "  AS owned_resolutions, "
+                "COALESCE(w.quality_profile_id, (SELECT s.quality_profile_id FROM shows s "
+                "  WHERE s.tmdb_id = w.tmdb_id)) AS quality_profile_id "
                 "FROM video_wishlist w WHERE w.kind='episode' AND w.tmdb_id IS NOT NULL "
                 # release-window gate: search an episode only once it's within a week of air
                 # (early scene releases show up a few days out) — a further-off episode stays on
@@ -5417,7 +5431,9 @@ class VideoDatabase:
                     "  AS owned, "
                     "(SELECT GROUP_CONCAT(f.resolution) FROM movies m "
                     "  JOIN media_files f ON f.movie_id=m.id "
-                    "  WHERE m.tmdb_id=w.tmdb_id AND m.has_file=1) AS owned_resolutions "
+                    "  WHERE m.tmdb_id=w.tmdb_id AND m.has_file=1) AS owned_resolutions, "
+                    "COALESCE(w.quality_profile_id, (SELECT m.quality_profile_id FROM movies m "
+                    "  WHERE m.tmdb_id=w.tmdb_id)) AS quality_profile_id "
                     "FROM video_wishlist w "
                     "WHERE w.kind='movie' AND w.tmdb_id=?", (int(tmdb_id),))]
             where, args = "", [int(tmdb_id)]
@@ -5437,7 +5453,9 @@ class VideoDatabase:
                 "  JOIN media_files f ON f.episode_id = e.id "
                 "  WHERE s.tmdb_id = w.tmdb_id AND e.season_number = w.season_number "
                 "  AND e.episode_number = w.episode_number AND e.has_file = 1) "
-                "  AS owned_resolutions "
+                "  AS owned_resolutions, "
+                "COALESCE(w.quality_profile_id, (SELECT s.quality_profile_id FROM shows s "
+                "  WHERE s.tmdb_id = w.tmdb_id)) AS quality_profile_id "
                 "FROM video_wishlist w WHERE w.kind='episode' AND w.tmdb_id=?" + where +
                 " ORDER BY w.season_number, w.episode_number", args)]
         finally:
@@ -5622,6 +5640,129 @@ class VideoDatabase:
         return {"items": items, "pagination": {
             "page": page, "total_pages": total_pages, "total_count": total,
             "has_prev": page > 1, "has_next": page < total_pages}}
+
+    # ── named quality profiles (the schema's day-one quality_profiles table,
+    #    finally in service; arr-parity P2). ``items`` holds the FULL normalized
+    #    profile blob as JSON (the original 'list of quality names' idea grew
+    #    into the rich tiers/rejects/preferences profile); ``cutoff`` mirrors
+    #    cutoff_resolution for at-a-glance SQL. ─────────────────────────────────
+    def named_quality_profiles(self) -> list:
+        conn = self._get_connection()
+        try:
+            return [dict(r) for r in conn.execute(
+                "SELECT id, name, cutoff, items FROM quality_profiles ORDER BY name COLLATE NOCASE")]
+        except sqlite3.Error:
+            logger.exception("named_quality_profiles failed")
+            return []
+        finally:
+            conn.close()
+
+    def get_named_quality_profile(self, profile_id) -> dict | None:
+        conn = self._get_connection()
+        try:
+            row = conn.execute("SELECT id, name, cutoff, items FROM quality_profiles WHERE id=?",
+                               (int(profile_id),)).fetchone()
+            return dict(row) if row else None
+        except (sqlite3.Error, TypeError, ValueError):
+            return None
+        finally:
+            conn.close()
+
+    def upsert_named_quality_profile(self, profile_id, name, items_json, cutoff):
+        """Create (profile_id None) or update a named profile row; returns the id.
+        The name is UNIQUE — collisions get a numeric suffix rather than failing."""
+        conn = self._get_connection()
+        try:
+            base = str(name or "").strip() or "Unnamed profile"
+            for attempt in range(20):
+                candidate = base if attempt == 0 else "%s (%d)" % (base, attempt + 1)
+                try:
+                    if profile_id is None:
+                        cur = conn.execute(
+                            "INSERT INTO quality_profiles (name, cutoff, items) VALUES (?, ?, ?)",
+                            (candidate, cutoff, items_json))
+                        conn.commit()
+                        return cur.lastrowid
+                    conn.execute(
+                        "UPDATE quality_profiles SET name=?, cutoff=?, items=? WHERE id=?",
+                        (candidate, cutoff, items_json, int(profile_id)))
+                    conn.commit()
+                    return int(profile_id)
+                except sqlite3.IntegrityError:
+                    conn.rollback()   # duplicate name → next suffix
+            return None
+        except sqlite3.Error:
+            logger.exception("upsert_named_quality_profile failed")
+            return None
+        finally:
+            conn.close()
+
+    def delete_named_quality_profile(self, profile_id) -> bool:
+        """Delete a named profile. The schema's ON DELETE SET NULL clears
+        movies/shows assignments; migrated columns (wishlist/downloads) degrade
+        via profile_by_id's dangling-id rule."""
+        conn = self._get_connection()
+        try:
+            cur = conn.execute("DELETE FROM quality_profiles WHERE id=?", (int(profile_id),))
+            conn.commit()
+            return cur.rowcount > 0
+        except (sqlite3.Error, TypeError, ValueError):
+            logger.exception("delete_named_quality_profile failed")
+            return False
+        finally:
+            conn.close()
+
+    def quality_profile_id_for(self, kind: str, *, tmdb_id=None, library_id=None):
+        """The per-title quality-profile id for a movie/show (P2), or None for
+        the Default. Library row wins; a wishlist row's assignment covers
+        titles not in the library yet."""
+        tbl = "movies" if kind == "movie" else "shows"
+        conn = self._get_connection()
+        try:
+            if library_id:
+                row = conn.execute(f"SELECT quality_profile_id FROM {tbl} WHERE id=?",
+                                   (int(library_id),)).fetchone()
+                if row and row[0]:
+                    return row[0]
+            if tmdb_id:
+                row = conn.execute(f"SELECT quality_profile_id FROM {tbl} WHERE tmdb_id=?",
+                                   (int(tmdb_id),)).fetchone()
+                if row and row[0]:
+                    return row[0]
+                row = conn.execute(
+                    "SELECT quality_profile_id FROM video_wishlist "
+                    "WHERE tmdb_id=? AND quality_profile_id IS NOT NULL LIMIT 1",
+                    (int(tmdb_id),)).fetchone()
+                if row and row[0]:
+                    return row[0]
+            return None
+        except sqlite3.Error:
+            logger.exception("quality_profile_id_for failed")
+            return None
+        finally:
+            conn.close()
+
+    def set_title_quality_profile(self, kind: str, library_id, profile_id) -> bool:
+        """Assign a quality profile to an owned movie/show (NULL/0 = Default).
+        Also stamps the title's wishlist rows so in-flight wishes follow."""
+        tbl = "movies" if kind == "movie" else "shows"
+        pid = int(profile_id) if profile_id else None
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(f"UPDATE {tbl} SET quality_profile_id=? WHERE id=?",
+                               (pid, int(library_id)))
+            row = conn.execute(f"SELECT tmdb_id FROM {tbl} WHERE id=?",
+                               (int(library_id),)).fetchone()
+            if row and row[0]:
+                conn.execute("UPDATE video_wishlist SET quality_profile_id=? WHERE tmdb_id=?",
+                             (pid, int(row[0])))
+            conn.commit()
+            return cur.rowcount > 0
+        except sqlite3.Error:
+            logger.exception("set_title_quality_profile failed")
+            return False
+        finally:
+            conn.close()
 
     def wishlist_owned_media_resolutions(self) -> dict:
         """Owned-file resolutions for wishlist rows whose media is in the library —
@@ -6586,6 +6727,7 @@ class VideoDatabase:
         return {
             "kind": "movie", "id": m["id"], "title": m["title"], "year": m["year"],
             "sort_title": m["sort_title"],
+            "quality_profile_id": m["quality_profile_id"] or 0,
             "locked_fields": sorted(self._parse_locked(m["locked_fields"])),
             "watched": (m["play_count"] or 0) > 0,
             "overview": m["overview"], "status": m["status"], "studio": m["studio"],

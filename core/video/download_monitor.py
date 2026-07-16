@@ -355,9 +355,10 @@ def _wishlist_obtained(db, dl, upd=None) -> None:
             return
         try:
             from core.video.quality_eval import meets_cutoff, resolution_rank
-            from core.video.quality_profile import load as load_profile
+            from core.video.quality_profile import profile_by_id
             label = (upd or {}).get("quality_label") or dl.get("quality_label") or ""
-            profile = load_profile(db)
+            # judged under the profile the grab was made with (per-title, P2)
+            profile = profile_by_id(db, dl.get("quality_profile_id"))
             if resolution_rank(label) and not meets_cutoff(label, profile):
                 logger.info("video download %s: '%s' landed below the cutoff — kept on the "
                             "wishlist for a future upgrade", dl.get("id"), label)
@@ -512,14 +513,16 @@ def _search_for_retry(query, max_seconds=55):
 
 def _requery_worker(dl_id) -> None:
     from core.video.quality_eval import evaluate_release
-    from core.video.quality_profile import load as load_profile
+    from core.video.quality_profile import profile_by_id
     from core.video.release_parse import parse_release
     from core.video.retry import merge_candidates, plan_retry
     try:
         db = _db_provider() if _db_provider else None
         if db is None:
             return
-        profile = load_profile(db)
+        first = db.get_video_download(dl_id) or {}
+        # requery under the profile the ORIGINAL grab was judged with (P2)
+        profile = profile_by_id(db, first.get("quality_profile_id"))
         for _ in range(8):   # hard loop cap on top of the attempt budget
             row = db.get_video_download(dl_id)
             if not row or row.get("status") != "searching":

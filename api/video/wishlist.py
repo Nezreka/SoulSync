@@ -39,11 +39,20 @@ def _annotate_live_state(db, kind, items):
         from core.video.quality_eval import resolution_rank
         keys = active_download_keys(db.get_active_video_downloads())
         owned = db.wishlist_owned_media_resolutions()
-        try:
-            from core.video.quality_profile import load as load_profile
-            cutoff = resolution_rank((load_profile(db) or {}).get("cutoff_resolution"))
-        except Exception:
-            cutoff = 0
+        from core.video.quality_profile import profile_by_id
+        _cutoff_memo: dict = {}
+
+        def cutoff_for_title(item_kind, tmdb):
+            """Per-title cutoff rank (P2): the title's own profile when
+            assigned, else Default. Memoized per profile id per page."""
+            try:
+                pid = db.quality_profile_id_for(item_kind, tmdb_id=tmdb) or 0
+                if pid not in _cutoff_memo:
+                    _cutoff_memo[pid] = resolution_rank(
+                        (profile_by_id(db, pid) or {}).get("cutoff_resolution"))
+                return _cutoff_memo[pid]
+            except Exception:   # noqa: BLE001
+                return 0
 
         def best_res(csv):
             rs = [x.strip() for x in str(csv or "").split(",") if x.strip()]
@@ -58,11 +67,14 @@ def _annotate_live_state(db, kind, items):
                     it["downloading"] = True
                 rank, label = best_res(owned.get("movie:%s" % it.get("tmdb_id")))
                 # below cutoff (or no cutoff = always chasing) → live upgrade watch
-                if rank and (not cutoff or rank < cutoff):
-                    it["upgrade_from"] = label
+                if rank:
+                    cutoff = cutoff_for_title("movie", it.get("tmdb_id"))
+                    if not cutoff or rank < cutoff:
+                        it["upgrade_from"] = label
         else:
             for show in items:
                 dl = up = 0
+                cutoff = cutoff_for_title("show", show.get("tmdb_id"))
                 for season in show.get("seasons") or []:
                     sn = season.get("season_number")
                     for ep in season.get("episodes") or []:

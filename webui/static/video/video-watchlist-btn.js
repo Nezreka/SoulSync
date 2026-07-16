@@ -97,22 +97,84 @@
                 if (ok) doRemove();
                 else done();   // cancelled — re-enable, no change
             });
+        } else if (kind === 'show') {
+            // Follow-time monitor policy (arr-parity P2): shows ask WHAT to
+            // monitor — future-only (the classic follow) or a back-catalog
+            // slice wished right now. Person/studio follows stay one-click.
+            done();                        // menu owns the flow from here
+            followMenu(b);
         } else {
-            var body = {
-                kind: kind, tmdb_id: Number(id),
-                title: b.getAttribute('data-vwl-title') || '',
-                poster_url: b.getAttribute('data-vwl-poster') || ''
-            };
-            var lib = b.getAttribute('data-vwl-libid');
-            if (lib) body.library_id = Number(lib);
-            fetch('/api/video/watchlist/add', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body)
-            }).then(function (r) { return r.json(); }).then(function (d) {
-                if (d && d.success) { syncAll(kind, id, true); toast('Added to watchlist', 'success'); }
-                else { toast((d && d.error) || 'Could not add', 'error'); }
-            }).catch(function () { toast('Watchlist update failed', 'error'); }).then(done);
+            follow(b, null, done);
         }
+    }
+
+    function follow(b, monitor, done) {
+        var kind = b.getAttribute('data-vwl-kind'), id = b.getAttribute('data-vwl-id');
+        var body = {
+            kind: kind, tmdb_id: Number(id),
+            title: b.getAttribute('data-vwl-title') || '',
+            poster_url: b.getAttribute('data-vwl-poster') || ''
+        };
+        var lib = b.getAttribute('data-vwl-libid');
+        if (lib) body.library_id = Number(lib);
+        if (monitor && monitor !== 'future') body.monitor = monitor;
+        fetch('/api/video/watchlist/add', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        }).then(function (r) { return r.json(); }).then(function (d) {
+            if (d && d.success) {
+                syncAll(kind, id, true);
+                var n = d.wished || 0;
+                toast(n ? 'Following — ' + n + ' episode' + (n === 1 ? '' : 's') + ' added to the wishlist'
+                        : 'Added to watchlist', 'success');
+                if (n) document.dispatchEvent(new CustomEvent('soulsync:video-wishlist-changed'));
+            } else { toast((d && d.error) || 'Could not add', 'error'); }
+        }).catch(function () { toast('Watchlist update failed', 'error'); }).then(done || function () {});
+    }
+
+    var MONITOR_OPTIONS = [
+        ['future', 'Follow — new episodes as they air'],
+        ['all', 'Follow + wishlist the entire back catalog'],
+        ['latest_season', 'Follow + wishlist the latest season'],
+        ['first_season', 'Follow + wishlist the first season'],
+        ['pilot', 'Follow + wishlist just the pilot'],
+    ];
+
+    function followMenu(b) {
+        var old = document.querySelector('.vwl-menu');
+        if (old) old.remove();
+        var m = document.createElement('div');
+        m.className = 'vwl-menu';
+        m.setAttribute('role', 'menu');
+        m.innerHTML = MONITOR_OPTIONS.map(function (o, i) {
+            return '<button type="button" class="vwl-menu-it' + (i === 0 ? ' vwl-menu-it--default' : '') +
+                '" role="menuitem" data-vwl-monitor="' + o[0] + '">' + o[1] + '</button>';
+        }).join('');
+        document.body.appendChild(m);
+        var r = b.getBoundingClientRect();
+        m.style.top = Math.min(window.innerHeight - m.offsetHeight - 8, r.bottom + 6) + 'px';
+        m.style.left = Math.max(8, Math.min(window.innerWidth - m.offsetWidth - 8, r.right - m.offsetWidth)) + 'px';
+        function closeMenu() {
+            m.remove();
+            document.removeEventListener('click', closer, true);
+            document.removeEventListener('keydown', onKey, true);
+        }
+        function closer(e) { if (!m.contains(e.target)) closeMenu(); }
+        function onKey(e) { if (e.key === 'Escape') closeMenu(); }
+        setTimeout(function () {
+            document.addEventListener('click', closer, true);
+            document.addEventListener('keydown', onKey, true);
+        }, 0);
+        m.addEventListener('click', function (e) {
+            var it = e.target.closest('[data-vwl-monitor]');
+            if (!it) return;
+            e.preventDefault();
+            e.stopPropagation();
+            var monitor = it.getAttribute('data-vwl-monitor');
+            closeMenu();
+            b.disabled = true;
+            follow(b, monitor, function () { b.disabled = false; });
+        });
     }
 
     // Batch-check watched state for every un-painted button under `root`.
