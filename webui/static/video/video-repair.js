@@ -1143,8 +1143,79 @@
         loadStatus();
         loadJobs();
         loadBackups();
+        wireRename();
         // Seed live progress for a job already running before this page opened.
         jget(API + '/progress').then(function (p) { if (p) updateProgress(p); });
+    }
+
+    // ── Mass Rename card (arr-parity P7) ──────────────────────────────────────
+    function wireRename() {
+        var card = document.querySelector('[data-video-rename-card]');
+        if (!card) return;
+        if (typeof currentProfile !== 'undefined' && currentProfile && !currentProfile.is_admin) {
+            card.style.display = 'none';
+            return;
+        }
+        if (card._vrnWired) return;
+        card._vrnWired = true;
+        var listEl = card.querySelector('[data-vrn-list]');
+        var applyBtn = card.querySelector('[data-vrn-apply]');
+        card.addEventListener('click', function (e) {
+            var pv = e.target.closest('[data-vrn-preview]');
+            if (pv) {
+                pv.disabled = true;
+                fetch('/api/video/organization/rename/preview', { headers: { 'Accept': 'application/json' } })
+                    .then(function (r) { return r.json(); })
+                    .then(function (d) {
+                        pv.disabled = false;
+                        if (!d || !d.success) throw new Error();
+                        var n = (d.entries || []).length;
+                        listEl.innerHTML = n
+                            ? '<div class="vbk-row"><span class="vbk-name"><strong>' + n + ' file(s)</strong> differ from your templates' +
+                              (d.unresolved ? ' · ' + d.unresolved + ' unresolved path(s) skipped' : '') + '</span></div>' +
+                              d.entries.slice(0, 8).map(function (en) {
+                                  return '<div class="vbk-row"><span class="vbk-name" title="' +
+                                      esc(en.current + ' → ' + en.proposed) + '">' +
+                                      esc(en.title) + '</span></div>';
+                              }).join('') + (n > 8 ? '<div class="vbk-empty">…and ' + (n - 8) + ' more</div>' : '')
+                            : '<div class="vbk-empty">Everything already matches your templates' +
+                              (d.unresolved ? ' (' + d.unresolved + ' unresolved path(s) skipped)' : '') + '.</div>';
+                        applyBtn.style.display = n ? '' : 'none';
+                    })
+                    .catch(function () { pv.disabled = false; if (typeof showToast === 'function') showToast('Preview failed', 'error'); });
+                return;
+            }
+            var ap = e.target.closest('[data-vrn-apply]');
+            if (ap) {
+                var run = function () {
+                    ap.disabled = true;
+                    fetch('/api/video/organization/rename/apply', { method: 'POST',
+                        headers: { 'Content-Type': 'application/json' }, body: '{}' })
+                        .then(function (r) { return r.json(); })
+                        .then(function (d) {
+                            ap.disabled = false;
+                            if (d && d.success) {
+                                if (typeof showToast === 'function') {
+                                    showToast(d.renamed + ' file(s) renamed' +
+                                        (d.skipped ? ', ' + d.skipped + ' skipped' : ''), 'success');
+                                }
+                                applyBtn.style.display = 'none';
+                                listEl.innerHTML = '<div class="vbk-empty">Done — run a library scan so the server re-adopts the names.</div>';
+                            } else if (typeof showToast === 'function') {
+                                showToast((d && d.error) || 'Rename failed', 'error');
+                            }
+                        })
+                        .catch(function () { ap.disabled = false; });
+                };
+                if (typeof showConfirmDialog === 'function') {
+                    showConfirmDialog({
+                        title: 'Rename these files on disk?',
+                        message: 'Every previewed file is moved to its template name. Sidecars travel along; occupied destinations are skipped, never overwritten.',
+                        confirmText: 'Rename', destructive: true,
+                    }).then(function (ok) { if (ok) run(); });
+                } else { run(); }
+            }
+        });
     }
 
     // ── Backups card (arr-parity P10) ─────────────────────────────────────────

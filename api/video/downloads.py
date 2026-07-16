@@ -257,6 +257,24 @@ def register_routes(bp):
             return jsonify({"success": False, "error": "Unknown list."}), 404
         return jsonify({"success": True})
 
+    # ── mass rename (arr-parity P7). Under /organization so the blueprint's
+    #    admin gate covers it (renaming the library is management). ───────────
+    @bp.route("/organization/rename/preview", methods=["GET"])
+    def video_rename_preview():
+        from core.video.mass_rename import preview
+        return jsonify({"success": True, **preview()})
+
+    @bp.route("/organization/rename/apply", methods=["POST"])
+    def video_rename_apply():
+        """Apply renames from a fresh preview. Body: {keys?: [...]} — omitted
+        keys means everything the preview found."""
+        from core.video.mass_rename import apply as apply_renames
+        body = request.get_json(silent=True) or {}
+        res = apply_renames(body.get("keys"))
+        if res.get("status") == "skipped":
+            return jsonify({"success": False, "error": "A rename run is already in progress."}), 409
+        return jsonify({"success": True, **res})
+
     @bp.route("/downloads/blocklist", methods=["GET"])
     def video_downloads_blocklist():
         """The release blocklist — exact remote files that will never be re-picked."""
