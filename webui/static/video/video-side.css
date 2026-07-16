@@ -1041,6 +1041,19 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 .vsr-card--skel { animation: none; cursor: default; pointer-events: none; }
 .vsr-card--skel .vsr-poster, .vsr-card--skel .vsr-studio-logo { box-shadow: none; border-color: rgba(255, 255, 255, 0.05); }
 .vsr-group { transition: opacity 0.24s ease; }
+
+/* recent searches — chips above the idle trending rail */
+.vsr-recent { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 0 0 22px; }
+.vsr-recent-label { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em;
+    color: rgba(255, 255, 255, 0.35); margin-right: 2px; }
+.vsr-recent-chip { border: 1px solid rgba(255, 255, 255, 0.12); background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.75); font-size: 12.5px; font-weight: 600; padding: 6px 13px;
+    border-radius: 999px; cursor: pointer; max-width: 220px; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; transition: all 0.15s ease; }
+.vsr-recent-chip:hover { color: #fff; background: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.24); }
+.vsr-recent-clear { border: 0; background: transparent; color: rgba(255, 255, 255, 0.3); font-size: 12px;
+    cursor: pointer; padding: 6px 8px; border-radius: 999px; transition: color 0.15s ease; }
+.vsr-recent-clear:hover { color: #f87171; }
 .vsr-group--gone { opacity: 0; }
 .vsr-grid > .vsr-card:not(.vsr-card--skel):nth-child(2) { animation-delay: 0.03s; }
 .vsr-grid > .vsr-card:not(.vsr-card--skel):nth-child(3) { animation-delay: 0.06s; }
