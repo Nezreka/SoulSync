@@ -676,12 +676,49 @@
         host.innerHTML = html;
     }
 
+    // ── per-title acquisition history (arr-parity P9) ─────────────────────────
+    // Every grab/import/upgrade/failure this title has ever had, from the
+    // permanent archive. Library-source pages only (the id keys the lookup).
+    var _HIST_OUTCOME = {
+        completed: ['Imported', 'vd-hist-chip--ok'],
+        import_failed: ['Needs import', 'vd-hist-chip--warn'],
+        failed: ['Failed', 'vd-hist-chip--bad'],
+        cancelled: ['Cancelled', 'vd-hist-chip--mut'],
+    };
+    function loadTitleHistory(kind, id) {
+        var section = q('[data-vd-history-section]'), host = q('[data-vd-history]');
+        if (!section || !host) return;
+        fetch('/api/video/detail/' + kind + '/' + id + '/history', { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                var rows = (d && d.history) || [];
+                if (!rows.length) { section.hidden = true; return; }
+                host.innerHTML = rows.map(function (h) {
+                    var oc = _HIST_OUTCOME[h.outcome] || _HIST_OUTCOME.completed;
+                    var se = (h.season_number != null && h.episode_number != null)
+                        ? 'S' + String(h.season_number).padStart(2, '0') + 'E' + String(h.episode_number).padStart(2, '0') + ' · '
+                        : '';
+                    var bits = [h.quality_label, h.source,
+                        h.size_bytes ? (Math.round(h.size_bytes / 1e8) / 10 + ' GB') : null,
+                        (h.created_at || '').slice(0, 10)].filter(Boolean).join(' · ');
+                    return '<div class="vd-hist-row">' +
+                        '<span class="vd-hist-chip ' + oc[1] + '">' + oc[0] + '</span>' +
+                        '<span class="vd-hist-main"><span class="vd-hist-rel">' + se +
+                            esc(h.release_title || h.filename || '?') + '</span>' +
+                        '<span class="vd-hist-sub">' + esc(bits) + '</span></span>' +
+                        '</div>';
+                }).join('');
+                section.hidden = false;
+            })
+            .catch(function () { section.hidden = true; });
+    }
+
     // ── live TMDB extras (trailer / where-to-watch / similar) ─────────────────
     function resetExtras() {
         ['[data-vd-providers-section]', '[data-vd-similar-section]', '[data-vd-collection-section]',
          '[data-vd-next-ep]', '[data-vd-crew-line]', '[data-vd-season-overview]',
          '[data-vd-facts-section]', '[data-vd-videos-section]', '[data-vd-gallery-section]',
-         '[data-vd-review-section]', '[data-vd-cast-all]'].forEach(function (s) {
+         '[data-vd-review-section]', '[data-vd-cast-all]', '[data-vd-history-section]'].forEach(function (s) {
             var n = q(s); if (n) n.hidden = true;
         });
         // Clear any YouTube-channel playlists from the show DOM so they don't leak
@@ -1572,6 +1609,7 @@
                 } else {
                     maybeRefreshMovie(id);
                     loadExtras('movie', id);
+                    loadTitleHistory('movie', id);    // acquisition history (P9)
                     watchMovieDownload(id);           // live download progress chip (if any)
                 }
             })
@@ -1646,6 +1684,7 @@
                 } else {
                     maybeRefreshArt(id);
                     loadExtras('show', id);
+                    loadTitleHistory('show', id);     // acquisition history (P9)
                 }
             })
             .catch(function () { showLoading(false); setText('[data-vd-title]', 'Could not load show'); });

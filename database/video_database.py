@@ -2052,6 +2052,34 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def title_download_history(self, kind: str, *, library_id=None, tmdb_id=None,
+                               limit=50) -> list:
+        """This TITLE's permanent acquisition history (arr-parity P9): every
+        grab/import/upgrade/failure archived for it, newest first. A title can
+        appear under BOTH identities (grabbed from a TMDB preview page before
+        it was owned, re-grabbed from the library page after), so both are
+        matched."""
+        idents = []
+        if library_id:
+            idents.append(("library", str(library_id)))
+        if tmdb_id:
+            idents.append(("tmdb", str(tmdb_id)))
+        if not idents:
+            return []
+        where = " OR ".join("(media_source=? AND media_id=?)" for _ in idents)
+        args = [v for pair in idents for v in pair]
+        conn = self._get_connection()
+        try:
+            return [dict(r) for r in conn.execute(
+                "SELECT * FROM video_download_history WHERE kind IN (?, 'episode') AND (" + where + ") "
+                "ORDER BY id DESC LIMIT ?",
+                [kind] + args + [max(1, int(limit))])]
+        except sqlite3.Error:
+            logger.exception("title_download_history failed")
+            return []
+        finally:
+            conn.close()
+
     def clear_finished_video_downloads(self) -> int:
         conn = self._get_connection()
         try:
