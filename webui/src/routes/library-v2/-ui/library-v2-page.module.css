@@ -2888,3 +2888,77 @@ textarea.searchInput {
   background: rgba(255, 255, 255, 0.08);
   margin: 4px 0;
 }
+
+/* Custom styled checkboxes within all library-v2-page elements */
+.checkboxInput,
+.trackTable input[type='checkbox'],
+.table input[type='checkbox'],
+.editRow input[type='checkbox'],
+.tableOptionsItem input[type='checkbox'],
+.modal input[type='checkbox'] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+  vertical-align: middle;
+}
+
+.checkboxInput:hover:not(:disabled),
+.trackTable input[type='checkbox']:hover:not(:disabled),
+.table input[type='checkbox']:hover:not(:disabled),
+.editRow input[type='checkbox']:hover:not(:disabled),
+.tableOptionsItem input[type='checkbox']:hover:not(:disabled),
+.modal input[type='checkbox']:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.checkboxInput:checked,
+.trackTable input[type='checkbox']:checked,
+.table input[type='checkbox']:checked,
+.editRow input[type='checkbox']:checked,
+.tableOptionsItem input[type='checkbox']:checked,
+.modal input[type='checkbox']:checked {
+  background: rgba(var(--accent-rgb), 0.7);
+  border-color: rgba(var(--accent-rgb), 0.7);
+}
+
+.checkboxInput:checked::after,
+.trackTable input[type='checkbox']:checked::after,
+.table input[type='checkbox']:checked::after,
+.editRow input[type='checkbox']:checked::after,
+.tableOptionsItem input[type='checkbox']:checked::after,
+.modal input[type='checkbox']:checked::after {
+  content: '';
+  width: 3px;
+  height: 6px;
+  border: solid white;
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+  position: absolute;
+  top: 3px;
+  left: 6px;
+}
+
+.checkboxInput:disabled,
+.trackTable input[type='checkbox']:disabled,
+.table input[type='checkbox']:disabled,
+.editRow input[type='checkbox']:disabled,
+.tableOptionsItem input[type='checkbox']:disabled,
+.modal input[type='checkbox']:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: rgba(255, 255, 255, 0.02);
+  border-color: rgba(255, 255, 255, 0.1);
+}
