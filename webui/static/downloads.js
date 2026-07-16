@@ -6804,28 +6804,46 @@ async function checkForUpdates() {
         const btn = document.querySelector('.version-button');
         if (!btn) return;
         if (data.update_available) {
+            // Kazimir's severity glow: green = routine release, yellow = major
+            // version, red = critical/security. Dismissal is per-version — a
+            // NEW release glows again — and a critical release never stays
+            // dismissed.
+            const updateKey = data.latest_version || data.latest_sha;
+            const severity = data.severity || 'update';
             const dismissed = localStorage.getItem('soulsync-update-dismissed');
-            if (dismissed !== data.latest_sha) {
-                // Add glow class
-                btn.classList.add('update-available');
-                // Add UPDATE badge if not already present
-                if (!btn.querySelector('.update-badge')) {
-                    const badge = document.createElement('span');
+            if (dismissed !== updateKey || severity === 'critical') {
+                btn.classList.remove('update-available--update', 'update-available--major',
+                                     'update-available--critical');
+                btn.classList.add('update-available', 'update-available--' + severity);
+                btn.title = data.latest_version
+                    ? ('v' + data.latest_version + ' is available'
+                        + (severity === 'critical' ? ' — critical update'
+                            : severity === 'major' ? ' — major release' : ''))
+                    : 'A new update is available';
+                let badge = btn.querySelector('.update-badge');
+                if (!badge) {
+                    badge = document.createElement('span');
                     badge.className = 'update-badge';
-                    badge.textContent = 'UPDATE';
                     btn.appendChild(badge);
                 }
+                badge.textContent = severity === 'critical' ? 'CRITICAL'
+                    : severity === 'major' ? 'MAJOR' : 'UPDATE';
                 // Show toast on first detection (not if already notified this session)
                 const notified = sessionStorage.getItem('soulsync-update-notified');
-                if (notified !== data.latest_sha) {
-                    sessionStorage.setItem('soulsync-update-notified', data.latest_sha);
+                if (notified !== updateKey) {
+                    sessionStorage.setItem('soulsync-update-notified', updateKey);
+                    const what = data.latest_version
+                        ? `SoulSync v${data.latest_version} is available!`
+                        : 'A new SoulSync update is available!';
                     showToast(data.is_docker
-                        ? 'A new SoulSync update has been pushed to the repo — Docker image will be updated soon!'
-                        : 'A new SoulSync update is available!', 'info');
+                        ? what + ' The Docker image will be updated soon.'
+                        : what, severity === 'critical' ? 'error' : 'info');
                 }
             }
         } else {
-            btn.classList.remove('update-available');
+            btn.classList.remove('update-available', 'update-available--update',
+                                 'update-available--major', 'update-available--critical');
+            btn.removeAttribute('title');
             const badge = btn.querySelector('.update-badge');
             if (badge) badge.remove();
         }
@@ -6840,17 +6858,20 @@ async function showVersionInfo() {
     const btn = document.querySelector('.version-button');
     const hadUpdate = btn && btn.classList.contains('update-available');
 
-    // Dismiss update glow when user opens the modal
+    // Dismiss update glow when user opens the modal (per-version — a newer
+    // release glows again; a critical one re-glows on the next check).
     if (hadUpdate) {
-        btn.classList.remove('update-available');
+        btn.classList.remove('update-available', 'update-available--update',
+                             'update-available--major', 'update-available--critical');
         const badge = btn.querySelector('.update-badge');
         if (badge) badge.remove();
         try {
             const updateRes = await fetch('/api/update-check');
             if (updateRes.ok) {
                 updateInfo = await updateRes.json();
-                if (updateInfo.latest_sha) {
-                    localStorage.setItem('soulsync-update-dismissed', updateInfo.latest_sha);
+                const key = updateInfo.latest_version || updateInfo.latest_sha;
+                if (key) {
+                    localStorage.setItem('soulsync-update-dismissed', key);
                 }
             }
         } catch (e) { /* ignore */ }
@@ -6910,13 +6931,23 @@ function populateVersionModal(versionData, updateInfo) {
         const banner = document.createElement('div');
         banner.className = 'version-update-banner';
         const isDocker = updateInfo.is_docker;
+        const sev = updateInfo.severity;
+        const heading = sev === 'critical' ? 'Critical update available'
+            : sev === 'major' ? 'Major release available'
+            : (isDocker ? 'Update detected' : 'New update available');
+        const detail = updateInfo.latest_version
+            ? `You're on v${updateInfo.current_version || '?'} &mdash; v${updateInfo.latest_version} is out.`
+                + (isDocker ? ' The Docker image updates shortly after each release.' : '')
+                + (updateInfo.release_url
+                    ? ` <a href="${updateInfo.release_url}" target="_blank" rel="noopener">Release notes</a>` : '')
+            : (isDocker
+                ? 'A new update has been pushed to the repo. The Docker image will be updated soon — no action needed yet.'
+                : `Your version: ${updateInfo.current_sha || 'unknown'} &rarr; Latest: ${updateInfo.latest_sha || 'unknown'}`);
         banner.innerHTML = `
             <div class="version-update-banner-icon">&#x2B06;</div>
             <div class="version-update-banner-text">
-                <strong>${isDocker ? 'Repo update detected' : 'New update available'}</strong>
-                <span>${isDocker
-                ? 'A new update has been pushed to the repo. The Docker image will be updated soon — no action needed yet.'
-                : `Your version: ${updateInfo.current_sha || 'unknown'} &rarr; Latest: ${updateInfo.latest_sha || 'unknown'}`}</span>
+                <strong>${heading}</strong>
+                <span>${detail}</span>
             </div>
         `;
         container.appendChild(banner);

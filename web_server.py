@@ -17280,12 +17280,24 @@ def _get_current_commit_sha():
 _current_commit_sha = _get_current_commit_sha()
 
 def _check_for_updates():
-    """Check GitHub for the latest commit SHA on main branch."""
+    """Check GitHub for the latest RELEASE (version + severity) and, as a
+    fallback signal for git-pull users running between releases, the latest
+    commit SHA on main."""
     import time as _time
     now = _time.time()
     if now - _update_cache['last_check'] < _UPDATE_CHECK_INTERVAL:
         return  # Still fresh
     _update_cache['last_check'] = now
+    # Releases first — this is what drives the version glow (green routine /
+    # yellow major / red critical) and gives the user a number, not a hash.
+    try:
+        from core.update_check import evaluate_update, fetch_releases
+        releases = fetch_releases(_GITHUB_REPO)
+        _update_cache['release_info'] = evaluate_update(_SOULSYNC_BASE_VERSION, releases)
+        _update_cache['error'] = None
+    except Exception as e:
+        _update_cache['error'] = str(e)
+        logger.debug(f"Release check failed: {e}")
     try:
         import urllib.request
         import json as _json
@@ -17296,22 +17308,30 @@ def _check_for_updates():
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = _json.loads(resp.read().decode())
             _update_cache['latest_sha'] = data.get('sha')
-            _update_cache['error'] = None
     except Exception as e:
         _update_cache['error'] = str(e)
         logger.debug(f"Update check failed: {e}")
 
 @app.route('/api/update-check', methods=['GET'])
 def check_for_update():
-    """Check if a newer version is available on GitHub."""
+    """Check if a newer version is available on GitHub. Release-aware: a
+    published release newer than the running base version reports its
+    number + severity; the commit-SHA comparison stays as the fallback
+    signal when no release info is available."""
     _check_for_updates()
     current = _current_commit_sha
     latest = _update_cache.get('latest_sha')
-    update_available = bool(current and latest and current != latest)
+    rel = _update_cache.get('release_info') or {}
+    sha_update = bool(current and latest and current != latest)
+    update_available = bool(rel.get('available')) or (not rel and sha_update)
     return jsonify({
         'update_available': update_available,
         'current_sha': current[:8] if current else None,
         'latest_sha': latest[:8] if latest else None,
+        'current_version': _SOULSYNC_BASE_VERSION,
+        'latest_version': rel.get('latest_version'),
+        'severity': rel.get('severity'),
+        'release_url': rel.get('release_url'),
         'is_docker': os.path.exists('/.dockerenv'),
     })
 
