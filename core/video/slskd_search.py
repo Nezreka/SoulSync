@@ -66,15 +66,26 @@ def _conn():
 
 
 def build_query(scope: str, title: Any, *, year: Any = None, season: Any = None,
-                episode: Any = None) -> str:
-    """The text we hand slskd for a given scope (movie / episode / season / series)."""
+                episode: Any = None, air_date: Any = None, absolute: Any = None,
+                series_type: Any = None) -> str:
+    """The text we hand slskd for a given scope (movie / episode / season / series).
+    Series type (P8) picks the episode identity the SCENE actually names releases
+    by: daily shows release by air date ('Title 2026.07.08'), anime by absolute
+    number ('Title 1071') — an SxxExx query would simply never find those."""
     t = str(title or "").strip()
     scope = (scope or "movie").lower()
+    st = str(series_type or "").lower()
     try:
         s_i = int(season) if season is not None else None
         e_i = int(episode) if episode is not None else None
     except (TypeError, ValueError):
         s_i = e_i = None
+    if scope == "episode":
+        ad = str(air_date or "")[:10]
+        if st == "daily" and len(ad) == 10:
+            return "%s %s" % (t, ad.replace("-", "."))
+        if st == "anime" and absolute:
+            return "%s %s" % (t, absolute)
     if scope == "episode" and s_i is not None and e_i is not None:
         return "%s S%02dE%02d" % (t, s_i, e_i)
     if scope == "season" and s_i is not None:

@@ -169,6 +169,20 @@ def search_context(item: Dict[str, Any], media_type: str) -> Dict[str, Any]:
                # full air date — daily series (Daily Show / Kimmel / soaps) release by
                # DATE, not SxxExx; the ranker + retry queries key off this.
                "air_date": (str(item.get("air_date") or "")[:10] or None)}
+        # Series type (P8): daily/anime shows QUERY differently. Anime also carries
+        # the wanted ABSOLUTE episode number (scene anime is numbered 'Show - 1071',
+        # no season) — derived from the library's episode list, best-effort.
+        stype = str(item.get("series_type") or "").strip().lower()
+        if stype in ("daily", "anime"):
+            ctx["series_type"] = stype
+        if stype == "anime":
+            try:
+                from api.video import get_video_db
+                ctx["absolute"] = get_video_db().episode_absolute_number(
+                    item.get("show_tmdb_id"), item.get("season_number"),
+                    item.get("episode_number"))
+            except Exception:   # noqa: BLE001 - a numbering assist must never break a grab
+                ctx["absolute"] = None
         tmdb_id, kind = item.get("show_tmdb_id"), "show"
     titles = _acceptable_titles(ctx["title"], kind, tmdb_id)
     if len(titles) > 1:
@@ -273,7 +287,9 @@ def _search_one_source(source: str, item: Dict[str, Any], media_type: str):
         from core.video.download_monitor import _search_for_retry
         from core.video.slskd_search import build_query
         query = build_query(ctx["scope"], ctx["title"], year=ctx.get("year"),
-                            season=ctx.get("season"), episode=ctx.get("episode"))
+                            season=ctx.get("season"), episode=ctx.get("episode"),
+                            air_date=ctx.get("air_date"), absolute=ctx.get("absolute"),
+                            series_type=ctx.get("series_type"))
         res = _search_for_retry(query) or {}
         if res.get("started") is False:
             return None, res.get("error")
@@ -281,7 +297,9 @@ def _search_one_source(source: str, item: Dict[str, Any], media_type: str):
     elif source in ("torrent", "usenet"):
         from core.video.prowlarr_search import prowlarr_search
         pres = prowlarr_search(ctx["scope"], ctx["title"], year=ctx.get("year"),
-                               season=ctx.get("season"), episode=ctx.get("episode"), source=source)
+                               season=ctx.get("season"), episode=ctx.get("episode"), source=source,
+                               air_date=ctx.get("air_date"), absolute=ctx.get("absolute"),
+                               series_type=ctx.get("series_type"))
         if not pres.get("configured"):
             return None, "Prowlarr not configured"
         if pres.get("error"):
@@ -292,7 +310,7 @@ def _search_one_source(source: str, item: Dict[str, Any], media_type: str):
     cands = _evaluate_hits(hits, profile, ctx["scope"], ctx.get("season"), ctx.get("episode"),
                            want_year=ctx.get("year"),
                            want_title=ctx.get("titles") or ctx.get("title"),
-                           want_date=ctx.get("air_date"))
+                           want_date=ctx.get("air_date"), want_absolute=ctx.get("absolute"))
     for c in cands:
         c["source"] = source
     return cands, None

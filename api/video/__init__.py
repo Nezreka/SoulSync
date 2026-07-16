@@ -91,7 +91,10 @@ def create_video_blueprint() -> Blueprint:
             # views only READ metadata (the detail GET stays open); these MUTATE the library.
             admin = admin or _p("/api/video/bulk", "/api/video/monitor",
                                  "/api/video/poster/set", "/api/video/downloads/blocklist") \
-                or path.endswith(("/metadata", "/lock", "/refresh-art"))
+                or path.endswith(("/metadata", "/lock", "/refresh-art",
+                                  # per-title acquisition settings (P2/P8) — management,
+                                  # same as the metadata edits above
+                                  "/quality-profile", "/series-type"))
         if admin and not is_admin:
             return jsonify({"error": "Admin only."}), 403
 
