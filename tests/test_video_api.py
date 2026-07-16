@@ -565,8 +565,16 @@ def test_enrichment_endpoints(tmp_path):
         assert st["enabled"] is True and st["stats"]["pending"] == 1
 
         db.enrichment_apply("tmdb", "movie", mid, matched=False)
+        # CI-only phantom: prove each link separately so the next failure
+        # names the culprit (write not sticking vs engine/db swapped mid-test).
+        direct = db.enrichment_breakdown("tmdb")
+        assert direct.get("movie", {}).get("not_found") == 1, \
+            f"enrichment_apply did not stick on the test's own db handle: {direct}"
+        assert eng_mod._engine is not None and eng_mod._engine.db is db, \
+            f"engine/db swapped mid-test: engine={eng_mod._engine!r}"
         bd = client.get("/api/video/enrichment/tmdb/breakdown").get_json()
-        assert bd["breakdown"]["movie"]["not_found"] == 1
+        assert bd["breakdown"]["movie"]["not_found"] == 1, \
+            f"endpoint disagrees with the direct read: {bd}"
         un = client.get("/api/video/enrichment/tmdb/unmatched?kind=movie&status=not_found").get_json()
         assert un["total"] == 1 and un["kind"] == "movie"
 
