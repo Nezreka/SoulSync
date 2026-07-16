@@ -368,6 +368,8 @@ ACTIONS: list[dict] = [
      ]},
     {"type": "video_rss_sync", "label": "RSS Sync (Instant Grabs)", "icon": "download", "scope": "video",
      "description": "Sonarr-speed acquisition: every few minutes, pull your indexers' newest releases from Prowlarr (one aggregate call, no searching) and instantly grab any that match your wishlist — a wanted episode lands minutes after it's posted instead of at the next hourly drain. Respects your quality profile, upgrade cutoff, blocklist and download mode (needs torrent/usenet enabled + Prowlarr). Pair with a 15-minute schedule.", "available": True},
+    {"type": "video_import_lists", "label": "Sync Import Lists", "icon": "list", "scope": "video",
+     "description": "Radarr/Sonarr Import Lists: everything on your configured external lists (TMDB lists, TMDB/IMDb charts, IMDb user lists, your Plex account watchlist) enters acquisition automatically — movies wishlist, shows follow with the list's monitor policy. Only NEW list members are added, so removing something you didn't want never boomerangs back. Configure lists on Settings → Downloads. Pair with a 6-hourly schedule.", "available": True},
     {"type": "video_seeding_sweep", "label": "Seeding Sweep", "icon": "download", "scope": "video",
      "description": "Radarr's seed-until-done tail: once a completed torrent grab reaches your seed ratio or seed time goal (Settings → Downloads), remove it from the torrent client — including the client's copy of the file (your imported library copy is separate and never touched). Off until you set a goal. Pair with a half-hourly schedule.", "available": True},
     {"type": "video_process_youtube_wishlist", "label": "Process YouTube Wishlist", "icon": "download", "scope": "video",
