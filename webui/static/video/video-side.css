@@ -4426,11 +4426,15 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 /* ── Library cards: rating · watched tick · show status chip · progress line ── */
 .vlib-rate { color: #fbbf24; font-weight: 700; white-space: nowrap; }
 .vlib-watched { color: #2bd17e; font-weight: 800; }
-.vlib-chip { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 0.68rem;
-    font-weight: 700; letter-spacing: 0.02em; vertical-align: 1px; border: 1px solid transparent; }
-.vlib-chip--airing { color: #2bd17e; background: rgba(34, 197, 94, 0.13); border-color: rgba(34, 197, 94, 0.32); }
-.vlib-chip--ended { color: rgba(255, 255, 255, 0.55); background: rgba(255, 255, 255, 0.07); border-color: rgba(255, 255, 255, 0.14); }
-.vlib-chip--upcoming { color: #60a5fa; background: rgba(96, 165, 250, 0.12); border-color: rgba(96, 165, 250, 0.3); }
+/* Show lifecycle on the poster corner (movies wear resolution there) — the
+   stat line is too tight on small cards to carry it. */
+.library-artist-card .video-card-badge--airing { color: #2bd17e; background: rgba(10, 40, 22, 0.82);
+    border: 1px solid rgba(34, 197, 94, 0.4); }
+.library-artist-card .video-card-badge--ended { color: rgba(255, 255, 255, 0.72); background: rgba(20, 20, 24, 0.82);
+    border: 1px solid rgba(255, 255, 255, 0.18); }
+.library-artist-card .video-card-badge--upcoming { color: #60a5fa; background: rgba(12, 25, 48, 0.82);
+    border: 1px solid rgba(96, 165, 250, 0.38); }
+
 /* slim owned-episodes progress under a show card's stats */
 .vlib-prog { margin-top: 7px; height: 3px; border-radius: 999px; background: rgba(255, 255, 255, 0.09); overflow: hidden; }
 .vlib-prog-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, rgba(164, 114, 245, 0.65), rgb(164, 114, 245)); }

@@ -548,13 +548,18 @@ def test_library_toolbar_has_rating_sort_watched_filter_and_genre_dropdown():
     assert "/api/video/library/genres?kind=" in _LIB_JS
 
 
-def test_library_cards_show_rating_show_progress_and_status_chip():
+def test_library_cards_show_rating_show_progress_and_status_badge():
     assert "vlib-rate" in _LIB_JS                      # ★ rating in the stat line
     assert "vlib-watched" in _LIB_JS                   # watched tick on movie cards
-    assert "function showStatusChip(" in _LIB_JS       # Airing/Ended/Upcoming chip
+    # Airing/Ended/Upcoming moved to the POSTER CORNER (Boulder: the stat line
+    # is too tight on small cards to fit it after year/★/eps/size)
+    assert "function showStatusBadge(" in _LIB_JS
+    assert 'video-card-badge video-card-badge--airing' in _LIB_JS
+    assert "showStatusChip" not in _LIB_JS             # the stat-line chip is gone
     assert "vlib-prog" in _LIB_JS                      # owned-episodes progress line
     css = _CSS_PATH.read_text(encoding="utf-8")
-    for cls in (".vlib-rate", ".vlib-chip--airing", ".vlib-chip--ended", ".vlib-prog-fill"):
+    for cls in (".vlib-rate", ".video-card-badge--airing", ".video-card-badge--ended",
+                ".video-card-badge--upcoming", ".vlib-prog-fill"):
         assert cls in css, cls
 
 
