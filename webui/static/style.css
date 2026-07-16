@@ -28658,12 +28658,19 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
 .artist-image-container {
     position: relative;
     flex-shrink: 0;
+    /* Bound relative to the PARENT, not the viewport: the old 40vw cap let a
+       huge source image (Deezer ships up to 1000px) out-muscle its flex
+       siblings whenever the hero was narrower than the viewport — the info
+       column collapsed ("KISS" clipped to "KIS") and overlapped the fixed
+       280px Top Tracks sidebar (#1036). 38% + sidebar + gaps always leaves
+       the info column real room. */
+    max-width: min(38%, 460px);
 }
 
 #artist-hero-section #artist-detail-image {
     width: 100%;
     height: auto;
-    max-width: 40vw;
+    max-width: 100%;
 }
 
 .artist-detail-image {
@@ -71371,3 +71378,28 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
     vertical-align: 2px; transition: all 0.15s ease; }
 .sact-open::after { content: 'Open ↗'; }
 .sact-card--link:hover .sact-open { background: rgba(var(--vd-accent-rgb, 88 101 242), 0.3); }
+
+/* ── Artist photo picker (hover overlay on the artist-detail hero image) ─── */
+/* Mirrors .enhanced-art-edit-overlay: invisible until hover, click opens the
+   per-source photo picker (openArtistArtPicker). Container already clips. */
+.artist-image-container { cursor: pointer; }
+.artist-image-edit-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: .02em;
+    background: linear-gradient(to top, rgba(0,0,0,.78), rgba(0,0,0,.28));
+    opacity: 0;
+    transition: opacity .18s ease;
+    border-radius: inherit;
+    z-index: 2;
+}
+.artist-image-container:hover .artist-image-edit-overlay { opacity: 1; }
+.artist-image-edit-overlay svg { opacity: .95; }

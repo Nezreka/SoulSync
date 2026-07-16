@@ -746,3 +746,34 @@ def create_lossy_copy(final_path, settings=None):
     except Exception as e:
         logger.error(f"[Lossy Copy] Conversion error: {e}")
     return None
+
+
+# Sidecars that belong to ONE audio file (same filename stem) and should travel
+# with it. Only synced lyrics for now: .nfo/.txt/.json alongside downloads are
+# usually release junk the import correctly leaves behind, but a .lrc IS part
+# of the track (SoulSync even generates them) — imports used to move the audio
+# and strand the lyrics in the source folder (lilbob5769's report).
+_COMPANION_SIDECAR_EXTS = ('.lrc',)
+
+
+def move_companion_sidecars(src_audio, dst_audio) -> List[str]:
+    """Move same-stem companion sidecars along with their track, renamed to the
+    destination stem. Called after the audio file itself has moved. Best-effort
+    per sidecar — a lyrics problem must never fail the track import. Returns
+    the destination paths of everything moved."""
+    moved: List[str] = []
+    src_stem, _ = os.path.splitext(str(src_audio))
+    dst_stem, _ = os.path.splitext(str(dst_audio))
+    for ext in _COMPANION_SIDECAR_EXTS:
+        for candidate in (src_stem + ext, src_stem + ext.upper()):
+            if not os.path.isfile(candidate):
+                continue
+            try:
+                target = dst_stem + ext
+                safe_move_file(candidate, target)
+                moved.append(target)
+                logger.info(f"Moved companion sidecar with track: {os.path.basename(target)}")
+            except Exception as e:
+                logger.warning(f"Could not move sidecar {candidate}: {e}")
+            break
+    return moved

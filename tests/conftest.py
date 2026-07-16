@@ -1078,8 +1078,30 @@ def _inert_video_enrichment_engine():
     yield engine
 
 
+@pytest.fixture(autouse=True, scope='session')
+def _inert_video_download_monitor():
+    """Pre-mark the video download monitor as started so no test can spawn it.
+
+    ensure_started() launches a daemon thread on the first grab-shaped call
+    (the /youtube/download endpoint, manual grabs, ...). In the suite that
+    thread then lives FOREVER, and its loop calls the LIVE db_provider —
+    get_video_db() — which resolves to whichever per-test database happens to
+    be installed at that moment: it re-queues orphans, pumps youtube workers,
+    and mutates rows in other tests' databases. Caught on camera by the
+    self-describing assert in test_youtube_episode_parity: 'youtube recovery:
+    re-queued 0 orphan(s), started 3 worker(s)' fired mid-test and called the
+    test's stubbed start_next_queued three extra times. Same hermeticity rule
+    as the enrichment fleet above; production is untouched (the flag is only
+    pre-set inside pytest).
+    """
+    import core.video.download_monitor as monitor
+    with monitor._lock:
+        monitor._started = True
+    yield
+
+
 @pytest.fixture(autouse=True)
-def reset_state(_inert_video_enrichment_engine):
+def reset_state(_inert_video_enrichment_engine, _inert_video_download_monitor):
     """Reset all mutable state between tests."""
     # Video enrichment engine: re-install the inert (never-started) singleton
     # so an engine a previous test set never leaks into the next one.

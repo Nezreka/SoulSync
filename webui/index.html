@@ -4457,9 +4457,13 @@
 
                     <div class="artist-hero-content">
                         <!-- Left: Image -->
-                        <div class="artist-image-container">
+                        <div class="artist-image-container" title="Change artist photo" onclick="openArtistArtPicker()">
                             <img class="artist-image" id="artist-detail-image" src="" alt="Artist Image" />
                             <div class="artist-image-fallback" id="artist-detail-image-fallback">🎵</div>
+                            <div class="artist-image-edit-overlay">
+                                <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+                                <span>Change photo</span>
+                            </div>
                         </div>
 
                         <!-- Center: Identity + Meta -->

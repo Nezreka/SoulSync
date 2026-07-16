@@ -46,18 +46,25 @@ def test_direct_download_requires_a_youtube_folder(client):
 def test_direct_download_enqueues_like_the_wishlist_drain(client, monkeypatch):
     """Same row shape as the automation's enqueue: kind/source youtube, ctx with
     channel identity, target_dir = the youtube root — and the pump is kicked."""
+    import core.video.disk_guard as disk_guard
     import core.video.youtube_download as ytd
     c, db = client
     db.set_setting("youtube_path", "/media/youtube")
     started = []
     monkeypatch.setattr(ytd, "start_next_queued", lambda provider: started.append(1) or 7)
+    # Hermetic: the enqueue path probes REAL free disk space for the target
+    # dir's nearest existing ancestor ('/' on a CI runner, whose fill level
+    # varies run to run). The guard is not what this test is about.
+    monkeypatch.setattr(disk_guard, "has_room", lambda root, settings: (True, None))
 
     r = c.post("/api/video/youtube/download", json={
         "video_id": "vid42", "channel_id": "UC9", "channel_title": "Veritasium",
         "video_title": "Big Misconception", "published_at": "2026-07-01",
         "thumbnail_url": "https://yt/t.jpg"})
     out = r.get_json()
-    assert out["success"] is True and out["started"] is True and started == [1]
+    assert out.get("success") is True, f"download endpoint refused: {out}"
+    assert out.get("started") is True and started == [1], \
+        f"pump not kicked: {out}, started={started}"
 
     rows = db.list_video_downloads()
     assert len(rows) == 1

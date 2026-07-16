@@ -3404,19 +3404,18 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Convention: keep only the CURRENT release here, plus a single brief
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '3.0.4': [
-        { date: 'July 2026 — 3.0.4' },
-        { title: 'Video: Discover 2.0', desc: 'the discover page rebuilt top to bottom — a billboard hero with real title logo art, one clean header with a preferences popover, browse-by-genre tiles, live filters in grid views, and a feed that\'s actually endless. view more pages forever now, grids respect hide-owned, and it lazy-renders so it stays fast.' },
-        { title: 'Profiles: music, video, or both', desc: 'each profile can be music-only, video-only, or both (new profiles default to music-only). single-side profiles never see the music/video switcher, blocked-side page options disable automatically, and there\'s no toggle flash on reload.' },
-        { title: 'Video: wishlist state on every card', desc: 'search results, discover cards, the hero button, more-like-this cards and the get modal all show wishlisted / in-library state now, instead of offering to add something you already have.' },
-        { title: 'Tidal download source survives restarts (#1002)', desc: 'a startup ordering bug wiped the saved session from memory on every docker boot before it could be verified — which is why the logs showed nothing and the earlier fix never seemed to take. boot network blips retry now instead of dropping a valid session. re-add tidal to your hybrid order once after updating.' },
-        { title: 'Torrent grabs work in split-container setups', desc: 'soulsync downloads the .torrent itself and hands your client the file (like sonarr/radarr) instead of passing a prowlarr url the client may not be able to resolve. all four clients, music and video.' },
-        { title: 'Amazon Music works again (#1033)', desc: 't2tunes changed their api format. search, downloads and file tags (track/disc numbers, covers, dates) all read the new format; the old format still parses for self-hosted instances.' },
-        { title: 'Owned artists respect the source you clicked (#1026)', desc: 'opening an owned artist from a deezer/itunes/tidal card shows that source\'s catalog instead of snapping back to your primary source.' },
-        { title: 'Playlist sync same-artist mismatch (#769)', desc: '"Dani California" could match "Californication" with high confidence — same artist plus a shared substring was enough. title similarity actually has to earn it now.' },
-        { title: 'One shared slskd search budget', desc: 'music and video each had their own rate limiter, so together they could double slskd\'s search limit and eat 429s. one shared budget now, and a manual search says the window is busy instead of hanging.' },
-        { title: 'Idle CPU drop', desc: 'the dashboard websocket push loops (including one that polled slskd every 2 seconds) skip entirely while no browser is connected. thanks thegabriele97 (#1030).' },
-        { title: 'Earlier versions', desc: '3.0.3 added whole-show wishlisting, a per-service match editor, per-side automation pause, and fixed the Corrupt File Detector scanning nothing. 3.0.2 made video downloads smarter and took the video side mobile. 3.0.1 shipped the entire video side: movies, tv & youtube, kometa-style overlays & collections, Server Activity, and radarr/sonarr-parity download matching.' },
+    '3.0.5': [
+        { date: 'July 2026 — 3.0.5' },
+        { title: 'Import: identify albums by exact IDs', desc: 'files from spotify-derived tools carry an ISRC tag and the track\'s spotify link in the comment field — import now uses them FIRST. the link resolves 1:1 to the album; ISRCs resolve by folder consensus, so a compilation can\'t hijack the import. fixes text-search failures on japanese releases. folders without IDs behave exactly as before.' },
+        { title: 'Import: lyrics travel with tracks', desc: 'a track\'s .lrc sidecar now moves with it (renamed to match), on imports and downloads both — they used to get stranded in the source folder.' },
+        { title: 'Movies get a real Get button', desc: 'movie detail pages show two buttons like shows do: Get is always visible (opens the download modal — per-source manual search + grab), and a separate wishlist toggle adds/removes in place. one button used to wear three states and could hide the download path entirely.' },
+        { title: 'Change a wrong artist photo everywhere', desc: 'hover the artist image on the library page, pick from every connected source, and it updates soulsync, your media server, and artist.jpg on disk (what navidrome reads) in one go. built for the mis-matched-artist-photo case.' },
+        { title: 'Tidal playlists over ~20 all load now (#1035)', desc: 'tidal pages its playlist api roughly 20 at a time and soulsync only read the first page — deleting playlists just rotated different ones into view. every page loads now.' },
+        { title: 'MusicBrainz search picks the right same-name artist (#1036)', desc: 'searching "korn" surfaced a thai pop duo instead of the band — every same-name artist ties on search score and the cleanup kept whichever musicbrainz listed first. ties now break on community tag weight, and artist card photos resolve through musicbrainz\'s own links to the artist\'s exact deezer/spotify/apple pages so a namesake can\'t hijack the picture either.' },
+        { title: 'Huge artist images behave (#1036)', desc: 'the artist page image was sized against the window instead of its container, so a giant source image could crush the name and buttons into the top tracks column.' },
+        { title: 'Paste cookies.txt works on the video side', desc: 'headless/docker users\' pasted youtube cookies now apply to channels and video downloads too, not just music downloads.' },
+        { title: 'Spotify free metadata as a cover art source', desc: 'the preferred-album-art list only offered spotify to connected accounts; the free source works now — spotify has the best JP covers.' },
+        { title: 'Earlier versions', desc: '3.0.4 rebuilt video Discover (billboard hero, endless feed), added per-profile side access, fixed the tidal restart loss, split-container torrent grabs, and amazon music. 3.0.3 added whole-show wishlisting and the match editor. 3.0.1 shipped the entire video side.' },
     ],
 };
 
@@ -3447,7 +3446,20 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "3.0.4 — discover 2.0 + profile side access",
+        title: "3.0.5 — the community-reports release",
+        description: "eight user requests and bug reports, all shipped: imports learn exact-ID identification, lyrics travel with tracks, and a stack of 'why is this wrong' reports turned out to be real bugs.",
+        features: [
+            "import identifies albums by exact IDs: the spotify link in a file's comment tag resolves 1:1, and ISRC tags resolve by folder consensus (the album containing most of the folder's codes wins, so a compilation can't hijack the import) — fixes text-search failures on japanese releases, costs nothing for files without IDs",
+            "a track's .lrc lyrics sidecar moves with it on imports and downloads, renamed to match — no more stranded lyrics in the source folder",
+            "fix a wrong artist photo everywhere at once: hover the artist image on the library page, pick from every connected source, and it updates soulsync, your media server, and artist.jpg on disk (what navidrome reads)",
+            "tidal playlists over ~20 all load (#1035): tidal pages its playlist api and only the first page was read — deleting playlists just rotated different ones into view",
+            "musicbrainz same-name artists resolve correctly (#1036): 'korn' surfaced a thai pop duo because ties broke on api order; they break on community tag weight now, and card photos resolve through MB's own links to the exact deezer/spotify/apple artist so a namesake can't hijack the picture",
+            "layout: a huge artist image can't crush the artist page into the top-tracks column anymore (#1036)",
+            "paste-cookies.txt applies to the video side too (headless/docker youtube), and the spotify FREE metadata source now works as a cover-art source (best JP covers)",
+        ],
+    },
+    {
+        title: "Earlier in 3.0.4 — discover 2.0 + profile side access",
         description: "the video discover page becomes a netflix-class browse, profiles can be scoped to one side of the app, and a stack of reported bugs die — including the tidal restart loss that survived two releases.",
         features: [
             "discover 2.0: a billboard hero with real title logo art, one clean header with a preferences popover, browse-by-genre tiles, live filters, and a feed that's actually endless — view more pages forever, grids respect hide-owned, and the page lazy-renders so it stays fast",

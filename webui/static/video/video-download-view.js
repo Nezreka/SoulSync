@@ -5,10 +5,12 @@
  * caller owns — the get-modal swaps its detail body for this view (with a Back
  * button) when you click "Download", and a future YouTube trigger can reuse it.
  *
- * v1 is VISUAL scaffolding: it shows the quality TARGET (read from the Settings →
- * Downloads profile), judges any copy you ALREADY own against that target (real —
- * via /downloads/evaluate), and lists each attached source with a per-source
- * "Search" affordance. The searches are stubs — no backend yet (engine phase).
+ * Shows the quality TARGET (read from the Settings → Downloads profile), judges
+ * any copy you ALREADY own against that target (via /downloads/evaluate), and
+ * lists each attached source with a per-source Search that's fully live:
+ * /downloads/search/start + poll, ranked against the profile, with Grab
+ * (/downloads/grab) per release. (An earlier version of this header called the
+ * searches stubs — long since real.)
  *
  * VideoDownload.render(containerEl, { kind, id, source, isYt, file }). Self-contained.
  */
