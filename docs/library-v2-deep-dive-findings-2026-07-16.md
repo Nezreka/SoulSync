@@ -131,7 +131,7 @@ zeigt BPM als sortier- und editierbare Spalte (`library.js:4795,4333`).
 Analog: `duration` IST im Payload (`queries.py:700`, Type `:231`), wird aber
 nirgends angezeigt. Legacy zeigt Duration als Spalte.
 
-### A6. History-Modal liest nur `track_downloads`, obwohl Lidarr-Parity-Daten längst journaliert werden
+### A6. History-Modal liest nur `track_downloads`, obwohl Lidarr-Parity-Daten längst journaliert werden — ✅ behoben (siehe library-v2.md §35)
 
 `GET /artists/<id>/history` (`api/library_v2.py:2844`) = nur
 Download-Provenance per Artist-**Namens**-Match. Dabei existieren bereits vier
@@ -368,7 +368,7 @@ Artist-/Album-Scope begrenzt.
   Refactor notiert — mit ADR-05-Reuse ist es deutlich kleiner als dort
   vermutet).
 
-### C3. History-Read-Vereinheitlichung (Umsetzung zu A6)
+### C3. History-Read-Vereinheitlichung (Umsetzung zu A6) — ✅ umgesetzt (siehe library-v2.md §35)
 
 Ein `core/library2/history_feed.py`-Helper, der pro Scope (artist/album/track)
 die vier Quellen merged und ein einheitliches
@@ -466,13 +466,14 @@ A7 für nicht-acquisition-korrelierte Downloads (der Normalfall heute) leer.
    Toolbar in Primär-/Tools-Dropdown-/Entity-Gruppen (B4). Die im Deep-Dive
    als „ggf." markierte Edit/Monitoring/Profile-Tab-Zusammenlegung wurde
    bewusst NICHT gemacht (optional, keine belastbare Notwendigkeit).
-9. **A6/C3 + A7/C4 (History + Lifecycle)** — hoher Nutzerwert, bewusst
-   zurückgestellt: `acquisition_requests.scope` (`recording`/`release_group`/
-   `release_edition`/`artist_missing`/`upgrade`) ist nicht 1:1 Artist/Album/
-   Track — die Korrelation zurück auf lib2-Entities braucht eine eigene
-   fokussierte Recherche-Session vor dem Code, sonst droht Fehlzuordnung
-   (schlimmer als der Status quo). C4 zuerst designen (Persistenz), C3 ist
-   reine Leseschicht.
+9. ~~**A6/C3 (History)**~~ behoben 2026-07-16 (§35): die befürchtete
+   Fehlzuordnungsgefahr entfiel, weil `core/acquisition/catalog.py` die
+   scope→lib2-Entity-Auflösung für den Search-Pfad bereits korrekt besitzt —
+   `history_feed.py` läuft dieselbe Beziehungskette nur rückwärts, statt einen
+   zweiten Resolver zu erfinden. **A7/C4 (Lifecycle-Persistenz pro File)**
+   bleibt offen: das ist ein invasiverer Eingriff in den
+   Import-Pipeline-Callback (nicht nur eine Leseschicht wie C3) und verdient
+   weiterhin eine eigene fokussierte Design-Session.
 10. ~~**B5/B6 (konfigurierbare Spalten/Provider, Sort, Bulk)**~~ behoben
     2026-07-16 (§31: Options-Zahnrad mit persistierten Spalten- + Provider-
     Sichtbarkeits-Prefs, clientseitiger Sort, Checkbox-Mehrfachauswahl +

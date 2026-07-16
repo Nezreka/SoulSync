@@ -567,18 +567,24 @@ export async function fetchLibraryV2ArtistTrackFiles(
   };
 }
 
+export type LibraryV2HistoryCategory =
+  | 'grabbed'
+  | 'imported'
+  | 'failed'
+  | 'quarantined'
+  | 'blocklist'
+  | 'moved'
+  | 'deleted'
+  | 'override'
+  | 'info';
+
 export interface LibraryV2HistoryEntry {
-  title: string | null;
-  album: string | null;
-  source: string | null;
-  source_detail: string | null;
-  quality: string | null;
-  bit_depth: number | null;
-  sample_rate: number | null;
-  bitrate: number | null;
-  file_path: string | null;
-  status: string | null;
   date: string | null;
+  event_type: string;
+  category: LibraryV2HistoryCategory;
+  title: string | null;
+  detail: string | null;
+  source: string | null;
 }
 
 export async function fetchLibraryV2ArtistHistory(

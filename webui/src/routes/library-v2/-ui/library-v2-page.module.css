@@ -1541,6 +1541,45 @@ button.featureTag:disabled {
   background: rgba(139, 92, 246, 0.14);
 }
 
+/* History event categories (§A6/C3) — same yellow/green/red/orange/blue
+   convention Lidarr uses for its History tab event chips. */
+.sourceBadge[data-tone='grabbed'] {
+  color: rgb(250, 204, 21);
+  background: rgba(234, 179, 8, 0.14);
+}
+
+.sourceBadge[data-tone='imported'] {
+  color: rgb(74, 222, 128);
+  background: rgba(34, 197, 94, 0.14);
+}
+
+.sourceBadge[data-tone='failed'] {
+  color: rgb(248, 113, 113);
+  background: rgba(239, 68, 68, 0.14);
+}
+
+.sourceBadge[data-tone='quarantined'] {
+  color: rgb(251, 146, 60);
+  background: rgba(249, 115, 22, 0.14);
+}
+
+.sourceBadge[data-tone='deleted'] {
+  color: rgb(248, 113, 113);
+  background: rgba(239, 68, 68, 0.14);
+}
+
+.sourceBadge[data-tone='moved'] {
+  color: rgb(96, 165, 250);
+  background: rgba(59, 130, 246, 0.14);
+}
+
+.sourceBadge[data-tone='blocklist'],
+.sourceBadge[data-tone='override'],
+.sourceBadge[data-tone='info'] {
+  color: rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.08);
+}
+
 .sourceDetail {
   margin-left: 6px;
   font-size: 11px;

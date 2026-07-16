@@ -78,6 +78,7 @@ import {
   type Lib2EntityRef,
   type LibraryV2AlbumType,
   type LibraryV2ArtistTrackFile,
+  type LibraryV2HistoryCategory,
 } from '../-library-v2.api';
 import { computeTrackEditValues } from '../-metadata-edit';
 import { Route } from '../route';
@@ -1173,30 +1174,64 @@ export function MonitoringModal({
   );
 }
 
-/** Recent downloads for this artist, from the pipeline's provenance records. */
+const HISTORY_CATEGORY_LABELS: Record<LibraryV2HistoryCategory, string> = {
+  grabbed: 'Grabbed',
+  imported: 'Imported',
+  failed: 'Failed',
+  quarantined: 'Quarantined',
+  blocklist: 'Blocklist',
+  moved: 'Moved',
+  deleted: 'Deleted',
+  override: 'Override',
+  info: 'Info',
+};
+
+/** Merged pipeline history for this artist — grabs, imports, quarantine,
+ *  catalog moves and physical deletes, not just raw downloads (§A6/C3). */
 function HistoryModal({ artistId, onClose }: { artistId: number; onClose: () => void }) {
   const historyQuery = useQuery({
     queryKey: [...LIBRARY_V2_QUERY_KEY, 'history', artistId],
     queryFn: () => fetchLibraryV2ArtistHistory(artistId),
   });
-  const rows = historyQuery.data ?? [];
+  const [category, setCategory] = useState<LibraryV2HistoryCategory | 'all'>('all');
+  const allRows = historyQuery.data ?? [];
+  const availableCategories = Array.from(new Set(allRows.map((h) => h.category)));
+  const rows = category === 'all' ? allRows : allRows.filter((h) => h.category === category);
   return (
     <ModalShell title="History" wide onClose={onClose}>
+      {availableCategories.length > 1 ? (
+        <div className={styles.searchOptions}>
+          <label className={styles.checkOption}>
+            Filter:
+            <select
+              value={category}
+              onChange={(event) =>
+                setCategory(event.target.value as LibraryV2HistoryCategory | 'all')
+              }
+            >
+              <option value="all">All events</option>
+              {availableCategories.map((c) => (
+                <option key={c} value={c}>
+                  {HISTORY_CATEGORY_LABELS[c] ?? c}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      ) : null}
       <div className={styles.resultsWrap}>
         {historyQuery.isLoading ? (
           <div className={styles.inlineLoading}>Loading history…</div>
         ) : rows.length === 0 ? (
-          <div className={styles.inlineLoading}>No recorded downloads for this artist yet.</div>
+          <div className={styles.inlineLoading}>No recorded history for this artist yet.</div>
         ) : (
           <table className={styles.trackTable}>
             <thead>
               <tr>
                 <th>Date</th>
-                <th>Title</th>
-                <th>Album</th>
+                <th>Event</th>
+                <th>Detail</th>
                 <th>Source</th>
-                <th>Quality</th>
-                <th>Status</th>
               </tr>
             </thead>
             <tbody>
@@ -1205,21 +1240,13 @@ function HistoryModal({ artistId, onClose }: { artistId: number; onClose: () => 
                   <td className={styles.muted}>
                     {h.date ? h.date.slice(0, 16).replace('T', ' ') : '—'}
                   </td>
-                  <td title={h.file_path ?? undefined}>{h.title ?? '—'}</td>
-                  <td>{h.album ?? '—'}</td>
                   <td>
-                    <span className={styles.sourceBadge}>{h.source ?? '—'}</span>
+                    <span className={styles.sourceBadge} data-tone={h.category}>
+                      {h.title ?? h.event_type}
+                    </span>
                   </td>
-                  <td className={styles.qualityText}>
-                    {[
-                      h.quality,
-                      h.bit_depth ? `${h.bit_depth}-bit` : null,
-                      h.sample_rate ? `${Math.round(h.sample_rate / 100) / 10} kHz` : null,
-                    ]
-                      .filter(Boolean)
-                      .join(' / ') || '—'}
-                  </td>
-                  <td>{h.status ?? '—'}</td>
+                  <td>{h.detail ?? '—'}</td>
+                  <td className={styles.muted}>{h.source ?? '—'}</td>
                 </tr>
               ))}
             </tbody>

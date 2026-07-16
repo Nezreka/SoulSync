@@ -3106,8 +3106,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
     @app.route("/api/library/v2/artists/<int:artist_id>/history")
     def lib2_artist_history(artist_id):
-        """Recent download/import provenance for this artist (Lidarr's History
-        tab), read from the existing ``track_downloads`` table by artist name."""
+        """Merged history for this artist (Lidarr's History tab): grabs,
+        imports, quarantine, catalog moves and physical deletes — not just
+        raw downloads (§A6/C3, see ``core.library2.history_feed``)."""
         guard = _guard()
         if guard:
             return guard
@@ -3123,41 +3124,17 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 "success": False,
                 "error": "limit must be an integer between 1 and 200",
             }), 400
+        from core.library2.history_feed import scoped_history
         conn = _conn()
         try:
             artist = conn.execute(
                 "SELECT name FROM lib2_artists WHERE id=?", (artist_id,)).fetchone()
             if not artist:
                 return jsonify({"success": False, "error": "Artist not found"}), 404
-            try:
-                # Provenance rows store the full credit string ("Drake feat.
-                # Wizkid"), so match exact OR name-as-prefix — an exact-only
-                # match made History look empty for multi-artist downloads.
-                rows = conn.execute(
-                    """SELECT track_title, track_album, source_service, source_username,
-                              audio_quality, bit_depth, sample_rate, bitrate,
-                              file_path, status, created_at
-                       FROM track_downloads
-                       WHERE lower(track_artist) = lower(?)
-                          OR lower(track_artist) LIKE lower(?) || ' %'
-                       ORDER BY id DESC LIMIT ?""",
-                    (artist["name"], artist["name"], limit),
-                ).fetchall()
-            except Exception:  # table/columns may not exist on a fresh DB
-                rows = []
-            history = [{
-                "title": r["track_title"],
-                "album": r["track_album"],
-                "source": r["source_service"],
-                "source_detail": r["source_username"],
-                "quality": r["audio_quality"],
-                "bit_depth": r["bit_depth"],
-                "sample_rate": r["sample_rate"],
-                "bitrate": r["bitrate"],
-                "file_path": r["file_path"],
-                "status": r["status"],
-                "date": r["created_at"],
-            } for r in rows]
+            history = scoped_history(
+                conn, scope="artist", entity_id=artist_id, limit=limit,
+                artist_name=artist["name"],
+            )
         finally:
             conn.close()
         return jsonify({"success": True, "history": history})

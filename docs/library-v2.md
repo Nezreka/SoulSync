@@ -5146,3 +5146,87 @@ woher kommt die Datei, wenn es noch keinen sichtbaren
 „Unmapped Files"-Browser in lib2 gibt, siehe I9), keine Ad-hoc-Umsetzung in
 derselben Session wie §48. A6/A7/C3/C4, G8-Vierter-Punkt und alle H/I-Punkte
 bleiben aus denselben bereits dokumentierten Gründen unverändert offen.
+
+---
+
+## 35. §A6/C3 History-Read-Vereinheitlichung — ✅ umgesetzt (2026-07-16)
+
+Der einzige Deep-Dive-Punkt aus der „braucht erst eine fokussierte
+Recherche-Session"-Kategorie (§E, Punkt 9), der sich bei genauerem Hinsehen
+doch sauber umsetzen ließ, ohne die dort befürchtete Fehlzuordnungsgefahr
+einzugehen: `acquisition_requests.scope` (`recording`/`release_group`/
+`release_edition`/`artist_missing`) ist tatsächlich nicht 1:1 mit einer
+lib2-Artist-/Album-/Track-ID — aber `core/acquisition/catalog.py` löst genau
+diese Beziehung für den Search-Pfad bereits korrekt auf (scope+entity_id →
+lib2-Relationship-IDs). Statt einen zweiten Resolver zu bauen, läuft das neue
+`core/library2/history_feed.py` dieselbe Beziehungskette rückwärts: lib2-ID →
+passende `recording`/`release_group`/`release_edition`-IDs → passende
+`acquisition_requests.id` → `acquisition_history`-Events. Kein neues Journal —
+reine Read/JOIN-Schicht über vier bestehende Quellen:
+
+- **`acquisition_history`** (via `acquisition_requests`): 26 Event-Typen auf
+  Kategorien gemappt (grabbed/imported/failed/quarantined/blocklist), inkl.
+  der bislang komplett toten `release_group`/`release_edition`/
+  `artist_missing`-Scopes (heute erzeugt kein Code-Pfad sie — nur der
+  generische `POST /acquisition/requests`-Endpoint akzeptiert sie — aber die
+  Kontraktabdeckung ist jetzt vollständig, nicht nur für den heute einzig
+  genutzten `recording`-Scope). `upgrade`-Scope bewusst ausgelassen: dafür
+  existiert bis heute gar kein Erzeugungs-Pfad (keine `entity_type`-Konvention
+  zum Testen), ihn zu resolven wäre reine Spekulation.
+- **`lib2_entity_history`** (bestehendes `list_entity_history`-Muster, hier
+  aber als eine gebündelte IN-Query statt N Einzelaufrufen pro Track):
+  Canonical-Link/Relink/Unlink, File-Moves.
+- **`lib2_file_delete_operations`** (ADR-05): direkt per `entity_type`/
+  `entity_id` (`artist`/`release_group`) — Album-/Artist-Scope brauchten hier
+  keine Übersetzung.
+- **`lib2_manual_skips`**: per Primary-File-Pfad (dasselbe Muster wie der
+  bestehende Track-Info-Tab), für Album/Artist über einen Join auf alle
+  zugehörigen Tracks aggregiert statt N Einzelabfragen.
+- **`track_downloads`**: wie bisher primär über `legacy_track_id` (rename-fest,
+  Muster aus `source_info.py`), Pfad-Fallback für reine Autolink-Tracks ohne
+  Legacy-ID; der bisherige Name-Match-Query bleibt als Legacy-Fallback NUR für
+  Artist-Scope erhalten (fängt Downloads ohne jeden lib2-Track-Bezug ab, z.B.
+  gelöschte/ersetzte Tracks) und dedupliziert gegen die ID-Treffer.
+
+**Album-/Artist-Zuordnung** läuft über `lib2_album_artists` (nicht nur
+`primary_artist_id`) — dasselbe bereits etablierte G8-Muster, damit
+featured/verlinkte Alben nicht stillschweigend fehlen.
+
+**Endpoint:** `GET /api/library/v2/artists/<id>/history` liefert jetzt
+`{date, event_type, category, title, detail, source}` statt der alten
+`track_downloads`-Rohspalten (Titel/Album/Quality/Bit-Depth). `scoped_history()`
+selbst ist bereits für `artist`/`album`/`track`-Scope generisch nutzbar; nur
+der Artist-Scope ist verdrahtet — Album-/Track-History-Buttons existieren in
+der UI heute nicht, sie neu einzuführen wäre Scope über das eigentliche
+Deep-Dive-Ziel (A6: die Artist-History-Ansicht ist zu eng) hinaus.
+
+- **UI:** `HistoryModal` zeigt Date/Event/Detail/Source statt
+  Date/Title/Album/Source/Quality/Status; Event-Zelle ist ein farbiger Chip
+  (gelb=grabbed, grün=imported, rot=failed/deleted, orange=quarantined,
+  blau=moved — Lidarr-Konvention wie im Deep-Dive vorgeschlagen) mit einem
+  client-seitigen Kategorie-Filter-Dropdown (alle Events sind ohnehin schon
+  geladen, kein Zusatz-Request nötig).
+
+**Verifikation:** 10 neue gezielte Tests in
+`tests/library2/test_history_feed.py` — der Kernpunkt ist Isolation: zwei
+unabhängige Artists werden geseedet und jeder Scope-Typ (`recording`,
+`release_group`, `artist_missing`) wird geprüft, dass ein Event NUR beim
+richtigen Artist/Album/Track auftaucht und beim Nachbar-Entity NICHT (genau
+die Fehlzuordnungsgefahr, vor der der Deep-Dive gewarnt hatte). Volle
+`pytest tests/library2` (595 Tests, davon 10 neu) grün, `ruff check` clean,
+`tsc --noEmit`/`oxfmt --check`/`oxlint --type-check` clean, `vitest`
+(192 Tests) grün, Production-Build grün — alle Checks 2026-07-16 erneut
+verifiziert.
+
+**Scope:** `core/library2/history_feed.py` (neu), `api/library_v2.py`
+(`lib2_artist_history`), `webui/.../-library-v2.api.ts`
+(`LibraryV2HistoryEntry`/`LibraryV2HistoryCategory`),
+`webui/.../-ui/library-v2-page.tsx` (`HistoryModal`),
+`webui/.../-ui/library-v2-page.module.css` (Kategorie-Chip-Farben).
+
+**Bewusst nicht Teil dieser Runde:** A7/C4 (Pipeline-Ergebnis-Persistenz pro
+File) bleibt offen — das ist ein eigener, invasiverer Eingriff in den
+Import-Callback der Haupt-Pipeline, nicht nur eine Read-Schicht wie C3, und
+verdient laut Deep-Dive-Dokument eine eigene fokussierte Design-Session statt
+in derselben Runde mitgezogen zu werden. G8-Vierter-Punkt und alle H/I-Punkte
+bleiben aus denselben bereits dokumentierten Gründen unverändert offen.
