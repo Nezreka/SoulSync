@@ -7061,6 +7061,16 @@ async function showVersionInfo() {
         sections,
     };
 
+    // The version modal shows the same What's New content the helper's badge
+    // points at — mark it seen here too, or the helper button's red dot never
+    // clears for users who read release notes this way (Kazimir's stuck dot).
+    try {
+        if (typeof _getLatestWhatsNewVersion === 'function') {
+            localStorage.setItem('soulsync_helper_version_seen', _getLatestWhatsNewVersion());
+            if (typeof _updateHelperBadge === 'function') _updateHelperBadge();
+        }
+    } catch (e) { /* badge sync is cosmetic */ }
+
     try {
         populateVersionModal(versionData, hadUpdate ? updateInfo : null);
         const modalOverlay = document.getElementById('version-modal-overlay');

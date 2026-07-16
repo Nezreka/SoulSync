@@ -2350,7 +2350,6 @@ const HELPER_TOURS = {
             { page: 'dashboard', selector: '#metadata-updater-card', title: 'Metadata Enrichment', description: 'Background workers that enrich your library from 9 services — Spotify, MusicBrainz, Deezer, Last.fm, iTunes, AudioDB, Genius, Tidal, Qobuz. Runs automatically at the configured interval.' },
             { page: 'dashboard', selector: '#duplicate-cleaner-card', title: 'Duplicate Cleaner', description: 'Finds and removes duplicate tracks by comparing title, artist, album, and audio characteristics. Always reviews before deleting.' },
             { page: 'dashboard', selector: '#discovery-pool-card', title: 'Discovery Pool', description: 'Tracks from similar artists found during watchlist scans. Matched tracks feed the Discover page playlists and genre browser. Fix failed matches manually.' },
-            { page: 'dashboard', selector: '#retag-tool-card', title: 'Retag Tool', description: 'Queue of tracks needing metadata corrections. When enrichment detects better tags than what\'s in your files, they appear here for batch review.' },
             { page: 'dashboard', selector: '#media-scan-card', title: 'Media Server Scan', description: 'Manually trigger a library scan on your media server. Usually automatic after downloads, but useful after bulk imports.' },
             { page: 'dashboard', selector: '#backup-manager-card', title: 'Backup Manager', description: 'Create and manage database backups. Includes all metadata, settings, enrichment data, and automation configs — everything except audio files.' },
             { page: 'dashboard', selector: '#metadata-cache-card', title: 'Metadata Cache', description: 'Browse cached API responses from all metadata searches. Every artist, album, and track looked up is stored here, speeding up future lookups and feeding the Genre Explorer.' },
@@ -2366,7 +2365,7 @@ const HELPER_TOURS = {
         steps: [
             { page: 'search', selector: '#enh-source-row', title: 'Pick a Search Source', description: 'Each icon is a metadata source. The highlighted one is where your next search goes — defaults to your configured primary source. Click a different icon to switch to Spotify, Apple Music, Deezer, Discogs, Hydrabase, MusicBrainz, Music Videos, or Soulseek (raw P2P files). A small dot marks sources you\'ve already searched for the current query.' },
             { page: 'search', selector: '.enhanced-search-input-wrapper', title: 'Search for Music', description: 'Type an artist or album name here. Results appear in categorized sections — Artists, Albums, Singles/EPs, and Tracks. Try searching for your favorite artist now!' },
-            { page: 'search', selector: '#enh-results-container', title: 'Search Results', description: 'After searching, results appear organized by type: Artists at the top as cards, then Albums, Singles/EPs, and individual Tracks. "In Library" badges mark items you already own.' },
+            { page: 'search', selector: '#enhanced-results-container', title: 'Search Results', description: 'After searching, results appear organized by type: Artists at the top as cards, then Albums, Singles/EPs, and individual Tracks. "In Library" badges mark items you already own.' },
             { page: 'search', selector: '.enhanced-search-input-wrapper', title: 'Downloading an Album', description: 'Click any album card to open the download modal. You\'ll see the tracklist, quality options, and a big "Download Album" button. Individual tracks have a play button to preview before downloading.' },
             { page: 'search', selector: '.enhanced-search-input-wrapper', title: 'That\'s It!', description: 'Search, click, download. Albums go to your configured download path, get tagged with metadata, and sync to your media server automatically. Active downloads live on the dedicated Downloads page.' },
         ]
@@ -2501,15 +2500,14 @@ const HELPER_TOURS = {
         icon: '📥',
         steps: [
             // Header
-            { page: 'import', selector: '.import-page-header', title: 'Import Music', description: 'Import audio files from your import folder into your organized library. Files are matched to album metadata, tagged, and moved to the correct location.' },
-            { page: 'import', selector: '.import-page-staging-bar', title: 'Import Folder', description: 'Shows your configured import folder path and stats (file count, total size). This is where you drop audio files before importing. Configure the path in Settings → Downloads.' },
-            { page: 'import', selector: '.import-page-refresh-btn', title: 'Refresh', description: 'Re-scans your import folder for new audio files. Hit this after dropping new files in.' },
+            { page: 'import', selector: '#import-page', title: 'Import Music', description: 'Import audio files from your import folder into your organized library. Files are matched to album metadata, tagged, and moved to the correct location.' },
+            { page: 'import', selector: '#import-page-staging-path', title: 'Import Folder', description: 'Shows your configured import folder path and stats (file count, total size). This is where you drop audio files before importing — the refresh arrow re-scans it after you add files. Configure the path in Settings → Downloads.' },
 
             // Queue
             { page: 'import', selector: '#import-page-queue', title: 'Processing Queue', description: 'When you process albums or singles, jobs appear here with progress indicators. "Clear finished" removes completed jobs from the list.' },
 
             // Tabs
-            { page: 'import', selector: '.import-page-tab-bar', title: 'Albums vs Singles', description: 'Two modes: Albums tab matches full albums to metadata (cover art, track numbers, disc info). Singles tab processes individual files one at a time.' },
+            { page: 'import', selector: '#import-page-tab-album', title: 'Albums vs Singles', description: 'Two modes: Albums tab matches full albums to metadata (cover art, track numbers, disc info). Singles tab processes individual files one at a time.' },
 
             // Album workflow
             { page: 'import', selector: '#import-page-suggestions', title: 'Album Suggestions', description: 'The importer analyzes your import files and suggests album matches based on embedded tags. Click a suggestion to start the matching process.' },
@@ -2626,17 +2624,32 @@ function showTourStep() {
         const currentPage = document.querySelector('.page.active')?.id?.replace('-page', '') || '';
         if (currentPage !== step.page) {
             navigateToPage(step.page);
-            // Wait for page to render, then show the step
-            setTimeout(() => _renderTourStep(tour, step), 350);
-            return;
         }
     }
-
-    _renderTourStep(tour, step);
+    // Resolve the anchor with RETRIES — pages render async (React mounts,
+    // fetch-then-render lists), and the old fixed 350ms wait was the "box
+    // jumps to a corner and lives there" bug: the selector missed once and
+    // every later step rendered against nothing.
+    _resolveTourTarget(step.selector, (target) => {
+        // The user may have advanced/exited while we were resolving.
+        if (HelperState.tourId && tour.steps[HelperState.tourStep] === step) {
+            _renderTourStep(tour, step, target);
+        }
+    });
 }
 
-function _renderTourStep(tour, step) {
-    const target = document.querySelector(step.selector);
+// Poll for a VISIBLE anchor (display:none / unmounted elements don't count),
+// then give up honestly after ~2s so the step centers itself instead of
+// anchoring to a hidden element's garbage rect.
+function _resolveTourTarget(selector, cb, attempt = 0) {
+    const el = selector ? document.querySelector(selector) : null;
+    const visible = el && el.offsetParent !== null && el.getClientRects().length > 0;
+    if (visible) { cb(el); return; }
+    if (attempt >= 8) { cb(null); return; }
+    setTimeout(() => _resolveTourTarget(selector, cb, attempt + 1), 250);
+}
+
+function _renderTourStep(tour, step, target) {
 
     // Create spotlight overlay
     _tourOverlay = document.createElement('div');
@@ -2688,11 +2701,29 @@ function _renderTourStep(tour, step) {
             setTimeout(() => positionPopover(popover, target), 100);
         });
     } else {
-        // Target not found on this page — center the popover
+        // Target genuinely not on this page — center the popover
         popover.style.left = '50%';
         popover.style.top = '40%';
         popover.style.transform = 'translate(-50%, -50%)';
         requestAnimationFrame(() => popover.classList.add('visible'));
+    }
+
+    // Keep the box attached: re-anchor on resize while this step is up
+    // (scrollIntoView + window changes used to strand it mid-screen).
+    _tourRepositionHandler = () => {
+        if (target && document.body.contains(target) && _helperPopover === popover) {
+            positionPopover(popover, target);
+        }
+    };
+    window.addEventListener('resize', _tourRepositionHandler);
+}
+
+let _tourRepositionHandler = null;
+
+function _removeTourReposition() {
+    if (_tourRepositionHandler) {
+        window.removeEventListener('resize', _tourRepositionHandler);
+        _tourRepositionHandler = null;
     }
 }
 
@@ -2727,6 +2758,7 @@ function dismissTour() {
 }
 
 function removeTourOverlay() {
+    _removeTourReposition();
     if (_tourOverlay) {
         _tourOverlay.remove();
         _tourOverlay = null;
