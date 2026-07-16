@@ -8368,23 +8368,33 @@
                             <div class="settings-group" data-stg="library">
                                 <h3>Folder Paths</h3>
                                 <div class="setting-help-text" style="margin-bottom: 4px;">
-                                    Container-internal paths. Only change them if you know what you're doing — wrong values break downloads.
+                                    How files flow: <strong>Download Folder</strong> (raw downloads land here) → post-processing
+                                    (tagging, artwork, organizing) → <strong>Music Library Folder</strong> (their final home — point
+                                    your media server here). Keeping the two separate stops half-finished files being scanned.
+                                </div>
+                                <div class="setting-help-text" style="margin-bottom: 4px;">
+                                    <strong>Docker / Unraid:</strong> leave these as the container-internal paths and map your real
+                                    folders in the container config — wrong values here break downloads.
+                                    <strong>Bare metal / Proxmox LXC / systemd:</strong> there is no container, so you're expected to
+                                    unlock these and point them at your real folders.
                                 </div>
 
                                 <div class="form-group">
-                                    <label>Input Folder (Download Dir):</label>
+                                    <label>Download Folder (input):</label>
                                     <div class="path-input-group">
                                         <input type="text" id="download-path" placeholder="./downloads" readonly>
                                         <button class="browse-button locked" onclick="togglePathLock('download', this)">Unlock</button>
                                     </div>
+                                    <small class="settings-hint">Where new downloads land before processing. Match this to your slskd download folder.</small>
                                 </div>
 
                                 <div class="form-group">
-                                    <label>Output Folder (Music Library):</label>
+                                    <label>Music Library Folder (output):</label>
                                     <div class="path-input-group">
                                         <input type="text" id="transfer-path" placeholder="./Transfer" readonly>
                                         <button class="browse-button locked" onclick="togglePathLock('transfer', this)">Unlock</button>
                                     </div>
+                                    <small class="settings-hint">Your main music library. Finished tracks are moved here, organized into Artist/Album folders.</small>
                                 </div>
 
                                 <div class="form-group">
@@ -8569,15 +8579,17 @@
                                 </div>
                             </div>
 
-                            <!-- Music Library Paths (moved into Paths & Organization) -->
+                            <!-- Additional Music Libraries (moved into Paths & Organization) -->
                             <div class="settings-group" data-stg="library">
-                                <h3>Music Library Paths</h3>
+                                <h3>Additional Music Libraries</h3>
 
                                 <div class="help-text" style="margin-bottom: 12px;">
-                                    Tell SoulSync where your music files live. Required for tag writing, streaming, and file detection
-                                    when your media server stores files at a different path than SoulSync can see.
-                                    <strong>Docker users:</strong> mount your music folder(s) into the SoulSync container with read-write access,
-                                    then add the <em>container-side</em> path here (e.g. <code>/music</code>).
+                                    Your Music Library Folder above is already covered — <strong>you don't need to repeat it here.</strong>
+                                    Add entries only for <em>extra</em> libraries SoulSync should read (a second collection, an archive
+                                    drive), or when your media server sees the same files at a different path than SoulSync can.
+                                    Used for tag writing, streaming, and file detection.
+                                    <strong>Docker users:</strong> mount the extra folder(s) into the SoulSync container with read-write access,
+                                    then add the <em>container-side</em> path here (e.g. <code>/music2</code>).
                                 </div>
 
                                 <div id="music-paths-list"></div>
