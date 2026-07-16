@@ -42,20 +42,46 @@ def normalize_hybrid_order(value: Any) -> list:
     return out or ["soulseek"]
 
 
+def _norm_ratio(value: Any) -> float:
+    try:
+        return max(0.0, min(100.0, float(value)))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _norm_hours(value: Any) -> int:
+    try:
+        return max(0, min(24 * 365, int(value)))
+    except (TypeError, ValueError):
+        return 0
+
+
 def load(db) -> dict:
     return {
         "download_mode": normalize_mode(db.get_setting("download_mode")),
         "hybrid_order": normalize_hybrid_order(db.get_setting("hybrid_order")),
+        # Seeding lifecycle (arr-parity P5). BOTH goals default 0 = the sweep
+        # is OFF and torrents behave exactly as before — managing (and deleting
+        # from) someone's torrent client is strictly opt-in.
+        "seed_ratio_goal": _norm_ratio(db.get_setting("seed_ratio_goal")),
+        "seed_time_goal_hours": _norm_hours(db.get_setting("seed_time_goal_hours")),
+        "seed_remove_data": (db.get_setting("seed_remove_data") or "1") != "0",
     }
 
 
 def save(db, body: Any) -> dict:
-    """Persist whichever of mode/hybrid_order is present in ``body``."""
+    """Persist whichever known keys are present in ``body``."""
     body = body if isinstance(body, dict) else {}
     if "download_mode" in body:
         db.set_setting("download_mode", normalize_mode(body.get("download_mode")))
     if "hybrid_order" in body:
         db.set_setting("hybrid_order", json.dumps(normalize_hybrid_order(body.get("hybrid_order"))))
+    if "seed_ratio_goal" in body:
+        db.set_setting("seed_ratio_goal", str(_norm_ratio(body.get("seed_ratio_goal"))))
+    if "seed_time_goal_hours" in body:
+        db.set_setting("seed_time_goal_hours", str(_norm_hours(body.get("seed_time_goal_hours"))))
+    if "seed_remove_data" in body:
+        db.set_setting("seed_remove_data", "1" if body.get("seed_remove_data") else "0")
     return load(db)
 
 

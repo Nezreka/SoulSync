@@ -7035,6 +7035,20 @@
                                     <div class="setting-help-text" style="margin-top:10px;">Use the arrows to order sources. Enable the ones you want — downloads try each enabled source in order.</div>
                                     <div class="hybrid-source-list" id="video-hybrid-rows"></div>
                                 </div>
+                                <!-- Seeding lifecycle (arr-parity P5) — torrent grabs only -->
+                                <div class="form-group" id="video-seeding-goals">
+                                    <label>Seeding goals (torrents):</label>
+                                    <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
+                                        <span class="settings-hint">Ratio</span>
+                                        <input type="number" id="video-seed-ratio" min="0" step="0.1" style="max-width:90px;" placeholder="0">
+                                        <span class="settings-hint">or hours seeded</span>
+                                        <input type="number" id="video-seed-hours" min="0" step="1" style="max-width:90px;" placeholder="0">
+                                        <label style="display:flex; align-items:center; gap:6px; font-size:12.5px;">
+                                            <input type="checkbox" id="video-seed-remove-data" checked> also delete the client's copy
+                                        </label>
+                                    </div>
+                                    <small class="settings-hint">Once a completed grab hits either goal, it's removed from the torrent client (your imported library copy is separate and never touched). Both at 0 = never remove — exactly the old behavior.</small>
+                                </div>
                             </div>
                             <!-- slskd connection — SHARED with Music (one slskd instance). Writes the
                                  app-wide soulseek.* config, not video.db. Collapsible; shown when soulseek

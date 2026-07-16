@@ -221,6 +221,9 @@ _COLUMN_MIGRATIONS = [
     ("shows", "quality_profile_id", "INTEGER"),
     ("video_wishlist", "quality_profile_id", "INTEGER"),
     ("video_downloads", "quality_profile_id", "INTEGER"),
+    # seeding lifecycle (P5): 1 = the sweep finished with this torrent (goals
+    # met + removed from the client, or the client no longer knows it)
+    ("video_downloads", "seed_released", "INTEGER"),
     ("video_watchlist", "lookback_years", "INTEGER"),   # per-person back-catalog window: NULL/0=forward-only, N=years, -1=everything
     ("video_wishlist", "still_url", "TEXT"),   # episode still thumbnail (captured at add time)
     ("video_wishlist", "season_poster_url", "TEXT"),   # the episode's season poster
@@ -2030,6 +2033,22 @@ class VideoDatabase:
             conn.execute("UPDATE video_downloads SET " + sets + " WHERE id = ?",
                          tuple(fields[k] for k in keys) + (int(dl_id),))
             conn.commit()
+        finally:
+            conn.close()
+
+    def torrents_awaiting_seed_release(self, limit=100) -> list:
+        """Completed TORRENT grabs the seeding sweep still manages: imported,
+        client ref known, not yet released."""
+        conn = self._get_connection()
+        try:
+            return [dict(r) for r in conn.execute(
+                "SELECT * FROM video_downloads WHERE status='completed' AND source='torrent' "
+                "AND client_ref IS NOT NULL AND client_ref <> '' "
+                "AND COALESCE(seed_released, 0) = 0 ORDER BY id LIMIT ?",
+                (max(1, int(limit)),))]
+        except sqlite3.Error:
+            logger.exception("torrents_awaiting_seed_release failed")
+            return []
         finally:
             conn.close()
 
