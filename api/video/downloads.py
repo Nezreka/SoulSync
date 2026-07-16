@@ -70,7 +70,7 @@ def _parse_text(hit) -> str:
 
 
 def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None, want_year=None,
-                   want_title=None, blocked_users=None, want_date=None) -> list:
+                   want_title=None, blocked_users=None, want_date=None, want_absolute=None) -> list:
     """Parse → evaluate → rank a list of raw indexer hits against the quality profile.
     Shared by the mock search and the live slskd start/poll endpoints.
 
@@ -106,7 +106,8 @@ def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None,
         size_gb = round((hit.get("size_bytes") or 0) / (1024 ** 3), 1)
         verdict = evaluate_release(parsed, profile, scope=scope, want_season=want_season,
                                    want_episode=want_episode, size_gb=size_gb, want_year=want_year,
-                                   want_title=want_title, want_date=want_date)
+                                   want_title=want_title, want_date=want_date,
+                                   want_absolute=want_absolute)
         # Custom formats: matched formats ADD their (per-profile) score; a
         # summed score under the profile's floor hard-rejects (Radarr's
         # min custom format score).
@@ -521,6 +522,19 @@ def register_routes(bp):
         ok = get_video_db().set_title_quality_profile(kind, library_id, body.get("profile_id"))
         if not ok:
             return jsonify({"success": False, "error": "Title not found."}), 404
+        return jsonify({"success": True})
+
+    @bp.route("/detail/show/<int:library_id>/series-type", methods=["PUT"])
+    def video_show_series_type(library_id):
+        """Set a show's series type (P8): standard | daily | anime. Drives how the
+        drain queries for its episodes (SxxExx vs air date vs absolute number)."""
+        from . import get_video_db
+        body = request.get_json(silent=True) or {}
+        st = str(body.get("series_type") or "").strip().lower()
+        if st not in ("standard", "daily", "anime"):
+            return jsonify({"success": False, "error": "series_type must be standard|daily|anime"}), 400
+        if not get_video_db().set_show_series_type(library_id, st):
+            return jsonify({"success": False, "error": "Show not found."}), 404
         return jsonify({"success": True})
 
     @bp.route("/organization", methods=["GET"])

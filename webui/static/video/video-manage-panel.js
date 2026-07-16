@@ -223,6 +223,19 @@
             '<div class="vmg-field"><label>Quality profile</label>' +
                 '<select class="vmg-input" data-vmg-quality-profile>' +
                 '<option value="0">Default</option></select></div>' +
+            // Series type (arr-parity P8, shows only): how episode releases are
+            // hunted — SxxExx (standard), air date (daily), absolute number (anime).
+            (d.kind === 'show'
+                ? '<div class="vmg-field"><label>Series type</label>' +
+                    '<select class="vmg-input" data-vmg-series-type>' +
+                    ['standard', 'daily', 'anime'].map(function (t) {
+                        var cur = d.series_type || 'standard';
+                        return '<option value="' + t + '"' + (t === cur ? ' selected' : '') + '>' +
+                            t.charAt(0).toUpperCase() + t.slice(1) +
+                            (t === 'daily' ? ' (releases by air date)' : t === 'anime' ? ' (absolute numbering)' : '') +
+                            '</option>';
+                    }).join('') + '</select></div>'
+                : '') +
             '<div class="vmg-sect">Matches</div>' +
             '<div class="vmg-matches" data-vmg-matches>' +
                 '<div class="vmg-msearch-hint">Loading matches…</div>' +
@@ -528,6 +541,17 @@
             .catch(function () { /* picker keeps its Default option */ });
     }
 
+    function setSeriesType(sel) {
+        fetch('/api/video/detail/show/' + state.id + '/series-type', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ series_type: sel.value }) })
+            .then(function (r) {
+                if (!r.ok) throw new Error();
+                toast('Series type updated — episode searches follow it', 'success');
+            })
+            .catch(function () { toast('Couldn’t update the series type', 'error'); });
+    }
+
     function setQualityProfile(sel) {
         var pid = parseInt(sel.value, 10) || 0;
         fetch('/api/video/detail/' + state.kind + '/' + state.id + '/quality-profile', {
@@ -660,6 +684,8 @@
         ov.addEventListener('change', function (e) {
             var qp = e.target.closest('[data-vmg-quality-profile]');
             if (qp) setQualityProfile(qp);
+            var st = e.target.closest('[data-vmg-series-type]');
+            if (st) setSeriesType(st);
         });
         ov.addEventListener('keydown', function (e) {
             var msin = e.target.closest('[data-vmg-msearch-in]');

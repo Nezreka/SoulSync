@@ -37,7 +37,6 @@ SUB_EXTS = frozenset({".srt", ".sub", ".ass", ".ssa", ".idx", ".vtt", ".smi"})
 
 _SAMPLE_MAX_BYTES = 150 * 1024 * 1024   # a "sample"-named file under this is a sample
 _SAMPLE = re.compile(r"(^|[.\-_ ])sample([.\-_ ]|$)", re.I)
-_SXXEXX = re.compile(r"\bS(\d{1,2})[ .]?E(\d{1,3})\b", re.I)
 
 # A probed runtime under this (seconds) is a sample/clip, not the real thing. Movies
 # get a generous floor; episodes vary wildly (shorts/cartoons) so only the absurdly
@@ -106,6 +105,7 @@ def _ctx(dl: dict) -> dict:
         "season": sc.get("season"),
         "episode": sc.get("episode"),
         "episode_title": sc.get("episode_title"),
+        "air_date": sc.get("air_date"),
     }
 
 
@@ -134,8 +134,10 @@ def _existing_match(scope: str, dest_dir: str, ctx: dict, list_dir: Callable) ->
         except (TypeError, ValueError):
             return None
         for n in vids:
-            m = _SXXEXX.search(n)
-            if m and int(m.group(1)) == ws and int(m.group(2)) == we:
+            # span-aware (P8): an existing 'S01E01-E02' file already covers E02
+            p = parse_release(n)
+            if p.get("season") == ws and p.get("episode") is not None \
+                    and p["episode"] <= we <= (p.get("episode_end") or p["episode"]):
                 return n
         return None
     return None
@@ -185,11 +187,17 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
             if ctx.get("season") is None or ctx.get("episode") is None:
                 return _reject("Missing season/episode info")
             # If the release name itself names a DIFFERENT episode, don't mis-file it.
-            if parsed.get("episode") is not None and (
-                    parsed.get("season") != ctx.get("season")
-                    or parsed.get("episode") != ctx.get("episode")):
-                return _reject("Release is S%02dE%02d, not the episode requested"
-                               % (parsed.get("season") or 0, parsed.get("episode") or 0))
+            # A multi-episode file (S01E01E02, P8) counts as a match for any episode
+            # it spans; a date-named daily file matches on the episode's air date.
+            if parsed.get("episode") is not None:
+                span_end = parsed.get("episode_end") or parsed.get("episode")
+                numbering_ok = (parsed.get("season") == ctx.get("season")
+                                and parsed.get("episode") <= ctx.get("episode") <= span_end)
+                date_ok = bool(ctx.get("air_date")
+                               and parsed.get("air_date") == ctx.get("air_date"))
+                if not numbering_ok and not date_ok:
+                    return _reject("Release is S%02dE%02d, not the episode requested"
+                                   % (parsed.get("season") or 0, parsed.get("episode") or 0))
     else:
         if scope not in ("movie", "episode"):
             return _reject("Pick a movie or an episode to place this file")
@@ -223,10 +231,17 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
 
     media_id = override.get("media_id") if force else dl.get("media_id")
     quality = quality_full(parsed)
+    # A multi-episode file is NAMED by its full span (S01E01-E02, the Sonarr/Plex
+    # convention) even though the download row's identity is one episode of it.
+    ep, ep_end = ctx.get("episode"), None
+    if scope == "episode" and parsed.get("episode_end") \
+            and parsed.get("season") == ctx.get("season"):
+        ep, ep_end = parsed.get("episode"), parsed.get("episode_end")
     fields = {
         "title": ctx.get("title"), "year": ctx.get("year"),
         "series": ctx.get("title"), "season": ctx.get("season"),
-        "episode": ctx.get("episode"), "episode_title": ctx.get("episode_title"),
+        "episode": ep, "episode_end": ep_end, "episode_title": ctx.get("episode_title"),
+        "air_date": ctx.get("air_date"),
         "quality": quality, "resolution": parsed.get("resolution"),
         "source": parsed.get("source"), "codec": parsed.get("codec"),
         "tmdbid": media_id if scope == "movie" else None,

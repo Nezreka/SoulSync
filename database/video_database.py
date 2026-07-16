@@ -43,7 +43,7 @@ def _publish_video_event(event_type: str, data: dict) -> None:
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 42   # v42: video_requests (in-app Overseerr, arr-parity P4); v41: one-time details_synced heal; v40: video_watchlist.lookback_years
+SCHEMA_VERSION = 43   # v43: shows.series_type (daily/anime, P8); v42: video_requests (in-app Overseerr, arr-parity P4); v41: one-time details_synced heal
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -225,6 +225,9 @@ _COLUMN_MIGRATIONS = [
     # met + removed from the client, or the client no longer knows it)
     ("video_downloads", "seed_released", "INTEGER"),
     ("video_watchlist", "lookback_years", "INTEGER"),   # per-person back-catalog window: NULL/0=forward-only, N=years, -1=everything
+    # series type (P8, Sonarr parity): standard | daily | anime — drives how the
+    # drain QUERIES for episodes (SxxExx vs air date vs absolute number).
+    ("shows", "series_type", "TEXT"),
     ("video_wishlist", "still_url", "TEXT"),   # episode still thumbnail (captured at add time)
     ("video_wishlist", "season_poster_url", "TEXT"),   # the episode's season poster
     ("video_wishlist", "episode_overview", "TEXT"),    # episode synopsis
@@ -4263,6 +4266,7 @@ class VideoDatabase:
             "kind": "show", "id": show["id"], "title": show["title"], "year": show["year"],
             "sort_title": show["sort_title"],
             "quality_profile_id": show["quality_profile_id"] or 0,
+            "series_type": show["series_type"] or "standard",
             "locked_fields": sorted(self._parse_locked(show["locked_fields"])),
             "watched": (show["watched_episodes"] or 0) >= total > 0,
             "overview": show["overview"], "status": show["status"], "network": show["network"],
@@ -5499,7 +5503,11 @@ class VideoDatabase:
                 "  AND e.episode_number = w.episode_number AND e.has_file = 1) "
                 "  AS owned_resolutions, "
                 "COALESCE(w.quality_profile_id, (SELECT s.quality_profile_id FROM shows s "
-                "  WHERE s.tmdb_id = w.tmdb_id)) AS quality_profile_id "
+                "  WHERE s.tmdb_id = w.tmdb_id)) AS quality_profile_id, "
+                # series type (P8): daily/anime shows QUERY differently (air date /
+                # absolute number). NULL for shows not in the library = standard.
+                # MAX = a type set on ANY server's row wins over a NULL sibling.
+                "(SELECT MAX(s.series_type) FROM shows s WHERE s.tmdb_id = w.tmdb_id) AS series_type "
                 "FROM video_wishlist w WHERE w.kind='episode' AND w.tmdb_id IS NOT NULL "
                 # release-window gate: search an episode only once it's within a week of air
                 # (early scene releases show up a few days out) — a further-off episode stays on
@@ -5552,7 +5560,8 @@ class VideoDatabase:
                 "  AND e.episode_number = w.episode_number AND e.has_file = 1) "
                 "  AS owned_resolutions, "
                 "COALESCE(w.quality_profile_id, (SELECT s.quality_profile_id FROM shows s "
-                "  WHERE s.tmdb_id = w.tmdb_id)) AS quality_profile_id "
+                "  WHERE s.tmdb_id = w.tmdb_id)) AS quality_profile_id, "
+                "(SELECT MAX(s.series_type) FROM shows s WHERE s.tmdb_id = w.tmdb_id) AS series_type "
                 "FROM video_wishlist w WHERE w.kind='episode' AND w.tmdb_id=?" + where +
                 " ORDER BY w.season_number, w.episode_number", args)]
         finally:
@@ -5858,6 +5867,53 @@ class VideoDatabase:
         except sqlite3.Error:
             logger.exception("set_title_quality_profile failed")
             return False
+        finally:
+            conn.close()
+
+    def set_show_series_type(self, library_id, series_type) -> bool:
+        """Set a show's series type (P8): 'standard' | 'daily' | 'anime'. NULL/
+        'standard' means standard. Drives episode query building in the drain."""
+        st = str(series_type or "").strip().lower()
+        if st not in ("standard", "daily", "anime"):
+            return False
+        conn = self._get_connection()
+        try:
+            cur = conn.execute("UPDATE shows SET series_type=? WHERE id=?",
+                               (None if st == "standard" else st, int(library_id)))
+            conn.commit()
+            return cur.rowcount > 0
+        except sqlite3.Error:
+            logger.exception("set_show_series_type failed")
+            return False
+        finally:
+            conn.close()
+
+    def episode_absolute_number(self, show_tmdb_id, season_number, episode_number):
+        """The episode's ABSOLUTE number (anime numbering, P8): its 1-based position
+        in the show's aired order, specials (season 0) excluded. None when the show
+        or its episode list isn't in the library (can't be derived)."""
+        try:
+            s, e = int(season_number), int(episode_number)
+        except (TypeError, ValueError):
+            return None
+        if s < 1 or e < 1:
+            return None
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n, "
+                "SUM(CASE WHEN e.season_number=? AND e.episode_number=? THEN 1 ELSE 0 END) AS hit "
+                "FROM episodes e "
+                # ONE show row only — a show mirrored on two servers would
+                # otherwise count every episode twice
+                "WHERE e.show_id = (SELECT id FROM shows WHERE tmdb_id=? ORDER BY id LIMIT 1) "
+                "AND e.season_number >= 1 "
+                "AND (e.season_number < ? OR (e.season_number = ? AND e.episode_number <= ?))",
+                (s, e, int(show_tmdb_id), s, s, e)).fetchone()
+            # the episode itself must be known — otherwise the count is a guess
+            return int(row["n"]) if row and row["hit"] else None
+        except (sqlite3.Error, TypeError, ValueError):
+            return None
         finally:
             conn.close()
 

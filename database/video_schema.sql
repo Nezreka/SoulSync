@@ -143,6 +143,7 @@ CREATE TABLE IF NOT EXISTS shows (
     logo_url           TEXT,             -- transparent title logo (clearlogo)
     episodes_synced    INTEGER NOT NULL DEFAULT 0,   -- full episode list pulled from metadata?
     monitored          INTEGER NOT NULL DEFAULT 1,   -- "following" (watchlist)
+    series_type        TEXT,                -- standard | daily | anime (NULL = standard)
     quality_profile_id INTEGER REFERENCES quality_profiles(id) ON DELETE SET NULL,
     root_folder_id     INTEGER REFERENCES root_folders(id)     ON DELETE SET NULL,
     path               TEXT,

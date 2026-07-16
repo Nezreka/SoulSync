@@ -131,7 +131,7 @@ def tier_key(source, resolution) -> str:
 
 
 def _scope_ok(parsed, scope, want_season, want_episode, want_year=None, want_title=None,
-              want_date=None):
+              want_date=None, want_absolute=None):
     """Validate a hit actually matches what was searched (Sonarr/Radarr-style): the
     TITLE must match the wanted film/show (not just be a substring — 'The Cloverfield
     Paradox 2018' must NOT satisfy a search for 'Paradox (2017)'), an episode search
@@ -162,6 +162,13 @@ def _scope_ok(parsed, scope, want_season, want_episode, want_year=None, want_tit
             # ('The.Daily.Show.2026.07.08...'). A date match IS the episode identity.
             if want_date and parsed.get("air_date") == want_date:
                 return None, None
+            # Anime (Sonarr's absolute numbering): releases are named by ABSOLUTE
+            # episode number, no season ('[SubsPlease] One Piece - 1071 (1080p)').
+            # The wanted absolute number appearing in the title region IS a match.
+            if want_absolute:
+                from core.video.release_parse import has_absolute_episode
+                if has_absolute_episode(parsed.get("title"), want_absolute):
+                    return None, None
             return None, "Not a single episode"
         if want_season is not None and season != want_season:
             # A date match trumps a numbering mismatch — scene season numbering for
@@ -169,7 +176,9 @@ def _scope_ok(parsed, scope, want_season, want_episode, want_year=None, want_tit
             if want_date and parsed.get("air_date") == want_date:
                 return None, None
             return None, "Wrong season"
-        if want_episode is not None and episode != want_episode:
+        # A multi-episode file (S01E01E02 / E01-03) satisfies any episode it spans.
+        ep_end = parsed.get("episode_end") or episode
+        if want_episode is not None and not (episode <= want_episode <= ep_end):
             if want_date and parsed.get("air_date") == want_date:
                 return None, None
             return None, "Wrong episode"
@@ -187,7 +196,7 @@ def _scope_ok(parsed, scope, want_season, want_episode, want_year=None, want_tit
 
 def evaluate_release(parsed, profile, *, scope="movie", want_season=None,
                      want_episode=None, size_gb=None, want_year=None, want_title=None,
-                     want_date=None) -> dict:
+                     want_date=None, want_absolute=None) -> dict:
     """Judge a parsed search hit against the quality profile + the search scope.
 
     Returns ``{accepted, score, rejected, tier, quality_label}`` — ``accepted`` False
@@ -236,7 +245,7 @@ def evaluate_release(parsed, profile, *, scope="movie", want_season=None,
     # 4) scope validation (episode vs season pack vs series pack; movie year match)
     if not rejected:
         _, scope_reason = _scope_ok(parsed, scope, want_season, want_episode, want_year, want_title,
-                                    want_date)
+                                    want_date, want_absolute)
         if scope_reason:
             rejected = scope_reason
 

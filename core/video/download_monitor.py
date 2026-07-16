@@ -557,6 +557,7 @@ def _requery_worker(dl_id) -> None:
                                      want_year=ctx.get("year"),
                                      want_title=ctx.get("titles") or ctx.get("title"),
                                      want_date=ctx.get("air_date"),
+                                     want_absolute=ctx.get("absolute"),
                                      size_gb=round((hit.get("size_bytes") or 0) / (1024 ** 3), 1))
                 if v["accepted"]:
                     accepted.append(hit)

@@ -175,7 +175,7 @@ def _rank(pool: List[Dict[str, Any]], item: Dict[str, Any], media_type: str) -> 
                            ctx.get("season"), ctx.get("episode"),
                            want_year=ctx.get("year"),
                            want_title=ctx.get("titles") or ctx.get("title"),
-                           want_date=ctx.get("air_date"))
+                           want_date=ctx.get("air_date"), want_absolute=ctx.get("absolute"))
     for c in cands:
         c["source"] = "usenet" if str(c.get("protocol") or "") == "usenet" else "torrent"
     # Full ranked list, not just accepted: rejected candidates ride along into
