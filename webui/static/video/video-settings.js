@@ -292,6 +292,10 @@
                 _videoHybrid = (d.hybrid_order && d.hybrid_order.length) ? d.hybrid_order : ['soulseek'];
                 var ms = document.getElementById('video-download-mode');
                 if (ms) ms.value = _videoMode;
+                setP('video-seed-ratio', d.seed_ratio_goal != null ? d.seed_ratio_goal : 0);
+                setP('video-seed-hours', d.seed_time_goal_hours != null ? d.seed_time_goal_hours : 0);
+                var srd = document.getElementById('video-seed-remove-data');
+                if (srd) srd.checked = d.seed_remove_data !== false;
                 renderVideoHybrid();
                 updateVideoSourceUI();
             })
@@ -309,6 +313,9 @@
                 youtube_path: val('video-youtube-path'),
                 download_mode: _videoMode,
                 hybrid_order: _videoHybrid,
+                seed_ratio_goal: parseFloat(val('video-seed-ratio')) || 0,
+                seed_time_goal_hours: parseInt(val('video-seed-hours'), 10) || 0,
+                seed_remove_data: !!(document.getElementById('video-seed-remove-data') || {}).checked,
             })
         }).then(function () { if (!silent) toast('Download folders saved', 'success'); })
           .catch(function () { /* ignore */ });

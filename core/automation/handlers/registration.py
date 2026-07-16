@@ -47,6 +47,7 @@ from core.automation.handlers.video_process_youtube_wishlist import auto_video_p
 from core.automation.handlers.video_scan_watchlist_playlists import auto_video_scan_watchlist_playlists
 from core.automation.handlers.video_process_wishlist import auto_video_process_wishlist, is_running
 from core.automation.handlers.video_rss_sync import auto_video_rss_sync
+from core.automation.handlers.video_seeding_sweep import auto_video_seeding_sweep
 from core.automation.handlers.video_apply_overlays import auto_video_apply_overlays
 from core.automation.handlers.video_clean_plex_images import auto_video_clean_plex_images
 from core.automation.handlers.video_sync_collections import auto_video_sync_collections
@@ -311,6 +312,13 @@ def register_all(deps: AutomationDeps) -> None:
         'video_rss_sync',
         lambda config: auto_video_rss_sync(config, deps),
         lambda: __import__('core.video.rss_sync', fromlist=['is_running']).is_running(),
+    )
+    # Seeding lifecycle: release completed torrent grabs once ratio/time goals
+    # are met (off until goals are set on Settings → Downloads).
+    engine.register_action_handler(
+        'video_seeding_sweep',
+        lambda config: auto_video_seeding_sweep(config, deps),
+        lambda: __import__('core.video.seeding', fromlist=['is_running']).is_running(),
     )
     # Daily overlay refresh — reads the per-scope overlay settings and re-applies
     # only enabled scopes, skipping unchanged items. Guarded so it can't overlap a

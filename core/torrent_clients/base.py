@@ -73,6 +73,11 @@ class TorrentStatus:
     content_path: Optional[str] = None
     files: Optional[List[str]] = None
     error: Optional[str] = None
+    # Seeding lifecycle (video P5): share ratio + seconds spent seeding. Only
+    # clients that expose them populate these (qBittorrent); consumers fall
+    # back to their own clock when None.
+    ratio: Optional[float] = None
+    seeding_time: Optional[int] = None
 
 
 @runtime_checkable

@@ -71,6 +71,7 @@ EXPECTED_ACTION_NAMES = frozenset({
     'video_process_episode_wishlist',
     'video_process_youtube_wishlist',
     'video_rss_sync',
+    'video_seeding_sweep',
     'video_clean_youtube_episodes',
     'video_clean_search_history',
     'video_clean_completed_downloads',
@@ -96,6 +97,7 @@ EXPECTED_GUARDED_ACTIONS = frozenset({
     'video_process_movie_wishlist',
     'video_process_episode_wishlist',
     'video_rss_sync',
+    'video_seeding_sweep',
     'video_apply_overlays',
     'video_clean_plex_images',
 })
