@@ -47,7 +47,37 @@ DEFAULT_PREFERENCES: Dict[str, Any] = {
             # bridge) — opt-in like file_path, not everyone wants it visible.
             "play": False,
         },
+        "column_order": [
+            "play",
+            "disc",
+            "artists",
+            "duration",
+            "bpm",
+            "match",
+            "quality",
+            "features",
+            "metadata",
+            "file_path",
+        ],
         "show_all_match_providers": False,
+        "visible_match_providers": {
+            "spotify": True,
+            "musicbrainz": True,
+            "deezer": True,
+            "itunes": True,
+            "audiodb": True,
+            "discogs": True,
+            "lastfm": True,
+            "genius": True,
+            "tidal": True,
+            "qobuz": True,
+            "amazon": True,
+            "jiosaavn": True,
+            "bandcamp": True,
+        },
+        "quality_show_format": True,
+        "quality_show_resolution": True,
+        "quality_show_bitrate": True,
     },
     # Round 5 (deep-dive D6): mirrors track_table's shape for the artist
     # overview's table view. All default off — the table view's whole point
@@ -58,6 +88,11 @@ DEFAULT_PREFERENCES: Dict[str, Any] = {
             "genres": False,
             "added": False,
         },
+        "column_order": [
+            "quality_profile",
+            "genres",
+            "added",
+        ],
     },
 }
 

@@ -504,8 +504,45 @@
 .qualityCellRow {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
   flex-wrap: wrap;
+}
+
+.qualityColFormat {
+  width: 140px;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.qualityColBitrate {
+  width: 80px;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.qualityColProfile {
+  width: 110px;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.qualityColVerification {
+  width: 120px;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.qualityPlaceholderDash {
+  color: rgba(255, 255, 255, 0.25);
+  font-weight: 500;
 }
 
 .qualityDisplay {
@@ -513,6 +550,31 @@
   gap: 0.5rem;
   align-items: center;
   flex-wrap: wrap;
+  justify-content: center;
+}
+
+.qualityProfileBadge.qpDefault {
+  background: rgba(168, 85, 247, 0.16);
+  color: rgb(196, 156, 250);
+  border: 1px solid rgba(168, 85, 247, 0.4);
+}
+
+.qualityProfileBadge.qpBelow {
+  background: rgba(239, 68, 68, 0.05);
+  color: rgba(254, 202, 202, 0.85);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+.qualityProfileBadge.qpUpgrade {
+  background: rgba(245, 158, 11, 0.05);
+  color: rgba(253, 237, 202, 0.85);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+}
+
+.qualityProfileBadge.qpUnknown {
+  background: rgba(59, 130, 246, 0.05);
+  color: rgba(219, 234, 254, 0.85);
+  border: 1px solid rgba(59, 130, 246, 0.25);
 }
 
 .qualityTag {
@@ -882,7 +944,49 @@ button.featureTag:disabled {
   position: absolute;
   z-index: 2;
   top: 18px;
-  right: 18px;
+  left: 18px;
+}
+
+.cardMonitor .monitorBtn {
+  width: 30px;
+  height: 30px;
+  background: rgba(15, 23, 42, 0.85); /* Slightly darker slate background for extra contrast */
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.2); /* Sharper border */
+  border-radius: 50%;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5); /* Stronger shadow */
+  color: rgba(255, 255, 255, 0.7); /* Brighter outline */
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cardMonitor .monitorBtn:hover {
+  background: rgba(15, 23, 42, 0.95);
+  border-color: rgba(var(--accent-rgb), 0.65);
+  color: rgba(255, 255, 255, 0.95);
+  transform: scale(1.08);
+}
+
+.cardMonitor .monitorOn {
+  background: rgba(15, 23, 42, 0.85);
+  border-color: rgba(var(--accent-rgb), 0.55);
+  color: rgb(var(--accent-rgb));
+  box-shadow:
+    0 4px 12px rgba(0, 0, 0, 0.5),
+    0 0 8px rgba(var(--accent-rgb), 0.25); /* Added subtle accent glow */
+}
+
+.cardMonitor .monitorOn:hover {
+  background: rgba(15, 23, 42, 0.95);
+  border-color: rgba(var(--accent-rgb), 0.75);
+  color: rgb(var(--accent-rgb));
+  box-shadow:
+    0 4px 12px rgba(0, 0, 0, 0.5),
+    0 0 12px rgba(var(--accent-rgb), 0.4);
 }
 
 .artPlaceholder {
@@ -2288,15 +2392,16 @@ button.featureTag:disabled {
 
 .qBelow,
 .qUpgrade,
-.qUnknown,
-.qMeets,
-.qAcceptable {
-  display: inline;
-  margin-left: 0.6rem;
+.qUnknown {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font-size: 9px;
   font-weight: 600;
-  padding: 1px 4px;
+  padding: 1px 5px;
   white-space: nowrap;
+  border-radius: 4px;
+  flex-shrink: 0;
 }
 
 .qBelow {
@@ -2312,6 +2417,16 @@ button.featureTag:disabled {
 .qUnknown {
   background: rgba(96, 165, 250, 0.2);
   color: rgb(165, 215, 255);
+}
+
+.qMeets,
+.qAcceptable {
+  display: inline;
+  margin-left: 0.6rem;
+  font-size: 9px;
+  font-weight: 600;
+  padding: 1px 4px;
+  white-space: nowrap;
 }
 
 .qMeets {
@@ -2582,6 +2697,60 @@ button.featureTag:disabled {
 
 .tableOptionsItem:hover {
   background: rgba(255, 255, 255, 0.07);
+}
+
+.tableOptionsRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+}
+
+.tableOptionsRow:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.tableOptionsRow .tableOptionsItem {
+  padding: 6px 0;
+  flex: 1;
+}
+
+.tableOptionsRow .tableOptionsItem:hover {
+  background: transparent;
+}
+
+.tableOptionsReorder {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 4px;
+}
+
+.reorderBtn {
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.35);
+  cursor: pointer;
+  padding: 0;
+  font-size: 9px;
+  line-height: 1;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  transition: all 0.12s ease;
+}
+
+.reorderBtn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgb(var(--accent-rgb));
+}
+
+.reorderBtn:disabled {
+  opacity: 0.15;
+  cursor: not-allowed;
 }
 
 .tableOptionsDivider {

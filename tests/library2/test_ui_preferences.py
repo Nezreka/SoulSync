@@ -97,3 +97,53 @@ def test_unknown_stored_value_is_tolerated_not_fatal():
     conn.commit()
     # Falls back to defaults rather than raising on malformed JSON.
     assert get_ui_preferences(conn) == DEFAULT_PREFERENCES
+
+
+def test_column_order_defaults_and_customization():
+    conn = _conn()
+    prefs = get_ui_preferences(conn)
+    # Default order exists.
+    assert prefs["track_table"]["column_order"] == [
+        "play",
+        "disc",
+        "artists",
+        "duration",
+        "bpm",
+        "match",
+        "quality",
+        "features",
+        "metadata",
+        "file_path",
+    ]
+    # Patch overrides it completely since lists are leaf values.
+    custom_order = ["file_path", "play", "artists"]
+    update_ui_preferences(conn, {"track_table": {"column_order": custom_order}})
+    prefs = get_ui_preferences(conn)
+    assert prefs["track_table"]["column_order"] == custom_order
+    # Columns sibling mapping remains untouched.
+    assert prefs["track_table"]["columns"]["bpm"] is True
+
+
+def test_quality_and_match_provider_preferences():
+    conn = _conn()
+    prefs = get_ui_preferences(conn)
+    # Default values exist.
+    assert prefs["track_table"]["quality_show_format"] is True
+    assert prefs["track_table"]["quality_show_resolution"] is True
+    assert prefs["track_table"]["quality_show_bitrate"] is True
+    assert prefs["track_table"]["visible_match_providers"]["spotify"] is True
+    assert prefs["track_table"]["visible_match_providers"]["tidal"] is True
+
+    # Patch values individually.
+    patch = {
+        "track_table": {
+            "quality_show_resolution": False,
+            "visible_match_providers": {"spotify": False},
+        }
+    }
+    update_ui_preferences(conn, patch)
+    prefs = get_ui_preferences(conn)
+    assert prefs["track_table"]["quality_show_resolution"] is False
+    assert prefs["track_table"]["quality_show_format"] is True
+    assert prefs["track_table"]["visible_match_providers"]["spotify"] is False
+    assert prefs["track_table"]["visible_match_providers"]["tidal"] is True

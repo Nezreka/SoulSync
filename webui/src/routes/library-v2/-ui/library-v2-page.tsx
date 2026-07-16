@@ -227,29 +227,55 @@ function SvgIcon({
   );
 }
 
-/** Quality display: compact boxes for format, resolution, bitrate. */
+/** Quality display: format and resolution (bit depth + sample rate). */
 function QualityDisplay({ file }: { file: LibraryV2Track['file'] | null | undefined }) {
-  if (!file) return <span className={styles.qualityMissing}>-</span>;
+  const prefsQuery = useQuery(libraryV2UiPreferencesQueryOptions());
+  if (!file) {
+    return <span className={styles.qualityPlaceholderDash}>—</span>;
+  }
 
-  const fmt = (file.format ?? '').toUpperCase() || null;
+  const showFormat = prefsQuery.data?.track_table.quality_show_format ?? true;
+  const showResolution = prefsQuery.data?.track_table.quality_show_resolution ?? true;
+
+  const fmt = showFormat ? (file.format ?? '').toUpperCase() || null : null;
+  const bitDepth = showResolution && file.bit_depth ? `${file.bit_depth}bit` : null;
+  const sampleRate =
+    showResolution && file.sample_rate
+      ? `${Number((file.sample_rate / 1000).toFixed(file.sample_rate % 1000 === 0 ? 0 : 1))}kHz`
+      : null;
+  const resolution = [bitDepth, sampleRate].filter(Boolean).join('/');
+  const formatBadge = [fmt, resolution || null].filter(Boolean).join(' · ');
+
+  if (!formatBadge) return null;
+
+  return (
+    <span className={styles.qualityDisplay}>
+      <span className={styles.qualityTag}>{formatBadge}</span>
+    </span>
+  );
+}
+
+/** Bitrate display: kbps value. */
+function BitrateDisplay({ file }: { file: LibraryV2Track['file'] | null | undefined }) {
+  const prefsQuery = useQuery(libraryV2UiPreferencesQueryOptions());
+  if (!file) {
+    return <span className={styles.qualityPlaceholderDash}>—</span>;
+  }
+
+  const showBitrate = prefsQuery.data?.track_table.quality_show_bitrate ?? true;
+  if (!showBitrate) return null;
+
   const kbps = file.bitrate
     ? file.bitrate > 5000
       ? Math.round(file.bitrate / 1000)
       : file.bitrate
     : null;
-  const bitDepth = file.bit_depth ? `${file.bit_depth}bit` : null;
-  const sampleRate = file.sample_rate
-    ? `${Number((file.sample_rate / 1000).toFixed(file.sample_rate % 1000 === 0 ? 0 : 1))}kHz`
-    : null;
-  const resolution = [bitDepth, sampleRate].filter(Boolean).join('/');
-  // Format + resolution share one badge (e.g. "FLAC · 16bit/44.1kHz"); bitrate
-  // stays its own badge since it's independently meaningful for lossy files.
-  const formatBadge = [fmt, resolution || null].filter(Boolean).join(' · ');
+
+  if (!kbps) return null;
 
   return (
     <span className={styles.qualityDisplay}>
-      {formatBadge && <span className={styles.qualityTag}>{formatBadge}</span>}
-      {kbps && <span className={styles.qualityTag}>{kbps} kbps</span>}
+      <span className={styles.qualityTag}>{kbps} kbps</span>
     </span>
   );
 }
@@ -568,11 +594,17 @@ export function MatchChips({
    *  instance never configured (A8's default hides those as noise). */
   showAll?: boolean;
 }) {
+  const prefsQuery = useQuery(libraryV2UiPreferencesQueryOptions());
   const [active, setActive] = useState<LibraryV2MatchService | null>(null);
   // A8: hide chips for providers nobody configured on this instance — a
   // permanently grey Tidal/Qobuz/… row was pure noise. `available` is
   // `undefined` for older cached responses, which reads as available.
-  const visible = showAll ? services : services.filter((s) => s.available !== false);
+  // Also support manual exclusion via visible_match_providers preference.
+  const visibleProviders = prefsQuery.data?.track_table.visible_match_providers ?? {};
+  const visible = services.filter((s) => {
+    if (visibleProviders[s.service] === false) return false;
+    return showAll ? true : s.available !== false;
+  });
   if (!visible.length) return null;
   return (
     <div className={abbreviated ? styles.trackMatchChips : styles.matchChips}>
@@ -2752,7 +2784,14 @@ function ArtistIndexView() {
             Table
           </button>
         </div>
-        {isTableView ? <ArtistTableOptionsMenu columns={artistTableColumns} /> : null}
+        {isTableView ? (
+          <ArtistTableOptionsMenu
+            columns={artistTableColumns}
+            columnOrder={
+              prefsQuery.data?.artist_table.column_order ?? ['quality_profile', 'genres', 'added']
+            }
+          />
+        ) : null}
       </div>
 
       {artistsQuery.isLoading ? (
@@ -2767,6 +2806,9 @@ function ArtistIndexView() {
         <ArtistTable
           artists={artists}
           columns={artistTableColumns}
+          columnOrder={
+            prefsQuery.data?.artist_table.column_order ?? ['quality_profile', 'genres', 'added']
+          }
           profileNameById={profileNameById}
         />
       ) : (
@@ -3199,13 +3241,63 @@ function ArtistCards({ artists }: { artists: LibraryV2ArtistSummary[] }) {
 function ArtistTable({
   artists,
   columns,
+  columnOrder,
   profileNameById,
 }: {
   artists: LibraryV2ArtistSummary[];
   columns: LibraryV2ArtistTableColumns;
+  columnOrder: (keyof LibraryV2ArtistTableColumns)[];
   profileNameById: Map<number, string>;
 }) {
   const navigate = useNavigate();
+
+  const defaultOrder: (keyof LibraryV2ArtistTableColumns)[] = [
+    'quality_profile',
+    'genres',
+    'added',
+  ];
+  const orderedKeys = Array.from(
+    new Set([
+      ...columnOrder.filter(
+        (key) => key === 'quality_profile' || key === 'genres' || key === 'added',
+      ),
+      ...defaultOrder,
+    ]),
+  ) as (keyof LibraryV2ArtistTableColumns)[];
+
+  const renderHeaderCell = (key: keyof LibraryV2ArtistTableColumns) => {
+    if (!columns[key]) return null;
+    switch (key) {
+      case 'quality_profile':
+        return <th key="quality_profile">Quality Profile</th>;
+      case 'genres':
+        return <th key="genres">Genre</th>;
+      case 'added':
+        return <th key="added">Added</th>;
+      default:
+        return null;
+    }
+  };
+
+  const renderBodyCell = (
+    artist: LibraryV2ArtistSummary,
+    key: keyof LibraryV2ArtistTableColumns,
+  ) => {
+    if (!columns[key]) return null;
+    switch (key) {
+      case 'quality_profile':
+        return (
+          <td key="quality_profile">{profileNameById.get(artist.quality_profile_id) ?? '—'}</td>
+        );
+      case 'genres':
+        return <td key="genres">{artist.genres.join(', ') || '—'}</td>;
+      case 'added':
+        return <td key="added">{formatReleaseDate(artist.added_at) ?? '—'}</td>;
+      default:
+        return null;
+    }
+  };
+
   return (
     <table className={styles.table}>
       <thead>
@@ -3216,9 +3308,7 @@ function ArtistTable({
           <th className={styles.colNum}>Singles</th>
           <th className={styles.colNum}>Tracks</th>
           <th className={styles.colNum}>Missing</th>
-          {columns.quality_profile ? <th>Quality Profile</th> : null}
-          {columns.genres ? <th>Genre</th> : null}
-          {columns.added ? <th>Added</th> : null}
+          {orderedKeys.map(renderHeaderCell)}
         </tr>
       </thead>
       <tbody>
@@ -3250,11 +3340,7 @@ function ArtistTable({
             <td className={styles.colNum}>
               {artist.tracks_missing > 0 ? artist.tracks_missing : '—'}
             </td>
-            {columns.quality_profile ? (
-              <td>{profileNameById.get(artist.quality_profile_id) ?? '—'}</td>
-            ) : null}
-            {columns.genres ? <td>{artist.genres.join(', ') || '—'}</td> : null}
-            {columns.added ? <td>{formatReleaseDate(artist.added_at) ?? '—'}</td> : null}
+            {orderedKeys.map((key) => renderBodyCell(artist, key))}
           </tr>
         ))}
       </tbody>
@@ -4300,12 +4386,16 @@ function ColumnsOptionsMenu<K extends string>({
   columnLabels,
   columns,
   onToggle,
+  columnOrder,
+  onReorder,
   extra,
 }: {
   title: string;
   columnLabels: Record<K, string>;
   columns: Record<K, boolean>;
   onToggle: (key: K) => void;
+  columnOrder?: K[];
+  onReorder?: (newOrder: K[]) => void;
   extra?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -4320,7 +4410,7 @@ function ColumnsOptionsMenu<K extends string>({
     return () => document.removeEventListener('mousedown', onDocClick);
   }, [open]);
 
-  const columnKeys = Object.keys(columnLabels) as K[];
+  const columnKeys = columnOrder ?? (Object.keys(columnLabels) as K[]);
 
   return (
     <span ref={wrapRef} className={styles.overflowWrap} onClick={(e) => e.stopPropagation()}>
@@ -4328,11 +4418,47 @@ function ColumnsOptionsMenu<K extends string>({
       {open ? (
         <div className={`${styles.overflowMenu} ${styles.tableOptionsMenu} ${styles.alignRight}`}>
           <div className={styles.tableOptionsGroupLabel}>Columns</div>
-          {columnKeys.map((key) => (
-            <label key={key} className={styles.tableOptionsItem}>
-              <input type="checkbox" checked={columns[key]} onChange={() => onToggle(key)} />
-              {columnLabels[key]}
-            </label>
+          {columnKeys.map((key, index) => (
+            <div key={key} className={styles.tableOptionsRow}>
+              {onReorder && columnOrder ? (
+                <div className={styles.tableOptionsReorder}>
+                  <button
+                    type="button"
+                    title="Move up"
+                    disabled={index === 0}
+                    onClick={() => {
+                      const nextOrder = [...columnOrder];
+                      const temp = nextOrder[index];
+                      nextOrder[index] = nextOrder[index - 1];
+                      nextOrder[index - 1] = temp;
+                      onReorder(nextOrder);
+                    }}
+                    className={styles.reorderBtn}
+                  >
+                    ▲
+                  </button>
+                  <button
+                    type="button"
+                    title="Move down"
+                    disabled={index === columnKeys.length - 1}
+                    onClick={() => {
+                      const nextOrder = [...columnOrder];
+                      const temp = nextOrder[index];
+                      nextOrder[index] = nextOrder[index + 1];
+                      nextOrder[index + 1] = temp;
+                      onReorder(nextOrder);
+                    }}
+                    className={styles.reorderBtn}
+                  >
+                    ▼
+                  </button>
+                </div>
+              ) : null}
+              <label className={styles.tableOptionsItem}>
+                <input type="checkbox" checked={columns[key]} onChange={() => onToggle(key)} />
+                {columnLabels[key]}
+              </label>
+            </div>
           ))}
           {extra ? (
             <>
@@ -4348,29 +4474,118 @@ function ColumnsOptionsMenu<K extends string>({
 
 function TrackTableOptionsMenu({
   columns,
+  columnOrder,
   showAllProviders,
 }: {
   columns: LibraryV2TrackTableColumns;
+  columnOrder: (keyof LibraryV2TrackTableColumns)[];
   showAllProviders: boolean;
 }) {
   const mutation = useUiPreferencesMutation();
+  const prefsQuery = useQuery(libraryV2UiPreferencesQueryOptions());
+  const visibleProviders = prefsQuery.data?.track_table.visible_match_providers ?? {};
+  const qualityShowFormat = prefsQuery.data?.track_table.quality_show_format ?? true;
+  const qualityShowResolution = prefsQuery.data?.track_table.quality_show_resolution ?? true;
+  const qualityShowBitrate = prefsQuery.data?.track_table.quality_show_bitrate ?? true;
+
+  const MATCH_PROVIDERS = [
+    { key: 'spotify', label: 'Spotify' },
+    { key: 'musicbrainz', label: 'MusicBrainz' },
+    { key: 'deezer', label: 'Deezer' },
+    { key: 'itunes', label: 'iTunes' },
+    { key: 'audiodb', label: 'AudioDB' },
+    { key: 'discogs', label: 'Discogs' },
+    { key: 'lastfm', label: 'Last.fm' },
+    { key: 'genius', label: 'Genius' },
+    { key: 'tidal', label: 'Tidal' },
+    { key: 'qobuz', label: 'Qobuz' },
+    { key: 'amazon', label: 'Amazon' },
+    { key: 'jiosaavn', label: 'JioSaavn' },
+    { key: 'bandcamp', label: 'Bandcamp' },
+  ];
+
   return (
     <ColumnsOptionsMenu
       title="Table options — columns & match providers"
       columnLabels={TRACK_TABLE_COLUMN_LABELS}
       columns={columns}
       onToggle={(key) => mutation.mutate({ track_table: { columns: { [key]: !columns[key] } } })}
+      columnOrder={columnOrder}
+      onReorder={(newOrder) => mutation.mutate({ track_table: { column_order: newOrder } })}
       extra={
-        <label className={styles.tableOptionsItem}>
-          <input
-            type="checkbox"
-            checked={showAllProviders}
-            onChange={() =>
-              mutation.mutate({ track_table: { show_all_match_providers: !showAllProviders } })
-            }
-          />
-          Show all match providers
-        </label>
+        <>
+          <div className={styles.tableOptionsDivider} />
+          <div className={styles.tableOptionsGroupLabel}>Quality Details</div>
+          <label className={styles.tableOptionsItem}>
+            <input
+              type="checkbox"
+              checked={qualityShowFormat}
+              onChange={() =>
+                mutation.mutate({ track_table: { quality_show_format: !qualityShowFormat } })
+              }
+            />
+            Show Format (e.g. FLAC, MP3)
+          </label>
+          <label className={styles.tableOptionsItem}>
+            <input
+              type="checkbox"
+              checked={qualityShowResolution}
+              onChange={() =>
+                mutation.mutate({
+                  track_table: { quality_show_resolution: !qualityShowResolution },
+                })
+              }
+            />
+            Show Resolution (e.g. 24bit/96kHz)
+          </label>
+          <label className={styles.tableOptionsItem}>
+            <input
+              type="checkbox"
+              checked={qualityShowBitrate}
+              onChange={() =>
+                mutation.mutate({ track_table: { quality_show_bitrate: !qualityShowBitrate } })
+              }
+            />
+            Show Bitrate (e.g. 320 kbps)
+          </label>
+
+          <div className={styles.tableOptionsDivider} />
+          <label className={styles.tableOptionsItem}>
+            <input
+              type="checkbox"
+              checked={showAllProviders}
+              onChange={() =>
+                mutation.mutate({ track_table: { show_all_match_providers: !showAllProviders } })
+              }
+            />
+            Show all match providers
+          </label>
+
+          <div className={styles.tableOptionsDivider} />
+          <div className={styles.tableOptionsGroupLabel}>Match Providers</div>
+          {MATCH_PROVIDERS.map((provider) => {
+            const isVisible = visibleProviders[provider.key] ?? true;
+            return (
+              <label key={provider.key} className={styles.tableOptionsItem}>
+                <input
+                  type="checkbox"
+                  checked={isVisible}
+                  onChange={() =>
+                    mutation.mutate({
+                      track_table: {
+                        visible_match_providers: {
+                          ...visibleProviders,
+                          [provider.key]: !isVisible,
+                        },
+                      },
+                    })
+                  }
+                />
+                {provider.label}
+              </label>
+            );
+          })}
+        </>
       }
     />
   );
@@ -4384,7 +4599,13 @@ const ARTIST_TABLE_COLUMN_LABELS: Record<keyof LibraryV2ArtistTableColumns, stri
   added: 'Added',
 };
 
-function ArtistTableOptionsMenu({ columns }: { columns: LibraryV2ArtistTableColumns }) {
+function ArtistTableOptionsMenu({
+  columns,
+  columnOrder,
+}: {
+  columns: LibraryV2ArtistTableColumns;
+  columnOrder: (keyof LibraryV2ArtistTableColumns)[];
+}) {
   const mutation = useUiPreferencesMutation();
   return (
     <ColumnsOptionsMenu
@@ -4392,6 +4613,8 @@ function ArtistTableOptionsMenu({ columns }: { columns: LibraryV2ArtistTableColu
       columnLabels={ARTIST_TABLE_COLUMN_LABELS}
       columns={columns}
       onToggle={(key) => mutation.mutate({ artist_table: { columns: { [key]: !columns[key] } } })}
+      columnOrder={columnOrder}
+      onReorder={(newOrder) => mutation.mutate({ artist_table: { column_order: newOrder } })}
     />
   );
 }
@@ -4719,6 +4942,23 @@ function AlbumTrackTable({
   const columns = prefsQuery.data?.track_table.columns ?? DEFAULT_TRACK_TABLE_COLUMNS;
   const showAllProviders = prefsQuery.data?.track_table.show_all_match_providers ?? false;
 
+  const defaultOrder: (keyof LibraryV2TrackTableColumns)[] = [
+    'play',
+    'disc',
+    'artists',
+    'duration',
+    'bpm',
+    'match',
+    'quality',
+    'features',
+    'metadata',
+    'file_path',
+  ];
+  const columnOrder = prefsQuery.data?.track_table.column_order ?? defaultOrder;
+  const orderedKeys = Array.from(
+    new Set([...columnOrder.filter((key) => key in DEFAULT_TRACK_TABLE_COLUMNS), ...defaultOrder]),
+  ) as (keyof LibraryV2TrackTableColumns)[];
+
   const sortedTracks = sortTracks(album.tracks, sort);
   const selectableIds = album.tracks.filter((t) => t.id != null).map((t) => t.id as number);
   const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id));
@@ -4741,6 +4981,60 @@ function AlbumTrackTable({
     });
   }
 
+  const renderHeaderCell = (key: keyof LibraryV2TrackTableColumns) => {
+    if (!columns[key]) return null;
+    switch (key) {
+      case 'disc':
+        return (
+          <th key="disc" className={styles.colNum}>
+            Disc
+          </th>
+        );
+      case 'artists':
+        return <th key="artists">Artists</th>;
+      case 'duration':
+        return (
+          <SortableHeader
+            key="duration"
+            className={styles.colDuration}
+            label="Duration"
+            sortKey="duration"
+            sort={sort}
+            onSort={toggleSort}
+          />
+        );
+      case 'bpm':
+        return (
+          <SortableHeader
+            key="bpm"
+            className={styles.colBpm}
+            label="BPM"
+            sortKey="bpm"
+            sort={sort}
+            onSort={toggleSort}
+          />
+        );
+      case 'match':
+        return <th key="match">Match</th>;
+      case 'quality':
+        return <th key="quality">Quality</th>;
+      case 'features':
+        return (
+          <th key="features" className={styles.colFeatures}>
+            Features
+          </th>
+        );
+      case 'metadata':
+        return <th key="metadata">Metadata</th>;
+      case 'file_path':
+        return <th key="file_path">File</th>;
+      case 'play':
+        return <th key="play" className={styles.colPlay}></th>;
+      default:
+        return null;
+    }
+  };
+
   return (
     <div className={styles.trackTableWrap}>
       <div className={styles.trackTableToolbar}>
@@ -4757,7 +5051,11 @@ function AlbumTrackTable({
         ) : (
           <span />
         )}
-        <TrackTableOptionsMenu columns={columns} showAllProviders={showAllProviders} />
+        <TrackTableOptionsMenu
+          columns={columns}
+          columnOrder={orderedKeys}
+          showAllProviders={showAllProviders}
+        />
       </div>
       {selected.size > 0 ? (
         <TrackTableBulkBar
@@ -4786,33 +5084,8 @@ function AlbumTrackTable({
               sort={sort}
               onSort={toggleSort}
             />
-            {columns.disc ? <th className={styles.colNum}>Disc</th> : null}
             <SortableHeader label="Title" sortKey="title" sort={sort} onSort={toggleSort} />
-            {columns.artists ? <th>Artists</th> : null}
-            {columns.duration ? (
-              <SortableHeader
-                className={styles.colDuration}
-                label="Duration"
-                sortKey="duration"
-                sort={sort}
-                onSort={toggleSort}
-              />
-            ) : null}
-            {columns.bpm ? (
-              <SortableHeader
-                className={styles.colBpm}
-                label="BPM"
-                sortKey="bpm"
-                sort={sort}
-                onSort={toggleSort}
-              />
-            ) : null}
-            {columns.match ? <th>Match</th> : null}
-            {columns.quality ? <th>Quality</th> : null}
-            {columns.features ? <th className={styles.colFeatures}>Features</th> : null}
-            {columns.metadata ? <th>Metadata</th> : null}
-            {columns.file_path ? <th>File</th> : null}
-            {columns.play ? <th className={styles.colPlay}></th> : null}
+            {orderedKeys.map(renderHeaderCell)}
             <th className={styles.colActions}>Actions</th>
           </tr>
         </thead>
@@ -4826,6 +5099,7 @@ function AlbumTrackTable({
               matchServices={track.id ? (trackMatch[track.id] ?? []) : []}
               profileName={profileNameById.get(track.quality_profile_id) ?? null}
               columns={columns}
+              columnOrder={orderedKeys}
               showAllProviders={showAllProviders}
               selected={track.id != null && selected.has(track.id)}
               onToggleSelect={
@@ -4871,6 +5145,7 @@ function TrackRow({
   matchServices,
   profileName,
   columns,
+  columnOrder,
   showAllProviders,
   selected,
   onToggleSelect,
@@ -4882,15 +5157,175 @@ function TrackRow({
   matchServices: LibraryV2MatchService[];
   profileName: string | null;
   columns: LibraryV2TrackTableColumns;
+  columnOrder: (keyof LibraryV2TrackTableColumns)[];
   showAllProviders: boolean;
   selected: boolean;
   onToggleSelect: (() => void) | undefined;
   onAction: ActionHandler;
 }) {
+  const prefsQuery = useQuery(libraryV2UiPreferencesQueryOptions());
   const missing = track.file_status === 'missing';
   const label = track.title ?? `Track ${track.track_number ?? '?'}`;
   const entity: Lib2EntityRef = { ...entityBase, ...(track.id ? { trackId: track.id } : {}) };
   const [detailTab, setDetailTab] = useState<TrackDetailTab | null>(null);
+
+  const renderBodyCell = (key: keyof LibraryV2TrackTableColumns) => {
+    if (!columns[key]) return null;
+    switch (key) {
+      case 'disc':
+        return (
+          <td key="disc" className={styles.colNum}>
+            {track.disc_number ?? '—'}
+          </td>
+        );
+      case 'artists':
+        return <td key="artists">{track.artists.map((a) => a.name).join(', ')}</td>;
+      case 'duration':
+        return (
+          <td key="duration" className={styles.colDuration}>
+            {formatDuration(track.duration)}
+          </td>
+        );
+      case 'bpm':
+        return (
+          <td key="bpm" className={styles.colBpm}>
+            {track.bpm ?? '—'}
+          </td>
+        );
+      case 'match':
+        return (
+          <td key="match">
+            {matchServices.length > 0 ? (
+              <MatchChips
+                entityType="track"
+                entityName={`${track.artists.map((a) => a.name).join(' ')} ${track.title ?? ''}`.trim()}
+                services={matchServices}
+                abbreviated
+                showAll={showAllProviders}
+              />
+            ) : (
+              <span className={styles.muted}>—</span>
+            )}
+          </td>
+        );
+      case 'quality': {
+        const showFormat = prefsQuery.data?.track_table.quality_show_format ?? true;
+        const showResolution = prefsQuery.data?.track_table.quality_show_resolution ?? true;
+        const showBitrate = prefsQuery.data?.track_table.quality_show_bitrate ?? true;
+        const showFormatCol = showFormat || showResolution;
+
+        return (
+          <td key="quality" className={styles.qualityText}>
+            <span className={styles.qualityCellRow}>
+              {/* 1. Format & Resolution */}
+              {showFormatCol ? (
+                <div className={styles.qualityColFormat}>
+                  <QualityDisplay file={track.file} />
+                </div>
+              ) : null}
+
+              {/* 2. Bitrate */}
+              {showBitrate ? (
+                <div className={styles.qualityColBitrate}>
+                  <BitrateDisplay file={track.file} />
+                </div>
+              ) : null}
+
+              {/* 3. Quality Profile (color-coded based on quality status) */}
+              <div className={styles.qualityColProfile}>
+                {profileName ? (
+                  <span
+                    className={`${styles.qualityProfileBadge} ${
+                      track.meets_profile === false
+                        ? styles.qpBelow
+                        : track.upgrade_candidate === true
+                          ? styles.qpUpgrade
+                          : track.meets_profile === null && track.file
+                            ? styles.qpUnknown
+                            : styles.qpDefault
+                    }`}
+                    title={
+                      track.meets_profile === false
+                        ? `Quality profile: ${profileName} (Below profile)`
+                        : track.upgrade_candidate === true
+                          ? `Quality profile: ${profileName} (Upgrade candidate available)`
+                          : track.meets_profile === null && track.file
+                            ? `Quality profile: ${profileName} (Quality unknown - scan to evaluate)`
+                            : `Quality profile: ${profileName} (Meets profile)`
+                    }
+                  >
+                    <SvgIcon name="star" />
+                    {profileName}
+                  </span>
+                ) : null}
+              </div>
+
+              {/* 4. AcoustID Verification Status */}
+              <div className={styles.qualityColVerification}>
+                {track.file && track.file.verification_status ? (
+                  <TrackVerificationBadge file={track.file} />
+                ) : null}
+              </div>
+            </span>
+          </td>
+        );
+      }
+      case 'features':
+        return (
+          <td key="features">
+            {!missing && track.file ? (
+              <span className={styles.featuresDisplay}>
+                <TrackReplayGainBadge track={track} />
+                <TrackLyricsBadge track={track} onOpenLyrics={() => setDetailTab('lyrics')} />
+              </span>
+            ) : (
+              <span className={styles.muted}>—</span>
+            )}
+          </td>
+        );
+      case 'metadata':
+        return (
+          <td key="metadata">
+            {track.id && !missing ? (
+              track.metadata_gaps.length === 0 ? (
+                <span className={styles.statusOk} title={metadataGapsTooltip(track.metadata_gaps)}>
+                  tags ✓
+                </span>
+              ) : (
+                <span
+                  className={styles.statusWarn}
+                  title={metadataGapsTooltip(track.metadata_gaps)}
+                >
+                  {track.metadata_gaps.length} tag gaps
+                </span>
+              )
+            ) : (
+              <span className={styles.muted}>—</span>
+            )}
+          </td>
+        );
+      case 'file_path':
+        return (
+          <td key="file_path" className={styles.filePathCell} title={track.file?.path ?? undefined}>
+            {track.file?.path ?? <span className={styles.muted}>—</span>}
+          </td>
+        );
+      case 'play':
+        return (
+          <td key="play" className={styles.colPlay}>
+            <TrackPlayButton
+              track={track}
+              albumId={entityBase.albumId}
+              albumTitle={albumTitle}
+              artistName={track.artists.map((a) => a.name).join(', ')}
+            />
+          </td>
+        );
+      default:
+        return null;
+    }
+  };
+
   return (
     <tr className={missing ? styles.missingRow : styles.staticRow}>
       <td className={styles.colCheckbox}>
@@ -4915,7 +5350,6 @@ function TrackRow({
         />
       </td>
       <td className={styles.colNum}>{track.track_number ?? '—'}</td>
-      {columns.disc ? <td className={styles.colNum}>{track.disc_number ?? '—'}</td> : null}
       <td>
         {/* Legacy parity: present/missing shown inline right after the title. */}
         <span className={styles.trackTitleCell}>
@@ -4923,85 +5357,7 @@ function TrackRow({
           <InlineFileStatus status={track.file_status} />
         </span>
       </td>
-      {columns.artists ? <td>{track.artists.map((a) => a.name).join(', ')}</td> : null}
-      {columns.duration ? (
-        <td className={styles.colDuration}>{formatDuration(track.duration)}</td>
-      ) : null}
-      {columns.bpm ? <td className={styles.colBpm}>{track.bpm ?? '—'}</td> : null}
-      {columns.match ? (
-        <td>
-          {matchServices.length > 0 ? (
-            <MatchChips
-              entityType="track"
-              entityName={`${track.artists.map((a) => a.name).join(' ')} ${track.title ?? ''}`.trim()}
-              services={matchServices}
-              abbreviated
-              showAll={showAllProviders}
-            />
-          ) : (
-            <span className={styles.muted}>—</span>
-          )}
-        </td>
-      ) : null}
-      {columns.quality ? (
-        <td className={styles.qualityText}>
-          <span className={styles.qualityCellRow}>
-            <QualityDisplay file={track.file} />
-            <TrackQualityProfileBadge track={track} />
-            {profileName ? (
-              <span className={styles.qualityProfileBadge} title="Quality profile for this track">
-                <SvgIcon name="star" />
-                {profileName}
-              </span>
-            ) : null}
-            <TrackVerificationBadge file={track.file} />
-          </span>
-        </td>
-      ) : null}
-      {columns.features ? (
-        <td>
-          {!missing && track.file ? (
-            <span className={styles.featuresDisplay}>
-              <TrackReplayGainBadge track={track} />
-              <TrackLyricsBadge track={track} onOpenLyrics={() => setDetailTab('lyrics')} />
-            </span>
-          ) : (
-            <span className={styles.muted}>—</span>
-          )}
-        </td>
-      ) : null}
-      {columns.metadata ? (
-        <td>
-          {track.id && !missing ? (
-            track.metadata_gaps.length === 0 ? (
-              <span className={styles.statusOk} title={metadataGapsTooltip(track.metadata_gaps)}>
-                tags ✓
-              </span>
-            ) : (
-              <span className={styles.statusWarn} title={metadataGapsTooltip(track.metadata_gaps)}>
-                {track.metadata_gaps.length} tag gaps
-              </span>
-            )
-          ) : (
-            <span className={styles.muted}>—</span>
-          )}
-        </td>
-      ) : null}
-      {columns.file_path ? (
-        <td className={styles.filePathCell} title={track.file?.path ?? undefined}>
-          {track.file?.path ?? <span className={styles.muted}>—</span>}
-        </td>
-      ) : null}
-      {columns.play ? (
-        <td className={styles.colPlay}>
-          <TrackPlayButton
-            track={track}
-            albumId={entityBase.albumId}
-            albumTitle={albumTitle}
-            artistName={track.artists.map((a) => a.name).join(', ')}
-          />
-        </td>
-      ) : null}
+      {columnOrder.map(renderBodyCell)}
       <td className={styles.trackActions}>
         <IconActionButton
           icon="automatic"
@@ -6083,23 +6439,23 @@ export function TrackQualityProfileBadge({ track }: { track: LibraryV2Track }) {
   if (!track.file) return null;
   if (track.meets_profile === false) {
     return (
-      <span className={styles.qBelow} title="Below the album's quality profile">
-        below profile
-      </span>
+      <span className={styles.qualityStatusDotRed} title="Below the album's quality profile" />
     );
   }
   if (track.upgrade_candidate === true) {
     return (
-      <span className={styles.qUpgrade} title="A higher-quality version may be available">
-        upgrade ↑
-      </span>
+      <span
+        className={styles.qualityStatusDotOrange}
+        title="A higher-quality version may be available (upgrade candidate)"
+      />
     );
   }
   if (track.meets_profile === null) {
     return (
-      <span className={styles.qUnknown} title="Scan the file to evaluate its quality profile">
-        quality unknown
-      </span>
+      <span
+        className={styles.qualityStatusDotBlue}
+        title="Quality unknown (scan the file to evaluate)"
+      />
     );
   }
   return null;

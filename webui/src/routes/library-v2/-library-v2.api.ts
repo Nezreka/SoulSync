@@ -1148,10 +1148,16 @@ interface UiPreferencesResponse {
 type UiPreferencesPatch = {
   track_table?: {
     columns?: Partial<LibraryV2TrackTableColumns>;
+    column_order?: (keyof LibraryV2TrackTableColumns)[];
     show_all_match_providers?: boolean;
+    visible_match_providers?: Record<string, boolean>;
+    quality_show_format?: boolean;
+    quality_show_resolution?: boolean;
+    quality_show_bitrate?: boolean;
   };
   artist_table?: {
     columns?: Partial<LibraryV2ArtistTableColumns>;
+    column_order?: (keyof LibraryV2ArtistTableColumns)[];
   };
 };
 

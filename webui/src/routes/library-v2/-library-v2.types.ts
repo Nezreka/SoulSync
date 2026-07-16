@@ -450,9 +450,15 @@ export interface LibraryV2ArtistTableColumns {
 export interface LibraryV2UiPreferences {
   track_table: {
     columns: LibraryV2TrackTableColumns;
+    column_order: (keyof LibraryV2TrackTableColumns)[];
     show_all_match_providers: boolean;
+    visible_match_providers: Record<string, boolean>;
+    quality_show_format: boolean;
+    quality_show_resolution: boolean;
+    quality_show_bitrate: boolean;
   };
   artist_table: {
     columns: LibraryV2ArtistTableColumns;
+    column_order: (keyof LibraryV2ArtistTableColumns)[];
   };
 }
