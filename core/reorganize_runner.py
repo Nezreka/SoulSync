@@ -74,6 +74,28 @@ def build_runner(
                 conn.commit()
         except Exception as db_err:
             logger.warning(f"[Reorganize] DB path update failed for {track_id}: {db_err}")
+            return
+        # A lib2-imported track keeps a legacy_track_id back-reference so lib2
+        # can serve/scan/embed-art from the file lib2 never re-resolves the
+        # path itself — it just trusts lib2_track_files.path. Without this,
+        # a reorganize move (from ANY caller: the legacy Enhanced View, the
+        # library_reorganize repair job, or lib2's own reorganize action)
+        # would silently desync that path from the file's real location.
+        # Best-effort: a lib2-less install has no such table, and this must
+        # never fail the reorganize itself.
+        try:
+            with db._get_connection() as conn:
+                conn.execute(
+                    "UPDATE lib2_track_files SET path = ?, updated_at = CURRENT_TIMESTAMP "
+                    "WHERE legacy_track_id = ?",
+                    (new_path, str(track_id)),
+                )
+                conn.commit()
+        except Exception as lib2_err:
+            logger.debug(
+                "[Reorganize] lib2_track_files path sync skipped for %s: %s",
+                track_id, lib2_err,
+            )
 
     def runner(item):
         # Read config per-run so the user changing their download path
