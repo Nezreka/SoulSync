@@ -1191,6 +1191,10 @@ def reset_state(_inert_video_enrichment_engine, _inert_video_download_monitor):
     # between tests like any other module-global.
     from core.slskd_throttle import _reset_for_tests
     _reset_for_tests()
+    # Enrichment status TTL cache (core.enrichment.api): a cached stats dict
+    # must never leak into the next test's registry (same service id, new fake).
+    from core.enrichment.api import _invalidate_status_cache
+    _invalidate_status_cache()
     # Reset to defaults
     _status_cache.clear()
     _status_cache.update(copy.deepcopy(_DEFAULT_STATUS_CACHE))
