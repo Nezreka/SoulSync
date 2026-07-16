@@ -393,6 +393,7 @@ export interface LibraryV2PlaylistDetail extends LibraryV2PlaylistSummary {
 /** B5: which optional track-table columns are shown. #/Title/Actions are
  *  always shown and have no entry here. */
 export interface LibraryV2TrackTableColumns {
+  disc: boolean;
   artists: boolean;
   duration: boolean;
   bpm: boolean;
@@ -403,9 +404,21 @@ export interface LibraryV2TrackTableColumns {
   file_path: boolean;
 }
 
+/** Round 5 (deep-dive D6): which optional artist-overview table columns are
+ *  shown. Only meaningful in table view — the card grid has its own fixed
+ *  layout. Mon./Artist/Albums/Singles/Tracks/Missing are always shown. */
+export interface LibraryV2ArtistTableColumns {
+  quality_profile: boolean;
+  genres: boolean;
+  added: boolean;
+}
+
 export interface LibraryV2UiPreferences {
   track_table: {
     columns: LibraryV2TrackTableColumns;
     show_all_match_providers: boolean;
+  };
+  artist_table: {
+    columns: LibraryV2ArtistTableColumns;
   };
 }

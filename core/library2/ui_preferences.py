@@ -28,10 +28,13 @@ CREATE TABLE IF NOT EXISTS lib2_ui_preferences (
 """
 
 # Deep-dive B5/B6 defaults: everything visible except the opt-in file path
-# column, matching the table's shape before this feature existed.
+# column, matching the table's shape before this feature existed. ``disc``
+# (round 5) defaults off too — most albums are single-disc, so it's noise
+# until a user has a multi-disc release to look at.
 DEFAULT_PREFERENCES: Dict[str, Any] = {
     "track_table": {
         "columns": {
+            "disc": False,
             "artists": True,
             "duration": True,
             "bpm": True,
@@ -42,6 +45,16 @@ DEFAULT_PREFERENCES: Dict[str, Any] = {
             "file_path": False,
         },
         "show_all_match_providers": False,
+    },
+    # Round 5 (deep-dive D6): mirrors track_table's shape for the artist
+    # overview's table view. All default off — the table view's whole point
+    # is a denser row than the card grid, so extra columns stay opt-in.
+    "artist_table": {
+        "columns": {
+            "quality_profile": False,
+            "genres": False,
+            "added": False,
+        },
     },
 }
 

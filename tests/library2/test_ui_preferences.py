@@ -35,6 +35,27 @@ def test_update_merges_into_existing_section_without_clobbering_siblings():
     assert prefs["track_table"]["show_all_match_providers"] is False
 
 
+def test_disc_column_defaults_off():
+    conn = _conn()
+    assert get_ui_preferences(conn)["track_table"]["columns"]["disc"] is False
+
+
+def test_artist_table_columns_default_off_and_merge_independently():
+    conn = _conn()
+    prefs = get_ui_preferences(conn)
+    assert prefs["artist_table"]["columns"] == {
+        "quality_profile": False,
+        "genres": False,
+        "added": False,
+    }
+    update_ui_preferences(conn, {"artist_table": {"columns": {"genres": True}}})
+    prefs = get_ui_preferences(conn)
+    assert prefs["artist_table"]["columns"]["genres"] is True
+    assert prefs["artist_table"]["columns"]["added"] is False
+    # Sibling section untouched.
+    assert prefs["track_table"]["columns"]["bpm"] is True
+
+
 def test_update_persists_across_connections(tmp_path):
     path = str(tmp_path / "lib2.db")
 

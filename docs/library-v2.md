@@ -4964,3 +4964,101 @@ unverändert zurückgestellt), G8-Vierter-Punkt (`_find_or_create_artist`
 Perf + Alias-Awareness), H1–H13, I1–I10 (Legacy-/Lidarr-Gap, brauchen
 Nutzer-Abstimmung vor Umsetzung) sowie die zwei in B5 oben genannten
 kleinen Politur-Punkte (Disc-Spalte, Format/Bitrate-Split).
+
+---
+
+## 32. UI-Politur nach Runde 4 (Enrich-Konsolidierung, Monitor-Materialize, Zell-Styling)
+
+Nachträglich dokumentiert (Commit `546f8b67`, direkt nach §31 entstanden, aber
+ohne eigenen Doc-Abschnitt committed) — reines Frontend-Polish, kein neuer
+Deep-Dive-Punkt:
+
+- **Enrich-Dropdowns vereinheitlicht:** Album-Overflow-Menü und Artist-Enrich
+  bekommen eine „Enrich with all"-Sammel-Option plus eine Submenü-Darstellung
+  am Album-Overflow-Menü; einheitliche `alignLeft`/`alignRight`-Utility-Klassen
+  halten alle Popover unabhängig von der Trigger-Position im sichtbaren
+  Bereich.
+- **Monitor materialisiert fehlende Slots inline:** Klick auf Monitor bei
+  einem Missing-Track ruft jetzt direkt `materializeLibraryV2MissingTrack`
+  auf und ersetzt den separaten `MissingTrackAddButton` — eine Aktion statt
+  zwei, gleicher Mirror-Monitor-Pfad wie zuvor.
+- **Reorganize-/Retag-Preview-Modals** bekommen dedizierte Zell-Klassen
+  (`filePathCell` für gekürzte Pfade, `diffCell` für umgebrochene Tag-Diffs,
+  `modalActionsText` für Footer-Hinweistexte) statt `qualityText`/`muted`
+  zweckzuentfremden.
+
+**Verifikation (aus der Commit-Message):** `vitest` 184/184, `oxlint
+--type-check` clean, `oxfmt` clean, `pytest tests/library2` 577/577 (Backend
+von dieser Änderung nicht berührt).
+
+**Scope:** `webui/.../-ui/library-v2-page.tsx`,
+`webui/.../-ui/library-v2-page.module.css`,
+`webui/.../-ui/reorganize-modal.tsx`, `webui/.../-ui/retag-modal.tsx`.
+
+---
+
+## 33. Deep-Dive-Findings 2026-07-16, Runde 5 (B5-Rest Disc-Spalte, D6, D3-Teil, D1) — ✅ behoben
+
+Vier kleine, konkret umsetzbare „Kleinere Beobachtungen"/Restpunkte aus
+`docs/library-v2-deep-dive-findings-2026-07-16.md`, die (anders als H/I)
+keine Nutzer-Abstimmung brauchten — reine B/D-Kategorie (UI/UX, kein
+Legacy-/Lidarr-Paritäts-Punkt). A6/A7/C3/C4, der G8-Vierte-Punkt und alle
+H1–H13/I1–I10 bleiben unverändert zurückgestellt (Begründung §29/Kopf des
+Deep-Dive-Dokuments gilt weiter); D2 (Enrich/Manual-Match-Modal-Merge), D4
+(an P2-25 gekoppelt), D5 (Play/Preview — Produktentscheidung, siehe
+Diskussion im Deep-Dive-Dokument) bewusst nicht angefasst.
+
+- **B5-Rest: Disc-Spalte** — `core/library2/ui_preferences.py`s
+  `DEFAULT_PREFERENCES` bekommt `track_table.columns.disc` (Default: aus,
+  die meisten Alben sind Single-Disc). Frontend: neue opt-in Spalte in der
+  Track-Tabelle (`disc_number`), erscheint im bestehenden
+  `TrackTableOptionsMenu`-Zahnrad ohne Zusatzcode (das Menü iteriert bereits
+  generisch über die Spalten-Labels). Die zweite B5-Rest-Idee
+  (Format/Bitrate-Split) bleibt bewusst ausgelassen — `QualityDisplay` zeigt
+  beides schon in einem Badge, ein Split wäre reine Redundanz ohne
+  funktionalen Gewinn.
+- **D6: konfigurierbare Artist-Übersicht-Spalten** — neue
+  `artist_table.columns`-Sektion in den UI-Preferences (`quality_profile`,
+  `genres`, `added`, alle Default aus — die Tabellen-Ansicht ist gerade wegen
+  ihrer Dichte gegenüber der Card-Grid interessant, zusätzliche Spalten
+  bleiben daher opt-in). Neues Zahnrad-Icon neben dem Cards/Table-Umschalter
+  (nur sichtbar in der Table-Ansicht) öffnet dasselbe Popover-Muster wie die
+  Track-Tabelle. Backend brauchte nichts Neues: `quality_profile_id`,
+  `genres`, `added_at` waren im `LibraryV2ArtistSummary`-Payload schon
+  vorhanden.
+  - **Refactor im Zuge dessen:** `TrackTableOptionsMenu` und die neue
+    `ArtistTableOptionsMenu` teilen sich jetzt einen generischen
+    `ColumnsOptionsMenu<K>`-Baustein (Spalten-Checkboxen + optionaler
+    `extra`-Slot für Track-Tabelle-spezifische Zusatz-Toggles wie „Show all
+    match providers") statt zwei fast identischer Popover-Komponenten.
+- **D3 (Teil 1 von 2): „Only show results meeting cutoff"-Filter** in
+  Interactive Search — Checkbox neben Quality-/AcoustID-Check, nutzt dieselbe
+  `profileTargetRank`-Logik wie das bestehende `ProfileBadge` (inkl. dessen
+  „nie fälschlich verstecken"-Regel: Ergebnisse ohne beurteilbare
+  Qualitäts-Fakten bleiben auch bei aktivem Filter sichtbar). Eigener
+  Leerzustand-Hinweis, wenn der Filter alle Treffer wegfiltert. **Teil 2
+  (konfigurierbare Ergebnis-Spalten) bewusst ausgelassen** — bei nur 7 festen
+  Spalten in diesem Modal ist der Nutzen gegenüber dem Aufwand gering, anders
+  als bei der deutlich breiteren Track-Tabelle.
+- **D1: Doppeltes Edit-Icon-Konzept aufgelöst** — `TrackDetailButton` (reine
+  Ansichts-Aktion „Track details") nutzte bisher dasselbe `edit`-Icon wie der
+  Artist-Header („Edit Metadata", eine echte Metadaten-Änderung). Auf das
+  bereits vorhandene `info`-Icon umgestellt; `edit` bleibt ausschließlich für
+  echte Edit-Aktionen reserviert. „Album details" im Overflow-Menü war schon
+  vorher textbasiert (kein Icon-Konflikt dort).
+
+**Verifikation:** `pytest tests/library2` 579 grün (2 neue Tests in
+`test_ui_preferences.py` für Disc-Spalten-Default und
+`artist_table`-Merge-Verhalten), `tests/metadata` 728 grün unverändert.
+`vitest` 186 grün (2 neue Tests: ein API-Roundtrip-Test für
+`artist_table`-Patches, ein Komponententest für den Cutoff-Filter in
+`interactive-search.test.tsx`). `oxfmt --check`/`oxlint --type-check` über
+den gesamten `webui/src`-Baum clean.
+
+**Scope:** `core/library2/ui_preferences.py`,
+`webui/.../-library-v2.types.ts`, `webui/.../-library-v2.api.ts`,
+`webui/.../-ui/library-v2-page.tsx`, `webui/.../-ui/interactive-search.tsx`.
+
+**Noch offen aus dem Deep-Dive:** A6/A7/C3/C4, G8-Vierter-Punkt, H1–H13,
+I1–I10 (alle wie gehabt), plus D2/D4/D5 (siehe Begründung oben) und der
+Format/Bitrate-Split-Politurpunkt aus B5.

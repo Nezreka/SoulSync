@@ -32,6 +32,20 @@ function resultFacts(r: SourceSearchResult): {
   };
 }
 
+function cutoffIndex(profile: LibraryV2QualityProfile): number {
+  return profile.upgrade_policy === 'until_cutoff' ? profile.upgrade_cutoff_index : 0;
+}
+
+/** Deep-dive D3: results below the profile's cutoff never get grabbed
+ *  automatically (Lidarr hides them by default too) — but a result with no
+ *  judgeable quality facts stays visible either way, matching
+ *  `profileTargetRank`'s "never falsely reject" rule. */
+function meetsCutoffOnly(r: SourceSearchResult, profile: LibraryV2QualityProfile): boolean {
+  if (profile.ranked_targets.length === 0) return true;
+  const rank = profileTargetRank(r, profile.ranked_targets);
+  return rank === null || rank <= cutoffIndex(profile);
+}
+
 /** Client-side PREVIEW of how the pipeline's quality check will see a result:
  *  the index of the best ranked target it plausibly satisfies, or null when
  *  the source doesn't expose enough facts to judge (never falsely reject).
@@ -288,7 +302,7 @@ function ProfileBadge({
       </span>
     );
   }
-  const cutoff = profile.upgrade_policy === 'until_cutoff' ? profile.upgrade_cutoff_index : 0;
+  const cutoff = cutoffIndex(profile);
   const label = targets[rank]?.label ?? `target #${rank + 1}`;
   if (rank <= cutoff) {
     return (
@@ -350,11 +364,20 @@ export function InteractiveSearchModal({
   const [grabErrors, setGrabErrors] = useState<Record<string, string>>({});
   const [qualityCheck, setQualityCheck] = useState(true);
   const [acoustidCheck, setAcoustidCheck] = useState(true);
+  const [cutoffOnly, setCutoffOnly] = useState(false);
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'quality', dir: -1 });
 
   const sorted = useMemo(
     () => sortSourceSearchResults(results, sort.key, sort.dir),
     [results, sort],
+  );
+  const canFilterByCutoff = !!effectiveProfile && effectiveProfile.ranked_targets.length > 0;
+  const filtered = useMemo(
+    () =>
+      cutoffOnly && effectiveProfile
+        ? sorted.filter((r) => meetsCutoffOnly(r, effectiveProfile))
+        : sorted,
+    [sorted, cutoffOnly, effectiveProfile],
   );
 
   function toggleSort(key: SortKey) {
@@ -490,6 +513,16 @@ export function InteractiveSearchModal({
             AcoustID check
           </label>
           <span className={styles.optionHint}>applied to grabs from this window</span>
+          {canFilterByCutoff ? (
+            <label className={styles.checkOption}>
+              <input
+                type="checkbox"
+                checked={cutoffOnly}
+                onChange={(e) => setCutoffOnly(e.target.checked)}
+              />
+              Only show results meeting cutoff
+            </label>
+          ) : null}
         </div>
 
         {error ? <div className={styles.searchError}>{error}</div> : null}
@@ -511,6 +544,12 @@ export function InteractiveSearchModal({
             <div className={styles.inlineLoading}>
               {error ? 'Search failed.' : 'No results — refine the query and search again.'}
             </div>
+          ) : filtered.length === 0 ? (
+            <div className={styles.inlineLoading}>
+              No results meet{' '}
+              {effectiveProfile?.name ? `"${effectiveProfile.name}"'s` : "the profile's"} cutoff —
+              turn off the filter to see them all.
+            </div>
           ) : (
             <table className={styles.trackTable}>
               <thead>
@@ -526,7 +565,7 @@ export function InteractiveSearchModal({
                 </tr>
               </thead>
               <tbody>
-                {sorted.map((r, i) => {
+                {filtered.map((r, i) => {
                   const key = resultKey(r);
                   const state = grabbed[key];
                   const isAlbum = r.result_type === 'album';

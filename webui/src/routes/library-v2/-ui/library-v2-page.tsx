@@ -9,6 +9,7 @@ import type {
   LibraryV2AlbumSummary,
   LibraryV2ArtistDetail,
   LibraryV2ArtistSummary,
+  LibraryV2ArtistTableColumns,
   LibraryV2FileTags,
   LibraryV2ManualSkip,
   LibraryV2MatchService,
@@ -2512,6 +2513,20 @@ function ArtistIndexView() {
   const pagination = artistsQuery.data?.pagination;
   const isEmpty = !artistsQuery.isLoading && artists.length === 0 && !search.q;
 
+  // Only fetched for the table view (D6) — the card grid doesn't use either.
+  const isTableView = search.view === 'table';
+  const profilesQuery = useQuery({
+    ...libraryV2QualityProfilesQueryOptions(),
+    enabled: isTableView,
+  });
+  const prefsQuery = useQuery({ ...libraryV2UiPreferencesQueryOptions(), enabled: isTableView });
+  const profileNameById = new Map((profilesQuery.data ?? []).map((p) => [p.id, p.name]));
+  const artistTableColumns = prefsQuery.data?.artist_table.columns ?? {
+    quality_profile: false,
+    genres: false,
+    added: false,
+  };
+
   return (
     <div className={styles.page}>
       <header className={styles.header}>
@@ -2585,6 +2600,7 @@ function ArtistIndexView() {
             Table
           </button>
         </div>
+        {isTableView ? <ArtistTableOptionsMenu columns={artistTableColumns} /> : null}
       </div>
 
       {artistsQuery.isLoading ? (
@@ -2596,7 +2612,11 @@ function ArtistIndexView() {
           <ImportButton hasArtists={false} prominent />
         </div>
       ) : search.view === 'table' ? (
-        <ArtistTable artists={artists} />
+        <ArtistTable
+          artists={artists}
+          columns={artistTableColumns}
+          profileNameById={profileNameById}
+        />
       ) : (
         <ArtistCards artists={artists} />
       )}
@@ -3024,7 +3044,15 @@ function ArtistCards({ artists }: { artists: LibraryV2ArtistSummary[] }) {
   );
 }
 
-function ArtistTable({ artists }: { artists: LibraryV2ArtistSummary[] }) {
+function ArtistTable({
+  artists,
+  columns,
+  profileNameById,
+}: {
+  artists: LibraryV2ArtistSummary[];
+  columns: LibraryV2ArtistTableColumns;
+  profileNameById: Map<number, string>;
+}) {
   const navigate = useNavigate();
   return (
     <table className={styles.table}>
@@ -3036,6 +3064,9 @@ function ArtistTable({ artists }: { artists: LibraryV2ArtistSummary[] }) {
           <th className={styles.colNum}>Singles</th>
           <th className={styles.colNum}>Tracks</th>
           <th className={styles.colNum}>Missing</th>
+          {columns.quality_profile ? <th>Quality Profile</th> : null}
+          {columns.genres ? <th>Genre</th> : null}
+          {columns.added ? <th>Added</th> : null}
         </tr>
       </thead>
       <tbody>
@@ -3067,6 +3098,11 @@ function ArtistTable({ artists }: { artists: LibraryV2ArtistSummary[] }) {
             <td className={styles.colNum}>
               {artist.tracks_missing > 0 ? artist.tracks_missing : '—'}
             </td>
+            {columns.quality_profile ? (
+              <td>{profileNameById.get(artist.quality_profile_id) ?? '—'}</td>
+            ) : null}
+            {columns.genres ? <td>{artist.genres.join(', ') || '—'}</td> : null}
+            {columns.added ? <td>{formatReleaseDate(artist.added_at) ?? '—'}</td> : null}
           </tr>
         ))}
       </tbody>
@@ -4002,6 +4038,7 @@ function AlbumBlock({
  *  DEFAULT_PREFERENCES — used only until the real preferences query lands
  *  (it's cached/fast, so this is a brief flash at most). */
 const DEFAULT_TRACK_TABLE_COLUMNS: LibraryV2TrackTableColumns = {
+  disc: false,
   artists: true,
   duration: true,
   bpm: true,
@@ -4013,6 +4050,7 @@ const DEFAULT_TRACK_TABLE_COLUMNS: LibraryV2TrackTableColumns = {
 };
 
 const TRACK_TABLE_COLUMN_LABELS: Record<keyof LibraryV2TrackTableColumns, string> = {
+  disc: 'Disc #',
   artists: 'Artists',
   duration: 'Duration',
   bpm: 'BPM',
@@ -4081,22 +4119,35 @@ function SortableHeader({
 /** B5: gear popover to pick which optional columns show and whether to show
  *  every match-provider chip (vs. A8's default of only configured
  *  providers). Persisted server-side so picks survive a reload. */
-function TrackTableOptionsMenu({
-  columns,
-  showAllProviders,
-}: {
-  columns: LibraryV2TrackTableColumns;
-  showAllProviders: boolean;
-}) {
+function useUiPreferencesMutation() {
   const queryClient = useQueryClient();
-  const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLSpanElement>(null);
-  const mutation = useMutation({
+  return useMutation({
     mutationFn: (patch: Parameters<typeof updateLibraryV2UiPreferences>[0]) =>
       updateLibraryV2UiPreferences(patch),
     onSuccess: (preferences) =>
       queryClient.setQueryData([...LIBRARY_V2_QUERY_KEY, 'ui-preferences'], preferences),
   });
+}
+
+/** Shared gear-popover column-visibility menu (B5 pattern) — one generic body
+ *  reused by both the track table and the artist-overview table (round 5,
+ *  D6) instead of two near-identical popovers. `extra` renders additional
+ *  non-column toggles (e.g. the track table's "show all match providers"). */
+function ColumnsOptionsMenu<K extends string>({
+  title,
+  columnLabels,
+  columns,
+  onToggle,
+  extra,
+}: {
+  title: string;
+  columnLabels: Record<K, string>;
+  columns: Record<K, boolean>;
+  onToggle: (key: K) => void;
+  extra?: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -4107,46 +4158,79 @@ function TrackTableOptionsMenu({
     return () => document.removeEventListener('mousedown', onDocClick);
   }, [open]);
 
-  const columnKeys = Object.keys(TRACK_TABLE_COLUMN_LABELS) as (keyof LibraryV2TrackTableColumns)[];
+  const columnKeys = Object.keys(columnLabels) as K[];
 
   return (
     <span ref={wrapRef} className={styles.overflowWrap} onClick={(e) => e.stopPropagation()}>
-      <IconActionButton
-        icon="settings"
-        title="Table options — columns & match providers"
-        onClick={() => setOpen((v) => !v)}
-      />
+      <IconActionButton icon="settings" title={title} onClick={() => setOpen((v) => !v)} />
       {open ? (
         <div className={`${styles.overflowMenu} ${styles.tableOptionsMenu} ${styles.alignRight}`}>
           <div className={styles.tableOptionsGroupLabel}>Columns</div>
           {columnKeys.map((key) => (
             <label key={key} className={styles.tableOptionsItem}>
-              <input
-                type="checkbox"
-                checked={columns[key]}
-                onChange={() =>
-                  mutation.mutate({ track_table: { columns: { [key]: !columns[key] } } })
-                }
-              />
-              {TRACK_TABLE_COLUMN_LABELS[key]}
+              <input type="checkbox" checked={columns[key]} onChange={() => onToggle(key)} />
+              {columnLabels[key]}
             </label>
           ))}
-          <div className={styles.tableOptionsDivider} />
-          <label className={styles.tableOptionsItem}>
-            <input
-              type="checkbox"
-              checked={showAllProviders}
-              onChange={() =>
-                mutation.mutate({
-                  track_table: { show_all_match_providers: !showAllProviders },
-                })
-              }
-            />
-            Show all match providers
-          </label>
+          {extra ? (
+            <>
+              <div className={styles.tableOptionsDivider} />
+              {extra}
+            </>
+          ) : null}
         </div>
       ) : null}
     </span>
+  );
+}
+
+function TrackTableOptionsMenu({
+  columns,
+  showAllProviders,
+}: {
+  columns: LibraryV2TrackTableColumns;
+  showAllProviders: boolean;
+}) {
+  const mutation = useUiPreferencesMutation();
+  return (
+    <ColumnsOptionsMenu
+      title="Table options — columns & match providers"
+      columnLabels={TRACK_TABLE_COLUMN_LABELS}
+      columns={columns}
+      onToggle={(key) => mutation.mutate({ track_table: { columns: { [key]: !columns[key] } } })}
+      extra={
+        <label className={styles.tableOptionsItem}>
+          <input
+            type="checkbox"
+            checked={showAllProviders}
+            onChange={() =>
+              mutation.mutate({ track_table: { show_all_match_providers: !showAllProviders } })
+            }
+          />
+          Show all match providers
+        </label>
+      }
+    />
+  );
+}
+
+/** Round 5 (deep-dive D6): same gear pattern for the artist-overview table's
+ *  optional Quality Profile/Genre/Added columns. */
+const ARTIST_TABLE_COLUMN_LABELS: Record<keyof LibraryV2ArtistTableColumns, string> = {
+  quality_profile: 'Quality Profile',
+  genres: 'Genre',
+  added: 'Added',
+};
+
+function ArtistTableOptionsMenu({ columns }: { columns: LibraryV2ArtistTableColumns }) {
+  const mutation = useUiPreferencesMutation();
+  return (
+    <ColumnsOptionsMenu
+      title="Table options — columns"
+      columnLabels={ARTIST_TABLE_COLUMN_LABELS}
+      columns={columns}
+      onToggle={(key) => mutation.mutate({ artist_table: { columns: { [key]: !columns[key] } } })}
+    />
   );
 }
 
@@ -4365,6 +4449,7 @@ function AlbumTrackTable({
               sort={sort}
               onSort={toggleSort}
             />
+            {columns.disc ? <th className={styles.colNum}>Disc</th> : null}
             <SortableHeader label="Title" sortKey="title" sort={sort} onSort={toggleSort} />
             {columns.artists ? <th>Artists</th> : null}
             {columns.duration ? (
@@ -4492,6 +4577,7 @@ function TrackRow({
         />
       </td>
       <td className={styles.colNum}>{track.track_number ?? '—'}</td>
+      {columns.disc ? <td className={styles.colNum}>{track.disc_number ?? '—'}</td> : null}
       <td>
         {/* Legacy parity: present/missing shown inline right after the title. */}
         <span className={styles.trackTitleCell}>
@@ -4707,7 +4793,7 @@ function TrackDetailButton({
   return (
     <>
       <IconActionButton
-        icon="edit"
+        icon="info"
         title="Track details — quality profile, metadata, source info"
         onClick={() => onOpenTab('quality')}
       />

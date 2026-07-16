@@ -138,4 +138,73 @@ describe('library v2 interactive grab', () => {
     expect(searches[0]).toEqual({ query: 'Artist Selected' });
     expect(searches[1]).toEqual({ query: 'Artist Selected', source: 'usenet' });
   });
+
+  it('filters to only results meeting the quality profile cutoff (deep-dive D3)', async () => {
+    server.use(
+      http.get('/api/search/sources', () =>
+        HttpResponse.json({
+          mode: 'hybrid',
+          sources: [{ name: 'soulseek', display_name: 'Soulseek' }],
+        }),
+      ),
+      http.get('/api/library/v2/quality-profiles', () =>
+        HttpResponse.json({
+          success: true,
+          profiles: [
+            {
+              id: 1,
+              name: 'Lossless',
+              description: null,
+              upgrade_policy: 'until_cutoff',
+              upgrade_cutoff_index: 0,
+              ranked_targets: [{ label: 'FLAC', format: 'flac' }],
+              repair_job_id: 'x',
+            },
+          ],
+        }),
+      ),
+      http.post('/api/search', () =>
+        HttpResponse.json({
+          results: [
+            {
+              result_type: 'track',
+              username: 'peer',
+              filename: 'Good.flac',
+              title: 'Good',
+              quality: 'flac',
+              size: 10,
+            },
+            {
+              result_type: 'track',
+              username: 'peer',
+              filename: 'Bad.mp3',
+              title: 'Bad',
+              quality: 'mp3',
+              bitrate: 128,
+              size: 5,
+            },
+          ],
+        }),
+      ),
+    );
+
+    const queryClient = createTestQueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <InteractiveSearchModal
+          initialQuery="Artist Selected"
+          entity={{ qualityProfileId: 1 }}
+          onClose={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByText('Good');
+    expect(screen.getByText('Bad')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Only show results meeting cutoff' }));
+
+    await waitFor(() => expect(screen.queryByText('Bad')).not.toBeInTheDocument());
+    expect(screen.getByText('Good')).toBeInTheDocument();
+  });
 });

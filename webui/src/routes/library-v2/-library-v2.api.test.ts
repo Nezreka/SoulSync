@@ -789,4 +789,30 @@ describe('library v2 ui preferences api (B5)', () => {
       'admin profile',
     );
   });
+
+  it('round-trips an artist_table column patch (round 5, D6)', async () => {
+    server.use(
+      http.put('/api/library/v2/ui-preferences', async ({ request }) => {
+        expect(await request.json()).toEqual({
+          artist_table: { columns: { genres: true } },
+        });
+        return HttpResponse.json({
+          success: true,
+          preferences: {
+            track_table: {
+              columns: { bpm: true, file_path: false },
+              show_all_match_providers: false,
+            },
+            artist_table: {
+              columns: { quality_profile: false, genres: true, added: false },
+            },
+          },
+        });
+      }),
+    );
+
+    await expect(
+      updateLibraryV2UiPreferences({ artist_table: { columns: { genres: true } } }),
+    ).resolves.toMatchObject({ artist_table: { columns: { genres: true } } });
+  });
 });

@@ -393,20 +393,28 @@ A7 für nicht-acquisition-korrelierte Downloads (der Normalfall heute) leer.
 
 ## D. Kleinere Beobachtungen
 
-- **D1. Doppeltes „Edit"-Icon-Konzept:** Track-Actions-Spalte nutzt das
-  `edit`-Icon für „Track details", die Album-Zeile für „Album details", der
-  Artist-Header für „Edit Metadata" — dreimal dasselbe Icon, drei
-  verschiedene Bedeutungen. Nach B1/B4 vereinheitlichen (ein Detail-Icon, ein
-  Edit-Konzept).
+- **D1. Doppeltes „Edit"-Icon-Konzept — ✅ behoben (siehe library-v2.md §33):**
+  Track-Actions-Spalte nutzte das `edit`-Icon für „Track details", die
+  Album-Zeile für „Album details", der Artist-Header für „Edit Metadata" —
+  dreimal dasselbe Icon, drei verschiedene Bedeutungen. `TrackDetailButton`
+  nutzt jetzt das bereits vorhandene `info`-Icon; `edit` bleibt für echte
+  Metadaten-Edits reserviert („Album details" war schon textbasiert, kein
+  Icon-Konflikt dort).
 - **D2. `EnrichDropdown` vs. `ManualMatchModal`:** Enrich re-queried einen
   Provider, Manual Match ändert die Provider-ID — für Nutzer schwer zu
   unterscheiden („frische Daten holen" vs. „Zuordnung korrigieren"). Ein
   gemeinsames „Provider"-Modal (Chips + pro Provider: Status, Re-Match,
   Enrich) würde beide Konzepte an einem Ort erklären und einen
-  Toolbar-Eintrag sparen.
-- **D3. Interactive-Search-Ergebnisspalten** sind nicht konfigurierbar (B5
-  einbeziehen); Age-Spalte + Availability sind gut, aber ein Profil-Filter
-  („nur meets cutoff anzeigen") fehlt — Lidarr filtert Rejections sichtbar.
+  Toolbar-Eintrag sparen. Weiterhin offen — größerer Modal-Merge, keine
+  Notwendigkeit ihn ungefragt anzugehen.
+- **D3. Interactive-Search-Ergebnisspalten** — **Teil 1 (Profil-Filter) ✅
+  behoben (siehe library-v2.md §33):** eine „Only show results meeting
+  cutoff"-Checkbox nutzt dieselbe `profileTargetRank`-Logik wie das
+  bestehende `ProfileBadge` (inkl. dessen „nie fälschlich verstecken"-Regel
+  für Ergebnisse ohne beurteilbare Qualitäts-Fakten). **Teil 2
+  (konfigurierbare Spalten, B5 einbeziehen) bewusst ausgelassen:** bei nur 7
+  festen Spalten ist der Nutzen gegenüber dem Aufwand gering, anders als bei
+  der deutlich breiteren Track-Tabelle.
 - **D4. `waitForLibraryV2Import`**-10-Minuten-Timeout + statisches
   „Importing…" ist als P2-25 bereits getrackt — bei der Umsetzung auch den
   `window.location.reload()` (Full-Page-Reload nach Import,
@@ -414,8 +422,12 @@ A7 für nicht-acquisition-korrelierte Downloads (der Normalfall heute) leer.
 - **D5. Play/Preview fehlt komplett** (Legacy hat `col-play` mit
   Stream-Preview pro Track). Bewusste Lücke? Nirgends dokumentiert — als
   Produktentscheidung festhalten oder als Parity-Punkt aufnehmen.
-- **D6. Artist-Tabelle** (Übersicht, `:2490`) hat keine Quality-Profile-/
-  Genre-/Added-Spalte und keinen Spalten-Zahnrad — mit B5 miterledigen.
+- **D6. Artist-Tabelle — ✅ behoben (siehe library-v2.md §33):** hatte keine
+  Quality-Profile-/Genre-/Added-Spalte und keinen Spalten-Zahnrad. Neue
+  `artist_table.columns`-Sektion in den UI-Preferences (Default aus) +
+  Zahnrad neben dem Cards/Table-Umschalter (nur in der Table-Ansicht). Backend
+  brauchte nichts Neues — `quality_profile_id`/`genres`/`added_at` waren im
+  Summary-Payload bereits vorhanden.
 
 ---
 

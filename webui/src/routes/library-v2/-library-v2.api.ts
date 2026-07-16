@@ -26,6 +26,7 @@ import type {
   LibraryV2Search,
   LibraryV2Track,
   LibraryV2TrackDownload,
+  LibraryV2ArtistTableColumns,
   LibraryV2TrackTableColumns,
   LibraryV2UiPreferences,
 } from './-library-v2.types';
@@ -1142,6 +1143,9 @@ type UiPreferencesPatch = {
   track_table?: {
     columns?: Partial<LibraryV2TrackTableColumns>;
     show_all_match_providers?: boolean;
+  };
+  artist_table?: {
+    columns?: Partial<LibraryV2ArtistTableColumns>;
   };
 };
 
