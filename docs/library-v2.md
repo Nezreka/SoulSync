@@ -5434,3 +5434,17 @@ Volle `pytest tests/library2` (609 Tests, davon 6 neu) grün; gezielt
 Backend-Fix), daher kein `vitest`/`tsc`-Lauf nötig.
 
 **Scope:** `core/library2/autolink.py`, `tests/library2/test_autolink.py`.
+
+---
+
+## 39. Excel-like Resizable Columns (Spaltenbreiten veränderbar machen) — ❌ verworfen / aufgeschoben (2026-07-16)
+
+Ein erster Prototyp für Excel-style Resizable Columns wurde entwickelt, um Spaltenbreiten in Artist- und Tracklist-Tabellen per Drag-and-Drop veränderbar zu machen und im `localStorage` zu persistieren. Das Feature wurde aufgrund von Layout- und Interaktionsmängeln verworfen. Der Code wurde per Hard-Reset gelöscht und die Anforderungen in das Backlog übertragen.
+
+### Anforderungen für eine spätere Umsetzung:
+- **Zieh-Verhalten (Spreadsheet-Konvention):** Das Resizen einer Spalte darf andere Spalten nicht automatisch stauchen oder dehnen. Spalten links von der Maus bleiben starr, Spalten rechts davon verschieben sich als Block, und das Gesamtlayout passt sich entsprechend an (mit Scrollbar-Unterstützung bei Überschreiten des Bildschirms).
+- **Flexible Spalte:** Um Leerraum auf großen Monitoren zu vermeiden, füllt die jeweils letzte sichtbare Daten-Spalte (z.B. Dateipfad oder Added-Datum) den restlichen Platz dynamisch aus.
+- **Persistence:** Speichern der vom Nutzer gezogenen Spaltenbreiten im `localStorage` des Browsers.
+- **Visuelle Griffe:** Sichtbare Trennlinien an den Spaltengrenzen im Header, die bei Hover deutlicher hervorgehoben werden und einen breiteren Klickbereich (`~12px`) haben, um das Greifen zu erleichtern.
+- **Minimum-Grenzen:** Mindestbreiten (ca. 40px) pro Spalte zur Vermeidung von Collapses, aber keine Maximum-Grenzen.
+
