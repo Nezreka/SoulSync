@@ -1798,6 +1798,13 @@ async function hydrateArtistBubblesFromSnapshot() {
 
         // Restore artistDownloadBubbles with hydrated data
         for (const [artistId, bubbleData] of Object.entries(bubbles)) {
+            // One malformed snapshot entry must not poison the map or abort
+            // hydration of the rest (#1038: it broke Library page init).
+            if (!bubbleData || !bubbleData.artist || bubbleData.artist.id == null
+                || !Array.isArray(bubbleData.downloads)) {
+                console.warn(`⚠️ Skipping malformed bubble snapshot entry for artist ${artistId}`, bubbleData);
+                continue;
+            }
             artistDownloadBubbles[artistId] = {
                 artist: bubbleData.artist,
                 downloads: bubbleData.downloads.map(download => ({
@@ -1816,7 +1823,7 @@ async function hydrateArtistBubblesFromSnapshot() {
             // Start monitoring for any in-progress downloads
             for (const download of bubbleData.downloads) {
                 if (download.status === 'in_progress') {
-                    console.log(`📡 Starting monitoring for: ${download.album.name}`);
+                    console.log(`📡 Starting monitoring for: ${(download.album && download.album.name) || '?'}`);
                     monitorArtistDownload(artistId, download.virtualPlaylistId);
                 }
             }
@@ -2589,7 +2596,9 @@ function showArtistDownloadsSection() {
 
     // Count active artists (those with downloads)
     const activeArtists = Object.keys(artistDownloadBubbles).filter(artistId =>
-        artistDownloadBubbles[artistId].downloads.length > 0
+        artistDownloadBubbles[artistId] && artistDownloadBubbles[artistId].artist
+        && Array.isArray(artistDownloadBubbles[artistId].downloads)
+        && artistDownloadBubbles[artistId].downloads.length > 0
     );
 
     if (activeArtists.length === 0) {
@@ -2650,7 +2659,9 @@ function showLibraryDownloadsSection() {
 
     // Count active artists (reuses artistDownloadBubbles state)
     const activeArtists = Object.keys(artistDownloadBubbles).filter(artistId =>
-        artistDownloadBubbles[artistId].downloads.length > 0
+        artistDownloadBubbles[artistId] && artistDownloadBubbles[artistId].artist
+        && Array.isArray(artistDownloadBubbles[artistId].downloads)
+        && artistDownloadBubbles[artistId].downloads.length > 0
     );
 
     if (activeArtists.length === 0) {
@@ -2688,7 +2699,13 @@ function showLibraryDownloadsSection() {
  * Create HTML for an artist bubble card
  */
 function createArtistBubbleCard(artistBubbleData) {
-    const { artist, downloads } = artistBubbleData;
+    const { artist, downloads } = artistBubbleData || {};
+    // A malformed bubble (snapshot from an older/partial write) must not take
+    // down the whole page render — skip it instead of throwing (#1038).
+    if (!artist || artist.id == null || !Array.isArray(downloads)) {
+        console.warn('⚠️ Skipping malformed artist bubble:', artistBubbleData);
+        return '';
+    }
     const activeCount = downloads.filter(d => d.status === 'in_progress').length;
     const completedCount = downloads.filter(d => d.status === 'view_results').length;
     const allCompleted = activeCount === 0 && completedCount > 0;
@@ -2699,7 +2716,7 @@ function createArtistBubbleCard(artistBubbleData) {
         activeCount,
         completedCount,
         allCompleted,
-        downloadStatuses: downloads.map(d => `${d.album.name}: ${d.status}`)
+        downloadStatuses: downloads.map(d => `${(d.album && d.album.name) || '?'}: ${d.status}`)
     });
 
     // CRITICAL: Green checkmark detection logging

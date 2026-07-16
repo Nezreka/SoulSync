@@ -27445,13 +27445,26 @@ def hydrate_artist_bubbles():
         # Update bubble statuses with live data
         hydrated_bubbles = {}
         for artist_id, bubble_data in saved_bubbles.items():
+            # A malformed snapshot entry (no artist dict / no downloads list) must be
+            # dropped here — hydrating it breaks the client's Library page init (#1038).
+            if not isinstance(bubble_data, dict) or not isinstance(bubble_data.get('artist'), dict) \
+                    or bubble_data.get('artist', {}).get('id') is None:
+                logger.warning(f"Skipping malformed artist bubble snapshot entry: {artist_id}")
+                continue
             hydrated_bubble = {
                 'artist': bubble_data['artist'],
                 'downloads': [],
                 'hasCompletedDownloads': False
             }
-            
-            for download in bubble_data.get('downloads', []):
+
+            downloads = bubble_data.get('downloads') or []
+            if not isinstance(downloads, list):
+                downloads = []
+            for download in downloads:
+                if not isinstance(download, dict) or not isinstance(download.get('album'), dict) \
+                        or not download.get('virtualPlaylistId'):
+                    logger.warning(f"Skipping malformed download in bubble snapshot for artist {artist_id}")
+                    continue
                 virtual_playlist_id = download['virtualPlaylistId']
                 
                 # Determine current live status
