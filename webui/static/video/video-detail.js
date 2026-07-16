@@ -464,8 +464,14 @@
         // upgrade). Opens the same VideoGet modal the discover/search cards use.
         if (d.kind === 'movie' && window.VideoGet) {
             var wished = !!d._wl_wished;
-            var wlLabel = wished ? 'In Wishlist' : (d.owned ? 'Get' : 'Add to Wishlist');
-            var wlIcon = wished ? '✓' : (d.owned ? '⬇' : '＋');
+            // 'Get' for anything acquirable — the modal it opens offers Download
+            // now (auto/manual search + grab) AND Add to Wishlist. The old
+            // 'Add to Wishlist' label on unowned movies hid the whole download
+            // path behind a wishlist-sounding button (Boulder: "how come there
+            // is no get or download button on movie detail pages?" — there was,
+            // it was just labeled as wishlist).
+            var wlLabel = wished ? 'In Wishlist' : 'Get';
+            var wlIcon = wished ? '✓' : '⬇';
             html +=
                 '<button class="library-artist-watchlist-btn' + (wished ? ' watching' : '') + '" type="button" data-vd-act="get">' +
                 '<span class="watchlist-icon">' + wlIcon + '</span>' +
