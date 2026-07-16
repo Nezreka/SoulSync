@@ -56,6 +56,11 @@ def register_routes(bp):
                                        server_source=resolve_video_server(),
                                        watchlist_only=(scope != "all"))
 
+            # Movie release events (wishlisted movies): cinema + home-availability
+            # dates in the same window — Radarr's calendar lane, plus the per-type
+            # client filter Radarr never shipped.
+            movies = db.calendar_movie_releases(start.isoformat(), end.isoformat())
+
             # Per-date counts drive the day-strip dots without a second query.
             counts: dict[str, int] = {}
             owned = 0
@@ -73,6 +78,7 @@ def register_routes(bp):
                 "total": len(eps),
                 "owned": owned,
                 "episodes": eps,
+                "movies": movies,
             })
         except Exception:
             logger.exception("video calendar failed")
@@ -108,13 +114,34 @@ def register_routes(bp):
                 summary = "%s %s" % (e.get("show_title") or "?", code)
                 if e.get("title"):
                     summary += " — " + e["title"]
+                # A real air time (TVDB, network-local) becomes a timed event —
+                # floating local time, same convention the on-page grid uses. The
+                # 00:00 placeholder means "streaming/unknown" and stays whole-day.
+                airs = str(e.get("airs_time") or "")[:5]
+                if len(airs) == 5 and airs[2] == ":" and airs != "00:00":
+                    dtstart = "DTSTART:%sT%s%s00" % (day, airs[:2], airs[3:5])
+                else:
+                    dtstart = "DTSTART;VALUE=DATE:" + day
                 lines += ["BEGIN:VEVENT",
                           "UID:ss-%s-%s-%s@soulsync" % (e.get("show_tmdb_id") or e.get("show_id"),
                                                         e.get("season_number"), e.get("episode_number")),
-                          "DTSTART;VALUE=DATE:" + day,
+                          dtstart,
                           "SUMMARY:" + _ics_escape(summary),
                           "DESCRIPTION:" + _ics_escape(e.get("overview") or ""),
                           "STATUS:CONFIRMED", "END:VEVENT"]
+            # Movie release events (wishlisted movies) — whole-day, typed.
+            if (request.args.get("movies") or "1") != "0":
+                _MOVIE_LABEL = {"cinema": "In Cinemas", "available": "Home Release"}
+                for m in get_video_db().calendar_movie_releases(start.isoformat(), end.isoformat()):
+                    day = m["date"].replace("-", "")
+                    title = m["title"] or "?"
+                    if m.get("year"):
+                        title += " (%s)" % m["year"]
+                    lines += ["BEGIN:VEVENT",
+                              "UID:ss-movie-%s-%s@soulsync" % (m["tmdb_id"], m["type"]),
+                              "DTSTART;VALUE=DATE:" + day,
+                              "SUMMARY:" + _ics_escape("%s — %s" % (title, _MOVIE_LABEL[m["type"]])),
+                              "STATUS:CONFIRMED", "END:VEVENT"]
             lines.append("END:VCALENDAR")
             body = "\r\n".join(lines) + "\r\n"
             from flask import Response

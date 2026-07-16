@@ -2222,6 +2222,53 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vcal-addmissing-ic { font-size: 15px; font-weight: 900; line-height: 1; }
 @media (max-width: 720px) { .vcal-head-row { flex-direction: column; align-items: stretch; } .vcal-controls { justify-content: space-between; } }
 
+/* Movies rail — wishlisted movies' release dates lead the guide */
+.vcal-rail--movies .vcal-rail-label { color: hsl(282, 85%, 76%); }
+.vcal-rail--movies small { color: hsla(282, 70%, 65%, 0.6); }
+.vcal-mv-chip { font-size: 11px; font-weight: 800; letter-spacing: 0.02em; padding: 3px 8px; border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08); color: rgba(255, 255, 255, 0.85); align-self: flex-start; }
+.vcal-mv--cinema .vcal-mv-chip { background: hsla(44, 90%, 58%, 0.16); color: hsl(44, 100%, 74%); }
+.vcal-mv--home .vcal-mv-chip { background: hsla(150, 65%, 45%, 0.16); color: hsl(150, 75%, 70%); }
+.vcal-ics-btn { width: 38px; height: 34px; border-radius: 11px; border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.05); }
+.vcal-ics-btn:hover { border-color: rgba(255, 255, 255, 0.22); }
+
+/* Agenda view — the 8-col guide collapses into one chronological list */
+.vcal-grid.vcal-view--agenda .vcal-cols { display: flex; flex-direction: column; gap: 14px; max-width: 860px; margin: 0 auto; }
+.vcal-ag-day { border: 1px solid rgba(255, 255, 255, 0.07); border-radius: 16px; overflow: hidden;
+    background: rgba(255, 255, 255, 0.025); }
+.vcal-ag-day--today { border-color: rgba(var(--vcal-accent), 0.45); box-shadow: 0 10px 30px -18px rgba(var(--vcal-accent), 0.7); }
+.vcal-ag-day--past { opacity: 0.62; }
+.vcal-ag-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px;
+    background: rgba(255, 255, 255, 0.04); border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
+.vcal-ag-day--today .vcal-ag-head { background: rgba(var(--vcal-accent), 0.16); }
+.vcal-ag-head-label { font-size: 13.5px; font-weight: 800; letter-spacing: -0.01em; color: #fff; }
+.vcal-ag-head-n { font-size: 11px; font-weight: 800; color: rgba(255, 255, 255, 0.6);
+    background: rgba(255, 255, 255, 0.08); padding: 3px 9px; border-radius: 999px; }
+.vcal-ag-row { display: flex; align-items: center; gap: 14px; padding: 11px 16px; text-decoration: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.045); transition: background 0.13s ease; }
+.vcal-ag-row:last-child { border-bottom: 0; }
+.vcal-ag-row:hover { background: rgba(255, 255, 255, 0.05); }
+.vcal-ag-time { flex: 0 0 92px; font-size: 12px; font-weight: 800; color: hsl(var(--vcal-h, 232), 85%, 74%); }
+.vcal-ag-time.vcal-time--none { color: rgba(255, 255, 255, 0.32); }
+.vcal-ag-time.vcal-mv-chip { flex-basis: auto; }
+.vcal-ag-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.vcal-ag-title { font-size: 13.5px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vcal-ag-sub { font-size: 12px; color: rgba(255, 255, 255, 0.5); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vcal-ag-row .vcal-flag { position: static; flex: 0 0 auto; }
+@media (max-width: 560px) { .vcal-ag-time { flex-basis: 72px; } .vcal-ag-row { gap: 10px; padding: 10px 12px; } }
+
+/* iCal subscribe modal (reuses the .vcm overlay chrome) */
+.vcal-ics-modal { width: min(560px, 100%); }
+.vcal-ics-body { padding: 26px 26px 22px; display: flex; flex-direction: column; gap: 12px; }
+.vcal-ics-title { margin: 0; font-size: 18px; font-weight: 800; letter-spacing: -0.01em; color: #fff; }
+.vcal-ics-sub { margin: 0; font-size: 13px; line-height: 1.55; color: rgba(255, 255, 255, 0.66); }
+.vcal-ics-row { display: flex; gap: 8px; }
+.vcal-ics-url { flex: 1; min-width: 0; padding: 10px 12px; border-radius: 10px; font-size: 12.5px;
+    border: 1px solid rgba(255, 255, 255, 0.12); background: rgba(0, 0, 0, 0.35); color: rgba(255, 255, 255, 0.85); }
+.vcal-ics-note { margin: 0; font-size: 11.5px; line-height: 1.5; color: rgba(255, 255, 255, 0.42); }
+.vcal-ics-note code { background: rgba(255, 255, 255, 0.08); padding: 1px 5px; border-radius: 5px; }
+
 /* ══════════════════════════════════════════════════════════════════════════
    Watchlist — shared "add to watchlist" button (.vwl-btn) + the Watchlist page
    (.vwlp-*). The button is the video mirror of the music ya-watchlist-btn.
