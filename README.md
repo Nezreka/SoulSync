@@ -81,7 +81,7 @@ SoulSync bridges streaming services to your music library with automated discove
 
 **Hybrid Mode** — Enable any combination of sources, drag to set priority order, automatic fallback chain
 
-**Playlist Sources**: Spotify, Tidal, YouTube, Deezer, Beatport charts, ListenBrainz, Spotify Link (no API needed)
+**Playlist Sources**: Spotify, Tidal, YouTube, Deezer, Qobuz, Beatport charts, ListenBrainz, Spotify/Deezer link paste (no API needed), CSV/TSV/M3U file import
 
 **Post-Download**
 - Lossy copy creation: MP3, Opus, AAC with configurable bitrate (Opus capped at 256kbps)
@@ -105,7 +105,7 @@ SoulSync bridges streaming services to your music library with automated discove
 ### Audio Verification
 
 **AcoustID Fingerprinting** (optional) — Verifies downloaded files match expected tracks
-- Runs for all download sources (Soulseek, Tidal, Qobuz, HiFi, Deezer, YouTube)
+- Runs for all download sources (Soulseek, Tidal, Qobuz, HiFi, Deezer, Amazon Music, YouTube)
 - Catches wrong versions (live, remix, cover) even from streaming API sources
 - Fail-open design: verification errors never block downloads
 
@@ -560,7 +560,7 @@ Open SoulSync at `http://localhost:8008` and go to Settings.
 
 ## Architecture
 
-**Scale**: ~120,000 lines across Python backend and JavaScript frontend, 80+ API endpoints, handles 10,000+ album libraries
+**Scale**: ~400,000 lines across Python backend and JavaScript/TypeScript frontend, 1,000+ API endpoints, handles 10,000+ album libraries
 
 **Integrations**: Spotify, iTunes/Apple Music, Deezer, Tidal, Qobuz, YouTube, Soulseek (slskd), HiFi, Beatport, ListenBrainz, MusicBrainz, AcoustID, AudioDB, Last.fm, Genius, LRClib, music-map.com, Plex, Jellyfin, Navidrome
 
