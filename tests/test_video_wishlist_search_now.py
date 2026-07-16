@@ -108,7 +108,9 @@ def test_search_now_runs_the_drain_seams_in_background(client, db, monkeypatch):
     out = r.get_json()
     assert out["success"] is True and out["queued"] == 1, out
     assert _wait_for(lambda: calls == [(88, "movie", "/media/movies")]), f"enqueue never ran: {calls}"
-    assert ws._inflight == set()      # bookkeeping released
+    # the batch thread's finally releases the bookkeeping AFTER the enqueue —
+    # wait for it rather than racing it
+    assert _wait_for(lambda: ws._inflight == set()), f"bookkeeping never released: {ws._inflight}"
 
 
 def test_search_now_skips_items_already_downloading(client, db, monkeypatch):
