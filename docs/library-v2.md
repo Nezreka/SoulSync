@@ -5362,3 +5362,75 @@ von dieser Änderung berührt), `tsc --noEmit`/`oxfmt --check`/
 `.pipeline_result`, neues `LibraryV2PipelineResult`),
 `webui/.../-ui/library-v2-page.tsx` (`TrackVerificationBadge`,
 `TrackLifecycleSection`, `QUALITY_FALLBACK_LABELS`).
+
+---
+
+## 38. §G8-Vierter-Punkt — `_find_or_create_artist` External-ID-Awareness — ✅ umgesetzt (2026-07-16)
+
+Der letzte offene Punkt aus G8 (siehe library-v2.md §30): der Autolink-Pfad
+kannte beim Artist-Matching weder `spotify_id` noch die §40-Alias-Gruppen und
+scannte bei jedem Nicht-Exakt-Treffer die volle `lib2_artists`-Tabelle. Der
+Deep-Dive hatte hierfür bewusst KEINE konkrete Fix-Richtung vorgegeben — eine
+Auto-Erkennungs-Heuristik für Alias-Kandidaten wäre exakt das, was §40.1
+explizit ausschließt (Fehlzuordnungsrisiko), und war deshalb nie das Ziel
+dieser Runde.
+
+**Umgesetzter Teil (sicher, ohne neue Heuristik):** ID-Matching als
+zusätzliche, stärkere Signalquelle VOR dem Namens-Matching — dieselbe
+Präferenz, die `_ArtistResolver` (§38-Provider-ID-Merge, `importer.py`) für
+den Import-Pfad bereits etabliert hat, hier für den Autolink-Pfad
+nachgezogen:
+- `_primary_artist_spotify_id(ti)` liest `artists[0]["id"]` — aber NUR wenn
+  `ti["provider"] == "spotify"` (dieselbe Gate-Regel wie beim bereits
+  vorhandenen `spotify_track_id`), weil dasselbe Feld bei anderen Clients
+  (JioSaavn, Amazon, …) provider-eigene, nicht-Spotify-IDs trägt, die niemals
+  in die `spotify_id`-Spalte geraten dürfen.
+- `_find_or_create_artist` prüft, falls eine Spotify-Artist-ID vorliegt,
+  zuerst `WHERE spotify_id=?` (bereits indiziert —
+  `idx_lib2_artists_spotify` existierte schon, keine Schema-Änderung nötig).
+  Ein Treffer hier braucht keinen Namensvergleich — löst also genau den Fall,
+  den ein reiner String-Vergleich strukturell nie lösen kann (kanji- vs.
+  romaji-Credit derselben Provider-Identität, oder jede andere
+  Formatierungs-Abweichung bei sonst identischer ID).
+- Ein Namens-Treffer (Fast- oder Slow-Path, unverändert) BACKFILLT die
+  mitgelieferte Spotify-ID auf die gematchte Zeile, sofern diese noch NULL
+  ist (`AND spotify_id IS NULL` — überschreibt nie eine bereits bekannte,
+  ggf. abweichende ID). Jeder Treffer über den Namenspfad macht die Zeile
+  damit für das NÄCHSTE fertige Download ID-matchbar statt wieder auf den
+  O(n)-Slow-Path angewiesen zu sein — die Perf-Beobachtung aus G8 entschärft
+  sich dadurch mit der Zeit von selbst, ohne dass der Scan-Mechanismus selbst
+  angefasst werden musste (SQLite hat kein `casefold()`; der Slow-Path bleibt
+  der einzige Weg, Whitespace-/Unicode-Normalisierungsunterschiede zu fangen,
+  die `lower()` nicht sieht — er wird nur zunehmend seltener gebraucht).
+- Neu erstellte Artist-Zeilen persistieren die mitgelieferte Spotify-ID
+  gleich beim `INSERT` (vorher: nie gesetzt, obwohl die Spalte seit Langem
+  existiert — jede autolink-erzeugte Artist-Zeile war dadurch strukturell
+  blind für künftige ID-Matches, unabhängig vom jetzigen Fix).
+
+**Bewusst nicht Teil dieser Runde:**
+- **Keine Alias-Erkennungs-Heuristik.** §40 bleibt bei manuellem Verlinken;
+  dieser Fix ändert nichts an `resolve_alias_group`/Fan-out-Verhalten. Trifft
+  ein Download eine bereits als Alias verlinkte Zeile (per Name oder ID),
+  matcht er weiterhin auf GENAU diese Zeile — konsistent mit dem
+  §40.4-Anzeigeprinzip „jede Zeile behält ihre eigenen Alben".
+- **Kein Ersatz des Slow-Path-Scans** durch einen Schema-Umbau (z. B. eine
+  normalisierte Namens-Spalte/Index). Die ID-Präferenz reduziert, wie oft der
+  Scan überhaupt noch erreicht wird; ein struktureller Umbau des Scans selbst
+  wäre eine eigene, größere Änderung ohne akuten Bedarf.
+- Musicbrainz-/Deezer-IDs werden hier nicht ergänzt — im Autolink-Kontext
+  liegt ausschließlich die Spotify-Artist-ID aus dem Track-Kontext vor
+  (dieselbe Quelle, aus der auch `spotify_track_id`/`spotify_album_id` schon
+  gelesen werden); ein Ausbau auf weitere Provider bräuchte erst eine eigene
+  Quelle dafür im Pipeline-Kontext.
+
+**Verifikation:** 6 neue gezielte Tests in `tests/library2/test_autolink.py`
+(ID-Match trotz Namens-Drift, Backfill auf NULL, Backfill überschreibt nie
+eine vorhandene ID, neue Zeile persistiert die ID, Provider-Gate für
+`_primary_artist_spotify_id`, End-to-End über `link_download_into_library_v2`).
+Volle `pytest tests/library2` (609 Tests, davon 6 neu) grün; gezielt
+`pytest tests/imports tests/downloads/test_downloads_post_processing.py`
+(698 von 703 grün — dieselben 5 vorbestehenden, unabhängigen Fails wie in
+§37 dokumentiert). `ruff check` clean. Keine Frontend-Änderung (reiner
+Backend-Fix), daher kein `vitest`/`tsc`-Lauf nötig.
+
+**Scope:** `core/library2/autolink.py`, `tests/library2/test_autolink.py`.

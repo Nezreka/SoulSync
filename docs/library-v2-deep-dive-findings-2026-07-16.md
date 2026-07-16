@@ -586,7 +586,7 @@ gemoved wurden, sieht man nur indirekt. Fix: das bestehende
 Queue-Status-API wiederverwenden (dünner Read reicht — Panel oder
 Status-Zeile im Modal mit Poll bis Queue leer).
 
-### G8. Kleinere Runde-2-Funde (gesammelt) — 3 von 4 behoben (siehe library-v2.md §30)
+### G8. Kleinere Runde-2-Funde (gesammelt) — 4 von 4 behoben (siehe library-v2.md §30, 4. Punkt siehe §38)
 
 - **`auto_monitor_releases` überfährt Flags:** `UPDATE lib2_tracks SET
   monitored=1 WHERE album_id=?` (`discography.py:522`) flippt auch explizit
@@ -606,12 +606,13 @@ Status-Zeile im Modal mit Poll bis Queue leer).
 - **`_find_or_create_artist`-Slow-Path** (`autolink.py:62`) scannt bei jedem
   nicht-exakten Treffer die GANZE Artist-Tabelle pro fertigem Download —
   bei großen Libraries messbar; und er kennt weder `external_ids` noch die
-  §40-Alias-Gruppen (Duplikat-Artist-Risiko, deckt sich mit §40). —
-  **weiterhin offen**: anders als die drei obigen hat dieser Punkt keine
-  konkrete Fix-Richtung hier im Dokument; ein Alias-Match-Fix ohne eigene
-  Recherche riskiert genau die Fehlzuordnung, vor der A6/A7 schon
-  zurückschrecken ließ (siehe §29-Begründung). Braucht denselben
-  fokussierten Recherche-Schritt wie C3/C4, bevor Code entsteht.
+  §40-Alias-Gruppen (Duplikat-Artist-Risiko, deckt sich mit §40). — ✅
+  behoben (siehe library-v2.md §38): ID-Match (`spotify_id`, bereits
+  indiziert) läuft jetzt VOR dem Namens-Matching und wird auf Namens-Treffer
+  zurückgeschrieben (Backfill), sodass der Slow-Path-Scan mit der Zeit
+  zunehmend seltener erreicht wird. Bewusst NICHT Teil des Fixes: eine
+  Alias-Erkennungs-Heuristik — die bleibt laut §40.1 manuell, um genau die
+  Fehlzuordnung zu vermeiden, vor der A6/A7 schon zurückschrecken ließ.
 - **Track-Automatic-Search-Query ohne Albumkontext:**
   `buildSearchQuery` wirft den Album-Teil bewusst weg — bei generischen
   Titeln („Intro") grabbt der Best-Pick beliebige Versionen. Wird durch C1

@@ -302,6 +302,98 @@ def test_disc_and_track_number_slot_fills_when_titles_dont_normalize_equal(
     ).fetchone()["c"] == 1
 
 
+def test_find_or_create_artist_matches_by_spotify_id_despite_name_drift(
+        lib2_enabled, imported_conn):
+    """G8: a provider identity is a stronger signal than a name string — the
+    canonical example is a kanji vs. romaji release credit for the same
+    artist, where SQLite's ASCII-only lower() can't even prove two spellings
+    differ only by casing. Drake's row already carries spotify_id='sp1' from
+    the legacy import; a completely different credit string with that same id
+    must still resolve to the one existing row instead of minting a
+    duplicate."""
+    before = imported_conn.execute("SELECT COUNT(*) c FROM lib2_artists").fetchone()["c"]
+    artist_id = A._find_or_create_artist(imported_conn, "Aubrey Graham", spotify_id="sp1")
+    drake_id = imported_conn.execute(
+        "SELECT id FROM lib2_artists WHERE name='Drake'").fetchone()["id"]
+    assert artist_id == drake_id
+    assert imported_conn.execute(
+        "SELECT COUNT(*) c FROM lib2_artists").fetchone()["c"] == before
+
+
+def test_find_or_create_artist_backfills_spotify_id_on_name_match(
+        lib2_enabled, imported_conn):
+    """A name-matched row without a known provider id gets one attached, so
+    the NEXT finished download for the same artist can take the indexed
+    ID-match path instead of the O(n) name scan."""
+    imported_conn.execute(
+        "INSERT INTO lib2_artists(name, sort_name, quality_profile_id) "
+        "VALUES('Overseas Artist', 'Overseas Artist', 1)")
+
+    artist_id = A._find_or_create_artist(
+        imported_conn, "Overseas Artist", spotify_id="sp-overseas")
+    row = imported_conn.execute(
+        "SELECT spotify_id FROM lib2_artists WHERE id=?", (artist_id,)).fetchone()
+    assert row["spotify_id"] == "sp-overseas"
+
+
+def test_find_or_create_artist_never_overwrites_an_existing_spotify_id(
+        lib2_enabled, imported_conn):
+    """Backfill only fills a NULL — a row that already carries a provider id
+    must never be overwritten by a second, possibly-wrong one arriving
+    through a plain name match."""
+    A._find_or_create_artist(imported_conn, "Drake", spotify_id="sp-wrong")
+    row = imported_conn.execute(
+        "SELECT spotify_id FROM lib2_artists WHERE name='Drake'").fetchone()
+    assert row["spotify_id"] == "sp1"
+
+
+def test_new_artist_persists_the_spotify_id_it_was_created_with(
+        lib2_enabled, imported_conn):
+    artist_id = A._find_or_create_artist(
+        imported_conn, "Brand New Artist", spotify_id="sp-new")
+    row = imported_conn.execute(
+        "SELECT spotify_id FROM lib2_artists WHERE id=?", (artist_id,)).fetchone()
+    assert row["spotify_id"] == "sp-new"
+
+
+def test_primary_artist_spotify_id_ignored_for_non_spotify_providers():
+    """artists[0]['id'] is populated by non-Spotify clients too (JioSaavn,
+    Amazon, …) with their own provider-local ids — never trust it into the
+    spotify_id column unless the result itself is Spotify's."""
+    ti = {"provider": "jiosaavn", "artists": [{"name": "Some Artist", "id": "jio-123"}]}
+    assert A._primary_artist_spotify_id(ti) is None
+
+
+def test_end_to_end_autolink_reuses_artist_matched_purely_by_spotify_id(
+        lib2_enabled, imported_conn):
+    """Full pipeline wiring: a finished download whose track_info spells the
+    artist differently from the library row, but carries the same Spotify
+    artist id, must attach to the existing Drake artist/album tree instead of
+    creating a second 'Aubrey Graham' artist with its own duplicate Scorpion
+    album."""
+    ctx = _context(track_info={
+        "name": "Nonstop",
+        "artists": [{"name": "Aubrey Graham", "id": "sp1"}],
+        "album": {"name": "Scorpion", "id": "sp-scorpion", "total_tracks": 25,
+                  "album_type": "album"},
+        "track_number": 1,
+        "provider": "spotify",
+        "id": "sp-track-nonstop",
+    })
+    before = imported_conn.execute("SELECT COUNT(*) c FROM lib2_artists").fetchone()["c"]
+    file_id = A.link_download_into_library_v2(ctx)
+    assert file_id is not None
+    assert imported_conn.execute(
+        "SELECT COUNT(*) c FROM lib2_artists").fetchone()["c"] == before
+    row = imported_conn.execute(
+        """SELECT ar.name FROM lib2_track_files tf
+             JOIN lib2_tracks t ON t.id = tf.track_id
+             JOIN lib2_albums al ON al.id = t.album_id
+             JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+            WHERE tf.id=?""", (file_id,)).fetchone()
+    assert row["name"] == "Drake"
+
+
 def test_linking_file_graduates_discography_album_to_library(lib2_enabled, imported_conn):
     """Attaching a real file to a provider-only release must flip its origin —
     'My Library' filters on origin/monitored, so an unmonitored discography row

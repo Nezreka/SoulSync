@@ -48,7 +48,32 @@ def _primary_artist_name(ti: Dict[str, Any]) -> str:
     return _get(ti, "artist")
 
 
-def _find_or_create_artist(conn, name: str) -> Optional[int]:
+def _primary_artist_spotify_id(ti: Dict[str, Any]) -> Optional[str]:
+    # Gated on provider=="spotify" like spotify_track_id below: `artists[0]["id"]`
+    # is populated by several non-Spotify clients too (JioSaavn, Amazon, …) with
+    # their own provider-local ids, which must never be trusted into the
+    # `spotify_id` column.
+    if ti.get("provider") != "spotify":
+        return None
+    artists = ti.get("artists")
+    if isinstance(artists, list) and artists:
+        first = artists[0]
+        if isinstance(first, dict) and first.get("id"):
+            return str(first["id"])
+    return None
+
+
+def _find_or_create_artist(conn, name: str, *, spotify_id: Optional[str] = None) -> Optional[int]:
+    # ID match first: cheap (indexed) and — unlike name matching — survives
+    # name-spelling variants of the same provider identity (e.g. a kanji vs.
+    # romaji release credit), the case G8's alias-awareness gap calls out.
+    if spotify_id:
+        row = conn.execute(
+            "SELECT id FROM lib2_artists WHERE spotify_id = ? LIMIT 1", (spotify_id,)
+        ).fetchone()
+        if row:
+            return row["id"]
+
     key = normalize_name(name)
     if not key:
         return None
@@ -57,16 +82,28 @@ def _find_or_create_artist(conn, name: str) -> Optional[int]:
     row = conn.execute(
         "SELECT id FROM lib2_artists WHERE lower(name) = ? LIMIT 1", (key,)
     ).fetchone()
-    if row:
+    if row is None:
+        # Slow path: python normalization also collapses whitespace/casefolds
+        # (SQLite's lower() is ASCII-only, so this also covers non-ASCII names
+        # the fast path's lower() comparison misses).
+        for candidate in conn.execute("SELECT id, name FROM lib2_artists"):
+            if normalize_name(candidate["name"]) == key:
+                row = candidate
+                break
+    if row is not None:
+        if spotify_id:
+            # Backfill so the next finished download for this artist can take
+            # the indexed ID path above instead of falling through to here.
+            conn.execute(
+                "UPDATE lib2_artists SET spotify_id=?, updated_at=CURRENT_TIMESTAMP "
+                "WHERE id=? AND spotify_id IS NULL", (spotify_id, row["id"]))
         return row["id"]
-    # Slow path: python normalization also collapses whitespace/casefolds.
-    for row in conn.execute("SELECT id, name FROM lib2_artists"):
-        if normalize_name(row["name"]) == key:
-            return row["id"]
+
     from core.library2.profile_lookup import default_quality_profile_id
     cur = conn.execute(
-        "INSERT INTO lib2_artists(name, sort_name, quality_profile_id) VALUES(?, ?, ?)",
-        (name, name, default_quality_profile_id(conn)))
+        "INSERT INTO lib2_artists(name, sort_name, spotify_id, quality_profile_id) "
+        "VALUES(?, ?, ?, ?)",
+        (name, name, spotify_id, default_quality_profile_id(conn)))
     return cur.lastrowid
 
 
@@ -262,7 +299,8 @@ def link_download_into_library_v2(context: Dict[str, Any]) -> Optional[int]:
                 # Entity gone or absent — heuristic name matching as before.
                 if not title or not artist_name:
                     return None
-                artist_id = _find_or_create_artist(conn, artist_name)
+                artist_id = _find_or_create_artist(
+                    conn, artist_name, spotify_id=_primary_artist_spotify_id(ti))
                 if artist_id is None:
                     return None
                 album_id = _find_or_create_album(
