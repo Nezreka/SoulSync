@@ -76,7 +76,8 @@ def create_video_blueprint() -> Blueprint:
                    "/api/video/repair",
                    "/api/video/server-config", "/api/video/jellyfin", "/api/video/libraries",
                    "/api/video/organization", "/api/video/downloads/slskd",
-                   "/api/video/enrichment/config", "/api/video/enrichment/priority")
+                   "/api/video/enrichment/config", "/api/video/enrichment/priority",
+                   "/api/video/notifications")   # P11: GETs return webhook URLs/bot tokens
         # Config the Settings page WRITES but content views (download modal / grab)
         # legitimately READ — gate the writes, leave the GETs open.
         if writing:
@@ -121,6 +122,7 @@ def create_video_blueprint() -> Blueprint:
     from .repair import register_routes as reg_repair
     from .issues import register_routes as reg_issues
     from .requests import register_routes as reg_requests
+    from .notifications import register_routes as reg_notifications
     reg_dashboard(bp)
     reg_scan(bp)
     reg_library(bp)
@@ -143,5 +145,6 @@ def create_video_blueprint() -> Blueprint:
     reg_repair(bp)
     reg_issues(bp)
     reg_requests(bp)
+    reg_notifications(bp)
 
     return bp
