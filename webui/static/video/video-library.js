@@ -116,6 +116,10 @@
         if (kind === 'movie') {
             var rl = resLabel(it.resolution);
             if (rl) badge = '<div class="video-card-badge">' + rl + '</div>';
+        } else if (kind === 'show') {
+            // Airing/Ended/Upcoming rides the poster corner (movies keep their
+            // resolution there) — the stat line is too tight to fit it.
+            badge = showStatusBadge(it.status);
         }
 
         // Stat line: year · ★ rating · owned-state (+ watched tick). Parts are
@@ -130,8 +134,6 @@
         } else {
             meta.push((it.owned_count || 0) + '/' + (it.episode_count || 0) + ' eps');
             if (it.size_bytes) meta.push(fmtSize(it.size_bytes));
-            var chip = showStatusChip(it.status);
-            if (chip) meta.push(chip);
         }
 
         // Shows: a slim owned-episodes progress line under the stats — collection
@@ -156,17 +158,17 @@
     }
 
     // Show lifecycle chip: the server/TMDB status strings collapse to three states.
-    function showStatusChip(status) {
+    function showStatusBadge(status) {
         var st = String(status || '').toLowerCase();
         if (!st) return '';
         if (st.indexOf('continu') > -1 || st.indexOf('return') > -1 || st.indexOf('air') > -1) {
-            return '<span class="vlib-chip vlib-chip--airing">Airing</span>';
+            return '<div class="video-card-badge video-card-badge--airing">Airing</div>';
         }
         if (st.indexOf('end') > -1 || st.indexOf('cancel') > -1) {
-            return '<span class="vlib-chip vlib-chip--ended">Ended</span>';
+            return '<div class="video-card-badge video-card-badge--ended">Ended</div>';
         }
         if (st.indexOf('upcoming') > -1 || st.indexOf('production') > -1 || st.indexOf('planned') > -1) {
-            return '<span class="vlib-chip vlib-chip--upcoming">Upcoming</span>';
+            return '<div class="video-card-badge video-card-badge--upcoming">Upcoming</div>';
         }
         return '';
     }
