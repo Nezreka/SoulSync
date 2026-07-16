@@ -7162,6 +7162,23 @@
                                     </div>
                                 </div>
                             </div>
+                            <!-- Custom Formats (arr-parity P3): scored release-name matchers -->
+                            <div class="settings-group" data-stg="quality" data-video-only>
+                                <h3>Custom Formats</h3>
+                                <div class="setting-help-text">
+                                    Score releases by their <strong>name</strong> — prefer trusted groups, bury x265, chase freeleech, anything a pattern can see.
+                                    Terms are plain substrings, or regex written <code>/x265|hevc/</code>. A format matches when <em>all</em> "match" terms hit and <em>no</em> "never" term does;
+                                    matching formats add their score to a release's rank (negative buries without rejecting).
+                                    The "this profile" column overrides a format's score for the profile selected above.
+                                </div>
+                                <div id="vq-format-rows"></div>
+                                <button class="test-button" type="button" data-vq-format-add>+ Add format</button>
+                                <div class="form-group" style="margin-top:10px;">
+                                    <label>Minimum format score (this profile):</label>
+                                    <input type="number" id="vq-min-format-score" style="max-width:120px;" value="0">
+                                    <small class="settings-hint">Releases whose summed format score falls below this are rejected outright. 0 = off.</small>
+                                </div>
+                            </div>
                             </div>
                             <!-- VIDEO youtube quality — separate, smaller yt-dlp profile -->
                             <div class="settings-section-header collapsed" data-stg="quality" data-video-only onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">

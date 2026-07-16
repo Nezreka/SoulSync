@@ -2287,6 +2287,17 @@ body[data-side="video"] #soulsync-toggle { display: none; }
    (.vwlp-*). The button is the video mirror of the music ya-watchlist-btn.
    ══════════════════════════════════════════════════════════════════════════ */
 
+/* Custom Formats editor rows (P3) */
+.vq-fmt-row { display: grid; grid-template-columns: 1fr 1.6fr 1.2fr 74px 74px 30px; gap: 8px;
+    align-items: center; margin-bottom: 8px; }
+.vq-fmt-in { padding: 8px 10px; border-radius: 9px; font-size: 12.5px;
+    border: 1px solid rgba(255, 255, 255, 0.12); background: rgba(0, 0, 0, 0.3); color: #fff; }
+.vq-fmt-num { text-align: center; }
+.vq-fmt-del { width: 28px; height: 30px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(0, 0, 0, 0.3); color: rgba(255, 255, 255, 0.55); cursor: pointer; }
+.vq-fmt-del:hover { background: rgba(239, 68, 68, 0.8); color: #fff; border-color: transparent; }
+@media (max-width: 900px) { .vq-fmt-row { grid-template-columns: 1fr 1fr; } }
+
 /* Follow-time monitor menu (P2): what to wish when following a SHOW. */
 .vwl-menu { position: fixed; z-index: 10000; min-width: 280px; padding: 6px; border-radius: 12px;
     background: rgba(18, 18, 24, 0.97); border: 1px solid rgba(255, 255, 255, 0.12);

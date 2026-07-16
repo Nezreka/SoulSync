@@ -77,6 +77,8 @@ def default_profile() -> dict:
         "prefer_repack": True,
         "max_movie_gb": 0,      # per-item size guard, split by runtime (0 = no limit)
         "max_episode_gb": 0,
+        "format_scores": {},    # custom-format score overrides (P3): {format_id: score}
+        "min_format_score": 0,  # hard floor on the summed format score (0 = off)
     }
 
 
@@ -142,6 +144,19 @@ def normalize(raw: Any) -> dict:
 
     d["max_movie_gb"] = _clamp_size(raw.get("max_movie_gb"))
     d["max_episode_gb"] = _clamp_size(raw.get("max_episode_gb"))
+
+    # Custom formats (P3): per-profile score overrides {format_id: score} and
+    # an optional hard floor on the summed format score (0 = off).
+    fs = raw.get("format_scores")
+    if isinstance(fs, dict):
+        clean = {}
+        for k, v in fs.items():
+            try:
+                clean[str(int(k))] = max(-1000, min(1000, int(v)))
+            except (TypeError, ValueError):
+                continue
+        d["format_scores"] = clean
+    d["min_format_score"] = max(-1000, min(1000, _coerce_int(raw.get("min_format_score"), 0)))
     return d
 
 

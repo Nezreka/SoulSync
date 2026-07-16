@@ -79,8 +79,16 @@ def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None,
     them up. Blocked hits stay VISIBLE in manual search (greyed, with the reason — the
     Sonarr behaviour) but are never `accepted`, so every auto-picker skips them; a manual
     grab of one is a deliberate user override."""
+    from core.video.custom_formats import format_score, load_formats
     from core.video.quality_eval import evaluate_release
     from core.video.release_parse import parse_release
+    # Custom formats (P3): loaded once per evaluation batch; scored per hit
+    # under THIS profile's overrides. Failure = no formats, never a 500.
+    try:
+        from . import get_video_db as _gdb
+        _formats = load_formats(_gdb())
+    except Exception:   # noqa: BLE001
+        _formats = []
     if blocked is None or blocked_users is None:
         try:
             from . import get_video_db
@@ -99,6 +107,17 @@ def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None,
         verdict = evaluate_release(parsed, profile, scope=scope, want_season=want_season,
                                    want_episode=want_episode, size_gb=size_gb, want_year=want_year,
                                    want_title=want_title, want_date=want_date)
+        # Custom formats: matched formats ADD their (per-profile) score; a
+        # summed score under the profile's floor hard-rejects (Radarr's
+        # min custom format score).
+        fscore, fnames = (0, [])
+        if _formats:
+            fscore, fnames = format_score(_parse_text(hit), _formats, profile)
+            verdict = {**verdict, "score": verdict["score"] + fscore}
+            floor = (profile or {}).get("min_format_score") or 0
+            if floor and verdict["accepted"] and fscore < floor:
+                verdict = {**verdict, "accepted": False,
+                           "rejected": "Format score %d is below your minimum %d" % (fscore, floor)}
         user = hit.get("username")
         is_blocked = bool(user and user in blocked_users) or (user, hit.get("filename")) in blocked
         if user and user in blocked_users:
@@ -125,6 +144,7 @@ def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None,
             "folder_size_bytes": hit.get("folder_size_bytes") or 0,
             "quality_label": verdict["quality_label"], "accepted": verdict["accepted"],
             "rejected": verdict["rejected"], "score": verdict["score"], "blocked": is_blocked,
+            "format_score": fscore, "formats": fnames,
             "resolution": parsed.get("resolution"), "source": parsed.get("source"),
             "codec": parsed.get("codec"), "hdr": parsed.get("hdr"),
             "audio": parsed.get("audio"), "group": parsed.get("group"),
@@ -410,6 +430,36 @@ def register_routes(bp):
         from core.video.quality_profile import delete_named
         if not delete_named(get_video_db(), profile_id):
             return jsonify({"success": False, "error": "Unknown profile (Default can't be deleted)."}), 404
+        return jsonify({"success": True})
+
+    # ── custom formats (scored release matchers; arr-parity P3) ──────────────
+    @bp.route("/downloads/quality/formats", methods=["GET"])
+    def video_custom_formats_list():
+        from core.video.custom_formats import load_formats
+
+        from . import get_video_db
+        return jsonify({"formats": load_formats(get_video_db())})
+
+    @bp.route("/downloads/quality/formats", methods=["POST"])
+    def video_custom_formats_save():
+        """Create (no id) or update a format:
+        {id?, name, include: [term|/regex/], exclude: [...], score}."""
+        from core.video.custom_formats import save_format
+
+        from . import get_video_db
+        f = save_format(get_video_db(), request.get_json(silent=True) or {})
+        if not f:
+            return jsonify({"success": False,
+                            "error": "A format needs a name and at least one term."}), 400
+        return jsonify({"success": True, **f})
+
+    @bp.route("/downloads/quality/formats/<int:format_id>", methods=["DELETE"])
+    def video_custom_formats_delete(format_id):
+        from core.video.custom_formats import delete_format
+
+        from . import get_video_db
+        if not delete_format(get_video_db(), format_id):
+            return jsonify({"success": False, "error": "Unknown format."}), 404
         return jsonify({"success": True})
 
     @bp.route("/detail/<kind>/<int:library_id>/quality-profile", methods=["PUT"])
