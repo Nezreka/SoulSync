@@ -1329,6 +1329,10 @@
                                             <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><rect x="1" y="2.4" width="14" height="2.3" rx="1.1"/><rect x="1" y="6.85" width="14" height="2.3" rx="1.1"/><rect x="1" y="11.3" width="14" height="2.3" rx="1.1"/></svg>
                                             <span>Compact</span>
                                         </button>
+                                        <button class="vcal-view-btn" type="button" data-video-cal-view="agenda" title="Agenda — one chronological list, day by day">
+                                            <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><rect x="1" y="2" width="3" height="3" rx="1"/><rect x="6" y="2.4" width="9" height="2.2" rx="1.1"/><rect x="1" y="8" width="3" height="3" rx="1"/><rect x="6" y="8.4" width="9" height="2.2" rx="1.1"/></svg>
+                                            <span>Agenda</span>
+                                        </button>
                                     </div>
                                     <div class="vcal-filter" role="group" aria-label="Source">
                                         <button class="vcal-filter-btn vcal-filter-btn--on" type="button" data-video-cal-scope="watchlist" title="Only shows on your watchlist">Watchlist</button>
@@ -1339,10 +1343,18 @@
                                         <button class="vcal-filter-btn" type="button" data-video-cal-filter="owned">In library</button>
                                         <button class="vcal-filter-btn" type="button" data-video-cal-filter="missing">Missing</button>
                                     </div>
+                                    <div class="vcal-filter hidden" role="group" aria-label="Movie releases" data-video-cal-movies-wrap>
+                                        <button class="vcal-filter-btn vcal-filter-btn--on" type="button" data-video-cal-movietype="cinema" title="Theatrical premieres of wishlisted movies">🎬 Cinema</button>
+                                        <button class="vcal-filter-btn vcal-filter-btn--on" type="button" data-video-cal-movietype="available" title="Home releases (digital/physical) of wishlisted movies">🏠 Home</button>
+                                    </div>
                                     <button class="vcal-addmissing hidden" type="button" data-video-cal-addmissing
                                             title="Add already-aired missing episodes to your wishlist">
                                         <span class="vcal-addmissing-ic" aria-hidden="true">&#43;</span>
                                         <span data-video-cal-addmissing-label>Add missing to wishlist</span>
+                                    </button>
+                                    <button class="vcal-nav-btn vcal-ics-btn" type="button" data-video-cal-ical
+                                            title="Subscribe to this calendar from Google/Apple/Outlook (iCal feed)" aria-label="Subscribe (iCal feed)">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="12" y1="13.5" x2="12" y2="18.5"/><line x1="9.5" y1="16" x2="14.5" y2="16"/></svg>
                                     </button>
                                 </div>
                             </div>

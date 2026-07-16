@@ -2930,6 +2930,57 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def calendar_movie_releases(self, start_date: str, end_date: str) -> list[dict]:
+        """Movie release events in [start_date, end_date] (ISO) for WISHLISTED
+        movies — the calendar's movie lane. Up to two event types per movie:
+
+          'cinema'    — theatrical premiere (detail_json's TMDB release_date,
+                        captured at add time)
+          'available' — home availability (the release_date column, owned by the
+                        wishlist drain's backfill: digital/physical, or
+                        wide-theatrical + window)
+
+        Same-day collision (streaming films: theatrical == digital) emits one
+        event, labeled 'available' — that's the truthful label for a film that
+        never sees a cinema. The 1970 backfill sentinel means "no date known"
+        and is never a calendar event."""
+        import json as _json
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT tmdb_id, title, year, poster_url, library_id, status, "
+                "release_date, detail_json FROM video_wishlist WHERE kind='movie' "
+                "AND tmdb_id IS NOT NULL").fetchall()
+        finally:
+            conn.close()
+        out: list[dict] = []
+        for r in rows:
+            r = dict(r)
+            theatrical = None
+            if r.get("detail_json"):
+                try:
+                    theatrical = (_json.loads(r["detail_json"]) or {}).get("release_date")
+                except Exception:
+                    theatrical = None
+            avail = r.get("release_date")
+            if avail and str(avail).startswith("1970"):
+                avail = None
+            seen: set[str] = set()
+            # 'available' first so a same-day theatrical collapses into it.
+            for ev_type, ev_date in (("available", avail), ("cinema", theatrical)):
+                d = str(ev_date or "")[:10]
+                if len(d) != 10 or d < start_date or d > end_date or d in seen:
+                    continue
+                seen.add(d)
+                out.append({"date": d, "type": ev_type, "tmdb_id": r["tmdb_id"],
+                            "title": r["title"], "year": r["year"],
+                            "poster_url": r["poster_url"],
+                            "owned": bool(r["library_id"]),
+                            "library_id": r["library_id"],
+                            "status": r["status"]})
+        out.sort(key=lambda e: (e["date"], (e["title"] or "").lower()))
+        return out
+
     def get_poster_ref(self, kind: str, item_id: int) -> dict | None:
         """Server source/id/poster path for one movie or show, for the poster proxy."""
         return self.get_art_ref(kind, item_id, "poster")
