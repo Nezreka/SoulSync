@@ -464,18 +464,19 @@
         // upgrade). Opens the same VideoGet modal the discover/search cards use.
         if (d.kind === 'movie' && window.VideoGet) {
             var wished = !!d._wl_wished;
-            // 'Get' for anything acquirable — the modal it opens offers Download
-            // now (auto/manual search + grab) AND Add to Wishlist. The old
-            // 'Add to Wishlist' label on unowned movies hid the whole download
-            // path behind a wishlist-sounding button (Boulder: "how come there
-            // is no get or download button on movie detail pages?" — there was,
-            // it was just labeled as wishlist).
-            var wlLabel = wished ? 'In Wishlist' : 'Get';
-            var wlIcon = wished ? '✓' : '⬇';
+            // TWO buttons, like the shows' follow+get pair: 'Get' is ALWAYS
+            // visible (the modal offers download-now / manual search / grab),
+            // and the wishlist button is a separate TOGGLE showing membership.
+            // The old single button wore three states, so a wishlisted movie
+            // showed only 'In Wishlist' and the whole download path vanished.
             html +=
-                '<button class="library-artist-watchlist-btn' + (wished ? ' watching' : '') + '" type="button" data-vd-act="get">' +
-                '<span class="watchlist-icon">' + wlIcon + '</span>' +
-                '<span class="watchlist-text">' + wlLabel + '</span></button>';
+                '<button class="library-artist-watchlist-btn" type="button" data-vd-act="get">' +
+                '<span class="watchlist-icon">⬇</span>' +
+                '<span class="watchlist-text">Get</span></button>';
+            html +=
+                '<button class="library-artist-watchlist-btn' + (wished ? ' watching' : '') + '" type="button" data-vd-act="wishtoggle">' +
+                '<span class="watchlist-icon">' + (wished ? '✓' : '＋') + '</span>' +
+                '<span class="watchlist-text">' + (wished ? 'In Wishlist' : 'Wishlist') + '</span></button>';
             // Reflect wishlist membership on the button (like the show watchlist eye):
             // check once, then re-render. Re-checked on soulsync:video-wishlist-changed.
             if (!d._wl_checked && d.tmdb_id) {
@@ -541,6 +542,41 @@
             // "Get Missing" jumps straight to the season/episode grab view.
             startDownload: !!startDownload,
         });
+    }
+
+    // Wishlist toggle for the movie hero's dedicated button — quick add/remove
+    // without opening the Get modal (mirrors the shows' watchlist toggle).
+    function toggleMovieWishlist(btn) {
+        if (!data || data.kind !== 'movie' || !data.tmdb_id) { openGetModal(); return; }
+        var d = data;
+        var wished = !!d._wl_wished;
+        if (btn) btn.disabled = true;
+        var done = function (nowWished, msg) {
+            d._wl_wished = nowWished;
+            if (data === d) renderActions(d);
+            document.dispatchEvent(new CustomEvent('soulsync:video-wishlist-changed'));
+            if (typeof showToast === 'function') showToast(msg, 'success');
+        };
+        var fail = function () {
+            if (btn) btn.disabled = false;
+            if (typeof showToast === 'function') showToast('Wishlist update failed', 'error');
+        };
+        var opts = { method: 'POST', headers: { 'Content-Type': 'application/json' } };
+        if (wished) {
+            opts.body = JSON.stringify({ scope: 'movie', tmdb_id: d.tmdb_id });
+            fetch('/api/video/wishlist/remove', opts)
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (res) { (res && res.success) ? done(false, 'Removed from wishlist') : fail(); })
+                .catch(fail);
+        } else {
+            opts.body = JSON.stringify({ movie: { tmdb_id: d.tmdb_id, title: d.title,
+                year: d.year, poster_url: d.poster_url || null,
+                library_id: (d.source !== 'tmdb') ? (d.id != null ? d.id : currentId) : (d.library_id || null) } });
+            fetch('/api/video/wishlist/add', opts)
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (res) { (res && res.success) ? done(true, 'Added to wishlist') : fail(); })
+                .catch(fail);
+        }
     }
 
     // Manage — the per-item metadata editor (slide-over panel, own module).
@@ -2219,6 +2255,7 @@
         if (act && r.contains(act)) {
             var which = act.getAttribute('data-vd-act');
             if (which === 'watchlist') toggleWatchlist();
+            else if (which === 'wishtoggle') toggleMovieWishlist(act);
             else if (which === 'get') openGetModal();
             else if (which === 'missing') openGetModal(true);
             else if (which === 'wishlist-missing') wishlistAllMissing(act);
