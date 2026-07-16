@@ -14,9 +14,59 @@ free of web_server imports.
 from __future__ import annotations
 
 import logging
+import os
+import time
 import traceback
 
 logger = logging.getLogger(__name__)
+
+# Landed audio a cancelled streaming download leaves behind (yt-dlp can't be
+# interrupted mid-stream; the file arrives after its record is gone). These
+# are the extensions the streaming clients actually write.
+_ORPHAN_AUDIO_EXTS = frozenset({'.mp3', '.flac', '.m4a', '.ogg', '.opus', '.wav', '.aac', '.wma'})
+
+
+def sweep_orphaned_download_audio(download_dir, *, min_age_seconds: int = 3600,
+                                  referenced_basenames=frozenset(), now=None) -> list:
+    """Delete ROOT-LEVEL audio files in the download dir that are older than
+    ``min_age_seconds`` and referenced by no live download record.
+
+    This is the reaper for the downloads-folder bleed: the monitor cancels a
+    streaming download, the cancel can't interrupt yt-dlp, and the finished
+    file lands with no record to claim it — nothing ever post-processes or
+    deletes it. Streaming clients write flat into the download root, so ONLY
+    root-level files are considered: Soulseek's per-share folders, the
+    quarantine and staging trees all live in subdirectories and are never
+    touched. The caller must only invoke this while no batch is active and
+    nothing is post-processing (the automation's existing guard).
+
+    Returns the list of removed paths (best-effort; unremovable files are
+    logged and skipped).
+    """
+    removed = []
+    now = time.time() if now is None else now
+    refs = {str(b).casefold() for b in (referenced_basenames or ())}
+    try:
+        names = os.listdir(download_dir)
+    except OSError:
+        return removed
+    for name in names:
+        path = os.path.join(download_dir, name)
+        try:
+            if not os.path.isfile(path):
+                continue
+            if os.path.splitext(name)[1].lower() not in _ORPHAN_AUDIO_EXTS:
+                continue
+            if name.casefold() in refs:
+                continue
+            if (now - os.path.getmtime(path)) < min_age_seconds:
+                continue
+            os.remove(path)
+            removed.append(path)
+            logger.info("[Orphan Reaper] Removed abandoned download: %s", path)
+        except OSError as e:
+            logger.warning("[Orphan Reaper] Could not remove %s: %s", path, e)
+    return removed
 
 
 def cleanup_wishlist_after_db_update(config_manager) -> None:
