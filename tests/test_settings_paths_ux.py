@@ -29,7 +29,7 @@ def test_warning_serves_both_audiences_not_just_docker():
     # the old copy told EVERYONE to leave the fields alone; LXC/bare-metal
     # users are the ones who must edit them
     assert "Container-internal paths. Only change them if you know what you're doing" not in _INDEX
-    assert "Docker / Unraid:" in _INDEX
+    assert "Docker / Unraid detected:" in _INDEX
     assert "Proxmox LXC" in _INDEX
     assert "expected to" in _INDEX and "unlock" in _INDEX
 
