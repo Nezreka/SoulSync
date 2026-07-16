@@ -2333,29 +2333,27 @@ const HELPER_TOURS = {
         icon: '📊',
         steps: [
             // Header area (top of page)
-            { page: 'dashboard', selector: '.dashboard-header', title: 'Welcome to SoulSync', description: 'This is your System Dashboard — the central hub for monitoring your music system. Let\'s walk through everything from top to bottom.' },
+            { page: 'dashboard', selector: '.dashboard-header', title: 'Welcome to SoulSync', description: 'This is your Music Dashboard — the central hub for monitoring your music system. Let\'s walk through everything from top to bottom.' },
+            { page: 'dashboard', selector: '.dashboard-header .header-actions', title: 'Enrichment Worker Orbs', description: 'Each orb is a live metadata worker — MusicBrainz, AudioDB, Deezer, Spotify, iTunes, Last.fm, Genius and friends. They pulse while enriching your library; hover one for its current status and progress.' },
             { page: 'dashboard', selector: '#watchlist-button', title: 'Watchlist', description: 'Artists you follow for new releases. Click to manage watched artists, run scans, and configure per-artist download preferences.' },
             { page: 'dashboard', selector: '#wishlist-button', title: 'Wishlist', description: 'Tracks queued for download. Failed downloads, watchlist discoveries, and manual additions all land here for retry.' },
 
-            // Service cards
-            { page: 'dashboard', selector: '#metadata-source-service-card', title: 'Metadata Source', description: 'Shows your metadata source connection (Spotify, iTunes, or Deezer). This determines where album, artist, and track info comes from. Click "Test Connection" to verify.' },
-            { page: 'dashboard', selector: '#media-server-service-card', title: 'Media Server', description: 'Your media server (Plex, Jellyfin, or Navidrome). This is where your music library lives. SoulSync reads your collection and sends downloads here.' },
-            { page: 'dashboard', selector: '#soulseek-service-card', title: 'Download Source', description: 'Your primary download source status. In hybrid mode, shows the first source in your priority chain.' },
-
-            // System stats
+            // Main content — top to bottom
+            { page: 'dashboard', selector: '.service-status-grid', title: 'Service Status', description: 'Your three core connections at a glance: metadata source (Spotify/iTunes/Deezer), media server (Plex/Jellyfin/Navidrome), and download source. Each card shows live status, response time, and a Test button.' },
             { page: 'dashboard', selector: '.stats-grid-dashboard', title: 'System Stats', description: 'Real-time metrics: active downloads, speed, sync operations, uptime, and memory usage. Updates live via WebSocket.' },
+            { page: 'dashboard', selector: '#library-status-card', title: 'Library', description: 'Your library at a glance — artists, albums, tracks, and total size — plus the scan buttons. Incremental scan picks up new content fast; Deep Scan re-reads everything and clears out stale entries.' },
+            { page: 'dashboard', selector: '#sync-history-cards', title: 'Recent Syncs', description: 'Your latest playlist sync runs — what matched, what downloaded, what failed. Click one to jump into the details.' },
+            { page: 'dashboard', selector: '.dash-card--quick-actions', title: 'Quick Actions', description: 'One-click shortcuts to the things you do most — start a sync, open the tool pages, jump to search. The bigger Tools collection lives on its own pages under the System section of the sidebar.' },
+            { page: 'dashboard', selector: '#dashboard-activity-feed', title: 'Recent Activity', description: 'Live stream of system events — downloads, syncs, enrichment updates, errors. Newest at the top, updates in real-time via WebSocket.' },
+            { page: 'dashboard', selector: '#enrichment-pills-section', title: 'Enrichment Services', description: 'Per-service enrichment coverage — how much of your library each metadata service has processed, with controls to manage priorities and intervals.' },
 
-            // Tools — in page order
-            { page: 'dashboard', selector: '#db-updater-card', title: 'Database Updater', description: 'Syncs your media server\'s library into SoulSync\'s database. Three modes: Incremental (fast, new content only), Full Refresh (rebuilds everything), Deep Scan (finds and removes stale entries).' },
-            { page: 'dashboard', selector: '#metadata-updater-card', title: 'Metadata Enrichment', description: 'Background workers that enrich your library from 9 services — Spotify, MusicBrainz, Deezer, Last.fm, iTunes, AudioDB, Genius, Tidal, Qobuz. Runs automatically at the configured interval.' },
-            { page: 'dashboard', selector: '#duplicate-cleaner-card', title: 'Duplicate Cleaner', description: 'Finds and removes duplicate tracks by comparing title, artist, album, and audio characteristics. Always reviews before deleting.' },
-            { page: 'dashboard', selector: '#discovery-pool-card', title: 'Discovery Pool', description: 'Tracks from similar artists found during watchlist scans. Matched tracks feed the Discover page playlists and genre browser. Fix failed matches manually.' },
-            { page: 'dashboard', selector: '#media-scan-card', title: 'Media Server Scan', description: 'Manually trigger a library scan on your media server. Usually automatic after downloads, but useful after bulk imports.' },
-            { page: 'dashboard', selector: '#backup-manager-card', title: 'Backup Manager', description: 'Create and manage database backups. Includes all metadata, settings, enrichment data, and automation configs — everything except audio files.' },
-            { page: 'dashboard', selector: '#metadata-cache-card', title: 'Metadata Cache', description: 'Browse cached API responses from all metadata searches. Every artist, album, and track looked up is stored here, speeding up future lookups and feeding the Genre Explorer.' },
-
-            // Activity feed (bottom)
-            { page: 'dashboard', selector: '#dashboard-activity-feed', title: 'Activity Feed', description: 'Live stream of system events — downloads, syncs, enrichment updates, errors. Newest at the top, updates in real-time via WebSocket. That\'s the dashboard! 🎉' },
+            // The shell around every page
+            { page: 'dashboard', selector: '.side-toggle', title: 'Music / Video Toggle', description: 'SoulSync has two whole sides. This switch flips between the MUSIC app and the VIDEO app (movies + TV) — each has its own pages, library, and settings.' },
+            { page: 'dashboard', selector: '#profile-indicator', title: 'Your Profile', description: 'Who\'s signed in. Click to switch profiles; the small icons open My Accounts (per-profile streaming logins) and My Settings.' },
+            { page: 'dashboard', selector: '.nav-section-label[data-section="find"]', title: 'Find', description: 'Discovery lives here — Search, Discover, and the Artist Map. Section headers collapse if you like a tidy sidebar.' },
+            { page: 'dashboard', selector: '.nav-section-label[data-section="music"]', title: 'Music', description: 'Your collection: Library, Playlists & Sync, Downloads, and Import for files you already have.' },
+            { page: 'dashboard', selector: '.nav-section-label[data-section="system"]', title: 'System', description: 'The machinery: Automations, Tools, Stats, Issues, and Settings.' },
+            { page: 'dashboard', selector: '.version-button', title: 'Version & Support', description: 'Click the version number for release notes — it glows when an update is available (green routine, yellow major, red critical). Support SoulSync lives right above it. That\'s the dashboard! 🎉' },
         ]
     },
     'first-download': {
@@ -2651,20 +2649,30 @@ function _resolveTourTarget(selector, cb, attempt = 0) {
 
 function _renderTourStep(tour, step, target) {
 
-    // Create spotlight overlay
+    // Spotlight scrim: FOUR panels around a real hole. The old single
+    // overlay + z-index-raise-the-target trick failed for any target inside
+    // an ancestor stacking context (transform/backdrop-filter — most
+    // dashboard cards), which is why highlighted elements stayed dimmed
+    // and blurred behind the overlay.
     _tourOverlay = document.createElement('div');
     _tourOverlay.className = 'helper-tour-overlay';
-    _tourOverlay.addEventListener('click', (e) => {
-        if (e.target === _tourOverlay) dismissTour();
-    });
+    for (let i = 0; i < 4; i++) {
+        const panel = document.createElement('div');
+        panel.className = 'helper-tour-scrim';
+        panel.addEventListener('click', () => dismissTour());
+        _tourOverlay.appendChild(panel);
+    }
     document.body.appendChild(_tourOverlay);
 
-    // Highlight target
+    // Highlight target — scroll INSTANTLY so every rect below is final
+    // (smooth scrolling made the hole + popover anchor to mid-animation
+    // positions, another way the box ended up stranded).
     if (target) {
         target.classList.add('helper-tour-target');
         _helperHighlighted = target;
-        setTimeout(() => target.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
+        target.scrollIntoView({ behavior: 'auto', block: 'center' });
     }
+    _updateTourSpotlight(target);
 
     // Build tour popover
     const stepNum = HelperState.tourStep + 1;
@@ -2708,14 +2716,18 @@ function _renderTourStep(tour, step, target) {
         requestAnimationFrame(() => popover.classList.add('visible'));
     }
 
-    // Keep the box attached: re-anchor on resize while this step is up
-    // (scrollIntoView + window changes used to strand it mid-screen).
+    // Keep the box AND the spotlight hole attached: re-anchor on resize and
+    // on any scroll while this step is up (scrollIntoView + window changes
+    // used to strand the box mid-screen with the hole elsewhere).
     _tourRepositionHandler = () => {
-        if (target && document.body.contains(target) && _helperPopover === popover) {
+        if (_helperPopover !== popover) return;
+        _updateTourSpotlight(target && document.body.contains(target) ? target : null);
+        if (target && document.body.contains(target)) {
             positionPopover(popover, target);
         }
     };
     window.addEventListener('resize', _tourRepositionHandler);
+    document.addEventListener('scroll', _tourRepositionHandler, true);
 }
 
 let _tourRepositionHandler = null;
@@ -2723,8 +2735,42 @@ let _tourRepositionHandler = null;
 function _removeTourReposition() {
     if (_tourRepositionHandler) {
         window.removeEventListener('resize', _tourRepositionHandler);
+        document.removeEventListener('scroll', _tourRepositionHandler, true);
         _tourRepositionHandler = null;
     }
+}
+
+// Geometry of the four scrim panels: everything EXCEPT the target's padded
+// rect is dimmed; the rect itself is a genuine hole (no covering element),
+// so no stacking context can keep the target dimmed. No target → one panel
+// covers the whole viewport.
+function _updateTourSpotlight(target) {
+    if (!_tourOverlay) return;
+    const panels = _tourOverlay.children;
+    if (panels.length < 4) return;
+    const W = window.innerWidth, H = window.innerHeight, PAD = 8;
+    let top = 0, bottom = 0, left = 0, right = 0, x1 = 0, x2 = 0;
+    if (target) {
+        const r = target.getBoundingClientRect();
+        top = Math.max(0, r.top - PAD);
+        bottom = Math.min(H, r.bottom + PAD);
+        x1 = Math.max(0, r.left - PAD);
+        x2 = Math.min(W, r.right + PAD);
+        left = x1;
+        right = W - x2;
+    } else {
+        top = H;        // "top" panel covers everything…
+        bottom = H;     // …and the other three collapse to zero
+        x1 = 0; x2 = 0; left = 0; right = 0;
+    }
+    const set = (el, t, l, w, h) => {
+        el.style.top = t + 'px'; el.style.left = l + 'px';
+        el.style.width = Math.max(0, w) + 'px'; el.style.height = Math.max(0, h) + 'px';
+    };
+    set(panels[0], 0, 0, W, top);                       // above
+    set(panels[1], bottom, 0, W, H - bottom);           // below
+    set(panels[2], top, 0, left, bottom - top);         // left of hole
+    set(panels[3], top, x2, right, bottom - top);       // right of hole
 }
 
 function nextTourStep() {
