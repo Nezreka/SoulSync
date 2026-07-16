@@ -23,6 +23,7 @@ function track(overrides: Partial<LibraryV2Track> = {}): LibraryV2Track {
     canonical_track_id: null,
     artists: [],
     file: {
+      file_id: 1,
       path: '/music/track.flac',
       size: null,
       bitrate: null,

@@ -17,6 +17,7 @@ import type {
   LibraryV2PlaylistTrack,
   LibraryV2Track,
   LibraryV2TrackFile,
+  LibraryV2TrackTableColumns,
 } from '../-library-v2.types';
 
 import {
@@ -52,6 +53,7 @@ import {
   libraryV2QualityProfilesQueryOptions,
   libraryV2TrackFileTagsQueryOptions,
   libraryV2TrackSourceInfoQueryOptions,
+  libraryV2UiPreferencesQueryOptions,
   linkLibraryV2ArtistAlias,
   manualMatchLibraryV2Entity,
   materializeLibraryV2MissingTrack,
@@ -70,6 +72,7 @@ import {
   unlinkLibraryV2ArtistAlias,
   unlinkLibraryV2Duplicate,
   updateLibraryV2MetadataOverrides,
+  updateLibraryV2UiPreferences,
   writeLibraryV2Tags,
   type Lib2EntityRef,
   type LibraryV2AlbumType,
@@ -190,6 +193,8 @@ const ICON_PATHS = {
   gain: 'M3 12h3l2-7 3 15 3-11 2 5h5',
   cover: 'M4 4h16v16H4z M4 16l4-4 3 3 5-6 4 5',
   more: 'M3.4,12 a1.6,1.6 0 1,0 3.2,0 a1.6,1.6 0 1,0 -3.2,0 M10.4,12 a1.6,1.6 0 1,0 3.2,0 a1.6,1.6 0 1,0 -3.2,0 M17.4,12 a1.6,1.6 0 1,0 3.2,0 a1.6,1.6 0 1,0 -3.2,0',
+  settings:
+    'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z',
 } as const;
 
 type IconName = keyof typeof ICON_PATHS;
@@ -508,17 +513,21 @@ export function MatchChips({
   entityName,
   services,
   abbreviated = false,
+  showAll = false,
 }: {
   entityType: 'artist' | 'album' | 'track';
   entityName: string;
   services: LibraryV2MatchService[];
   abbreviated?: boolean;
+  /** B5 opt-in override: show every provider chip, including ones this
+   *  instance never configured (A8's default hides those as noise). */
+  showAll?: boolean;
 }) {
   const [active, setActive] = useState<LibraryV2MatchService | null>(null);
   // A8: hide chips for providers nobody configured on this instance — a
   // permanently grey Tidal/Qobuz/… row was pure noise. `available` is
   // `undefined` for older cached responses, which reads as available.
-  const visible = services.filter((s) => s.available !== false);
+  const visible = showAll ? services : services.filter((s) => s.available !== false);
   if (!visible.length) return null;
   return (
     <div className={abbreviated ? styles.trackMatchChips : styles.matchChips}>
@@ -2204,7 +2213,8 @@ function ArtistFilesTab({ artistId }: { artistId: number }) {
       </div>
       {confirming ? (
         <FilesDeleteConfirm
-          artistId={artistId}
+          entity="artists"
+          eid={artistId}
           fileIds={[...selected]}
           onDone={() => {
             setSelected(new Set());
@@ -2220,14 +2230,17 @@ function ArtistFilesTab({ artistId }: { artistId: number }) {
 
 /** Scoped ADR-05 preview/execute for a caller-selected file-id subset — same
  *  contract and UX as `DeleteConfirmModal`'s physical-file section, just
- *  bounded to `fileIds` instead of the whole artist. */
+ *  bounded to `fileIds` instead of the whole entity. Entity-generic (C2's
+ *  artist Files tab, B6's album-scoped track-table bulk delete). */
 function FilesDeleteConfirm({
-  artistId,
+  entity,
+  eid,
   fileIds,
   onDone,
   onCancel,
 }: {
-  artistId: number;
+  entity: 'artists' | 'albums';
+  eid: number;
   fileIds: number[];
   onDone: () => void;
   onCancel: () => void;
@@ -2236,8 +2249,8 @@ function FilesDeleteConfirm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const preview = useQuery({
-    queryKey: [...LIBRARY_V2_QUERY_KEY, 'file-delete-preview', 'artists', artistId, fileIds],
-    queryFn: () => fetchLibraryV2FileDeletePreview('artists', artistId, fileIds),
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'file-delete-preview', entity, eid, fileIds],
+    queryFn: () => fetchLibraryV2FileDeletePreview(entity, eid, fileIds),
   });
   const physical = preview.data;
   const physicalReady = Boolean(physical && physical.file_count > 0 && physical.unsafe_count === 0);
@@ -2298,7 +2311,7 @@ function FilesDeleteConfirm({
             if (!physical) return;
             setBusy(true);
             setError(null);
-            void deleteLibraryV2Files('artists', artistId, physical.preview_token, fileIds)
+            void deleteLibraryV2Files(entity, eid, physical.preview_token, fileIds)
               .then(() => onDone())
               .catch((e) =>
                 setError(e instanceof Error ? e.message : 'Physical file deletion failed'),
@@ -3888,6 +3901,280 @@ function AlbumBlock({
   );
 }
 
+/** B5 defaults, mirroring core/library2/ui_preferences.py's
+ *  DEFAULT_PREFERENCES — used only until the real preferences query lands
+ *  (it's cached/fast, so this is a brief flash at most). */
+const DEFAULT_TRACK_TABLE_COLUMNS: LibraryV2TrackTableColumns = {
+  artists: true,
+  duration: true,
+  bpm: true,
+  match: true,
+  quality: true,
+  features: true,
+  metadata: true,
+  file_path: false,
+};
+
+const TRACK_TABLE_COLUMN_LABELS: Record<keyof LibraryV2TrackTableColumns, string> = {
+  artists: 'Artists',
+  duration: 'Duration',
+  bpm: 'BPM',
+  match: 'Match',
+  quality: 'Quality',
+  features: 'Features',
+  metadata: 'Metadata',
+  file_path: 'File path',
+};
+
+type TrackSortKey = 'number' | 'title' | 'duration' | 'bpm';
+type TrackSort = { key: TrackSortKey; dir: 'asc' | 'desc' };
+
+/** Clientside-only (B6) — every field is already in the fetched payload, so
+ *  there's no reason to round-trip a sort choice through the server. */
+function sortTracks(tracks: LibraryV2Track[], sort: TrackSort | null): LibraryV2Track[] {
+  if (!sort) return tracks;
+  const dir = sort.dir === 'asc' ? 1 : -1;
+  const value = (t: LibraryV2Track): number | string => {
+    switch (sort.key) {
+      case 'number':
+        return t.track_number ?? Number.MAX_SAFE_INTEGER;
+      case 'title':
+        return (t.title ?? '').toLowerCase();
+      case 'duration':
+        return t.duration ?? -1;
+      case 'bpm':
+        return t.bpm ?? -1;
+    }
+  };
+  return [...tracks].sort((a, b) => {
+    const av = value(a);
+    const bv = value(b);
+    if (av < bv) return -1 * dir;
+    if (av > bv) return 1 * dir;
+    return 0;
+  });
+}
+
+function SortableHeader({
+  label,
+  sortKey,
+  sort,
+  onSort,
+  className,
+}: {
+  label: string;
+  sortKey: TrackSortKey;
+  sort: TrackSort | null;
+  onSort: (key: TrackSortKey) => void;
+  className?: string;
+}) {
+  const active = sort?.key === sortKey;
+  return (
+    <th className={className}>
+      <button type="button" className={styles.sortableHeader} onClick={() => onSort(sortKey)}>
+        {label}
+        {active ? (
+          <span className={styles.sortIndicator}>{sort?.dir === 'asc' ? '▲' : '▼'}</span>
+        ) : null}
+      </button>
+    </th>
+  );
+}
+
+/** B5: gear popover to pick which optional columns show and whether to show
+ *  every match-provider chip (vs. A8's default of only configured
+ *  providers). Persisted server-side so picks survive a reload. */
+function TrackTableOptionsMenu({
+  columns,
+  showAllProviders,
+}: {
+  columns: LibraryV2TrackTableColumns;
+  showAllProviders: boolean;
+}) {
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLSpanElement>(null);
+  const mutation = useMutation({
+    mutationFn: (patch: Parameters<typeof updateLibraryV2UiPreferences>[0]) =>
+      updateLibraryV2UiPreferences(patch),
+    onSuccess: (preferences) =>
+      queryClient.setQueryData([...LIBRARY_V2_QUERY_KEY, 'ui-preferences'], preferences),
+  });
+
+  useEffect(() => {
+    if (!open) return;
+    function onDocClick(e: MouseEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [open]);
+
+  const columnKeys = Object.keys(TRACK_TABLE_COLUMN_LABELS) as (keyof LibraryV2TrackTableColumns)[];
+
+  return (
+    <span ref={wrapRef} className={styles.overflowWrap}>
+      <IconActionButton
+        icon="settings"
+        title="Table options — columns & match providers"
+        onClick={() => setOpen((v) => !v)}
+      />
+      {open ? (
+        <div className={`${styles.overflowMenu} ${styles.tableOptionsMenu}`}>
+          <div className={styles.tableOptionsGroupLabel}>Columns</div>
+          {columnKeys.map((key) => (
+            <label key={key} className={styles.tableOptionsItem}>
+              <input
+                type="checkbox"
+                checked={columns[key]}
+                onChange={() =>
+                  mutation.mutate({ track_table: { columns: { [key]: !columns[key] } } })
+                }
+              />
+              {TRACK_TABLE_COLUMN_LABELS[key]}
+            </label>
+          ))}
+          <div className={styles.tableOptionsDivider} />
+          <label className={styles.tableOptionsItem}>
+            <input
+              type="checkbox"
+              checked={showAllProviders}
+              onChange={() =>
+                mutation.mutate({
+                  track_table: { show_all_match_providers: !showAllProviders },
+                })
+              }
+            />
+            Show all match providers
+          </label>
+        </div>
+      ) : null}
+    </span>
+  );
+}
+
+/** B6 bulk action bar for the track table's row-selection checkboxes.
+ *  Deliberate reuse-first: Monitor/ReplayGain fan out the existing
+ *  single-track mutations with Promise.all (no new backend), Write Tags
+ *  calls the already-multi-track /tags/write job, and Delete reuses the
+ *  same ADR-05 file_ids-scoped flow C2 built for the artist Files tab —
+ *  just scoped to this album's selected tracks instead of the whole artist. */
+function TrackTableBulkBar({
+  albumId,
+  tracks,
+  onClear,
+}: {
+  albumId: number;
+  tracks: LibraryV2Track[];
+  onClear: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  const trackIds = tracks.filter((t) => t.id != null).map((t) => t.id as number);
+  const fileIds = tracks.map((t) => t.file?.file_id).filter((id): id is number => id != null);
+
+  async function run(label: string, fn: () => Promise<void>) {
+    setBusy(label);
+    setError(null);
+    try {
+      await fn();
+      await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+    } catch (e) {
+      setError(mutationErrorMessage(e, `${label} failed`));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className={styles.bulkBar}>
+      <span className={styles.bulkBarCount}>{tracks.length} selected</span>
+      <button
+        type="button"
+        className={styles.bulkBarButton}
+        disabled={busy !== null}
+        onClick={() =>
+          void run('Monitor', async () => {
+            await Promise.all(trackIds.map((id) => setLibraryV2Monitored('tracks', id, true)));
+          })
+        }
+      >
+        {busy === 'Monitor' ? 'Monitoring…' : 'Monitor'}
+      </button>
+      <button
+        type="button"
+        className={styles.bulkBarButton}
+        disabled={busy !== null}
+        onClick={() =>
+          void run('Unmonitor', async () => {
+            await Promise.all(trackIds.map((id) => setLibraryV2Monitored('tracks', id, false)));
+          })
+        }
+      >
+        {busy === 'Unmonitor' ? 'Unmonitoring…' : 'Unmonitor'}
+      </button>
+      <button
+        type="button"
+        className={styles.bulkBarButton}
+        disabled={busy !== null || trackIds.length === 0}
+        onClick={() =>
+          void run('Write Tags', async () => {
+            const jobId = await writeLibraryV2Tags(trackIds);
+            const jobError = await awaitBulkJob(queryClient, jobId);
+            if (jobError) throw new Error(jobError);
+          })
+        }
+      >
+        {busy === 'Write Tags' ? 'Writing…' : 'Write Tags'}
+      </button>
+      <button
+        type="button"
+        className={styles.bulkBarButton}
+        disabled={busy !== null || trackIds.length === 0}
+        onClick={() =>
+          void run('ReplayGain', async () => {
+            await Promise.all(trackIds.map((id) => analyzeLibraryV2TrackReplayGain(id)));
+          })
+        }
+      >
+        {busy === 'ReplayGain' ? 'Analyzing…' : 'ReplayGain'}
+      </button>
+      <button
+        type="button"
+        className={`${styles.bulkBarButton} ${styles.bulkBarButtonDanger}`}
+        disabled={busy !== null || fileIds.length === 0}
+        onClick={() => setConfirmingDelete(true)}
+      >
+        Delete files…
+      </button>
+      <button type="button" className={styles.bulkBarClear} onClick={onClear}>
+        Clear
+      </button>
+      {error ? (
+        <span className={styles.bulkBarError} role="alert">
+          {error}
+        </span>
+      ) : null}
+      {confirmingDelete ? (
+        <FilesDeleteConfirm
+          entity="albums"
+          eid={albumId}
+          fileIds={fileIds}
+          onDone={() => {
+            setConfirmingDelete(false);
+            onClear();
+            void queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+          }}
+          onCancel={() => setConfirmingDelete(false)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
 function AlbumTrackTable({
   albumId,
   resolve,
@@ -3901,39 +4188,116 @@ function AlbumTrackTable({
   const albumQuery = useQuery(libraryV2AlbumQueryOptions(albumId, { resolve }));
   const matchQuery = useQuery(libraryV2AlbumMatchStatusQueryOptions(albumId));
   const profilesQuery = useQuery(libraryV2QualityProfilesQueryOptions());
+  const prefsQuery = useQuery(libraryV2UiPreferencesQueryOptions());
   const album = albumQuery.data;
+  const [sort, setSort] = useState<TrackSort | null>(null);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
   if (albumQuery.isLoading || !album) {
     return <div className={styles.inlineLoading}>Loading tracks…</div>;
   }
   const albumMatch = matchQuery.data?.album ?? [];
   const trackMatch = matchQuery.data?.tracks ?? {};
   const profileNameById = new Map((profilesQuery.data ?? []).map((p) => [p.id, p.name]));
+  const columns = prefsQuery.data?.track_table.columns ?? DEFAULT_TRACK_TABLE_COLUMNS;
+  const showAllProviders = prefsQuery.data?.track_table.show_all_match_providers ?? false;
+
+  const sortedTracks = sortTracks(album.tracks, sort);
+  const selectableIds = album.tracks.filter((t) => t.id != null).map((t) => t.id as number);
+  const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id));
+  const selectedTracks = album.tracks.filter((t) => t.id != null && selected.has(t.id as number));
+
+  function toggleSort(key: TrackSortKey) {
+    setSort((s) => {
+      if (!s || s.key !== key) return { key, dir: 'asc' };
+      if (s.dir === 'asc') return { key, dir: 'desc' };
+      return null;
+    });
+  }
+
+  function toggleSelected(id: number) {
+    setSelected((s) => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
   return (
     <div className={styles.trackTableWrap}>
-      {albumMatch.length > 0 ? (
-        <div className={styles.albumMatchRow}>
-          <span className={styles.albumMatchLabel}>Matched via</span>
-          <MatchChips entityType="album" entityName={album.title} services={albumMatch} />
-        </div>
+      <div className={styles.trackTableToolbar}>
+        {albumMatch.length > 0 ? (
+          <div className={styles.albumMatchRow}>
+            <span className={styles.albumMatchLabel}>Matched via</span>
+            <MatchChips
+              entityType="album"
+              entityName={album.title}
+              services={albumMatch}
+              showAll={showAllProviders}
+            />
+          </div>
+        ) : (
+          <span />
+        )}
+        <TrackTableOptionsMenu columns={columns} showAllProviders={showAllProviders} />
+      </div>
+      {selected.size > 0 ? (
+        <TrackTableBulkBar
+          albumId={albumId}
+          tracks={selectedTracks}
+          onClear={() => setSelected(new Set())}
+        />
       ) : null}
       <table className={styles.trackTable}>
         <thead>
           <tr>
+            <th className={styles.colCheckbox}>
+              <input
+                type="checkbox"
+                checked={allSelected}
+                disabled={selectableIds.length === 0}
+                aria-label="Select all tracks"
+                onChange={() => setSelected(allSelected ? new Set() : new Set(selectableIds))}
+              />
+            </th>
             <th className={styles.colMonitor}></th>
-            <th className={styles.colNum}>#</th>
-            <th>Title</th>
-            <th>Artists</th>
-            <th className={styles.colDuration}>Duration</th>
-            <th className={styles.colBpm}>BPM</th>
-            <th>Match</th>
-            <th>Quality</th>
-            <th className={styles.colFeatures}>Features</th>
-            <th>Metadata</th>
+            <SortableHeader
+              className={styles.colNum}
+              label="#"
+              sortKey="number"
+              sort={sort}
+              onSort={toggleSort}
+            />
+            <SortableHeader label="Title" sortKey="title" sort={sort} onSort={toggleSort} />
+            {columns.artists ? <th>Artists</th> : null}
+            {columns.duration ? (
+              <SortableHeader
+                className={styles.colDuration}
+                label="Duration"
+                sortKey="duration"
+                sort={sort}
+                onSort={toggleSort}
+              />
+            ) : null}
+            {columns.bpm ? (
+              <SortableHeader
+                className={styles.colBpm}
+                label="BPM"
+                sortKey="bpm"
+                sort={sort}
+                onSort={toggleSort}
+              />
+            ) : null}
+            {columns.match ? <th>Match</th> : null}
+            {columns.quality ? <th>Quality</th> : null}
+            {columns.features ? <th className={styles.colFeatures}>Features</th> : null}
+            {columns.metadata ? <th>Metadata</th> : null}
+            {columns.file_path ? <th>File</th> : null}
             <th className={styles.colActions}>Actions</th>
           </tr>
         </thead>
         <tbody>
-          {album.tracks.map((track, i) => (
+          {sortedTracks.map((track, i) => (
             <TrackRow
               key={track.id ?? `missing-${i}`}
               track={track}
@@ -3941,6 +4305,12 @@ function AlbumTrackTable({
               entityBase={{ albumId: album.id, qualityProfileId: album.quality_profile?.id }}
               matchServices={track.id ? (trackMatch[track.id] ?? []) : []}
               profileName={profileNameById.get(track.quality_profile_id) ?? null}
+              columns={columns}
+              showAllProviders={showAllProviders}
+              selected={track.id != null && selected.has(track.id)}
+              onToggleSelect={
+                track.id != null ? () => toggleSelected(track.id as number) : undefined
+              }
               onAction={onAction}
             />
           ))}
@@ -3980,6 +4350,10 @@ function TrackRow({
   entityBase,
   matchServices,
   profileName,
+  columns,
+  showAllProviders,
+  selected,
+  onToggleSelect,
   onAction,
 }: {
   track: LibraryV2Track;
@@ -3987,6 +4361,10 @@ function TrackRow({
   entityBase: Lib2EntityRef;
   matchServices: LibraryV2MatchService[];
   profileName: string | null;
+  columns: LibraryV2TrackTableColumns;
+  showAllProviders: boolean;
+  selected: boolean;
+  onToggleSelect: (() => void) | undefined;
   onAction: ActionHandler;
 }) {
   const missing = track.file_status === 'missing';
@@ -3995,6 +4373,16 @@ function TrackRow({
   const [detailTab, setDetailTab] = useState<TrackDetailTab | null>(null);
   return (
     <tr className={missing ? styles.missingRow : styles.staticRow}>
+      <td className={styles.colCheckbox}>
+        {onToggleSelect ? (
+          <input
+            type="checkbox"
+            checked={selected}
+            aria-label={`Select ${label}`}
+            onChange={onToggleSelect}
+          />
+        ) : null}
+      </td>
       <td>
         {track.id ? (
           <MonitorToggle entity="tracks" id={track.id} monitored={track.monitored} />
@@ -4008,59 +4396,75 @@ function TrackRow({
           <InlineFileStatus status={track.file_status} />
         </span>
       </td>
-      <td>{track.artists.map((a) => a.name).join(', ')}</td>
-      <td className={styles.colDuration}>{formatDuration(track.duration)}</td>
-      <td className={styles.colBpm}>{track.bpm ?? '—'}</td>
-      <td>
-        {matchServices.length > 0 ? (
-          <MatchChips
-            entityType="track"
-            entityName={`${track.artists.map((a) => a.name).join(' ')} ${track.title ?? ''}`.trim()}
-            services={matchServices}
-            abbreviated
-          />
-        ) : (
-          <span className={styles.muted}>—</span>
-        )}
-      </td>
-      <td className={styles.qualityText}>
-        <span className={styles.qualityCellRow}>
-          <QualityDisplay file={track.file} />
-          <TrackQualityProfileBadge track={track} />
-          {profileName ? (
-            <span className={styles.qualityProfileBadge} title="Quality profile for this track">
-              <SvgIcon name="star" />
-              {profileName}
-            </span>
-          ) : null}
-          <TrackVerificationBadge file={track.file} />
-        </span>
-      </td>
-      <td>
-        {!missing && track.file ? (
-          <span className={styles.featuresDisplay}>
-            <TrackReplayGainBadge track={track} />
-            <TrackLyricsBadge track={track} onOpenLyrics={() => setDetailTab('lyrics')} />
+      {columns.artists ? <td>{track.artists.map((a) => a.name).join(', ')}</td> : null}
+      {columns.duration ? (
+        <td className={styles.colDuration}>{formatDuration(track.duration)}</td>
+      ) : null}
+      {columns.bpm ? <td className={styles.colBpm}>{track.bpm ?? '—'}</td> : null}
+      {columns.match ? (
+        <td>
+          {matchServices.length > 0 ? (
+            <MatchChips
+              entityType="track"
+              entityName={`${track.artists.map((a) => a.name).join(' ')} ${track.title ?? ''}`.trim()}
+              services={matchServices}
+              abbreviated
+              showAll={showAllProviders}
+            />
+          ) : (
+            <span className={styles.muted}>—</span>
+          )}
+        </td>
+      ) : null}
+      {columns.quality ? (
+        <td className={styles.qualityText}>
+          <span className={styles.qualityCellRow}>
+            <QualityDisplay file={track.file} />
+            <TrackQualityProfileBadge track={track} />
+            {profileName ? (
+              <span className={styles.qualityProfileBadge} title="Quality profile for this track">
+                <SvgIcon name="star" />
+                {profileName}
+              </span>
+            ) : null}
+            <TrackVerificationBadge file={track.file} />
           </span>
-        ) : (
-          <span className={styles.muted}>—</span>
-        )}
-      </td>
-      <td>
-        {track.id && !missing ? (
-          track.metadata_gaps.length === 0 ? (
-            <span className={styles.statusOk} title={metadataGapsTooltip(track.metadata_gaps)}>
-              tags ✓
+        </td>
+      ) : null}
+      {columns.features ? (
+        <td>
+          {!missing && track.file ? (
+            <span className={styles.featuresDisplay}>
+              <TrackReplayGainBadge track={track} />
+              <TrackLyricsBadge track={track} onOpenLyrics={() => setDetailTab('lyrics')} />
             </span>
           ) : (
-            <span className={styles.statusWarn} title={metadataGapsTooltip(track.metadata_gaps)}>
-              {track.metadata_gaps.length} tag gaps
-            </span>
-          )
-        ) : (
-          <span className={styles.muted}>—</span>
-        )}
-      </td>
+            <span className={styles.muted}>—</span>
+          )}
+        </td>
+      ) : null}
+      {columns.metadata ? (
+        <td>
+          {track.id && !missing ? (
+            track.metadata_gaps.length === 0 ? (
+              <span className={styles.statusOk} title={metadataGapsTooltip(track.metadata_gaps)}>
+                tags ✓
+              </span>
+            ) : (
+              <span className={styles.statusWarn} title={metadataGapsTooltip(track.metadata_gaps)}>
+                {track.metadata_gaps.length} tag gaps
+              </span>
+            )
+          ) : (
+            <span className={styles.muted}>—</span>
+          )}
+        </td>
+      ) : null}
+      {columns.file_path ? (
+        <td className={styles.filePathCell} title={track.file?.path ?? undefined}>
+          {track.file?.path ?? <span className={styles.muted}>—</span>}
+        </td>
+      ) : null}
       <td className={styles.trackActions}>
         {missing && !track.monitored ? (
           <MissingTrackAddButton track={track} albumId={entityBase.albumId} />

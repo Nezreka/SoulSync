@@ -1629,6 +1629,37 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             conn.close()
         return jsonify({"success": True, "profiles": profiles})
 
+    # -- UI display preferences (B5: configurable columns/match-providers) ---
+
+    @app.route("/api/library/v2/ui-preferences")
+    def lib2_get_ui_preferences():
+        guard = _guard()
+        if guard:
+            return guard
+        from core.library2.ui_preferences import get_ui_preferences
+        conn = _conn()
+        try:
+            preferences = get_ui_preferences(conn)
+        finally:
+            conn.close()
+        return jsonify({"success": True, "preferences": preferences})
+
+    @app.route("/api/library/v2/ui-preferences", methods=["PUT"])
+    def lib2_update_ui_preferences():
+        guard = _guard()
+        if guard:
+            return guard
+        body = request.get_json(silent=True) or {}
+        if not isinstance(body, dict):
+            return jsonify({"success": False, "error": "JSON body must be an object"}), 400
+        from core.library2.ui_preferences import update_ui_preferences
+        conn = _conn()
+        try:
+            preferences = update_ui_preferences(conn, body)
+        finally:
+            conn.close()
+        return jsonify({"success": True, "preferences": preferences})
+
     # -- artwork (media-server-independent, disk-cached) ----------------------
 
     def _send_art(path):

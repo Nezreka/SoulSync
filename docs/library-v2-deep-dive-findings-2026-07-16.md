@@ -277,7 +277,7 @@ Enrich, Edit Metadata, Monitoring, Profile, Delete. Vorschlag:
    (Metadata / Monitoring / Quality Profile), wie das Track-Detail-Modal es
    bereits vormacht.
 
-### B5. Nutzer-konfigurierbare Anzeige (Spalten + Match-Provider + Features) — „richtig modal"
+### B5. Nutzer-konfigurierbare Anzeige (Spalten + Match-Provider + Features) — „richtig modal" — ✅ behoben (siehe library-v2.md §31)
 
 Nutzer-Wunsch: pro Nutzer einstellen, welche Match-Provider, Spalten und
 Badges sichtbar sind (Lidarr: „Table Options"-Zahnrad pro Tabelle).
@@ -298,7 +298,7 @@ Badges sichtbar sind (Lidarr: „Table Options"-Zahnrad pro Tabelle).
 - Query-Seite: Spalten wie BPM/Duration/Pfad sind bereits im
   Album-Detail-Payload bzw. trivial ergänzbar — kein teures Backend.
 
-### B6. Track-Tabelle: fehlende Legacy-Spalten, kein Sort, keine Mehrfachauswahl
+### B6. Track-Tabelle: fehlende Legacy-Spalten, kein Sort, keine Mehrfachauswahl — ✅ behoben (siehe library-v2.md §31)
 
 Legacy Enhanced View (`library.js:4787–4806`): Play, #, Disc, Title, Duration,
 Format, Bitrate, BPM, File, Match, Queue + WriteTag/Delete, **sortierbar**,
@@ -461,11 +461,14 @@ A7 für nicht-acquisition-korrelierte Downloads (der Normalfall heute) leer.
    fokussierte Recherche-Session vor dem Code, sonst droht Fehlzuordnung
    (schlimmer als der Status quo). C4 zuerst designen (Persistenz), C3 ist
    reine Leseschicht.
-10. **B5/B6 (konfigurierbare Spalten/Provider, Sort, Bulk)** + **H6/H7/H8**
-    (Filter/Inline-Edit/Bulk-Bar) — ein zusammenhängender Tabellen-Block;
-    A8 (Provider-Filter) ist als Übergangslösung schon per Default umgesetzt,
-    B5 selbst (der Options-Zahnrad/Opt-in „alle zeigen") bleibt offen. Größter
-    verbleibender Block aus diesem Dokument.
+10. ~~**B5/B6 (konfigurierbare Spalten/Provider, Sort, Bulk)**~~ behoben
+    2026-07-16 (§31: Options-Zahnrad mit persistierten Spalten- + Provider-
+    Sichtbarkeits-Prefs, clientseitiger Sort, Checkbox-Mehrfachauswahl +
+    Bulk-Leiste Monitor/Unmonitor/Write-Tags/ReplayGain/Delete). **H6/H7/H8**
+    (A-Z-Selector/Inline-Edit/eigene Bulk-Bar-Variante der Legacy-Tabelle)
+    bleiben als H-Punkte offen (Nutzer-Abstimmung vor Umsetzung) — B6s
+    Bulk-Leiste deckt den funktionalen Kern von H8 bereits ab, ohne dass H8
+    selbst als Punkt geschlossen wäre.
 11. ~~**C2 (Manage Track Files)**~~ behoben 2026-07-16 (§30, inkl. optionalem
     `file_ids`-Scope auf den bestehenden ADR-05-Endpoints) + **H5**
     (Track-Delete in der Tabelle) bleibt offen (H-Punkt) + ~~A8/A9~~.

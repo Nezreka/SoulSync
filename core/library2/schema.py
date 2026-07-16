@@ -744,6 +744,12 @@ def ensure_library_v2_schema(connection: Any) -> None:
         ensure_file_delete_schema(cursor)
     except Exception as e:  # noqa: BLE001
         logger.error("file-delete journal migration failed (will retry next start): %s", e)
+    # B5: persisted table/column/match-provider display preferences.
+    try:
+        from core.library2.ui_preferences import ensure_ui_preferences_schema
+        ensure_ui_preferences_schema(cursor)
+    except Exception as e:  # noqa: BLE001
+        logger.error("ui-preferences migration failed (will retry next start): %s", e)
     # The read API falls back to download provenance (track_downloads) for
     # files the importer knew no quality data for — index the lookup column so
     # album views don't table-scan a large history per track. Guarded: the

@@ -114,6 +114,9 @@ export interface LibraryV2TrackArtist {
 }
 
 export interface LibraryV2TrackFile {
+  /** lib2_track_files row id — used to scope ADR-05 file-delete to a caller
+   *  selection (B6 bulk delete from the track table). */
+  file_id: number;
   path: string;
   format: string | null;
   bitrate: number | null;
@@ -385,4 +388,24 @@ export interface LibraryV2PlaylistTrack {
 
 export interface LibraryV2PlaylistDetail extends LibraryV2PlaylistSummary {
   tracks: LibraryV2PlaylistTrack[];
+}
+
+/** B5: which optional track-table columns are shown. #/Title/Actions are
+ *  always shown and have no entry here. */
+export interface LibraryV2TrackTableColumns {
+  artists: boolean;
+  duration: boolean;
+  bpm: boolean;
+  match: boolean;
+  quality: boolean;
+  features: boolean;
+  metadata: boolean;
+  file_path: boolean;
+}
+
+export interface LibraryV2UiPreferences {
+  track_table: {
+    columns: LibraryV2TrackTableColumns;
+    show_all_match_providers: boolean;
+  };
 }

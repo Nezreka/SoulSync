@@ -20,7 +20,9 @@
 > nebenbei ein separat vom User eingebrachtes, veraltetes externes
 > Findings-Dokument zu Playlists/Artwork, dessen Kernannahmen — Playlists
 > unbegonnen, P2-05 offen — beim Gegenprüfen gegen den Code bereits
-> überholt waren).
+> überholt waren); am 2026-07-16 Abschnitt 31 ergänzt (Deep-Dive Runde 4:
+> B5 konfigurierbare Spalten/Match-Provider, B6 Sort/Mehrfachauswahl/
+> Bulk-Leiste an der Track-Tabelle).
 
 Opt-in, Lidarr-style Library-Manager auf SoulSyncs eigener
 Such-/Download-/Processing-/Tagging-Pipeline. Gated hinter
@@ -3328,6 +3330,9 @@ Basierend auf Nutzer-Feedback und real-world Testlauf, aufzunehmend nach Abschlu
 
 **Ergänzt die Notiz in Abschnitt 14** ("Match via Source Display... nicht in der API vorhanden") — dieser Audit zeigt: es ist mehr als reine Anzeige, es ist eine vollständige manuelle Re-Match-Funktion inkl. Locking des kanonischen Release bei manuellem Album-Match (`core.metadata.canonical_version.should_pin_manual_canonical`).
 
+**Wichtige Architektureinschränkung bei fehlenden (Missing) Tracks:**
+Da fehlende Tracks (`file_status = 'missing'`) keine Entsprechung (Zeile) in der alten Legacy-Datenbanktabelle `tracks` besitzen, bleibt ihre `legacy_entity_id` dauerhaft `None` (auch nach der Materialisierung in `lib2_tracks`). Daher können diese Tracks auf Einzelebene nicht manuell per Match-Chip zugeordnet werden.
+
 **Nicht zu verwechseln mit:** `core/library/manual_library_match.py` — anderes Feature (Wishlist/Sync-History-Source zu existierendem Library-Track verlinken, um Re-Downloads zu verhindern), keine Metadaten-Provider-Zuordnung.
 
 **Scope für Library v2:** Audit nötig, ob `lib2_artists`/`lib2_albums`/`lib2_tracks` dieselben `{service}_match_status`/`{service}_id`-Spalten spiegeln, die Legacy nutzt, oder nur die IDs ohne Status. Falls Spalten vorhanden: reiner UI-Reuse (Chips + Modal); falls nicht: kleine additive Migration nötig.
@@ -4866,3 +4871,96 @@ unverändert zurückgestellt), B5/B6 (konfigurierbare Spalten/Sort/Bulk —
 größter verbleibender Block), G8-Vierter-Punkt (`_find_or_create_artist`
 Perf + Alias-Awareness, s.o.), H1–H13, I1–I10 (Legacy-/Lidarr-Gap, brauchen
 Nutzer-Abstimmung vor Umsetzung).
+
+---
+
+## 31. Deep-Dive-Findings 2026-07-16, Runde 4 (B5, B6) — ✅ behoben
+
+Siehe `docs/library-v2-deep-dive-findings-2026-07-16.md` Abschnitt E,
+Punkt 10 — der zu diesem Zeitpunkt größte verbleibende Block, der (anders
+als H/I) **keine** Nutzer-Abstimmung vor Umsetzung brauchte (reine
+B-Kategorie: UI/UX-Vorschlag, kein Legacy-/Lidarr-Paritäts-Punkt).
+A6/A7/C3/C4 und H1–H13/I1–I10 bleiben unverändert zurückgestellt
+(Begründung §29/Kopf des Deep-Dive-Dokuments gilt weiter).
+
+- **B5 (nutzerkonfigurierbare Spalten + Match-Provider-Sichtbarkeit)** —
+  neue, sehr kleine `lib2_ui_preferences`-Tabelle (ein JSON-Blob, ein Row —
+  lib2 ist Admin-only/Single-Profil laut ADR-01, also kein Grund für eine
+  Multi-User-Tabelle) statt localStorage: überlebt Browser-/Profilwechsel.
+  `core/library2/ui_preferences.py` (`get_ui_preferences`/
+  `update_ui_preferences`, One-Level-Deep-Merge pro Sektion, sodass ein
+  Patch wie `{"track_table":{"columns":{"bpm":false}}}` nur dieses Feld
+  ändert) + `GET`/`PUT /api/library/v2/ui-preferences` (PUT admin-only via
+  `_guard()`, GET für jedes Profil). Frontend: Zahnrad-Icon-Popover
+  (`TrackTableOptionsMenu`, gleiches optische Muster wie das bestehende
+  Overflow-Menü) an der Track-Tabelle jedes Albums — Spalten-Checkboxen
+  (Artists/Duration/BPM/Match/Quality/Features/Metadata/File-Pfad) + „Show
+  all match providers"-Toggle (überschreibt A8s Default-Filterung auf nur
+  konfigurierte Provider). Jede Checkbox schreibt sofort einen Patch,
+  React-Query-Cache wird optimistisch aus der Response gesetzt. Bewusst
+  NICHT umgesetzt (kleinere Restpunkte aus dem Deep-Dive-Vorschlag, um den
+  Scope beherrschbar zu halten): eine eigene Disc-Spalte (Alben sind
+  überwiegend Single-Disc; `disc_number` ist im Payload, aber es gibt noch
+  keine Spalte, die man ein-/ausblenden könnte) und die Aufspaltung von
+  Format/Bitrate in zwei separate Spalten (`QualityDisplay` zeigt beides
+  bereits kombiniert in einem Badge). Beides sind reine Politur-Punkte,
+  kein funktionaler Gap.
+- **B6 (Sort, Mehrfachauswahl, Bulk-Leiste)** — rein clientseitiger Sort
+  (alle Felder sind bereits im Album-Payload; kein Server-Roundtrip nötig)
+  über klickbare `#`/Title/Duration/BPM-Header (`SortableHeader`,
+  drei-Zustands-Zyklus asc→desc→unsortiert). Checkbox-Spalte + „Select
+  all"-Header-Checkbox (nur für Zeilen mit echter `track.id`, also nicht
+  für Missing-Slots ohne Row). Bulk-Leiste (`TrackTableBulkBar`) erscheint
+  bei nicht-leerer Auswahl, reine Wiederverwendung bestehender
+  Endpoints/Mutationen statt neuer Bulk-Pipeline:
+  - **Monitor/Unmonitor**: `Promise.all` über den bestehenden
+    Einzel-Track-`/monitor`-Endpoint (kein neuer Bulk-Endpoint nötig).
+  - **Write Tags**: `/tags/write` nahm bereits eine `track_ids`-Liste
+    entgegen (unverändert seit §18.2) — direkter Aufruf +
+    `awaitBulkJob`-Polling (dasselbe Muster wie `RetagModal`).
+  - **ReplayGain**: `Promise.all` über den bestehenden
+    Einzel-Track-`/replaygain`-Endpoint (analog zu Monitor — die
+    Auswahl ist album-scoped, ein Album-weiter Bulk-Endpoint wäre hier zu
+    grobkörnig für eine Teilauswahl).
+  - **Delete files…**: reused denselben `file_ids`-scoped ADR-05-Flow, den
+    C2 (§30) für den Artist-Files-Tab gebaut hat — `FilesDeleteConfirm`
+    wurde dafür von hart auf `entity: 'artists'` verdrahtet auf
+    `entity`/`eid`-Parameter generalisiert (ein Caller, ArtistFilesTab,
+    entsprechend angepasst), sodass dieselbe Preview/Execute/Root-Safety-
+    Komponente jetzt auch album-scoped für eine Track-Auswahl funktioniert.
+    Dafür brauchte `track.file` ein neues `file_id`-Feld (lib2_track_files-
+    Row-id) — bisher trug der Payload nur den Pfad, nicht die id, die
+    ADR-05 zum Scopen braucht (`core/library2/queries.py::_serialize_track`,
+    eine Stelle, versorgt sowohl `get_album` als auch `get_track`).
+  - Ein gemischt-selektiertes „Delete files…" (manche Zeilen missing, ohne
+    File) deleted nur die File-tragenden — der Button bleibt aktiv, solange
+    mindestens eine Auswahl-Zeile eine Datei hat.
+
+**Verifikation:** `pytest tests/library2` (577 grün, 4 neue Backend-Tests:
+`test_ui_preferences.py` + Ergänzungen in `test_schema.py`/
+`test_queries.py`/`test_api_routes.py`) und `tests/metadata` (728 grün) je
+isoliert grün; kombiniert dieselben 6 vorbestehenden Cross-Suite-Test-
+Order-Pollution-Failures aus §29/§30 (nicht durch diese Session verursacht).
+`vitest` 184 grün (7 neue Frontend-Tests in `-library-v2.api.test.ts`),
+`oxfmt --check`/`oxlint --type-check` über den gesamten `webui/src`-Baum
+clean. Live gegen den laufenden Dev-Server verifiziert (`dev.py`, echte
+Daten, Artist „Michael Jackson"): `GET`/`PUT .../ui-preferences` per curl
+(Round-Trip inkl. partiellem Patch bestätigt persistent über Requests
+hinweg), UI per Playwright/Chromium-Screenshots — Options-Popover mit allen
+8 Spalten-Checkboxen + Provider-Toggle, Bulk-Leiste bei 2 ausgewählten
+Tracks (inkl. korrekt aktiviertem „Delete files…" trotz einer Missing-Zeile
+in der Auswahl), Sort-Klick dreimal verifiziert (unsortiert → aufsteigend →
+absteigend, Titel-Reihenfolge bei jedem Schritt geprüft) — alles wie
+entworfen, keine Konsolenfehler.
+
+**Scope:** `core/library2/schema.py`, `core/library2/ui_preferences.py`
+(neu), `core/library2/queries.py`, `api/library_v2.py`,
+`webui/.../-library-v2.types.ts`, `webui/.../-library-v2.api.ts`,
+`webui/.../-ui/library-v2-page.tsx`,
+`webui/.../-ui/library-v2-page.module.css`.
+
+**Noch offen aus dem Deep-Dive:** A6/A7/C3/C4 (History/Lifecycle, §29
+unverändert zurückgestellt), G8-Vierter-Punkt (`_find_or_create_artist`
+Perf + Alias-Awareness), H1–H13, I1–I10 (Legacy-/Lidarr-Gap, brauchen
+Nutzer-Abstimmung vor Umsetzung) sowie die zwei in B5 oben genannten
+kleinen Politur-Punkte (Disc-Spalte, Format/Bitrate-Split).

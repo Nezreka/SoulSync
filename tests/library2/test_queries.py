@@ -238,6 +238,9 @@ def test_get_album_track_status(imported_conn):
     assert [a["name"] for a in one_dance["artists"]] == ["Drake", "Wizkid"]
     assert one_dance["file_status"] == "present"
     assert one_dance["file"]["quality_tier"] == "lossless"
+    # B6: bulk row-selection reuses the ADR-05 file_ids-scoped delete, which
+    # needs the lib2_track_files row id, not just the path.
+    assert isinstance(one_dance["file"]["file_id"], int)
     # The track with no file_path is reported missing.
     assert by_title["Hotline Bling"]["file_status"] == "missing"
 

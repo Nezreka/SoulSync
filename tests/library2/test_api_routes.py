@@ -1961,3 +1961,40 @@ def test_artwork_route_serves_real_jpeg_with_matching_mime(api):
     assert response.mimetype == "image/jpeg"
     with Image.open(BytesIO(response.data)) as image:
         assert image.format == "JPEG"
+
+
+def test_ui_preferences_round_trip(api):
+    """B5: GET returns defaults, PUT merges a partial patch and persists it."""
+    client, _db, _ids = api
+
+    defaults = client.get("/api/library/v2/ui-preferences")
+    assert defaults.status_code == 200
+    body = defaults.get_json()
+    assert body["success"] is True
+    assert body["preferences"]["track_table"]["columns"]["bpm"] is True
+    assert body["preferences"]["track_table"]["show_all_match_providers"] is False
+
+    updated = client.put(
+        "/api/library/v2/ui-preferences",
+        json={"track_table": {"columns": {"bpm": False}, "show_all_match_providers": True}},
+    )
+    assert updated.status_code == 200
+    prefs = updated.get_json()["preferences"]
+    assert prefs["track_table"]["columns"]["bpm"] is False
+    # Sibling column untouched by the partial patch.
+    assert prefs["track_table"]["columns"]["duration"] is True
+
+    refetched = client.get("/api/library/v2/ui-preferences")
+    assert refetched.get_json()["preferences"]["track_table"]["show_all_match_providers"] is True
+
+
+def test_ui_preferences_write_rejected_for_non_admin_profile(api):
+    client, db, _ids = api
+    db.active_profile = 7
+
+    resp = client.put("/api/library/v2/ui-preferences", json={"track_table": {}})
+
+    assert resp.status_code == 403
+    assert "admin" in resp.get_json()["error"].lower()
+    # Reads stay available.
+    assert client.get("/api/library/v2/ui-preferences").status_code == 200

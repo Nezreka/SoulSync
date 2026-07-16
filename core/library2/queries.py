@@ -745,6 +745,7 @@ def _serialize_track(
             except Exception:
                 pass
         file_info = {
+            "file_id": file_row["id"],
             "path": file_row["path"],
             "format": file_row["format"],
             "bitrate": bitrate,

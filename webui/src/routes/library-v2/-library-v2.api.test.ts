@@ -22,6 +22,7 @@ import {
   fetchLibraryV2Playlists,
   fetchLibraryV2ReorganizeSourcesGlobal,
   fetchLibraryV2TrackSourceInfo,
+  fetchLibraryV2UiPreferences,
   manualMatchLibraryV2Entity,
   materializeLibraryV2MissingTrack,
   previewLibraryV2AlbumReorganize,
@@ -31,6 +32,7 @@ import {
   startLibraryV2AlbumReplayGain,
   startLibraryV2ScopedSearch,
   updateLibraryV2MetadataOverrides,
+  updateLibraryV2UiPreferences,
 } from './-library-v2.api';
 
 describe('library v2 metadata api', () => {
@@ -717,5 +719,74 @@ describe('library v2 playlist api', () => {
       playlist_id: 9,
       status: 'running',
     });
+  });
+});
+
+describe('library v2 ui preferences api (B5)', () => {
+  it('fetches the stored/default preferences', async () => {
+    server.use(
+      http.get('/api/library/v2/ui-preferences', () =>
+        HttpResponse.json({
+          success: true,
+          preferences: {
+            track_table: {
+              columns: {
+                artists: true,
+                duration: true,
+                bpm: true,
+                match: true,
+                quality: true,
+                features: true,
+                metadata: true,
+                file_path: false,
+              },
+              show_all_match_providers: false,
+            },
+          },
+        }),
+      ),
+    );
+
+    await expect(fetchLibraryV2UiPreferences()).resolves.toMatchObject({
+      track_table: { show_all_match_providers: false, columns: { bpm: true } },
+    });
+  });
+
+  it('sends a partial patch and returns the merged result', async () => {
+    server.use(
+      http.put('/api/library/v2/ui-preferences', async ({ request }) => {
+        expect(await request.json()).toEqual({
+          track_table: { columns: { file_path: true } },
+        });
+        return HttpResponse.json({
+          success: true,
+          preferences: {
+            track_table: {
+              columns: { bpm: true, file_path: true },
+              show_all_match_providers: false,
+            },
+          },
+        });
+      }),
+    );
+
+    await expect(
+      updateLibraryV2UiPreferences({ track_table: { columns: { file_path: true } } }),
+    ).resolves.toMatchObject({ track_table: { columns: { file_path: true } } });
+  });
+
+  it('surfaces a rejected update', async () => {
+    server.use(
+      http.put('/api/library/v2/ui-preferences', () =>
+        HttpResponse.json({
+          success: false,
+          error: 'Library v2 changes require the admin profile',
+        }),
+      ),
+    );
+
+    await expect(updateLibraryV2UiPreferences({ track_table: {} })).rejects.toThrow(
+      'admin profile',
+    );
   });
 });

@@ -16,6 +16,7 @@ _EXPECTED_TABLES = {
     "lib2_recording_review", "lib2_wanted_tracks", "lib2_external_id_history",
     "lib2_entity_history", "lib2_metadata_overrides",
     "lib2_file_delete_operations", "lib2_file_delete_items",
+    "lib2_ui_preferences",
 }
 
 

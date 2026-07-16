@@ -26,6 +26,8 @@ import type {
   LibraryV2Search,
   LibraryV2Track,
   LibraryV2TrackDownload,
+  LibraryV2TrackTableColumns,
+  LibraryV2UiPreferences,
 } from './-library-v2.types';
 
 export const LIBRARY_V2_QUERY_KEY = ['library-v2'] as const;
@@ -1122,6 +1124,50 @@ export function libraryV2QualityProfilesQueryOptions() {
   return queryOptions({
     queryKey: [...LIBRARY_V2_QUERY_KEY, 'quality-profiles'],
     queryFn: fetchLibraryV2QualityProfiles,
+  });
+}
+
+// --- UI display preferences (B5) ---------------------------------------------
+
+interface UiPreferencesResponse {
+  success: boolean;
+  preferences: LibraryV2UiPreferences;
+  error?: string;
+}
+
+/** Deep-partial patch for the PUT endpoint's shallow-merge-per-section
+ *  contract (core/library2/ui_preferences.py's ``_merge_section``): each
+ *  section field, and each field within `columns`, is independently optional. */
+type UiPreferencesPatch = {
+  track_table?: {
+    columns?: Partial<LibraryV2TrackTableColumns>;
+    show_all_match_providers?: boolean;
+  };
+};
+
+export async function fetchLibraryV2UiPreferences(): Promise<LibraryV2UiPreferences> {
+  const payload = await readJson<UiPreferencesResponse>(apiClient.get('library/v2/ui-preferences'));
+  if (!payload.success) throw new Error(payload.error || 'Failed to load UI preferences');
+  return payload.preferences;
+}
+
+/** Deep-partial patch — merged server-side onto the stored (or default)
+ *  preferences one section deep, so callers only send what changed. */
+export async function updateLibraryV2UiPreferences(
+  patch: UiPreferencesPatch,
+): Promise<LibraryV2UiPreferences> {
+  const payload = await readJson<UiPreferencesResponse>(
+    apiClient.put('library/v2/ui-preferences', { json: patch }),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Failed to update UI preferences');
+  return payload.preferences;
+}
+
+export function libraryV2UiPreferencesQueryOptions() {
+  return queryOptions({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'ui-preferences'],
+    queryFn: fetchLibraryV2UiPreferences,
+    staleTime: 60_000,
   });
 }
 

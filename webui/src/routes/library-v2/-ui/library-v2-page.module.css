@@ -2445,3 +2445,150 @@ button.featureTag:disabled {
   color: rgba(255, 255, 255, 0.6);
   text-align: center;
 }
+
+/* --- track table: B5 options popover + B6 sort/selection/bulk bar --- */
+
+.trackTableToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.colCheckbox {
+  width: 30px;
+  text-align: center;
+}
+
+.sortableHeader {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sortableHeader:hover {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.sortIndicator {
+  font-size: 9px;
+}
+
+.filePathCell {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 11.5px;
+}
+
+.tableOptionsMenu {
+  min-width: 210px;
+  padding: 8px 0;
+}
+
+.tableOptionsGroupLabel {
+  padding: 4px 14px;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.tableOptionsItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.85);
+  cursor: pointer;
+}
+
+.tableOptionsItem:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.tableOptionsDivider {
+  height: 1px;
+  margin: 6px 0;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.bulkBar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 10px;
+  margin: 0 0 4px;
+  background: rgba(var(--accent-rgb), 0.1);
+  border: 1px solid rgba(var(--accent-rgb), 0.3);
+  border-radius: 8px;
+}
+
+.bulkBarCount {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.75);
+  margin-right: 4px;
+}
+
+.bulkBarButton {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 7px;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 12px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.bulkBarButton:hover:not(:disabled) {
+  border-color: rgba(var(--accent-rgb), 0.6);
+  color: #fff;
+}
+
+.bulkBarButton:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.bulkBarButtonDanger {
+  border-color: rgba(239, 68, 68, 0.35);
+  color: rgb(248, 113, 113);
+}
+
+.bulkBarButtonDanger:hover:not(:disabled) {
+  border-color: rgba(239, 68, 68, 0.7);
+  color: #ff8080;
+}
+
+.bulkBarClear {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 12px;
+  padding: 5px 6px;
+  cursor: pointer;
+  margin-left: auto;
+}
+
+.bulkBarClear:hover {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.bulkBarError {
+  flex-basis: 100%;
+  color: rgb(248, 113, 113);
+  font-size: 11.5px;
+}
