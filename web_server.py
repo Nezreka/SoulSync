@@ -17336,6 +17336,39 @@ def check_for_update():
     })
 
 
+# ── Notification history (Kazimir) ───────────────────────────────
+@app.route('/api/notifications/log', methods=['POST'])
+def log_notifications():
+    """Journal a batch of UI toasts so 'Clear All' in the bell panel loses
+    nothing. The frontend flushes these fire-and-forget every few seconds."""
+    from database.music_database import get_database
+    body = request.get_json(silent=True) or {}
+    entries = body.get('entries')
+    if not isinstance(entries, list):
+        return jsonify({'success': False, 'error': 'entries must be a list'}), 400
+    logged = get_database().add_notifications(entries[:50], profile_id=get_current_profile_id())
+    return jsonify({'success': True, 'logged': logged})
+
+
+@app.route('/api/notifications/history', methods=['GET', 'DELETE'])
+def notification_history():
+    """The persistent notification journal for the ACTIVE profile —
+    filterable by type, searchable, paginated. DELETE clears it."""
+    from database.music_database import get_database
+    db = get_database()
+    pid = get_current_profile_id()
+    if request.method == 'DELETE':
+        return jsonify({'success': True, 'removed': db.clear_notification_history(pid)})
+    rows = db.get_notification_history(
+        pid,
+        type_filter=request.args.get('type'),
+        search=request.args.get('q'),
+        limit=request.args.get('limit', default=100, type=int) or 100,
+        offset=request.args.get('offset', default=0, type=int) or 0,
+    )
+    return jsonify({'success': True, 'notifications': rows})
+
+
 def _simple_monitor_task():
     """The actual monitoring task that runs in the background thread.
     Search cleanup and download cleanup are now handled by system automations."""
