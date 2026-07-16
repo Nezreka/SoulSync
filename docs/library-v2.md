@@ -4625,3 +4625,112 @@ Bugs (Priorisierung §E, Punkte 1–4):
 **Noch offen aus dem Deep-Dive:** A3–A9, B1–B7, C1–C4, G7–G8, H1–H13, I1–I10 —
 siehe `docs/library-v2-deep-dive-findings-2026-07-16.md` Abschnitt E für die
 Priorisierung der nächsten Runde.
+
+## 29. Deep-Dive-Findings 2026-07-16, Runde 2 (C1, G7, A5, A8, A9, B3) — ✅ behoben
+
+Siehe `docs/library-v2-deep-dive-findings-2026-07-16.md` für die vollständige
+Analyse; hier die Fix-Zusammenfassung der in dieser Session behobenen Punkte
+(Priorisierung §E, Punkte 5–7 + Teile von 11).
+
+- **C1 (Scoped Automatic Search)** — größter Punkt: `A3` (Album-Zeile feuerte
+  in Wahrheit die globale Wishlist) und `A4` (Track-Level `autoGrabBest` war
+  eine zweite Client-Decision-Engine) sind komplett ersetzt. Neuer Endpoint
+  `POST /api/library/v2/<entity>/<id>/search` (`entity` ∈
+  `artists|albums|tracks`) löst den Track-Scope auf (neuer
+  `core/library2/wanted.entity_track_ids`-Helper, aus
+  `recompute_wanted_for_entity` extrahiert), recomputet die Wanted-Projektion,
+  mirrort sie in die Wishlist (`mirror_projected_tracks_wishlist` — dieselbe
+  "inline upgrade scan"-Logik wie der globale Upgrade-Scan und die
+  Monitor-Toggles) und übergibt die daraus tatsächlich "should-queue"-fähigen
+  Wishlist-IDs an einen neu injizierten `scoped_wishlist_search_dispatcher`.
+  Der Dispatcher (`web_server._library_v2_scoped_wishlist_search`) ruft
+  denselben `start_manual_wishlist_download_batch` auf, den
+  `/api/wishlist/download_missing` bereits nutzt — **keine zweite
+  Download-Pipeline**, nur eine neue Scope-Auflösung davor. Track-Scope nutzt
+  `user_initiated=True` (bypasst eine Ignore-Liste, wie beim Track-Monitor-
+  Toggle), Album-/Artist-Scope nicht (Cascade-Regel, P1-11-Präzedenzfall).
+  Frontend: `AUTOMATIC_SEARCH_RE`/`AUTO_GRAB_RE`/`autoGrabBest`/
+  `processWishlist`-Callsite entfernt, durch eine einzige `SCOPED_SEARCH_RE` +
+  `runScopedSearch()`-Helper-Funktion ersetzt, die anhand des mitgegebenen
+  `Lib2EntityRef` (trackId > albumId > Artist-Fallback) den Scope bestimmt.
+  Behebt nebenbei die in A3 genannte Handler-Asymmetrie in `AlbumDetailView`
+  (`Automatic Search` war dort ein stiller No-Op).
+- **G7 (Reorganize-Queue-Status)** — reiner Frontend-Fix, kein Backend nötig:
+  neue `fetchLibraryV2ReorganizeQueueSnapshot()` liest das bestehende
+  `/api/library/reorganize/queue` (dieselbe Legacy-Queue, die
+  `mountReorganizeStatusPanel` pollt). `AlbumReorganizeModal` trackt sein
+  eigenes `queue_id` (das Apply-Response bereits lieferte, auch im
+  „already queued"-Fall) und pollt bis zu einem Terminalstatus
+  (`done`/`failed`/`cancelled`) mit Live-Fortschritt. `ArtistReorganizeAllModal`
+  hat keine Per-Album-IDs vom Bulk-Endpoint — pollt best-effort nach
+  `artist_name`-Match, bis nichts mehr für diesen Artist aktiv/queued ist.
+- **A5 (BPM/Duration)** — `bpm` (Spalte existierte bereits, wurde nie
+  projiziert) jetzt in `_serialize_track`/`_missing_track_placeholder`
+  (`core/library2/queries.py`) und im `LibraryV2Track`-Typ. Neue Duration-
+  (mm:ss, `lib2_tracks.duration` ist Millisekunden) und BPM-Spalte in der
+  Track-Tabelle (`AlbumTrackTable`), zwischen Artists und Match.
+- **A8 (Match-Chips nur für konfigurierte Provider)** — `entity_match_status`/
+  `album_match_bundle` (`core/library2/match_status.py`) bekommen einen
+  optionalen `available_services`-Parameter; jeder Chip trägt jetzt
+  `available: bool`. Der neue DI-Callable `configured_match_services_getter`
+  (`web_server._library_v2_configured_match_services`) leitet das aus
+  `_get_enrichment_status()` ab — denselben "configured"-Flags, die die
+  Settings-Enrichment-Karten zeigen (per Remap-Tabelle für die
+  `_enrichment`-Suffix-Keys) — keine Duplikation der Worker-/Config-Checks.
+  `MatchChips` filtert `available === false` standardmäßig raus (Default „nur
+  konfigurierte", siehe B5-Vorschlag; ein globaler „alle zeigen"-Toggle bleibt
+  B5 vorbehalten). Das dauerhaft graue Tidal-Rauschen ist damit weg.
+- **A9 (Artist-Image-Picker)** — rundet §49 ab. Neues
+  `core.metadata.art_lookup.gather_artist_image_candidates`: ein Kandidat pro
+  konfigurierter Quelle (Spotify/Deezer/iTunes/Discogs — die vier mit
+  einheitlichem `search_artists()→Artist.image_url`; AudioDB/Last.fm/Genius/
+  Tidal/Qobuz/JioSaavn/Bandcamp fehlen mangels einheitlicher Client-Methode
+  bewusst, kein sauberer Wiederverwendungspfad ohne Risiko). Nutzt dieselbe
+  Signifikant-Token-Namensabgleich-Logik wie der Album-Matcher
+  (`_artist_name_matches`, aus `_significant_tokens` abgeleitet). Neue
+  Endpoints `GET/POST .../artists/<id>/art-options|art` — `apply_manual_
+  artwork` unterstützte `kind="artist"` bereits vollständig (§49-Design), kein
+  Cover-Embed-Retag nötig (Artist-Foto wird in keine Audiodatei eingebettet).
+  Frontend: `art-picker-modal.tsx` bekommt `ArtistImagePickerModal` (identisches
+  Karten-Grid), neuer „Change Photo"-Button im Artist-Toolbar.
+- **B3 (klickbare RG/LR-Badges)** — Features-Spalte zeigt RG/LR jetzt IMMER
+  (grau + klickbar wenn fehlend, statt „—"): RG-Klick ruft den bestehenden
+  `/tracks/<id>/replaygain`-Endpoint; LR-Klick bei fehlenden Lyrics ruft einen
+  neuen `POST /api/library/v2/tracks/<id>/fetch-lyrics`-Endpoint (neues
+  `core/library2/lyrics.py`, spiegelt `replaygain.py`s Orchestrierungs-Muster:
+  injizierbarer `resolve_fn`/`lyrics_client_obj`, nutzt denselben
+  `LyricsClient`/`create_lrc_file` wie der `missing_lyrics`-Repair-Job, rescannt
+  den Tag-Cache danach). LR-Klick bei vorhandenen Lyrics öffnet den
+  Lyrics-Tab des Track-Detail-Modals (`TrackDetailButton`/`TrackDetailModal`
+  bekommen ein extern kontrolliertes `openTab`, damit Badge und „Details"-Icon
+  dieselbe Modal-Instanz teilen). Der separate `TrackReplayGainButton` in der
+  Actions-Spalte entfällt (durch die Badge ersetzt).
+
+**Verifikation:** `pytest tests/library2 tests/metadata` — 562 + 728 grün in
+Isolation (6 vorbestehende, unabhängige Test-Order-Pollution-Failures in
+`tests/metadata/test_metadata_completion_canonical.py`/
+`test_metadata_discography.py` treten nur auf, wenn beide Suiten in
+DERSELBEN pytest-Session nacheinander laufen — per `git stash`-Vergleich
+verifiziert als bereits vor dieser Session vorhanden, nicht durch diese
+Änderungen verursacht). 41 neue Backend-Tests. `vitest` 179 grün (24 neue
+Frontend-Tests), `oxfmt`/`oxlint --type-check` clean.
+
+**Scope:** `core/library2/wanted.py`, `core/library2/wishlist_mirror.py`
+(unverändert, nur wiederverwendet), `core/library2/lyrics.py` (neu),
+`core/library2/match_status.py`, `core/library2/queries.py`,
+`core/metadata/art_lookup.py`, `api/library_v2.py`, `web_server.py`,
+`webui/.../-library-v2.api.ts`, `webui/.../-library-v2.types.ts`,
+`webui/.../library-v2-page.tsx`, `webui/.../reorganize-modal.tsx`,
+`webui/.../art-picker-modal.tsx`.
+
+**Noch offen aus dem Deep-Dive:** A6/A7 (History-Vereinheitlichung +
+Pipeline-Lifecycle-Persistenz, C3/C4) — bewusst zurückgestellt: die
+Scope-Korrelation von `acquisition_requests` (Scope-Werte `recording`/
+`release_group`/`release_edition`/`artist_missing`/`upgrade`, nicht 1:1
+Artist/Album/Track) auf lib2-Entities zurück auf Artist/Album/Track ist nicht
+trivial und verdient eine eigene fokussierte Recherche-Session, bevor Code
+geschrieben wird — falsches Zuordnen wäre schlimmer als der Status quo
+(nur `track_downloads`). B1/B2/B4 (UI-Entrümpelung), B5/B6 (konfigurierbare
+Spalten/Sort/Bulk), C2 (Manage Track Files), G8 (kleinere Runde-2-Funde),
+H1–H13, I1–I10 — siehe `docs/library-v2-deep-dive-findings-2026-07-16.md`
+Abschnitt E.

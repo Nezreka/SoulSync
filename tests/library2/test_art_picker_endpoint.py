@@ -219,3 +219,140 @@ def test_apply_art_triggers_a_background_cover_embed_retag(monkeypatch, api):
     assert state is not None
     assert state["kind"] == "retag"
     assert state["result"]["failed"] == 1  # file doesn't really exist on disk
+
+
+# ---------------------------------------------------------------------------
+# Artist photo picker (deep-dive A9) — same pattern, no cover-embed retag.
+# ---------------------------------------------------------------------------
+
+
+def test_artist_art_options_returns_candidates(monkeypatch, api):
+    client, _db, ids = api
+    captured = {}
+
+    def fake_gather(artist_name):
+        captured["artist"] = artist_name
+        return [{"url": "https://example.com/a.jpg", "source": "spotify"}]
+
+    monkeypatch.setattr("core.metadata.art_lookup.gather_artist_image_candidates", fake_gather)
+
+    resp = client.get(f"/api/library/v2/artists/{ids['artist']}/art-options")
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["success"] is True
+    assert body["candidates"] == [{"url": "https://example.com/a.jpg", "source": "spotify"}]
+    assert captured["artist"] == "Drake"
+
+
+def test_artist_art_options_404_for_missing_artist(api):
+    client, _db, _ids = api
+    resp = client.get("/api/library/v2/artists/999999/art-options")
+    assert resp.status_code == 404
+
+
+def test_artist_art_options_honors_name_override(monkeypatch, api):
+    client, db, ids = api
+    conn = db._get_connection()
+    from core.library2.metadata_overrides import set_field_override
+    set_field_override(conn, entity_type="artist", entity_id=ids["artist"],
+                       field_name="name", value="Drake (Corrected)")
+    conn.commit()
+    conn.close()
+
+    captured = {}
+    monkeypatch.setattr(
+        "core.metadata.art_lookup.gather_artist_image_candidates",
+        lambda artist_name: captured.update({"artist": artist_name}) or [],
+    )
+    resp = client.get(f"/api/library/v2/artists/{ids['artist']}/art-options")
+    assert resp.status_code == 200
+    assert captured["artist"] == "Drake (Corrected)"
+
+
+def test_artist_art_options_caches_within_ttl_until_refresh(monkeypatch, api):
+    client, _db, ids = api
+    calls = []
+    monkeypatch.setattr(
+        "core.metadata.art_lookup.gather_artist_image_candidates",
+        lambda artist_name: calls.append(1) or [{"url": "x", "source": "spotify"}],
+    )
+    first = client.get(f"/api/library/v2/artists/{ids['artist']}/art-options")
+    second = client.get(f"/api/library/v2/artists/{ids['artist']}/art-options")
+    assert first.status_code == 200 and second.status_code == 200
+    assert len(calls) == 1
+    assert second.get_json().get("cached") is True
+
+    refreshed = client.get(f"/api/library/v2/artists/{ids['artist']}/art-options?refresh=1")
+    assert refreshed.status_code == 200
+    assert len(calls) == 2
+
+
+def test_artist_and_album_art_options_caches_do_not_collide_on_a_shared_id(monkeypatch, api):
+    """Both caches are keyed by a raw int id. ``lib2_artists`` and
+    ``lib2_albums`` are separate tables with independent autoincrement
+    counters, so the fixture's artist and album naturally share id 1 — a
+    cache hit for one must never leak into the other."""
+    client, _db, ids = api
+    assert ids["artist"] == ids["album"], "fixture no longer produces a shared id — test needs updating"
+
+    monkeypatch.setattr(
+        "core.metadata.art_lookup.gather_album_art_candidates",
+        lambda artist, album, metadata: [{"url": "album-pick", "source": "deezer"}],
+    )
+    monkeypatch.setattr(
+        "core.metadata.art_lookup.gather_artist_image_candidates",
+        lambda artist_name: [{"url": "artist-pick", "source": "spotify"}],
+    )
+
+    album_resp = client.get(f"/api/library/v2/albums/{ids['album']}/art-options")
+    artist_resp = client.get(f"/api/library/v2/artists/{ids['artist']}/art-options")
+    assert album_resp.get_json()["candidates"] == [{"url": "album-pick", "source": "deezer"}]
+    assert artist_resp.get_json()["candidates"] == [{"url": "artist-pick", "source": "spotify"}]
+
+
+def test_apply_artist_art_requires_url(api):
+    client, _db, ids = api
+    resp = client.post(f"/api/library/v2/artists/{ids['artist']}/art", json={})
+    assert resp.status_code == 400
+
+
+def test_apply_artist_art_400_for_unresolvable_url(monkeypatch, api):
+    client, _db, ids = api
+    monkeypatch.setattr("core.library.artist_image.download_image_bytes", lambda url: None)
+    resp = client.post(
+        f"/api/library/v2/artists/{ids['artist']}/art", json={"url": "https://example.com/dead.jpg"},
+    )
+    assert resp.status_code == 400
+
+
+def test_apply_artist_art_404_for_missing_artist(monkeypatch, api):
+    client, _db, _ids = api
+    monkeypatch.setattr(
+        "core.library.artist_image.download_image_bytes", lambda url: _png_bytes(),
+    )
+    resp = client.post(
+        "/api/library/v2/artists/999999/art", json={"url": "https://example.com/photo.jpg"},
+    )
+    assert resp.status_code == 404
+
+
+def test_apply_artist_art_pins_the_choice_and_serves_it_locally(monkeypatch, api):
+    client, _db, ids = api
+    chosen = _png_bytes((5, 6, 7))
+    monkeypatch.setattr(
+        "core.library.artist_image.download_image_bytes",
+        lambda url: chosen if url == "https://example.com/photo.jpg" else None,
+    )
+
+    resp = client.post(
+        f"/api/library/v2/artists/{ids['artist']}/art", json={"url": "https://example.com/photo.jpg"},
+    )
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["success"] is True
+    assert body["image_url"].startswith(f"/api/library/v2/artwork/artist/{ids['artist']}?v=")
+
+    served = client.get(body["image_url"])
+    assert served.status_code == 200
+    with Image.open(BytesIO(served.data)) as image:
+        assert image.getpixel((0, 0)) == pytest.approx((5, 6, 7), abs=2)

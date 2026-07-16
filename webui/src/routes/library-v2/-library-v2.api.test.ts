@@ -6,6 +6,7 @@ import {
   analyzeLibraryV2TrackReplayGain,
   applyLibraryV2AlbumArt,
   applyLibraryV2AlbumReorganize,
+  applyLibraryV2ArtistArt,
   applyLibraryV2ArtistReorganizeAll,
   blacklistLibraryV2Source,
   deleteLibraryV2Files,
@@ -13,6 +14,7 @@ import {
   fetchLibraryV2AlbumArtOptions,
   fetchLibraryV2AlbumMatchStatus,
   fetchLibraryV2AlbumReorganizeSources,
+  fetchLibraryV2ArtistArtOptions,
   fetchLibraryV2ArtistMatchStatus,
   fetchLibraryV2FileDeletePreview,
   fetchLibraryV2Playlist,
@@ -26,6 +28,7 @@ import {
   runRepairJob,
   searchLibraryV2MatchService,
   startLibraryV2AlbumReplayGain,
+  startLibraryV2ScopedSearch,
   updateLibraryV2MetadataOverrides,
 } from './-library-v2.api';
 
@@ -281,6 +284,26 @@ describe('library v2 replaygain api', () => {
   });
 });
 
+describe('library v2 scoped search api', () => {
+  it('starts a scoped search job for the given entity and id', async () => {
+    server.use(
+      http.post('/api/library/v2/albums/7/search', () =>
+        HttpResponse.json({ success: true, started: true, job_id: 'search-1' }),
+      ),
+    );
+    await expect(startLibraryV2ScopedSearch('albums', 7)).resolves.toBe('search-1');
+  });
+
+  it('surfaces a server error', async () => {
+    server.use(
+      http.post('/api/library/v2/tracks/9/search', () =>
+        HttpResponse.json({ success: false, error: 'Not found' }, { status: 404 }),
+      ),
+    );
+    await expect(startLibraryV2ScopedSearch('tracks', 9)).rejects.toThrow('Not found');
+  });
+});
+
 describe('library v2 enrich api', () => {
   it('sends the chosen service and returns whether the row was resynced', async () => {
     server.use(
@@ -453,6 +476,63 @@ describe('library v2 art picker api', () => {
       ),
     );
     await expect(applyLibraryV2AlbumArt(42, 'https://example.com/dead.jpg')).rejects.toThrow(
+      'Could not download or validate',
+    );
+  });
+});
+
+describe('library v2 artist image picker api (deep-dive A9)', () => {
+  it('fetches candidate photos', async () => {
+    server.use(
+      http.get('/api/library/v2/artists/7/art-options', () =>
+        HttpResponse.json({
+          success: true,
+          count: 1,
+          candidates: [{ url: 'https://example.com/a.jpg', source: 'spotify' }],
+        }),
+      ),
+    );
+    await expect(fetchLibraryV2ArtistArtOptions(7)).resolves.toEqual([
+      { url: 'https://example.com/a.jpg', source: 'spotify' },
+    ]);
+  });
+
+  it('requests a refresh when asked', async () => {
+    server.use(
+      http.get('/api/library/v2/artists/7/art-options', ({ request }) => {
+        expect(new URL(request.url).searchParams.get('refresh')).toBe('1');
+        return HttpResponse.json({ success: true, candidates: [] });
+      }),
+    );
+    await expect(fetchLibraryV2ArtistArtOptions(7, { refresh: true })).resolves.toEqual([]);
+  });
+
+  it('applies the chosen photo and returns the local artwork url', async () => {
+    server.use(
+      http.post('/api/library/v2/artists/7/art', async ({ request }) => {
+        expect(await request.json()).toEqual({ url: 'https://example.com/pick.jpg' });
+        return HttpResponse.json({
+          success: true,
+          artist_id: 7,
+          image_url: '/api/library/v2/artwork/artist/7',
+        });
+      }),
+    );
+    await expect(applyLibraryV2ArtistArt(7, 'https://example.com/pick.jpg')).resolves.toBe(
+      '/api/library/v2/artwork/artist/7',
+    );
+  });
+
+  it('surfaces an unresolvable-image error', async () => {
+    server.use(
+      http.post('/api/library/v2/artists/7/art', () =>
+        HttpResponse.json(
+          { success: false, error: 'Could not download or validate that image URL' },
+          { status: 400 },
+        ),
+      ),
+    );
+    await expect(applyLibraryV2ArtistArt(7, 'https://example.com/dead.jpg')).rejects.toThrow(
       'Could not download or validate',
     );
   });

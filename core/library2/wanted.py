@@ -157,26 +157,30 @@ def recompute_wanted(conn: Any, *, profile_id: int = 1,
     return stats
 
 
-def recompute_wanted_for_entity(conn: Any, entity: str, entity_id: int,
-                                *, profile_id: int = 1) -> Dict[str, int]:
-    """Scoped recompute after a monitor mutation on one entity.
+def entity_track_ids(conn: Any, entity: str, entity_id: int) -> List[int]:
+    """All lib2 track ids belonging to one artist/album/track.
 
     Artists scope through the PRIMARY-artist chain — the same chain the
     projection's artist tier reads; featured credits don't inherit rules.
     """
     if entity in ("track", "tracks"):
-        ids = [int(entity_id)]
-    elif entity in ("album", "albums"):
-        ids = [r[0] for r in conn.execute(
+        return [int(entity_id)]
+    if entity in ("album", "albums"):
+        return [r[0] for r in conn.execute(
             "SELECT id FROM lib2_tracks WHERE album_id=?", (int(entity_id),))]
-    elif entity in ("artist", "artists"):
-        ids = [r[0] for r in conn.execute(
+    if entity in ("artist", "artists"):
+        return [r[0] for r in conn.execute(
             """SELECT t.id FROM lib2_tracks t
                JOIN lib2_albums al ON al.id = t.album_id
               WHERE al.primary_artist_id=?""", (int(entity_id),))]
-    else:
-        return {"projected": 0, "wanted": 0, "pruned": 0, "flag_mismatches": 0}
-    return recompute_wanted(conn, profile_id=profile_id, track_ids=ids)
+    return []
+
+
+def recompute_wanted_for_entity(conn: Any, entity: str, entity_id: int,
+                                *, profile_id: int = 1) -> Dict[str, int]:
+    """Scoped recompute after a monitor mutation on one entity."""
+    return recompute_wanted(
+        conn, profile_id=profile_id, track_ids=entity_track_ids(conn, entity, entity_id))
 
 
 def wanted_track_ids(conn: Any, *, profile_id: int = 1) -> List[int]:
@@ -282,6 +286,7 @@ def ensure_wanted_projection(cursor: Any) -> None:
 
 __all__ = [
     "PROJECTION_VERSION",
+    "entity_track_ids",
     "ensure_wanted_projection",
     "ensure_wanted_schema",
     "recompute_wanted",

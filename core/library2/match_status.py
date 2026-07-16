@@ -74,7 +74,16 @@ def _table_columns(conn, table: str) -> set:
         return set()
 
 
-def _chips_for_row(canonical: str, legacy_row, columns: set, legacy_id: int) -> List[Dict[str, Any]]:
+def _is_available(service: str, available_services: Optional[set]) -> bool:
+    """True unless the caller passed an explicit configured-services set that
+    excludes this one (A8: hide chips for providers nobody configured —
+    default behavior when the caller omits the set is 'assume available' so
+    existing callers/tests are unaffected)."""
+    return available_services is None or service in available_services
+
+
+def _chips_for_row(canonical: str, legacy_row, columns: set, legacy_id: int,
+                   available_services: Optional[set] = None) -> List[Dict[str, Any]]:
     """Build the per-service chip list from one already-fetched legacy row."""
     row_keys = set(legacy_row.keys())
     out: List[Dict[str, Any]] = []
@@ -98,17 +107,23 @@ def _chips_for_row(canonical: str, legacy_row, columns: set, legacy_id: int) -> 
             "external_id": external_id,
             "last_attempted": legacy_row[attempted_col] if attempted_col in columns else None,
             "legacy_entity_id": legacy_id,
+            "available": _is_available(service, available_services),
         })
     return out
 
 
-def entity_match_status(conn, entity_type: str, entity_id: int) -> List[Dict[str, Any]]:
+def entity_match_status(conn, entity_type: str, entity_id: int,
+                        *, available_services: Optional[set] = None) -> List[Dict[str, Any]]:
     """Per-provider match status for one lib2 entity, read from its legacy row.
 
     If the entity has no legacy source row (e.g. a discography-only release,
     or a new direct-import), synthesizes chips from its own columns.
-    Each entry is ``{service, label, status, external_id, last_attempted, legacy_entity_id}``
-    where ``status`` is ``matched`` / ``not_found`` / ``pending``.
+    Each entry is ``{service, label, status, external_id, last_attempted,
+    legacy_entity_id, available}`` where ``status`` is ``matched`` /
+    ``not_found`` / ``pending``. ``available_services``, when given, is the
+    set of service ids actually configured on this instance (A8) — chips for
+    everything else still come back (so a manual re-match action stays
+    reachable) but flagged ``available: False`` for the UI to grey out/hide.
     """
     canonical = _NORMALIZE.get(str(entity_type))
     if canonical is None:
@@ -129,7 +144,7 @@ def entity_match_status(conn, entity_type: str, entity_id: int) -> List[Dict[str
             f"SELECT * FROM {legacy_table} WHERE id=?", (legacy_id,)
         ).fetchone()
         if legacy_row is not None:
-            return _chips_for_row(canonical, legacy_row, columns, legacy_id)
+            return _chips_for_row(canonical, legacy_row, columns, legacy_id, available_services)
 
     # Fallback: synthesize chips from lib2 row columns
     import json
@@ -164,19 +179,25 @@ def entity_match_status(conn, entity_type: str, entity_id: int) -> List[Dict[str
             "external_id": external_id,
             "last_attempted": None,
             "legacy_entity_id": None,
+            "available": _is_available(service, available_services),
         })
     return out
 
 
-def album_match_bundle(conn, album_id: int) -> Dict[str, Any]:
+def album_match_bundle(conn, album_id: int,
+                       *, available_services: Optional[set] = None) -> Dict[str, Any]:
     """Album-level chips plus a per-track chip map, in one batched pass.
 
     Returns ``{"album": [...chips], "tracks": {lib2_track_id: [...chips]}}``.
     Computes the legacy column sets once for the whole album (cheap for a
     detail view). Tracks/albums without a legacy back-reference synthesize
-    chips based on their own columns.
+    chips based on their own columns. ``available_services`` — see
+    ``entity_match_status``.
     """
-    result: Dict[str, Any] = {"album": entity_match_status(conn, "album", album_id), "tracks": {}}
+    result: Dict[str, Any] = {
+        "album": entity_match_status(conn, "album", album_id, available_services=available_services),
+        "tracks": {},
+    }
     track_columns = _table_columns(conn, "tracks")
 
     rows = conn.execute(
@@ -199,7 +220,7 @@ def album_match_bundle(conn, album_id: int) -> Dict[str, Any]:
         legacy_row = legacy_rows.get(int(lid)) if lid is not None else None
         if legacy_row is not None:
             result["tracks"][int(row["id"])] = _chips_for_row(
-                "track", legacy_row, track_columns, int(lid)
+                "track", legacy_row, track_columns, int(lid), available_services
             )
         else:
             # Synthetic chips for track without legacy row
@@ -222,6 +243,7 @@ def album_match_bundle(conn, album_id: int) -> Dict[str, Any]:
                     "external_id": external_id,
                     "last_attempted": None,
                     "legacy_entity_id": None,
+                    "available": _is_available(service, available_services),
                 })
             result["tracks"][int(row["id"])] = chips
     return result

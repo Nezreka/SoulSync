@@ -20,6 +20,8 @@ import type {
   LibraryV2MatchService,
   LibraryV2QualityProfile,
   LibraryV2ReorganizePreview,
+  LibraryV2ReorganizeQueueItem,
+  LibraryV2ReorganizeQueueSnapshot,
   LibraryV2ReorganizeSource,
   LibraryV2Search,
   LibraryV2Track,
@@ -658,6 +660,24 @@ export async function startLibraryV2UpgradeScan(): Promise<string> {
   return payload.job_id;
 }
 
+/** Lidarr-style scoped Automatic Search (deep-dive C1): searches missing
+ *  tracks AND, if the quality profile allows it, upgrades — for exactly this
+ *  artist/album/track, never the whole wishlist. Replaces the client-side
+ *  best-pick heuristic (A4) and the mislabeled album-row global search (A3).
+ *  Returns a job id to poll via fetchLibraryV2JobStatus; the job's `result`
+ *  carries `{checked, queued, searching, batch_id}`. */
+export async function startLibraryV2ScopedSearch(
+  entity: 'artists' | 'albums' | 'tracks',
+  id: number,
+): Promise<string> {
+  const payload = await readJson<{ success: boolean; job_id?: string; error?: string }>(
+    apiClient.post(`library/v2/${entity}/${id}/search`, { json: {} }),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Search failed');
+  if (!payload.job_id) throw new Error('Search did not return a job id');
+  return payload.job_id;
+}
+
 /** Analyze an album's files and write track+album ReplayGain tags. Returns a
  *  job id to poll via fetchLibraryV2JobStatus (legacy Enrich→ReplayGain). */
 export async function startLibraryV2AlbumReplayGain(albumId: number): Promise<string> {
@@ -679,6 +699,15 @@ export async function analyzeLibraryV2TrackReplayGain(trackId: number): Promise<
   }>(apiClient.post(`library/v2/tracks/${trackId}/replaygain`, { json: {} }));
   if (!payload.success) throw new Error(payload.error || 'ReplayGain analysis failed');
   return payload.track_gain_db ?? null;
+}
+
+/** Fetch + write lyrics for one track from LRClib (synchronous) — the "LR"
+ *  badge's missing→click path (deep-dive B3). */
+export async function fetchLibraryV2TrackLyrics(trackId: number): Promise<void> {
+  const payload = await readJson<{ success: boolean; fetched?: boolean; error?: string }>(
+    apiClient.post(`library/v2/tracks/${trackId}/fetch-lyrics`, { json: {} }),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Lyrics fetch failed');
 }
 
 /** Re-query one metadata provider for one entity (legacy Enrich parity, §44).
@@ -792,6 +821,57 @@ export async function applyLibraryV2ArtistReorganizeAll(
   };
 }
 
+interface RawReorganizeQueueItem {
+  queue_id: string;
+  album_id: string;
+  album_title: string;
+  artist_name: string;
+  status: LibraryV2ReorganizeQueueItem['status'];
+  result_status: string | null;
+  current_track: string | null;
+  progress_total: number;
+  progress_processed: number;
+  finished_at: number | null;
+}
+
+function normalizeReorganizeQueueItem(raw: RawReorganizeQueueItem): LibraryV2ReorganizeQueueItem {
+  return {
+    queueId: raw.queue_id,
+    albumId: raw.album_id,
+    albumTitle: raw.album_title,
+    artistName: raw.artist_name,
+    status: raw.status,
+    resultStatus: raw.result_status ?? null,
+    currentTrack: raw.current_track ?? null,
+    progressTotal: raw.progress_total ?? 0,
+    progressProcessed: raw.progress_processed ?? 0,
+    finishedAt: raw.finished_at ?? null,
+  };
+}
+
+/** Snapshot of the (legacy, shared) reorganize queue — the lib2 Reorganize
+ *  modals poll this so an enqueued move has visible live status instead of
+ *  being fire-and-forget (deep-dive G7). Same endpoint the legacy Enhanced
+ *  View's status panel uses; album/artist ids in items are LEGACY ids
+ *  (the lib2→legacy reorganize bridge, docs §50), so lib2 callers match by
+ *  `queueId` (per-album apply) or `artistName` (best-effort for the
+ *  artist-wide bulk apply, which doesn't get per-item ids back). */
+export async function fetchLibraryV2ReorganizeQueueSnapshot(): Promise<LibraryV2ReorganizeQueueSnapshot> {
+  const payload = await readJson<{
+    success: boolean;
+    active?: RawReorganizeQueueItem | null;
+    queued?: RawReorganizeQueueItem[];
+    recent?: RawReorganizeQueueItem[];
+    error?: string;
+  }>(apiClient.get('library/reorganize/queue'));
+  if (!payload.success) throw new Error(payload.error || 'Failed to load the reorganize queue');
+  return {
+    active: payload.active ? normalizeReorganizeQueueItem(payload.active) : null,
+    queued: (payload.queued ?? []).map(normalizeReorganizeQueueItem),
+    recent: (payload.recent ?? []).map(normalizeReorganizeQueueItem),
+  };
+}
+
 /** Candidate cover-art images for an album, for the art picker (docs §49). */
 export async function fetchLibraryV2AlbumArtOptions(
   albumId: number,
@@ -816,6 +896,34 @@ export async function applyLibraryV2AlbumArt(albumId: number, url: string): Prom
   );
   if (!payload.success || !payload.image_url) {
     throw new Error(payload.error || 'Failed to apply cover art');
+  }
+  return payload.image_url;
+}
+
+/** Candidate photos for an artist, for the image picker (deep-dive A9). */
+export async function fetchLibraryV2ArtistArtOptions(
+  artistId: number,
+  options: { refresh?: boolean } = {},
+): Promise<LibraryV2ArtCandidate[]> {
+  const params = new URLSearchParams();
+  if (options.refresh) params.set('refresh', '1');
+  const payload = await readJson<{
+    success: boolean;
+    candidates: LibraryV2ArtCandidate[];
+    error?: string;
+  }>(apiClient.get(`library/v2/artists/${artistId}/art-options`, { searchParams: params }));
+  if (!payload.success) throw new Error(payload.error || 'Failed to load photo options');
+  return payload.candidates;
+}
+
+/** Apply a photo chosen in the picker (deep-dive A9). Pins the choice so a
+ *  later refresh won't clobber it; returns the local artwork URL to re-render. */
+export async function applyLibraryV2ArtistArt(artistId: number, url: string): Promise<string> {
+  const payload = await readJson<{ success: boolean; image_url?: string; error?: string }>(
+    apiClient.post(`library/v2/artists/${artistId}/art`, { json: { url } }),
+  );
+  if (!payload.success || !payload.image_url) {
+    throw new Error(payload.error || 'Failed to apply photo');
   }
   return payload.image_url;
 }

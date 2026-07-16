@@ -96,6 +96,40 @@ def test_unknown_entity_type_raises(imported_conn):
         MS.entity_match_status(imported_conn, "playlist", 1)
 
 
+def test_available_services_flags_chips_from_a_legacy_row(imported_conn):
+    rows = MS.entity_match_status(
+        imported_conn, "artist", _drake_lib2_id(imported_conn),
+        available_services={"spotify", "deezer"},
+    )
+    by_service = {r["service"]: r["available"] for r in rows}
+
+    assert by_service["spotify"] is True
+    assert by_service["musicbrainz"] is False
+    assert by_service["deezer"] is True
+    assert by_service["discogs"] is False
+
+
+def test_available_services_flags_synthetic_chips(imported_conn):
+    new_id = imported_conn.execute(
+        "INSERT INTO lib2_artists(name, sort_name, quality_profile_id, spotify_id) "
+        "VALUES('Ghost', 'Ghost', 1, 'ghost_sp')"
+    ).lastrowid
+    imported_conn.commit()
+
+    rows = MS.entity_match_status(
+        imported_conn, "artist", new_id, available_services={"spotify"},
+    )
+    by_service = {r["service"]: r["available"] for r in rows}
+
+    assert by_service["spotify"] is True
+    assert by_service["musicbrainz"] is False
+
+
+def test_omitted_available_services_defaults_every_chip_available(imported_conn):
+    rows = MS.entity_match_status(imported_conn, "artist", _drake_lib2_id(imported_conn))
+    assert all(r["available"] is True for r in rows)
+
+
 def test_album_match_bundle_returns_album_and_track_chips(imported_conn):
     imported_conn.execute("ALTER TABLE tracks ADD COLUMN spotify_track_id TEXT")
     imported_conn.execute("UPDATE tracks SET spotify_track_id='spt' WHERE id=100")
@@ -113,3 +147,23 @@ def test_album_match_bundle_returns_album_and_track_chips(imported_conn):
     spotify = next(r for r in bundle["tracks"][one_dance] if r["service"] == "spotify")
     assert spotify["status"] == "matched"
     assert spotify["external_id"] == "spt"
+
+
+def test_album_match_bundle_propagates_available_services_to_album_and_tracks(imported_conn):
+    views_id = imported_conn.execute(
+        "SELECT id FROM lib2_albums WHERE title='Views'"
+    ).fetchone()[0]
+    one_dance = imported_conn.execute(
+        "SELECT id FROM lib2_tracks WHERE legacy_track_id=100"
+    ).fetchone()[0]
+
+    bundle = MS.album_match_bundle(imported_conn, views_id, available_services={"spotify"})
+
+    album_spotify = next(r for r in bundle["album"] if r["service"] == "spotify")
+    album_deezer = next(r for r in bundle["album"] if r["service"] == "deezer")
+    track_spotify = next(r for r in bundle["tracks"][one_dance] if r["service"] == "spotify")
+    track_deezer = next(r for r in bundle["tracks"][one_dance] if r["service"] == "deezer")
+    assert album_spotify["available"] is True
+    assert album_deezer["available"] is False
+    assert track_spotify["available"] is True
+    assert track_deezer["available"] is False

@@ -21,7 +21,6 @@ import type {
 
 import {
   analyzeLibraryV2TrackReplayGain,
-  autoGrabBest,
   blacklistLibraryV2Source,
   bulkMonitorLibraryV2Releases,
   deleteLibraryV2Entity,
@@ -36,6 +35,7 @@ import {
   fetchLibraryV2FileDeletePreview,
   fetchLibraryV2ImportStatus,
   fetchLibraryV2JobStatus,
+  fetchLibraryV2TrackLyrics,
   LIBRARY_V2_ALBUM_TYPES,
   LIBRARY_V2_QUERY_KEY,
   libraryV2AlbumMatchStatusQueryOptions,
@@ -56,7 +56,6 @@ import {
   materializeLibraryV2MissingTrack,
   moveLibraryV2TrackFile,
   searchLibraryV2MatchService,
-  processWishlist,
   refreshLibraryV2,
   refreshLibraryV2Discography,
   retryLibraryV2Mirror,
@@ -65,6 +64,7 @@ import {
   setLibraryV2Monitored,
   startLibraryV2AlbumReplayGain,
   startLibraryV2Import,
+  startLibraryV2ScopedSearch,
   startLibraryV2UpgradeScan,
   unlinkLibraryV2ArtistAlias,
   unlinkLibraryV2Duplicate,
@@ -75,7 +75,7 @@ import {
 } from '../-library-v2.api';
 import { computeTrackEditValues } from '../-metadata-edit';
 import { Route } from '../route';
-import { AlbumArtPickerModal } from './art-picker-modal';
+import { AlbumArtPickerModal, ArtistImagePickerModal } from './art-picker-modal';
 import { InteractiveSearchModal } from './interactive-search';
 import styles from './library-v2-page.module.css';
 import { QualityProfileModal, QualityProfilePicker } from './quality-profile-modal';
@@ -109,6 +109,15 @@ export function clampPercent(value: number | null | undefined): number {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
+/** `duration` travels in milliseconds (`lib2_tracks.duration`) end to end. */
+function formatDuration(ms: number | null | undefined): string {
+  if (ms == null || ms <= 0) return '—';
+  const totalSeconds = Math.round(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   const units = ['KB', 'MB', 'GB', 'TB'];
@@ -132,11 +141,10 @@ function formatReleaseDate(value: string | number | null | undefined): string | 
 
 /** Only "Interactive Search" opens the manual results window. */
 const INTERACTIVE_RE = /^Interactive Search\b/;
-/** "Automatic Search" triggers wishlist processing (checked BEFORE the
- *  auto-grab route). */
-const AUTOMATIC_SEARCH_RE = /^Automatic Search\b/;
-/** Per-track "Search" / "Grab Release" auto-search + grab the best result. */
-const AUTO_GRAB_RE = /^(Search|Grab Release)\b/;
+/** "Automatic Search" (any scope) / per-track "Search" / "Grab Release" all
+ *  route to the scoped server-side search (deep-dive C1) — the entity ref
+ *  carried alongside the action string decides artist/album/track scope. */
+const SCOPED_SEARCH_RE = /^(Automatic Search|Search|Grab Release)\b/;
 
 /** Build a source-search query from an artist name + an action label like
  *  "Interactive Search: Title (Album)". */
@@ -492,7 +500,7 @@ function getServiceAbbreviation(service: string): string {
 
 /** A row of provider match chips. Clicking a chip opens the manual-match modal
  *  (reuses the app-wide match endpoints via the legacy entity id). */
-function MatchChips({
+export function MatchChips({
   entityType,
   entityName,
   services,
@@ -504,10 +512,14 @@ function MatchChips({
   abbreviated?: boolean;
 }) {
   const [active, setActive] = useState<LibraryV2MatchService | null>(null);
-  if (!services.length) return null;
+  // A8: hide chips for providers nobody configured on this instance — a
+  // permanently grey Tidal/Qobuz/… row was pure noise. `available` is
+  // `undefined` for older cached responses, which reads as available.
+  const visible = services.filter((s) => s.available !== false);
+  if (!visible.length) return null;
   return (
     <div className={abbreviated ? styles.trackMatchChips : styles.matchChips}>
-      {services.map((s) => {
+      {visible.map((s) => {
         const details = [
           s.external_id ? `id: ${s.external_id}` : 'no id',
           s.last_attempted ? `last: ${s.last_attempted.slice(0, 16).replace('T', ' ')}` : null,
@@ -2541,6 +2553,7 @@ function ArtistTable({ artists }: { artists: LibraryV2ArtistSummary[] }) {
 
 function AlbumDetailView({ albumId }: { albumId: number }) {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const albumQuery = useQuery(libraryV2AlbumQueryOptions(albumId));
   const album = albumQuery.data;
   const [modalAction, setModalAction] = useState<{
@@ -2558,24 +2571,12 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
       setModalAction({ action, entity });
       return;
     }
-    if (!AUTO_GRAB_RE.test(action) || !album) return;
-    const query = buildSearchQuery(album.primary_artist?.name ?? '', action);
-    setGrabBanner({ tone: 'busy', text: `Searching "${query}"…` });
-    void autoGrabBest(query, {}, entity)
-      .then((best) => {
-        if (!best) {
-          setGrabBanner({ tone: 'err', text: `No results for "${query}".` });
-          return;
-        }
-        const title = best.result_type === 'album' ? best.album_title : best.title;
-        setGrabBanner({ tone: 'ok', text: `Grabbing "${title}" from ${best.username}.` });
-      })
-      .catch((error) =>
-        setGrabBanner({
-          tone: 'err',
-          text: error instanceof Error ? error.message : 'Search failed',
-        }),
-      );
+    if (!SCOPED_SEARCH_RE.test(action)) return;
+    const scope = entity?.trackId
+      ? { entity: 'tracks' as const, id: entity.trackId }
+      : { entity: 'albums' as const, id: albumId };
+    setGrabBanner({ tone: 'busy', text: 'Searching…' });
+    void runScopedSearch(queryClient, scope.entity, scope.id).then(setGrabBanner);
   }
 
   const goBack = () =>
@@ -2728,6 +2729,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   const [showEnrich, setShowEnrich] = useState(false);
   const enrichWrapRef = useRef<HTMLSpanElement>(null);
   const [showEditArtist, setShowEditArtist] = useState(false);
+  const [showArtPicker, setShowArtPicker] = useState(false);
   const [retagTarget, setRetagTarget] = useState<{
     entity: 'artists' | 'albums';
     id: number;
@@ -2816,30 +2818,10 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [releasesMode, artist?.discography_count, discographyBusy]);
 
-  /** "Automatic Search" = run the wishlist processor. Every monitored missing
-   *  or upgradable track is already mirrored into the wishlist, so processing
-   *  it searches and downloads exactly those — it must NOT blind-grab the best
-   *  result for a bare artist-name query (an arbitrary release). */
-  function searchMonitored() {
-    setGrabBanner({ tone: 'busy', text: 'Starting global Wishlist processing…' });
-    void processWishlist()
-      .then((message) =>
-        setGrabBanner({
-          tone: 'ok',
-          text: `${message} — all monitored missing tracks in the Wishlist are searched through the normal pipeline (progress on the Wishlist page).`,
-        }),
-      )
-      .catch((e) =>
-        setGrabBanner({
-          tone: 'err',
-          text: e instanceof Error ? e.message : 'Wishlist processing failed to start',
-        }),
-      );
-  }
-
   /** Route a toolbar/row action: Interactive Search opens the window;
-   *  Automatic Search runs the wishlist processor; per-track Search / Grab
-   *  auto-searches and downloads the best result for that specific track. */
+   *  Automatic Search (any scope) / per-track Search run the scoped
+   *  server-side search (deep-dive C1) — the entity ref decides whether it
+   *  searches this one track, this one album, or the whole artist. */
   function handleAction(action: string, entity?: Lib2EntityRef) {
     if (action === 'Quality Profile' && artist) {
       setQpTarget({
@@ -2854,25 +2836,10 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
       setModalAction({ action, entity });
       return;
     }
-    if (AUTOMATIC_SEARCH_RE.test(action)) {
-      searchMonitored();
-      return;
-    }
-    if (AUTO_GRAB_RE.test(action)) {
-      const query = buildSearchQuery(artistName, action);
-      setGrabBanner({ tone: 'busy', text: `Searching "${query}"…` });
-      void autoGrabBest(query, {}, entity)
-        .then((best) => {
-          if (!best) {
-            setGrabBanner({ tone: 'err', text: `No results for "${query}".` });
-          } else {
-            const t = best.result_type === 'album' ? best.album_title : best.title;
-            setGrabBanner({ tone: 'ok', text: `Grabbing "${t}" from ${best.username}.` });
-          }
-        })
-        .catch((e) =>
-          setGrabBanner({ tone: 'err', text: e instanceof Error ? e.message : 'Search failed' }),
-        );
+    if (SCOPED_SEARCH_RE.test(action)) {
+      const scope = resolveSearchScope(entity, artistId);
+      setGrabBanner({ tone: 'busy', text: 'Searching…' });
+      void runScopedSearch(queryClient, scope.entity, scope.id).then(setGrabBanner);
     }
   }
 
@@ -2891,7 +2858,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               <ActionButton
                 icon="automatic"
                 label="Automatic Search"
-                title="Search entire monitored wishlist for missing tracks"
+                title="Search missing/upgradable tracks for this artist"
                 onClick={() => handleAction('Automatic Search')}
               />
               <ActionButton
@@ -2978,6 +2945,12 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 label="Edit Metadata"
                 title="Correct artist metadata without rewriting provider data"
                 onClick={() => setShowEditArtist(true)}
+              />
+              <ActionButton
+                icon="cover"
+                label="Change Photo"
+                title="Pick from alternate artist photos"
+                onClick={() => setShowArtPicker(true)}
               />
               <ActionButton
                 icon="monitor"
@@ -3161,6 +3134,13 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
           {showEditArtist ? (
             <EditArtistModal artist={artist} onClose={() => setShowEditArtist(false)} />
           ) : null}
+          {showArtPicker ? (
+            <ArtistImagePickerModal
+              artistId={artist.id}
+              artistName={artist.name}
+              onClose={() => setShowArtPicker(false)}
+            />
+          ) : null}
           {retagTarget ? (
             <RetagModal
               entity={retagTarget.entity}
@@ -3212,6 +3192,40 @@ async function awaitBulkJob(
     await new Promise((r) => setTimeout(r, 1000));
   }
   return 'Timed out waiting for the bulk job';
+}
+
+/** Deep-dive C1: run the scoped Automatic Search endpoint for exactly one
+ *  artist/album/track and report a banner-ready outcome. Replaces the old
+ *  client-side best-pick heuristic (A4) — the server does the searching,
+ *  candidate-walking and grabbing through the normal wishlist pipeline. */
+async function runScopedSearch(
+  queryClient: ReturnType<typeof useQueryClient>,
+  entity: 'artists' | 'albums' | 'tracks',
+  id: number,
+): Promise<{ tone: 'ok' | 'err'; text: string }> {
+  try {
+    const jobId = await startLibraryV2ScopedSearch(entity, id);
+    const error = await awaitBulkJob(queryClient, jobId);
+    if (error) return { tone: 'err', text: `Search failed: ${error}` };
+    return {
+      tone: 'ok',
+      text: 'Search started for the monitored missing/upgradable tracks in scope — progress on the Downloads page.',
+    };
+  } catch (e) {
+    return { tone: 'err', text: e instanceof Error ? e.message : 'Search failed' };
+  }
+}
+
+/** Resolve the scope a fired "Automatic Search" / "Search" action targets:
+ *  the entity ref's most specific id wins (track > album), falling back to
+ *  the artist the action originated from. */
+function resolveSearchScope(
+  entity: Lib2EntityRef | undefined,
+  fallbackArtistId: number,
+): { entity: 'artists' | 'albums' | 'tracks'; id: number } {
+  if (entity?.trackId) return { entity: 'tracks', id: entity.trackId };
+  if (entity?.albumId) return { entity: 'albums', id: entity.albumId };
+  return { entity: 'artists', id: fallbackArtistId };
 }
 
 /** Lidarr-style album list: each album is a block whose header expands to reveal
@@ -3408,8 +3422,13 @@ function AlbumBlock({
           />
           <IconActionButton
             icon="automatic"
-            title="Automatic Search — find & grab the best source (global Wishlist action)"
-            onClick={() => onAction(`Automatic Search: ${album.title}`)}
+            title="Automatic Search — search missing/upgradable tracks on this album"
+            onClick={() =>
+              onAction(`Automatic Search: ${album.title}`, {
+                albumId: album.id,
+                qualityProfileId: album.quality_profile_id,
+              })
+            }
           />
           <IconActionButton
             icon="interactive"
@@ -3539,6 +3558,8 @@ function AlbumTrackTable({
             <th className={styles.colNum}>#</th>
             <th>Title</th>
             <th>Artists</th>
+            <th className={styles.colDuration}>Duration</th>
+            <th className={styles.colBpm}>BPM</th>
             <th>Match</th>
             <th>Quality</th>
             <th className={styles.colFeatures}>Features</th>
@@ -3606,6 +3627,7 @@ function TrackRow({
   const missing = track.file_status === 'missing';
   const label = track.title ?? `Track ${track.track_number ?? '?'}`;
   const entity: Lib2EntityRef = { ...entityBase, ...(track.id ? { trackId: track.id } : {}) };
+  const [detailTab, setDetailTab] = useState<TrackDetailTab | null>(null);
   return (
     <tr className={missing ? styles.missingRow : styles.staticRow}>
       <td>
@@ -3622,6 +3644,8 @@ function TrackRow({
         </span>
       </td>
       <td>{track.artists.map((a) => a.name).join(', ')}</td>
+      <td className={styles.colDuration}>{formatDuration(track.duration)}</td>
+      <td className={styles.colBpm}>{track.bpm ?? '—'}</td>
       <td>
         {matchServices.length > 0 ? (
           <MatchChips
@@ -3650,25 +3674,8 @@ function TrackRow({
       <td>
         {!missing && track.file ? (
           <span className={styles.featuresDisplay}>
-            {track.file.has_replaygain && (
-              <span
-                className={`${styles.featureTag} ${styles.featureRg}`}
-                title="ReplayGain is written to this track"
-              >
-                RG
-              </span>
-            )}
-            {track.file.has_lyrics && (
-              <span
-                className={`${styles.featureTag} ${styles.featureLr}`}
-                title="Lyrics are embedded in this track"
-              >
-                LR
-              </span>
-            )}
-            {!track.file.has_replaygain && !track.file.has_lyrics && (
-              <span className={styles.muted}>—</span>
-            )}
+            <TrackReplayGainBadge track={track} />
+            <TrackLyricsBadge track={track} onOpenLyrics={() => setDetailTab('lyrics')} />
           </span>
         ) : (
           <span className={styles.muted}>—</span>
@@ -3695,7 +3702,7 @@ function TrackRow({
         ) : null}
         <IconActionButton
           icon="automatic"
-          title="Automatic Search — find & grab the best source"
+          title="Automatic Search — search missing/upgradable for this track"
           disabled={!track.id}
           onClick={() => onAction(`Search: ${label} (${albumTitle})`, entity)}
         />
@@ -3705,37 +3712,99 @@ function TrackRow({
           disabled={!track.id}
           onClick={() => onAction(`Interactive Search: ${label} (${albumTitle})`, entity)}
         />
-        {!missing && track.file ? <TrackReplayGainButton track={track} /> : null}
-        {track.id ? <TrackDetailButton track={track} albumTitle={albumTitle} /> : null}
+        {track.id ? (
+          <TrackDetailButton
+            track={track}
+            albumTitle={albumTitle}
+            openTab={detailTab}
+            onOpenTab={setDetailTab}
+            onClose={() => setDetailTab(null)}
+          />
+        ) : null}
       </td>
     </tr>
   );
 }
 
-/** Per-track ReplayGain: analyze this one file and write track-level tags. */
-function TrackReplayGainButton({ track }: { track: LibraryV2Track }) {
+/** RG badge (deep-dive B3): always rendered — green when present, grey when
+ *  missing and clickable to analyze + write it on the spot. Replaces the
+ *  separate ReplayGain action button; a `mutation.isError` note surfaces
+ *  inline instead of a silent failed icon. */
+export function TrackReplayGainBadge({ track }: { track: LibraryV2Track }) {
   const queryClient = useQueryClient();
-  const [done, setDone] = useState(false);
+  const hasRg = Boolean(track.file?.has_replaygain);
   const mutation = useMutation({
     mutationFn: () => analyzeLibraryV2TrackReplayGain(track.id as number),
-    onSuccess: () => {
-      setDone(true);
-      void queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
-    },
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY }),
   });
+  if (hasRg) {
+    return (
+      <span
+        className={`${styles.featureTag} ${styles.featureRg}`}
+        title="ReplayGain is written to this track"
+      >
+        RG
+      </span>
+    );
+  }
   return (
-    <IconActionButton
-      icon={mutation.isPending ? 'refresh' : 'gain'}
+    <button
+      type="button"
+      className={`${styles.featureTag} ${styles.featureMissing}`}
+      disabled={mutation.isPending || !track.id}
       title={
         mutation.isError
           ? mutationErrorMessage(mutation.error, 'ReplayGain analysis failed')
-          : done
-            ? 'ReplayGain written'
-            : 'Analyze ReplayGain for this track'
+          : 'Analyze + write ReplayGain for this track'
       }
-      disabled={mutation.isPending || !track.id}
       onClick={() => mutation.mutate()}
-    />
+    >
+      {mutation.isPending ? '…' : 'RG'}
+    </button>
+  );
+}
+
+/** LR badge (deep-dive B3): green + present opens the Lyrics tab of the track
+ *  detail modal; grey + missing fetches lyrics from LRClib on the spot. */
+export function TrackLyricsBadge({
+  track,
+  onOpenLyrics,
+}: {
+  track: LibraryV2Track;
+  onOpenLyrics: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const hasLyrics = Boolean(track.file?.has_lyrics);
+  const mutation = useMutation({
+    mutationFn: () => fetchLibraryV2TrackLyrics(track.id as number),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY }),
+  });
+  if (hasLyrics) {
+    return (
+      <button
+        type="button"
+        className={`${styles.featureTag} ${styles.featureLr}`}
+        title="Lyrics are embedded in this track — click to view"
+        onClick={onOpenLyrics}
+      >
+        LR
+      </button>
+    );
+  }
+  return (
+    <button
+      type="button"
+      className={`${styles.featureTag} ${styles.featureMissing}`}
+      disabled={mutation.isPending || !track.id}
+      title={
+        mutation.isError
+          ? mutationErrorMessage(mutation.error, 'Lyrics fetch failed')
+          : 'Fetch lyrics from LRClib for this track'
+      }
+      onClick={() => mutation.mutate()}
+    >
+      {mutation.isPending ? '…' : 'LR'}
+    </button>
   );
 }
 
@@ -3793,19 +3862,38 @@ function MissingTrackAddButton({
 /** Per-track details, consolidated behind one button: Quality profile (the
  *  default/first tab — the most common reason to open this), Metadata edit,
  *  and Info (source/download history). Keeps the row from getting crowded
- *  with a separate icon per action. */
-function TrackDetailButton({ track, albumTitle }: { track: LibraryV2Track; albumTitle: string }) {
-  const [open, setOpen] = useState(false);
+ *  with a separate icon per action. ``openTab``/``onOpenTab`` are lifted to
+ *  the row so the LR badge (deep-dive B3) can jump straight to the Lyrics
+ *  tab of the SAME modal instead of opening a second one. */
+function TrackDetailButton({
+  track,
+  albumTitle,
+  openTab,
+  onOpenTab,
+  onClose,
+}: {
+  track: LibraryV2Track;
+  albumTitle: string;
+  openTab: TrackDetailTab | null;
+  onOpenTab: (tab: TrackDetailTab) => void;
+  onClose: () => void;
+}) {
   if (!track.id) return null;
   return (
     <>
       <IconActionButton
         icon="edit"
         title="Track details — quality profile, metadata, source info"
-        onClick={() => setOpen(true)}
+        onClick={() => onOpenTab('quality')}
       />
-      {open ? (
-        <TrackDetailModal track={track} albumTitle={albumTitle} onClose={() => setOpen(false)} />
+      {openTab ? (
+        <TrackDetailModal
+          key={openTab}
+          track={track}
+          albumTitle={albumTitle}
+          initialTab={openTab}
+          onClose={onClose}
+        />
       ) : null}
     </>
   );
@@ -3824,13 +3912,15 @@ const TRACK_DETAIL_TAB_LABELS: Record<TrackDetailTab, string> = {
 function TrackDetailModal({
   track,
   albumTitle,
+  initialTab = 'quality',
   onClose,
 }: {
   track: LibraryV2Track;
   albumTitle: string;
+  initialTab?: TrackDetailTab;
   onClose: () => void;
 }) {
-  const [tab, setTab] = useState<TrackDetailTab>('quality');
+  const [tab, setTab] = useState<TrackDetailTab>(initialTab);
   const trackId = track.id as number; // TrackDetailButton only renders when track.id is set
   // Tags + Lyrics share one live file read; fetch once, lazily, on first visit
   // to either tab (avoids a mutagen file read for every track detail open).

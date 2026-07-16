@@ -338,20 +338,47 @@ def test_track_replaygain_analyzes_synchronously(api, monkeypatch):
     assert response.get_json()["track_gain_db"] == 2.5
 
 
+def test_fetch_lyrics_endpoint_writes_synchronously(api, monkeypatch):
+    client, _db, ids = api
+    monkeypatch.setattr(
+        "core.library2.lyrics.fetch_track_lyrics",
+        lambda conn, track_id, config_manager=None: {"fetched": True, "error": None},
+    )
+    response = client.post(f"/api/library/v2/tracks/{ids['album_track']}/fetch-lyrics")
+    assert response.status_code == 200
+    assert response.get_json()["fetched"] is True
+
+
+def test_fetch_lyrics_endpoint_surfaces_unavailable_error(api, monkeypatch):
+    client, _db, ids = api
+    monkeypatch.setattr(
+        "core.library2.lyrics.fetch_track_lyrics",
+        lambda conn, track_id, config_manager=None: {
+            "fetched": False, "error": "No lyrics available for this track",
+        },
+    )
+    response = client.post(f"/api/library/v2/tracks/{ids['album_track']}/fetch-lyrics")
+    assert response.status_code == 400
+    assert "No lyrics available" in response.get_json()["error"]
+
+
 def test_match_status_endpoints_return_service_chips(api, monkeypatch):
     client, db, ids = api
     # The api fixture's lib2 rows have no legacy back-reference, so stub the
     # match reader to prove the routes shape their responses correctly.
     monkeypatch.setattr(
         "core.library2.match_status.entity_match_status",
-        lambda conn, entity, eid: [
+        lambda conn, entity, eid, available_services=None: [
             {"service": "spotify", "label": "Spotify", "status": "matched",
-             "external_id": "sp1", "last_attempted": None, "legacy_entity_id": 5},
+             "external_id": "sp1", "last_attempted": None, "legacy_entity_id": 5,
+             "available": True},
         ],
     )
     monkeypatch.setattr(
         "core.library2.match_status.album_match_bundle",
-        lambda conn, album_id: {"album": [], "tracks": {ids["album_track"]: []}},
+        lambda conn, album_id, available_services=None: {
+            "album": [], "tracks": {ids["album_track"]: []},
+        },
     )
 
     artist = client.get(f"/api/library/v2/artists/{ids['artist']}/match-status").get_json()
@@ -361,6 +388,42 @@ def test_match_status_endpoints_return_service_chips(api, monkeypatch):
     album = client.get(f"/api/library/v2/albums/{ids['views']}/match-status").get_json()
     assert album["success"] is True
     assert "tracks" in album
+
+
+def test_match_status_routes_apply_the_configured_services_getter(tmp_path):
+    """A8: when the host injects ``configured_match_services_getter``, chips
+    for providers it excludes come back ``available: False`` — same real
+    entity_match_status/album_match_bundle, no monkeypatching."""
+    db_path = str(tmp_path / "lib2.db")
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    from core.library2.schema import ensure_library_v2_schema
+    ensure_library_v2_schema(conn)
+    cur = conn.cursor()
+    cur.execute("INSERT INTO lib2_artists(name, sort_name, spotify_id, monitored) "
+                "VALUES('Drake','Drake','sp-drake',0)")
+    artist_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+
+    db = FakeDB(db_path)
+    db.active_profile = 1
+    db.config = {"features.library_v2": True}
+    app = flask.Flask(__name__)
+    from api.library_v2 import register_library_v2_routes
+    register_library_v2_routes(
+        app,
+        get_database=lambda: db,
+        config_get=lambda key, default=None: db.config.get(key, default),
+        config_manager=None,
+        profile_id_getter=lambda: db.active_profile,
+        configured_match_services_getter=lambda: {"spotify"},
+    )
+
+    response = app.test_client().get(f"/api/library/v2/artists/{artist_id}/match-status")
+    by_service = {r["service"]: r["available"] for r in response.get_json()["services"]}
+    assert by_service["spotify"] is True
+    assert by_service["musicbrainz"] is False
 
 
 def test_eps_get_local_artwork_urls(api):

@@ -85,7 +85,12 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                                acquisition_search_adapters_getter: Optional[Callable[..., Any]] = None,
                                acquisition_async_runner: Optional[Callable[..., Any]] = None,
                                acquisition_submission_adapter_getter: Optional[Callable[..., Any]] = None,
-                               run_enrichment: Optional[Callable[..., Dict[str, Any]]] = None) -> None:
+                               run_enrichment: Optional[Callable[..., Dict[str, Any]]] = None,
+                               scoped_wishlist_search_dispatcher:
+                                   Optional[Callable[[List[str], int], Dict[str, Any]]] = None,
+                               configured_match_services_getter:
+                                   Optional[Callable[[], Any]] = None,
+                               ) -> None:
     """Attach the Library v2 routes to ``app``.
 
     ``get_database`` → shared ``MusicDatabase``; ``config_get(key, default)`` reads
@@ -95,6 +100,17 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
     delegates to ``web_server._run_single_enrichment`` (the same per-provider
     workers the legacy Enhanced View's Enrich dropdown uses) — injected rather
     than imported to avoid a circular import back into ``web_server.py``.
+    ``scoped_wishlist_search_dispatcher(wishlist_track_ids, profile_id) -> {"success", "batch_id"?, "error"?}``
+    submits a manual wishlist batch scoped to exactly those ids (same
+    executors/pools ``/api/wishlist/download_missing`` uses) — the scoped
+    Automatic Search endpoint (C1) hands it the ids currently wanted in an
+    artist/album/track's scope after mirroring them fresh into the wishlist.
+    Injected for the same circular-import reason as ``run_enrichment``.
+    ``configured_match_services_getter() -> set[str]`` — service ids from
+    ``core.library2.match_status.SERVICES`` actually configured on this
+    instance right now (A8), same "configured" flags the Settings
+    enrichment-status cards show. ``None``/omitted means "assume all
+    available" (match-status chips carry no availability signal).
     """
 
     def _enabled() -> bool:
@@ -1334,9 +1350,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         if guard:
             return guard
         from core.library2.match_status import entity_match_status
+        available = configured_match_services_getter() if configured_match_services_getter else None
         conn = _conn()
         try:
-            services = entity_match_status(conn, "artist", artist_id)
+            services = entity_match_status(conn, "artist", artist_id, available_services=available)
         finally:
             conn.close()
         return jsonify({"success": True, "services": services})
@@ -1348,9 +1365,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         if guard:
             return guard
         from core.library2.match_status import album_match_bundle
+        available = configured_match_services_getter() if configured_match_services_getter else None
         conn = _conn()
         try:
-            bundle = album_match_bundle(conn, album_id)
+            bundle = album_match_bundle(conn, album_id, available_services=available)
         finally:
             conn.close()
         return jsonify({"success": True, **bundle})
@@ -1459,6 +1477,24 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             conn.close()
         if not result["analyzed"]:
             return jsonify({"success": False, "error": result["error"] or "Analysis failed"}), 400
+        return jsonify({"success": True, **result})
+
+    @app.route("/api/library/v2/tracks/<int:track_id>/fetch-lyrics", methods=["POST"])
+    def lib2_track_fetch_lyrics(track_id):
+        """Fetch + write lyrics for one track from LRClib — the "LR" badge's
+        missing→click path (deep-dive B3), synchronous like the track
+        ReplayGain endpoint next to it."""
+        guard = _guard()
+        if guard:
+            return guard
+        from core.library2.lyrics import fetch_track_lyrics
+        conn = _conn()
+        try:
+            result = fetch_track_lyrics(conn, track_id, config_manager=config_manager)
+        finally:
+            conn.close()
+        if not result["fetched"]:
+            return jsonify({"success": False, "error": result["error"] or "Fetch failed"}), 400
         return jsonify({"success": True, **result})
 
     # -- reorganize (docs §50, bridges onto the legacy planner/queue) ---------
@@ -1795,6 +1831,92 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 threading.Thread(target=_run, name="lib2-cover-embed", daemon=True).start()
 
         return jsonify({"success": True, "album_id": album_id, "image_url": _artwork_url("album", album_id)})
+
+    _artist_art_options_cache: Dict[int, tuple] = {}
+    _artist_art_options_cache_lock = threading.Lock()
+
+    @app.route("/api/library/v2/artists/<int:artist_id>/art-options")
+    def lib2_artist_art_options(artist_id):
+        """Candidate photos for an artist, for the image picker (deep-dive
+        A9, read-only). One candidate per configured source (Spotify/Deezer/
+        iTunes/Discogs), via ``core.metadata.art_lookup.gather_artist_image_
+        candidates`` — no legacy record needed, works for discography-only
+        artists too."""
+        guard = _guard()
+        if guard:
+            return guard
+        force_refresh = request.args.get("refresh") == "1"
+        conn = _conn()
+        try:
+            row = conn.execute(
+                "SELECT name FROM lib2_artists WHERE id=?", (artist_id,)
+            ).fetchone()
+            if row is None:
+                return jsonify({"success": False, "error": "Artist not found"}), 404
+            from core.library2.metadata_overrides import project_metadata
+            effective, _overrides = project_metadata(
+                conn, entity_type="artist", entity_id=artist_id,
+                provider_fields={"name": row["name"]},
+            )
+            artist_name = effective["name"]
+        finally:
+            conn.close()
+
+        now = time.time()
+        if not force_refresh:
+            with _artist_art_options_cache_lock:
+                hit = _artist_art_options_cache.get(artist_id)
+                if hit and now - hit[0] < _ART_OPTIONS_TTL_S:
+                    return jsonify({
+                        "success": True, "count": len(hit[1]),
+                        "candidates": hit[1], "cached": True,
+                    })
+
+        from core.metadata.art_lookup import gather_artist_image_candidates
+        candidates = gather_artist_image_candidates(artist_name)
+        with _artist_art_options_cache_lock:
+            _artist_art_options_cache[artist_id] = (now, candidates)
+        return jsonify({"success": True, "count": len(candidates), "candidates": candidates})
+
+    @app.route("/api/library/v2/artists/<int:artist_id>/art", methods=["POST"])
+    def lib2_artist_art_apply(artist_id):
+        """Apply a photo chosen in the picker (deep-dive A9). Body:
+        ``{"url": "<image url>"}``. Pins the choice as a metadata override
+        (same mechanism as the album cover picker, §49) — no cover-embed
+        retag needed, an artist photo isn't embedded into any audio file."""
+        guard = _guard()
+        if guard:
+            return guard
+        body = request.get_json(silent=True) or {}
+        url = str(body.get("url") or "").strip()
+        if not url:
+            return jsonify({"success": False, "error": "url is required"}), 400
+
+        from core.library2.artwork import apply_manual_artwork
+        from core.library2.metadata_overrides import MetadataOverrideError
+        conn = _conn()
+        try:
+            ok = apply_manual_artwork(
+                get_database(), conn, "artist", artist_id, url, profile_id=_profile(),
+            )
+            if ok:
+                conn.commit()
+            else:
+                conn.rollback()
+        except MetadataOverrideError as exc:
+            conn.rollback()
+            return jsonify({"success": False, "error": str(exc)}), exc.status
+        finally:
+            conn.close()
+        if not ok:
+            return jsonify({
+                "success": False,
+                "error": "Could not download or validate that image URL",
+            }), 400
+        return jsonify({
+            "success": True, "artist_id": artist_id,
+            "image_url": _artwork_url("artist", artist_id),
+        })
 
     # -- monitoring (mirrors watchlist / wishlist) ----------------------------
 
@@ -2998,6 +3120,108 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 _job_registry.finish(job_id)
 
         threading.Thread(target=_run, name="lib2-upgrade-scan", daemon=True).start()
+        return jsonify({"success": True, "started": True, "job_id": job_id})
+
+    # -- scoped Automatic Search (deep-dive C1) ---------------------------------
+
+    @app.route("/api/library/v2/<entity>/<int:eid>/search", methods=["POST"])
+    def lib2_scoped_search(entity, eid):
+        """Lidarr-style scoped Automatic Search: missing tracks AND, if the
+        quality profile allows it, upgrades — for exactly this artist/album/
+        track, never the whole wishlist.
+
+        Reuse-first (no second decision engine, replaces A3/A4): (a) refresh
+        the wanted projection for this scope and mirror it into the wishlist
+        — the same "inline upgrade scan" the global upgrade-scan job and
+        monitor toggles already use (``mirror_projected_tracks_wishlist``);
+        (b) hand the resulting wishlist ids to the existing manual wishlist
+        batch runtime (``start_manual_wishlist_download_batch``, already
+        ``track_ids``-filterable — it backs ``/api/wishlist/download_missing``)
+        so the search/grab itself runs through the one candidate-walk/retry
+        pipeline every other download path uses.
+        """
+        guard = _guard()
+        if guard:
+            return guard
+        table = _MONITOR_TABLES.get(entity)
+        if not table:
+            return jsonify({"success": False, "error": "Unknown entity"}), 400
+        db = get_database()
+        conn = db._get_connection()
+        try:
+            if not conn.execute(f"SELECT 1 FROM {table} WHERE id=?", (eid,)).fetchone():
+                return jsonify({"success": False, "error": "Not found"}), 404
+        finally:
+            conn.close()
+
+        active_profile = _profile()
+        try:
+            job = _job_registry.start(f"search:{entity}:{eid}")
+        except JobAlreadyRunning as exc:
+            return jsonify({
+                "success": False,
+                "error": str(exc),
+                "job_id": exc.state["job_id"],
+            }), 409
+        job_id = job["job_id"]
+
+        def _run():
+            db = get_database()
+            conn = db._get_connection()
+            try:
+                from core.library2.wanted import (
+                    entity_track_ids,
+                    recompute_wanted_for_entity,
+                    track_wanted_states,
+                )
+                recompute_wanted_for_entity(conn, entity, eid, profile_id=active_profile)
+                conn.commit()
+                track_ids = entity_track_ids(conn, entity, eid)
+                _job_registry.update(job_id, total=len(track_ids))
+
+                from core.library2.wishlist_mirror import (
+                    mirror_projected_tracks_wishlist,
+                    track_wishlist_payload,
+                )
+                # Only the direct track-level action bypasses the ignore-list
+                # (audit P1-11 precedent, mirrored from lib2_set_monitored):
+                # an album/artist search must not silently un-ignore a track
+                # the user deliberately cancelled elsewhere.
+                queued = mirror_projected_tracks_wishlist(
+                    db, conn, track_ids, profile_id=active_profile,
+                    user_initiated=(entity in ("track", "tracks")),
+                )
+
+                states = track_wanted_states(conn, track_ids, profile_id=active_profile) \
+                    if track_ids else {}
+                search_ids = []
+                for track_id, wanted in states.items():
+                    if not wanted:
+                        continue
+                    payload = track_wishlist_payload(conn, track_id)
+                    if payload and payload.get("_should_queue"):
+                        search_ids.append(payload["id"])
+
+                batch_id = None
+                if search_ids and scoped_wishlist_search_dispatcher:
+                    batch_payload = scoped_wishlist_search_dispatcher(search_ids, active_profile) or {}
+                    if batch_payload.get("success"):
+                        batch_id = batch_payload.get("batch_id")
+
+                _job_registry.update(job_id, result={
+                    "checked": len(track_ids),
+                    "queued": queued,
+                    "searching": len(search_ids),
+                    "batch_id": batch_id,
+                })
+            except Exception as e:  # noqa: BLE001
+                logger.error("Scoped search failed (%s %s): %s", entity, eid, e, exc_info=True)
+                _job_registry.update(job_id, error=str(e))
+            finally:
+                conn.close()
+                _job_registry.finish(job_id)
+
+        threading.Thread(target=_run, name="lib2-scoped-search", daemon=True).start()
         return jsonify({"success": True, "started": True, "job_id": job_id})
 
     # -- Phase C: tag preview / re-tag -----------------------------------------

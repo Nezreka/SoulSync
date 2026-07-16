@@ -80,7 +80,7 @@ Legacy löste das mit Cache-Bustern.
 ändert die mtime ohnehin → URL ändert sich automatisch, `immutable` bleibt
 korrekt.
 
-### A3. „Automatic Search" auf Album-Zeile ist in Wahrheit die GLOBALE Wishlist-Verarbeitung
+### A3. „Automatic Search" auf Album-Zeile ist in Wahrheit die GLOBALE Wishlist-Verarbeitung — ✅ behoben (siehe library-v2.md §29, C1)
 
 Der Album-Button (`library-v2-page.tsx:3409–3413`) feuert
 `Automatic Search: <Albumtitel>` → `AUTOMATIC_SEARCH_RE` (`:137`) matcht →
@@ -101,7 +101,7 @@ wartende Falle.
 der Album-Zeile entfernen (Interactive Search reicht dort) statt ihn global
 wirken zu lassen.
 
-### A4. Track-Level „Automatic Search" = clientseitige Best-Pick-Heuristik (zweite Decision-Engine im Frontend)
+### A4. Track-Level „Automatic Search" = clientseitige Best-Pick-Heuristik (zweite Decision-Engine im Frontend) — ✅ behoben (siehe library-v2.md §29, C1)
 
 `autoGrabBest` (`-library-v2.api.ts:1194–1214`) implementiert die
 Source-Auswahl **im Client**: eigenes Scoring (lossless > quality_score >
@@ -122,7 +122,7 @@ Track ist bei Monitoring ohnehin wishlist-gemirrort — ein
 Candidate-Walk für genau diesen Wishlist-Eintrag anstößt) ersetzt die
 Client-Heuristik vollständig.
 
-### A5. BPM existiert im Schema, erreicht aber weder API noch UI
+### A5. BPM existiert im Schema, erreicht aber weder API noch UI — ✅ behoben (siehe library-v2.md §29)
 
 `lib2_tracks.bpm` ist migriert (`schema.py:149,377`) und wird vom Importer
 befüllt (§17.7-Fixes), aber `queries.py` projiziert es in keinem
@@ -176,7 +176,7 @@ erweitern, die `acquisition_history` (via `download_id`/`entity_id`-Korrelation)
 `lib2_entity_history`, File-Delete-Journal und `manual_skips` merged. Gleiche
 Datenbasis wie A6, nur Track-gefiltert.
 
-### A8. Match-Chips zeigen alle 13 Provider — auch nie konfigurierte (ewig graues Tidal)
+### A8. Match-Chips zeigen alle 13 Provider — auch nie konfigurierte (ewig graues Tidal) — ✅ behoben (siehe library-v2.md §29)
 
 `SERVICES` (`core/library2/match_status.py:27–54`) ist statisch; weder Backend
 noch UI filtern nach konfigurierten/aktiven Providern. Ein Nutzer ohne
@@ -192,7 +192,7 @@ reines Rauschen (Nutzer-Beschwerde). Vorbild im eigenen Code:
 2. User-Einstellung darüber (siehe B5): Default = nur konfigurierte Provider,
    opt-in „alle zeigen".
 
-### A9. Kein Artist-Image-Picker (Override-Feld existiert bereits)
+### A9. Kein Artist-Image-Picker (Override-Feld existiert bereits) — ✅ behoben (siehe library-v2.md §29)
 
 Der §49-Picker gibt es nur für Alben. Das `image_url`-Override ist für
 `artist` im Whitelist bereits freigeschaltet und `build_artwork` liest es für
@@ -238,7 +238,7 @@ B1) in den Detail-Header heben — die Handler existieren alle schon als
 Komponenten, es ist reine Verdrahtung. Erst DANN kann B1 die Zeile guten
 Gewissens entrümpeln.
 
-### B3. Features-Spalte: RG/LR immer anzeigen, ausgegraut wenn fehlend, klickbar als Aktion
+### B3. Features-Spalte: RG/LR immer anzeigen, ausgegraut wenn fehlend, klickbar als Aktion — ✅ behoben (siehe library-v2.md §29)
 
 Aktuell (`:3650–3676`): Badges erscheinen nur bei Vorhandensein, sonst „—";
 ReplayGain hat zusätzlich einen eigenen Action-Button in der Actions-Spalte.
@@ -330,7 +330,7 @@ Zielbild nach C1 (ergänzt §25.1 um die Upgrade-Frage, die dort offen blieb):
 
 ## C. Backend-Design-Findings
 
-### C1. Artist-/Album-/Track-scoped Automatic Search (konkretisiertes Design zu §25.1)
+### C1. Artist-/Album-/Track-scoped Automatic Search (konkretisiertes Design zu §25.1) — ✅ umgesetzt (siehe library-v2.md §29)
 
 Reuse-first, keine zweite Pipeline:
 1. **Scope-Auflösung serverseitig:** neuer Endpoint
@@ -434,21 +434,34 @@ A7 für nicht-acquisition-korrelierte Downloads (der Normalfall heute) leer.
    Invalidierung)** und **G5 (has_lyrics vs. unsyncedlyrics)** — kleine,
    gezielte Fixes; G6 (falsche Fußnote) nebenbei.~~
 
-**Dann Architektur/UX:**
-5. **C1 + B7 (scoped Automatic Search, Search-Upgrades-Konsolidierung)** —
-   größter Verständnis-Gewinn, ersetzt A3/A4 gleich mit; danach I10
-   („search on monitor") fast gratis.
-6. **I6 (Queue-Sichtbarkeit an der Entity)** + **G7/H13
-   (Reorganize-Queue-Status)** — Vertrauen in den Auto-Flow.
-7. **B3 (klickbare RG/LR-Badges)** + **A5 (BPM/Duration)** — sichtbare
-   Quick-Wins, sparen Buttons.
+**Dann Architektur/UX:** — ✅ Punkte 5–7 (bis auf B7-Rest/I10/I6/H13, s.u.)
++ A8/A9 aus Punkt 11 behoben 2026-07-16, siehe library-v2.md §29.
+5. ~~**C1 (scoped Automatic Search)** — größter Verständnis-Gewinn, ersetzt
+   A3/A4 gleich mit.~~ **B7** (Search-Upgrades-Button-Konsolidierung auf der
+   Artist-Toolbar) und **I10** („search on monitor") sind durch C1 jetzt
+   trivial nachziehbar, aber noch nicht umgesetzt — reine UI-Verdrahtung,
+   kein neues Backend nötig.
+6. ~~**G7 (Reorganize-Queue-Status)**~~ — **I6** (Queue-Sichtbarkeit direkt an
+   der Album-/Track-Zeile, nicht nur im Reorganize-Modal) und **H13**
+   (identisch mit G7, Legacy-Referenz) bleiben offen — I/H-Punkte brauchen
+   erst Nutzer-Abstimmung zu Scope/UI-Ansatz (siehe Hinweis oben).
+7. ~~**B3 (klickbare RG/LR-Badges)** + **A5 (BPM/Duration)**~~ — sichtbare
+   Quick-Wins, gespart wurde der separate ReplayGain-Button.
 8. **B1 + B2 + B4 (Entrümpelung Zeile/Toolbar/Detail-Ansicht)** — nach C1, da
-   sich die Button-Menge dann ohnehin ändert.
-9. **A6/C3 + A7/C4 (History + Lifecycle)** — hoher Nutzerwert; C4 zuerst
-   designen (Persistenz), C3 ist reine Leseschicht.
+   sich die Button-Menge jetzt geändert hat (Automatic Search ist
+   album-/artist-scoped, „Change Photo" ist neu dazugekommen); noch offen.
+9. **A6/C3 + A7/C4 (History + Lifecycle)** — hoher Nutzerwert, bewusst
+   zurückgestellt: `acquisition_requests.scope` (`recording`/`release_group`/
+   `release_edition`/`artist_missing`/`upgrade`) ist nicht 1:1 Artist/Album/
+   Track — die Korrelation zurück auf lib2-Entities braucht eine eigene
+   fokussierte Recherche-Session vor dem Code, sonst droht Fehlzuordnung
+   (schlimmer als der Status quo). C4 zuerst designen (Persistenz), C3 ist
+   reine Leseschicht.
 10. **B5/B6 (konfigurierbare Spalten/Provider, Sort, Bulk)** + **H6/H7/H8**
-    (Filter/Inline-Edit/Bulk-Bar) — ein zusammenhängender Tabellen-Block.
-11. **C2 (Manage Track Files)** + **H5 (Track-Delete)** + **A8/A9**.
+    (Filter/Inline-Edit/Bulk-Bar) — ein zusammenhängender Tabellen-Block;
+    A8 (Provider-Filter) ist als Übergangslösung schon per Default umgesetzt,
+    B5 selbst (der Options-Zahnrad/Opt-in „alle zeigen") bleibt offen.
+11. **C2 (Manage Track Files)** + **H5 (Track-Delete)** + ~~A8/A9~~.
 12. **Strategisch klären, dann bauen:** I1 (Add Artist), I2 (Wanted-Views),
     I4 (Metadata Profile), H1 (Playback), H3 (Discography-Batch-Download),
     H9 (Multi-User-Frage von lib2).
@@ -530,7 +543,7 @@ new files into the v2 library" — seit dem Autolink-Hook (§3) verlinken
 fertige Downloads automatisch. Die Fußnote schickt Nutzer in unnötige
 Full-Scans und untergräbt das Vertrauen in den Auto-Flow.
 
-### G7. lib2-Reorganize ist fire-and-forget — die Queue hat in lib2 kein Gesicht
+### G7. lib2-Reorganize ist fire-and-forget — die Queue hat in lib2 kein Gesicht — ✅ behoben (siehe library-v2.md §29)
 
 `reorganize-modal.tsx` meldet nur „N queued". Die Legacy-UI hat ein
 komplettes Queue-Status-Panel (`mountReorganizeStatusPanel`,

@@ -139,6 +139,10 @@ export interface LibraryV2MatchService {
   last_attempted: string | null;
   /** The legacy row id — used to drive the app-wide manual-match endpoint. */
   legacy_entity_id: number | null;
+  /** Is this provider configured/usable on this instance right now (A8)?
+   *  Always ``true`` when the server has no availability signal (older
+   *  cached response shape). */
+  available?: boolean;
 }
 
 /** One candidate cover-art image for the art picker (docs §49). */
@@ -180,6 +184,28 @@ export interface LibraryV2ReorganizePreview {
   artist: string;
   transfer_dir: string;
   tracks: LibraryV2ReorganizeTrackPreview[];
+}
+
+/** One item in the (legacy, shared) reorganize queue — polled by the lib2
+ *  Reorganize modals so a queued/running move has a face (deep-dive G7). */
+export interface LibraryV2ReorganizeQueueItem {
+  queueId: string;
+  albumId: string;
+  albumTitle: string;
+  artistName: string;
+  status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
+  resultStatus: string | null;
+  currentTrack: string | null;
+  progressTotal: number;
+  progressProcessed: number;
+  finishedAt: number | null;
+}
+
+/** `GET /api/library/reorganize/queue` snapshot (docs G7). */
+export interface LibraryV2ReorganizeQueueSnapshot {
+  active: LibraryV2ReorganizeQueueItem | null;
+  queued: LibraryV2ReorganizeQueueItem[];
+  recent: LibraryV2ReorganizeQueueItem[];
 }
 
 /** One row from the legacy `track_downloads` provenance table (Source Info popover). */
@@ -229,6 +255,7 @@ export interface LibraryV2Track {
   track_number: number | null;
   disc_number: number | null;
   duration: number | null;
+  bpm: number | null;
   isrc: string | null;
   monitored: boolean;
   quality_profile_id: number;

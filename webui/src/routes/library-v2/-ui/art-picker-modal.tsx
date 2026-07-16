@@ -5,7 +5,9 @@ import type { LibraryV2ArtCandidate } from '../-library-v2.types';
 
 import {
   applyLibraryV2AlbumArt,
+  applyLibraryV2ArtistArt,
   fetchLibraryV2AlbumArtOptions,
+  fetchLibraryV2ArtistArtOptions,
   LIBRARY_V2_QUERY_KEY,
 } from '../-library-v2.api';
 import styles from './library-v2-page.module.css';
@@ -74,6 +76,95 @@ export function AlbumArtPickerModal({
             </div>
           ) : candidates.length === 0 ? (
             <div className={styles.inlineLoading}>No alternate covers found.</div>
+          ) : (
+            <div className={styles.artPickerGrid}>
+              {candidates.map((c, i) => (
+                <ArtPickerCard
+                  key={`${c.source}:${c.url}:${i}`}
+                  candidate={c}
+                  busy={busyUrl === c.url}
+                  disabled={busyUrl !== null}
+                  onPick={() => void apply(c.url)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className={styles.modalActions}>
+          <button type="button" className={styles.btnGhost} onClick={onClose}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Artist image picker (deep-dive A9): one candidate photo per configured
+ *  source (Spotify/Deezer/iTunes/Discogs), click one to apply. Same pick/pin
+ *  mechanism as the album cover picker (§49) — no cover-embed retag needed. */
+export function ArtistImagePickerModal({
+  artistId,
+  artistName,
+  onClose,
+}: {
+  artistId: number;
+  artistName: string;
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const optionsQuery = useQuery({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'artist-art-options', artistId],
+    queryFn: () => fetchLibraryV2ArtistArtOptions(artistId),
+    staleTime: 0,
+  });
+  const [busyUrl, setBusyUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function apply(url: string) {
+    setBusyUrl(url);
+    setError(null);
+    try {
+      await applyLibraryV2ArtistArt(artistId, url);
+      await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+      onClose();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Failed to apply photo');
+      setBusyUrl(null);
+    }
+  }
+
+  const candidates = optionsQuery.data ?? [];
+
+  return (
+    <div className={styles.modalBackdrop} role="presentation" onClick={onClose}>
+      <div
+        className={`${styles.modal} ${styles.modalWide}`}
+        role="dialog"
+        aria-modal="true"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className={styles.modalHeader}>
+          <h3>Change Photo — {artistName}</h3>
+          <button type="button" className={styles.iconAction} title="Close" onClick={onClose}>
+            ✕
+          </button>
+        </div>
+
+        {error ? <div className={styles.searchError}>{error}</div> : null}
+
+        <div className={styles.resultsWrap}>
+          {optionsQuery.isLoading ? (
+            <div className={styles.inlineLoading}>Fetching candidate photos…</div>
+          ) : optionsQuery.isError ? (
+            <div className={styles.searchError}>
+              {optionsQuery.error instanceof Error
+                ? optionsQuery.error.message
+                : 'Failed to load photos'}
+            </div>
+          ) : candidates.length === 0 ? (
+            <div className={styles.inlineLoading}>No alternate photos found.</div>
           ) : (
             <div className={styles.artPickerGrid}>
               {candidates.map((c, i) => (

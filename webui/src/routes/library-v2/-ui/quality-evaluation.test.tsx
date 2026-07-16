@@ -12,6 +12,7 @@ function track(overrides: Partial<LibraryV2Track> = {}): LibraryV2Track {
     track_number: 1,
     disc_number: 1,
     duration: null,
+    bpm: null,
     isrc: null,
     monitored: true,
     quality_profile_id: 1,
