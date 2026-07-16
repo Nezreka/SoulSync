@@ -2779,11 +2779,18 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 
 .version-button.update-available {
-    color: rgb(var(--accent-light-rgb));
-    border-color: rgba(var(--accent-rgb), 0.4);
+    /* --upd-rgb picks the severity color (Kazimir's ask):
+       green = routine release, yellow = major, red = critical. */
+    --upd-rgb: var(--accent-rgb);
+    color: rgb(var(--upd-rgb));
+    border-color: rgba(var(--upd-rgb), 0.4);
     animation: version-glow 2s ease-in-out infinite;
     position: relative;
 }
+
+.version-button.update-available--update { --upd-rgb: 46, 204, 113; }
+.version-button.update-available--major { --upd-rgb: 241, 196, 15; }
+.version-button.update-available--critical { --upd-rgb: 231, 76, 60; animation-duration: 1.1s; }
 
 .version-button.update-available .update-badge {
     display: inline-block;
@@ -2791,7 +2798,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     font-size: 7px;
     font-weight: 700;
     letter-spacing: 0.5px;
-    background: rgb(var(--accent-rgb));
+    background: rgb(var(--upd-rgb, var(--accent-rgb)));
     color: #fff;
     padding: 1px 5px;
     border-radius: 8px;
@@ -2806,12 +2813,12 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 
 @keyframes version-glow {
     0%, 100% {
-        box-shadow: 0 0 4px rgba(var(--accent-rgb), 0.2), 0 0 8px rgba(var(--accent-rgb), 0.1);
-        border-color: rgba(var(--accent-rgb), 0.3);
+        box-shadow: 0 0 4px rgba(var(--upd-rgb, var(--accent-rgb)), 0.2), 0 0 8px rgba(var(--upd-rgb, var(--accent-rgb)), 0.1);
+        border-color: rgba(var(--upd-rgb, var(--accent-rgb)), 0.3);
     }
     50% {
-        box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.5), 0 0 20px rgba(var(--accent-rgb), 0.3), 0 0 30px rgba(var(--accent-rgb), 0.1);
-        border-color: rgba(var(--accent-rgb), 0.6);
+        box-shadow: 0 0 8px rgba(var(--upd-rgb, var(--accent-rgb)), 0.5), 0 0 20px rgba(var(--upd-rgb, var(--accent-rgb)), 0.3), 0 0 30px rgba(var(--upd-rgb, var(--accent-rgb)), 0.1);
+        border-color: rgba(var(--upd-rgb, var(--accent-rgb)), 0.6);
     }
 }
 
