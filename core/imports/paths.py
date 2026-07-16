@@ -357,10 +357,22 @@ def get_file_path_from_template(context: dict, template_type: str = "album_path"
 
     templates = _get_config_manager().get("file_organization.templates", {})
     template = templates.get(template_type)
+    # The settings page used to seed the singles input with this exact string
+    # and Save persisted it — so most installs carry the old default without
+    # ever having customized anything. A stored value that IS the old default
+    # upgrades to the new one (same pattern as the YouTube template upgrade);
+    # anything the user actually edited is untouched.
+    if template_type == "single_path" and template == "$artist/$artist - $title/$title":
+        template = None
     if not template:
         default_templates = {
             "album_path": "$albumartist/$albumartist - $album/$track - $title",
-            "single_path": "$artist/$artist - $title/$title",
+            # $albumartist, not $artist, for the FOLDER identity: only
+            # $albumartist honors the Collaborative Album Artist setting, so a
+            # multi-artist single ("A, B & C") files under its main artist when
+            # the mode is 'first' (TheHomeGuy). For single-artist tracks the two
+            # are identical; users with a CUSTOM template are untouched.
+            "single_path": "$albumartist/$albumartist - $title/$title",
             "compilation_path": "Compilations/$album/$track - $artist - $title",
             "playlist_path": "$playlist/$artist - $title",
         }

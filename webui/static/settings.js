@@ -1637,7 +1637,15 @@ async function loadSettingsData() {
         // Populate File Organization settings
         document.getElementById('file-organization-enabled').checked = settings.file_organization?.enabled !== false;
         document.getElementById('template-album-path').value = settings.file_organization?.templates?.album_path || '$albumartist/$albumartist - $album/$track - $title';
-        document.getElementById('template-single-path').value = settings.file_organization?.templates?.single_path || '$artist/$artist - $title/$title';
+        // $albumartist honors the Collaborative Album Artist mode; the old
+        // $artist default filed multi-artist singles under "A, B & C". A
+        // stored old-default upgrades server-side too (core/imports/paths.py).
+        {
+            const _sp = settings.file_organization?.templates?.single_path;
+            document.getElementById('template-single-path').value =
+                (!_sp || _sp === '$artist/$artist - $title/$title')
+                    ? '$albumartist/$albumartist - $title/$title' : _sp;
+        }
         document.getElementById('template-playlist-path').value = settings.file_organization?.templates?.playlist_path || '$playlist/$artist - $title';
         document.getElementById('template-playlist-item').value = settings.file_organization?.templates?.playlist_item || '';
         document.getElementById('template-video-path').value = settings.file_organization?.templates?.video_path || '$artist/$title-video';
