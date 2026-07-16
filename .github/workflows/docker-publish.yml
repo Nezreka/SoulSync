@@ -11,7 +11,7 @@ on:
       version_tag:
         description: 'Version tag (e.g. 3.0.3)'
         required: true
-        default: '3.0.4'
+        default: '3.0.5'
 
 jobs:
   build-and-push:
