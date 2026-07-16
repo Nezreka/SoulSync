@@ -664,9 +664,12 @@ oben — diese Tabelle ist eine Enumeration, kein Spec.
 - Artist-scoped Automatic Search als Grundidee: `library-v2.md` §25.1 /
   ui-requirements §6.4 (hier durch C1/B7 konkretisiert und um die
   Upgrade-Semantik erweitert).
-- §45 Reidentify, §48 Rich-Metadata-Edit-Rest (BPM/Style/Mood/Label/Bulk —
-  Track-Basis-Edit existiert inzwischen), §51 „I Have This"-Hälfte: offen laut
-  §15 (Status dort korrigiert).
+- §45 Reidentify, §51 „I Have This"-Hälfte: offen laut §15 (Status dort
+  korrigiert) — beide bewusst zurückgestellt (siehe library-v2.md §34):
+  echte Datei-mutierende Pfade (Staged Copy + Re-Import-Pipeline bzw.
+  Hint-Datei), keine dünnen Wrapper wie ursprünglich angenommen. §48
+  Rich-Metadata-Edit-Rest (BPM/Style/Mood/Label/Bulk) ist jetzt vollständig
+  umgesetzt (library-v2.md §34).
 - Manage-Tracks-Delete-Wünsche: ui-requirements §3.1/§3.2/§5.1 (durch C2
   konkretisiert).
 - Import-Progress/Timeout: P2-25; Artist-Credit-Splitting-Restrisiko: P2-24;

@@ -497,6 +497,73 @@ def test_effective_reads_project_user_metadata_without_rewriting_provider(import
     assert Q.get_album(imported_conn, album_id)["title"] == "Provider Refresh"
 
 
+def test_rich_metadata_fields_are_projected_in_reads(imported_conn):
+    """§48: style/mood/label (artist), +explicit/label/style/mood (album),
+    +bpm/explicit/style/mood (track) must round-trip through the read
+    projections used by the edit modals, not just live in the DB column."""
+    artist_id = imported_conn.execute(
+        "SELECT id FROM lib2_artists WHERE name='Drake'"
+    ).fetchone()[0]
+    album_id = imported_conn.execute(
+        "SELECT id FROM lib2_albums WHERE title='Views'"
+    ).fetchone()[0]
+    track_id = imported_conn.execute(
+        "SELECT id FROM lib2_tracks WHERE title='One Dance' AND album_id=?",
+        (album_id,),
+    ).fetchone()[0]
+
+    imported_conn.execute(
+        "UPDATE lib2_albums SET explicit=1, label='Provider Label', "
+        "style='Provider Style', mood='Provider Mood' WHERE id=?", (album_id,)
+    )
+    imported_conn.execute(
+        "UPDATE lib2_tracks SET bpm=90.0, explicit=0, style='Provider T-Style', "
+        "mood='Provider T-Mood' WHERE id=?", (track_id,)
+    )
+
+    artist = Q.get_artist(imported_conn, artist_id)
+    assert artist["style"] is None and artist["mood"] is None and artist["label"] is None
+    album_entry = next(row for row in artist["albums"] + artist["singles"] + artist["eps"]
+                        if row["id"] == album_id)
+    assert album_entry["explicit"] is True
+    assert album_entry["label"] == "Provider Label"
+    assert album_entry["style"] == "Provider Style"
+    assert album_entry["mood"] == "Provider Mood"
+
+    album = Q.get_album(imported_conn, album_id)
+    assert album["explicit"] is True
+    assert album["label"] == "Provider Label"
+    assert album["style"] == "Provider Style"
+    assert album["mood"] == "Provider Mood"
+
+    track = next(row for row in album["tracks"] if row["id"] == track_id)
+    assert track["bpm"] == 90.0
+    assert track["explicit"] is False
+    assert track["style"] == "Provider T-Style"
+    assert track["mood"] == "Provider T-Mood"
+
+    set_field_override(
+        imported_conn, entity_type="artist", entity_id=artist_id,
+        field_name="style", value="User Style",
+    )
+    set_field_override(
+        imported_conn, entity_type="release_group", entity_id=album_id,
+        field_name="explicit", value=False,
+    )
+    set_field_override(
+        imported_conn, entity_type="track", entity_id=track_id,
+        field_name="bpm", value=104.5,
+    )
+
+    artist = Q.get_artist(imported_conn, artist_id)
+    assert artist["style"] == "User Style"
+    album = Q.get_album(imported_conn, album_id)
+    assert album["explicit"] is False
+    track = next(row for row in Q.get_album(imported_conn, album_id)["tracks"]
+                 if row["id"] == track_id)
+    assert track["bpm"] == 104.5
+
+
 def test_track_reads_expose_effective_wanted_projection(imported_conn):
     from core.library2.monitor_rules import PROVENANCE_USER, record_rule
     from core.library2.wanted import recompute_wanted

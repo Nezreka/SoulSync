@@ -74,6 +74,11 @@ export interface LibraryV2AlbumSummary {
   quality_profile_id: number;
   origin: LibraryV2AlbumOrigin;
   spotify_id: string | null;
+  /** §48 rich-metadata-edit fields — provider baseline overlaid with any admin override. */
+  explicit: boolean | null;
+  label: string | null;
+  style: string | null;
+  mood: string | null;
   track_count: number;
   tracks_present: number;
   tracks_missing: number;
@@ -85,6 +90,10 @@ export interface LibraryV2ArtistDetail {
   name: string;
   image_url: string | null;
   summary: string | null;
+  /** §48 rich-metadata-edit fields — provider baseline overlaid with any admin override. */
+  style: string | null;
+  mood: string | null;
+  label: string | null;
   genres: string[];
   monitored: boolean;
   monitor_new_items: string;
@@ -259,6 +268,10 @@ export interface LibraryV2Track {
   disc_number: number | null;
   duration: number | null;
   bpm: number | null;
+  /** §48 rich-metadata-edit fields — provider baseline overlaid with any admin override. */
+  explicit: boolean | null;
+  style: string | null;
+  mood: string | null;
   isrc: string | null;
   monitored: boolean;
   quality_profile_id: number;
@@ -283,6 +296,11 @@ export interface LibraryV2AlbumDetail {
   year: number | null;
   image_url: string | null;
   genres: string[];
+  /** §48 rich-metadata-edit fields — provider baseline overlaid with any admin override. */
+  explicit: boolean | null;
+  label: string | null;
+  style: string | null;
+  mood: string | null;
   monitored: boolean;
   origin: LibraryV2AlbumOrigin;
   quality_profile: LibraryV2QualityProfile | null;

@@ -9,12 +9,21 @@ export interface TrackEditOriginal {
   title: string | null;
   track_number: number | null;
   disc_number: number | null;
+  bpm: number | null;
+  explicit: boolean | null;
+  style: string | null;
+  mood: string | null;
 }
 
 export interface TrackEditForm {
   title: string;
   trackNumber: string;
   discNumber: string;
+  bpm: string;
+  /** '' = unknown/no override, 'yes'/'no' = explicit true/false. */
+  explicitFlag: '' | 'yes' | 'no';
+  style: string;
+  mood: string;
 }
 
 export interface MetadataEditResult {
@@ -30,6 +39,30 @@ function parseOptionalCount(raw: string): { value: number | null; valid: boolean
   const num = Number(trimmed);
   if (!Number.isInteger(num) || num < 0) return { value: null, valid: false };
   return { value: num, valid: true };
+}
+
+/** Like `parseOptionalCount` but allows fractional values (bpm). */
+function parseOptionalNumber(raw: string): { value: number | null; valid: boolean } {
+  const trimmed = raw.trim();
+  if (trimmed === '') return { value: null, valid: true };
+  const num = Number(trimmed);
+  if (!Number.isFinite(num) || num < 0) return { value: null, valid: false };
+  return { value: num, valid: true };
+}
+
+/** Nullable free-text field: empty clears to `null`, matching the album/artist
+ *  forms' style/mood/label convention (unlike track/disc number, which treat
+ *  an emptied field as "no change" rather than an explicit clear). */
+function diffOptionalText(
+  values: Record<string, unknown>,
+  field: string,
+  raw: string,
+  original: string | null,
+): void {
+  const trimmed = raw.trim();
+  if (trimmed !== (original ?? '')) {
+    values[field] = trimmed || null;
+  }
 }
 
 /** Diff a track-edit form against the track's current effective metadata. */
@@ -60,6 +93,22 @@ export function computeTrackEditValues(
   } else if (disc.value !== null && disc.value !== original.disc_number) {
     values.disc_number = disc.value;
   }
+
+  const bpm = parseOptionalNumber(form.bpm);
+  if (!bpm.valid) {
+    valid = false;
+  } else if (bpm.value !== null && bpm.value !== original.bpm) {
+    values.bpm = bpm.value;
+  }
+
+  const initialExplicitFlag =
+    original.explicit === true ? 'yes' : original.explicit === false ? 'no' : '';
+  if (form.explicitFlag !== initialExplicitFlag) {
+    values.explicit = form.explicitFlag === '' ? null : form.explicitFlag === 'yes';
+  }
+
+  diffOptionalText(values, 'style', form.style, original.style);
+  diffOptionalText(values, 'mood', form.mood, original.mood);
 
   return { values, valid };
 }

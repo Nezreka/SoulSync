@@ -30,11 +30,11 @@ def conn(tmp_path):
         );
         CREATE TABLE albums(
             id INTEGER PRIMARY KEY, title TEXT, thumb_url TEXT, genres TEXT,
-            label TEXT, explicit INTEGER, upc TEXT
+            label TEXT, explicit INTEGER, upc TEXT, style TEXT, mood TEXT
         );
         CREATE TABLE tracks(
             id INTEGER PRIMARY KEY, title TEXT, bpm REAL, explicit INTEGER,
-            genius_lyrics TEXT, copyright TEXT
+            genius_lyrics TEXT, copyright TEXT, style TEXT, mood TEXT
         );
         """
     )
@@ -104,15 +104,16 @@ def test_resync_album_overwrites_from_legacy_row(conn):
     )
     lib2_id = conn.execute("SELECT id FROM lib2_albums").fetchone()["id"]
     conn.execute(
-        "INSERT INTO albums(id, title, thumb_url, genres, label, explicit, upc) "
-        "VALUES(601, 'Views', 'http://cover', '[\"rap\"]', 'OVO Sound', 1, '123456789012')"
+        "INSERT INTO albums(id, title, thumb_url, genres, label, explicit, upc, style, mood) "
+        "VALUES(601, 'Views', 'http://cover', '[\"rap\"]', 'OVO Sound', 1, "
+        "'123456789012', 'Hip Hop', 'Moody')"
     )
     conn.commit()
 
     assert resync_entity_from_legacy(conn, "album", lib2_id, 601) is True
 
     row = conn.execute(
-        "SELECT image_url, genres, label, explicit, upc FROM lib2_albums WHERE id=?",
+        "SELECT image_url, genres, label, explicit, upc, style, mood FROM lib2_albums WHERE id=?",
         (lib2_id,),
     ).fetchone()
     assert row["image_url"] == "http://cover"
@@ -120,6 +121,8 @@ def test_resync_album_overwrites_from_legacy_row(conn):
     assert row["label"] == "OVO Sound"
     assert row["explicit"] == 1
     assert row["upc"] == "123456789012"
+    assert row["style"] == "Hip Hop"
+    assert row["mood"] == "Moody"
 
 
 def test_resync_track_overwrites_from_legacy_row(conn):
@@ -136,21 +139,23 @@ def test_resync_track_overwrites_from_legacy_row(conn):
     )
     lib2_id = conn.execute("SELECT id FROM lib2_tracks").fetchone()["id"]
     conn.execute(
-        "INSERT INTO tracks(id, title, bpm, explicit, genius_lyrics, copyright) "
-        "VALUES(701, 'One Dance', 104.0, 0, 'some lyrics', '(C) 2016 OVO')"
+        "INSERT INTO tracks(id, title, bpm, explicit, genius_lyrics, copyright, style, mood) "
+        "VALUES(701, 'One Dance', 104.0, 0, 'some lyrics', '(C) 2016 OVO', 'Pop Rap', 'Chill')"
     )
     conn.commit()
 
     assert resync_entity_from_legacy(conn, "track", lib2_id, 701) is True
 
     row = conn.execute(
-        "SELECT bpm, explicit, genius_lyrics, copyright FROM lib2_tracks WHERE id=?",
+        "SELECT bpm, explicit, genius_lyrics, copyright, style, mood FROM lib2_tracks WHERE id=?",
         (lib2_id,),
     ).fetchone()
     assert row["bpm"] == 104.0
     assert row["explicit"] == 0
     assert row["genius_lyrics"] == "some lyrics"
     assert row["copyright"] == "(C) 2016 OVO"
+    assert row["style"] == "Pop Rap"
+    assert row["mood"] == "Chill"
 
 
 def test_resync_returns_false_when_legacy_row_is_gone(conn):

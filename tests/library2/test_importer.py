@@ -416,6 +416,30 @@ def test_import_captures_track_bpm_and_explicit(legacy_db):
         conn.close()
 
 
+def test_import_captures_track_style_mood(legacy_db):
+    """§48: ``style``/``mood`` exist on the legacy ``tracks`` row (like
+    bpm/explicit already handled) but had no lib2 destination column."""
+    conn = sqlite3.connect(legacy_db.path)
+    conn.execute("ALTER TABLE tracks ADD COLUMN style TEXT")
+    conn.execute("ALTER TABLE tracks ADD COLUMN mood TEXT")
+    conn.execute("UPDATE tracks SET style='Pop Rap', mood='Chill' WHERE id=100")
+    conn.commit()
+    conn.close()
+
+    import_legacy_library(legacy_db, reset=True)
+
+    conn = legacy_db._get_connection()
+    try:
+        row = conn.execute(
+            "SELECT style, mood FROM lib2_tracks WHERE title='One Dance' "
+            "AND legacy_track_id=100"
+        ).fetchone()
+        assert row["style"] == "Pop Rap"
+        assert row["mood"] == "Chill"
+    finally:
+        conn.close()
+
+
 def test_import_captures_album_explicit_label_upc(legacy_db):
     """§17.7 step 2: ``explicit``/``label``/``upc`` (barcode) exist on the
     legacy ``albums`` row but had no lib2 destination column."""
@@ -439,6 +463,29 @@ def test_import_captures_album_explicit_label_upc(legacy_db):
         assert row["explicit"] == 1
         assert row["label"] == "OVO Sound"
         assert row["upc"] == "00602557546317"
+    finally:
+        conn.close()
+
+
+def test_import_captures_album_style_mood(legacy_db):
+    """§48: ``style``/``mood`` exist on the legacy ``albums`` row (like the
+    artist row already handled) but had no lib2 destination column."""
+    conn = sqlite3.connect(legacy_db.path)
+    conn.execute("ALTER TABLE albums ADD COLUMN style TEXT")
+    conn.execute("ALTER TABLE albums ADD COLUMN mood TEXT")
+    conn.execute("UPDATE albums SET style='Hip Hop', mood='Moody' WHERE id=10")
+    conn.commit()
+    conn.close()
+
+    import_legacy_library(legacy_db, reset=True)
+
+    conn = legacy_db._get_connection()
+    try:
+        row = conn.execute(
+            "SELECT style, mood FROM lib2_albums WHERE title='Views'"
+        ).fetchone()
+        assert row["style"] == "Hip Hop"
+        assert row["mood"] == "Moody"
     finally:
         conn.close()
 

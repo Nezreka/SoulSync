@@ -75,13 +75,17 @@ def resync_album_from_legacy(conn, lib2_album_id: int, legacy_row: Any) -> bool:
         "image_url=COALESCE(?, image_url), "
         "genres=COALESCE(?, genres), "
         "label=COALESCE(?, label), explicit=COALESCE(?, explicit), "
-        "upc=COALESCE(?, upc), updated_at=CURRENT_TIMESTAMP WHERE id=?",
+        "upc=COALESCE(?, upc), "
+        "style=COALESCE(?, style), mood=COALESCE(?, mood), "
+        "updated_at=CURRENT_TIMESTAMP WHERE id=?",
         (
             _row_get(legacy_row, "thumb_url"),
             _normalize_genres(genres) if genres else None,
             _row_get(legacy_row, "label"),
             _row_get(legacy_row, "explicit"),
             _row_get(legacy_row, "upc"),
+            _row_get(legacy_row, "style"),
+            _row_get(legacy_row, "mood"),
             lib2_album_id,
         ),
     )
@@ -93,12 +97,16 @@ def resync_track_from_legacy(conn, lib2_track_id: int, legacy_row: Any) -> bool:
         "UPDATE lib2_tracks SET "
         "bpm=COALESCE(?, bpm), explicit=COALESCE(?, explicit), "
         "genius_lyrics=COALESCE(?, genius_lyrics), "
-        "copyright=COALESCE(?, copyright), updated_at=CURRENT_TIMESTAMP WHERE id=?",
+        "copyright=COALESCE(?, copyright), "
+        "style=COALESCE(?, style), mood=COALESCE(?, mood), "
+        "updated_at=CURRENT_TIMESTAMP WHERE id=?",
         (
             _row_get(legacy_row, "bpm"),
             _row_get(legacy_row, "explicit"),
             _row_get(legacy_row, "genius_lyrics"),
             _row_get(legacy_row, "copyright"),
+            _row_get(legacy_row, "style"),
+            _row_get(legacy_row, "mood"),
             lib2_track_id,
         ),
     )

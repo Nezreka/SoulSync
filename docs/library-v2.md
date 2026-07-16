@@ -3357,11 +3357,11 @@ Da fehlende Tracks (`file_status = 'missing'`) keine Entsprechung (Zeile) in der
 
 ---
 
-### 48. Rich-Metadata-Edit (Free-Text-Felder + Track-Level-Edit + Bulk-Edit) fehlt größtenteils
+### 48. Rich-Metadata-Edit (Free-Text-Felder + Track-Level-Edit + Bulk-Edit) — ✅ gefixt (2026-07-16, siehe §34)
 
 **Beobachtung:** Legacy erlaubt Editieren von Artist (`name`, `genres`, `label`, `style`, `mood`, `summary`), Album (`title`, `genres`, `year`, `release_date`, `explicit`, `track_count`, `label`, `style`, `mood`) und **Track** (`title`, `track_number`, `bpm`, `explicit`, `style`, `mood`) über inline-editierbare Felder + `PUT /api/library/{artist,album,track}/<id>` mit serverseitigem Feld-Whitelist (`database/music_database.py:12808-12810`). Zusätzlich ein Bulk-Edit-Modal für mehrere selektierte Tracks (`PUT /api/library/tracks/batch` → `database.batch_update_tracks()`).
 
-**Library v2 aktueller Stand** (Roadmap Punkt 8, bereits umgesetzt): Nur `title`/`year`/`release_type` fürs Album (Batch-Override-API) und `name`/`genres` fürs Artist. **Update 2026-07-16:** Track-Level-Basis-Edit existiert inzwischen (Track-Detail-Modal „Metadata"-Tab: `title`/`track_number`/`disc_number` über den Override-Batch-Command, plus „Write Tags to File"). **Weiterhin offen:** BPM/Style/Mood/Label/Summary/Explicit-Felder und Bulk-Edit über mehrere selektierte Tracks.
+**Library v2 aktueller Stand** (Roadmap Punkt 8, bereits umgesetzt): Nur `title`/`year`/`release_type` fürs Album (Batch-Override-API) und `name`/`genres` fürs Artist. **Update 2026-07-16:** Track-Level-Basis-Edit existiert inzwischen (Track-Detail-Modal „Metadata"-Tab: `title`/`track_number`/`disc_number` über den Override-Batch-Command, plus „Write Tags to File"). **Update 2026-07-16 (später, siehe §34): BPM/Style/Mood/Label/Explicit-Felder + Bulk-Edit über mehrere selektierte Tracks jetzt umgesetzt.** (Summary bleibt Artist-only, wie im Legacy-Schema — Album/Track hatten dort nie ein Summary-Feld.)
 
 **Wichtiger Architektur-Unterschied:** Library v2 nutzt bereits ein saubereres Konzept — `lib2_metadata_overrides` (Roadmap Punkt 4, Slice 3) trennt validierte Admin-Overrides von der Provider-Baseline, mit Read-Projection. Fehlende Felder (BPM, Style, Mood, Label, Summary, Explicit, Track-Title/Number) sollten in dieses bestehende Override-System **erweitert** werden, nicht als Parallel-Struktur wie Legacys direktes Feld-Whitelisting auf der Katalogtabelle.
 
@@ -5062,3 +5062,87 @@ den gesamten `webui/src`-Baum clean.
 **Noch offen aus dem Deep-Dive:** A6/A7/C3/C4, G8-Vierter-Punkt, H1–H13,
 I1–I10 (alle wie gehabt), plus D2/D4/D5 (siehe Begründung oben) und der
 Format/Bitrate-Split-Politurpunkt aus B5.
+
+---
+
+## 34. §48 Rich-Metadata-Edit-Rest — BPM/Style/Mood/Label/Explicit + Bulk-Edit — ✅ gefixt (2026-07-16)
+
+Letzter offener Kern-Punkt aus §15/§48: Legacy erlaubte Artist/Album/Track das
+Editieren von `style`/`mood`/`label` (Artist), `explicit`/`label`/`style`/`mood`
+(Album) und `bpm`/`explicit`/`style`/`mood` (Track); Library v2 hatte dafür
+weder überall eine Spalte noch einen Override-Pfad, und keine Mehrfachauswahl
+für Tracks. Durchgehend Reuse-First über das bestehende
+`lib2_metadata_overrides`-System (ADR-06) — keine Parallelstruktur.
+
+- **Schema:** `lib2_albums.style`/`lib2_albums.mood` und
+  `lib2_tracks.style`/`lib2_tracks.mood` neu (lib2_tracks.bpm/explicit und
+  lib2_albums.explicit/label existierten bereits aus §17.7).
+- **Importer + Enrich-Resync:** Album-/Track-Upsert (Insert **und** Update)
+  übernehmen jetzt `style`/`mood` aus der Legacy-Zeile, exakt wie bereits für
+  den Artist — `insert_fields`-Slicing für `play_count`/`last_played` beim
+  Track-Insert blieb dabei unangetastet (neue Felder wurden davor, nicht
+  danach eingefügt). `core/library2/enrich.py` COALESCEd dieselben Felder
+  beim Re-Sync nach einem manuellen Enrich-Aufruf (§44).
+- **Override-Store (`core/library2/metadata_overrides.py`):** `_FIELD_SPECS`
+  um die neuen Felder erweitert (artist: `style`/`mood`/`label`;
+  release_group: `explicit`/`label`/`style`/`mood`; track:
+  `bpm`/`explicit`/`style`/`mood`). Zwei neue Validierungs-Kinds:
+  `bool01` (bool/0/1 → int, sonst Fehler) für `explicit`,
+  `nonnegative_number` (float, ≥0) für `bpm` — der bestehende generische
+  `PATCH /api/library/v2/metadata-overrides/<entity_type>/<id>`-Batch-Endpoint
+  brauchte dadurch **keine** Code-Änderung, er ist bereits rein
+  spec-getrieben.
+- **Read-Projection (`core/library2/queries.py`):** `get_artist()` (Header +
+  Album-Zeilen-SELECT/-Entry), `get_album()` und `_serialize_track()` (geteilt
+  zwischen Album-Tabelle und Einzel-Track-Detail) projizieren die neuen
+  Felder jetzt in jede betroffene Payload; die Missing-Track-Placeholder-Zeile
+  bekam passend `explicit`/`style`/`mood: null` für Typ-Konsistenz.
+- **UI:** `EditArtistModal` (Style/Mood/Label-Felder), `AlbumMetadataForm`
+  (Explicit als Tri-State-Select „Unknown/Explicit/Clean" + Label/Style/Mood),
+  `TrackMetadataForm` (BPM-Zahlenfeld, Explicit-Select, Style/Mood) — alle
+  nach demselben Muster wie die bestehenden Felder (Diff gegen die aktuelle
+  effektive Metadata, PATCH nur der geänderten Felder, „Restore provider
+  values" für aktive Overrides). Der Track-Diff wurde in die bereits
+  getestete reine Funktion `computeTrackEditValues`
+  (`-metadata-edit.ts`) integriert statt inline dupliziert.
+- **Bulk-Edit (neu, B6-Lücke geschlossen):** `BulkEditTracksModal`, aus der
+  Track-Tabellen-Bulk-Leiste („Bulk edit…"-Button neben Monitor/Write
+  Tags/ReplayGain/Delete) — pro Feld ein Checkbox-Gate („Apply this to all
+  selected tracks") statt Diff-gegen-Baseline (bei einer Mehrfachauswahl gibt
+  es keine gemeinsame Baseline). Sendet pro Feld+Track denselben bestehenden
+  Override-Endpoint parallel (`Promise.all`) — kein neuer Bulk-Endpoint
+  nötig, identisch zum bereits etablierten Bulk-Muster (Monitor/ReplayGain
+  laufen genauso pro Track parallel).
+
+**Verifikation:** `pytest tests/library2` 585 grün (6 neue Tests: Importer
+Album/Track-Style/Mood-Carry-over, Enrich-Resync-Erweiterung,
+Override-Validierung neuer Felder inkl. `bool01`/`nonnegative_number`,
+Read-Projection-Rundtrip über Artist/Album/Track inkl. Override-Overlay),
+`tests/imports` unverändert (die 5 vorbestehenden Fails in
+`test_simple_download_tags.py` sind unabhängig von dieser Änderung — Ursache
+ist eine bereits vor dieser Session umbenannte `write_tags_to_file`-Funktion
+in `core/imports/pipeline.py`, nicht berührt hier). `vitest` 192 grün (12 neue
+Tests: 6 in `-metadata-edit.test.ts` für bpm/explicit/style/mood-Diffs, 2 in
+`bulk-edit-tracks-modal.test.tsx`). `tsc --noEmit` und
+`oxfmt --check`/`oxlint --type-check` über den gesamten `webui/src`-Baum
+clean.
+
+**Scope:** `core/library2/schema.py`, `core/library2/importer.py`,
+`core/library2/enrich.py`, `core/library2/metadata_overrides.py`,
+`core/library2/queries.py`, `webui/.../-library-v2.types.ts`,
+`webui/.../-metadata-edit.ts`, `webui/.../-ui/library-v2-page.tsx`.
+
+**Bewusst zurückgestellt (nicht Teil dieser Runde):** §45 (Reidentify) und
+die „I Have This"-Hälfte von §51 — bei genauerem Blick auf die zugrunde
+liegenden Module (`core/imports/rematch_*`, `core/library/missing_track_import.py`)
+sind das KEINE dünnen ID-Mapping-Wrapper wie ursprünglich im Deep-Dive
+angenommen: beide kopieren echte Dateien, laufen durch die
+Post-Processing-Pipeline bzw. schreiben ein Hint-File fürs Re-Import, und
+`missing_track_import.py` schreibt zusätzlich direkt (mit
+hand-genrolltem ID-Vergabe-Schema) in die Legacy-`tracks`-Tabelle. Ein
+sauberer lib2-natives Äquivalent braucht eine eigene fokussierte
+Design-Session (insbesondere die Quellen-Auswahl-UX für „I Have This" —
+woher kommt die Datei, wenn es noch keinen sichtbaren
+„Unmapped Files"-Browser in lib2 gibt, siehe I9), keine Ad-hoc-Umsetzung in
+derselben Session wie §48. A6/A7/C3/C4, G8-Vierter-Punkt und alle H/I-Punkte
+bleiben aus denselben bereits dokumentierten Gründen unverändert offen.

@@ -57,6 +57,9 @@ _FIELD_SPECS = {
         "image_url": "text",
         "genres": "string_list",
         "summary": "long_text",
+        "style": "text",
+        "mood": "text",
+        "label": "text",
     },
     "release_group": {
         "title": "required_text",
@@ -66,12 +69,20 @@ _FIELD_SPECS = {
         "year": "year",
         "image_url": "text",
         "genres": "string_list",
+        "explicit": "bool01",
+        "label": "text",
+        "style": "text",
+        "mood": "text",
     },
     "track": {
         "title": "required_text",
         "track_number": "nonnegative_int",
         "disc_number": "nonnegative_int",
         "duration": "nonnegative_int",
+        "bpm": "nonnegative_number",
+        "explicit": "bool01",
+        "style": "text",
+        "mood": "text",
     },
     "release_edition": {
         "title": "text",
@@ -197,6 +208,24 @@ def _validated_value(spec: str, value: Any) -> Any:
         if spec == "nonnegative_int" and normalized < 0:
             raise MetadataOverrideError("metadata override cannot be negative")
         return normalized
+    if spec == "nonnegative_number":
+        if isinstance(value, bool):
+            raise MetadataOverrideError("metadata override must be a number")
+        try:
+            normalized = float(value)
+        except (TypeError, ValueError) as exc:
+            raise MetadataOverrideError(
+                "metadata override must be a number"
+            ) from exc
+        if normalized < 0:
+            raise MetadataOverrideError("metadata override cannot be negative")
+        return normalized
+    if spec == "bool01":
+        if isinstance(value, bool):
+            return int(value)
+        if value in (0, 1):
+            return int(value)
+        raise MetadataOverrideError("metadata override must be true/false")
     if spec == "string_list":
         if not isinstance(value, list) or not all(
             isinstance(item, str) for item in value

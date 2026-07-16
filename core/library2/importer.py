@@ -847,6 +847,9 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 _pick(row, "thumb_url"), _normalize_genres(_pick(row, "genres")),
                 track_count, expected,
                 _pick(row, "explicit"), _pick(row, "label"), _pick(row, "upc"),
+                # §48: rich-metadata-edit parity — same AudioDB-sourced fields
+                # already carried over for artists (see above).
+                _pick(row, "style"), _pick(row, "mood"),
             )
             existing = album_map.get(_legacy_key(row["id"]))
             if existing is None:
@@ -870,6 +873,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                     "genres=?, track_count=?, expected_track_count=?, "
                     "explicit=COALESCE(?, explicit), label=COALESCE(?, label), "
                     "upc=COALESCE(?, upc), "
+                    "style=COALESCE(?, style), mood=COALESCE(?, mood), "
                     "origin='library', legacy_album_id=?, legacy_import_run_id=?, "
                     "updated_at=CURRENT_TIMESTAMP WHERE id=?",
                     (*fields, row["id"], run_id, existing),
@@ -890,8 +894,9 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                     "INSERT INTO lib2_albums(primary_artist_id, title, album_type, "
                     "release_date, year, spotify_id, musicbrainz_id, image_url, genres, "
                     "track_count, expected_track_count, explicit, label, upc, "
+                    "style, mood, "
                     "legacy_album_id, quality_profile_id, monitored, legacy_import_run_id) "
-                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (*fields, row["id"], default_profile_id, album_monitored, run_id),
                 )
                 album_id = cursor.lastrowid
@@ -976,6 +981,11 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 _pick(row, "spotify_track_id"),
                 _pick(row, "bpm"), _pick(row, "explicit"),
                 _pick(row, "genius_lyrics"), _pick(row, "copyright"),
+                # §48: rich-metadata-edit parity (same fields as album/artist).
+                # Kept before play_count/last_played so the insert_fields
+                # play-count-fallback slicing below (tfields[-2:]) still lands
+                # on the right two columns.
+                _pick(row, "style"), _pick(row, "mood"),
                 _pick(row, "play_count"), _pick(row, "last_played"),
             )
             existing = track_map.get(_legacy_key(row["id"]))
@@ -986,6 +996,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                     "bpm=COALESCE(?, bpm), explicit=COALESCE(?, explicit), "
                     "genius_lyrics=COALESCE(?, genius_lyrics), "
                     "copyright=COALESCE(?, copyright), "
+                    "style=COALESCE(?, style), mood=COALESCE(?, mood), "
                     "play_count=COALESCE(?, play_count), "
                     "last_played=COALESCE(?, last_played), "
                     "legacy_import_run_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
@@ -1014,9 +1025,9 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 cursor.execute(
                     "INSERT INTO lib2_tracks(album_id, title, track_number, disc_number, "
                     "duration, isrc, musicbrainz_id, spotify_id, bpm, explicit, "
-                    "genius_lyrics, copyright, play_count, last_played, "
+                    "genius_lyrics, copyright, style, mood, play_count, last_played, "
                     "legacy_track_id, quality_profile_id, monitored, legacy_import_run_id) "
-                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (*insert_fields, row["id"], track_profile_id, track_monitored, run_id),
                 )
                 track_id = cursor.lastrowid

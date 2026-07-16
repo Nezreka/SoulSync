@@ -1416,7 +1416,16 @@ function DeleteConfirmModal({
 /** Correct effective release metadata without rewriting provider baselines. */
 type EditableAlbumMetadata = Pick<
   LibraryV2AlbumSummary | LibraryV2AlbumDetail,
-  'id' | 'title' | 'year' | 'album_type' | 'release_date' | 'user_overrides'
+  | 'id'
+  | 'title'
+  | 'year'
+  | 'album_type'
+  | 'release_date'
+  | 'explicit'
+  | 'label'
+  | 'style'
+  | 'mood'
+  | 'user_overrides'
 >;
 
 /** Album/EP/single detail, consolidated behind one Edit button (same pattern
@@ -1475,11 +1484,22 @@ function AlbumMetadataForm({
       ? (album.album_type as LibraryV2AlbumType)
       : 'album',
   );
+  const [explicitFlag, setExplicitFlag] = useState<'' | 'yes' | 'no'>(
+    album.explicit === true ? 'yes' : album.explicit === false ? 'no' : '',
+  );
+  const [label, setLabel] = useState(album.label ?? '');
+  const [style, setStyle] = useState(album.style ?? '');
+  const [mood, setMood] = useState(album.mood ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const normalizedTitle = title.trim();
   const normalizedYear = year.trim() === '' ? null : Number(year);
   const normalizedReleaseDate = releaseDate.trim();
+  const normalizedLabel = label.trim();
+  const normalizedStyle = style.trim();
+  const normalizedMood = mood.trim();
+  const normalizedExplicit = explicitFlag === '' ? null : explicitFlag === 'yes';
+  const initialExplicit = album.explicit === true ? 'yes' : album.explicit === false ? 'no' : '';
   const values: Record<string, unknown> = {};
   if (normalizedTitle !== album.title) values.title = normalizedTitle;
   if (normalizedYear !== album.year) values.year = normalizedYear;
@@ -1487,9 +1507,20 @@ function AlbumMetadataForm({
   if (normalizedReleaseDate !== (album.release_date ?? '')) {
     values.release_date = normalizedReleaseDate || null;
   }
-  const resettable = ['title', 'year', 'album_type', 'release_date'].filter(
-    (field) => field in album.user_overrides,
-  );
+  if (explicitFlag !== initialExplicit) values.explicit = normalizedExplicit;
+  if (normalizedLabel !== (album.label ?? '')) values.label = normalizedLabel || null;
+  if (normalizedStyle !== (album.style ?? '')) values.style = normalizedStyle || null;
+  if (normalizedMood !== (album.mood ?? '')) values.mood = normalizedMood || null;
+  const resettable = [
+    'title',
+    'year',
+    'album_type',
+    'release_date',
+    'explicit',
+    'label',
+    'style',
+    'mood',
+  ].filter((field) => field in album.user_overrides);
 
   async function save(valuesToSet: Record<string, unknown>, clear: string[] = []) {
     setBusy(true);
@@ -1556,6 +1587,50 @@ function AlbumMetadataForm({
             </option>
           ))}
         </select>
+      </div>
+      <div className={styles.editRow}>
+        <label htmlFor="lib2-album-explicit">Explicit</label>
+        <select
+          id="lib2-album-explicit"
+          className={styles.select}
+          value={explicitFlag}
+          disabled={busy}
+          onChange={(e) => setExplicitFlag(e.target.value as '' | 'yes' | 'no')}
+        >
+          <option value="">Unknown</option>
+          <option value="yes">Explicit</option>
+          <option value="no">Clean</option>
+        </select>
+      </div>
+      <div className={styles.editRow}>
+        <label htmlFor="lib2-album-label">Label</label>
+        <input
+          id="lib2-album-label"
+          className={styles.searchInput}
+          value={label}
+          disabled={busy}
+          onChange={(event) => setLabel(event.target.value)}
+        />
+      </div>
+      <div className={styles.editRow}>
+        <label htmlFor="lib2-album-style">Style</label>
+        <input
+          id="lib2-album-style"
+          className={styles.searchInput}
+          value={style}
+          disabled={busy}
+          onChange={(event) => setStyle(event.target.value)}
+        />
+      </div>
+      <div className={styles.editRow}>
+        <label htmlFor="lib2-album-mood">Mood</label>
+        <input
+          id="lib2-album-mood"
+          className={styles.searchInput}
+          value={mood}
+          disabled={busy}
+          onChange={(event) => setMood(event.target.value)}
+        />
       </div>
       {error ? <div className={styles.searchError}>{error}</div> : null}
       <div className={styles.modalActions}>
@@ -1779,10 +1854,16 @@ function EditArtistModal({
   const [name, setName] = useState(artist.name);
   const [genres, setGenres] = useState(artist.genres.join(', '));
   const [summary, setSummary] = useState(artist.summary ?? '');
+  const [style, setStyle] = useState(artist.style ?? '');
+  const [mood, setMood] = useState(artist.mood ?? '');
+  const [label, setLabel] = useState(artist.label ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const normalizedName = name.trim();
   const normalizedSummary = summary.trim();
+  const normalizedStyle = style.trim();
+  const normalizedMood = mood.trim();
+  const normalizedLabel = label.trim();
   const normalizedGenres = genres
     .split(',')
     .map((genre) => genre.trim())
@@ -1790,10 +1871,13 @@ function EditArtistModal({
   const values: Record<string, unknown> = {};
   if (normalizedName !== artist.name) values.name = normalizedName;
   if (normalizedSummary !== (artist.summary ?? '')) values.summary = normalizedSummary || null;
+  if (normalizedStyle !== (artist.style ?? '')) values.style = normalizedStyle || null;
+  if (normalizedMood !== (artist.mood ?? '')) values.mood = normalizedMood || null;
+  if (normalizedLabel !== (artist.label ?? '')) values.label = normalizedLabel || null;
   if (normalizedGenres.join('\u0000') !== artist.genres.join('\u0000')) {
     values.genres = normalizedGenres;
   }
-  const resettable = ['name', 'genres', 'summary'].filter(
+  const resettable = ['name', 'genres', 'summary', 'style', 'mood', 'label'].filter(
     (field) => field in artist.user_overrides,
   );
 
@@ -1843,6 +1927,36 @@ function EditArtistModal({
           disabled={busy}
           placeholder="Short biography / summary"
           onChange={(event) => setSummary(event.target.value)}
+        />
+      </div>
+      <div className={styles.editRow}>
+        <label htmlFor="lib2-artist-style">Style</label>
+        <input
+          id="lib2-artist-style"
+          className={styles.searchInput}
+          value={style}
+          disabled={busy}
+          onChange={(event) => setStyle(event.target.value)}
+        />
+      </div>
+      <div className={styles.editRow}>
+        <label htmlFor="lib2-artist-mood">Mood</label>
+        <input
+          id="lib2-artist-mood"
+          className={styles.searchInput}
+          value={mood}
+          disabled={busy}
+          onChange={(event) => setMood(event.target.value)}
+        />
+      </div>
+      <div className={styles.editRow}>
+        <label htmlFor="lib2-artist-label">Label</label>
+        <input
+          id="lib2-artist-label"
+          className={styles.searchInput}
+          value={label}
+          disabled={busy}
+          onChange={(event) => setLabel(event.target.value)}
         />
       </div>
       {error ? <div className={styles.searchError}>{error}</div> : null}
@@ -3184,6 +3298,10 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
                     year: album.year,
                     album_type: album.album_type,
                     release_date: album.release_date,
+                    explicit: album.explicit,
+                    label: album.label,
+                    style: album.style,
+                    mood: album.mood,
                     user_overrides: album.user_overrides,
                     quality_profile_id: album.quality_profile?.id ?? 1,
                   }}
@@ -4023,6 +4141,10 @@ function AlbumBlock({
               year: album.year,
               album_type: album.album_type,
               release_date: album.release_date,
+              explicit: album.explicit,
+              label: album.label,
+              style: album.style,
+              mood: album.mood,
               user_overrides: album.user_overrides,
               quality_profile_id: album.quality_profile_id,
             }}
@@ -4253,6 +4375,7 @@ function TrackTableBulkBar({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [showBulkEdit, setShowBulkEdit] = useState(false);
 
   const trackIds = tracks.filter((t) => t.id != null).map((t) => t.id as number);
   const fileIds = tracks.map((t) => t.file?.file_id).filter((id): id is number => id != null);
@@ -4325,6 +4448,14 @@ function TrackTableBulkBar({
       </button>
       <button
         type="button"
+        className={styles.bulkBarButton}
+        disabled={busy !== null || trackIds.length === 0}
+        onClick={() => setShowBulkEdit(true)}
+      >
+        Bulk edit…
+      </button>
+      <button
+        type="button"
         className={`${styles.bulkBarButton} ${styles.bulkBarButtonDanger}`}
         disabled={busy !== null || fileIds.length === 0}
         onClick={() => setConfirmingDelete(true)}
@@ -4352,7 +4483,173 @@ function TrackTableBulkBar({
           onCancel={() => setConfirmingDelete(false)}
         />
       ) : null}
+      {showBulkEdit ? (
+        <BulkEditTracksModal
+          trackIds={trackIds}
+          onClose={() => setShowBulkEdit(false)}
+          onSaved={() => {
+            setShowBulkEdit(false);
+            onClear();
+          }}
+        />
+      ) : null}
     </div>
+  );
+}
+
+/** §48 (Rich-Metadata-Edit rest): apply the same style/mood/bpm/explicit
+ *  value to every selected track in one go. Unlike the per-track form, there
+ *  is no single shared baseline to diff against across a multi-track
+ *  selection — so each field is opt-in via its own checkbox ("apply this to
+ *  all selected tracks") rather than computed as a diff. Reuses the existing
+ *  per-field override endpoint (one PATCH per track per field), the same one
+ *  the single-track metadata form already calls — no new backend endpoint. */
+export function BulkEditTracksModal({
+  trackIds,
+  onClose,
+  onSaved,
+}: {
+  trackIds: number[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [applyStyle, setApplyStyle] = useState(false);
+  const [style, setStyle] = useState('');
+  const [applyMood, setApplyMood] = useState(false);
+  const [mood, setMood] = useState('');
+  const [applyBpm, setApplyBpm] = useState(false);
+  const [bpm, setBpm] = useState('');
+  const [applyExplicit, setApplyExplicit] = useState(false);
+  const [explicitFlag, setExplicitFlag] = useState<'yes' | 'no'>('yes');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const parsedBpm = bpm.trim() === '' ? null : Number(bpm);
+  const bpmValid =
+    !applyBpm || (parsedBpm !== null && Number.isFinite(parsedBpm) && parsedBpm >= 0);
+  const nothingSelected = !applyStyle && !applyMood && !applyBpm && !applyExplicit;
+
+  async function save() {
+    setBusy(true);
+    setError(null);
+    const values: Record<string, unknown> = {};
+    if (applyStyle) values.style = style.trim() || null;
+    if (applyMood) values.mood = mood.trim() || null;
+    if (applyBpm) values.bpm = parsedBpm;
+    if (applyExplicit) values.explicit = explicitFlag === 'yes';
+    try {
+      await Promise.all(
+        trackIds.map((id) => updateLibraryV2MetadataOverrides('track', id, values)),
+      );
+      await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+      onSaved();
+    } catch (caught) {
+      setError(mutationErrorMessage(caught, 'Bulk edit failed'));
+      setBusy(false);
+    }
+  }
+
+  return (
+    <ModalShell
+      title={`Bulk edit — ${trackIds.length} track${trackIds.length === 1 ? '' : 's'}`}
+      onClose={onClose}
+    >
+      <div className={styles.editRow}>
+        <label>
+          <input
+            type="checkbox"
+            checked={applyStyle}
+            disabled={busy}
+            onChange={(e) => setApplyStyle(e.target.checked)}
+          />{' '}
+          Style
+        </label>
+        <input
+          className={styles.searchInput}
+          aria-label="Style value"
+          value={style}
+          disabled={busy || !applyStyle}
+          onChange={(event) => setStyle(event.target.value)}
+        />
+      </div>
+      <div className={styles.editRow}>
+        <label>
+          <input
+            type="checkbox"
+            checked={applyMood}
+            disabled={busy}
+            onChange={(e) => setApplyMood(e.target.checked)}
+          />{' '}
+          Mood
+        </label>
+        <input
+          className={styles.searchInput}
+          aria-label="Mood value"
+          value={mood}
+          disabled={busy || !applyMood}
+          onChange={(event) => setMood(event.target.value)}
+        />
+      </div>
+      <div className={styles.editRow}>
+        <label>
+          <input
+            type="checkbox"
+            checked={applyBpm}
+            disabled={busy}
+            onChange={(e) => setApplyBpm(e.target.checked)}
+          />{' '}
+          BPM
+        </label>
+        <input
+          className={styles.searchInput}
+          aria-label="BPM value"
+          type="number"
+          min={0}
+          step="0.1"
+          value={bpm}
+          disabled={busy || !applyBpm}
+          onChange={(event) => setBpm(event.target.value)}
+        />
+      </div>
+      <div className={styles.editRow}>
+        <label>
+          <input
+            type="checkbox"
+            checked={applyExplicit}
+            disabled={busy}
+            onChange={(e) => setApplyExplicit(e.target.checked)}
+          />{' '}
+          Explicit
+        </label>
+        <select
+          className={styles.select}
+          aria-label="Explicit value"
+          value={explicitFlag}
+          disabled={busy || !applyExplicit}
+          onChange={(e) => setExplicitFlag(e.target.value as 'yes' | 'no')}
+        >
+          <option value="yes">Explicit</option>
+          <option value="no">Clean</option>
+        </select>
+      </div>
+      {error ? <div className={styles.searchError}>{error}</div> : null}
+      <div className={styles.modalActions}>
+        <button type="button" className={styles.btnGhost} disabled={busy} onClick={onClose}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          className={styles.btnPrimary}
+          disabled={busy || nothingSelected || !bpmValid}
+          onClick={() => void save()}
+        >
+          {busy
+            ? 'Saving…'
+            : `Apply to ${trackIds.length} track${trackIds.length === 1 ? '' : 's'}`}
+        </button>
+      </div>
+    </ModalShell>
   );
 }
 
@@ -4886,15 +5183,37 @@ function TrackMetadataForm({ track, onSaved }: { track: LibraryV2Track; onSaved:
   const [discNumber, setDiscNumber] = useState(
     track.disc_number === null ? '' : String(track.disc_number),
   );
+  const [bpm, setBpm] = useState(track.bpm === null ? '' : String(track.bpm));
+  const [explicitFlag, setExplicitFlag] = useState<'' | 'yes' | 'no'>(
+    track.explicit === true ? 'yes' : track.explicit === false ? 'no' : '',
+  );
+  const [style, setStyle] = useState(track.style ?? '');
+  const [mood, setMood] = useState(track.mood ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const { values, valid } = computeTrackEditValues(
-    { title: track.title, track_number: track.track_number, disc_number: track.disc_number },
-    { title, trackNumber, discNumber },
+    {
+      title: track.title,
+      track_number: track.track_number,
+      disc_number: track.disc_number,
+      bpm: track.bpm,
+      explicit: track.explicit,
+      style: track.style,
+      mood: track.mood,
+    },
+    { title, trackNumber, discNumber, bpm, explicitFlag, style, mood },
   );
   const overrides = track.user_overrides ?? {};
-  const resettable = ['title', 'track_number', 'disc_number'].filter((field) => field in overrides);
+  const resettable = [
+    'title',
+    'track_number',
+    'disc_number',
+    'bpm',
+    'explicit',
+    'style',
+    'mood',
+  ].filter((field) => field in overrides);
 
   async function save(valuesToSet: Record<string, unknown>, clear: string[] = []) {
     if (!track.id) return;
@@ -4944,6 +5263,53 @@ function TrackMetadataForm({ track, onSaved }: { track: LibraryV2Track; onSaved:
           value={discNumber}
           disabled={busy}
           onChange={(event) => setDiscNumber(event.target.value)}
+        />
+      </div>
+      <div className={styles.editRow}>
+        <label htmlFor="lib2-track-bpm">BPM</label>
+        <input
+          id="lib2-track-bpm"
+          className={styles.searchInput}
+          type="number"
+          min={0}
+          step="0.1"
+          value={bpm}
+          disabled={busy}
+          onChange={(event) => setBpm(event.target.value)}
+        />
+      </div>
+      <div className={styles.editRow}>
+        <label htmlFor="lib2-track-explicit">Explicit</label>
+        <select
+          id="lib2-track-explicit"
+          className={styles.select}
+          value={explicitFlag}
+          disabled={busy}
+          onChange={(e) => setExplicitFlag(e.target.value as '' | 'yes' | 'no')}
+        >
+          <option value="">Unknown</option>
+          <option value="yes">Explicit</option>
+          <option value="no">Clean</option>
+        </select>
+      </div>
+      <div className={styles.editRow}>
+        <label htmlFor="lib2-track-style">Style</label>
+        <input
+          id="lib2-track-style"
+          className={styles.searchInput}
+          value={style}
+          disabled={busy}
+          onChange={(event) => setStyle(event.target.value)}
+        />
+      </div>
+      <div className={styles.editRow}>
+        <label htmlFor="lib2-track-mood">Mood</label>
+        <input
+          id="lib2-track-mood"
+          className={styles.searchInput}
+          value={mood}
+          disabled={busy}
+          onChange={(event) => setMood(event.target.value)}
         />
       </div>
       {error ? <div className={styles.searchError}>{error}</div> : null}

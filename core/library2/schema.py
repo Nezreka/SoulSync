@@ -400,6 +400,14 @@ _ADDED_COLUMNS = (
     # romaji name with distinct Deezer/Spotify catalog entries).
     ("lib2_artists", "canonical_artist_id",
      "ALTER TABLE lib2_artists ADD COLUMN canonical_artist_id INTEGER"),
+    # §48: rich-metadata-edit parity — style/mood exist on the legacy albums/
+    # tracks tables (and already on lib2_artists) but had no lib2 destination
+    # column, so neither the importer nor the metadata-override store could
+    # carry or correct them for albums/tracks.
+    ("lib2_albums", "style", "ALTER TABLE lib2_albums ADD COLUMN style TEXT"),
+    ("lib2_albums", "mood", "ALTER TABLE lib2_albums ADD COLUMN mood TEXT"),
+    ("lib2_tracks", "style", "ALTER TABLE lib2_tracks ADD COLUMN style TEXT"),
+    ("lib2_tracks", "mood", "ALTER TABLE lib2_tracks ADD COLUMN mood TEXT"),
 )
 
 
