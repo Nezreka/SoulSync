@@ -8607,7 +8607,7 @@
                                 <div class="form-group">
                                     <label>Single Path Template:</label>
                                     <input type="text" id="template-single-path"
-                                        placeholder="$artist/$artist - $title/$title">
+                                        placeholder="$albumartist/$albumartist - $title/$title">
                                     <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                     <small class="settings-hint setting-help-body" hidden>Variables: <code>$albumartist</code>, <code>$artist</code>, <code>$artistletter</code>, <code>$title</code>, <code>$track</code> (01), <code>$album</code>, <code>$albumtype</code>, <code>$year</code>, <code>$quality</code> (filename only). Use <code>${var}</code> to append text: <code>${albumtype}s</code> → Singles</small>
                                 </div>
@@ -8657,7 +8657,7 @@
                                         <option value="all">All Artists Combined</option>
                                     </select>
                                     <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                    <small class="settings-hint setting-help-body" hidden>How <code>$albumartist</code> resolves for albums with multiple artists. "First Listed" uses only the primary artist for folder names (e.g., "Larry June" instead of "Larry June, Curren$y &amp; The Alchemist"). Full artist list is always preserved in file metadata tags.</small>
+                                    <small class="settings-hint setting-help-body" hidden>How <code>$albumartist</code> resolves when a release has multiple artists — this governs the FOLDER your music sorts into for both albums and singles (the default templates use <code>$albumartist</code>). "First Listed" uses only the primary artist for folder names (e.g., "Larry June" instead of "Larry June, Curren$y &amp; The Alchemist"). Full artist list is always preserved in file metadata tags.</small>
                                 </div>
 
                                 <div class="form-group">
