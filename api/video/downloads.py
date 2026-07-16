@@ -2,9 +2,9 @@
 
 Persists the video download configuration in video.db's ``video_settings`` KV
 table — fully separate from the music ``soulseek.*`` paths so the two libraries
-never share a folder or collide. The actual download fulfillment engine (wishlist
-→ search → grab) is a later roadmap phase; these endpoints just store/serve the
-config the Settings → Downloads tab edits.
+never share a folder or collide — plus the queue/history/blocklist endpoints the
+Downloads page reads. The fulfillment engine itself lives in the wishlist drain
+(``core/automation/handlers/video_process_wishlist``) + ``download_monitor``.
 
 Folders:
   - INPUT (download) folder is SHARED with the music side — it's the same

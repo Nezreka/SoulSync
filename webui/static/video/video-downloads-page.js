@@ -222,7 +222,10 @@
             if (el_ms > 2000) ctx += '  ·  ' + fmtElapsed(el_ms);
         }
         else if (d.status === 'queued') ctx = 'Waiting for a free slot…';
-        else if (showBar) ctx = [fmtSize(d.size_bytes), d.username ? ('👤 ' + d.username) : '', Math.round(pct) + '%'].filter(Boolean).join('  ·  ');
+        else if (showBar) ctx = [fmtSize(d.size_bytes),
+            d.speed_bps ? ('↓ ' + fmtSpeed(d.speed_bps)) : '',
+            fmtEta(d.eta_seconds),
+            d.username ? ('👤 ' + d.username) : '', Math.round(pct) + '%'].filter(Boolean).join('  ·  ');
         else ctx = (d.release_title && d.release_title !== (d.title || '')) ? d.release_title : fmtSize(d.size_bytes);
         // YouTube rows all read as bare video titles — say whose channel it is right
         // on the collapsed row (the drawer already knows, but you shouldn't have to open it).
@@ -316,6 +319,14 @@
     function fmtSpeed(bps) {
         bps = +bps || 0; if (!bps) return '';
         return bps >= 1e6 ? (Math.round(bps / 1e5) / 10 + ' MB/s') : Math.max(1, Math.round(bps / 1e3)) + ' KB/s';
+    }
+    // remaining-time estimate from the monitor (slskd averageSpeed / client eta)
+    function fmtEta(secs) {
+        secs = parseInt(secs, 10);
+        if (!secs || secs <= 0 || isNaN(secs)) return '';
+        if (secs < 60) return '~' + secs + 's left';
+        if (secs < 3600) return '~' + Math.round(secs / 60) + 'm left';
+        return '~' + Math.floor(secs / 3600) + 'h ' + Math.round((secs % 3600) / 60) + 'm left';
     }
     function pad2(n) { n = parseInt(n, 10) || 0; return (n < 10 ? '0' : '') + n; }
     function castHTMLOf(meta) {
