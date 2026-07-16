@@ -35,14 +35,32 @@
         wanted: ['Wanted', 'vwsh-st--wanted'], searching: ['Searching', 'vwsh-st--searching'],
         downloading: ['Downloading', 'vwsh-st--downloading'], downloaded: ['Done', 'vwsh-st--done'],
         failed: ['Failed', 'vwsh-st--failed'],
+        monitored: ['Not out yet', 'vwsh-st--monitored'],
+        upgrade: ['⇪ Upgrading', 'vwsh-st--upgrade'],
     };
-    function statusPill(status) {
+    // The pill tells the TRUTH, not the stale status column: an active download
+    // row wins, then the upgrade watch (owned below cutoff), then the column.
+    function liveStatus(it) {
+        if (it.downloading) return 'downloading';
+        if (it.upgrade_from) return 'upgrade';
+        return STATUS[it.status] ? it.status : 'wanted';
+    }
+    function statusPill(status, tip) {
         var s = STATUS[status] || STATUS.wanted;
-        return '<span class="vwsh-st ' + s[1] + '">' + s[0] + '</span>';
+        return '<span class="vwsh-st ' + s[1] + '"' + (tip ? ' title="' + esc(tip) + '"' : '') + '>' + s[0] + '</span>';
     }
     function rmBtn(scope, attrs) {
         return '<button class="vwsh-rm" type="button" title="Remove" aria-label="Remove" ' +
             'data-vwsh-rm="' + scope + '"' + attrs + '>&times;</button>';
+    }
+    // "Search now" — the manual override Sonarr users expect: skips the release
+    // gate for THIS item and runs the drain's search/pick/enqueue immediately.
+    function huntBtn(scope, attrs) {
+        return '<button class="vwsh-hunt" type="button" title="Search now" aria-label="Search now" ' +
+            'data-vwsh-hunt="' + scope + '"' + attrs + '>' +
+            '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" ' +
+            'stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>' +
+            '</button>';
     }
 
     // ── movie card ────────────────────────────────────────────────────────────
@@ -52,11 +70,18 @@
             ? '<img class="vwsh-movie-img" src="' + esc(it.poster_url) + '" alt="" loading="lazy" ' +
               'onerror="this.style.display=\'none\'">'
             : '<div class="vwsh-movie-ph">🎬</div>';
-        var meta = [it.year, owned ? 'In library' : null].filter(Boolean).join(' · ');
+        var meta = [it.year,
+            it.upgrade_from ? ('⇪ from ' + it.upgrade_from) : (owned ? 'In library' : null)]
+            .filter(Boolean).join(' · ');
+        var st = liveStatus(it);
+        var tip = st === 'upgrade' ? ('Own it in ' + it.upgrade_from + ' — watching for a better copy')
+            : st === 'monitored' ? 'Not released yet — grabs automatically once it\'s out' : null;
         return '<div class="vwsh-movie" data-vwsh-open-movie="' + esc(it.tmdb_id) +
             '" data-vwsh-src="' + (owned ? 'library' : 'tmdb') + '" data-vwsh-id="' + esc(owned ? it.library_id : it.tmdb_id) + '">' +
             '<div class="vwsh-movie-art">' + art + '<div class="vwsh-movie-scrim"></div>' +
-            statusPill(it.status) + rmBtn('movie', ' data-tmdb="' + esc(it.tmdb_id) + '"') + '</div>' +
+            statusPill(st, tip) +
+            (st === 'downloading' ? '' : huntBtn('movie', ' data-tmdb="' + esc(it.tmdb_id) + '"')) +
+            rmBtn('movie', ' data-tmdb="' + esc(it.tmdb_id) + '"') + '</div>' +
             '<div class="vwsh-movie-info"><span class="vwsh-movie-title" title="' + esc(it.title) + '">' +
             esc(it.title) + '</span>' + (meta ? '<span class="vwsh-movie-meta">' + esc(meta) + '</span>' : '') +
             '</div></div>';
@@ -109,6 +134,10 @@
                     '<div class="vwsh-szn-name">' + esc(sName) + '</div>' +
                     '<div class="vwsh-szn-count">' + n + (yt ? ' video' : ' episode') + (n === 1 ? '' : 's') + '</div>' +
                     '<div class="vwsh-szn-go">' + (yt ? 'View channel' : 'View show') + ' &rarr;</div>' +
+                    (yt ? '' : '<button class="vwsh-szn-hunt" type="button" data-vwsh-hunt="season" ' +
+                        'data-tmdb="' + esc(sh.tmdb_id) + '" data-s="' + se.season_number + '" title="Search this season now">' +
+                        '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" ' +
+                        'stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></button>') +
                     '<button class="vwsh-szn-rm" type="button" ' + sRm + ' title="Remove">&#10005;</button>' +
                 '</div>' +
                 '<div class="vwsh-ep-grid">' + cards + '</div>' +
@@ -263,10 +292,11 @@
         var yt = sh.source === 'youtube';
         var pimg = function (u) { return (yt && window.VideoYoutube) ? VideoYoutube.img(u) : u; };
         var t = e.title || (yt ? 'Untitled' : ('Episode ' + e.episode_number));
-        var st = STATUS[e.status] ? e.status : 'wanted';
+        var st = liveStatus(e);
         var date = fmtDate(e.air_date);
         // TMDB shows the SxEx label; a YouTube video shows just its upload date.
-        var metaTxt = yt ? (date || 'Video') : ('S' + se.season_number + '·E' + e.episode_number + (date ? ' · ' + esc(date) : ''));
+        var metaTxt = yt ? (date || 'Video') : ('S' + se.season_number + '·E' + e.episode_number + (date ? ' · ' + esc(date) : '') +
+            (e.upgrade_from ? ' · ⇪ ' + esc(e.upgrade_from) : ''));
         var thumb = e.still_url
             ? '<span class="vwsh-epc-thumb"><img src="' + esc(pimg(e.still_url)) + '" alt="" loading="lazy" ' +
               'onerror="this.parentNode.classList.add(\'vwsh-epc-thumb--none\')"></span>'
@@ -280,6 +310,11 @@
                 '<div class="vwsh-epc-title" title="' + esc(t) + '">' + esc(t) + '</div>' +
                 '<div class="vwsh-epc-meta"><span class="vwsh-ep-dot vwsh-ep-dot--' + st + '"></span>' + (yt ? esc(metaTxt) : metaTxt) + '</div>' +
             '</div>' +
+            (yt || st === 'downloading' ? ''
+                : '<button class="vwsh-epc-hunt" type="button" data-vwsh-hunt="episode" data-tmdb="' + esc(sh.tmdb_id) +
+                  '" data-s="' + se.season_number + '" data-e="' + e.episode_number + '" title="Search now">' +
+                  '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" ' +
+                  'stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></button>') +
             '<button class="vwsh-epc-rm" type="button" ' + rm + ' title="Remove">&#10005;</button>' +
         '</div>';
     }
@@ -329,6 +364,64 @@
             : state.tab === 'show' ? state.counts.show > 0
             : (state.ytVideo > 0 || state.ytChannel > 0);
         btn.hidden = !has;
+        // "Search all missing" — TMDB tabs only (YouTube has its own drain), and
+        // only when there's something to search.
+        var sa = $('[data-vwsh-searchall]');
+        if (sa) sa.hidden = state.tab === 'youtube' || !has;
+    }
+
+    // ── manual acquisition (per-item 'Search now' + 'Search all missing') ─────
+    function doHunt(btn) {
+        if (btn.disabled) return;
+        var payload = { scope: btn.getAttribute('data-vwsh-hunt'),
+            tmdb_id: parseInt(btn.getAttribute('data-tmdb'), 10) };
+        if (btn.hasAttribute('data-s')) payload.season_number = parseInt(btn.getAttribute('data-s'), 10);
+        if (btn.hasAttribute('data-e')) payload.episode_number = parseInt(btn.getAttribute('data-e'), 10);
+        btn.disabled = true; btn.classList.add('vwsh-hunt--busy');
+        fetch('/api/video/wishlist/search', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload) })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (res) {
+                if (!res || !res.success) throw new Error();
+                if (typeof showToast === 'function') {
+                    showToast(res.queued
+                        ? 'Searching for ' + res.queued + ' item' + (res.queued === 1 ? '' : 's') + '… grabs land in Downloads'
+                        : (res.total ? 'Already downloading or being searched' : 'Nothing on the wishlist for that'),
+                        res.queued ? 'success' : 'info');
+                }
+                btn.classList.remove('vwsh-hunt--busy');
+                if (!res.queued) btn.disabled = false;   // queued items keep the button dead until reload
+            })
+            .catch(function () {
+                btn.disabled = false; btn.classList.remove('vwsh-hunt--busy');
+                if (typeof showToast === 'function') showToast('Search could not start', 'error');
+            });
+    }
+    function searchAllMissing() {
+        var btn = $('[data-vwsh-searchall]'); if (!btn || btn.disabled) return;
+        btn.disabled = true;
+        fetch('/api/video/wishlist/search-all', { method: 'POST' })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (res) {
+                if (!res || !res.success) throw new Error();
+                var k = res.kinds || {};
+                var going = [];
+                if (k.movie === 'started') going.push('movies');
+                if (k.episode === 'started') going.push('episodes');
+                if (typeof showToast === 'function') {
+                    showToast(going.length
+                        ? 'Searching wishlist ' + going.join(' + ') + ' now — grabs land in Downloads'
+                        : (k.movie === 'busy' || k.episode === 'busy'
+                            ? 'A wishlist search is already running'
+                            : 'Nothing eligible to search right now'),
+                        going.length ? 'success' : 'info');
+                }
+                btn.disabled = false;
+            })
+            .catch(function () {
+                btn.disabled = false;
+                if (typeof showToast === 'function') showToast('Search could not start', 'error');
+            });
     }
     // Keep the YouTube tab badge fresh without switching to the tab.
     function refreshYtCount() {
@@ -535,6 +628,8 @@
     }
 
     function onGridClick(e) {
+        var hunt = e.target.closest('[data-vwsh-hunt]');
+        if (hunt) { e.preventDefault(); e.stopPropagation(); doHunt(hunt); return; }
         var rm = e.target.closest('[data-vwsh-rm]');
         if (rm) { e.preventDefault(); e.stopPropagation(); doRemove(rm); return; }
         if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
@@ -601,6 +696,8 @@
         if (sortSel) sortSel.addEventListener('change', function () { state.sort = sortSel.value; state.page = 1; load(); });
         var clearBtn = $('[data-vwsh-clear]');
         if (clearBtn) clearBtn.addEventListener('click', clearAll);
+        var saBtn = $('[data-vwsh-searchall]');
+        if (saBtn) saBtn.addEventListener('click', searchAllMissing);
         var prev = $('[data-vwsh-prev]');
         if (prev) prev.addEventListener('click', function () { if (state.page > 1) { state.page--; load(); } });
         var next = $('[data-vwsh-next]');
