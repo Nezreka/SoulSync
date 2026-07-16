@@ -6607,12 +6607,19 @@ class VideoDatabase:
 
     # ── paged/filtered/sorted library query (server-side, like music) ─────────
     def query_library(self, kind: str, *, search=None, letter=None, sort="title",
-                      status="all", genre=None, page=1, limit=75, server_source=None) -> dict:
+                      status="all", genre=None, resolution=None, page=1, limit=75,
+                      server_source=None) -> dict:
         """One page of movies/shows with search + A–Z + sort + owned/wanted/
         watched + genre filtering done in SQL. Scoped to ``server_source`` (the
         active video server) so Plex and Jellyfin libraries never commingle —
         mirrors how the music side keeps servers separate.
-        Returns {items, pagination:{...}}."""
+
+        Every row carries ``size_bytes`` (summed over its media files) and the
+        result carries ``total_size_bytes`` for the whole filtered set — the
+        size-on-disk surfaces Radarr/Sonarr users expect. Extra filters:
+        ``status='missing'`` (shows: partially owned — the classic 'wanted'
+        view) and ``resolution`` (movies: any file at that resolution).
+        Returns {items, total_size_bytes, pagination:{...}}."""
         try:
             page = max(1, int(page or 1))
             limit = max(1, min(500, int(limit or 75)))
@@ -6644,18 +6651,27 @@ class VideoDatabase:
         if not is_shows:
             if status == "owned":
                 where.append("m.has_file = 1")
-            elif status == "wanted":
+            elif status in ("wanted", "missing"):
                 where.append("m.has_file = 0")
             elif status == "watched":
                 where.append("COALESCE(m.play_count, 0) > 0")
             elif status == "unwatched":
                 # owned-but-untouched — the "what should I put on tonight" filter
                 where.append("m.has_file = 1 AND COALESCE(m.play_count, 0) = 0")
+            if resolution:
+                where.append("EXISTS (SELECT 1 FROM media_files mf WHERE mf.movie_id=m.id "
+                             "AND mf.resolution = ? COLLATE NOCASE)")
+                params.append(resolution)
         else:
             if status == "owned":
                 where.append("EXISTS (SELECT 1 FROM episodes e WHERE e.show_id=s.id AND e.has_file=1)")
             elif status == "wanted":
                 where.append("NOT EXISTS (SELECT 1 FROM episodes e WHERE e.show_id=s.id AND e.has_file=1)")
+            elif status == "missing":
+                # partially owned — you have SOME episodes but gaps remain (Sonarr's
+                # bread-and-butter 'which of my shows are incomplete' view)
+                where.append("EXISTS (SELECT 1 FROM episodes e WHERE e.show_id=s.id AND e.has_file=1) "
+                             "AND EXISTS (SELECT 1 FROM episodes e WHERE e.show_id=s.id AND e.has_file=0)")
             elif status == "watched":
                 where.append("COALESCE(s.watched_episodes, 0) > 0")
             elif status == "unwatched":
@@ -6666,11 +6682,18 @@ class VideoDatabase:
         title_key = f"COALESCE({alias}.sort_title, {alias}.title) COLLATE NOCASE ASC"
         # display rating: IMDb once OMDb has synced it, TMDB audience score before (both 0-10)
         rating_key = f"COALESCE({alias}.imdb_rating, {alias}.rating)"
+        if is_shows:
+            size_sub = ("(SELECT COALESCE(SUM(mf.size_bytes), 0) FROM media_files mf "
+                        "JOIN episodes e ON mf.episode_id=e.id WHERE e.show_id=s.id)")
+        else:
+            size_sub = ("(SELECT COALESCE(SUM(mf.size_bytes), 0) FROM media_files mf "
+                        "WHERE mf.movie_id=m.id)")
         order_sql = {
             "title": title_key,
             "year": f"{alias}.year DESC, " + title_key,
             "added": f"{alias}.added_at DESC",
             "rating": f"{rating_key} IS NULL, {rating_key} DESC, " + title_key,
+            "size": "size_bytes DESC, " + title_key,
         }.get(sort, title_key)
 
         if is_shows:
@@ -6678,18 +6701,23 @@ class VideoDatabase:
                       f"{rating_key} AS rating, s.watched_episodes, "
                       "(s.poster_url IS NOT NULL AND s.poster_url <> '') AS has_poster, "
                       "(SELECT COUNT(*) FROM episodes e WHERE e.show_id=s.id) AS episode_count, "
-                      "(SELECT COUNT(*) FROM episodes e WHERE e.show_id=s.id AND e.has_file=1) AS owned_count "
+                      "(SELECT COUNT(*) FROM episodes e WHERE e.show_id=s.id AND e.has_file=1) AS owned_count, "
+                      f"{size_sub} AS size_bytes "
                       "FROM shows s")
         else:
             select = ("SELECT m.id, m.title, m.year, m.has_file, m.tmdb_id, "
                       f"{rating_key} AS rating, m.play_count, "
                       "(m.poster_url IS NOT NULL AND m.poster_url <> '') AS has_poster, "
-                      "(SELECT mf.resolution FROM media_files mf WHERE mf.movie_id=m.id LIMIT 1) AS resolution "
+                      "(SELECT mf.resolution FROM media_files mf WHERE mf.movie_id=m.id LIMIT 1) AS resolution, "
+                      f"{size_sub} AS size_bytes "
                       "FROM movies m")
 
         conn = self._get_connection()
         try:
             total = conn.execute(f"SELECT COUNT(*) FROM {tbl} {alias}{where_sql}", params).fetchone()[0]
+            total_size = conn.execute(
+                f"SELECT COALESCE(SUM({size_sub}), 0) FROM {tbl} {alias}{where_sql}",
+                params).fetchone()[0]
             rows = conn.execute(
                 f"{select}{where_sql} ORDER BY {order_sql} LIMIT ? OFFSET ?",
                 params + [limit, (page - 1) * limit]).fetchall()
@@ -6701,7 +6729,7 @@ class VideoDatabase:
                     d["has_file"] = bool(d.get("has_file"))
                 items.append(d)
             total_pages = max(1, (total + limit - 1) // limit)
-            return {"items": items, "pagination": {
+            return {"items": items, "total_size_bytes": total_size or 0, "pagination": {
                 "page": page, "total_pages": total_pages, "total_count": total,
                 "has_prev": page > 1, "has_next": page < total_pages}}
         finally:
@@ -6724,6 +6752,24 @@ class VideoDatabase:
         conn = self._get_connection()
         try:
             return [r[0] for r in conn.execute(sql, params)]
+        finally:
+            conn.close()
+
+    def library_resolutions(self, server_source=None) -> list:
+        """Distinct file resolutions in the movie library (best first) — feeds
+        the library page's resolution filter dropdown."""
+        from core.video.quality_eval import resolution_rank
+        sql = ("SELECT DISTINCT mf.resolution FROM media_files mf "
+               "JOIN movies m ON m.id=mf.movie_id "
+               "WHERE mf.resolution IS NOT NULL AND mf.resolution <> ''")
+        params = []
+        if server_source:
+            sql += " AND m.server_source = ?"
+            params.append(server_source)
+        conn = self._get_connection()
+        try:
+            vals = [r[0] for r in conn.execute(sql, params)]
+            return sorted(vals, key=resolution_rank, reverse=True)
         finally:
             conn.close()
 
