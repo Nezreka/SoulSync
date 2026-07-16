@@ -420,6 +420,8 @@ export interface LibraryV2TrackTableColumns {
   features: boolean;
   metadata: boolean;
   file_path: boolean;
+  /** H1: row play button, reuses the Legacy player via the shell bridge. */
+  play: boolean;
 }
 
 /** Round 5 (deep-dive D6): which optional artist-overview table columns are

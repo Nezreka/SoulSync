@@ -40,6 +40,11 @@ def test_disc_column_defaults_off():
     assert get_ui_preferences(conn)["track_table"]["columns"]["disc"] is False
 
 
+def test_play_column_defaults_off():
+    conn = _conn()
+    assert get_ui_preferences(conn)["track_table"]["columns"]["play"] is False
+
+
 def test_artist_table_columns_default_off_and_merge_independently():
     conn = _conn()
     prefs = get_ui_preferences(conn)

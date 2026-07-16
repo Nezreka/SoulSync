@@ -43,6 +43,9 @@ DEFAULT_PREFERENCES: Dict[str, Any] = {
             "features": True,
             "metadata": True,
             "file_path": False,
+            # H1: row play button (reuses the Legacy player via the shell
+            # bridge) — opt-in like file_path, not everyone wants it visible.
+            "play": False,
         },
         "show_all_match_providers": False,
     },

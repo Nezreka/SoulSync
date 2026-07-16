@@ -984,6 +984,12 @@ button.featureTag:disabled {
   white-space: nowrap;
 }
 
+.colPlay {
+  text-align: center;
+  width: 36px;
+  white-space: nowrap;
+}
+
 .trackActions {
   display: flex;
   gap: 4px;

@@ -5230,3 +5230,48 @@ Import-Callback der Haupt-Pipeline, nicht nur eine Read-Schicht wie C3, und
 verdient laut Deep-Dive-Dokument eine eigene fokussierte Design-Session statt
 in derselben Runde mitgezogen zu werden. G8-Vierter-Punkt und alle H/I-Punkte
 bleiben aus denselben bereits dokumentierten Gründen unverändert offen.
+
+---
+
+## 36. §H1 Track-Playback — Legacy-Player wiederverwendet, kein neuer Player — ✅ umgesetzt (2026-07-16)
+
+Nutzer-Vorgabe war explizit „übernimm den Legacy-Player, erfinde nichts
+Neues" — library-v2 (React) und das Legacy-`library.js` laufen im selben
+Browser-Fenster/`window` und teilen sich bereits eine Bridge
+(`window.SoulSyncWebShellBridge`, gesetzt von `shell-bridge.js`). Diese Bridge
+hat seit Kurzem schon eine vollständige, typisierte, in `stats-page.tsx`
+bereits genutzte `playLibraryTrack()`-Methode, die 1:1 an Legacys eigene
+Play-Funktion durchreicht (inkl. der bestehenden Media-Bar am unteren
+Bildschirmrand, `/api/library/play`, Navidrome-Stream-Fallback — alles
+unverändert). Für library-v2 gab es also buchstäblich nichts Neues zu bauen
+außer einem Knopf, der diese Methode aufruft.
+
+**Umsetzung:**
+- Neue optionale Spalte **„Play"** in der Track-Tabelle (Options-Zahnrad,
+  gleiches Muster wie Duration/BPM/File-Pfad aus §31/B5) — Default **aus**,
+  da der Nutzer den Knopf explizit nicht dauerhaft sichtbar haben wollte
+  (`core/library2/ui_preferences.py`: `track_table.columns.play: False`).
+- `TrackPlayButton` (`library-v2-page.tsx`) ruft
+  `getShellBridge()?.playLibraryTrack({id, title, file_path, bitrate,
+  artist_id, album_id}, albumTitle, artistName)` — dieselben Felder, die die
+  Zeile ohnehin schon im Payload hat, kein Zusatz-Request. Disabled + Tooltip
+  „No file available", wenn Track keine Datei hat (identisch zur
+  Legacy-Logik in `playLibraryTrack`/`col-play`).
+- Kein neuer Endpoint, kein neuer Player-State, keine neue Player-UI.
+
+**Bewusst nicht umgesetzt (H3, Discography-Batch-Auswahl):** ursprünglich
+zusammen mit H1 als „größte funktionale Regressionen" geplant, vom Nutzer
+nach kurzer Rückfrage explizit abgelehnt — kein Bedarf für eine
+Mehrfachauswahl-UI auf dem „All Releases"-Tab. Bleibt als H3 in der
+Feature-Gap-Enumeration stehen, aber ohne Umsetzungsabsicht.
+
+**Verifikation:** `pytest tests/library2` (596 Tests, davon 1 neu für den
+`play`-Spalten-Default) grün, `ruff check` clean, `tsc --noEmit`/
+`oxfmt --check`/`oxlint --type-check` clean, `vitest` (195 Tests, davon 3 neu)
+grün, Production-Build grün.
+
+**Scope:** `core/library2/ui_preferences.py`, `tests/library2/test_ui_preferences.py`,
+`webui/.../-library-v2.types.ts` (`LibraryV2TrackTableColumns.play`),
+`webui/.../-ui/library-v2-page.tsx` (`TrackPlayButton`, `play`-Icon,
+Spalten-Default/-Label), `webui/.../-ui/library-v2-page.module.css`
+(`.colPlay`), `webui/.../-ui/track-play-button.test.tsx` (neu).

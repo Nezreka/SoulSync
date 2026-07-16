@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tan
 import { useNavigate as useRouterNavigate } from '@tanstack/react-router';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 
+import { getShellBridge } from '@/platform/shell/bridge';
 import { useReactPageShell } from '@/platform/shell/route-controllers';
 
 import type {
@@ -193,6 +194,7 @@ const ICON_PATHS = {
   close: 'M6 6l12 12M18 6L6 18',
   info: 'M12 21a9 9 0 1 1 0-18 9 9 0 0 1 0 18zM12 16v-4M12 8h.01',
   gain: 'M3 12h3l2-7 3 15 3-11 2 5h5',
+  play: 'M8 5l11 7-11 7V5z',
   cover: 'M4 4h16v16H4z M4 16l4-4 3 3 5-6 4 5',
   more: 'M3.4,12 a1.6,1.6 0 1,0 3.2,0 a1.6,1.6 0 1,0 -3.2,0 M10.4,12 a1.6,1.6 0 1,0 3.2,0 a1.6,1.6 0 1,0 -3.2,0 M17.4,12 a1.6,1.6 0 1,0 3.2,0 a1.6,1.6 0 1,0 -3.2,0',
   settings:
@@ -4196,6 +4198,7 @@ const DEFAULT_TRACK_TABLE_COLUMNS: LibraryV2TrackTableColumns = {
   features: true,
   metadata: true,
   file_path: false,
+  play: false,
 };
 
 const TRACK_TABLE_COLUMN_LABELS: Record<keyof LibraryV2TrackTableColumns, string> = {
@@ -4208,6 +4211,7 @@ const TRACK_TABLE_COLUMN_LABELS: Record<keyof LibraryV2TrackTableColumns, string
   features: 'Features',
   metadata: 'Metadata',
   file_path: 'File path',
+  play: 'Play button',
 };
 
 type TrackSortKey = 'number' | 'title' | 'duration' | 'bpm';
@@ -4799,6 +4803,7 @@ function AlbumTrackTable({
             {columns.features ? <th className={styles.colFeatures}>Features</th> : null}
             {columns.metadata ? <th>Metadata</th> : null}
             {columns.file_path ? <th>File</th> : null}
+            {columns.play ? <th className={styles.colPlay}></th> : null}
             <th className={styles.colActions}>Actions</th>
           </tr>
         </thead>
@@ -4978,6 +4983,16 @@ function TrackRow({
           {track.file?.path ?? <span className={styles.muted}>—</span>}
         </td>
       ) : null}
+      {columns.play ? (
+        <td className={styles.colPlay}>
+          <TrackPlayButton
+            track={track}
+            albumId={entityBase.albumId}
+            albumTitle={albumTitle}
+            artistName={track.artists.map((a) => a.name).join(', ')}
+          />
+        </td>
+      ) : null}
       <td className={styles.trackActions}>
         <IconActionButton
           icon="automatic"
@@ -5002,6 +5017,48 @@ function TrackRow({
         ) : null}
       </td>
     </tr>
+  );
+}
+
+/** H1: reuses the Legacy player as-is via the shell bridge (`playLibraryTrack`)
+ *  instead of building a new player — library-v2 and Legacy share one
+ *  `window`/media bar, so this is the same call Legacy's own row play button
+ *  makes. Opt-in column (§36), disabled when there's no file to play. */
+export function TrackPlayButton({
+  track,
+  albumId,
+  albumTitle,
+  artistName,
+}: {
+  track: LibraryV2Track;
+  albumId: number | undefined;
+  albumTitle: string;
+  artistName: string;
+}) {
+  const trackId = track.id;
+  const filePath = track.file?.path ?? null;
+  const canPlay = trackId != null && filePath != null;
+  return (
+    <IconActionButton
+      icon="play"
+      title={canPlay ? 'Play track' : 'No file available'}
+      disabled={!canPlay}
+      onClick={() => {
+        if (trackId == null || filePath == null) return;
+        void getShellBridge()?.playLibraryTrack(
+          {
+            id: trackId,
+            title: track.title ?? 'Unknown Track',
+            file_path: filePath,
+            bitrate: track.file?.bitrate ?? null,
+            artist_id: track.artists[0]?.id ?? null,
+            album_id: albumId ?? null,
+          },
+          albumTitle,
+          artistName,
+        );
+      }}
+    />
   );
 }
 

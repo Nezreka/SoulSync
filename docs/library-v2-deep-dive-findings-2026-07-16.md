@@ -619,7 +619,7 @@ den V2-Stand. Neu identifiziert, bisher NIRGENDS getrackt:
 
 | # | Legacy-Feature | Code-Referenz | V2-Stand |
 |---|---|---|---|
-| H1 | **Track-Playback/Preview** (Play-Button pro Track, Streaming) | `playLibraryTrack`, `col-play` | fehlt komplett — kein Playback in lib2 |
+| H1 | **Track-Playback/Preview** (Play-Button pro Track, Streaming) | `playLibraryTrack`, `col-play` | ✅ umgesetzt (siehe library-v2.md §36) — Play-Spalte ruft die Legacy-Funktion über die Shell-Bridge auf, kein neuer Player |
 | H2 | **Artist Top Tracks** (Hero-Sektion, Last.fm-Fallback, „Download one/all") | `_loadArtistTopTracks`, `/api/artist/<id>/top-tracks` | fehlt |
 | H3 | **Discography-Download-Modal** (Releases multi-selektieren → Batch-Download, Filter, Select-All) | `openDiscographyModal`, `startDiscographyDownload` | fehlt — lib2 kann nur monitor→wishlist pro Release |
 | H4 | **Track-Redownload-Modal** (Quellen streamen, gezielt neu laden) | `showTrackRedownloadModal` | fehlt (Interactive Search deckt es halb ab, aber ohne „replace existing"-Semantik) |
@@ -633,10 +633,13 @@ den V2-Stand. Neu identifiziert, bisher NIRGENDS getrackt:
 | H12 | **Export**: Artist-Roster (Watchlist/Library) + **M3U-Export** | `openArtistExportModal`, `/api/library/export/m3u` | fehlt |
 | H13 | **Reorganize-Queue-Status-Panel** (Live, Cancel, Clear) | `mountReorganizeStatusPanel` | fehlt (= G7) |
 
-Bewertung: H1 (Playback) und H3 (Discography-Batch-Download) sind die
+Bewertung: H1 (Playback) und H3 (Discography-Batch-Download) waren die
 größten funktionalen Regressionen; H6/H8 die alltäglichsten. H9 ist
 strategisch (Multi-User-Fähigkeit von lib2 ist ungeklärt — ADR-01 sagt
-admin-only, die Legacy-UI hatte aber ein Nicht-Admin-Verhalten).
+admin-only, die Legacy-UI hatte aber ein Nicht-Admin-Verhalten). **Update
+2026-07-16:** H1 umgesetzt (library-v2.md §36); H3 vom Nutzer nach Rückfrage
+explizit nicht gewollt (kein Bedarf für die Mehrfachauswahl-UI) — bleibt als
+Enumerationspunkt stehen, aber ohne Umsetzungsabsicht.
 
 ---
 
