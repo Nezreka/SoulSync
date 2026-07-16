@@ -120,7 +120,7 @@ if (document.readyState === 'loading') {
             button.addEventListener('click', toggleMusicBrainzEnrichment);
             // Start polling
             updateMusicBrainzStatus();
-            setInterval(updateMusicBrainzStatus, 2000); // Poll every 2 seconds
+            setInterval(updateMusicBrainzStatus, 10000); // fallback only — the websocket push owns live updates
             console.log('✅ MusicBrainz UI initialized');
         }
     });
@@ -130,7 +130,7 @@ if (document.readyState === 'loading') {
         button.addEventListener('click', toggleMusicBrainzEnrichment);
         // Start polling
         updateMusicBrainzStatus();
-        setInterval(updateMusicBrainzStatus, 2000); // Poll every 2 seconds
+        setInterval(updateMusicBrainzStatus, 10000); // fallback only — the websocket push owns live updates
         console.log('✅ MusicBrainz UI initialized');
     }
 }
@@ -301,7 +301,7 @@ if (document.readyState === 'loading') {
         if (button) {
             button.addEventListener('click', toggleAudioDBEnrichment);
             updateAudioDBStatus();
-            setInterval(updateAudioDBStatus, 2000);
+            setInterval(updateAudioDBStatus, 10000); // fallback only — the websocket push owns live updates
             console.log('✅ AudioDB UI initialized');
         }
     });
@@ -310,7 +310,7 @@ if (document.readyState === 'loading') {
     if (button) {
         button.addEventListener('click', toggleAudioDBEnrichment);
         updateAudioDBStatus();
-        setInterval(updateAudioDBStatus, 2000);
+        setInterval(updateAudioDBStatus, 10000); // fallback only — the websocket push owns live updates
         console.log('✅ AudioDB UI initialized');
     }
 }
@@ -420,7 +420,7 @@ if (document.readyState === 'loading') {
         if (button) {
             button.addEventListener('click', toggleDeezerEnrichment);
             updateDeezerStatus();
-            setInterval(updateDeezerStatus, 2000);
+            setInterval(updateDeezerStatus, 10000); // fallback only — the websocket push owns live updates
             console.log('✅ Deezer UI initialized');
         }
     });
@@ -429,7 +429,7 @@ if (document.readyState === 'loading') {
     if (button) {
         button.addEventListener('click', toggleDeezerEnrichment);
         updateDeezerStatus();
-        setInterval(updateDeezerStatus, 2000);
+        setInterval(updateDeezerStatus, 10000); // fallback only — the websocket push owns live updates
         console.log('✅ Deezer UI initialized');
     }
 }
@@ -531,7 +531,7 @@ function initJioSaavnEnrichmentUI() {
     if (!button) return;
     button.addEventListener('click', toggleJioSaavnEnrichment);
     updateJioSaavnStatus();
-    setInterval(updateJioSaavnStatus, 2000);
+    setInterval(updateJioSaavnStatus, 10000); // fallback only — the websocket push owns live updates
 }
 
 if (document.readyState === 'loading') {
@@ -694,7 +694,7 @@ if (document.readyState === 'loading') {
         if (button) {
             button.addEventListener('click', toggleSpotifyEnrichment);
             updateSpotifyEnrichmentStatus();
-            setInterval(updateSpotifyEnrichmentStatus, 2000);
+            setInterval(updateSpotifyEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
         }
     });
 } else {
@@ -702,7 +702,7 @@ if (document.readyState === 'loading') {
     if (button) {
         button.addEventListener('click', toggleSpotifyEnrichment);
         updateSpotifyEnrichmentStatus();
-        setInterval(updateSpotifyEnrichmentStatus, 2000);
+        setInterval(updateSpotifyEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
     }
 }
 
@@ -813,7 +813,7 @@ if (document.readyState === 'loading') {
         if (button) {
             button.addEventListener('click', toggleiTunesEnrichment);
             updateiTunesEnrichmentStatus();
-            setInterval(updateiTunesEnrichmentStatus, 2000);
+            setInterval(updateiTunesEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
         }
     });
 } else {
@@ -821,7 +821,7 @@ if (document.readyState === 'loading') {
     if (button) {
         button.addEventListener('click', toggleiTunesEnrichment);
         updateiTunesEnrichmentStatus();
-        setInterval(updateiTunesEnrichmentStatus, 2000);
+        setInterval(updateiTunesEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
     }
 }
 
@@ -940,7 +940,7 @@ if (document.readyState === 'loading') {
         if (button) {
             button.addEventListener('click', toggleLastFMEnrichment);
             updateLastFMEnrichmentStatus();
-            setInterval(updateLastFMEnrichmentStatus, 2000);
+            setInterval(updateLastFMEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
         }
     });
 } else {
@@ -948,7 +948,7 @@ if (document.readyState === 'loading') {
     if (button) {
         button.addEventListener('click', toggleLastFMEnrichment);
         updateLastFMEnrichmentStatus();
-        setInterval(updateLastFMEnrichmentStatus, 2000);
+        setInterval(updateLastFMEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
     }
 }
 
@@ -1061,7 +1061,7 @@ if (document.readyState === 'loading') {
         if (button) {
             button.addEventListener('click', toggleGeniusEnrichment);
             updateGeniusEnrichmentStatus();
-            setInterval(updateGeniusEnrichmentStatus, 2000);
+            setInterval(updateGeniusEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
         }
     });
 } else {
@@ -1069,7 +1069,7 @@ if (document.readyState === 'loading') {
     if (button) {
         button.addEventListener('click', toggleGeniusEnrichment);
         updateGeniusEnrichmentStatus();
-        setInterval(updateGeniusEnrichmentStatus, 2000);
+        setInterval(updateGeniusEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
     }
 }
 
@@ -1188,7 +1188,7 @@ if (document.readyState === 'loading') {
         if (button) {
             button.addEventListener('click', toggleBandcampEnrichment);
             updateBandcampEnrichmentStatus();
-            setInterval(updateBandcampEnrichmentStatus, 2000);
+            setInterval(updateBandcampEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
         }
     });
 } else {
@@ -1196,7 +1196,7 @@ if (document.readyState === 'loading') {
     if (button) {
         button.addEventListener('click', toggleBandcampEnrichment);
         updateBandcampEnrichmentStatus();
-        setInterval(updateBandcampEnrichmentStatus, 2000);
+        setInterval(updateBandcampEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
     }
 }
 
@@ -1313,7 +1313,7 @@ if (document.readyState === 'loading') {
         if (button) {
             button.addEventListener('click', toggleTidalEnrichment);
             updateTidalEnrichmentStatus();
-            setInterval(updateTidalEnrichmentStatus, 2000);
+            setInterval(updateTidalEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
         }
     });
 } else {
@@ -1321,7 +1321,7 @@ if (document.readyState === 'loading') {
     if (button) {
         button.addEventListener('click', toggleTidalEnrichment);
         updateTidalEnrichmentStatus();
-        setInterval(updateTidalEnrichmentStatus, 2000);
+        setInterval(updateTidalEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
     }
 }
 
@@ -1438,7 +1438,7 @@ if (document.readyState === 'loading') {
         if (button) {
             button.addEventListener('click', toggleQobuzEnrichment);
             updateQobuzEnrichmentStatus();
-            setInterval(updateQobuzEnrichmentStatus, 2000);
+            setInterval(updateQobuzEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
         }
     });
 } else {
@@ -1446,7 +1446,7 @@ if (document.readyState === 'loading') {
     if (button) {
         button.addEventListener('click', toggleQobuzEnrichment);
         updateQobuzEnrichmentStatus();
-        setInterval(updateQobuzEnrichmentStatus, 2000);
+        setInterval(updateQobuzEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
     }
 }
 
@@ -1544,7 +1544,7 @@ if (document.readyState === 'loading') {
         if (button) {
             button.addEventListener('click', toggleAmazonEnrichment);
             updateAmazonEnrichmentStatus();
-            setInterval(updateAmazonEnrichmentStatus, 2000);
+            setInterval(updateAmazonEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
         }
     });
 } else {
@@ -1552,7 +1552,7 @@ if (document.readyState === 'loading') {
     if (button) {
         button.addEventListener('click', toggleAmazonEnrichment);
         updateAmazonEnrichmentStatus();
-        setInterval(updateAmazonEnrichmentStatus, 2000);
+        setInterval(updateAmazonEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
     }
 }
 
@@ -1629,7 +1629,7 @@ if (document.readyState === 'loading') {
         if (button) {
             button.addEventListener('click', toggleSimilarArtistsEnrichment);
             updateSimilarArtistsEnrichmentStatus();
-            setInterval(updateSimilarArtistsEnrichmentStatus, 2000);
+            setInterval(updateSimilarArtistsEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
         }
     });
 } else {
@@ -1637,7 +1637,7 @@ if (document.readyState === 'loading') {
     if (button) {
         button.addEventListener('click', toggleSimilarArtistsEnrichment);
         updateSimilarArtistsEnrichmentStatus();
-        setInterval(updateSimilarArtistsEnrichmentStatus, 2000);
+        setInterval(updateSimilarArtistsEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
     }
 }
 
@@ -1704,7 +1704,7 @@ if (document.readyState === 'loading') {
         if (button) {
             button.addEventListener('click', toggleHydrabaseWorker);
             updateHydrabaseStatus();
-            setInterval(updateHydrabaseStatus, 2000);
+            setInterval(updateHydrabaseStatus, 10000); // fallback only — the websocket push owns live updates
         }
     });
 } else {
@@ -1712,7 +1712,7 @@ if (document.readyState === 'loading') {
     if (button) {
         button.addEventListener('click', toggleHydrabaseWorker);
         updateHydrabaseStatus();
-        setInterval(updateHydrabaseStatus, 2000);
+        setInterval(updateHydrabaseStatus, 10000); // fallback only — the websocket push owns live updates
     }
 }
 
