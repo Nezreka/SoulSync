@@ -8372,11 +8372,22 @@
                                     (tagging, artwork, organizing) → <strong>Music Library Folder</strong> (their final home — point
                                     your media server here). Keeping the two separate stops half-finished files being scanned.
                                 </div>
-                                <div class="setting-help-text" style="margin-bottom: 4px;">
-                                    <strong>Docker / Unraid:</strong> leave these as the container-internal paths and map your real
-                                    folders in the container config — wrong values here break downloads.
+                                <!-- One of these shows, picked by the detected deployment (settings.js
+                                     reads _environment.docker); both render until detection lands. -->
+                                <div class="setting-help-text" style="margin-bottom: 4px;" data-paths-guide="docker">
+                                    <strong>Docker / Unraid detected:</strong> leave these as the container-internal paths and map your
+                                    real folders in the container config — wrong values here break downloads.
+                                </div>
+                                <div class="setting-help-text" style="margin-bottom: 4px;" data-paths-guide="native">
                                     <strong>Bare metal / Proxmox LXC / systemd:</strong> there is no container, so you're expected to
                                     unlock these and point them at your real folders.
+                                </div>
+                                <div class="setting-help-text hidden" style="margin-bottom: 4px; color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 10px; padding: 10px 12px; background: rgba(239, 68, 68, 0.08);"
+                                     data-paths-default-warning>
+                                    ⚠️ <strong>Your Music Library Folder is still the install-folder default.</strong> Every finished
+                                    download is landing on the disk SoulSync is installed on — on a Proxmox LXC that's typically an
+                                    8&nbsp;GB root that fills until the container hangs. Unlock the field and point it at your real
+                                    music folder.
                                 </div>
 
                                 <div class="form-group">
@@ -8395,6 +8406,12 @@
                                         <button class="browse-button locked" onclick="togglePathLock('transfer', this)">Unlock</button>
                                     </div>
                                     <small class="settings-hint">Your main music library. Finished tracks are moved here, organized into Artist/Album folders.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Minimum free disk space (GB):</label>
+                                    <input type="number" id="min-free-disk-gb" min="0" step="0.5" placeholder="5">
+                                    <small class="settings-hint">New downloads are refused when the download disk drops below this. Stops a full disk from hanging the whole system (0 = off).</small>
                                 </div>
 
                                 <div class="form-group">

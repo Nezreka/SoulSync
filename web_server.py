@@ -3602,6 +3602,13 @@ def handle_settings():
                 data['_source_status'] = download_orchestrator.get_source_status()
             except Exception as e:
                 logger.debug("download source status read failed: %s", e)
+            # Deployment environment: the folder-paths guidance differs by world
+            # (Docker: leave container paths alone / bare-metal-LXC: you MUST edit
+            # them). A fresh non-Docker install still on the ./Transfer default
+            # dumps every download onto the install disk — Proxmox LXCs default
+            # to an 8GB root, which fills until the container hangs — so the UI
+            # needs to know which story to tell and when to warn.
+            data['_environment'] = {'docker': os.path.exists('/.dockerenv')}
             return jsonify(data)
         except Exception as e:
             return jsonify({"error": str(e)}), 500

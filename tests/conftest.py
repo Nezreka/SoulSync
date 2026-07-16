@@ -1101,6 +1101,20 @@ def _inert_video_download_monitor():
 
 
 @pytest.fixture(scope="session", autouse=True)
+def _inert_music_disk_guard():
+    """Pin the music min-free-disk guard OFF for the whole suite.
+
+    music_has_room() probes the REAL filesystem's free space (rule 3b: CI
+    runner fill varies run to run) on every DownloadOrchestrator.download().
+    Tests of the guard itself monkeypatch the probe and reset the override.
+    """
+    import core.disk_guard as dg
+    dg._floor_override = 0.0
+    yield
+    dg._floor_override = None
+
+
+@pytest.fixture(scope="session", autouse=True)
 def _video_db_lazy_create_tripwire():
     """Name the poisoner: log a full stack whenever get_video_db() LAZILY
     CREATES the module-global VideoDatabase during the suite.

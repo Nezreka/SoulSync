@@ -484,6 +484,10 @@ class ConfigManager:
                 # searches even when the window cap isn't hit. 0 = disabled
                 # (preserves prior behavior).
                 "search_min_delay_seconds": 0,
+                # Refuse new downloads when the download disk has less than
+                # this many GB free (0 = off). A fresh LXC install left on the
+                # default paths otherwise fills its 8GB root until it hangs.
+                "min_free_disk_gb": 5.0,
             },
             "download_source": {
                 "mode": "soulseek",  # Options: "soulseek", "youtube", "tidal", "qobuz", "hifi", "hybrid", "torrent", "usenet"
