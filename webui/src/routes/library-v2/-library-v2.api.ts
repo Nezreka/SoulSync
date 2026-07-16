@@ -15,6 +15,7 @@ import type {
   LibraryV2PlaylistDetail,
   LibraryV2PlaylistPipelineState,
   LibraryV2PlaylistSummary,
+  LibraryV2ArtCandidate,
   LibraryV2ManualSkip,
   LibraryV2MatchService,
   LibraryV2QualityProfile,
@@ -789,6 +790,34 @@ export async function applyLibraryV2ArtistReorganizeAll(
     alreadyQueued: payload.already_queued ?? 0,
     totalAlbums: payload.total_albums ?? 0,
   };
+}
+
+/** Candidate cover-art images for an album, for the art picker (docs §49). */
+export async function fetchLibraryV2AlbumArtOptions(
+  albumId: number,
+  options: { refresh?: boolean } = {},
+): Promise<LibraryV2ArtCandidate[]> {
+  const params = new URLSearchParams();
+  if (options.refresh) params.set('refresh', '1');
+  const payload = await readJson<{
+    success: boolean;
+    candidates: LibraryV2ArtCandidate[];
+    error?: string;
+  }>(apiClient.get(`library/v2/albums/${albumId}/art-options`, { searchParams: params }));
+  if (!payload.success) throw new Error(payload.error || 'Failed to load cover art options');
+  return payload.candidates;
+}
+
+/** Apply a cover chosen in the picker (docs §49). Pins the choice so a later
+ *  refresh won't clobber it; returns the local artwork URL to re-render. */
+export async function applyLibraryV2AlbumArt(albumId: number, url: string): Promise<string> {
+  const payload = await readJson<{ success: boolean; image_url?: string; error?: string }>(
+    apiClient.post(`library/v2/albums/${albumId}/art`, { json: { url } }),
+  );
+  if (!payload.success || !payload.image_url) {
+    throw new Error(payload.error || 'Failed to apply cover art');
+  }
+  return payload.image_url;
 }
 
 export async function fetchLibraryV2JobStatus(jobId?: string): Promise<LibraryV2JobState> {

@@ -4,11 +4,13 @@ import { HttpResponse, http, server } from '@/test/msw';
 
 import {
   analyzeLibraryV2TrackReplayGain,
+  applyLibraryV2AlbumArt,
   applyLibraryV2AlbumReorganize,
   applyLibraryV2ArtistReorganizeAll,
   blacklistLibraryV2Source,
   deleteLibraryV2Files,
   enrichLibraryV2Entity,
+  fetchLibraryV2AlbumArtOptions,
   fetchLibraryV2AlbumMatchStatus,
   fetchLibraryV2AlbumReorganizeSources,
   fetchLibraryV2ArtistMatchStatus,
@@ -396,6 +398,63 @@ describe('library v2 reorganize api', () => {
       alreadyQueued: 1,
       totalAlbums: 4,
     });
+  });
+});
+
+describe('library v2 art picker api', () => {
+  it('fetches candidate covers', async () => {
+    server.use(
+      http.get('/api/library/v2/albums/42/art-options', () =>
+        HttpResponse.json({
+          success: true,
+          count: 1,
+          candidates: [{ url: 'https://example.com/a.jpg', source: 'deezer', front: true }],
+        }),
+      ),
+    );
+    await expect(fetchLibraryV2AlbumArtOptions(42)).resolves.toEqual([
+      { url: 'https://example.com/a.jpg', source: 'deezer', front: true },
+    ]);
+  });
+
+  it('requests a refresh when asked', async () => {
+    server.use(
+      http.get('/api/library/v2/albums/42/art-options', ({ request }) => {
+        expect(new URL(request.url).searchParams.get('refresh')).toBe('1');
+        return HttpResponse.json({ success: true, candidates: [] });
+      }),
+    );
+    await expect(fetchLibraryV2AlbumArtOptions(42, { refresh: true })).resolves.toEqual([]);
+  });
+
+  it('applies the chosen cover and returns the local artwork url', async () => {
+    server.use(
+      http.post('/api/library/v2/albums/42/art', async ({ request }) => {
+        expect(await request.json()).toEqual({ url: 'https://example.com/pick.jpg' });
+        return HttpResponse.json({
+          success: true,
+          album_id: 42,
+          image_url: '/api/library/v2/artwork/album/42',
+        });
+      }),
+    );
+    await expect(applyLibraryV2AlbumArt(42, 'https://example.com/pick.jpg')).resolves.toBe(
+      '/api/library/v2/artwork/album/42',
+    );
+  });
+
+  it('surfaces an unresolvable-image error', async () => {
+    server.use(
+      http.post('/api/library/v2/albums/42/art', () =>
+        HttpResponse.json(
+          { success: false, error: 'Could not download or validate that image URL' },
+          { status: 400 },
+        ),
+      ),
+    );
+    await expect(applyLibraryV2AlbumArt(42, 'https://example.com/dead.jpg')).rejects.toThrow(
+      'Could not download or validate',
+    );
   });
 });
 

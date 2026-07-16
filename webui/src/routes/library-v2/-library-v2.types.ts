@@ -141,6 +141,14 @@ export interface LibraryV2MatchService {
   legacy_entity_id: number | null;
 }
 
+/** One candidate cover-art image for the art picker (docs §49). */
+export interface LibraryV2ArtCandidate {
+  url: string;
+  source: string;
+  type?: string;
+  front?: boolean;
+}
+
 /** One reorganize metadata source option (docs §50). */
 export interface LibraryV2ReorganizeSource {
   source: string;

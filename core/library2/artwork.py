@@ -220,6 +220,28 @@ def _source_ids(raw: Any) -> Dict[str, str]:
     }
 
 
+_OVERRIDE_ENTITY_TYPE = {"album": "release_group", "artist": "artist"}
+
+
+def _manual_art_override_url(conn, kind: str, entity_id: int) -> Optional[str]:
+    """A user-picked cover (docs §49 art picker) always wins over the
+    auto-resolved embedded/provider image — mirrors the legacy picker's "a
+    manual pick pins the choice" guarantee, but via the existing
+    ``lib2_metadata_overrides`` store (``image_url`` field) instead of a
+    parallel pin flag."""
+    entity_type = _OVERRIDE_ENTITY_TYPE.get(kind)
+    if entity_type is None:
+        return None
+    try:
+        from core.library2.metadata_overrides import get_field_overrides
+        overrides = get_field_overrides(conn, entity_type=entity_type, entity_id=entity_id)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("manual art override lookup failed (%s %s): %s", kind, entity_id, e)
+        return None
+    override = overrides.get("image_url")
+    return str(override.value) if override and override.value else None
+
+
 def build_artwork(database, conn, config_manager, kind: str, entity_id: int,
                   *, force: bool = False) -> Optional[str]:
     """Resolve + cache artwork for an artist/album; return the on-disk jpg path.
@@ -246,9 +268,17 @@ def build_artwork(database, conn, config_manager, kind: str, entity_id: int,
             pass
 
     data: Optional[bytes] = None
-    if kind == "album":
+    override_url = _manual_art_override_url(conn, kind, entity_id)
+    if override_url:
+        try:
+            from core.library.artist_image import download_image_bytes
+            data = download_image_bytes(override_url)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("manual art override download failed (%s %s): %s", kind, entity_id, e)
+
+    if not data and kind == "album":
         data = _embedded_art_for_album(conn, config_manager, entity_id)
-    elif kind == "artist":
+    elif not data and kind == "artist":
         # Artists: prefer the embedded cover of one of their albums (fast, local),
         # then fall back to a provider image via external IDs.
         album = conn.execute(
@@ -369,8 +399,58 @@ def precache_all_artwork(database, config_manager, *, progress=None) -> Dict[str
     return counts
 
 
+def apply_manual_artwork(
+    database, conn, kind: str, entity_id: int, url: str, *, profile_id: int = 1,
+) -> bool:
+    """Apply a user-picked cover (docs §49 art picker).
+
+    Downloads + validates ``url`` FIRST, then pins it as the entity's
+    ``image_url`` metadata override (so a later "Refresh & Scan"/precache
+    pass — which calls :func:`build_artwork` again — sees it via
+    :func:`_manual_art_override_url` and won't clobber the pick with the
+    auto-resolved embedded/provider image), then writes it straight into the
+    managed artwork cache file so it's visible immediately, without waiting
+    for a background rebuild.
+
+    Returns False (no override set, no write) when the URL doesn't resolve
+    to a valid image — the caller surfaces that as a user-facing error.
+    Raises :class:`~core.library2.metadata_overrides.MetadataOverrideError`
+    when the entity itself doesn't exist (propagated from ``set_field_override``).
+    """
+    entity_type = _OVERRIDE_ENTITY_TYPE.get(kind)
+    if entity_type is None:
+        return False
+
+    from core.library.artist_image import download_image_bytes
+    data = download_image_bytes(url)
+    if not data:
+        return False
+    data = _normalize_jpeg(data)
+    if not data:
+        return False
+
+    from core.library2.metadata_overrides import set_field_override
+    set_field_override(
+        conn, entity_type=entity_type, entity_id=entity_id,
+        field_name="image_url", value=url, profile_id=profile_id,
+        reason="manual cover pick",
+    )
+
+    out = artwork_file(database, kind, entity_id)
+    try:
+        tmp = out.with_suffix(".writing")
+        tmp.write_bytes(data)
+        os.replace(tmp, out)
+        _write_thumbnail(out, thumb_file(database, kind, entity_id))
+    except OSError as e:
+        logger.debug("manual artwork write failed (%s %s): %s", kind, entity_id, e)
+        return False
+    return True
+
+
 __all__ = [
     "build_artwork",
+    "apply_manual_artwork",
     "artwork_file",
     "thumb_file",
     "artwork_dir",

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from typing import Any, Callable, Dict, List, Optional
 
 from flask import jsonify, request, send_file
@@ -1650,6 +1651,106 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         if want_thumb and not target.exists():
             _write_thumbnail(artwork_file(db, kind, eid), target)
         return _send_art(target if target.exists() else artwork_file(db, kind, eid))
+
+    _art_options_cache: Dict[int, tuple] = {}
+    _art_options_cache_lock = threading.Lock()
+    _ART_OPTIONS_TTL_S = 300
+
+    @app.route("/api/library/v2/albums/<int:album_id>/art-options")
+    def lib2_album_art_options(album_id):
+        """Candidate cover-art images for an album, for the art picker
+        (docs §49, read-only). Mirrors the legacy ``/api/album/<id>/art-options``
+        gather (Cover Art Archive + Deezer/iTunes/Spotify/AudioDB via
+        ``core.metadata.art_lookup.gather_album_art_candidates``), but resolves
+        artist/album/MBID from the lib2 row (with overrides applied) instead
+        of query params — works for discography-only albums too, no legacy
+        record needed."""
+        guard = _guard()
+        if guard:
+            return guard
+        force_refresh = request.args.get("refresh") == "1"
+        conn = _conn()
+        try:
+            row = conn.execute(
+                """SELECT al.title, al.musicbrainz_id AS release_group_mbid,
+                          ar.id AS artist_id, ar.name AS artist_name,
+                          ed.musicbrainz_id AS edition_mbid
+                   FROM lib2_albums al JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                   LEFT JOIN lib2_release_editions ed
+                          ON ed.release_group_id = al.id AND ed.is_default = 1
+                   WHERE al.id = ?""",
+                (album_id,),
+            ).fetchone()
+            if row is None:
+                return jsonify({"success": False, "error": "Album not found"}), 404
+
+            from core.library2.metadata_overrides import project_metadata
+            album_effective, _album_overrides = project_metadata(
+                conn, entity_type="release_group", entity_id=album_id,
+                provider_fields={"title": row["title"]},
+            )
+            artist_effective, _artist_overrides = project_metadata(
+                conn, entity_type="artist", entity_id=row["artist_id"],
+                provider_fields={"name": row["artist_name"]},
+            )
+            album_title = album_effective["title"]
+            artist_name = artist_effective["name"]
+            mbid = row["edition_mbid"] or row["release_group_mbid"]
+        finally:
+            conn.close()
+
+        now = time.time()
+        if not force_refresh:
+            with _art_options_cache_lock:
+                hit = _art_options_cache.get(album_id)
+                if hit and now - hit[0] < _ART_OPTIONS_TTL_S:
+                    return jsonify({
+                        "success": True, "count": len(hit[1]),
+                        "candidates": hit[1], "cached": True,
+                    })
+
+        from core.metadata.art_lookup import gather_album_art_candidates
+        metadata = {"musicbrainz_release_id": mbid} if mbid else {}
+        candidates = gather_album_art_candidates(artist_name, album_title, metadata)
+        with _art_options_cache_lock:
+            _art_options_cache[album_id] = (now, candidates)
+        return jsonify({"success": True, "count": len(candidates), "candidates": candidates})
+
+    @app.route("/api/library/v2/albums/<int:album_id>/art", methods=["POST"])
+    def lib2_album_art_apply(album_id):
+        """Apply a cover chosen in the picker (docs §49). Body: ``{"url": "<image url>"}``.
+        Pins the choice as a metadata override so a later refresh won't clobber
+        it, and writes it into the managed artwork cache immediately."""
+        guard = _guard()
+        if guard:
+            return guard
+        body = request.get_json(silent=True) or {}
+        url = str(body.get("url") or "").strip()
+        if not url:
+            return jsonify({"success": False, "error": "url is required"}), 400
+
+        from core.library2.artwork import apply_manual_artwork
+        from core.library2.metadata_overrides import MetadataOverrideError
+        conn = _conn()
+        try:
+            ok = apply_manual_artwork(
+                get_database(), conn, "album", album_id, url, profile_id=_profile(),
+            )
+            if ok:
+                conn.commit()
+            else:
+                conn.rollback()
+        except MetadataOverrideError as exc:
+            conn.rollback()
+            return jsonify({"success": False, "error": str(exc)}), exc.status
+        finally:
+            conn.close()
+        if not ok:
+            return jsonify({
+                "success": False,
+                "error": "Could not download or validate that image URL",
+            }), 400
+        return jsonify({"success": True, "album_id": album_id, "image_url": _artwork_url("album", album_id)})
 
     # -- monitoring (mirrors watchlist / wishlist) ----------------------------
 

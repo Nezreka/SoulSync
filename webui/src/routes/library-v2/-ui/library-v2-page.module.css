@@ -2285,3 +2285,50 @@
 .enrichDropdownLabel {
   white-space: nowrap;
 }
+
+.artPickerGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 14px;
+}
+
+.artPickerCard {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.artPickerCard:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.artPickerImg {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  transition:
+    transform 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.artPickerCard:hover:not(:disabled) .artPickerImg {
+  transform: translateY(-2px);
+  border-color: rgba(var(--accent-rgb), 0.6);
+}
+
+.artPickerBadge {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.6);
+  text-align: center;
+}

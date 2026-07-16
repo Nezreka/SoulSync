@@ -75,6 +75,7 @@ import {
 } from '../-library-v2.api';
 import { computeTrackEditValues } from '../-metadata-edit';
 import { Route } from '../route';
+import { AlbumArtPickerModal } from './art-picker-modal';
 import { InteractiveSearchModal } from './interactive-search';
 import styles from './library-v2-page.module.css';
 import { QualityProfileModal, QualityProfilePicker } from './quality-profile-modal';
@@ -177,6 +178,7 @@ const ICON_PATHS = {
   close: 'M6 6l12 12M18 6L6 18',
   info: 'M12 21a9 9 0 1 1 0-18 9 9 0 0 1 0 18zM12 16v-4M12 8h.01',
   gain: 'M3 12h3l2-7 3 15 3-11 2 5h5',
+  cover: 'M4 4h16v16H4z M4 16l4-4 3 3 5-6 4 5',
 } as const;
 
 type IconName = keyof typeof ICON_PATHS;
@@ -3338,6 +3340,7 @@ function AlbumBlock({
   const [showEnrich, setShowEnrich] = useState(false);
   const enrichWrapRef = useRef<HTMLSpanElement>(null);
   const [showReorganize, setShowReorganize] = useState(false);
+  const [showArtPicker, setShowArtPicker] = useState(false);
   const profilesQuery = useQuery(libraryV2QualityProfilesQueryOptions());
   const profileName =
     (profilesQuery.data ?? []).find((p) => p.id === album.quality_profile_id)?.name ?? null;
@@ -3425,6 +3428,11 @@ function AlbumBlock({
             title="Reorganize — preview and move files to match the naming template"
             onClick={() => setShowReorganize(true)}
           />
+          <IconActionButton
+            icon="cover"
+            title="Change cover — pick from alternate cover art"
+            onClick={() => setShowArtPicker(true)}
+          />
           <span ref={enrichWrapRef} className={styles.enrichWrap}>
             <IconActionButton
               icon="refresh"
@@ -3456,6 +3464,13 @@ function AlbumBlock({
           albumId={album.id}
           albumTitle={album.title}
           onClose={() => setShowReorganize(false)}
+        />
+      ) : null}
+      {showArtPicker ? (
+        <AlbumArtPickerModal
+          albumId={album.id}
+          albumTitle={album.title}
+          onClose={() => setShowArtPicker(false)}
         />
       ) : null}
     </div>
