@@ -366,6 +366,8 @@ ACTIONS: list[dict] = [
      "config_fields": [
          {"key": "max_concurrent", "type": "number", "label": "Max simultaneous searches", "default": 3, "min": 1}
      ]},
+    {"type": "video_rss_sync", "label": "RSS Sync (Instant Grabs)", "icon": "download", "scope": "video",
+     "description": "Sonarr-speed acquisition: every few minutes, pull your indexers' newest releases from Prowlarr (one aggregate call, no searching) and instantly grab any that match your wishlist — a wanted episode lands minutes after it's posted instead of at the next hourly drain. Respects your quality profile, upgrade cutoff, blocklist and download mode (needs torrent/usenet enabled + Prowlarr). Pair with a 15-minute schedule.", "available": True},
     {"type": "video_process_youtube_wishlist", "label": "Process YouTube Wishlist", "icon": "download", "scope": "video",
      "description": "Download wished YouTube videos (yt-dlp), organised as a Plex 'TV by date' show (channel/year/date). Queues the WHOLE wishlist — the setting only limits how many download at the same time; each finished one starts the next, so it all drains. A completed download leaves the wishlist. Needs the YouTube library folder set on Settings → Downloads.", "available": True,
      "config_fields": [
