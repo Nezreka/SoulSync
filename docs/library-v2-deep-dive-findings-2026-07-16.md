@@ -19,6 +19,13 @@ E = Priorisierung · **G = Code-Audit Runde 2 (neu gefundene Bugs, Zeile für
 Zeile)** · **H = vollständiger Legacy-Gap** · **I = vollständiger
 Lidarr-Gap** · F = Querverweise auf bereits Getracktes.
 
+**⚠️ Vorgehen bei Library-Parität (Abschnitte H + I):** Das sind reine
+Feature-Gap-Enumerationen, keine fertig durchdachten Specs — bevor an einem
+H-/I-Punkt gearbeitet wird, erst beim Nutzer nachfragen, was genau und wie
+umgesetzt werden soll (Scope, UI-Ansatz, Priorität innerhalb des Punkts).
+Nicht vorab schon klären — erst wenn wir tatsächlich an diesem Punkt
+angekommen sind und ihn umsetzen wollen.
+
 ---
 
 ## A. Echte Bugs / Denkfehler (neu gefunden)
@@ -561,6 +568,9 @@ Status-Zeile im Modal mit Poll bis Queue leer).
 
 ## H. Vollständiger Feature-Gap: Legacy Enhanced View → V2 (über §45–§51 hinaus)
 
+**Vor Umsetzung eines H-Punkts: erst beim Nutzer nachfragen**, siehe Hinweis
+oben — diese Tabelle ist eine Enumeration, kein Spec.
+
 Systematische Enumeration aller `library.js`-Funktionen (9.691 Zeilen) gegen
 den V2-Stand. Neu identifiziert, bisher NIRGENDS getrackt:
 
@@ -588,6 +598,9 @@ admin-only, die Legacy-UI hatte aber ein Nicht-Admin-Verhalten).
 ---
 
 ## I. Vollständiger Feature-Gap: Lidarr → V2 (über die Search-Semantik hinaus)
+
+**Vor Umsetzung eines I-Punkts: erst beim Nutzer nachfragen**, siehe Hinweis
+oben — diese Tabelle ist eine Enumeration, kein Spec.
 
 | # | Lidarr-Konzept | V2-Stand | Einschätzung |
 |---|---|---|---|
