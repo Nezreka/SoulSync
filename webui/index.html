@@ -8589,6 +8589,12 @@
                                 </div>
 
                                 <div class="form-group">
+                                    <label>Minimum free disk space (GB):</label>
+                                    <input type="number" id="min-free-disk-gb" min="0" step="0.5" placeholder="5">
+                                    <small class="settings-hint">New downloads are refused when the download disk drops below this. Stops a full disk from hanging the whole system (0 = off).</small>
+                                </div>
+
+                                <div class="form-group">
                                     <label>Import Folder:</label>
                                     <div class="path-input-group">
                                         <input type="text" id="staging-path" placeholder="./Staging" readonly>
