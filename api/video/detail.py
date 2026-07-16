@@ -86,6 +86,22 @@ def register_routes(bp):
             return jsonify({"error": res.get("error", "not found")}), 404
         return jsonify(res)
 
+    @bp.route("/detail/<kind>/<int:item_id>/history", methods=["GET"])
+    def video_title_history(kind, item_id):
+        """This title's permanent acquisition history (arr-parity P9): grabs,
+        imports, upgrades, failures — matched under both the library and TMDB
+        identities the title may have been grabbed as."""
+        from . import get_video_db
+        if kind not in ("movie", "show"):
+            return jsonify({"error": "bad kind"}), 400
+        db = get_video_db()
+        detail = db.movie_detail(item_id) if kind == "movie" else db.show_detail(item_id)
+        if not detail:
+            return jsonify({"error": "not found"}), 404
+        rows = db.title_download_history(kind, library_id=item_id,
+                                         tmdb_id=detail.get("tmdb_id"))
+        return jsonify({"success": True, "history": rows})
+
     @bp.route("/detail/show/<int:show_id>", methods=["GET"])
     def video_show_detail(show_id):
         from . import get_video_db
