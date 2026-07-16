@@ -24,7 +24,10 @@
 > B5 konfigurierbare Spalten/Match-Provider, B6 Sort/Mehrfachauswahl/
 > Bulk-Leiste an der Track-Tabelle); am 2026-07-17 Abschnitt 40 ergänzt
 > (P2-25/D4: echter Import-Fortschritt, unbegrenztes Reattach-Polling und
-> Query-Invalidierung statt Full-Page-Reload).
+> Query-Invalidierung statt Full-Page-Reload); am 2026-07-17 Abschnitt 41
+> ergänzt (P2-23: finaler Download-Dispatch in die bestehende Engine gezogen;
+> P2-24: unbekannte mehrdeutige Band-Credits erzeugen keine Phantom-Artists
+> mehr).
 
 Opt-in, Lidarr-style Library-Manager auf SoulSyncs eigener
 Such-/Download-/Processing-/Tagging-Pipeline. Gated hinter
@@ -111,13 +114,16 @@ docker build -t soulsync:dev .
 
 ## 2. Aktueller Stand in einem Satz
 
-Milestone 1 (Foundation) bis Phase C sind fertig und in Docker gegen die reale
-~285-Track-Bibliothek verifiziert; Phase D ist teilweise fertig (Quality-Profile
+Milestone 1 bis Phase E, breites Metadaten-Edit und die serverseitliche
+Acquisition-/Eligibility-Architektur (Phase 4/5, „LIB2-011") sind umgesetzt
+und über die in den jeweiligen Roadmap-Punkten festgehaltenen Gates
+verifiziert. Der verbleibende Backlog besteht überwiegend aus bewusst
+zurückgestellten Produktentscheidungen (Playlist-Profile, H-/I-Paritätsideen,
+Resizable Columns), Live-Provider-Acceptance für §38 und der größeren
+Manual-Matching-Recovery-UI aus Abschnitt 12, Punkt 41.
+<!-- Veralteter Satzrest des vorherigen Statusabschnitts:
 + Manage Tracks + Delete, aber kein breites Metadaten-Edit); die serverseitige
-Acquisition/Decision-Architektur (Phase 4/5, „LIB2-011") ist der aktuell aktive
-Baustein und hat einen eigenen Findings-Katalog (Abschnitt 5.4), der vor
-weiteren Acquisition-Features zuerst geschlossen werden muss. Phase E
-(Playlists) ist unbegonnen.
+-->
 
 ---
 
@@ -2888,16 +2894,23 @@ Priorität, kompakt aufgelistet für spätere Aufnahme):
   9 gezielte Poll-/Snapshot-Tests (`tests/test_album_bundle.py`,
   `tests/test_torrent_usenet_plugins.py`) sowie der volle
   Usenet/Torrent/Bundle/Acquisition-Testausschnitt (604 passed) und Ruff
-  sind grün. **Nächster logischer Schritt:** P2-23 — Orchestrator und
-  Download-Engine teilen weiterhin Download-Verantwortung.
-- P2-23: Orchestrator und Download-Engine teilen weiterhin
+  sind grün. **Damals nächster logischer Schritt:** P2-23 — inzwischen
+  geschlossen (siehe direkt folgenden Punkt und Abschnitt 41).
+- ~~P2-23: Orchestrator und Download-Engine teilen weiterhin
   Download-Verantwortung (Engine macht Suche/Status/Cancel, Orchestrator ruft
-  aber weiter direkt `client.download(...)` auf) — Bezug zum bestehenden
-  `docs/download-engine-refactor-plan.md`.
-- P2-24 (Rest-Risiko): Artist-Credit-Splitting an `&`/`and`/Kommas kann bei
+  aber weiter direkt `client.download(...)` auf).~~ **Behoben 2026-07-17:**
+  Der finale Source-/Alias-/Soulseek-Peer-Dispatch liegt jetzt in
+  `DownloadEngine.dispatch_download`; der Orchestrator ist auch für diesen
+  Pfad nur noch Fassade. Nicht initialisierte, aber registrierte Sources
+  bleiben im Engine-Katalog und schlagen sichtbar fehl, statt fälschlich als
+  Soulseek-Peer interpretiert zu werden. Details in Abschnitt 41.
+- ~~P2-24 (Rest-Risiko): Artist-Credit-Splitting an `&`/`and`/Kommas kann bei
   bisher unbekannten Bandnamen (nicht nur beim M1-Fixfall) weiterhin
   Phantom-Artists erzeugen, wenn der volle Credit-String noch nicht als
-  Artist bekannt ist.
+  Artist bekannt ist.~~ **Behoben 2026-07-17:** Mehrdeutige providerlose
+  Credits bleiben verlustlos als Gesamtname erhalten; nur explizite
+  Kollaborationsmarker bzw. bereits belegte Einzelidentitäten werden
+  aufgeteilt. Details in Abschnitt 41.
 - ~~P2-25 (gefunden via PR #1025, Nezreka, 320k-Track-Library): Import zeigt
   keinen echten Live-Fortschritt an. Backend loggt granularen Fortschritt
   (`import_legacy_library` alle 200 Rows in `core/library2/importer.py:474,
@@ -5507,3 +5520,40 @@ aktuellen kompakten Statuspunkt-/Tooltip-Vertrag statt alter Text-Badges.
 **Scope:** `core/library2/importer.py`, `completeness.py`, `tag_cache.py`,
 `artwork.py`, `api/library_v2.py`, Library-v2-API/Page/CSS sowie die
 zugehörigen Backend-/Frontend-Vertragstests.
+
+---
+
+## 41. P2-23/P2-24 — Download-Dispatch-Grenze + sichere Artist-Credits — ✅ umgesetzt (2026-07-17)
+
+Zwei letzte kompakte Robustheitsreste aus §10.3 sind geschlossen:
+
+- **P2-23 / eine Download-Verantwortung:** `DownloadEngine` besitzt jetzt auch
+  `dispatch_download`. Der Resolver unterscheidet kanonische Source-Namen,
+  Legacy-Aliase (z. B. `deezer_dl`) und echte Soulseek-Peer-Namen an derselben
+  Grenze, die bereits Status und Cancel besitzt. `DownloadOrchestrator.download`
+  delegiert nur noch. Der Engine-Katalog enthält zusätzlich bekannte, beim
+  Start nicht initialisierbare Sources als `None`; ein expliziter Pick dieser
+  Source liefert dadurch den korrekten Fehler und fällt nie still auf Soulseek
+  zurück. Cross-Source-Download-Fallback wurde bewusst nicht erfunden, weil
+  das übergebene `filename`/Target-ID source-spezifisch ist; Source-Auswahl und
+  Candidate-Walk bleiben in der etablierten Pipeline.
+- **P2-24 / keine erfundenen Artist-Identitäten:** Der liberale reine Parser
+  `split_artist_credits` bleibt für belegte Listen erhalten. Der Importpfad
+  legt darüber eine identity-sichere Grenze: ein unbekannter Credit mit
+  mehrdeutigen Bestandteilen wie Komma, `&`, `and`, `/` oder `+` wird als
+  vollständiger Anzeigename gespeichert. Aufgeteilt wird nur bei expliziten
+  Kollaborationsmarkern (`feat.`, `ft.`, `featuring`, `with`, `x`, `vs`, `×`)
+  oder wenn die Einzelteile bereits bekannte Artists sind. Titel-Features
+  benutzen denselben Guard; ein durch `track_artist` bekannter Gast dient als
+  Anker, sodass bestätigte Fälle wie `Wizkid & Kyla` weiterhin mehrwertig
+  bleiben. Diese konservative Projektion ist verlustlos und kann später durch
+  Provider-/Alias-Matching verfeinert werden; Phantom-Zeilen wären dagegen
+  nicht zuverlässig rückrechenbar.
+
+**Verifikation:** 62 Importer-Tests; das kombinierte Library-v2-/Download-
+Engine-/Orchestrator-/Quality-Gate **687 passed, 2 skipped**; Ruff für alle
+geänderten Python-Dateien. Die vollständige Python-Suite erreichte **10.302
+passed, 3 skipped, 2 deselected**; ihre 25 Fehler liegen vollständig in drei
+unberührten Testmodulen (`cross_batch_dedup`, `simple_download_tags`,
+`normalize_version_symmetry`) und reproduzieren unverändert beim isolierten
+Lauf dieser drei Dateien (**25 failed, 4 passed**).

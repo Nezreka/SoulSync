@@ -693,7 +693,7 @@ oben — diese Tabelle ist eine Enumeration, kein Spec.
 - Manage-Tracks-Delete-Wünsche: ui-requirements §3.1/§3.2/§5.1 (durch C2
   konkretisiert).
 - ~~Import-Progress/Timeout: P2-25~~ umgesetzt in library-v2.md §40;
-  Artist-Credit-Splitting-Restrisiko: P2-24; Download-Engine-Verantwortung:
-  P2-23.
+  ~~Artist-Credit-Splitting-Restrisiko P2-24 + Download-Engine-Verantwortung
+  P2-23~~ umgesetzt in library-v2.md §41.
 - §40/§41 Alias-Registry-Folgearbeiten (Fan-out-Sweep, Merge-UI), §38-Rest
   (Live-Katalog-Fetch-Verifikation), §42 (laut ui-req §5.2 abgeschlossen).

@@ -1,26 +1,13 @@
-"""DownloadEngine — central owner of cross-source download state.
+"""DownloadEngine — central owner of cross-source download operations.
 
-Phase B scope: skeleton only. The engine exposes a place for
-plugins to register, a single ``active_downloads`` dict keyed by
-``(source, download_id)``, and per-source RLocks that guard mutations
-without serializing workers across different sources.
+The engine owns the live source catalog (including aliases/unavailable
+sources), active-download state, background workers, throttling, aggregate
+status/cancel operations, hybrid search and final source dispatch. Individual
+plugins retain source-specific protocol/authentication and their atomic
+search/download implementations.
 
-Subsequent phases bolt more capability on top:
-- ``dispatch_download(plugin, target_id)`` (Phase C — replaces every
-  client's ``_download_thread_worker`` boilerplate).
-- ``search(query, source_chain)`` (Phase D — replaces every client's
-  retry ladder + quality filter).
-- ``rate_limit.acquire(source)`` (Phase E — replaces every client's
-  semaphore + last-download-timestamp dance).
-- ``search_with_fallback`` / ``download_with_fallback`` (Phase F —
-  unifies hybrid mode across search and download).
-
-The engine is constructed by ``DownloadOrchestrator.__init__`` and
-each plugin from the registry is registered with it. In Phase B
-nothing in the existing code paths goes through the engine yet —
-this commit is pure additive scaffolding so subsequent commits can
-introduce engine-driven behavior one piece at a time without a
-big-bang switchover.
+``DownloadOrchestrator`` remains the compatibility facade and policy layer; it
+delegates source resolution and operational dispatch to this class.
 """
 
 from __future__ import annotations
@@ -96,7 +83,7 @@ class DownloadEngine:
     # Plugin registration
     # ------------------------------------------------------------------
 
-    def register_plugin(self, source_name: str, plugin: Any,
+    def register_plugin(self, source_name: str, plugin: Optional[Any],
                         aliases: Tuple[str, ...] = ()) -> None:
         """Register a plugin under its canonical source name. Called
         once per source by the orchestrator after the registry's
@@ -125,6 +112,13 @@ class DownloadEngine:
         self._plugins[source_name] = plugin
         for alias in aliases:
             self._aliases[alias] = source_name
+
+        # Keep failed/unavailable sources in the name+alias catalog. Dispatch
+        # can then fail loudly for an explicitly selected source instead of
+        # misclassifying its name as a Soulseek peer. Aggregate operations
+        # already skip ``None`` plugins.
+        if plugin is None:
+            return
 
         # Apply the plugin's rate-limit policy BEFORE set_engine so
         # set_engine callbacks can override per-source if they need
@@ -164,6 +158,39 @@ class DownloadEngine:
 
     def registered_sources(self) -> List[str]:
         return list(self._plugins.keys())
+
+    async def dispatch_download(
+        self,
+        username: str,
+        filename: str,
+        file_size: int = 0,
+        *,
+        default_source: str = "soulseek",
+    ) -> Optional[str]:
+        """Route one already-selected result to its owning plugin.
+
+        Streaming results encode their source (or a registered legacy alias)
+        in ``username``.  An unrecognized value is a real Soulseek peer name,
+        so it must fall back to ``default_source`` while remaining unchanged in
+        the plugin call.  Keeping this distinction at the registry-owning
+        engine boundary makes download dispatch, status and cancellation share
+        one source-resolution contract (Library-v2 roadmap P2-23).
+
+        This method deliberately does not perform source fallback: ``filename``
+        contains a source-specific target id.  Search/candidate selection has
+        already chosen the source, and trying that opaque id on a different
+        plugin would not be meaningful.
+        """
+        canonical = self._resolve_canonical(username) if username else None
+        source_name = canonical or default_source
+        plugin = self.get_plugin(source_name)
+        if plugin is None:
+            raise RuntimeError(
+                f"{source_name} download client not available (failed to initialize)"
+            )
+
+        logger.info("Dispatching download through %s: %s", source_name, filename)
+        return await plugin.download(username, filename, file_size)
 
     def _source_lock(self, source_name: str) -> threading.RLock:
         """Return the per-source RLock, lazy-creating it on first use.

@@ -34,6 +34,8 @@ def _mock_aggregate_plugins(orchestrator, method_name, soundcloud_result, other_
     with ExitStack() as stack:
         methods = {}
         for source_name, plugin in orchestrator.engine._plugins.items():
+            if plugin is None:
+                continue
             result = soundcloud_result if source_name == 'soundcloud' else other_result
             methods[source_name] = stack.enter_context(
                 patch.object(plugin, method_name, new=AsyncMock(return_value=result))
@@ -240,8 +242,21 @@ def test_soundcloud_only_mode_uses_soundcloud(orchestrator: DownloadOrchestrator
     async def _fake_search(query, timeout=None, progress_callback=None):
         return ([MagicMock(username='soundcloud')], [])
 
-    with patch.object(orchestrator.client('soundcloud'), 'search', side_effect=_fake_search) as mock_sc, \
-         patch.object(orchestrator.client('soulseek'), 'search', side_effect=AssertionError("soulseek must not be searched")):
+    with ExitStack() as stack:
+        mock_sc = stack.enter_context(
+            patch.object(
+                orchestrator.client('soundcloud'), 'search', side_effect=_fake_search
+            )
+        )
+        soulseek = orchestrator.client('soulseek')
+        if soulseek is not None:
+            stack.enter_context(
+                patch.object(
+                    soulseek,
+                    'search',
+                    side_effect=AssertionError("soulseek must not be searched"),
+                )
+            )
         tracks, _ = _run(orchestrator.search("any"))
 
     assert len(tracks) == 1

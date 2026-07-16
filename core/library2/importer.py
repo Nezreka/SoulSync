@@ -43,6 +43,13 @@ _FEAT_IN_TITLE_RE = re.compile(r"[\(\[]\s*(?:feat\.?|ft\.?|featuring|with)\s+([^
 # "Dancing With Myself"); only the parenthesized form above strips a "with" credit.
 _FEAT_TITLE_TAIL_RE = re.compile(r"\s+(?:featuring|feat|ft)\b\.?\s+\S.*$", re.IGNORECASE)
 _LIST_SEP_RE = re.compile(r"\s*(?:,|;|/|&|\bx\b|\band\b|\bvs\.?\b|×|\+)\s*", re.IGNORECASE)
+# These markers communicate a collaboration rather than merely looking like a
+# list.  Commas, ``&``, ``and``, ``/`` and ``+`` are intentionally absent:
+# they are also ordinary parts of providerless band names.
+_EXPLICIT_CREDIT_RE = re.compile(
+    r"\b(?:feat|ft|featuring|with)\b\.?|\s(?:x|vs\.?)\s|\s×\s",
+    re.IGNORECASE,
+)
 
 
 def normalize_name(name: str) -> str:
@@ -80,6 +87,62 @@ def featured_from_title(title: str) -> List[str]:
     names: List[str] = []
     for match in _FEAT_IN_TITLE_RE.finditer(title or ""):
         names.extend(split_artist_credits(match.group(1)))
+    return names
+
+
+def _credit_names_for_import(
+    raw: str,
+    known_name: Callable[[str], bool],
+    *,
+    split_with_known_anchor: bool = False,
+) -> List[str]:
+    """Resolve a flat legacy credit without inventing provider identities.
+
+    ``split_artist_credits`` remains the deliberately liberal syntax parser used
+    when the input is known to describe a list.  A legacy ``track_artist`` value
+    does not carry that guarantee: ``Earth, Wind & Fire`` and ``Hall & Oates``
+    are complete artist names, not three/two separate identities.  We therefore
+    split at ambiguous punctuation only when the complete credit or every
+    resulting component is already known.  Explicit collaboration markers
+    (``feat.``, ``x``, ``vs``...) retain the existing multi-artist behaviour.
+
+    Unknown ambiguous text is preserved losslessly as one credit.  A later
+    provider match or manual alias link can refine it; creating several phantom
+    artists cannot be reversed reliably from the source text alone (P2-24).
+    """
+    display = (raw or "").strip()
+    if not display:
+        return []
+    if known_name(display):
+        return [display]
+
+    pieces = split_artist_credits(display)
+    if len(pieces) <= 1:
+        return pieces
+    if _EXPLICIT_CREDIT_RE.search(display):
+        return pieces
+    if all(known_name(piece) for piece in pieces):
+        return pieces
+    if split_with_known_anchor and any(known_name(piece) for piece in pieces):
+        return pieces
+    return [display]
+
+
+def _featured_names_for_import(
+    title: str, known_name: Callable[[str], bool]
+) -> List[str]:
+    """Extract title credits through the same P2-24 identity guard."""
+    names: List[str] = []
+    for match in _FEAT_IN_TITLE_RE.finditer(title or ""):
+        # A title's ``feat.`` wrapper establishes that this is a guest-credit
+        # list.  One already known component is enough to disambiguate its
+        # conjunctions; with no known anchor we still preserve an unknown band
+        # name as a unit.
+        names.extend(
+            _credit_names_for_import(
+                match.group(1), known_name, split_with_known_anchor=True
+            )
+        )
     return names
 
 
@@ -1058,16 +1121,19 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
             credits: List[Tuple[int, str, int]] = []  # (artist_id, role, position)
             if primary_lib2 is not None:
                 credits.append((primary_lib2, "primary", 0))
-            # Band names legitimately contain the list separators ("Simon &
-            # Garfunkel", "Florence and the Machine") — when the FULL credit
-            # string is already a known artist, trust it over the split
-            # heuristic so we don't invent ghost artists.
             raw_credit = _pick(row, "track_artist") or ""
-            if raw_credit and resolver.known_name(raw_credit):
-                extra_names = [raw_credit.strip()]
-            else:
-                extra_names = split_artist_credits(raw_credit)
-            extra_names += featured_from_title(title)
+            extra_names = _credit_names_for_import(raw_credit, resolver.known_name)
+            planned_names = {normalize_name(name) for name in extra_names}
+
+            def _known_or_planned(
+                name: str, planned: Set[str] = planned_names
+            ) -> bool:
+                return resolver.known_name(name) or normalize_name(name) in planned
+
+            extra_names += _featured_names_for_import(
+                title,
+                _known_or_planned,
+            )
             pos = 1
             for nm in extra_names:
                 aid = resolver.get_or_create_by_name(nm)

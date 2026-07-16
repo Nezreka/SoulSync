@@ -1465,6 +1465,120 @@ def test_full_band_name_credit_is_not_split_into_ghost_artists(legacy_db):
     assert "Garfunkel" not in names
 
 
+@pytest.mark.parametrize(
+    ("credit", "ghost_names"),
+    [
+        ("Earth, Wind & Fire", {"Earth", "Wind", "Fire"}),
+        ("Florence and the Machine", {"Florence", "the Machine"}),
+        ("Hall & Oates", {"Hall", "Oates"}),
+    ],
+)
+def test_unknown_full_band_credit_is_preserved_without_ghost_artists(
+    legacy_db, credit, ghost_names
+):
+    """P2-24: an ambiguous, providerless credit is not evidence that every
+    comma/conjunction-delimited token is a separate artist.
+
+    The old M1 guard only worked when the full band already had its own legacy
+    artist row.  Guest bands can appear solely in ``track_artist``; preserve
+    that raw credit as one artist instead of inventing several identities.
+    """
+    conn = sqlite3.connect(legacy_db.path)
+    conn.execute("UPDATE tracks SET track_artist=? WHERE id=101", (credit,))
+    conn.commit()
+    conn.close()
+
+    import_legacy_library(legacy_db, reset=True)
+
+    conn = sqlite3.connect(legacy_db.path)
+    conn.row_factory = sqlite3.Row
+    names = {r["name"] for r in conn.execute("SELECT name FROM lib2_artists")}
+    credited = {
+        r["name"]
+        for r in conn.execute(
+            """SELECT a.name
+                 FROM lib2_track_artists ta
+                 JOIN lib2_artists a ON a.id=ta.artist_id
+                 JOIN lib2_tracks t ON t.id=ta.track_id
+                WHERE t.legacy_track_id=101"""
+        )
+    }
+    conn.close()
+
+    assert credit in names
+    assert credit in credited
+    assert names.isdisjoint(ghost_names)
+
+
+def test_unknown_band_in_title_feature_credit_is_preserved(legacy_db):
+    """The same P2-24 guard applies to credits extracted from a title."""
+    credit = "Earth, Wind & Fire"
+    conn = sqlite3.connect(legacy_db.path)
+    conn.execute(
+        "UPDATE tracks SET title=?, track_artist=NULL WHERE id=101",
+        (f"September (feat. {credit})",),
+    )
+    conn.commit()
+    conn.close()
+
+    import_legacy_library(legacy_db, reset=True)
+
+    conn = sqlite3.connect(legacy_db.path)
+    names = {r[0] for r in conn.execute("SELECT name FROM lib2_artists")}
+    conn.close()
+    assert credit in names
+    assert names.isdisjoint({"Earth", "Wind", "Fire"})
+
+
+def test_ambiguous_credit_splits_when_every_artist_is_already_known(legacy_db):
+    """Conservative P2-24 parsing must not discard corroborated junctions."""
+    conn = sqlite3.connect(legacy_db.path)
+    conn.execute(
+        "INSERT INTO artists VALUES(2,'Rihanna',NULL,NULL,NULL,NULL,NULL)"
+    )
+    conn.execute("UPDATE tracks SET track_artist='Drake & Rihanna' WHERE id=101")
+    conn.commit()
+    conn.close()
+
+    import_legacy_library(legacy_db, reset=True)
+
+    conn = sqlite3.connect(legacy_db.path)
+    credited = {
+        r[0]
+        for r in conn.execute(
+            """SELECT a.name
+                 FROM lib2_track_artists ta
+                 JOIN lib2_artists a ON a.id=ta.artist_id
+                 JOIN lib2_tracks t ON t.id=ta.track_id
+                WHERE t.legacy_track_id=101"""
+        )
+    }
+    names = {r[0] for r in conn.execute("SELECT name FROM lib2_artists")}
+    conn.close()
+    assert {"Drake", "Rihanna"} <= credited
+    assert "Drake & Rihanna" not in names
+
+
+def test_title_feature_list_splits_when_track_credit_supplies_a_known_anchor(legacy_db):
+    """P2-24 stays multi-artist aware when the flat legacy fields corroborate
+    one member of an otherwise ambiguous title-credit list."""
+    conn = sqlite3.connect(legacy_db.path)
+    conn.execute(
+        "UPDATE tracks SET title=?, track_artist=? WHERE id=100",
+        ("One Dance (feat. Wizkid & Kyla)", "Drake feat. Wizkid"),
+    )
+    conn.commit()
+    conn.close()
+
+    import_legacy_library(legacy_db, reset=True)
+
+    conn = sqlite3.connect(legacy_db.path)
+    names = {r[0] for r in conn.execute("SELECT name FROM lib2_artists")}
+    conn.close()
+    assert {"Drake", "Wizkid", "Kyla"} <= names
+    assert "Wizkid & Kyla" not in names
+
+
 def test_watchlist_artist_monitoring_is_independent_from_wishlist_tracks(legacy_db):
     conn = sqlite3.connect(legacy_db.path)
     conn.execute("""

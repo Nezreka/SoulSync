@@ -50,20 +50,19 @@ class DownloadOrchestrator:
         exists so tests can inject a registry with mock plugins; in
         production callers leave it None and get the default.
 
-        ``engine`` is the cross-source state owner. Phase B introduces
-        it as a held reference; it isn't on any code path yet — Phase
-        C/D/E/F migrate behavior into it incrementally.
+        ``engine`` is the cross-source operation/state owner. The orchestrator
+        keeps source-mode policy and compatibility methods, while search,
+        download dispatch, status and cancellation cross the engine boundary.
         """
         self.registry = registry if registry is not None else build_default_registry()
         self.registry.initialize()
         self._init_failures = self.registry.init_failures
 
-        # Engine — owns cross-source state, threading, search retry,
-        # rate-limits, fallback. Built in subsequent phases. For Phase
-        # B it's just an empty registry of plugins so future phases
-        # can route through it without further orchestrator changes.
+        # Engine — owns source resolution, cross-source state, threading,
+        # rate-limits and operational dispatch.
         self.engine = engine if engine is not None else DownloadEngine()
-        for source_name, plugin in self.registry.all_plugins():
+        for source_name in self.registry.names():
+            plugin = self.registry.get(source_name)
             spec = self.registry.get_spec(source_name)
             aliases = spec.aliases if spec else ()
             self.engine.register_plugin(source_name, plugin, aliases=aliases)
@@ -480,21 +479,7 @@ class DownloadOrchestrator:
                 f"(minimum {floor:.0f} GB). Free up space, or change the floor in "
                 f"Settings → Soulseek (min_free_disk_gb).")
 
-        # Streaming sources are dispatched by name match; anything
-        # unrecognized falls through to Soulseek (peer username case).
-        spec = self.registry.get_spec(username) if username else None
-        if spec is not None and spec.name != 'soulseek':
-            client = self.registry.get(spec.name)
-            if not client:
-                raise RuntimeError(f"{spec.display_name} download client not available (failed to initialize)")
-            logger.info(f"Downloading from {spec.display_name}: {filename}")
-            return await client.download(username, filename, file_size)
-
-        soulseek = self.registry.get('soulseek')
-        if not soulseek:
-            raise RuntimeError("Soulseek client not available (failed to initialize)")
-        logger.info(f"Downloading from Soulseek: {filename}")
-        return await soulseek.download(username, filename, file_size)
+        return await self.engine.dispatch_download(username, filename, file_size)
 
     async def get_all_downloads(self) -> List[DownloadStatus]:
         """Aggregated view across every source. Delegates to the
