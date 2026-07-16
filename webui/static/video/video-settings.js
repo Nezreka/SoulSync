@@ -451,11 +451,99 @@
     }
 
     // ── Video quality profile (resolution tiers + source/codec/HDR/size) ──
+    // ── named profiles (per-title assignment; arr-parity P2) ─────────────────
+    // The editor edits ONE profile at a time; the bar above it picks which.
+    // id 0 = Default (the classic single profile), >=1 = named profiles.
+    var _vqProfiles = [];
+    var _vqSelectedId = 0;
+
+    function _vqSelected() {
+        for (var i = 0; i < _vqProfiles.length; i++) {
+            if (_vqProfiles[i].id === _vqSelectedId) return _vqProfiles[i];
+        }
+        return _vqProfiles[0] || null;
+    }
+
+    function renderProfileBar() {
+        var sel = document.querySelector('[data-vq-profile-select]');
+        if (!sel) return;
+        sel.innerHTML = _vqProfiles.map(function (p) {
+            return '<option value="' + p.id + '"' + (p.id === _vqSelectedId ? ' selected' : '') + '>' +
+                String(p.name).replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</option>';
+        }).join('');
+        var named = _vqSelectedId > 0;
+        var nameIn = document.querySelector('[data-vq-profile-name]');
+        if (nameIn) {
+            nameIn.classList.toggle('hidden', !named);
+            if (named) nameIn.value = (_vqSelected() || {}).name || '';
+        }
+        var del = document.querySelector('[data-vq-profile-delete]');
+        if (del) del.classList.toggle('hidden', !named);
+    }
+
     function loadQuality() {
-        fetch(QUALITY_URL, { headers: { 'Accept': 'application/json' } })
+        fetch(QUALITY_URL + '/profiles', { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
-            .then(function (d) { if (d) { _videoQuality = d; renderQuality(); } })
+            .then(function (d) {
+                if (!d || !Array.isArray(d.profiles) || !d.profiles.length) return;
+                _vqProfiles = d.profiles;
+                var cur = _vqSelected();
+                _vqSelectedId = cur ? cur.id : 0;
+                _videoQuality = (cur || d.profiles[0]).profile;
+                renderProfileBar();
+                renderQuality();
+                wireProfileBar();
+            })
             .catch(function () { /* ignore */ });
+    }
+
+    function wireProfileBar() {
+        var sel = document.querySelector('[data-vq-profile-select]');
+        if (!sel || sel._vqWired) return;
+        sel._vqWired = true;
+        sel.addEventListener('change', function () {
+            _vqSelectedId = parseInt(sel.value, 10) || 0;
+            var cur = _vqSelected();
+            if (cur) { _videoQuality = cur.profile; renderProfileBar(); renderQuality(); }
+        });
+        var nameIn = document.querySelector('[data-vq-profile-name]');
+        if (nameIn) nameIn.addEventListener('change', function () { saveQuality(true); });
+        var nb = document.querySelector('[data-vq-profile-new]');
+        if (nb) nb.addEventListener('click', function () {
+            fetch(QUALITY_URL + '/profiles', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: 'New profile', profile: _videoQuality })
+            }).then(function (r) { return r.ok ? r.json() : null; })
+              .then(function (res) {
+                  if (!res || !res.success) throw new Error();
+                  _vqSelectedId = res.id;
+                  toast('Profile created — rename it, tweak it, then assign it from a title’s Manage panel', 'success');
+                  loadQuality();
+              })
+              .catch(function () { toast('Couldn’t create the profile', 'error'); });
+        });
+        var db = document.querySelector('[data-vq-profile-delete]');
+        if (db) db.addEventListener('click', function () {
+            if (_vqSelectedId <= 0) return;
+            var doDelete = function () {
+                fetch(QUALITY_URL + '/profiles/' + _vqSelectedId, { method: 'DELETE' })
+                    .then(function (r) { return r.ok ? r.json() : null; })
+                    .then(function (res) {
+                        if (!res || !res.success) throw new Error();
+                        _vqSelectedId = 0;
+                        toast('Profile deleted — titles using it fall back to Default', 'success');
+                        loadQuality();
+                    })
+                    .catch(function () { toast('Couldn’t delete the profile', 'error'); });
+            };
+            if (typeof showConfirmDialog === 'function') {
+                showConfirmDialog({
+                    title: 'Delete this quality profile?',
+                    message: 'Titles assigned to it will use the Default profile instead.',
+                    confirmText: 'Delete', destructive: true,
+                }).then(function (ok) { if (ok) doDelete(); });
+            } else { doDelete(); }
+        });
     }
 
     function _vqSizeLabel(id, v) {
@@ -539,6 +627,23 @@
 
     function saveQuality(silent) {
         if (!_videoQuality) return Promise.resolve();
+        if (_vqSelectedId > 0) {
+            // a NAMED profile — routed through the profiles endpoint (P2)
+            var nameIn = document.querySelector('[data-vq-profile-name]');
+            var cur = _vqSelected() || {};
+            return fetch(QUALITY_URL + '/profiles', {
+                method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                body: JSON.stringify({ id: _vqSelectedId,
+                                       name: (nameIn && nameIn.value.trim()) || cur.name || 'Unnamed profile',
+                                       profile: _videoQuality })
+            }).then(function (r) { return r.ok ? r.json() : null; })
+              .then(function (d) {
+                  if (d && d.profile) { _videoQuality = d.profile; cur.name = d.name; cur.profile = d.profile; }
+                  renderProfileBar();
+                  if (!silent) toast('Quality profile saved', 'success');
+              })
+              .catch(function () { /* ignore */ });
+        }
         return fetch(QUALITY_URL, {
             method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
             body: JSON.stringify(_videoQuality)

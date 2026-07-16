@@ -2287,6 +2287,15 @@ body[data-side="video"] #soulsync-toggle { display: none; }
    (.vwlp-*). The button is the video mirror of the music ya-watchlist-btn.
    ══════════════════════════════════════════════════════════════════════════ */
 
+/* Follow-time monitor menu (P2): what to wish when following a SHOW. */
+.vwl-menu { position: fixed; z-index: 10000; min-width: 280px; padding: 6px; border-radius: 12px;
+    background: rgba(18, 18, 24, 0.97); border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 0 18px 44px rgba(0, 0, 0, 0.55); backdrop-filter: blur(10px); }
+.vwl-menu-it { display: block; width: 100%; text-align: left; border: 0; background: transparent;
+    color: rgba(255, 255, 255, 0.82); font-size: 13px; padding: 9px 12px; border-radius: 8px; cursor: pointer; }
+.vwl-menu-it:hover { background: rgba(255, 255, 255, 0.09); color: #fff; }
+.vwl-menu-it--default { font-weight: 700; color: #fff; }
+
 /* Shared eye button — overlaid top-right on a show poster / person photo. */
 .vwl-btn {
     position: absolute; top: 8px; right: 8px; z-index: 4;

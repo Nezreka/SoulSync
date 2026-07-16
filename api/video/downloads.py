@@ -386,6 +386,46 @@ def register_routes(bp):
         body = request.get_json(silent=True) or {}
         return jsonify(save(get_video_db(), body))
 
+    # ── named quality profiles (per-title assignment; arr-parity P2) ─────────
+    @bp.route("/downloads/quality/profiles", methods=["GET"])
+    def video_quality_profiles_list():
+        """Every selectable profile, Default (id 0) first."""
+        from . import get_video_db
+        from core.video.quality_profile import list_profiles
+        return jsonify({"profiles": list_profiles(get_video_db())})
+
+    @bp.route("/downloads/quality/profiles", methods=["POST"])
+    def video_quality_profiles_save():
+        """Create (no id) or update (id) a named profile; id 0 = the Default."""
+        from . import get_video_db
+        from core.video.quality_profile import save_named
+        body = request.get_json(silent=True) or {}
+        entry = save_named(get_video_db(), body.get("id"), body.get("name"), body.get("profile"))
+        return jsonify({"success": True, **entry})
+
+    @bp.route("/downloads/quality/profiles/<int:profile_id>", methods=["DELETE"])
+    def video_quality_profiles_delete(profile_id):
+        """Remove a named profile. Titles pointing at it fall back to Default."""
+        from . import get_video_db
+        from core.video.quality_profile import delete_named
+        if not delete_named(get_video_db(), profile_id):
+            return jsonify({"success": False, "error": "Unknown profile (Default can't be deleted)."}), 404
+        return jsonify({"success": True})
+
+    @bp.route("/detail/<kind>/<int:library_id>/quality-profile", methods=["PUT"])
+    def video_title_quality_profile(kind, library_id):
+        """Assign a quality profile to an owned movie/show (0/null = Default).
+        The title's wishlist rows follow so in-flight wishes are judged the
+        same way."""
+        from . import get_video_db
+        if kind not in ("movie", "show"):
+            return jsonify({"success": False, "error": "kind must be movie|show"}), 400
+        body = request.get_json(silent=True) or {}
+        ok = get_video_db().set_title_quality_profile(kind, library_id, body.get("profile_id"))
+        if not ok:
+            return jsonify({"success": False, "error": "Title not found."}), 404
+        return jsonify({"success": True})
+
     @bp.route("/organization", methods=["GET"])
     def video_organization():
         """The library-organisation settings: naming templates + post-process toggles."""
@@ -412,6 +452,23 @@ def register_routes(bp):
         profile = load(get_video_db())
         return jsonify(evaluate_owned(body.get("file"), profile))
 
+    def _profile_for_request(db, src):
+        """The quality profile a get-modal search/grab should be judged under:
+        the title's own assignment (resolved from tmdb_id when the client sends
+        it) → else the Default profile (P2, per-title profiles)."""
+        from core.video.quality_profile import profile_by_id
+        pid = src.get("quality_profile_id")
+        if pid in (None, "", 0, "0"):
+            tmdb = src.get("tmdb_id") or src.get("media_id")
+            scope = str(src.get("scope") or src.get("kind") or "movie").lower()
+            kind = "movie" if scope == "movie" else "show"
+            if tmdb and str(src.get("media_source") or "tmdb") == "tmdb":
+                try:
+                    pid = db.quality_profile_id_for(kind, tmdb_id=int(tmdb))
+                except (TypeError, ValueError):
+                    pid = None
+        return profile_by_id(db, pid), pid
+
     @bp.route("/downloads/search", methods=["POST"])
     def video_downloads_search():
         """Search a scope (movie / episode / season / series) and return candidates
@@ -421,14 +478,13 @@ def register_routes(bp):
         Body: {scope, title, year?, season?, episode?, season_end?}."""
         from . import get_video_db
         from core.video.mock_search import mock_search
-        from core.video.quality_profile import load as load_profile
 
         body = request.get_json(silent=True) or {}
         scope = str(body.get("scope") or "movie").lower()
         title = body.get("title") or ""
         source = str(body.get("source") or "").lower()
         want_season, want_episode, season_end = _search_ints(body)
-        profile = load_profile(get_video_db())
+        profile, _pid = _profile_for_request(get_video_db(), body)
         live = False
         if source == "soulseek":
             from core.video.slskd_search import build_query, slskd_search
@@ -462,7 +518,6 @@ def register_routes(bp):
         like the music side) — fixes 'no results' from waiting too briefly."""
         from . import get_video_db
         from core.video.mock_search import mock_search
-        from core.video.quality_profile import load as load_profile
         body = request.get_json(silent=True) or {}
         scope = str(body.get("scope") or "movie").lower()
         title = body.get("title") or ""
@@ -482,7 +537,7 @@ def register_routes(bp):
             # how long the client should keep polling (slskd keeps searching this long).
             return jsonify({"id": res["id"], "live": True, "complete": False,
                             "poll_ms": search_timeout_ms() + 8000})
-        profile = load_profile(get_video_db())
+        profile, _pid = _profile_for_request(get_video_db(), body)
         if source in ("torrent", "usenet"):
             # Prowlarr is synchronous — like the old mock, results come back in one shot
             # (no polling id), so the client renders immediately.
@@ -506,14 +561,13 @@ def register_routes(bp):
         """Current ranked results for an in-flight slskd search. Query: id, scope,
         title, season?, episode?. The client polls until it stops growing or times out."""
         from . import get_video_db
-        from core.video.quality_profile import load as load_profile
         from core.video.slskd_search import poll_search
         sid = request.args.get("id")
         scope = str(request.args.get("scope") or "movie").lower()
         want_season, want_episode, _ = _search_ints(request.args)
         if not sid:
             return jsonify({"results": [], "live": True, "total_files": 0})
-        profile = load_profile(get_video_db())
+        profile, _pid = _profile_for_request(get_video_db(), request.args)
         polled = poll_search(sid)
         return jsonify({"live": True, "total_files": polled["total_files"],
                         "results": _evaluate_hits(polled["hits"], profile, scope, want_season, want_episode, want_year=request.args.get("year"), want_title=request.args.get("title"))})
@@ -563,6 +617,7 @@ def register_routes(bp):
         import json as _json
         from core.video.slskd_search import build_query
         ctx = body.get("search_ctx") if isinstance(body.get("search_ctx"), dict) else {}
+        _prof, _pid = _profile_for_request(db, body)
         common = {
             "kind": str(body.get("kind") or "movie"), "title": body.get("title"),
             "release_title": body.get("release_title") or body.get("filename") or body.get("title"),
@@ -571,6 +626,7 @@ def register_routes(bp):
             "media_id": (str(body.get("media_id")) if body.get("media_id") is not None else None),
             "media_source": body.get("media_source"), "year": body.get("year"),
             "poster_url": body.get("poster_url"), "search_ctx": _json.dumps(ctx), "attempts": 0,
+            "quality_profile_id": _pid,   # the profile this grab is judged under (P2)
         }
         if source == "soulseek":
             started = start_download(username, filename, body.get("size_bytes") or 0)

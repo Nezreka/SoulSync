@@ -973,7 +973,7 @@ def test_watchlist_add_check_list_remove_roundtrip(tmp_path):
     r = client.post("/api/video/watchlist/add", json={
         "kind": "show", "tmdb_id": 1399, "title": "Game of Thrones",
         "poster_url": "/p.jpg", "library_id": 7})
-    assert r.get_json() == {"success": True, "watched": True}
+    assert r.get_json() == {"success": True, "watched": True, "wished": 0}   # P2: follow reports the policy expansion
     client.post("/api/video/watchlist/add", json={
         "kind": "person", "tmdb_id": 287, "title": "Brad Pitt"})
 

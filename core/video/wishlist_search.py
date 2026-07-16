@@ -45,7 +45,9 @@ def _prepare(items: List[Dict[str, Any]], media_type: str) -> List[Dict[str, Any
     judging for owned rows, then de-dupe against active downloads AND other
     in-flight manual searches. Marks survivors in-flight (caller must _finish)."""
     if any(it.get("owned") for it in items):
-        items = vpw.annotate_upgrades(items, _cutoff_rank())
+        per_item = vpw._cutoff_rank_for_item if any(
+            it.get("quality_profile_id") for it in items) else None
+        items = vpw.annotate_upgrades(items, _cutoff_rank(), cutoff_for=per_item)
     active = set(vpw._default_active_keys(media_type) or set())
     todo = []
     with _lock:

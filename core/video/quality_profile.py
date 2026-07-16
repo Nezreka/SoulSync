@@ -163,7 +163,89 @@ def save(db, raw: Any) -> dict:
     return prof
 
 
+# ── named profiles (per-title assignment; arr-parity P2) ─────────────────────
+# The classic single profile stays exactly where it is ('quality_profile') and
+# is always profile id 0, "Default" — every existing reader keeps working.
+# EXTRA named profiles live in the schema's day-one ``quality_profiles`` TABLE
+# (movies/shows reference it by real FOREIGN KEY with ON DELETE SET NULL; the
+# migrated columns on video_wishlist/video_downloads are plain ints that
+# degrade via :func:`profile_by_id`). The table's ``items`` column holds the
+# FULL normalized profile blob as JSON.
+
+DEFAULT_PROFILE_ID = 0
+
+
+def list_profiles(db) -> list:
+    """Every selectable profile, Default first:
+    [{'id': 0, 'name': 'Default', 'profile': <the classic one>}, ...named]."""
+    out = [{"id": DEFAULT_PROFILE_ID, "name": "Default", "profile": load(db)}]
+    for row in db.named_quality_profiles():
+        out.append({"id": row["id"], "name": row["name"],
+                    "profile": _profile_from_row(row)})
+    return out
+
+
+def _profile_from_row(row: Any) -> dict:
+    try:
+        return normalize(json.loads(row["items"] or "{}"))
+    except (ValueError, TypeError, KeyError):
+        return default_profile()
+
+
+def profile_by_id(db, profile_id: Any) -> dict:
+    """The profile a title resolved to — Default for None/0/unknown ids, so a
+    deleted profile degrades safely instead of wedging acquisition."""
+    try:
+        pid = int(profile_id)
+    except (TypeError, ValueError):
+        return load(db)
+    if pid <= DEFAULT_PROFILE_ID:
+        return load(db)
+    row = db.get_named_quality_profile(pid)
+    return _profile_from_row(row) if row else load(db)
+
+
+def save_named(db, profile_id: Any, name: str, raw: Any) -> dict:
+    """Create (profile_id None) or update a named profile. id 0 routes to the
+    classic default. Returns the stored entry."""
+    if profile_id is not None and str(profile_id) in ("", "0"):
+        return {"id": DEFAULT_PROFILE_ID, "name": "Default", "profile": save(db, raw)}
+    prof = normalize(raw)
+    pid = db.upsert_named_quality_profile(
+        None if profile_id is None else int(profile_id),
+        name, json.dumps(prof), prof.get("cutoff_resolution") or None)
+    row = db.get_named_quality_profile(pid) if pid else None
+    if not row:
+        return {"id": DEFAULT_PROFILE_ID, "name": "Default", "profile": load(db)}
+    return {"id": row["id"], "name": row["name"], "profile": prof}
+
+
+def delete_named(db, profile_id: Any) -> bool:
+    """Remove a named profile. Owned titles are FK-cleared to Default by the
+    schema (ON DELETE SET NULL); wishlist/download rows degrade via
+    :func:`profile_by_id`. id 0 is undeletable."""
+    try:
+        pid = int(profile_id)
+    except (TypeError, ValueError):
+        return False
+    if pid <= DEFAULT_PROFILE_ID:
+        return False
+    return db.delete_named_quality_profile(pid)
+
+
+def load_for_item(db, item: Any) -> dict:
+    """The profile for a drain/RSS/manual-search item dict — honors the
+    ``quality_profile_id`` the wishlist queries annotate (COALESCEd from the
+    wishlist row and the library row), else Default."""
+    pid = None
+    if isinstance(item, dict):
+        pid = item.get("quality_profile_id")
+    return profile_by_id(db, pid)
+
+
 __all__ = [
     "TIERS", "REJECTS", "CODECS", "HDR_MODES", "AUDIO_MODES", "RESOLUTIONS",
-    "MAX_SIZE_CAP_GB", "default_profile", "normalize", "normalize_tiers", "load", "save",
+    "MAX_SIZE_CAP_GB", "DEFAULT_PROFILE_ID", "default_profile", "normalize",
+    "normalize_tiers", "load", "save", "list_profiles", "profile_by_id",
+    "save_named", "delete_named", "load_for_item",
 ]

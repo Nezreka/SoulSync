@@ -69,7 +69,10 @@ def register_routes(bp):
 
     @bp.route("/watchlist/add", methods=["POST"])
     def video_watchlist_add():
-        """Add a show/person. Body: {kind, tmdb_id, title, poster_url?, library_id?}."""
+        """Add a show/person. Body: {kind, tmdb_id, title, poster_url?, library_id?,
+        monitor?}. ``monitor`` (shows only; arr-parity P2) picks what to wish at
+        follow time: future (default) | all | first_season | latest_season | pilot —
+        back-catalog expansion is best-effort, the follow itself always lands."""
         from . import get_video_db
         body = request.get_json(silent=True) or {}
         kind = body.get("kind")
@@ -78,13 +81,31 @@ def register_routes(bp):
         if kind not in _KINDS or not tmdb_id or not title:
             return jsonify({"success": False, "error": "kind, tmdb_id and title are required"}), 400
         try:
-            ok = get_video_db().add_to_watchlist(
+            db = get_video_db()
+            ok = db.add_to_watchlist(
                 kind, int(tmdb_id), title,
                 poster_url=body.get("poster_url") or None,
                 library_id=body.get("library_id") or None)
             if not ok:
                 return jsonify({"success": False, "error": "Could not add to watchlist"}), 400
-            return jsonify({"success": True, "watched": True})
+            wished = 0
+            monitor = str(body.get("monitor") or "future").lower()
+            if kind == "show" and monitor != "future":
+                try:
+                    from datetime import date
+
+                    from core.video.enrichment.engine import get_video_enrichment_engine
+                    from core.video.monitor_policy import episodes_for_policy
+                    eps = episodes_for_policy(get_video_enrichment_engine(), int(tmdb_id),
+                                              monitor, date.today().isoformat())
+                    if eps:
+                        wished = db.add_episodes_to_wishlist(
+                            int(tmdb_id), title, eps,
+                            poster_url=body.get("poster_url") or None,
+                            library_id=body.get("library_id") or None)
+                except Exception:   # noqa: BLE001 - policy expansion must never sink the follow
+                    logger.exception("monitor policy expansion failed for %s", tmdb_id)
+            return jsonify({"success": True, "watched": True, "wished": wished})
         except Exception:
             logger.exception("Failed to add to video watchlist")
             return jsonify({"success": False, "error": "Failed"}), 500

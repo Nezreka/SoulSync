@@ -50,12 +50,22 @@ class QualityUpgradeJob(VideoRepairJob):
 
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
-        from core.video.quality_profile import load as load_profile
-        profile = load_profile(context.db)
-        cutoff = (profile or {}).get("cutoff_resolution") or ""
-        if not cutoff:
-            logger.info("quality_upgrade: no cutoff configured — nothing to judge")
+        from core.video.quality_profile import list_profiles, load as load_profile, profile_by_id
+        default_profile = load_profile(context.db)
+        # per-title profiles (P2): a title may have its own cutoff even when the
+        # Default has none — only bail early when NO profile anywhere has one
+        if not any((p.get("profile") or {}).get("cutoff_resolution")
+                   for p in list_profiles(context.db)):
+            logger.info("quality_upgrade: no cutoff configured on any profile — nothing to judge")
             return result
+        _prof_memo: dict = {}
+
+        def _profile_for_movie(movie_id):
+            pid = context.db.quality_profile_id_for("movie", library_id=movie_id) or 0
+            if pid not in _prof_memo:
+                _prof_memo[pid] = profile_by_id(context.db, pid) if pid else default_profile
+            return _prof_memo[pid]
+
         by_movie: dict = {}
         for r in context.db.repair_owned_movie_files():
             by_movie.setdefault(r["movie_id"], []).append(r)
@@ -66,7 +76,9 @@ class QualityUpgradeJob(VideoRepairJob):
             result.scanned += 1
             best = best_file(files)
             context.report(processed=i, current_item=best["title"])
-            if meets_cutoff(best.get("resolution"), profile):
+            profile = _profile_for_movie(movie_id)
+            cutoff = (profile or {}).get("cutoff_resolution") or ""
+            if not cutoff or meets_cutoff(best.get("resolution"), profile):
                 continue
             label = resolution_label(best.get("resolution")) or best.get("resolution") or "unknown"
             entity_id = f"{movie_id}:{resolution_rank(best.get('resolution'))}"

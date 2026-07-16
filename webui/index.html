@@ -7085,7 +7085,15 @@
                             <div class="settings-section-body collapsed" data-stg="quality" data-video-only>
                             <div class="settings-group" data-stg="quality" data-video-only>
                                 <div class="setting-help-text">
-                                    One profile for every video source (slskd · torrent · usenet). Quality is read from the release name — pick the ladder you'll accept, where to stop upgrading, what to reject outright, then the soft tie-breakers.
+                                    Profiles apply <strong>per title</strong>: everything uses <strong>Default</strong> unless you assign another profile from a movie/show's Manage panel. Quality is read from the release name — pick the ladder you'll accept, where to stop upgrading, what to reject outright, then the soft tie-breakers.
+                                </div>
+                                <div class="form-group" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                                    <select class="library-source-filter-select" data-vq-profile-select title="Which profile you're editing">
+                                        <option value="0">Default</option>
+                                    </select>
+                                    <input type="text" class="hidden" data-vq-profile-name placeholder="Profile name" style="max-width:180px;">
+                                    <button class="test-button" type="button" data-vq-profile-new title="Duplicate what's on screen as a new named profile">+ New profile</button>
+                                    <button class="test-button hidden" type="button" data-vq-profile-delete style="background:#663333;">Delete</button>
                                 </div>
                                 <div class="vq-block">
                                     <div class="vq-label">Quality ladder <span class="vq-hint">toggle what you'll accept · rank best&rarr;worst with the arrows</span></div>

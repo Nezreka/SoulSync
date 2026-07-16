@@ -134,7 +134,9 @@ def _rss_pass_inner(*, fetch, log) -> Dict[str, Any]:
     for media_type, items in (("movie", db.movie_wishlist_to_download()),
                               ("episode", db.episode_wishlist_to_download())):
         if any(it.get("owned") for it in items):
-            items = vpw.annotate_upgrades(items, cutoff)
+            per_item = vpw._cutoff_rank_for_item if any(
+                it.get("quality_profile_id") for it in items) else None
+            items = vpw.annotate_upgrades(items, cutoff, cutoff_for=per_item)
         target = vpw._default_target_dir(media_type)
         if not target:
             continue
@@ -167,9 +169,9 @@ def _rank(pool: List[Dict[str, Any]], item: Dict[str, Any], media_type: str) -> 
     from api.video import get_video_db
     from api.video.downloads import _evaluate_hits
     from core.automation.handlers.video_process_wishlist import search_context
-    from core.video.quality_profile import load as load_profile
+    from core.video.quality_profile import load_for_item
     ctx = search_context(item, media_type)
-    cands = _evaluate_hits(pool, load_profile(get_video_db()), ctx["scope"],
+    cands = _evaluate_hits(pool, load_for_item(get_video_db(), item), ctx["scope"],
                            ctx.get("season"), ctx.get("episode"),
                            want_year=ctx.get("year"),
                            want_title=ctx.get("titles") or ctx.get("title"),
