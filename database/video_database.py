@@ -209,6 +209,10 @@ _COLUMN_MIGRATIONS = [
     ("shows", "airs_time", "TEXT"),   # TVDB show air time, e.g. "21:00" (network local)
     ("video_watchlist", "state", "TEXT NOT NULL DEFAULT 'follow'"),  # follow | mute (tombstone)
     ("video_wishlist", "release_date", "TEXT"),   # movie release date — gate: don't search until near release
+    # live transfer telemetry (slskd averageSpeed / torrent client dlspeed+eta),
+    # refreshed by the monitor each poll while a row is downloading
+    ("video_downloads", "speed_bps", "INTEGER"),
+    ("video_downloads", "eta_seconds", "INTEGER"),
     ("video_watchlist", "lookback_years", "INTEGER"),   # per-person back-catalog window: NULL/0=forward-only, N=years, -1=everything
     ("video_wishlist", "still_url", "TEXT"),   # episode still thumbnail (captured at add time)
     ("video_wishlist", "season_poster_url", "TEXT"),   # the episode's season poster

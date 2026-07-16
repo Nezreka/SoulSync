@@ -1,9 +1,10 @@
 """Background monitor that drives video downloads to completion.
 
-A daemon thread polls slskd for the active video downloads, updates their progress,
-and when one finishes MOVES the file from the shared download folder into the right
-per-type library folder (Movies / TV / YouTube) and marks it completed. Simple v1:
-slskd source only, flat move by basename.
+A daemon thread polls the active video downloads — slskd transfers AND
+torrent/usenet client jobs (``client_download``) — updates their progress +
+live speed/ETA, and when one finishes runs the importer (parse → verify →
+templated rename into the right Movies / TV / YouTube library folder), with
+auto-retry through the ranked candidates and requery when they run dry.
 
 The per-download decision (``process_download``) is pure — filesystem + slskd are
 injected — so it's unit-tested; the thread loop is thin glue.
@@ -24,6 +25,7 @@ from utils.logging_config import get_logger
 from core.video.download_pipeline import dest_path_for, find_completed_file
 from core.video.slskd_download import (
     classify_state,
+    eta_seconds,
     find_transfer,
     list_downloads,
     progress_pct,
@@ -76,9 +78,10 @@ def process_download(dl: dict, transfers: list, download_dir: str, *, lister, mo
         return {"_missing": True}
     state = classify_state(t.get("state"))
     if state == "queued":
-        return {"status": "queued", "progress": progress_pct(t)}
+        return {"status": "queued", "progress": progress_pct(t), "speed_bps": 0, "eta_seconds": None}
     if state == "active":
-        return {"status": "downloading", "progress": progress_pct(t)}
+        return {"status": "downloading", "progress": progress_pct(t),
+                "speed_bps": int(t.get("speed") or 0), "eta_seconds": eta_seconds(t)}
     if state == "cancelled":
         return {"status": "cancelled", "error": "Cancelled on Soulseek"}
     if state == "failed":

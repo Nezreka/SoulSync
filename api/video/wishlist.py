@@ -1,8 +1,10 @@
 """Video wishlist API — the curated 'get this' list (movies + episodes).
 
 Atomic units are movies and episodes; adding a whole show or a season just hands
-us the explicit episodes to expand into rows. v1 manages membership + the tabbed
-Movies/TV page; the search/download engine that fulfils a wish is a later phase.
+us the explicit episodes to expand into rows. Manages membership + the tabbed
+Movies/TV page, the live-state annotations (downloading / upgrade watch), and
+manual acquisition ('Search now' / 'Search all missing' via
+``core/video/wishlist_search``); the hourly drain does the rest.
 Reads/writes only video_library.db via the shared VideoDatabase.
 """
 

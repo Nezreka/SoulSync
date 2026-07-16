@@ -107,7 +107,8 @@ def test_process_download_active_reports_progress():
     from core.video.download_monitor import process_download
     upd = process_download(_dl(), [_xfer("InProgress")], "/dl",
                            lister=lambda d: [], mover=lambda s, d: None)
-    assert upd == {"status": "downloading", "progress": 40.0}
+    assert upd["status"] == "downloading" and upd["progress"] == 40.0
+    assert "speed_bps" in upd and "eta_seconds" in upd   # live telemetry rides the patch
 
 
 def test_process_download_queued_reports_queued():
