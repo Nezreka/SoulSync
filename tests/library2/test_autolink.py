@@ -99,6 +99,34 @@ def test_new_autolink_artist_uses_live_default_profile(lib2_enabled, imported_co
     assert profile_id == 2
 
 
+def test_autolink_projects_wanted_state_under_the_live_default_profile(
+        lib2_enabled, imported_conn):
+    """G8: the pipeline has no request-scoped profile, so recompute_wanted
+    must resolve the live default profile the same way artist/album/track
+    creation already does — never hardcode profile_id=1 (§1 invariant),
+    which would silently orphan the wanted row once profile 1 is deleted."""
+    conn = lib2_enabled._get_connection()
+    try:
+        conn.execute("UPDATE quality_profiles SET is_default=0")
+        conn.execute("UPDATE quality_profiles SET is_default=1 WHERE id=2")
+        for table in ("lib2_artists", "lib2_albums", "lib2_tracks"):
+            conn.execute(f"UPDATE {table} SET quality_profile_id=2 WHERE quality_profile_id=1")
+        conn.execute("DELETE FROM quality_profiles WHERE id=1")
+        conn.commit()
+    finally:
+        conn.close()
+
+    file_id = A.link_download_into_library_v2(_context())
+    assert file_id is not None
+
+    row = imported_conn.execute(
+        """SELECT wt.profile_id FROM lib2_wanted_tracks wt
+             JOIN lib2_track_files tf ON tf.track_id = wt.track_id
+            WHERE tf.id = ?""", (file_id,),
+    ).fetchone()
+    assert row["profile_id"] == 2
+
+
 def test_attaches_file_to_materialized_missing_track(lib2_enabled, imported_conn):
     """A fileless provider-tracklist row (wanted/missing) gains the file instead
     of a duplicate track being created."""

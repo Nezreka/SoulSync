@@ -214,7 +214,7 @@ Toggle, Edit/Delete); Album-Zeilen auf der Artist-Seite haben **2–3 Icons**
 (Tabs), nicht als Icon-Batterie an jeder Zeile. Tabellen haben einen
 „Options"-Zahnrad für Spalten-Konfiguration.
 
-### B1. Album-Zeile: 10 Icon-Buttons → Ziel 3–4 + Overflow-Menü
+### B1. Album-Zeile: 10 Icon-Buttons → Ziel 3–4 + Overflow-Menü — ✅ behoben (siehe library-v2.md §30)
 
 Aktuell (`library-v2-page.tsx:3401–3459`): Open Detail, Automatic Search,
 Interactive Search, Preview Retag, ReplayGain, Reorganize, Change Cover,
@@ -227,7 +227,7 @@ Enrich, Album Details, Delete. Vorschlag:
 | „…"-Overflow-Menü | Preview Retag, Reorganize, Change Cover, Enrich, Delete → ins Overflow-Menü |
 | | „Album Details"(Edit-Icon)-Modal mit dem Overflow bzw. der Detail-Ansicht zusammenführen (zwei konkurrierende „Details"-Konzepte an einer Zeile verwirren) |
 
-### B2. Album-Detail-Ansicht (Deep-Link) verliert fast alle Album-Funktionen
+### B2. Album-Detail-Ansicht (Deep-Link) verliert fast alle Album-Funktionen — ✅ behoben (siehe library-v2.md §30)
 
 `AlbumDetailView` (`:2542–2682`) bietet nur Edit-Metadata + Track-Tabelle.
 Retag, ReplayGain, Reorganize, Cover-Picker, Enrich, Quality-Profil, Delete,
@@ -256,7 +256,7 @@ Nutzer-Wunsch + Button-Ersparnis:
 - Gleiches Muster perspektivisch für Album-Scope (Album-RG-Button → Badge im
   Album-Kopf), dann verschwindet noch ein Zeilen-Button.
 
-### B4. Artist-Toolbar: 16 Aktionen → gruppieren, globale Aktionen raus aus dem Artist-Kontext
+### B4. Artist-Toolbar: 16 Aktionen → gruppieren, globale Aktionen raus aus dem Artist-Kontext — ✅ behoben (siehe library-v2.md §30; Punkt 4's optionale Edit/Monitoring/Profile-Tab-Zusammenlegung bewusst nicht gemacht, siehe dort)
 
 Aktuell (`:2888–3003`): Refresh & Scan, Automatic Search (global!),
 Interactive Search, Update Discography, Search Upgrades (global!), Preview
@@ -313,7 +313,7 @@ Metadata, Actions — **nicht sortierbar, keine Auswahl, kein Bulk**.
 - Duration/BPM/File-Pfad als opt-in Spalten (B5). Damit ist die
   Enhanced-View-Spalten-Parity komplett.
 
-### B7. Suche: Benennung & Scope endgültig Lidarr-konform machen (Zusammenführung)
+### B7. Suche: Benennung & Scope endgültig Lidarr-konform machen (Zusammenführung) — ✅ behoben (siehe library-v2.md §30)
 
 Zielbild nach C1 (ergänzt §25.1 um die Upgrade-Frage, die dort offen blieb):
 - **Automatic Search** (Artist/Album/Track) = scoped: sucht Missing **und**
@@ -351,7 +351,7 @@ Reuse-first, keine zweite Pipeline:
    Acquisition-Korrelation (`scheduled_grab_correlated`) → History (A6) wird
    automatisch reicher.
 
-### C2. Manage Tracks → Lidarr „Manage Track Files"
+### C2. Manage Tracks → Lidarr „Manage Track Files" — ✅ behoben (siehe library-v2.md §30)
 
 Heute: nur Single↔Album-Duplikat-Paare (`/artists/<id>/duplicates`).
 Lidarr-Modell: Liste **aller Track-Files** (Pfad relativ, Größe, Quality,
@@ -434,22 +434,26 @@ A7 für nicht-acquisition-korrelierte Downloads (der Normalfall heute) leer.
    Invalidierung)** und **G5 (has_lyrics vs. unsyncedlyrics)** — kleine,
    gezielte Fixes; G6 (falsche Fußnote) nebenbei.~~
 
-**Dann Architektur/UX:** — ✅ Punkte 5–7 (bis auf B7-Rest/I10/I6/H13, s.u.)
-+ A8/A9 aus Punkt 11 behoben 2026-07-16, siehe library-v2.md §29.
+**Dann Architektur/UX:** — ✅ Punkte 5–8 + 11 (bis auf H5/I10/I6/H13, s.u.)
++ A8/A9 aus Punkt 11 behoben 2026-07-16, siehe library-v2.md §29/§30.
 5. ~~**C1 (scoped Automatic Search)** — größter Verständnis-Gewinn, ersetzt
-   A3/A4 gleich mit.~~ **B7** (Search-Upgrades-Button-Konsolidierung auf der
-   Artist-Toolbar) und **I10** („search on monitor") sind durch C1 jetzt
-   trivial nachziehbar, aber noch nicht umgesetzt — reine UI-Verdrahtung,
-   kein neues Backend nötig.
+   A3/A4 gleich mit.~~ ~~**B7** (Search-Upgrades-Button-Konsolidierung auf
+   der Artist-Toolbar)~~ behoben 2026-07-16 (§30). **I10** („search on
+   monitor") ist durch C1 jetzt trivial nachziehbar, aber noch nicht
+   umgesetzt — reine UI-Verdrahtung, kein neues Backend nötig; bleibt ein
+   I-Punkt (Nutzer-Abstimmung vor Umsetzung).
 6. ~~**G7 (Reorganize-Queue-Status)**~~ — **I6** (Queue-Sichtbarkeit direkt an
    der Album-/Track-Zeile, nicht nur im Reorganize-Modal) und **H13**
    (identisch mit G7, Legacy-Referenz) bleiben offen — I/H-Punkte brauchen
    erst Nutzer-Abstimmung zu Scope/UI-Ansatz (siehe Hinweis oben).
 7. ~~**B3 (klickbare RG/LR-Badges)** + **A5 (BPM/Duration)**~~ — sichtbare
    Quick-Wins, gespart wurde der separate ReplayGain-Button.
-8. **B1 + B2 + B4 (Entrümpelung Zeile/Toolbar/Detail-Ansicht)** — nach C1, da
-   sich die Button-Menge jetzt geändert hat (Automatic Search ist
-   album-/artist-scoped, „Change Photo" ist neu dazugekommen); noch offen.
+8. ~~**B1 + B2 + B4 (Entrümpelung Zeile/Toolbar/Detail-Ansicht)**~~ behoben
+   2026-07-16 (§30) — neues generisches Overflow-Menü-Muster, Albumtitel als
+   Detail-Link, `AlbumOverflowMenu` jetzt auch im Detail-Header (B2), Artist-
+   Toolbar in Primär-/Tools-Dropdown-/Entity-Gruppen (B4). Die im Deep-Dive
+   als „ggf." markierte Edit/Monitoring/Profile-Tab-Zusammenlegung wurde
+   bewusst NICHT gemacht (optional, keine belastbare Notwendigkeit).
 9. **A6/C3 + A7/C4 (History + Lifecycle)** — hoher Nutzerwert, bewusst
    zurückgestellt: `acquisition_requests.scope` (`recording`/`release_group`/
    `release_edition`/`artist_missing`/`upgrade`) ist nicht 1:1 Artist/Album/
@@ -460,8 +464,11 @@ A7 für nicht-acquisition-korrelierte Downloads (der Normalfall heute) leer.
 10. **B5/B6 (konfigurierbare Spalten/Provider, Sort, Bulk)** + **H6/H7/H8**
     (Filter/Inline-Edit/Bulk-Bar) — ein zusammenhängender Tabellen-Block;
     A8 (Provider-Filter) ist als Übergangslösung schon per Default umgesetzt,
-    B5 selbst (der Options-Zahnrad/Opt-in „alle zeigen") bleibt offen.
-11. **C2 (Manage Track Files)** + **H5 (Track-Delete)** + ~~A8/A9~~.
+    B5 selbst (der Options-Zahnrad/Opt-in „alle zeigen") bleibt offen. Größter
+    verbleibender Block aus diesem Dokument.
+11. ~~**C2 (Manage Track Files)**~~ behoben 2026-07-16 (§30, inkl. optionalem
+    `file_ids`-Scope auf den bestehenden ADR-05-Endpoints) + **H5**
+    (Track-Delete in der Tabelle) bleibt offen (H-Punkt) + ~~A8/A9~~.
 12. **Strategisch klären, dann bauen:** I1 (Add Artist), I2 (Wanted-Views),
     I4 (Metadata Profile), H1 (Playback), H3 (Discography-Batch-Download),
     H9 (Multi-User-Frage von lib2).
@@ -553,25 +560,32 @@ gemoved wurden, sieht man nur indirekt. Fix: das bestehende
 Queue-Status-API wiederverwenden (dünner Read reicht — Panel oder
 Status-Zeile im Modal mit Poll bis Queue leer).
 
-### G8. Kleinere Runde-2-Funde (gesammelt)
+### G8. Kleinere Runde-2-Funde (gesammelt) — 3 von 4 behoben (siehe library-v2.md §30)
 
 - **`auto_monitor_releases` überfährt Flags:** `UPDATE lib2_tracks SET
   monitored=1 WHERE album_id=?` (`discography.py:522`) flippt auch explizit
   unmonitorte Tracks (nur das Kompatibilitäts-Flag; die Projektion respektiert
   die `user_explicit`-Rule — aber Flag und Projektion divergieren dann
-  sichtbar).
+  sichtbar). — ✅ behoben: veto per `explicitly_unmonitored_track_ids`.
 - **Retry-/Prune-Scope-Asymmetrie:** der Auto-Monitor-Retry
   (`discography.py:267–282`) filtert auf `primary_artist_id`, Index/Prune
   laufen über die `lib2_album_artists`-Junction — ein Album, dessen Primary
-  ein anderer Artist ist, wird nie retried.
+  ein anderer Artist ist, wird nie retried. — ✅ behoben: Retry-Query joint
+  jetzt ebenfalls über die Junction.
 - **Autolink → `recompute_wanted` mit Default-Profil 1**
   (`autolink.py:279`): verletzt die §1-Invariante „Profil-IDs nie hart auf 1"
   (im Pipeline-Kontext gibt es kein Request-Profil; sauber wäre der
-  Admin-/Default-Lookup wie überall sonst).
+  Admin-/Default-Lookup wie überall sonst). — ✅ behoben:
+  `default_quality_profile_id(conn)`.
 - **`_find_or_create_artist`-Slow-Path** (`autolink.py:62`) scannt bei jedem
   nicht-exakten Treffer die GANZE Artist-Tabelle pro fertigem Download —
   bei großen Libraries messbar; und er kennt weder `external_ids` noch die
-  §40-Alias-Gruppen (Duplikat-Artist-Risiko, deckt sich mit §40).
+  §40-Alias-Gruppen (Duplikat-Artist-Risiko, deckt sich mit §40). —
+  **weiterhin offen**: anders als die drei obigen hat dieser Punkt keine
+  konkrete Fix-Richtung hier im Dokument; ein Alias-Match-Fix ohne eigene
+  Recherche riskiert genau die Fehlzuordnung, vor der A6/A7 schon
+  zurückschrecken ließ (siehe §29-Begründung). Braucht denselben
+  fokussierten Recherche-Schritt wie C3/C4, bevor Code entsteht.
 - **Track-Automatic-Search-Query ohne Albumkontext:**
   `buildSearchQuery` wirft den Album-Teil bewusst weg — bei generischen
   Titeln („Intro") grabbt der Best-Pick beliebige Versionen. Wird durch C1

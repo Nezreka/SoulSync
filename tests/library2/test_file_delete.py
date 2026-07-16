@@ -119,6 +119,56 @@ def test_preview_groups_duplicate_rows_for_one_physical_path(
     assert preview["file_count"] == 1
 
 
+def test_preview_and_delete_scope_to_selected_file_ids(imported_conn, legacy_db, tmp_path):
+    """C2: Manage Track Files bulk-delete narrows the whole-entity ADR-05
+    scope to a caller-selected subset — everything else about the preview
+    contract stays identical, and unselected files are left untouched."""
+    root = tmp_path / "music"
+    root.mkdir()
+    keep = root / "keep.flac"
+    keep.write_bytes(b"keep")
+    drop = root / "drop.flac"
+    drop.write_bytes(b"drop")
+    tracks = imported_conn.execute(
+        "SELECT id, album_id FROM lib2_tracks ORDER BY id LIMIT 2"
+    ).fetchall()
+    keep_id = _set_track_path(imported_conn, tracks[0]["id"], keep)
+    drop_id = _set_track_path(imported_conn, tracks[1]["id"], drop)
+    album_id = tracks[0]["album_id"]
+    imported_conn.execute(
+        "UPDATE lib2_tracks SET album_id=? WHERE id=?", (album_id, tracks[1]["id"])
+    )
+    imported_conn.commit()
+    config = _Config([str(root)])
+
+    scoped_preview = preview_entity_files(
+        legacy_db, entity="albums", entity_id=album_id, file_ids=[keep_id],
+        config_manager=config,
+    )
+    assert scoped_preview["file_count"] == 1
+    assert scoped_preview["files"][0]["file_ids"] == [keep_id]
+
+    operation = delete_entity_files(
+        legacy_db,
+        entity="albums",
+        entity_id=album_id,
+        preview_token=scoped_preview["preview_token"],
+        file_ids=[keep_id],
+        config_manager=config,
+        unlink=lambda resolved: Path(resolved).unlink(),
+    )
+
+    assert operation["status"] == "completed"
+    assert not keep.exists()
+    assert drop.exists()
+    assert imported_conn.execute(
+        "SELECT file_state FROM lib2_track_files WHERE id=?", (keep_id,)
+    ).fetchone()["file_state"] == "deleted"
+    assert imported_conn.execute(
+        "SELECT file_state FROM lib2_track_files WHERE id=?", (drop_id,)
+    ).fetchone()["file_state"] != "deleted"
+
+
 def test_preview_missing_entity_is_controlled(imported_conn, legacy_db):
     with pytest.raises(FileDeleteError) as exc:
         preview_entity_files(legacy_db, entity="albums", entity_id=999999)

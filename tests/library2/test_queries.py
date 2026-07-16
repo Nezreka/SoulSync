@@ -59,6 +59,60 @@ def test_list_artists_stats(imported_conn):
     assert by_name["Wizkid"]["track_count"] == 1
 
 
+def test_list_artist_track_files_scopes_paginates_and_excludes_deleted(imported_conn):
+    """C2 (Manage Track Files): a flat, paginated per-artist file list that
+    mirrors ADR-05's own artist scope (primary_artist_id, non-deleted)."""
+    artist_id = imported_conn.execute(
+        "INSERT INTO lib2_artists(name) VALUES('File List Artist')"
+    ).lastrowid
+    album_id = imported_conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title) VALUES(?, 'File List Album')",
+        (artist_id,),
+    ).lastrowid
+    imported_conn.execute(
+        "INSERT INTO lib2_album_artists(album_id, artist_id) VALUES(?, ?)",
+        (album_id, artist_id),
+    )
+    track_ids = []
+    for n in range(1, 4):
+        track_id = imported_conn.execute(
+            "INSERT INTO lib2_tracks(album_id, title, track_number) VALUES(?, ?, ?)",
+            (album_id, f"Track {n}", n),
+        ).lastrowid
+        track_ids.append(track_id)
+        imported_conn.execute(
+            "INSERT INTO lib2_track_files(track_id, path, size, format, quality_tier, "
+            "file_state, is_primary) VALUES(?, ?, ?, 'flac', 'lossless', 'active', 1)",
+            (track_id, f"/music/track{n}.flac", 1000 * n),
+        )
+    # A soft-deleted file must never surface in the list.
+    imported_conn.execute(
+        "INSERT INTO lib2_track_files(track_id, path, size, format, quality_tier, file_state) "
+        "VALUES(?, '/music/gone.flac', 1, 'flac', 'lossless', 'deleted')",
+        (track_ids[0],),
+    )
+    imported_conn.commit()
+
+    all_files, total = Q.list_artist_track_files(imported_conn, artist_id, limit=500)
+    assert total == 3
+    assert {f["path"] for f in all_files} == {
+        "/music/track1.flac", "/music/track2.flac", "/music/track3.flac",
+    }
+
+    page1, total_page1 = Q.list_artist_track_files(imported_conn, artist_id, page=1, limit=2)
+    page2, total_page2 = Q.list_artist_track_files(imported_conn, artist_id, page=2, limit=2)
+    assert total_page1 == total_page2 == 3
+    assert len(page1) == 2
+    assert len(page2) == 1
+    assert {f["file_id"] for f in page1} | {f["file_id"] for f in page2} == \
+        {f["file_id"] for f in all_files}
+
+    filtered, filtered_total = Q.list_artist_track_files(
+        imported_conn, artist_id, search="Track 2")
+    assert filtered_total == 1
+    assert filtered[0]["track_title"] == "Track 2"
+
+
 def test_artist_index_and_detail_query_counts_do_not_scale_with_rows(imported_conn):
     def select_count(call):
         statements = []

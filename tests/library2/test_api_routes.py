@@ -1559,6 +1559,91 @@ def test_physical_file_delete_preview_is_separate_and_root_safe(api, tmp_path, m
         ).fetchone()
 
 
+def test_track_files_endpoint_lists_every_owned_file_paginated(api):
+    """C2: Manage Track Files "Files" tab — flat, paginated list of every
+    physical file this artist owns, independent of the duplicates endpoint."""
+    client, db, ids = api
+    with _conn(db) as conn:
+        conn.execute(
+            "INSERT INTO lib2_track_files(track_id, path, format, bitrate) "
+            "VALUES(?, '/m/ep-song.flac', 'flac', 900)", (ids["ep_track"],))
+        conn.commit()
+
+    resp = client.get(f"/api/library/v2/artists/{ids['artist']}/track-files").get_json()
+    assert resp["success"] is True
+    assert {f["path"] for f in resp["files"]} == {"/m/one-dance.flac", "/m/ep-song.flac"}
+    assert resp["pagination"]["total_count"] == 2
+
+    paged = client.get(
+        f"/api/library/v2/artists/{ids['artist']}/track-files?limit=1&page=2"
+    ).get_json()
+    assert len(paged["files"]) == 1
+    assert paged["pagination"] == {
+        "page": 2, "limit": 1, "total_count": 2, "total_pages": 2,
+        "has_prev": True, "has_next": False,
+    }
+
+
+def test_track_files_endpoint_404s_for_unknown_artist(api):
+    client, _db, _ids = api
+    resp = client.get("/api/library/v2/artists/999999/track-files")
+    assert resp.status_code == 404
+
+
+def test_file_delete_preview_and_delete_accept_a_file_ids_selection(
+        api, tmp_path, monkeypatch):
+    """C2 bulk-delete: a caller-selected subset of an artist's files goes
+    through the same ADR-05 preview/execute contract, leaving files outside
+    the selection untouched."""
+    client, db, ids = api
+    root = tmp_path / "music"
+    root.mkdir()
+    keep_path = root / "one-dance.flac"
+    keep_path.write_bytes(b"audio")
+    drop_path = root / "ep-song.flac"
+    drop_path.write_bytes(b"audio2")
+    with _conn(db) as conn:
+        conn.execute(
+            "UPDATE lib2_track_files SET path=? WHERE track_id=?",
+            (str(keep_path), ids["album_track"]),
+        )
+        drop_file_id = conn.execute(
+            "INSERT INTO lib2_track_files(track_id, path, format, bitrate) "
+            "VALUES(?, ?, 'flac', 900)", (ids["ep_track"], str(drop_path)),
+        ).lastrowid
+        conn.commit()
+    monkeypatch.setattr(
+        "core.library2.file_delete._library_roots", lambda _config=None: [str(root)]
+    )
+
+    preview = client.get(
+        f"/api/library/v2/artists/{ids['artist']}/file-delete-preview"
+    ).get_json()
+    assert preview["file_count"] == 2
+    keep_file_id = next(
+        item["file_ids"][0] for item in preview["files"] if item["path"] == str(keep_path))
+
+    scoped_preview = client.get(
+        f"/api/library/v2/artists/{ids['artist']}/file-delete-preview"
+        f"?file_ids={keep_file_id}"
+    ).get_json()
+    assert scoped_preview["file_count"] == 1
+    assert scoped_preview["files"][0]["path"] == str(keep_path)
+
+    executed = client.post(
+        f"/api/library/v2/artists/{ids['artist']}/file-delete",
+        json={"preview_token": scoped_preview["preview_token"], "file_ids": [keep_file_id]},
+    ).get_json()
+    assert executed["success"] is True
+    assert executed["operation"]["status"] == "completed"
+    assert not keep_path.exists()
+    assert drop_path.exists()
+    with _conn(db) as conn:
+        assert conn.execute(
+            "SELECT file_state FROM lib2_track_files WHERE id=?", (drop_file_id,)
+        ).fetchone()[0] != "deleted"
+
+
 def test_non_admin_profile_writes_are_rejected(api):
     """ADR-01 (admin-only, technically enforced): lib2 mutations from any
     profile but the admin are rejected with 403 — not silently applied to the

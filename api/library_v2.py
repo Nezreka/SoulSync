@@ -2761,14 +2761,26 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
     @app.route("/api/library/v2/<entity>/<int:eid>/file-delete-preview")
     def lib2_file_delete_preview(entity, eid):
-        """ADR-05 preview for the separate physical-file command."""
+        """ADR-05 preview for the separate physical-file command.
+
+        Optional ``?file_ids=1,2,3`` (C2) narrows the usual whole-entity
+        scope to a caller-selected subset — the Manage Track Files "Files"
+        tab bulk-delete uses this to preview/execute only the checked rows.
+        """
         guard = _guard()
         if guard:
             return guard
         from core.library2.file_delete import FileDeleteError, preview_entity_files
+        file_ids = None
+        raw_ids = request.args.get("file_ids")
+        if raw_ids:
+            try:
+                file_ids = [int(v) for v in raw_ids.split(",") if v.strip()]
+            except ValueError:
+                return jsonify({"success": False, "error": "file_ids must be integers"}), 400
         try:
             preview = preview_entity_files(
-                get_database(), entity=entity, entity_id=eid
+                get_database(), entity=entity, entity_id=eid, file_ids=file_ids
             )
             return jsonify({"success": True, **preview})
         except FileDeleteError as exc:
@@ -2779,7 +2791,12 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         methods=["POST"],
     )
     def lib2_file_delete(entity, eid):
-        """Execute a fresh-token-validated, journaled ADR-05 delete."""
+        """Execute a fresh-token-validated, journaled ADR-05 delete.
+
+        Body may carry ``file_ids`` (C2) — must match whatever selection
+        produced ``preview_token``, otherwise the stale-preview check rejects
+        it same as any other scope drift.
+        """
         guard = _guard()
         if guard:
             return guard
@@ -2788,11 +2805,18 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             body = request.get_json(silent=True)
             if not isinstance(body, dict):
                 raise FileDeleteError("JSON body is required")
+            file_ids = body.get("file_ids")
+            if file_ids is not None and (
+                not isinstance(file_ids, list)
+                or not all(isinstance(v, int) for v in file_ids)
+            ):
+                raise FileDeleteError("file_ids must be a list of integers")
             operation = delete_entity_files(
                 get_database(),
                 entity=entity,
                 entity_id=eid,
                 preview_token=body.get("preview_token"),
+                file_ids=file_ids,
             )
             return jsonify({"success": True, "operation": operation})
         except FileDeleteError as exc:
@@ -2928,6 +2952,48 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         finally:
             conn.close()
         return jsonify({"success": True, "pairs": pairs})
+
+    @app.route("/api/library/v2/artists/<int:artist_id>/track-files")
+    def lib2_artist_track_files(artist_id):
+        """C2: Lidarr-style flat file list for Manage Track Files — every
+        physical file this artist owns (quality/size/state), paginated.
+        Independent of the single↔album duplicate pairs above; feeds the
+        "Files" tab whose selection drives the ADR-05 preview/delete above."""
+        guard = _guard()
+        if guard:
+            return guard
+        from core.library2 import queries as Q
+        search = request.args.get("search", "")
+        try:
+            page = int(request.args.get("page", 1))
+            limit = int(request.args.get("limit", 100))
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "error": "page/limit must be integers"}), 400
+        if page < 1 or not 1 <= limit <= 500:
+            return jsonify({
+                "success": False,
+                "error": "page must be positive and limit must be between 1 and 500",
+            }), 400
+        conn = _conn()
+        try:
+            if not conn.execute(
+                "SELECT 1 FROM lib2_artists WHERE id=?", (artist_id,)
+            ).fetchone():
+                return jsonify({"success": False, "error": "Artist not found"}), 404
+            files, total = Q.list_artist_track_files(
+                conn, artist_id, search=search, page=page, limit=limit)
+        finally:
+            conn.close()
+        total_pages = (total + limit - 1) // limit if limit else 0
+        return jsonify({
+            "success": True,
+            "files": files,
+            "pagination": {
+                "page": page, "limit": limit, "total_count": total,
+                "total_pages": total_pages,
+                "has_prev": page > 1, "has_next": page < total_pages,
+            },
+        })
 
     @app.route("/api/library/v2/tracks/<int:track_id>/canonical", methods=["POST"])
     def lib2_set_canonical(track_id):

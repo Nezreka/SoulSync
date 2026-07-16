@@ -16,6 +16,7 @@ import {
   fetchLibraryV2AlbumReorganizeSources,
   fetchLibraryV2ArtistArtOptions,
   fetchLibraryV2ArtistMatchStatus,
+  fetchLibraryV2ArtistTrackFiles,
   fetchLibraryV2FileDeletePreview,
   fetchLibraryV2Playlist,
   fetchLibraryV2Playlists,
@@ -576,6 +577,103 @@ describe('library v2 physical file delete api', () => {
       id: 'journal-1',
       status: 'completed',
     });
+  });
+
+  it('narrows preview and delete to a caller-selected file_ids subset (C2)', async () => {
+    server.use(
+      http.get('/api/library/v2/artists/7/file-delete-preview', ({ request }) => {
+        const url = new URL(request.url);
+        expect(url.searchParams.get('file_ids')).toBe('101,102');
+        return HttpResponse.json({
+          success: true,
+          entity: 'artists',
+          entity_id: 7,
+          title: 'Drake',
+          configured_roots: ['/music'],
+          files: [],
+          file_count: 2,
+          deletable_count: 2,
+          unsafe_count: 0,
+          total_size: 2048,
+          preview_token: 'scoped-token',
+        });
+      }),
+      http.post('/api/library/v2/artists/7/file-delete', async ({ request }) => {
+        expect(await request.json()).toEqual({
+          preview_token: 'scoped-token',
+          file_ids: [101, 102],
+        });
+        return HttpResponse.json({
+          success: true,
+          operation: {
+            id: 'journal-2',
+            status: 'completed',
+            file_count: 2,
+            total_size: 2048,
+            items: [],
+          },
+        });
+      }),
+    );
+
+    const preview = await fetchLibraryV2FileDeletePreview('artists', 7, [101, 102]);
+    await expect(
+      deleteLibraryV2Files('artists', 7, preview.preview_token, [101, 102]),
+    ).resolves.toMatchObject({ id: 'journal-2', status: 'completed' });
+  });
+});
+
+describe('library v2 artist track files api (C2 — Manage Track Files)', () => {
+  it('sends pagination/search params and returns the file list', async () => {
+    server.use(
+      http.get('/api/library/v2/artists/7/track-files', ({ request }) => {
+        const url = new URL(request.url);
+        expect(url.searchParams.get('search')).toBe('Nonstop');
+        expect(url.searchParams.get('page')).toBe('2');
+        expect(url.searchParams.get('limit')).toBe('50');
+        return HttpResponse.json({
+          success: true,
+          files: [
+            {
+              file_id: 1,
+              track_id: 2,
+              track_title: 'Nonstop',
+              track_number: 1,
+              disc_number: 1,
+              album_id: 3,
+              album_title: 'Scorpion',
+              path: '/m/a.flac',
+              size: 4096,
+              format: 'flac',
+              bitrate: null,
+              sample_rate: 44100,
+              bit_depth: 16,
+              quality_tier: 'lossless',
+              file_state: 'active',
+              is_primary: true,
+              added_at: '2026-01-01T00:00:00',
+            },
+          ],
+          pagination: {
+            page: 2,
+            limit: 50,
+            total_count: 51,
+            total_pages: 2,
+            has_prev: true,
+            has_next: false,
+          },
+        });
+      }),
+    );
+
+    const result = await fetchLibraryV2ArtistTrackFiles(7, {
+      search: 'Nonstop',
+      page: 2,
+      limit: 50,
+    });
+    expect(result.files).toHaveLength(1);
+    expect(result.files[0]).toMatchObject({ file_id: 1, track_title: 'Nonstop' });
+    expect(result.pagination).toMatchObject({ page: 2, total_pages: 2 });
   });
 });
 

@@ -286,9 +286,14 @@ def _expand_artist_discography(database, artist_id: int) -> Dict[str, Any]:
         # Retry interrupted/failed auto-monitor materialization independently
         # of whether the provider catalog still considers the release "new".
         # ``idle`` + no rows also recovers albums stranded by pre-marker builds.
+        # G8: joins through lib2_album_artists like _existing_release_index
+        # and the prune query below — filtering on primary_artist_id alone
+        # would silently skip an album whose primary is a different (linked)
+        # artist, leaving it stuck forever.
         retry_rows = conn.execute(
-            """SELECT al.id FROM lib2_albums al
-                WHERE al.primary_artist_id=? AND al.origin='discography'
+            """SELECT al.id FROM lib2_album_artists aa
+                JOIN lib2_albums al ON al.id = aa.album_id
+                WHERE aa.artist_id=? AND al.origin='discography'
                   AND al.monitored=1
                   AND (
                       al.tracklist_status='pending'
@@ -542,11 +547,28 @@ def auto_monitor_releases(db, config_manager, album_ids: List[int],
                     WHERE id=?""",
                 (album_id,),
             )
-            conn.execute("UPDATE lib2_tracks SET monitored=1 WHERE album_id=?", (album_id,))
             # Monitor provenance (audit P1-13): this album became wanted via
             # the "monitor new items" enforcement, not a user click. The track
-            # flips are its cascade projection and stay rule-less.
-            from core.library2.monitor_rules import PROVENANCE_NEW_RELEASE, record_rule
+            # flips are its cascade projection and stay rule-less — EXCEPT a
+            # track the user already explicitly unmonitored (G8): a
+            # rematerialize retry must not overturn that, same veto pattern
+            # as the bulk monitor-toggle endpoint uses.
+            from core.library2.monitor_rules import (
+                PROVENANCE_NEW_RELEASE,
+                explicitly_unmonitored_track_ids,
+                record_rule,
+            )
+            album_track_ids = [r[0] for r in conn.execute(
+                "SELECT id FROM lib2_tracks WHERE album_id=?", (album_id,))]
+            vetoed = explicitly_unmonitored_track_ids(
+                conn, album_track_ids, profile_id=wishlist_profile_id)
+            auto_monitor_ids = [t for t in album_track_ids if t not in vetoed]
+            if auto_monitor_ids:
+                marks = ",".join("?" for _ in auto_monitor_ids)
+                conn.execute(
+                    f"UPDATE lib2_tracks SET monitored=1 WHERE id IN ({marks})",
+                    auto_monitor_ids,
+                )
             record_rule(conn, "album", album_id, True, PROVENANCE_NEW_RELEASE,
                         profile_id=wishlist_profile_id)
             # The freshly materialized tracks inherit the album's new_release

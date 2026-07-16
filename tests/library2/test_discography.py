@@ -571,6 +571,101 @@ def test_failed_auto_monitor_tracklist_is_persisted_and_retried(
         legacy_db, artist_id)["auto_monitor_album_ids"] == []
 
 
+def test_auto_monitor_releases_never_reflips_an_explicitly_unmonitored_track(
+        legacy_db, imported_conn, monkeypatch):
+    """G8: a retry re-materialization must not steamroll a track the user
+    explicitly unmonitored before the retry fired — only the compatibility
+    ``lib2_tracks.monitored`` flag is at stake here (the wanted projection
+    already respects the rule), but the flag must not lie either."""
+    from core.library2.monitor_rules import PROVENANCE_USER, record_rule
+
+    artist_id = _artist_id(imported_conn)
+    conn = legacy_db._get_connection()
+    album_id = conn.execute(
+        """INSERT INTO lib2_albums(
+               primary_artist_id, title, origin, monitored, tracklist_status)
+           VALUES(?, 'Retry Release', 'discography', 1, 'pending')""",
+        (artist_id,),
+    ).lastrowid
+    conn.execute(
+        "INSERT INTO lib2_album_artists(album_id, artist_id, role) "
+        "VALUES(?, ?, 'primary')",
+        (album_id, artist_id),
+    )
+    kept_off_id = conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title, track_number, monitored) "
+        "VALUES(?, 'Explicitly Off', 1, 0)",
+        (album_id,),
+    ).lastrowid
+    record_rule(conn, "track", kept_off_id, False, PROVENANCE_USER)
+    conn.commit()
+    conn.close()
+
+    def materialize(_config, conn, target_album_id):
+        conn.execute(
+            "INSERT INTO lib2_tracks(album_id, title, track_number, monitored) "
+            "VALUES(?, 'New Track', 2, 0)",
+            (target_album_id,),
+        )
+        return [
+            {"title": "Explicitly Off", "track_number": 1},
+            {"title": "New Track", "track_number": 2},
+        ]
+
+    monkeypatch.setattr("core.library2.completeness.resolve_tracklist", materialize)
+    monkeypatch.setattr(
+        "core.library2.wishlist_mirror.mirror_projected_tracks_wishlist",
+        lambda _db, _conn, track_ids, **_kwargs: len(track_ids),
+    )
+    D.auto_monitor_releases(legacy_db, None, [album_id])
+
+    conn = legacy_db._get_connection()
+    rows = {
+        r["title"]: bool(r["monitored"])
+        for r in conn.execute(
+            "SELECT title, monitored FROM lib2_tracks WHERE album_id=?", (album_id,))
+    }
+    conn.close()
+    assert rows["Explicitly Off"] is False
+    assert rows["New Track"] is True
+
+
+def test_expand_discography_retries_album_where_this_artist_is_not_primary(
+        legacy_db, imported_conn, monkeypatch):
+    """G8: an album whose primary_artist_id belongs to a different (featured)
+    artist must still be retried when THIS artist's discography is
+    expanded, as long as this artist is linked via lib2_album_artists —
+    matching _existing_release_index's and the prune query's scope."""
+    artist_id = _artist_id(imported_conn)
+    conn = legacy_db._get_connection()
+    other_artist_id = conn.execute(
+        "INSERT INTO lib2_artists(name, monitored) VALUES ('Feat Artist', 1)"
+    ).lastrowid
+    album_id = conn.execute(
+        """INSERT INTO lib2_albums(
+               primary_artist_id, title, origin, monitored, tracklist_status)
+           VALUES(?, 'Collab Release', 'discography', 1, 'pending')""",
+        (other_artist_id,),
+    ).lastrowid
+    conn.execute(
+        "INSERT INTO lib2_album_artists(album_id, artist_id, role) VALUES(?, ?, 'primary')",
+        (album_id, other_artist_id),
+    )
+    conn.execute(
+        "INSERT INTO lib2_album_artists(album_id, artist_id, role) VALUES(?, ?, 'featured')",
+        (album_id, artist_id),
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(
+        "core.library2.provider_adapters.fetch_artist_discography",
+        lambda *_args, **_kwargs: None,
+    )
+    stats = D.expand_artist_discography(legacy_db, artist_id)
+    assert stats["auto_monitor_album_ids"] == [album_id]
+
+
 def test_same_artist_discography_refreshes_are_serialized(
     legacy_db, imported_conn, fake_discography, monkeypatch
 ):

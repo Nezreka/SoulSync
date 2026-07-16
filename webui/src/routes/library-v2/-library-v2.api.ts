@@ -477,9 +477,13 @@ export interface LibraryV2FileDeleteOperation {
 export async function fetchLibraryV2FileDeletePreview(
   entity: 'artists' | 'albums',
   id: number,
+  fileIds?: number[],
 ): Promise<LibraryV2FileDeletePreview> {
+  const searchParams = fileIds?.length
+    ? new URLSearchParams({ file_ids: fileIds.join(',') })
+    : undefined;
   const payload = await readJson<{ success: boolean; error?: string } & LibraryV2FileDeletePreview>(
-    apiClient.get(`library/v2/${entity}/${id}/file-delete-preview`),
+    apiClient.get(`library/v2/${entity}/${id}/file-delete-preview`, { searchParams }),
   );
   if (!payload.success) throw new Error(payload.error || 'File delete preview failed');
   return payload;
@@ -489,6 +493,7 @@ export async function deleteLibraryV2Files(
   entity: 'artists' | 'albums',
   id: number,
   previewToken: string,
+  fileIds?: number[],
 ): Promise<LibraryV2FileDeleteOperation> {
   const payload = await readJson<{
     success: boolean;
@@ -496,13 +501,67 @@ export async function deleteLibraryV2Files(
     operation?: LibraryV2FileDeleteOperation;
   }>(
     apiClient.post(`library/v2/${entity}/${id}/file-delete`, {
-      json: { preview_token: previewToken },
+      json: {
+        preview_token: previewToken,
+        ...(fileIds?.length ? { file_ids: fileIds } : {}),
+      },
     }),
   );
   if (!payload.success || !payload.operation) {
     throw new Error(payload.error || 'Physical file deletion failed');
   }
   return payload.operation;
+}
+
+export interface LibraryV2ArtistTrackFile {
+  file_id: number;
+  track_id: number;
+  track_title: string | null;
+  track_number: number | null;
+  disc_number: number | null;
+  album_id: number;
+  album_title: string | null;
+  path: string;
+  size: number | null;
+  format: string | null;
+  bitrate: number | null;
+  sample_rate: number | null;
+  bit_depth: number | null;
+  quality_tier: string | null;
+  file_state: string;
+  is_primary: boolean;
+  added_at: string | null;
+}
+
+/** C2 (Manage Track Files): every physical file this artist owns, flat and
+ *  paginated — feeds the "Files" tab whose selection drives the ADR-05
+ *  preview/delete above. */
+export async function fetchLibraryV2ArtistTrackFiles(
+  artistId: number,
+  { search = '', page = 1, limit = 100 }: { search?: string; page?: number; limit?: number } = {},
+): Promise<{ files: LibraryV2ArtistTrackFile[]; pagination: LibraryV2Pagination }> {
+  const params = new URLSearchParams();
+  if (search) params.set('search', search);
+  params.set('page', String(page));
+  params.set('limit', String(limit));
+  const payload = await readJson<{
+    success: boolean;
+    error?: string;
+    files?: LibraryV2ArtistTrackFile[];
+    pagination?: LibraryV2Pagination;
+  }>(apiClient.get(`library/v2/artists/${artistId}/track-files`, { searchParams: params }));
+  if (!payload.success) throw new Error(payload.error || 'Track files failed');
+  return {
+    files: payload.files ?? [],
+    pagination: payload.pagination ?? {
+      page,
+      limit,
+      total_count: 0,
+      total_pages: 0,
+      has_prev: false,
+      has_next: false,
+    },
+  };
 }
 
 export interface LibraryV2HistoryEntry {

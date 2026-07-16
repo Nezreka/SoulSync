@@ -31,6 +31,7 @@ import {
   fetchLibraryV2ArtistDeletePreview,
   fetchLibraryV2ArtistHistory,
   fetchLibraryV2Artists,
+  fetchLibraryV2ArtistTrackFiles,
   fetchLibraryV2Duplicates,
   fetchLibraryV2FileDeletePreview,
   fetchLibraryV2ImportStatus,
@@ -72,6 +73,7 @@ import {
   writeLibraryV2Tags,
   type Lib2EntityRef,
   type LibraryV2AlbumType,
+  type LibraryV2ArtistTrackFile,
 } from '../-library-v2.api';
 import { computeTrackEditValues } from '../-metadata-edit';
 import { Route } from '../route';
@@ -187,6 +189,7 @@ const ICON_PATHS = {
   info: 'M12 21a9 9 0 1 1 0-18 9 9 0 0 1 0 18zM12 16v-4M12 8h.01',
   gain: 'M3 12h3l2-7 3 15 3-11 2 5h5',
   cover: 'M4 4h16v16H4z M4 16l4-4 3 3 5-6 4 5',
+  more: 'M3.4,12 a1.6,1.6 0 1,0 3.2,0 a1.6,1.6 0 1,0 -3.2,0 M10.4,12 a1.6,1.6 0 1,0 3.2,0 a1.6,1.6 0 1,0 -3.2,0 M17.4,12 a1.6,1.6 0 1,0 3.2,0 a1.6,1.6 0 1,0 -3.2,0',
 } as const;
 
 type IconName = keyof typeof ICON_PATHS;
@@ -1336,33 +1339,6 @@ interface AlbumDetailTarget extends EditableAlbumMetadata {
   quality_profile_id: number;
 }
 
-function AlbumDetailButton({ album }: { album: LibraryV2AlbumSummary }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <>
-      <IconActionButton
-        icon="edit"
-        title="Album details — quality profile, metadata"
-        onClick={() => setOpen(true)}
-      />
-      {open ? (
-        <AlbumDetailModal
-          album={{
-            id: album.id,
-            title: album.title,
-            year: album.year,
-            album_type: album.album_type,
-            release_date: album.release_date,
-            user_overrides: album.user_overrides,
-            quality_profile_id: album.quality_profile_id,
-          }}
-          onClose={() => setOpen(false)}
-        />
-      ) : null}
-    </>
-  );
-}
-
 type AlbumDetailTab = 'quality' | 'metadata';
 
 function AlbumDetailModal({ album, onClose }: { album: AlbumDetailTarget; onClose: () => void }) {
@@ -1522,6 +1498,180 @@ function AlbumMetadataForm({
         </button>
       </div>
     </>
+  );
+}
+
+/** B1/B2/B4: the consolidated "…" overflow menu for album actions — details,
+ *  retag, ReplayGain, reorganize, cover, enrich, delete. Used by both the
+ *  collapsed album row (AlbumBlock) and the album deep-link header
+ *  (AlbumDetailView), so both surfaces offer the identical action set
+ *  instead of the row alone owning everything and the detail view almost
+ *  nothing. `onDeleted` lets the deep-link view navigate back to the artist
+ *  after a successful delete; the row doesn't need it (it just disappears
+ *  once the query invalidates). */
+function AlbumOverflowMenu({
+  album,
+  onDeleted,
+}: {
+  album: AlbumDetailTarget;
+  onDeleted?: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [showEnrich, setShowEnrich] = useState(false);
+  const [showRetag, setShowRetag] = useState(false);
+  const [showReorganize, setShowReorganize] = useState(false);
+  const [showArtPicker, setShowArtPicker] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
+  const [showDelete, setShowDelete] = useState(false);
+  const wrapRef = useRef<HTMLSpanElement>(null);
+  const replaygain = useMutation({
+    mutationFn: async () => {
+      const jobId = await startLibraryV2AlbumReplayGain(album.id);
+      const jobError = await awaitBulkJob(queryClient, jobId);
+      if (jobError) throw new Error(jobError);
+    },
+  });
+
+  useEffect(() => {
+    if (!open) return;
+    function onDocClick(e: MouseEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [open]);
+
+  return (
+    <span ref={wrapRef} className={styles.overflowWrap}>
+      <IconActionButton icon="more" title="More actions" onClick={() => setOpen((v) => !v)} />
+      {open ? (
+        <div className={styles.overflowMenu}>
+          <button
+            type="button"
+            className={styles.overflowMenuItem}
+            onClick={() => {
+              setShowDetails(true);
+              setOpen(false);
+            }}
+          >
+            Album details
+          </button>
+          <button
+            type="button"
+            className={styles.overflowMenuItem}
+            onClick={() => {
+              setShowRetag(true);
+              setOpen(false);
+            }}
+          >
+            Preview retag
+          </button>
+          <button
+            type="button"
+            className={styles.overflowMenuItem}
+            disabled={replaygain.isPending}
+            onClick={() => {
+              replaygain.mutate();
+              setOpen(false);
+            }}
+          >
+            {replaygain.isPending ? 'Analyzing ReplayGain…' : 'Analyze ReplayGain'}
+          </button>
+          <button
+            type="button"
+            className={styles.overflowMenuItem}
+            onClick={() => {
+              setShowReorganize(true);
+              setOpen(false);
+            }}
+          >
+            Reorganize
+          </button>
+          <button
+            type="button"
+            className={styles.overflowMenuItem}
+            onClick={() => {
+              setShowArtPicker(true);
+              setOpen(false);
+            }}
+          >
+            Change cover
+          </button>
+          <button
+            type="button"
+            className={styles.overflowMenuItem}
+            onClick={() => {
+              setShowEnrich(true);
+              setOpen(false);
+            }}
+          >
+            Enrich…
+          </button>
+          <button
+            type="button"
+            className={`${styles.overflowMenuItem} ${styles.overflowMenuItemDanger}`}
+            onClick={() => {
+              setShowDelete(true);
+              setOpen(false);
+            }}
+          >
+            Delete
+          </button>
+        </div>
+      ) : null}
+      {replaygain.isError ? (
+        <span className={styles.monitorError} role="alert">
+          {mutationErrorMessage(replaygain.error, 'ReplayGain analysis failed')}
+        </span>
+      ) : null}
+      {showEnrich ? (
+        <EnrichDropdown
+          entity="albums"
+          entityId={album.id}
+          entityName={album.title}
+          wrapperRef={wrapRef}
+          onClose={() => setShowEnrich(false)}
+        />
+      ) : null}
+      {showRetag ? (
+        <RetagModal
+          entity="albums"
+          id={album.id}
+          title={album.title}
+          onClose={() => setShowRetag(false)}
+        />
+      ) : null}
+      {showReorganize ? (
+        <AlbumReorganizeModal
+          albumId={album.id}
+          albumTitle={album.title}
+          onClose={() => setShowReorganize(false)}
+        />
+      ) : null}
+      {showArtPicker ? (
+        <AlbumArtPickerModal
+          albumId={album.id}
+          albumTitle={album.title}
+          onClose={() => setShowArtPicker(false)}
+        />
+      ) : null}
+      {showDetails ? (
+        <AlbumDetailModal album={album} onClose={() => setShowDetails(false)} />
+      ) : null}
+      {showDelete ? (
+        <DeleteConfirmModal
+          entity="albums"
+          id={album.id}
+          title={album.title}
+          onDone={() => {
+            setShowDelete(false);
+            onDeleted?.();
+          }}
+          onClose={() => setShowDelete(false)}
+        />
+      ) : null}
+    </span>
   );
 }
 
@@ -1744,11 +1894,36 @@ function MaintenanceModal({
   );
 }
 
-/** Manage Tracks: the same recording appearing both as a single and on an
- *  album (linked by the importer via canonical_track_id). Shows each side's
- *  quality and lets the user decide which version stays wanted; file-level
- *  dedup is the single_album_dedup maintenance job. */
+type ManageTracksTab = 'duplicates' | 'files';
+
+/** Manage Tracks: "Duplicates" (single↔album pairs, unchanged) plus a new
+ *  "Files" tab (C2 — Lidarr's "Manage Track Files") listing every physical
+ *  file this artist owns for bulk selection + ADR-05 delete. */
 function ManageTracksModal({ artistId, onClose }: { artistId: number; onClose: () => void }) {
+  const [tab, setTab] = useState<ManageTracksTab>('duplicates');
+  return (
+    <ModalShell title="Manage Tracks" wide onClose={onClose}>
+      <div className={styles.detailTabs}>
+        {(['duplicates', 'files'] as const).map((t) => (
+          <button
+            key={t}
+            type="button"
+            className={`${styles.detailTab} ${tab === t ? styles.detailTabActive : ''}`}
+            onClick={() => setTab(t)}
+          >
+            {t === 'duplicates' ? 'Duplicates' : 'Files'}
+          </button>
+        ))}
+      </div>
+      <div className={styles.tabBody}>
+        {tab === 'duplicates' ? <ManageTracksDuplicatesTab artistId={artistId} /> : null}
+        {tab === 'files' ? <ArtistFilesTab artistId={artistId} /> : null}
+      </div>
+    </ModalShell>
+  );
+}
+
+function ManageTracksDuplicatesTab({ artistId }: { artistId: number }) {
   const queryClient = useQueryClient();
   const dupesQuery = useQuery({
     queryKey: [...LIBRARY_V2_QUERY_KEY, 'duplicates', artistId],
@@ -1793,7 +1968,7 @@ function ManageTracksModal({ artistId, onClose }: { artistId: number; onClose: (
   }
 
   return (
-    <ModalShell title="Manage Tracks — single ↔ album duplicates" wide onClose={onClose}>
+    <>
       <p className={styles.qpSubtitle}>
         The same recording released as a single and on an album. Unmonitor the version you don't
         want kept up to date; <strong>Move file</strong> re-homes all source file links onto the
@@ -1885,7 +2060,260 @@ function ManageTracksModal({ artistId, onClose }: { artistId: number; onClose: (
           </table>
         )}
       </div>
-    </ModalShell>
+    </>
+  );
+}
+
+/** C2 (Manage Track Files): flat, paginated, selectable list of every
+ *  physical file this artist owns — bulk-delete goes through the same
+ *  ADR-05 preview/execute contract as the single-entity delete flow
+ *  (`DeleteConfirmModal`), scoped to the checked file ids. */
+function ArtistFilesTab({ artistId }: { artistId: number }) {
+  const queryClient = useQueryClient();
+  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState('');
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [confirming, setConfirming] = useState(false);
+
+  const filesQuery = useQuery({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'track-files', artistId, search, page],
+    queryFn: () => fetchLibraryV2ArtistTrackFiles(artistId, { search, page, limit: 100 }),
+  });
+  const files = filesQuery.data?.files ?? [];
+  const pagination = filesQuery.data?.pagination;
+  const allOnPageSelected = files.length > 0 && files.every((f) => selected.has(f.file_id));
+
+  function toggle(fileId: number) {
+    setSelected((s) => {
+      const next = new Set(s);
+      if (next.has(fileId)) next.delete(fileId);
+      else next.add(fileId);
+      return next;
+    });
+  }
+
+  function toggleAllOnPage() {
+    setSelected((s) => {
+      const next = new Set(s);
+      for (const f of files) {
+        if (allOnPageSelected) next.delete(f.file_id);
+        else next.add(f.file_id);
+      }
+      return next;
+    });
+  }
+
+  function qualityText(f: LibraryV2ArtistTrackFile) {
+    const parts = [(f.format ?? '').toUpperCase() || null];
+    if (f.bit_depth && f.sample_rate) {
+      parts.push(`${f.bit_depth}/${Math.round(f.sample_rate / 1000)}kHz`);
+    }
+    // bitrate is stored inconsistently (bps for some sources, already kbps
+    // for others) — same heuristic as QualityDisplay/fileText elsewhere.
+    const kbps = f.bitrate ? (f.bitrate > 5000 ? Math.round(f.bitrate / 1000) : f.bitrate) : null;
+    if (kbps) parts.push(`${kbps}kbps`);
+    return parts.filter(Boolean).join(' · ') || '—';
+  }
+
+  return (
+    <>
+      <input
+        className={styles.searchInput}
+        type="text"
+        placeholder="Filter by track or album…"
+        value={search}
+        onChange={(e) => {
+          setSearch(e.target.value);
+          setPage(1);
+        }}
+      />
+      {filesQuery.isLoading ? (
+        <div className={styles.inlineLoading}>Loading files…</div>
+      ) : files.length === 0 ? (
+        <div className={styles.inlineLoading}>No files found.</div>
+      ) : (
+        <>
+          <table className={styles.trackTable}>
+            <thead>
+              <tr>
+                <th>
+                  <input type="checkbox" checked={allOnPageSelected} onChange={toggleAllOnPage} />
+                </th>
+                <th>Track</th>
+                <th>Album</th>
+                <th>Quality</th>
+                <th>Size</th>
+                <th>State</th>
+              </tr>
+            </thead>
+            <tbody>
+              {files.map((f) => (
+                <tr key={f.file_id}>
+                  <td>
+                    <input
+                      type="checkbox"
+                      checked={selected.has(f.file_id)}
+                      onChange={() => toggle(f.file_id)}
+                    />
+                  </td>
+                  <td>
+                    {f.track_number != null ? `${f.track_number}. ` : ''}
+                    {f.track_title ?? '—'}
+                  </td>
+                  <td className={styles.qualityText}>{f.album_title ?? '—'}</td>
+                  <td className={styles.qualityText}>{qualityText(f)}</td>
+                  <td>{formatFileSize(f.size ?? 0)}</td>
+                  <td className={styles.muted}>{f.file_state}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {pagination && pagination.total_pages > 1 ? (
+            <div className={styles.pagination}>
+              <button
+                type="button"
+                disabled={!pagination.has_prev}
+                onClick={() => setPage((p) => p - 1)}
+              >
+                ←
+              </button>
+              <span>
+                Page {pagination.page} of {pagination.total_pages}
+              </span>
+              <button
+                type="button"
+                disabled={!pagination.has_next}
+                onClick={() => setPage((p) => p + 1)}
+              >
+                →
+              </button>
+            </div>
+          ) : null}
+        </>
+      )}
+      <div className={styles.modalActions}>
+        <span className={styles.muted}>{selected.size} selected</span>
+        <button
+          type="button"
+          className={styles.btnDanger}
+          disabled={selected.size === 0}
+          onClick={() => setConfirming(true)}
+        >
+          Delete selected…
+        </button>
+      </div>
+      {confirming ? (
+        <FilesDeleteConfirm
+          artistId={artistId}
+          fileIds={[...selected]}
+          onDone={() => {
+            setSelected(new Set());
+            setConfirming(false);
+            void queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+          }}
+          onCancel={() => setConfirming(false)}
+        />
+      ) : null}
+    </>
+  );
+}
+
+/** Scoped ADR-05 preview/execute for a caller-selected file-id subset — same
+ *  contract and UX as `DeleteConfirmModal`'s physical-file section, just
+ *  bounded to `fileIds` instead of the whole artist. */
+function FilesDeleteConfirm({
+  artistId,
+  fileIds,
+  onDone,
+  onCancel,
+}: {
+  artistId: number;
+  fileIds: number[];
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const [confirmed, setConfirmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const preview = useQuery({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'file-delete-preview', 'artists', artistId, fileIds],
+    queryFn: () => fetchLibraryV2FileDeletePreview('artists', artistId, fileIds),
+  });
+  const physical = preview.data;
+  const physicalReady = Boolean(physical && physical.file_count > 0 && physical.unsafe_count === 0);
+
+  return (
+    <section className={styles.fileDeletePanel}>
+      <h4>
+        Delete {fileIds.length} selected file{fileIds.length === 1 ? '' : 's'}
+      </h4>
+      {preview.isLoading ? <p className={styles.muted}>Checking file roots…</p> : null}
+      {preview.error ? <div className={styles.searchError}>{preview.error.message}</div> : null}
+      {physical ? (
+        <>
+          <p>
+            {physical.file_count} file{physical.file_count === 1 ? '' : 's'} ·{' '}
+            {formatFileSize(physical.total_size)}
+          </p>
+          <ul className={styles.fileDeleteList}>
+            {physical.files.map((file) => (
+              <li key={file.path ?? file.file_ids.join('-')}>
+                <span>{file.path ?? file.stored_paths[0] ?? 'Unresolved file'}</span>
+                <small>
+                  {file.deletable
+                    ? `${formatFileSize(file.size ?? 0)} · ${file.root}`
+                    : `Blocked: ${file.reason ?? 'unsafe path'}`}
+                </small>
+              </li>
+            ))}
+          </ul>
+          {physical.unsafe_count > 0 ? (
+            <div className={styles.searchError}>
+              Physical deletion is blocked because {physical.unsafe_count} file
+              {physical.unsafe_count === 1 ? ' is' : 's are'} unresolved or outside a configured
+              library root.
+            </div>
+          ) : null}
+        </>
+      ) : null}
+      {error ? <div className={styles.searchError}>{error}</div> : null}
+      <label className={styles.fileDeleteConfirm}>
+        <input
+          type="checkbox"
+          checked={confirmed}
+          disabled={!physicalReady || busy}
+          onChange={(e) => setConfirmed(e.target.checked)}
+        />
+        I understand these files will be permanently deleted from disk.
+      </label>
+      <div className={styles.modalActions}>
+        <button type="button" className={styles.btnGhost} disabled={busy} onClick={onCancel}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          className={styles.btnDanger}
+          disabled={!physicalReady || !confirmed || busy}
+          onClick={() => {
+            if (!physical) return;
+            setBusy(true);
+            setError(null);
+            void deleteLibraryV2Files('artists', artistId, physical.preview_token, fileIds)
+              .then(() => onDone())
+              .catch((e) =>
+                setError(e instanceof Error ? e.message : 'Physical file deletion failed'),
+              )
+              .finally(() => setBusy(false));
+          }}
+        >
+          {busy
+            ? 'Deleting…'
+            : `Permanently delete ${physical?.deletable_count ?? 0} file${
+                physical?.deletable_count === 1 ? '' : 's'
+              }`}
+        </button>
+      </div>
+    </section>
   );
 }
 
@@ -1998,6 +2426,7 @@ function ArtistIndexView() {
           </p>
         </div>
         <div className={styles.headerActions}>
+          <UpgradeScanButton />
           <ImportButton hasArtists={artists.length > 0} />
         </div>
       </header>
@@ -2564,7 +2993,6 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
     tone: 'busy' | 'ok' | 'err';
     text: string;
   } | null>(null);
-  const [showEdit, setShowEdit] = useState(false);
 
   function handleAction(action: string, entity?: Lib2EntityRef) {
     if (INTERACTIVE_RE.test(action)) {
@@ -2617,10 +3045,17 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
               <div className={styles.detailTitleRow}>
                 <MonitorToggle entity="albums" id={album.id} monitored={album.monitored} />
                 <h1 className={styles.title}>{album.title}</h1>
-                <IconActionButton
-                  icon="edit"
-                  title="Edit metadata"
-                  onClick={() => setShowEdit(true)}
+                <AlbumOverflowMenu
+                  album={{
+                    id: album.id,
+                    title: album.title,
+                    year: album.year,
+                    album_type: album.album_type,
+                    release_date: album.release_date,
+                    user_overrides: album.user_overrides,
+                    quality_profile_id: album.quality_profile?.id ?? 1,
+                  }}
+                  onDeleted={goBack}
                 />
               </div>
               <p className={styles.subtitle}>
@@ -2654,20 +3089,6 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
             </div>
           </header>
           <AlbumTrackTable albumId={album.id} onAction={handleAction} />
-          {showEdit ? (
-            <AlbumDetailModal
-              album={{
-                id: album.id,
-                title: album.title,
-                year: album.year,
-                album_type: album.album_type,
-                release_date: album.release_date,
-                user_overrides: album.user_overrides,
-                quality_profile_id: album.quality_profile?.id ?? 1,
-              }}
-              onClose={() => setShowEdit(false)}
-            />
-          ) : null}
           {modalAction && INTERACTIVE_RE.test(modalAction.action) ? (
             <InteractiveSearchModal
               initialQuery={buildSearchQuery(album.primary_artist?.name ?? '', modalAction.action)}
@@ -2709,6 +3130,114 @@ export function shouldAutoFetchDiscography(params: {
   return discographyCount === 0;
 }
 
+/** B4: artist-toolbar decluttering — Preview Retag/Reorganize All/Maintenance/
+ *  Manual Import/Enrich are secondary "files & tools" actions, tucked behind
+ *  one dropdown instead of five separate buttons next to the Lidarr-core
+ *  primary bar (Refresh & Scan/Automatic Search/Interactive Search/Update
+ *  Discography). */
+function ArtistToolsMenu({
+  artistId,
+  artistName,
+  onRetag,
+  onReorganizeAll,
+  onMaintenance,
+  onManualImport,
+}: {
+  artistId: number;
+  artistName: string;
+  onRetag: () => void;
+  onReorganizeAll: () => void;
+  onMaintenance: () => void;
+  onManualImport: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [showEnrich, setShowEnrich] = useState(false);
+  const wrapRef = useRef<HTMLSpanElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDocClick(e: MouseEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [open]);
+
+  return (
+    <span ref={wrapRef} className={styles.overflowWrap}>
+      <ActionButton
+        icon="organize"
+        label="Files/Tools"
+        title="Preview Retag, Reorganize All, Maintenance, Manual Import, Enrich"
+        onClick={() => setOpen((v) => !v)}
+      />
+      {open ? (
+        <div className={styles.overflowMenu}>
+          <button
+            type="button"
+            className={styles.overflowMenuItem}
+            onClick={() => {
+              onRetag();
+              setOpen(false);
+            }}
+          >
+            Preview Retag
+          </button>
+          <button
+            type="button"
+            className={styles.overflowMenuItem}
+            onClick={() => {
+              onReorganizeAll();
+              setOpen(false);
+            }}
+          >
+            Reorganize All
+          </button>
+          <button
+            type="button"
+            className={styles.overflowMenuItem}
+            onClick={() => {
+              onMaintenance();
+              setOpen(false);
+            }}
+          >
+            Maintenance
+          </button>
+          <button
+            type="button"
+            className={styles.overflowMenuItem}
+            onClick={() => {
+              onManualImport();
+              setOpen(false);
+            }}
+          >
+            Manual Import
+          </button>
+          <button
+            type="button"
+            className={styles.overflowMenuItem}
+            onClick={() => {
+              setShowEnrich(true);
+              setOpen(false);
+            }}
+          >
+            Enrich…
+          </button>
+        </div>
+      ) : null}
+      {showEnrich ? (
+        <EnrichDropdown
+          entity="artists"
+          entityId={artistId}
+          entityName={artistName}
+          wrapperRef={wrapRef}
+          onClose={() => setShowEnrich(false)}
+        />
+      ) : null}
+    </span>
+  );
+}
+
 function ArtistDetailView({ artistId }: { artistId: number }) {
   const navigate = useNavigate();
   const search = Route.useSearch();
@@ -2716,7 +3245,6 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   const artistQuery = useQuery(libraryV2ArtistQueryOptions(artistId));
   const artist = artistQuery.data;
   const [discographyBusy, setDiscographyBusy] = useState(false);
-  const [upgradeScanBusy, setUpgradeScanBusy] = useState(false);
   const [modalAction, setModalAction] = useState<{
     action: string;
     entity?: Lib2EntityRef;
@@ -2726,17 +3254,18 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   const [showMaintenance, setShowMaintenance] = useState(false);
   const [showManageTracks, setShowManageTracks] = useState(false);
   const [showReorganizeAll, setShowReorganizeAll] = useState(false);
-  const [showEnrich, setShowEnrich] = useState(false);
-  const enrichWrapRef = useRef<HTMLSpanElement>(null);
   const [showEditArtist, setShowEditArtist] = useState(false);
   const [showArtPicker, setShowArtPicker] = useState(false);
+  // Album-scoped retag/delete now live inside each album's own
+  // AlbumOverflowMenu (B1/B2) — this state is only for the artist-level
+  // toolbar's own Preview Retag / Delete buttons.
   const [retagTarget, setRetagTarget] = useState<{
-    entity: 'artists' | 'albums';
+    entity: 'artists';
     id: number;
     title: string;
   } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{
-    entity: 'artists' | 'albums';
+    entity: 'artists';
     id: number;
     title: string;
   } | null>(null);
@@ -2748,30 +3277,6 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   const queryClient = useQueryClient();
   const artistName = artist?.name ?? '';
   const attemptedDiscographyFetchRef = useRef(false);
-
-  async function searchUpgrades() {
-    setUpgradeScanBusy(true);
-    setGrabBanner({
-      tone: 'busy',
-      text: 'Running a global scan of all monitored tracks for quality upgrades…',
-    });
-    try {
-      const jobId = await startLibraryV2UpgradeScan();
-      const error = await awaitBulkJob(queryClient, jobId);
-      setGrabBanner(
-        error
-          ? { tone: 'err', text: `Upgrade scan failed: ${error}` }
-          : {
-              tone: 'ok',
-              text: 'Global upgrade scan finished — genuine candidates from the whole Library v2 catalog were queued to the wishlist.',
-            },
-      );
-    } catch (e) {
-      setGrabBanner({ tone: 'err', text: e instanceof Error ? e.message : 'Upgrade scan failed' });
-    } finally {
-      setUpgradeScanBusy(false);
-    }
-  }
 
   async function updateDiscography() {
     setDiscographyBusy(true);
@@ -2876,43 +3381,22 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               />
             </div>
             <div className={styles.toolbarGroup}>
-              <ActionButton
-                icon="automatic"
-                label={upgradeScanBusy ? 'Scanning…' : 'Search Upgrades'}
-                title="Scan the entire Library v2 catalog and queue monitored tracks below their quality-profile cutoff"
-                busy={upgradeScanBusy}
-                onClick={() => void searchUpgrades()}
-              />
-              <ActionButton
-                icon="retag"
-                label="Preview Retag"
-                title="Compare file tags against library metadata and rewrite them"
-                onClick={() =>
+              <ArtistToolsMenu
+                artistId={artistId}
+                artistName={artistName}
+                onRetag={() =>
                   setRetagTarget({ entity: 'artists', id: artistId, title: artist.name })
                 }
+                onReorganizeAll={() => setShowReorganizeAll(true)}
+                onMaintenance={() => setShowMaintenance(true)}
+                onManualImport={() => void navigate({ to: '/import' })}
               />
-              <ActionButton
-                icon="folder"
-                label="Reorganize All"
-                title="Move every album's files to match the naming template"
-                onClick={() => setShowReorganizeAll(true)}
-              />
-              <ActionButton
-                icon="organize"
-                label="Maintenance"
-                title="Run library-wide repair jobs (gap fill, unknown artist, consistency, rename)"
-                onClick={() => setShowMaintenance(true)}
-              />
-              <ActionButton
-                icon="import"
-                label="Manual Import"
-                title="Open the Import page to bring staged files into the library"
-                onClick={() => void navigate({ to: '/import' })}
-              />
+            </div>
+            <div className={styles.toolbarGroup}>
               <ActionButton
                 icon="tracks"
                 label="Manage Tracks"
-                title="Review single↔album duplicate recordings and their monitor state"
+                title="Review single↔album duplicate recordings, files, and their monitor state"
                 onClick={() => setShowManageTracks(true)}
               />
               <ActionButton
@@ -2921,25 +3405,6 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 title="Recent downloads recorded for this artist"
                 onClick={() => setShowHistory(true)}
               />
-              <span ref={enrichWrapRef} className={styles.enrichWrap}>
-                <ActionButton
-                  icon="refresh"
-                  label="Enrich"
-                  title="Re-query a single metadata provider for fresh artist data"
-                  onClick={() => setShowEnrich((prev) => !prev)}
-                />
-                {showEnrich ? (
-                  <EnrichDropdown
-                    entity="artists"
-                    entityId={artistId}
-                    entityName={artistName}
-                    wrapperRef={enrichWrapRef}
-                    onClose={() => setShowEnrich(false)}
-                  />
-                ) : null}
-              </span>
-            </div>
-            <div className={styles.toolbarGroup}>
               <ActionButton
                 icon="edit"
                 label="Edit Metadata"
@@ -3062,12 +3527,6 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             artistId={artistId}
             scope="albums"
             onAction={handleAction}
-            onDelete={(album) =>
-              setDeleteTarget({ entity: 'albums', id: album.id, title: album.title })
-            }
-            onRetag={(album) =>
-              setRetagTarget({ entity: 'albums', id: album.id, title: album.title })
-            }
           />
           <AlbumGroup
             title="EPs"
@@ -3075,12 +3534,6 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             artistId={artistId}
             scope="eps"
             onAction={handleAction}
-            onDelete={(album) =>
-              setDeleteTarget({ entity: 'albums', id: album.id, title: album.title })
-            }
-            onRetag={(album) =>
-              setRetagTarget({ entity: 'albums', id: album.id, title: album.title })
-            }
           />
           <AlbumGroup
             title="Singles"
@@ -3088,12 +3541,6 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             artistId={artistId}
             scope="singles"
             onAction={handleAction}
-            onDelete={(album) =>
-              setDeleteTarget({ entity: 'albums', id: album.id, title: album.title })
-            }
-            onRetag={(album) =>
-              setRetagTarget({ entity: 'albums', id: album.id, title: album.title })
-            }
           />
           {modalAction && INTERACTIVE_RE.test(modalAction.action) ? (
             <InteractiveSearchModal
@@ -3156,9 +3603,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               title={deleteTarget.title}
               onDone={() => {
                 setDeleteTarget(null);
-                if (deleteTarget.entity === 'artists') {
-                  void navigate({ search: (p) => ({ ...p, artist: undefined }) });
-                }
+                void navigate({ search: (p) => ({ ...p, artist: undefined }) });
               }}
               onClose={() => setDeleteTarget(null)}
             />
@@ -3297,16 +3742,12 @@ function AlbumGroup({
   artistId,
   scope,
   onAction,
-  onDelete,
-  onRetag,
 }: {
   title: string;
   albums: LibraryV2AlbumSummary[];
   artistId: number;
   scope: 'albums' | 'eps' | 'singles';
   onAction: ActionHandler;
-  onDelete: (album: LibraryV2AlbumSummary) => void;
-  onRetag: (album: LibraryV2AlbumSummary) => void;
 }) {
   if (albums.length === 0) return null;
   const allMonitored = albums.every((a) => a.monitored);
@@ -3325,13 +3766,7 @@ function AlbumGroup({
       </h2>
       <div className={styles.albumList}>
         {albums.map((album) => (
-          <AlbumBlock
-            key={album.id}
-            album={album}
-            onAction={onAction}
-            onDelete={onDelete}
-            onRetag={onRetag}
-          />
+          <AlbumBlock key={album.id} album={album} onAction={onAction} />
         ))}
       </div>
     </section>
@@ -3341,20 +3776,12 @@ function AlbumGroup({
 function AlbumBlock({
   album,
   onAction,
-  onDelete,
-  onRetag,
 }: {
   album: LibraryV2AlbumSummary;
   onAction: ActionHandler;
-  onDelete: (album: LibraryV2AlbumSummary) => void;
-  onRetag: (album: LibraryV2AlbumSummary) => void;
 }) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
-  const [showEnrich, setShowEnrich] = useState(false);
-  const enrichWrapRef = useRef<HTMLSpanElement>(null);
-  const [showReorganize, setShowReorganize] = useState(false);
-  const [showArtPicker, setShowArtPicker] = useState(false);
   const profilesQuery = useQuery(libraryV2QualityProfilesQueryOptions());
   const profileName =
     (profilesQuery.data ?? []).find((p) => p.id === album.quality_profile_id)?.name ?? null;
@@ -3377,7 +3804,17 @@ function AlbumBlock({
           thumb
         />
         <div className={styles.albumHeadMeta}>
-          <span className={styles.albumHeadTitle}>{album.title}</span>
+          <button
+            type="button"
+            className={styles.albumHeadTitleLink}
+            title="Open album detail"
+            onClick={(e) => {
+              e.stopPropagation();
+              void navigate({ search: (previous) => ({ ...previous, album: album.id }) });
+            }}
+          >
+            {album.title}
+          </button>
           <span className={styles.albumHeadBadges}>
             <span className={styles.albumTypeBadge}>{album.album_type}</span>
             {releaseDate ? (
@@ -3414,13 +3851,6 @@ function AlbumBlock({
         )}
         <span className={styles.albumActions}>
           <IconActionButton
-            icon="expand"
-            title="Open album detail"
-            onClick={() =>
-              void navigate({ search: (previous) => ({ ...previous, album: album.id }) })
-            }
-          />
-          <IconActionButton
             icon="automatic"
             title="Automatic Search — search missing/upgradable tracks on this album"
             onClick={() =>
@@ -3440,86 +3870,21 @@ function AlbumBlock({
               })
             }
           />
-          <IconActionButton icon="retag" title="Preview Retag" onClick={() => onRetag(album)} />
-          <AlbumReplayGainButton albumId={album.id} />
-          <IconActionButton
-            icon="folder"
-            title="Reorganize — preview and move files to match the naming template"
-            onClick={() => setShowReorganize(true)}
-          />
-          <IconActionButton
-            icon="cover"
-            title="Change cover — pick from alternate cover art"
-            onClick={() => setShowArtPicker(true)}
-          />
-          <span ref={enrichWrapRef} className={styles.enrichWrap}>
-            <IconActionButton
-              icon="refresh"
-              title="Enrich — re-query a single metadata provider for fresh album data"
-              onClick={() => setShowEnrich((prev) => !prev)}
-            />
-            {showEnrich ? (
-              <EnrichDropdown
-                entity="albums"
-                entityId={album.id}
-                entityName={album.title}
-                wrapperRef={enrichWrapRef}
-                onClose={() => setShowEnrich(false)}
-              />
-            ) : null}
-          </span>
-          <AlbumDetailButton album={album} />
-          <IconActionButton
-            icon="delete"
-            title="Remove album from library (files stay on disk)"
-            tone="danger"
-            onClick={() => onDelete(album)}
+          <AlbumOverflowMenu
+            album={{
+              id: album.id,
+              title: album.title,
+              year: album.year,
+              album_type: album.album_type,
+              release_date: album.release_date,
+              user_overrides: album.user_overrides,
+              quality_profile_id: album.quality_profile_id,
+            }}
           />
         </span>
       </div>
       {open ? <AlbumTrackTable albumId={album.id} resolve={unowned} onAction={onAction} /> : null}
-      {showReorganize ? (
-        <AlbumReorganizeModal
-          albumId={album.id}
-          albumTitle={album.title}
-          onClose={() => setShowReorganize(false)}
-        />
-      ) : null}
-      {showArtPicker ? (
-        <AlbumArtPickerModal
-          albumId={album.id}
-          albumTitle={album.title}
-          onClose={() => setShowArtPicker(false)}
-        />
-      ) : null}
     </div>
-  );
-}
-
-/** Legacy Enrich→ReplayGain: analyze the album's files and write track+album
- *  ReplayGain tags. Runs as a background job and polls it to completion. */
-function AlbumReplayGainButton({ albumId }: { albumId: number }) {
-  const queryClient = useQueryClient();
-  const mutation = useMutation({
-    mutationFn: async () => {
-      const jobId = await startLibraryV2AlbumReplayGain(albumId);
-      const jobError = await awaitBulkJob(queryClient, jobId);
-      if (jobError) throw new Error(jobError);
-    },
-  });
-  return (
-    <IconActionButton
-      icon={mutation.isPending ? 'refresh' : 'gain'}
-      title={
-        mutation.isError
-          ? mutationErrorMessage(mutation.error, 'ReplayGain analysis failed')
-          : mutation.isPending
-            ? 'Analyzing ReplayGain…'
-            : 'Analyze ReplayGain (write track + album loudness tags)'
-      }
-      disabled={mutation.isPending}
-      onClick={() => mutation.mutate()}
-    />
   );
 }
 
@@ -4744,6 +5109,46 @@ export async function waitForLibraryV2Import(
     await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
   }
   throw new Error('Timed out waiting for the library import');
+}
+
+/** Deep-dive B7: the manual global upgrade scan used to live in every
+ *  artist's toolbar (misleadingly, since it always scanned the whole
+ *  catalog). Scoped Automatic Search (C1) covers per-artist/-album/-track
+ *  upgrades now, so the global variant only makes sense here, at the
+ *  library-overview level, next to Import. */
+function UpgradeScanButton() {
+  const queryClient = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function runScan() {
+    setBusy(true);
+    setMessage('Scanning…');
+    try {
+      const jobId = await startLibraryV2UpgradeScan();
+      const error = await awaitBulkJob(queryClient, jobId);
+      setMessage(error ? `Failed: ${error}` : 'Upgrade scan finished — candidates queued.');
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : 'Upgrade scan failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <span className={styles.importWrap}>
+      <button
+        type="button"
+        className={styles.btnGhost}
+        disabled={busy}
+        title="Scan the entire Library v2 catalog and queue monitored tracks below their quality-profile cutoff"
+        onClick={() => void runScan()}
+      >
+        {busy ? 'Scanning…' : 'Search Upgrades'}
+      </button>
+      {message ? <span className={styles.importMsg}>{message}</span> : null}
+    </span>
+  );
 }
 
 function ImportButton({ hasArtists, prominent }: { hasArtists: boolean; prominent?: boolean }) {

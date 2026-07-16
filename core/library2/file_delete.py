@@ -103,10 +103,25 @@ def _containing_root(path: str, roots: List[str]) -> Optional[str]:
     return max(matches, key=len) if matches else None
 
 
-def _scope_snapshot(database, entity: str, entity_id: int) -> tuple[str, List[Dict[str, Any]]]:
-    """Read the exact owned-file scope and close SQLite before path I/O."""
+def _scope_snapshot(
+    database, entity: str, entity_id: int, file_ids: Optional[List[int]] = None,
+) -> tuple[str, List[Dict[str, Any]]]:
+    """Read the exact owned-file scope and close SQLite before path I/O.
+
+    ``file_ids``, when given, narrows the normal whole-entity scope to a
+    caller-selected subset (C2: Manage Track Files bulk-delete) — the SQL
+    filter is still bounded by the entity's own ownership, so a stray id
+    outside this artist/album is silently dropped rather than trusted.
+    """
     if entity not in ("artists", "albums"):
         raise FileDeleteError("Unsupported entity")
+    id_filter, id_params = "", []
+    if file_ids is not None:
+        if not file_ids:
+            raise FileDeleteError("file_ids must not be empty")
+        marks = ",".join("?" for _ in file_ids)
+        id_filter = f" AND tf.id IN ({marks})"
+        id_params = [int(f) for f in file_ids]
     conn = database._get_connection()
     try:
         if entity == "artists":
@@ -116,15 +131,15 @@ def _scope_snapshot(database, entity: str, entity_id: int) -> tuple[str, List[Di
             if not entity_row:
                 raise FileDeleteError("Artist not found", 404)
             rows = conn.execute(
-                """SELECT tf.id AS file_id, tf.track_id, tf.path AS stored_path,
+                f"""SELECT tf.id AS file_id, tf.track_id, tf.path AS stored_path,
                           tf.size AS db_size, tf.file_state, t.title AS track_title,
                           al.id AS album_id, al.title AS album_title
                      FROM lib2_track_files tf
                      JOIN lib2_tracks t ON t.id=tf.track_id
                      JOIN lib2_albums al ON al.id=t.album_id
-                    WHERE al.primary_artist_id=? AND tf.file_state<>'deleted'
+                    WHERE al.primary_artist_id=? AND tf.file_state<>'deleted'{id_filter}
                     ORDER BY al.id, t.id, tf.id""",
-                (int(entity_id),),
+                (int(entity_id), *id_params),
             ).fetchall()
             title = entity_row["name"]
         else:
@@ -134,15 +149,15 @@ def _scope_snapshot(database, entity: str, entity_id: int) -> tuple[str, List[Di
             if not entity_row:
                 raise FileDeleteError("Album not found", 404)
             rows = conn.execute(
-                """SELECT tf.id AS file_id, tf.track_id, tf.path AS stored_path,
+                f"""SELECT tf.id AS file_id, tf.track_id, tf.path AS stored_path,
                           tf.size AS db_size, tf.file_state, t.title AS track_title,
                           al.id AS album_id, al.title AS album_title
                      FROM lib2_track_files tf
                      JOIN lib2_tracks t ON t.id=tf.track_id
                      JOIN lib2_albums al ON al.id=t.album_id
-                    WHERE al.id=? AND tf.file_state<>'deleted'
+                    WHERE al.id=? AND tf.file_state<>'deleted'{id_filter}
                     ORDER BY t.id, tf.id""",
-                (int(entity_id),),
+                (int(entity_id), *id_params),
             ).fetchall()
             title = entity_row["title"]
         return str(title), [dict(row) for row in rows]
@@ -155,12 +170,18 @@ def preview_entity_files(
     *,
     entity: str,
     entity_id: int,
+    file_ids: Optional[List[int]] = None,
     config_manager: Any = None,
 ) -> Dict[str, Any]:
-    """Build a deterministic, non-mutating physical-delete preview."""
+    """Build a deterministic, non-mutating physical-delete preview.
+
+    ``file_ids`` narrows the scope to a caller-selected subset of this
+    entity's files (C2) — everything else (root-safety, journaling, the
+    preview-token contract) is unchanged.
+    """
     from core.library2.paths import resolve_lib2_path
 
-    title, rows = _scope_snapshot(database, entity, entity_id)
+    title, rows = _scope_snapshot(database, entity, entity_id, file_ids)
     roots = _library_roots(config_manager)
     grouped: Dict[str, Dict[str, Any]] = {}
     for row in rows:
@@ -351,10 +372,16 @@ def delete_entity_files(
     entity: str,
     entity_id: int,
     preview_token: str,
+    file_ids: Optional[List[int]] = None,
     config_manager: Any = None,
     unlink: Callable[[str], None] = os.unlink,
 ) -> Dict[str, Any]:
-    """Execute an ADR-05 delete after revalidating the exact preview."""
+    """Execute an ADR-05 delete after revalidating the exact preview.
+
+    ``file_ids`` must match whatever selection produced ``preview_token`` —
+    passing a different selection than the one previewed naturally fails the
+    stale-preview check below, same as any other scope drift.
+    """
     if not isinstance(preview_token, str) or not preview_token:
         raise FileDeleteError("preview_token is required")
     reconcile_incomplete_deletes(database)
@@ -362,6 +389,7 @@ def delete_entity_files(
         database,
         entity=entity,
         entity_id=entity_id,
+        file_ids=file_ids,
         config_manager=config_manager,
     )
     if preview_token != preview["preview_token"]:

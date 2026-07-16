@@ -641,6 +641,29 @@ button.featureTag:disabled {
   text-overflow: ellipsis;
 }
 
+/* B1: album title is now the Lidarr-style link to the detail view (the
+ * standalone "Open Detail" icon was removed) — same look as .albumHeadTitle,
+ * reset to a button and underlined on hover to read as a link. */
+.albumHeadTitleLink {
+  font-weight: 600;
+  font-size: 14px;
+  color: #f3f3f3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  max-width: 100%;
+}
+
+.albumHeadTitleLink:hover {
+  color: #fff;
+  text-decoration: underline;
+}
+
 .albumHeadSub {
   font-size: 12px;
   color: rgba(255, 255, 255, 0.45);
@@ -2317,6 +2340,63 @@ button.featureTag:disabled {
 
 .enrichDropdownLabel {
   white-space: nowrap;
+}
+
+/* Generic overflow ("…") action menu — B1/B2/B4 decluttering. Same visual
+ * language as the enrich dropdown above (dark popover, hoverable rows), just
+ * under a name that isn't tied to one specific action. */
+.overflowWrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.overflowMenu {
+  position: absolute;
+  z-index: 200;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 180px;
+  background: #191919;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 9px;
+  padding: 5px 0;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  backdrop-filter: blur(8px);
+}
+
+.overflowMenuItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  white-space: nowrap;
+  transition:
+    background 0.1s ease,
+    color 0.1s ease;
+}
+
+.overflowMenuItem:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.07);
+  color: #fff;
+}
+
+.overflowMenuItemDanger {
+  color: #ef4444;
+}
+
+.overflowMenuItemDanger:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.12);
+  color: #ff8080;
 }
 
 .artPickerGrid {

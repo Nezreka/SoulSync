@@ -294,9 +294,14 @@ def link_download_into_library_v2(context: Dict[str, Any]) -> Optional[int]:
                 "WHERE id=? AND origin='discography'", (album_id,))
             # Heuristic auto-link can create a catalog track outside importer/
             # tracklist flows; materialize its wanted state before commit so
-            # projection consumers never silently miss the new row.
+            # projection consumers never silently miss the new row. No
+            # request context exists in this pipeline callback, so resolve
+            # the live default profile (G8) instead of hardcoding 1 (§1
+            # invariant) — same lookup already used above for new rows.
+            from core.library2.profile_lookup import default_quality_profile_id
             from core.library2.wanted import recompute_wanted
-            recompute_wanted(conn, track_ids=[track_id])
+            recompute_wanted(conn, profile_id=default_quality_profile_id(conn),
+                             track_ids=[track_id])
             conn.commit()
             logger.info("Library v2 auto-linked download: %s → track %s (file %s)",
                         os.path.basename(str(file_path)), track_id, file_id)

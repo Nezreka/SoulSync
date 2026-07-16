@@ -4734,3 +4734,135 @@ geschrieben wird — falsches Zuordnen wäre schlimmer als der Status quo
 Spalten/Sort/Bulk), C2 (Manage Track Files), G8 (kleinere Runde-2-Funde),
 H1–H13, I1–I10 — siehe `docs/library-v2-deep-dive-findings-2026-07-16.md`
 Abschnitt E.
+
+## 30. Deep-Dive-Findings 2026-07-16, Runde 3 (B7, G8, C2, B1/B2/B4) — ✅ behoben
+
+Siehe `docs/library-v2-deep-dive-findings-2026-07-16.md` Abschnitt E,
+Punkte 5, 8, 10 (Teil) und 11 (Teil). H-/I-Punkte bleiben unangetastet
+(brauchen erst Nutzer-Abstimmung, siehe Hinweis am Kopf des Dokuments);
+A6/A7/C3/C4 bleiben bewusst zurückgestellt (§29-Begründung gilt unverändert).
+
+- **B7 (Search-Upgrades-Konsolidierung)** — der globale
+  `lib2_upgrade_scan`-Trigger stand fälschlich in jeder Artist-Toolbar
+  (er scannte immer den GANZEN Katalog, nie nur diesen Artist). Button aus
+  der Artist-Toolbar entfernt, neue `UpgradeScanButton`-Komponente lebt jetzt
+  auf der Library-Übersicht neben Import — ehrlicher Ort für eine global
+  wirkende Aktion. Reiner Frontend-Move, kein Backend-Unterschied.
+- **G8 (drei der vier gesammelten Runde-2-Kleinfunde)**:
+  - `auto_monitor_releases` (`core/library2/discography.py`) setzte
+    `UPDATE lib2_tracks SET monitored=1 WHERE album_id=?` bedingungslos beim
+    Retry/Materialize einer auto-monitorten Release — überfuhr damit einen
+    Track, den der Nutzer zuvor explizit unmonitort hatte (P1-14-Verletzung).
+    Fix: dieselbe `explicitly_unmonitored_track_ids`-Veto-Prüfung wie im
+    Bulk-Monitor-Endpoint (`api/library_v2.py`) davor geschaltet — nur
+    unveto'te Tracks werden geflippt.
+  - Der Retry-Query für stecken gebliebene Tracklist-Materialisierungen
+    filterte auf `al.primary_artist_id=?`, während Index und Prune-Query
+    im selben Modul über die `lib2_album_artists`-Junction laufen — ein Album,
+    dessen Primary ein anderer (verlinkter) Artist ist, wurde nie retried.
+    Jetzt joint auch der Retry-Query über die Junction, konsistent mit den
+    anderen beiden Queries.
+  - `link_download_into_library_v2` (`core/library2/autolink.py`) rief
+    `recompute_wanted(conn, track_ids=[track_id])` ohne `profile_id` auf —
+    Default `1`, eine harte §1-Invarianten-Verletzung im Pipeline-Kontext
+    (kein Request-Profil vorhanden). Fix: `default_quality_profile_id(conn)`
+    wie überall sonst im selben Modul.
+  - Die vierte Beobachtung (`_find_or_create_artist`-Volltabellen-Scan +
+    fehlende External-ID-/§40-Alias-Berücksichtigung) bleibt bewusst offen —
+    anders als die drei oben hat sie keine konkrete Fix-Richtung im
+    Deep-Dive-Dokument, und ein Alias-Match-Heuristik-Fix ohne eigene
+    Recherche riskiert genau das falsche Zusammenführen von Artists, vor dem
+    schon A6/A7 zurückschrecken ließ.
+- **C2 (Manage Track Files)** — Lidarr-Style Datei-Liste + Bulk-Delete,
+  ADR-05-Reuse wie vom Deep-Dive vorgeschlagen:
+  - Neuer Read `core.library2.queries.list_artist_track_files` +
+    `GET /api/library/v2/artists/<id>/track-files` (paginiert, Suche über
+    Track-/Album-Titel), Scope identisch zu `file_delete._scope_snapshot`
+    (`primary_artist_id`, `file_state<>'deleted'`) — eine Selektion aus
+    dieser Liste passt exakt zu dem, was die ADR-05-Endpoints für dieselben
+    File-IDs sehen.
+  - `core/library2/file_delete.py`: `preview_entity_files`/
+    `delete_entity_files` bekommen ein optionales `file_ids`, das
+    `_scope_snapshot`s WHERE-Klausel zusätzlich einschränkt — Journal,
+    Preview-Token-Mechanismus und Root-Safety-Checks bleiben unverändert,
+    keine zweite Delete-Pipeline. API:
+    `GET .../file-delete-preview?file_ids=1,2,3`,
+    `POST .../file-delete` mit `file_ids` im Body.
+  - Frontend: `ManageTracksModal` bekommt einen Tab-Umschalter
+    ("Duplicates" — unverändert, jetzt `ManageTracksDuplicatesTab` — und neu
+    "Files"). `ArtistFilesTab` listet paginiert mit Checkbox-Spalte,
+    „Select all on page", Freitext-Filter; `FilesDeleteConfirm` spiegelt
+    exakt das UX-Muster von `DeleteConfirmModal`s physischem Lösch-Abschnitt
+    (Preview, Root-Safety-Anzeige, Bestätigungs-Checkbox, Danger-Button),
+    nur auf die Auswahl begrenzt.
+- **B1/B2/B4 (UI-Entrümpelung nach C1)** — neues generisches
+  „…"-Overflow-Menü-Muster (`styles.overflowMenu`/`overflowMenuItem`,
+  gleiche Optik wie das bestehende `EnrichDropdown`, aber ohne dessen
+  Enrich-spezifischen Namen) ersetzt an zwei Stellen eine Reihe einzelner
+  Icon-Buttons:
+  - **Album-Zeile** (`AlbumBlock`): von 10 auf 3 sichtbare Controls reduziert
+    — Automatic Search, Interactive Search, „…". „Open Detail" entfällt
+    ersatzlos: der Albumtitel selbst ist jetzt der Link zur Detail-Ansicht
+    (Lidarr-Muster), Zeilen-Klick bleibt Inline-Expand (eigenes
+    `stopPropagation` auf dem Titel-Button verhindert Doppel-Trigger).
+    Preview Retag, ReplayGain, Reorganize, Change Cover, Enrich, Album
+    Details (vormals `AlbumDetailButton`, jetzt entfernt und in den neuen
+    `AlbumOverflowMenu` gefaltet) und Delete wandern ins Overflow-Menü.
+  - **Album-Detail-Ansicht** (`AlbumDetailView`, B2) hatte vorher NUR
+    Edit-Metadata; bekommt jetzt exakt denselben `AlbumOverflowMenu` im
+    Header wie die Zeile — dieselbe Komponente, `onDeleted` unterscheidet nur
+    das Verhalten nach einem erfolgreichen Löschen (Zeile: verschwindet von
+    selbst durch Query-Invalidierung; Detail-Ansicht: `onDeleted` navigiert
+    zurück zum Artist, da die aufgerufene Seite sonst auf ein gelöschtes
+    Album zeigen würde).
+  - **Artist-Toolbar** (`ArtistDetailView`, B4): von 16 auf 12 sichtbare
+    Controls, in drei Gruppen statt drei beliebigen Reihen. Primärleiste
+    unverändert (Refresh & Scan, Automatic Search, Interactive Search, Update
+    Discography — Lidarr-Kern). Neue `ArtistToolsMenu`-Dropdown bündelt
+    Preview Retag, Reorganize All, Maintenance, Manual Import, Enrich (exakt
+    die vom Deep-Dive vorgeschlagene "Files/Tools"-Gruppe). Rechte Gruppe
+    (Entity-Verwaltung): Manage Tracks, History, Edit Metadata, Change Photo,
+    Monitoring, Profile, Delete — die im Deep-Dive als „ggf." (optional)
+    markierte Zusammenlegung von Edit/Monitoring/Profile in ein gemeinsames
+    Tab-Modal wurde bewusst NICHT gemacht (spekulativer Umbau ohne
+    festgeschriebene Notwendigkeit; reine Gruppierung erfüllt den
+    Kern-Vorschlag bereits).
+  - `retagTarget`/`deleteTarget` in `ArtistDetailView` sind jetzt auf
+    `entity: 'artists'` verengt (Album-Retag/-Delete läuft komplett über den
+    neuen `AlbumOverflowMenu`, der seinen eigenen `RetagModal`/
+    `DeleteConfirmModal` besitzt statt über lifted State im Parent).
+
+**Verifikation:** `pytest tests/library2` (570 grün) und `tests/metadata`
+(728 grün) je isoliert; kombiniert dieselben 6 vorbestehenden
+Test-Order-Pollution-Failures aus §29 (Cross-Suite-Only, nicht durch diese
+Session verursacht — mit `tests/library2`/`tests/metadata` einzeln
+verifiziert). 16 neue Backend-Tests (`test_discography.py`,
+`test_autolink.py`, `test_queries.py`, `test_file_delete.py`,
+`test_api_routes.py`). `vitest` 181 grün (39 neue Frontend-Tests in
+`-library-v2.api.test.ts`), `oxfmt --check`/`oxlint --type-check` über den
+gesamten `webui/src`-Baum clean. Zusätzlich live gegen den laufenden
+Dev-Server verifiziert (`dev.py`, echte Daten, Artist „Justin Bieber"):
+`GET .../track-files` direkt per curl (13 Files über 5 Seiten), UI per
+Playwright/Chromium-Screenshots — Album-Overflow-Menü, Artist-Toolbar
+„Files/Tools"-Dropdown, Album-Detail-Header-Menü (B2) und der neue
+Files-Tab inkl. Checkbox-Auswahl + Delete-Preview (die ADR-05-
+Root-Safety-Sperre griff dabei korrekt, weil die Dev-Config keinen
+passenden `library.music_paths`-Root für die Testdateien hat) sehen alle
+wie entworfen aus, keine Konsolenfehler. Der visuelle Check deckte dabei
+einen echten Bug auf: `qualityText` in `ArtistFilesTab` nahm an, `bitrate`
+sei immer in bps (zeigte „1kbps" statt „923kbps") — gefixt mit derselben
+Normalisierungs-Heuristik (`bitrate > 5000 ? /1000 : bitrate`), die
+`QualityDisplay`/`fileText` an anderer Stelle schon nutzen (Datenmodell
+liefert Bitrate je nach Quelle inkonsistent in bps oder schon in kbps).
+
+**Scope:** `core/library2/discography.py`, `core/library2/autolink.py`,
+`core/library2/queries.py`, `core/library2/file_delete.py`,
+`api/library_v2.py`, `webui/.../-library-v2.api.ts`,
+`webui/.../-library-v2.page.module.css`,
+`webui/.../-ui/library-v2-page.tsx`.
+
+**Noch offen aus dem Deep-Dive:** A6/A7/C3/C4 (History/Lifecycle, §29
+unverändert zurückgestellt), B5/B6 (konfigurierbare Spalten/Sort/Bulk —
+größter verbleibender Block), G8-Vierter-Punkt (`_find_or_create_artist`
+Perf + Alias-Awareness, s.o.), H1–H13, I1–I10 (Legacy-/Lidarr-Gap, brauchen
+Nutzer-Abstimmung vor Umsetzung).

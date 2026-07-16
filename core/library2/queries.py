@@ -175,6 +175,73 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
     return artists, total
 
 
+def list_artist_track_files(conn, artist_id: int, *, search: str = "",
+                            page: int = 1, limit: int = 100
+                            ) -> Tuple[List[Dict[str, Any]], int]:
+    """Paginated flat file list for one artist (C2: Lidarr "Manage Track
+    Files"). Mirrors ``core.library2.file_delete._scope_snapshot``'s artist
+    scope exactly (``primary_artist_id``, non-deleted files) so a selection
+    made from this list lines up with what the ADR-05 preview/execute
+    endpoints will actually see for the same file ids.
+    """
+    page = max(1, int(page))
+    limit = max(1, min(int(limit), 500))
+    offset = (page - 1) * limit
+    clauses = ["al.primary_artist_id = :artist_id", "tf.file_state <> 'deleted'"]
+    params: Dict[str, Any] = {"artist_id": int(artist_id)}
+    if search:
+        clauses.append("(t.title LIKE :like OR al.title LIKE :like)")
+        params["like"] = f"%{search}%"
+    where = "WHERE " + " AND ".join(clauses)
+
+    total = conn.execute(
+        f"""SELECT COUNT(*) AS c FROM lib2_track_files tf
+             JOIN lib2_tracks t ON t.id = tf.track_id
+             JOIN lib2_albums al ON al.id = t.album_id
+            {where}""",
+        params,
+    ).fetchone()["c"]
+
+    rows = conn.execute(
+        f"""SELECT tf.id AS file_id, tf.track_id, tf.path, tf.size, tf.format,
+                   tf.bitrate, tf.sample_rate, tf.bit_depth, tf.quality_tier,
+                   tf.file_state, tf.is_primary, tf.added_at,
+                   t.title AS track_title, t.track_number, t.disc_number,
+                   al.id AS album_id, al.title AS album_title
+              FROM lib2_track_files tf
+              JOIN lib2_tracks t ON t.id = tf.track_id
+              JOIN lib2_albums al ON al.id = t.album_id
+             {where}
+             ORDER BY al.title, t.disc_number, t.track_number, tf.id
+             LIMIT :limit OFFSET :offset""",
+        {**params, "limit": limit, "offset": offset},
+    ).fetchall()
+
+    files = [
+        {
+            "file_id": r["file_id"],
+            "track_id": r["track_id"],
+            "track_title": r["track_title"],
+            "track_number": r["track_number"],
+            "disc_number": r["disc_number"],
+            "album_id": r["album_id"],
+            "album_title": r["album_title"],
+            "path": r["path"],
+            "size": r["size"],
+            "format": r["format"],
+            "bitrate": r["bitrate"],
+            "sample_rate": r["sample_rate"],
+            "bit_depth": r["bit_depth"],
+            "quality_tier": r["quality_tier"],
+            "file_state": r["file_state"],
+            "is_primary": bool(r["is_primary"]),
+            "added_at": r["added_at"],
+        }
+        for r in rows
+    ]
+    return files, total
+
+
 def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
     """Artist detail: header + albums and singles grouped separately.
 
@@ -960,4 +1027,5 @@ def list_quality_profiles(conn) -> List[Dict[str, Any]]:
     return [_quality_profile_dict(row) for row in rows if row is not None]
 
 
-__all__ = ["list_artists", "get_artist", "get_album", "get_track", "list_quality_profiles"]
+__all__ = ["list_artists", "list_artist_track_files", "get_artist", "get_album", "get_track",
+           "list_quality_profiles"]
