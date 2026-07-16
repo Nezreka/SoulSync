@@ -4728,6 +4728,48 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def rename_owned_episode_files(self) -> list:
+        """Every owned episode file with the show/episode context the naming
+        templates need (mass rename, P7)."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT e.id AS episode_id, e.season_number, e.episode_number, "
+                "e.title AS episode_title, s.title AS show_title, s.year AS show_year, "
+                "f.id AS file_id, f.relative_path, f.size_bytes, f.resolution, f.quality, "
+                "f.video_codec, f.release_source "
+                "FROM episodes e JOIN shows s ON s.id = e.show_id "
+                "JOIN media_files f ON f.episode_id = e.id "
+                "WHERE e.has_file=1 "
+                "ORDER BY s.title COLLATE NOCASE, e.season_number, e.episode_number").fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def media_file_stored_path(self, file_id) -> str | None:
+        conn = self._get_connection()
+        try:
+            row = conn.execute("SELECT relative_path FROM media_files WHERE id=?",
+                               (int(file_id),)).fetchone()
+            return row["relative_path"] if row else None
+        except (sqlite3.Error, TypeError, ValueError):
+            return None
+        finally:
+            conn.close()
+
+    def set_media_file_stored_path(self, file_id, new_path) -> bool:
+        conn = self._get_connection()
+        try:
+            cur = conn.execute("UPDATE media_files SET relative_path=? WHERE id=?",
+                               (str(new_path), int(file_id)))
+            conn.commit()
+            return cur.rowcount > 0
+        except (sqlite3.Error, TypeError, ValueError):
+            logger.exception("set_media_file_stored_path failed")
+            return False
+        finally:
+            conn.close()
+
     def repair_movie_metadata_gaps(self) -> list:
         """Owned movies with enrichment gaps: unmatched, or missing overview /
         genres / poster / backdrop. Returns the raw signals; the job decides
