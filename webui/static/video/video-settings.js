@@ -421,6 +421,137 @@
         }
     }
 
+    // ── notification connections (arr-parity P11) ────────────────────────────
+    var NOTIFY_URL = '/api/video/notifications';
+    var _vqNotify = [];
+    var _vqNotifyEvents = [];
+    var _NOTIFY_EVENT_LABEL = {
+        video_download_completed: 'Imported', video_upgrade_completed: 'Upgraded',
+        video_import_failed: 'Import failed', video_download_failed: 'Failed',
+        video_wishlist_item_added: 'Wishlisted', video_watchlist_added: 'Followed',
+    };
+
+    function loadNotify() {
+        fetch(NOTIFY_URL, { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d) return;
+                _vqNotify = d.connections || [];
+                _vqNotifyEvents = d.events || [];
+                renderNotify();
+                wireNotify();
+            })
+            .catch(function () { /* non-admins get a 403 — section stays empty */ });
+    }
+
+    function renderNotify() {
+        var host = document.getElementById('vq-notify-rows');
+        if (!host) return;
+        host.innerHTML = _vqNotify.map(function (c) {
+            var tg = c.type === 'telegram';
+            var evs = _vqNotifyEvents.map(function (ev) {
+                return '<label class="vq-nt-ev"><input type="checkbox" data-vq-nt-ev="' + ev + '"' +
+                    (c.events.indexOf(ev) > -1 ? ' checked' : '') + '>' +
+                    (_NOTIFY_EVENT_LABEL[ev] || ev) + '</label>';
+            }).join('');
+            return '<div class="vq-nt-block" data-vq-notify="' + c.id + '">' +
+                '<div class="vq-fmt-row vq-nt-row">' +
+                    '<input class="vq-fmt-in" data-vq-nt-f="name" value="' + escA(c.name) + '" placeholder="Name">' +
+                    '<select class="vq-fmt-in" data-vq-nt-f="type">' +
+                        _sel([['discord', 'Discord'], ['webhook', 'Webhook'], ['telegram', 'Telegram']], c.type) + '</select>' +
+                    '<input class="vq-fmt-in" data-vq-nt-f="url" value="' + escA(c.url) + '" placeholder="Webhook URL"' + (tg ? ' style="display:none"' : '') + '>' +
+                    '<input class="vq-fmt-in" data-vq-nt-f="token" value="' + escA(c.token) + '" placeholder="Bot token"' + (tg ? '' : ' style="display:none"') + '>' +
+                    '<input class="vq-fmt-in" data-vq-nt-f="chat_id" value="' + escA(c.chat_id) + '" placeholder="Chat id"' + (tg ? '' : ' style="display:none"') + '>' +
+                    '<button class="test-button vq-nt-test" type="button" data-vq-notify-test="' + c.id + '">Test</button>' +
+                    '<label class="vq-il-on" title="Enabled"><input type="checkbox" data-vq-nt-f="enabled"' + (c.enabled ? ' checked' : '') + '></label>' +
+                    '<button class="vq-fmt-del" type="button" data-vq-notify-del="' + c.id + '" title="Delete">✕</button>' +
+                '</div>' +
+                '<div class="vq-nt-events">' + evs + '</div>' +
+                '</div>';
+        }).join('') || '<div class="settings-hint" style="padding:6px 0;">No connections yet.</div>';
+    }
+
+    function _notifyFromBlock(block) {
+        var val = function (k) {
+            var el = block.querySelector('[data-vq-nt-f="' + k + '"]');
+            return el ? (el.type === 'checkbox' ? el.checked : el.value) : '';
+        };
+        var events = [];
+        Array.prototype.forEach.call(block.querySelectorAll('[data-vq-nt-ev]'), function (cb) {
+            if (cb.checked) events.push(cb.getAttribute('data-vq-nt-ev'));
+        });
+        return { id: parseInt(block.getAttribute('data-vq-notify'), 10),
+                 name: val('name'), type: val('type'), url: val('url'),
+                 token: val('token'), chat_id: val('chat_id'),
+                 enabled: val('enabled'), events: events };
+    }
+
+    function wireNotify() {
+        var host = document.getElementById('vq-notify-rows');
+        if (!host || host._vqWired) return;
+        host._vqWired = true;
+        host.addEventListener('change', function (e) {
+            var block = e.target.closest('[data-vq-notify]');
+            if (!block) return;
+            var conn = _notifyFromBlock(block);
+            fetch(NOTIFY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(conn) })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (res) {
+                    if (!res || !res.success) { toast('Connection needs a valid target (URL or token + chat id)', 'error'); return; }
+                    for (var i = 0; i < _vqNotify.length; i++) {
+                        if (_vqNotify[i].id === res.id) _vqNotify[i] = res;
+                    }
+                    if (e.target.getAttribute('data-vq-nt-f') === 'type') renderNotify();   // swap target inputs
+                })
+                .catch(function () { toast('Couldn’t save the connection', 'error'); });
+        });
+        host.addEventListener('click', function (e) {
+            var del = e.target.closest('[data-vq-notify-del]');
+            if (del) {
+                fetch(NOTIFY_URL + '/' + del.getAttribute('data-vq-notify-del'), { method: 'DELETE' })
+                    .then(function (r) { return r.ok ? r.json() : null; })
+                    .then(function (res) {
+                        if (!res || !res.success) throw new Error();
+                        _vqNotify = _vqNotify.filter(function (c) { return String(c.id) !== del.getAttribute('data-vq-notify-del'); });
+                        renderNotify();
+                    })
+                    .catch(function () { toast('Couldn’t delete the connection', 'error'); });
+                return;
+            }
+            var tb = e.target.closest('[data-vq-notify-test]');
+            if (tb) {
+                var block = tb.closest('[data-vq-notify]');
+                tb.disabled = true;
+                fetch(NOTIFY_URL + '/test', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(_notifyFromBlock(block)) })
+                    .then(function (r) { return r.json().catch(function () { return null; }).then(function (j) { return { ok: r.ok, j: j }; }); })
+                    .then(function (res) {
+                        tb.disabled = false;
+                        if (res.ok && res.j && res.j.success) toast('Test sent — check the channel', 'success');
+                        else toast((res.j && res.j.error) || 'Test failed', 'error');
+                    })
+                    .catch(function () { tb.disabled = false; toast('Test failed', 'error'); });
+            }
+        });
+        var add = document.querySelector('[data-vq-notify-add]');
+        if (add && !add._vqWired) {
+            add._vqWired = true;
+            add.addEventListener('click', function () {
+                fetch(NOTIFY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: 'Discord', type: 'discord',
+                                           url: 'https://discord.com/api/webhooks/REPLACE-ME' }) })
+                    .then(function (r) { return r.ok ? r.json() : null; })
+                    .then(function (res) {
+                        if (!res || !res.success) throw new Error();
+                        _vqNotify.push(res);
+                        renderNotify();
+                    })
+                    .catch(function () { toast('Couldn’t add a connection', 'error'); });
+            });
+        }
+    }
+
     // Hybrid chain — reuses music's .hybrid-source-item markup/CSS for visual
     // parity. Enabled sources (ordered, numbered) first, disabled ones appended.
     // No album-level/track-level badge — that's a music-only concept.
@@ -1160,6 +1291,7 @@
         loadKeys();
         loadDownloads();
         loadImportLists();
+        loadNotify();
         wireDownloads();
         loadQuality();
         wireQuality();

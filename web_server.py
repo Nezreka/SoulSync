@@ -1450,6 +1450,15 @@ def _register_automation_handlers():
                 lambda etype, data: automation_engine.emit(etype, data or {}))
         except Exception:
             logger.exception("Could not wire video events -> automation engine")
+    # Notifications (arr-parity P11): a second forwarder fans the same events
+    # out to configured Discord/webhook/Telegram connections. Independent of
+    # the engine — notify still works if automations are off.
+    try:
+        from core.video.download_events import register_event_forwarder as _reg_fw
+        from core.video.notifications import handle_event as _notify_handle
+        _reg_fw(_notify_handle)
+    except Exception:
+        logger.exception("Could not wire video events -> notifications")
 
     logger.info("Automation action handlers registered")
 
