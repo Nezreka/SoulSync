@@ -389,6 +389,14 @@ SYSTEM_AUTOMATIONS = [
         'initial_delay': 1080,
         'owned_by': 'video',
     },
+    {
+        'name': 'Sync Import Lists',                   # external lists → wishlist/watchlist
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 6, 'unit': 'hours'},
+        'action_type': 'video_import_lists',
+        'initial_delay': 1860,
+        'owned_by': 'video',
+    },
     # YouTube retention: delete channel episodes outside each channel's keep window. No-op
     # unless a channel opts in (cog modal → Keep); default keeps everything, so safe to seed.
     {

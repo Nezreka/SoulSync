@@ -2333,6 +2333,10 @@ body[data-side="video"] #soulsync-toggle { display: none; }
     background: rgba(0, 0, 0, 0.3); color: rgba(255, 255, 255, 0.55); cursor: pointer; }
 .vq-fmt-del:hover { background: rgba(239, 68, 68, 0.8); color: #fff; border-color: transparent; }
 @media (max-width: 900px) { .vq-fmt-row { grid-template-columns: 1fr 1fr; } }
+/* import-list rows reuse the format grid with different column weights (P6) */
+.vq-implist-row { grid-template-columns: 1fr 1fr 1.2fr 0.8fr 1fr 34px 30px; }
+.vq-il-on { display: flex; align-items: center; justify-content: center; }
+@media (max-width: 900px) { .vq-implist-row { grid-template-columns: 1fr 1fr; } }
 
 /* Follow-time monitor menu (P2): what to wish when following a SHOW. */
 .vwl-menu { position: fixed; z-index: 10000; min-width: 280px; padding: 6px; border-radius: 12px;

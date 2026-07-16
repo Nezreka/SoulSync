@@ -7049,6 +7049,17 @@
                                     </div>
                                     <small class="settings-hint">Once a completed grab hits either goal, it's removed from the torrent client (your imported library copy is separate and never touched). Both at 0 = never remove — exactly the old behavior.</small>
                                 </div>
+                                <!-- Import lists (arr-parity P6) -->
+                                <div class="form-group" id="video-import-lists">
+                                    <label>Import lists:</label>
+                                    <small class="settings-hint" style="display:block; margin-bottom:8px;">
+                                        Everything on a list enters acquisition automatically (movies → wishlist, shows → follow with the chosen monitor policy).
+                                        Only NEW list members are added, so removing something never boomerangs back. Synced by the "Sync Import Lists" automation.
+                                        Ref: a TMDB list id, a chart key (trending_movies, top_shows, …), an IMDb ls-id/URL — Plex Watchlist needs no ref.
+                                    </small>
+                                    <div id="vq-implist-rows"></div>
+                                    <button class="test-button" type="button" data-vq-implist-add>+ Add list</button>
+                                </div>
                             </div>
                             <!-- slskd connection — SHARED with Music (one slskd instance). Writes the
                                  app-wide soulseek.* config, not video.db. Collapsible; shown when soulseek

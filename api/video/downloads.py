@@ -228,6 +228,35 @@ def register_routes(bp):
         save_source(db, body)         # download_mode + hybrid_order (validated)
         return jsonify({"status": "saved"})
 
+    # ── import lists (arr-parity P6). Nested under /downloads/config so the
+    #    blueprint's write-admin gate covers mutations automatically. ─────────
+    @bp.route("/downloads/config/import-lists", methods=["GET"])
+    def video_import_lists_get():
+        from core.video.import_lists import load_lists
+
+        from . import get_video_db
+        return jsonify({"lists": load_lists(get_video_db())})
+
+    @bp.route("/downloads/config/import-lists", methods=["POST"])
+    def video_import_lists_save():
+        from core.video.import_lists import save_list
+
+        from . import get_video_db
+        entry = save_list(get_video_db(), request.get_json(silent=True) or {})
+        if not entry:
+            return jsonify({"success": False,
+                            "error": "A list needs a valid source (and a list id/ref)."}), 400
+        return jsonify({"success": True, **entry})
+
+    @bp.route("/downloads/config/import-lists/<int:list_id>", methods=["DELETE"])
+    def video_import_lists_delete(list_id):
+        from core.video.import_lists import delete_list
+
+        from . import get_video_db
+        if not delete_list(get_video_db(), list_id):
+            return jsonify({"success": False, "error": "Unknown list."}), 404
+        return jsonify({"success": True})
+
     @bp.route("/downloads/blocklist", methods=["GET"])
     def video_downloads_blocklist():
         """The release blocklist — exact remote files that will never be re-picked."""

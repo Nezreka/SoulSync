@@ -321,6 +321,106 @@
           .catch(function () { /* ignore */ });
     }
 
+    // ── import lists editor (arr-parity P6) ─────────────────────────────────
+    var IMPLIST_URL = DOWNLOADS_URL + '/import-lists';
+    var _vqImpLists = [];
+
+    function loadImportLists() {
+        fetch(IMPLIST_URL, { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d) return;
+                _vqImpLists = d.lists || [];
+                renderImportLists();
+                wireImportLists();
+            })
+            .catch(function () { /* ignore */ });
+    }
+
+    function _sel(options, value) {
+        return options.map(function (o) {
+            return '<option value="' + o[0] + '"' + (o[0] === value ? ' selected' : '') + '>' + o[1] + '</option>';
+        }).join('');
+    }
+
+    function renderImportLists() {
+        var host = document.getElementById('vq-implist-rows');
+        if (!host) return;
+        host.innerHTML = _vqImpLists.map(function (l) {
+            return '<div class="vq-fmt-row vq-implist-row" data-vq-implist="' + l.id + '">' +
+                '<input class="vq-fmt-in" data-vq-il-f="name" value="' + escA(l.name) + '" placeholder="Name">' +
+                '<select class="vq-fmt-in" data-vq-il-f="source">' +
+                    _sel([['tmdb_list', 'TMDB list'], ['tmdb_chart', 'TMDB chart'],
+                          ['imdb_list', 'IMDb list'], ['plex_watchlist', 'Plex Watchlist']], l.source) + '</select>' +
+                '<input class="vq-fmt-in" data-vq-il-f="ref" value="' + escA(l.ref) + '" placeholder="list id / chart / ls…">' +
+                '<select class="vq-fmt-in" data-vq-il-f="media">' +
+                    _sel([['both', 'Both'], ['movie', 'Movies'], ['show', 'Shows']], l.media) + '</select>' +
+                '<select class="vq-fmt-in" data-vq-il-f="monitor" title="Shows: what to wish when followed">' +
+                    _sel([['future', 'Future eps'], ['all', 'All aired'], ['latest_season', 'Latest season'],
+                          ['first_season', 'First season'], ['pilot', 'Pilot']], l.monitor) + '</select>' +
+                '<label class="vq-il-on" title="Enabled"><input type="checkbox" data-vq-il-f="enabled"' + (l.enabled ? ' checked' : '') + '></label>' +
+                '<button class="vq-fmt-del" type="button" data-vq-implist-del="' + l.id + '" title="Delete list">✕</button>' +
+                '</div>';
+        }).join('') || '<div class="settings-hint" style="padding:6px 0;">No import lists yet.</div>';
+    }
+
+    function _impListFromRow(row) {
+        var val = function (k) {
+            var el = row.querySelector('[data-vq-il-f="' + k + '"]');
+            return el ? (el.type === 'checkbox' ? el.checked : el.value) : '';
+        };
+        return { id: parseInt(row.getAttribute('data-vq-implist'), 10),
+                 name: val('name'), source: val('source'), ref: val('ref'),
+                 media: val('media'), monitor: val('monitor'), enabled: val('enabled') };
+    }
+
+    function wireImportLists() {
+        var host = document.getElementById('vq-implist-rows');
+        if (!host || host._vqWired) return;
+        host._vqWired = true;
+        host.addEventListener('change', function (e) {
+            var row = e.target.closest('[data-vq-implist]');
+            if (!row) return;
+            fetch(IMPLIST_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(_impListFromRow(row)) })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (res) {
+                    if (!res || !res.success) { toast('A list needs a valid source + ref', 'error'); return; }
+                    for (var i = 0; i < _vqImpLists.length; i++) {
+                        if (_vqImpLists[i].id === res.id) _vqImpLists[i] = res;
+                    }
+                })
+                .catch(function () { toast('Couldn’t save the list', 'error'); });
+        });
+        host.addEventListener('click', function (e) {
+            var del = e.target.closest('[data-vq-implist-del]');
+            if (!del) return;
+            fetch(IMPLIST_URL + '/' + del.getAttribute('data-vq-implist-del'), { method: 'DELETE' })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (res) {
+                    if (!res || !res.success) throw new Error();
+                    _vqImpLists = _vqImpLists.filter(function (l) { return String(l.id) !== del.getAttribute('data-vq-implist-del'); });
+                    renderImportLists();
+                })
+                .catch(function () { toast('Couldn’t delete the list', 'error'); });
+        });
+        var add = document.querySelector('[data-vq-implist-add]');
+        if (add && !add._vqWired) {
+            add._vqWired = true;
+            add.addEventListener('click', function () {
+                fetch(IMPLIST_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: 'New list', source: 'tmdb_chart', ref: 'trending_movies' }) })
+                    .then(function (r) { return r.ok ? r.json() : null; })
+                    .then(function (res) {
+                        if (!res || !res.success) throw new Error();
+                        _vqImpLists.push(res);
+                        renderImportLists();
+                    })
+                    .catch(function () { toast('Couldn’t add a list', 'error'); });
+            });
+        }
+    }
+
     // Hybrid chain — reuses music's .hybrid-source-item markup/CSS for visual
     // parity. Enabled sources (ordered, numbered) first, disabled ones appended.
     // No album-level/track-level badge — that's a music-only concept.
@@ -1059,6 +1159,7 @@
         load();
         loadKeys();
         loadDownloads();
+        loadImportLists();
         wireDownloads();
         loadQuality();
         wireQuality();
