@@ -3561,7 +3561,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             try:
                 stats = import_legacy_library(get_database(), reset=reset, progress=_progress,
                                               profile_id=active_profile)
-                _import_state.update(stats=stats, stage="tracklists")
+                _import_state.update(stats=stats, stage="tracklists", current=0, total=0)
 
                 # Resolve missing-track titles before artwork: cached tracklists
                 # can immediately become real, monitorable rows, while
@@ -3572,17 +3572,17 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 except Exception as e:  # noqa: BLE001
                     logger.debug("tracklist precache failed: %s", e)
 
-                _import_state.update(stage="tags")
+                _import_state.update(stage="tags", current=0, total=0)
                 try:
                     from core.library2.tag_cache import precache_tag_cache
                     precache_tag_cache(get_database(), config_manager, progress=_progress)
                 except Exception as e:  # noqa: BLE001
                     logger.debug("tag cache precache failed: %s", e)
 
-                _import_state.update(stage="artwork")
+                _import_state.update(stage="artwork", current=0, total=0)
                 try:
                     from core.library2.artwork import precache_all_artwork
-                    precache_all_artwork(get_database(), config_manager)
+                    precache_all_artwork(get_database(), config_manager, progress=_progress)
                 except Exception as e:  # noqa: BLE001
                     logger.debug("artwork precache failed: %s", e)
 

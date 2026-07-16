@@ -1021,6 +1021,14 @@ export async function fetchLibraryV2ImportStatus(): Promise<LibraryV2ImportState
   return readJson<LibraryV2ImportState>(apiClient.get('library/v2/import/status'));
 }
 
+export function libraryV2ImportStatusQueryOptions(refetchIntervalMs = 1000) {
+  return queryOptions({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'import-status'],
+    queryFn: fetchLibraryV2ImportStatus,
+    refetchInterval: (query) => (query.state.data?.running ? refetchIntervalMs : false),
+  });
+}
+
 export function libraryV2EnabledQueryOptions() {
   return queryOptions({
     queryKey: [...LIBRARY_V2_QUERY_KEY, 'enabled'],

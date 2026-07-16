@@ -64,6 +64,30 @@ def test_precache_tag_cache_populates_never_scanned_file(
     assert tags["lyrics"] == "some lyrics"
 
 
+def test_precache_tag_cache_reports_small_library_progress(
+        legacy_db_factory, tmp_path, monkeypatch):
+    database = _database(legacy_db_factory(n_albums=1))
+    real_file = tmp_path / "track.flac"
+    real_file.write_bytes(b"not-real-audio")
+    monkeypatch.setattr(
+        "core.library2.paths.resolve_lib2_path", lambda _path: str(real_file)
+    )
+    monkeypatch.setattr(
+        "core.tag_writer.read_file_tags",
+        lambda _path: {"title": "Track 0", "error": None},
+    )
+    events = []
+
+    precache_tag_cache(
+        database,
+        None,
+        progress=lambda stage, current, total: events.append((stage, current, total)),
+    )
+
+    assert events[0] == ("tags", 0, 1)
+    assert events[-1] == ("tags", 1, 1)
+
+
 def test_precache_tag_cache_skips_already_scanned_files(
         legacy_db, tmp_path, monkeypatch):
     """A file whose tags_json is no longer the schema default must not be

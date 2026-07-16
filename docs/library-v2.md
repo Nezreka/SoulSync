@@ -22,7 +22,9 @@
 > unbegonnen, P2-05 offen — beim Gegenprüfen gegen den Code bereits
 > überholt waren); am 2026-07-16 Abschnitt 31 ergänzt (Deep-Dive Runde 4:
 > B5 konfigurierbare Spalten/Match-Provider, B6 Sort/Mehrfachauswahl/
-> Bulk-Leiste an der Track-Tabelle).
+> Bulk-Leiste an der Track-Tabelle); am 2026-07-17 Abschnitt 40 ergänzt
+> (P2-25/D4: echter Import-Fortschritt, unbegrenztes Reattach-Polling und
+> Query-Invalidierung statt Full-Page-Reload).
 
 Opt-in, Lidarr-style Library-Manager auf SoulSyncs eigener
 Such-/Download-/Processing-/Tagging-Pipeline. Gated hinter
@@ -2896,7 +2898,7 @@ Priorität, kompakt aufgelistet für spätere Aufnahme):
   bisher unbekannten Bandnamen (nicht nur beim M1-Fixfall) weiterhin
   Phantom-Artists erzeugen, wenn der volle Credit-String noch nicht als
   Artist bekannt ist.
-- P2-25 (gefunden via PR #1025, Nezreka, 320k-Track-Library): Import zeigt
+- ~~P2-25 (gefunden via PR #1025, Nezreka, 320k-Track-Library): Import zeigt
   keinen echten Live-Fortschritt an. Backend loggt granularen Fortschritt
   (`import_legacy_library` alle 200 Rows in `core/library2/importer.py:474,
   555,665`, danach `precache_tracklists` alle 20 Alben und
@@ -2913,7 +2915,18 @@ Priorität, kompakt aufgelistet für spätere Aufnahme):
   (`provider_adapters.py:294-330`, `artwork.py:264-271`) — bei 320k Tracks
   potenziell zehntausende Calls. **Fix-Richtung:** echten Fortschritt im UI
   anzeigen (Backend liefert die Daten bereits) und den 10-Minuten-Timeout im
-  Frontend entfernen/erhöhen, da er keine reale Fehlerbedingung abbildet.
+  Frontend entfernen/erhöhen, da er keine reale Fehlerbedingung abbildet.~~
+  **Behoben 2026-07-17:** Der Importstatus ist eine geteilte React-Query, die
+  beim Laden an einen bereits laufenden Backend-Import anknüpft und nur
+  solange pollt, wie `running=true` ist — ohne künstliches Zeitlimit. Stufe,
+  Zähler und geklemmter Prozentwert werden live mit Progress-Bar angezeigt;
+  nach Abschluss werden die Library-v2-Queries invalidiert statt die ganze
+  Seite neu zu laden. Backendseitig melden Artist-/Album-/Track-Import sowie
+  Tracklist-, Tag- und Artwork-Precache jetzt auch für kleine Libraries
+  garantiert Start und Abschluss; Tracklist-Cached-/Provider-Phasen bilden
+  einen monotonen Gesamtzähler, und Artwork reicht seinen zuvor ungenutzten
+  Progress-Callback bis zum Statusendpoint durch. Details und Verifikation in
+  Abschnitt 40.
 
 ---
 
@@ -5448,3 +5461,49 @@ Ein erster Prototyp für Excel-style Resizable Columns wurde entwickelt, um Spal
 - **Visuelle Griffe:** Sichtbare Trennlinien an den Spaltengrenzen im Header, die bei Hover deutlicher hervorgehoben werden und einen breiteren Klickbereich (`~12px`) haben, um das Greifen zu erleichtern.
 - **Minimum-Grenzen:** Mindestbreiten (ca. 40px) pro Spalte zur Vermeidung von Collapses, aber keine Maximum-Grenzen.
 
+---
+
+## 40. §P2-25/D4 Library-Import mit echtem Live-Fortschritt — ✅ umgesetzt (2026-07-17)
+
+Der bei großen Bibliotheken irreführende statische Zustand „Importing…“ ist
+durch einen durchgängigen, reconnect-fähigen Statusvertrag ersetzt:
+
+- `import_legacy_library` meldet für Artists, Alben und Tracks jeweils
+  `(stage, 0, total)` sowie garantiert `(stage, total, total)`. Die bisherigen
+  200er-Zwischenstände bleiben erhalten, verwenden jetzt aber verarbeitete
+  Zeilen statt nullbasierter Indizes.
+- Tracklist-Precache fasst Cache- und Provider-Phase in EINEN monotonen
+  Gesamtzähler. Tag- und Artwork-Precache melden auch unterhalb ihrer
+  50er-/25er-Batchgrenzen Start und Abschluss; der Import-Worker reicht den
+  Progress-Callback nun auch tatsächlich an Artwork weiter. Beim Wechsel der
+  Stufen werden alte `current`-/`total`-Werte zurückgesetzt.
+- `libraryV2ImportStatusQueryOptions` ist die gemeinsame Statusquelle aller
+  Import-Buttons. Ein Seiten-Reload oder zweiter Button hängt sich damit an
+  denselben laufenden Import; gepollt wird ausschließlich während
+  `running=true`, ohne den falschen bisherigen Zehn-Minuten-Timeout. Ein
+  vorübergehender Statusfehler bleibt sichtbar und React Query versucht die
+  laufende Abfrage weiter.
+- Die UI zeigt verständliche Stufen (`Importing artists`, `Resolving
+  tracklists`, `Reading file tags`, `Caching artwork`), `current/total`, einen
+  auf 0–100 geklemmten Prozentwert und eine native Progress-Bar. Der
+  Abschluss nennt Artist-/Album-/Track-Zahlen.
+- `window.location.reload()` ist entfernt. Nach Erfolg invalidiert der Client
+  den bestehenden `LIBRARY_V2_QUERY_KEY`; Navigation, Filter und sonstiger
+  React-Zustand bleiben erhalten.
+- Die bereits im Worktree vorhandene Tooltip-Politur aus §18.6 bleibt
+  erhalten: vorhandene und fehlende Dateitags erscheinen jetzt zeilenweise
+  mit `✓`/`✗`, statt als schwer lesbare kommagetrennte Einzeile.
+
+**Verifikation:** `pytest tests/library2` **615 passed**; Frontend Format,
+Lint und Typecheck ohne Fehler/Warnungen; Vitest **34 Dateien / 198 Tests
+passed**; Production-Build erfolgreich (nur der bekannte Main-Chunk-Hinweis).
+Vier neue Backend-Verträge pinnen kleine/terminale und monotone
+Fortschrittsmeldungen; fünf neue Frontend-Tests pinnen Formatierung, Reattach,
+Start→Live-Status→Abschluss, terminale Fehler und Query-Invalidierung. Die Vollsuite deckte
+zusätzlich fünf veraltete Frontend-Tests auf: Match-Chip-Tests laufen jetzt im
+erforderlichen QueryClient-/Preferences-Harness, Quality-Tests prüfen den
+aktuellen kompakten Statuspunkt-/Tooltip-Vertrag statt alter Text-Badges.
+
+**Scope:** `core/library2/importer.py`, `completeness.py`, `tag_cache.py`,
+`artwork.py`, `api/library_v2.py`, Library-v2-API/Page/CSS sowie die
+zugehörigen Backend-/Frontend-Vertragstests.

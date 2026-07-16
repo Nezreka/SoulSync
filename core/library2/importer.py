@@ -755,6 +755,8 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
         # --- Artists -------------------------------------------------------
         cursor.execute("SELECT * FROM artists")
         artist_rows = cursor.fetchall()
+        if progress:
+            progress("artists", 0, len(artist_rows))
         for i, row in enumerate(artist_rows):
             name = row["name"]
             if not name:
@@ -795,8 +797,10 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
             # through the same COALESCE-on-UPDATE columns as name/image/genres.
             _merge_artist_enrichment(cursor, lib2_artist_id, _artist_enrichment_payload(row))
             stats["artists"] += 1
-            if progress and i % 200 == 0:
-                progress("artists", i, len(artist_rows))
+            if progress and (i + 1) % 200 == 0:
+                progress("artists", i + 1, len(artist_rows))
+        if progress:
+            progress("artists", len(artist_rows), len(artist_rows))
 
         # --- Albums (map legacy album id -> lib2 album id) -----------------
         album_map: Dict[str, int] = {}
@@ -806,6 +810,8 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
 
         cursor.execute("SELECT * FROM albums")
         album_rows = cursor.fetchall()
+        if progress:
+            progress("albums", 0, len(album_rows))
         actual_track_counts = {
             int(row["album_id"]): int(row["count"])
             for row in cursor.execute(
@@ -922,8 +928,10 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 "VALUES(?,?, 'primary')", (album_id, lib2_artist),
             )
             stats["albums"] += 1
-            if progress and i % 200 == 0:
-                progress("albums", i, len(album_rows))
+            if progress and (i + 1) % 200 == 0:
+                progress("albums", i + 1, len(album_rows))
+        if progress:
+            progress("albums", len(album_rows), len(album_rows))
 
         # --- Tracks + track files + track-artist junctions -----------------
         track_map: Dict[str, int] = {}
@@ -969,6 +977,8 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
 
         cursor.execute("SELECT * FROM tracks")
         track_rows = cursor.fetchall()
+        if progress:
+            progress("tracks", 0, len(track_rows))
         for i, row in enumerate(track_rows):
             album_id = album_map.get(_legacy_key(row["album_id"]))
             if album_id is None:
@@ -1103,8 +1113,10 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                          _pick(row, "sample_rate"), _pick(row, "bit_depth"), fmt,
                          _pick(row, "verification_status"), row["id"], run_id, file_id),
                     )
-            if progress and i % 200 == 0:
-                progress("tracks", i, len(track_rows))
+            if progress and (i + 1) % 200 == 0:
+                progress("tracks", i + 1, len(track_rows))
+        if progress:
+            progress("tracks", len(track_rows), len(track_rows))
 
         stats.update(_reconcile_legacy_snapshot(cursor, run_id))
         stats["wishlist_tracks"] = seed_wishlist_tracks(cursor, resolver, profile_id)

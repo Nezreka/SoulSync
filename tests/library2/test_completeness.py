@@ -655,3 +655,37 @@ def test_precache_tracklists_max_workers_caps_concurrency(legacy_db_factory, mon
     )
     proceed.set()
     t.join(timeout=5)
+
+
+def test_precache_tracklists_reports_one_monotonic_combined_stage(
+        legacy_db_factory, monkeypatch):
+    from core.library2.importer import import_legacy_library
+
+    legacy_db = legacy_db_factory(n_albums=3)
+    import_legacy_library(legacy_db)
+    conn = legacy_db._get_connection()
+    album_ids = _mark_all_albums_partial(conn)
+    conn.close()
+
+    monkeypatch.setattr(
+        completeness,
+        "_partial_album_rows",
+        lambda _conn, *, cached: [(album_ids[0],)] if cached else [
+            (album_ids[1],),
+            (album_ids[2],),
+        ],
+    )
+    monkeypatch.setattr(completeness, "resolve_tracklist", lambda *_args: True)
+    events = []
+
+    precache_tracklists(
+        legacy_db,
+        None,
+        progress=lambda stage, current, total: events.append((stage, current, total)),
+    )
+
+    assert events[0] == ("tracklists", 0, 3)
+    assert events[-1] == ("tracklists", 3, 3)
+    assert [current for _, current, _ in events] == sorted(
+        current for _, current, _ in events
+    )

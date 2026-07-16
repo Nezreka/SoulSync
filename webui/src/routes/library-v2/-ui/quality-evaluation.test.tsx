@@ -47,21 +47,20 @@ describe('Library v2 quality evaluation state', () => {
   it('renders unknown quality as an explicit third state', () => {
     render(<TrackQualityProfileBadge track={track()} />);
 
-    expect(screen.getByText('quality unknown')).toHaveAttribute(
-      'title',
-      'Scan the file to evaluate its quality profile',
-    );
+    expect(screen.getByTitle('Quality unknown (scan the file to evaluate)')).toBeInTheDocument();
   });
 
   it('keeps known below-profile and upgrade states distinct', () => {
     const { rerender } = render(
       <TrackQualityProfileBadge track={track({ meets_profile: false, upgrade_candidate: true })} />,
     );
-    expect(screen.getByText('below profile')).toBeInTheDocument();
+    expect(screen.getByTitle("Below the album's quality profile")).toBeInTheDocument();
 
     rerender(
       <TrackQualityProfileBadge track={track({ meets_profile: true, upgrade_candidate: true })} />,
     );
-    expect(screen.getByText('upgrade ↑')).toBeInTheDocument();
+    expect(
+      screen.getByTitle('A higher-quality version may be available (upgrade candidate)'),
+    ).toBeInTheDocument();
   });
 });

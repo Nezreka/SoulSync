@@ -131,3 +131,18 @@ def test_precache_all_artwork_skips_already_cached(legacy_db_factory, monkeypatc
     )
     assert counts["albums"] == len(album_ids) - 1
     assert counts["artists"] == 1
+
+
+def test_precache_all_artwork_reports_small_library_progress(legacy_db_factory, monkeypatch):
+    database = _database(legacy_db_factory(n_albums=2))
+    monkeypatch.setattr(artwork, "build_artwork", lambda *_args, **_kwargs: None)
+    events = []
+
+    artwork.precache_all_artwork(
+        database,
+        None,
+        progress=lambda stage, current, total: events.append((stage, current, total)),
+    )
+
+    assert events[0] == ("artwork", 0, 3)
+    assert events[-1] == ("artwork", 3, 3)

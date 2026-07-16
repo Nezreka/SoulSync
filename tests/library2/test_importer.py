@@ -54,6 +54,20 @@ def test_import_counts(legacy_db):
     assert stats["linked_duplicates"] == 1
 
 
+def test_import_reports_start_and_completion_for_every_row_stage(legacy_db):
+    events = []
+
+    import_legacy_library(
+        legacy_db,
+        progress=lambda stage, current, total: events.append((stage, current, total)),
+    )
+
+    for stage, total in (("artists", 1), ("albums", 2), ("tracks", 3)):
+        stage_events = [event for event in events if event[0] == stage]
+        assert stage_events[0] == (stage, 0, total)
+        assert stage_events[-1] == (stage, total, total)
+
+
 def test_import_preloads_row_lookup_maps_instead_of_n_plus_one_selects(legacy_db):
     """The large-library contract: entity writes remain ordered, but lookup
     SELECTs must not scale once per legacy album/track/wishlist row."""

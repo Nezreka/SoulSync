@@ -363,6 +363,8 @@ def precache_all_artwork(database, config_manager, *, progress=None) -> Dict[str
     ]
     progress_lock = threading.Lock()
     done = [total - len(pending)]
+    if progress:
+        progress("artwork", done[0], total)
 
     def _build_one(kind: str, eid: int) -> bool:
         try:
@@ -391,10 +393,12 @@ def precache_all_artwork(database, config_manager, *, progress=None) -> Dict[str
                         counts[futures[future] + "s"] += 1
                     with progress_lock:
                         done[0] += 1
-                        if progress and done[0] % 25 == 0:
+                        if progress and (done[0] % 25 == 0 or done[0] == total):
                             progress("artwork", done[0], total)
     except Exception as e:  # noqa: BLE001
         logger.debug("artwork precache error: %s", e)
+    if progress:
+        progress("artwork", total, total)
     logger.info("Library v2 artwork precache: %s", counts)
     return counts
 

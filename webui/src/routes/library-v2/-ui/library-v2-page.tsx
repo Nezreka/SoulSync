@@ -12,6 +12,7 @@ import type {
   LibraryV2ArtistSummary,
   LibraryV2ArtistTableColumns,
   LibraryV2FileTags,
+  LibraryV2ImportState,
   LibraryV2ManualSkip,
   LibraryV2MatchService,
   LibraryV2PlaylistPipelineState,
@@ -37,11 +38,11 @@ import {
   fetchLibraryV2ArtistTrackFiles,
   fetchLibraryV2Duplicates,
   fetchLibraryV2FileDeletePreview,
-  fetchLibraryV2ImportStatus,
   fetchLibraryV2JobStatus,
   fetchLibraryV2TrackLyrics,
   LIBRARY_V2_ALBUM_TYPES,
   LIBRARY_V2_QUERY_KEY,
+  invalidateLibraryV2,
   libraryV2AlbumMatchStatusQueryOptions,
   libraryV2AlbumQueryOptions,
   libraryV2ArtistAliasesQueryOptions,
@@ -49,6 +50,7 @@ import {
   libraryV2ArtistQueryOptions,
   libraryV2ArtistsQueryOptions,
   libraryV2EnabledQueryOptions,
+  libraryV2ImportStatusQueryOptions,
   libraryV2MirrorStatusQueryOptions,
   libraryV2PlaylistQueryOptions,
   libraryV2PlaylistsQueryOptions,
@@ -5130,12 +5132,24 @@ const METADATA_TAG_ORDER = Object.keys(METADATA_TAG_LABELS);
 
 function metadataGapsTooltip(gaps: string[]): string {
   const present = METADATA_TAG_ORDER.filter((tag) => !gaps.includes(tag)).map(
-    (tag) => METADATA_TAG_LABELS[tag],
+    (tag) => `✓ ${METADATA_TAG_LABELS[tag]}`,
   );
-  const missing = gaps.map((tag) => METADATA_TAG_LABELS[tag] ?? tag);
-  const parts = [`Present: ${present.length ? present.join(', ') : 'none'}`];
-  if (missing.length) parts.push(`Missing: ${missing.join(', ')}`);
-  return parts.join(' / ');
+  const missing = gaps.map((tag) => `✗ ${METADATA_TAG_LABELS[tag] ?? tag}`);
+
+  const lines: string[] = [];
+
+  if (present.length > 0) {
+    lines.push('Present Tags:');
+    lines.push(...present);
+  }
+
+  if (missing.length > 0) {
+    if (lines.length > 0) lines.push('');
+    lines.push('Missing Tags:');
+    lines.push(...missing);
+  }
+
+  return lines.join('\n');
 }
 
 function TrackRow({
@@ -6469,16 +6483,39 @@ function BackLink({ children, onClick }: { children: ReactNode; onClick: () => v
   );
 }
 
-export async function waitForLibraryV2Import(
-  maxPolls = 600,
-  pollIntervalMs = 1000,
-): Promise<Awaited<ReturnType<typeof fetchLibraryV2ImportStatus>>> {
-  for (let i = 0; i < maxPolls; i += 1) {
-    const state = await fetchLibraryV2ImportStatus();
-    if (!state.running) return state;
-    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
-  }
-  throw new Error('Timed out waiting for the library import');
+const IMPORT_STAGE_LABELS: Record<string, string> = {
+  starting: 'Starting import',
+  artists: 'Importing artists',
+  albums: 'Importing albums',
+  tracks: 'Importing tracks',
+  tracklists: 'Resolving tracklists',
+  tags: 'Reading file tags',
+  artwork: 'Caching artwork',
+  done: 'Finishing import',
+};
+
+export function describeLibraryV2ImportProgress(state: LibraryV2ImportState): string {
+  const label = IMPORT_STAGE_LABELS[state.stage ?? ''] ?? 'Importing library';
+  if (!Number.isFinite(state.total) || state.total <= 0) return `${label}…`;
+  const total = Math.max(0, Math.round(state.total));
+  const current = Math.min(total, Math.max(0, Math.round(state.current)));
+  const percent = clampPercent((current / total) * 100);
+  return `${label} · ${current}/${total} · ${percent}%`;
+}
+
+export function describeLibraryV2ImportCompletion(state: LibraryV2ImportState): string {
+  const stats = state.stats;
+  if (!stats) return 'Import complete.';
+  const counts = [
+    ['artist', 'artists', stats.artists],
+    ['album', 'albums', stats.albums],
+    ['track', 'tracks', stats.tracks],
+  ] as const;
+  if (counts.some(([, , value]) => typeof value !== 'number')) return 'Import complete.';
+  const summary = counts
+    .map(([singular, plural, value]) => `${value} ${value === 1 ? singular : plural}`)
+    .join(' · ');
+  return `Import complete — ${summary}.`;
 }
 
 /** Deep-dive B7: the manual global upgrade scan used to live in every
@@ -6521,24 +6558,60 @@ function UpgradeScanButton() {
   );
 }
 
-function ImportButton({ hasArtists, prominent }: { hasArtists: boolean; prominent?: boolean }) {
-  const [busy, setBusy] = useState(false);
+export function ImportButton({
+  hasArtists,
+  prominent,
+  pollIntervalMs = 1000,
+}: {
+  hasArtists: boolean;
+  prominent?: boolean;
+  pollIntervalMs?: number;
+}) {
+  const queryClient = useQueryClient();
+  const importQuery = useQuery(libraryV2ImportStatusQueryOptions(pollIntervalMs));
+  const observedRunning = useRef(false);
   const [message, setMessage] = useState<string | null>(null);
+  const startImport = useMutation({
+    mutationFn: () => startLibraryV2Import(false),
+    onMutate: () => setMessage(null),
+    onSuccess: () => {
+      observedRunning.current = true;
+      return queryClient.invalidateQueries({
+        queryKey: [...LIBRARY_V2_QUERY_KEY, 'import-status'],
+      });
+    },
+    onError: (error) => setMessage(mutationErrorMessage(error, 'Import failed')),
+  });
 
-  async function runImport() {
-    setBusy(true);
-    setMessage('Importing…');
-    try {
-      await startLibraryV2Import(false);
-      const state = await waitForLibraryV2Import();
-      setMessage(state.error ? `Failed: ${state.error}` : 'Imported — refreshing…');
-      if (!state.error) window.location.reload();
-    } catch (e) {
-      setMessage(e instanceof Error ? e.message : 'Import failed');
-    } finally {
-      setBusy(false);
+  const importState = importQuery.data;
+  const running = importState?.running === true;
+  const busy = startImport.isPending || running;
+
+  useEffect(() => {
+    if (!importState) return;
+    if (importState.running) {
+      observedRunning.current = true;
+      return;
     }
-  }
+    if (!observedRunning.current) return;
+    observedRunning.current = false;
+    if (importState.error || importState.stage === 'failed') {
+      setMessage(`Failed: ${importState.error || 'Import failed'}`);
+      return;
+    }
+    setMessage(describeLibraryV2ImportCompletion(importState));
+    void invalidateLibraryV2(queryClient);
+  }, [importState, queryClient]);
+
+  const statusMessage = running
+    ? describeLibraryV2ImportProgress(importState)
+    : startImport.isPending
+      ? 'Starting import…'
+      : message;
+  const progress =
+    running && importState.total > 0
+      ? clampPercent((importState.current / importState.total) * 100)
+      : null;
 
   return (
     <span className={styles.importWrap}>
@@ -6546,11 +6619,26 @@ function ImportButton({ hasArtists, prominent }: { hasArtists: boolean; prominen
         type="button"
         className={prominent ? styles.btnPrimary : styles.btnGhost}
         disabled={busy}
-        onClick={() => void runImport()}
+        onClick={() => startImport.mutate()}
       >
         {busy ? 'Importing…' : hasArtists ? 'Re-import library' : 'Import library'}
       </button>
-      {message ? <span className={styles.importMsg}>{message}</span> : null}
+      {statusMessage ? (
+        <span className={styles.importStatus} role="status" aria-live="polite">
+          <span className={styles.importMsg}>{statusMessage}</span>
+          {progress !== null ? (
+            <progress
+              className={styles.importProgress}
+              max={100}
+              value={progress}
+              aria-label={statusMessage}
+            />
+          ) : null}
+          {running && importQuery.isError ? (
+            <span className={styles.importPollError}>Status unavailable; retrying…</span>
+          ) : null}
+        </span>
+      ) : null}
     </span>
   );
 }

@@ -140,6 +140,8 @@ def precache_tag_cache(database, config_manager, *, progress=None) -> Dict[str, 
     total = len(pending)
     progress_lock = threading.Lock()
     done = [0]
+    if progress:
+        progress("tags", 0, total)
 
     def _read_one(file_id: int, raw_path: str) -> bool:
         path = resolve_lib2_path(raw_path)
@@ -174,10 +176,12 @@ def precache_tag_cache(database, config_manager, *, progress=None) -> Dict[str, 
                         counts["updated"] += 1
                     with progress_lock:
                         done[0] += 1
-                        if progress and done[0] % 50 == 0:
+                        if progress and (done[0] % 50 == 0 or done[0] == total):
                             progress("tags", done[0], total)
     except Exception as e:  # noqa: BLE001
         logger.debug("tag cache precache error: %s", e)
+    if progress:
+        progress("tags", total, total)
     logger.info("Library v2 tag-cache precache: %s", counts)
     return counts
 

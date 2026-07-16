@@ -425,10 +425,15 @@ A7 für nicht-acquisition-korrelierte Downloads (der Normalfall heute) leer.
   (konfigurierbare Spalten, B5 einbeziehen) bewusst ausgelassen:** bei nur 7
   festen Spalten ist der Nutzen gegenüber dem Aufwand gering, anders als bei
   der deutlich breiteren Track-Tabelle.
-- **D4. `waitForLibraryV2Import`**-10-Minuten-Timeout + statisches
-  „Importing…" ist als P2-25 bereits getrackt — bei der Umsetzung auch den
-  `window.location.reload()` (Full-Page-Reload nach Import,
-  `library-v2-page.tsx:4666`) durch Query-Invalidierung ersetzen.
+- **D4. Import-Polling/Live-Fortschritt — ✅ behoben (siehe library-v2.md
+  §40):** Der manuelle `waitForLibraryV2Import`-Loop samt Zehn-Minuten-Timeout
+  ist entfernt. Ein geteilter React-Query-Status hängt sich auch nach Reload
+  an laufende Importe, pollt ohne künstliches Zeitbudget, zeigt Backend-Stufe,
+  Zähler, Prozent und Progress-Bar und invalidiert nach Erfolg die Library-v2-
+  Queries. `window.location.reload()` entfällt vollständig. Die Backend-
+  Precache-Stufen garantieren zusätzlich Start-/Endstände auch unterhalb ihrer
+  früheren Batch-Schwellen; Tracklist-Fortschritt bleibt über Cache-/Provider-
+  Phase monoton.
 - **D5. Play/Preview fehlt komplett** (Legacy hat `col-play` mit
   Stream-Preview pro Track). Bewusste Lücke? Nirgends dokumentiert — als
   Produktentscheidung festhalten oder als Parity-Punkt aufnehmen.
@@ -687,7 +692,8 @@ oben — diese Tabelle ist eine Enumeration, kein Spec.
   umgesetzt (library-v2.md §34).
 - Manage-Tracks-Delete-Wünsche: ui-requirements §3.1/§3.2/§5.1 (durch C2
   konkretisiert).
-- Import-Progress/Timeout: P2-25; Artist-Credit-Splitting-Restrisiko: P2-24;
-  Download-Engine-Verantwortung: P2-23.
+- ~~Import-Progress/Timeout: P2-25~~ umgesetzt in library-v2.md §40;
+  Artist-Credit-Splitting-Restrisiko: P2-24; Download-Engine-Verantwortung:
+  P2-23.
 - §40/§41 Alias-Registry-Folgearbeiten (Fan-out-Sweep, Merge-UI), §38-Rest
   (Live-Katalog-Fetch-Verifikation), §42 (laut ui-req §5.2 abgeschlossen).

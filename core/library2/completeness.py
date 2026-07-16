@@ -513,7 +513,8 @@ def _precache_max_workers(config_manager, default: int = 3) -> int:
 
 
 def _resolve_stage(database, config_manager, album_ids: List[int], *,
-                    stage: str, progress=None) -> int:
+                    stage: str, progress=None, progress_offset: int = 0,
+                    progress_total: Optional[int] = None) -> int:
     """Resolve one precache stage's albums via a bounded ThreadPoolExecutor,
     each worker opening its own connection. Returns count resolved."""
     if not album_ids:
@@ -543,8 +544,12 @@ def _resolve_stage(database, config_manager, album_ids: List[int], *,
                 resolved += 1
             with lock:
                 done += 1
-                if progress and done % 20 == 0:
-                    progress(stage, done, len(album_ids))
+                if progress and (done % 20 == 0 or done == len(album_ids)):
+                    progress(
+                        stage,
+                        progress_offset + done,
+                        progress_total if progress_total is not None else len(album_ids),
+                    )
     return resolved
 
 
@@ -572,13 +577,21 @@ def precache_tracklists(database, config_manager, *, progress=None) -> int:
     finally:
         conn.close()
 
+    total = len(cached_ids) + len(uncached_ids)
+    if progress:
+        progress("tracklists", 0, total)
+
     try:
         resolved += _resolve_stage(database, config_manager, cached_ids,
-                                    stage="tracklists", progress=progress)
+                                    stage="tracklists", progress=progress,
+                                    progress_offset=0, progress_total=total)
         resolved += _resolve_stage(database, config_manager, uncached_ids,
-                                    stage="tracklists", progress=progress)
+                                    stage="tracklists", progress=progress,
+                                    progress_offset=len(cached_ids), progress_total=total)
     except Exception as e:  # noqa: BLE001
         logger.debug("tracklist precache error: %s", e)
+    if progress:
+        progress("tracklists", total, total)
     logger.info("Library v2 tracklist precache: %d resolved", resolved)
     return resolved
 
