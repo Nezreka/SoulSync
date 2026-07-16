@@ -152,6 +152,11 @@
 ### 8.3 Enrich Album/Track Funktion
 - **Ziel:** Wie in alter Library — gezielt Album/Track mit Metadaten anreichern.
 - **Scope:** Backend-Funktion (API + Worker).
+- **Design-Überlegungen (2026-07-16):**
+  - *Artist-Level-Enrichment* holt nur Artist-spezifische Metadaten (Bio, Genre, IDs, Bilder), führt aber kein Deep-Enrichment aller Tracks des Künstlers aus.
+  - *Album-Level-Enrichment* holt Album-Metadaten und aktualisiert alle Tracks dieses Albums.
+  - *Track-Level-Enrichment* existiert im Backend/API, ist aber in der UI weggelassen worden, um visuelle Überladung zu vermeiden.
+  - *Nutzer-Feedback:* Der Nutzer möchte ungern zusätzliche Buttons in der Track-Tabelle haben. Falls Track-Enrichment gebraucht wird, muss eine alternative, platzsparende Lösung gefunden werden.
 
 ### 8.4 Manual Matching nach Metadaten-Source
 - **Ziel:** Ähnlich Plex — bei Match-Fehlern manuell beheben; spezifisch pro Metadaten-Source.

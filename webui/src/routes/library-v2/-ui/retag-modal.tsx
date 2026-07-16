@@ -48,7 +48,7 @@ export function RetagModal({
   const tracks = useMemo(() => {
     const raw = previewQuery.data?.tracks ?? [];
     return raw.filter(
-      (t) => t.file_path && t.error !== 'No file' && t.error !== 'File not found on disk'
+      (t) => t.file_path && t.error !== 'No file' && t.error !== 'File not found on disk',
     );
   }, [previewQuery.data]);
   const changed = useMemo(() => tracks.filter((t) => t.has_changes), [tracks]);

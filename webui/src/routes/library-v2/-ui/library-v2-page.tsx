@@ -671,107 +671,119 @@ function ManualMatchModal({
  *  ``core.library2.match_status.SERVICES``' per-entity-type column map
  *  (Genius has no album column, Discogs has no track column, Bandcamp has
  *  no artist column), which the backend re-validates regardless. */
-const ENRICH_SERVICES: Record<'artists' | 'albums' | 'tracks', { value: string; label: string }[]> =
-  {
-    artists: [
-      { value: 'spotify', label: 'Spotify' },
-      { value: 'musicbrainz', label: 'MusicBrainz' },
-      { value: 'deezer', label: 'Deezer' },
-      { value: 'itunes', label: 'iTunes' },
-      { value: 'audiodb', label: 'AudioDB' },
-      { value: 'discogs', label: 'Discogs' },
-      { value: 'lastfm', label: 'Last.fm' },
-      { value: 'genius', label: 'Genius' },
-      { value: 'tidal', label: 'Tidal' },
-      { value: 'qobuz', label: 'Qobuz' },
-      { value: 'amazon', label: 'Amazon' },
-      { value: 'jiosaavn', label: 'JioSaavn' },
-    ],
-    albums: [
-      { value: 'spotify', label: 'Spotify' },
-      { value: 'musicbrainz', label: 'MusicBrainz' },
-      { value: 'deezer', label: 'Deezer' },
-      { value: 'itunes', label: 'iTunes' },
-      { value: 'audiodb', label: 'AudioDB' },
-      { value: 'discogs', label: 'Discogs' },
-      { value: 'lastfm', label: 'Last.fm' },
-      { value: 'tidal', label: 'Tidal' },
-      { value: 'qobuz', label: 'Qobuz' },
-      { value: 'amazon', label: 'Amazon' },
-      { value: 'jiosaavn', label: 'JioSaavn' },
-      { value: 'bandcamp', label: 'Bandcamp' },
-    ],
-    tracks: [
-      { value: 'spotify', label: 'Spotify' },
-      { value: 'musicbrainz', label: 'MusicBrainz' },
-      { value: 'deezer', label: 'Deezer' },
-      { value: 'itunes', label: 'iTunes' },
-      { value: 'audiodb', label: 'AudioDB' },
-      { value: 'lastfm', label: 'Last.fm' },
-      { value: 'genius', label: 'Genius' },
-      { value: 'tidal', label: 'Tidal' },
-      { value: 'qobuz', label: 'Qobuz' },
-      { value: 'amazon', label: 'Amazon' },
-      { value: 'jiosaavn', label: 'JioSaavn' },
-      { value: 'bandcamp', label: 'Bandcamp' },
-    ],
-  };
+const ENRICH_SERVICES: Record<
+  'artists' | 'albums' | 'tracks',
+  { value: string; label: string; icon: string }[]
+> = {
+  artists: [
+    { value: 'spotify', label: 'Spotify', icon: '🟢' },
+    { value: 'musicbrainz', label: 'MusicBrainz', icon: '🟠' },
+    { value: 'deezer', label: 'Deezer', icon: '🟣' },
+    { value: 'itunes', label: 'iTunes', icon: '🔴' },
+    { value: 'audiodb', label: 'AudioDB', icon: '🔵' },
+    { value: 'discogs', label: 'Discogs', icon: '🟤' },
+    { value: 'lastfm', label: 'Last.fm', icon: '⚪' },
+    { value: 'genius', label: 'Genius', icon: '🟡' },
+    { value: 'tidal', label: 'Tidal', icon: '⬛' },
+    { value: 'qobuz', label: 'Qobuz', icon: '🔷' },
+    { value: 'amazon', label: 'Amazon', icon: '🛒' },
+    { value: 'jiosaavn', label: 'JioSaavn', icon: '🎵' },
+  ],
+  albums: [
+    { value: 'spotify', label: 'Spotify', icon: '🟢' },
+    { value: 'musicbrainz', label: 'MusicBrainz', icon: '🟠' },
+    { value: 'deezer', label: 'Deezer', icon: '🟣' },
+    { value: 'itunes', label: 'iTunes', icon: '🔴' },
+    { value: 'audiodb', label: 'AudioDB', icon: '🔵' },
+    { value: 'discogs', label: 'Discogs', icon: '🟤' },
+    { value: 'lastfm', label: 'Last.fm', icon: '⚪' },
+    { value: 'tidal', label: 'Tidal', icon: '⬛' },
+    { value: 'qobuz', label: 'Qobuz', icon: '🔷' },
+    { value: 'amazon', label: 'Amazon', icon: '🛒' },
+    { value: 'jiosaavn', label: 'JioSaavn', icon: '🎵' },
+    { value: 'bandcamp', label: 'Bandcamp', icon: '🔹' },
+  ],
+  tracks: [
+    { value: 'spotify', label: 'Spotify', icon: '🟢' },
+    { value: 'musicbrainz', label: 'MusicBrainz', icon: '🟠' },
+    { value: 'deezer', label: 'Deezer', icon: '🟣' },
+    { value: 'itunes', label: 'iTunes', icon: '🔴' },
+    { value: 'audiodb', label: 'AudioDB', icon: '🔵' },
+    { value: 'lastfm', label: 'Last.fm', icon: '⚪' },
+    { value: 'genius', label: 'Genius', icon: '🟡' },
+    { value: 'tidal', label: 'Tidal', icon: '⬛' },
+    { value: 'qobuz', label: 'Qobuz', icon: '🔷' },
+    { value: 'amazon', label: 'Amazon', icon: '🛒' },
+    { value: 'jiosaavn', label: 'JioSaavn', icon: '🎵' },
+    { value: 'bandcamp', label: 'Bandcamp', icon: '🔹' },
+  ],
+};
 
 /** Legacy Enrich-dropdown parity (docs §44): pick one provider, re-query it
  *  for this single entity. Delegates to the same worker the legacy Enhanced
  *  View uses; the lib2 row is resynced server-side so the refreshed fields
  *  (genres/bio/label/etc.) show up without a full re-import. */
-function EnrichModal({
+function EnrichDropdown({
   entity,
   entityId,
   entityName,
+  wrapperRef,
   onClose,
 }: {
   entity: 'artists' | 'albums' | 'tracks';
   entityId: number;
   entityName: string;
+  wrapperRef: React.RefObject<HTMLSpanElement | null>;
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
-  const [lastService, setLastService] = useState<string | null>(null);
   const mutation = useMutation({
     mutationFn: (service: string) => {
-      setLastService(service);
+      window.showToast?.(`Enriching ${entityName} from ${service}...`, 'info');
       return enrichLibraryV2Entity(entity, entityId, service);
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY }),
+    onSuccess: (data) => {
+      void queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+      if (data?.resynced) {
+        window.showToast?.('Enriched and refreshed.', 'success');
+      } else {
+        window.showToast?.('Enriched (nothing new found).', 'success');
+      }
+    },
+    onError: (error) => {
+      window.showToast?.(mutationErrorMessage(error, 'Enrichment failed'), 'error');
+    },
   });
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) {
+        onClose();
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [onClose, wrapperRef]);
+
   return (
-    <ModalShell title={`Enrich ${entityName}`} onClose={onClose}>
-      <p className={styles.subtitle}>
-        Re-query a single provider for fresh metadata (genres, bio, label, …).
-      </p>
-      {mutation.isError ? (
-        <div className={styles.searchError}>
-          {mutationErrorMessage(mutation.error, 'Enrichment failed')}
-        </div>
-      ) : null}
-      {mutation.isSuccess ? (
-        <div className={styles.inlineLoading}>
-          {mutation.data.resynced ? 'Enriched and refreshed.' : 'Enriched (nothing new found).'}
-        </div>
-      ) : null}
-      <div className={styles.matchResults}>
-        {ENRICH_SERVICES[entity].map((s) => (
-          <div key={s.value} className={styles.matchResultRow}>
-            <span className={styles.matchResultName}>{s.label}</span>
-            <button
-              type="button"
-              className={styles.btnPrimary}
-              disabled={mutation.isPending}
-              onClick={() => mutation.mutate(s.value)}
-            >
-              {mutation.isPending && lastService === s.value ? 'Enriching…' : 'Enrich'}
-            </button>
-          </div>
-        ))}
-      </div>
-    </ModalShell>
+    <div className={styles.enrichDropdownMenu}>
+      {ENRICH_SERVICES[entity].map((s) => (
+        <button
+          key={s.value}
+          type="button"
+          className={styles.enrichDropdownItem}
+          disabled={mutation.isPending}
+          onClick={(e) => {
+            e.stopPropagation();
+            mutation.mutate(s.value);
+            onClose();
+          }}
+        >
+          <span className={styles.enrichDropdownIcon}>{s.icon}</span>
+          <span className={styles.enrichDropdownLabel}>{s.label}</span>
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -2710,6 +2722,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   const [showMaintenance, setShowMaintenance] = useState(false);
   const [showManageTracks, setShowManageTracks] = useState(false);
   const [showEnrich, setShowEnrich] = useState(false);
+  const enrichWrapRef = useRef<HTMLSpanElement>(null);
   const [showEditArtist, setShowEditArtist] = useState(false);
   const [retagTarget, setRetagTarget] = useState<{
     entity: 'artists' | 'albums';
@@ -2931,12 +2944,23 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 title="Recent downloads recorded for this artist"
                 onClick={() => setShowHistory(true)}
               />
-              <ActionButton
-                icon="refresh"
-                label="Enrich"
-                title="Re-query a single metadata provider for fresh artist data"
-                onClick={() => setShowEnrich(true)}
-              />
+              <span ref={enrichWrapRef} className={styles.enrichWrap}>
+                <ActionButton
+                  icon="refresh"
+                  label="Enrich"
+                  title="Re-query a single metadata provider for fresh artist data"
+                  onClick={() => setShowEnrich((prev) => !prev)}
+                />
+                {showEnrich ? (
+                  <EnrichDropdown
+                    entity="artists"
+                    entityId={artistId}
+                    entityName={artistName}
+                    wrapperRef={enrichWrapRef}
+                    onClose={() => setShowEnrich(false)}
+                  />
+                ) : null}
+              </span>
             </div>
             <div className={styles.toolbarGroup}>
               <ActionButton
@@ -3116,14 +3140,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
           {showManageTracks ? (
             <ManageTracksModal artistId={artistId} onClose={() => setShowManageTracks(false)} />
           ) : null}
-          {showEnrich ? (
-            <EnrichModal
-              entity="artists"
-              entityId={artist.id}
-              entityName={artist.name}
-              onClose={() => setShowEnrich(false)}
-            />
-          ) : null}
+
           {showEditArtist ? (
             <EditArtistModal artist={artist} onClose={() => setShowEditArtist(false)} />
           ) : null}
@@ -3304,6 +3321,7 @@ function AlbumBlock({
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [showEnrich, setShowEnrich] = useState(false);
+  const enrichWrapRef = useRef<HTMLSpanElement>(null);
   const profilesQuery = useQuery(libraryV2QualityProfilesQueryOptions());
   const profileName =
     (profilesQuery.data ?? []).find((p) => p.id === album.quality_profile_id)?.name ?? null;
@@ -3386,11 +3404,22 @@ function AlbumBlock({
           />
           <IconActionButton icon="retag" title="Preview Retag" onClick={() => onRetag(album)} />
           <AlbumReplayGainButton albumId={album.id} />
-          <IconActionButton
-            icon="refresh"
-            title="Enrich — re-query a single metadata provider for fresh album data"
-            onClick={() => setShowEnrich(true)}
-          />
+          <span ref={enrichWrapRef} className={styles.enrichWrap}>
+            <IconActionButton
+              icon="refresh"
+              title="Enrich — re-query a single metadata provider for fresh album data"
+              onClick={() => setShowEnrich((prev) => !prev)}
+            />
+            {showEnrich ? (
+              <EnrichDropdown
+                entity="albums"
+                entityId={album.id}
+                entityName={album.title}
+                wrapperRef={enrichWrapRef}
+                onClose={() => setShowEnrich(false)}
+              />
+            ) : null}
+          </span>
           <AlbumDetailButton album={album} />
           <IconActionButton
             icon="delete"
@@ -3401,14 +3430,6 @@ function AlbumBlock({
         </span>
       </div>
       {open ? <AlbumTrackTable albumId={album.id} resolve={unowned} onAction={onAction} /> : null}
-      {showEnrich ? (
-        <EnrichModal
-          entity="albums"
-          entityId={album.id}
-          entityName={album.title}
-          onClose={() => setShowEnrich(false)}
-        />
-      ) : null}
     </div>
   );
 }
