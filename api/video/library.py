@@ -36,6 +36,7 @@ def register_routes(bp):
                 sort=request.args.get("sort", "title"),
                 status=request.args.get("status", "all"),
                 genre=request.args.get("genre") or None,
+                resolution=request.args.get("resolution") or None,
                 page=request.args.get("page", 1),
                 limit=request.args.get("limit", 75),
                 server_source=resolve_video_server(),
@@ -43,6 +44,19 @@ def register_routes(bp):
         except Exception:
             logger.exception("Failed to query video library")
             return jsonify({"error": "Failed to load video library"}), 500
+
+    @bp.route("/library/resolutions", methods=["GET"])
+    def video_library_resolutions():
+        """File resolutions in use in the movie library — the library page's
+        resolution filter dropdown (movies tab only)."""
+        from . import get_video_db
+        from core.video.sources import resolve_video_server
+        try:
+            return jsonify({"resolutions": get_video_db().library_resolutions(
+                server_source=resolve_video_server())})
+        except Exception:
+            logger.exception("Failed to list library resolutions")
+            return jsonify({"resolutions": []})
 
     @bp.route("/library/genres", methods=["GET"])
     def video_library_genres():
