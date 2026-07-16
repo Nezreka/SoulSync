@@ -798,6 +798,31 @@ CREATE INDEX IF NOT EXISTS idx_vrjr_job ON video_repair_job_runs(job_id);
 -- library row id; snapshot_data denormalizes the item's state at report time
 -- so the report stays meaningful even if the item changes/vanishes. Reporter
 -- name is captured at create (profiles live in the music DB — isolation).
+-- Requests (arr-parity P4): the in-app Overseerr. A member asks for a title;
+-- an admin approves (→ wishlist/watchlist, acquisition takes over) or denies
+-- with a note. One PENDING request per (profile, kind, tmdb) — re-asking
+-- bumps nothing; a denied title can be re-requested.
+CREATE TABLE IF NOT EXISTS video_requests (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_id     INTEGER NOT NULL DEFAULT 1,
+    requester_name TEXT,
+    kind           TEXT NOT NULL,                  -- movie | show
+    tmdb_id        INTEGER NOT NULL,
+    title          TEXT NOT NULL,
+    year           INTEGER,
+    poster_url     TEXT,
+    note           TEXT,                           -- the requester's "why"
+    monitor        TEXT DEFAULT 'future',          -- shows: P2 monitor policy applied on approve
+    status         TEXT NOT NULL DEFAULT 'pending',-- pending | approved | denied
+    admin_response TEXT,
+    resolved_by    INTEGER,
+    resolved_at    TIMESTAMP,
+    created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_vreq_profile ON video_requests(profile_id);
+CREATE INDEX IF NOT EXISTS idx_vreq_status  ON video_requests(status);
+CREATE INDEX IF NOT EXISTS idx_vreq_title   ON video_requests(kind, tmdb_id);
+
 CREATE TABLE IF NOT EXISTS video_issues (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     profile_id     INTEGER NOT NULL DEFAULT 1,

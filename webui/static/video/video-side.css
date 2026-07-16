@@ -2287,6 +2287,42 @@ body[data-side="video"] #soulsync-toggle { display: none; }
    (.vwlp-*). The button is the video mirror of the music ya-watchlist-btn.
    ══════════════════════════════════════════════════════════════════════════ */
 
+/* Requests page (P4) — the in-app Overseerr */
+.vreq-page { padding: 26px 30px 60px; max-width: 900px; margin: 0 auto; }
+.vreq-head { margin-bottom: 20px; }
+.vreq-title-h { margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -0.02em; color: #fff; }
+.vreq-sub-h { margin: 6px 0 0; font-size: 13px; color: rgba(255, 255, 255, 0.55); }
+.vreq-row { display: flex; gap: 14px; align-items: flex-start; padding: 14px; border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.07); background: rgba(255, 255, 255, 0.025); margin-bottom: 12px; }
+.vreq-poster { width: 52px; height: 78px; border-radius: 8px; object-fit: cover; flex: 0 0 auto; }
+.vreq-poster--ph { display: flex; align-items: center; justify-content: center; font-size: 22px;
+    background: rgba(255, 255, 255, 0.06); }
+.vreq-main { flex: 1; min-width: 0; }
+.vreq-title { font-size: 15px; font-weight: 700; color: #fff; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.vreq-sub { font-size: 12px; color: rgba(255, 255, 255, 0.5); margin-top: 3px; }
+.vreq-note { font-size: 12.5px; color: rgba(255, 255, 255, 0.68); margin-top: 6px; font-style: italic; }
+.vreq-note--admin { font-style: normal; color: #93c5fd; }
+.vreq-st { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em;
+    padding: 3px 8px; border-radius: 999px; }
+.vreq-st--pending { background: rgba(245, 158, 11, 0.16); color: #fbbf24; }
+.vreq-st--approved { background: rgba(34, 197, 94, 0.16); color: #4ade80; }
+.vreq-st--denied { background: rgba(248, 113, 113, 0.14); color: #f87171; }
+.vreq-actions { display: flex; gap: 8px; flex: 0 0 auto; }
+.vreq-btn { padding: 8px 14px; border-radius: 10px; font-size: 12.5px; font-weight: 700; cursor: pointer;
+    border: 1px solid rgba(255, 255, 255, 0.14); background: rgba(255, 255, 255, 0.05); color: #fff; }
+.vreq-btn:hover { background: rgba(255, 255, 255, 0.1); }
+.vreq-btn:disabled { opacity: 0.5; cursor: default; }
+.vreq-btn--ok { border-color: rgba(34, 197, 94, 0.4); background: rgba(34, 197, 94, 0.14); }
+.vreq-btn--ok:hover { background: rgba(34, 197, 94, 0.3); }
+.vreq-btn--no { border-color: rgba(239, 68, 68, 0.35); background: rgba(239, 68, 68, 0.1); color: #fca5a5; }
+.vreq-btn--no:hover { background: rgba(239, 68, 68, 0.25); }
+.vreq-denybox { display: flex; gap: 8px; margin-top: 10px; }
+.vreq-denybox.hidden { display: none; }
+.vreq-denyin { flex: 1; padding: 8px 10px; border-radius: 9px; font-size: 12.5px;
+    border: 1px solid rgba(255, 255, 255, 0.12); background: rgba(0, 0, 0, 0.3); color: #fff; }
+.vreq-empty { padding: 40px 0; text-align: center; color: rgba(255, 255, 255, 0.45); font-size: 13.5px; }
+@media (max-width: 640px) { .vreq-row { flex-wrap: wrap; } .vreq-actions { width: 100%; justify-content: flex-end; } }
+
 /* Custom Formats editor rows (P3) */
 .vq-fmt-row { display: grid; grid-template-columns: 1fr 1.6fr 1.2fr 74px 74px 30px; gap: 8px;
     align-items: center; margin-bottom: 8px; }

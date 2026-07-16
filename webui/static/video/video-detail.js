@@ -452,7 +452,17 @@
         // Watchlist (follow an AIRING show to wishlist its new episodes) applies whether
         // the show is owned or a TMDB preview — the curated watchlist is keyed by
         // tmdb_id. Ended/cancelled shows are terminal (isAiringShow=false) → no button.
-        if (isAiringShow) {
+        // Requests (arr-parity P4): a profile WITHOUT download rights has no
+        // acquisition path at all — give it the ask-an-admin button instead of
+        // the Get/Watchlist controls (those APIs are gated for this profile).
+        var _canDl = (typeof canDownload !== 'function') || canDownload();
+        if (!_canDl && (d.kind === 'movie' || d.kind === 'show') && d.tmdb_id) {
+            html +=
+                '<button class="library-artist-watchlist-btn" type="button" data-vd-act="request">' +
+                '<span class="watchlist-icon">🙋</span>' +
+                '<span class="watchlist-text">Request</span></button>';
+        }
+        if (isAiringShow && _canDl) {
             html +=
                 '<button class="library-artist-watchlist-btn' + (watching ? ' watching' : '') +
                 '" type="button" data-vd-act="watchlist">' +
@@ -462,7 +472,7 @@
         // Movies are terminal — no "watch for new" follow, so give them the shared
         // Get control instead (unowned → add to wishlist, owned → re-download /
         // upgrade). Opens the same VideoGet modal the discover/search cards use.
-        if (d.kind === 'movie' && window.VideoGet) {
+        if (d.kind === 'movie' && window.VideoGet && _canDl) {
             var wished = !!d._wl_wished;
             // TWO buttons, like the shows' follow+get pair: 'Get' is ALWAYS
             // visible (the modal offers download-now / manual search / grab),
@@ -495,7 +505,7 @@
         // Missing" (fill the gaps), one you don't have reads "Get Show" (grab it
         // all). A library-sourced page is inherently owned; a TMDB page keys off
         // d.owned (the same flag that drives the "In library" badge).
-        if (d.kind === 'show' && window.VideoGet) {
+        if (d.kind === 'show' && window.VideoGet && _canDl) {
             var haveShow = (d.source !== 'tmdb') || !!d.owned;
             var showGetLabel = haveShow ? 'Get Missing' : 'Get Show';
             html += '<button class="discog-download-btn discog-btn-compact" type="button" data-vd-act="missing">' +
@@ -2255,6 +2265,7 @@
         if (act && r.contains(act)) {
             var which = act.getAttribute('data-vd-act');
             if (which === 'watchlist') toggleWatchlist();
+            else if (which === 'request') sendRequest(act);
             else if (which === 'wishtoggle') toggleMovieWishlist(act);
             else if (which === 'get') openGetModal();
             else if (which === 'missing') openGetModal(true);
@@ -2269,6 +2280,32 @@
         var mt = e.target.closest('[data-vd-missing-toggle]');
         if (mt && r.contains(mt)) { toggleMissing(); return; }
         if (menuOpen && !e.target.closest('[data-vd-season-nav]')) { menuOpen = false; renderSeasonNav(); }
+    }
+
+    // Requests (P4): the no-download-rights acquisition path — ask an admin.
+    function sendRequest(btn) {
+        if (!data || !data.tmdb_id || btn.disabled) return;
+        btn.disabled = true;
+        fetch('/api/video/requests', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ kind: data.kind, tmdb_id: data.tmdb_id,
+                title: data.title, year: data.year,
+                poster_url: data.poster_url || data.poster || null }) })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (res) {
+                if (!res || !res.success) throw new Error();
+                if (typeof showToast === 'function') {
+                    showToast(res.already ? 'Already requested — an admin will review it'
+                                          : 'Request sent — an admin will review it', 'success');
+                }
+                var txt = btn.querySelector('.watchlist-text');
+                if (txt) txt.textContent = 'Requested';
+                btn.classList.add('watching');
+            })
+            .catch(function () {
+                btn.disabled = false;
+                if (typeof showToast === 'function') showToast('Couldn’t send the request', 'error');
+            });
     }
 
     function toggleMissing() {

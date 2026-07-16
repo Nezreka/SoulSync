@@ -43,7 +43,7 @@ def _publish_video_event(event_type: str, data: dict) -> None:
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 41   # v41: one-time details_synced heal (status-less burn victims); v40: video_watchlist.lookback_years; v39: video_wishlist.release_date
+SCHEMA_VERSION = 42   # v42: video_requests (in-app Overseerr, arr-parity P4); v41: one-time details_synced heal; v40: video_watchlist.lookback_years
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -5761,6 +5761,110 @@ class VideoDatabase:
         except sqlite3.Error:
             logger.exception("set_title_quality_profile failed")
             return False
+        finally:
+            conn.close()
+
+    # ── requests (in-app Overseerr; arr-parity P4) ────────────────────────────
+    def add_video_request(self, *, profile_id, requester_name, kind, tmdb_id, title,
+                          year=None, poster_url=None, note=None, monitor="future"):
+        """File a request. One PENDING request per (profile, kind, tmdb) —
+        re-asking returns the existing id ('already'). Returns (id, created)."""
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT id FROM video_requests WHERE profile_id=? AND kind=? AND tmdb_id=? "
+                "AND status='pending'", (int(profile_id), kind, int(tmdb_id))).fetchone()
+            if row:
+                return row["id"], False
+            cur = conn.execute(
+                "INSERT INTO video_requests (profile_id, requester_name, kind, tmdb_id, title, "
+                "year, poster_url, note, monitor) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (int(profile_id), requester_name, kind, int(tmdb_id), title, year,
+                 poster_url, note, monitor or "future"))
+            conn.commit()
+            return cur.lastrowid, True
+        except sqlite3.Error:
+            logger.exception("add_video_request failed")
+            return None, False
+        finally:
+            conn.close()
+
+    def list_video_requests(self, *, profile_id=None, status=None, limit=200) -> list:
+        """Requests, newest first. profile_id None = all (admin); else own only."""
+        where, args = [], []
+        if profile_id is not None:
+            where.append("profile_id=?")
+            args.append(int(profile_id))
+        if status:
+            where.append("status=?")
+            args.append(status)
+        sql = ("SELECT * FROM video_requests" +
+               ((" WHERE " + " AND ".join(where)) if where else "") +
+               " ORDER BY (status='pending') DESC, created_at DESC, id DESC LIMIT ?")
+        conn = self._get_connection()
+        try:
+            return [dict(r) for r in conn.execute(sql, args + [max(1, int(limit))])]
+        except sqlite3.Error:
+            logger.exception("list_video_requests failed")
+            return []
+        finally:
+            conn.close()
+
+    def get_video_request(self, request_id) -> dict | None:
+        conn = self._get_connection()
+        try:
+            row = conn.execute("SELECT * FROM video_requests WHERE id=?",
+                               (int(request_id),)).fetchone()
+            return dict(row) if row else None
+        except (sqlite3.Error, TypeError, ValueError):
+            return None
+        finally:
+            conn.close()
+
+    def resolve_video_request(self, request_id, *, status, resolved_by, admin_response=None) -> bool:
+        """Approve/deny a PENDING request (terminal states never flip back)."""
+        if status not in ("approved", "denied"):
+            return False
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE video_requests SET status=?, admin_response=?, resolved_by=?, "
+                "resolved_at=datetime('now') WHERE id=? AND status='pending'",
+                (status, admin_response, int(resolved_by), int(request_id)))
+            conn.commit()
+            return cur.rowcount > 0
+        except sqlite3.Error:
+            logger.exception("resolve_video_request failed")
+            return False
+        finally:
+            conn.close()
+
+    def delete_video_request(self, request_id, profile_id) -> bool:
+        """A member withdraws their OWN pending request."""
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                "DELETE FROM video_requests WHERE id=? AND profile_id=? AND status='pending'",
+                (int(request_id), int(profile_id)))
+            conn.commit()
+            return cur.rowcount > 0
+        except sqlite3.Error:
+            logger.exception("delete_video_request failed")
+            return False
+        finally:
+            conn.close()
+
+    def video_requests_pending_count(self, profile_id=None) -> int:
+        conn = self._get_connection()
+        try:
+            if profile_id is None:
+                return conn.execute(
+                    "SELECT COUNT(*) FROM video_requests WHERE status='pending'").fetchone()[0]
+            return conn.execute(
+                "SELECT COUNT(*) FROM video_requests WHERE status='pending' AND profile_id=?",
+                (int(profile_id),)).fetchone()[0]
+        except sqlite3.Error:
+            return 0
         finally:
             conn.close()
 

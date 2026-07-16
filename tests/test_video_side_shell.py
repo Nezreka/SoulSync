@@ -24,9 +24,9 @@ _CSS_PATH = _ROOT / "webui" / "static" / "video" / "video-side.css"
 
 EXPECTED_VIDEO_PAGES = {
     "video-dashboard", "video-search", "video-discover", "video-library",
-    "video-watchlist", "video-wishlist", "video-downloads", "video-calendar",
-    "video-automations", "video-tools", "video-import", "video-settings",
-    "video-issues", "video-help",
+    "video-watchlist", "video-wishlist", "video-downloads", "video-requests",
+    "video-calendar", "video-automations", "video-tools", "video-import",
+    "video-settings", "video-issues", "video-help",
 }
 
 # Reads of sibling VIDEO-side module handles + standard DOM/browser APIs are fine —
