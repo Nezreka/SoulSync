@@ -155,6 +155,16 @@ def test_page_nav_and_module_exist():
     assert "'/api/video/requests/'" in _REQ_JS or "/api/video/requests/" in _REQ_JS
 
 
+def test_admin_detection_reads_the_real_global():
+    # currentProfile is a top-level `let` in init.js — NOT a window property.
+    # Reading window.currentProfile is always undefined, which rendered every
+    # profile (admins included) the member 'Withdraw' view. The page must read
+    # the bare global like every other video module.
+    assert "window.currentProfile" not in _REQ_JS
+    assert "typeof currentProfile !== 'undefined'" in _REQ_JS
+    assert "data-vreq-approve" in _REQ_JS and "data-vreq-withdraw" in _REQ_JS
+
+
 def test_no_download_profiles_get_the_request_button():
     assert 'data-vd-act="request"' in _DETAIL_JS
     assert "canDownload()" in _DETAIL_JS

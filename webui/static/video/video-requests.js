@@ -20,7 +20,11 @@
     }
     function toast(m, t) { if (typeof showToast === 'function') showToast(m, t); }
     function isAdmin() {
-        return !!(window.currentProfile && (window.currentProfile.is_admin || window.currentProfile.id === 1));
+        // currentProfile is a top-level `let` in init.js — it is NOT a window
+        // property, so it must be read by bare name; reading it off window is
+        // always undefined and rendered everyone, admins included, as a member.
+        var cp = (typeof currentProfile !== 'undefined') ? currentProfile : null;
+        return !!(cp && (cp.is_admin || cp.id === 1));
     }
 
     var STATUS = { pending: ['Pending', 'vreq-st--pending'], approved: ['Approved', 'vreq-st--approved'],
