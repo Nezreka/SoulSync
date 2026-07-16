@@ -197,6 +197,43 @@ def auto_full_cleanup(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str,
             log_type='success' if dirs_removed else 'info',
         )
 
+    # --- 3b. Reap orphaned root-level audio (the downloads-folder bleed) ---
+    # A cancelled streaming download can't interrupt yt-dlp: the finished file
+    # lands AFTER its record is removed and nothing ever claims it. Only safe
+    # while nothing is active — the same guard as the empty-dir sweep.
+    deps.update_progress(automation_id, phase='Reaping orphaned downloads...', progress=50)
+    if has_active_batches or has_post_processing:
+        reason = 'active batches' if has_active_batches else 'post-processing active'
+        steps.append(f'Orphaned files: skipped ({reason})')
+        deps.update_progress(
+            automation_id,
+            log_line=f'Orphaned files: skipped ({reason})',
+            log_type='skip',
+        )
+    else:
+        from core.downloads.cleanup import sweep_orphaned_download_audio
+        download_root = deps.docker_resolve_path(
+            deps.config_manager.get('soulseek.download_path', './downloads'))
+        # Belt-and-braces: never touch a file a live engine record still names,
+        # even though the active-batch guard already implies there are none.
+        referenced = set()
+        try:
+            if deps.download_orchestrator:
+                for d in deps.run_async(deps.download_orchestrator.get_all_downloads()) or []:
+                    for attr in ('filename', 'file_path'):
+                        val = getattr(d, attr, None)
+                        if val:
+                            referenced.add(os.path.basename(str(val)))
+        except Exception as e:  # noqa: BLE001 — the reaper still has the age + root-level guards
+            deps.logger.debug("orphan reaper: could not list live records: %s", e)
+        reaped = sweep_orphaned_download_audio(download_root, referenced_basenames=referenced)
+        steps.append(f'Orphaned files: removed {len(reaped)}')
+        deps.update_progress(
+            automation_id,
+            log_line=f'Orphaned files: removed {len(reaped)}',
+            log_type='success' if reaped else 'info',
+        )
+
     # --- 4. Sweep empty staging directories ---
     deps.update_progress(automation_id, phase='Sweeping import folder...', progress=60)
     staging_path = deps.get_staging_path()
