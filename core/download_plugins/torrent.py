@@ -350,7 +350,8 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
                 last_save_path = status.save_path
 
             if status.state in _COMPLETE_STATES:
-                self._finalize_download(download_id, last_save_path)
+                self._finalize_download(download_id, last_save_path,
+                                        torrent_name=status.name)
                 return
             if status.state == 'error':
                 # Clean the dead torrent out of the client, or it's left orphaned
@@ -376,7 +377,8 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
         except Exception:
             final = None
         if final is not None and final.state in _COMPLETE_STATES:
-            self._finalize_download(download_id, final.save_path or last_save_path)
+            self._finalize_download(download_id, final.save_path or last_save_path,
+                                    torrent_name=final.name)
             return
         self._cleanup_torrent(torrent_hash, get_stall_action())
         self._mark_error(download_id, "Torrent download timed out")
@@ -413,21 +415,33 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
             f"Torrent stalled (no progress for {timeout_min} min) — {verb}",
         )
 
-    def _finalize_download(self, download_id: str, save_path: Optional[str]) -> None:
+    def _finalize_download(self, download_id: str, save_path: Optional[str],
+                           torrent_name: Optional[str] = None) -> None:
         """Adapter said complete. Walk the directory + pick the
         first audio file as the canonical ``file_path``."""
         if not save_path:
             self._mark_error(download_id, "Torrent completed but no save_path reported")
             return
         # Resolve the client-reported path to one this process can read
-        # (the client may report its own container's mount). See
-        # ``resolve_reported_save_path``.
-        local_path = resolve_reported_save_path(save_path)
+        # (the client may report its own container's mount). The torrent's
+        # NAME is the content check: a same-named directory that doesn't
+        # contain this torrent is the wrong mount, not a resolution
+        # (TheHomeGuy's '/downloads'). See ``resolve_reported_save_path``.
+        local_path = resolve_reported_save_path(save_path, expect_name=torrent_name)
         if local_path != save_path:
             logger.info("Torrent %s: resolved client path %r -> %r",
                         download_id[:8], save_path, local_path)
+        # save_path is the torrent's save DIRECTORY; the content lives at
+        # <save_path>/<name>. Walking just the release keeps a shared
+        # download root from donating the "first audio file" of some OTHER
+        # torrent that happens to live there.
+        walk_root = Path(local_path)
+        if torrent_name and (walk_root / torrent_name).is_dir():
+            # is_dir, not exists: a single-FILE torrent's name points at the
+            # file itself, and the audio walker only walks directories.
+            walk_root = walk_root / torrent_name
         try:
-            audio_files = collect_audio_after_extraction(Path(local_path))
+            audio_files = collect_audio_after_extraction(walk_root)
         except Exception as e:
             self._mark_error(download_id, f"Post-extract walk failed: {e}")
             return
@@ -627,12 +641,26 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
 
         # Phase 4: extract + walk + copy to staging.
         _emit('staging', release=picked.title)
-        # Resolve the client-reported path to one this process can read.
-        local_path = resolve_reported_save_path(save_path)
+        # Resolve the client-reported path to one this process can read,
+        # content-checked against the torrent's on-disk NAME (the release
+        # folder) so an existing-but-wrong mount can't win, and walk just
+        # that release so a shared root can't donate another torrent's files.
+        torrent_name = None
+        try:
+            _final_status = run_async(adapter.get_status(torrent_id))
+            torrent_name = _final_status.name if _final_status else None
+        except Exception:   # noqa: BLE001 - the name is an assist, not a requirement
+            torrent_name = None
+        local_path = resolve_reported_save_path(save_path, expect_name=torrent_name)
         if local_path != save_path:
             logger.info("[Torrent album] Resolved client path %r -> %r", save_path, local_path)
+        walk_root = Path(local_path)
+        if torrent_name and (walk_root / torrent_name).is_dir():
+            # is_dir, not exists: a single-FILE torrent's name points at the
+            # file itself, and the audio walker only walks directories.
+            walk_root = walk_root / torrent_name
         try:
-            audio_files = collect_audio_after_extraction(Path(local_path))
+            audio_files = collect_audio_after_extraction(walk_root)
         except Exception as e:
             result['error'] = f'Failed to walk audio files: {e}'
             return result

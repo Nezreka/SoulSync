@@ -635,6 +635,7 @@ def _candidate_download_roots(config_get: Callable[..., Any]) -> list:
 def resolve_reported_save_path(
     reported_path: Optional[str],
     config_get: Optional[Callable[..., Any]] = None,
+    expect_name: Optional[str] = None,
 ) -> Optional[str]:
     """Translate a downloader-reported save_path into one THIS process can read.
 
@@ -671,14 +672,33 @@ def resolve_reported_save_path(
         except OSError:
             return False
 
+    def _contains_expected(candidate) -> bool:
+        """When the caller told us WHAT should be inside (the torrent/job
+        name), an existing-but-content-less directory is the WRONG mount,
+        not a resolution. TheHomeGuy's bug: qBittorrent reported its own
+        container's '/downloads', a directory by that name happened to
+        exist in SoulSync's namespace too, and the verbatim short-circuit
+        accepted it — SoulSync then watched an empty folder instead of the
+        configured one that actually had the files."""
+        if not expect_name:
+            return True
+        try:
+            return (Path(candidate) / expect_name).exists()
+        except OSError:
+            return False
+
     # 1. Reported path is directly readable — mounts already line up.
-    if _is_dir(reported_path):
+    #    Verbatim acceptance requires the expected content when known.
+    if _is_dir(reported_path) and _contains_expected(reported_path):
         return reported_path
 
     normalized = str(reported_path).replace('\\', '/')
 
     # 2. Explicit prefix mappings (remote-path-mapping escape hatch).
-    mappings = config_get('download_source.usenet_path_mappings', None) or []
+    #    ``path_mappings`` is the protocol-neutral key; the historical
+    #    ``usenet_path_mappings`` keeps working.
+    mappings = list(config_get('download_source.path_mappings', None) or []) \
+        + list(config_get('download_source.usenet_path_mappings', None) or [])
     if isinstance(mappings, (list, tuple)):
         for mapping in mappings:
             if not isinstance(mapping, dict):
@@ -690,7 +710,7 @@ def resolve_reported_save_path(
             if normalized == frm or normalized.startswith(frm + '/'):
                 rest = normalized[len(frm):].lstrip('/')
                 candidate = str(Path(to) / rest) if rest else to
-                if _is_dir(candidate):
+                if _is_dir(candidate) and _contains_expected(candidate):
                     return candidate
 
     # 3. Basename fallback under known download roots — covers the standard
@@ -699,9 +719,20 @@ def resolve_reported_save_path(
     if basename:
         for root in _candidate_download_roots(config_get):
             candidate = Path(root) / basename
-            if _is_dir(candidate):
+            if _is_dir(candidate) and _contains_expected(candidate):
                 return str(candidate)
 
+    # 4. The roots THEMSELVES. A torrent client reports its save DIRECTORY
+    #    (e.g. '/downloads'), not a per-release folder — in the shared-mount
+    #    setup the release lands as '<SoulSync download root>/<name>', so the
+    #    right resolution of '/downloads' is simply our own configured root.
+    if expect_name:
+        for root in _candidate_download_roots(config_get):
+            if _is_dir(root) and _contains_expected(root):
+                return str(root)
+
+    # Nothing verifiably better — hand back the reported path unchanged so
+    # the caller's "no audio found" error can name it honestly.
     return reported_path
 
 
