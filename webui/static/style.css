@@ -1710,13 +1710,22 @@ body.max-performance .nav-button.active:hover {
 }
 
 /* Tour Overlay (spotlight) */
+/* Spotlight scrim: four panels around a REAL hole. A single overlay with a
+   z-index-raised target failed whenever the target sat inside an ancestor
+   stacking context (transform / backdrop-filter) — it stayed dimmed+blurred. */
 .helper-tour-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.65);
     z-index: 99998;
+    pointer-events: none;
     animation: tourOverlayIn 0.3s ease;
+}
+
+.helper-tour-scrim {
+    position: absolute;
+    background: rgba(0, 0, 0, 0.65);
     backdrop-filter: blur(2px);
+    pointer-events: auto;
 }
 
 @keyframes tourOverlayIn {
@@ -1725,8 +1734,8 @@ body.max-performance .nav-button.active:hover {
 }
 
 .helper-tour-target {
-    position: relative;
-    z-index: 99999 !important;
+    /* glow ring only — the scrim hole does the revealing now, so no
+       z-index games (they broke inside stacking contexts anyway) */
     box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.5), 0 0 30px rgba(var(--accent-rgb), 0.15) !important;
     border-radius: 10px;
     transition: box-shadow 0.3s ease;

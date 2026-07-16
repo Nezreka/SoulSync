@@ -79,6 +79,58 @@ def test_every_tour_selector_has_a_renderer(selector):
     assert checks and all(checks), f'tour anchor has no renderer: {selector}'
 
 
+def _page_sections():
+    """Split index.html into the shell (sidebar/header/modals) and per-page
+    content. Approximate but directional: a page's slice runs to the next
+    page div."""
+    parts = re.split(r'<div class="page(?:\s[^"]*)?" id="([\w-]+)-page">', _INDEX)
+    shell = parts[0]
+    pages = {}
+    for k in range(1, len(parts) - 1, 2):
+        pages[parts[k]] = parts[k + 1]
+    return shell, pages
+
+
+_STEPS = re.findall(r"page:\s*'([\w-]+)',\s*selector:\s*'([^']+)'", _tour_block())
+
+
+def test_steps_anchor_to_their_own_page_or_the_shell():
+    """Boulder's report: the dashboard tour talked about tool cards that MOVED
+    to another page — the ids still existed, so the renderer check passed,
+    but the elements were invisible on the tour's page and every step showed
+    the centered fallback. A static #id anchor that index.html renders must
+    live inside the step's own page section or the shell."""
+    shell, pages = _page_sections()
+    offenders = []
+    for page, selector in _STEPS:
+        m = re.match(r'^#([\w-]+)$', selector)
+        if not m:
+            continue
+        needle = f'id="{m.group(1)}"'
+        if needle not in _INDEX:
+            continue        # dynamically rendered (React/JS) — renderer test covers it
+        if needle not in shell and needle not in pages.get(page, ''):
+            offenders.append(f'{page}: {selector}')
+    assert not offenders, f'tour anchors living on the WRONG page: {offenders}'
+
+
+def test_dashboard_tour_matches_the_current_dashboard():
+    # the sections Boulder enumerated, in walk order
+    block = _tour_block()
+    dash = block.split("'dashboard': {")[1].split("'first-download': {")[0]
+    for anchor in ('.dashboard-header', '.header-actions', '#watchlist-button',
+                   '#wishlist-button', '.service-status-grid', '.stats-grid-dashboard',
+                   '#library-status-card', '#sync-history-cards', '.dash-card--quick-actions',
+                   '#dashboard-activity-feed', '#enrichment-pills-section',
+                   '.side-toggle', '#profile-indicator', '.version-button'):
+        assert anchor in dash, f'dashboard tour lost its {anchor} step'
+    # the pre-redesign tool cards are gone from the dashboard tour
+    for stale in ('#db-updater-card', '#metadata-updater-card', '#duplicate-cleaner-card',
+                  '#backup-manager-card', '#metadata-cache-card', '#media-scan-card',
+                  '#discovery-pool-card'):
+        assert stale not in dash, f'dashboard tour still anchors to the moved {stale}'
+
+
 # ── engine contracts ──────────────────────────────────────────────────────────
 
 def test_anchor_resolution_retries_instead_of_one_fixed_wait():
