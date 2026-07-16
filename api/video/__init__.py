@@ -120,6 +120,7 @@ def create_video_blueprint() -> Blueprint:
     from .bulk import register_routes as reg_bulk
     from .repair import register_routes as reg_repair
     from .issues import register_routes as reg_issues
+    from .requests import register_routes as reg_requests
     reg_dashboard(bp)
     reg_scan(bp)
     reg_library(bp)
@@ -141,5 +142,6 @@ def create_video_blueprint() -> Blueprint:
     reg_bulk(bp)
     reg_repair(bp)
     reg_issues(bp)
+    reg_requests(bp)
 
     return bp
