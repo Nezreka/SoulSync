@@ -18,6 +18,7 @@ import type {
   LibraryV2PlaylistPipelineState,
   LibraryV2PlaylistSummary,
   LibraryV2PlaylistTrack,
+  LibraryV2QualityProfileSource,
   LibraryV2Track,
   LibraryV2TrackFile,
   LibraryV2TrackTableColumns,
@@ -99,6 +100,8 @@ interface QpTarget {
   entity: 'artists';
   id: number;
   currentProfileId: number;
+  currentProfileSource?: LibraryV2QualityProfileSource;
+  currentProfileExplicit?: boolean;
   title: string;
 }
 
@@ -109,6 +112,18 @@ type ActionHandler = (action: string, entity?: Lib2EntityRef) => void;
 
 function trackProgress(present: number, total: number): string {
   return `${present}/${total}`;
+}
+
+function qualityProfileSourceLabel(source?: LibraryV2QualityProfileSource): string {
+  if (source === 'track') return 'Track';
+  if (source === 'album') return 'Album';
+  if (source === 'artist') return 'Artist';
+  if (source === 'playlist') return 'Playlist';
+  return 'App default';
+}
+
+function profileLabel(name: string, source?: LibraryV2QualityProfileSource): string {
+  return `${name} (${qualityProfileSourceLabel(source)})`;
 }
 
 /** Single clamp for every derived progress percent (P2-20): counters can
@@ -1505,6 +1520,8 @@ type EditableAlbumMetadata = Pick<
  *  album/EP/single; artist-level Quality Profile / Edit stay separate). */
 interface AlbumDetailTarget extends EditableAlbumMetadata {
   quality_profile_id: number;
+  quality_profile_source?: LibraryV2QualityProfileSource;
+  quality_profile_explicit?: boolean;
 }
 
 type AlbumDetailTab = 'quality' | 'metadata';
@@ -1531,6 +1548,8 @@ function AlbumDetailModal({ album, onClose }: { album: AlbumDetailTarget; onClos
             entity="albums"
             id={album.id}
             currentProfileId={album.quality_profile_id}
+            currentProfileSource={album.quality_profile_source}
+            currentProfileExplicit={album.quality_profile_explicit}
             onSaved={onClose}
           />
         ) : null}
@@ -3289,7 +3308,14 @@ function ArtistTable({
     switch (key) {
       case 'quality_profile':
         return (
-          <td key="quality_profile">{profileNameById.get(artist.quality_profile_id) ?? '—'}</td>
+          <td key="quality_profile">
+            {profileNameById.has(artist.quality_profile_id)
+              ? profileLabel(
+                  profileNameById.get(artist.quality_profile_id) as string,
+                  artist.quality_profile_source,
+                )
+              : '—'}
+          </td>
         );
       case 'genres':
         return <td key="genres">{artist.genres.join(', ') || '—'}</td>;
@@ -3430,6 +3456,8 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
                     mood: album.mood,
                     user_overrides: album.user_overrides,
                     quality_profile_id: album.quality_profile?.id ?? 1,
+                    quality_profile_source: album.quality_profile_source,
+                    quality_profile_explicit: album.quality_profile_explicit,
                   }}
                   onDeleted={goBack}
                 />
@@ -3446,7 +3474,9 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
               <div className={styles.detailLabels}>
                 <span className={`${styles.detailLabel} ${styles.labelProfile}`}>
                   <SvgIcon name="star" />
-                  {album.quality_profile?.name ?? 'No quality profile'}
+                  {album.quality_profile
+                    ? profileLabel(album.quality_profile.name, album.quality_profile_source)
+                    : 'No quality profile'}
                 </span>
                 <span className={styles.detailLabel}>
                   <SvgIcon name="tracks" />
@@ -3723,6 +3753,8 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
         entity: 'artists',
         id: artistId,
         currentProfileId: artist.quality_profile?.id ?? 1,
+        currentProfileSource: artist.quality_profile_source,
+        currentProfileExplicit: artist.quality_profile_explicit,
         title: artist.name,
       });
       return;
@@ -3815,7 +3847,11 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               />
               <ActionButton
                 icon="star"
-                label={`Profile: ${artist.quality_profile?.name ?? 'None'}`}
+                label={`Profile: ${
+                  artist.quality_profile
+                    ? profileLabel(artist.quality_profile.name, artist.quality_profile_source)
+                    : 'None'
+                }`}
                 title="Change default quality profile for this artist"
                 onClick={() => handleAction('Quality Profile')}
               />
@@ -3862,7 +3898,9 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               <div className={styles.detailLabels}>
                 <span className={`${styles.detailLabel} ${styles.labelProfile}`}>
                   <SvgIcon name="star" />
-                  {artist.quality_profile?.name ?? 'No quality profile'}
+                  {artist.quality_profile
+                    ? profileLabel(artist.quality_profile.name, artist.quality_profile_source)
+                    : 'No quality profile'}
                 </span>
                 <span
                   className={`${styles.detailLabel} ${artist.monitored ? styles.labelMonitored : styles.labelUnmonitored}`}
@@ -4003,6 +4041,8 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               entity={qpTarget.entity}
               id={qpTarget.id}
               currentProfileId={qpTarget.currentProfileId}
+              currentProfileSource={qpTarget.currentProfileSource}
+              currentProfileExplicit={qpTarget.currentProfileExplicit}
               title={qpTarget.title}
               onClose={() => setQpTarget(null)}
             />
@@ -4273,6 +4313,8 @@ function AlbumBlock({
               mood: album.mood,
               user_overrides: album.user_overrides,
               quality_profile_id: album.quality_profile_id,
+              quality_profile_source: album.quality_profile_source,
+              quality_profile_explicit: album.quality_profile_explicit,
             }}
           />
         </span>
@@ -5260,16 +5302,16 @@ function TrackRow({
                     }`}
                     title={
                       track.meets_profile === false
-                        ? `Quality profile: ${profileName} (Below profile)`
+                        ? `Quality profile: ${profileLabel(profileName, track.quality_profile_source)} · Below profile`
                         : track.upgrade_candidate === true
-                          ? `Quality profile: ${profileName} (Upgrade candidate available)`
+                          ? `Quality profile: ${profileLabel(profileName, track.quality_profile_source)} · Upgrade candidate available`
                           : track.meets_profile === null && track.file
-                            ? `Quality profile: ${profileName} (Quality unknown - scan to evaluate)`
-                            : `Quality profile: ${profileName} (Meets profile)`
+                            ? `Quality profile: ${profileLabel(profileName, track.quality_profile_source)} · Quality unknown - scan to evaluate`
+                            : `Quality profile: ${profileLabel(profileName, track.quality_profile_source)} · Meets profile`
                     }
                   >
                     <SvgIcon name="star" />
-                    {profileName}
+                    {profileLabel(profileName, track.quality_profile_source)}
                   </span>
                 ) : null}
               </div>
@@ -5553,8 +5595,8 @@ function TrackDetailButton({
   return (
     <>
       <IconActionButton
-        icon="info"
-        title="Track details — quality profile, metadata, source info"
+        icon="edit"
+        title="Edit track — quality profile, metadata, tags, lyrics and pipeline info"
         onClick={() => onOpenTab('quality')}
       />
       {openTab ? (
@@ -5618,6 +5660,8 @@ function TrackDetailModal({
             entity="tracks"
             id={trackId}
             currentProfileId={track.quality_profile_id}
+            currentProfileSource={track.quality_profile_source}
+            currentProfileExplicit={track.quality_profile_explicit}
             onSaved={onClose}
           />
         ) : null}

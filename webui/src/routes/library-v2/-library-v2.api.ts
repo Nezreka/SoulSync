@@ -123,14 +123,16 @@ export async function fetchLibraryV2QualityProfiles(): Promise<LibraryV2QualityP
 export async function setLibraryV2QualityProfile(
   entity: 'artists' | 'albums' | 'tracks',
   id: number,
-  qualityProfileId: number,
+  qualityProfileId: number | null,
   cascade = true,
   monitorExisting = false,
 ): Promise<void> {
   const payload = await readJson<{ success: boolean; error?: string }>(
     apiClient.post(`library/v2/${entity}/${id}/quality-profile`, {
       json: {
-        quality_profile_id: qualityProfileId,
+        ...(qualityProfileId === null
+          ? { inherit: true }
+          : { quality_profile_id: qualityProfileId, inherit: false }),
         cascade,
         // Assigning a profile is a quality decision; monitoring the entity's
         // tracks for upgrades (a wanted-action) is a separate, explicit

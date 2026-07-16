@@ -65,8 +65,57 @@ describe('library v2 quality-profile mutation', () => {
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
     expect(attempts).toBe(2);
     expect(submitted).toEqual([
-      { quality_profile_id: 9, cascade: true, monitor_existing: true },
-      { quality_profile_id: 9, cascade: true, monitor_existing: true },
+      { quality_profile_id: 9, inherit: false, cascade: true, monitor_existing: false },
+      { quality_profile_id: 9, inherit: false, cascade: true, monitor_existing: false },
     ]);
+  });
+
+  it('shows effective provenance and can clear an explicit override', async () => {
+    let submitted: unknown;
+    server.use(
+      http.get('/api/library/v2/quality-profiles', () =>
+        HttpResponse.json({
+          success: true,
+          profiles: [
+            {
+              id: 9,
+              name: 'Lossless',
+              description: 'Keep FLAC',
+              upgrade_policy: 'until_top',
+              upgrade_cutoff_index: 0,
+              ranked_targets: [],
+              repair_job_id: '',
+              repair_settings: {},
+              is_default: false,
+            },
+          ],
+        }),
+      ),
+      http.post('/api/library/v2/albums/42/quality-profile', async ({ request }) => {
+        submitted = await request.json();
+        return HttpResponse.json({ success: true });
+      }),
+    );
+    const queryClient = createTestQueryClient();
+    const onClose = vi.fn();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <QualityProfileModal
+          entity="albums"
+          id={42}
+          currentProfileId={9}
+          currentProfileSource="album"
+          currentProfileExplicit
+          title="Selected Release"
+          onClose={onClose}
+        />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText('Effective: Lossless (Album override)')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Use inherited profile' }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(submitted).toEqual({ inherit: true, cascade: true, monitor_existing: false });
   });
 });

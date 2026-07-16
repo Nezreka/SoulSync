@@ -25,8 +25,9 @@ def _seed(conn, *, policy: str, monitored: int = 1, with_file: bool = True) -> i
     cur.execute("INSERT INTO lib2_album_artists(album_id, artist_id) VALUES(?,?)",
                 (album_id, artist_id))
     cur.execute(
-        "INSERT INTO lib2_tracks(album_id, title, monitored, quality_profile_id) "
-        "VALUES(?, 'T', ?, ?)", (album_id, monitored, profile_id))
+        "INSERT INTO lib2_tracks(album_id, title, monitored, quality_profile_id, "
+        "quality_profile_explicit) VALUES(?, 'T', ?, ?, 1)",
+        (album_id, monitored, profile_id))
     track_id = cur.lastrowid
     cur.execute("INSERT INTO lib2_track_artists(track_id, artist_id) VALUES(?,?)",
                 (track_id, artist_id))

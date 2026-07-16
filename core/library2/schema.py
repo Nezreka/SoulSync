@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS lib2_artists (
     monitored INTEGER NOT NULL DEFAULT 1,
     monitor_new_items TEXT NOT NULL DEFAULT 'all',   -- 'all' | 'none' | 'new'
     quality_profile_id INTEGER REFERENCES quality_profiles(id) ON DELETE RESTRICT,
+    quality_profile_explicit INTEGER NOT NULL DEFAULT 0,
     canonical_artist_id INTEGER REFERENCES lib2_artists(id) ON DELETE SET NULL, -- self-ref; NULL = canonical/standalone. Set = alias of that row (§40 registry: same real artist under a different, unlinked provider identity — see core/library2/artist_aliases.py)
     legacy_artist_id INTEGER,                         -- source row in legacy `artists`
     legacy_import_run_id TEXT,                        -- last complete legacy snapshot that saw it
@@ -109,6 +110,7 @@ CREATE TABLE IF NOT EXISTS lib2_albums (
     stable_id TEXT,                                    -- provider-less identity (audit P1-12); minted once, survives reset+reimport
     monitored INTEGER NOT NULL DEFAULT 1,
     quality_profile_id INTEGER REFERENCES quality_profiles(id) ON DELETE RESTRICT,
+    quality_profile_explicit INTEGER NOT NULL DEFAULT 0,
     legacy_album_id INTEGER,                           -- source row in legacy `albums`
     legacy_import_run_id TEXT,                         -- last complete legacy snapshot that saw it
     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -155,6 +157,7 @@ CREATE TABLE IF NOT EXISTS lib2_tracks (
     stable_id TEXT,                                   -- provider-less identity (audit P1-12); minted once, survives reset+reimport
     monitored INTEGER NOT NULL DEFAULT 1,
     quality_profile_id INTEGER REFERENCES quality_profiles(id) ON DELETE RESTRICT,
+    quality_profile_explicit INTEGER NOT NULL DEFAULT 0,
     canonical_track_id INTEGER,                       -- self-ref; NULL = canonical
     legacy_track_id INTEGER,                          -- source row in legacy `tracks`
     legacy_import_run_id TEXT,                        -- last complete legacy snapshot that saw it
@@ -334,6 +337,15 @@ _ADDED_COLUMNS = (
      "ALTER TABLE lib2_albums ADD COLUMN quality_profile_id INTEGER"),
     ("lib2_tracks", "quality_profile_id",
      "ALTER TABLE lib2_tracks ADD COLUMN quality_profile_id INTEGER"),
+    # §52.2: distinguish a direct user assignment from a persisted inherited
+    # value.  Existing installs get NULL first so the one-time inference below
+    # can recover old cascade intent; fresh rows use the DDL's DEFAULT 0.
+    ("lib2_artists", "quality_profile_explicit",
+     "ALTER TABLE lib2_artists ADD COLUMN quality_profile_explicit INTEGER"),
+    ("lib2_albums", "quality_profile_explicit",
+     "ALTER TABLE lib2_albums ADD COLUMN quality_profile_explicit INTEGER"),
+    ("lib2_tracks", "quality_profile_explicit",
+     "ALTER TABLE lib2_tracks ADD COLUMN quality_profile_explicit INTEGER"),
     ("lib2_albums", "origin",
      "ALTER TABLE lib2_albums ADD COLUMN origin TEXT NOT NULL DEFAULT 'library'"),
     # NULL = the artist's provider catalog was never expanded; used by the
@@ -540,6 +552,13 @@ def _migrate_quality_profile_constraints(cursor: Any) -> None:
     column, then rename the FK column into place. Each table uses a savepoint
     so a failed SQLite capability check cannot leave a half-migrated schema.
     """
+    # Projection triggers reference all three profile columns. Drop them
+    # before a possible column rebuild and recreate them below.
+    for trigger_name in (
+        "trg_quality_profiles_lib2_default_insert",
+        "trg_quality_profiles_lib2_default_update",
+    ):
+        cursor.execute(f"DROP TRIGGER IF EXISTS {trigger_name}")
     default_row = cursor.execute(
         "SELECT id FROM quality_profiles ORDER BY is_default DESC, id LIMIT 1"
     ).fetchone()
@@ -611,6 +630,88 @@ def _migrate_quality_profile_constraints(cursor: Any) -> None:
             SELECT RAISE(ABORT, 'quality profile is referenced by Library v2');
         END
     """)
+    # Keep the persisted effective compatibility projection aligned when the
+    # app-wide default changes.  Explicit Library-v2 choices remain pinned;
+    # inherited albums/tracks follow their (possibly explicit) parent.
+    for trigger_name in (
+        "trg_quality_profiles_lib2_default_insert",
+        "trg_quality_profiles_lib2_default_update",
+    ):
+        cursor.execute(f"DROP TRIGGER IF EXISTS {trigger_name}")
+    propagation_sql = """
+        UPDATE lib2_artists
+           SET quality_profile_id=NEW.id
+         WHERE COALESCE(quality_profile_explicit, 0)=0;
+        UPDATE lib2_albums
+           SET quality_profile_id=(
+               SELECT a.quality_profile_id FROM lib2_artists a
+                WHERE a.id=lib2_albums.primary_artist_id)
+         WHERE COALESCE(quality_profile_explicit, 0)=0;
+        UPDATE lib2_tracks
+           SET quality_profile_id=(
+               SELECT al.quality_profile_id FROM lib2_albums al
+                WHERE al.id=lib2_tracks.album_id)
+         WHERE COALESCE(quality_profile_explicit, 0)=0;
+    """
+    cursor.execute(f"""
+        CREATE TRIGGER trg_quality_profiles_lib2_default_insert
+        AFTER INSERT ON quality_profiles
+        FOR EACH ROW WHEN NEW.is_default=1
+        BEGIN
+            {propagation_sql}
+        END
+    """)
+    cursor.execute(f"""
+        CREATE TRIGGER trg_quality_profiles_lib2_default_update
+        AFTER UPDATE OF is_default ON quality_profiles
+        FOR EACH ROW WHEN NEW.is_default=1
+        BEGIN
+            {propagation_sql}
+        END
+    """)
+
+
+def _backfill_quality_profile_provenance(cursor: Any) -> None:
+    """Infer explicit-vs-inherited provenance for pre-§52.2 rows once.
+
+    The additive migration deliberately creates nullable columns on old
+    installs.  NULL therefore means "not classified yet" while fresh rows
+    are born with ``DEFAULT 0``.  A child whose value equals its parent's
+    persisted effective value is the old cascade shape; a differing value is
+    the strongest evidence of an explicit override.  At the artist root a
+    non-default value is treated as explicit.  Same-value explicit overrides
+    cannot be reconstructed from the old schema, but retaining the cascade is
+    the least surprising and least destructive migration.
+    """
+    default_row = cursor.execute(
+        "SELECT id FROM quality_profiles ORDER BY is_default DESC, id LIMIT 1"
+    ).fetchone()
+    default_id = int(default_row[0]) if default_row else 1
+    cursor.execute(
+        """UPDATE lib2_artists
+              SET quality_profile_explicit=CASE
+                    WHEN quality_profile_id<>? THEN 1 ELSE 0 END
+            WHERE quality_profile_explicit IS NULL""",
+        (default_id,),
+    )
+    cursor.execute(
+        """UPDATE lib2_albums
+              SET quality_profile_explicit=CASE
+                    WHEN quality_profile_id<>(
+                        SELECT a.quality_profile_id FROM lib2_artists a
+                         WHERE a.id=lib2_albums.primary_artist_id
+                    ) THEN 1 ELSE 0 END
+            WHERE quality_profile_explicit IS NULL"""
+    )
+    cursor.execute(
+        """UPDATE lib2_tracks
+              SET quality_profile_explicit=CASE
+                    WHEN quality_profile_id<>(
+                        SELECT al.quality_profile_id FROM lib2_albums al
+                         WHERE al.id=lib2_tracks.album_id
+                    ) THEN 1 ELSE 0 END
+            WHERE quality_profile_explicit IS NULL"""
+    )
 
 
 def ensure_library_v2_schema(connection: Any) -> None:
@@ -645,6 +746,7 @@ def ensure_library_v2_schema(connection: Any) -> None:
                 logger.debug("column migration %s.%s: %s", table, column, e)
     _migrate_lib2_profiles_to_app_wide(cursor)
     _migrate_quality_profile_constraints(cursor)
+    _backfill_quality_profile_provenance(cursor)
     # §40 alias registry index — runs AFTER the additive column migration
     # above so it also works on installs that predate canonical_artist_id.
     try:

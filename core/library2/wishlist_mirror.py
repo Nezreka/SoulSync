@@ -24,15 +24,12 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
     """Build the wishlist payload for a lib2 track (or None when unknown)."""
     t = conn.execute(
         """SELECT t.id AS track_id, t.spotify_id, t.title, t.track_number,
-                  t.disc_number, t.duration, t.quality_profile_id,
+                  t.disc_number, t.duration,
                   al.id AS album_id, al.title album_title, al.spotify_id album_spotify,
                   al.track_count, al.expected_track_count, al.album_type,
-                  qp.name AS quality_profile_name, qp.upgrade_policy,
-                  qp.upgrade_cutoff_index, qp.ranked_targets,
                   EXISTS(SELECT 1 FROM lib2_track_files tf
                          WHERE tf.track_id = t.id AND tf.path IS NOT NULL AND tf.path <> '') has_file
            FROM lib2_tracks t JOIN lib2_albums al ON al.id = t.album_id
-           LEFT JOIN quality_profiles qp ON qp.id = t.quality_profile_id
            WHERE t.id = ?""",
         (track_id,),
     ).fetchone()
@@ -52,12 +49,22 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
     # never an arbitrary sibling copy of the recording.
     from core.library2.track_files import primary_file_row
     file_info = primary_file_row(conn, track_id)
+    from core.library2.profile_lookup import effective_quality_profile
+    resolved_profile = effective_quality_profile(conn, "tracks", track_id)
+    profile_row = conn.execute(
+        """SELECT id, name, upgrade_policy, upgrade_cutoff_index, ranked_targets
+             FROM quality_profiles WHERE id=?""",
+        (resolved_profile["id"],),
+    ).fetchone()
     profile_info = {
-        "id": t["quality_profile_id"],
-        "name": t["quality_profile_name"] or "",
-        "upgrade_policy": t["upgrade_policy"] or "acceptable",
-        "upgrade_cutoff_index": t["upgrade_cutoff_index"] or 0,
-        "ranked_targets": t["ranked_targets"] or "[]",
+        "id": resolved_profile["id"],
+        "name": profile_row["name"] if profile_row else "",
+        "upgrade_policy": profile_row["upgrade_policy"] if profile_row else "acceptable",
+        "upgrade_cutoff_index": profile_row["upgrade_cutoff_index"] if profile_row else 0,
+        "ranked_targets": profile_row["ranked_targets"] if profile_row else "[]",
+        "source": resolved_profile["source"],
+        "source_id": resolved_profile["source_id"],
+        "explicit": resolved_profile["explicit"],
     }
 
     from core.library2.quality_eval import is_upgrade_policy
@@ -96,7 +103,7 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
         "track_number": t["track_number"],
         "disc_number": t["disc_number"],
         "duration_ms": t["duration"],
-        "quality_profile_id": t["quality_profile_id"],
+        "quality_profile_id": resolved_profile["id"],
         "quality_profile": profile_info,
         "_album_type": t["album_type"],
         "_has_file": bool(t["has_file"]),
@@ -106,8 +113,10 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
             "source": "library_v2",
             "lib2_track_id": t["track_id"],
             "lib2_album_id": t["album_id"],
-            "quality_profile_id": t["quality_profile_id"],
+            "quality_profile_id": resolved_profile["id"],
             "quality_profile_name": profile_info["name"],
+            "quality_profile_source": resolved_profile["source"],
+            "quality_profile_source_id": resolved_profile["source_id"],
             "upgrade_policy": profile_info["upgrade_policy"],
             "upgrade_check": bool(t["has_file"]),
             "quality_evaluation": quality_evaluation,

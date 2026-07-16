@@ -276,11 +276,22 @@ def build_artwork(database, conn, config_manager, kind: str, entity_id: int,
         except Exception as e:  # noqa: BLE001
             logger.debug("manual art override download failed (%s %s): %s", kind, entity_id, e)
 
+    provider_attempted = False
     if not data and kind == "album":
         data = _embedded_art_for_album(conn, config_manager, entity_id)
     elif not data and kind == "artist":
-        # Artists: prefer the embedded cover of one of their albums (fast, local),
-        # then fall back to a provider image via external IDs.
+        # §52.5: an artist photo is semantically different from an album
+        # cover. Prefer the provider's artist image; embedded album art is the
+        # resilient fallback for providers/artists without one.
+        provider_attempted = True
+        url = _provider_art_url(conn, kind, entity_id)
+        if url:
+            try:
+                from core.library.artist_image import download_image_bytes
+                data = download_image_bytes(url)
+            except Exception as e:  # noqa: BLE001
+                logger.debug("provider image download failed: %s", e)
+
         album = conn.execute(
             """
             SELECT al.id FROM lib2_album_artists aa
@@ -291,9 +302,10 @@ def build_artwork(database, conn, config_manager, kind: str, entity_id: int,
             (entity_id,),
         ).fetchone()
         if album:
-            data = _embedded_art_for_album(conn, config_manager, album["id"])
+            if not data:
+                data = _embedded_art_for_album(conn, config_manager, album["id"])
 
-    if not data:
+    if not data and not provider_attempted:
         url = _provider_art_url(conn, kind, entity_id)
         if url:
             try:

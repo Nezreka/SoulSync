@@ -36,6 +36,13 @@ export type LibraryV2AlbumOrigin = 'library' | 'discography' | (string & {});
 /** `until_top` is the persisted compatibility alias for `until_cutoff` with
  *  `upgrade_cutoff_index = 0`; it remains a first-class API read value. */
 export type LibraryV2UpgradePolicy = 'acceptable' | 'until_cutoff' | 'until_top' | (string & {});
+export type LibraryV2QualityProfileSource =
+  | 'track'
+  | 'album'
+  | 'artist'
+  | 'playlist'
+  | 'global'
+  | (string & {});
 
 export interface LibraryV2Pagination {
   page: number;
@@ -54,6 +61,9 @@ export interface LibraryV2ArtistSummary {
   monitored: boolean;
   monitor_new_items: string;
   quality_profile_id: number;
+  quality_profile_source?: LibraryV2QualityProfileSource;
+  quality_profile_source_id?: number | null;
+  quality_profile_explicit?: boolean;
   added_at: string | null;
   album_count: number;
   single_count: number;
@@ -72,6 +82,9 @@ export interface LibraryV2AlbumSummary {
   image_url: string | null;
   monitored: boolean;
   quality_profile_id: number;
+  quality_profile_source?: LibraryV2QualityProfileSource;
+  quality_profile_source_id?: number | null;
+  quality_profile_explicit?: boolean;
   origin: LibraryV2AlbumOrigin;
   spotify_id: string | null;
   /** §48 rich-metadata-edit fields — provider baseline overlaid with any admin override. */
@@ -98,6 +111,9 @@ export interface LibraryV2ArtistDetail {
   monitored: boolean;
   monitor_new_items: string;
   quality_profile: LibraryV2QualityProfile | null;
+  quality_profile_source?: LibraryV2QualityProfileSource;
+  quality_profile_source_id?: number | null;
+  quality_profile_explicit?: boolean;
   albums: LibraryV2AlbumSummary[];
   eps: LibraryV2AlbumSummary[];
   singles: LibraryV2AlbumSummary[];
@@ -289,6 +305,9 @@ export interface LibraryV2Track {
   isrc: string | null;
   monitored: boolean;
   quality_profile_id: number;
+  quality_profile_source?: LibraryV2QualityProfileSource;
+  quality_profile_source_id?: number | null;
+  quality_profile_explicit?: boolean;
   canonical_track_id: number | null;
   artists: LibraryV2TrackArtist[];
   file: LibraryV2TrackFile | null;
@@ -318,6 +337,9 @@ export interface LibraryV2AlbumDetail {
   monitored: boolean;
   origin: LibraryV2AlbumOrigin;
   quality_profile: LibraryV2QualityProfile | null;
+  quality_profile_source?: LibraryV2QualityProfileSource;
+  quality_profile_source_id?: number | null;
+  quality_profile_explicit?: boolean;
   primary_artist: { id: number; name: string } | null;
   tracks: LibraryV2Track[];
   track_count: number;

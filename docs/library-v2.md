@@ -27,7 +27,12 @@
 > Query-Invalidierung statt Full-Page-Reload); am 2026-07-17 Abschnitt 41
 > ergänzt (P2-23: finaler Download-Dispatch in die bestehende Engine gezogen;
 > P2-24: unbekannte mehrdeutige Band-Credits erzeugen keine Phantom-Artists
-> mehr).
+> mehr); am 2026-07-17 ergänzt um Abschnitt 52 (verbindliches Nutzer-Review
+> zu Quality-Profile-Priorität, konsolidiertem Monitoring/Artist Settings,
+> Search→Library-v2-Materialisierung, Pipeline-History und Delete-UX); am
+> 2026-07-17 Abschnitt 53 ergänzt (§52.2 Profilherkunft für Track/Album/Artist/
+> Global, §52.5 Artist-Providerfoto zuerst, §52.6 direkte Track-Suche trotz
+> unmonitored und §52.10 Edit-Icon/Herkunftsanzeige umgesetzt).
 
 Opt-in, Lidarr-style Library-Manager auf SoulSyncs eigener
 Such-/Download-/Processing-/Tagging-Pipeline. Gated hinter
@@ -40,8 +45,10 @@ Tests: `tests/library2/`.
 ## 1. Nicht verhandelbare Designregeln (Core principles — do not break)
 
 - **NIE Media-Server-abhängig** (Plex/Jellyfin/Navidrome) — auch nicht für
-  Artwork. Artwork = Embedded-Cover aus der Datei (primär) → Metadata-Provider
-  (Fallback) → Disk-Cache `<db_dir>/lib2_artwork/`, serviert via
+  Artwork. Album-/Track-Artwork = Embedded-Cover aus der Datei (primär) →
+  Metadata-Provider (Fallback); Artist-Artwork = Provider-Artist-Foto (primär)
+  → Embedded-Albumcover (Fallback; Nutzerentscheidung §52.5) → Disk-Cache
+  `<db_dir>/lib2_artwork/`, serviert via
   `/api/library/v2/artwork/<kind>/<id>[?size=thumb]`.
 - **Monitoring spiegelt die Bestandssysteme** über interne DB-Calls:
   Artist-Monitor ⇄ Watchlist; Album/Single/Track-Monitor ⇄ Wishlist. Ein Artist
@@ -117,10 +124,14 @@ docker build -t soulsync:dev .
 Milestone 1 bis Phase E, breites Metadaten-Edit und die serverseitliche
 Acquisition-/Eligibility-Architektur (Phase 4/5, „LIB2-011") sind umgesetzt
 und über die in den jeweiligen Roadmap-Punkten festgehaltenen Gates
-verifiziert. Der verbleibende Backlog besteht überwiegend aus bewusst
-zurückgestellten Produktentscheidungen (Playlist-Profile, H-/I-Paritätsideen,
-Resizable Columns), Live-Provider-Acceptance für §38 und der größeren
-Manual-Matching-Recovery-UI aus Abschnitt 12, Punkt 41.
+verifiziert. Das Nutzer-Review in §52 legt den nächsten Produkt-Scope fest:
+Quality-Profile brauchen eine nachvollziehbare Track→Album→Artist→Playlist-
+Priorität, Monitoring/Artist Settings müssen die bestehende Watchlist
+wiederverwenden, Search muss Einträge vor dem Download in Library v2
+materialisieren, und fehlgeschlagene bzw. quarantänisierte Pipeline-Schritte
+müssen in der Entity-History sichtbar bleiben. Kalender und Artist Top Tracks
+sind ausdrücklich kein Ziel; weitere Legacy-/Lidarr-Gaps bleiben reine
+Enumeration, solange sie nicht einzeln angenommen wurden.
 <!-- Veralteter Satzrest des vorherigen Statusabschnitts:
 + Manage Tracks + Delete, aber kein breites Metadaten-Edit); die serverseitige
 -->
@@ -2982,57 +2993,57 @@ vermutet** — das Dokument war zum Zeitpunkt dieser Prüfung bereits überholt.
   alte falsch benannte Cachedateien heilen sich selbst. Damit stimmen `.jpg`,
   Bytes und `image/jpeg` überein. Cache-Control und Invalidierung waren bereits
   vorher sauber und blieben unverändert.
-- **Artist- vs. Album-Art-Strategie ist tatsächlich uneindeutig**, aber
+- **Artist- vs. Album-Art-Strategie war tatsächlich uneindeutig**, aber
   anders gelagert als im externen Dokument vermutet: `build_artwork`
   bevorzugt für `kind == "artist"` HEUTE das Embedded-Cover eines beliebigen
-  Alben des Artists (Priorität: kein Single, dann neuestes Jahr) und fällt
+  Albums des Artists (Priorität: kein Single, dann neuestes Jahr) und fällt
   erst danach auf ein Provider-Artist-Photo zurück
   (`core/library2/artwork.py:205-221`) — bewusst so gebaut ("fast, local").
-  Der externe Vorschlag "Artist-Bild IMMER vom Provider, nie embedded" wäre
-  also eine bewusste Verhaltensänderung, kein reiner Bugfix — vor Umsetzung
-  explizit mit dem User klären (Trade-off: Konsistenz/Lidarr-Parität vs.
-  Provider-Coverage/Rate-Limits für Nischen-Artists ohne
-  Fanart-/Deezer-Artist-Photo).
+  Das Nutzer-Review vom 2026-07-17 entscheidet diese Frage nun anders:
+  **Provider-Artist-Foto zuerst, Embedded-Albumcover nur als Fallback** (siehe
+  §52.5). Das ist eine noch umzusetzende Verhaltensänderung, kein bereits
+  geschlossener Bugfix.
 
 ### 11.3 Die eigentliche offene Anforderung: Quality-Profile-Konfliktauflösung
 
 Das externe Dokument stellte 1.3 ("Quality Profile Assignment for
 Playlists") als offene Frage mit drei Optionen dar. Der User hat sie in der
-anschließenden Voice-Session konkretisiert, und diese Konkretisierung — nicht
-das ursprüngliche Dokument — ist der Teil, der tatsächlich noch fehlt und
-implementiert werden muss:
+anschließenden Voice-Sessions konkretisiert. Die jüngste, verbindliche Fassung
+steht in §52.2; sie ersetzt die frühere dreistufige Fassung dieses Abschnitts.
 
 Sobald Playlist-Tracks mehr als einen Read-Only-View bekommen und
 tatsächlich in die Wishlist gemirrort/monitored werden können, entsteht ein
 Prioritätskonflikt, den es bei reinem Artist-/Album-Monitoring so nicht gab:
 ein Track kann gleichzeitig über mehrere Pfade "wanted" werden — als Teil
 einer Playlist (mit Playlist-Default-Profil), als Teil eines
-Artist-Monitorings (mit Artist-Profil), und/oder individuell manuell gesetzt
-(Track-spezifisches Profil). Nutzer-Erwartung (Voice-Session
-2026-07-14): **das spezifischste Profil gewinnt**, in dieser Reihenfolge:
+Artist-Monitorings (mit Artist-Profil), über ein Release/Album und/oder
+individuell manuell gesetzt (Track-spezifisches Profil). Nutzer-Erwartung
+(zuletzt bestätigt am 2026-07-17): **das spezifischste explizite Profil
+gewinnt**, in dieser Reihenfolge:
 
 1. **Track-spezifisch** gesetztes Profil (höchste Priorität) — der User hat
    für genau diesen Song explizit ein Profil gewählt.
-2. **Artist-spezifisches** Profil, falls für den Artist bereits eines gesetzt
+2. **Album-/Release-spezifisches** Profil — gilt nur für Tracks dieses
+   Releases und überschreibt keinen expliziten Track-Wert.
+3. **Artist-spezifisches** Profil, falls für den Artist bereits eines gesetzt
    ist (`lib2_artists.quality_profile_id`, s.
    `core/library2/profile_lookup.py:58-69`).
-3. **Playlist-Default-Profil** (niedrigste Priorität) — greift nur, wenn
-   weder 1 noch 2 zutrifft.
+4. **Playlist-Default-Profil** — greift nur, wenn keine der spezifischeren
+   Ebenen 1–3 einen expliziten Wert liefert.
+5. **App-weites Default-Profil** als rein technischer letzter Fallback.
 
-Das ist kein neues Konzept, sondern eine Erweiterung des bereits
-bestehenden Fallback-Musters: `profile_lookup.default_quality_profile_id`
-löst heute schon Artist- vor Global-Default auf; jeder Wishlist-Mirror-Call
-trägt bereits ein Per-Item `quality_profile_id` (s. Abschnitt 1,
-Designregel "Quality-Profile"; `wishlist_mirror.py`). Für Playlists fehlt
-lediglich die dritte, niedrigste Stufe in dieser Kette (Playlist-Default)
-UND ein Ort, an dem ein Playlist-Default überhaupt gespeichert wird — es
-gibt aktuell **kein** Playlist-Datenmodell in Library v2 (kein
-`lib2_playlists`), das ein Default-Profil tragen könnte; Playlist-Daten
-kommen bislang rein aus den bestehenden `mirrored_playlists`-Tabellen
-(`core/playlists/*`), die keinerlei Quality-Profile-Spalte haben. Verifiziert
-per Grep: `core/playlists/pipeline.py` und
-`core/playlists/materialize_service.py` haben aktuell keinerlei
-Quality-Profile-Bezug.
+Das ist eine Erweiterung des bestehenden Fallback-Musters, aber **nicht**
+durch blindes Kopieren derselben Profil-ID auf alle Kinder lösbar:
+`profile_lookup.default_quality_profile_id` löst heute Artist vor Global-
+Default auf; jeder Wishlist-Mirror-Call trägt bereits ein Per-Item
+`quality_profile_id` (s. Abschnitt 1, Designregel "Quality-Profile";
+`wishlist_mirror.py`). Der heutige Library-v2-Cascade schreibt hingegen die
+Profil-ID direkt in Album-/Track-Zeilen und verliert damit, ob ein Wert dort
+explizit gewählt oder nur geerbt wurde. Der gewünschte Vorrang ist deshalb
+erst belastbar, wenn Herkunft/Explizitheit gespeichert oder aus getrennten
+Ebenen zur Laufzeit aufgelöst wird. Zusätzlich braucht das bestehende
+Playlist-Modell einen Ort für sein Default-Profil; eine parallele
+`lib2_playlists`-Welt soll dafür nicht entstehen (Details §52.2).
 
 ### 11.4 Weitere offene Punkte aus der Voice-Session
 
@@ -3052,41 +3063,44 @@ Quality-Profile-Bezug.
   (Reihenfolge ist kein Wanted-Kriterium), aber potenziell relevant für
   Media-Server-Sync (bestehende Pipeline, außerhalb Library v2). Hier nur
   festgehalten, nicht weiter untersucht.
-- **Playlists als First-Class-Entity vs. Read-Through:** Um ein
-  Playlist-Default-Profil zu speichern, wird zwingend irgendeine Persistenz
-  gebraucht — entweder eine schlanke neue Spalte an der bestehenden
-  `mirrored_playlists`-Tabelle (kein neues `lib2_playlists`, näher an der
-  Architekturregel "keine Parallelstruktur"/"kein zweiter Importer") oder ein
-  minimales `lib2_playlists` (nur `id`, `mirrored_playlist_id`,
-  `quality_profile_id`). Beide Varianten sind mit den Nicht-verhandelbaren
-  Designregeln (Abschnitt 1) vereinbar; welche gewählt wird, sollte im
-  Implementierungs-Chat explizit neu entschieden werden, nicht hier
-  vorentschieden.
+- **Playlist-Profil im bestehenden Sync-Modell:** Um ein Playlist-Default-
+  Profil zu speichern, wird Persistenz im bestehenden Mirrored-Playlist-/
+  Sync-Modell gebraucht, bevorzugt als additive Spalte an
+  `mirrored_playlists` bzw. dessen bestehender Settings-Struktur. Ein neues
+  `lib2_playlists` nur für diese Einstellung ist nach dem Nutzer-Review vom
+  2026-07-17 ausdrücklich nicht gewünscht. Der Picker gehört dorthin, wo die
+  jeweilige Spotify-/Provider-Playlist im bestehenden Sync-/Mirroring-Flow
+  konfiguriert wird; Library v2 soll diesen Wert lesen und anwenden, nicht eine
+  zweite Einstellung führen. Der User berichtet, dass in diesem Flow bereits
+  ein Quality-Profile-Picker sichtbar ist; der Code-Audit fand im
+  Playlist-Core noch keinen eindeutigen persistierten Quality-Profile-Bezug.
+  Vor der Migration ist deshalb zu prüfen, ob der sichtbare Picker bereits
+  anderswo gespeichert, nur teilweise verdrahtet oder noch rein UI-seitig ist.
 
-### 11.5 Priorität — bewusst zurückgestellt
+### 11.5 Voraussetzungen — durch §52 wieder aktiv, noch nicht umgesetzt
 
-**Das hier ist explizit NICHT der nächste Schritt.** Der User hat in der
-Voice-Session ausdrücklich gesagt, dass Playlist-Quality-Profile-Konflikte
-kompliziert und nicht ganz intuitiv sind (mehrere existierende
-Playlist-Seiten sorgen schon für Verwirrung) und dass zuerst "das Richtige"
-fertig werden soll, bevor das hier angegangen wird. Diese Sektion existiert
-NUR, damit die Idee nicht verloren geht — nicht als Auftrag, sie als
-Nächstes umzusetzen. Der tatsächliche nächste Schritt bleibt wie in
-Abschnitt 7 vermerkt: **P2-01** (Scan/Retag SQLite-Lock-Dauer über lange
-Dateisystem-I/O).
+Die frühere Zurückstellung ist mit dem Nutzer-Review vom 2026-07-17
+aufgehoben. Die Profilpriorität ist Teil des angenommenen Scopes, soll aber
+zusammen mit der Monitoring-/Search-Konsolidierung aus §52 umgesetzt werden,
+nicht als isolierter Playlist-Sonderweg.
 
-Falls dieser Punkt später aufgegriffen wird, sind die Voraussetzungen dafür:
-1. Persistenzentscheidung für das Playlist-Default-Profil (11.4, letzter
-   Punkt).
-2. Playlist-Track → Wishlist-Mirror-Pfad um die 3-stufige Profil-Kette
-   (Track > Artist > Playlist-Default) erweitern — ansetzend dort, wo der
-   Playlist→Wishlist-Mirror-Call real passiert. Aktuell triggert Library v2
-   nur die bestehende Pipeline (`run_mirrored_playlist_pipeline`,
+Voraussetzungen dafür:
+
+1. Persistenzentscheidung im **bestehenden** Playlist-/Sync-Modell (11.4),
+   inklusive Migration und API-Vertrag für den dortigen Picker.
+2. Explizite Profilherkunft bzw. ein Resolver, der geerbte Werte nicht als
+   explizite Track-/Album-Werte materialisiert.
+3. Playlist-Track → Wishlist-Mirror-Pfad um die vollständige Profil-Kette
+   (Track > Album > Artist > Playlist > Global) erweitern — ansetzend dort,
+   wo der Playlist→Wishlist-Mirror-Call real passiert. Aktuell triggert
+   Library v2 nur die bestehende Pipeline (`run_mirrored_playlist_pipeline`,
    s. `core/playlists/pipeline.py`); dort ist noch kein
    Quality-Profile-Bezug vorhanden (verifiziert per Grep) — die Kette müsste
    dort oder im nachgelagerten Wishlist-Mirror-Schritt ansetzen.
-3. UI-Entscheidung, wo der Playlist-Default-Profil-Picker sitzt (11.4,
-   erster Punkt).
+4. Gleichrangige Konflikte definieren: derselbe Track kann in mehreren
+   Playlists mit unterschiedlichen Default-Profilen vorkommen. §52.2 lässt
+   diese Entscheidung bewusst offen, statt willkürlich "zuletzt gewinnt" zu
+   implementieren.
 
 ---
 
@@ -5557,3 +5571,517 @@ passed, 3 skipped, 2 deselected**; ihre 25 Fehler liegen vollständig in drei
 unberührten Testmodulen (`cross_batch_dedup`, `simple_download_tags`,
 `normalize_version_symmetry`) und reproduzieren unverändert beim isolierten
 Lauf dieser drei Dateien (**25 failed, 4 passed**).
+
+---
+
+## 52. Nutzer-Review 2026-07-17 — Profile, Monitoring, Search, History und Delete-UX
+
+**Status: verbindliche Produktanforderung und Code-Audit; erster vertikaler
+Slice umgesetzt, siehe §53.** Dieser Abschnitt dokumentiert das Nutzerfeedback vom 2026-07-17
+und ersetzt widersprechende ältere Annahmen, besonders die frühere
+dreistufige Profilregel in §11 sowie die reine Gap-Enumeration in der
+Deep-Dive-Doku. Ziel ist möglichst viel Wiederverwendung: Watchlist,
+Wishlist, bestehende Search-/Download-/Import-Pipeline, Quality Profiles und
+Quarantäne bleiben die fachlichen Systeme; Library v2 wird die verständliche,
+zusammenhängende Oberfläche darüber und keine zweite Implementierung.
+
+### 52.1 Angenommener Scope und klare Nicht-Ziele
+
+Angenommen sind:
+
+- nachvollziehbare Quality-Profile-Vererbung für Track, Album, Artist und
+  Playlist;
+- konsolidierte Artist-Monitoring-/Watchlist-Einstellungen in Library v2;
+- bessere Provider-Zuordnung inklusive Artist-Foto und verständlicher
+  Anzeige des aktuell gematchten Artists;
+- Lidarr-vertraute Semantik für Automatic und Interactive Search;
+- frühe Library-v2-Materialisierung bei der globalen Track-Suche;
+- vollständige, korrelierte Search-/Download-/Check-/Quarantäne-/Import-
+  History auf Entity- und File-Ebene;
+- eine gemeinsame, verständliche Delete-Files-Oberfläche für Albumansicht
+  und Manage Tracks.
+
+Ausdrücklich **nicht** angenommen sind:
+
+- **Kalender / Upcoming Releases:** nicht implementieren. Der unsichtbare
+  Watchlist-Scanner darf weiterarbeiten; daraus folgt keine Kalender-UI.
+- **Artist Top Tracks:** nicht in Library v2 übernehmen.
+- **vollständige Legacy- oder Lidarr-Parität als Selbstzweck:** nur die in
+  diesem Abschnitt angenommenen Funktionen werden gebaut.
+- **gezieltes Re-Download-Modal:** vorerst zurückgestellt/nicht notwendig.
+  Falls es später wieder aufgenommen wird, muss es neu suchen und die alte
+  Datei erst nach einem erfolgreichen, verifizierten Import ersetzen.
+- **Reidentify-vs.-„I Have This"-Reihenfolge:** weiterhin zurückgestellt; die
+  Reihenfolge ist dem User derzeit egal.
+
+### 52.2 Quality Profile: verbindliche Priorität und Herkunft
+
+Für einen konkreten Track gilt von höchster zu niedrigster Priorität:
+
+1. **explizites Track-Profil**;
+2. **explizites Album-/Release-Profil**;
+3. **explizites Artist-Profil**;
+4. **Playlist-Default-Profil** der Playlist, über die der Track gewünscht
+   wurde;
+5. **app-weites Default-Profil** als technischer Fallback.
+
+Eine niedrigere Ebene darf eine bereits gesetzte höhere Ebene nie
+überschreiben. Insbesondere darf das Hinzufügen eines bereits bekannten Songs
+zu einer Playlist dessen Track-, Album- oder Artist-Profil nicht verändern.
+Ein Playlist-Profil ist ein Default für noch unentschiedene Tracks, kein
+Massen-Override.
+
+**Aktuelle Lücke:** `POST /api/library/v2/<entity>/<id>/quality-profile`
+schreibt mit `cascade=true` dieselbe Profil-ID direkt auf Nachfahren.
+`wanted.py`/`wishlist_mirror.py` projizieren anschließend primär die
+Track-Spalte. Damit ist nicht mehr erkennbar, ob der Trackwert explizit
+gewählt oder nur vom Album/Artist kopiert wurde. Eine korrekte Umsetzung
+braucht daher einen gemeinsamen `effective_quality_profile`-Resolver samt
+Herkunft, zum Beispiel:
+
+```text
+effective_profile = {
+  id: <quality_profile_id>,
+  source: track | album | artist | playlist | global,
+  source_id: <entity id or null>,
+  explicit: true | false
+}
+```
+
+Die genaue DB-Repräsentation ist Implementierungsdetail, aber folgende
+Invarianten sind verbindlich:
+
+- explizite Werte und geerbte/effektive Werte dürfen nicht verwechselt
+  werden;
+- UI, Wishlist-Mirror, Automatic Search und Import-Quality-Gate benutzen
+  denselben serverseitigen Resolver;
+- das UI zeigt Profil **und Herkunft**, zum Beispiel „Lossless (Album)" oder
+  „Standard (Playlist: Discover Weekly)";
+- das Ändern einer höheren Ebene berechnet Nachfahren neu, ohne deren
+  explizite Overrides zu löschen;
+- `cascade` darf nicht länger blind explizite Kindwerte überschreiben;
+- ein vorhandener Track in mehreren Wanted-Kontexten bleibt eine Entity und
+  wird nicht pro Playlist dupliziert.
+
+Der Playlist-Picker gehört in den bestehenden Sync-/Mirrored-Playlist-
+Einstellungen zur jeweiligen Spotify-/Provider-Playlist. Library v2 liest
+und verwendet diesen Wert; es soll weder ein paralleles Playlist-
+Konfigurationsmodell noch eine zweite Quality-Profile-Tabelle geben.
+
+**Umsetzungsstand 2026-07-17:** Track→Album→Artist→Global ist mit expliziter
+Herkunft, zentralem Resolver, schonender Bestandsmigration, Clear-to-Inherit,
+Pipeline-Verwendung und UI-Anzeige umgesetzt (§53). Die Playlist-Stufe bleibt
+bewusst offen, weil ihre gleichrangige Konfliktregel weiterhin §52.12.1
+unterliegt.
+
+**Noch offene Produktentscheidung:** Befindet sich derselbe Track in zwei
+Playlists mit unterschiedlichen Profilen und existiert kein Track-, Album-
+oder Artist-Profil, kollidieren zwei gleichrangige Playlist-Defaults. Dafür
+ist vor Umsetzung eine deterministische Regel nötig (siehe §52.12); „letzter
+Write gewinnt" darf nicht versehentlich das Verhalten bestimmen.
+
+### 52.3 Ein Monitoring-Modell statt mehrerer unklarer Schalter
+
+Heute liegen ähnliche Einstellungen an mehreren Orten:
+
+- das Bookmark neben dem Artist-Namen spiegelt Artist ⇄ Watchlist;
+- das Library-v2-Monitoring-Modal bietet sinngemäß „all releases",
+  „missing only", „unmonitor everything" und die Behandlung neuer Releases;
+- die bestehenden Watchlist Artist Settings führen zusätzlich
+  `auto_download`, Lookback, Release-Typen, bevorzugte Metadatenquelle und
+  das manuelle Provider-Linking;
+- Track-/Album-Monitoring spiegelt weiterhin in die Wishlist.
+
+Diese Zustände dürfen nicht als vier unabhängige Monitoring-Systeme
+weiterentwickelt werden. Die fachliche Bedeutung soll lauten:
+
+- **Bookmark gesetzt:** Der Artist ist Mitglied der Watchlist und damit als
+  Artist monitored. Bookmark entfernen nimmt ihn aus der Watchlist, löscht
+  aber weder Library-Dateien noch automatisch explizit gemonitorte Tracks.
+- **Artist Settings:** bestimmen, welche neuen Releases beobachtet werden
+  und ob passende neue Releases automatisch in die vorhandene
+  Search-/Download-Pipeline gehen.
+- **Release-/Track-Monitoring:** bestimmt, welche konkreten vorhandenen oder
+  fehlenden Items aktuell wanted sind. Ein einzelner Wishlist-Track monitored
+  nie automatisch die gesamte Discography seines Artists.
+- **Quality Profile:** ist orthogonal zum Monitorstatus. Es entscheidet die
+  erlaubte Qualität und Upgrades, nicht ob überhaupt gesucht wird.
+
+Neben Bookmark/Artist-Name erscheint ein Settings-/Gear-Icon, sobald der
+Artist gebookmarkt ist. Es öffnet in Library v2 die **bestehenden Watchlist
+Artist Settings** als gemeinsame Komponente bzw. über denselben API-Vertrag,
+nicht eine reduzierte Kopie. Dort müssen mindestens verfügbar sein:
+
+- Quality Profile für den Artist;
+- Auto-download new releases an/aus;
+- Release-Typen: Albums, EPs, Singles sowie die bereits unterstützten Live,
+  Remixes, Acoustic, Compilations und Instrumentals;
+- Lookback/ab welchem Zeitraum neue Releases berücksichtigt werden;
+- bevorzugter Metadatenprovider;
+- aktuell verknüpfter Provider-Artist und manuelles Re-Matching.
+
+Das bestehende Library-v2-Monitoring-Modal wird in diese Semantik integriert
+oder durch sie ersetzt. Begriffe wie „Monitor all releases" und „Monitor
+missing only" müssen im UI erklären, welche **bestehenden** Releases/Tracks
+sie markieren; die Watchlist-Einstellungen erklären getrennt, was bei
+zukünftigen Releases passiert. Das Bookmark braucht einen Tooltip, der seine
+Watchlist-Wirkung explizit nennt.
+
+### 52.4 „Metadata Profile" nicht als drittes Profilsystem nachbauen
+
+In Lidarr beschreibt ein Metadata Profile vor allem, welche Release-Gruppen
+und Release-Status in die Discography aufgenommen werden. In SoulSync decken
+die vorhandenen Watchlist-Felder `include_*` plus `monitor_new_items` einen
+großen Teil dieser Absicht bereits ab. Deshalb wird **vorerst kein separates
+Metadata-Profile-Modell** eingeführt.
+
+Stattdessen zuerst:
+
+1. Watchlist-Release-Typen und Library-v2-Monitoring fachlich konsolidieren;
+2. dieselben Werte in Artist Settings sichtbar/editierbar machen;
+3. prüfen, welche Lidarr-Release-Status danach tatsächlich noch fehlen.
+
+Nur wenn wiederverwendbare benannte Presets später einen klaren Mehrwert
+haben, ist ein eigenes Metadata-Profile-Konzept erneut zu entscheiden. Es
+darf nicht neben Watchlist-Regeln und `monitor_new_items` eine dritte,
+widersprüchliche Wahrheit erzeugen.
+
+Referenz zur Begriffsklärung: [Lidarr Library / Metadata
+Profile](https://wiki.servarr.com/lidarr/library).
+
+### 52.5 Artist Matching und Artist-Darstellung
+
+Library v2 soll den bereits reicheren Watchlist-Providerpfad wiederverwenden.
+Beim aktuellen und beim manuellen Match werden nicht nur Codes/IDs gezeigt,
+sondern – soweit der Provider Daten liefert –:
+
+- Artist-Name und Provider;
+- Artist-Profilbild;
+- Provider-ID als sekundäre technische Information mit Copy-Aktion;
+- Follower-/Fan-Zahl, Popularität und Genres;
+- Match-Status bzw. ob die Zuordnung manuell oder automatisch entstand.
+
+Der aktuell verknüpfte Artist muss schon vor einer neuen Suche als
+verständliche Karte/Zeile sichtbar sein. Match-Kandidaten verwenden dieselbe
+Darstellung, damit der User nicht nur zwischen anonymen Codes entscheidet.
+Das bestehende Library-v2-Identity-Modell bleibt maßgeblich; die Watchlist-UI
+liefert Daten und Interaktionsmuster, keine zweite Identitätstabelle.
+
+**Entschiedene Artwork-Reihenfolge für Artists:** Provider-Artist-Foto zuerst
+→ Embedded-Albumcover nur als Fallback → bestehender Cache/Placeholder. Das
+ersetzt die heutige Reihenfolge aus §11.2. Fehlende Follower-/Fan-Zahlen sind
+kein Fehler, wenn der gewählte Provider sie nicht anbietet; das UI nennt dann
+die Datenquelle bzw. zeigt keinen erfundenen Nullwert.
+
+**Umsetzungsstand 2026-07-17:** Die Artwork-Reihenfolge ist umgesetzt und
+getestet (Providerfoto vor Embedded-Albumcover, manuelles Override bleibt
+weiterhin höchste Priorität). Die reichere Current-Match-/Candidate-Karte mit
+Followern/Genres bleibt offen.
+
+### 52.6 Automatic Search: erwartetes Lidarr-Verhalten
+
+Automatic Search ist immer auf den gewählten Artist, das Album oder den Track
+gescoped und benutzt die bestehende Wishlist-Candidate-/Quality-/Download-
+Pipeline.
+
+Für fehlende Dateien:
+
+- Artist-/Album-Suche berücksichtigt nur monitored/wanted Tracks;
+- es wird der beste zulässige Kandidat nach dem effektiven Quality Profile
+  gewählt und durch alle bestehenden Checks geführt.
+
+Für bereits vorhandene Dateien:
+
+- nur suchen/grabben, wenn das effektive Profil ein Upgrade erlaubt;
+- nur einen Kandidaten laden, der nach derselben serverseitigen
+  Qualitätsbewertung besser als die aktuelle Datei ist und das Profilziel
+  erfüllt;
+- wenn Upgrade nicht erlaubt ist oder kein besserer zulässiger Kandidat
+  existiert: **nichts verändern**;
+- die bestehende Datei erst ersetzen/löschen, nachdem der neue Download alle
+  Quality-, Acoustic-ID-, Tagging- und Import-Checks erfolgreich bestanden
+  hat. Ein Fehler oder eine Quarantäne lässt die alte Datei unangetastet.
+
+Eine **direkt am einzelnen Track** manuell gestartete Automatic Search ist
+expliziter Nutzer-Intent und läuft auch dann, wenn dieser Track nicht
+monitored ist. Sie setzt den Monitorstatus nicht stillschweigend um. Das ist
+anders als die Artist-/Album-/globale Suche, die weiterhin nur monitored/
+wanted Items verarbeitet.
+
+**Aktuelle Lücke:** Der scoped Endpoint berechnet Wanted-State neu und
+filtert anschließend auch einen explizit ausgewählten unmonitored Track weg.
+Dieser Spezialfall muss als expliziter Track-Override bis zur
+Eligibility-Grenze getragen werden, ohne die globalen Monitoring-Regeln
+aufzuweichen.
+
+**Umsetzungsstand 2026-07-17:** Diese konkrete Lücke ist geschlossen. Eine
+direkte Track-Suche erzeugt einen einmaligen, idempotenten Wishlist-Add und
+dispatcht den Track, ohne `monitored` oder die Wanted-Projektion zu ändern;
+Artist-/Album-Suchen bleiben weiterhin strikt wanted-only (§53).
+
+### 52.7 Interactive Search und Manual Grab
+
+Interactive Search zeigt Kandidaten und überlässt die Auswahl dem User, führt
+den gewählten Kandidaten danach aber durch **dieselbe** Download-/Import-
+Pipeline wie Automatic Search. Die UI trifft keine eigene Quality-
+Entscheidung und darf einen bestehenden File-Row nicht vor erfolgreichem
+Import überschreiben.
+
+Ein Manual Grab bedeutet nicht automatisch „alle Checks ignorieren":
+
+- Quality Profile und Acoustic-ID werden normal geprüft;
+- ein Hard-Fail muss mit Grund in Quarantäne/History landen;
+- `Force Download` und `Skip Acoustic ID Verification` sind explizite,
+  sichtbare Overrides und werden mit Actor, Zeitpunkt und Grund/Quelle
+  protokolliert;
+- ein späteres „Approve / Human Verified / Tag + DB" aus der Quarantäne wird
+  als manueller Entscheidungsschritt an denselben Versuch angehängt;
+- bei einem Replacement bleibt die alte Datei bis zum erfolgreichen finalen
+  Import bestehen.
+
+**Noch zu entscheiden:** Ob Interactive Search Kandidaten außerhalb des
+Quality Profiles grundsätzlich nur anzeigen, anzeigen aber blockieren oder
+nach einer zweiten expliziten Force-Bestätigung erlauben soll (§52.12). Die
+Pipeline darf den Fall bis dahin nicht stillschweigend akzeptieren.
+
+### 52.8 Globale Search-Seite → frühe Library-v2-Materialisierung
+
+Im bestehenden Search-Flow wählt der User zuerst Provider/Resultat und danach
+Aktionen wie „Begin Analysis", „Add to Wishlist", „Force Download" und
+„Skip Acoustic ID Verification". Dieser Flow erhält einen Quality-Profile-
+Picker.
+
+Sobald der User die gewählte Aktion verbindlich abschickt, muss der Server
+**vor Search/Download** idempotent:
+
+1. den richtigen Artist, das Release/Album und den Track anhand stabiler
+   Provider-IDs in Library v2 auflösen oder anlegen;
+2. den Track unter den richtigen Parents verknüpfen, ohne Artist-/Track-
+   Duplikate zu erzeugen;
+3. das ausgewählte Profil als **explizites Track-Profil** speichern (höchste
+   Priorität);
+4. den konkreten Track explizit monitoren/wanted setzen und über den
+   bestehenden Mirror in die Wishlist bringen;
+5. Library-v2-Entity-IDs, Profilherkunft und eine gemeinsame Correlation-ID
+   an Analysis, Grab, Quarantäne und Import weiterreichen.
+
+Das Anlegen darf nicht erst im finalen Autolink nach einem erfolgreichen
+Import passieren. Sonst existiert bei einem frühen Quality-/Acoustic-ID-Fail
+keine zuverlässige Library-v2-Entity, an der der Versuch und die Quarantäne
+sichtbar werden. Der heutige Search-Request führt außerdem noch keine
+`quality_profile_id`; diese Lücke ist Teil dieses Scopes.
+
+Das explizite Track-Monitoring weitet sich standardmäßig **nicht** auf alle
+Releases des Artists. Der Artist wird als korrekter Parent angelegt; die
+gesamte Artist-Watchlist wird nur über das Bookmark/Artist Settings aktiviert.
+Falls mit „beim richtigen Artist auf Monitor" stattdessen zwingend die ganze
+Artist-Watchlist gemeint ist, ist das vor Implementierung als offene
+Entscheidung in §52.12 zu bestätigen.
+
+### 52.9 Pipeline-Ergebnis, Quarantäne und History dürfen nicht verloren gehen
+
+Der Code-Audit zeigt heute:
+
+- Quality-/Acoustic-ID-Hard-Fails können vor dem finalen Library-v2-Autolink
+  in Quarantäne gehen;
+- Acquisition History journalisiert Quarantäne und manuelle Auflösung;
+- `pipeline_result_json`/Verification wird primär an einer erfolgreich
+  verknüpften finalen File-Zeile persistiert;
+- die Artist-History merged mehrere Quellen, die Track-Info-Ansicht zeigt
+  jedoch im Wesentlichen File-/Source-Zusammenfassung und nicht die gesamte
+  Timeline eines fehlgeschlagenen Versuchs.
+
+Dadurch sind die Daten teilweise vorhanden, aber nicht stabil an derselben
+Track-/File-Ansicht korreliert. Der Zielvertrag ist ein durchgängiger Versuch
+mit einer Correlation-ID von Search/Watchlist bis zum Endzustand:
+
+```text
+search_requested
+→ candidates_evaluated
+→ candidate_selected / manual_grab
+→ quality_checked
+→ acoustic_id_checked
+→ download_started / download_finished
+→ quarantined [optional]
+→ human_verified / rejected / retried [optional]
+→ imported
+→ previous_file_replaced [upgrade only]
+```
+
+Jeder Schritt trägt mindestens Zeit, Entity-Scope, Actor (`system`/User),
+Quelle/Kandidat, Entscheidung, strukturierten Grund und relevante Vorher-/
+Nachher-Qualität. Nicht ausgeführte Checks werden als `not_run`/`skipped` mit
+Grund unterschieden, nicht durch fehlende Daten suggeriert.
+
+Die History soll Lidarr-vertraut Search/Grab, Download, Import, Upgrade,
+Delete, Rename/Move, Failure und Quarantäne in einer chronologischen Sicht
+zeigen. Die bestehende History-Zusammenführung wird dafür erweitert, nicht
+durch ein separates UI-only-Protokoll ersetzt. Referenz zum erwarteten
+Informationsumfang: [Lidarr Activity / History](https://wiki.servarr.com/lidarr/activity).
+
+### 52.10 Track-Detail: Edit/Settings statt reinem Info-Icon
+
+Das Track-Modal bearbeitet Quality Profile, Metadata, Tags und Lyrics und
+zeigt zusätzlich Info. Deshalb soll der Tabellen-Button wieder als
+**Pencil/Edit oder Settings** erscheinen, nicht als reines Info-Icon. Diese
+Nutzerentscheidung ersetzt die frühere D1-Entscheidung aus §33.
+
+Die Tabs bleiben fachlich erhalten, werden aber ergänzt:
+
+- **Info/Pipeline:** chronologischer Stepper mit allen Checks, Quarantäne,
+  manueller Freigabe und Replacement;
+- **Tags:** dieselbe lesbare, gruppierte Key/Value-Formatierung wie
+  „Quarantine → Inspect → Tags", statt einer schlechter formatierten
+  Parallelansicht;
+- **Quality:** effektives Profil plus Herkunft und expliziter Override;
+- **Metadata/Lyrics:** weiter editierbar wie heute.
+
+Vom Track aus müssen auch fehlgeschlagene Versuche sichtbar sein, die nie eine
+neue `lib2_track_files`-Zeile erreicht haben. Vom File aus wird zusätzlich
+der konkrete erfolgreiche Import-/Verification-Zustand angezeigt.
+
+**Umsetzungsstand 2026-07-17:** Pencil/Edit-Icon sowie Quality-Profil inkl.
+Herkunft und „Use inherited profile" sind umgesetzt. Der chronologische
+Pipeline-Stepper und die gemeinsame Quarantine-Tag-Formatierung bleiben offen.
+
+### 52.11 Manage Tracks und Delete Files: ein gemeinsamer Dialog
+
+„Manage Tracks → Delete Selected" ist die kanonische Oberfläche für
+Dateiverwaltung. Eine Delete-Files-Aktion direkt am Album darf als Shortcut
+bleiben, öffnet aber **denselben** Dialog und denselben Backend-Vertrag; es
+gibt keine zweite Delete-Implementierung.
+
+Der aktuelle Dialog stapelt „aus DB entfernen" und „physische Dateien
+löschen" mit langen Rohpfadlisten in einer schwer lesbaren Darstellung. Der
+neue Dialog zeigt zuerst eine kompakte Auswahlzusammenfassung (Tracks,
+Dateien, Gesamtgröße) und genau eine verständliche Wahl:
+
+- **nur aus der Library-Datenbank entfernen** – Dateien auf Disk behalten;
+- **permanent löschen** – Library-Einträge und die dazugehörigen Dateien auf
+  Disk entfernen.
+
+Für die permanente Option folgt eine deutliche Destructive-Bestätigung. Die
+Backend-Kommandos und Journale aus ADR-05 bleiben getrennt und sicher, auch
+wenn die UI sie als einen zusammenhängenden Entscheidungsflow präsentiert.
+
+Lange Pfade:
+
+- stehen nicht als ungebrochene Volltextwand im Hauptdialog;
+- werden sinnvoll in der Mitte gekürzt, mit vollständigem Pfad in Tooltip,
+  Reveal und Copy;
+- liegen in einer scrollbaren/aufklappbaren Liste, nach Root/Album gruppiert;
+- verändern nicht die Breite des Modals.
+
+Die History erfasst Modus, betroffene File-IDs/Pfade, Actor, Erfolg/Fehler und
+bei Permanent Delete den tatsächlichen Disk-Ausgang. Als Referenz für die
+einheitliche Entscheidung dient der offizielle Lidarr-Flow „Remove from
+Lidarr only" vs. „Remove from Lidarr and delete files": [Lidarr Tips and
+Tricks](https://wiki.servarr.com/en/lidarr/tips-and-tricks).
+
+### 52.12 Entscheidungen, die vor der Umsetzung noch bestätigt werden müssen
+
+Die Grundrichtung ist entschieden. Offen bleiben nur Punkte, bei denen eine
+technische Annahme sichtbares Nutzerverhalten festlegen würde:
+
+1. **Zwei Playlist-Profile auf demselben Track:** Soll das strengere Profil,
+   eine explizit gewählte Primär-Playlist oder eine andere sichtbare Regel
+   gewinnen? Empfehlung: „strengstes erreichbares Profil" nur verwenden,
+   wenn Quality-Ränge profilübergreifend eindeutig vergleichbar sind;
+   ansonsten Konflikt anzeigen und explizite Auswahl verlangen.
+2. **Search-Materialisierungszeitpunkt:** Empfehlung ist der serverseitige
+   Submit von „Add to Wishlist"/„Begin Analysis"/„Force Download", nicht
+   schon ein unverbindlicher Klick auf ein Suchresultat. Soll „Begin
+   Analysis" allein den Track bereits dauerhaft monitoren oder erst die
+   bestätigte Download-/Wishlist-Aktion?
+3. **Artist-Monitoring bei globaler Track-Suche:** Empfehlung: nur den Track
+   monitoren und den Artist als Parent anlegen; die gesamte Watchlist nur bei
+   gesetztem Bookmark. Bestätigen, ob der User stattdessen automatisch den
+   ganzen Artist in die Watchlist aufnehmen will.
+4. **Manual Grab außerhalb des Profils:** nur anzeigen, anzeigen aber
+   blockieren oder nach explizitem Force-Override erlauben? Empfehlung:
+   anzeigen mit rotem Fail-Grund und nur über eine separat bestätigte,
+   auditierte Force-Aktion zulassen.
+5. **Replacement-Aufbewahrung:** technisch ist entschieden, dass die alte
+   Datei bis zum erfolgreichen Import bestehen bleibt. Noch festzulegen ist,
+   ob sie danach sofort permanent gelöscht, in einen konfigurierbaren
+   Backup/Trash verschoben oder für eine kurze Rollback-Frist behalten wird.
+
+Alle übrigen Aussagen dieses Abschnitts sind Anforderungen, keine offenen
+Fragen. Vor Implementierung sollte daraus ein vertikaler Arbeitsplan mit
+Schema-/API-Migration, zentralem Profilresolver, Early-Materialization,
+Correlation-History und anschließend den gemeinsamen UI-Komponenten erstellt
+werden.
+
+---
+
+## 53. §52 erster vertikaler Slice — Profilherkunft, Artist-Artwork, direkte Track-Suche und Edit-UX — ✅ umgesetzt (2026-07-17)
+
+Dieser Slice schließt alle entscheidungsfreien Kernteile, die sich ohne eine
+der fünf offenen Produktfragen aus §52.12 belastbar implementieren ließen.
+
+### 53.1 Quality Profile: explizit vs. geerbt
+
+- `lib2_artists`, `lib2_albums` und `lib2_tracks` tragen neu
+  `quality_profile_explicit`. Die weiterhin persistierte Profil-ID ist die
+  effektive Kompatibilitätsprojektion für älteren Code; das Flag hält fest,
+  ob die Entity die Wahl wirklich besitzt.
+- Die additive Migration legt das Flag auf Bestandsinstallationen zuerst als
+  NULL an und inferiert die frühere Kaskade genau einmal: gleicher Wert wie
+  Parent = geerbt, abweichender Wert = explizites Override; am Artist-Root
+  gilt ein vom App-Default abweichender Wert als explizit. Gleichwertige alte
+  Overrides waren im alten Schema nicht rekonstruierbar und bleiben deshalb
+  konservativ geerbt.
+- `core/library2/profile_lookup.py::effective_quality_profile` ist der
+  gemeinsame Resolver für **Track > Album > Artist > Global** und liefert
+  `{id, source, source_id, explicit}`. Ein DB-Trigger projiziert einen später
+  geänderten App-Default sofort auf alle nicht expliziten Artists, Albums und
+  Tracks; explizite Kinder bleiben dabei gepinnt.
+- `assign_quality_profile` setzt oder entfernt (`inherit=true`) ein Override.
+  Parent-Änderungen aktualisieren nur geerbte Nachfahren; explizite Album- und
+  Track-Werte werden niemals überschrieben. Das alte `cascade`-Feld bleibt als
+  Request-Kompatibilität erhalten, bedeutet aber nicht mehr „blind alle
+  Kinder überschreiben".
+- Wishlist-Payload, Wanted-Projektion, scoped Automatic Search und damit das
+  Import-Quality-Gate erhalten dieselbe effektive Profil-ID. Wishlist-
+  `source_info` führt zusätzlich Herkunft und Source-ID mit.
+- API-Payloads und React-UI zeigen Profil plus Herkunft, z. B.
+  `Lossless (Album)`. Der Picker zeigt den effektiven Ursprung und bietet
+  „Use inherited profile" für explizite Overrides. Wishlist-importierte
+  Track-Profile werden als explizite Track-Wahl markiert.
+- Der React-Picker setzt `monitor_existing=false`: eine Profiländerung ist
+  gemäß §52.3 keine versteckte Wanted-/Monitoring-Aktion. Der bestehende
+  serverseitige Opt-in bleibt für explizite andere Workflows verfügbar.
+
+Die Playlist-Stufe ist absichtlich nicht geraten worden. Persistenz am
+bestehenden Mirrored-Playlist-Modell und Konfliktregel bei zwei Playlists
+folgen erst nach §52.12.1.
+
+### 53.2 Drei weitere geschlossene §52-Punkte
+
+- **Artist-Artwork (§52.5):** manuelles Override bleibt zuerst; danach wird
+  das Provider-Artist-Foto versucht und nur bei fehlendem/fehlerhaftem Bild
+  auf Embedded-Art eines Albums zurückgefallen. Der bestehende JPEG-/Thumb-
+  Cache bleibt unverändert.
+- **Direkte Track-Suche (§52.6):** ein Klick am einzelnen Track darf nun auch
+  einen unmonitored Track suchen. Das ist ein einmaliger Wishlist-/Dispatcher-
+  Intent und ändert weder Monitorflag noch Wanted-Regel. Artist-/Album-Scope
+  bleibt monitored/wanted-only; vorhandene Dateien bleiben weiterhin durch
+  dieselbe Upgrade-/Quality-Bewertung geschützt.
+- **Track-Detail (§52.10):** der Tabellenbutton verwendet wieder das
+  Pencil/Edit-Icon und benennt im Tooltip den tatsächlichen bearbeitbaren
+  Umfang. Im Quality-Tab sind effektives Profil, Herkunft und Clear-to-Inherit
+  sichtbar.
+
+### 53.3 Verifikation und verbleibender Scope
+
+- Backend: `pytest tests/library2` → **631 passed**.
+- Frontend: Vitest → **34 Dateien / 199 Tests passed**.
+- Frontend Format + OXLint-Typecheck → **0 Warnungen / 0 Fehler**; TypeScript
+  `--noEmit` ebenfalls grün.
+
+Weiterhin offen und nicht als erledigt dargestellt: §52.3/§52.4 gemeinsame
+Artist-/Watchlist-Settings, die reichere Provider-Match-Karte aus §52.5,
+Replacement-Teil von §52.6, §52.7 Manual-Grab-Policy, §52.8 Early
+Materialization, §52.9 Correlation-History/Stepper und §52.11 gemeinsamer
+Delete-Files-Dialog. Die fünf sichtbaren Entscheidungen aus §52.12 bleiben
+unverändert Voraussetzung für ihre jeweiligen Teilstücke.

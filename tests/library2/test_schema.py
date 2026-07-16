@@ -95,6 +95,13 @@ def test_migrates_parallel_profile_table_to_app_wide():
     assert rows["A"] == 4      # custom profile remapped by name
     assert rows["B"] == 2      # same-name same-id stays
     assert rows["C"] == 1      # dangling pointer → default
+    provenance = {
+        r["name"]: r["quality_profile_explicit"]
+        for r in conn.execute(
+            "SELECT name, quality_profile_explicit FROM lib2_artists"
+        )
+    }
+    assert provenance == {"A": 1, "B": 1, "C": 0}
     assert conn.execute(
         "SELECT COUNT(*) FROM sqlite_master WHERE name='lib2_quality_profiles'"
     ).fetchone()[0] == 0
@@ -126,6 +133,10 @@ def test_foreign_keys_and_inserts():
                 f"PRAGMA table_info({table})")
         }
         assert info["quality_profile_id"][4] is None
+        assert info["quality_profile_explicit"][3] == 1
+        assert conn.execute(
+            f"SELECT quality_profile_explicit FROM {table} LIMIT 1"
+        ).fetchone()[0] == 0
         assert any(
             fk[2] == "quality_profiles" and fk[3] == "quality_profile_id"
             for fk in conn.execute(f"PRAGMA foreign_key_list({table})")
@@ -175,6 +186,43 @@ def test_live_default_trigger_and_quality_reference_guards():
         conn.execute("DELETE FROM quality_profiles WHERE id=2")
 
 
+def test_default_profile_change_reprojects_only_inherited_rows():
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    ensure_library_v2_schema(conn)
+    artist_id = conn.execute("INSERT INTO lib2_artists(name) VALUES('A')").lastrowid
+    album_id = conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title) VALUES(?, 'Album')",
+        (artist_id,),
+    ).lastrowid
+    track_id = conn.execute(
+        """INSERT INTO lib2_tracks(
+               album_id, title, quality_profile_id, quality_profile_explicit)
+           VALUES(?, 'Track', 1, 1)""",
+        (album_id,),
+    ).lastrowid
+
+    conn.execute("UPDATE quality_profiles SET is_default=0")
+    conn.execute("UPDATE quality_profiles SET is_default=1 WHERE id=2")
+
+    assert conn.execute(
+        "SELECT quality_profile_id FROM lib2_artists WHERE id=?", (artist_id,)
+    ).fetchone()[0] == 2
+    assert conn.execute(
+        "SELECT quality_profile_id FROM lib2_albums WHERE id=?", (album_id,)
+    ).fetchone()[0] == 2
+    assert conn.execute(
+        "SELECT quality_profile_id FROM lib2_tracks WHERE id=?", (track_id,)
+    ).fetchone()[0] == 1
+
+    from core.library2.profile_lookup import effective_quality_profile
+
+    assert effective_quality_profile(conn, "artists", artist_id)["source"] == "global"
+    assert effective_quality_profile(conn, "artists", artist_id)["id"] == 2
+    assert effective_quality_profile(conn, "tracks", track_id)["source"] == "track"
+
+
 def test_migrates_default_one_columns_without_losing_graph_data():
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
@@ -199,6 +247,8 @@ def test_migrates_default_one_columns_without_losing_graph_data():
     )
 
     conn.execute("DROP TRIGGER trg_quality_profiles_lib2_restrict")
+    conn.execute("DROP TRIGGER trg_quality_profiles_lib2_default_insert")
+    conn.execute("DROP TRIGGER trg_quality_profiles_lib2_default_update")
     for table in ("lib2_artists", "lib2_albums", "lib2_tracks"):
         for suffix in ("default", "insert", "update"):
             conn.execute(f"DROP TRIGGER trg_{table}_quality_profile_{suffix}")

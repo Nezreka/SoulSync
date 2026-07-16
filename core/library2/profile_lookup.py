@@ -1,9 +1,14 @@
-"""Resolve a Library-v2 artist's assigned quality profile by artist name.
+"""Resolve Library-v2 quality profiles and their inheritance provenance.
 
 Used by acquisition paths that predate Library v2 (the watchlist scanner's
 new-release queueing) so a per-artist profile assignment still reaches the
 wishlist row — and therefore the download/import pipeline — for releases lib2
 itself didn't queue.
+
+§52.2 adds one important invariant: the stored profile id is the effective
+compatibility projection, while ``quality_profile_explicit`` records whether
+that entity actually owns the choice.  All pipeline consumers resolve through
+this module so Track > Album > Artist > Global cannot drift between callers.
 
 Fail-open: returns ``None`` (→ app-wide default profile) when the feature is
 off, the artist isn't in lib2, or anything errors. Never raises.
@@ -11,11 +16,20 @@ off, the artist isn't in lib2, or anything errors. Never raises.
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from utils.logging_config import get_logger
 
 logger = get_logger("library2.profile_lookup")
+
+_ENTITY_ALIASES = {
+    "artist": "artists",
+    "artists": "artists",
+    "album": "albums",
+    "albums": "albums",
+    "track": "tracks",
+    "tracks": "tracks",
+}
 
 
 def default_quality_profile_id(conn) -> int:
@@ -39,6 +53,180 @@ def default_quality_profile_id(conn) -> int:
     return 1
 
 
+def effective_quality_profile(conn, entity: str, entity_id: int) -> Dict[str, Any]:
+    """Return the effective profile id plus the level that owns the choice.
+
+    Playlist defaults deliberately are not guessed here: §52.12 still needs a
+    deterministic same-track/multiple-playlist conflict rule.  Until that is
+    decided, this resolver implements every unambiguous level and finishes at
+    the app-wide default.
+    """
+    normalized = _ENTITY_ALIASES.get(str(entity).strip().lower())
+    if normalized == "tracks":
+        row = conn.execute(
+            """SELECT t.id AS track_id, t.quality_profile_id AS track_profile,
+                      COALESCE(t.quality_profile_explicit, 0) AS track_explicit,
+                      al.id AS album_id, al.quality_profile_id AS album_profile,
+                      COALESCE(al.quality_profile_explicit, 0) AS album_explicit,
+                      a.id AS artist_id, a.quality_profile_id AS artist_profile,
+                      COALESCE(a.quality_profile_explicit, 0) AS artist_explicit
+                 FROM lib2_tracks t
+                 JOIN lib2_albums al ON al.id=t.album_id
+                 JOIN lib2_artists a ON a.id=al.primary_artist_id
+                WHERE t.id=?""",
+            (int(entity_id),),
+        ).fetchone()
+        if row is None:
+            raise LookupError("Track not found")
+        levels = (
+            ("track", row["track_id"], row["track_profile"], row["track_explicit"]),
+            ("album", row["album_id"], row["album_profile"], row["album_explicit"]),
+            ("artist", row["artist_id"], row["artist_profile"], row["artist_explicit"]),
+        )
+    elif normalized == "albums":
+        row = conn.execute(
+            """SELECT al.id AS album_id, al.quality_profile_id AS album_profile,
+                      COALESCE(al.quality_profile_explicit, 0) AS album_explicit,
+                      a.id AS artist_id, a.quality_profile_id AS artist_profile,
+                      COALESCE(a.quality_profile_explicit, 0) AS artist_explicit
+                 FROM lib2_albums al
+                 JOIN lib2_artists a ON a.id=al.primary_artist_id
+                WHERE al.id=?""",
+            (int(entity_id),),
+        ).fetchone()
+        if row is None:
+            raise LookupError("Album not found")
+        levels = (
+            ("album", row["album_id"], row["album_profile"], row["album_explicit"]),
+            ("artist", row["artist_id"], row["artist_profile"], row["artist_explicit"]),
+        )
+    elif normalized == "artists":
+        row = conn.execute(
+            """SELECT id AS artist_id, quality_profile_id AS artist_profile,
+                      COALESCE(quality_profile_explicit, 0) AS artist_explicit
+                 FROM lib2_artists WHERE id=?""",
+            (int(entity_id),),
+        ).fetchone()
+        if row is None:
+            raise LookupError("Artist not found")
+        levels = ((
+            "artist", row["artist_id"], row["artist_profile"], row["artist_explicit"]
+        ),)
+    else:
+        raise ValueError("Unknown Library-v2 profile entity")
+
+    default_id = default_quality_profile_id(conn)
+    for source, source_id, profile_id, explicit in levels:
+        if explicit and profile_id is not None:
+            return {
+                "id": int(profile_id),
+                "source": source,
+                "source_id": int(source_id),
+                "explicit": True,
+            }
+    return {
+        "id": default_id,
+        "source": "global",
+        "source_id": None,
+        "explicit": False,
+    }
+
+
+def assign_quality_profile(
+    conn, entity: str, entity_id: int, profile_id: Optional[int]
+) -> Dict[str, Any]:
+    """Set/clear one explicit assignment and refresh inherited projections.
+
+    ``profile_id=None`` means "inherit".  Descendant rows that do not own an
+    explicit choice are updated for compatibility with older readers; their
+    provenance stays inherited.  Explicit descendants are never overwritten.
+    The caller owns the transaction.
+    """
+    normalized = _ENTITY_ALIASES.get(str(entity).strip().lower())
+    tables = {"artists": "lib2_artists", "albums": "lib2_albums", "tracks": "lib2_tracks"}
+    table = tables.get(normalized or "")
+    if table is None:
+        raise ValueError("Unknown Library-v2 profile entity")
+
+    exists = conn.execute(f"SELECT 1 FROM {table} WHERE id=?", (int(entity_id),)).fetchone()
+    if exists is None:
+        raise LookupError("Not found")
+
+    if profile_id is None:
+        if normalized == "artists":
+            inherited_id = default_quality_profile_id(conn)
+        elif normalized == "albums":
+            parent = conn.execute(
+                "SELECT primary_artist_id FROM lib2_albums WHERE id=?", (int(entity_id),)
+            ).fetchone()
+            inherited_id = effective_quality_profile(
+                conn, "artists", int(parent["primary_artist_id"])
+            )["id"]
+        else:
+            parent = conn.execute(
+                "SELECT album_id FROM lib2_tracks WHERE id=?", (int(entity_id),)
+            ).fetchone()
+            inherited_id = effective_quality_profile(
+                conn, "albums", int(parent["album_id"])
+            )["id"]
+        conn.execute(
+            f"UPDATE {table} SET quality_profile_id=?, quality_profile_explicit=0 "
+            "WHERE id=?",
+            (int(inherited_id), int(entity_id)),
+        )
+    else:
+        conn.execute(
+            f"UPDATE {table} SET quality_profile_id=?, quality_profile_explicit=1 "
+            "WHERE id=?",
+            (int(profile_id), int(entity_id)),
+        )
+
+    updated = 1
+    if normalized == "artists":
+        cur = conn.execute(
+            """UPDATE lib2_albums
+                  SET quality_profile_id=(
+                      SELECT a.quality_profile_id FROM lib2_artists a
+                       WHERE a.id=lib2_albums.primary_artist_id)
+                WHERE primary_artist_id=?
+                  AND COALESCE(quality_profile_explicit, 0)=0""",
+            (int(entity_id),),
+        )
+        updated += max(0, cur.rowcount)
+        cur = conn.execute(
+            """UPDATE lib2_tracks
+                  SET quality_profile_id=(
+                      SELECT al.quality_profile_id FROM lib2_albums al
+                       WHERE al.id=lib2_tracks.album_id)
+                WHERE album_id IN (
+                      SELECT id FROM lib2_albums WHERE primary_artist_id=?)
+                  AND COALESCE(quality_profile_explicit, 0)=0""",
+            (int(entity_id),),
+        )
+        updated += max(0, cur.rowcount)
+    elif normalized == "albums":
+        cur = conn.execute(
+            """UPDATE lib2_tracks
+                  SET quality_profile_id=(
+                      SELECT al.quality_profile_id FROM lib2_albums al
+                       WHERE al.id=lib2_tracks.album_id)
+                WHERE album_id=?
+                  AND COALESCE(quality_profile_explicit, 0)=0""",
+            (int(entity_id),),
+        )
+        updated += max(0, cur.rowcount)
+
+    result = effective_quality_profile(conn, normalized, int(entity_id))
+    current_source = {
+        "artists": "artist",
+        "albums": "album",
+        "tracks": "track",
+    }[normalized]
+    result["entity_explicit"] = result["source"] == current_source
+    result["updated"] = updated
+    return result
+
+
 def lib2_quality_profile_for_artist(database, artist_name: str) -> Optional[int]:
     """The app-wide ``quality_profiles`` id assigned to this artist in
     Library v2, or ``None`` when unavailable."""
@@ -55,18 +243,18 @@ def lib2_quality_profile_for_artist(database, artist_name: str) -> Optional[int]
             # Fast path: SQL case-insensitive match (avoids a full-table
             # python scan on every watchlist queue decision).
             row = conn.execute(
-                "SELECT quality_profile_id FROM lib2_artists "
+                "SELECT id FROM lib2_artists "
                 "WHERE lower(name) = ? AND quality_profile_id IS NOT NULL LIMIT 1",
                 (key,),
             ).fetchone()
             if row:
-                return int(row["quality_profile_id"])
+                return int(effective_quality_profile(conn, "artists", row["id"])["id"])
             for row in conn.execute(
-                "SELECT name, quality_profile_id FROM lib2_artists "
+                "SELECT id, name FROM lib2_artists "
                 "WHERE quality_profile_id IS NOT NULL"
             ):
                 if normalize_name(row["name"]) == key:
-                    return int(row["quality_profile_id"])
+                    return int(effective_quality_profile(conn, "artists", row["id"])["id"])
         finally:
             conn.close()
     except Exception as e:  # noqa: BLE001
@@ -74,4 +262,9 @@ def lib2_quality_profile_for_artist(database, artist_name: str) -> Optional[int]
     return None
 
 
-__all__ = ["lib2_quality_profile_for_artist"]
+__all__ = [
+    "assign_quality_profile",
+    "default_quality_profile_id",
+    "effective_quality_profile",
+    "lib2_quality_profile_for_artist",
+]

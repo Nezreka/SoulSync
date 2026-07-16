@@ -58,6 +58,13 @@ def _quality_profile_dict(row: Any) -> Optional[Dict[str, Any]]:
     }
 
 
+def _quality_profile_assignment(conn: Any, entity: str, entity_id: int) -> Dict[str, Any]:
+    """Shared API projection for §52.2 effective-profile provenance."""
+    from core.library2.profile_lookup import effective_quality_profile
+
+    return effective_quality_profile(conn, entity, int(entity_id))
+
+
 def _json_list(raw: Any) -> List[str]:
     if not raw:
         return []
@@ -131,7 +138,8 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
              GROUP BY ta.artist_id
         )
         SELECT a.id, a.name, a.sort_name, a.image_url, a.genres,
-               a.monitored, a.monitor_new_items, a.quality_profile_id, a.added_at,
+               a.monitored, a.monitor_new_items, a.quality_profile_id,
+               a.quality_profile_explicit, a.added_at,
                COALESCE(als.album_count, 0) AS album_count,
                COALESCE(als.single_count, 0) AS single_count,
                COALESCE(ts.track_count, 0) AS track_count,
@@ -164,6 +172,13 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
             "monitored": bool(r["monitored"]),
             "monitor_new_items": r["monitor_new_items"],
             "quality_profile_id": r["quality_profile_id"],
+            "quality_profile_source": (
+                "artist" if bool(r["quality_profile_explicit"]) else "global"
+            ),
+            "quality_profile_source_id": (
+                r["id"] if bool(r["quality_profile_explicit"]) else None
+            ),
+            "quality_profile_explicit": bool(r["quality_profile_explicit"]),
             "added_at": r["added_at"],
             "album_count": r["album_count"] or 0,
             "single_count": r["single_count"] or 0,
@@ -264,15 +279,20 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
         entity_id=a["id"],
         provider_fields=dict(a),
     )
+    artist_profile = _quality_profile_assignment(conn, "artists", a["id"])
     qp = conn.execute(
-        "SELECT * FROM quality_profiles WHERE id = ?", (a["quality_profile_id"],)
+        "SELECT * FROM quality_profiles WHERE id = ?", (artist_profile["id"],)
     ).fetchone()
 
     album_rows = conn.execute(
         f"""
         SELECT al.id, al.title, al.album_type, al.release_date, al.year,
-               al.image_url, al.monitored, al.quality_profile_id, al.track_count,
+               al.image_url, al.monitored, al.quality_profile_id,
+               al.quality_profile_explicit, al.track_count,
                al.expected_track_count, al.origin, al.spotify_id,
+               al.primary_artist_id,
+               pa.quality_profile_id AS artist_quality_profile_id,
+               pa.quality_profile_explicit AS artist_quality_profile_explicit,
                al.explicit, al.label, al.style, al.mood,
                COUNT(DISTINCT t.id) AS db_track_count,
                COUNT(DISTINCT CASE
@@ -282,6 +302,7 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
                    THEN t.id END) AS files_present
         FROM lib2_album_artists aa
         JOIN lib2_albums al ON al.id = aa.album_id
+        JOIN lib2_artists pa ON pa.id=al.primary_artist_id
         LEFT JOIN lib2_tracks t ON t.album_id=al.id
         LEFT JOIN lib2_track_files tf ON tf.track_id=t.id
         WHERE aa.artist_id IN ({",".join("?" for _ in group)})
@@ -299,6 +320,17 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
     albums, eps, singles = [], [], []
     for r in album_rows:
         effective, overrides = projected_albums[int(r["id"])]
+        album_owns_profile = bool(r["quality_profile_explicit"])
+        artist_owns_profile = bool(r["artist_quality_profile_explicit"])
+        album_profile = {
+            "source": "album" if album_owns_profile else (
+                "artist" if artist_owns_profile else "global"
+            ),
+            "source_id": r["id"] if album_owns_profile else (
+                r["primary_artist_id"] if artist_owns_profile else None
+            ),
+            "explicit": album_owns_profile,
+        }
         present = r["files_present"] or 0
         # Total = the metadata's true track count when known, so partial albums
         # show "have / total" and the missing count is visible (Lidarr-style).
@@ -313,6 +345,9 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
             "image_url": effective["image_url"],
             "monitored": bool(r["monitored"]),
             "quality_profile_id": r["quality_profile_id"],
+            "quality_profile_source": album_profile["source"],
+            "quality_profile_source_id": album_profile["source_id"],
+            "quality_profile_explicit": album_profile["explicit"],
             "origin": r["origin"] or "library",
             "spotify_id": r["spotify_id"],
             "explicit": (bool(effective["explicit"]) if effective["explicit"] is not None else None),
@@ -346,6 +381,9 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
         "monitored": bool(a["monitored"]),
         "monitor_new_items": a["monitor_new_items"],
         "quality_profile": _quality_profile_dict(qp),
+        "quality_profile_source": artist_profile["source"],
+        "quality_profile_source_id": artist_profile["source_id"],
+        "quality_profile_explicit": artist_profile["explicit"],
         "albums": albums,
         "eps": eps,
         "singles": singles,
@@ -792,6 +830,15 @@ def _serialize_track(
         "isrc": t["isrc"],
         "monitored": wanted,
         "quality_profile_id": t["quality_profile_id"],
+        "quality_profile_source": (
+            "track" if bool(t["quality_profile_explicit"])
+            else (album or {}).get("quality_profile_source", "global")
+        ),
+        "quality_profile_source_id": (
+            t["id"] if bool(t["quality_profile_explicit"])
+            else (album or {}).get("quality_profile_source_id")
+        ),
+        "quality_profile_explicit": bool(t["quality_profile_explicit"]),
         "canonical_track_id": t["canonical_track_id"],
         "artists": artists,
         "file": file_info,
@@ -867,6 +914,13 @@ def _missing_track_placeholder(track_number: int, *, disc_number: int = 1,
         "isrc": None,
         "monitored": bool(album["monitored"]) if album and "monitored" in album else False,
         "quality_profile_id": album["quality_profile_id"] if album and "quality_profile_id" in album else None,
+        "quality_profile_source": (
+            album.get("quality_profile_source", "global") if album else "global"
+        ),
+        "quality_profile_source_id": (
+            album.get("quality_profile_source_id") if album else None
+        ),
+        "quality_profile_explicit": False,
         "canonical_track_id": None,
         "artists": artists,
         "file": None,
@@ -887,8 +941,9 @@ def get_album(conn, album_id: int) -> Optional[Dict[str, Any]]:
         entity_id=al["id"],
         provider_fields=dict(al),
     )
+    album_profile = _quality_profile_assignment(conn, "albums", al["id"])
     qp = conn.execute(
-        "SELECT * FROM quality_profiles WHERE id = ?", (al["quality_profile_id"],)
+        "SELECT * FROM quality_profiles WHERE id = ?", (album_profile["id"],)
     ).fetchone()
     artist = conn.execute(
         "SELECT id, name FROM lib2_artists WHERE id = ?", (al["primary_artist_id"],)
@@ -903,6 +958,9 @@ def get_album(conn, album_id: int) -> Optional[Dict[str, Any]]:
         (album_id,),
     ).fetchall()
     album_for_tracks = album_effective
+    album_for_tracks["quality_profile_id"] = album_profile["id"]
+    album_for_tracks["quality_profile_source"] = album_profile["source"]
+    album_for_tracks["quality_profile_source_id"] = album_profile["source_id"]
     if artist:
         artist_effective, _artist_overrides = project_metadata(
             conn,
@@ -1001,6 +1059,9 @@ def get_album(conn, album_id: int) -> Optional[Dict[str, Any]]:
         "monitored": bool(al["monitored"]),
         "origin": origin,
         "quality_profile": _quality_profile_dict(qp),
+        "quality_profile_source": album_profile["source"],
+        "quality_profile_source_id": album_profile["source_id"],
+        "quality_profile_explicit": album_profile["source"] == "album",
         "primary_artist": {
             "id": artist["id"],
             "name": album_for_tracks["primary_artist_name"],

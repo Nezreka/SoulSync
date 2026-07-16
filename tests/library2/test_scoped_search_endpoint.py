@@ -135,6 +135,39 @@ def test_track_scope_searches_only_that_track(api):
     assert {a["id"] for a in db.wishlist_adds} == {"sp-t2"}
 
 
+def test_direct_track_search_bypasses_monitor_filter_without_changing_it(api):
+    """§52.6: a direct track click is one-shot explicit intent, not a hidden
+    monitoring mutation.  Artist/album searches remain wanted-only."""
+    client, db, ids = api
+    with db._get_connection() as conn:
+        conn.execute(
+            "UPDATE lib2_tracks SET monitored=0 WHERE id=?", (ids["ep_track"],)
+        )
+        conn.commit()
+
+    response = client.post(f"/api/library/v2/tracks/{ids['ep_track']}/search")
+    status = _await_job(client, response.get_json()["job_id"])
+
+    assert status["error"] is None
+    assert status["result"] == {
+        "checked": 1,
+        "queued": 1,
+        "searching": 1,
+        "batch_id": None,
+    }
+    assert {a["id"] for a in db.wishlist_adds} == {"sp-t2"}
+    with db._get_connection() as conn:
+        track = conn.execute(
+            "SELECT monitored FROM lib2_tracks WHERE id=?", (ids["ep_track"],)
+        ).fetchone()
+        wanted = conn.execute(
+            "SELECT wanted FROM lib2_wanted_tracks WHERE track_id=?",
+            (ids["ep_track"],),
+        ).fetchone()
+    assert track["monitored"] == 0
+    assert wanted["wanted"] == 0
+
+
 def test_album_scope_excludes_tracks_that_already_have_a_satisfying_file(api):
     client, db, ids = api
     client.post(f"/api/library/v2/albums/{ids['views']}/monitor", json={"monitored": True})

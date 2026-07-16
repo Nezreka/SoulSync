@@ -1021,6 +1021,12 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
             int(r["id"]): int(r["monitored"])
             for r in cursor.execute("SELECT id, monitored FROM lib2_albums").fetchall()
         }
+        album_profile_by_id = {
+            int(r["id"]): int(r["quality_profile_id"])
+            for r in cursor.execute(
+                "SELECT id, quality_profile_id FROM lib2_albums"
+            ).fetchall()
+        }
         # Per-track quality_profile_id (§17.7 remainder): only trusted at INSERT
         # time for a brand-new row (never on UPDATE — an existing lib2 track may
         # have been reassigned a profile independently of the legacy row, and
@@ -1089,6 +1095,10 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                     legacy_profile_id if legacy_profile_id in valid_profile_ids
                     else default_profile_id
                 )
+                profile_explicit = int(
+                    legacy_profile_id in valid_profile_ids
+                    and track_profile_id != album_profile_by_id.get(album_id)
+                )
                 # play_count is NOT NULL DEFAULT 0; an explicit NULL insert
                 # would violate that (the column default only applies when
                 # omitted), so a missing legacy value falls back to 0 here —
@@ -1099,9 +1109,11 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                     "INSERT INTO lib2_tracks(album_id, title, track_number, disc_number, "
                     "duration, isrc, musicbrainz_id, spotify_id, bpm, explicit, "
                     "genius_lyrics, copyright, style, mood, play_count, last_played, "
-                    "legacy_track_id, quality_profile_id, monitored, legacy_import_run_id) "
-                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (*insert_fields, row["id"], track_profile_id, track_monitored, run_id),
+                    "legacy_track_id, quality_profile_id, quality_profile_explicit, "
+                    "monitored, legacy_import_run_id) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (*insert_fields, row["id"], track_profile_id, profile_explicit,
+                     track_monitored, run_id),
                 )
                 track_id = cursor.lastrowid
                 track_map[_legacy_key(row["id"])] = track_id
@@ -1487,7 +1499,7 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
                 UPDATE lib2_tracks
                    SET title=?, track_number=COALESCE(track_number, ?),
                        disc_number=COALESCE(disc_number, ?), duration=COALESCE(duration, ?),
-                       quality_profile_id=?, monitored=1,
+                       quality_profile_id=?, quality_profile_explicit=1, monitored=1,
                        updated_at=CURRENT_TIMESTAMP
                  WHERE id=?
                 """,
@@ -1498,8 +1510,9 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
             cursor.execute(
                 """
                 INSERT INTO lib2_tracks(album_id, title, track_number, disc_number,
-                    duration, spotify_id, quality_profile_id, monitored)
-                VALUES(?,?,?,?,?,?,?,1)
+                    duration, spotify_id, quality_profile_id,
+                    quality_profile_explicit, monitored)
+                VALUES(?,?,?,?,?,?,?,1,1)
                 """,
                 (album_id, title, track_number, disc_number, duration, track_id,
                  quality_profile_id),

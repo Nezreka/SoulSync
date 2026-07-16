@@ -132,6 +132,10 @@ def recompute_wanted(conn: Any, *, profile_id: int = 1,
         wanted, reason = _decide(r["trk_mon"], r["trk_prov"],
                                  r["alb_mon"], r["alb_prov"],
                                  r["art_mon"], r["art_prov"])
+        from core.library2.profile_lookup import effective_quality_profile
+        effective_profile_id = effective_quality_profile(
+            conn, "tracks", int(r["track_id"])
+        )["id"]
         conn.execute(
             """INSERT INTO lib2_wanted_tracks(
                    profile_id, track_id, wanted, reason,
@@ -144,7 +148,7 @@ def recompute_wanted(conn: Any, *, profile_id: int = 1,
                    projection_version=excluded.projection_version,
                    updated_at=CURRENT_TIMESTAMP""",
             (int(profile_id), r["track_id"], 1 if wanted else 0, reason,
-             r["quality_profile_id"], PROJECTION_VERSION))
+             effective_profile_id, PROJECTION_VERSION))
         stats["projected"] += 1
         if wanted:
             stats["wanted"] += 1

@@ -2121,8 +2121,11 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         body = request.get_json(silent=True) or {}
         if not isinstance(body, dict):
             return jsonify({"success": False, "error": "JSON body must be an object"}), 400
+        inherit = body.get("inherit", False)
+        if not isinstance(inherit, bool):
+            return jsonify({"success": False, "error": "inherit must be a boolean"}), 400
         raw_profile_id = body.get("quality_profile_id")
-        if (
+        if not inherit and (
             isinstance(raw_profile_id, bool)
             or not isinstance(raw_profile_id, int)
             or raw_profile_id <= 0
@@ -2131,8 +2134,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 "success": False,
                 "error": "quality_profile_id must be a positive integer",
             }), 400
-        profile_id = raw_profile_id
-        cascade = bool(body.get("cascade", True))
+        requested_profile_id = None if inherit else raw_profile_id
         # P1-15: assigning a profile is a QUALITY decision, not a wanted-
         # action. Monitoring existing tracks (and thereby queueing upgrade
         # downloads) only happens on explicit opt-in from the UI.
@@ -2140,12 +2142,24 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         db = get_database()
         conn = db._get_connection()
         try:
+            if requested_profile_id is not None and conn.execute(
+                "SELECT 1 FROM quality_profiles WHERE id=?", (requested_profile_id,)
+            ).fetchone() is None:
+                return jsonify({"success": False, "error": "Quality profile not found"}), 404
+            from core.library2.profile_lookup import assign_quality_profile
+            try:
+                assignment = assign_quality_profile(
+                    conn, entity, eid, requested_profile_id
+                )
+            except LookupError:
+                return jsonify({"success": False, "error": "Not found"}), 404
+            profile_id = int(assignment["id"])
             profile = conn.execute(
                 "SELECT id, upgrade_policy, repair_job_id, repair_settings "
                 "FROM quality_profiles WHERE id=?",
                 (profile_id,),
             ).fetchone()
-            if profile is None:
+            if profile is None:  # defensive: resolver always returns a live profile
                 return jsonify({"success": False, "error": "Quality profile not found"}), 404
             try:
                 settings = json.loads(profile["repair_settings"] or "{}")
@@ -2158,28 +2172,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 )
                 settings = {}
             cur = conn.cursor()
-            cur.execute(f"UPDATE {table} SET quality_profile_id=? WHERE id=?", (profile_id, eid))
-            if not cur.rowcount:
-                return jsonify({"success": False, "error": "Not found"}), 404
-            updated = cur.rowcount
-            if cascade and entity == "artists":
-                cur.execute(
-                    "UPDATE lib2_albums SET quality_profile_id=? WHERE primary_artist_id=?",
-                    (profile_id, eid),
-                )
-                updated += cur.rowcount
-                cur.execute(
-                    "UPDATE lib2_tracks SET quality_profile_id=? "
-                    "WHERE album_id IN (SELECT id FROM lib2_albums WHERE primary_artist_id=?)",
-                    (profile_id, eid),
-                )
-                updated += cur.rowcount
-            elif cascade and entity == "albums":
-                cur.execute(
-                    "UPDATE lib2_tracks SET quality_profile_id=? WHERE album_id=?",
-                    (profile_id, eid),
-                )
-                updated += cur.rowcount
+            updated = int(assignment["updated"])
             auto_monitored = 0
             auto_monitor_track_ids: List[int] = []
             from core.library2.quality_eval import is_upgrade_policy
@@ -2248,6 +2241,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         return jsonify({
             "success": True,
             "quality_profile_id": profile_id,
+            "quality_profile_source": assignment["source"],
+            "quality_profile_source_id": assignment["source_id"],
+            "quality_profile_explicit": assignment["entity_explicit"],
             "updated": updated,
             "upgrade_policy": profile["upgrade_policy"],
             "auto_monitored": auto_monitored,
@@ -3255,22 +3251,38 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
                 from core.library2.wishlist_mirror import (
                     mirror_projected_tracks_wishlist,
+                    mirror_tracks_wishlist,
                     track_wishlist_payload,
                 )
                 # Only the direct track-level action bypasses the ignore-list
                 # (audit P1-11 precedent, mirrored from lib2_set_monitored):
                 # an album/artist search must not silently un-ignore a track
                 # the user deliberately cancelled elsewhere.
-                queued = mirror_projected_tracks_wishlist(
-                    db, conn, track_ids, profile_id=active_profile,
-                    user_initiated=(entity in ("track", "tracks")),
-                )
+                direct_track_search = entity in ("track", "tracks")
+                if direct_track_search:
+                    # §52.6: clicking Automatic Search on one concrete track
+                    # is sufficient intent for this attempt, even when the
+                    # persistent monitor rule is off.  Mirror an idempotent
+                    # wishlist add without mutating monitored/wanted state.
+                    queued = mirror_tracks_wishlist(
+                        db,
+                        conn,
+                        track_ids,
+                        True,
+                        profile_id=active_profile,
+                        user_initiated=True,
+                    )
+                else:
+                    queued = mirror_projected_tracks_wishlist(
+                        db, conn, track_ids, profile_id=active_profile,
+                        user_initiated=False,
+                    )
 
                 states = track_wanted_states(conn, track_ids, profile_id=active_profile) \
                     if track_ids else {}
                 search_ids = []
                 for track_id, wanted in states.items():
-                    if not wanted:
+                    if not wanted and not direct_track_search:
                         continue
                     payload = track_wishlist_payload(conn, track_id)
                     if payload and payload.get("_should_queue"):

@@ -1261,6 +1261,42 @@ def test_profile_assign_does_not_touch_monitoring_by_default(api):
     assert db.wishlist_adds == []
 
 
+def test_profile_assign_preserves_explicit_children_and_can_restore_inheritance(api):
+    """§52.2: parent changes refresh inherited projections only; a child can
+    later clear its override and immediately follow the parent again."""
+    client, db, ids = api
+    track_url = f"/api/library/v2/tracks/{ids['album_track']}/quality-profile"
+    artist_url = f"/api/library/v2/artists/{ids['artist']}/quality-profile"
+
+    track_response = client.post(track_url, json={"quality_profile_id": 2})
+    assert track_response.status_code == 200
+    assert track_response.get_json()["quality_profile_source"] == "track"
+
+    artist_response = client.post(artist_url, json={"quality_profile_id": 1})
+    assert artist_response.status_code == 200
+    with _conn(db) as conn:
+        explicit = conn.execute(
+            "SELECT quality_profile_id, quality_profile_explicit "
+            "FROM lib2_tracks WHERE id=?",
+            (ids["album_track"],),
+        ).fetchone()
+    assert tuple(explicit) == (2, 1)
+
+    inherited_response = client.post(track_url, json={"inherit": True})
+    assert inherited_response.status_code == 200
+    inherited = inherited_response.get_json()
+    assert inherited["quality_profile_id"] == 1
+    assert inherited["quality_profile_source"] == "artist"
+    assert inherited["quality_profile_explicit"] is False
+    with _conn(db) as conn:
+        stored = conn.execute(
+            "SELECT quality_profile_id, quality_profile_explicit "
+            "FROM lib2_tracks WHERE id=?",
+            (ids["album_track"],),
+        ).fetchone()
+    assert tuple(stored) == (1, 0)
+
+
 def test_profile_assign_skips_consolidated_duplicates(api):
     """With the explicit monitor-existing opt-in, an upgrade-policy profile
     monitors the artist's tracks — but not a consolidated-away duplicate (no

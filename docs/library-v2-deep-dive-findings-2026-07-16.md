@@ -212,6 +212,11 @@ ab. (Betrifft auch die in §11.2/P2-04 bewusst offene Frage
 „Provider-Foto vs. Embedded-Cover als Artist-Bild" — der Picker wäre die
 Nutzer-Antwort darauf.)
 
+**Update 2026-07-17:** Die spätere Nutzerentscheidung aus §52.5 ist ebenfalls
+umgesetzt (§53): manuelles Override zuerst, dann Provider-Artist-Foto, danach
+Embedded-Albumcover als Fallback. Der Picker und Cachevertrag bleiben dabei
+unverändert.
+
 ---
 
 ## B. UI/UX — Überladung reduzieren, Lidarr-Alignment
@@ -361,6 +366,12 @@ Reuse-first, keine zweite Pipeline:
    Acquisition-Korrelation (`scheduled_grab_correlated`) → History (A6) wird
    automatisch reicher.
 
+**Update 2026-07-17:** Der im Nutzerreview §52.6 gefundene Restfall ist nun
+ebenfalls geschlossen (§53): eine direkt ausgelöste Track-Suche darf einen
+unmonitored Track einmalig in Wishlist/Dispatcher geben, ohne dessen
+Monitorflag oder Wanted-Regel zu verändern. Artist-/Album-Scope bleibt
+wanted-only.
+
 ### C2. Manage Tracks → Lidarr „Manage Track Files" — ✅ behoben (siehe library-v2.md §30)
 
 Heute: nur Single↔Album-Duplikat-Paare (`/artists/<id>/duplicates`).
@@ -378,7 +389,7 @@ Artist-/Album-Scope begrenzt.
   Refactor notiert — mit ADR-05-Reuse ist es deutlich kleiner als dort
   vermutet).
 
-### C3. History-Read-Vereinheitlichung (Umsetzung zu A6) — ✅ umgesetzt (siehe library-v2.md §35)
+### C3. History-Read-Vereinheitlichung (Umsetzung zu A6) — 🟡 Basis umgesetzt, Track-/Pipeline-Sicht wieder offen (siehe library-v2.md §52.9)
 
 Ein `core/library2/history_feed.py`-Helper, der pro Scope (artist/album/track)
 die vier Quellen merged und ein einheitliches
@@ -388,6 +399,13 @@ den heutigen `track_downloads`-only-Read (dessen Zeilen als
 nur noch als Legacy-Fallback — primär über `entity_id`-Joins
 (acquisition_requests tragen lib2-Scope+ID; `track_downloads` ist über
 `legacy_track_id` erreichbar, wie `source_info.py` es vormacht).
+
+**Update 2026-07-17:** Der Merge-Helper und die Artist-History sind eine
+brauchbare Basis, erfüllen aber die neue Nutzeranforderung noch nicht. Ein
+Quality-/Acoustic-ID-Fail kann vor dem finalen File-Autolink passieren; die
+Track-Info zeigt nicht die vollständige korrelierte Search→Check→Quarantäne→
+Freigabe→Import-Timeline. §52.9 ist daher der verbindliche Rest-Scope und
+ersetzt den früheren Eindruck „vollständig umgesetzt".
 
 ### C4. Pipeline-Resultate pro File persistieren (Lücke hinter A7) — ✅ teilweise umgesetzt (siehe library-v2.md §37)
 
@@ -403,13 +421,15 @@ A7 für nicht-acquisition-korrelierte Downloads (der Normalfall heute) leer.
 
 ## D. Kleinere Beobachtungen
 
-- **D1. Doppeltes „Edit"-Icon-Konzept — ✅ behoben (siehe library-v2.md §33):**
+- **D1. Track-Detail wieder als Edit-Aktion — ✅ umgesetzt (siehe library-v2.md §53):**
   Track-Actions-Spalte nutzte das `edit`-Icon für „Track details", die
   Album-Zeile für „Album details", der Artist-Header für „Edit Metadata" —
   dreimal dasselbe Icon, drei verschiedene Bedeutungen. `TrackDetailButton`
-  nutzt jetzt das bereits vorhandene `info`-Icon; `edit` bleibt für echte
-  Metadaten-Edits reserviert („Album details" war schon textbasiert, kein
-  Icon-Konflikt dort).
+  verwendete zwischenzeitlich das `info`-Icon. Da das dahinterliegende Modal
+  nicht nur Infos zeigt, sondern Quality Profile, Metadata, Tags und Lyrics
+  bearbeitet, verwendet es jetzt wieder das Pencil/Edit-Icon mit entsprechend
+  vollständigem Tooltip. Diese konkrete Nutzerentscheidung ersetzt die
+  frühere D1-Lösung aus §33.
 - **D2. `EnrichDropdown` vs. `ManualMatchModal`:** Enrich re-queried einen
   Provider, Manual Match ändert die Provider-ID — für Nutzer schwer zu
   unterscheiden („frische Daten holen" vs. „Zuordnung korrigieren"). Ein
@@ -636,10 +656,10 @@ den V2-Stand. Neu identifiziert, bisher NIRGENDS getrackt:
 | # | Legacy-Feature | Code-Referenz | V2-Stand |
 |---|---|---|---|
 | H1 | **Track-Playback/Preview** (Play-Button pro Track, Streaming) | `playLibraryTrack`, `col-play` | ✅ umgesetzt (siehe library-v2.md §36) — Play-Spalte ruft die Legacy-Funktion über die Shell-Bridge auf, kein neuer Player |
-| H2 | **Artist Top Tracks** (Hero-Sektion, Last.fm-Fallback, „Download one/all") | `_loadArtistTopTracks`, `/api/artist/<id>/top-tracks` | fehlt |
+| H2 | **Artist Top Tracks** (Hero-Sektion, Last.fm-Fallback, „Download one/all") | `_loadArtistTopTracks`, `/api/artist/<id>/top-tracks` | ❌ vom User am 2026-07-17 ausdrücklich nicht gewollt |
 | H3 | **Discography-Download-Modal** (Releases multi-selektieren → Batch-Download, Filter, Select-All) | `openDiscographyModal`, `startDiscographyDownload` | fehlt — lib2 kann nur monitor→wishlist pro Release |
-| H4 | **Track-Redownload-Modal** (Quellen streamen, gezielt neu laden) | `showTrackRedownloadModal` | fehlt (Interactive Search deckt es halb ab, aber ohne „replace existing"-Semantik) |
-| H5 | **Track-/Album-Delete in der Tabelle** (inkl. Smart-Delete-Dialog) | `deleteLibraryTrack`, `_showSmartDeleteDialog`, `col-delete` | fehlt auf Track-Ebene; Album/Artist nur als Entity-Delete + ADR-05 |
+| H4 | **Track-Redownload-Modal** (Quellen streamen, gezielt neu laden) | `showTrackRedownloadModal` | ⏸️ zurückgestellt/nicht nötig; falls später: neu suchen und erst nach verifiziertem Import atomar ersetzen (§52.1/§52.6) |
+| H5 | **Track-/Album-Delete in der Tabelle** (inkl. Smart-Delete-Dialog) | `deleteLibraryTrack`, `_showSmartDeleteDialog`, `col-delete` | 🟡 Delete Selected/Album-Delete existieren, aber Dialog und gemeinsame Semantik sind nach Nutzerreview unzureichend; angenommener Redesign-Scope §52.11 |
 | H6 | **A-Z-Alphabet-Selector + Source-/Watchlist-Filter + Stats-Header** der Artist-Liste | `initializeAlphabetSelector`, `initializeSourceFilter`, `updateLibraryStats` | V2 hat nur Suche/Sort/Monitor-Filter/Paging |
 | H7 | **Inline-Edit in der Tabelle** (Klick auf BPM-Zelle etc.) | `startInlineEdit` | fehlt (V2: Modal-only) |
 | H8 | **Bulk-Selektion + Bulk-Bar** (Batch-Write-Tags, Batch-ReplayGain, Bulk-Edit-Modal) | `batchWriteTagsSelected`, `showBulkEditModal` | fehlt (deckt sich mit B6) |
@@ -655,7 +675,9 @@ strategisch (Multi-User-Fähigkeit von lib2 ist ungeklärt — ADR-01 sagt
 admin-only, die Legacy-UI hatte aber ein Nicht-Admin-Verhalten). **Update
 2026-07-16:** H1 umgesetzt (library-v2.md §36); H3 vom Nutzer nach Rückfrage
 explizit nicht gewollt (kein Bedarf für die Mehrfachauswahl-UI) — bleibt als
-Enumerationspunkt stehen, aber ohne Umsetzungsabsicht.
+Enumerationspunkt stehen, aber ohne Umsetzungsabsicht. **Update 2026-07-17:**
+Dasselbe gilt nun ausdrücklich für H2. H4 ist zurückgestellt. Die Tabelle ist
+keine allgemeine Legacy-Paritäts-Roadmap; §52 definiert den angenommenen Scope.
 
 ---
 
@@ -669,8 +691,8 @@ oben — diese Tabelle ist eine Enumeration, kein Spec.
 | I1 | **Add Artist** (Provider-Suche → hinzufügen mit Monitor-Optionen all/future/missing/existing/first/latest/none + „search on add") | fehlt komplett — lib2 kann nur importieren, was Legacy/Downloads liefern; neue Artists entstehen nur indirekt über Watchlist/Discovery-Seiten | größte konzeptionelle Lücke für „Library Manager" |
 | I2 | **Wanted-Views**: globale „Missing"- und „Cutoff Unmet"-Listen | nur per-Artist-Zähler; keine globale lib2-Sicht (Legacy-Wishlist-Seite ist ungefiltert und nicht lib2-aware) | passt zu B4/B7 — dorthin gehören auch die globalen Search-Buttons |
 | I3 | **Mass Editor** (Artists multi-selektieren → Monitor/Profil setzen; Album Studio) | fehlt; V2 hat nur per-Artist-Bulk | mittel |
-| I4 | **Metadata Profile** (welche Release-Typen der Discography-Fetch überhaupt holt: Albums/EPs/Singles/Comps/Live) | fehlt — „All Releases" holt immer alles; bei großen Artists unübersichtlich + teuer | mittel-hoch, klein umsetzbar (Filter im Fetch + Anzeige) |
-| I5 | **Kalender / kommende Releases** | fehlt (Watchlist-Scanner arbeitet unsichtbar) | nice-to-have |
+| I4 | **Metadata Profile** (welche Release-Typen/Status der Discography-Fetch berücksichtigt) | SoulSync hat bereits Watchlist-`include_*` und `monitor_new_items`; diese zuerst in gemeinsame Artist Settings konsolidieren | kein separates Profilsystem bauen, solange nach §52.4 kein echter Restbedarf belegt ist |
+| I5 | **Kalender / kommende Releases** | fehlt (Watchlist-Scanner arbeitet unsichtbar) | ❌ vom User am 2026-07-17 ausdrücklich abgelehnt |
 | I6 | **Queue-Sichtbarkeit an der Entity** (Lidarr zeigt laufende Grabs/Queue direkt an Album/Track-Zeile) | fehlt — nach „Grabbing…"-Banner ist der Downloadstatus nur auf der Downloads-Seite sichtbar; Track-Zeile zeigt nichts | hoch für Vertrauen in den Auto-Flow; Daten existieren (acquisition_grabs + Downloads-API) |
 | I7 | **Blocklist-Ansicht** (einsehen/aufheben) | Blacklist nur als Write-Aktion (Source-Info-Popover); `candidate_blocklisted`/`candidate_unblocked` sind journaliert, keine UI | klein |
 | I8 | **Root-Folder/Pfad + Diskspace am Artist** | Pfade nirgends sichtbar außer Reorganize-Preview | klein |

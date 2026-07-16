@@ -2,6 +2,14 @@
 
 **Konsolidiert aus Nutzerfeedback:** User-Anforderungen zur visuellen Darstellung, Icons, Beschriftungen und Interaktionsmodellen, die die Usability und Klarheit der Library V2 UI verbessern, ohne Backend-/Query-Änderungen zu erfordern.
 
+> **Update 2026-07-17:** Das verbindliche neuere Nutzer-Review steht in
+> `docs/library-v2.md`, §52. Es erweitert den Scope ausdrücklich über reine
+> UI-Arbeit hinaus (Profilherkunft, Early Search→Library-v2-Materialisierung,
+> Pipeline-Correlation/History) und ersetzt widersprechende ältere Aussagen,
+> insbesondere das reine Info-Icon am Track und getrennte Monitoring-
+> Oberflächen. Diese Datei bleibt Detailreferenz für nicht widersprechende
+> UI-Anforderungen.
+
 ---
 
 ## 1. Icon-Konsistenz & Nomenklatur (Lidarr-Alignment)
@@ -35,13 +43,18 @@
 ## 2. Visuelle Hierarchie & Hervorhebung
 
 ### 2.1 Quality Profile Visibility vor Expand
-- **Aktuell:** Quality Profile ist nur nach Expand sichtbar.
+- **Status 2026-07-17:** **Umgesetzt und um Herkunft erweitert (§53).** Album-
+  und Track-Badges zeigen neben dem effektiven Profil auch `Album`, `Artist`
+  oder `App default`; der Picker kann explizite Overrides auf Vererbung
+  zurücksetzen.
+- **Früher:** Quality Profile war nur nach Expand sichtbar.
 - **Ziel:** Quality Profile beim **Album/Single in der Übersicht** vor Expand zeigen.
   - z.B. in der Album-Card oder Album-Row: `[Album Title] — Quality: [Profile Name]`
 - **Anwendung:** Artist-Detail Album-Tabelle, Album-/Single-Cards.
 - **Scope:** UI Query/Projection bestätigen, dass `quality_profile_id` verfügbar ist; ggf. leichte Query-Ergänzung.
 
 ### 2.2 Quality Profile beim Artist (explizit sichtbar)
+- **Status 2026-07-17:** **Umgesetzt und um Herkunft erweitert (§53).**
 - **Ziel:** Artist-Detail sollte anzeigen, welches Quality Profile dem Artist zugewiesen ist.
 - **Anwendung:** Artist-Toolbar oder separater "Default Quality Profile"-Block.
 - **Scope:** UI-only (Profil wird bereits gemutet über API).
