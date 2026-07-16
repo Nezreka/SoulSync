@@ -493,8 +493,123 @@
                 renderProfileBar();
                 renderQuality();
                 wireProfileBar();
+                loadFormats();
             })
             .catch(function () { /* ignore */ });
+    }
+
+    // ── custom formats (arr-parity P3) ───────────────────────────────────────
+    var _vqFormats = [];
+
+    function loadFormats() {
+        fetch(QUALITY_URL + '/formats', { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d) return;
+                _vqFormats = d.formats || [];
+                renderFormats();
+                wireFormats();
+            })
+            .catch(function () { /* ignore */ });
+    }
+
+    function renderFormats() {
+        var host = document.getElementById('vq-format-rows');
+        if (!host) return;
+        var overrides = (_videoQuality && _videoQuality.format_scores) || {};
+        host.innerHTML = _vqFormats.map(function (f) {
+            var ov = overrides[String(f.id)];
+            return '<div class="vq-fmt-row" data-vq-fmt="' + f.id + '">' +
+                '<input class="vq-fmt-in" data-vq-fmt-f="name" value="' + escA(f.name) + '" placeholder="Name">' +
+                '<input class="vq-fmt-in" data-vq-fmt-f="include" value="' + escA((f.include || []).join(', ')) + '" placeholder="match: term, /regex/">' +
+                '<input class="vq-fmt-in" data-vq-fmt-f="exclude" value="' + escA((f.exclude || []).join(', ')) + '" placeholder="never: term, /regex/">' +
+                '<input class="vq-fmt-in vq-fmt-num" data-vq-fmt-f="score" type="number" value="' + f.score + '" title="Default score">' +
+                '<input class="vq-fmt-in vq-fmt-num" data-vq-fmt-f="override" type="number" value="' + (ov == null ? '' : ov) + '" placeholder="—" title="Score for the selected profile (blank = default)">' +
+                '<button class="vq-fmt-del" type="button" data-vq-fmt-del="' + f.id + '" title="Delete format">✕</button>' +
+                '</div>';
+        }).join('') || '<div class="settings-hint" style="padding:6px 0;">No custom formats yet — releases rank purely by the ladder + tie-breakers.</div>';
+        var minIn = document.getElementById('vq-min-format-score');
+        if (minIn) minIn.value = (_videoQuality && _videoQuality.min_format_score) || 0;
+    }
+
+    function escA(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
+
+    function _fmtFromRow(row) {
+        var val = function (k) { var el = row.querySelector('[data-vq-fmt-f="' + k + '"]'); return el ? el.value : ''; };
+        var split = function (s) { return s.split(',').map(function (x) { return x.trim(); }).filter(Boolean); };
+        return { id: parseInt(row.getAttribute('data-vq-fmt'), 10),
+                 name: val('name'), include: split(val('include')), exclude: split(val('exclude')),
+                 score: parseInt(val('score'), 10) || 0 };
+    }
+
+    function wireFormats() {
+        var host = document.getElementById('vq-format-rows');
+        if (!host || host._vqWired) return;
+        host._vqWired = true;
+        host.addEventListener('change', function (e) {
+            var row = e.target.closest('[data-vq-fmt]');
+            if (!row) return;
+            if (e.target.matches('[data-vq-fmt-f="override"]')) {
+                // per-profile score override lives on the SELECTED profile
+                if (!_videoQuality) return;
+                var fs = _videoQuality.format_scores || (_videoQuality.format_scores = {});
+                var v = e.target.value.trim();
+                if (v === '') delete fs[row.getAttribute('data-vq-fmt')];
+                else fs[row.getAttribute('data-vq-fmt')] = parseInt(v, 10) || 0;
+                saveQuality(true);
+                return;
+            }
+            var f = _fmtFromRow(row);
+            fetch(QUALITY_URL + '/formats', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(f)
+            }).then(function (r) { return r.ok ? r.json() : null; })
+              .then(function (res) {
+                  if (!res || !res.success) { toast('A format needs a name and at least one term', 'error'); return; }
+                  for (var i = 0; i < _vqFormats.length; i++) {
+                      if (_vqFormats[i].id === res.id) { _vqFormats[i] = { id: res.id, name: res.name, include: res.include, exclude: res.exclude, score: res.score }; }
+                  }
+              })
+              .catch(function () { toast('Couldn’t save the format', 'error'); });
+        });
+        host.addEventListener('click', function (e) {
+            var del = e.target.closest('[data-vq-fmt-del]');
+            if (!del) return;
+            var fid = del.getAttribute('data-vq-fmt-del');
+            fetch(QUALITY_URL + '/formats/' + fid, { method: 'DELETE' })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (res) {
+                    if (!res || !res.success) throw new Error();
+                    _vqFormats = _vqFormats.filter(function (f) { return String(f.id) !== fid; });
+                    renderFormats();
+                })
+                .catch(function () { toast('Couldn’t delete the format', 'error'); });
+        });
+        var add = document.querySelector('[data-vq-format-add]');
+        if (add && !add._vqWired) {
+            add._vqWired = true;
+            add.addEventListener('click', function () {
+                fetch(QUALITY_URL + '/formats', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: 'New format', include: ['REPLACE-ME'], score: 10 })
+                }).then(function (r) { return r.ok ? r.json() : null; })
+                  .then(function (res) {
+                      if (!res || !res.success) throw new Error();
+                      _vqFormats.push({ id: res.id, name: res.name, include: res.include, exclude: res.exclude, score: res.score });
+                      renderFormats();
+                  })
+                  .catch(function () { toast('Couldn’t add a format', 'error'); });
+            });
+        }
+        var minIn = document.getElementById('vq-min-format-score');
+        if (minIn && !minIn._vqWired) {
+            minIn._vqWired = true;
+            minIn.addEventListener('change', function () {
+                if (!_videoQuality) return;
+                _videoQuality.min_format_score = parseInt(minIn.value, 10) || 0;
+                saveQuality(true);
+            });
+        }
     }
 
     function wireProfileBar() {
@@ -504,7 +619,7 @@
         sel.addEventListener('change', function () {
             _vqSelectedId = parseInt(sel.value, 10) || 0;
             var cur = _vqSelected();
-            if (cur) { _videoQuality = cur.profile; renderProfileBar(); renderQuality(); }
+            if (cur) { _videoQuality = cur.profile; renderProfileBar(); renderQuality(); renderFormats(); }
         });
         var nameIn = document.querySelector('[data-vq-profile-name]');
         if (nameIn) nameIn.addEventListener('change', function () { saveQuality(true); });
