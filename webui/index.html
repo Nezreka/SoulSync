@@ -1955,6 +1955,21 @@
                         <div class="tools-section">
                             <h3 class="tools-section-title">Database &amp; Scanning</h3>
                             <div class="tools-grid">
+                                <div class="tool-card" data-video-backups-card>
+                                    <div class="tool-card-header">
+                                        <h4 class="tool-card-title">💾 Backups</h4>
+                                        <button class="tool-help-button" data-tool="video-backups" title="Learn more about this tool">?</button>
+                                    </div>
+                                    <p class="tool-card-info">Verified snapshots of the video database (wishlist, watchlist, history, settings). The nightly automation keeps a rolling set; restore stages a swap for the next restart — your current database is set aside, never deleted.</p>
+                                    <div class="vbk-pending hidden" data-vbk-pending>
+                                        ⏳ A restore is staged — it applies on the next restart.
+                                        <button type="button" class="vbk-cancel" data-vbk-cancel>Cancel</button>
+                                    </div>
+                                    <div class="vbk-list" data-vbk-list></div>
+                                    <div class="tool-card-controls">
+                                        <button type="button" data-vbk-create>Back up now</button>
+                                    </div>
+                                </div>
                                 <div class="tool-card">
                                     <div class="tool-card-header">
                                         <h4 class="tool-card-title" data-video-scan-title>Library Scan</h4>

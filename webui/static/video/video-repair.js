@@ -1142,8 +1142,86 @@
         wire();
         loadStatus();
         loadJobs();
+        loadBackups();
         // Seed live progress for a job already running before this page opened.
         jget(API + '/progress').then(function (p) { if (p) updateProgress(p); });
+    }
+
+    // ── Backups card (arr-parity P10) ─────────────────────────────────────────
+    function loadBackups() {
+        var card = document.querySelector('[data-video-backups-card]');
+        if (!card) return;
+        if (typeof currentProfile !== 'undefined' && currentProfile && !currentProfile.is_admin) {
+            card.style.display = 'none';
+            return;
+        }
+        wireBackups(card);
+        fetch('/api/video/backups', { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d || !d.success) return;
+                var pend = card.querySelector('[data-vbk-pending]');
+                if (pend) pend.classList.toggle('hidden', !d.pending_restore);
+                var host = card.querySelector('[data-vbk-list]');
+                if (!host) return;
+                host.innerHTML = (d.backups || []).map(function (b) {
+                    var sz = b.size_bytes >= 1e6 ? (Math.round(b.size_bytes / 1e5) / 10 + ' MB')
+                                                 : Math.round(b.size_bytes / 1e3) + ' KB';
+                    return '<div class="vbk-row">' +
+                        '<span class="vbk-name">' + (b.created_at || '').replace('T', ' ') + ' · ' + sz + '</span>' +
+                        '<a class="vbk-btn" href="/api/video/backups/' + encodeURIComponent(b.name) + '/download">⭳</a>' +
+                        '<button type="button" class="vbk-btn vbk-btn--restore" data-vbk-restore="' + b.name + '">Restore</button>' +
+                        '</div>';
+                }).join('') || '<div class="vbk-empty">No backups yet — the nightly automation makes them, or hit "Back up now".</div>';
+            })
+            .catch(function () { /* non-critical */ });
+    }
+
+    function wireBackups(card) {
+        if (card._vbkWired) return;
+        card._vbkWired = true;
+        card.addEventListener('click', function (e) {
+            var mk = e.target.closest('[data-vbk-create]');
+            if (mk) {
+                mk.disabled = true;
+                fetch('/api/video/backups', { method: 'POST' })
+                    .then(function (r) { return r.json(); })
+                    .then(function (d) {
+                        mk.disabled = false;
+                        if (d && d.success) { if (typeof showToast === 'function') showToast('Backup created', 'success'); loadBackups(); }
+                        else if (typeof showToast === 'function') showToast((d && d.error) || 'Backup failed', 'error');
+                    })
+                    .catch(function () { mk.disabled = false; });
+                return;
+            }
+            var rs = e.target.closest('[data-vbk-restore]');
+            if (rs) {
+                var doStage = function () {
+                    fetch('/api/video/backups/restore', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name: rs.getAttribute('data-vbk-restore') }) })
+                        .then(function (r) { return r.json(); })
+                        .then(function (d) {
+                            if (d && d.success) { if (typeof showToast === 'function') showToast('Restore staged — restart SoulSync to apply', 'success'); loadBackups(); }
+                            else if (typeof showToast === 'function') showToast((d && d.error) || 'Could not stage the restore', 'error');
+                        })
+                        .catch(function () { /* toast skipped */ });
+                };
+                if (typeof showConfirmDialog === 'function') {
+                    showConfirmDialog({
+                        title: 'Restore this backup?',
+                        message: 'On the next restart, the video database is swapped for this backup. Your current database is set aside (kept), so this can be undone.',
+                        confirmText: 'Stage restore', destructive: true,
+                    }).then(function (ok) { if (ok) doStage(); });
+                } else { doStage(); }
+                return;
+            }
+            if (e.target.closest('[data-vbk-cancel]')) {
+                fetch('/api/video/backups/restore', { method: 'DELETE' })
+                    .then(function () { loadBackups(); })
+                    .catch(function () { /* ignore */ });
+            }
+        });
     }
 
     document.addEventListener('soulsync:video-page-shown', onPageShown);
