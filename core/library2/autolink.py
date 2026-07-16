@@ -21,7 +21,7 @@ from typing import Any, Dict, Optional
 
 from utils.logging_config import get_logger
 
-from .importer import normalize_name
+from .importer import dedup_title_key, normalize_name
 
 logger = get_logger("library2.autolink")
 
@@ -106,18 +106,31 @@ def _find_or_create_album(conn, artist_id: int, title: str, *,
 
 def _find_or_create_track(conn, album_id: int, artist_id: int, title: str, *,
                           track_number: Optional[int],
-                          spotify_track_id: Optional[str]) -> int:
-    key = normalize_name(title)
+                          spotify_track_id: Optional[str],
+                          disc_number: Optional[int] = None) -> int:
+    key = dedup_title_key(title)
     rows = conn.execute(
-        "SELECT id, title, track_number, spotify_id FROM lib2_tracks WHERE album_id=?",
+        "SELECT id, title, track_number, disc_number, spotify_id "
+        "FROM lib2_tracks WHERE album_id=?",
         (album_id,),
     ).fetchall()
     for row in rows:
         if spotify_track_id and row["spotify_id"] == spotify_track_id:
             return row["id"]
     for row in rows:
-        if normalize_name(row["title"]) == key:
+        # dedup_title_key (§39) drops feat.-annotations so a finished
+        # download's title matches a fileless wanted-row that spells the
+        # credit differently — without it, a bare exact-title match misses
+        # this (the most common real-world case) and creates a duplicate
+        # track row whose wanted-row keeps re-downloading forever (G4).
+        if dedup_title_key(row["title"]) == key:
             return row["id"]
+    if track_number is not None:
+        wanted_disc = disc_number if disc_number is not None else 1
+        for row in rows:
+            row_disc = row["disc_number"] if row["disc_number"] is not None else 1
+            if row["track_number"] == track_number and row_disc == wanted_disc:
+                return row["id"]
     from core.library2.profile_lookup import default_quality_profile_id
     album_profile = conn.execute(
         "SELECT quality_profile_id FROM lib2_albums WHERE id=?", (album_id,)
@@ -186,6 +199,11 @@ def link_download_into_library_v2(context: Dict[str, Any]) -> Optional[int]:
             track_number = int(track_number) if track_number else None
         except (TypeError, ValueError):
             track_number = None
+        disc_number = ti.get("disc_number")
+        try:
+            disc_number = int(disc_number) if disc_number else None
+        except (TypeError, ValueError):
+            disc_number = None
 
         from database.music_database import get_database
         db = get_database()
@@ -206,7 +224,8 @@ def link_download_into_library_v2(context: Dict[str, Any]) -> Optional[int]:
                     album_id = row["id"]
                     track_id = _find_or_create_track(
                         conn, album_id, row["primary_artist_id"], title,
-                        track_number=track_number, spotify_track_id=spotify_track_id)
+                        track_number=track_number, spotify_track_id=spotify_track_id,
+                        disc_number=disc_number)
             if track_id is None:
                 # Entity gone or absent — heuristic name matching as before.
                 if not title or not artist_name:
@@ -219,7 +238,8 @@ def link_download_into_library_v2(context: Dict[str, Any]) -> Optional[int]:
                     album_type=album_type, spotify_album_id=spotify_album_id)
                 track_id = _find_or_create_track(
                     conn, album_id, artist_id, title,
-                    track_number=track_number, spotify_track_id=spotify_track_id)
+                    track_number=track_number, spotify_track_id=spotify_track_id,
+                    disc_number=disc_number)
 
             fmt = file_path.rsplit(".", 1)[-1].lower() if "." in file_path else None
             bitrate = sample_rate = bit_depth = None

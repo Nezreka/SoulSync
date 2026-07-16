@@ -59,6 +59,39 @@ def test_album_replaygain_computes_album_gain_and_writes_all(imported_conn):
     assert {w[3] for w in writes} == {-1.0}
 
 
+def test_album_replaygain_persists_tag_cache_by_file_id_not_resolved_path(
+        imported_conn, monkeypatch):
+    """G2: lib2_track_files.path stores the media-server view (§1 invariant);
+    on a path-mapped setup (e.g. Docker: /music/... vs the local mount) the
+    resolved filesystem path never matches a raw ``WHERE path=?`` lookup, so
+    the tag cache would silently never refresh after an album ReplayGain
+    write and the RG badge stays grey. file_id must travel with each entry
+    instead of being re-looked-up by path."""
+    one_dance, hotline = _seed_two_present_files(imported_conn)
+    calls = []
+    monkeypatch.setattr(
+        "core.library2.tag_cache.read_and_persist_tag_cache",
+        lambda conn, file_id, path: calls.append((file_id, path)) or True,
+    )
+    mapped = {"/m/01.flac": "/mapped/root/01.flac", "/m/02.flac": "/mapped/root/02.flac"}
+
+    RG.analyze_album_replaygain(
+        imported_conn,
+        imported_conn.execute("SELECT id FROM lib2_albums WHERE title='Views'").fetchone()[0],
+        analyze_fn=_fake_analyze({mapped["/m/01.flac"]: -20.0, mapped["/m/02.flac"]: -16.0}),
+        write_fn=lambda *a: True,
+        resolve_fn=lambda p: mapped[p],
+    )
+
+    expected_file_ids = {
+        row["id"] for row in imported_conn.execute(
+            "SELECT id FROM lib2_track_files WHERE track_id IN (?,?)", (one_dance, hotline)
+        )
+    }
+    assert {c[0] for c in calls} == expected_file_ids
+    assert {c[1] for c in calls} == set(mapped.values())
+
+
 def test_album_replaygain_uses_per_track_gain(imported_conn):
     _seed_two_present_files(imported_conn)
     writes = {}

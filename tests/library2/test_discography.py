@@ -125,6 +125,94 @@ def test_provider_id_matching_is_exact_not_json_substring():
     assert matched["id"] == 2
 
 
+def test_cross_bucket_fallback_denied_when_release_has_its_own_provider_id():
+    """G1: a Single sharing an Album's title but carrying its OWN provider id
+    must NOT match the Album row via the candidates[0] fallback — that id
+    belongs to a genuinely different release and matching here would let the
+    caller overwrite the Album's external_ids with the Single's id."""
+    album = {
+        "id": 1, "title": "Faith", "album_type": "album",
+        "spotify_id": None, "external_ids": json.dumps({"deezer": "album-id"}),
+    }
+    index = {"faith": [album]}
+
+    matched = D._match_existing(
+        index, title="Faith", album_type="single",
+        provider_id="single-id", source="deezer",
+    )
+
+    assert matched is None
+
+
+def test_cross_bucket_fallback_still_allowed_without_a_provider_id():
+    """Legacy-imported releases without any provider id still need the old
+    cross-bucket title fallback (e.g. a single legacy-classified as 'album'
+    by the one-track heuristic) — only an id-carrying release is exempted."""
+    album = {
+        "id": 1, "title": "Faith", "album_type": "album",
+        "spotify_id": None, "external_ids": "{}",
+    }
+    index = {"faith": [album]}
+
+    matched = D._match_existing(
+        index, title="Faith", album_type="single",
+        provider_id="", source=None,
+    )
+
+    assert matched is not None
+    assert matched["id"] == 1
+
+
+def test_merge_external_id_refuses_to_overwrite_a_conflicting_id():
+    """G1: once a source's id is set, a differing id for the same source must
+    never silently replace it (defense-in-depth alongside the match-time
+    fallback restriction — a conflict here means two different releases were
+    matched to the same row somewhere upstream)."""
+    raw = json.dumps({"deezer": "album-id"})
+
+    merged = D._merge_external_id(raw, "deezer", "single-id")
+
+    assert json.loads(merged) == {"deezer": "album-id"}
+
+
+def test_merge_external_id_fills_a_missing_source_normally():
+    raw = json.dumps({"musicbrainz": "mb-1"})
+
+    merged = D._merge_external_id(raw, "deezer", "deezer-1")
+
+    assert json.loads(merged) == {"musicbrainz": "mb-1", "deezer": "deezer-1"}
+
+
+def test_single_sharing_album_title_gets_its_own_row_not_the_albums_identity(
+        legacy_db, imported_conn, monkeypatch):
+    """G1 end-to-end: a Single release sharing the 'Views' album's title, with
+    its own provider id, must land in its own new row — the Album's
+    external_ids must keep its own id, not the Single's."""
+    aid = _artist_id(imported_conn)
+    payload = _cards(
+        ("albums", {"id": "sp-views", "title": "Views", "album_type": "album",
+                    "release_date": "2016-04-29", "year": "2016", "track_count": 20}),
+        ("singles", {"id": "sp-views-single", "title": "Views", "album_type": "single",
+                     "release_date": "2016-04-05", "year": "2016", "track_count": 1}),
+    )
+    monkeypatch.setattr(
+        "core.metadata.discography.get_artist_detail_discography",
+        lambda artist_id, artist_name="", options=None: payload,
+    )
+
+    D.expand_artist_discography(legacy_db, aid)
+
+    rows = imported_conn.execute(
+        "SELECT album_type, spotify_id, external_ids FROM lib2_albums WHERE title='Views'"
+    ).fetchall()
+    assert len(rows) == 2
+    by_type = {r["album_type"]: r for r in rows}
+    assert by_type["album"]["spotify_id"] == "sp-views"
+    assert json.loads(by_type["album"]["external_ids"]) == {"spotify": "sp-views"}
+    assert by_type["single"]["spotify_id"] == "sp-views-single"
+    assert json.loads(by_type["single"]["external_ids"]) == {"spotify": "sp-views-single"}
+
+
 def test_discography_enrichment_merges_external_ids(
         legacy_db, imported_conn, fake_discography):
     aid = _artist_id(imported_conn)

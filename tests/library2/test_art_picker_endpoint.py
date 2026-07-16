@@ -10,6 +10,7 @@ level) and writes it straight into the artwork cache.
 from __future__ import annotations
 
 import sqlite3
+import time
 from io import BytesIO
 
 import pytest
@@ -170,9 +171,51 @@ def test_apply_art_pins_the_choice_and_serves_it_locally(monkeypatch, api):
     assert resp.status_code == 200
     body = resp.get_json()
     assert body["success"] is True
-    assert body["image_url"] == f"/api/library/v2/artwork/album/{ids['album']}"
+    # A2: cache-busted with the cache file's own mtime, so a fresh pick gets a
+    # URL the browser hasn't already cached under the old, immutable response.
+    assert body["image_url"].startswith(f"/api/library/v2/artwork/album/{ids['album']}?v=")
 
-    served = client.get(f"/api/library/v2/artwork/album/{ids['album']}")
+    served = client.get(body["image_url"])
     assert served.status_code == 200
     with Image.open(BytesIO(served.data)) as image:
         assert image.getpixel((0, 0)) == pytest.approx((9, 8, 7), abs=2)
+
+
+def test_apply_art_triggers_a_background_cover_embed_retag(monkeypatch, api):
+    """A1: applying a pick must also (re-)embed the cover into the album's
+    existing files — not just update the DB/cache — otherwise the picked
+    cover never reaches files that already have every text tag correct."""
+    client, db, ids = api
+    conn = db._get_connection()
+    conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title, track_number) VALUES(?, 'One Dance', 1)",
+        (ids["album"],),
+    )
+    track_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    conn.execute(
+        "INSERT INTO lib2_track_files(track_id, path) VALUES(?, '/nope/track.flac')",
+        (track_id,),
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(
+        "core.library.artist_image.download_image_bytes",
+        lambda url: _png_bytes((9, 8, 7)),
+    )
+
+    resp = client.post(
+        f"/api/library/v2/albums/{ids['album']}/art", json={"url": "https://example.com/cover.jpg"},
+    )
+    assert resp.status_code == 200
+
+    deadline = time.time() + 5
+    state = None
+    while time.time() < deadline:
+        state = client.get("/api/library/v2/jobs/status").get_json()
+        if not state.get("running"):
+            break
+        time.sleep(0.02)
+    assert state is not None
+    assert state["kind"] == "retag"
+    assert state["result"]["failed"] == 1  # file doesn't really exist on disk

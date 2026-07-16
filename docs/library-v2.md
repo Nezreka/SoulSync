@@ -3322,7 +3322,7 @@ Basierend auf Nutzer-Feedback und real-world Testlauf, aufzunehmend nach Abschlu
 
 ---
 
-### 46. Match-Status-Anzeige & manuelles Re-Match pro Provider fehlt
+### 46. Match-Status-Anzeige & manuelles Re-Match pro Provider fehlt — ✅ umgesetzt (siehe §17.1; Chips + ManualMatchModal live)
 
 **Beobachtung:** Legacy zeigt auf Artist-/Album-/Track-Ebene farbcodierte Chips (`matched`/`not_found`/`pending`) pro Metadaten-Provider (Spotify, MusicBrainz, Deezer, JioSaavn, AudioDB, Discogs, iTunes, Last.fm, Genius, Tidal, Qobuz, Amazon). Klick öffnet `openManualMatchModal()` — freitextige Provider-Suche (`POST /api/library/search-service` → `core.library.service_search._search_service`) → Auswahl schreibt externe ID + `matched`-Status (`PUT /api/library/manual-match`), oder löst den Match (`PUT /api/library/clear-match`).
 
@@ -3336,7 +3336,7 @@ Basierend auf Nutzer-Feedback und real-world Testlauf, aufzunehmend nach Abschlu
 
 ---
 
-### 47. Source-Info-Popover (Download-Provenance) fehlt
+### 47. Source-Info-Popover (Download-Provenance) fehlt — ✅ umgesetzt (Track-Detail „Info"-Tab: Service/User/File/Quality/Historie + Blacklist; §16.1-Legacy-ID-Fix in `core/library2/source_info.py`)
 
 **Beobachtung:** Legacy zeigt pro Track ein `ℹ`-Popover (`showTrackSourceInfo`, `:4960-…`) mit: Service-Icon/Label, Soulseek-Username, Original-Dateiname, Dateigröße, Audio-Qualität-String, Bit-Depth/Sample-Rate/Bitrate, "downloaded"-Zeitstempel, Status (rot bei Nicht-„completed"), Anzahl historischer Download-Records. Zusätzlich eine "⛔ Blacklist This Source"-Action direkt aus dem Popover.
 
@@ -3356,7 +3356,7 @@ Basierend auf Nutzer-Feedback und real-world Testlauf, aufzunehmend nach Abschlu
 
 **Beobachtung:** Legacy erlaubt Editieren von Artist (`name`, `genres`, `label`, `style`, `mood`, `summary`), Album (`title`, `genres`, `year`, `release_date`, `explicit`, `track_count`, `label`, `style`, `mood`) und **Track** (`title`, `track_number`, `bpm`, `explicit`, `style`, `mood`) über inline-editierbare Felder + `PUT /api/library/{artist,album,track}/<id>` mit serverseitigem Feld-Whitelist (`database/music_database.py:12808-12810`). Zusätzlich ein Bulk-Edit-Modal für mehrere selektierte Tracks (`PUT /api/library/tracks/batch` → `database.batch_update_tracks()`).
 
-**Library v2 aktueller Stand** (Roadmap Punkt 8, bereits umgesetzt): Nur `title`/`year`/`release_type` fürs Album (Batch-Override-API) und `name`/`genres` fürs Artist. **Kein Track-Level-Edit-Endpoint existiert überhaupt** (bestätigt: nur `GET .../tracks/<id>`, `.../canonical`, `.../move-file` unter `/api/library/v2/tracks/`). Kein Bulk-Edit.
+**Library v2 aktueller Stand** (Roadmap Punkt 8, bereits umgesetzt): Nur `title`/`year`/`release_type` fürs Album (Batch-Override-API) und `name`/`genres` fürs Artist. **Update 2026-07-16:** Track-Level-Basis-Edit existiert inzwischen (Track-Detail-Modal „Metadata"-Tab: `title`/`track_number`/`disc_number` über den Override-Batch-Command, plus „Write Tags to File"). **Weiterhin offen:** BPM/Style/Mood/Label/Summary/Explicit-Felder und Bulk-Edit über mehrere selektierte Tracks.
 
 **Wichtiger Architektur-Unterschied:** Library v2 nutzt bereits ein saubereres Konzept — `lib2_metadata_overrides` (Roadmap Punkt 4, Slice 3) trennt validierte Admin-Overrides von der Provider-Baseline, mit Read-Projection. Fehlende Felder (BPM, Style, Mood, Label, Summary, Explicit, Track-Title/Number) sollten in dieses bestehende Override-System **erweitert** werden, nicht als Parallel-Struktur wie Legacys direktes Feld-Whitelisting auf der Katalogtabelle.
 
@@ -3399,7 +3399,7 @@ Basierend auf Nutzer-Feedback und real-world Testlauf, aufzunehmend nach Abschlu
 - **"Add to Library"** → normaler Wishlist-Flow (`wishlistEnhancedMissingTrack`).
 - **"I Have This"** → Datei-Picker, importiert eine existierende Datei direkt in den exakten Album-Slot (`POST /api/library/album/<id>/import-existing-track`).
 
-**Library v2 aktueller Stand:** `completeness.py` löst kanonische Tracklists bereits serverseitig auf (echte Titel statt "Track N", disc-aware) — das Backend-Fundament ist da. Die UI zeigt aber nur ein aggregiertes „N missing"-Badge + generisches „missing"-Label pro Zeile (`library-v2-page.tsx:1839-1840, 1908, 2798-2802`), **keine** interaktive Per-Slot-Aktion.
+**Library v2 aktueller Stand:** `completeness.py` löst kanonische Tracklists bereits serverseitig auf (echte Titel statt "Track N", disc-aware) — das Backend-Fundament ist da. **Update 2026-07-16 (Teil-Umsetzung):** Die „Add to Library"-Hälfte existiert inzwischen — `MissingTrackAddButton` pro Missing-Row (materialisiert den Slot via `POST /albums/<id>/missing-tracks/materialize` und monitored ihn → Wishlist-Mirror). **Offen bleibt nur die „I Have This"-Hälfte** (Datei-Picker, Datei direkt an den `lib2_track_id`-Slot binden).
 
 **Scope für Library v2:** UI-seitig ist am wenigsten zu tun (Backend-Tracklist-Auflösung existiert schon) — "Manage"-Button + Modal mit denselben zwei Pfaden hinzufügen: Wishlist-Mirror für "Add to Library" ist bereits die etablierte lib2-Monitoring-Mechanik; "I Have This" bräuchte einen neuen `lib2`-Import-Endpoint, der eine hochgeladene/ausgewählte Datei direkt an den bestehenden `lib2_track_id`-Slot bindet (analog zu Legacys `import-existing-track`, aber durch die lib2-Autolink-Logik statt Legacy-Tabellen).
 
@@ -4577,4 +4577,51 @@ des Implementierungsplans nicht erneut aufgerollt werden müssen:
 
 **Verifikation:** 6 neue Core-Modul-Tests (Override-Präzedenz + explizite Prüfung, dass ein Force-Refresh eine manuelle Auswahl NICHT überschreibt) + 8 neue Flask-Route-Tests + 7 neue Frontend-API-Tests, alle grün. `pytest tests/library2` 513 grün gesamt. `oxfmt`/`oxlint` clean.
 
+**⚠️ Nachtrag Deep-Dive 2026-07-16 (Status-Einschränkung) — ✅ behoben, siehe §28.**
+
 **Scope:** `core/library2/artwork.py`, `api/library_v2.py`, `webui/.../art-picker-modal.tsx` (neu), `webui/.../-library-v2.api.ts`, `webui/.../-library-v2.types.ts`.
+
+## 28. Deep-Dive-Findings 2026-07-16, Runde 1 (A1/A2, G1–G6) — ✅ behoben
+
+Siehe `docs/library-v2-deep-dive-findings-2026-07-16.md` für die vollständige
+Analyse; hier nur die Fix-Zusammenfassung der in dieser Session behobenen
+Bugs (Priorisierung §E, Punkte 1–4):
+
+- **A1 (Cover-Embed-Lücke):** `core/library2/retag.write_tags` bekam einen
+  `force_cover`-Parameter, der den Unchanged-Text-Diff-Fastpath überspringt,
+  wenn ein Album-Cover zum Embedden vorliegt. `POST .../albums/<id>/art`
+  stößt nach erfolgreichem Apply automatisch einen Background-Retag-Job
+  (`force_cover=True`) für alle file-tragenden Tracks des Albums an —
+  derselbe Job-Registry-Pfad wie `/tags/write`.
+- **A2 (7-Tage-Browser-Cache):** `_artwork_url` hängt jetzt `?v=<mtime der
+  Cache-Datei>` an — ein neuer Pick ändert die Cache-Datei-mtime und damit
+  die URL, sodass `Cache-Control: immutable` nicht mehr im Weg steht.
+- **G1 (Discography-Single-Swallow):** `_match_existing` erlaubt den
+  Cross-Bucket-Fallback nur noch, wenn die Provider-Release KEINE eigene
+  Provider-ID trägt; `_merge_external_id` überschreibt nie mehr eine
+  vorhandene, abweichende ID derselben Source (loggt den Konflikt statt
+  die Row zu vergiften).
+- **G2 (Album-RG-Tag-Cache auf gemappten Pfaden):** `analyze_album_replaygain`
+  trägt `file_id` jetzt direkt durch die Analyse-Pipeline statt die
+  File-Zeile nach dem Write per `WHERE path=?` (aufgelöster Pfad) erneut
+  zu suchen — funktioniert jetzt auch mit Path-Mapping (Docker).
+- **G3 (Track-RG-Button ohne Invalidierung):** `TrackReplayGainButton`
+  invalidiert jetzt `LIBRARY_V2_QUERY_KEY` nach Erfolg, analog zum
+  Album-RG-Button.
+- **G4 (Autolink-Feat-Titel-Duplikat):** `_find_or_create_track` nutzt jetzt
+  `dedup_title_key` (dieselbe Feat.-Normalisierung wie der Importer, §39)
+  statt eines rohen Exact-Title-Matches, plus einen (disc, track_number)
+  -Slot-Fallback, bevor eine neue Row entsteht.
+- **G5 (`has_lyrics` ignoriert `unsyncedlyrics`):** `queries.py` prüft jetzt
+  beide Tag-Keys, deckungsgleich mit dem Lyrics-Tab und dem
+  `missing_lyrics`-Repair-Job.
+- **G6 (falsche Interactive-Search-Fußnote):** Text korrigiert — Autolink
+  verlinkt fertige Downloads automatisch, kein manuelles „Refresh & Scan"
+  nötig.
+
+**Verifikation:** `pytest tests/library2` 533 grün (20 neue Tests). `oxfmt`/
+`oxlint --type-check` clean für die geänderten Frontend-Dateien.
+
+**Noch offen aus dem Deep-Dive:** A3–A9, B1–B7, C1–C4, G7–G8, H1–H13, I1–I10 —
+siehe `docs/library-v2-deep-dive-findings-2026-07-16.md` Abschnitt E für die
+Priorisierung der nächsten Runde.

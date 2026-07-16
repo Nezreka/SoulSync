@@ -193,7 +193,7 @@ def _persist_file_tags(database, file_id: int, file_tags: Dict[str, Any]) -> boo
 
 
 def write_tags(database, track_ids: List[int], *, embed_cover: bool = True,
-               progress=None) -> Dict[str, Any]:
+               force_cover: bool = False, progress=None) -> Dict[str, Any]:
     """Write lib2 DB metadata into the files' tags.
 
     Returns ``{written, skipped, failed, errors: [...]}``. Cover art comes from
@@ -202,6 +202,11 @@ def write_tags(database, track_ids: List[int], *, embed_cover: bool = True,
     ``build_tag_diff`` decides nothing changed). Any number of tracks is
     processed — ``MAX_TRACKS`` is only the per-query batch size, never a
     silent cap on a write the user asked for.
+
+    ``force_cover`` bypasses the unchanged-text-diff fastpath so the album
+    cover gets (re-)embedded even when no text field changed — ``build_tag_diff``
+    only compares text fields (docs §"A1"), so a cover-only change would
+    otherwise be silently skipped forever.
     """
     from core.library2.paths import resolve_lib2_path
     from core.library2.tag_cache import read_tag_snapshot
@@ -229,17 +234,24 @@ def write_tags(database, track_ids: List[int], *, embed_cover: bool = True,
         try:
             file_tags = read_file_tags(abs_path)
             db_data = row["db_data"]
+
+            def _cover() -> Optional[Tuple[bytes, str]]:
+                if row["album_id"] not in covers:
+                    covers[row["album_id"]] = _album_cover_data(database, row["album_id"])
+                return covers[row["album_id"]]
+
             if not file_tags.get("error"):
                 diff = build_tag_diff(file_tags, db_data)
-                if not any(d.get("changed") for d in diff):
+                text_changed = any(d.get("changed") for d in diff)
+                # Only worth the cover-cache lookup when force_cover might turn
+                # an otherwise-unchanged file into a write — the common case
+                # (nothing changed, embed_cover=True from a routine full-library
+                # retag) must not pay for reading every album's cover file.
+                if not text_changed and not (force_cover and embed_cover and _cover()):
                     _persist_file_tags(database, row["file_id"], file_tags)
                     stats["skipped"] += 1
                     continue
-            cover = None
-            if embed_cover:
-                if row["album_id"] not in covers:
-                    covers[row["album_id"]] = _album_cover_data(database, row["album_id"])
-                cover = covers[row["album_id"]]
+            cover = _cover() if embed_cover else None
             result = write_tags_to_file(
                 abs_path, db_data,
                 embed_cover=bool(cover), cover_data=cover,

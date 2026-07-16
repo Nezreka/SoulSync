@@ -674,7 +674,7 @@ def _serialize_track(
                         "replaygain_album_peak",
                     )
                 )
-                has_lyrics = bool(tags_data.get("lyrics"))
+                has_lyrics = bool(tags_data.get("lyrics") or tags_data.get("unsyncedlyrics"))
             except Exception:
                 pass
         file_info = {

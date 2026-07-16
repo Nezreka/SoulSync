@@ -125,6 +125,71 @@ def test_attaches_file_to_materialized_missing_track(lib2_enabled, imported_conn
         "SELECT COUNT(*) c FROM lib2_tracks WHERE title='Nonstop'").fetchone()["c"] == 1
 
 
+def test_feat_annotated_title_fills_the_wanted_slot_instead_of_duplicating(
+        lib2_enabled, imported_conn):
+    """G4: the finished download's title ("One Dance") often doesn't spell
+    out the featured-artist annotation the wanted-row's title carries
+    ("One Dance (feat. Wizkid & Kyla)") — or vice versa. Without
+    dedup_title_key (the same normalization the importer already uses for
+    §39), an exact-title match misses this, a duplicate track row gets
+    created with the file, and the original wanted-row keeps re-downloading
+    the same song forever."""
+    conn = lib2_enabled._get_connection()
+    artist_id = conn.execute("SELECT id FROM lib2_artists WHERE name='Drake'").fetchone()["id"]
+    conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title, album_type, spotify_id, origin) "
+        "VALUES(?, 'Scorpion', 'album', 'sp-scorpion', 'discography')", (artist_id,))
+    album_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    conn.execute(
+        "INSERT INTO lib2_album_artists(album_id, artist_id) VALUES(?,?)", (album_id, artist_id))
+    conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title, track_number, monitored) "
+        "VALUES(?, 'Nonstop (feat. Wizkid & Kyla)', 1, 1)", (album_id,))
+    conn.commit()
+    conn.close()
+
+    # The download's own title/tags never mention the feature — a very common
+    # real-world spelling difference between a single's tags and the album
+    # tracklist. No spotify_track_id on the wanted row either, so the fix must
+    # come from the title-normalization fallback, not the ID fast-path.
+    file_id = A.link_download_into_library_v2(_context())
+    assert file_id is not None
+    assert imported_conn.execute(
+        "SELECT COUNT(*) c FROM lib2_tracks WHERE album_id=?", (album_id,)
+    ).fetchone()["c"] == 1
+    row = imported_conn.execute(
+        "SELECT t.title FROM lib2_track_files tf JOIN lib2_tracks t ON t.id=tf.track_id "
+        "WHERE tf.id=?", (file_id,),
+    ).fetchone()
+    assert row["title"] == "Nonstop (feat. Wizkid & Kyla)"
+
+
+def test_disc_and_track_number_slot_fills_when_titles_dont_normalize_equal(
+        lib2_enabled, imported_conn):
+    """G4 fallback: even when dedup_title_key doesn't collapse the titles to
+    the same key (a genuine title-spelling drift beyond feat.-annotations),
+    the (disc, track_number) slot still wins over minting a duplicate row."""
+    conn = lib2_enabled._get_connection()
+    artist_id = conn.execute("SELECT id FROM lib2_artists WHERE name='Drake'").fetchone()["id"]
+    conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title, album_type, spotify_id, origin) "
+        "VALUES(?, 'Scorpion', 'album', 'sp-scorpion', 'discography')", (artist_id,))
+    album_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    conn.execute(
+        "INSERT INTO lib2_album_artists(album_id, artist_id) VALUES(?,?)", (album_id, artist_id))
+    conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title, track_number, disc_number, monitored) "
+        "VALUES(?, 'Nonstop (Radio Edit)', 1, 1, 1)", (album_id,))
+    conn.commit()
+    conn.close()
+
+    file_id = A.link_download_into_library_v2(_context())
+    assert file_id is not None
+    assert imported_conn.execute(
+        "SELECT COUNT(*) c FROM lib2_tracks WHERE album_id=?", (album_id,)
+    ).fetchone()["c"] == 1
+
+
 def test_linking_file_graduates_discography_album_to_library(lib2_enabled, imported_conn):
     """Attaching a real file to a provider-only release must flip its origin —
     'My Library' filters on origin/monitored, so an unmonitored discography row

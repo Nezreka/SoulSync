@@ -351,6 +351,22 @@ def test_get_track_detail(imported_conn):
     assert [a["name"] for a in track["artists"]] == ["Drake", "Wizkid"]
 
 
+def test_has_lyrics_recognizes_unsyncedlyrics_tag(imported_conn):
+    """G5: the Lyrics tab and missing_lyrics repair job both read/write
+    'unsyncedlyrics' (USLT-only files, .lrc sidecars), not just 'lyrics' — the
+    LR badge must agree with what the tab actually shows."""
+    import json
+    tid = imported_conn.execute(
+        "SELECT id FROM lib2_tracks WHERE legacy_track_id=100").fetchone()[0]
+    imported_conn.execute(
+        "UPDATE lib2_track_files SET tags_json=? WHERE track_id=?",
+        (json.dumps({"unsyncedlyrics": "la la la"}), tid),
+    )
+    imported_conn.commit()
+    track = Q.get_track(imported_conn, tid)
+    assert track["file"]["has_lyrics"] is True
+
+
 def test_effective_reads_project_user_metadata_without_rewriting_provider(imported_conn):
     artist_id = imported_conn.execute(
         "SELECT id FROM lib2_artists WHERE name='Drake'"

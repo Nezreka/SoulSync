@@ -1,0 +1,620 @@
+# Library V2 — Deep-Dive-Findings (2026-07-16)
+
+**Methode:** Vollständige Lektüre von `docs/library-v2.md` (§1–§27) +
+`docs/library-v2-ui-requirements.md`, Code-Analyse von
+`webui/src/routes/library-v2/` (Page, Modals, API-Layer, Types),
+`api/library_v2.py`, `core/library2/` (artwork, retag, match_status,
+source_info, queries, schema), `core/acquisition/history.py`, Legacy-Vergleich
+gegen `webui/static/library.js` (Enhanced View) und Lidarr-Recherche
+(Servarr-Wiki + bekannte Lidarr-UI-Semantik).
+
+**Scope dieses Dokuments:** NUR Punkte, die noch **nicht** in `library-v2.md`
+oder `library-v2-ui-requirements.md` getrackt sind (bereits Getracktes wird am
+Ende nur referenziert, Abschnitt F). Direkte Fehler in `library-v2.md`
+(veraltete Status-Marker) wurden dort korrigiert.
+
+**Aufbau:** A = Bugs/Denkfehler Runde 1 (nutzer-getriggert verifiziert +
+vertieft) · B = UI/UX-Vorschläge · C = Backend-Designs · D = Kleinfunde ·
+E = Priorisierung · **G = Code-Audit Runde 2 (neu gefundene Bugs, Zeile für
+Zeile)** · **H = vollständiger Legacy-Gap** · **I = vollständiger
+Lidarr-Gap** · F = Querverweise auf bereits Getracktes.
+
+---
+
+## A. Echte Bugs / Denkfehler (neu gefunden)
+
+### A1. Gewähltes Cover erreicht die Audio-Dateien NIE (Embed-Lücke, zweischichtig) — KRITISCHSTER FUND — ✅ behoben (siehe library-v2.md §28)
+
+**Beobachtung (Nutzer):** Cover-Picker anwenden → Cover in der UI/DB neu, aber
+in den vorhandenen Tracks bleibt das alte Cover embedded.
+
+**Root-Cause-Analyse — es sind ZWEI unabhängige Lücken:**
+
+1. **Kein Trigger:** `apply_manual_artwork()` (`core/library2/artwork.py:402`)
+   setzt das `image_url`-Override und schreibt den Artwork-Cache — löst aber
+   keinerlei Tag-Write für die Dateien des Albums aus. Der Embed-Pfad existiert
+   (`core/library2/retag.py::write_tags` embedded das Cover aus dem
+   lib2-Artwork-Cache), wird nur nie aufgerufen.
+2. **Selbst ein manueller Retag würde es NICHT heilen:** `write_tags`
+   (`retag.py:232–237`) skippt jede Datei, deren Text-Tag-Diff leer ist —
+   `build_tag_diff` (`core/tag_writer.py:238`) vergleicht **nur Textfelder**
+   (title/artist/album/year/genre/track#/disc#/bpm), nie das Cover. Ein Album
+   mit korrekten Tags aber altem Cover wird also immer als „unchanged"
+   übersprungen → das neue Cover kann auf keinem existierenden Weg in die
+   Dateien gelangen.
+
+**Fix-Richtung (Reuse-First):**
+- `write_tags` bekommt einen Parameter `force_cover=True` (oder `force=True`),
+  der den Unchanged-Fastpath überspringt (bzw. nur die Cover-Embed-Prüfung
+  erzwingt).
+- `POST /albums/<id>/art` triggert nach erfolgreichem Apply einen
+  Background-Tag-Write für alle file-tragenden Tracks des Albums mit diesem
+  Flag (gleicher Job-Registry-Pfad wie `/tags/write`). UI: kleiner Hinweis im
+  Picker („Cover wird in N Dateien geschrieben…" mit Fortschritt) oder
+  zumindest eine Checkbox „Embed into files" (default an).
+- Optional sauberer: `build_tag_diff` um einen Cover-Vergleich erweitern
+  (Hash der embedded Art vs. Hash der Cache-Datei) — dann bleibt der Fastpath
+  ehrlich. Teurer, aber macht auch „Preview Retag" cover-aware.
+
+### A2. Neues Cover wird im Browser bis zu 7 Tage NICHT angezeigt (immutable Cache auf mutable URL) — ✅ behoben (siehe library-v2.md §28)
+
+`_send_art` (`api/library_v2.py:1588–1591`) sendet
+`Cache-Control: public, max-age=604800, immutable`, aber die Bild-URL ist stabil
+(`/api/library/v2/artwork/album/<id>`, `_artwork_url` `api/library_v2.py:80`).
+Nach einem Cover-Pick invalidiert das Frontend zwar React-Query
+(`art-picker-modal.tsx:39`), der Browser bedient das `<img>` aber weiter aus dem
+HTTP-Cache — `immutable` unterdrückt sogar die Revalidierung. Ergebnis: altes
+Cover bleibt in Zeilen-Thumb + Detail-Ansicht sichtbar (bis Hard-Reload).
+Legacy löste das mit Cache-Bustern.
+
+**Fix-Richtung:** Versionsparameter in die URL aufnehmen —
+`_artwork_url` um `?v=<mtime der Cachedatei>` ergänzen (oder ein
+`artwork_version`-Feld im Payload, das die UI anhängt). `apply_manual_artwork`
+ändert die mtime ohnehin → URL ändert sich automatisch, `immutable` bleibt
+korrekt.
+
+### A3. „Automatic Search" auf Album-Zeile ist in Wahrheit die GLOBALE Wishlist-Verarbeitung
+
+Der Album-Button (`library-v2-page.tsx:3409–3413`) feuert
+`Automatic Search: <Albumtitel>` → `AUTOMATIC_SEARCH_RE` (`:137`) matcht →
+`searchMonitored()` → `POST /api/wishlist/process` (global). Der Albumtitel im
+Action-String wird **komplett ignoriert**. Der Tooltip („find & grab the best
+source (global Wishlist action)") ist in sich widersprüchlich: er verspricht
+eine Album-Aktion und liefert eine globale. P2-08 hat die Artist-Toolbar
+ehrlich beschriftet, aber die Album-Zeile suggeriert durch ihre Position
+weiterhin Album-Scope.
+
+**Zusatz-Inkonsistenz:** In der deep-linkbaren `AlbumDetailView`
+(`:2556–2561`) behandelt `handleAction` `AUTOMATIC_SEARCH_RE` gar nicht — ein
+dort gefeuertes „Automatic Search:" wäre ein stilles No-Op. Aktuell nicht
+auslösbar (die View hat den Button nicht), aber die Handler-Asymmetrie ist eine
+wartende Falle.
+
+**Fix-Richtung:** siehe C1 (scoped Automatic Search); bis dahin den Button aus
+der Album-Zeile entfernen (Interactive Search reicht dort) statt ihn global
+wirken zu lassen.
+
+### A4. Track-Level „Automatic Search" = clientseitige Best-Pick-Heuristik (zweite Decision-Engine im Frontend)
+
+`autoGrabBest` (`-library-v2.api.ts:1194–1214`) implementiert die
+Source-Auswahl **im Client**: eigenes Scoring (lossless > quality_score >
+upload slots), dann direkter `/api/download`. Das verletzt die eigene
+Kernregel „keine zweite Decision-Engine / Reuse-First" (§1, §5.3) auf der
+Frontend-Seite:
+- Quality-Profile der Entity fließt in die **Auswahl** nicht ein (nur später in
+  den Import-Check) — Lidarrs Automatic Search wählt profile-getrieben.
+- Kein Candidate-Walk/Retry bei Fehlschlag (die Wishlist-Pipeline hat genau
+  das), keine Blacklist-/exhausted-sources-Beachtung bei der Auswahl.
+- Die Scoring-Logik existiert damit doppelt (Server-Kandidaten-Ranking vs.
+  diese drei Zeilen TS) und wird zwangsläufig divergieren.
+
+**Fix-Richtung:** Track-scoped Automatic Search serverseitig (siehe C1):
+Track ist bei Monitoring ohnehin wishlist-gemirrort — ein
+`POST /api/wishlist/process` mit `track`-Scope (oder ein dünner
+`/api/library/v2/tracks/<id>/search`-Endpoint, der den bestehenden
+Candidate-Walk für genau diesen Wishlist-Eintrag anstößt) ersetzt die
+Client-Heuristik vollständig.
+
+### A5. BPM existiert im Schema, erreicht aber weder API noch UI
+
+`lib2_tracks.bpm` ist migriert (`schema.py:149,377`) und wird vom Importer
+befüllt (§17.7-Fixes), aber `queries.py` projiziert es in keinem
+Track-Payload, `LibraryV2Track` hat kein Feld, die UI keine Spalte. Legacy
+zeigt BPM als sortier- und editierbare Spalte (`library.js:4795,4333`).
+Analog: `duration` IST im Payload (`queries.py:700`, Type `:231`), wird aber
+nirgends angezeigt. Legacy zeigt Duration als Spalte.
+
+### A6. History-Modal liest nur `track_downloads`, obwohl Lidarr-Parity-Daten längst journaliert werden
+
+`GET /artists/<id>/history` (`api/library_v2.py:2844`) = nur
+Download-Provenance per Artist-**Namens**-Match. Dabei existieren bereits vier
+reichere, ungelesene Quellen:
+- **`acquisition_history`** (`core/acquisition/history.py:15–42`): 26
+  Event-Typen — `grab_submitted`, `grab_failed`, `retry_started`, `cancelled`,
+  `import_file_quarantined`, `import_needs_review`,
+  `import_resolved_manually`, `import_completed`, `import_failed`,
+  `candidate_blocklisted`, `force_quarantine_auto_approved`, … Das ist eine
+  **Obermenge** der Lidarr-Event-Typen (Grabbed / Download Failed / Track
+  Imported / Import Incomplete / Deleted / Renamed / Retagged / Ignored).
+  Requests tragen `scope` + `entity_id` (lib2!) → per Artist/Album/Track
+  joinbar.
+- **`lib2_entity_history`**: Canonical-Link/Unlink, File-Moves.
+- **`lib2_file_delete_operations`/`_items`**: physische Löschungen (ADR-05).
+- **`lib2_manual_skips`**: manuelle Check-Overrides.
+
+**Fix-Richtung:** History-Endpoint zu einem Event-Union erweitern (Typ-Spalte +
+Farb-Chips wie Lidarr: grabbed=gelb, imported=grün, deleted=rot,
+quarantined=orange, retagged/moved=blau), Filter nach Event-Typ. Kein neues
+Journal nötig — reine Read/JOIN + UI-Arbeit.
+
+### A7. Track-Info-Tab: Pipeline-Lifecycle bleibt unsichtbar (Nutzer-Wunsch: „wie ging es durch die Pipeline?")
+
+Der Info-Tab zeigt Verification-Badge + `lib2_manual_skips` + Download-Historie
+(§18.3, `TrackLifecycleSection`, `library-v2-page.tsx:4450`). Was fehlt, obwohl
+teilweise persistiert:
+- **Quality-Gate-Ergebnis** beim Import (bestanden? mit welchem Profil? Fallback
+  gegriffen?) — für acquisition-korrelierte Grabs in `acquisition_history`
+  (`candidates_evaluated`, Gate-Runs mit `forced=0`) vorhanden, für den reinen
+  Legacy-Pfad nicht pro File persistiert. → Lücke benennen: der eine
+  Import-Callback sollte das Gate-/Quality-Resultat auf die
+  `lib2_track_files`-Zeile (oder ein kleines Journal) schreiben.
+- **AcoustID-Detail** (welcher Fehler genau, Score) — heute nur der Endstatus
+  (`verification_status`); der konkrete Fehlgrund geht verloren.
+- **Quarantäne-Geschichte** („war in Quarantäne, manuell importiert am …") —
+  als `import_file_quarantined`/`import_resolved_manually` journaliert, aber
+  nur über `/acquisition/requests/<id>/history` erreichbar, nie per Track.
+
+**Fix-Richtung:** Info-Tab um eine chronologische „Lifecycle"-Timeline
+erweitern, die `acquisition_history` (via `download_id`/`entity_id`-Korrelation),
+`lib2_entity_history`, File-Delete-Journal und `manual_skips` merged. Gleiche
+Datenbasis wie A6, nur Track-gefiltert.
+
+### A8. Match-Chips zeigen alle 13 Provider — auch nie konfigurierte (ewig graues Tidal)
+
+`SERVICES` (`core/library2/match_status.py:27–54`) ist statisch; weder Backend
+noch UI filtern nach konfigurierten/aktiven Providern. Ein Nutzer ohne
+Tidal/Qobuz/JioSaavn sieht dauerhaft tote graue Chips in jeder Track-Zeile —
+reines Rauschen (Nutzer-Beschwerde). Vorbild im eigenen Code:
+`gather_album_art_candidates` filtert mit `is_art_source_available(s)`
+(`core/metadata/art_lookup.py:483`) auf tatsächlich verfügbare Quellen.
+
+**Fix-Richtung (zweistufig):**
+1. Server: Match-Status-Endpoints um Verfügbarkeits-Flag ergänzen (Provider
+   konfiguriert/enabled?) — analoge Availability-Prüfung wie die
+   Enrichment-Worker/`is_art_source_available`.
+2. User-Einstellung darüber (siehe B5): Default = nur konfigurierte Provider,
+   opt-in „alle zeigen".
+
+### A9. Kein Artist-Image-Picker (Override-Feld existiert bereits)
+
+Der §49-Picker gibt es nur für Alben. Das `image_url`-Override ist für
+`artist` im Whitelist bereits freigeschaltet und `build_artwork` liest es für
+beide Kinds — es fehlt nur `GET /artists/<id>/art-options` (Artist-Fotos via
+bestehende Artist-Image-Engine) + derselbe Modal. Geringer Aufwand, rundet §49
+ab. (Betrifft auch die in §11.2/P2-04 bewusst offene Frage
+„Provider-Foto vs. Embedded-Cover als Artist-Bild" — der Picker wäre die
+Nutzer-Antwort darauf.)
+
+---
+
+## B. UI/UX — Überladung reduzieren, Lidarr-Alignment
+
+**Lidarr-Referenz (recherchiert):** Artist-Seite hat ~6 Toolbar-Aktionen
+(Refresh & Scan, Search Monitored, Preview Rename, Preview Retag, Monitor
+Toggle, Edit/Delete); Album-Zeilen auf der Artist-Seite haben **2–3 Icons**
+(Automatic Search, Interactive Search, ggf. „…"); Datei-Verwaltung
+(Manage Track Files), History und Details liegen auf der **Album-Detailseite**
+(Tabs), nicht als Icon-Batterie an jeder Zeile. Tabellen haben einen
+„Options"-Zahnrad für Spalten-Konfiguration.
+
+### B1. Album-Zeile: 10 Icon-Buttons → Ziel 3–4 + Overflow-Menü
+
+Aktuell (`library-v2-page.tsx:3401–3459`): Open Detail, Automatic Search,
+Interactive Search, Preview Retag, ReplayGain, Reorganize, Change Cover,
+Enrich, Album Details, Delete. Vorschlag:
+
+| Bleibt sichtbar | Wandert |
+|---|---|
+| Automatic Search (nach C1 wirklich album-scoped) | **Open Album Detail entfernen** → Albumtitel wird Link zur Detail-Ansicht (Lidarr-Muster); Chevron/Kopfzeilen-Klick bleibt Inline-Expand |
+| Interactive Search | ReplayGain → Features-Badge (B3) |
+| „…"-Overflow-Menü | Preview Retag, Reorganize, Change Cover, Enrich, Delete → ins Overflow-Menü |
+| | „Album Details"(Edit-Icon)-Modal mit dem Overflow bzw. der Detail-Ansicht zusammenführen (zwei konkurrierende „Details"-Konzepte an einer Zeile verwirren) |
+
+### B2. Album-Detail-Ansicht (Deep-Link) verliert fast alle Album-Funktionen
+
+`AlbumDetailView` (`:2542–2682`) bietet nur Edit-Metadata + Track-Tabelle.
+Retag, ReplayGain, Reorganize, Cover-Picker, Enrich, Quality-Profil, Delete,
+Monitoring-Strategie — alles nur an der eingeklappten Zeile auf der
+Artist-Seite verfügbar. Genau invers zu Lidarr (dort ist die Detailseite der
+Ort für all das). **Fix:** dieselbe Action-Leiste (bzw. das Overflow-Menü aus
+B1) in den Detail-Header heben — die Handler existieren alle schon als
+Komponenten, es ist reine Verdrahtung. Erst DANN kann B1 die Zeile guten
+Gewissens entrümpeln.
+
+### B3. Features-Spalte: RG/LR immer anzeigen, ausgegraut wenn fehlend, klickbar als Aktion
+
+Aktuell (`:3650–3676`): Badges erscheinen nur bei Vorhandensein, sonst „—";
+ReplayGain hat zusätzlich einen eigenen Action-Button in der Actions-Spalte.
+Nutzer-Wunsch + Button-Ersparnis:
+- **RG**-Badge immer rendern: grün = vorhanden (Tooltip: Werte), grau =
+  fehlt → Klick startet `POST /tracks/<id>/replaygain` (Endpoint existiert);
+  der separate `TrackReplayGainButton` entfällt.
+- **LR**-Badge immer rendern: grün = vorhanden → Klick öffnet den Lyrics-Tab;
+  grau = fehlt → Klick startet einen Lyrics-Fetch. Backend-Reuse:
+  `core/repair_jobs/missing_lyrics.py` (LRClib, prüft Verfügbarkeit, embedded
+  + .lrc-Sidecar) — braucht nur einen dünnen
+  `POST /api/library/v2/tracks/<id>/fetch-lyrics`, der dieselbe Logik
+  track-scoped aufruft.
+- Pending-State im Badge (Spinner) statt separatem Button.
+- Gleiches Muster perspektivisch für Album-Scope (Album-RG-Button → Badge im
+  Album-Kopf), dann verschwindet noch ein Zeilen-Button.
+
+### B4. Artist-Toolbar: 16 Aktionen → gruppieren, globale Aktionen raus aus dem Artist-Kontext
+
+Aktuell (`:2888–3003`): Refresh & Scan, Automatic Search (global!),
+Interactive Search, Update Discography, Search Upgrades (global!), Preview
+Retag, Reorganize All, Maintenance, Manual Import, Manage Tracks, History,
+Enrich, Edit Metadata, Monitoring, Profile, Delete. Vorschlag:
+
+1. **Globale Aktionen verschieben:** „Automatic Search (global)" und „Search
+   Upgrades (global)" gehören auf die Library-Übersicht (Header neben
+   Import/Filter) oder zur Wishlist-Seite — nicht in die Artist-Toolbar
+   (deckt sich mit §25.1; bis der scoped Search existiert, ist Verschieben der
+   ehrlichste Zwischenschritt).
+2. **Primärleiste (Lidarr-Kern):** Refresh & Scan · Automatic Search
+   (artist-scoped, C1) · Interactive Search · Update Discography.
+3. **Sekundär als Dropdown „Files/Tools":** Preview Retag, Reorganize All,
+   Maintenance, Manual Import, Enrich.
+4. **Rechts (Entity-Verwaltung):** Manage Tracks, History, Monitoring, Profile,
+   Edit, Delete — Edit/Monitoring/Profile ggf. in EIN „Edit"-Modal mit Tabs
+   (Metadata / Monitoring / Quality Profile), wie das Track-Detail-Modal es
+   bereits vormacht.
+
+### B5. Nutzer-konfigurierbare Anzeige (Spalten + Match-Provider + Features) — „richtig modal"
+
+Nutzer-Wunsch: pro Nutzer einstellen, welche Match-Provider, Spalten und
+Badges sichtbar sind (Lidarr: „Table Options"-Zahnrad pro Tabelle).
+
+**Design-Vorschlag:**
+- Neue UI-Preferences, persistiert pro Profil (kleine
+  `lib2_ui_preferences`-Tabelle oder JSON-Blob in `app_config`;
+  localStorage wäre billiger, überlebt aber keinen Browser-Wechsel — DB
+  bevorzugt, die App ist ohnehin profilbewusst).
+- Ein „Options"-Popover an der Track-Tabelle (Zahnrad im Tabellenkopf):
+  - Spalten an/aus: #, Disc, Artists, Match, Quality, Features, Metadata,
+    Duration (A5), BPM (A5), File-Pfad, Format/Bitrate getrennt.
+  - Match-Provider-Auswahl (Set aus `SERVICES`), Default „nur konfigurierte"
+    (A8).
+  - Features-Badges an/aus.
+- Dieselbe Preferences-Quelle steuert Artist-Tabelle/Cards
+  (Sort-/Spaltenwahl) und Interactive-Search-Spalten.
+- Query-Seite: Spalten wie BPM/Duration/Pfad sind bereits im
+  Album-Detail-Payload bzw. trivial ergänzbar — kein teures Backend.
+
+### B6. Track-Tabelle: fehlende Legacy-Spalten, kein Sort, keine Mehrfachauswahl
+
+Legacy Enhanced View (`library.js:4787–4806`): Play, #, Disc, Title, Duration,
+Format, Bitrate, BPM, File, Match, Queue + WriteTag/Delete, **sortierbar**,
+mit Select-All-Checkbox + Batch-Edit + Batch-ReplayGain. V2-Tabelle
+(`:3535–3547`): Monitor, #, Title, Artists, Match, Quality, Features,
+Metadata, Actions — **nicht sortierbar, keine Auswahl, kein Bulk**.
+- Sortierbare Header (rein clientseitig, Daten sind schon da).
+- Checkbox-Spalte + Bulk-Leiste (Monitor an/aus, Quality-Profil, ReplayGain,
+  Write Tags, Delete-Files-Preview) — Backend für alles vorhanden
+  (`/tags/write` nimmt Track-Listen, ReplayGain-Batch existiert legacy-seitig,
+  Monitor-Bulk existiert).
+- Duration/BPM/File-Pfad als opt-in Spalten (B5). Damit ist die
+  Enhanced-View-Spalten-Parity komplett.
+
+### B7. Suche: Benennung & Scope endgültig Lidarr-konform machen (Zusammenführung)
+
+Zielbild nach C1 (ergänzt §25.1 um die Upgrade-Frage, die dort offen blieb):
+- **Automatic Search** (Artist/Album/Track) = scoped: sucht Missing **und**
+  Upgrades gemäß Quality-Profil (Upgrade-Erlaubnis/Cutoff entscheidet das
+  Profil — exakt Lidarrs Verhalten: erlaubt das Profil Upgrades, upgraded die
+  Suche automatisch; sonst nur Missing).
+- **„Search Upgrades"-Button entfällt** auf Artist-Ebene ersatzlos — die
+  Funktion geht im scoped Automatic Search auf. Der globale
+  `lib2_upgrade_scan`-Repair-Job (24h) bleibt die Automation; die globale
+  manuelle Variante wandert in die Library-Übersicht (B4.1).
+- Interactive Search bleibt wie ist (bereits Lidarr-konform benannt).
+
+---
+
+## C. Backend-Design-Findings
+
+### C1. Artist-/Album-/Track-scoped Automatic Search (konkretisiertes Design zu §25.1)
+
+Reuse-first, keine zweite Pipeline:
+1. **Scope-Auflösung serverseitig:** neuer Endpoint
+   `POST /api/library/v2/<entity>/<id>/search` →
+   (a) für den Scope einen **inline Upgrade-Scan** laufen lassen
+   (`wishlist_mirror.py` kann Upgrade-Kandidaten bereits selektieren — heute
+   nur global verdrahtet; auf Artist-/Album-/Track-Filter der
+   `lib2_wanted_tracks`/Files einschränken), damit profile-erlaubte Upgrades
+   frisch in der Wishlist liegen;
+   (b) anschließend die Wishlist-Verarbeitung **nur für diese Items** anstoßen.
+2. Die Wishlist-Verarbeitung braucht dafür einen Scope-Parameter
+   (`/api/wishlist/process` akzeptiert heute keinen — `web_server.py:18229`).
+   Kleinster Eingriff: optionale `wishlist_ids`/`lib2_scope`-Liste, die der
+   Worker als Filter auf seine Task-Auswahl legt; Retry-/Candidate-Walk bleibt
+   unverändert.
+3. Track-Level ersetzt `autoGrabBest` (A4) durch denselben Endpoint.
+4. Alle Grabs laufen damit automatisch durch die bestehende
+   Acquisition-Korrelation (`scheduled_grab_correlated`) → History (A6) wird
+   automatisch reicher.
+
+### C2. Manage Tracks → Lidarr „Manage Track Files"
+
+Heute: nur Single↔Album-Duplikat-Paare (`/artists/<id>/duplicates`).
+Lidarr-Modell: Liste **aller Track-Files** (Pfad relativ, Größe, Quality,
+Datum) mit Mehrfachauswahl + Delete. Alles Nötige existiert:
+`lib2_track_files` (Pfad/Größe/Quality/Lifecycle), ADR-05-File-Delete-Maschine
+(Preview-Token, Journal, fail-closed Root-Safety) — nur heute auf
+Artist-/Album-Scope begrenzt.
+- Neuer Read: `GET /artists/<id>/track-files` (paginiert, mit Quality/State).
+- ADR-05-Preview/Execute um eine `file_ids`-Auswahl erweitern (der
+  Snapshot-Token-Mechanismus trägt File-IDs bereits).
+- UI: Manage-Tracks-Modal bekommt zwei Tabs: „Duplicates" (heutiger Inhalt,
+  inkl. der offenen ui-req-3.1/3.2-Delete-Wünsche) + „Files" (neue Liste).
+- Deckt zugleich `library-v2-ui-requirements.md` §5.1 ab (dort als größerer
+  Refactor notiert — mit ADR-05-Reuse ist es deutlich kleiner als dort
+  vermutet).
+
+### C3. History-Read-Vereinheitlichung (Umsetzung zu A6)
+
+Ein `core/library2/history_feed.py`-Helper, der pro Scope (artist/album/track)
+die vier Quellen merged und ein einheitliches
+`{date, event_type, title, detail, source}`-Schema liefert; Endpoint ersetzt
+den heutigen `track_downloads`-only-Read (dessen Zeilen als
+`event_type='downloaded'` einfließen). Namens-Matching (`track_artist LIKE`)
+nur noch als Legacy-Fallback — primär über `entity_id`-Joins
+(acquisition_requests tragen lib2-Scope+ID; `track_downloads` ist über
+`legacy_track_id` erreichbar, wie `source_info.py` es vormacht).
+
+### C4. Pipeline-Resultate pro File persistieren (Lücke hinter A7)
+
+`lib2_track_files` kennt `verification_status` + `import_status`, aber nicht:
+Quality-Gate-Ergebnis (bestanden/Fallback/übersprungen + Profil-ID),
+AcoustID-Fehlgrund, Quarantäne-Referenz. Der Import-Callback (eine Stelle,
+`record_download_provenance`/Autolink-Hook) sollte ein kompaktes
+`pipeline_result_json` auf die File-Zeile schreiben (oder ein
+`lib2_file_events`-Journal im Stil von `lib2_entity_history`). Ohne das bleibt
+A7 für nicht-acquisition-korrelierte Downloads (der Normalfall heute) leer.
+
+---
+
+## D. Kleinere Beobachtungen
+
+- **D1. Doppeltes „Edit"-Icon-Konzept:** Track-Actions-Spalte nutzt das
+  `edit`-Icon für „Track details", die Album-Zeile für „Album details", der
+  Artist-Header für „Edit Metadata" — dreimal dasselbe Icon, drei
+  verschiedene Bedeutungen. Nach B1/B4 vereinheitlichen (ein Detail-Icon, ein
+  Edit-Konzept).
+- **D2. `EnrichDropdown` vs. `ManualMatchModal`:** Enrich re-queried einen
+  Provider, Manual Match ändert die Provider-ID — für Nutzer schwer zu
+  unterscheiden („frische Daten holen" vs. „Zuordnung korrigieren"). Ein
+  gemeinsames „Provider"-Modal (Chips + pro Provider: Status, Re-Match,
+  Enrich) würde beide Konzepte an einem Ort erklären und einen
+  Toolbar-Eintrag sparen.
+- **D3. Interactive-Search-Ergebnisspalten** sind nicht konfigurierbar (B5
+  einbeziehen); Age-Spalte + Availability sind gut, aber ein Profil-Filter
+  („nur meets cutoff anzeigen") fehlt — Lidarr filtert Rejections sichtbar.
+- **D4. `waitForLibraryV2Import`**-10-Minuten-Timeout + statisches
+  „Importing…" ist als P2-25 bereits getrackt — bei der Umsetzung auch den
+  `window.location.reload()` (Full-Page-Reload nach Import,
+  `library-v2-page.tsx:4666`) durch Query-Invalidierung ersetzen.
+- **D5. Play/Preview fehlt komplett** (Legacy hat `col-play` mit
+  Stream-Preview pro Track). Bewusste Lücke? Nirgends dokumentiert — als
+  Produktentscheidung festhalten oder als Parity-Punkt aufnehmen.
+- **D6. Artist-Tabelle** (Übersicht, `:2490`) hat keine Quality-Profile-/
+  Genre-/Added-Spalte und keinen Spalten-Zahnrad — mit B5 miterledigen.
+
+---
+
+## E. Priorisierung (Vorschlag — inkl. Runde-2-Funde aus G/H/I)
+
+**Bugs zuerst (klein, klar umrissen, real):** — ✅ Punkte 1–4 behoben
+2026-07-16, siehe library-v2.md §28.
+1. ~~**A1 + A2 (Cover-Embed + Cache-Bust)** — kritisch: Kernversprechen des
+   frisch gelieferten §49 ist sonst nicht eingelöst.~~
+2. ~~**G1 (Discography-Single-Swallow + External-ID-Vergiftung)** —
+   korrumpiert Katalog-Identitäten; wahrscheinliche Mit-Ursache des
+   §38-Restsymptoms.~~
+3. ~~**G4 (Autolink-Feat-Titel-Duplikat → Wishlist lädt doppelt)** — kostet
+   real Downloads/Bandbreite.~~
+4. ~~**G2 + G3 (ReplayGain-Tag-Cache auf gemappten Pfaden / fehlende
+   Invalidierung)** und **G5 (has_lyrics vs. unsyncedlyrics)** — kleine,
+   gezielte Fixes; G6 (falsche Fußnote) nebenbei.~~
+
+**Dann Architektur/UX:**
+5. **C1 + B7 (scoped Automatic Search, Search-Upgrades-Konsolidierung)** —
+   größter Verständnis-Gewinn, ersetzt A3/A4 gleich mit; danach I10
+   („search on monitor") fast gratis.
+6. **I6 (Queue-Sichtbarkeit an der Entity)** + **G7/H13
+   (Reorganize-Queue-Status)** — Vertrauen in den Auto-Flow.
+7. **B3 (klickbare RG/LR-Badges)** + **A5 (BPM/Duration)** — sichtbare
+   Quick-Wins, sparen Buttons.
+8. **B1 + B2 + B4 (Entrümpelung Zeile/Toolbar/Detail-Ansicht)** — nach C1, da
+   sich die Button-Menge dann ohnehin ändert.
+9. **A6/C3 + A7/C4 (History + Lifecycle)** — hoher Nutzerwert; C4 zuerst
+   designen (Persistenz), C3 ist reine Leseschicht.
+10. **B5/B6 (konfigurierbare Spalten/Provider, Sort, Bulk)** + **H6/H7/H8**
+    (Filter/Inline-Edit/Bulk-Bar) — ein zusammenhängender Tabellen-Block.
+11. **C2 (Manage Track Files)** + **H5 (Track-Delete)** + **A8/A9**.
+12. **Strategisch klären, dann bauen:** I1 (Add Artist), I2 (Wanted-Views),
+    I4 (Metadata Profile), H1 (Playback), H3 (Discography-Batch-Download),
+    H9 (Multi-User-Frage von lib2).
+
+---
+
+## G. Code-Audit Runde 2 — neue Bugs (Zeile für Zeile gefunden, nicht Nutzer-gemeldet)
+
+### G1. Discography-Match frisst Singles, die den Titel eines Albums teilen — und vergiftet dessen Provider-Identität — ✅ behoben (siehe library-v2.md §28)
+
+`_match_existing` (`core/library2/discography.py:155–175`): Nach dem
+Provider-ID-Match und dem bucket-gleichen Titel-Match fällt es auf
+`candidates[0]` zurück — **über Bucket-Grenzen hinweg**. Szenario: Library hat
+Album „Faith" (Deezer-ID A). Der Provider-Katalog enthält Album „Faith" (ID A)
+und Single „Faith" (ID S). Die Single findet keinen ID-Match und keinen
+Single-Bucket-Kandidaten → Fallback matcht sie aufs **Album** →
+`_merge_external_id` (`:103–109`) überschreibt bedingungslos
+`external_ids["deezer"] = S`. Folgen:
+1. Die Single erscheint **nie** als eigene Row („Update Discography findet nur
+   Singles nicht" / unvollständiger Katalog — passt zum §38-Restsymptom).
+2. Das Album trägt jetzt die **Provider-ID der Single** → die nächste
+   Tracklist-Auflösung (`completeness.py` bindet an `external_ids`) kann die
+   Single-Tracklist für das Album fetchen und via Snapshot-Referenz-Wechsel
+   den korrekten Cache invalidieren.
+
+**Fix-Richtung:** (a) Cross-Bucket-Fallback nur zulassen, wenn die
+Provider-Release **keine** eigene ID hat; (b) `_merge_external_id` darf eine
+VORHANDENE, abweichende ID derselben Source nie stillschweigend überschreiben
+(Konflikt loggen, Row unangetastet lassen). Regressionstest: Album+Single
+gleichen Titels im Provider-Snapshot.
+
+### G2. Album-ReplayGain aktualisiert den Tag-Cache auf path-gemappten Setups nie (Resolver-Invariante verletzt) — ✅ behoben (siehe library-v2.md §28)
+
+`analyze_album_replaygain` (`core/library2/replaygain.py:125–139`): Nach dem
+Tag-Write wird die File-Row per `WHERE path=?` mit dem **aufgelösten** Pfad
+gesucht — gespeichert ist aber die Media-Server-Sicht (§1-Invariante!). Auf
+jedem Setup mit Path-Mapping (Docker: `/music/...` vs. lokal) findet das
+UPDATE nichts → `tags_json` bleibt alt → RG-Badge bleibt grau, obwohl die
+Tags geschrieben wurden. Die `analyzed`-Liste verliert `track_id`/`file_id`
+(`:96,113`) — genau die hätte man durchreichen müssen; die
+Track-Level-Variante (`:201`) macht es korrekt mit `file_row["id"]`.
+
+### G3. Per-Track-ReplayGain-Button invalidiert die Query nicht — ✅ behoben (siehe library-v2.md §28)
+
+`TrackReplayGainButton` (`library-v2-page.tsx:3716–3736`): `onSuccess` setzt
+nur `setDone(true)` — keine `invalidateQueries`. Das frisch geschriebene
+`has_replaygain` (Backend persistiert es korrekt via
+`read_and_persist_tag_cache`) erscheint erst nach irgendeinem fremden Refetch.
+Der Album-RG-Button macht es richtig (`awaitBulkJob` invalidiert am Ende,
+`:3209`).
+
+### G4. Autolink-Heuristik hat die §39-Lektion nicht gelernt → Duplikat-Track statt Missing-Slot-Füllung — ✅ behoben (siehe library-v2.md §28)
+
+`_find_or_create_track` (`core/library2/autolink.py:107–137`) matcht nur
+Spotify-ID → exakter normalisierter Titel. Der häufigste reale Unterschied —
+Featured-Annotation im Titel („One Dance (feat. Wizkid & Kyla)" vs. „One
+Dance") — wurde in §39 für den Importer mit `dedup_title_key` gefixt, hier
+aber nicht: ein fertiger Download mit Feat-Titel matcht die fileless
+Wanted-Row NICHT → neue Duplikat-Row mit File, die Wanted-Row bleibt missing
+→ **die Wishlist lädt denselben Track erneut**. Betrifft alle Downloads ohne
+`lib2_track_id`-Kontext (Watchlist-New-Releases, manuelle Suchen von der
+Search-Seite, Playlists). Fix: `dedup_title_key` wiederverwenden + Fallback
+auf (disc, track_number)-Slot, bevor eine neue Row entsteht.
+
+### G5. `has_lyrics` erkennt nur den `lyrics`-Tag — Lyrics-Tab und LR-Badge widersprechen sich — ✅ behoben (siehe library-v2.md §28)
+
+`queries.py:677`: `has_lyrics = bool(tags_data.get("lyrics"))`. Der
+Lyrics-Tab liest aber `tags.lyrics || tags.unsyncedlyrics`
+(`library-v2-page.tsx:4384`), und der `missing_lyrics`-Repair-Job legt
+zusätzlich `.lrc`-Sidecars an. Ein Track mit USLT-only-Lyrics oder Sidecar
+zeigt LR=fehlend, obwohl der Lyrics-Tab Text anzeigt. Fix: `unsyncedlyrics`
+in die Ableitung aufnehmen (Sidecar-Erkennung optional, dann aber auch im
+Tag-Cache erfassen).
+
+### G6. Interactive-Search-Fußnote ist faktisch falsch (Autolink existiert) — ✅ behoben (siehe library-v2.md §28)
+
+`interactive-search.tsx:594–597`: „Use ‚Refresh & Scan' afterwards to pull
+new files into the v2 library" — seit dem Autolink-Hook (§3) verlinken
+fertige Downloads automatisch. Die Fußnote schickt Nutzer in unnötige
+Full-Scans und untergräbt das Vertrauen in den Auto-Flow.
+
+### G7. lib2-Reorganize ist fire-and-forget — die Queue hat in lib2 kein Gesicht
+
+`reorganize-modal.tsx` meldet nur „N queued". Die Legacy-UI hat ein
+komplettes Queue-Status-Panel (`mountReorganizeStatusPanel`,
+Per-Item-Cancel, Clear, Live-Polling gegen die Reorganize-Queue). In lib2
+sind Kollisionen/Fehler nach dem Enqueue **unsichtbar**; ob Files wirklich
+gemoved wurden, sieht man nur indirekt. Fix: das bestehende
+Queue-Status-API wiederverwenden (dünner Read reicht — Panel oder
+Status-Zeile im Modal mit Poll bis Queue leer).
+
+### G8. Kleinere Runde-2-Funde (gesammelt)
+
+- **`auto_monitor_releases` überfährt Flags:** `UPDATE lib2_tracks SET
+  monitored=1 WHERE album_id=?` (`discography.py:522`) flippt auch explizit
+  unmonitorte Tracks (nur das Kompatibilitäts-Flag; die Projektion respektiert
+  die `user_explicit`-Rule — aber Flag und Projektion divergieren dann
+  sichtbar).
+- **Retry-/Prune-Scope-Asymmetrie:** der Auto-Monitor-Retry
+  (`discography.py:267–282`) filtert auf `primary_artist_id`, Index/Prune
+  laufen über die `lib2_album_artists`-Junction — ein Album, dessen Primary
+  ein anderer Artist ist, wird nie retried.
+- **Autolink → `recompute_wanted` mit Default-Profil 1**
+  (`autolink.py:279`): verletzt die §1-Invariante „Profil-IDs nie hart auf 1"
+  (im Pipeline-Kontext gibt es kein Request-Profil; sauber wäre der
+  Admin-/Default-Lookup wie überall sonst).
+- **`_find_or_create_artist`-Slow-Path** (`autolink.py:62`) scannt bei jedem
+  nicht-exakten Treffer die GANZE Artist-Tabelle pro fertigem Download —
+  bei großen Libraries messbar; und er kennt weder `external_ids` noch die
+  §40-Alias-Gruppen (Duplikat-Artist-Risiko, deckt sich mit §40).
+- **Track-Automatic-Search-Query ohne Albumkontext:**
+  `buildSearchQuery` wirft den Album-Teil bewusst weg — bei generischen
+  Titeln („Intro") grabbt der Best-Pick beliebige Versionen. Wird durch C1
+  (serverseitige scoped Search) mit erledigt.
+
+---
+
+## H. Vollständiger Feature-Gap: Legacy Enhanced View → V2 (über §45–§51 hinaus)
+
+Systematische Enumeration aller `library.js`-Funktionen (9.691 Zeilen) gegen
+den V2-Stand. Neu identifiziert, bisher NIRGENDS getrackt:
+
+| # | Legacy-Feature | Code-Referenz | V2-Stand |
+|---|---|---|---|
+| H1 | **Track-Playback/Preview** (Play-Button pro Track, Streaming) | `playLibraryTrack`, `col-play` | fehlt komplett — kein Playback in lib2 |
+| H2 | **Artist Top Tracks** (Hero-Sektion, Last.fm-Fallback, „Download one/all") | `_loadArtistTopTracks`, `/api/artist/<id>/top-tracks` | fehlt |
+| H3 | **Discography-Download-Modal** (Releases multi-selektieren → Batch-Download, Filter, Select-All) | `openDiscographyModal`, `startDiscographyDownload` | fehlt — lib2 kann nur monitor→wishlist pro Release |
+| H4 | **Track-Redownload-Modal** (Quellen streamen, gezielt neu laden) | `showTrackRedownloadModal` | fehlt (Interactive Search deckt es halb ab, aber ohne „replace existing"-Semantik) |
+| H5 | **Track-/Album-Delete in der Tabelle** (inkl. Smart-Delete-Dialog) | `deleteLibraryTrack`, `_showSmartDeleteDialog`, `col-delete` | fehlt auf Track-Ebene; Album/Artist nur als Entity-Delete + ADR-05 |
+| H6 | **A-Z-Alphabet-Selector + Source-/Watchlist-Filter + Stats-Header** der Artist-Liste | `initializeAlphabetSelector`, `initializeSourceFilter`, `updateLibraryStats` | V2 hat nur Suche/Sort/Monitor-Filter/Paging |
+| H7 | **Inline-Edit in der Tabelle** (Klick auf BPM-Zelle etc.) | `startInlineEdit` | fehlt (V2: Modal-only) |
+| H8 | **Bulk-Selektion + Bulk-Bar** (Batch-Write-Tags, Batch-ReplayGain, Bulk-Edit-Modal) | `batchWriteTagsSelected`, `showBulkEditModal` | fehlt (deckt sich mit B6) |
+| H9 | **Report-Button für Nicht-Admins** (Multi-User: Problem melden statt löschen) | `col-report` | fehlt — lib2 ist bisher rein admin-gedacht |
+| H10 | **„Watch All Unwatched"-Bulk-Tool** | `openWatchAllUnwatchedModal` | fehlt |
+| H11 | **Artist-Record-Inspector** (Raw-JSON-Ansicht mit Filter/Copy/Download) | `openArtistRecordModal` | fehlt (Debug-Feature, niedrig) |
+| H12 | **Export**: Artist-Roster (Watchlist/Library) + **M3U-Export** | `openArtistExportModal`, `/api/library/export/m3u` | fehlt |
+| H13 | **Reorganize-Queue-Status-Panel** (Live, Cancel, Clear) | `mountReorganizeStatusPanel` | fehlt (= G7) |
+
+Bewertung: H1 (Playback) und H3 (Discography-Batch-Download) sind die
+größten funktionalen Regressionen; H6/H8 die alltäglichsten. H9 ist
+strategisch (Multi-User-Fähigkeit von lib2 ist ungeklärt — ADR-01 sagt
+admin-only, die Legacy-UI hatte aber ein Nicht-Admin-Verhalten).
+
+---
+
+## I. Vollständiger Feature-Gap: Lidarr → V2 (über die Search-Semantik hinaus)
+
+| # | Lidarr-Konzept | V2-Stand | Einschätzung |
+|---|---|---|---|
+| I1 | **Add Artist** (Provider-Suche → hinzufügen mit Monitor-Optionen all/future/missing/existing/first/latest/none + „search on add") | fehlt komplett — lib2 kann nur importieren, was Legacy/Downloads liefern; neue Artists entstehen nur indirekt über Watchlist/Discovery-Seiten | größte konzeptionelle Lücke für „Library Manager" |
+| I2 | **Wanted-Views**: globale „Missing"- und „Cutoff Unmet"-Listen | nur per-Artist-Zähler; keine globale lib2-Sicht (Legacy-Wishlist-Seite ist ungefiltert und nicht lib2-aware) | passt zu B4/B7 — dorthin gehören auch die globalen Search-Buttons |
+| I3 | **Mass Editor** (Artists multi-selektieren → Monitor/Profil setzen; Album Studio) | fehlt; V2 hat nur per-Artist-Bulk | mittel |
+| I4 | **Metadata Profile** (welche Release-Typen der Discography-Fetch überhaupt holt: Albums/EPs/Singles/Comps/Live) | fehlt — „All Releases" holt immer alles; bei großen Artists unübersichtlich + teuer | mittel-hoch, klein umsetzbar (Filter im Fetch + Anzeige) |
+| I5 | **Kalender / kommende Releases** | fehlt (Watchlist-Scanner arbeitet unsichtbar) | nice-to-have |
+| I6 | **Queue-Sichtbarkeit an der Entity** (Lidarr zeigt laufende Grabs/Queue direkt an Album/Track-Zeile) | fehlt — nach „Grabbing…"-Banner ist der Downloadstatus nur auf der Downloads-Seite sichtbar; Track-Zeile zeigt nichts | hoch für Vertrauen in den Auto-Flow; Daten existieren (acquisition_grabs + Downloads-API) |
+| I7 | **Blocklist-Ansicht** (einsehen/aufheben) | Blacklist nur als Write-Aktion (Source-Info-Popover); `candidate_blocklisted`/`candidate_unblocked` sind journaliert, keine UI | klein |
+| I8 | **Root-Folder/Pfad + Diskspace am Artist** | Pfade nirgends sichtbar außer Reorganize-Preview | klein |
+| I9 | **Unmapped Files** (Dateien ohne Katalog-Zuordnung) | nur als `orphan_file_detector`-Repair-Job, nicht in lib2 sichtbar | klein |
+| I10 | **„Search on monitor"**: Lidarr sucht direkt nach dem Monitoren (opt-in) | Monitoren mirrort nur in die Wishlist; Suche erst beim nächsten Scheduled Run / globalen Button | Quick-Win: Option „search immediately" am Monitor-Flow (nach C1 trivial) |
+
+---
+
+## F. Bereits getrackt (hier NICHT dupliziert, nur Querverweis)
+
+- Artist-scoped Automatic Search als Grundidee: `library-v2.md` §25.1 /
+  ui-requirements §6.4 (hier durch C1/B7 konkretisiert und um die
+  Upgrade-Semantik erweitert).
+- §45 Reidentify, §48 Rich-Metadata-Edit-Rest (BPM/Style/Mood/Label/Bulk —
+  Track-Basis-Edit existiert inzwischen), §51 „I Have This"-Hälfte: offen laut
+  §15 (Status dort korrigiert).
+- Manage-Tracks-Delete-Wünsche: ui-requirements §3.1/§3.2/§5.1 (durch C2
+  konkretisiert).
+- Import-Progress/Timeout: P2-25; Artist-Credit-Splitting-Restrisiko: P2-24;
+  Download-Engine-Verantwortung: P2-23.
+- §40/§41 Alias-Registry-Folgearbeiten (Fan-out-Sweep, Merge-UI), §38-Rest
+  (Live-Katalog-Fetch-Verifikation), §42 (laut ui-req §5.2 abgeschlossen).

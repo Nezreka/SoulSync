@@ -592,8 +592,9 @@ export function InteractiveSearchModal({
         </div>
 
         <div className={styles.modalFootNote}>
-          Downloads run through the normal SoulSync pipeline (staging → processing → tagging). Use
-          “Refresh &amp; Scan” afterwards to pull new files into the v2 library.
+          Downloads run through the normal SoulSync pipeline (staging → processing → tagging) and
+          are linked into the v2 library automatically once the file lands — no manual “Refresh
+          &amp; Scan” needed.
         </div>
       </div>
     </div>

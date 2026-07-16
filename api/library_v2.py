@@ -77,17 +77,6 @@ def _artwork_lock(kind: str, eid: int) -> threading.Lock:
         return lock
 
 
-def _artwork_url(kind: str, entity_id: int) -> str:
-    return f"/api/library/v2/artwork/{kind}/{int(entity_id)}"
-
-
-def _apply_artwork_urls(data: Any, kind: str) -> Any:
-    """Point a serialized entity's ``image_url`` at the local artwork endpoint."""
-    if isinstance(data, dict) and "id" in data:
-        data["image_url"] = _artwork_url(kind, data["id"])
-    return data
-
-
 def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                                config_get: Callable[..., Any],
                                config_manager: Any = None,
@@ -130,6 +119,27 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
     def _conn():
         return get_database()._get_connection()
+
+    def _artwork_url(kind: str, entity_id: int) -> str:
+        """The stable artwork endpoint, cache-busted with the cache file's own
+        mtime (A2). The endpoint is served with an ``immutable`` 7-day
+        Cache-Control on a URL that's otherwise stable, so a fresh cover pick
+        (which rewrites the cache file, changing its mtime) needs a changed
+        URL to ever reach the browser — invalidating React-Query alone only
+        clears the app's own cache, not the HTTP cache."""
+        from core.library2.artwork import artwork_file
+        try:
+            version = int(artwork_file(get_database(), kind, int(entity_id)).stat().st_mtime)
+        except OSError:
+            version = 0
+        suffix = f"?v={version}" if version else ""
+        return f"/api/library/v2/artwork/{kind}/{int(entity_id)}{suffix}"
+
+    def _apply_artwork_urls(data: Any, kind: str) -> Any:
+        """Point a serialized entity's ``image_url`` at the local artwork endpoint."""
+        if isinstance(data, dict) and "id" in data:
+            data["image_url"] = _artwork_url(kind, data["id"])
+        return data
 
     def _profile() -> int:
         try:
@@ -1750,6 +1760,40 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 "success": False,
                 "error": "Could not download or validate that image URL",
             }), 400
+
+        # A1: a picked cover only lands in the DB/cache above — without this,
+        # existing files keep their old embedded art forever (build_tag_diff
+        # never compares cover art, so a normal retag would just skip them).
+        from core.library2 import retag
+        scope_conn = _conn()
+        try:
+            track_ids = retag.album_track_ids(scope_conn, album_id)
+        finally:
+            scope_conn.close()
+        if track_ids:
+            try:
+                job = _job_registry.start("retag", total=len(track_ids))
+            except JobAlreadyRunning:
+                job = None
+            if job is not None:
+                job_id = job["job_id"]
+
+                def _run():
+                    db = get_database()
+                    try:
+                        def _progress(_stage, current, total):
+                            _job_registry.update(job_id, current=current, total=total)
+                        stats = retag.write_tags(db, track_ids, embed_cover=True,
+                                                 force_cover=True, progress=_progress)
+                        _job_registry.update(job_id, result=stats)
+                    except Exception as e:  # noqa: BLE001
+                        logger.error("Library v2 cover-embed retag failed: %s", e, exc_info=True)
+                        _job_registry.update(job_id, error=str(e))
+                    finally:
+                        _job_registry.finish(job_id)
+
+                threading.Thread(target=_run, name="lib2-cover-embed", daemon=True).start()
+
         return jsonify({"success": True, "album_id": album_id, "image_url": _artwork_url("album", album_id)})
 
     # -- monitoring (mirrors watchlist / wishlist) ----------------------------

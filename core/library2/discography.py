@@ -101,11 +101,26 @@ def _external_ids(raw: Any) -> Dict[str, str]:
 
 
 def _merge_external_id(raw: Any, source: Optional[str], provider_id: str) -> str:
+    """Add/refresh one source's id — but never silently clobber an existing,
+    DIFFERING id of the same source (G1). A cross-bucket title-fallback match
+    (see ``_match_existing``) can hand this a release that legitimately
+    belongs to a different catalog entry; overwriting here would poison the
+    row's identity (the next tracklist fetch then resolves the wrong
+    release). Log the conflict and leave the row's id untouched instead."""
     import json
 
     values = _external_ids(raw)
     if source and provider_id:
-        values[str(source).strip().lower()] = str(provider_id).strip()
+        key = str(source).strip().lower()
+        candidate = str(provider_id).strip()
+        current = values.get(key)
+        if current and current != candidate:
+            logger.warning(
+                "discography external-id conflict for source=%s: keeping %s, "
+                "refusing to overwrite with %s", key, current, candidate,
+            )
+        else:
+            values[key] = candidate
     return json.dumps(values, sort_keys=True, separators=(",", ":"))
 
 
@@ -172,7 +187,15 @@ def _match_existing(index: Dict[str, List[Dict[str, Any]]], *, title: str,
     for row in candidates:
         if _bucket(row["album_type"]) == want:
             return row
-    return candidates[0] if candidates else None
+    # Cross-bucket fallback (e.g. a legacy single filed as 'album') is only
+    # safe when the provider release has no id of its own (G1): a Single
+    # that DOES carry its own provider id but matches no library row is
+    # genuinely new — not a legacy-misclassified duplicate of the Album
+    # sharing its title — and must get its own row instead of a random
+    # candidates[0] pick that would then poison that row's external_ids.
+    if not provider_id:
+        return candidates[0] if candidates else None
+    return None
 
 
 def _resolve_group(database, artist_id: int) -> List[int]:

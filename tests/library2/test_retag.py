@@ -152,6 +152,72 @@ def test_successful_retag_reloads_written_tags_instead_of_leaving_old_gaps(
     assert json.loads(cache["missing_tags_json"]) == []
 
 
+def test_force_cover_embeds_even_when_text_tags_are_unchanged(
+        imported_conn, legacy_db, tmp_path, monkeypatch):
+    """A1: a picked cover must reach the file even when every text tag already
+    matches — build_tag_diff never compares cover art, so without force_cover
+    the unchanged-fastpath would skip the file and the new cover would never
+    be embedded."""
+    conn = imported_conn
+    file_path = tmp_path / "track.flac"
+    file_path.write_bytes(b"fake")
+    _, album_id, track_id = _seed_album_with_files(conn, path="/mapped/track.flac")
+
+    from core.library2.artwork import artwork_file
+    cover_path = artwork_file(legacy_db, "album", album_id)
+    cover_path.write_bytes(b"new-cover-bytes")
+
+    file_tags = {
+        "title": "One Dance", "artist": "Drake; Wizkid",
+        "album_artist": "Drake", "album": "Views", "year": "2016-04-29",
+        "genre": "rap, pop", "track_number": 1, "disc_number": 1,
+        "has_cover_art": True, "error": None,
+    }
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda _path: str(file_path))
+    monkeypatch.setattr("core.tag_writer.read_file_tags", lambda _path: file_tags)
+    monkeypatch.setattr("core.tag_writer.build_tag_diff", lambda *_args: [])
+    captured = {}
+
+    def _fake_write(path, db_data, *, embed_cover, cover_data):
+        captured["embed_cover"] = embed_cover
+        captured["cover_data"] = cover_data
+        return {"success": True}
+
+    monkeypatch.setattr("core.tag_writer.write_tags_to_file", _fake_write)
+
+    stats = retag.write_tags(legacy_db, [track_id], embed_cover=True, force_cover=True)
+
+    assert stats["written"] == 1
+    assert stats["skipped"] == 0
+    assert captured["embed_cover"] is True
+    assert captured["cover_data"] == (b"new-cover-bytes", "image/jpeg")
+
+
+def test_force_cover_without_a_cache_file_still_skips_unchanged(
+        imported_conn, legacy_db, tmp_path, monkeypatch):
+    """force_cover has nothing to embed if the album has no cached artwork
+    yet — must fall back to the normal skip instead of a pointless write."""
+    conn = imported_conn
+    file_path = tmp_path / "track.flac"
+    file_path.write_bytes(b"fake")
+    _, _, track_id = _seed_album_with_files(conn, path="/mapped/track.flac")
+
+    file_tags = {
+        "title": "One Dance", "artist": "Drake; Wizkid",
+        "album_artist": "Drake", "album": "Views", "year": "2016-04-29",
+        "genre": "rap, pop", "track_number": 1, "disc_number": 1,
+        "has_cover_art": True, "error": None,
+    }
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda _path: str(file_path))
+    monkeypatch.setattr("core.tag_writer.read_file_tags", lambda _path: file_tags)
+    monkeypatch.setattr("core.tag_writer.build_tag_diff", lambda *_args: [])
+
+    stats = retag.write_tags(legacy_db, [track_id], embed_cover=True, force_cover=True)
+
+    assert stats["skipped"] == 1
+    assert stats["written"] == 0
+
+
 def test_write_closes_snapshot_connection_before_file_io(
         imported_conn, legacy_db, tmp_path, monkeypatch):
     conn = imported_conn

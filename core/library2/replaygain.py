@@ -25,8 +25,8 @@ ResolveFn = Callable[[str], Optional[str]]
 ProgressFn = Callable[[int, int, str], None]
 
 
-def _present_track_files(conn, album_id: int) -> List[Tuple[int, str, str]]:
-    """(track_id, title, path) for the album's tracks that own a primary file."""
+def _present_track_files(conn, album_id: int) -> List[Tuple[int, int, str, str]]:
+    """(track_id, file_id, title, path) for tracks that own a primary file."""
     track_rows = conn.execute(
         "SELECT id, title FROM lib2_tracks WHERE album_id=? "
         "ORDER BY disc_number, track_number, id",
@@ -37,7 +37,7 @@ def _present_track_files(conn, album_id: int) -> List[Tuple[int, str, str]]:
     from core.library2.track_files import primary_file_rows
 
     files = primary_file_rows(conn, [int(r["id"]) for r in track_rows])
-    out: List[Tuple[int, str, str]] = []
+    out: List[Tuple[int, int, str, str]] = []
     for row in track_rows:
         file_row = files.get(int(row["id"]))
         path = file_row["path"] if file_row and file_row.get("path") else None
@@ -45,7 +45,7 @@ def _present_track_files(conn, album_id: int) -> List[Tuple[int, str, str]]:
             continue
         if file_row.get("file_state") == "missing_confirmed":
             continue
-        out.append((int(row["id"]), row["title"] or path, path))
+        out.append((int(row["id"]), int(file_row["id"]), row["title"] or path, path))
     return out
 
 
@@ -93,8 +93,12 @@ def analyze_album_replaygain(
     # Pass 1: analyze every resolvable file.
     lufs_values: List[float] = []
     peak_values: List[float] = []
-    analyzed: List[Tuple[str, float, float]] = []  # (path, track_gain_db, peak)
-    for index, (_track_id, title, stored_path) in enumerate(entries, start=1):
+    # (file_id, path, track_gain_db, peak) — file_id travels with the entry so
+    # pass 2 never has to re-look-up the row by path (see G2: the stored path
+    # is the media-server view, not the resolved filesystem path, so a
+    # path-mapped setup would silently match nothing).
+    analyzed: List[Tuple[int, str, float, float]] = []
+    for index, (_track_id, file_id, title, stored_path) in enumerate(entries, start=1):
         if progress is not None:
             progress(index, total, title)
         resolved = resolve(stored_path)
@@ -110,7 +114,7 @@ def analyze_album_replaygain(
             continue
         lufs_values.append(lufs)
         peak_values.append(peak_dbfs)
-        analyzed.append((resolved, RG_REFERENCE_LUFS - lufs, peak_dbfs))
+        analyzed.append((file_id, resolved, RG_REFERENCE_LUFS - lufs, peak_dbfs))
 
     album_gain_db: Optional[float] = None
     album_peak_dbfs: Optional[float] = None
@@ -122,7 +126,7 @@ def analyze_album_replaygain(
     # Pass 2: write track + album tags for everything that analyzed.
     from core.metadata.common import get_file_lock
 
-    for path, track_gain_db, peak_dbfs in analyzed:
+    for file_id, path, track_gain_db, peak_dbfs in analyzed:
         try:
             with get_file_lock(path):
                 write(path, track_gain_db, peak_dbfs, album_gain_db, album_peak_dbfs)
@@ -131,10 +135,8 @@ def analyze_album_replaygain(
             # Rescan tags into database cache
             try:
                 from core.library2.tag_cache import read_and_persist_tag_cache
-                row = conn.execute("SELECT id FROM lib2_track_files WHERE path=?", (path,)).fetchone()
-                if row:
-                    read_and_persist_tag_cache(conn, row["id"], path)
-                    conn.commit()
+                read_and_persist_tag_cache(conn, file_id, path)
+                conn.commit()
             except Exception as scan_err:
                 logger.debug("Failed to rescan file tags after album ReplayGain write for %s: %s", path, scan_err)
         except Exception as e:  # noqa: BLE001

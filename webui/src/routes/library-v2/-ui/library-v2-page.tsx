@@ -3714,10 +3714,14 @@ function TrackRow({
 
 /** Per-track ReplayGain: analyze this one file and write track-level tags. */
 function TrackReplayGainButton({ track }: { track: LibraryV2Track }) {
+  const queryClient = useQueryClient();
   const [done, setDone] = useState(false);
   const mutation = useMutation({
     mutationFn: () => analyzeLibraryV2TrackReplayGain(track.id as number),
-    onSuccess: () => setDone(true),
+    onSuccess: () => {
+      setDone(true);
+      void queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+    },
   });
   return (
     <IconActionButton
