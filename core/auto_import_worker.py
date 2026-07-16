@@ -104,6 +104,7 @@ def _read_file_tags(file_path: str) -> Dict[str, Any]:
         'title': '', 'artist': '', 'album': '',
         'track_number': 0, 'disc_number': 1, 'year': '',
         'genres': [], 'isrc': '', 'mbid': '', 'duration_ms': 0,
+        'spotify_track_id': '',
     }
     try:
         from mutagen import File as MutagenFile
@@ -161,6 +162,15 @@ def _read_file_tags(file_path: str) -> Dict[str, Any]:
                 # `MUSICBRAINZ_TRACKID` for Vorbis comments. Mutagen's easy
                 # mode normalizes the key.
                 result['mbid'] = (tags.get('musicbrainz_trackid', [''])[0] or '').strip().lower()
+
+        # Spotify track link in the COMMENT tag (spotiflac and friends write the
+        # source URL there) — an exact 1:1 identity for the file. Read separately
+        # because ID3 COMM frames aren't exposed by mutagen's easy mode.
+        try:
+            from core.imports.exact_id_discovery import extract_spotify_track_id, read_comment_text
+            result['spotify_track_id'] = extract_spotify_track_id(read_comment_text(file_path)) or ''
+        except Exception:
+            result['spotify_track_id'] = ''
     except Exception as e:
         logger.debug(f"Could not read tags from {os.path.basename(file_path)}: {e}")
     return result
@@ -1039,6 +1049,13 @@ class AutoImportWorker:
         if candidate.is_single:
             return self._identify_single(candidate)
 
+        # Strategy 0: exact identifiers — a Spotify link in the comment tag or
+        # ISRC codes resolve the album with no text matching at all (Sokhi:
+        # Japanese releases fail the text search while their tags carry both).
+        exact_result = self._identify_from_exact_ids(candidate)
+        if exact_result:
+            return exact_result
+
         # Strategy 1: Read tags
         tag_result = self._identify_from_tags(candidate)
         if tag_result:
@@ -1069,6 +1086,24 @@ class AutoImportWorker:
         artist = tags.get('artist', '')
         title = tags.get('title', '')
         album = tags.get('album', '')
+
+        # Exact identifiers first (Sokhi): a Spotify comment-link or ISRC gives
+        # canonical names, fixing text-search failures (JP releases). Refines
+        # the search terms only — the normal single-track search still decides.
+        if tags.get('spotify_track_id') or tags.get('isrc'):
+            try:
+                from core.imports.exact_id_discovery import default_resolvers, discover_album_from_ids
+                resolve_spotify, resolve_isrc = default_resolvers()
+                found = discover_album_from_ids([tags], resolve_spotify_track=resolve_spotify,
+                                                resolve_isrc=resolve_isrc)
+                if found:
+                    logger.info(f"[Auto-Import] Exact-ID identity for single '{candidate.name}': "
+                                f"'{found['artist']}' - '{found.get('title') or title}' (via {found['via']})")
+                    artist = found['artist'] or artist
+                    album = found['album'] or album
+                    title = found.get('title') or title
+            except Exception as e:
+                logger.debug(f"[Auto-Import] exact-id single identity skipped: {e}")
 
         # Fallback: parse filename (Artist - Title.ext)
         if not artist or not title:
@@ -1250,6 +1285,35 @@ class AutoImportWorker:
 
         except Exception as e:
             logger.debug(f"Single track search failed for '{artist} - {title}': {e}")
+            return None
+
+    def _identify_from_exact_ids(self, candidate: FolderCandidate) -> Optional[Dict]:
+        """Strategy 0: resolve the album from exact identifiers in the files'
+        tags — Spotify comment-links (1:1) first, then ISRC consensus across
+        the folder (one recording lives on many releases; the album that
+        contains MOST of the folder's codes is the album). On a hit the
+        canonical artist+album feed the normal source search, so everything
+        downstream (track pairing, which is already ISRC-aware) is unchanged.
+        Fail-safe: any error falls through to the text strategies."""
+        try:
+            from core.imports.exact_id_discovery import default_resolvers, discover_album_from_ids
+            tags_list = [_read_file_tags(f) for f in candidate.audio_files[:10]]
+            if not any(t.get('spotify_track_id') or t.get('isrc') for t in tags_list):
+                return None
+            resolve_spotify, resolve_isrc = default_resolvers()
+            found = discover_album_from_ids(
+                tags_list,
+                resolve_spotify_track=resolve_spotify,
+                resolve_isrc=resolve_isrc,
+            )
+            if not found:
+                return None
+            logger.info(f"[Auto-Import] Exact-ID identification for '{candidate.name}': "
+                        f"'{found['artist']}' - '{found['album']}' (via {found['via']})")
+            return self._search_metadata_source(found['artist'], found['album'],
+                                                f"exact-ids ({found['via']})", candidate)
+        except Exception as e:
+            logger.debug(f"[Auto-Import] exact-id identification skipped: {e}")
             return None
 
     def _identify_from_tags(self, candidate: FolderCandidate) -> Optional[Dict]:
