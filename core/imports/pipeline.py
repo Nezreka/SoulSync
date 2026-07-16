@@ -32,7 +32,12 @@ from core.imports.context import (
     get_import_track_info,
     normalize_import_context,
 )
-from core.imports.file_integrity import check_audio_integrity, expected_duration_for_check, resolve_duration_tolerance
+from core.imports.file_integrity import (
+    check_audio_integrity,
+    expected_duration_for_check,
+    probe_decoded_duration,
+    resolve_duration_tolerance,
+)
 from core.imports.filename import extract_track_number_from_filename
 from core.imports.guards import check_flac_bit_depth, check_quality_target, move_to_quarantine
 from core.imports.silence import detect_broken_audio
@@ -85,6 +90,35 @@ __all__ = [
     "post_process_matched_download",
     "post_process_matched_download_with_verification",
 ]
+
+
+def _audio_length_seconds(path: str) -> float:
+    """Best-effort real length of an audio file: mutagen's header first, then
+    an ffmpeg decode when the header reads 0 (HiFi's fragmented FLAC does).
+    0.0 when it genuinely can't be determined."""
+    try:
+        from mutagen import File as MutagenFile
+        info = getattr(MutagenFile(path), 'info', None)
+        length = float(getattr(info, 'length', 0) or 0)
+        if length > 0:
+            return length
+    except Exception:   # noqa: BLE001,S110 - fall through to the ffmpeg decode
+        logger.debug("mutagen length read failed for %s, decoding instead", path, exc_info=True)
+    return probe_decoded_duration(path)
+
+
+def _replacement_length_is_safe(existing_path: str, incoming_path: str,
+                                min_ratio: float = 0.8) -> bool:
+    """Guard a library-file replacement: True unless the incoming file plays
+    materially shorter than the file it would replace (a preview/truncated
+    clip). Conservative — if EITHER length can't be determined we allow the
+    replace (the other gates own that case), so this never blocks a legit
+    upgrade, only a clear shrink."""
+    existing_s = _audio_length_seconds(existing_path)
+    incoming_s = _audio_length_seconds(incoming_path)
+    if existing_s <= 0 or incoming_s <= 0:
+        return True
+    return incoming_s >= existing_s * min_ratio
 
 
 def _should_skip_quarantine_check(context: dict, check_name: str) -> bool:
@@ -916,6 +950,42 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
         if os.path.exists(final_path):
             if not os.path.exists(file_path):
                 logger.info(f"[Protection] Destination exists and source already gone - file already transferred: {os.path.basename(final_path)}")
+                return
+            # THE backstop for sella's incident: an upgrade/replace must NEVER
+            # swap a good library file for a materially shorter one. Every path
+            # below can os.remove(final_path) and move the incoming file in — so
+            # before any of them, compare the REAL decoded lengths. A 30s HiFi
+            # preview replacing a 220s track is caught here even if every header
+            # (and AcoustID) was faked, and even for files no other gate saw.
+            if not _replacement_length_is_safe(final_path, file_path):
+                logger.error(
+                    "[Protection] Refusing to replace %s — the incoming file is "
+                    "far shorter (likely a preview/truncated clip). Quarantining it.",
+                    os.path.basename(final_path))
+                try:
+                    qpath = move_to_quarantine(
+                        file_path, context,
+                        "Replacement guard: incoming file is far shorter than the "
+                        "library file it would replace (preview/truncated clip)",
+                        automation_engine, trigger='integrity')
+                    _mark_task_quarantined(context, qpath)
+                except Exception as _qe:   # noqa: BLE001
+                    logger.error("[Protection] Could not quarantine the short replacement "
+                                 "(leaving in place, NOT replacing): %s", _qe)
+                task_id = context.get('task_id')
+                batch_id = context.get('batch_id')
+                if task_id:
+                    with tasks_lock:
+                        if task_id in download_tasks:
+                            download_tasks[task_id]['status'] = 'failed'
+                            download_tasks[task_id]['error_message'] = (
+                                "Replacement rejected: incoming file is far shorter "
+                                "than the existing library file")
+                    if batch_id:
+                        _notify_download_completed(batch_id, task_id, success=False)
+                with matched_context_lock:
+                    if context_key in matched_downloads_context:
+                        del matched_downloads_context[context_key]
                 return
             try:
                 from mutagen import File as MutagenFile
