@@ -185,7 +185,7 @@ export function RetagModal({
                       </td>
                       <td className={styles.colNum}>{t.track_number ?? '—'}</td>
                       <td title={t.file_path ?? undefined}>{t.title ?? '—'}</td>
-                      <td className={styles.qualityText}>
+                      <td className={styles.diffCell}>
                         {t.error ? (
                           <span className={styles.statusWarn}>{t.error}</span>
                         ) : t.has_changes ? (
@@ -204,7 +204,7 @@ export function RetagModal({
 
         <div className={styles.modalActions}>
           {previewQuery.data?.truncated ? (
-            <span className={styles.muted}>Showing the first 500 tracks.</span>
+            <span className={styles.modalActionsText}>Showing the first 500 tracks.</span>
           ) : null}
           <button type="button" className={styles.btnGhost} onClick={onClose}>
             {phase === 'done' ? 'Close' : 'Cancel'}

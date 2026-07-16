@@ -268,8 +268,12 @@ export function AlbumReorganizeModal({
                   <tr key={t.track_id ?? i}>
                     <td className={styles.colNum}>{t.track_number ?? '—'}</td>
                     <td>{t.title || '—'}</td>
-                    <td title={t.current_path ?? undefined}>{t.current_path || '—'}</td>
-                    <td title={t.new_path ?? undefined}>{t.new_path || '—'}</td>
+                    <td className={styles.filePathCell} title={t.current_path ?? undefined}>
+                      {t.current_path || '—'}
+                    </td>
+                    <td className={styles.filePathCell} title={t.new_path ?? undefined}>
+                      {t.new_path || '—'}
+                    </td>
                     <td className={styles.qualityText}>
                       {t.unchanged ? (
                         <span className={styles.statusOk}>unchanged</span>
@@ -287,7 +291,7 @@ export function AlbumReorganizeModal({
         </div>
 
         <div className={styles.modalActions}>
-          <span className={styles.muted}>
+          <span className={styles.modalActionsText}>
             {moving.length} of {tracks.length} track(s) will move
           </span>
           <button type="button" className={styles.btnGhost} onClick={onClose}>

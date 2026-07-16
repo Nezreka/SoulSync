@@ -286,8 +286,31 @@ function Artwork({
 function useMonitorMutation() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (v: { entity: 'artists' | 'albums' | 'tracks'; id: number; monitored: boolean }) =>
-      setLibraryV2Monitored(v.entity, v.id, v.monitored),
+    mutationFn: async (v: {
+      entity: 'artists' | 'albums' | 'tracks';
+      id: number | null;
+      monitored: boolean;
+      albumId?: number;
+      trackNumber?: number;
+      discNumber?: number;
+      title?: string;
+    }) => {
+      let targetId = v.id;
+      if (targetId == null && v.entity === 'tracks') {
+        if (v.albumId == null || v.trackNumber == null) {
+          throw new Error('This track cannot be monitored yet');
+        }
+        const created = await materializeLibraryV2MissingTrack(v.albumId, {
+          track_number: v.trackNumber,
+          disc_number: v.discNumber ?? 1,
+          title: v.title,
+        });
+        targetId = created.track_id;
+      }
+      if (targetId != null) {
+        return setLibraryV2Monitored(v.entity, targetId, v.monitored);
+      }
+    },
     onSettled: () => queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY }),
   });
 }
@@ -301,10 +324,18 @@ export function MonitorToggle({
   entity,
   id,
   monitored,
+  albumId,
+  trackNumber,
+  discNumber,
+  title,
 }: {
   entity: 'artists' | 'albums' | 'tracks';
-  id: number;
+  id: number | null;
   monitored: boolean;
+  albumId?: number;
+  trackNumber?: number;
+  discNumber?: number;
+  title?: string;
 }) {
   const mutation = useMonitorMutation();
   const nextMonitored = !monitored;
@@ -328,7 +359,17 @@ export function MonitorToggle({
               : 'Not monitored — click to monitor'
         }
         disabled={mutation.isPending}
-        onClick={() => mutation.mutate({ entity, id, monitored: nextMonitored })}
+        onClick={() =>
+          mutation.mutate({
+            entity,
+            id,
+            monitored: nextMonitored,
+            albumId,
+            trackNumber,
+            discNumber,
+            title,
+          })
+        }
       >
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d={BOOKMARK_PATH} strokeLinejoin="round" />
@@ -756,16 +797,34 @@ function EnrichDropdown({
   entityName,
   wrapperRef,
   onClose,
+  align = 'left',
+  submenu = false,
 }: {
   entity: 'artists' | 'albums' | 'tracks';
   entityId: number;
   entityName: string;
   wrapperRef: React.RefObject<HTMLSpanElement | null>;
   onClose: () => void;
+  align?: 'left' | 'right';
+  submenu?: boolean;
 }) {
   const queryClient = useQueryClient();
   const mutation = useMutation({
-    mutationFn: (service: string) => {
+    mutationFn: async (service: string) => {
+      if (service === 'all') {
+        const services = ENRICH_SERVICES[entity];
+        window.showToast?.(`Enriching ${entityName} from all services...`, 'info');
+        let resynced = false;
+        for (const s of services) {
+          try {
+            const res = await enrichLibraryV2Entity(entity, entityId, s.value);
+            if (res.resynced) resynced = true;
+          } catch (e) {
+            console.error(`Bulk enrich failed for ${s.value}:`, e);
+          }
+        }
+        return { resynced };
+      }
       window.showToast?.(`Enriching ${entityName} from ${service}...`, 'info');
       return enrichLibraryV2Entity(entity, entityId, service);
     },
@@ -793,7 +852,25 @@ function EnrichDropdown({
   }, [onClose, wrapperRef]);
 
   return (
-    <div className={styles.enrichDropdownMenu}>
+    <div
+      className={`${styles.enrichDropdownMenu} ${align === 'right' ? styles.alignRight : styles.alignLeft} ${
+        submenu ? styles.enrichDropdownSubmenu : ''
+      }`}
+    >
+      <button
+        type="button"
+        className={styles.enrichDropdownItem}
+        disabled={mutation.isPending}
+        onClick={(e) => {
+          e.stopPropagation();
+          mutation.mutate('all');
+          onClose();
+        }}
+      >
+        <span className={styles.enrichDropdownIcon}>✨</span>
+        <span className={styles.enrichDropdownLabel}>Enrich with all</span>
+      </button>
+      <div className={styles.enrichDivider} />
       {ENRICH_SERVICES[entity].map((s) => (
         <button
           key={s.value}
@@ -1527,7 +1604,7 @@ function AlbumOverflowMenu({
 }) {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
-  const [showEnrich, setShowEnrich] = useState(false);
+  const [showSubmenu, setShowSubmenu] = useState(false);
   const [showRetag, setShowRetag] = useState(false);
   const [showReorganize, setShowReorganize] = useState(false);
   const [showArtPicker, setShowArtPicker] = useState(false);
@@ -1552,10 +1629,10 @@ function AlbumOverflowMenu({
   }, [open]);
 
   return (
-    <span ref={wrapRef} className={styles.overflowWrap}>
+    <span ref={wrapRef} className={styles.overflowWrap} onClick={(e) => e.stopPropagation()}>
       <IconActionButton icon="more" title="More actions" onClick={() => setOpen((v) => !v)} />
       {open ? (
-        <div className={styles.overflowMenu}>
+        <div className={`${styles.overflowMenu} ${styles.alignRight}`}>
           <button
             type="button"
             className={styles.overflowMenuItem}
@@ -1607,16 +1684,36 @@ function AlbumOverflowMenu({
           >
             Change cover
           </button>
-          <button
-            type="button"
-            className={styles.overflowMenuItem}
-            onClick={() => {
-              setShowEnrich(true);
-              setOpen(false);
-            }}
+          <div
+            className={styles.submenuContainer}
+            onMouseEnter={() => setShowSubmenu(true)}
+            onMouseLeave={() => setShowSubmenu(false)}
           >
-            Enrich…
-          </button>
+            <button
+              type="button"
+              className={styles.overflowMenuItem}
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowSubmenu((v) => !v);
+              }}
+            >
+              Enrich… <span className={styles.submenuChevron}>›</span>
+            </button>
+            {showSubmenu ? (
+              <EnrichDropdown
+                entity="albums"
+                entityId={album.id}
+                entityName={album.title}
+                wrapperRef={wrapRef}
+                align="right"
+                submenu
+                onClose={() => {
+                  setShowSubmenu(false);
+                  setOpen(false);
+                }}
+              />
+            ) : null}
+          </div>
           <button
             type="button"
             className={`${styles.overflowMenuItem} ${styles.overflowMenuItemDanger}`}
@@ -1628,20 +1725,6 @@ function AlbumOverflowMenu({
             Delete
           </button>
         </div>
-      ) : null}
-      {replaygain.isError ? (
-        <span className={styles.monitorError} role="alert">
-          {mutationErrorMessage(replaygain.error, 'ReplayGain analysis failed')}
-        </span>
-      ) : null}
-      {showEnrich ? (
-        <EnrichDropdown
-          entity="albums"
-          entityId={album.id}
-          entityName={album.title}
-          wrapperRef={wrapRef}
-          onClose={() => setShowEnrich(false)}
-        />
       ) : null}
       {showRetag ? (
         <RetagModal
@@ -1909,18 +1992,18 @@ type ManageTracksTab = 'duplicates' | 'files';
  *  "Files" tab (C2 — Lidarr's "Manage Track Files") listing every physical
  *  file this artist owns for bulk selection + ADR-05 delete. */
 function ManageTracksModal({ artistId, onClose }: { artistId: number; onClose: () => void }) {
-  const [tab, setTab] = useState<ManageTracksTab>('duplicates');
+  const [tab, setTab] = useState<ManageTracksTab>('files');
   return (
     <ModalShell title="Manage Tracks" wide onClose={onClose}>
       <div className={styles.detailTabs}>
-        {(['duplicates', 'files'] as const).map((t) => (
+        {(['files', 'duplicates'] as const).map((t) => (
           <button
             key={t}
             type="button"
             className={`${styles.detailTab} ${tab === t ? styles.detailTabActive : ''}`}
             onClick={() => setTab(t)}
           >
-            {t === 'duplicates' ? 'Duplicates' : 'Files'}
+            {t === 'files' ? 'Files' : 'Duplicates'}
           </button>
         ))}
       </div>
@@ -2201,7 +2284,7 @@ function ArtistFilesTab({ artistId }: { artistId: number }) {
         </>
       )}
       <div className={styles.modalActions}>
-        <span className={styles.muted}>{selected.size} selected</span>
+        <span className={styles.modalActionsText}>{selected.size} selected</span>
         <button
           type="button"
           className={styles.btnDanger}
@@ -3164,20 +3247,23 @@ function ArtistToolsMenu({
   onManualImport: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [showEnrich, setShowEnrich] = useState(false);
+  const [showSubmenu, setShowSubmenu] = useState(false);
   const wrapRef = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
     if (!open) return;
     function onDocClick(e: MouseEvent) {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setShowSubmenu(false);
+      }
     }
     document.addEventListener('mousedown', onDocClick);
     return () => document.removeEventListener('mousedown', onDocClick);
   }, [open]);
 
   return (
-    <span ref={wrapRef} className={styles.overflowWrap}>
+    <span ref={wrapRef} className={styles.overflowWrap} onClick={(e) => e.stopPropagation()}>
       <ActionButton
         icon="organize"
         label="Files/Tools"
@@ -3185,7 +3271,7 @@ function ArtistToolsMenu({
         onClick={() => setOpen((v) => !v)}
       />
       {open ? (
-        <div className={styles.overflowMenu}>
+        <div className={`${styles.overflowMenu} ${styles.alignLeft}`}>
           <button
             type="button"
             className={styles.overflowMenuItem}
@@ -3226,26 +3312,37 @@ function ArtistToolsMenu({
           >
             Manual Import
           </button>
-          <button
-            type="button"
-            className={styles.overflowMenuItem}
-            onClick={() => {
-              setShowEnrich(true);
-              setOpen(false);
-            }}
+          <div
+            className={styles.submenuContainer}
+            onMouseEnter={() => setShowSubmenu(true)}
+            onMouseLeave={() => setShowSubmenu(false)}
           >
-            Enrich…
-          </button>
+            <button
+              type="button"
+              className={styles.overflowMenuItem}
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowSubmenu((v) => !v);
+              }}
+            >
+              Enrich… <span className={styles.submenuChevron}>›</span>
+            </button>
+            {showSubmenu ? (
+              <EnrichDropdown
+                entity="artists"
+                entityId={artistId}
+                entityName={artistName}
+                wrapperRef={wrapRef}
+                align="left"
+                submenu
+                onClose={() => {
+                  setShowSubmenu(false);
+                  setOpen(false);
+                }}
+              />
+            ) : null}
+          </div>
         </div>
-      ) : null}
-      {showEnrich ? (
-        <EnrichDropdown
-          entity="artists"
-          entityId={artistId}
-          entityName={artistName}
-          wrapperRef={wrapRef}
-          onClose={() => setShowEnrich(false)}
-        />
       ) : null}
     </span>
   );
@@ -4013,14 +4110,14 @@ function TrackTableOptionsMenu({
   const columnKeys = Object.keys(TRACK_TABLE_COLUMN_LABELS) as (keyof LibraryV2TrackTableColumns)[];
 
   return (
-    <span ref={wrapRef} className={styles.overflowWrap}>
+    <span ref={wrapRef} className={styles.overflowWrap} onClick={(e) => e.stopPropagation()}>
       <IconActionButton
         icon="settings"
         title="Table options — columns & match providers"
         onClick={() => setOpen((v) => !v)}
       />
       {open ? (
-        <div className={`${styles.overflowMenu} ${styles.tableOptionsMenu}`}>
+        <div className={`${styles.overflowMenu} ${styles.tableOptionsMenu} ${styles.alignRight}`}>
           <div className={styles.tableOptionsGroupLabel}>Columns</div>
           {columnKeys.map((key) => (
             <label key={key} className={styles.tableOptionsItem}>
@@ -4384,9 +4481,15 @@ function TrackRow({
         ) : null}
       </td>
       <td>
-        {track.id ? (
-          <MonitorToggle entity="tracks" id={track.id} monitored={track.monitored} />
-        ) : null}
+        <MonitorToggle
+          entity="tracks"
+          id={track.id}
+          monitored={track.monitored}
+          albumId={entityBase.albumId}
+          trackNumber={track.track_number ?? undefined}
+          discNumber={track.disc_number ?? undefined}
+          title={track.title ?? undefined}
+        />
       </td>
       <td className={styles.colNum}>{track.track_number ?? '—'}</td>
       <td>
@@ -4466,9 +4569,6 @@ function TrackRow({
         </td>
       ) : null}
       <td className={styles.trackActions}>
-        {missing && !track.monitored ? (
-          <MissingTrackAddButton track={track} albumId={entityBase.albumId} />
-        ) : null}
         <IconActionButton
           icon="automatic"
           title="Automatic Search — search missing/upgradable for this track"
@@ -4579,53 +4679,9 @@ export function TrackLyricsBadge({
 
 /** Legacy parity: present/missing indicator that sits inline after the title. */
 function InlineFileStatus({ status }: { status: LibraryV2Track['file_status'] }) {
-  if (status === 'present') return <span className={styles.inlinePresent}>present</span>;
   if (status === 'duplicate_single')
     return <span className={styles.inlineDuplicate}>also on album</span>;
-  return <span className={styles.inlineMissing}>missing</span>;
-}
-
-/** Legacy "Add to Library" for a missing track: materialize the slot into a
- *  real row if needed, then monitor it (queues it for download via the
- *  wishlist mirror). Reuses the proven /monitor path for the mirror. */
-function MissingTrackAddButton({
-  track,
-  albumId,
-}: {
-  track: LibraryV2Track;
-  albumId: number | undefined;
-}) {
-  const queryClient = useQueryClient();
-  const mutation = useMutation({
-    mutationFn: async () => {
-      let trackId = track.id;
-      if (trackId == null) {
-        if (albumId == null || track.track_number == null) {
-          throw new Error('This track slot cannot be added yet');
-        }
-        const created = await materializeLibraryV2MissingTrack(albumId, {
-          track_number: track.track_number,
-          disc_number: track.disc_number ?? 1,
-          title: track.title ?? undefined,
-        });
-        trackId = created.track_id;
-      }
-      await setLibraryV2Monitored('tracks', trackId, true);
-    },
-    onSettled: () => queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY }),
-  });
-  return (
-    <IconActionButton
-      icon="import"
-      title={
-        mutation.isError
-          ? mutationErrorMessage(mutation.error, 'Failed to add to library')
-          : 'Add to Library — monitor this track so it queues for download'
-      }
-      disabled={mutation.isPending || (track.id == null && track.track_number == null)}
-      onClick={() => mutation.mutate()}
-    />
-  );
+  return null;
 }
 
 /** Per-track details, consolidated behind one button: Quality profile (the

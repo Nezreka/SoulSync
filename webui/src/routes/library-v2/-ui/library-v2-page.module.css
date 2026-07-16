@@ -99,6 +99,8 @@
   flex-wrap: wrap;
   padding-right: 10px;
   margin-right: 6px;
+  margin-top: 4px;
+  margin-bottom: 4px;
   border-right: 1px solid rgba(255, 255, 255, 0.1);
 }
 
@@ -805,7 +807,11 @@ button.featureTag:disabled {
 }
 
 .missingRow {
-  background: rgba(239, 68, 68, 0.05);
+  font-style: italic;
+}
+
+.missingRow td:not(.colCheckbox):not(.trackActions):not(:nth-child(2)) {
+  opacity: 0.55;
 }
 
 .muted {
@@ -1385,7 +1391,9 @@ button.featureTag:disabled {
 
 .modalActions {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  gap: 12px;
   margin-top: 18px;
 }
 
@@ -1482,6 +1490,7 @@ button.featureTag:disabled {
   display: flex;
   gap: 8px;
   margin-bottom: 8px;
+  flex-wrap: wrap;
 }
 
 .searchOptions {
@@ -1491,6 +1500,7 @@ button.featureTag:disabled {
   margin-bottom: 10px;
   font-size: 12.5px;
   color: rgba(255, 255, 255, 0.7);
+  flex-wrap: wrap;
 }
 
 .checkOption {
@@ -2131,6 +2141,16 @@ button.featureTag:disabled {
   cursor: pointer;
   opacity: 0.7;
   font-size: 13px;
+  transition: opacity 0.15s ease;
+}
+
+.grabBannerClose:hover:not(:disabled) {
+  opacity: 1;
+}
+
+.grabBannerClose:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
 .mirrorRetryError {
@@ -2403,6 +2423,7 @@ button.featureTag:disabled {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: 14px;
+  padding: 12px;
 }
 
 .artPickerCard {
@@ -2591,4 +2612,65 @@ button.featureTag:disabled {
   flex-basis: 100%;
   color: rgb(248, 113, 113);
   font-size: 11.5px;
+}
+
+.alignLeft {
+  left: 0 !important;
+  right: auto !important;
+}
+
+.alignRight {
+  right: 0 !important;
+  left: auto !important;
+}
+
+.modalActionsText {
+  margin-right: auto;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 13px;
+}
+
+textarea.searchInput {
+  font-family: inherit;
+  resize: vertical;
+  min-height: 80px;
+  line-height: 1.45;
+}
+
+.diffCell {
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 12px;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.submenuContainer {
+  position: relative;
+  width: 100%;
+}
+
+.submenuChevron {
+  margin-left: auto;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 14px;
+}
+
+.enrichDropdownSubmenu {
+  top: -6px;
+}
+
+.enrichDropdownSubmenu.alignLeft {
+  left: calc(100% - 2px) !important;
+  right: auto !important;
+}
+
+.enrichDropdownSubmenu.alignRight {
+  right: calc(100% - 2px) !important;
+  left: auto !important;
+}
+
+.enrichDivider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+  margin: 4px 0;
 }
