@@ -573,7 +573,6 @@
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
-  overflow: hidden;
 }
 
 .albumBlockOpen {
@@ -586,6 +585,12 @@
   gap: 12px;
   padding: 8px 14px;
   cursor: pointer;
+  border-radius: 11px;
+}
+
+.albumBlockOpen .albumHead {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
 }
 
 .albumHead:hover {
@@ -2237,7 +2242,7 @@
   position: absolute;
   z-index: 200;
   top: calc(100% + 4px);
-  right: 0;
+  left: 0;
   min-width: 170px;
   background: #191919;
   border: 1px solid rgba(255, 255, 255, 0.12);
