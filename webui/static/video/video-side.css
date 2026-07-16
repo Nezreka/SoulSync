@@ -3403,6 +3403,8 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 .vwsh-nebula .vwsh-ep-dot--downloading { background: #8ab0ff; box-shadow: 0 0 6px rgba(100, 149, 237, 0.6); }
 .vwsh-nebula .vwsh-ep-dot--downloaded { background: #4ade80; box-shadow: 0 0 6px rgba(34, 197, 94, 0.6); }
 .vwsh-nebula .vwsh-ep-dot--failed { background: #f87171; box-shadow: 0 0 6px rgba(248, 113, 113, 0.6); }
+.vwsh-nebula .vwsh-ep-dot--monitored { background: rgba(255, 255, 255, 0.45); }
+.vwsh-nebula .vwsh-ep-dot--upgrade { background: hsl(282, 85%, 68%); box-shadow: 0 0 6px hsla(282, 85%, 62%, 0.6); }
 
 /* #5 sort select — custom chevron (no native arrow), matched height/radius/ring */
 .vwsh-sort { height: 42px; padding: 0 36px 0 14px; box-sizing: border-box; border-radius: 12px;
@@ -3535,7 +3537,43 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 .vwsh-st--downloading { background: rgba(100, 149, 237, 0.18); color: #8ab0ff; }
 .vwsh-st--done { background: rgba(34, 197, 94, 0.18); color: #4ade80; }
 .vwsh-st--failed { background: rgba(248, 113, 113, 0.16); color: #f87171; }
+.vwsh-st--monitored { background: rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.65); }
+.vwsh-st--upgrade { background: hsla(282, 80%, 62%, 0.18); color: hsl(282, 90%, 78%); }
 .vwsh-movie-art .vwsh-st { position: absolute; top: 8px; left: 8px; z-index: 2; backdrop-filter: blur(6px); }
+
+/* 'Search now' — per-item manual search (movie art / episode row / season side) */
+.vwsh-hunt { flex-shrink: 0; width: 26px; height: 26px; border-radius: 7px; border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(0, 0, 0, 0.35); color: rgba(255, 255, 255, 0.6); cursor: pointer;
+    display: flex; align-items: center; justify-content: center; transition: all 0.15s ease; }
+.vwsh-hunt:hover { background: rgba(var(--accent-rgb, 29, 185, 84), 0.85); border-color: transparent; color: #fff; }
+.vwsh-hunt:disabled { opacity: 0.4; cursor: default; }
+.vwsh-hunt--busy svg { animation: vwsh-hunt-spin 0.9s linear infinite; }
+@keyframes vwsh-hunt-spin { to { transform: rotate(360deg); } }
+.vwsh-movie-art .vwsh-hunt { position: absolute; top: 8px; right: 40px; z-index: 3; opacity: 0; }
+.vwsh-movie:hover .vwsh-movie-art .vwsh-hunt { opacity: 1; }
+.vwsh-nebula .vwsh-epc-hunt { flex-shrink: 0; width: 22px; height: 22px; border-radius: 50%; border: none;
+    background: rgba(255, 255, 255, 0.08); color: rgba(255, 255, 255, 0.6); cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center; opacity: 0; transition: all 0.15s ease; }
+.vwsh-nebula .vwsh-epc:hover .vwsh-epc-hunt { opacity: 1; }
+.vwsh-nebula .vwsh-epc-hunt:hover { background: rgba(var(--accent-rgb, 29, 185, 84), 0.85); color: #fff; }
+.vwsh-nebula .vwsh-epc-hunt:disabled { opacity: 0.35; cursor: default; }
+.vwsh-nebula .vwsh-szn-hunt { position: absolute; top: 4px; right: 30px; width: 22px; height: 22px; border-radius: 50%; border: none;
+    background: rgba(0, 0, 0, 0.45); color: rgba(255, 255, 255, 0.65); cursor: pointer;
+    display: flex; align-items: center; justify-content: center; opacity: 0; transition: all 0.15s ease; }
+.vwsh-nebula .vwsh-szn-side:hover .vwsh-szn-hunt { opacity: 1; }
+.vwsh-nebula .vwsh-szn-hunt:hover { background: rgba(var(--accent-rgb, 29, 185, 84), 0.85); color: #fff; }
+@media (hover: none) { .vwsh-movie-art .vwsh-hunt, .vwsh-nebula .vwsh-epc-hunt, .vwsh-nebula .vwsh-szn-hunt { opacity: 1; } }
+
+/* 'Search all missing' — toolbar sibling of Clear all */
+.vwsh-searchall { margin-left: auto; height: 42px; padding: 0 16px; box-sizing: border-box; border-radius: 12px;
+    display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; cursor: pointer;
+    border: 1px solid rgba(var(--accent-rgb, 29, 185, 84), 0.4); color: #fff;
+    background: rgba(var(--accent-rgb, 29, 185, 84), 0.14); transition: all 0.15s ease; }
+.vwsh-searchall:hover { background: rgba(var(--accent-rgb, 29, 185, 84), 0.3);
+    border-color: rgba(var(--accent-rgb, 29, 185, 84), 0.7); }
+.vwsh-searchall:disabled { opacity: 0.5; cursor: default; }
+.vwsh-searchall[hidden] { display: none; }
+.vwsh-searchall + .vwsh-clear { margin-left: 0; }
 
 .vwsh-rm { flex-shrink: 0; width: 26px; height: 26px; border-radius: 7px; border: 1px solid rgba(255, 255, 255, 0.12);
     background: rgba(0, 0, 0, 0.35); color: rgba(255, 255, 255, 0.6); font-size: 17px; line-height: 1; cursor: pointer;

@@ -5395,6 +5395,50 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def wishlist_manual_search_items(self, scope, tmdb_id, season_number=None,
+                                     episode_number=None) -> list:
+        """Wishlist rows shaped EXACTLY like the to_download queries, for a
+        user-initiated 'Search now' — but WITHOUT the release-window gate and
+        (movies) without the status gate: the click is the override, same as
+        Sonarr's manual search. scope: 'movie' → that movie; 'show' → every
+        wished episode of the show; 'season' → that season; 'episode' → one row."""
+        if not tmdb_id:
+            return []
+        conn = self._get_connection()
+        try:
+            if scope == "movie":
+                return [dict(r) for r in conn.execute(
+                    "SELECT w.tmdb_id, w.title, w.year, w.poster_url, "
+                    "EXISTS (SELECT 1 FROM movies m WHERE m.tmdb_id=w.tmdb_id AND m.has_file=1) "
+                    "  AS owned, "
+                    "(SELECT GROUP_CONCAT(f.resolution) FROM movies m "
+                    "  JOIN media_files f ON f.movie_id=m.id "
+                    "  WHERE m.tmdb_id=w.tmdb_id AND m.has_file=1) AS owned_resolutions "
+                    "FROM video_wishlist w "
+                    "WHERE w.kind='movie' AND w.tmdb_id=?", (int(tmdb_id),))]
+            where, args = "", [int(tmdb_id)]
+            if scope == "season" and season_number is not None:
+                where, args = " AND w.season_number=?", args + [int(season_number)]
+            elif scope == "episode":
+                where = " AND w.season_number=? AND w.episode_number=?"
+                args += [int(season_number or 0), int(episode_number or 0)]
+            return [dict(r) for r in conn.execute(
+                "SELECT w.tmdb_id AS show_tmdb_id, w.title AS show_title, w.season_number, "
+                "w.episode_number, w.episode_title, w.air_date, w.poster_url, w.library_id, "
+                "EXISTS (SELECT 1 FROM episodes e JOIN shows s ON e.show_id = s.id "
+                "  WHERE s.tmdb_id = w.tmdb_id AND e.season_number = w.season_number "
+                "  AND e.episode_number = w.episode_number AND e.has_file = 1) AS owned, "
+                "(SELECT GROUP_CONCAT(f.resolution) FROM episodes e "
+                "  JOIN shows s ON e.show_id = s.id "
+                "  JOIN media_files f ON f.episode_id = e.id "
+                "  WHERE s.tmdb_id = w.tmdb_id AND e.season_number = w.season_number "
+                "  AND e.episode_number = w.episode_number AND e.has_file = 1) "
+                "  AS owned_resolutions "
+                "FROM video_wishlist w WHERE w.kind='episode' AND w.tmdb_id=?" + where +
+                " ORDER BY w.season_number, w.episode_number", args)]
+        finally:
+            conn.close()
+
     def add_episodes_to_wishlist(self, show_tmdb_id, show_title, episodes, *,
                                  poster_url=None, library_id=None, server_source=None) -> int:
         """Wish for one or more episodes of a show (the show's tmdb id keys them).
@@ -5574,6 +5618,35 @@ class VideoDatabase:
         return {"items": items, "pagination": {
             "page": page, "total_pages": total_pages, "total_count": total,
             "has_prev": page > 1, "has_next": page < total_pages}}
+
+    def wishlist_owned_media_resolutions(self) -> dict:
+        """Owned-file resolutions for wishlist rows whose media is in the library —
+        {'movie:<tmdb>': 'res,res', 'ep:<tmdb>:<s>:<e>': 'res'}. Feeds the wishlist
+        page's upgrade-watch badges (owned + still wishlisted = chasing better)."""
+        conn = self._get_connection()
+        out: dict = {}
+        try:
+            for r in conn.execute(
+                    "SELECT w.tmdb_id, GROUP_CONCAT(f.resolution) AS res FROM video_wishlist w "
+                    "JOIN movies m ON m.tmdb_id=w.tmdb_id AND m.has_file=1 "
+                    "JOIN media_files f ON f.movie_id=m.id "
+                    "WHERE w.kind='movie' GROUP BY w.tmdb_id"):
+                out["movie:%s" % r["tmdb_id"]] = r["res"]
+            for r in conn.execute(
+                    "SELECT w.tmdb_id AS t, w.season_number AS sn, w.episode_number AS en, "
+                    "GROUP_CONCAT(f.resolution) AS res FROM video_wishlist w "
+                    "JOIN shows s ON s.tmdb_id=w.tmdb_id "
+                    "JOIN episodes e ON e.show_id=s.id AND e.season_number=w.season_number "
+                    "  AND e.episode_number=w.episode_number AND e.has_file=1 "
+                    "JOIN media_files f ON f.episode_id=e.id "
+                    "WHERE w.kind='episode' GROUP BY w.tmdb_id, w.season_number, w.episode_number"):
+                out["ep:%s:%s:%s" % (r["t"], r["sn"], r["en"])] = r["res"]
+            return out
+        except sqlite3.Error:
+            logger.exception("wishlist_owned_media_resolutions failed")
+            return out
+        finally:
+            conn.close()
 
     def wishlist_keys_for_shows(self, show_tmdb_ids) -> dict:
         """{show_tmdb_id: set('S_E')} of episodes already wishlisted — lets the
