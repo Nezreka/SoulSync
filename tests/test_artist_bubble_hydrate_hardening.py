@@ -130,3 +130,17 @@ def test_downloads_sections_filter_malformed_bubbles():
 def test_library_init_toast_names_the_real_error():
     fn = _LIBRARY_JS.split("function initializeLibraryPage")[1].split("function initializeLibrarySearch")[0]
     assert "error.message" in fn, "the toast should carry the underlying error"
+
+
+def test_library_downloads_section_anchors_on_the_grid_not_a_class_query():
+    """#1038 round two (named by the improved toast): insertBefore threw because
+    document.querySelector('.library-content') matched the VIDEO library's copy
+    of the class (first in the DOM) while #library-artists-grid lives in the
+    music one. The section must derive its container FROM the grid."""
+    fn = _HELPERS_JS.split("function showLibraryDownloadsSection")[1].split("function createArtistBubbleCard")[0]
+    assert "getElementById('library-artists-grid')" in fn
+    assert "artistGrid.parentElement" in fn
+    assert "document.querySelector" not in fn    # the ambiguous global query is gone
+    # the ambiguity is real: both sides carry the class (video first)
+    index = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
+    assert index.count('class="library-content"') >= 2
