@@ -78,6 +78,7 @@ import { Route } from '../route';
 import { InteractiveSearchModal } from './interactive-search';
 import styles from './library-v2-page.module.css';
 import { QualityProfileModal, QualityProfilePicker } from './quality-profile-modal';
+import { AlbumReorganizeModal, ArtistReorganizeAllModal } from './reorganize-modal';
 import { RetagModal } from './retag-modal';
 
 /** Artist-level quality-profile target only — albums/EPs/singles use the
@@ -2721,6 +2722,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   const [showHistory, setShowHistory] = useState(false);
   const [showMaintenance, setShowMaintenance] = useState(false);
   const [showManageTracks, setShowManageTracks] = useState(false);
+  const [showReorganizeAll, setShowReorganizeAll] = useState(false);
   const [showEnrich, setShowEnrich] = useState(false);
   const enrichWrapRef = useRef<HTMLSpanElement>(null);
   const [showEditArtist, setShowEditArtist] = useState(false);
@@ -2919,6 +2921,12 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 onClick={() =>
                   setRetagTarget({ entity: 'artists', id: artistId, title: artist.name })
                 }
+              />
+              <ActionButton
+                icon="folder"
+                label="Reorganize All"
+                title="Move every album's files to match the naming template"
+                onClick={() => setShowReorganizeAll(true)}
               />
               <ActionButton
                 icon="organize"
@@ -3140,6 +3148,13 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
           {showManageTracks ? (
             <ManageTracksModal artistId={artistId} onClose={() => setShowManageTracks(false)} />
           ) : null}
+          {showReorganizeAll ? (
+            <ArtistReorganizeAllModal
+              artistId={artistId}
+              artistName={artist.name}
+              onClose={() => setShowReorganizeAll(false)}
+            />
+          ) : null}
 
           {showEditArtist ? (
             <EditArtistModal artist={artist} onClose={() => setShowEditArtist(false)} />
@@ -3322,6 +3337,7 @@ function AlbumBlock({
   const [open, setOpen] = useState(false);
   const [showEnrich, setShowEnrich] = useState(false);
   const enrichWrapRef = useRef<HTMLSpanElement>(null);
+  const [showReorganize, setShowReorganize] = useState(false);
   const profilesQuery = useQuery(libraryV2QualityProfilesQueryOptions());
   const profileName =
     (profilesQuery.data ?? []).find((p) => p.id === album.quality_profile_id)?.name ?? null;
@@ -3404,6 +3420,11 @@ function AlbumBlock({
           />
           <IconActionButton icon="retag" title="Preview Retag" onClick={() => onRetag(album)} />
           <AlbumReplayGainButton albumId={album.id} />
+          <IconActionButton
+            icon="folder"
+            title="Reorganize — preview and move files to match the naming template"
+            onClick={() => setShowReorganize(true)}
+          />
           <span ref={enrichWrapRef} className={styles.enrichWrap}>
             <IconActionButton
               icon="refresh"
@@ -3430,6 +3451,13 @@ function AlbumBlock({
         </span>
       </div>
       {open ? <AlbumTrackTable albumId={album.id} resolve={unowned} onAction={onAction} /> : null}
+      {showReorganize ? (
+        <AlbumReorganizeModal
+          albumId={album.id}
+          albumTitle={album.title}
+          onClose={() => setShowReorganize(false)}
+        />
+      ) : null}
     </div>
   );
 }

@@ -141,6 +141,39 @@ export interface LibraryV2MatchService {
   legacy_entity_id: number | null;
 }
 
+/** One reorganize metadata source option (docs §50). */
+export interface LibraryV2ReorganizeSource {
+  source: string;
+  label: string;
+}
+
+/** One per-track row of a reorganize preview plan. */
+export interface LibraryV2ReorganizeTrackPreview {
+  track_id: number | null;
+  title: string;
+  track_number: number | null;
+  disc_number: number | null;
+  current_path: string | null;
+  new_path: string | null;
+  file_exists: boolean;
+  unchanged: boolean;
+  collision: boolean;
+  matched: boolean;
+  reason: string | null;
+}
+
+/** `POST .../reorganize/preview` response (docs §50). */
+export interface LibraryV2ReorganizePreview {
+  success: boolean;
+  /** 'planned' | 'no_source_id' — a failed 'no_album'/'no_tracks' surfaces as a thrown error instead. */
+  status: string;
+  source: string | null;
+  album: string;
+  artist: string;
+  transfer_dir: string;
+  tracks: LibraryV2ReorganizeTrackPreview[];
+}
+
 /** One row from the legacy `track_downloads` provenance table (Source Info popover). */
 export interface LibraryV2TrackDownload {
   id: number;

@@ -18,6 +18,8 @@ import type {
   LibraryV2ManualSkip,
   LibraryV2MatchService,
   LibraryV2QualityProfile,
+  LibraryV2ReorganizePreview,
+  LibraryV2ReorganizeSource,
   LibraryV2Search,
   LibraryV2Track,
   LibraryV2TrackDownload,
@@ -694,6 +696,99 @@ export async function enrichLibraryV2Entity(
   }>(apiClient.post(`library/v2/${entity}/${id}/enrich`, { json: { service } }));
   if (!payload.success) throw new Error(payload.error || payload.message || 'Enrichment failed');
   return { message: payload.message, resynced: payload.resynced };
+}
+
+/** Sources authed/configured on this instance — for the artist-level
+ *  "Reorganize All" source picker (docs §50, no per-album ID coverage check). */
+export async function fetchLibraryV2ReorganizeSourcesGlobal(): Promise<
+  LibraryV2ReorganizeSource[]
+> {
+  const payload = await readJson<{
+    success: boolean;
+    sources: LibraryV2ReorganizeSource[];
+    error?: string;
+  }>(apiClient.get('library/v2/reorganize/sources'));
+  if (!payload.success) throw new Error(payload.error || 'Failed to load reorganize sources');
+  return payload.sources;
+}
+
+/** Sources this album has a stored provider ID for AND an authed client —
+ *  for the per-album source picker (docs §50). */
+export async function fetchLibraryV2AlbumReorganizeSources(
+  albumId: number,
+): Promise<LibraryV2ReorganizeSource[]> {
+  const payload = await readJson<{
+    success: boolean;
+    sources: LibraryV2ReorganizeSource[];
+    error?: string;
+  }>(apiClient.get(`library/v2/albums/${albumId}/reorganize/sources`));
+  if (!payload.success) throw new Error(payload.error || 'Failed to load reorganize sources');
+  return payload.sources;
+}
+
+/** Preview current-vs-proposed file paths for one lib2 album, without moving
+ *  anything (docs §50). */
+export async function previewLibraryV2AlbumReorganize(
+  albumId: number,
+  options: { source?: string | null; mode?: 'api' | 'tags' } = {},
+): Promise<LibraryV2ReorganizePreview> {
+  const payload = await readJson<LibraryV2ReorganizePreview & { error?: string }>(
+    apiClient.post(`library/v2/albums/${albumId}/reorganize/preview`, {
+      json: { source: options.source ?? null, mode: options.mode ?? 'api' },
+    }),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Reorganize preview failed');
+  return payload;
+}
+
+/** Enqueue one lib2 album for reorganize — returns immediately, the queue
+ *  worker processes items FIFO (docs §50). */
+export async function applyLibraryV2AlbumReorganize(
+  albumId: number,
+  options: { source?: string | null; mode?: 'api' | 'tags'; renameOnly?: boolean } = {},
+): Promise<{ queued: boolean; queueId?: string; reason?: string }> {
+  const payload = await readJson<{
+    success: boolean;
+    queued?: boolean;
+    queue_id?: string;
+    reason?: string;
+    error?: string;
+  }>(
+    apiClient.post(`library/v2/albums/${albumId}/reorganize`, {
+      json: {
+        source: options.source ?? null,
+        mode: options.mode ?? 'api',
+        rename_only: Boolean(options.renameOnly),
+      },
+    }),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Reorganize failed');
+  return { queued: Boolean(payload.queued), queueId: payload.queue_id, reason: payload.reason };
+}
+
+/** Enqueue every album of one lib2 artist for reorganize (docs §50). Same
+ *  source/mode pick applied to every album — no per-album overrides. */
+export async function applyLibraryV2ArtistReorganizeAll(
+  artistId: number,
+  options: { source?: string | null; mode?: 'api' | 'tags' } = {},
+): Promise<{ enqueued: number; alreadyQueued: number; totalAlbums: number }> {
+  const payload = await readJson<{
+    success: boolean;
+    enqueued?: number;
+    already_queued?: number;
+    total_albums?: number;
+    error?: string;
+  }>(
+    apiClient.post(`library/v2/artists/${artistId}/reorganize-all`, {
+      json: { source: options.source ?? null, mode: options.mode ?? 'api' },
+    }),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Reorganize-all failed');
+  return {
+    enqueued: payload.enqueued ?? 0,
+    alreadyQueued: payload.already_queued ?? 0,
+    totalAlbums: payload.total_albums ?? 0,
+  };
 }
 
 export async function fetchLibraryV2JobStatus(jobId?: string): Promise<LibraryV2JobState> {

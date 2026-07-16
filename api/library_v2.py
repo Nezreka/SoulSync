@@ -1450,6 +1450,104 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             return jsonify({"success": False, "error": result["error"] or "Analysis failed"}), 400
         return jsonify({"success": True, **result})
 
+    # -- reorganize (docs §50, bridges onto the legacy planner/queue) ---------
+
+    @app.route("/api/library/v2/reorganize/sources")
+    def lib2_reorganize_sources_global():
+        """Sources authed/configured on this instance — used by the artist-
+        level "Reorganize All" source picker (no per-album ID coverage
+        check, mirrors the legacy bulk modal)."""
+        guard = _guard()
+        if guard:
+            return guard
+        from core.library2.reorganize_bridge import global_reorganize_sources
+        return jsonify({"success": True, "sources": global_reorganize_sources()})
+
+    @app.route("/api/library/v2/albums/<int:album_id>/reorganize/sources")
+    def lib2_album_reorganize_sources(album_id):
+        """Sources this album has a stored provider ID for AND an
+        authenticated client — used by the per-album source picker."""
+        guard = _guard()
+        if guard:
+            return guard
+        from core.library2.reorganize_bridge import (
+            ReorganizeBridgeError,
+            album_reorganize_sources,
+        )
+        try:
+            sources = album_reorganize_sources(get_database(), album_id)
+        except ReorganizeBridgeError as exc:
+            return jsonify({"success": False, "error": str(exc)}), exc.status
+        return jsonify({"success": True, "sources": sources})
+
+    @app.route("/api/library/v2/albums/<int:album_id>/reorganize/preview", methods=["POST"])
+    def lib2_album_reorganize_preview(album_id):
+        """Preview current-vs-proposed file paths for one lib2 album, WITHOUT
+        moving anything. Body: ``{source?, mode?: 'api'|'tags'}``."""
+        guard = _guard()
+        if guard:
+            return guard
+        from core.library2.reorganize_bridge import (
+            ReorganizeBridgeError,
+            preview_album_reorganize,
+        )
+        body = request.get_json(silent=True) or {}
+        try:
+            result = preview_album_reorganize(
+                get_database(), config_manager, album_id,
+                source=body.get("source") or None,
+                mode=body.get("mode") or "api",
+            )
+        except ReorganizeBridgeError as exc:
+            return jsonify({"success": False, "error": str(exc)}), exc.status
+        return jsonify(result)
+
+    @app.route("/api/library/v2/albums/<int:album_id>/reorganize", methods=["POST"])
+    def lib2_album_reorganize_apply(album_id):
+        """Enqueue one lib2 album for reorganize. Returns immediately — the
+        queue worker processes items FIFO. Body: ``{source?, mode?, rename_only?}``."""
+        guard = _guard()
+        if guard:
+            return guard
+        from core.library2.reorganize_bridge import (
+            ReorganizeBridgeError,
+            enqueue_album_reorganize,
+        )
+        body = request.get_json(silent=True) or {}
+        try:
+            result = enqueue_album_reorganize(
+                get_database(), album_id,
+                source=body.get("source") or None,
+                mode=body.get("mode") or "api",
+                rename_only=bool(body.get("rename_only")),
+            )
+        except ReorganizeBridgeError as exc:
+            return jsonify({"success": False, "error": str(exc)}), exc.status
+        return jsonify({"success": True, **result})
+
+    @app.route("/api/library/v2/artists/<int:artist_id>/reorganize-all", methods=["POST"])
+    def lib2_artist_reorganize_all(artist_id):
+        """Enqueue every album of one lib2 artist for reorganize. Body:
+        ``{source?, mode?}`` applied to every album (same as legacy bulk
+        modal — per-album overrides aren't supported here)."""
+        guard = _guard()
+        if guard:
+            return guard
+        from core.library2.reorganize_bridge import (
+            ReorganizeBridgeError,
+            enqueue_artist_reorganize_all,
+        )
+        body = request.get_json(silent=True) or {}
+        try:
+            result = enqueue_artist_reorganize_all(
+                get_database(), artist_id,
+                source=body.get("source") or None,
+                mode=body.get("mode") or "api",
+            )
+        except ReorganizeBridgeError as exc:
+            return jsonify({"success": False, "error": str(exc)}), exc.status
+        return jsonify({"success": True, **result})
+
     @app.route("/api/library/v2/quality-profiles/sync", methods=["POST"])
     def lib2_sync_quality_profiles():
         """Compatibility endpoint: profiles are the app-wide ``quality_profiles``

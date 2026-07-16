@@ -4,17 +4,22 @@ import { HttpResponse, http, server } from '@/test/msw';
 
 import {
   analyzeLibraryV2TrackReplayGain,
+  applyLibraryV2AlbumReorganize,
+  applyLibraryV2ArtistReorganizeAll,
   blacklistLibraryV2Source,
   deleteLibraryV2Files,
   enrichLibraryV2Entity,
   fetchLibraryV2AlbumMatchStatus,
+  fetchLibraryV2AlbumReorganizeSources,
   fetchLibraryV2ArtistMatchStatus,
   fetchLibraryV2FileDeletePreview,
   fetchLibraryV2Playlist,
   fetchLibraryV2Playlists,
+  fetchLibraryV2ReorganizeSourcesGlobal,
   fetchLibraryV2TrackSourceInfo,
   manualMatchLibraryV2Entity,
   materializeLibraryV2MissingTrack,
+  previewLibraryV2AlbumReorganize,
   runLibraryV2PlaylistPipeline,
   runRepairJob,
   searchLibraryV2MatchService,
@@ -308,6 +313,89 @@ describe('library v2 enrich api', () => {
     await expect(enrichLibraryV2Entity('albums', 9, 'deezer')).rejects.toThrow(
       'no legacy library record',
     );
+  });
+});
+
+describe('library v2 reorganize api', () => {
+  it('fetches global reorganize sources', async () => {
+    server.use(
+      http.get('/api/library/v2/reorganize/sources', () =>
+        HttpResponse.json({ success: true, sources: [{ source: 'deezer', label: 'Deezer' }] }),
+      ),
+    );
+    await expect(fetchLibraryV2ReorganizeSourcesGlobal()).resolves.toEqual([
+      { source: 'deezer', label: 'Deezer' },
+    ]);
+  });
+
+  it('fetches per-album reorganize sources', async () => {
+    server.use(
+      http.get('/api/library/v2/albums/42/reorganize/sources', () =>
+        HttpResponse.json({ success: true, sources: [{ source: 'spotify', label: 'Spotify' }] }),
+      ),
+    );
+    await expect(fetchLibraryV2AlbumReorganizeSources(42)).resolves.toEqual([
+      { source: 'spotify', label: 'Spotify' },
+    ]);
+  });
+
+  it('previews a reorganize with the chosen source/mode', async () => {
+    server.use(
+      http.post('/api/library/v2/albums/42/reorganize/preview', async ({ request }) => {
+        expect(await request.json()).toEqual({ source: 'spotify', mode: 'tags' });
+        return HttpResponse.json({
+          success: true,
+          status: 'planned',
+          source: 'spotify',
+          album: 'Views',
+          artist: 'Drake',
+          transfer_dir: '/Transfer',
+          tracks: [],
+        });
+      }),
+    );
+    await expect(
+      previewLibraryV2AlbumReorganize(42, { source: 'spotify', mode: 'tags' }),
+    ).resolves.toMatchObject({ status: 'planned', album: 'Views' });
+  });
+
+  it('surfaces the "no legacy record" preview error', async () => {
+    server.use(
+      http.post('/api/library/v2/albums/9/reorganize/preview', () =>
+        HttpResponse.json(
+          { success: false, error: 'This album has no legacy library record to reorganize.' },
+          { status: 409 },
+        ),
+      ),
+    );
+    await expect(previewLibraryV2AlbumReorganize(9)).rejects.toThrow('no legacy library record');
+  });
+
+  it('enqueues an album reorganize', async () => {
+    server.use(
+      http.post('/api/library/v2/albums/42/reorganize', async ({ request }) => {
+        expect(await request.json()).toEqual({ source: null, mode: 'api', rename_only: false });
+        return HttpResponse.json({ success: true, queued: true, queue_id: 'q-1' });
+      }),
+    );
+    await expect(applyLibraryV2AlbumReorganize(42)).resolves.toEqual({
+      queued: true,
+      queueId: 'q-1',
+      reason: undefined,
+    });
+  });
+
+  it('enqueues every album for an artist', async () => {
+    server.use(
+      http.post('/api/library/v2/artists/7/reorganize-all', () =>
+        HttpResponse.json({ success: true, enqueued: 3, already_queued: 1, total_albums: 4 }),
+      ),
+    );
+    await expect(applyLibraryV2ArtistReorganizeAll(7)).resolves.toEqual({
+      enqueued: 3,
+      alreadyQueued: 1,
+      totalAlbums: 4,
+    });
   });
 });
 
