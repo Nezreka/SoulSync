@@ -116,6 +116,9 @@
     };
     function movieCell(m, idx) {
         var t = MOVIE_TYPE[m.type] || MOVIE_TYPE.available;
+        // click lookup by identity in the rendered event list — never by render
+        // order (the stagger counter is animation-only)
+        var evIdx = (state.movieEvents || []).indexOf(m);
         var hue = showHue(m.title || '');
         var img = m.poster_url ? '<img class="vcal-cell-img" src="' + esc(m.poster_url) + '" alt="" loading="lazy" decoding="async" ' +
             'onload="this.classList.add(\'vcal-loaded\')" onerror="this.style.display=\'none\'">' : '';
@@ -125,7 +128,7 @@
             : '/video-detail/tmdb/movie/' + m.tmdb_id;
         return '<a class="vcal-cell vcal-mv ' + t.cls + (m.owned ? ' vcal-cell--owned' : '') + '" ' +
             'style="--vcal-h:' + hue + ';--i:' + (idx % 24) + '" href="' + href + '" ' +
-            'data-cal-movie="' + idx + '" ' +
+            'data-cal-movie="' + evIdx + '" ' +
             'title="' + esc(m.title) + (m.year ? ' (' + m.year + ')' : '') + '">' +
             '<span class="vcal-glow" aria-hidden="true"></span>' +
             '<span class="vcal-card">' +
