@@ -16,6 +16,7 @@ provider tracklist — attaching a file to one flips it from "missing" to
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Any, Dict, Optional
 
@@ -150,6 +151,37 @@ def _find_or_create_track(conn, album_id: int, artist_id: int, title: str, *,
     return track_id
 
 
+def _acoustid_status_for(raw: Any) -> Optional[str]:
+    """Map the pipeline's raw AcoustID outcome to the schema's narrower
+    ``acoustid_status`` vocabulary. 'disabled'/'error'/unset make no claim
+    either way (None) — a hard FAIL never reaches here: it quarantines the
+    file and returns before this callback runs."""
+    return raw if raw in ("pass", "skip") else None
+
+
+def _pipeline_result_json(context: Dict[str, Any]) -> str:
+    """Deep-dive A7/C4: compact per-file detail that has no dedicated column
+    — the AcoustID reason and whether a quality-profile fallback (downsample /
+    lossy copy) fired for this file. Built from context keys the pipeline
+    already sets; empty when none apply so most rows stay `'{}'`."""
+    result: Dict[str, Any] = {}
+    message = context.get("_acoustid_message")
+    if message:
+        result["acoustid_message"] = str(message)
+    version = context.get("_version_mismatch_fallback")
+    if version:
+        result["version_mismatch_fallback"] = str(version)
+    fallbacks = [
+        name for name, key in (
+            ("downsample", "_quality_fallback_downsample"),
+            ("lossy_copy", "_quality_fallback_lossy_copy"),
+        ) if context.get(key)
+    ]
+    if fallbacks:
+        result["quality_fallback"] = fallbacks
+    return json.dumps(result) if result else "{}"
+
+
 def link_download_into_library_v2(context: Dict[str, Any]) -> Optional[int]:
     """Link a finished download's file into ``lib2_*``. Returns the file-row id.
 
@@ -261,6 +293,15 @@ def link_download_into_library_v2(context: Dict[str, Any]) -> Optional[int]:
             except OSError:
                 size = None
             source = str(context.get("username") or "") or None
+            # Deep-dive A7/C4: the ONE callback every finished download (grabbed
+            # via wishlist, manual search, or watchlist) passes through — the
+            # verification badge and AcoustID/quality-fallback detail were
+            # computed upstream this same pipeline run but never made it onto
+            # the file row for autolink-created files, leaving the Info-tab
+            # lifecycle UI permanently empty for "the normal case today".
+            verification_status = context.get("_verification_status")
+            acoustid_status = _acoustid_status_for(context.get("_acoustid_result"))
+            pipeline_result_json = _pipeline_result_json(context)
 
             existing = conn.execute(
                 "SELECT id FROM lib2_track_files WHERE track_id=? AND path=?",
@@ -272,18 +313,25 @@ def link_download_into_library_v2(context: Dict[str, Any]) -> Optional[int]:
                            bitrate=COALESCE(?, bitrate), sample_rate=COALESCE(?, sample_rate),
                            bit_depth=COALESCE(?, bit_depth), format=COALESCE(?, format),
                            quality_tier=COALESCE(?, quality_tier),
+                           verification_status=COALESCE(?, verification_status),
+                           acoustid_status=COALESCE(?, acoustid_status),
+                           pipeline_result_json=?,
                            updated_at=CURRENT_TIMESTAMP WHERE id=?""",
-                    (size, bitrate, sample_rate, bit_depth, fmt, tier, existing["id"]),
+                    (size, bitrate, sample_rate, bit_depth, fmt, tier,
+                     verification_status, acoustid_status, pipeline_result_json,
+                     existing["id"]),
                 )
                 file_id = existing["id"]
             else:
                 cur = conn.execute(
                     """INSERT INTO lib2_track_files(track_id, path, size, bitrate,
                            sample_rate, bit_depth, format, quality_tier, source,
+                           verification_status, acoustid_status, pipeline_result_json,
                            import_status)
-                       VALUES(?,?,?,?,?,?,?,?,?, 'imported')""",
+                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?, 'imported')""",
                     (track_id, file_path, size, bitrate, sample_rate, bit_depth,
-                     fmt, tier, source),
+                     fmt, tier, source,
+                     verification_status, acoustid_status, pipeline_result_json),
                 )
                 file_id = cur.lastrowid
             # The album now owns a real file — a provider-only discography row

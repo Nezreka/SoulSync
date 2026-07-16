@@ -79,6 +79,90 @@ def test_links_new_album_track_and_file(lib2_enabled, imported_conn):
         "SELECT COUNT(*) c FROM lib2_artists WHERE name='Drake'").fetchone()["c"] == 1
 
 
+def test_persists_verification_and_acoustid_status(lib2_enabled, imported_conn):
+    """Deep-dive A7/C4: the pipeline already computes these upstream (same
+    context) — the autolink callback is the only place that can put them on
+    the file row, otherwise the Info-tab verification badge stays empty for
+    every autolink-created file (the normal case today)."""
+    file_id = A.link_download_into_library_v2(
+        _context(_verification_status="unverified", _acoustid_result="skip"))
+    assert file_id is not None
+
+    row = imported_conn.execute(
+        "SELECT verification_status, acoustid_status, pipeline_result_json "
+        "FROM lib2_track_files WHERE id=?", (file_id,),
+    ).fetchone()
+    assert row["verification_status"] == "unverified"
+    assert row["acoustid_status"] == "skip"
+    assert json.loads(row["pipeline_result_json"]) == {}
+
+
+def test_acoustid_error_and_disabled_make_no_status_claim(lib2_enabled, imported_conn):
+    """'error'/'disabled' aren't a pass or a skip — schema's acoustid_status
+    should stay NULL rather than encode a made-up claim (only a hard FAIL
+    would map to 'fail', and FAIL never reaches this callback: it quarantines
+    the file and returns before record_download_provenance runs)."""
+    file_id = A.link_download_into_library_v2(
+        _context(_verification_status=None, _acoustid_result="disabled"))
+    assert file_id is not None
+    row = imported_conn.execute(
+        "SELECT acoustid_status FROM lib2_track_files WHERE id=?", (file_id,),
+    ).fetchone()
+    assert row["acoustid_status"] is None
+
+
+def test_persists_pipeline_result_json_detail(lib2_enabled, imported_conn):
+    """AcoustID message + quality-profile fallback flags: real detail the
+    pipeline computes and would otherwise discard once this call returns."""
+    file_id = A.link_download_into_library_v2(_context(
+        _verification_status="unverified",
+        _acoustid_result="skip",
+        _acoustid_message="no confident fingerprint match",
+        _quality_fallback_downsample=True,
+    ))
+    assert file_id is not None
+    row = imported_conn.execute(
+        "SELECT pipeline_result_json FROM lib2_track_files WHERE id=?", (file_id,),
+    ).fetchone()
+    result = json.loads(row["pipeline_result_json"])
+    assert result["acoustid_message"] == "no confident fingerprint match"
+    assert result["quality_fallback"] == ["downsample"]
+
+
+def test_version_mismatch_fallback_recorded_in_pipeline_result(lib2_enabled, imported_conn):
+    file_id = A.link_download_into_library_v2(_context(
+        _verification_status="force_imported",
+        _version_mismatch_fallback="live",
+    ))
+    assert file_id is not None
+    row = imported_conn.execute(
+        "SELECT verification_status, pipeline_result_json FROM lib2_track_files WHERE id=?",
+        (file_id,),
+    ).fetchone()
+    assert row["verification_status"] == "force_imported"
+    assert json.loads(row["pipeline_result_json"])["version_mismatch_fallback"] == "live"
+
+
+def test_relink_refreshes_verification_fields_without_duplicating_row(
+        lib2_enabled, imported_conn):
+    """The UPDATE branch (idempotent re-link of the same path) must carry the
+    same fields as the INSERT branch, not just quality-probe columns."""
+    first_id = A.link_download_into_library_v2(
+        _context(_verification_status="unverified", _acoustid_result="skip"))
+    second_id = A.link_download_into_library_v2(_context(
+        _verification_status="verified", _acoustid_result="pass",
+        _acoustid_message="matched",
+    ))
+    assert first_id == second_id
+    row = imported_conn.execute(
+        "SELECT verification_status, acoustid_status, pipeline_result_json "
+        "FROM lib2_track_files WHERE id=?", (first_id,),
+    ).fetchone()
+    assert row["verification_status"] == "verified"
+    assert row["acoustid_status"] == "pass"
+    assert json.loads(row["pipeline_result_json"])["acoustid_message"] == "matched"
+
+
 def test_new_autolink_artist_uses_live_default_profile(lib2_enabled, imported_conn):
     conn = lib2_enabled._get_connection()
     try:

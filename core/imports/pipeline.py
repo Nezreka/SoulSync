@@ -707,6 +707,10 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                     )
                     logger.info(f"AcoustID verification result: {verification_result.value} - {verification_msg}")
                     context['_acoustid_result'] = verification_result.value
+                    # Deep-dive A7: the concrete AcoustID reason is otherwise lost the
+                    # moment this function returns — stash it now so the lib2 autolink
+                    # callback can persist it onto the file row for the Info-tab.
+                    context['_acoustid_message'] = verification_msg
 
                     # Fail-closed mode: when the item's quality profile
                     # requires a hard AcoustID PASS, a SKIP (ran but couldn't
@@ -772,12 +776,15 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                 else:
                     logger.warning("AcoustID verification skipped: missing track/artist info")
                     context['_acoustid_result'] = 'skip'
+                    context['_acoustid_message'] = 'missing track/artist info'
             else:
                 logger.info(f"ℹ️ AcoustID verification not available: {available_reason}")
                 context['_acoustid_result'] = 'disabled'
+                context['_acoustid_message'] = available_reason
         except Exception as verify_error:
             logger.error(f"AcoustID verification error (continuing normally): {verify_error}")
             context['_acoustid_result'] = 'error'
+            context['_acoustid_message'] = str(verify_error)
 
         search_result = context.get('search_result', {}) or {}
         if not isinstance(search_result, dict):
@@ -1218,6 +1225,10 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
         if downsampled_path:
             final_path = downsampled_path
             context['_final_processed_path'] = final_path
+            # Deep-dive A7/C4: record that the quality profile's fallback fired,
+            # so the lib2 autolink callback can surface it on the file row
+            # instead of the fact silently disappearing after this function returns.
+            context['_quality_fallback_downsample'] = True
 
         _persist_verification_status(context, final_path)
         _attach_manual_skip_path(context_key, final_path)
@@ -1230,6 +1241,7 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
         } if _qp_post else None)
         if blasphemy_path:
             context['_final_processed_path'] = blasphemy_path
+            context['_quality_fallback_lossy_copy'] = True
 
         downloads_path = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
         cleanup_empty_directories(downloads_path, file_path)

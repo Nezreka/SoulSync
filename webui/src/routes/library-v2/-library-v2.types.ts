@@ -135,10 +135,24 @@ export interface LibraryV2TrackFile {
   quality_tier: string;
   import_status: string | null;
   verification_status: string | null;
+  /** Deep-dive A7/C4: raw AcoustID outcome ('pass'|'skip'|null) — narrower
+   *  than verification_status, populated by the autolink import callback. */
+  acoustid_status?: string | null;
+  /** Compact pipeline detail with no dedicated column (AcoustID reason,
+   *  quality-profile fallback applied). Always an object, `{}` when empty. */
+  pipeline_result?: LibraryV2PipelineResult;
   source: string | null;
   file_state: string | null;
   has_replaygain?: boolean;
   has_lyrics?: boolean;
+}
+
+/** Deep-dive A7/C4: what `autolink.py` stashes per file beyond the dedicated
+ *  status columns — all keys optional, present only when they apply. */
+export interface LibraryV2PipelineResult {
+  acoustid_message?: string;
+  version_mismatch_fallback?: string;
+  quality_fallback?: string[];
 }
 
 /** One provider's match state for an entity (legacy Enhanced-View match chips). */

@@ -640,12 +640,21 @@ function TrackVerificationBadge({ file }: { file: LibraryV2TrackFile | null }) {
     default:
       return null;
   }
+  // A7/C4: the concrete AcoustID reason, when the pipeline captured one —
+  // otherwise the tooltip only states the outcome, not why.
+  const detail = file.pipeline_result?.acoustid_message;
+  if (detail) tooltip = `${tooltip} (${detail})`;
   return (
     <span className={`${styles.verificationBadge} ${className}`} title={tooltip}>
       {label}
     </span>
   );
 }
+
+const QUALITY_FALLBACK_LABELS: Record<string, string> = {
+  downsample: 'Hi-Res downsampled',
+  lossy_copy: 'Lossy copy created',
+};
 
 function ManualMatchModal({
   entityType,
@@ -5909,11 +5918,20 @@ function TrackLifecycleSection({
   file: LibraryV2TrackFile | null | undefined;
   manualSkips: LibraryV2ManualSkip[];
 }) {
-  if (!file?.verification_status && manualSkips.length === 0) return null;
+  const fallbacks = file?.pipeline_result?.quality_fallback ?? [];
+  if (!file?.verification_status && manualSkips.length === 0 && fallbacks.length === 0) {
+    return null;
+  }
   return (
     <div className={styles.sourceInfoBody}>
       {file?.verification_status ? (
         <SourceInfoRow label="Verification" value={<TrackVerificationBadge file={file} />} />
+      ) : null}
+      {fallbacks.length > 0 ? (
+        <SourceInfoRow
+          label="Quality gate"
+          value={fallbacks.map((f) => QUALITY_FALLBACK_LABELS[f] ?? f).join(', ')}
+        />
       ) : null}
       {manualSkips.map((skip) => (
         <SourceInfoRow

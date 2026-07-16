@@ -202,6 +202,9 @@ CREATE TABLE IF NOT EXISTS lib2_track_files (
     processing_status TEXT,                           -- mirrors download pipeline state
     verification_status TEXT,                         -- 'verified'|'unverified'|'force_imported'
     acoustid_status TEXT,                             -- 'pass'|'skip'|'fail'|NULL
+    pipeline_result_json TEXT NOT NULL DEFAULT '{}',  -- deep-dive A7/C4: compact import-pipeline
+                                                       -- detail (acoustid_message, quality_fallback)
+                                                       -- not covered by a dedicated column
     tags_json TEXT NOT NULL DEFAULT '{}',             -- present tags snapshot
     missing_tags_json TEXT NOT NULL DEFAULT '[]',     -- list of missing tag keys
     metadata_gaps_json TEXT NOT NULL DEFAULT '[]',    -- list of gap descriptors
@@ -408,6 +411,10 @@ _ADDED_COLUMNS = (
     ("lib2_albums", "mood", "ALTER TABLE lib2_albums ADD COLUMN mood TEXT"),
     ("lib2_tracks", "style", "ALTER TABLE lib2_tracks ADD COLUMN style TEXT"),
     ("lib2_tracks", "mood", "ALTER TABLE lib2_tracks ADD COLUMN mood TEXT"),
+    # Deep-dive A7/C4: pipeline-result detail (AcoustID message, quality-gate
+    # fallback) that the autolink import-callback now persists per file.
+    ("lib2_track_files", "pipeline_result_json",
+     "ALTER TABLE lib2_track_files ADD COLUMN pipeline_result_json TEXT NOT NULL DEFAULT '{}'"),
 )
 
 

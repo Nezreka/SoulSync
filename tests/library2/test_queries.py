@@ -424,6 +424,36 @@ def test_has_lyrics_recognizes_unsyncedlyrics_tag(imported_conn):
     assert track["file"]["has_lyrics"] is True
 
 
+def test_track_read_exposes_acoustid_status_and_pipeline_result(imported_conn):
+    """A7/C4: the autolink callback now persists these onto the file row —
+    the read side must surface them so the Info-tab lifecycle UI can show
+    more than the coarse verification_status badge."""
+    import json
+    tid = imported_conn.execute(
+        "SELECT id FROM lib2_tracks WHERE legacy_track_id=100").fetchone()[0]
+    imported_conn.execute(
+        "UPDATE lib2_track_files SET acoustid_status='skip', "
+        "pipeline_result_json=? WHERE track_id=?",
+        (json.dumps({"acoustid_message": "no confident match",
+                     "quality_fallback": ["downsample"]}), tid),
+    )
+    imported_conn.commit()
+    track = Q.get_track(imported_conn, tid)
+    assert track["file"]["acoustid_status"] == "skip"
+    assert track["file"]["pipeline_result"]["acoustid_message"] == "no confident match"
+    assert track["file"]["pipeline_result"]["quality_fallback"] == ["downsample"]
+
+
+def test_track_read_defaults_pipeline_result_to_empty_dict(imported_conn):
+    """The DDL default is the '{}' string — reads must hand back {} , not the
+    raw string, so the UI can index into it unconditionally."""
+    tid = imported_conn.execute(
+        "SELECT id FROM lib2_tracks WHERE legacy_track_id=100").fetchone()[0]
+    track = Q.get_track(imported_conn, tid)
+    assert track["file"]["pipeline_result"] == {}
+    assert track["file"]["acoustid_status"] is None
+
+
 def test_effective_reads_project_user_metadata_without_rewriting_provider(imported_conn):
     artist_id = imported_conn.execute(
         "SELECT id FROM lib2_artists WHERE name='Drake'"

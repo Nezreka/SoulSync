@@ -5275,3 +5275,90 @@ grün, Production-Build grün.
 `webui/.../-ui/library-v2-page.tsx` (`TrackPlayButton`, `play`-Icon,
 Spalten-Default/-Label), `webui/.../-ui/library-v2-page.module.css`
 (`.colPlay`), `webui/.../-ui/track-play-button.test.tsx` (neu).
+
+---
+
+## 37. §A7/C4 Pipeline-Ergebnis-Persistenz pro File — ✅ umgesetzt (2026-07-16)
+
+Der einzige verbliebene A/C-Punkt aus dem Deep-Dive (H/I brauchen weiterhin
+erst Nutzer-Abstimmung, siehe Dokument-Kopf). Kernbefund beim Umsetzen: das
+war nicht nur „mehr Detail nachrüsten" — die bereits gebaute
+Verification-Badge-UI (§18.3, `TrackVerificationBadge`/`TrackLifecycleSection`)
+war für **jede autolink-erzeugte Datei** (also den Normalfall: jeder fertige
+Download, der über `link_download_into_library_v2` reinläuft) faktisch tot,
+weil `verification_status` dort nie gesetzt wurde — nur legacy-importierte
+Zeilen (`importer.py`) hatten je einen Wert. Reines Lesen hätte also nichts
+gezeigt; der Fix musste am Schreibpunkt ansetzen.
+
+**Root Cause:** `link_download_into_library_v2` (`core/library2/autolink.py`)
+ist exakt der „eine Import-Callback", den C4 meint — jeder fertige Download
+läuft hier durch, ob acquisition-korreliert oder nicht. Er setzte beim
+INSERT/UPDATE der `lib2_track_files`-Zeile nie `verification_status` oder
+`acoustid_status`, obwohl beide Spalten im Schema bereits existierten (die
+erste seit Langem tot, die zweite von Anfang an nie beschrieben). Die Pipeline
+berechnet den Wert (`context['_verification_status']`,
+`core/matching/verification_status.py::status_for_import`) im selben
+Funktionsaufruf, kurz bevor `record_download_provenance` (→ Autolink) läuft —
+er ging schlicht beim Reichen durch die Callback-Grenze verloren.
+
+**Umsetzung (Reuse-First, keine neue Architektur):**
+- `core/imports/pipeline.py`: an allen vier Stellen, die
+  `context['_acoustid_result']` setzen (Pass/Skip via `verify_audio_file`,
+  „missing track/artist info", „not available", Exception), wird jetzt
+  zusätzlich `context['_acoustid_message']` mit dem bereits vorhandenen
+  Klartext-Grund gesetzt — sonst verschwindet der einzige Hinweis, WARUM
+  AcoustID skip/disabled/error war, sobald die Funktion zurückkehrt. Am
+  Downsample- bzw. Lossy-Copy-Fallback (`downsample_hires_flac`/
+  `create_lossy_copy`, beide nur im Metadata-Enhancement-Pfad, nicht beim
+  Simple-Download) wird bei Anwendung `context['_quality_fallback_downsample']`
+  bzw. `_quality_fallback_lossy_copy'] = True` gesetzt.
+- `core/library2/schema.py`: neue Spalte `lib2_track_files.pipeline_result_json`
+  (`TEXT NOT NULL DEFAULT '{}'`, DDL + `_ADDED_COLUMNS`-Migration) für das
+  kompakte Detail, das keine eigene Spalte verdient (AcoustID-Grund,
+  Version-Mismatch-Fallback-Version, Quality-Fallback-Liste).
+- `core/library2/autolink.py`: `link_download_into_library_v2` schreibt jetzt
+  `verification_status` (aus `context['_verification_status']`),
+  `acoustid_status` (aus `context['_acoustid_result']`, gemappt auf die
+  schmalere Schema-Vokabel `'pass'|'skip'|None` — ein hartes `FAIL` erreicht
+  diesen Callback nie, weil die Datei dann quarantiniert wird und die Pipeline
+  vorher zurückkehrt) und `pipeline_result_json` (AcoustID-Message,
+  `version_mismatch_fallback`, `quality_fallback`-Liste) — sowohl im
+  INSERT- als auch im idempotenten UPDATE-Zweig (COALESCE für die
+  Status-Spalten, damit ein Kontext ohne diese Keys eine zuvor bekannte
+  Verification nicht stillschweigend löscht; `pipeline_result_json` wird pro
+  Lauf frisch geschrieben, da es das Ergebnis DIESES Durchlaufs beschreibt).
+- `core/library2/queries.py`: `file_info`-Payload um `acoustid_status` und
+  geparstes `pipeline_result` (leeres Dict als Default) ergänzt.
+- **UI:** `TrackVerificationBadge`-Tooltip hängt die AcoustID-Message an, wenn
+  vorhanden; `TrackLifecycleSection` bekommt eine neue „Quality gate"-Zeile
+  für angewandte Fallbacks („Hi-Res downsampled"/„Lossy copy created").
+
+**Bewusst nicht Teil dieser Runde:** kein AcoustID-Score/Konfidenzwert (den
+gibt es im Pipeline-Kontext nirgends als Zahl, nur die Klartext-Message);
+keine Quarantäne-Referenz auf der File-Zeile (dafür existiert bereits der
+History-Feed aus §35, der denselben Kontext scope-generisch liefert — eine
+zweite Verlinkung wäre Redundanz, kein neuer Nutzen). G8-Vierter-Punkt
+(`_find_or_create_artist`-Slow-Path/Alias-Risiko) bleibt offen — verdient
+laut Deep-Dive-Dokument dieselbe eigene Recherche wie C3/C4 vor ihm, nicht
+ungefragt nebenbei.
+
+**Verifikation:** 5 neue gezielte Tests in `tests/library2/test_autolink.py`
+(Insert- und Update-Pfad, `error`/`disabled` → keine Status-Behauptung,
+Quality-Fallback- und Version-Mismatch-Detail im JSON) + 2 neue in
+`tests/library2/test_queries.py` (Read-Seite: Werte kommen durch, Default ist
+`{}`/`None` statt Roh-String). Volle `pytest tests/library2` (603 Tests,
+davon 7 neu) grün, gezielt `pytest tests/imports tests/downloads/test_downloads_post_processing.py`
+(698 von 703 grün — die 5 vorbestehenden Fails in
+`test_simple_download_tags.py` sind unabhängig von dieser Änderung, per
+Stash-Vergleich verifiziert: `write_tags_to_file` fehlt bereits auf `main`),
+`ruff check` clean (ein vorbestehender S110-Fund in `queries.py:753`, nicht
+von dieser Änderung berührt), `tsc --noEmit`/`oxfmt --check`/
+`oxlint --type-check` clean, `vitest` (195 Tests) grün.
+
+**Scope:** `core/imports/pipeline.py`, `core/library2/schema.py`,
+`core/library2/autolink.py`, `core/library2/queries.py`,
+`tests/library2/test_autolink.py`, `tests/library2/test_queries.py`,
+`webui/.../-library-v2.types.ts` (`LibraryV2TrackFile.acoustid_status`/
+`.pipeline_result`, neues `LibraryV2PipelineResult`),
+`webui/.../-ui/library-v2-page.tsx` (`TrackVerificationBadge`,
+`TrackLifecycleSection`, `QUALITY_FALLBACK_LABELS`).

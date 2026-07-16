@@ -752,6 +752,12 @@ def _serialize_track(
                 has_lyrics = bool(tags_data.get("lyrics") or tags_data.get("unsyncedlyrics"))
             except Exception:
                 pass
+        pipeline_result = {}
+        if file_row.get("pipeline_result_json"):
+            try:
+                pipeline_result = json.loads(file_row["pipeline_result_json"]) or {}
+            except Exception:
+                pipeline_result = {}
         file_info = {
             "file_id": file_row["id"],
             "path": file_row["path"],
@@ -763,6 +769,11 @@ def _serialize_track(
             "quality_tier": quality_tier(file_row["format"], bitrate, bit_depth),
             "import_status": file_row["import_status"],
             "verification_status": file_row["verification_status"],
+            # Deep-dive A7/C4: AcoustID outcome + compact pipeline detail
+            # (AcoustID reason, quality-profile fallback) for the Info-tab
+            # lifecycle section — populated by the autolink import callback.
+            "acoustid_status": file_row["acoustid_status"],
+            "pipeline_result": pipeline_result,
             "source": source,
             "file_state": file_row["file_state"],
             "has_replaygain": has_rg,

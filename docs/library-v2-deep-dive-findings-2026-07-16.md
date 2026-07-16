@@ -154,7 +154,7 @@ Farb-Chips wie Lidarr: grabbed=gelb, imported=grün, deleted=rot,
 quarantined=orange, retagged/moved=blau), Filter nach Event-Typ. Kein neues
 Journal nötig — reine Read/JOIN + UI-Arbeit.
 
-### A7. Track-Info-Tab: Pipeline-Lifecycle bleibt unsichtbar (Nutzer-Wunsch: „wie ging es durch die Pipeline?")
+### A7. Track-Info-Tab: Pipeline-Lifecycle bleibt unsichtbar (Nutzer-Wunsch: „wie ging es durch die Pipeline?") — ✅ teilweise behoben (siehe library-v2.md §37)
 
 Der Info-Tab zeigt Verification-Badge + `lib2_manual_skips` + Download-Historie
 (§18.3, `TrackLifecycleSection`, `library-v2-page.tsx:4450`). Was fehlt, obwohl
@@ -175,6 +175,16 @@ teilweise persistiert:
 erweitern, die `acquisition_history` (via `download_id`/`entity_id`-Korrelation),
 `lib2_entity_history`, File-Delete-Journal und `manual_skips` merged. Gleiche
 Datenbasis wie A6, nur Track-gefiltert.
+
+**Update 2026-07-16:** Quality-Gate-Fallback (Downsample/Lossy-Copy) und
+AcoustID-Detail (Klartext-Grund) sind jetzt pro File persistiert und in der
+Lifecycle-Sektion sichtbar — der eine Import-Callback (`autolink.py`) schreibt
+sie, siehe library-v2.md §37. Bewusst NICHT Teil davon: die
+„Quarantäne-Geschichte"-Timeline (dritter Punkt oben) — der bereits
+existierende History-Feed (§35/A6) liefert dieselbe Korrelation bereits
+scope-generisch; eine zweite, Track-Info-Tab-eigene Verlinkung wäre Redundanz
+ohne neuen Nutzen. Kein AcoustID-Score, da im Pipeline-Kontext keiner als Zahl
+existiert, nur die Klartext-Message.
 
 ### A8. Match-Chips zeigen alle 13 Provider — auch nie konfigurierte (ewig graues Tidal) — ✅ behoben (siehe library-v2.md §29)
 
@@ -379,7 +389,7 @@ nur noch als Legacy-Fallback — primär über `entity_id`-Joins
 (acquisition_requests tragen lib2-Scope+ID; `track_downloads` ist über
 `legacy_track_id` erreichbar, wie `source_info.py` es vormacht).
 
-### C4. Pipeline-Resultate pro File persistieren (Lücke hinter A7)
+### C4. Pipeline-Resultate pro File persistieren (Lücke hinter A7) — ✅ teilweise umgesetzt (siehe library-v2.md §37)
 
 `lib2_track_files` kennt `verification_status` + `import_status`, aber nicht:
 Quality-Gate-Ergebnis (bestanden/Fallback/übersprungen + Profil-ID),
@@ -470,10 +480,10 @@ A7 für nicht-acquisition-korrelierte Downloads (der Normalfall heute) leer.
    Fehlzuordnungsgefahr entfiel, weil `core/acquisition/catalog.py` die
    scope→lib2-Entity-Auflösung für den Search-Pfad bereits korrekt besitzt —
    `history_feed.py` läuft dieselbe Beziehungskette nur rückwärts, statt einen
-   zweiten Resolver zu erfinden. **A7/C4 (Lifecycle-Persistenz pro File)**
-   bleibt offen: das ist ein invasiverer Eingriff in den
-   Import-Pipeline-Callback (nicht nur eine Leseschicht wie C3) und verdient
-   weiterhin eine eigene fokussierte Design-Session.
+   zweiten Resolver zu erfinden. ~~**A7/C4 (Lifecycle-Persistenz pro File)**~~
+   teilweise behoben 2026-07-16 (§37): derselbe Import-Callback (`autolink.py`)
+   persistiert jetzt Quality-Gate-Fallback + AcoustID-Detail pro File — die
+   Quarantäne-Geschichte-Timeline aus A7 blieb bewusst aus (Redundanz zu §35).
 10. ~~**B5/B6 (konfigurierbare Spalten/Provider, Sort, Bulk)**~~ behoben
     2026-07-16 (§31: Options-Zahnrad mit persistierten Spalten- + Provider-
     Sichtbarkeits-Prefs, clientseitiger Sort, Checkbox-Mehrfachauswahl +
