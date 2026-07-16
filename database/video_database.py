@@ -391,6 +391,14 @@ class VideoDatabase:
             _initialized_paths.add(key)
 
     def _initialize_database(self) -> None:
+        # Staged restore (P10): if the admin picked a backup, swap it in NOW —
+        # before any connection opens. The current DB is set aside (kept), so
+        # this is reversible; a no-pending call is a no-op.
+        try:
+            from core.video.backup_restore import apply_pending_restore
+            apply_pending_restore(str(self.database_path))
+        except Exception:   # noqa: BLE001 - a restore hiccup must never block startup
+            logger.exception("staged video restore failed; continuing with the current DB")
         schema = _SCHEMA_FILE.read_text(encoding="utf-8")
         conn = self._get_connection()
         try:
