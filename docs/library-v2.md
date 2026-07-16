@@ -3366,7 +3366,7 @@ Basierend auf Nutzer-Feedback und real-world Testlauf, aufzunehmend nach Abschlu
 
 ---
 
-### 49. Alternate-Cover-Art-Picker fehlt
+### 49. Alternate-Cover-Art-Picker fehlt — ✅ gefixt (2026-07-16, siehe §27)
 
 **Beobachtung:** Legacy erlaubt Klick auf Album-Cover → "Change cover"-Overlay → `openAlbumArtPicker()` (`:3664-3790`) zeigt mehrere Kandidaten-Cover mit Quellen-Badge (`GET /api/album/<id>/art-options`), Anwenden via `POST /api/album/<id>/art`.
 
@@ -3378,7 +3378,7 @@ Basierend auf Nutzer-Feedback und real-world Testlauf, aufzunehmend nach Abschlu
 
 ---
 
-### 50. Interaktives Reorganize (Preview, Mode/Source-Picker, Album-Einzelaktion) fehlt
+### 50. Interaktives Reorganize (Preview, Mode/Source-Picker, Album-Einzelaktion) fehlt — ✅ gefixt (2026-07-16, siehe §26)
 
 **Beobachtung:** Legacy bietet:
 - Pro Album: "📁 Reorganize"-Button → Preview-Modal (`showReorganizeModal`) mit Live-Vorschau (aktueller vs. vorgeschlagener Pfad) → `GET /api/library/album/<id>/reorganize/preview` → Apply via `POST /api/library/album/<id>/reorganize` (enqueued via `core/reorganize_queue.py`).
@@ -4548,3 +4548,33 @@ des Implementierungsplans nicht erneut aufgerollt werden müssen:
 - **Fix:** Neue Funktion `precache_tag_cache()` (`core/library2/tag_cache.py`) liest `tags_json` für alle noch nie gescannten Dateien (`tags_json = '{}'`-Filter, damit ein erneuter Lauf nach einem echten Scan ein No-Op ist) direkt nach dem Import — analog zu `precache_all_artwork`/`precache_tracklists`: bounded `ThreadPoolExecutor` (`auto_import.max_workers`), damit tausende Dateien den Import nicht seriell blockieren. Als neue Stage `"tags"` zwischen Tracklist- und Artwork-Precache in `POST /api/library/v2/import` (`api/library_v2.py`) eingehängt.
 - **Verifikation:** `pytest tests/library2/test_tag_cache_precache.py` (5 neue Tests: Population, Skip bereits gescannter Dateien, Nebenläufigkeit + `max_workers`-Cap, nicht auflösbarer Pfad) + `pytest tests/library2 tests/imports` grün (1137, siehe [[stale-dev-server-false-bug-reports]]-Verifikationsdisziplin). Zusätzlich gegen eine Backup-Kopie der echten Nutzer-DB verifiziert (kein Docker, siehe §12-Nachtrag zur No-Docker-Verifikation): 30/43 Track-Dateien waren `tags_json='{}'`; nach `precache_tag_cache()` 0/43 — reale Lyrics/ReplayGain/Genre-Tags korrekt gelesen und persistiert.
 - **Scope:** `core/library2/tag_cache.py` (neu: `precache_tag_cache`), `api/library_v2.py` (Import-Flow-Hook).
+
+## 26. §50 Interaktives Reorganize — Preview + Apply, Album- und Artist-Scope — ✅ gefixt (2026-07-16)
+
+**Architektur-Vorentscheidung:** Ein Explore-Audit zeigte, dass `core.library_reorganize.preview_album_reorganize`/`reorganize_album` hart gegen die LEGACY-Tabellen (`albums`/`artists`/`tracks`) verdrahtet sind (`load_album_and_tracks`) — eine komplette Neuimplementierung gegen `lib2_*`-Tabellen (Staging, Copy, Post-Processing/Re-Tag, Quality-Gate, Sidecar-Handling) wäre eine zweite Pipeline, die synchron gehalten werden müsste (widerspricht §4.5 Reuse-First). Der Audit deckte aber einen echten, unabhängig vom aktuellen Feature bereits bestehenden Bug auf: `core/reorganize_runner.py::_update_track_path` aktualisierte nach einem Datei-Move NUR die Legacy-`tracks.file_path` — nie `lib2_track_files.path` über den vorhandenen `legacy_track_id`-Rückverweis. Jedes Reorganize eines bereits importierten Albums (egal ob über die Legacy-UI, den `library_reorganize`-Repair-Job oder das neue lib2-Feature) hätte lib2 also stillschweigend desynchronisiert.
+
+**Fix vor dem eigentlichen Feature:** `_update_track_path` synct jetzt zusätzlich `lib2_track_files.path` (best-effort, bricht den Reorganize-Lauf nicht ab, no-op auf einer reinen Legacy-Installation ohne lib2-Schema). Erst danach war die Bridge-Strategie (Pattern A, wie bei §44 Enrich: `legacy_album_id`/`legacy_artist_id` auflösen, an die bestehende Pipeline delegieren) sicher.
+
+**Umsetzung:**
+- `core/library2/reorganize_bridge.py` (neu): `resolve_legacy_album_id`/`resolve_legacy_artist_id` (404 fehlende Entity, 409 „kein Legacy-Datensatz" — z.B. ein per Update Discography hinzugefügtes Album), plus dünne Wrapper `album_reorganize_sources`, `global_reorganize_sources`, `preview_album_reorganize`, `enqueue_album_reorganize`, `enqueue_artist_reorganize_all` — jede löst zuerst die Legacy-ID auf und delegiert dann unverändert an `core.library_reorganize`/`core.reorganize_queue`.
+- `api/library_v2.py`: 5 neue Endpoints (`GET .../albums/<id>/reorganize/sources`, `GET .../reorganize/sources` global, `POST .../albums/<id>/reorganize/preview`, `POST .../albums/<id>/reorganize`, `POST .../artists/<id>/reorganize-all`).
+- Frontend (`reorganize-modal.tsx`, neu): `AlbumReorganizeModal` (Live-Vorschau-Tabelle current→new Path, Source-/Mode-Picker, Rename-only-Checkbox) hinter einem neuen „Reorganize"-Icon-Button (`folder`-Icon, bisher ungenutzt, entspricht Legacys 📁) pro Album; `ArtistReorganizeAllModal` hinter „Reorganize All" im Artist-Toolbar.
+
+**Verifikation:** `pytest tests/library2 tests/test_reorganize*.py tests/test_library_reorganize*.py` — 737 grün (28 neue Tests: Runner-Sync-Fix, Bridge-Unit-Tests gegen eine echte importierte Legacy+lib2-DB, Flask-Route-Tests). `vitest`/`oxfmt`/`oxlint` clean (6 neue Frontend-API-Tests). Keine Live-Docker-Verifikation (kein laufender Provider-Auth-Kontext in dieser Session) — reine Testabdeckung.
+
+**Scope:** `core/reorganize_runner.py` (Bugfix), `core/library2/reorganize_bridge.py` (neu), `api/library_v2.py`, `webui/.../reorganize-modal.tsx` (neu), `webui/.../-library-v2.api.ts`, `webui/.../-library-v2.types.ts`.
+
+## 27. §49 Alternate-Cover-Art-Picker — ✅ gefixt (2026-07-16)
+
+**Architektur:** Anders als §50 brauchte dieses Feature KEINE Legacy-Brücke — die Kandidaten-Suche (`core.metadata.art_lookup.gather_album_art_candidates`) ist bereits rein namensbasiert (Artist-/Album-String + optionale MusicBrainz-Release-ID), und lib2 hat mit `core/library2/artwork.py` bereits ein vollständig lib2-natives, medienserver-unabhängiges Artwork-Cache-System (`build_artwork`, `<db_dir>/lib2_artwork/<kind>_<id>.jpg`, serviert über `/api/library/v2/artwork/<kind>/<id>`). Damit funktioniert der Picker auch für reine Discography-Alben ohne Legacy-Datensatz — ein Vorteil gegenüber der Legacy-Variante.
+
+**Persistenz-Entscheidung:** Statt eines separaten „Pin"-Flags (wie Legacys nicht-leere `thumb_url`) nutzt die Auswahl das bereits vorhandene, generische `lib2_metadata_overrides`-Feld `image_url` (war für `release_group`/`artist` bereits im Feld-Whitelist vorhanden, aber bisher von keinem Feature gelesen). `build_artwork()` prüft dieses Override jetzt VOR dem eingebetteten Cover/Provider-Fallback — dadurch übersteht eine manuelle Auswahl auch ein späteres erzwungenes „Refresh & Scan" oder einen Precache-Lauf, ohne dass eine zweite Pin-Mechanik gebaut werden musste.
+
+**Umsetzung:**
+- `core/library2/artwork.py`: `_manual_art_override_url()` (liest das `image_url`-Override), `apply_manual_artwork()` (lädt die gewählte URL herunter, validiert sie als Bild, setzt das Override, schreibt sofort in den Cache — in dieser Reihenfolge, damit ein totes URL niemals ein Override hinterlässt, das bei jedem künftigen Refresh erneut fehlschlägt).
+- `api/library_v2.py`: `GET .../albums/<id>/art-options` (kurzlebiger In-Prozess-TTL-Cache, spiegelt den Legacy-Cache) und `POST .../albums/<id>/art`.
+- Frontend (`art-picker-modal.tsx`, neu): `AlbumArtPickerModal` (Kandidaten-Grid, Klick zum Anwenden) hinter einem neuen „Change cover"-Icon-Button (`cover`-Icon, neu).
+
+**Verifikation:** 6 neue Core-Modul-Tests (Override-Präzedenz + explizite Prüfung, dass ein Force-Refresh eine manuelle Auswahl NICHT überschreibt) + 8 neue Flask-Route-Tests + 7 neue Frontend-API-Tests, alle grün. `pytest tests/library2` 513 grün gesamt. `oxfmt`/`oxlint` clean.
+
+**Scope:** `core/library2/artwork.py`, `api/library_v2.py`, `webui/.../art-picker-modal.tsx` (neu), `webui/.../-library-v2.api.ts`, `webui/.../-library-v2.types.ts`.
