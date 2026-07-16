@@ -2639,8 +2639,14 @@ function showArtistDownloadsSection() {
  * Show download bubbles on the Library page (mirrors showArtistDownloadsSection)
  */
 function showLibraryDownloadsSection() {
-    const libraryContent = document.querySelector('.library-content');
-    if (!libraryContent) return;
+    // Anchor on the MUSIC library's grid and derive the container FROM it.
+    // Never querySelector('.library-content'): the video library page reuses
+    // that class and its copy comes FIRST in the DOM, so the old global query
+    // grabbed the wrong container and insertBefore threw ("not a child of
+    // this node") — killing the whole Library page init (#1038).
+    const artistGrid = document.getElementById('library-artists-grid');
+    if (!artistGrid || !artistGrid.parentElement) return;
+    const libraryContent = artistGrid.parentElement;
 
     let downloadsSection = document.getElementById('library-downloads-section');
 
@@ -2649,12 +2655,8 @@ function showLibraryDownloadsSection() {
         downloadsSection = document.createElement('div');
         downloadsSection.id = 'library-downloads-section';
         downloadsSection.className = 'artist-downloads-section';
-
-        // Insert before the artist grid
-        const artistGrid = document.getElementById('library-artists-grid');
-        if (artistGrid) {
-            libraryContent.insertBefore(downloadsSection, artistGrid);
-        }
+        downloadsSection.style.display = 'none';   // revealed below only when bubbles exist
+        libraryContent.insertBefore(downloadsSection, artistGrid);
     }
 
     // Count active artists (reuses artistDownloadBubbles state)
