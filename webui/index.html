@@ -10238,6 +10238,17 @@
                             <div id="backup-list-container" class="backup-list-container"></div>
                         </div>
 
+                        <!-- Config Migration Card (export/import settings for both sides) -->
+                        <div class="tool-card" id="config-migration-card">
+                            <div class="tool-card-header">
+                                <h4 class="tool-card-title">Config Migration</h4>
+                            </div>
+                            <p class="tool-card-info">Export every setting (music + video) as one JSON file to move to a new install, or import one here.</p>
+                            <div class="tool-card-controls">
+                                <button id="config-export-button" onclick="openConfigExportModal()">Export / Import Config</button>
+                            </div>
+                        </div>
+
                         <!-- Metadata Cache Tool Card -->
                         <div class="tool-card" id="metadata-cache-card">
                             <div class="tool-card-header">
@@ -11805,6 +11816,7 @@
     <!-- Video worker orbs (isolated copy of the music orbs; idles into the
          floating-orb animation around the SoulSync logo on the video dashboard) -->
     <script src="{{ url_for('static', filename='video/video-worker-orbs.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='config-migration.js', v=static_v) }}"></script>
 </body>
 
 </html>
