@@ -440,9 +440,29 @@
         if (!e || e.detail !== PAGE_ID) return;
         wire();
         var input = $('[data-video-search-input]');
+        if (_pendingQuery && input) {   // a keyword chip navigated here (#1042)
+            input.value = _pendingQuery;
+            onInput(_pendingQuery);
+            _pendingQuery = null;
+            return;
+        }
         if (input) { try { input.focus(); } catch (err) { /* ignore */ } }
         if (!lastQuery) loadTrending();               // fill the idle page
     }
+
+    // Cross-page search-a-keyword (#1042): a keyword chip on a detail page
+    // navigates here with a query. Stash it; onPageShown (fired by the nav) runs
+    // it. Apply immediately too when we're already the active page.
+    var _pendingQuery = null;
+    document.addEventListener('soulsync:video-search-query', function (e) {
+        var qv = e && e.detail && (e.detail.q || e.detail);
+        if (typeof qv !== 'string' || !qv.trim()) return;
+        _pendingQuery = qv.trim();
+        if (document.body.getAttribute('data-video-page') === PAGE_ID) {
+            var input = $('[data-video-search-input]');
+            if (input) { input.value = _pendingQuery; onInput(_pendingQuery); _pendingQuery = null; }
+        }
+    });
 
     function init() {
         document.addEventListener('soulsync:video-page-shown', onPageShown);
