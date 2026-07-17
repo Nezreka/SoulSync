@@ -205,3 +205,29 @@ def test_grab_still_logs_the_grab_line(db, seams):
                        log=logs.append)
     assert out["grabbed"] == 1
     assert any(l.startswith("RSS grab: Heat") for l in logs), logs
+
+
+# ── prescreen precision (the flood Boulder's live logs exposed) ───────────────
+
+@pytest.mark.parametrize("title,release,keep", [
+    # false positives from the live run — must be excluded
+    ("The Oval", "Lee Cronin's The Mummy 2025 1080p WEB", False),
+    ("Love Island USA", "Muppet Treasure Island 1996 1080p", False),
+    ("RuPaul's Drag Race All Stars", "Cornwall A Year by the Sea S01E01", False),
+    ("One Piece", "Normal 2023 1080p WEB", False),
+    ("The Smurfs", "Lee Cronin's The Mummy", False),
+    # real matches must still pass the prescreen
+    ("The Oval", "Tyler.Perry.The.Oval.S07E09.1080p.WEB-GRP", True),
+    ("One Piece", "One.Piece.S23E1170.1080p.WEB", True),
+    ("Love Island USA", "Love.Island.USA.S08E36.720p.WEB", True),
+    ("The Daily Show", "The.Daily.Show.2026.07.08.1080p.WEB", True),
+])
+def test_prescreen_is_word_level_and_stopword_aware(title, release, keep):
+    kept = rss._prescreen([{"title": release}], [title])
+    assert (len(kept) == 1) is keep, (title, release)
+
+
+def test_prescreen_substring_no_longer_false_matches():
+    # 'all' (Stars) must not match inside 'Cornwall'; 'the' alone never qualifies
+    assert rss._prescreen([{"title": "Cornwall Documentary 1080p"}], ["All Stars"]) == []
+    assert rss._prescreen([{"title": "The Anything Show 1080p"}], ["The Oval"]) == []
