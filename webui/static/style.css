@@ -24543,6 +24543,35 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     gap: 12px;
 }
 
+.search-quality-profile-picker {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    min-width: 190px;
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.search-quality-profile-picker select {
+    width: 100%;
+    min-height: 34px;
+    border: 1px solid rgba(var(--accent-rgb), 0.25);
+    border-radius: 8px;
+    padding: 6px 9px;
+    background: rgba(20, 20, 20, 0.9);
+    color: rgba(255, 255, 255, 0.92);
+}
+
+.search-quality-profile-picker small {
+    max-width: 220px;
+    color: rgba(255, 255, 255, 0.52);
+    font-size: 10px;
+    font-weight: 400;
+    line-height: 1.25;
+}
+
 .download-control-btn {
     padding: 10px 20px;
     border-radius: 10px;

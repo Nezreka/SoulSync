@@ -22540,7 +22540,7 @@ def start_missing_tracks_process(playlist_id):
     A single, robust endpoint to kick off the entire missing tracks workflow.
     It creates a batch and starts the master worker in the background.
     """
-    data = request.get_json()
+    data = request.get_json() or {}
     tracks = data.get('tracks', [])
     playlist_name = data.get('playlist_name', 'Unknown Playlist')
     force_download_all = data.get('force_download_all', False)
@@ -22626,6 +22626,54 @@ def start_missing_tracks_process(playlist_id):
             }), 429
 
     batch_id = str(uuid.uuid4())
+
+    # §52.8/§55.2: an Enhanced-/Global-Search "Begin Analysis" click is a
+    # confirmed acquisition intent. Materialize its exact Artist/Release/Track
+    # rows before the background search can fail or quarantine, then carry the
+    # resolved ids/profile/correlation through the existing task payload. A
+    # plain /api/search candidate lookup remains read-only, and non-search
+    # playlist batches keep their established mirroring semantics.
+    try:
+        from core.library2 import ADMIN_PROFILE_ID
+        from core.library2.confirmed_intent import (
+            is_confirmed_search_process,
+            materialize_confirmed_search_tracks,
+        )
+        _materialize_search = (
+            config_manager.get('features.library_v2', False) is True
+            and get_current_profile_id() == ADMIN_PROFILE_ID
+            and is_confirmed_search_process(playlist_id)
+        )
+        if _materialize_search:
+            _lib2_conn = get_database()._get_connection()
+            try:
+                _requested_quality_profile = data.get('quality_profile_id')
+                if _requested_quality_profile is None:
+                    from core.library2.profile_lookup import default_quality_profile_id
+                    _requested_quality_profile = default_quality_profile_id(_lib2_conn)
+                tracks = list(materialize_confirmed_search_tracks(
+                    _lib2_conn,
+                    tracks,
+                    album_context=album_context,
+                    artist_context=artist_context,
+                    explicit_profile_id=_requested_quality_profile,
+                    profile_id=ADMIN_PROFILE_ID,
+                    correlation_id=batch_id,
+                ))
+                _lib2_conn.commit()
+            except Exception:
+                _lib2_conn.rollback()
+                raise
+            finally:
+                _lib2_conn.close()
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    except Exception as exc:
+        logger.exception("Confirmed Search intent materialization failed")
+        return jsonify({
+            "success": False,
+            "error": f"Could not prepare Library v2 search intent: {exc}",
+        }), 500
 
     with tasks_lock:
         download_batches[batch_id] = {

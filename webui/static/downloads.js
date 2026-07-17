@@ -2625,6 +2625,12 @@ async function startMissingTracksProcess(playlistId) {
             wing_it: isWingIt,
             skip_acoustid: skipAcoustid,
         };
+        if (typeof isConfirmedSearchIntentModal === 'function'
+            && isConfirmedSearchIntentModal(playlistId)
+            && Number.isInteger(process.qualityProfileId)
+            && process.qualityProfileId > 0) {
+            requestBody.quality_profile_id = process.qualityProfileId;
+        }
 
         // If this is an artist album download, use album name and include full context
         // Match 'artist_album_', 'enhanced_search_album_', 'discover_album_', and 'seasonal_album_' prefixes
