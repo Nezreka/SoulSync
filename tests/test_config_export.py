@@ -143,6 +143,21 @@ def test_apply_rejects_a_non_bundle():
 
 # ── wiring contracts ──────────────────────────────────────────────────────────
 
+def test_credentials_export_is_gated_behind_login_mode():
+    # SECURITY: plaintext-credential export is the only endpoint that leaks real
+    # secrets, so it must refuse when login is off (where @admin_only trusts
+    # every LAN request). Pin the guard so it can't silently regress.
+    src = (_ROOT / "web_server.py").read_text(encoding="utf-8", errors="replace")
+    export_fn = src.split("def export_config_bundle")[1].split("\ndef ")[0]
+    assert "include_secrets and not _require_login_enabled()" in export_fn
+    assert "403" in export_fn
+    # both routes carry @admin_only right above their handler
+    export_head = src.split("def export_config_bundle")[0]
+    import_head = src.split("def import_config_bundle")[0]
+    assert export_head.rstrip().endswith("@admin_only")
+    assert import_head.rstrip().endswith("@admin_only")
+
+
 def test_endpoints_and_ui_are_wired():
     src = (_ROOT / "web_server.py").read_text(encoding="utf-8", errors="replace")
     assert "'/api/config/export'" in src and "'/api/config/import'" in src
