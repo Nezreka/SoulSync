@@ -757,7 +757,9 @@ export function MatchChips({
         const details = [
           s.external_id ? `id: ${s.external_id}` : 'no id',
           s.last_attempted ? `last: ${s.last_attempted.slice(0, 16).replace('T', ' ')}` : null,
-          s.legacy_entity_id != null ? 'click to (re)match' : null,
+          s.legacy_entity_id != null || s.library_v2_entity_id != null
+            ? 'click to (re)match'
+            : null,
           matchOriginLabel(s.match_origin),
         ]
           .filter(Boolean)
@@ -769,27 +771,14 @@ export function MatchChips({
             type="button"
             className={`${styles.matchChip} ${abbreviated ? styles.trackMatchChip : ''} ${matchChipClass(s.status)}`}
             title={tip}
-            disabled={s.legacy_entity_id == null}
+            disabled={s.legacy_entity_id == null && s.library_v2_entity_id == null}
             onClick={() => setActive(s)}
           >
-            <span>
-              {abbreviated ? getServiceAbbreviation(s.service) : `${s.label}: ${s.status}`}
-            </span>
-            {s.status === 'matched' && matchOriginLabel(s.match_origin) ? (
-              <span className={styles.matchOriginBadge} data-origin={s.match_origin}>
-                {abbreviated
-                  ? s.match_origin === 'manual'
-                    ? 'M'
-                    : s.match_origin === 'automatic'
-                      ? 'A'
-                      : 'L'
-                  : matchOriginLabel(s.match_origin)}
-              </span>
-            ) : null}
+            <span>{abbreviated ? getServiceAbbreviation(s.service) : s.label}</span>
           </button>
         );
       })}
-      {active && active.legacy_entity_id != null ? (
+      {active && (active.legacy_entity_id != null || active.library_v2_entity_id != null) ? (
         <ManualMatchModal
           entityType={entityType}
           entityName={entityName}
@@ -879,6 +868,7 @@ function ManualMatchModal({
       return manualMatchLibraryV2Entity({
         entity_type: entityType,
         legacy_entity_id: service.legacy_entity_id as number | string,
+        library_v2_entity_id: service.library_v2_entity_id,
         service: resultService,
         service_id: result.id,
         ...(entityType === 'artist' &&
@@ -898,6 +888,7 @@ function ManualMatchModal({
       clearLibraryV2EntityMatch({
         entity_type: entityType,
         legacy_entity_id: service.legacy_entity_id as number | string,
+        library_v2_entity_id: service.library_v2_entity_id,
         service: service.service,
         ...(entityType === 'artist' &&
         watchlistRowId &&
@@ -7327,6 +7318,17 @@ export function describeLibraryV2ImportCompletion(state: LibraryV2ImportState): 
   return `Import complete — ${summary}.`;
 }
 
+export function describeLibraryV2ArtworkCacheProgress(state: LibraryV2ImportState): string {
+  const cache = state.artwork_cache;
+  if (!Number.isFinite(cache.total) || cache.total <= 0) {
+    return 'Library ready to browse · Caching artwork in the background…';
+  }
+  const total = Math.max(0, Math.round(cache.total));
+  const current = Math.min(total, Math.max(0, Math.round(cache.current)));
+  const percent = clampPercent((current / total) * 100);
+  return `Library ready to browse · Caching artwork in the background · ${current}/${total} · ${percent}%`;
+}
+
 /** Deep-dive B7: the manual global upgrade scan used to live in every
  *  artist's toolbar (misleadingly, since it always scanned the whole
  *  catalog). Scoped Automatic Search (C1) covers per-artist/-album/-track
@@ -7394,6 +7396,7 @@ export function ImportButton({
 
   const importState = importQuery.data;
   const running = importState?.running === true;
+  const artworkRunning = importState?.artwork_cache.running === true;
   const busy = startImport.isPending || running;
 
   useEffect(() => {
@@ -7416,18 +7419,29 @@ export function ImportButton({
     ? describeLibraryV2ImportProgress(importState)
     : startImport.isPending
       ? 'Starting import…'
-      : message;
+      : artworkRunning && importState
+        ? `${message ? `${message} ` : ''}${describeLibraryV2ArtworkCacheProgress(importState)}`
+        : importState?.artwork_cache.error
+          ? `${message ? `${message} ` : 'Library ready to browse. '}Artwork caching failed; covers will load on demand.`
+          : message;
   const progress =
     running && importState.total > 0
       ? clampPercent((importState.current / importState.total) * 100)
-      : null;
+      : artworkRunning && importState.artwork_cache.total > 0
+        ? clampPercent((importState.artwork_cache.current / importState.artwork_cache.total) * 100)
+        : null;
 
   return (
     <span className={styles.importWrap}>
       <button
         type="button"
         className={prominent ? styles.btnPrimary : styles.btnGhost}
-        disabled={busy}
+        disabled={busy || artworkRunning}
+        title={
+          artworkRunning
+            ? 'The library is ready; wait for background artwork caching before re-importing'
+            : undefined
+        }
         onClick={() => startImport.mutate()}
       >
         {busy ? 'Importing…' : hasArtists ? 'Re-import library' : 'Import library'}
@@ -7443,7 +7457,7 @@ export function ImportButton({
               aria-label={statusMessage}
             />
           ) : null}
-          {running && importQuery.isError ? (
+          {(running || artworkRunning) && importQuery.isError ? (
             <span className={styles.importPollError}>Status unavailable; retrying…</span>
           ) : null}
         </span>

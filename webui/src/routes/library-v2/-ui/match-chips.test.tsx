@@ -67,7 +67,7 @@ describe('library v2 match chips (deep-dive A8)', () => {
       />,
     );
 
-    expect(screen.getByText('Spotify: matched')).toBeInTheDocument();
+    expect(screen.getByText('Spotify')).toBeInTheDocument();
     expect(screen.queryByText(/Tidal/)).not.toBeInTheDocument();
   });
 
@@ -77,7 +77,35 @@ describe('library v2 match chips (deep-dive A8)', () => {
       <MatchChips entityType="artist" entityName="Drake" services={[withoutAvailable]} />,
     );
 
-    expect(screen.getByText('Spotify: matched')).toBeInTheDocument();
+    expect(screen.getByText('Spotify')).toBeInTheDocument();
+  });
+
+  it('keeps manual matching enabled for lib2-native artists', async () => {
+    server.use(
+      http.post('/api/library/search-service', () =>
+        HttpResponse.json({
+          success: true,
+          results: [{ id: 'sp-native', name: 'Native Artist', provider: 'spotify' }],
+        }),
+      ),
+      http.put('/api/library/v2/artists/77/manual-match', () =>
+        HttpResponse.json({ success: true }),
+      ),
+    );
+    renderWithClient(
+      <MatchChips
+        entityType="artist"
+        entityName="Native Artist"
+        services={[service({ legacy_entity_id: null, library_v2_entity_id: 77 })]}
+      />,
+    );
+
+    const chip = screen.getByText('Spotify');
+    expect(chip.closest('button')).not.toBeDisabled();
+    fireEvent.click(chip);
+    fireEvent.click(await screen.findByRole('button', { name: 'Search' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Use this match' }));
+    await waitFor(() => expect(screen.queryByText('Manual match')).not.toBeInTheDocument());
   });
 
   it('renders nothing when every chip is unavailable', () => {
@@ -111,7 +139,7 @@ describe('library v2 match chips (deep-dive A8)', () => {
     );
     renderWithClient(<MatchChips entityType="artist" entityName="Drake" services={[service()]} />);
 
-    fireEvent.click(screen.getByText('Spotify: matched'));
+    fireEvent.click(screen.getByText('Spotify'));
     fireEvent.click(await screen.findByRole('button', { name: 'Search' }));
 
     expect(await screen.findByText('54M followers · 97 popularity')).toBeInTheDocument();
@@ -128,7 +156,7 @@ describe('library v2 match chips (deep-dive A8)', () => {
     );
     renderWithClient(<MatchChips entityType="artist" entityName="Drake" services={[service()]} />);
 
-    fireEvent.click(screen.getByText('Spotify: matched'));
+    fireEvent.click(screen.getByText('Spotify'));
     fireEvent.click(await screen.findByRole('button', { name: 'Search' }));
 
     await waitFor(() => expect(screen.getByText('ID: it1')).toBeInTheDocument());
@@ -176,8 +204,8 @@ describe('library v2 match chips (deep-dive A8)', () => {
       />,
     );
 
-    fireEvent.click(screen.getByText('Spotify: matched'));
-    expect((await screen.findAllByText('Manual match')).length).toBeGreaterThanOrEqual(2);
+    fireEvent.click(screen.getByText('Spotify'));
+    expect(await screen.findByText('Manual match')).toBeInTheDocument();
     expect(screen.getByAltText('Drake')).toHaveAttribute(
       'src',
       'https://img.example/current.jpg?token=signed',
@@ -214,7 +242,7 @@ describe('library v2 match chips (deep-dive A8)', () => {
       />,
     );
 
-    fireEvent.click(screen.getByText('Spotify: matched'));
+    fireEvent.click(screen.getByText('Spotify'));
     fireEvent.click(await screen.findByRole('button', { name: 'Search' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Use this match' }));
 
