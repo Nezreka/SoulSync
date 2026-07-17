@@ -2543,6 +2543,50 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         threading.Thread(target=_run, name="lib2-reconcile-artists", daemon=True).start()
         return jsonify({"success": True, "started": True, "job_id": job_id})
 
+    @app.route("/api/library/v2/maintenance/reconcile-wishlist", methods=["POST"])
+    def lib2_reconcile_wishlist():
+        """Re-assert the wanted projection into the Wishlist (§69.1).
+
+        The lib2 → Wishlist mirror only fires on a monitor toggle, but the
+        Wishlist is a volatile queue — entries leave when downloaded, cleared,
+        or aged out. This re-derives the authoritative wanted projection and
+        mirrors it: monitored+missing tracks whose entry disappeared are re-added
+        and no-longer-wanted entries are pruned. Respects the ignore-list.
+        Background job; poll ``/api/library/v2/jobs/status``."""
+        guard = _guard()
+        if guard:
+            return guard
+        try:
+            job = _job_registry.start("reconcile-wishlist")
+        except JobAlreadyRunning as exc:
+            return jsonify({
+                "success": False, "error": str(exc), "job_id": exc.state["job_id"],
+            }), 409
+        job_id = job["job_id"]
+
+        def _run():
+            db = get_database()
+            try:
+                from core.library2.monitor_sync import reconcile_track_wishlist
+
+                def _progress(current, total):
+                    try:
+                        _job_registry.update(job_id, current=current, total=total)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug("wishlist reconcile progress update failed: %s", exc)
+
+                stats = reconcile_track_wishlist(
+                    db, profile_id=ADMIN_PROFILE_ID, progress=_progress)
+                _job_registry.update(job_id, result=stats)
+            except Exception as e:  # noqa: BLE001
+                logger.error("Reconcile wishlist failed: %s", e, exc_info=True)
+                _job_registry.update(job_id, error=str(e))
+            finally:
+                _job_registry.finish(job_id)
+
+        threading.Thread(target=_run, name="lib2-reconcile-wishlist", daemon=True).start()
+        return jsonify({"success": True, "started": True, "job_id": job_id})
+
     @app.route("/api/library/v2/maintenance/duplicate-findings", methods=["GET"])
     def lib2_duplicate_findings():
         """Open release-group/duplicate findings the automatic folds left for

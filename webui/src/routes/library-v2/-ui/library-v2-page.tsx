@@ -74,6 +74,7 @@ import {
   refreshLibraryV2,
   refreshLibraryV2Discography,
   reconcileUnmappedArtists,
+  reconcileWishlist,
   retryLibraryV2Mirror,
   runRepairJob,
   runLibraryV2PlaylistPipeline,
@@ -2666,6 +2667,8 @@ function MaintenanceModal({
   const [state, setState] = useState<Record<string, 'queued' | 'error'>>({});
   const [reconcile, setReconcile] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
   const [reconcileResult, setReconcileResult] = useState<string | null>(null);
+  const [wishlist, setWishlist] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
+  const [wishlistResult, setWishlistResult] = useState<string | null>(null);
 
   const runReconcile = () => {
     setReconcile('running');
@@ -2690,6 +2693,32 @@ function MaintenanceModal({
       .catch((e) => {
         setReconcile('error');
         setReconcileResult(e instanceof Error ? e.message : 'Reconcile failed');
+      });
+  };
+
+  const runWishlistReconcile = () => {
+    setWishlist('running');
+    setWishlistResult(null);
+    void reconcileWishlist()
+      .then(async (jobId) => {
+        for (let i = 0; i < 900; i += 1) {
+          const s = await fetchLibraryV2JobStatus(jobId);
+          if (!s.running) {
+            const r = (s.result ?? {}) as Record<string, number>;
+            setWishlist('done');
+            setWishlistResult(
+              `${r.wanted ?? 0} wanted · ${r.wishlisted ?? 0} in wishlist · ${r.mirrored ?? 0} synced`,
+            );
+            return;
+          }
+          await new Promise((res) => setTimeout(res, 1000));
+        }
+        setWishlist('error');
+        setWishlistResult('Timed out waiting for the job');
+      })
+      .catch((e) => {
+        setWishlist('error');
+        setWishlistResult(e instanceof Error ? e.message : 'Reconcile failed');
       });
   };
 
@@ -2718,6 +2747,25 @@ function MaintenanceModal({
             Resolve featured/wishlist/discography artists that never matched a provider (id + cover
             art), and split true collaboration names into their real artists.
             {reconcileResult ? ` — ${reconcileResult}` : ''}
+          </span>
+        </button>
+        <button
+          type="button"
+          className={styles.qpOption}
+          disabled={wishlist === 'running'}
+          onClick={runWishlistReconcile}
+        >
+          <span className={styles.qpName}>
+            Reconcile Wishlist
+            <span className={styles.qpBasis}>{MAINTENANCE_BASIS_LABEL.lib2}</span>
+            {wishlist === 'running' ? <span className={styles.statusOk}>running…</span> : null}
+            {wishlist === 'done' ? <span className={styles.statusOk}>done</span> : null}
+            {wishlist === 'error' ? <span className={styles.statusWarn}>failed</span> : null}
+          </span>
+          <span className={styles.qpDesc}>
+            Re-add monitored, still-missing tracks whose Wishlist entry was downloaded, cleared, or
+            aged away, and prune entries that are no longer wanted. Respects deliberate cancels.
+            {wishlistResult ? ` — ${wishlistResult}` : ''}
           </span>
         </button>
         {MAINTENANCE_JOBS.map((job) => (

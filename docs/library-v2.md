@@ -7447,7 +7447,7 @@ noch keine Root-Cause-Analyse, noch keine Umsetzung. Reihenfolge nach Nutzer-
 Priorität: erst §68 (erledigt), dann §69.1, dann §69.2. Für §69.1 besteht
 Dev-DB-Zugriff.
 
-### 69.1 Watchlist ↔ Library-Monitored muss BEIDSEITIG synchron sein
+### 69.1 Watchlist ↔ Library-Monitored muss BEIDSEITIG synchron sein — ✅ gefixt (2026-07-18, siehe §70)
 
 **Gemeldet:** Der Sync ist derzeit nur einseitig.
 
@@ -7493,3 +7493,86 @@ Track** wird direkt regulär gesucht/abgearbeitet — wie jeder andere Wishlist-
 Track — **ohne die gesamte Wishlist zu starten**. (Verwandt mit §69.1 Track-
 Wishlist-Kante und §29/C1 scoped Automatic Search; hier fehlt die sofortige
 Einzel-Track-Ausführung nach dem Wishlist-Insert.)
+
+---
+
+## 70. §69.1 Watchlist ↔ Library-Monitored beidseitig synchron — ✅ umgesetzt (2026-07-18)
+
+Root-Cause gegen die reale Dev-DB verifiziert (read-only Kopie). Der Mirror war
+**rein edge-getriggert**: eine lib2-Monitor-Umschaltung spiegelt via Outbox in
+Watchlist/Wishlist (`mirror_outbox`, `wishlist_mirror`), aber nur *im Moment des
+Toggles*. Daraus zwei Lücken:
+
+### 70.1 Befund an der echten DB
+
+- **Wishlist komplett leer (0 Zeilen)**, obwohl **168 Tracks autoritativ
+  `wanted=1`** sind (davon **72 monitored+missing**). Historie: 3370
+  `wishlist_add` + 3289 `wishlist_remove` (done), letzter Outbox-Batch waren
+  Massen-`wishlist_remove`. Sobald ein Wishlist-Eintrag geht (heruntergeladen,
+  „Clear", TTL), bringt ihn **nichts** zurück — kein Job re-projiziert die
+  autoritative `lib2_wanted_tracks` in die Wishlist. Das ist exakt §69.1 „ein
+  monitored missing Track muss in der Wishlist landen" (Nutzerbeispiel
+  SawanoHiroyuki[nZk] „Lost and Found").
+- **Watchlist → Library fehlte ganz.** `db.remove_artist_from_watchlist`
+  löscht nur die Legacy-Zeile; der passende lib2-Artist blieb `monitored=1`.
+  „Clear Watchlist" / Artist löschen ließ die Zustände auseinanderlaufen.
+
+### 70.2 Fix (`core/library2/monitor_sync.py`)
+
+- **Rück-Kante Watchlist → Library (event-getrieben).**
+  `demonitor_lib2_artists_for_removed_watchlist` matcht den entfernten
+  Watchlist-Artist per Provider-ID (`spotify_id`/`musicbrainz_id`/`external_ids`)
+  bzw. als Fallback per normalisiertem Namen auf die lib2-Zeile(n), setzt sie
+  `monitored=0`, schreibt eine `user_explicit`-Unmonitor-Regel, re-projiziert
+  und mirrort **nur die Artist-tier-entschiedenen Tracks** (`reason LIKE
+  'artist_rule%'`) — owned Tracks mit Album-/Track-Regel bleiben unberührt,
+  genau wie der Forward-Toggle Track-Flags nie cascadet. **Kein** erneutes
+  `enqueue_artist_watchlist` (die Zeile ist bereits weg → keine Loop). Idempotent.
+- **Choke-Point ist der Endpoint, NICHT die DB-Methode.** `remove_artist_from_watchlist`
+  ist auch der *Rückweg* des Forward-Mirrors (`mirror_outbox._execute_op`) —
+  ein Hook dort hätte einen Feedback-Loop erzeugt. Verdrahtet daher an den
+  drei nutzer­seitigen Removal-Pfaden: `web_server` `/api/watchlist/remove`
+  (single) + `/api/watchlist/remove-batch` (= „Clear Watchlist"), sowie dem
+  Blueprint `api/watchlist.py` DELETE. Neuer DB-Helper
+  `get_watchlist_artist_descriptor` erfasst Name + alle Provider-IDs **vor** dem
+  Löschen. Feature-gated + best-effort (`sync_watchlist_removal`) — ein
+  Reverse-Sync-Fehler darf die Watchlist-Entfernung nie brechen.
+- **Wanted-Projektion → Wishlist Re-Assertion (Reconcile).**
+  `reconcile_track_wishlist` recomputet die volle Projektion und mirrort sie
+  über denselben Outbox-Pfad wie die Toggles: jeder `wanted`-Track wird
+  (re-)eingereiht (nur ohne befriedigende Datei → `should_queue`), jeder noch
+  in der Wishlist stehende lib2-Track ohne `wanted` wird geprunt („und
+  umgekehrt"). `user_initiated=False` ⇒ die Ignore-Liste (bewusste Cancels)
+  bleibt respektiert.
+
+### 70.3 Verdrahtung & Auslösepfade
+
+- Neuer Repair-Job `core/repair_jobs/lib2_wishlist_reconcile.py`
+  (`default_enabled=True`, Intervall 6 h) ⇒ heilt Drift dauerhaft von selbst.
+  Bewusst *kein* Artist-Reconcile-Job: „nicht in der Watchlist" ist nicht von
+  „nie hinzugefügt" unterscheidbar, also ist die Rück-Kante zwingend
+  event-getrieben, nicht reconcile-ableitbar. (`lib2_mirror_reconcile` drainiert
+  nur PENDING-Outbox-Rows und re-derived nichts — deckt die Lücke nicht.)
+- Neuer Maintenance-Endpoint `POST /api/library/v2/maintenance/reconcile-wishlist`
+  (Background-Job, poll `jobs/status`) + Frontend-Button **„Reconcile Wishlist"**
+  in der Maintenance-Modal (Ergebnis `{wanted, wishlisted, mirrored}`), damit
+  der Nutzer den aktuell leeren Wishlist-Backlog sofort heilen kann.
+
+### 70.4 Verifikation
+
+- Neue Tests `tests/library2/test_monitor_sync.py` (8): Reconcile re-added
+  monitored+missing / prunet not-wanted / idempotent; Reverse-Edge matcht per
+  Spotify-ID + Namens-Fallback, idempotent, No-Match=No-Op, Feature-Gate.
+- **Real-DB-Beweis** (read-only Kopie): Reconcile reiht die 72 fehlenden Tracks
+  ein (73 Adds inkl. 1 Upgrade-Kandidat, 0 Removes bei leerer Wishlist);
+  „Clear Watchlist" demonitort beide realen Artists (VØJ, Justin Bieber) →
+  0 monitored lib2-Artists, mirror-Ops verengt (VØJ 9→0, Bieber 219→12).
+- `tests/library2` + `tests/wishlist` + `tests/repair` + `tests/repair_jobs`
+  + Watchlist-Tests: **1026 passed**. Ruff sauber (inkl. `web_server.py`).
+  Frontend `npm run check` 0/0, Vitest **226 passed**, Production-Build ok.
+
+### 70.5 Offen aus §69
+
+§69.2 (Manual Grab erreicht die Download-Pipeline nicht) und §69.3 (Automatic
+Search eines Einzel-Tracks führt die Wishlist nicht sofort aus) bleiben offen —
+separate Analyse.

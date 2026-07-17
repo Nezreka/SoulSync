@@ -11059,6 +11059,39 @@ class MusicDatabase:
                 raise
             return False
 
+    def get_watchlist_artist_descriptor(self, artist_id: str, profile_id: int = 1) -> Optional[Dict[str, Any]]:
+        """Full identity of a watchlist row (name + every provider id).
+
+        Captured BEFORE a removal so the Library-v2 reverse sync (§69.1) can
+        match the removed artist against its lib2 counterpart by any provider id
+        or name. Returns ``None`` when the id is not on the watchlist.
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("PRAGMA table_info(watchlist_artists)")
+                cols = {c[1] for c in cursor.fetchall()}
+                id_cols = [c for c in (
+                    'spotify_artist_id', 'itunes_artist_id', 'deezer_artist_id',
+                    'discogs_artist_id', 'amazon_artist_id', 'musicbrainz_artist_id',
+                ) if c in cols]
+                if not id_cols:
+                    return None
+                where = " OR ".join(f"{c} = ?" for c in id_cols)
+                cursor.execute(
+                    f"SELECT artist_name, {', '.join(id_cols)} FROM watchlist_artists "
+                    f"WHERE ({where}) AND profile_id = ? LIMIT 1",
+                    (*([artist_id] * len(id_cols)), profile_id),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    return None
+                external_ids = [row[c] for c in id_cols if row[c]]
+                return {"name": row["artist_name"], "external_ids": external_ids}
+        except Exception as e:
+            logger.debug(f"get_watchlist_artist_descriptor failed (ID: {artist_id}): {e}")
+            return None
+
     def is_artist_in_watchlist(self, artist_id: str, profile_id: int = 1, artist_name: str = None) -> bool:
         """Check if an artist is currently in the watchlist (checks cross-provider IDs and name)"""
         try:

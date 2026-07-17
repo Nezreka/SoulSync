@@ -48,6 +48,7 @@ JOB_DATA_BASIS: dict[str, str] = {
     'lib2_skips_cleanup': 'lib2',
     'lib2_discography_refresh': 'lib2',
     'lib2_mirror_reconcile': 'lib2',
+    'lib2_wishlist_reconcile': 'lib2',
     'audio_corruption_detector': 'mixed',
 }
 
@@ -103,6 +104,7 @@ _JOB_MODULES = [
     'core.repair_jobs.lib2_skips_cleanup',
     'core.repair_jobs.lib2_discography_refresh',
     'core.repair_jobs.lib2_mirror_reconcile',
+    'core.repair_jobs.lib2_wishlist_reconcile',
 ]
 
 

@@ -30180,9 +30180,21 @@ def remove_from_watchlist():
             return jsonify({"success": False, "error": "Missing artist_id"}), 400
 
         database = get_database()
+        # §69.1 reverse edge: capture the row's identity BEFORE deleting so the
+        # matching monitored lib2 artist can be demonitored (states must stay in
+        # sync both ways). Fires only for a user-facing removal — the forward
+        # mirror removes rows via the DB layer directly, never through here.
+        _wl_descriptor = database.get_watchlist_artist_descriptor(artist_id, profile_id=get_current_profile_id())
         success = database.remove_artist_from_watchlist(artist_id, profile_id=get_current_profile_id())
 
         if success:
+            try:
+                from core.library2 import ADMIN_PROFILE_ID
+                from core.library2.monitor_sync import sync_watchlist_removal
+                sync_watchlist_removal(database, config_manager, _wl_descriptor,
+                                       profile_id=ADMIN_PROFILE_ID)
+            except Exception as _sync_e:
+                logger.debug("watchlist reverse-sync (single) failed: %s", _sync_e)
             # Push updated count to this profile's WebSocket room immediately
             try:
                 pid = get_current_profile_id()
@@ -30373,9 +30385,24 @@ def remove_batch_from_watchlist():
 
         database = get_database()
         removed = 0
+        # §69.1 reverse edge (covers "Clear Watchlist" = batch remove): demonitor
+        # the matching lib2 artist for every row we actually removed.
+        removed_descriptors = []
         for artist_id in artist_ids:
+            descriptor = database.get_watchlist_artist_descriptor(artist_id, profile_id=get_current_profile_id())
             if database.remove_artist_from_watchlist(artist_id, profile_id=get_current_profile_id()):
                 removed += 1
+                if descriptor:
+                    removed_descriptors.append(descriptor)
+
+        try:
+            from core.library2 import ADMIN_PROFILE_ID
+            from core.library2.monitor_sync import sync_watchlist_removal
+            for descriptor in removed_descriptors:
+                sync_watchlist_removal(database, config_manager, descriptor,
+                                       profile_id=ADMIN_PROFILE_ID)
+        except Exception as _sync_e:
+            logger.debug("watchlist reverse-sync (batch) failed: %s", _sync_e)
 
         return jsonify({
             "success": True,

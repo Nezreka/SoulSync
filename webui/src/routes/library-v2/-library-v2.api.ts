@@ -971,6 +971,20 @@ export async function reconcileUnmappedArtists(): Promise<string> {
   return payload.job_id;
 }
 
+/** Re-assert the wanted projection into the Wishlist (§69.1): re-add
+ *  monitored+missing tracks whose Wishlist entry was downloaded/cleared/aged
+ *  away and prune no-longer-wanted entries. Returns a job id to poll via
+ *  fetchLibraryV2JobStatus; the result carries `{scanned, wanted, wishlisted,
+ *  mirrored}`. */
+export async function reconcileWishlist(): Promise<string> {
+  const payload = await readJson<{ success: boolean; job_id?: string; error?: string }>(
+    apiClient.post('library/v2/maintenance/reconcile-wishlist', { json: {} }),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Reconcile failed');
+  if (!payload.job_id) throw new Error('Reconcile did not return a job id');
+  return payload.job_id;
+}
+
 export async function startLibraryV2UpgradeScan(): Promise<string> {
   const payload = await readJson<{ success: boolean; job_id?: string; error?: string }>(
     apiClient.post('library/v2/upgrade-scan', { json: {} }),
