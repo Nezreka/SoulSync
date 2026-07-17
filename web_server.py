@@ -22150,6 +22150,12 @@ def start_missing_tracks_process(playlist_id):
             'analysis_processed': 0,
             'analysis_results': [],
             'force_download_all': force_download_all,  # Pass the force flag to the batch
+            # Replace-intent (#1045): ONLY a user-checked Force toggle means
+            # "rewrite the existing file". force_download_all alone is NOT that
+            # signal — wishlist batches set it to skip ownership checks, and
+            # Wing It auto-ors it in client-side — so wing_it is excluded here
+            # and the wishlist never sets this key at all.
+            'force_replace': bool(force_download_all and not wing_it),
             'ignore_manual_matches': ignore_manual_matches,
             # Blocklist override (Phase 2b) — the user confirmed "download anyway"
             # at the modal, so the per-track filter (2a) skips this batch.

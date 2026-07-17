@@ -122,16 +122,22 @@ def _replacement_length_is_safe(existing_path: str, incoming_path: str,
 
 
 def _batch_force_replace(context: dict) -> bool:
-    """True when the user explicitly forced this download (the 'Force
+    """True when the USER explicitly forced this download (the 'Force
     download' toggle on the download modal). An explicit re-download of a
     track they already own is replace-intent — the metadata-protection skip
-    must not silently discard it (#1045). Anything missing or unreadable →
-    False, i.e. the protective default."""
+    must not silently discard it (#1045).
+
+    Reads the batch's ``force_replace`` key, which web_server sets ONLY for a
+    user-checked toggle (wing_it excluded). Deliberately NOT
+    ``force_download_all``: the wishlist sets that on every background batch
+    (it means "skip ownership checks" there) and Wing It auto-enables it —
+    neither may ever overwrite library files. Anything missing or unreadable
+    → False, i.e. the protective default."""
     try:
         batch_id = (context or {}).get('batch_id')
         if not batch_id:
             return False
-        return bool((download_batches.get(batch_id) or {}).get('force_download_all'))
+        return bool((download_batches.get(batch_id) or {}).get('force_replace'))
     except Exception:   # noqa: BLE001 - protection is the safe default
         return False
 
