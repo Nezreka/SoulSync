@@ -1042,3 +1042,243 @@ def test_refresh_fans_out_auto_monitor_and_repair_across_group(
 
     assert len(stats["auto_monitor_album_ids"]) == 2
     assert "repaired_track_number_collisions" in stats
+
+
+# ---------------------------------------------------------------------------
+# §62 stage 1: cross-language/cross-release duplicate hardening
+# ---------------------------------------------------------------------------
+
+def _seed_library_album(conn, artist_id, *, title, release_date=None,
+                        expected_track_count=None, external_ids="{}",
+                        album_type="album", origin="library"):
+    cur = conn.execute(
+        """INSERT INTO lib2_albums(primary_artist_id, title, album_type,
+               release_date, expected_track_count, external_ids, origin)
+           VALUES(?,?,?,?,?,?,?)""",
+        (artist_id, title, album_type, release_date, expected_track_count,
+         external_ids, origin))
+    conn.execute(
+        "INSERT OR IGNORE INTO lib2_album_artists(album_id, artist_id, role) "
+        "VALUES(?,?, 'primary')", (cur.lastrowid, artist_id))
+    conn.commit()
+    return cur.lastrowid
+
+
+def _cards_from(source, *entries):
+    payload = _cards(*entries)
+    payload["source"] = source
+    return payload
+
+
+def test_release_title_key_ignores_quotes_brackets_and_width():
+    from core.library2.importer import release_title_key
+
+    assert release_title_key('TV Anime "Attack on Titan" Original Soundtrack') \
+        == release_title_key("TV Anime Attack on Titan Original Soundtrack")
+    # NFKC folds full-width forms (：) to ASCII; punctuation never splits identity.
+    assert release_title_key("The Seven Deadly Sins：Cursed by Light OST") \
+        == release_title_key("The Seven Deadly Sins: Cursed by Light OST")
+    assert release_title_key("Scorpion") != release_title_key("Views")
+
+
+def test_same_date_and_track_count_matches_other_language_edition(
+        legacy_db, imported_conn, monkeypatch):
+    """The Sawano case: the library holds the JP-titled Deezer release, the
+    provider lists the international EN-titled release of the SAME album
+    (same day, same track count, different provider id). Must enrich, not
+    duplicate."""
+    aid = _artist_id(imported_conn)
+    album_id = _seed_library_album(
+        imported_conn, aid,
+        title="TVアニメ「進撃の巨人」Season 2 オリジナルサウンドトラック",
+        release_date="2017-06-07", expected_track_count=33,
+        external_ids=json.dumps({"deezer": "196470602"}))
+
+    _fake_discography_by_name(monkeypatch, {"Drake": _cards_from(
+        "deezer",
+        ("albums", {"id": "42695001",
+                    "title": 'TV Anime "Attack on Titan Season 2" (Original Soundtrack)',
+                    "album_type": "album", "release_date": "2017-06-07",
+                    "year": "2017", "track_count": 33, "image_url": None}),
+    )})
+
+    stats = D.expand_artist_discography(legacy_db, aid)
+
+    assert stats["added"] == 0
+    assert stats["enriched"] >= 1
+    titles = [r["title"] for r in imported_conn.execute(
+        "SELECT title FROM lib2_albums WHERE primary_artist_id=?", (aid,))]
+    assert 'TV Anime "Attack on Titan Season 2" (Original Soundtrack)' not in titles
+    row = imported_conn.execute(
+        "SELECT external_ids FROM lib2_albums WHERE id=?", (album_id,)).fetchone()
+    # The library row keeps its own deezer identity (G1 — no clobbering).
+    assert json.loads(row["external_ids"])["deezer"] == "196470602"
+
+
+def test_punctuation_only_title_variant_matches(legacy_db, imported_conn, monkeypatch):
+    aid = _artist_id(imported_conn)
+    _seed_library_album(
+        imported_conn, aid, title='TV Anime "Attack on Titan" Original Soundtrack',
+        release_date="2014-07-31", expected_track_count=16)
+
+    _fake_discography_by_name(monkeypatch, {"Drake": _cards_from(
+        "deezer",
+        ("albums", {"id": "338920467",
+                    "title": "TV Anime Attack on Titan Original Soundtrack",
+                    "album_type": "album", "release_date": "2014-07-31",
+                    "year": "2014", "track_count": 16, "image_url": None}),
+    )})
+
+    stats = D.expand_artist_discography(legacy_db, aid)
+
+    assert stats["added"] == 0
+    assert stats["enriched"] >= 1
+
+
+def test_ambiguous_same_day_singles_are_not_merged(legacy_db, imported_conn, monkeypatch):
+    """Three 1-track singles dropped the same day (EGO / LICHT MEER /
+    Vigilante) must stay three distinct releases — the date+count fallback
+    only fires when exactly one candidate matches."""
+    aid = _artist_id(imported_conn)
+    for title in ("EGO", "LICHT MEER", "Vigilante"):
+        _seed_library_album(imported_conn, aid, title=title, album_type="single",
+                            release_date="2020-02-02", expected_track_count=1)
+
+    _fake_discography_by_name(monkeypatch, {"Drake": _cards_from(
+        "deezer",
+        ("singles", {"id": "dz-new", "title": "Brand New Cut", "album_type": "single",
+                     "release_date": "2020-02-02", "year": "2020",
+                     "track_count": 1, "image_url": None}),
+    )})
+
+    stats = D.expand_artist_discography(legacy_db, aid)
+
+    assert stats["added"] == 1          # genuinely new single, no false merge
+    count = imported_conn.execute(
+        "SELECT COUNT(*) c FROM lib2_albums WHERE title='Brand New Cut'").fetchone()["c"]
+    assert count == 1
+
+
+def test_year_only_dates_never_trigger_date_fallback(legacy_db, imported_conn, monkeypatch):
+    """A bare year is too coarse for the date+count fallback: two different
+    10-track albums from the same year must not merge."""
+    aid = _artist_id(imported_conn)
+    _seed_library_album(imported_conn, aid, title="Winter Works",
+                        release_date="2019", expected_track_count=10)
+
+    _fake_discography_by_name(monkeypatch, {"Drake": _cards_from(
+        "deezer",
+        ("albums", {"id": "dz-summer", "title": "Summer Works", "album_type": "album",
+                    "release_date": "2019", "year": "2019", "track_count": 10,
+                    "image_url": None}),
+    )})
+
+    stats = D.expand_artist_discography(legacy_db, aid)
+
+    assert stats["added"] == 1
+
+
+def test_reimport_claims_discography_row_despite_punctuation_variant(
+        legacy_db, imported_conn, monkeypatch):
+    """§62 stage 1, importer half: legacy files tagged `"Quoted" Album` must
+    claim the provider row spelled without quotes instead of duplicating."""
+    aid = _artist_id(imported_conn)
+    _fake_discography_by_name(monkeypatch, {"Drake": _cards_from(
+        "deezer",
+        ("albums", {"id": "dz-quoted", "title": "TV Anime Attack on Titan OST",
+                    "album_type": "album", "release_date": "2014-07-31",
+                    "year": "2014", "track_count": 2, "image_url": None}),
+    )})
+    D.expand_artist_discography(legacy_db, aid)
+
+    conn = legacy_db._get_connection()
+    conn.execute(
+        "INSERT INTO albums VALUES(13,1,'TV Anime \"Attack on Titan\" OST',"
+        "2014,NULL,NULL,2,'2014-07-31')")
+    conn.execute(
+        "INSERT INTO tracks VALUES(104,13,1,'attack',1,180000,'/m/atk.flac',900,4000,NULL)")
+    conn.commit()
+    conn.close()
+
+    import_legacy_library(legacy_db)
+
+    rows = imported_conn.execute(
+        "SELECT id, title, origin FROM lib2_albums WHERE title LIKE '%Attack on Titan%'"
+    ).fetchall()
+    assert len(rows) == 1
+    assert rows[0]["origin"] == "library"
+
+
+# ---------------------------------------------------------------------------
+# §62 stage 2: an alternative provider release becomes an edition, not noise
+# ---------------------------------------------------------------------------
+
+def _alt_editions(conn, album_id):
+    rows = conn.execute(
+        "SELECT is_default, external_ids, release_date, track_count "
+        "FROM lib2_release_editions WHERE release_group_id=? AND is_default=0",
+        (album_id,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def test_conflicting_provider_release_id_is_recorded_as_edition(
+        legacy_db, imported_conn, monkeypatch):
+    """When the day+count fallback (or a title match) lands on a row that
+    already carries a DIFFERENT id of the same source, the alternative
+    release id must survive as a lib2_release_editions row (§62.6 Stufe 2)
+    instead of being logged away."""
+    aid = _artist_id(imported_conn)
+    album_id = _seed_library_album(
+        imported_conn, aid,
+        title="TVアニメ「進撃の巨人」Season 2 オリジナルサウンドトラック",
+        release_date="2017-06-07", expected_track_count=33,
+        external_ids=json.dumps({"deezer": "196470602"}))
+
+    payload = _cards_from(
+        "deezer",
+        ("albums", {"id": "42695001",
+                    "title": 'TV Anime "Attack on Titan Season 2" (Original Soundtrack)',
+                    "album_type": "album", "release_date": "2017-06-07",
+                    "year": "2017", "track_count": 33, "image_url": None}),
+    )
+    _fake_discography_by_name(monkeypatch, {"Drake": payload})
+
+    D.expand_artist_discography(legacy_db, aid)
+
+    alts = _alt_editions(imported_conn, album_id)
+    assert len(alts) == 1
+    assert json.loads(alts[0]["external_ids"])["deezer"] == "42695001"
+    assert alts[0]["release_date"] == "2017-06-07"
+    assert alts[0]["track_count"] == 33
+
+    # Idempotent: a re-sync must not stack a second copy of the edition.
+    D.expand_artist_discography(legacy_db, aid)
+    assert len(_alt_editions(imported_conn, album_id)) == 1
+
+
+def test_same_title_second_release_id_is_recorded_as_edition(
+        legacy_db, imported_conn, monkeypatch):
+    """Deezer lists `"Attack on Titan" Season 3 OST` twice (two pressings,
+    two ids). The title match absorbs the second card; its id must land in
+    an edition."""
+    aid = _artist_id(imported_conn)
+    _fake_discography_by_name(monkeypatch, {"Drake": _cards_from(
+        "deezer",
+        ("albums", {"id": "100049482", "title": '"Attack on Titan" Season 3 OST',
+                    "album_type": "album", "release_date": "2019-06-26",
+                    "year": "2019", "track_count": 31, "image_url": None}),
+        ("albums", {"id": "197089272", "title": '"Attack on Titan" Season 3 OST',
+                    "album_type": "album", "release_date": "2019-06-26",
+                    "year": "2019", "track_count": 31, "image_url": None}),
+    )})
+
+    stats = D.expand_artist_discography(legacy_db, aid)
+
+    assert stats["added"] == 1
+    row = imported_conn.execute(
+        "SELECT id, external_ids FROM lib2_albums WHERE title LIKE '%Season 3%'"
+    ).fetchone()
+    assert json.loads(row["external_ids"])["deezer"] == "100049482"
+    alts = _alt_editions(imported_conn, row["id"])
+    assert len(alts) == 1
+    assert json.loads(alts[0]["external_ids"])["deezer"] == "197089272"

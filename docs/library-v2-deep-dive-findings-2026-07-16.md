@@ -676,14 +676,14 @@ den V2-Stand. Neu identifiziert, bisher NIRGENDS getrackt:
 | H3 | **Discography-Download-Modal** (Releases multi-selektieren → Batch-Download, Filter, Select-All) | `openDiscographyModal`, `startDiscographyDownload` | fehlt — lib2 kann nur monitor→wishlist pro Release |
 | H4 | **Track-Redownload-Modal** (Quellen streamen, gezielt neu laden) | `showTrackRedownloadModal` | ⏸️ zurückgestellt/nicht nötig; falls später: neu suchen und erst nach verifiziertem Import atomar ersetzen (§52.1/§52.6) |
 | H5 | **Track-/Album-Delete in der Tabelle** (inkl. Smart-Delete-Dialog) | `deleteLibraryTrack`, `_showSmartDeleteDialog`, `col-delete` | ✅ umgesetzt nach verbindlichem Nutzerreview §52.11: gemeinsamer Dialog für Manage Tracks und Album-/Artist-Shortcut, DB-only vs. permanent, sichere Pfade und gemeinsames Journal (library-v2.md §54) |
-| H6 | **A-Z-Alphabet-Selector + Source-/Watchlist-Filter + Stats-Header** der Artist-Liste | `initializeAlphabetSelector`, `initializeSourceFilter`, `updateLibraryStats` | V2 hat nur Suche/Sort/Monitor-Filter/Paging |
-| H7 | **Inline-Edit in der Tabelle** (Klick auf BPM-Zelle etc.) | `startInlineEdit` | fehlt (V2: Modal-only) |
-| H8 | **Bulk-Selektion + Bulk-Bar** (Batch-Write-Tags, Batch-ReplayGain, Bulk-Edit-Modal) | `batchWriteTagsSelected`, `showBulkEditModal` | fehlt (deckt sich mit B6) |
-| H9 | **Report-Button für Nicht-Admins** (Multi-User: Problem melden statt löschen) | `col-report` | fehlt — lib2 ist bisher rein admin-gedacht |
-| H10 | **„Watch All Unwatched"-Bulk-Tool** | `openWatchAllUnwatchedModal` | fehlt |
-| H11 | **Artist-Record-Inspector** (Raw-JSON-Ansicht mit Filter/Copy/Download) | `openArtistRecordModal` | fehlt (Debug-Feature, niedrig) |
-| H12 | **Export**: Artist-Roster (Watchlist/Library) + **M3U-Export** | `openArtistExportModal`, `/api/library/export/m3u` | fehlt |
-| H13 | **Reorganize-Queue-Status-Panel** (Live, Cancel, Clear) | `mountReorganizeStatusPanel` | fehlt (= G7) |
+| H6 | **A-Z-Alphabet-Selector + Source-/Watchlist-Filter + Stats-Header** der Artist-Liste | ❌ vom User am 2026-07-17 verworfen (nicht nötig; Textsuche und Paging reichen aus) | V2 hat nur Suche/Sort/Monitor-Filter/Paging |
+| H7 | **Inline-Edit in der Tabelle** (Klick auf BPM-Zelle etc.) | ❌ vom User am 2026-07-17 verworfen (Modale reichen aus und sind robuster) | fehlt (V2: Modal-only) |
+| H8 | **Bulk-Selektion + Bulk-Bar** (Batch-Write-Tags, Batch-ReplayGain, Bulk-Edit-Modal) | ✅ vom User am 2026-07-17 beibehalten (Bulk-Edit-Modal zum gemeinsamen Überschreiben von Metadaten-Feldern mehrerer Tracks umsetzen) | fehlt (deckt sich mit B6) |
+| H9 | **Report-Button für Nicht-Admins** (Multi-User: Problem melden statt löschen) | ❌ vom User am 2026-07-17 verworfen (nicht nötig, da Library v2 admin-only ist) | fehlt — lib2 ist bisher rein admin-gedacht |
+| H10 | **„Watch All Unwatched"-Bulk-Tool** | ❌ vom User am 2026-07-17 verworfen (nicht nötig; gezielte Auswahl ist besser) | fehlt |
+| H11 | **Artist-Record-Inspector** (Raw-JSON-Ansicht mit Filter/Copy/Download) | ❌ vom User am 2026-07-17 verworfen (nicht nötig; Entwicklerkonsole reicht aus) | fehlt (Debug-Feature, niedrig) |
+| H12 | **Export**: Artist-Roster (Watchlist/Library) + **M3U-Export** | ⏸️ vom User am 2026-07-17 aufgeschoben/zurückgestellt | fehlt |
+| H13 | **Reorganize-Queue-Status-Panel** (Live, Cancel, Clear) | `mountReorganizeStatusPanel` | ✅ behoben (siehe library-v2.md §29 / G7) |
 
 Bewertung: H1 (Playback) und H3 (Discography-Batch-Download) waren die
 größten funktionalen Regressionen; H6/H8 die alltäglichsten. H9 ist
@@ -704,16 +704,16 @@ oben — diese Tabelle ist eine Enumeration, kein Spec.
 
 | # | Lidarr-Konzept | V2-Stand | Einschätzung |
 |---|---|---|---|
-| I1 | **Add Artist** (Provider-Suche → hinzufügen mit Monitor-Optionen all/future/missing/existing/first/latest/none + „search on add") | fehlt komplett — lib2 kann nur importieren, was Legacy/Downloads liefern; neue Artists entstehen nur indirekt über Watchlist/Discovery-Seiten | größte konzeptionelle Lücke für „Library Manager" |
-| I2 | **Wanted-Views**: globale „Missing"- und „Cutoff Unmet"-Listen | nur per-Artist-Zähler; keine globale lib2-Sicht (Legacy-Wishlist-Seite ist ungefiltert und nicht lib2-aware) | passt zu B4/B7 — dorthin gehören auch die globalen Search-Buttons |
-| I3 | **Mass Editor** (Artists multi-selektieren → Monitor/Profil setzen; Album Studio) | fehlt; V2 hat nur per-Artist-Bulk | mittel |
-| I4 | **Metadata Profile** (welche Release-Typen/Status der Discography-Fetch berücksichtigt) | SoulSync hat bereits Watchlist-`include_*` und `monitor_new_items`; diese zuerst in gemeinsame Artist Settings konsolidieren | kein separates Profilsystem bauen, solange nach §52.4 kein echter Restbedarf belegt ist |
+| I1 | **Add Artist** (Provider-Suche → hinzufügen mit Monitor-Optionen all/future/missing/existing/first/latest/none + „search on add") | ❌ vom User am 2026-07-17 verworfen (nicht notwendig, da bereits über Search/Watchlist möglich) | größte konzeptionelle Lücke für „Library Manager" |
+| I2 | **Wanted-Views**: globale „Missing"- und „Cutoff Unmet"-Listen | ✅ vom User am 2026-07-17 beibehalten (globale Übersichten über die gesamte Library hinweg) | passt zu B4/B7 — dorthin gehören auch die globalen Search-Buttons |
+| I3 | **Mass Editor** (Artists multi-selektieren → Monitor/Profil setzen; Album Studio) | ❌ vom User am 2026-07-17 verworfen (nicht benötigt, da Einzel-Zahnrad ausreichend) | mittel |
+| I4 | **Metadata Profile** (welche Release-Typen/Status der Discography-Fetch berücksichtigt) | ❌ vom User am 2026-07-17 verworfen (kein separates Profilsystem nötig; Watchlist-Regeln reichen aus) | kein separates Profilsystem bauen, solange nach §52.4 kein echter Restbedarf belegt ist |
 | I5 | **Kalender / kommende Releases** | fehlt (Watchlist-Scanner arbeitet unsichtbar) | ❌ vom User am 2026-07-17 ausdrücklich abgelehnt |
-| I6 | **Queue-Sichtbarkeit an der Entity** (Lidarr zeigt laufende Grabs/Queue direkt an Album/Track-Zeile) | fehlt — nach „Grabbing…"-Banner ist der Downloadstatus nur auf der Downloads-Seite sichtbar; Track-Zeile zeigt nichts | hoch für Vertrauen in den Auto-Flow; Daten existieren (acquisition_grabs + Downloads-API) |
-| I7 | **Blocklist-Ansicht** (einsehen/aufheben) | Blacklist nur als Write-Aktion (Source-Info-Popover); `candidate_blocklisted`/`candidate_unblocked` sind journaliert, keine UI | klein |
-| I8 | **Root-Folder/Pfad + Diskspace am Artist** | Pfade nirgends sichtbar außer Reorganize-Preview | klein |
-| I9 | **Unmapped Files** (Dateien ohne Katalog-Zuordnung) | nur als `orphan_file_detector`-Repair-Job, nicht in lib2 sichtbar | klein |
-| I10 | **„Search on monitor"**: Lidarr sucht direkt nach dem Monitoren (opt-in) | Monitoren mirrort nur in die Wishlist; Suche erst beim nächsten Scheduled Run / globalen Button | Quick-Win: Option „search immediately" am Monitor-Flow (nach C1 trivial) |
+| I6 | **Queue-Sichtbarkeit an der Entity** (Lidarr zeigt laufende Grabs/Queue direkt an Album/Track-Zeile) | ✅ vom User am 2026-07-17 beibehalten (laufende Downloads direkt an Album-/Track-Zeilen visualisieren) | hoch für Vertrauen in den Auto-Flow; Daten existieren (acquisition_grabs + Downloads-API) |
+| I7 | **Blocklist-Ansicht** (einsehen/aufheben) | ❌ vom User am 2026-07-17 verworfen (keine separate UI nötig; Blockierungen sind selten) | klein |
+| I8 | **Root-Folder/Pfad + Diskspace am Artist** | ✅ vom User am 2026-07-17 beibehalten (Speicherplatzgröße pro Artist/Album anzeigen, absoluter Pfad nicht zwingend nötig) | klein |
+| I9 | **Unmapped Files** (Dateien ohne Katalog-Zuordnung) | ❌ vom User am 2026-07-17 verworfen (Hintergrund-Job `orphan_file_detector` reicht aus) | klein |
+| I10 | **„Search on monitor"**: Lidarr sucht direkt nach dem Monitoren (opt-in) | ❌ vom User am 2026-07-17 verworfen (nicht nötig; gezieltes Suchen läuft bereits direkt über den Automatic Search Button des Tracks) | Quick-Win: Option „search immediately" am Monitor-Flow (nach C1 trivial) |
 
 ---
 

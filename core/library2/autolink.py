@@ -22,7 +22,12 @@ from typing import Any, Dict, Optional
 
 from utils.logging_config import get_logger
 
-from .importer import dedup_title_key, normalize_name
+from .importer import (
+    dedup_title_key,
+    looks_like_foreign_provider_id,
+    normalize_name,
+    release_title_key,
+)
 
 logger = get_logger("library2.autolink")
 
@@ -48,13 +53,11 @@ def _primary_artist_name(ti: Dict[str, Any]) -> str:
     return _get(ti, "artist")
 
 
-def _primary_artist_spotify_id(ti: Dict[str, Any]) -> Optional[str]:
-    # Gated on provider=="spotify" like spotify_track_id below: `artists[0]["id"]`
-    # is populated by several non-Spotify clients too (JioSaavn, Amazon, …) with
-    # their own provider-local ids, which must never be trusted into the
-    # `spotify_id` column.
-    if ti.get("provider") != "spotify":
-        return None
+def _primary_artist_provider_id(ti: Dict[str, Any]) -> Optional[str]:
+    # `artists[0]["id"]` is populated by every client with its provider-local
+    # id. §62.4: the namespace decision (spotify column vs. external_ids vs.
+    # match-only) lives in `_provider_namespace`, driven by ti["provider"] and
+    # the id's shape — non-Spotify ids never reach the spotify_id column.
     artists = ti.get("artists")
     if isinstance(artists, list) and artists:
         first = artists[0]
@@ -63,16 +66,85 @@ def _primary_artist_spotify_id(ti: Dict[str, Any]) -> Optional[str]:
     return None
 
 
-def _find_or_create_artist(conn, name: str, *, spotify_id: Optional[str] = None) -> Optional[int]:
+def _provider_namespace(provider_id: Optional[str],
+                        source: Optional[str]) -> Optional[str]:
+    """Which external-id namespace an incoming id belongs to.
+
+    - a non-Spotify provider marker is authoritative for its own id;
+    - an unmarked/'spotify' id counts as Spotify UNLESS its shape rules that
+      out (numeric = Deezer/iTunes, UUID = MusicBrainz — §62.4's poison) —
+      then it is used for matching only (``None``), never persisted into a
+      namespace it may not belong to.
+    """
+    if not provider_id:
+        return None
+    src = str(source or "").strip().lower() or None
+    if src and src != "spotify":
+        return src
+    if looks_like_foreign_provider_id(provider_id):
+        return None
+    return "spotify"
+
+
+def _row_external_ids(raw: Any) -> Dict[str, str]:
+    try:
+        value = json.loads(raw or "{}")
+    except (TypeError, ValueError):
+        return {}
+    if not isinstance(value, dict):
+        return {}
+    return {
+        str(source).strip().lower(): str(pid).strip()
+        for source, pid in value.items()
+        if str(source).strip() and str(pid).strip()
+    }
+
+
+def _adopt_external_id(conn, table: str, row_id: int, namespace: str,
+                       provider_id: str) -> None:
+    """setdefault-style: record the id under its namespace, never overwrite."""
+    row = conn.execute(
+        f"SELECT external_ids FROM {table} WHERE id=?", (row_id,)).fetchone()
+    if row is None:
+        return
+    ids = _row_external_ids(row["external_ids"])
+    if ids.get(namespace):
+        return
+    ids[namespace] = provider_id
+    conn.execute(
+        f"UPDATE {table} SET external_ids=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+        (json.dumps(ids, sort_keys=True, separators=(",", ":")), row_id))
+
+
+def _find_or_create_artist(conn, name: str, *, spotify_id: Optional[str] = None,
+                           source: Optional[str] = None) -> Optional[int]:
     # ID match first: cheap (indexed) and — unlike name matching — survives
     # name-spelling variants of the same provider identity (e.g. a kanji vs.
     # romaji release credit), the case G8's alias-awareness gap calls out.
-    if spotify_id:
-        row = conn.execute(
-            "SELECT id FROM lib2_artists WHERE spotify_id = ? LIMIT 1", (spotify_id,)
-        ).fetchone()
-        if row:
-            return row["id"]
+    provider_id = str(spotify_id).strip() if spotify_id else None
+    namespace = _provider_namespace(provider_id, source)
+    if provider_id:
+        if namespace == "spotify":
+            row = conn.execute(
+                "SELECT id FROM lib2_artists WHERE spotify_id = ? LIMIT 1",
+                (provider_id,)).fetchone()
+            if row:
+                return row["id"]
+        else:
+            # Value match for non-Spotify/unmarked ids: the proper namespace
+            # in external_ids, plus (compat, §62.4) rows whose spotify_id
+            # column was poisoned with this very id before the shape guard.
+            for candidate in conn.execute(
+                    "SELECT id, spotify_id, external_ids FROM lib2_artists "
+                    "WHERE spotify_id = ? OR external_ids LIKE ?",
+                    (provider_id, f"%{provider_id}%")):
+                if candidate["spotify_id"] == provider_id:
+                    return candidate["id"]
+                ids = _row_external_ids(candidate["external_ids"])
+                if namespace is not None and ids.get(namespace) == provider_id:
+                    return candidate["id"]
+                if namespace is None and provider_id in ids.values():
+                    return candidate["id"]
 
     key = normalize_name(name)
     if not key:
@@ -91,35 +163,55 @@ def _find_or_create_artist(conn, name: str, *, spotify_id: Optional[str] = None)
                 row = candidate
                 break
     if row is not None:
-        if spotify_id:
+        if namespace == "spotify":
             # Backfill so the next finished download for this artist can take
             # the indexed ID path above instead of falling through to here.
             conn.execute(
                 "UPDATE lib2_artists SET spotify_id=?, updated_at=CURRENT_TIMESTAMP "
-                "WHERE id=? AND spotify_id IS NULL", (spotify_id, row["id"]))
+                "WHERE id=? AND spotify_id IS NULL", (provider_id, row["id"]))
+        elif namespace is not None:
+            _adopt_external_id(conn, "lib2_artists", row["id"], namespace, provider_id)
         return row["id"]
 
     from core.library2.profile_lookup import default_quality_profile_id
+    external_json = (json.dumps({namespace: provider_id})
+                     if namespace not in (None, "spotify") else "{}")
     cur = conn.execute(
-        "INSERT INTO lib2_artists(name, sort_name, spotify_id, quality_profile_id) "
-        "VALUES(?, ?, ?, ?)",
-        (name, name, spotify_id, default_quality_profile_id(conn)))
+        "INSERT INTO lib2_artists(name, sort_name, spotify_id, external_ids, "
+        "quality_profile_id) VALUES(?, ?, ?, ?, ?)",
+        (name, name, provider_id if namespace == "spotify" else None,
+         external_json, default_quality_profile_id(conn)))
     return cur.lastrowid
 
 
 def _find_or_create_album(conn, artist_id: int, title: str, *,
-                          album_type: str, spotify_album_id: Optional[str]) -> int:
-    key = normalize_name(title)
+                          album_type: str, spotify_album_id: Optional[str],
+                          source: Optional[str] = None) -> int:
+    provider_id = str(spotify_album_id).strip() if spotify_album_id else None
+    namespace = _provider_namespace(provider_id, source)
+    key = release_title_key(title)
     rows = conn.execute(
-        """SELECT al.id, al.title, al.spotify_id FROM lib2_album_artists aa
+        """SELECT al.id, al.title, al.spotify_id, al.external_ids
+           FROM lib2_album_artists aa
            JOIN lib2_albums al ON al.id = aa.album_id WHERE aa.artist_id=?""",
         (artist_id,),
     ).fetchall()
+    if provider_id:
+        for row in rows:
+            # spotify_id equality doubles as the §62.4 compat path for rows
+            # whose column was poisoned with a non-Spotify id earlier.
+            if row["spotify_id"] == provider_id:
+                return row["id"]
+            ids = _row_external_ids(row["external_ids"])
+            if namespace is not None and ids.get(namespace) == provider_id:
+                return row["id"]
+            if namespace is None and provider_id in ids.values():
+                return row["id"]
     for row in rows:
-        if spotify_album_id and row["spotify_id"] == spotify_album_id:
-            return row["id"]
-    for row in rows:
-        if normalize_name(row["title"]) == key:
+        if release_title_key(row["title"]) == key:
+            if namespace is not None and namespace != "spotify" and provider_id:
+                _adopt_external_id(conn, "lib2_albums", row["id"], namespace,
+                                   provider_id)
             return row["id"]
     # New albums inherit the artist's quality-profile assignment (cascade),
     # mirroring what the explicit assign endpoint does.
@@ -129,11 +221,15 @@ def _find_or_create_album(conn, artist_id: int, title: str, *,
     ).fetchone()
     profile_id = ((artist_profile["quality_profile_id"] if artist_profile else None)
                   or default_quality_profile_id(conn))
+    external_json = (json.dumps({namespace: provider_id})
+                     if namespace not in (None, "spotify") else "{}")
     cur = conn.execute(
         """INSERT INTO lib2_albums(primary_artist_id, title, album_type, spotify_id,
-               quality_profile_id)
-           VALUES(?,?,?,?,?)""",
-        (artist_id, title, album_type, spotify_album_id, profile_id),
+               external_ids, quality_profile_id)
+           VALUES(?,?,?,?,?,?)""",
+        (artist_id, title, album_type,
+         provider_id if namespace == "spotify" else None,
+         external_json, profile_id),
     )
     album_id = cur.lastrowid
     conn.execute(
@@ -307,13 +403,16 @@ def link_download_into_library_v2(context: Dict[str, Any]) -> Optional[int]:
                 # Entity gone or absent — heuristic name matching as before.
                 if not title or not artist_name:
                     return None
+                ti_provider = str(ti.get("provider") or "").strip().lower() or None
                 artist_id = _find_or_create_artist(
-                    conn, artist_name, spotify_id=_primary_artist_spotify_id(ti))
+                    conn, artist_name, spotify_id=_primary_artist_provider_id(ti),
+                    source=ti_provider)
                 if artist_id is None:
                     return None
                 album_id = _find_or_create_album(
                     conn, artist_id, album_name,
-                    album_type=album_type, spotify_album_id=spotify_album_id)
+                    album_type=album_type, spotify_album_id=spotify_album_id,
+                    source=ti_provider)
                 track_id = _find_or_create_track(
                     conn, album_id, artist_id, title,
                     track_number=track_number, spotify_track_id=spotify_track_id,

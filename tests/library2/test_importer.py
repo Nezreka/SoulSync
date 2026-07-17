@@ -1638,3 +1638,155 @@ def test_watchlist_artist_monitoring_is_independent_from_wishlist_tracks(legacy_
     assert drake["monitored"] == 1
     assert wishlist_artist["monitored"] == 0
     assert wishlist_track["monitored"] == 1
+
+
+# ---------------------------------------------------------------------------
+# §62.5/§62.6 Stufe 4: the legacy import must not duplicate a same-named artist
+# ---------------------------------------------------------------------------
+
+def _conn(legacy_db):
+    conn = sqlite3.connect(legacy_db.path)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _pre_seed_artist(legacy_db, name, **cols):
+    """Create the lib2 schema up front and plant an artist row — the state a
+    wishlist-materialize (autolink) leaves behind BEFORE the first legacy
+    import runs (§62.1 timeline steps 1→3)."""
+    import sqlite3
+    from core.library2.schema import ensure_library_v2_schema
+
+    conn = sqlite3.connect(legacy_db.path)
+    conn.row_factory = sqlite3.Row
+    ensure_library_v2_schema(conn)
+    keys = ", ".join(["name", "sort_name", *cols.keys()])
+    marks = ", ".join("?" for _ in range(2 + len(cols)))
+    cur = conn.execute(
+        f"INSERT INTO lib2_artists({keys}) VALUES({marks})",
+        (name, name, *cols.values()))
+    conn.commit()
+    conn.close()
+    return cur.lastrowid
+
+
+def test_legacy_import_adopts_existing_same_named_idless_artist(legacy_db):
+    pre_id = _pre_seed_artist(legacy_db, "Drake")
+
+    import_legacy_library(legacy_db)
+
+    conn = _conn(legacy_db)
+    rows = conn.execute(
+        "SELECT id, legacy_artist_id, spotify_id FROM lib2_artists "
+        "WHERE name='Drake'").fetchall()
+    assert len(rows) == 1
+    assert rows[0]["id"] == pre_id
+    assert rows[0]["legacy_artist_id"] == 1
+    assert rows[0]["spotify_id"] == "sp1"     # legacy ids adopted onto the row
+    conn.close()
+
+
+def test_legacy_import_adopts_same_named_artist_matched_by_provider_id(legacy_db):
+    pre_id = _pre_seed_artist(legacy_db, "drake  ", spotify_id="sp1")
+
+    import_legacy_library(legacy_db)
+
+    conn = _conn(legacy_db)
+    rows = conn.execute(
+        "SELECT id, legacy_artist_id FROM lib2_artists WHERE name='Drake'").fetchall()
+    assert len(rows) == 1
+    assert rows[0]["id"] == pre_id
+    assert rows[0]["legacy_artist_id"] == 1
+    conn.close()
+
+
+def test_legacy_import_keeps_conflicting_same_named_artist_separate(legacy_db):
+    """Same display name but a DIFFERENT id of the same source = a genuinely
+    different artist (§16.3(b)) — the import must NOT fold them."""
+    _pre_seed_artist(legacy_db, "Drake", spotify_id="sp-other")
+
+    import_legacy_library(legacy_db)
+
+    conn = _conn(legacy_db)
+    rows = conn.execute(
+        "SELECT id, spotify_id, legacy_artist_id FROM lib2_artists "
+        "WHERE name='Drake' ORDER BY id").fetchall()
+    assert len(rows) == 2
+    assert rows[0]["spotify_id"] == "sp-other"
+    assert rows[0]["legacy_artist_id"] is None
+    assert rows[1]["spotify_id"] == "sp1"
+    assert rows[1]["legacy_artist_id"] == 1
+    conn.close()
+
+
+def test_import_alias_links_leftover_conflicting_name_twins(legacy_db):
+    """§62.6 Stufe 4 wiring: the import's closing repair pass soft-links
+    same-name artists it must not merge (conflicting ids), so discography
+    fan-out sees them as one group."""
+    _pre_seed_artist(legacy_db, "Drake", spotify_id="sp-other")
+
+    import_legacy_library(legacy_db)
+
+    conn = _conn(legacy_db)
+    rows = conn.execute(
+        "SELECT id, spotify_id, canonical_artist_id FROM lib2_artists "
+        "WHERE name='Drake' ORDER BY id").fetchall()
+    assert len(rows) == 2
+    linked = [r for r in rows if r["canonical_artist_id"] is not None]
+    assert len(linked) == 1
+    conn.close()
+
+
+def test_artist_resolver_provider_map_is_namespace_aware(legacy_db):
+    """§62.6 Stufe 5: a Deezer id numerically equal to ANOTHER artist's
+    iTunes id must not resolve to that artist — the provider map keys on
+    (source, value), not on the bare value."""
+    conn, resolver = _fresh_resolver(legacy_db)
+    try:
+        a1 = resolver.get_or_create_by_name(
+            "Nova", provider_ids={"itunes": "1315147"})
+        a2 = resolver.get_or_create_by_name(
+            "Totally Different", provider_ids={"deezer": "1315147"})
+        assert a1 != a2
+        # Same (source, value) still resolves to the same artist.
+        assert resolver.get_or_create_by_name(
+            "Nova Alias", provider_ids={"itunes": "1315147"}) == a1
+    finally:
+        conn.close()
+
+
+def test_import_never_maps_foreign_shaped_ids_into_spotify_namespace(legacy_db):
+    """§62.4: legacy enrichment wrote iTunes/Deezer ids into spotify_*
+    columns ("Column name is spotify_album_id but stores iTunes ID too").
+    The importer must not carry that poison into lib2's spotify namespace."""
+    conn = _conn(legacy_db)
+    conn.execute("ALTER TABLE albums ADD COLUMN spotify_album_id TEXT")
+    conn.execute("ALTER TABLE albums ADD COLUMN itunes_album_id TEXT")
+    conn.execute("ALTER TABLE artists ADD COLUMN itunes_artist_id TEXT")
+    # The Sawano row shape: identical numeric value in both columns.
+    conn.execute(
+        "UPDATE albums SET spotify_album_id='1239706770', "
+        "itunes_album_id='1239706770' WHERE id=10")
+    conn.execute("UPDATE artists SET spotify_artist_id='1315147', "
+                 "itunes_artist_id='1315147' WHERE id=1")
+    conn.commit()
+    conn.close()
+
+    import_legacy_library(legacy_db)
+
+    conn = _conn(legacy_db)
+    album = conn.execute(
+        "SELECT spotify_id, external_ids FROM lib2_albums WHERE title='Views'"
+    ).fetchone()
+    assert album["spotify_id"] is None
+    album_ids = json.loads(album["external_ids"])
+    assert album_ids.get("itunes") == "1239706770"
+    assert "spotify" not in album_ids
+    artist = conn.execute(
+        "SELECT spotify_id, external_ids FROM lib2_artists WHERE name='Drake'"
+    ).fetchone()
+    assert artist["spotify_id"] is None
+    artist_ids = json.loads(artist["external_ids"])
+    assert artist_ids.get("itunes") == "1315147"
+    assert "spotify" not in artist_ids
+    conn.close()

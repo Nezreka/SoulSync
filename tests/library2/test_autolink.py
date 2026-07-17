@@ -356,12 +356,17 @@ def test_new_artist_persists_the_spotify_id_it_was_created_with(
     assert row["spotify_id"] == "sp-new"
 
 
-def test_primary_artist_spotify_id_ignored_for_non_spotify_providers():
+def test_non_spotify_provider_artist_id_stays_out_of_spotify_column():
     """artists[0]['id'] is populated by non-Spotify clients too (JioSaavn,
     Amazon, …) with their own provider-local ids — never trust it into the
-    spotify_id column unless the result itself is Spotify's."""
+    spotify_id column unless the result itself is Spotify's. §62.4 upgrades
+    the old drop-it gate: the id is KEPT, but under its own namespace."""
     ti = {"provider": "jiosaavn", "artists": [{"name": "Some Artist", "id": "jio-123"}]}
-    assert A._primary_artist_spotify_id(ti) is None
+    assert A._primary_artist_provider_id(ti) == "jio-123"
+    assert A._provider_namespace("jio-123", "jiosaavn") == "jiosaavn"
+    assert A._provider_namespace("1239706770", None) is None       # numeric ≠ spotify
+    assert A._provider_namespace("1239706770", "spotify") is None  # shape wins
+    assert A._provider_namespace("sp-new", None) == "spotify"
 
 
 def test_end_to_end_autolink_reuses_artist_matched_purely_by_spotify_id(
@@ -587,3 +592,108 @@ def test_stale_entity_falls_back_to_heuristics(lib2_enabled, imported_conn):
            JOIN lib2_tracks t ON t.id = tf.track_id WHERE tf.id=?""",
         (file_id,)).fetchone()
     assert row["title"] == "Nonstop"
+
+
+# ---------------------------------------------------------------------------
+# §62.4/§62.6 Stufe 4+5: provider-namespace-aware ids at the lib2 boundary
+# ---------------------------------------------------------------------------
+
+def test_numeric_deezer_id_is_not_stored_as_spotify_id(lib2_enabled, imported_conn):
+    """A Deezer-provided download (numeric ids, provider marker) must not
+    poison lib2 spotify_id columns — the id belongs in external_ids.deezer."""
+    ctx = _context()
+    ctx["track_info"] = {
+        "name": "Nonstop",
+        "artists": [{"name": "Drake", "id": "12345"}],
+        "album": {"name": "Scorpion", "id": "42695001", "total_tracks": 25,
+                  "album_type": "album"},
+        "track_number": 1,
+        "provider": "deezer",
+        "id": "999111",
+    }
+    ctx["_embedded_id_tags"] = {}
+
+    assert A.link_download_into_library_v2(ctx) is not None
+
+    album = imported_conn.execute(
+        "SELECT spotify_id, external_ids FROM lib2_albums WHERE title='Scorpion'"
+    ).fetchone()
+    assert album["spotify_id"] is None
+    assert json.loads(album["external_ids"])["deezer"] == "42695001"
+    artist = imported_conn.execute(
+        "SELECT spotify_id, external_ids FROM lib2_artists WHERE name='Drake'"
+    ).fetchone()
+    assert artist["spotify_id"] in (None, "sp1")   # legacy id may exist; never 12345
+    assert artist["spotify_id"] != "12345"
+
+
+def test_deezer_album_id_matches_existing_row_by_external_ids(
+        lib2_enabled, imported_conn):
+    """A second Deezer download for the same album must find the row via
+    external_ids.deezer instead of creating a duplicate."""
+    ctx = _context()
+    ctx["track_info"] = {
+        "name": "Nonstop",
+        "artists": [{"name": "Drake"}],
+        "album": {"name": "Scorpion", "id": "42695001", "total_tracks": 25,
+                  "album_type": "album"},
+        "track_number": 1, "provider": "deezer", "id": "999111",
+    }
+    ctx["_embedded_id_tags"] = {}
+    A.link_download_into_library_v2(ctx)
+
+    ctx2 = _context()
+    ctx2["_final_processed_path"] = "/music/Drake/Scorpion/02 Elevate.flac"
+    ctx2["track_info"] = {
+        "name": "Elevate",
+        "artists": [{"name": "Drake"}],
+        # Retagged variant title — only the deezer id can match it up.
+        "album": {"name": "Scorpion (Intl. Edition)", "id": "42695001",
+                  "total_tracks": 25, "album_type": "album"},
+        "track_number": 2, "provider": "deezer", "id": "999112",
+    }
+    ctx2["_embedded_id_tags"] = {}
+    A.link_download_into_library_v2(ctx2)
+
+    count = imported_conn.execute(
+        "SELECT COUNT(*) c FROM lib2_albums WHERE title LIKE 'Scorpion%'"
+    ).fetchone()["c"]
+    assert count == 1
+
+
+def test_unmarked_numeric_id_is_not_persisted_but_matches_poisoned_rows(
+        lib2_enabled, imported_conn):
+    """No provider marker + non-Spotify-shaped id: never write it to
+    spotify_id — but a pre-existing (poisoned) row carrying it as spotify_id
+    must still match so today's libraries keep linking (§62.4c)."""
+    aid = imported_conn.execute(
+        "SELECT id FROM lib2_artists WHERE name='Drake'").fetchone()["id"]
+    imported_conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title, album_type, spotify_id) "
+        "VALUES(?, 'Numeric Legacy', 'album', '1239706770')", (aid,))
+    imported_conn.execute(
+        "INSERT INTO lib2_album_artists(album_id, artist_id, role) "
+        "SELECT id, ?, 'primary' FROM lib2_albums WHERE title='Numeric Legacy'", (aid,))
+    imported_conn.commit()
+
+    ctx = _context()
+    ctx["track_info"] = {
+        "name": "Some Cut",
+        "artists": [{"name": "Drake"}],
+        "album": {"name": "Totally Different Spelling", "id": "1239706770",
+                  "total_tracks": 33, "album_type": "album"},
+        "track_number": 1,
+        "id": "77001",
+    }
+    ctx["_embedded_id_tags"] = {}
+    A.link_download_into_library_v2(ctx)
+
+    # Matched the poisoned row by value — no new album row.
+    assert imported_conn.execute(
+        "SELECT COUNT(*) c FROM lib2_albums WHERE title='Totally Different Spelling'"
+    ).fetchone()["c"] == 0
+    # And the id was NOT laundered into any new spotify_id column.
+    rows = imported_conn.execute(
+        "SELECT COUNT(*) c FROM lib2_albums WHERE spotify_id='1239706770'"
+    ).fetchone()["c"]
+    assert rows == 1

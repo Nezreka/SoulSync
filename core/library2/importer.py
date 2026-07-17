@@ -57,6 +57,45 @@ def normalize_name(name: str) -> str:
     return re.sub(r"\s+", " ", (name or "").strip()).casefold()
 
 
+def release_title_key(title: str) -> str:
+    """Release-title identity key for dedup (§62.3). Not for display.
+
+    Stricter than ``normalize_name``: NFKC folds width/compatibility forms
+    (full-width ：, quotes), then punctuation is treated as a separator so
+    `TV Anime "Attack on Titan" OST` and its quote-less provider variant
+    collapse to one key. Word characters (incl. CJK) are untouched — this
+    never merges genuinely different titles, only punctuation variants.
+    """
+    import unicodedata
+
+    text = unicodedata.normalize("NFKC", str(title or "")).casefold()
+    return " ".join(part for part in re.split(r"\W+", text) if part)
+
+
+_SPOTIFY_ID_RE = re.compile(r"^[0-9A-Za-z]{22}$")
+_UUID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+
+def looks_like_spotify_id(value: Any) -> bool:
+    """Whether a provider id has real Spotify shape (22-char base62)."""
+    text = str(value or "").strip()
+    return bool(_SPOTIFY_ID_RE.match(text)) and not text.isdigit()
+
+
+def looks_like_foreign_provider_id(value: Any) -> bool:
+    """Whether an id CANNOT be a Spotify id (§62.4's poison signature).
+
+    Legacy payloads label the ACTIVE provider's id "spotify" — numeric
+    Deezer/iTunes ids and MusicBrainz UUIDs ended up in spotify_id columns
+    and broke every later id match. Spotify ids are 22-char base62 and never
+    purely numeric or UUID-shaped, so those two shapes are safe to reject
+    without touching odd-but-possible values."""
+    text = str(value or "").strip()
+    return bool(text) and (text.isdigit() or bool(_UUID_RE.match(text)))
+
+
 def split_artist_credits(*sources: str) -> List[str]:
     """Split one or more raw artist/credit strings into individual artist names.
 
@@ -176,6 +215,17 @@ def _pick(row: Any, *keys: str) -> Optional[Any]:
         if val not in (None, ""):
             return val
     return None
+
+
+def _legacy_spotify_id(row: Any, *keys: str) -> Optional[Any]:
+    """A legacy spotify_* column value — unless its shape proves it is
+    another provider's id (§62.4: legacy enrichment stored iTunes/Deezer ids
+    under spotify_* names). Foreign-shaped values are dropped here; they
+    reach lib2 through their own itunes/deezer/… mappings instead."""
+    value = _pick(row, *keys)
+    if value is not None and looks_like_foreign_provider_id(value):
+        return None
+    return value
 
 
 def _legacy_key(legacy_id: Any) -> Optional[str]:
@@ -350,12 +400,12 @@ class _ArtistResolver:
         self.default_profile_id = default_profile_id
         self._by_name: Dict[str, int] = {}
         self._by_legacy: Dict[str, int] = {}
-        # provider-id VALUE -> artist id. Source-agnostic on purpose: SoulSync
-        # is multi-source (Deezer is the DEFAULT), so identity must key on ANY
-        # provider id — Deezer/MusicBrainz/Spotify/… — not just Spotify. The
-        # source→id map is persisted in the app-wide ``external_ids`` column
-        # exactly like ``discography.py`` already uses it.
-        self._by_provider: Dict[str, int] = {}
+        # (source, provider-id) -> artist id. Any source counts — SoulSync is
+        # multi-source (Deezer is the DEFAULT), so identity must key on ANY
+        # provider id, not just Spotify. Keying on the source TOO (§62.6
+        # Stufe 5) keeps numerically-colliding ids of different providers
+        # (a Deezer id equal to some iTunes id) from merging two artists.
+        self._by_provider: Dict[tuple, int] = {}
 
     @staticmethod
     def _clean_ids(ids: Optional[Dict[str, Any]]) -> Dict[str, str]:
@@ -368,8 +418,14 @@ class _ArtistResolver:
         return out
 
     def _register(self, artist_id: int, ids: Dict[str, str]) -> None:
-        for value in ids.values():
-            self._by_provider.setdefault(value, artist_id)
+        for source, value in ids.items():
+            self._by_provider.setdefault((source, value), artist_id)
+
+    def _row_legacy_id(self, artist_id: int) -> Optional[int]:
+        row = self.cursor.connection.execute(
+            "SELECT legacy_artist_id FROM lib2_artists WHERE id=?",
+            (artist_id,)).fetchone()
+        return row["legacy_artist_id"] if row else None
 
     def _stored_ids(self, artist_id: int) -> Dict[str, str]:
         """The artist's current source→id map (external_ids + the two columns)."""
@@ -460,9 +516,9 @@ class _ArtistResolver:
             ids.setdefault("musicbrainz", str(musicbrainz_id).strip())
         ids = self._clean_ids(ids)
 
-        # 1) authoritative provider-id VALUE match (any source beats the name key)
-        for value in ids.values():
-            hit = self._by_provider.get(value)
+        # 1) authoritative provider-id match (any source beats the name key)
+        for source, value in ids.items():
+            hit = self._by_provider.get((source, value))
             if hit is not None:
                 self._merge_ids(hit, ids)
                 return hit
@@ -506,26 +562,60 @@ class _ArtistResolver:
             ids.setdefault("spotify", str(fields["spotify_id"]).strip())
         if fields.get("musicbrainz_id"):
             ids.setdefault("musicbrainz", str(fields["musicbrainz_id"]).strip())
-        external_json = json.dumps(ids, sort_keys=True, separators=(",", ":")) if ids else "{}"
-        spotify_col, mbid_col = ids.get("spotify"), ids.get("musicbrainz")
         existing = self._by_legacy.get(_legacy_key(legacy_id))
+        adopted = False
+        if existing is None:
+            # §62.6 Stufe 4: a wishlist-materialize/autolink may have created
+            # this artist (name-only or with partial ids) BEFORE the first
+            # legacy import ran — §62.1's timeline. Inserting blindly here
+            # minted the same-named twin (artist 31/32); adopt that row
+            # instead, with the same disambiguation rules as
+            # ``get_or_create_by_name``: any shared provider-id value wins,
+            # then a same-name row without a conflicting same-source id.
+            # Never steal a row that already mirrors ANOTHER legacy artist.
+            for source, value in ids.items():
+                hit = self._by_provider.get((source, value))
+                if hit is not None and self._row_legacy_id(hit) is None:
+                    existing, adopted = hit, True
+                    break
+            if existing is None:
+                candidate = self._by_name.get(normalize_name(fields["name"]))
+                if candidate is not None and self._row_legacy_id(candidate) is None:
+                    stored = self._stored_ids(candidate)
+                    conflict = any(src in stored and stored[src] != val
+                                   for src, val in ids.items())
+                    if not conflict:
+                        existing, adopted = candidate, True
         if existing is not None:
+            row_ids = dict(ids)
+            if adopted:
+                # The adopted row may carry ids the legacy mirror lacks —
+                # keep them (never-overwrite semantics, like _merge_ids).
+                row_ids = self._stored_ids(existing)
+                for source, value in ids.items():
+                    row_ids.setdefault(source, value)
+            external_json = (json.dumps(row_ids, sort_keys=True, separators=(",", ":"))
+                             if row_ids else "{}")
             self.cursor.execute(
                 "UPDATE lib2_artists SET name=?, sort_name=?, spotify_id=?, "
                 "musicbrainz_id=?, external_ids=?, image_url=?, genres=?, summary=?, "
                 "style=COALESCE(?, style), mood=COALESCE(?, mood), "
                 "label=COALESCE(?, label), banner_url=COALESCE(?, banner_url), "
-                "aliases=?, "
+                "aliases=?, legacy_artist_id=?, "
                 "legacy_import_run_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                (fields["name"], fields["sort_name"], spotify_col, mbid_col,
+                (fields["name"], fields["sort_name"], row_ids.get("spotify"),
+                 row_ids.get("musicbrainz"),
                  external_json, fields["image_url"], fields["genres"],
                  fields["summary"], fields["style"], fields["mood"],
                  fields["label"], fields["banner_url"], fields["aliases"],
-                 run_id, existing),
+                 legacy_id, run_id, existing),
             )
+            self._by_legacy[_legacy_key(legacy_id)] = existing
             self._by_name.setdefault(normalize_name(fields["name"]), existing)
-            self._register(existing, ids)
+            self._register(existing, row_ids)
             return existing
+        external_json = json.dumps(ids, sort_keys=True, separators=(",", ":")) if ids else "{}"
+        spotify_col, mbid_col = ids.get("spotify"), ids.get("musicbrainz")
         self.cursor.execute(
             "INSERT INTO lib2_artists(name, sort_name, spotify_id, musicbrainz_id, "
             "external_ids, image_url, genres, summary, style, mood, label, "
@@ -552,7 +642,7 @@ def _discography_album_index(cursor) -> Dict[Tuple[int, str], List[Dict[str, Any
     index: Dict[Tuple[int, str], List[Dict[str, Any]]] = {}
     for row in rows:
         index.setdefault(
-            (int(row["primary_artist_id"]), normalize_name(row["title"])), []
+            (int(row["primary_artist_id"]), release_title_key(row["title"])), []
         ).append(dict(row))
     return index
 
@@ -573,7 +663,7 @@ def _claim_discography_album(
     Matching mirrors ``core/library2/discography.py``: normalized title, prefer
     the same single-vs-release bucket.
     """
-    key = normalize_name(title)
+    key = release_title_key(title)
     want_single = (album_type or "").lower() == "single"
     if index is None:
         index = _discography_album_index(cursor)
@@ -827,7 +917,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
             lib2_artist_id = resolver.upsert_legacy(row["id"], {
                 "name": name,
                 "sort_name": name,
-                "spotify_id": _pick(row, "spotify_artist_id"),
+                "spotify_id": _legacy_spotify_id(row, "spotify_artist_id"),
                 "musicbrainz_id": _pick(row, "musicbrainz_artist_id", "musicbrainz_id"),
                 # Import EVERY provider id the legacy row carries (SoulSync's
                 # default source is Deezer, not Spotify) into external_ids.
@@ -836,12 +926,20 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 # both so a Deezer-primary artist keeps its id in external_ids —
                 # without it, expand_artist_discography has no id to fetch with
                 # and "Update Discography" returns only a stray single (#38).
+                # Beyond the five below, capture the long tail (iTunes/AudioDB/
+                # Discogs/…) via match_status.SERVICES like albums/tracks do —
+                # §62.4 needs the iTunes artist id here so a foreign-shaped
+                # "spotify" id can be dropped without losing the identity.
                 "provider_ids": {
-                    "spotify": _pick(row, "spotify_artist_id"),
+                    "spotify": _legacy_spotify_id(row, "spotify_artist_id"),
                     "deezer": _pick(row, "deezer_artist_id", "deezer_id"),
                     "musicbrainz": _pick(row, "musicbrainz_artist_id", "musicbrainz_id"),
                     "tidal": _pick(row, "tidal_artist_id", "tidal_id"),
                     "qobuz": _pick(row, "qobuz_artist_id", "qobuz_id"),
+                    **_extra_provider_ids(
+                        row, "artist",
+                        exclude={"spotify", "deezer", "musicbrainz", "tidal", "qobuz"},
+                    ),
                 },
                 "image_url": _pick(row, "thumb_url", "banner_url"),
                 "genres": _normalize_genres(_pick(row, "genres")),
@@ -912,7 +1010,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
             fields = (
                 lib2_artist, row["title"], album_type,
                 _pick(row, "release_date"), year,
-                _pick(row, "spotify_album_id"), _pick(row, "musicbrainz_release_id"),
+                _legacy_spotify_id(row, "spotify_album_id"), _pick(row, "musicbrainz_release_id"),
                 _pick(row, "thumb_url"), _normalize_genres(_pick(row, "genres")),
                 track_count, expected,
                 _pick(row, "explicit"), _pick(row, "label"), _pick(row, "upc"),
@@ -976,7 +1074,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
             # Amazon/JioSaavn/Bandcamp/…) from match_status.SERVICES so a new
             # provider only needs to be added there, not re-derived here (§17.7).
             _merge_album_external_ids(cursor, album_id, {
-                "spotify": _pick(row, "spotify_album_id"),
+                "spotify": _legacy_spotify_id(row, "spotify_album_id"),
                 "deezer": _pick(row, "deezer_album_id", "deezer_id"),
                 "musicbrainz": _pick(row, "musicbrainz_release_id"),
                 "tidal": _pick(row, "tidal_album_id", "tidal_id"),
@@ -1057,7 +1155,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 album_id, title, _pick(row, "track_number"),
                 _pick(row, "disc_number") or 1, _pick(row, "duration"),
                 _pick(row, "isrc"), _pick(row, "musicbrainz_recording_id"),
-                _pick(row, "spotify_track_id"),
+                _legacy_spotify_id(row, "spotify_track_id"),
                 _pick(row, "bpm"), _pick(row, "explicit"),
                 _pick(row, "genius_lyrics"), _pick(row, "copyright"),
                 # §48: rich-metadata-edit parity (same fields as album/artist).
@@ -1230,6 +1328,15 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
         logger.info("Library v2 import complete: %s", stats)
     finally:
         conn.close()
+    # §62.6 Stufe 4: heal artist/album twins that pre-fix imports left behind
+    # (own connection, after the import transaction closed). Cheap when clean;
+    # best-effort — a repair failure must never fail the import that just
+    # succeeded.
+    try:
+        from core.library2.dedup_repair import repair_duplicate_artists
+        stats["dedup_repair"] = repair_duplicate_artists(database)
+    except Exception as repair_error:  # noqa: BLE001
+        logger.warning("Post-import duplicate repair failed: %s", repair_error)
     return stats
 
 
@@ -1369,7 +1476,7 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
         if album_row["spotify_id"]:
             album_by_spotify[(artist_id, str(album_row["spotify_id"]))] = album_id
         album_by_identity[
-            (artist_id, normalize_name(album_row["title"]), album_row["album_type"])
+            (artist_id, release_title_key(album_row["title"]), album_row["album_type"])
         ] = album_id
     track_by_spotify = {
         (int(track_row["album_id"]), str(track_row["spotify_id"])): int(track_row["id"])
@@ -1434,7 +1541,7 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
         )
         if album_id is None:
             album_id = album_by_identity.get(
-                (artist_id, normalize_name(album_title), album_type)
+                (artist_id, release_title_key(album_title), album_type)
             )
 
         album_fields = (
@@ -1468,7 +1575,7 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
             )
             album_id = cursor.lastrowid
         album_by_identity[
-            (artist_id, normalize_name(album_title), album_type)
+            (artist_id, release_title_key(album_title), album_type)
         ] = album_id
         if album_spotify:
             album_by_spotify[(artist_id, str(album_spotify))] = album_id

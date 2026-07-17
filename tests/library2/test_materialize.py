@@ -325,3 +325,51 @@ class TestMaterializeWishlistIntent:
             "id": "sp-x", "name": "X", "artists": [{"name": "Y"}], "album": {"name": "Z"},
         })
         assert result is None
+
+
+def test_numeric_provider_ids_never_land_in_spotify_columns(imported_conn):
+    """§62.4: the legacy 'spotify-shaped' payload carries the ACTIVE
+    provider's numeric id (Deezer/iTunes). Without a real Spotify shape the
+    id must not be persisted as spotify_id."""
+    materialize_from_spotify_track(imported_conn, {
+        "id": "999111",
+        "name": "JP Song",
+        "artists": [{"name": "Fresh JP Artist", "id": "1315147"}],
+        "album": {"name": "JP Album", "id": "1239706770", "total_tracks": 33,
+                  "album_type": "album"},
+        "track_number": 1,
+    })
+
+    artist = imported_conn.execute(
+        "SELECT spotify_id FROM lib2_artists WHERE name='Fresh JP Artist'"
+    ).fetchone()
+    assert artist["spotify_id"] is None
+    album = imported_conn.execute(
+        "SELECT spotify_id FROM lib2_albums WHERE title='JP Album'"
+    ).fetchone()
+    assert album["spotify_id"] is None
+
+
+def test_source_marked_payload_stores_id_in_its_own_namespace(imported_conn):
+    import json as _json
+
+    materialize_from_spotify_track(imported_conn, {
+        "id": "999111",
+        "name": "JP Song",
+        "source": "deezer",
+        "artists": [{"name": "Fresh JP Artist", "id": "1315147"}],
+        "album": {"name": "JP Album", "id": "1239706770", "total_tracks": 33,
+                  "album_type": "album"},
+        "track_number": 1,
+    })
+
+    album = imported_conn.execute(
+        "SELECT spotify_id, external_ids FROM lib2_albums WHERE title='JP Album'"
+    ).fetchone()
+    assert album["spotify_id"] is None
+    assert _json.loads(album["external_ids"])["deezer"] == "1239706770"
+    artist = imported_conn.execute(
+        "SELECT spotify_id, external_ids FROM lib2_artists WHERE name='Fresh JP Artist'"
+    ).fetchone()
+    assert artist["spotify_id"] is None
+    assert _json.loads(artist["external_ids"])["deezer"] == "1315147"

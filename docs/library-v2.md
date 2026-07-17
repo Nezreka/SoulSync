@@ -6728,3 +6728,382 @@ Provider-Herkunft des Kandidaten gespeichert statt irrtümlich Spotify.
   Provenienz, Album-Kontext und tatsächlicher Fallback-Provider sind durch
   Vitest/MSW-Tests abgedeckt; Format-, Lint-, TypeScript- und Build-Prüfung
   gehören zum Abschluss dieses Slices.
+
+## 62. Deep-Dive: Doppelte Alben/Artists bei Provider-Divergenz (Fall „Hiroyuki Sawano") — 🔍 Analyse, noch nicht umgesetzt (2026-07-17)
+
+Nutzerreport: Nach „Update Discography" erscheint dasselbe Album doppelt —
+einmal als `TV Anime "Attack on Titan Season 2" (Original Soundtrack)`
+(0/33, not in library) und einmal als
+`TVアニメ「進撃の巨人」Season 2 オリジナルサウンドトラック` (33/33, in library),
+beide mit Release-Datum 2017-06-07. Die Untersuchung lief gegen die echte
+Dev-DB plus Live-Anfragen an Deezer und MusicBrainz. Ergebnis: Es sind
+**vier gestapelte Ursachen**, die sich gegenseitig verstärken. Keine davon
+ist ein einzelner Tippfehler; alle vier sind strukturell.
+
+### 62.1 Faktenlage aus der DB (Beweiskette)
+
+Zwei Artist-Rows für denselben Künstler:
+
+| id | name | spotify_id | musicbrainz_id | external_ids | erstellt | von |
+|----|------|-----------|----------------|--------------|----------|-----|
+| 31 | Hiroyuki Sawano | – | – | `{}` | 07-16 16:39:18 | Wishlist-Materialize (nur Name) |
+| 32 | Hiroyuki Sawano | 0Riv2… | 60d2ea34-… | deezer 1315147, mb, spotify | 07-16 16:42:41 | Legacy-Import (`upsert_legacy`) |
+
+Die Duplikat-Alben (Auszug):
+
+| id | artist | title | provider-ids | origin |
+|----|--------|-------|--------------|--------|
+| 1163 | 31 | TVアニメ「進撃の巨人」Season 2 … | spotify_id=**1239706770** (das ist eine iTunes-ID!) | library |
+| 1229 | 32 | TVアニメ「進撃の巨人」Season 2 … | deezer 196470602, itunes 1239706770, „spotify" 1239706770 | library |
+| 1274 | 32 | TV Anime "Attack on Titan Season 2" (OST) | deezer **42695001** | discography |
+| 1169 | 31 | TV Anime "Attack on Titan" OST | spotify_id=**42388621** (das ist eine Deezer-ID!) | library |
+| 1230 | 32 | TV Anime "Attack on Titan" OST | deezer 42388621, mb d7595352-… | library |
+| 1167/1173 | 31/32 | Sengoku BASARA Digital Original Director's Special Edition | – | discography |
+
+Timeline (aus `lib2_external_id_history`):
+1. 16:39:18 — User bestätigt einen Wishlist-/Search-Intent → `materialize_track_intent`
+   erzeugt Artist 31 (nur Name, keine IDs) und Album 1163. Die „spotify_id"
+   1239706770 stammt aus dem Legacy-Suchpayload — tatsächlich eine iTunes-ID.
+2. 16:42:08 — Discography-Sync auf Artist 31 (ID-los → Namenssuche) findet auf
+   Deezer den **falschen Artist-Eintrag 234170331** („Hiroyuki Sawano", nur 4
+   Alben — ein Deezer-eigener Fragment-Duplikat-Artist) und importiert dessen
+   4 Sengoku-BASARA-Releases (1164–1167). Live verifiziert: Deezer hat mind.
+   5 verschiedene Artists namens „Hiroyuki Sawano" (234170331: 4 Alben,
+   **1315147: 104 Alben**, 218685045: 1, 352973132: 2, 7865594: 2).
+3. 16:42:41 — Legacy-Import läuft: `upsert_legacy` keyed **nur** auf
+   `legacy_artist_id` und legt Artist 32 an, obwohl Artist 31 mit exakt
+   demselben (normalisierten) Namen existiert. `_by_name`/`_by_provider`
+   werden in diesem Pfad nie konsultiert — nur `get_or_create_by_name` tut das.
+4. 20:28:33 — Legacy-Album-Import erzeugt 1229/1230 unter Artist 32. Album
+   1163 (identischer Titel) hängt an Artist 31 und wird nicht gefunden, weil
+   das Album-Claiming pro Artist gescoped ist → Cross-Artist-Duplikat.
+5. 07-17 13:37 — „Update Discography" auf Artist 32 (Quelle: Deezer, Artist
+   1315147) listet die **internationale EN-Ausgabe 42695001**. Row 1229 trägt
+   aber deezer=196470602 (JP-Ausgabe) → kein ID-Match; JP-Titel ≠ EN-Titel →
+   kein Titel-Match → Insert 1274. Das ist das vom User gemeldete Paar.
+
+### 62.2 Ursache A: Gleiche Release-Group, verschiedene Provider-Releases
+
+Live-Verifikation: Deezer führt **beide** Ausgaben als getrennte Alben —
+42695001 (EN-Titel, UPC 4988013932357) und 196470602 (JP-Titel, UPC
+4988013316096), beide 2017-06-07, beide 33 Tracks. Es sind zwei echte
+Handels-Releases (verschiedene Barcodes: Japan- vs. International-Edition)
+derselben Release-Group. **Auch die UPC unifiziert also nicht.**
+
+MusicBrainz kennt dagegen beide Barcodes und hängt beide Releases an
+**eine** Release-Group `f17d521f-f8e9-41d8-9b0e-e270d5d905ed`. Die Identität,
+die wir bräuchten, existiert in der Industrie — wir fragen sie nur nie ab.
+
+Pikant: `lib2_albums` IST konzeptionell bereits die Release-Group-Ebene
+(die ID-History nennt den Entity-Typ sogar `release_group`), und mit
+`lib2_release_editions` (ADR-04, §14) existiert die Edition-Ebene samt
+`edition_signature()` schon im Schema — der Discography-Sync benutzt sie
+aber nicht: Er legt pro Provider-Release flache `lib2_albums`-Rows an,
+statt Provider-Releases als **Editionen einer** Release-Group zu behandeln.
+Genau die Lücke, die ADR-04 schließen sollte („P1-04: duplicate detection
+hatte nichts außer normalisierten Titeln"), besteht im Sync-Pfad fort.
+
+Zusatzbefund: Deezer listet für Artist 1315147 sogar gleich-titlige
+Duplikate im eigenen Katalog (2× `"Attack on Titan" Season 3 Original
+Soundtrack`, 2× `TV Anime "Attack on Titan" Original Soundtrack`). Diese
+werden heute nur zufällig absorbiert, weil der Titel exakt gleich ist —
+`_merge_external_id` loggt dann einen ID-Konflikt und behält die erste ID
+(G1-Schutz). Sobald sich die Titel auch nur in Anführungszeichen, Klammern
+oder Sprache unterscheiden, entsteht ein Duplikat.
+
+### 62.3 Ursache B: Titel-Matching ist zu schwach für den Realfall
+
+`_match_existing` (discography.py) matcht in genau zwei Stufen: exakte
+Provider-ID, sonst `normalize_name` = casefold + Whitespace-Kollaps.
+Kein NFKC, keine Interpunktions-/Klammern-/Quote-Normalisierung, keine
+Transliteration, kein Sekundärsignal (Datum, Trackcount). Für
+`TVアニメ「進撃の巨人」…` vs. `TV Anime "Attack on Titan…"` ist das chancenlos,
+obwohl **Release-Datum (2017-06-07) und Trackcount (33) exakt übereinstimmen**
+— beide Signale liegen im `DiscographyRelease` bereits vor und werden beim
+Matching schlicht ignoriert.
+
+### 62.4 Ursache C: Provider-ID-Namespace-Verschmutzung
+
+Die Legacy-Pipeline schreibt IDs fremder Provider in `spotify_*`-Spalten:
+`core/seasonal_discovery.py:568` sagt es wörtlich („Column name is
+spotify_album_id but stores iTunes ID too"); der `SpotifyClient` fällt bei
+Rate-Limit/fehlender Konfiguration transparent auf Free-Sources (iTunes/
+Deezer) zurück, und `spotify_worker` schreibt das Ergebnis als
+`spotify_album_id` mit `spotify_match_status='matched'`. In der Dev-DB sind
+3 von 9 Legacy-Alben und 4 von 277 lib2-Alben so verschmutzt (`spotify_id`
+rein numerisch — echte Spotify-IDs sind 22-stellig base62): 1163/1229 tragen
+eine iTunes-ID, 1169 sogar eine **Deezer**-ID als „spotify_id".
+
+Folgen fürs Matching: (a) Ein echter Spotify-Sync kann diese Rows nie per
+ID matchen. (b) Die richtige ID steckt teils im falschen Namespace — der
+Deezer-Sync sucht `external_ids.deezer`, die Deezer-ID von 1169 steht aber
+in `spotify_id` → Miss trotz vorhandener ID. (c) Latent: `_ArtistResolver.
+_by_provider` keyed **nur auf den ID-Wert** (source-agnostisch, importer.py
+~353) — kollidierende numerische iTunes-/Deezer-IDs verschiedener Künstler
+würden stillschweigend denselben Artist treffen.
+
+### 62.5 Ursache D: Artist-Duplikate multiplizieren Album-Duplikate
+
+Drei Wege erzeugen bzw. verfestigen Artist-Duplikate:
+1. `materialize_track_intent`/`autolink._find_or_create_artist` legen
+   ID-lose Artists aus bloßen Namen an (Artist 31) — der Suchpayload hätte
+   die Provider-ID oft dabei, sie landet aber nur als (falsch benannte)
+   `spotify_id` oder gar nicht.
+2. `upsert_legacy` prüft weder Namens- noch Provider-Index, bevor es
+   inserted (Artist 32 neben identisch benanntem Artist 31).
+3. Provider haben selbst Fragment-Artists (Deezer: 5× „Hiroyuki Sawano");
+   ID-lose Namenssuche pickt den erstbesten (Artist 31 bekam so den
+   4-Alben-Fragment-Katalog 234170331).
+
+Da `_existing_release_index` und das Legacy-Album-Claiming pro Artist
+gescoped sind, wird jedes Artist-Duplikat automatisch zur Album-Duplikat-
+Fabrik: 1163↔1229, 1169↔1230, 1167↔1173 existieren NUR wegen der
+31/32-Spaltung. Die §40-Alias-Registry (soft-link `canonical_artist_id`)
+könnte 31↔32 heute schon verknüpfen, wurde hier aber nie angewandt —
+und sie verhindert Neuentstehung nicht.
+
+### 62.6 Lösungsvorschlag (noch nicht umgesetzt)
+
+Empfohlene Reihenfolge — jede Stufe ist einzeln shipbar und reduziert
+Duplikate messbar:
+
+**Stufe 1 — Matching-Härtung im Discography-Sync (klein, sofort wirksam):**
+- `_match_existing` um eine dritte Stufe erweitern: Kandidaten mit
+  **gleichem Release-Datum (exakt) + gleichem erwarteten Trackcount +
+  gleichem Typ-Bucket** gelten als dieselbe Release-Group, auch wenn der
+  Titel nicht matcht. Beide Signale sind im `DiscographyRelease` schon da.
+  Bei Datum UND Trackcount identisch ist die False-Positive-Gefahr minimal
+  (ggf. zusätzlich absichern: nur wenn genau EIN Kandidat übrig bleibt).
+- Titel-Normalisierung für Dedup-Zwecke von `normalize_name` auf eine
+  schärfere Variante heben (NFKC wie `duplicate_relationship._normalized_title`,
+  plus Quote-/Klammer-/Interpunktions-Strip). Display-Namen unangetastet.
+- Ergebnis für den Sawano-Fall: 1274 wäre nie entstanden (Datum+33 Tracks
+  matchen 1229), stattdessen wäre deezer=42695001 als **Edition/Alt-ID**
+  gemerged worden.
+
+**Stufe 2 — Editionen statt Alt-ID-Verlust (nutzt vorhandenes ADR-04):**
+- Wenn Stufe 1 (oder ein Titel-Match mit ID-Konflikt, der G1-Fall) eine
+  zweite Provider-Release-ID für dieselbe Release-Group liefert: statt
+  Warning-und-Wegwerfen eine `lib2_release_editions`-Row anlegen
+  (`edition_signature` existiert). Damit bleibt „Deezer kennt diese Gruppe
+  als 42695001 UND 196470602" abfragbar — wichtig für Tracklist-Fetch,
+  Interactive Search und künftige Syncs.
+
+**Stufe 3 — MusicBrainz-Release-Group als Schiedsrichter (asynchron):**
+- Für Alben mit MB-Artist-Kontext (Artist 32 hat die MBID) einen
+  Reconcile-Schritt: Release-Group-Browse des MB-Artists, Zuordnung
+  vorhandener lib2_albums via Barcode/Provider-URL-Relationships/Titel+Datum,
+  Persistenz der RG-MBID in `lib2_albums.musicbrainz_id`. Zwei lib2-Rows,
+  die auf dieselbe RG-MBID zeigen → Merge-Kandidat (Auto-Merge nur wenn
+  eine Seite fileless/pristine ist, sonst Review-Finding wie bei
+  `lib2_recording_review`). MB ist rate-limitiert (1 req/s) → als
+  Hintergrund-Job/on-Update, nicht im Sync-Hot-Path.
+
+**Stufe 4 — Artist-Duplikate an der Quelle schließen:**
+- `upsert_legacy`: vor dem Insert `_by_provider`- und `_by_name`-Lookup wie
+  in `get_or_create_by_name` (Adoptions-Semantik: Legacy-IDs auf den
+  vorhandenen Row mergen, solange kein Same-Source-ID-Konflikt besteht).
+  Hätte Artist 32 verhindert.
+- `materialize`/`autolink`: Provider-IDs aus dem Suchpayload **mit
+  Herkunfts-Namespace** durchreichen (der Payload weiß, welcher Provider
+  aktiv war — §61 hat das für Match-Provenance schon gelöst) statt alles
+  als `spotify_id` zu labeln; ID-lose Artist-Anlage nur noch als letzter
+  Fallback.
+- Discography-Sync für ID-lose Artists: Namenssuche nicht blind den ersten
+  Treffer nehmen, sondern den Kandidaten mit größtem Katalog/Follower-Zahl
+  bzw. — besser — die §56-Kandidatenliste dem User zeigen (der Sync auf
+  einem ID-losen Artist ist fast immer ein Fehlgriff, siehe Artist 31 mit
+  Fragment-Katalog 234170331).
+- Einmalige Repair-Migration: `lib2_artists` nach normalisiertem Namen
+  gruppieren; Gruppen ohne Same-Source-ID-Konflikt mergen (Alben/Tracks/
+  Monitoring/History umhängen), sonst §40-Alias-Link + Review-Finding.
+
+**Stufe 5 — Namespace-Sanierung (Hygiene, macht ID-Matching wieder scharf):**
+- Migration: numerische `spotify_id`-Werte in lib2 (und beim Legacy-Import)
+  als das behandeln, was sie sind — gegen `itunes`/`deezer`-Spalten des
+  Legacy-Rows abgleichen und in den richtigen `external_ids`-Namespace
+  verschieben; `spotify_id` nur noch für echte (base62-)Spotify-IDs.
+- Schreibseite: `spotify_worker`/Free-Fallback müssen die tatsächliche
+  Quelle deklarieren (analog §61-Fix „Bei Spotify-Suchen mit iTunes-Fallback
+  wird die tatsächliche Provider-Herkunft gespeichert").
+- `_ArtistResolver._by_provider` auf `(source, value)`-Keys umstellen.
+
+Nicht empfohlen: Transliterations-/Übersetzungs-Matching (JP→EN) als
+Primärmechanismus — zu fehleranfällig, und mit Datum+Trackcount (Stufe 1)
+plus MB-Release-Groups (Stufe 3) unnötig.
+
+### 62.7 Betroffene Stellen (Referenz)
+
+- `core/library2/discography.py` — `_match_existing`, `_existing_release_index`,
+  `_merge_external_id` (G1-Konfliktpfad = künftiger Edition-Einstieg)
+- `core/library2/importer.py` — `_ArtistResolver.upsert_legacy` (Insert ohne
+  Name/Provider-Lookup), `_by_provider` (value-only Keys), Legacy-Album-Mapping
+  `"spotify": spotify_album_id` (Verschmutzungs-Durchreiche)
+- `core/library2/autolink.py` / `materialize.py` — ID-lose Artist-Anlage,
+  `spotify_id`-Labeling beliebiger Provider-IDs
+- `core/library2/editions.py` — vorhandene, im Sync ungenutzte Edition-Ebene
+- `core/library2/provider_adapters.py` — `DiscographyRelease` (kein
+  UPC/RG-Feld; Datum/Trackcount vorhanden, aber ungenutzt fürs Matching)
+- `core/spotify_worker.py`, `core/seasonal_discovery.py`,
+  `core/metadata/registry.py` — Free-Source-Fallback schreibt Fremd-IDs als
+  Spotify
+
+---
+
+## 63. §62.6 umgesetzt — alle fünf Stufen der Duplikat-Behebung — ✅ implementiert (2026-07-17)
+
+Alle fünf Stufen aus §62.6 sind TDD-first umgesetzt (jede Änderung mit vorher
+rot gesehenen Tests) und gegen eine Kopie der echten Dev-DB live verifiziert.
+
+### 63.1 Stufe 1 — Matching-Härtung im Discography-Sync
+
+- Neuer Dedup-Schlüssel `release_title_key()` (importer.py): NFKC + casefold,
+  Interpunktion/Quotes/Klammern als Trenner. Verwendet in
+  `_match_existing`/`_existing_release_index` (discography.py), im
+  Legacy-Album-Claiming (`_claim_discography_album`), im Wishlist-Seeding
+  (`album_by_identity`) und in `autolink._find_or_create_album`.
+- Dritte Match-Stufe in `_match_existing`: volles Release-Datum (Y-M-D
+  zwingend, nie nur Jahr) + gleicher erwarteter Trackcount + gleicher
+  Typ-Bucket, nur bei GENAU einem Kandidaten. Drei 1-Track-Singles am
+  selben Tag bleiben getrennt (Ambiguitäts-Guard, Test abgedeckt).
+
+### 63.2 Stufe 2 — Alternative Releases werden Editionen
+
+- `editions.record_alternative_edition()`: idempotent pro (source, id) und
+  Gruppe. Der G1-Konfliktpfad (`_merge_external_id_details`) legt beim
+  Same-Source-ID-Konflikt jetzt eine nicht-default `lib2_release_editions`-
+  Row an statt die zweite Release-ID wegzuloggen.
+
+### 63.3 Stufe 3 — MusicBrainz-Release-Group-Reconcile
+
+- Neues Modul `core/library2/mb_reconcile.py`:
+  `reconcile_artist_release_groups(db, artist_id)` browst die RGs des
+  Artist-MBID (paginiert, Rate-Limit im Client), stempelt RG-MBIDs per
+  Titel-Key (bei Mehrdeutigkeit per primary-type, sonst gar nicht) und per
+  Datum-Fallback, merged Rows mit gleicher RG-MBID automatisch nur wenn die
+  Verlierer-Row pristine ist, sonst Finding in `lib2_release_group_review`.
+- Verkabelung: der Refresh-Endpoint startet den Reconcile als
+  Hintergrund-Thread (`lib2-mb-reconcile`), nie im Hot-Path; Fehler brechen
+  den Refresh nicht.
+- Zwei Real-DB-Funde während der Live-Verifikation, beide gefixt + getestet:
+  1. **Fileless-Placeholder-Tracks:** Die auto-monitorte EN-Duplikat-Row
+     (1274) hatte 33 Track-Rows OHNE Files („0/33") und Provenance
+     `new_release`. Pristine-Kriterium ist jetzt „keine FILES" statt „keine
+     Track-Rows", Maschinen-Monitoring (`new_release`/`legacy_import`)
+     blockt nicht (nur `user_explicit`/`wishlist_import`); der Fold löscht
+     die Placeholder-Tracks und enqueued `wishlist_remove`-Mirrors über die
+     bestehende Outbox (Drain nach Commit).
+  2. **Datum-Fallback-Fehlgriff:** LOSTandFOUND (EP, 7 Tracks) teilte den
+     Release-Tag mit dem Hathaway-OST (14 Tracks) und hätte dessen RG
+     gestohlen. Der Fallback prüft jetzt Trackcount-Kompatibilität mit den
+     bisherigen Haltern der RG (Zwei-Pass-Zuordnung).
+- Außerdem: der Registry-MB-Client ist der Search-Adapter — `_default_mb_client()`
+  entpackt `._client` bzw. instanziiert den rohen `MusicBrainzClient`.
+
+### 63.4 Stufe 4 — Artist-Duplikate: Prävention + Repair
+
+- `_pick_best_artist_match` (album_tracks.py): bei MEHREREN exakten
+  Namens-Treffern gewinnt Katalog-Größe (`nb_album`), dann Fans/Follower —
+  Deezers fünf „Hiroyuki Sawano"-Fragmente picken nicht mehr den 4-Alben-
+  Fragment-Artist. Ohne Signale bleibt das alte First-Hit-Verhalten.
+- `upsert_legacy` adoptiert vor dem Insert einen vorhandenen Artist über
+  Provider-ID-Wert oder konfliktfreien Namen (nie eine Row, die schon einen
+  ANDEREN Legacy-Artist spiegelt); IDs werden setdefault-gemerged.
+- Neues Modul `core/library2/dedup_repair.py`:
+  `repair_duplicate_artists(db)` — Namensgruppen ohne Same-Source-Konflikt
+  werden in den reichsten Row gemerged (Alben/Credits/Monitor-Rules
+  umgehängt), Konfliktgruppen per §40-Alias soft-verlinkt; danach werden
+  gleiche Titel-Keys innerhalb des Survivors mit den Stufe-3-Regeln gefoldet
+  bzw. als `duplicate_title_unmerged`-Finding notiert. Läuft am Ende jedes
+  Legacy-Imports (best-effort) und via
+  `POST /api/library/v2/maintenance/repair-duplicates`.
+- Findings lesbar über `GET /api/library/v2/maintenance/duplicate-findings`
+  (mit Artist-/Albumtiteln aufgelöst, `resolved=0`).
+
+### 63.5 Stufe 5 — Namespace-Sanierung
+
+- `looks_like_foreign_provider_id()` (rein numerisch oder UUID = sicher kein
+  Spotify): Gate an allen lib2-Schreibpfaden — `autolink`
+  (`_provider_namespace`: Provider-Marker autoritativ, sonst Shape),
+  `materialize` (Payload-`source`/`provider` wird durchgereicht, numerische
+  Track-IDs erreichen `lib2_tracks.spotify_id` nie mehr) und Importer
+  (`_legacy_spotify_id()` an allen vier spotify_*-Mappings).
+- Value-Matching bleibt kompatibel: autolink matcht nicht-Spotify-IDs gegen
+  `external_ids` (namespace-bewusst) UND gegen verschmutzte `spotify_id`-
+  Spalten, damit Bestandsrows weiter gefunden werden.
+- `_sanitize_provider_namespaces()` (dedup_repair, läuft VOR dem
+  Artist-Grouping): foreign-shaped `spotify_id`-Werte in
+  lib2_artists/lib2_albums/lib2_release_editions werden aufgelöst — eigener
+  external_ids-Eintrag > UUID→musicbrainz > Wert-Lookup in den
+  Legacy-Spalten (itunes/deezer/tidal/qobuz) > Parkplatz `legacy_unknown`.
+- `_ArtistResolver._by_provider` keyed auf `(source, value)` statt nur Wert.
+- Artist-Import erfasst jetzt auch die Long-Tail-Provider-IDs
+  (`_extra_provider_ids(row, "artist", …)` — vorher fehlte z. B. die
+  iTunes-Artist-ID komplett).
+
+### 63.6 Live-Verifikation gegen die echte Dev-DB (Kopie)
+
+Sequenz `repair_duplicate_artists` → `reconcile_artist_release_groups(32)`:
+
+- `namespaces_fixed=7`, keine numerischen spotify_ids mehr; Artist 31 in 32
+  gemerged (nur noch EIN „Hiroyuki Sawano"); Sengoku-Duplikat 1167→1173
+  gefoldet.
+- 81 Alben bekamen RG-MBIDs (181 RGs auf MB); **die vom User gemeldete
+  EN-Duplikat-Row 1274 wurde automatisch in die JP-Row gefoldet** (deezer
+  42695001 adoptiert, 33 Placeholder-Tracks weg, Wishlist-Unmirrors in der
+  Outbox); LOSTandFOUND blieb sauber.
+- Verbleibende Findings (bewusst nicht auto-gemerged, beide Seiten haben
+  echte Files): 1163↔1229 (JP-Doppel mit Files auf beiden Seiten) und
+  1169↔1230 — sichtbar über den Findings-Endpoint.
+
+### 63.7 Testabdeckung und bekannte Grenzen
+
+- Suites: tests/library2 724 passed (inkl. 4 neue Testdateien/Testblöcke),
+  tests/metadata 731 passed, plus 52 Root-Tests (admin-gating, acoustid,
+  confirmed-search, watchlist-materialize). Die 3 Failures von
+  `test_metadata_discography.py` in KOMBINIERTEN Läufen sind pre-existing
+  Cross-File-Pollution (auf sauberem HEAD reproduziert, `_DummyConfigManager`
+  leakt aus fremden Root-Testdateien).
+- Bewusst offen:
+  - Kein UI für `lib2_release_group_review`-Findings (nur der neue
+    GET-Endpoint) und kein UI-Button für den Repair (läuft beim Import mit).
+  - Legacy-Schreibseite (`spotify_worker`/Seasonal-Discovery schreiben bei
+    Free-Fallback weiterhin Fremd-IDs in spotify_*-Spalten) — lib2 ist durch
+    die Import-/Boundary-Guards geschützt, die Legacy-Tabellen selbst nicht.
+  - `lib2_tracks`-Bestandsrows mit numerischen spotify_ids werden (anders
+    als Artists/Alben/Editionen) noch nicht rückwirkend saniert.
+  - Der Reconcile läuft nur nach „Update Discography"; ein periodischer
+    Sweep über alle MBID-Artists wäre ein späterer Ausbau.
+
+---
+
+## 64. §52 H- und I-Elemente Entscheidungen (2026-07-17)
+
+In einer schrittweisen Abstimmung mit dem Nutzer wurden am 2026-07-17 verbindliche Entscheidungen für die verbleibenden H- und I-Elemente (Legacy- und Lidarr-Feature-Gaps) getroffen. Diese Entscheidungen dienen als Richtlinie für zukünftige Entwicklungsphasen:
+
+### I-Elemente (Lidarr-Parität)
+
+* **I1 — Add Artist:** ❌ **Verworfen / Nicht benötigt.** Der Nutzer erachtet diese Funktion als überflüssig, da die Künstler-Suche und das Hinzufügen bereits über die Haupt-Suche/Watchlist abgedeckt sind und von dort automatisch in die Library v2 gespiegelt werden.
+* **I2 — Wanted-Views (globale Listen für Missing/Cutoff Unmet):** ✅ **Beibehalten / Umsetzen.** Die globalen Listen für alle fehlenden oder verbesserungswürdigen Tracks sollen über die gesamte Library hinweg implementiert werden.
+* **I3 — Mass Editor:** ❌ **Verworfen / Nicht benötigt.** Bulk-Aktionen auf Künstler-Ebene sind nicht erforderlich, das Einstellungs-Zahnrad pro Künstler ist ausreichend.
+* **I4 — Metadata Profile:** ❌ **Verworfen / Nicht benötigt.** Ein drittes Profil-System ist redundant. Die in den Artist Settings konsolidierten Watchlist-Regeln (`include_*` + `monitor_new_items`) genügen vollkommen.
+* **I5 — Kalender / kommende Releases:** ❌ **Verworfen / Ausdrücklich abgelehnt.** (Bereits im Review vom 17. Juli abgelehnt).
+* **I6 — Queue-Sichtbarkeit an der Entity:** ✅ **Beibehalten / Umsetzen.** Der Status und Fortschritt laufender Downloads soll direkt an Album- und Track-Zeilen visualisiert werden.
+* **I7 — Blocklist-Ansicht:** ❌ **Verworfen / Nicht benötigt.** Keine eigene UI für blockierte Download-Kandidaten erforderlich.
+* **I8 — Root-Folder/Pfad + Diskspace am Artist:** ✅ **Teilweise Beibehalten / Umsetzen.** Die Speicherplatzbelegung (Größe) pro Artist und Album soll angezeigt werden, der absolute Pfad hingegen nicht.
+* **I9 — Unmapped Files:** ❌ **Verworfen / Nicht benötigt.** Ein UI-Bereich für nicht-zugeordnete Mediendateien ist nicht erforderlich; der Hintergrund-Job `orphan_file_detector` reicht aus.
+* **I10 — „Search on monitor“ (opt-in):** ❌ **Verworfen / Nicht benötigt.** Das gezielte Suchen beim Überwachen läuft bereits direkt und granular über den Automatic Search Button des jeweiligen Tracks.
+
+### H-Elemente (Legacy-Parität)
+
+* **H2 — Artist Top Tracks:** ❌ **Verworfen / Ausdrücklich nicht gewollt.** (Bereits im Review vom 17. Juli abgelehnt).
+* **H3 — Discography-Download-Modal:** ❌ **Verworfen / Ausdrücklich nicht gewollt.** (Bereits im Review vom 17. Juli abgelehnt).
+* **H4 — Track-Redownload-Modal:** ⏸️ **Aufgeschoben / Nicht benötigt.** (Falls später, gilt das Prinzip: neu suchen und erst nach verifiziertem Import atomar ersetzen).
+* **H6 — A-Z-Alphabet-Selector, Source-Filter & Stats-Header:** ❌ **Verworfen / Nicht benötigt.** Moderne Textsuche und Paging ersetzen die Buchstabenleiste vollkommen.
+* **H7 — Inline-Edit in der Tabelle:** ❌ **Verworfen / Nicht benötigt.** Editierungen laufen robuster und sicherer ausschließlich über Detail-Modale.
+* **H8 — Bulk-Selektion + Bulk-Bar / Bulk-Edit-Modal:** ✅ **Beibehalten / Umsetzen.** Die Bulk-Bar soll um ein Bulk-Edit-Modal erweitert werden, um Metadaten-Felder (wie Genre, Jahr, etc.) für mehrere ausgewählte Tracks gleichzeitig zu überschreiben (Legacy-Parität zu `showBulkEditModal`).
+* **H9 — Report-Button für Nicht-Admins:** ❌ **Verworfen / Nicht benötigt.** Library v2 ist rein für Administratoren konzipiert (admin-only).
+* **H10 — „Watch All Unwatched“-Bulk-Tool:** ❌ **Verworfen / Nicht benötigt.** Gezielte Auswahl über Bookmarks/Watchlist ist besser, um API-Limits nicht zu überlasten.
+* **H11 — Artist-Record-Inspector:** ❌ **Verworfen / Nicht benötigt.** Eine rohe JSON-Ansicht in der User-UI ist nicht notwendig; Entwickler können die Browser-Konsole oder SQLite nutzen.
+* **H12 — Export (Artist-Roster + M3U-Export):** ⏸️ **Aufgeschoben / Zurückgestellt.**
+

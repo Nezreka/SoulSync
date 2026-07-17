@@ -100,21 +100,47 @@ def _search_albums_for_source(source: str, client: Any, query: str, limit: int =
         return []
 
 
+def _artist_catalog_weight(artist: Any) -> tuple:
+    """Rank same-named search results: catalog size, then popularity.
+
+    §62.5: providers carry FRAGMENT artist entries under the exact same name
+    (Deezer lists five "Hiroyuki Sawano"s; the first exact hit had 4 albums,
+    the real one 104). Catalog size (`nb_album`) is the direct discriminator;
+    fan/follower counts (`nb_fan`, Spotify's `followers.total`, `popularity`)
+    break remaining ties. Missing signals rank lowest, preserving the old
+    first-exact-hit behavior when a source reports nothing."""
+    def _num(value: Any) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 0.0
+
+    albums = _num(_extract_lookup_value(artist, 'nb_album', 'album_count'))
+    followers = _extract_lookup_value(artist, 'followers')
+    if isinstance(followers, dict):
+        followers = followers.get('total')
+    fans = max(_num(_extract_lookup_value(artist, 'nb_fan')), _num(followers))
+    return (albums, fans, _num(_extract_lookup_value(artist, 'popularity')))
+
+
 def _pick_best_artist_match(search_results: List[Any], artist_name: str) -> Optional[Any]:
     """Pick the search result whose artist NAME matches, or None.
 
-    Exact (normalized) name wins; otherwise the closest fuzzy match, but only if
-    it's similar enough. Never a blind first result — that handed back an
-    unrelated popular artist (#988: a Deezer name-search for "The Outfield"
-    returning The Beatles) when the source's search doesn't actually contain the
-    artist we asked for. Returning None lets the caller fall back / show nothing
-    instead of the wrong artist's catalogue.
+    Exact (normalized) name wins; among SEVERAL exact hits the largest
+    catalog/most-popular entry is chosen (§62.5 — provider-side fragment
+    artists share the real entry's exact name). Otherwise the closest fuzzy
+    match, but only if it's similar enough. Never a blind first result — that
+    handed back an unrelated popular artist (#988: a Deezer name-search for
+    "The Outfield" returning The Beatles) when the source's search doesn't
+    actually contain the artist we asked for. Returning None lets the caller
+    fall back / show nothing instead of the wrong artist's catalogue.
     """
     if not search_results:
         return None
     target_name = _normalize_artist_name(artist_name)
     if not target_name:
         return None
+    exact: List[Any] = []
     best, best_ratio = None, 0.0
     for artist in search_results:
         candidate_name = _normalize_artist_name(
@@ -123,10 +149,13 @@ def _pick_best_artist_match(search_results: List[Any], artist_name: str) -> Opti
         if not candidate_name:
             continue
         if candidate_name == target_name:
-            return artist
+            exact.append(artist)
+            continue
         ratio = SequenceMatcher(None, target_name, candidate_name).ratio()
         if ratio > best_ratio:
             best, best_ratio = artist, ratio
+    if exact:
+        return max(exact, key=_artist_catalog_weight)
     return best if best_ratio >= 0.85 else None
 
 

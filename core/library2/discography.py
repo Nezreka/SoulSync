@@ -33,7 +33,7 @@ from typing import Any, Dict, List, Optional
 
 from utils.logging_config import get_logger
 
-from .importer import normalize_name
+from .importer import normalize_name, release_title_key
 
 logger = get_logger("library2.discography")
 
@@ -73,6 +73,7 @@ def _existing_release_index(conn, artist_id: int) -> Dict[str, List[Dict[str, An
     rows = conn.execute(
         """SELECT al.id, al.title, al.album_type, al.origin, al.spotify_id,
                   al.external_ids, al.monitored, al.release_date, al.year,
+                  al.expected_track_count, al.track_count,
                   (SELECT COUNT(*) FROM lib2_tracks t WHERE t.album_id = al.id) AS track_rows
              FROM lib2_album_artists aa JOIN lib2_albums al ON al.id = aa.album_id
             WHERE aa.artist_id = ?""",
@@ -80,7 +81,7 @@ def _existing_release_index(conn, artist_id: int) -> Dict[str, List[Dict[str, An
     ).fetchall()
     index: Dict[str, List[Dict[str, Any]]] = {}
     for r in rows:
-        index.setdefault(normalize_name(r["title"]), []).append(dict(r))
+        index.setdefault(release_title_key(r["title"]), []).append(dict(r))
     return index
 
 
@@ -100,28 +101,38 @@ def _external_ids(raw: Any) -> Dict[str, str]:
     }
 
 
-def _merge_external_id(raw: Any, source: Optional[str], provider_id: str) -> str:
+def _merge_external_id_details(raw: Any, source: Optional[str],
+                               provider_id: str) -> tuple[str, bool]:
     """Add/refresh one source's id — but never silently clobber an existing,
     DIFFERING id of the same source (G1). A cross-bucket title-fallback match
     (see ``_match_existing``) can hand this a release that legitimately
     belongs to a different catalog entry; overwriting here would poison the
     row's identity (the next tracklist fetch then resolves the wrong
-    release). Log the conflict and leave the row's id untouched instead."""
+    release). The row's id stays untouched; the second element reports the
+    conflict so the caller can keep the alternative id as an edition
+    (§62.6 Stufe 2) instead of losing it."""
     import json
 
     values = _external_ids(raw)
+    conflicted = False
     if source and provider_id:
         key = str(source).strip().lower()
         candidate = str(provider_id).strip()
         current = values.get(key)
         if current and current != candidate:
-            logger.warning(
+            conflicted = True
+            logger.info(
                 "discography external-id conflict for source=%s: keeping %s, "
-                "refusing to overwrite with %s", key, current, candidate,
+                "recording %s as alternative edition", key, current, candidate,
             )
         else:
             values[key] = candidate
-    return json.dumps(values, sort_keys=True, separators=(",", ":"))
+    return json.dumps(values, sort_keys=True, separators=(",", ":")), conflicted
+
+
+def _merge_external_id(raw: Any, source: Optional[str], provider_id: str) -> str:
+    merged, _ = _merge_external_id_details(raw, source, provider_id)
+    return merged
 
 
 def _release_date_key(release_date: Any, year: Any = None) -> Optional[tuple[int, int, int]]:
@@ -167,8 +178,38 @@ def _should_auto_monitor(
     return candidate is not None and candidate > newest_existing
 
 
+def _full_release_date_key(release_date: Any) -> Optional[tuple[int, int, int]]:
+    """A yyyy-mm-dd key ONLY when the raw date really carries all three parts.
+
+    The §62.3 date+count fallback must never fire on a bare year/month —
+    two different same-year releases with equal track counts are common."""
+    import re
+
+    match = re.match(r"^(\d{4})-(\d{1,2})-(\d{1,2})", str(release_date or "").strip())
+    if not match:
+        return None
+    candidate = (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+    try:
+        datetime(*candidate)
+    except ValueError:
+        return None
+    return candidate
+
+
+def _expected_count(row: Dict[str, Any]) -> Optional[int]:
+    value = row.get("expected_track_count")
+    if value is None:
+        value = row.get("track_count")
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 def _match_existing(index: Dict[str, List[Dict[str, Any]]], *, title: str,
-                    album_type: str, provider_id: str, source: Optional[str]) -> Optional[Dict[str, Any]]:
+                    album_type: str, provider_id: str, source: Optional[str],
+                    release_date: Any = None,
+                    track_count: Any = None) -> Optional[Dict[str, Any]]:
     """Find the library row a provider release corresponds to, if any."""
     # 1) Provider-id match beats everything (exact release identity).
     if provider_id:
@@ -181,8 +222,10 @@ def _match_existing(index: Dict[str, List[Dict[str, Any]]], *, title: str,
                     return row
     # 2) Normalized-title match, preferring the same single-vs-release bucket
     #    (legacy imports classify by track count, so ep<->album mismatches are
-    #    expected and still count as the same release).
-    candidates = index.get(normalize_name(title)) or []
+    #    expected and still count as the same release). release_title_key
+    #    (§62.3) folds width/punctuation variants so quote-less provider
+    #    spellings of the same title still land on the library row.
+    candidates = index.get(release_title_key(title)) or []
     want = _bucket(album_type)
     for row in candidates:
         if _bucket(row["album_type"]) == want:
@@ -194,7 +237,31 @@ def _match_existing(index: Dict[str, List[Dict[str, Any]]], *, title: str,
     # sharing its title — and must get its own row instead of a random
     # candidates[0] pick that would then poison that row's external_ids.
     if not provider_id:
-        return candidates[0] if candidates else None
+        if candidates:
+            return candidates[0]
+    # 3) §62.6 Stufe 1: same full release day + same track count + same
+    #    bucket = the same release group under a different provider release
+    #    (JP vs. international edition, re-issue with a translated title).
+    #    Titles diverge across scripts/languages, so they get no vote here;
+    #    the guard is uniqueness — with two or more candidates (e.g. three
+    #    1-track singles dropped the same day) nothing is merged.
+    provider_key = _full_release_date_key(release_date)
+    try:
+        provider_count = int(track_count) if track_count is not None else None
+    except (TypeError, ValueError):
+        provider_count = None
+    if provider_key is None or provider_count is None:
+        return None
+    day_matches = [
+        row
+        for rows in index.values()
+        for row in rows
+        if _bucket(row["album_type"]) == want
+        and _full_release_date_key(row["release_date"]) == provider_key
+        and _expected_count(row) == provider_count
+    ]
+    if len(day_matches) == 1:
+        return day_matches[0]
     return None
 
 
@@ -392,10 +459,12 @@ def _expand_artist_discography(database, artist_id: int) -> Dict[str, Any]:
             )
 
             existing = _match_existing(index, title=title, album_type=album_type,
-                                       provider_id=provider_id, source=source)
+                                       provider_id=provider_id, source=source,
+                                       release_date=release_date,
+                                       track_count=track_count)
             if existing:
                 seen_ids.add(existing["id"])
-                merged_external_ids = _merge_external_id(
+                merged_external_ids, id_conflict = _merge_external_id_details(
                     existing["external_ids"], source, provider_id)
                 cursor.execute(
                     """UPDATE lib2_albums SET
@@ -411,6 +480,12 @@ def _expand_artist_discography(database, artist_id: int) -> Dict[str, Any]:
                      merged_external_ids, existing["id"]),
                 )
                 existing["external_ids"] = merged_external_ids
+                if id_conflict:
+                    from core.library2.editions import record_alternative_edition
+                    record_alternative_edition(
+                        cursor, existing["id"], source=source,
+                        provider_id=provider_id, title=title,
+                        release_date=release_date, track_count=track_count)
                 stats["enriched"] += 1
                 continue
 
@@ -441,11 +516,12 @@ def _expand_artist_discography(database, artist_id: int) -> Dict[str, Any]:
                 "INSERT OR IGNORE INTO lib2_album_artists(album_id, artist_id, role) "
                 "VALUES(?,?, 'primary')", (new_id, artist_id),
             )
-            index.setdefault(normalize_name(title), []).append({
+            index.setdefault(release_title_key(title), []).append({
                 "id": new_id, "title": title, "album_type": album_type,
                 "origin": "discography", "spotify_id": spotify_id,
                 "external_ids": external_ids, "monitored": 0, "track_rows": 0,
                 "release_date": release_date, "year": year,
+                "expected_track_count": track_count, "track_count": track_count,
             })
             stats["added"] += 1
 

@@ -2298,10 +2298,71 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         # re-resolved (title-healed) in the same call, see
         # discography.repair_track_number_collisions.
         repaired_ids = stats.pop("repaired_track_number_collisions", []) or []
+
+        # §62.6 Stufe 3: reconcile the artist's MB release groups OFF the hot
+        # path — MB is rate-limited (1 req/s), and the reconcile only folds
+        # provider-release duplicates the sync itself cannot see. Best-effort:
+        # a failure here must never fail the refresh that already happened.
+        def _mb_reconcile():
+            try:
+                from core.library2 import mb_reconcile
+                mb_reconcile.reconcile_artist_release_groups(db, artist_id)
+            except Exception as reconcile_error:  # noqa: BLE001
+                logger.debug("MB release-group reconcile failed (artist %s): %s",
+                             artist_id, reconcile_error)
+
+        threading.Thread(target=_mb_reconcile, name="lib2-mb-reconcile",
+                         daemon=True).start()
+
         return jsonify({"success": True, **stats,
                         "auto_monitored_releases": len(auto_ids),
                         "auto_monitor_mirrored": mirrored,
                         "repaired_track_number_collisions": len(repaired_ids)})
+
+    @app.route("/api/library/v2/maintenance/repair-duplicates", methods=["POST"])
+    def lib2_repair_duplicates():
+        """§62.6 Stufe 4: fold same-name artist twins (and their album twins)
+        left behind by pre-fix imports; alias-link conflicting groups."""
+        guard = _guard()
+        if guard:
+            return guard
+        db = get_database()
+        try:
+            from core.library2.dedup_repair import repair_duplicate_artists
+            stats = repair_duplicate_artists(db)
+        except Exception as e:  # noqa: BLE001
+            logger.error("Duplicate repair failed: %s", e)
+            return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": True, **stats})
+
+    @app.route("/api/library/v2/maintenance/duplicate-findings", methods=["GET"])
+    def lib2_duplicate_findings():
+        """Open release-group/duplicate findings the automatic folds left for
+        the user (§62.6 Stufe 3/4: both sides carry real files or user
+        intent, so nothing was merged silently)."""
+        guard = _guard()
+        if guard:
+            return guard
+        db = get_database()
+        conn = db._get_connection()
+        try:
+            from core.library2.mb_reconcile import LIB2_RELEASE_GROUP_REVIEW_DDL
+            conn.execute(LIB2_RELEASE_GROUP_REVIEW_DDL)
+            rows = conn.execute(
+                """SELECT rv.id, rv.artist_id, rv.album_id, rv.other_album_id,
+                          rv.release_group_mbid, rv.reason, rv.created_at,
+                          ar.name AS artist_name,
+                          al.title AS album_title, ol.title AS other_album_title
+                     FROM lib2_release_group_review rv
+                     LEFT JOIN lib2_artists ar ON ar.id = rv.artist_id
+                     LEFT JOIN lib2_albums al ON al.id = rv.album_id
+                     LEFT JOIN lib2_albums ol ON ol.id = rv.other_album_id
+                    WHERE rv.resolved = 0
+                    ORDER BY rv.id DESC""").fetchall()
+            return jsonify({"success": True,
+                            "findings": [dict(r) for r in rows]})
+        finally:
+            conn.close()
 
     def _bulk_track_ids_for_albums(conn, album_ids: List[int]) -> List[int]:
         if not album_ids:

@@ -2300,3 +2300,72 @@ def test_ui_preferences_write_rejected_for_non_admin_profile(api):
     assert "admin" in resp.get_json()["error"].lower()
     # Reads stay available.
     assert client.get("/api/library/v2/ui-preferences").status_code == 200
+
+
+def test_discography_refresh_kicks_mb_reconcile_in_background(api, monkeypatch):
+    """§62.6 Stufe 3 wiring: a successful refresh schedules the MB
+    release-group reconcile off the hot path (background thread)."""
+    import threading
+
+    client, db, ids = api
+
+    monkeypatch.setattr(
+        "core.library2.discography.refresh_artist_discography",
+        lambda *a, **k: ({"added": 0, "enriched": 0, "removed": 0, "total": 0,
+                          "auto_monitor_album_ids": []}, 0))
+
+    called = {}
+    done = threading.Event()
+
+    def fake_reconcile(database, artist_id, **kwargs):
+        called["artist_id"] = artist_id
+        done.set()
+        return {"assigned": 0, "merged": 0, "review": 0}
+
+    monkeypatch.setattr(
+        "core.library2.mb_reconcile.reconcile_artist_release_groups",
+        fake_reconcile)
+
+    resp = client.post(f"/api/library/v2/artists/{ids['artist']}/discography/refresh")
+    assert resp.status_code == 200
+    assert done.wait(timeout=5.0), "reconcile was never scheduled"
+    assert called["artist_id"] == ids["artist"]
+
+
+def test_maintenance_repair_duplicates_endpoint(api, monkeypatch):
+    client, db, ids = api
+    monkeypatch.setattr(
+        "core.library2.dedup_repair.repair_duplicate_artists",
+        lambda database: {"artists_merged": 2, "alias_linked": 1,
+                          "albums_folded": 3, "album_review": 0})
+    resp = client.post("/api/library/v2/maintenance/repair-duplicates")
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["success"] is True
+    assert body["artists_merged"] == 2
+    assert body["albums_folded"] == 3
+
+
+def test_duplicate_findings_endpoint_lists_open_findings(api):
+    client, db, ids = api
+    conn = db._get_connection()
+    from core.library2.mb_reconcile import LIB2_RELEASE_GROUP_REVIEW_DDL
+    conn.execute(LIB2_RELEASE_GROUP_REVIEW_DDL)
+    conn.execute(
+        "INSERT INTO lib2_release_group_review(artist_id, album_id, "
+        "other_album_id, release_group_mbid, reason) VALUES(?,?,?,?,?)",
+        (ids["artist"], ids["views"], ids["ep"], None, "duplicate_title_unmerged"))
+    conn.commit()
+    conn.close()
+
+    resp = client.get("/api/library/v2/maintenance/duplicate-findings")
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["success"] is True
+    assert len(body["findings"]) == 1
+    finding = body["findings"][0]
+    assert finding["album_id"] == ids["views"]
+    assert finding["other_album_id"] == ids["ep"]
+    assert finding["reason"] == "duplicate_title_unmerged"
+    assert finding["album_title"] == "Views"
+    assert finding["other_album_title"] == "Best EP"

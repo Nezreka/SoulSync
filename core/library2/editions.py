@@ -176,6 +176,56 @@ def edition_signature(spotify_id: Optional[str], musicbrainz_id: Optional[str],
     return hashlib.sha1(payload).hexdigest()
 
 
+def record_alternative_edition(cursor: Any, release_group_id: int, *,
+                               source: str, provider_id: str,
+                               title: Optional[str] = None,
+                               release_date: Optional[str] = None,
+                               track_count: Optional[int] = None) -> Optional[int]:
+    """Persist an ALTERNATIVE provider release of an already-known group.
+
+    §62.6 Stufe 2: when a sync/title/day-count match lands on a group that
+    already carries a different id of the same source (JP vs. international
+    pressing, provider-side duplicate listing), the losing release id used to
+    be logged away (G1). Recording it as a non-default edition keeps the
+    fact "this provider ALSO knows the group as <id>" queryable. Idempotent
+    per (source, provider_id) within the group; returns the edition id, or
+    None when the id is already represented (including as the group's own)."""
+    import json
+
+    src = str(source or "").strip().lower()
+    pid = str(provider_id or "").strip()
+    if not src or not pid:
+        return None
+    group_id = int(release_group_id)
+    for row in cursor.execute(
+            """SELECT spotify_id, musicbrainz_id, external_ids
+                 FROM lib2_release_editions WHERE release_group_id=?""",
+            (group_id,)).fetchall():
+        if src == "spotify" and str(row["spotify_id"] or "") == pid:
+            return None
+        if src == "musicbrainz" and str(row["musicbrainz_id"] or "") == pid:
+            return None
+        try:
+            known = json.loads(row["external_ids"] or "{}")
+        except (TypeError, ValueError):
+            known = {}
+        if isinstance(known, dict) and str(known.get(src) or "") == pid:
+            return None
+
+    spotify_id = pid if src == "spotify" else None
+    musicbrainz_id = pid if src == "musicbrainz" else None
+    signature = edition_signature(spotify_id, musicbrainz_id, title, track_count)
+    cursor.execute(
+        """INSERT INTO lib2_release_editions(
+               release_group_id, is_default, title, spotify_id, musicbrainz_id,
+               external_ids, release_date, track_count, status, signature)
+           VALUES(?,0,?,?,?,?,?,?, 'official', ?)""",
+        (group_id, title, spotify_id, musicbrainz_id,
+         json.dumps({src: pid}, sort_keys=True, separators=(",", ":")),
+         release_date, track_count, signature))
+    return int(cursor.lastrowid)
+
+
 def default_edition_id(cursor: Any, album_id: int) -> Optional[int]:
     row = cursor.execute(
         "SELECT id FROM lib2_release_editions "
