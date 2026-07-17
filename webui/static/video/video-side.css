@@ -1842,6 +1842,8 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 .vd-ep-extra-still { width: 240px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 10px; flex: 0 0 auto;
     box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4); }
 .vd-ep-extra-body { flex: 1; min-width: 0; }
+/* Per-episode external deep-links (#1039) — a small badge row under the synopsis */
+.vd-ep-links { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 .vd-ep-extra-ov { margin: 0 0 16px; font-size: 14px; line-height: 1.6; color: rgba(255, 255, 255, 0.8); }
 .vd-ep-extra-empty { color: rgba(255, 255, 255, 0.45); font-size: 13.5px; padding: 4px 0; }
 .vd-ep-extra-gh { font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; color: rgba(255, 255, 255, 0.45); margin-bottom: 12px; }
