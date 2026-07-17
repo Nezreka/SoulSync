@@ -24,7 +24,8 @@ from __future__ import annotations
 import os
 import shutil
 import threading
-from typing import Any, Dict, List, Optional
+import time
+from typing import Any, Callable, Dict, List, Optional
 
 from utils.logging_config import get_logger
 
@@ -32,6 +33,16 @@ logger = get_logger("video.mass_rename")
 
 _running = False
 _lock = threading.Lock()
+
+# Background preview job. Resolving every stored path to a real file walks the
+# filesystem once per file, which is minutes on a big library — far too long to
+# block an HTTP request (it reads as a dead button). So preview runs on a worker
+# thread and the UI polls this state for a live count.
+_preview_lock = threading.Lock()
+_preview_state: Dict[str, Any] = {
+    "running": False, "done": 0, "total": 0,
+    "result": None, "error": None, "finished_at": 0.0,
+}
 
 _SIDECAR_EXTS = (".srt", ".ass", ".sub", ".idx", ".vtt", ".nfo", ".jpg", ".png")
 
@@ -93,10 +104,13 @@ def _inverse_reroot(new_local: str, old_local: str, stored: str) -> str:
     return stored_base + nl[len(local_base):]
 
 
-def preview() -> Dict[str, Any]:
+def preview(progress: Optional[Callable[[int, int], None]] = None) -> Dict[str, Any]:
     """Every file whose on-disk name differs from the current template.
     {status, entries: [{key, kind, title, current, proposed, reason?}],
-    unresolved: int}."""
+    unresolved: int}.
+
+    ``progress(done, total)`` is called as files are scanned so a background
+    caller can report a live count. Pure read — never mutates."""
     from api.video import get_video_db
     from core.video import organization
     from core.video.path_resolver import resolve_video_file_path, video_base_dirs
@@ -106,9 +120,36 @@ def preview() -> Dict[str, Any]:
     entries: List[Dict[str, Any]] = []
     unresolved = 0
 
+    # Per-directory resolution cache. Files in one server folder (a show's
+    # episodes, movies sharing a root) re-root to the same local folder, so once
+    # we've resolved one we can map the rest with a single stat instead of the
+    # full base-dir probe. Keyed by the stored path's parent; falls back to the
+    # real resolver on any miss, so it can never resolve to the wrong file.
+    dir_map: Dict[str, str] = {}
+
+    def _resolve(stored: str, size) -> Optional[str]:
+        if not isinstance(stored, str) or not stored:
+            return None
+        norm = stored.replace("\\", "/")
+        sdir = norm.rsplit("/", 1)[0] if "/" in norm else ""
+        hint = dir_map.get(sdir)
+        if hint is not None:
+            cand = os.path.join(hint, norm.rsplit("/", 1)[-1])
+            if os.path.exists(cand) and (not size or _same_size(cand, size)):
+                return cand
+        local = resolve_video_file_path(stored, base_dirs, size_bytes=size)
+        if local:
+            dir_map[sdir] = os.path.dirname(local)
+        return local
+
+    movies = db.repair_owned_movie_files()
+    episodes = db.rename_owned_episode_files()
+    total = len(movies) + len(episodes)
+    done = 0
+
     def _consider(kind: str, key: str, title: str, stored: str, size, fields: Dict[str, Any]):
         nonlocal unresolved
-        local = resolve_video_file_path(stored, base_dirs, size_bytes=size)
+        local = _resolve(stored, size)
         if not local or not os.path.exists(local):
             unresolved += 1
             return
@@ -119,15 +160,69 @@ def preview() -> Dict[str, Any]:
             entries.append({"key": key, "kind": kind, "title": title,
                             "current": local, "proposed": proposed})
 
-    for r in db.repair_owned_movie_files():
+    for r in movies:
         _consider("movie", "m:%s" % r["file_id"], "%s (%s)" % (r.get("title"), r.get("year") or "?"),
                   r["relative_path"], r.get("size_bytes"), _movie_fields(r))
-    for r in db.rename_owned_episode_files():
+        done += 1
+        if progress and done % 25 == 0:
+            progress(done, total)
+    for r in episodes:
         label = "%s S%02dE%02d" % (r.get("show_title") or "?",
                                    r.get("season_number") or 0, r.get("episode_number") or 0)
         _consider("episode", "e:%s" % r["file_id"], label,
                   r["relative_path"], r.get("size_bytes"), _episode_fields(r))
+        done += 1
+        if progress and done % 25 == 0:
+            progress(done, total)
+    if progress:
+        progress(total, total)
     return {"status": "completed", "entries": entries, "unresolved": unresolved}
+
+
+def _same_size(cand: str, size) -> bool:
+    try:
+        return int(os.path.getsize(cand)) == int(size)
+    except Exception:   # noqa: BLE001 - unreadable size → treat as mismatch, fall back
+        return False
+
+
+def start_preview() -> Dict[str, Any]:
+    """Kick off preview() on a worker thread if one isn't already running.
+    Returns the current state snapshot (see preview_state)."""
+    with _preview_lock:
+        if _preview_state["running"]:
+            return dict(_preview_state)   # already scanning — return it (lock held, no re-entry)
+        _preview_state.update(running=True, done=0, total=0, result=None,
+                              error=None, finished_at=0.0)
+
+    def _run():
+        def _prog(done, total):
+            with _preview_lock:
+                _preview_state["done"] = done
+                _preview_state["total"] = total
+        try:
+            res = preview(progress=_prog)
+            with _preview_lock:
+                _preview_state.update(result=res, running=False, finished_at=time.time())
+        except Exception as ex:   # noqa: BLE001 - report to the UI, don't crash the thread
+            logger.exception("mass rename preview failed")
+            with _preview_lock:
+                _preview_state.update(error=str(ex), running=False, finished_at=time.time())
+
+    threading.Thread(target=_run, name="video-rename-preview", daemon=True).start()
+    return _snapshot()
+
+
+def _snapshot() -> Dict[str, Any]:
+    with _preview_lock:
+        s = dict(_preview_state)
+    return s
+
+
+def preview_state() -> Dict[str, Any]:
+    """Snapshot of the background preview: {running, done, total, result, error}.
+    ``result`` is the finished preview() payload once done, else None."""
+    return _snapshot()
 
 
 def apply(keys: Optional[List[str]] = None) -> Dict[str, Any]:

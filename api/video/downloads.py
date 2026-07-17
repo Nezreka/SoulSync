@@ -262,8 +262,35 @@ def register_routes(bp):
     #    admin gate covers it (renaming the library is management). ───────────
     @bp.route("/organization/rename/preview", methods=["GET"])
     def video_rename_preview():
-        from core.video.mass_rename import preview
-        return jsonify({"success": True, **preview()})
+        """Kick off (or report) the background rename preview. Scanning a big
+        library resolves every stored path against the filesystem, which is too
+        slow to block the request — so it runs on a worker and the UI polls this.
+        Returns {success, ready, done, total, entries?, unresolved?, error?}."""
+        from core.video.mass_rename import start_preview
+        st = start_preview()
+        # If a fresh result is already sitting there, hand it straight back.
+        ready = (not st["running"]) and (st["result"] is not None or st["error"])
+        out = {"success": True, "ready": bool(ready),
+               "done": st["done"], "total": st["total"]}
+        if st["error"]:
+            out.update(success=False, error=st["error"])
+        elif ready and st["result"]:
+            out.update(st["result"])
+        return jsonify(out)
+
+    @bp.route("/organization/rename/preview/status", methods=["GET"])
+    def video_rename_preview_status():
+        """Poll the in-flight preview without starting a new one."""
+        from core.video.mass_rename import preview_state
+        st = preview_state()
+        ready = (not st["running"]) and (st["result"] is not None or st["error"])
+        out = {"success": True, "ready": bool(ready),
+               "running": st["running"], "done": st["done"], "total": st["total"]}
+        if st["error"]:
+            out.update(success=False, error=st["error"])
+        elif ready and st["result"]:
+            out.update(st["result"])
+        return jsonify(out)
 
     @bp.route("/organization/rename/apply", methods=["POST"])
     def video_rename_apply():
