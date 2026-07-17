@@ -571,3 +571,13 @@ def test_video_side_remembers_per_page_scroll():
     assert "_scrollMemo" in _JS
     # detail subpages are reused between titles — they must always reopen at the top
     assert "DETAIL_PAGES[meta.id] ? 0" in _JS
+
+
+def test_discover_filter_bar_has_collapse_toggle():
+    # QT3496 #1040: the Browse filter bar can eat the viewport; a toggle
+    # collapses it for more grid room, and the choice persists.
+    disc_js = (_ROOT / "webui" / "static" / "video" / "video-discover.js").read_text(encoding="utf-8")
+    css = _CSS_PATH.read_text(encoding="utf-8")
+    assert "data-vdsc-filter-toggle" in _INDEX
+    assert "_toggleFilterCollapsed" in disc_js and "vdsc-filters-collapsed" in disc_js
+    assert "vdsc-filterbar--collapsed" in disc_js and ".vdsc-filterbar--collapsed" in css

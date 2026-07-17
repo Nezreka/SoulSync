@@ -3025,7 +3025,15 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
     border-radius: 14px; background: rgba(16, 16, 22, 0.92); border: 1px solid rgba(255, 255, 255, 0.08);
     position: sticky; top: 8px; z-index: 5; backdrop-filter: blur(10px); }
 .vdsc-filterbar.hidden { display: none; }
+/* Collapsed (QT3496 #1040): hide the filter rows but keep the bar's toggle
+   reachable via the grid-head button. Animates the height away for more grid. */
+.vdsc-filterbar--collapsed { display: none; }
 .vdsc-filter-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* Show/Hide-filters toggle in the grid head (pushed to the far right) */
+.vdsc-filter-toggle { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; }
+.vdsc-filter-toggle.hidden { display: none; }
+.vdsc-filter-toggle[aria-expanded="false"] svg { opacity: 0.5; }
 
 /* ── Endless "Keep exploring" feed ────────────────────────────────────────── */
 .vdsc-explore { margin-top: 26px; }
