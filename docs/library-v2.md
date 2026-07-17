@@ -7107,3 +7107,55 @@ In einer schrittweisen Abstimmung mit dem Nutzer wurden am 2026-07-17 verbindlic
 * **H11 — Artist-Record-Inspector:** ❌ **Verworfen / Nicht benötigt.** Eine rohe JSON-Ansicht in der User-UI ist nicht notwendig; Entwickler können die Browser-Konsole oder SQLite nutzen.
 * **H12 — Export (Artist-Roster + M3U-Export):** ⏸️ **Aufgeschoben / Zurückgestellt.**
 
+---
+
+## 65. Legacy-TEXT-IDs im Importer und in Metadata-Brücken — ✅ gefixt (2026-07-17)
+
+**Produktionsbefund:** Der Library-v2-Import brach auf einer Main-Instanz in
+`importer.py:977` mit
+`invalid literal for int() with base 10: '01MoTj8w4VkVtgdPOijUUE'` ab.
+Die Legacy-Library verwendet für `artists.id`/`albums.id`/`tracks.id` und die
+zugehörigen Fremdschlüssel absichtlich `TEXT`; je nach Media-Server bzw.
+Erzeugungspfad kann ein solcher Schlüssel numerisch, UUID-förmig oder
+Spotify-Base62-förmig sein.
+
+### 65.1 Root Cause und Importer-Fix
+
+- `album_map`, `_ArtistResolver` und `track_map` verwendeten seit §38/§40
+  bereits `_legacy_key()` und behandelten Legacy-IDs damit korrekt als opaque
+  Strings.
+- Nur `actual_track_counts` und `present_track_counts` wandelten
+  `tracks.album_id` noch mit `int(...)` um. Dadurch scheiterte eine gültige
+  alphanumerische Album-ID, bevor das erste Album materialisiert wurde.
+- Beide Count-Maps und ihre Album-Lookups verwenden jetzt ebenfalls
+  `_legacy_key()`. Single-Erkennung, Ownership-/Monitoring-Ableitung und
+  Re-Import-Idempotenz funktionieren damit für numerische und opaque IDs
+  identisch.
+
+### 65.2 Zusammenspiel mit §63 (Matching und Provider-Namespaces)
+
+Die Korrektur vermischt keine Identitätsebenen: Eine Spotify-förmige
+`albums.id` ist weiterhin ausschließlich ein Legacy-PK/Backref im Namespace
+`legacy_album`. Sie wird **nicht** automatisch zu `lib2_albums.spotify_id`
+oder `external_ids.spotify`. Eine Provider-ID entsteht nur aus der expliziten
+Legacy-Provider-Spalte bzw. einer nachweisbaren Provider-Herkunft. Damit bleiben
+§63.1–§63.5 (Titel-/Datum-/Trackcount-Matching, Editions, MB-Reconcile,
+Artist-Dedup und Namespace-Sanierung) unverändert und scharf getrennt.
+
+Der anschließende Boundary-Audit fand denselben veralteten Integer-Zwang noch
+in nachgelagerten Library-v2-Brücken. Diese akzeptieren nun ebenfalls opaque
+Legacy-IDs:
+
+- Match-Chips und `metadata_match_provenance` (inklusive manueller Matches und
+  Album-Track-Bundle),
+- Track Source Info und Download-/Pipeline-History,
+- Enrich + Resync,
+- Reorganize-Bridge,
+- Frontend-Verträge für `legacy_entity_id` (`number | string`).
+
+Die lokalen lib2-Entity-IDs bleiben unverändert numerische Surrogat-IDs; nur
+die Backrefs in die Legacy-Library sind polymorph. Regressionstests verwenden
+die konkrete Produktions-ID `01MoTj8w4VkVtgdPOijUUE`, prüfen Import +
+Re-Import, fehlende Provider-Namespace-Kontamination sowie alle genannten
+Brücken. Verifikation: 216 fokussierte Backend-Tests (inkl. §63 Discography,
+Editions, MB-Reconcile und Dedup-Repair) und 57 betroffene Frontend-Tests grün.

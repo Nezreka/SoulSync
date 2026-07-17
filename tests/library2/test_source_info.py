@@ -178,3 +178,26 @@ def test_source_info_falls_back_to_path_when_legacy_id_is_null(imported_conn):
     rows = SI.track_source_info(imported_conn, track_id)
 
     assert [r["source_service"] for r in rows] == ["path-fallback"]
+
+
+def test_source_info_resolves_text_legacy_track_id(imported_conn):
+    track_id = _one_dance_track_id(imported_conn)
+    legacy_track_id = "base62-track-key"
+    imported_conn.execute(
+        "UPDATE lib2_tracks SET legacy_track_id=? WHERE id=?",
+        (legacy_track_id, track_id),
+    )
+    imported_conn.execute(
+        "UPDATE lib2_track_files SET legacy_track_id=? WHERE track_id=?",
+        (legacy_track_id, track_id),
+    )
+    _make_downloads_table(imported_conn)
+    imported_conn.execute(
+        "INSERT INTO track_downloads(id, track_id, source_service, status) "
+        "VALUES(1, ?, 'soulseek', 'completed')",
+        (legacy_track_id,),
+    )
+
+    rows = SI.track_source_info(imported_conn, track_id)
+
+    assert [row["source_service"] for row in rows] == ["soulseek"]

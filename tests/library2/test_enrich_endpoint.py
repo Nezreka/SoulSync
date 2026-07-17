@@ -36,15 +36,15 @@ def api(tmp_path):
     conn.executescript(
         """
         CREATE TABLE artists(
-            id INTEGER PRIMARY KEY, name TEXT, thumb_url TEXT, genres TEXT,
+            id TEXT PRIMARY KEY, name TEXT, thumb_url TEXT, genres TEXT,
             summary TEXT, style TEXT, mood TEXT, label TEXT, banner_url TEXT
         );
         CREATE TABLE albums(
-            id INTEGER PRIMARY KEY, title TEXT, thumb_url TEXT, genres TEXT,
+            id TEXT PRIMARY KEY, title TEXT, thumb_url TEXT, genres TEXT,
             label TEXT, explicit INTEGER, upc TEXT
         );
         CREATE TABLE tracks(
-            id INTEGER PRIMARY KEY, title TEXT, bpm REAL, explicit INTEGER,
+            id TEXT PRIMARY KEY, title TEXT, bpm REAL, explicit INTEGER,
             genius_lyrics TEXT, copyright TEXT
         );
         """
@@ -62,6 +62,17 @@ def api(tmp_path):
     )
     album_id = cur.lastrowid
     cur.execute("INSERT INTO albums(id, title) VALUES(601, 'Views')")
+
+    base62_legacy_album_id = "01MoTj8w4VkVtgdPOijUUE"
+    cur.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title, legacy_album_id) "
+        "VALUES(?, 'Base62 Album', ?)", (artist_id, base62_legacy_album_id)
+    )
+    base62_album_id = cur.lastrowid
+    cur.execute(
+        "INSERT INTO albums(id, title) VALUES(?, 'Base62 Album')",
+        (base62_legacy_album_id,),
+    )
 
     # A discography-only album — never had a legacy counterpart.
     cur.execute(
@@ -113,6 +124,7 @@ def api(tmp_path):
     )
     ids = {
         "artist": artist_id, "album": album_id,
+        "base62_album": base62_album_id,
         "no_legacy_album": no_legacy_album_id, "track": track_id,
     }
     yield app.test_client(), db, ids, calls
@@ -149,6 +161,24 @@ def test_enrich_album_passes_artist_name_and_resyncs(api):
     }
     conn = db._get_connection()
     row = conn.execute("SELECT label FROM lib2_albums WHERE id=?", (ids["album"],)).fetchone()
+    conn.close()
+    assert row["label"] == "OVO Sound"
+
+
+def test_enrich_album_preserves_text_legacy_id(api):
+    client, db, ids, calls = api
+    resp = client.post(
+        f"/api/library/v2/albums/{ids['base62_album']}/enrich",
+        json={"service": "deezer"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.get_json()["resynced"] is True
+    assert calls[0]["legacy_id"] == "01MoTj8w4VkVtgdPOijUUE"
+    conn = db._get_connection()
+    row = conn.execute(
+        "SELECT label FROM lib2_albums WHERE id=?", (ids["base62_album"],)
+    ).fetchone()
     conn.close()
     assert row["label"] == "OVO Sound"
 

@@ -9,6 +9,8 @@ so we can surface the exact same match data with no migration.
 
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 
 from core.library2 import match_status as MS
@@ -192,3 +194,73 @@ def test_album_match_bundle_propagates_available_services_to_album_and_tracks(im
     assert album_deezer["available"] is False
     assert track_spotify["available"] is True
     assert track_deezer["available"] is False
+
+
+def test_match_status_preserves_text_legacy_ids_and_provenance(tmp_path):
+    """§63 metadata identity must not coerce media-server TEXT ids to int."""
+    album_legacy_id = "01MoTj8w4VkVtgdPOijUUE"
+    track_legacy_id = "base62-track-key"
+    conn = sqlite3.connect(str(tmp_path / "text-match-ids.db"))
+    conn.row_factory = sqlite3.Row
+    from core.library2.schema import ensure_library_v2_schema
+    ensure_library_v2_schema(conn)
+    conn.executescript("""
+        CREATE TABLE artists(id TEXT PRIMARY KEY, name TEXT);
+        CREATE TABLE albums(
+            id TEXT PRIMARY KEY, title TEXT, spotify_album_id TEXT,
+            spotify_match_status TEXT, spotify_last_attempted TEXT);
+        CREATE TABLE tracks(
+            id TEXT PRIMARY KEY, title TEXT, spotify_track_id TEXT,
+            spotify_match_status TEXT, spotify_last_attempted TEXT);
+        CREATE TABLE metadata_match_provenance(
+            entity_type TEXT NOT NULL, entity_id INTEGER NOT NULL,
+            service TEXT NOT NULL, origin TEXT NOT NULL, external_id TEXT,
+            matched_at TEXT, actor TEXT,
+            PRIMARY KEY(entity_type, entity_id, service));
+    """)
+    artist_id = conn.execute(
+        "INSERT INTO lib2_artists(name, legacy_artist_id) VALUES('Text Artist', ?)",
+        ("artist-text-key",),
+    ).lastrowid
+    album_id = conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title, legacy_album_id) "
+        "VALUES(?, 'Text Album', ?)",
+        (artist_id, album_legacy_id),
+    ).lastrowid
+    track_id = conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title, legacy_track_id) "
+        "VALUES(?, 'Text Track', ?)",
+        (album_id, track_legacy_id),
+    ).lastrowid
+    conn.execute(
+        "INSERT INTO albums VALUES(?, 'Text Album', 'spotify-album', 'matched', '2026-07-17')",
+        (album_legacy_id,),
+    )
+    conn.execute(
+        "INSERT INTO tracks VALUES(?, 'Text Track', 'spotify-track', 'matched', '2026-07-17')",
+        (track_legacy_id,),
+    )
+    conn.execute(
+        "INSERT INTO metadata_match_provenance VALUES"
+        "('album', ?, 'spotify', 'manual', 'spotify-album', '2026-07-17', 'admin')",
+        (album_legacy_id,),
+    )
+    conn.execute(
+        "INSERT INTO metadata_match_provenance VALUES"
+        "('track', ?, 'spotify', 'automatic', 'spotify-track', '2026-07-17', 'system')",
+        (track_legacy_id,),
+    )
+    conn.commit()
+
+    album_services = MS.entity_match_status(conn, "album", album_id)
+    album_spotify = next(row for row in album_services if row["service"] == "spotify")
+    assert album_spotify["legacy_entity_id"] == album_legacy_id
+    assert album_spotify["match_origin"] == "manual"
+
+    bundle = MS.album_match_bundle(conn, album_id)
+    track_spotify = next(
+        row for row in bundle["tracks"][track_id] if row["service"] == "spotify"
+    )
+    assert track_spotify["legacy_entity_id"] == track_legacy_id
+    assert track_spotify["match_origin"] == "automatic"
+    conn.close()

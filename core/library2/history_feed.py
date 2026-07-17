@@ -391,7 +391,7 @@ def _track_download_events(
     except Exception:  # noqa: BLE001
         return [], set()
 
-    legacy_ids = sorted({str(int(r["legacy_id"])) for r in link_rows if r["legacy_id"] is not None})
+    legacy_ids = sorted({str(r["legacy_id"]) for r in link_rows if r["legacy_id"] is not None})
     rows: List[Any] = []
     matched_legacy_ids: set = set()
     try:

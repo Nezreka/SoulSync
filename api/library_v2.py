@@ -3804,14 +3804,14 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                           "(it was added via Update Discography)."),
             }), 409
 
-        result = run_enrichment(service, singular, int(legacy_id), name, artist_name)
+        result = run_enrichment(service, singular, legacy_id, name, artist_name)
 
         resynced = False
         if result.get("success"):
             conn = _conn()
             try:
                 from core.library2.enrich import resync_entity_from_legacy
-                resynced = resync_entity_from_legacy(conn, singular, eid, int(legacy_id))
+                resynced = resync_entity_from_legacy(conn, singular, eid, legacy_id)
                 conn.commit()
             except Exception as e:  # noqa: BLE001
                 logger.debug("enrich resync failed (%s %s): %s", entity, eid, e)

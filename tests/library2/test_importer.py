@@ -892,6 +892,94 @@ def test_reimport_keeps_stable_album_and_track_ids_with_text_legacy_ids(tmp_path
     assert twins == 0, "re-import spawned an origin='discography' twin album"
 
 
+def test_import_accepts_base62_legacy_album_ids(tmp_path):
+    """Legacy media-server IDs are TEXT and may be Spotify-shaped base62.
+
+    The ownership counters used to coerce ``tracks.album_id`` to ``int`` even
+    though the rest of the importer deliberately normalizes legacy IDs with
+    ``_legacy_key``.  A real Spotify-shaped album primary key therefore aborted
+    the import before the first album could be materialized.
+    """
+    import sqlite3
+
+    album_legacy_id = "01MoTj8w4VkVtgdPOijUUE"
+    path = str(tmp_path / "legacy_base62_album_id.db")
+    conn = sqlite3.connect(path)
+    conn.executescript("""
+        CREATE TABLE artists(id TEXT PRIMARY KEY, name TEXT, thumb_url TEXT,
+            genres TEXT, summary TEXT, spotify_artist_id TEXT, musicbrainz_id TEXT);
+        CREATE TABLE albums(id TEXT PRIMARY KEY, artist_id TEXT, title TEXT,
+            year INTEGER, thumb_url TEXT, genres TEXT, track_count INTEGER,
+            release_date TEXT);
+        CREATE TABLE tracks(id TEXT PRIMARY KEY, album_id TEXT, artist_id TEXT,
+            title TEXT, track_number INTEGER, duration INTEGER, file_path TEXT,
+            bitrate INTEGER, file_size INTEGER, track_artist TEXT);
+    """)
+    conn.execute(
+        "INSERT INTO artists VALUES(?, 'Base62 Artist', NULL, NULL, NULL, NULL, NULL)",
+        ("artist-provider-key",),
+    )
+    conn.execute(
+        "INSERT INTO albums VALUES(?, ?, 'Base62 Album', 2026, NULL, NULL, 1, NULL)",
+        (album_legacy_id, "artist-provider-key"),
+    )
+    conn.execute(
+        "INSERT INTO tracks VALUES(?, ?, ?, 'Base62 Track', 1, 180000, "
+        "'/m/base62.flac', 1000, 5000, NULL)",
+        ("track-provider-key", album_legacy_id, "artist-provider-key"),
+    )
+    conn.commit()
+    conn.close()
+
+    class _Shim:
+        def _get_connection(self):
+            db_conn = sqlite3.connect(path)
+            db_conn.row_factory = sqlite3.Row
+            db_conn.execute("PRAGMA foreign_keys=ON")
+            return db_conn
+
+    db = _Shim()
+    stats = import_legacy_library(db)
+
+    assert stats["albums"] == 1
+    assert stats["tracks"] == 1
+    assert stats["files"] == 1
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    imported = conn.execute(
+        """SELECT al.id, al.legacy_album_id, al.spotify_id, al.external_ids,
+                  al.monitored, t.legacy_track_id, f.path
+             FROM lib2_albums al
+             JOIN lib2_tracks t ON t.album_id=al.id
+             JOIN lib2_track_files f ON f.track_id=t.id
+            WHERE al.title='Base62 Album'"""
+    ).fetchone()
+    conn.close()
+
+    assert imported is not None
+    first_lib2_album_id = imported["id"]
+    assert imported["legacy_album_id"] == album_legacy_id
+    # A provider-shaped legacy PK is still only a legacy relationship.  It must
+    # not leak into §63's provider namespaces without an explicit legacy
+    # spotify_album_id/source marker.
+    assert imported["spotify_id"] is None
+    assert imported["external_ids"] == "{}"
+    assert imported["legacy_track_id"] == "track-provider-key"
+    assert imported["monitored"] == 1
+    assert imported["path"] == "/m/base62.flac"
+
+    # The §38/§40 idempotency contract applies to alphanumeric ids too: a
+    # re-import reconciles the same release instead of creating a discography
+    # twin for the §63 duplicate repair to clean up later.
+    import_legacy_library(db)
+    conn = sqlite3.connect(path)
+    rows = conn.execute(
+        "SELECT id FROM lib2_albums WHERE legacy_album_id=?", (album_legacy_id,)
+    ).fetchall()
+    conn.close()
+    assert rows == [(first_lib2_album_id,)]
+
+
 def test_import_captures_real_schema_album_provider_ids(legacy_db):
     """Album counterpart of the artist fix: real legacy albums carry
     ``deezer_id``/``tidal_id``/``qobuz_id`` (not ``*_album_id``)."""

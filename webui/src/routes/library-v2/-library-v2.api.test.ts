@@ -407,7 +407,7 @@ describe('library v2 match-status api', () => {
       http.put('/api/library/manual-match', async ({ request }) => {
         expect(await request.json()).toEqual({
           entity_type: 'album',
-          entity_id: 42,
+          entity_id: '01MoTj8w4VkVtgdPOijUUE',
           service: 'deezer',
           service_id: 'dz1',
         });
@@ -423,7 +423,7 @@ describe('library v2 match-status api', () => {
     await expect(
       manualMatchLibraryV2Entity({
         entity_type: 'album',
-        legacy_entity_id: 42,
+        legacy_entity_id: '01MoTj8w4VkVtgdPOijUUE',
         service: 'deezer',
         service_id: 'dz1',
       }),

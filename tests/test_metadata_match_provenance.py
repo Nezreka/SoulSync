@@ -156,3 +156,40 @@ def test_shared_trigger_contract_covers_album_and_track_provider_columns(tmp_pat
         },
     ]
     conn.close()
+
+
+def test_manual_match_provenance_accepts_text_entity_ids(tmp_path):
+    """Media-server entity ids may be opaque TEXT, including Spotify base62."""
+    entity_id = "01MoTj8w4VkVtgdPOijUUE"
+    db = MusicDatabase(str(tmp_path / "text-matches.db"))
+    conn = db._get_connection()
+    conn.execute("INSERT INTO artists(id, name) VALUES(?, 'Text Artist')", (entity_id,))
+    conn.execute(
+        """UPDATE artists
+              SET spotify_artist_id='spotify-artist',
+                  spotify_match_status='matched'
+            WHERE id=?""",
+        (entity_id,),
+    )
+
+    record_manual_match(
+        conn,
+        entity_type="artist",
+        entity_id=entity_id,
+        service="spotify",
+        external_id="spotify-artist",
+        actor="profile:1",
+    )
+
+    row = conn.execute(
+        """SELECT entity_id, origin, actor
+             FROM metadata_match_provenance
+            WHERE entity_type='artist' AND entity_id=? AND service='spotify'""",
+        (entity_id,),
+    ).fetchone()
+    conn.close()
+    assert dict(row) == {
+        "entity_id": entity_id,
+        "origin": "manual",
+        "actor": "profile:1",
+    }

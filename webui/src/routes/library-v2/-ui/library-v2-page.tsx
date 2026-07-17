@@ -878,7 +878,7 @@ function ManualMatchModal({
       const resultService = result.provider || service.service;
       return manualMatchLibraryV2Entity({
         entity_type: entityType,
-        legacy_entity_id: service.legacy_entity_id as number,
+        legacy_entity_id: service.legacy_entity_id as number | string,
         service: resultService,
         service_id: result.id,
         ...(entityType === 'artist' &&
@@ -897,7 +897,7 @@ function ManualMatchModal({
     mutationFn: () =>
       clearLibraryV2EntityMatch({
         entity_type: entityType,
-        legacy_entity_id: service.legacy_entity_id as number,
+        legacy_entity_id: service.legacy_entity_id as number | string,
         service: service.service,
         ...(entityType === 'artist' &&
         watchlistRowId &&

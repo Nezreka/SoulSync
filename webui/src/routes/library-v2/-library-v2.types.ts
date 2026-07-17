@@ -202,8 +202,8 @@ export interface LibraryV2MatchService {
   status: string;
   external_id: string | null;
   last_attempted: string | null;
-  /** The legacy row id — used to drive the app-wide manual-match endpoint. */
-  legacy_entity_id: number | null;
+  /** The legacy row id — media servers may use numeric or opaque TEXT ids. */
+  legacy_entity_id: number | string | null;
   /** Is this provider configured/usable on this instance right now (A8)?
    *  Always ``true`` when the server has no availability signal (older
    *  cached response shape). */

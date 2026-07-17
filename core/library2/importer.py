@@ -421,7 +421,7 @@ class _ArtistResolver:
         for source, value in ids.items():
             self._by_provider.setdefault((source, value), artist_id)
 
-    def _row_legacy_id(self, artist_id: int) -> Optional[int]:
+    def _row_legacy_id(self, artist_id: int) -> Optional[Any]:
         row = self.cursor.connection.execute(
             "SELECT legacy_artist_id FROM lib2_artists WHERE id=?",
             (artist_id,)).fetchone()
@@ -548,7 +548,7 @@ class _ArtistResolver:
         return new_id
 
     def upsert_legacy(
-        self, legacy_id: int, fields: Dict[str, Any], run_id: str
+        self, legacy_id: Any, fields: Dict[str, Any], run_id: str
     ) -> int:
         """Insert or update a lib2 artist mirrored from a legacy artist row.
 
@@ -973,8 +973,13 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
         album_rows = cursor.fetchall()
         if progress:
             progress("albums", 0, len(album_rows))
+        # Legacy media-server ids are TEXT and may be provider-shaped (for
+        # example a 22-character Spotify album id).  Use the same normalized
+        # key as ``album_map`` instead of assuming that ``tracks.album_id`` is
+        # numeric.  The old int coercion made otherwise valid libraries abort
+        # before the first album was imported.
         actual_track_counts = {
-            int(row["album_id"]): int(row["count"])
+            _legacy_key(row["album_id"]): int(row["count"])
             for row in cursor.execute(
                 "SELECT album_id, COUNT(*) AS count FROM tracks GROUP BY album_id"
             ).fetchall()
@@ -984,7 +989,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
         # fully owned; a partially-downloaded album must NOT be blanket-monitored
         # (that would project every un-owned track wanted and auto-grab it).
         present_track_counts = {
-            int(row["album_id"]): int(row["count"])
+            _legacy_key(row["album_id"]): int(row["count"])
             for row in cursor.execute(
                 "SELECT album_id, COUNT(*) AS count FROM tracks "
                 "WHERE file_path IS NOT NULL AND TRIM(file_path) <> '' "
@@ -996,7 +1001,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
             if lib2_artist is None:
                 continue  # orphan album with no artist; skip
             # actual track rows for single-detection
-            actual = actual_track_counts.get(int(row["id"]), 0)
+            actual = actual_track_counts.get(_legacy_key(row["id"]), 0)
             track_count = _pick(row, "track_count")
             album_type = _normalize_album_type(
                 _pick(row, "album_type", "release_type", "type"),
@@ -1052,7 +1057,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 # known track present, and at least as many as the metadata
                 # expects) → monitored; anything partial → unmonitored, so only
                 # the concretely-wanted tracks (wishlist rules) stay wanted.
-                present = present_track_counts.get(int(row["id"]), 0)
+                present = present_track_counts.get(_legacy_key(row["id"]), 0)
                 album_monitored = (
                     1 if present and present >= actual and present >= (expected or 0)
                     else 0

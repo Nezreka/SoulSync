@@ -87,7 +87,7 @@ def _chips_for_row(
     canonical: str,
     legacy_row,
     columns: set,
-    legacy_id: int,
+    legacy_id: Any,
     available_services: Optional[set] = None,
     provenance: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
@@ -159,14 +159,15 @@ def entity_match_status(conn, entity_type: str, entity_id: int,
             f"SELECT * FROM {legacy_table} WHERE id=?", (legacy_id,)
         ).fetchone()
         if legacy_row is not None:
-            origins = load_match_provenance(conn, canonical, [int(legacy_id)])
+            provenance_key = str(legacy_id)
+            origins = load_match_provenance(conn, canonical, [legacy_id])
             return _chips_for_row(
                 canonical,
                 legacy_row,
                 columns,
                 legacy_id,
                 available_services,
-                origins.get(int(legacy_id), {}),
+                origins.get(provenance_key, {}),
             )
 
     # Fallback: synthesize chips from lib2 row columns
@@ -229,13 +230,17 @@ def album_match_bundle(conn, album_id: int,
         "SELECT id, legacy_track_id, spotify_id, musicbrainz_id FROM lib2_tracks WHERE album_id=?", (album_id,)
     ).fetchall()
 
-    legacy_ids = {int(r["legacy_track_id"]) for r in rows if r["legacy_track_id"] is not None}
+    legacy_ids = {
+        str(r["legacy_track_id"])
+        for r in rows
+        if r["legacy_track_id"] is not None
+    }
     legacy_rows = {}
     provenance = load_match_provenance(conn, "track", legacy_ids)
     if legacy_ids and track_columns:
         marks = ",".join("?" for _ in legacy_ids)
         legacy_rows = {
-            int(r["id"]): r
+            str(r["id"]): r
             for r in conn.execute(
                 f"SELECT * FROM tracks WHERE id IN ({marks})", tuple(legacy_ids)
             )
@@ -243,15 +248,16 @@ def album_match_bundle(conn, album_id: int,
 
     for row in rows:
         lid = row["legacy_track_id"]
-        legacy_row = legacy_rows.get(int(lid)) if lid is not None else None
+        legacy_key = str(lid) if lid is not None else None
+        legacy_row = legacy_rows.get(legacy_key) if legacy_key is not None else None
         if legacy_row is not None:
             result["tracks"][int(row["id"])] = _chips_for_row(
                 "track",
                 legacy_row,
                 track_columns,
-                int(lid),
+                lid,
                 available_services,
-                provenance.get(int(lid), {}),
+                provenance.get(legacy_key, {}),
             )
         else:
             # Synthetic chips for track without legacy row

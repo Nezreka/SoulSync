@@ -297,6 +297,33 @@ def test_track_download_surfaces_via_path_fallback_when_legacy_id_stale(imported
     assert any(e["event_type"] == "downloaded" for e in history)
 
 
+def test_track_download_history_accepts_text_legacy_id(imported_conn):
+    drake = _drake_ids(imported_conn)
+    legacy_track_id = "base62-track-key"
+    imported_conn.execute(
+        "UPDATE lib2_tracks SET legacy_track_id=? WHERE id=?",
+        (legacy_track_id, drake["track_id"]),
+    )
+    imported_conn.execute(
+        """CREATE TABLE IF NOT EXISTS track_downloads(
+               id INTEGER PRIMARY KEY AUTOINCREMENT, track_id TEXT, file_path TEXT,
+               source_service TEXT, track_title TEXT, track_album TEXT,
+               status TEXT DEFAULT 'completed', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"""
+    )
+    imported_conn.execute(
+        "INSERT INTO track_downloads(track_id, source_service, track_title, status) "
+        "VALUES(?, 'soulseek', 'One Dance', 'completed')",
+        (legacy_track_id,),
+    )
+    imported_conn.commit()
+
+    history = scoped_history(
+        imported_conn, scope="track", entity_id=drake["track_id"]
+    )
+
+    assert any(e["event_type"] == "downloaded" for e in history)
+
+
 def test_unsupported_scope_raises(imported_conn):
     with pytest.raises(ValueError):
         scoped_history(imported_conn, scope="playlist", entity_id=1)

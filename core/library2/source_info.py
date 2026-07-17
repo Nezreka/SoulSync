@@ -27,7 +27,7 @@ from utils.logging_config import get_logger
 logger = get_logger("library2.source_info")
 
 
-def _legacy_track_id(conn, track_id: int) -> Optional[int]:
+def _legacy_track_id(conn, track_id: int) -> Optional[Any]:
     """The legacy ``tracks`` id this lib2 track was migrated from, if any.
 
     Prefers the track row's own link; falls back to its primary file's link
@@ -38,7 +38,7 @@ def _legacy_track_id(conn, track_id: int) -> Optional[int]:
     ).fetchone()
     legacy_id = row["legacy_track_id"] if row and "legacy_track_id" in row.keys() else None
     if legacy_id is not None:
-        return int(legacy_id)
+        return legacy_id
     frow = conn.execute(
         "SELECT legacy_track_id FROM lib2_track_files "
         "WHERE track_id=? AND legacy_track_id IS NOT NULL "
@@ -46,7 +46,7 @@ def _legacy_track_id(conn, track_id: int) -> Optional[int]:
         (int(track_id),),
     ).fetchone()
     if frow and frow["legacy_track_id"] is not None:
-        return int(frow["legacy_track_id"])
+        return frow["legacy_track_id"]
     return None
 
 

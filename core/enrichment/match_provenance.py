@@ -12,11 +12,16 @@ from __future__ import annotations
 from typing import Any, Dict, Iterable
 
 
+def _entity_key(value: Any) -> str:
+    """Stable key for legacy entity ids, which may be INTEGER or TEXT."""
+    return str(value)
+
+
 def record_manual_match(
     conn,
     *,
     entity_type: str,
-    entity_id: int,
+    entity_id: Any,
     service: str,
     external_id: str,
     actor: str = "admin",
@@ -30,22 +35,22 @@ def record_manual_match(
            ON CONFLICT(entity_type, entity_id, service) DO UPDATE SET
                origin='manual', external_id=excluded.external_id,
                matched_at=CURRENT_TIMESTAMP, actor=excluded.actor""",
-        (str(entity_type), int(entity_id), str(service), str(external_id), str(actor)),
+        (str(entity_type), _entity_key(entity_id), str(service), str(external_id), str(actor)),
     )
 
 
 def load_match_provenance(
     conn,
     entity_type: str,
-    entity_ids: Iterable[int],
-) -> Dict[int, Dict[str, Dict[str, Any]]]:
+    entity_ids: Iterable[Any],
+) -> Dict[str, Dict[str, Dict[str, Any]]]:
     """Return ``entity id -> service -> provenance`` without requiring schema.
 
     Minimal/older test databases and installations opened before migrations may
     not have the table yet. Match-status reads must still work, so absence is a
     graceful empty mapping rather than an error.
     """
-    ids = sorted({int(entity_id) for entity_id in entity_ids})
+    ids = sorted({_entity_key(entity_id) for entity_id in entity_ids})
     if not ids:
         return {}
     marks = ",".join("?" for _ in ids)
@@ -59,7 +64,7 @@ def load_match_provenance(
     except Exception:  # table is additive and optional for compatibility reads
         return {}
 
-    out: Dict[int, Dict[str, Dict[str, Any]]] = {}
+    out: Dict[str, Dict[str, Dict[str, Any]]] = {}
     for row in rows:
         payload = {
             "origin": row["origin"],
@@ -67,7 +72,7 @@ def load_match_provenance(
             "matched_at": row["matched_at"],
             "actor": row["actor"],
         }
-        out.setdefault(int(row["entity_id"]), {})[str(row["service"])] = payload
+        out.setdefault(_entity_key(row["entity_id"]), {})[str(row["service"])] = payload
     return out
 
 

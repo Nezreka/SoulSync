@@ -120,7 +120,7 @@ _RESYNC: Dict[str, tuple] = {
 }
 
 
-def resync_entity_from_legacy(conn, entity_type: str, lib2_id: int, legacy_id: int) -> bool:
+def resync_entity_from_legacy(conn, entity_type: str, lib2_id: int, legacy_id: Any) -> bool:
     """Re-read the legacy row and overwrite the lib2 row's provider fields.
 
     Returns False (no-op) if the legacy row is gone or ``entity_type`` is

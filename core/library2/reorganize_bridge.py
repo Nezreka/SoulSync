@@ -49,7 +49,7 @@ NO_LEGACY_ARTIST_MSG = (
 )
 
 
-def resolve_legacy_album_id(conn: Any, lib2_album_id: int) -> int:
+def resolve_legacy_album_id(conn: Any, lib2_album_id: int) -> Any:
     row = conn.execute(
         "SELECT legacy_album_id FROM lib2_albums WHERE id=?", (int(lib2_album_id),)
     ).fetchone()
@@ -58,10 +58,10 @@ def resolve_legacy_album_id(conn: Any, lib2_album_id: int) -> int:
     legacy_id = row["legacy_album_id"]
     if legacy_id is None:
         raise ReorganizeBridgeError(NO_LEGACY_ALBUM_MSG, status=409)
-    return int(legacy_id)
+    return legacy_id
 
 
-def resolve_legacy_artist_id(conn: Any, lib2_artist_id: int) -> int:
+def resolve_legacy_artist_id(conn: Any, lib2_artist_id: int) -> Any:
     row = conn.execute(
         "SELECT legacy_artist_id FROM lib2_artists WHERE id=?", (int(lib2_artist_id),)
     ).fetchone()
@@ -70,7 +70,7 @@ def resolve_legacy_artist_id(conn: Any, lib2_artist_id: int) -> int:
     legacy_id = row["legacy_artist_id"]
     if legacy_id is None:
         raise ReorganizeBridgeError(NO_LEGACY_ARTIST_MSG, status=409)
-    return int(legacy_id)
+    return legacy_id
 
 
 def _transfer_dir(config_manager: Any) -> str:

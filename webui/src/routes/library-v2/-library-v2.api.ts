@@ -247,10 +247,10 @@ export async function unlinkLibraryV2ArtistAlias(artistId: number): Promise<void
  *  endpoint (keys on the legacy row id carried by the match chip). */
 export async function manualMatchLibraryV2Entity(input: {
   entity_type: 'artist' | 'album' | 'track';
-  legacy_entity_id: number;
+  legacy_entity_id: number | string;
   service: string;
   service_id: string;
-  artist_legacy_id?: number;
+  artist_legacy_id?: number | string;
   watchlist_row_id?: number;
 }): Promise<void> {
   const payload = await readJson<{ success: boolean; error?: string }>(
@@ -272,7 +272,7 @@ export async function manualMatchLibraryV2Entity(input: {
  * row in the same transaction as the legacy library row. */
 export async function clearLibraryV2EntityMatch(input: {
   entity_type: 'artist' | 'album' | 'track';
-  legacy_entity_id: number;
+  legacy_entity_id: number | string;
   service: string;
   watchlist_row_id?: number;
 }): Promise<void> {

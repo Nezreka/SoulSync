@@ -152,6 +152,31 @@ def test_resolve_legacy_artist_id_returns_the_backref(imported_legacy_db):
     assert resolve_legacy_artist_id(imported_legacy_db._get_connection(), lib2_artist_id) == 1
 
 
+def test_resolvers_preserve_text_legacy_backrefs(imported_legacy_db):
+    album_legacy_id = "01MoTj8w4VkVtgdPOijUUE"
+    artist_legacy_id = "base62-artist-key"
+    conn = imported_legacy_db._get_connection()
+    album_id = conn.execute(
+        "SELECT id FROM lib2_albums WHERE legacy_album_id=10"
+    ).fetchone()["id"]
+    artist_id = conn.execute(
+        "SELECT id FROM lib2_artists WHERE legacy_artist_id=1"
+    ).fetchone()["id"]
+    conn.execute(
+        "UPDATE lib2_albums SET legacy_album_id=? WHERE id=?",
+        (album_legacy_id, album_id),
+    )
+    conn.execute(
+        "UPDATE lib2_artists SET legacy_artist_id=? WHERE id=?",
+        (artist_legacy_id, artist_id),
+    )
+    conn.commit()
+
+    assert resolve_legacy_album_id(conn, album_id) == album_legacy_id
+    assert resolve_legacy_artist_id(conn, artist_id) == artist_legacy_id
+    conn.close()
+
+
 def test_resolve_legacy_artist_id_raises_409_without_backref(imported_legacy_db):
     conn = imported_legacy_db._get_connection()
     conn.execute(
