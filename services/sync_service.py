@@ -367,7 +367,11 @@ class PlaylistSyncService:
                     spotify_track=track,
                     plex_track=plex_match,
                     confidence=confidence,
-                    match_type="robust_search" if plex_match else "no_match"
+                    match_type="robust_search" if plex_match else "no_match",
+                    # The finder accepts db matches at 0.7 (the app-wide "you
+                    # own this" bar) — is_match must agree, or the 0.70-0.79
+                    # band is wishlisted AND left off the playlist (#1047).
+                    match_threshold=0.7,
                 )
                 match_results.append(match_result)
             
