@@ -34,6 +34,7 @@ import {
   editLibraryV2Artist,
   editTrackFileTag,
   enrichLibraryV2Entity,
+  fetchLibraryV2AlbumHistory,
   fetchLibraryV2ArtistDeletePreview,
   fetchLibraryV2ArtistHistory,
   fetchLibraryV2ArtistSettings,
@@ -1578,12 +1579,24 @@ const HISTORY_CATEGORY_LABELS: Record<LibraryV2HistoryCategory, string> = {
   info: 'Info',
 };
 
-/** Merged pipeline history for this artist — grabs, imports, quarantine,
- *  catalog moves and physical deletes, not just raw downloads (§A6/C3). */
-function HistoryModal({ artistId, onClose }: { artistId: number; onClose: () => void }) {
+/** Merged pipeline history for one artist or album — grabs, imports,
+ *  quarantine, catalog moves and physical deletes, not just raw downloads
+ *  (§A6/C3 artist scope; §52.9 album scope reuses the same resolver). */
+function HistoryModal({
+  scope,
+  entityId,
+  onClose,
+}: {
+  scope: 'artist' | 'album';
+  entityId: number;
+  onClose: () => void;
+}) {
   const historyQuery = useQuery({
-    queryKey: [...LIBRARY_V2_QUERY_KEY, 'history', artistId],
-    queryFn: () => fetchLibraryV2ArtistHistory(artistId),
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'history', scope, entityId],
+    queryFn: () =>
+      scope === 'album'
+        ? fetchLibraryV2AlbumHistory(entityId)
+        : fetchLibraryV2ArtistHistory(entityId),
   });
   const [category, setCategory] = useState<LibraryV2HistoryCategory | 'all'>('all');
   const allRows = historyQuery.data ?? [];
@@ -1615,7 +1628,7 @@ function HistoryModal({ artistId, onClose }: { artistId: number; onClose: () => 
         {historyQuery.isLoading ? (
           <div className={styles.inlineLoading}>Loading history…</div>
         ) : rows.length === 0 ? (
-          <div className={styles.inlineLoading}>No recorded history for this artist yet.</div>
+          <div className={styles.inlineLoading}>No recorded history for this {scope} yet.</div>
         ) : (
           <table className={styles.trackTable}>
             <thead>
@@ -1953,6 +1966,7 @@ function AlbumOverflowMenu({
   const [showArtPicker, setShowArtPicker] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
   const wrapRef = useRef<HTMLSpanElement>(null);
   const replaygain = useMutation({
     mutationFn: async () => {
@@ -2027,6 +2041,16 @@ function AlbumOverflowMenu({
           >
             Change cover
           </button>
+          <button
+            type="button"
+            className={styles.overflowMenuItem}
+            onClick={() => {
+              setShowHistory(true);
+              setOpen(false);
+            }}
+          >
+            History
+          </button>
           <div
             className={styles.submenuContainer}
             onMouseEnter={() => setShowSubmenu(true)}
@@ -2068,6 +2092,9 @@ function AlbumOverflowMenu({
             Delete
           </button>
         </div>
+      ) : null}
+      {showHistory ? (
+        <HistoryModal scope="album" entityId={album.id} onClose={() => setShowHistory(false)} />
       ) : null}
       {showRetag ? (
         <RetagModal
@@ -4332,7 +4359,11 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             <ArtistSettingsModal artist={artist} onClose={() => setShowArtistSettings(false)} />
           ) : null}
           {showHistory ? (
-            <HistoryModal artistId={artistId} onClose={() => setShowHistory(false)} />
+            <HistoryModal
+              scope="artist"
+              entityId={artistId}
+              onClose={() => setShowHistory(false)}
+            />
           ) : null}
           {showMaintenance ? (
             <MaintenanceModal

@@ -721,6 +721,20 @@ export async function fetchLibraryV2TrackHistory(
   return payload.history ?? [];
 }
 
+/** §52.9 album branch: same merged resolver as artist/track history, scoped
+ * to just this release. */
+export async function fetchLibraryV2AlbumHistory(
+  albumId: number,
+): Promise<LibraryV2HistoryEntry[]> {
+  const payload = await readJson<{
+    success: boolean;
+    history?: LibraryV2HistoryEntry[];
+    error?: string;
+  }>(apiClient.get(`library/v2/albums/${albumId}/history`));
+  if (!payload.success) throw new Error(payload.error || 'History failed');
+  return payload.history ?? [];
+}
+
 export interface LibraryV2TagDiffField {
   field: string;
   file_value: unknown;

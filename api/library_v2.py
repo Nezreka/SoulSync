@@ -3304,6 +3304,39 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             conn.close()
         return jsonify({"success": True, "history": history})
 
+    @app.route("/api/library/v2/albums/<int:album_id>/history")
+    def lib2_album_history(album_id):
+        """Merged history for this album/EP/single (§52.9 album branch): grabs,
+        imports, quarantine, catalog moves and physical deletes, scoped to just
+        this release — reuses the same resolver as the artist/track scopes
+        (see ``core.library2.history_feed``)."""
+        guard = _guard()
+        if guard:
+            return guard
+        try:
+            limit = int(request.args.get("limit", 50))
+        except (TypeError, ValueError):
+            return jsonify({
+                "success": False,
+                "error": "limit must be an integer between 1 and 500",
+            }), 400
+        if not 1 <= limit <= 500:
+            return jsonify({
+                "success": False,
+                "error": "limit must be an integer between 1 and 500",
+            }), 400
+        from core.library2.history_feed import scoped_history
+        conn = _conn()
+        try:
+            album = conn.execute(
+                "SELECT id FROM lib2_albums WHERE id=?", (album_id,)).fetchone()
+            if not album:
+                return jsonify({"success": False, "error": "Album not found"}), 404
+            history = scoped_history(conn, scope="album", entity_id=album_id, limit=limit)
+        finally:
+            conn.close()
+        return jsonify({"success": True, "history": history})
+
     # -- upgrade scan (lib2-aware quality upgrade pass) ------------------------
 
     @app.route("/api/library/v2/upgrade-scan", methods=["POST"])

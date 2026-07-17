@@ -6467,3 +6467,52 @@ Weiterhin offen aus §52: die aktuelle-Match-Karte (§56.2), Match-Provenienz
 `quality_checked`/`acoustic_id_checked`-Eventvokabular sowie der
 Album-/Artist-Zweig von §52.9, sowie die legacy Search-/Download-Routen aus
 §55.2.
+
+---
+
+## 58. §52.9 Album-Zweig der History — ✅ umgesetzt (2026-07-17)
+
+Schließt den in §57.3 offen gelassenen Punkt „Album-Scope-Timeline im
+Album-Detail: `scoped_history(scope='album', …)` ist bereits vom Resolver
+abgedeckt, aber ohne konkrete Nutzeranfrage nicht verdrahtet" — reiner
+Wiederverwendungs-Slice, keine neue Design-Entscheidung nötig.
+
+### 58.1 Einstiegspunkt
+
+- Neuer Endpoint `GET /api/library/v2/albums/<id>/history` (analog zu
+  Artist/Track, reiner Reuse von `scoped_history(scope='album', …)`, das
+  bereits seit §29/A6-C3 vollständig getestet ist — u. a. gegen Leck in
+  Nachbaralben, `lib2_manual_skips`, File-Deletes).
+- Frontend: `HistoryModal` (bisher artist-only) generalisiert auf einen
+  `scope: 'artist' | 'album'`-Prop statt eines festen `artistId`-Props;
+  Leertext jetzt „No recorded history for this {scope} yet." statt hart
+  „…this artist…". Neuer `fetchLibraryV2AlbumHistory`.
+- Ein neues „History"-Item im bereits existierenden `AlbumOverflowMenu"
+  (wiederverwendet in der Album-Zeile der Artist-Detailansicht **und** im
+  Album-Detail-Header — beide Stellen bekommen die Funktion automatisch, da
+  beide dieselbe Komponente rendern) öffnet dieselbe flache Tabellen-Modal
+  wie die Artist-History — bewusst **nicht** die vertikale
+  `TrackPipelineTimeline` aus §57, da Alben (anders als Tracks) keinen
+  eigenen Info-Tab haben; die flache Tabelle ist der konsistente Fit zum
+  bestehenden Artist-Muster.
+
+### 58.2 Verifikation
+
+- Backend: 5 neue Tests (Skip-Event sichtbar, kein Leck ins Nachbaralbum,
+  404 für unbekanntes Album, 4 parametrisierte Limit-Validierungsfälle) —
+  `pytest tests/library2` → **671 passed**. `ruff check` clean.
+- Frontend: 2 neue API-Layer-Tests in `-library-v2.api.test.ts` — `vitest
+  run src/routes/library-v2/` → **21 Dateien, 118 Tests grün**; `npm run
+  check` (oxfmt + oxlint --type-check) und `tsc --noEmit` beide grün.
+- Live gegen die echte Dev-DB verifiziert (Playwright, `dev.py`): Artist
+  „Hiroyuki Sawano" → Album „TVアニメ「進撃の巨人」Season 2" → „…" → History
+  zeigt ausschließlich Grab-/Quarantäne-/Download-Events für dieses eine
+  Album (u. a. mehrere „Quarantined: Duration mismatch"-Versuche für den
+  fehlenden Track), nicht die Events des zweiten, vollständigen Albums
+  desselben Artists.
+
+Damit bleibt aus §52 offen: die aktuelle-Match-Karte (§56.2),
+Match-Provenienz (§56.2), §52.6-Replacement-Teil, §52.7 Manual-Grab-Policy,
+das granulare `quality_checked`/`acoustic_id_checked`-Eventvokabular sowie
+die legacy Search-/Download-Routen aus §55.2 — jeweils entweder an eine
+§52.12-Entscheidung gebunden oder ein eigener größerer Schreibpfad-Slice.

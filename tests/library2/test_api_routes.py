@@ -1885,6 +1885,56 @@ def test_artist_history_rejects_invalid_limits(api, limit):
     assert response.status_code == 400
 
 
+def test_album_history_surfaces_manual_skip(api):
+    client, db, ids = api
+    with _conn(db) as conn:
+        conn.execute(
+            """INSERT INTO lib2_manual_skips(file_path, skipped_checks, profile_id)
+               VALUES('/m/one-dance.flac', '["acoustid"]', 1)"""
+        )
+        conn.commit()
+
+    response = client.get(f"/api/library/v2/albums/{ids['views']}/history")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["success"] is True
+    assert any(e["event_type"] == "manual_skip" for e in payload["history"])
+
+
+def test_album_history_does_not_leak_sibling_album(api):
+    client, db, ids = api
+    with _conn(db) as conn:
+        conn.execute(
+            """INSERT INTO lib2_manual_skips(file_path, skipped_checks, profile_id)
+               VALUES('/m/one-dance.flac', '["acoustid"]', 1)"""
+        )
+        conn.commit()
+
+    response = client.get(f"/api/library/v2/albums/{ids['ep']}/history")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert not any(e["event_type"] == "manual_skip" for e in payload["history"])
+
+
+def test_album_history_404_for_unknown_album(api):
+    client, _db, _ids = api
+    response = client.get("/api/library/v2/albums/999999/history")
+
+    assert response.status_code == 404
+
+
+@pytest.mark.parametrize("limit", ["abc", "0", "-1", "501"])
+def test_album_history_rejects_invalid_limits(api, limit):
+    client, _db, ids = api
+    response = client.get(
+        f"/api/library/v2/albums/{ids['views']}/history?limit={limit}"
+    )
+
+    assert response.status_code == 400
+
+
 def test_track_history_surfaces_manual_skip(api):
     client, db, ids = api
     with _conn(db) as conn:

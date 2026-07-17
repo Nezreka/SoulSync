@@ -12,6 +12,7 @@ import {
   deleteLibraryV2Files,
   enrichLibraryV2Entity,
   fetchLibraryV2AlbumArtOptions,
+  fetchLibraryV2AlbumHistory,
   fetchLibraryV2AlbumMatchStatus,
   fetchLibraryV2AlbumReorganizeSources,
   fetchLibraryV2ArtistArtOptions,
@@ -247,6 +248,42 @@ describe('library v2 track history api (§52.9)', () => {
     );
 
     await expect(fetchLibraryV2TrackHistory(55)).rejects.toThrow('Track not found');
+  });
+});
+
+describe('library v2 album history api (§52.9 album branch)', () => {
+  it('returns the merged pipeline events for an album', async () => {
+    server.use(
+      http.get('/api/library/v2/albums/42/history', () =>
+        HttpResponse.json({
+          success: true,
+          history: [
+            {
+              date: '2026-07-17 10:00:00',
+              event_type: 'manual_skip',
+              category: 'override',
+              title: 'Manually skipped',
+              detail: 'acoustid mismatch',
+              source: 'manual',
+            },
+          ],
+        }),
+      ),
+    );
+
+    const history = await fetchLibraryV2AlbumHistory(42);
+    expect(history).toHaveLength(1);
+    expect(history[0].event_type).toBe('manual_skip');
+  });
+
+  it('throws when the backend reports failure', async () => {
+    server.use(
+      http.get('/api/library/v2/albums/42/history', () =>
+        HttpResponse.json({ success: false, error: 'Album not found' }, { status: 404 }),
+      ),
+    );
+
+    await expect(fetchLibraryV2AlbumHistory(42)).rejects.toThrow('Album not found');
   });
 });
 
