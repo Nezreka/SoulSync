@@ -29,6 +29,7 @@ import {
   analyzeLibraryV2TrackReplayGain,
   blacklistLibraryV2Source,
   bulkMonitorLibraryV2Releases,
+  clearLibraryV2EntityMatch,
   deleteLibraryV2Entity,
   deleteLibraryV2Files,
   editLibraryV2Artist,
@@ -38,6 +39,7 @@ import {
   fetchLibraryV2ArtistDeletePreview,
   fetchLibraryV2ArtistHistory,
   fetchLibraryV2ArtistSettings,
+  fetchLibraryV2MatchArtistReleases,
   fetchLibraryV2Artists,
   fetchLibraryV2ArtistTrackFiles,
   fetchLibraryV2Duplicates,
@@ -89,6 +91,8 @@ import {
   type LibraryV2AlbumType,
   type LibraryV2ArtistTrackFile,
   type LibraryV2HistoryCategory,
+  type LibraryV2MatchRelease,
+  type LibraryV2MatchSearchResult,
 } from '../-library-v2.api';
 import { computeTrackEditValues } from '../-metadata-edit';
 import { Route } from '../route';
@@ -311,7 +315,16 @@ function Artwork({
   thumb?: boolean;
 }) {
   const [failed, setFailed] = useState(false);
-  const url = src ? (thumb ? `${src}?size=thumb` : src) : '';
+  // Only SoulSync's artwork endpoint understands ``size=thumb``. Appending it
+  // to Spotify/Deezer/CDN URLs (the previous behavior) can invalidate signed
+  // URLs; it also produced ``...?v=123?size=thumb`` for cache-busted local art.
+  const url =
+    src && thumb && src.startsWith('/api/library/v2/artwork/')
+      ? `${src}${src.includes('?') ? '&' : '?'}size=thumb`
+      : src;
+  // A card is reused as searches/settings refresh. One failed old URL must not
+  // permanently pin the component to its placeholder after a valid URL arrives.
+  useEffect(() => setFailed(false), [url]);
   if (!url || failed) {
     return (
       <div className={`${className} ${styles.artPlaceholder}`} aria-label={alt}>
@@ -320,7 +333,14 @@ function Artwork({
     );
   }
   return (
-    <img className={className} src={url} alt={alt} loading="lazy" onError={() => setFailed(true)} />
+    <img
+      className={className}
+      src={url}
+      alt={alt}
+      loading="lazy"
+      referrerPolicy="no-referrer"
+      onError={() => setFailed(true)}
+    />
   );
 }
 
@@ -528,6 +548,7 @@ function ModalShell({
   title,
   wide,
   detail,
+  match,
   onClose,
   children,
 }: {
@@ -536,13 +557,15 @@ function ModalShell({
   /** Fixed width+height (tab body scrolls internally) so tabbed content
    *  (track/album detail modals) doesn't resize/jump when switching tabs. */
   detail?: boolean;
+  /** Roomier matching surface for identity cards + release context. */
+  match?: boolean;
   onClose: () => void;
   children: ReactNode;
 }) {
   return (
     <div className={styles.modalBackdrop} role="presentation" onClick={onClose}>
       <div
-        className={`${styles.modal} ${wide ? styles.modalWide : ''} ${detail ? styles.modalDetail : ''}`}
+        className={`${styles.modal} ${wide ? styles.modalWide : ''} ${detail ? styles.modalDetail : ''} ${match ? styles.modalMatch : ''}`}
         role="dialog"
         aria-modal="true"
         onClick={(e) => e.stopPropagation()}
@@ -582,6 +605,90 @@ function formatCompactNumber(value: number): string {
   return value.toLocaleString('en-US');
 }
 
+function matchOriginLabel(origin?: LibraryV2MatchService['match_origin']): string | null {
+  if (origin === 'manual') return 'Manual match';
+  if (origin === 'automatic') return 'Automatic match';
+  if (origin === 'legacy') return 'Legacy match';
+  return null;
+}
+
+const WATCHLIST_MATCH_PROVIDERS = new Set([
+  'spotify',
+  'itunes',
+  'deezer',
+  'discogs',
+  'amazon',
+  'musicbrainz',
+]);
+
+function MatchReleaseStrip({ albums }: { albums: LibraryV2MatchRelease[] }) {
+  if (!albums.length) return null;
+  return (
+    <div className={styles.matchReleaseStrip} aria-label="Albums from this artist match">
+      {albums.map((album, index) => (
+        <div key={album.id || `${album.title}-${index}`} className={styles.matchReleaseCard}>
+          <Artwork src={album.image || ''} alt={album.title} className={styles.matchReleaseCover} />
+          <span className={styles.matchReleaseTitle} title={album.title}>
+            {album.title}
+          </span>
+          <span className={styles.matchReleaseMeta}>
+            {[album.album_type, formatReleaseDate(album.release_date)]
+              .filter(Boolean)
+              .join(' · ') || 'Release'}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function MatchArtistReleaseContext({
+  result,
+  service,
+  autoLoad,
+}: {
+  result: LibraryV2MatchSearchResult;
+  service: string;
+  autoLoad: boolean;
+}) {
+  const [open, setOpen] = useState(autoLoad);
+  const provider = result.provider || service;
+  const query = useQuery({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'match-release-preview', provider, result.id],
+    queryFn: () =>
+      fetchLibraryV2MatchArtistReleases({
+        service: provider,
+        artist_id: result.id,
+        artist_name: result.name,
+        limit: 6,
+      }),
+    enabled: open,
+    staleTime: 10 * 60 * 1000,
+    retry: false,
+  });
+
+  if (!open) {
+    return (
+      <button type="button" className={styles.matchReleaseToggle} onClick={() => setOpen(true)}>
+        Preview albums
+      </button>
+    );
+  }
+  if (query.isLoading) {
+    return <span className={styles.matchReleaseHint}>Loading album context…</span>;
+  }
+  if (query.isError) {
+    return <span className={styles.matchReleaseHint}>Album context unavailable right now.</span>;
+  }
+  if (query.data?.supported === false) {
+    return <span className={styles.matchReleaseHint}>This provider has no album preview.</span>;
+  }
+  if (!query.data?.albums.length) {
+    return <span className={styles.matchReleaseHint}>No albums returned for this identity.</span>;
+  }
+  return <MatchReleaseStrip albums={query.data.albums} />;
+}
+
 function getServiceAbbreviation(service: string): string {
   switch (service.toLowerCase()) {
     case 'spotify':
@@ -617,6 +724,9 @@ export function MatchChips({
   services,
   abbreviated = false,
   showAll = false,
+  entityImage,
+  artistReleases = [],
+  watchlistRowId,
 }: {
   entityType: 'artist' | 'album' | 'track';
   entityName: string;
@@ -625,6 +735,9 @@ export function MatchChips({
   /** B5 opt-in override: show every provider chip, including ones this
    *  instance never configured (A8's default hides those as noise). */
   showAll?: boolean;
+  entityImage?: string | null;
+  artistReleases?: LibraryV2AlbumSummary[];
+  watchlistRowId?: number;
 }) {
   const prefsQuery = useQuery(libraryV2UiPreferencesQueryOptions());
   const [active, setActive] = useState<LibraryV2MatchService | null>(null);
@@ -645,6 +758,7 @@ export function MatchChips({
           s.external_id ? `id: ${s.external_id}` : 'no id',
           s.last_attempted ? `last: ${s.last_attempted.slice(0, 16).replace('T', ' ')}` : null,
           s.legacy_entity_id != null ? 'click to (re)match' : null,
+          matchOriginLabel(s.match_origin),
         ]
           .filter(Boolean)
           .join(' · ');
@@ -658,7 +772,20 @@ export function MatchChips({
             disabled={s.legacy_entity_id == null}
             onClick={() => setActive(s)}
           >
-            {abbreviated ? getServiceAbbreviation(s.service) : `${s.label}: ${s.status}`}
+            <span>
+              {abbreviated ? getServiceAbbreviation(s.service) : `${s.label}: ${s.status}`}
+            </span>
+            {s.status === 'matched' && matchOriginLabel(s.match_origin) ? (
+              <span className={styles.matchOriginBadge} data-origin={s.match_origin}>
+                {abbreviated
+                  ? s.match_origin === 'manual'
+                    ? 'M'
+                    : s.match_origin === 'automatic'
+                      ? 'A'
+                      : 'L'
+                  : matchOriginLabel(s.match_origin)}
+              </span>
+            ) : null}
           </button>
         );
       })}
@@ -667,6 +794,9 @@ export function MatchChips({
           entityType={entityType}
           entityName={entityName}
           service={active}
+          entityImage={entityImage}
+          artistReleases={artistReleases}
+          watchlistRowId={watchlistRowId}
           onClose={() => setActive(null)}
         />
       ) : null}
@@ -724,11 +854,17 @@ function ManualMatchModal({
   entityType,
   entityName,
   service,
+  entityImage,
+  artistReleases,
+  watchlistRowId,
   onClose,
 }: {
   entityType: 'artist' | 'album' | 'track';
   entityName: string;
   service: LibraryV2MatchService;
+  entityImage?: string | null;
+  artistReleases: LibraryV2AlbumSummary[];
+  watchlistRowId?: number;
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -738,12 +874,36 @@ function ManualMatchModal({
       searchLibraryV2MatchService({ service: service.service, entity_type: entityType, query }),
   });
   const apply = useMutation({
-    mutationFn: (serviceId: string) =>
-      manualMatchLibraryV2Entity({
+    mutationFn: (result: LibraryV2MatchSearchResult) => {
+      const resultService = result.provider || service.service;
+      return manualMatchLibraryV2Entity({
+        entity_type: entityType,
+        legacy_entity_id: service.legacy_entity_id as number,
+        service: resultService,
+        service_id: result.id,
+        ...(entityType === 'artist' &&
+        watchlistRowId &&
+        WATCHLIST_MATCH_PROVIDERS.has(resultService)
+          ? { watchlist_row_id: watchlistRowId }
+          : {}),
+      });
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+      onClose();
+    },
+  });
+  const clear = useMutation({
+    mutationFn: () =>
+      clearLibraryV2EntityMatch({
         entity_type: entityType,
         legacy_entity_id: service.legacy_entity_id as number,
         service: service.service,
-        service_id: serviceId,
+        ...(entityType === 'artist' &&
+        watchlistRowId &&
+        WATCHLIST_MATCH_PROVIDERS.has(service.service)
+          ? { watchlist_row_id: watchlistRowId }
+          : {}),
       }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
@@ -751,8 +911,63 @@ function ManualMatchModal({
     },
   });
   const results = search.data ?? [];
+  const currentReleases: LibraryV2MatchRelease[] = artistReleases.slice(0, 6).map((album) => ({
+    id: String(album.id),
+    title: album.title,
+    image: album.image_url,
+    release_date: album.release_date,
+    album_type: album.album_type,
+    total_tracks: album.track_count,
+  }));
   return (
-    <ModalShell title={`Match ${entityType} on ${service.label}`} onClose={onClose}>
+    <ModalShell title={`Match ${entityType} on ${service.label}`} match onClose={onClose}>
+      {service.status === 'matched' && service.external_id ? (
+        <section className={styles.currentMatchCard}>
+          <Artwork
+            src={entityImage || ''}
+            alt={entityName}
+            className={`${styles.currentMatchImage} ${entityType === 'artist' ? styles.matchArtistImage : ''}`}
+          />
+          <div className={styles.currentMatchBody}>
+            <div className={styles.currentMatchEyebrow}>
+              Current {service.label} identity
+              {matchOriginLabel(service.match_origin) ? (
+                <span className={styles.matchProvenancePill} data-origin={service.match_origin}>
+                  {matchOriginLabel(service.match_origin)}
+                </span>
+              ) : null}
+            </div>
+            <strong className={styles.currentMatchName}>{entityName}</strong>
+            <button
+              type="button"
+              className={styles.matchIdButton}
+              title="Copy provider ID"
+              onClick={() => void navigator.clipboard?.writeText(service.external_id || '')}
+            >
+              {service.external_id}
+              <span>Copy</span>
+            </button>
+            {entityType === 'artist' && currentReleases.length ? (
+              <div className={styles.currentMatchReleases}>
+                <span>Library release context</span>
+                <MatchReleaseStrip albums={currentReleases} />
+              </div>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            className={styles.btnDangerGhost}
+            disabled={clear.isPending}
+            onClick={() => {
+              if (window.confirm(`Clear the current ${service.label} match?`)) clear.mutate();
+            }}
+          >
+            {clear.isPending ? 'Clearing…' : 'Clear match'}
+          </button>
+        </section>
+      ) : (
+        <div className={styles.matchNoCurrent}>No current {service.label} identity is linked.</div>
+      )}
       <div className={styles.matchSearchRow}>
         <input
           className={styles.searchInput}
@@ -783,33 +998,67 @@ function ManualMatchModal({
           {mutationErrorMessage(apply.error, 'Manual match failed')}
         </div>
       ) : null}
+      {clear.isError ? (
+        <div className={styles.searchError}>
+          {mutationErrorMessage(clear.error, 'Clear match failed')}
+        </div>
+      ) : null}
       <div className={styles.matchResults}>
         {search.isSuccess && results.length === 0 ? (
           <div className={styles.inlineLoading}>No results — try a different search.</div>
         ) : null}
-        {results.map((r) => (
-          <div key={`${r.provider ?? service.service}:${r.id}`} className={styles.matchResultRow}>
-            <div className={styles.matchResultInfo}>
-              <span className={styles.matchResultName}>{r.name || 'Unknown'}</span>
-              {r.extra ? <span className={styles.matchResultExtra}>{r.extra}</span> : null}
-              {formatMatchStat(r) ? (
-                <span className={styles.matchResultExtra}>{formatMatchStat(r)}</span>
-              ) : null}
-              <span className={styles.matchResultId}>
-                ID: {r.id}
-                {r.provider && r.provider !== service.service ? ` (${r.provider})` : ''}
-              </span>
-            </div>
-            <button
-              type="button"
-              className={styles.btnPrimary}
-              disabled={apply.isPending}
-              onClick={() => apply.mutate(r.id)}
+        {results.map((r, index) => {
+          const resultProvider = r.provider || service.service;
+          const isCurrent =
+            resultProvider === service.service &&
+            String(r.id) === String(service.external_id || '');
+          return (
+            <div
+              key={`${resultProvider}:${r.id}`}
+              className={`${styles.matchResultRow} ${isCurrent ? styles.matchResultCurrent : ''}`}
             >
-              {apply.isPending ? 'Matching…' : 'Match'}
-            </button>
-          </div>
-        ))}
+              <Artwork
+                src={r.image || ''}
+                alt={r.name || 'Unknown'}
+                className={`${styles.matchResultImage} ${entityType === 'artist' ? styles.matchArtistImage : ''}`}
+              />
+              <div className={styles.matchResultInfo}>
+                <span className={styles.matchResultHeading}>
+                  <span className={styles.matchResultName}>{r.name || 'Unknown'}</span>
+                  <span className={styles.matchProviderPill}>{resultProvider}</span>
+                  {isCurrent ? <span className={styles.matchCurrentPill}>Current</span> : null}
+                </span>
+                {r.extra ? <span className={styles.matchResultExtra}>{r.extra}</span> : null}
+                {formatMatchStat(r) ? (
+                  <span className={styles.matchResultExtra}>{formatMatchStat(r)}</span>
+                ) : null}
+                <button
+                  type="button"
+                  className={styles.matchResultId}
+                  title="Copy provider ID"
+                  onClick={() => void navigator.clipboard?.writeText(r.id)}
+                >
+                  ID: {r.id}
+                </button>
+                {entityType === 'artist' ? (
+                  <MatchArtistReleaseContext
+                    result={r}
+                    service={service.service}
+                    autoLoad={index < 3}
+                  />
+                ) : null}
+              </div>
+              <button
+                type="button"
+                className={styles.btnPrimary}
+                disabled={apply.isPending || isCurrent}
+                onClick={() => apply.mutate(r)}
+              >
+                {isCurrent ? 'Current' : apply.isPending ? 'Matching…' : 'Use this match'}
+              </button>
+            </div>
+          );
+        })}
       </div>
     </ModalShell>
   );
@@ -971,11 +1220,27 @@ function EnrichDropdown({
   );
 }
 
-/** Fetches an artist's provider match chips and renders them. */
-function ArtistMatchChips({ artistId, artistName }: { artistId: number; artistName: string }) {
-  const query = useQuery(libraryV2ArtistMatchStatusQueryOptions(artistId));
+/** Fetches an artist's provider match chips and carries the rich local context
+ * into the current-match card. */
+function ArtistMatchChips({
+  artist,
+  watchlistRowId,
+}: {
+  artist: LibraryV2ArtistDetail;
+  watchlistRowId?: number;
+}) {
+  const query = useQuery(libraryV2ArtistMatchStatusQueryOptions(artist.id));
   if (!query.data?.length) return null;
-  return <MatchChips entityType="artist" entityName={artistName} services={query.data} />;
+  return (
+    <MatchChips
+      entityType="artist"
+      entityName={artist.name}
+      entityImage={artist.image_url}
+      artistReleases={[...artist.albums, ...(artist.eps ?? []), ...artist.singles]}
+      services={query.data}
+      watchlistRowId={watchlistRowId}
+    />
+  );
 }
 
 /** §40: alias-group chips on the artist header + a "Link alias" action.
@@ -1335,18 +1600,33 @@ export function ArtistSettingsModal({
             <h4>Watchlist identity</h4>
             <div className={styles.artistSettingsIdentity}>
               <Artwork
-                src={draft.watchlist_image_url || artist.image_url || ''}
-                alt={draft.watchlist_name || artist.name}
+                src={
+                  artist.image_url ||
+                  settingsQuery.data?.artist_stats?.image_url ||
+                  draft.watchlist_image_url ||
+                  ''
+                }
+                alt={settingsQuery.data?.artist_stats?.name || draft.watchlist_name || artist.name}
                 className={styles.artistSettingsPhoto}
                 thumb
               />
               <div className={styles.artistSettingsIdentityBody}>
-                <strong>{draft.watchlist_name || artist.name}</strong>
+                <strong className={styles.artistSettingsIdentityName}>
+                  {settingsQuery.data?.artist_stats?.name || draft.watchlist_name || artist.name}
+                </strong>
                 <span className={styles.muted}>
                   This is the artist currently linked to the admin Watchlist.
                 </span>
-                {artist.genres.length > 0 ? (
-                  <span className={styles.muted}>{artist.genres.join(', ')}</span>
+                {(settingsQuery.data?.artist_stats?.genres?.length
+                  ? settingsQuery.data.artist_stats.genres
+                  : artist.genres
+                ).length > 0 ? (
+                  <span className={styles.artistSettingsGenres}>
+                    {(settingsQuery.data?.artist_stats?.genres?.length
+                      ? settingsQuery.data.artist_stats.genres
+                      : artist.genres
+                    ).join(' · ')}
+                  </span>
                 ) : null}
                 {settingsQuery.data?.artist_stats &&
                 formatMatchStat(settingsQuery.data.artist_stats) ? (
@@ -1357,13 +1637,37 @@ export function ArtistSettingsModal({
                 {providerIds.length > 0 ? (
                   <div className={styles.artistSettingsProviderIds}>
                     {providerIds.map(([provider, id]) => (
-                      <span key={provider} title={id}>
-                        {provider}: {id}
-                      </span>
+                      <button
+                        type="button"
+                        key={provider}
+                        title={`Copy ${provider} ID: ${id}`}
+                        onClick={() => void navigator.clipboard?.writeText(id)}
+                      >
+                        <strong>{provider}</strong>
+                        <span>{id}</span>
+                        <small>Copy</small>
+                      </button>
                     ))}
                   </div>
                 ) : null}
-                <ArtistMatchChips artistId={artist.id} artistName={artist.name} />
+                <ArtistMatchChips artist={artist} watchlistRowId={draft.watchlist_row_id} />
+                {[...artist.albums, ...(artist.eps ?? []), ...artist.singles].length ? (
+                  <div className={styles.artistSettingsReleaseContext}>
+                    <span>Release context in Library v2</span>
+                    <MatchReleaseStrip
+                      albums={[...artist.albums, ...(artist.eps ?? []), ...artist.singles]
+                        .slice(0, 6)
+                        .map((album) => ({
+                          id: String(album.id),
+                          title: album.title,
+                          image: album.image_url,
+                          release_date: album.release_date,
+                          album_type: album.album_type,
+                          total_tracks: album.track_count,
+                        }))}
+                    />
+                  </div>
+                ) : null}
               </div>
             </div>
           </section>
@@ -4300,7 +4604,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               {artist.genres.length > 0 ? (
                 <p className={styles.genres}>{artist.genres.join(', ')}</p>
               ) : null}
-              <ArtistMatchChips artistId={artist.id} artistName={artist.name} />
+              <ArtistMatchChips artist={artist} />
               <ArtistAliases artistId={artist.id} artistName={artist.name} />
             </div>
           </header>
@@ -5472,6 +5776,7 @@ function AlbumTrackTable({
             <MatchChips
               entityType="album"
               entityName={album.title}
+              entityImage={album.image_url}
               services={albumMatch}
               showAll={showAllProviders}
             />

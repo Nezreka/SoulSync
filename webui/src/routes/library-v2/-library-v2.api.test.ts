@@ -9,6 +9,7 @@ import {
   applyLibraryV2ArtistArt,
   applyLibraryV2ArtistReorganizeAll,
   blacklistLibraryV2Source,
+  clearLibraryV2EntityMatch,
   deleteLibraryV2Files,
   enrichLibraryV2Entity,
   fetchLibraryV2AlbumArtOptions,
@@ -18,6 +19,7 @@ import {
   fetchLibraryV2ArtistArtOptions,
   fetchLibraryV2ArtistSettings,
   fetchLibraryV2ArtistMatchStatus,
+  fetchLibraryV2MatchArtistReleases,
   fetchLibraryV2ArtistTrackFiles,
   fetchLibraryV2FileDeletePreview,
   fetchLibraryV2Playlist,
@@ -426,6 +428,60 @@ describe('library v2 match-status api', () => {
         service_id: 'dz1',
       }),
     ).resolves.toBeUndefined();
+  });
+
+  it('loads exact-provider album context for an artist candidate', async () => {
+    server.use(
+      http.post('/api/library/match-artist-releases', async ({ request }) => {
+        expect(await request.json()).toEqual({
+          service: 'spotify',
+          artist_id: 'sp1',
+          artist_name: 'Drake',
+          limit: 6,
+        });
+        return HttpResponse.json({
+          success: true,
+          supported: true,
+          albums: [{ id: 'a1', title: 'Take Care', image: 'https://img/a1.jpg' }],
+        });
+      }),
+    );
+
+    await expect(
+      fetchLibraryV2MatchArtistReleases({
+        service: 'spotify',
+        artist_id: 'sp1',
+        artist_name: 'Drake',
+        limit: 6,
+      }),
+    ).resolves.toMatchObject({ albums: [{ title: 'Take Care' }] });
+  });
+
+  it('syncs manual/clear artist matches with the Watchlist row when supplied', async () => {
+    server.use(
+      http.put('/api/library/manual-match', async ({ request }) => {
+        expect(await request.json()).toMatchObject({ watchlist_row_id: 11, service_id: 'sp2' });
+        return HttpResponse.json({ success: true });
+      }),
+      http.put('/api/library/clear-match', async ({ request }) => {
+        expect(await request.json()).toMatchObject({ watchlist_row_id: 11, service: 'spotify' });
+        return HttpResponse.json({ success: true });
+      }),
+    );
+
+    await manualMatchLibraryV2Entity({
+      entity_type: 'artist',
+      legacy_entity_id: 42,
+      service: 'spotify',
+      service_id: 'sp2',
+      watchlist_row_id: 11,
+    });
+    await clearLibraryV2EntityMatch({
+      entity_type: 'artist',
+      legacy_entity_id: 42,
+      service: 'spotify',
+      watchlist_row_id: 11,
+    });
   });
 });
 

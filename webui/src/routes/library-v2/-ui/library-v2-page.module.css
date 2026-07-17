@@ -1372,20 +1372,22 @@ button.featureTag:disabled {
 
 .artistSettingsIdentity {
   display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 12px;
+  align-items: flex-start;
+  gap: 20px;
+  padding: 18px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.025);
 }
 
 .artistSettingsPhoto {
-  width: 72px;
-  height: 72px;
-  flex: 0 0 72px;
+  width: 112px;
+  height: 112px;
+  flex: 0 0 112px;
   border-radius: 50%;
   object-fit: cover;
+  border: 3px solid rgba(var(--accent-rgb), 0.32);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
 }
 
 .artistSettingsIdentityBody {
@@ -1393,7 +1395,17 @@ button.featureTag:disabled {
   flex: 1;
   min-width: 0;
   flex-direction: column;
-  gap: 4px;
+  gap: 7px;
+}
+
+.artistSettingsIdentityName {
+  font-size: 24px;
+  line-height: 1.15;
+}
+
+.artistSettingsGenres {
+  color: rgb(var(--accent-light-rgb));
+  font-size: 12px;
 }
 
 .artistSettingsProviderIds {
@@ -1403,17 +1415,54 @@ button.featureTag:disabled {
   margin-top: 3px;
 }
 
-.artistSettingsProviderIds span {
-  max-width: 220px;
+.artistSettingsProviderIds button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 280px;
   overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 6px;
   padding: 2px 7px;
   background: rgba(255, 255, 255, 0.06);
   color: rgba(255, 255, 255, 0.55);
   font-family: monospace;
   font-size: 10px;
+  cursor: pointer;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.artistSettingsProviderIds button:hover {
+  border-color: rgba(var(--accent-rgb), 0.35);
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.artistSettingsProviderIds button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.artistSettingsProviderIds button small {
+  color: rgb(var(--accent-light-rgb));
+  font-family: inherit;
+}
+
+.artistSettingsReleaseContext {
+  min-width: 0;
+  margin-top: 5px;
+}
+
+.artistSettingsReleaseContext > span,
+.currentMatchReleases > span {
+  display: block;
+  margin-bottom: 5px;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .artistSettingsToggle {
@@ -1611,6 +1660,14 @@ button.featureTag:disabled {
   max-height: 88vh;
   display: flex;
   flex-direction: column;
+}
+
+.modalMatch {
+  width: min(940px, 96vw);
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  padding: 22px;
 }
 
 .tabBody {
@@ -2238,6 +2295,9 @@ button.featureTag:disabled {
 }
 
 .matchChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-size: 10.5px;
   font-weight: 600;
   border: 1px solid transparent;
@@ -2248,6 +2308,14 @@ button.featureTag:disabled {
   transition:
     filter 0.12s ease,
     opacity 0.12s ease;
+}
+
+.matchOriginBadge {
+  border-left: 1px solid currentColor;
+  padding-left: 5px;
+  font-size: 8.5px;
+  opacity: 0.72;
+  text-transform: uppercase;
 }
 
 .matchChip:hover:not(:disabled) {
@@ -2287,6 +2355,11 @@ button.featureTag:disabled {
   font-size: 9px;
   border-radius: 4px;
   padding: 1px 4px;
+}
+
+.trackMatchChip .matchOriginBadge {
+  padding-left: 3px;
+  font-size: 7px;
 }
 
 /* --- §40 artist alias chips (docs/library-v2.md §24) --- */
@@ -2401,33 +2474,109 @@ button.featureTag:disabled {
 }
 
 .matchResults {
-  max-height: 360px;
+  min-height: 0;
+  max-height: none;
+  flex: 1;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 10px;
+  padding-right: 5px;
 }
 
 .matchResultRow {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
-  padding: 8px 10px;
+  gap: 16px;
+  padding: 14px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+
+.matchResultRow:hover {
+  border-color: rgba(var(--accent-rgb), 0.3);
+  background: rgba(var(--accent-rgb), 0.035);
+}
+
+.matchResultCurrent {
+  border-color: rgba(52, 211, 153, 0.42);
+  background: rgba(16, 185, 129, 0.045);
+}
+
+.matchResultImage,
+.currentMatchImage {
+  width: 84px;
+  height: 84px;
+  flex: 0 0 84px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  object-fit: cover;
+}
+
+.matchArtistImage {
+  border-radius: 50%;
 }
 
 .matchResultInfo {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
+  flex: 1;
   min-width: 0;
 }
 
+.matchResultHeading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
 .matchResultName {
-  font-weight: 600;
+  font-size: 16px;
+  font-weight: 700;
   overflow-wrap: anywhere;
+}
+
+.matchProviderPill,
+.matchCurrentPill,
+.matchProvenancePill {
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.matchProviderPill {
+  background: rgba(var(--accent-rgb), 0.12);
+  color: rgb(var(--accent-light-rgb));
+}
+
+.matchCurrentPill {
+  background: rgba(16, 185, 129, 0.14);
+  color: rgb(52, 211, 153);
+}
+
+.matchProvenancePill[data-origin='manual'] {
+  background: rgba(168, 85, 247, 0.16);
+  color: rgb(216, 180, 254);
+}
+
+.matchProvenancePill[data-origin='automatic'] {
+  background: rgba(59, 130, 246, 0.16);
+  color: rgb(147, 197, 253);
+}
+
+.matchProvenancePill[data-origin='legacy'] {
+  background: rgba(148, 163, 184, 0.14);
+  color: rgb(203, 213, 225);
 }
 
 .matchResultExtra {
@@ -2436,9 +2585,198 @@ button.featureTag:disabled {
 }
 
 .matchResultId {
+  appearance: none;
+  align-self: flex-start;
+  border: 0;
+  padding: 0;
+  background: none;
   font-size: 11px;
   color: rgba(255, 255, 255, 0.4);
   font-family: var(--font-mono, monospace);
+  cursor: copy;
+  text-align: left;
+}
+
+.matchResultId:hover {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.currentMatchCard {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 14px;
+  padding: 16px;
+  border: 1px solid rgba(52, 211, 153, 0.24);
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.08), rgba(255, 255, 255, 0.02));
+}
+
+.currentMatchBody {
+  min-width: 0;
+  flex: 1;
+}
+
+.currentMatchEyebrow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: rgba(255, 255, 255, 0.48);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.currentMatchName {
+  display: block;
+  margin-top: 4px;
+  font-size: 20px;
+}
+
+.matchIdButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  margin-top: 5px;
+  overflow: hidden;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: rgba(255, 255, 255, 0.46);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  cursor: copy;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.matchIdButton span {
+  color: rgb(var(--accent-light-rgb));
+  font-family: inherit;
+  font-size: 9px;
+  text-transform: uppercase;
+}
+
+.currentMatchReleases {
+  margin-top: 10px;
+}
+
+.matchNoCurrent {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border-radius: 9px;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 12px;
+}
+
+.btnDangerGhost {
+  flex: 0 0 auto;
+  border: 1px solid rgba(248, 113, 113, 0.28);
+  border-radius: 8px;
+  padding: 7px 10px;
+  background: rgba(239, 68, 68, 0.08);
+  color: rgb(248, 113, 113);
+  cursor: pointer;
+}
+
+.btnDangerGhost:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.16);
+}
+
+.matchReleaseStrip {
+  display: flex;
+  gap: 8px;
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 2px 0 4px;
+}
+
+.matchReleaseCard {
+  width: 78px;
+  flex: 0 0 78px;
+}
+
+.matchReleaseCover {
+  width: 78px;
+  height: 78px;
+  border-radius: 7px;
+  object-fit: cover;
+}
+
+.matchReleaseTitle,
+.matchReleaseMeta {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.matchReleaseTitle {
+  margin-top: 4px;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.matchReleaseMeta {
+  color: rgba(255, 255, 255, 0.36);
+  font-size: 9px;
+  text-transform: capitalize;
+}
+
+.matchReleaseToggle {
+  align-self: flex-start;
+  border: 0;
+  padding: 2px 0;
+  background: none;
+  color: rgb(var(--accent-light-rgb));
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.matchReleaseHint {
+  color: rgba(255, 255, 255, 0.38);
+  font-size: 11px;
+}
+
+@media (max-width: 650px) {
+  .modalMatch {
+    width: 100%;
+    max-height: 94vh;
+    padding: 14px;
+  }
+
+  .currentMatchCard,
+  .matchResultRow,
+  .artistSettingsIdentity {
+    flex-wrap: wrap;
+  }
+
+  .currentMatchImage,
+  .matchResultImage {
+    width: 68px;
+    height: 68px;
+    flex-basis: 68px;
+  }
+
+  .artistSettingsPhoto {
+    width: 88px;
+    height: 88px;
+    flex-basis: 88px;
+  }
+
+  .artistSettingsIdentityBody {
+    flex-basis: calc(100% - 108px);
+  }
+
+  .matchResultRow > .btnPrimary,
+  .currentMatchCard > .btnDangerGhost {
+    width: 100%;
+  }
 }
 
 /* --- detail modal tabs (Quality / Metadata / Info) — shared by the

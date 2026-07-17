@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+from core.enrichment.match_provenance import load_match_provenance
 from utils.logging_config import get_logger
 
 logger = get_logger("library2.match_status")
@@ -82,8 +83,14 @@ def _is_available(service: str, available_services: Optional[set]) -> bool:
     return available_services is None or service in available_services
 
 
-def _chips_for_row(canonical: str, legacy_row, columns: set, legacy_id: int,
-                   available_services: Optional[set] = None) -> List[Dict[str, Any]]:
+def _chips_for_row(
+    canonical: str,
+    legacy_row,
+    columns: set,
+    legacy_id: int,
+    available_services: Optional[set] = None,
+    provenance: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
     """Build the per-service chip list from one already-fetched legacy row."""
     row_keys = set(legacy_row.keys())
     out: List[Dict[str, Any]] = []
@@ -100,6 +107,12 @@ def _chips_for_row(canonical: str, legacy_row, columns: set, legacy_id: int,
             status = "matched"
         else:
             status = "pending"
+        provenance_row = (provenance or {}).get(service)
+        provenance_matches = bool(
+            status == "matched"
+            and provenance_row
+            and str(provenance_row.get("external_id") or "") == str(external_id or "")
+        )
         out.append({
             "service": service,
             "label": label,
@@ -108,6 +121,8 @@ def _chips_for_row(canonical: str, legacy_row, columns: set, legacy_id: int,
             "last_attempted": legacy_row[attempted_col] if attempted_col in columns else None,
             "legacy_entity_id": legacy_id,
             "available": _is_available(service, available_services),
+            "match_origin": provenance_row.get("origin") if provenance_matches else None,
+            "matched_at": provenance_row.get("matched_at") if provenance_matches else None,
         })
     return out
 
@@ -144,7 +159,15 @@ def entity_match_status(conn, entity_type: str, entity_id: int,
             f"SELECT * FROM {legacy_table} WHERE id=?", (legacy_id,)
         ).fetchone()
         if legacy_row is not None:
-            return _chips_for_row(canonical, legacy_row, columns, legacy_id, available_services)
+            origins = load_match_provenance(conn, canonical, [int(legacy_id)])
+            return _chips_for_row(
+                canonical,
+                legacy_row,
+                columns,
+                legacy_id,
+                available_services,
+                origins.get(int(legacy_id), {}),
+            )
 
     # Fallback: synthesize chips from lib2 row columns
     import json
@@ -155,8 +178,8 @@ def entity_match_status(conn, entity_type: str, entity_id: int,
     if "external_ids" in row_keys and row["external_ids"]:
         try:
             ext_ids = json.loads(row["external_ids"])
-        except Exception:
-            pass
+        except (json.JSONDecodeError, TypeError):
+            ext_ids = {}
 
     for service, label, id_cols in SERVICES:
         id_col = id_cols.get(canonical)
@@ -180,6 +203,8 @@ def entity_match_status(conn, entity_type: str, entity_id: int,
             "last_attempted": None,
             "legacy_entity_id": None,
             "available": _is_available(service, available_services),
+            "match_origin": None,
+            "matched_at": None,
         })
     return out
 
@@ -206,6 +231,7 @@ def album_match_bundle(conn, album_id: int,
 
     legacy_ids = {int(r["legacy_track_id"]) for r in rows if r["legacy_track_id"] is not None}
     legacy_rows = {}
+    provenance = load_match_provenance(conn, "track", legacy_ids)
     if legacy_ids and track_columns:
         marks = ",".join("?" for _ in legacy_ids)
         legacy_rows = {
@@ -220,7 +246,12 @@ def album_match_bundle(conn, album_id: int,
         legacy_row = legacy_rows.get(int(lid)) if lid is not None else None
         if legacy_row is not None:
             result["tracks"][int(row["id"])] = _chips_for_row(
-                "track", legacy_row, track_columns, int(lid), available_services
+                "track",
+                legacy_row,
+                track_columns,
+                int(lid),
+                available_services,
+                provenance.get(int(lid), {}),
             )
         else:
             # Synthetic chips for track without legacy row
@@ -244,6 +275,8 @@ def album_match_bundle(conn, album_id: int,
                     "last_attempted": None,
                     "legacy_entity_id": None,
                     "available": _is_available(service, available_services),
+                    "match_origin": None,
+                    "matched_at": None,
                 })
             result["tracks"][int(row["id"])] = chips
     return result

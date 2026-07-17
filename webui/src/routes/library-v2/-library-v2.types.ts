@@ -208,6 +208,10 @@ export interface LibraryV2MatchService {
    *  Always ``true`` when the server has no availability signal (older
    *  cached response shape). */
   available?: boolean;
+  /** How the current provider id was chosen. Pre-feature rows are `legacy`
+   * because automatic vs manual cannot be reconstructed safely. */
+  match_origin?: 'automatic' | 'manual' | 'legacy' | null;
+  matched_at?: string | null;
 }
 
 /** One candidate cover-art image for the art picker (docs §49). */

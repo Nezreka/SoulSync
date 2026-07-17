@@ -45,6 +45,31 @@ def test_explicit_match_status_column_wins_when_present(imported_conn):
     assert deezer["external_id"] == "dz9"
 
 
+def test_match_status_surfaces_normalized_provenance(imported_conn):
+    imported_conn.execute("ALTER TABLE artists ADD COLUMN deezer_id TEXT")
+    imported_conn.execute("ALTER TABLE artists ADD COLUMN deezer_match_status TEXT")
+    imported_conn.execute("ALTER TABLE artists ADD COLUMN deezer_last_attempted TEXT")
+    imported_conn.execute(
+        """CREATE TABLE metadata_match_provenance(
+               entity_type TEXT, entity_id INTEGER, service TEXT, origin TEXT,
+               external_id TEXT, matched_at TEXT, actor TEXT)"""
+    )
+    imported_conn.execute(
+        "UPDATE artists SET deezer_id='dz9', deezer_match_status='matched' WHERE id=1"
+    )
+    imported_conn.execute(
+        """INSERT INTO metadata_match_provenance
+               VALUES('artist', 1, 'deezer', 'manual', 'dz9', '2026-07-17 12:00:00', 'profile:1')"""
+    )
+    imported_conn.commit()
+
+    rows = MS.entity_match_status(imported_conn, "artist", _drake_lib2_id(imported_conn))
+    deezer = next(r for r in rows if r["service"] == "deezer")
+
+    assert deezer["match_origin"] == "manual"
+    assert deezer["matched_at"] == "2026-07-17 12:00:00"
+
+
 def test_entity_without_legacy_backref_returns_synthetic_pending_chips(imported_conn):
     # A row without legacy source row returns synthetic chips matching its own columns.
     new_id = imported_conn.execute(

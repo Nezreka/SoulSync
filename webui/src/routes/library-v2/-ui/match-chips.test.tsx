@@ -18,6 +18,7 @@ function service(overrides: Partial<LibraryV2MatchService> = {}): LibraryV2Match
     last_attempted: null,
     legacy_entity_id: 5,
     available: true,
+    match_origin: 'manual',
     ...overrides,
   };
 }
@@ -30,6 +31,24 @@ function renderWithClient(node: React.ReactElement) {
         preferences: { track_table: { visible_match_providers: {} } },
       }),
     ),
+    http.post('/api/library/match-artist-releases', async ({ request }) => {
+      const body = (await request.json()) as { artist_id?: string };
+      return body.artist_id === 'sp2'
+        ? HttpResponse.json({
+            success: true,
+            supported: true,
+            albums: [
+              {
+                id: 'a1',
+                title: 'Take Care',
+                image: 'https://img.example/take-care.jpg',
+                release_date: '2011-11-15',
+                album_type: 'album',
+              },
+            ],
+          })
+        : HttpResponse.json({ success: true, supported: false, albums: [] });
+    }),
   );
   const queryClient = createTestQueryClient();
   return render(<QueryClientProvider client={queryClient}>{node}</QueryClientProvider>);
@@ -112,7 +131,101 @@ describe('library v2 match chips (deep-dive A8)', () => {
     fireEvent.click(screen.getByText('Spotify: matched'));
     fireEvent.click(await screen.findByRole('button', { name: 'Search' }));
 
-    await waitFor(() => expect(screen.getByText('ID: it1 (itunes)')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('ID: it1')).toBeInTheDocument());
+    expect(screen.getByText('itunes')).toBeInTheDocument();
     expect(screen.queryByText(/followers|popularity/)).not.toBeInTheDocument();
+  });
+
+  it('§56.2: renders large provider artwork, provenance and candidate album context', async () => {
+    server.use(
+      http.post('/api/library/search-service', () =>
+        HttpResponse.json({
+          success: true,
+          results: [
+            {
+              id: 'sp2',
+              name: 'Drake candidate',
+              provider: 'spotify',
+              image: 'https://img.example/drake-candidate.jpg?token=signed',
+            },
+          ],
+        }),
+      ),
+      http.post('/api/library/match-artist-releases', () =>
+        HttpResponse.json({
+          success: true,
+          supported: true,
+          albums: [
+            {
+              id: 'a1',
+              title: 'Take Care',
+              image: 'https://img.example/take-care.jpg',
+              release_date: '2011-11-15',
+              album_type: 'album',
+            },
+          ],
+        }),
+      ),
+    );
+    renderWithClient(
+      <MatchChips
+        entityType="artist"
+        entityName="Drake"
+        entityImage="https://img.example/current.jpg?token=signed"
+        services={[service()]}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('Spotify: matched'));
+    expect((await screen.findAllByText('Manual match')).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByAltText('Drake')).toHaveAttribute(
+      'src',
+      'https://img.example/current.jpg?token=signed',
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+    expect(await screen.findByText('Take Care')).toBeInTheDocument();
+    expect(screen.getByAltText('Drake candidate')).toHaveAttribute(
+      'src',
+      'https://img.example/drake-candidate.jpg?token=signed',
+    );
+  });
+
+  it('uses the candidate provider for fallback matches and syncs its watchlist id', async () => {
+    let submitted: Record<string, unknown> | null = null;
+    server.use(
+      http.post('/api/library/search-service', () =>
+        HttpResponse.json({
+          success: true,
+          results: [{ id: 'it-artist-1', name: 'Drake', provider: 'itunes' }],
+        }),
+      ),
+      http.put('/api/library/manual-match', async ({ request }) => {
+        submitted = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ success: true });
+      }),
+    );
+    renderWithClient(
+      <MatchChips
+        entityType="artist"
+        entityName="Drake"
+        watchlistRowId={11}
+        services={[service()]}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('Spotify: matched'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Search' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Use this match' }));
+
+    await waitFor(() =>
+      expect(submitted).toMatchObject({
+        entity_type: 'artist',
+        entity_id: 5,
+        service: 'itunes',
+        service_id: 'it-artist-1',
+        watchlist_row_id: 11,
+      }),
+    );
   });
 });

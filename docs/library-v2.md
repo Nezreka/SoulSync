@@ -6678,3 +6678,53 @@ Blast-Radius-Vorsicht). Bleibt offen für eine eigene Anfrage/Session.
   `ruff check core/repair_worker.py` clean.
 - Frontend: `vitest run src/routes/library-v2/` → 21 Dateien, 120 Tests grün
   (+1 neu); `tsc --noEmit` clean; `npm run check` (oxfmt+oxlint) clean.
+
+---
+
+## 61. §56.2 Match-Provenienz und visuelle Match-Identität (2026-07-17)
+
+Der offene Provenienz-Punkt aus §56.2 ist umgesetzt, ohne die rund zwölf
+bestehenden Enrichment-Worker einzeln umzubauen. Eine normalisierte Tabelle
+`metadata_match_provenance` hält pro Entität und Provider `automatic`,
+`manual` oder `legacy`, Provider-ID, Zeitpunkt und Actor. Additive
+SQLite-Trigger hängen am gemeinsamen bestehenden Schreibvertrag der
+`artists`-, `albums`- und `tracks`-Tabellen: Worker-Schreibvorgänge werden
+damit automatisch erfasst, eine erneut bestätigte identische Provider-ID
+überschreibt aber keine manuelle Entscheidung. Beim Upgrade vorhandene
+Matches werden bewusst als `legacy` statt fälschlich als automatisch
+eingestuft; Clear löscht auch die Provenienz. Die Library-v2-Match-Status-API
+liefert `match_origin` und `matched_at` nun mit aus.
+
+Das Match-Modal wurde anhand der Legacy-Library und der Watchlist-Konfiguration
+neu aufgebaut: größeres Dialogfenster, 84px große runde Artistbilder,
+prominente aktuelle Identität, Provider/ID mit Copy-Aktion,
+Provenienz-Badges, Follower/Popularität, klare Current-Markierung und eine
+explizite Clear-Aktion. Signierte externe Bild-URLs werden nicht mehr durch
+ein pauschales `?size=thumb` beschädigt; ein Bild-Fehler wird bei einer neuen
+URL zurückgesetzt. In den Artist Settings ist das Identitätsbild 112px groß,
+Genres und Live-Stats stehen direkt dabei.
+
+Für Artist-Kandidaten zeigt der Dialog zusätzlich echte Album-/Release-Kontexte
+mit Cover, Titel, Typ und Datum. Die ersten drei Resultate werden automatisch
+geladen, weitere bewusst erst auf Klick, damit breite Suchergebnisse Provider
+nicht unnötig belasten. Der neue Endpoint verwendet die bestehenden
+provider-spezifischen Albumadapter und fällt bei nicht unterstützten oder
+fehlerhaften Providern stabil auf eine leere Vorschau zurück. Der aktuelle
+Match zeigt daneben bis zu sechs lokale Library-v2-Releases als Kontext.
+
+Die kombinierte Artist-Settings-/Watchlist-Oberfläche synchronisiert manuelle
+Provider-Änderungen jetzt transaktional in den konkreten Watchlist-Row. Der
+Server akzeptiert das nur, wenn Watchlist und Legacy-Artist über Namen oder
+eine bestehende Provider-ID sicher zusammengehören, und blockiert doppelte
+Provider-IDs. Bei Spotify-Suchen mit einem iTunes-Fallback wird die tatsächliche
+Provider-Herkunft des Kandidaten gespeichert statt irrtümlich Spotify.
+
+### 61.1 Verifikation
+
+- Backend: Provenienz-Trigger, Legacy-Seeding, Clear/Sticky-Manual,
+  Match-Status-Ausgabe und Provider-Release-Normalisierung sind durch
+  dedizierte Pytest-Tests abgedeckt.
+- Frontend: API-Verträge, Watchlist-Synchronisierung, externe/signed Images,
+  Provenienz, Album-Kontext und tatsächlicher Fallback-Provider sind durch
+  Vitest/MSW-Tests abgedeckt; Format-, Lint-, TypeScript- und Build-Prüfung
+  gehören zum Abschluss dieses Slices.

@@ -65,3 +65,51 @@ def test_deezer_artist_search_includes_fan_count_as_followers(monkeypatch):
     assert len(results) == 1
     assert results[0]["followers"] == 12_000_000
     assert results[0]["extra"] == "12000000 fans"
+
+
+def test_artist_release_preview_normalizes_and_deduplicates(monkeypatch):
+    albums = [
+        SimpleNamespace(
+            id="a1",
+            name="Take Care",
+            image_url="https://img/take-care.jpg",
+            release_date="2011-11-15",
+            album_type="album",
+            total_tracks=18,
+        ),
+        SimpleNamespace(
+            id="a1",
+            name="Take Care (duplicate market edition)",
+            image_url=None,
+            release_date="2011",
+            album_type="album",
+            total_tracks=18,
+        ),
+        {
+            "id": "a2",
+            "title": "Nothing Was the Same",
+            "images": [{"url": "https://img/nwts.jpg"}],
+            "date": "2013",
+            "type": "album",
+            "track_count": 13,
+        },
+    ]
+    monkeypatch.setattr(
+        "core.metadata.album_tracks.get_artist_albums_for_source",
+        lambda *args, **kwargs: albums,
+    )
+
+    preview = ss.artist_release_preview("spotify", "sp1", "Drake", limit=6)
+
+    assert preview["supported"] is True
+    assert [album["id"] for album in preview["albums"]] == ["a1", "a2"]
+    assert preview["albums"][0]["image"] == "https://img/take-care.jpg"
+    assert preview["albums"][1]["title"] == "Nothing Was the Same"
+    assert preview["albums"][1]["total_tracks"] == 13
+
+
+def test_artist_release_preview_degrades_for_unsupported_provider():
+    assert ss.artist_release_preview("tidal", "123") == {
+        "supported": False,
+        "albums": [],
+    }

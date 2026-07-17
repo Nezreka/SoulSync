@@ -109,7 +109,7 @@ describe('Library v2 Artist Settings', () => {
     renderModal();
 
     expect(await screen.findByText('Watchlist identity')).toBeInTheDocument();
-    expect(screen.getByText('spotify: sp-drake')).toBeInTheDocument();
+    expect(screen.getByTitle('Copy spotify ID: sp-drake')).toBeInTheDocument();
     expect(await screen.findByText(/Effective: Lossless/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('checkbox', { name: /Auto-download new releases/ }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Singles' }));

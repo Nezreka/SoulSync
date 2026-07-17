@@ -555,6 +555,13 @@ class MusicDatabase:
             # created by the migrations above.
             self._backfill_match_status_for_existing_ids(cursor)
 
+            # §56.2: normalized provenance for provider identity matches.
+            # Triggers cover every enrichment worker without teaching a dozen
+            # legacy write paths a second, easy-to-drift convention. Existing
+            # matches are explicitly marked ``legacy`` because their original
+            # automatic/manual source cannot be reconstructed honestly.
+            self._add_metadata_match_provenance(cursor)
+
             # Bubble snapshots table for persisting UI state across page refreshes
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS bubble_snapshots (
@@ -3207,6 +3214,150 @@ class MusicDatabase:
 
         if total_backfilled == 0:
             logger.debug("Match-status backfill: no rows needed updating.")
+
+    def _add_metadata_match_provenance(self, cursor):
+        """Persist automatic/manual provenance for every provider match.
+
+        All enrichment workers already converge on the same legacy contract:
+        ``<provider>_id`` plus ``<provider>_match_status='matched'``. SQLite
+        triggers turn that existing contract into one normalized audit row,
+        avoiding provider-specific provenance code in every worker. The manual
+        match endpoint overwrites the trigger-created ``automatic`` row with
+        ``manual`` in the same transaction.
+        """
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS metadata_match_provenance (
+                entity_type TEXT NOT NULL,
+                entity_id INTEGER NOT NULL,
+                service TEXT NOT NULL,
+                origin TEXT NOT NULL,
+                external_id TEXT,
+                matched_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                actor TEXT,
+                PRIMARY KEY (entity_type, entity_id, service),
+                CHECK (entity_type IN ('artist', 'album', 'track')),
+                CHECK (origin IN ('automatic', 'manual', 'legacy'))
+            )
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_metadata_match_provenance_origin "
+            "ON metadata_match_provenance(origin, service)"
+        )
+
+        # (legacy table, canonical entity type, provider, external-id column)
+        targets = [
+            ("artists", "artist", "spotify", "spotify_artist_id"),
+            ("artists", "artist", "musicbrainz", "musicbrainz_id"),
+            ("artists", "artist", "deezer", "deezer_id"),
+            ("artists", "artist", "itunes", "itunes_artist_id"),
+            ("artists", "artist", "audiodb", "audiodb_id"),
+            ("artists", "artist", "discogs", "discogs_id"),
+            ("artists", "artist", "lastfm", "lastfm_url"),
+            ("artists", "artist", "genius", "genius_id"),
+            ("artists", "artist", "tidal", "tidal_id"),
+            ("artists", "artist", "qobuz", "qobuz_id"),
+            ("artists", "artist", "amazon", "amazon_id"),
+            ("artists", "artist", "jiosaavn", "jiosaavn_id"),
+            ("albums", "album", "spotify", "spotify_album_id"),
+            ("albums", "album", "musicbrainz", "musicbrainz_release_id"),
+            ("albums", "album", "deezer", "deezer_id"),
+            ("albums", "album", "itunes", "itunes_album_id"),
+            ("albums", "album", "audiodb", "audiodb_id"),
+            ("albums", "album", "discogs", "discogs_id"),
+            ("albums", "album", "lastfm", "lastfm_url"),
+            ("albums", "album", "tidal", "tidal_id"),
+            ("albums", "album", "qobuz", "qobuz_id"),
+            ("albums", "album", "amazon", "amazon_id"),
+            ("albums", "album", "jiosaavn", "jiosaavn_id"),
+            ("albums", "album", "bandcamp", "bandcamp_url"),
+            ("tracks", "track", "spotify", "spotify_track_id"),
+            ("tracks", "track", "musicbrainz", "musicbrainz_recording_id"),
+            ("tracks", "track", "deezer", "deezer_id"),
+            ("tracks", "track", "itunes", "itunes_track_id"),
+            ("tracks", "track", "audiodb", "audiodb_id"),
+            ("tracks", "track", "lastfm", "lastfm_url"),
+            ("tracks", "track", "genius", "genius_id"),
+            ("tracks", "track", "tidal", "tidal_id"),
+            ("tracks", "track", "qobuz", "qobuz_id"),
+            ("tracks", "track", "amazon", "amazon_id"),
+            ("tracks", "track", "jiosaavn", "jiosaavn_id"),
+            ("tracks", "track", "bandcamp", "bandcamp_url"),
+        ]
+
+        for table, entity_type, service, id_col in targets:
+            cursor.execute(f"PRAGMA table_info({table})")
+            columns = {row[1] for row in cursor.fetchall()}
+            status_col = f"{service}_match_status"
+            attempted_col = f"{service}_last_attempted"
+            if not {id_col, status_col, attempted_col}.issubset(columns):
+                continue
+
+            # Preserve epistemic honesty for pre-feature rows: their origin is
+            # unknowable, even if an external id proves they are matched.
+            cursor.execute(
+                f"""INSERT OR IGNORE INTO metadata_match_provenance(
+                         entity_type, entity_id, service, origin, external_id,
+                         matched_at, actor)
+                    SELECT ?, id, ?, 'legacy', CAST({id_col} AS TEXT),
+                           COALESCE({attempted_col}, CURRENT_TIMESTAMP), 'migration'
+                      FROM {table}
+                     WHERE {status_col}='matched'
+                       AND COALESCE(CAST({id_col} AS TEXT), '') <> ''""",
+                (entity_type, service),
+            )
+
+            trigger_base = f"metadata_match_{table}_{service}"
+            upsert_sql = f"""
+                INSERT INTO metadata_match_provenance(
+                    entity_type, entity_id, service, origin, external_id,
+                    matched_at, actor)
+                VALUES(
+                    '{entity_type}', NEW.id, '{service}', 'automatic',
+                    CAST(NEW.{id_col} AS TEXT),
+                    COALESCE(NEW.{attempted_col}, CURRENT_TIMESTAMP), 'system')
+                ON CONFLICT(entity_type, entity_id, service) DO UPDATE SET
+                    external_id=excluded.external_id,
+                    matched_at=excluded.matched_at,
+                    origin=CASE
+                        WHEN metadata_match_provenance.origin='manual'
+                         AND metadata_match_provenance.external_id=excluded.external_id
+                        THEN 'manual' ELSE 'automatic' END,
+                    actor=CASE
+                        WHEN metadata_match_provenance.origin='manual'
+                         AND metadata_match_provenance.external_id=excluded.external_id
+                        THEN metadata_match_provenance.actor ELSE 'system' END;
+            """
+            match_when = (
+                f"NEW.{status_col}='matched' AND "
+                f"COALESCE(CAST(NEW.{id_col} AS TEXT), '') <> ''"
+            )
+            cursor.execute(f"""
+                CREATE TRIGGER IF NOT EXISTS {trigger_base}_insert
+                AFTER INSERT ON {table}
+                WHEN {match_when}
+                BEGIN
+                    {upsert_sql}
+                END
+            """)
+            cursor.execute(f"""
+                CREATE TRIGGER IF NOT EXISTS {trigger_base}_update
+                AFTER UPDATE OF {id_col}, {status_col} ON {table}
+                WHEN {match_when}
+                BEGIN
+                    {upsert_sql}
+                END
+            """)
+            cursor.execute(f"""
+                CREATE TRIGGER IF NOT EXISTS {trigger_base}_clear
+                AFTER UPDATE OF {id_col}, {status_col} ON {table}
+                WHEN COALESCE(NEW.{status_col}, '') <> 'matched'
+                  OR COALESCE(CAST(NEW.{id_col} AS TEXT), '') = ''
+                BEGIN
+                    DELETE FROM metadata_match_provenance
+                     WHERE entity_type='{entity_type}' AND entity_id=NEW.id
+                       AND service='{service}';
+                END
+            """)
 
     def _add_deezer_columns(self, cursor):
         """Add Deezer tracking + generic metadata columns for enrichment (artists, albums, tracks)"""

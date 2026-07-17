@@ -14225,9 +14225,38 @@ def library_search_service():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route('/api/library/match-artist-releases', methods=['POST'])
+def library_match_artist_releases():
+    """Return a lean release strip for one exact artist match candidate.
+
+    Kept separate from artist search so eight candidates do not force eight
+    provider discography calls. Library v2 auto-loads only the top candidates
+    and lets the user expand the rest on demand.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        service = str(data.get('service') or '').strip().lower()
+        artist_id = str(data.get('artist_id') or '').strip()
+        if not service or not artist_id:
+            return jsonify({"success": False, "error": "service and artist_id are required"}), 400
+        preview = artist_release_preview(
+            service,
+            artist_id,
+            artist_name=data.get('artist_name') or '',
+            limit=data.get('limit', 6),
+        )
+        return jsonify({"success": True, **preview})
+    except Exception as e:
+        logger.debug("Artist match release preview failed: %s", e)
+        # Candidate search remains usable even when a provider's release
+        # endpoint is unavailable or rate-limited.
+        return jsonify({"success": True, "supported": True, "albums": []})
+
+
 from core.library.service_search import (
     _detect_provider,
     _search_service,
+    artist_release_preview,
     init as _init_service_search,
 )
 
@@ -14249,6 +14278,46 @@ _SERVICE_ID_COLUMNS = {
     'jiosaavn': {'artist': 'jiosaavn_id', 'album': 'jiosaavn_id', 'track': 'jiosaavn_id'},
 }
 
+_WATCHLIST_PROVIDER_COLUMNS = {
+    'spotify': 'spotify_artist_id',
+    'itunes': 'itunes_artist_id',
+    'deezer': 'deezer_artist_id',
+    'discogs': 'discogs_artist_id',
+    'amazon': 'amazon_artist_id',
+    'musicbrainz': 'musicbrainz_artist_id',
+}
+
+
+def _watchlist_row_matches_legacy_artist(cursor, watchlist_row_id, artist_id):
+    """Fail closed before syncing a Library-v2 Settings provider change.
+
+    The combined Settings UI knows the concrete watchlist row. The public
+    legacy matcher historically knows only the legacy library artist id. This
+    guard accepts the bridge only when the rows already share a provider id or
+    the same normalized name; an arbitrary row id cannot be updated.
+    """
+    artist = cursor.execute(
+        """SELECT name, spotify_artist_id, itunes_artist_id, deezer_id,
+                  discogs_id, amazon_id, musicbrainz_id
+             FROM artists WHERE id=?""",
+        (artist_id,),
+    ).fetchone()
+    watchlist = cursor.execute(
+        """SELECT artist_name, spotify_artist_id, itunes_artist_id,
+                  deezer_artist_id, discogs_artist_id, amazon_artist_id,
+                  musicbrainz_artist_id
+             FROM watchlist_artists WHERE id=?""",
+        (watchlist_row_id,),
+    ).fetchone()
+    if not artist or not watchlist:
+        return False
+    if str(artist[0] or '').strip().casefold() == str(watchlist[0] or '').strip().casefold():
+        return True
+    return any(
+        left not in (None, '') and str(left) == str(right)
+        for left, right in zip(artist[1:], watchlist[1:], strict=True)
+    )
+
 @app.route('/api/library/manual-match', methods=['PUT'])
 def library_manual_match():
     """Manually set a service ID for an entity.
@@ -14260,6 +14329,7 @@ def library_manual_match():
         entity_id = data.get('entity_id')
         service = data.get('service')
         service_id = data.get('service_id')
+        watchlist_row_id = data.get('watchlist_row_id')
 
         if not all([entity_type, entity_id, service, service_id]):
             return jsonify({"success": False, "error": "entity_type, entity_id, service, and service_id are required"}), 400
@@ -14275,14 +14345,50 @@ def library_manual_match():
         database = get_database()
         with database._get_connection() as conn:
             cursor = conn.cursor()
+            if watchlist_row_id is not None:
+                if entity_type != 'artist' or service not in _WATCHLIST_PROVIDER_COLUMNS:
+                    return jsonify({"success": False, "error": "Watchlist sync is only supported for artist providers"}), 400
+                try:
+                    watchlist_row_id = int(watchlist_row_id)
+                except (TypeError, ValueError):
+                    return jsonify({"success": False, "error": "watchlist_row_id must be an integer"}), 400
+                if not _watchlist_row_matches_legacy_artist(cursor, watchlist_row_id, entity_id):
+                    return jsonify({"success": False, "error": "Watchlist artist does not match this library artist"}), 409
+                watchlist_col = _WATCHLIST_PROVIDER_COLUMNS[service]
+                duplicate = cursor.execute(
+                    f"SELECT artist_name FROM watchlist_artists WHERE {watchlist_col}=? AND id<>?",
+                    (service_id, watchlist_row_id),
+                ).fetchone()
+                if duplicate:
+                    return jsonify({
+                        "success": False,
+                        "error": f"Another watchlist artist ('{duplicate[0]}') already has this {service} ID",
+                    }), 409
             cursor.execute(f"""
                 UPDATE {table}
                 SET {id_col} = ?, {status_col} = 'matched', {attempted_col} = CURRENT_TIMESTAMP
                 WHERE id = ?
             """, (service_id, entity_id))
-            conn.commit()
             if cursor.rowcount == 0:
                 return jsonify({"success": False, "error": "Entity not found"}), 404
+            from core.enrichment.match_provenance import record_manual_match
+            record_manual_match(
+                conn,
+                entity_type=entity_type,
+                entity_id=entity_id,
+                service=service,
+                external_id=service_id,
+                actor=f"profile:{get_current_profile_id()}",
+            )
+            if watchlist_row_id is not None:
+                cursor.execute(
+                    f"""UPDATE watchlist_artists
+                           SET {_WATCHLIST_PROVIDER_COLUMNS[service]}=?,
+                               updated_at=CURRENT_TIMESTAMP
+                         WHERE id=?""",
+                    (service_id, watchlist_row_id),
+                )
+            conn.commit()
 
         # #758 — a manual ALBUM match also pins (and LOCKS) the canonical album
         # version to the chosen release, so the auto resolve job and every tool
@@ -14329,6 +14435,7 @@ def library_clear_match():
         entity_type = data.get('entity_type')
         entity_id = data.get('entity_id')
         service = data.get('service')
+        watchlist_row_id = data.get('watchlist_row_id')
 
         if not all([entity_type, entity_id, service]):
             return jsonify({"success": False, "error": "entity_type, entity_id, and service are required"}), 400
@@ -14346,14 +14453,31 @@ def library_clear_match():
         database = get_database()
         with database._get_connection() as conn:
             cursor = conn.cursor()
+            if watchlist_row_id is not None:
+                if entity_type != 'artist' or service not in _WATCHLIST_PROVIDER_COLUMNS:
+                    return jsonify({"success": False, "error": "Watchlist sync is only supported for artist providers"}), 400
+                try:
+                    watchlist_row_id = int(watchlist_row_id)
+                except (TypeError, ValueError):
+                    return jsonify({"success": False, "error": "watchlist_row_id must be an integer"}), 400
+                if not _watchlist_row_matches_legacy_artist(cursor, watchlist_row_id, entity_id):
+                    return jsonify({"success": False, "error": "Watchlist artist does not match this library artist"}), 409
             cursor.execute(f"""
                 UPDATE {table}
                 SET {id_col} = NULL, {status_col} = 'not_found', {attempted_col} = NULL
                 WHERE id = ?
             """, (entity_id,))
-            conn.commit()
             if cursor.rowcount == 0:
                 return jsonify({"success": False, "error": "Entity not found"}), 404
+            if watchlist_row_id is not None:
+                cursor.execute(
+                    f"""UPDATE watchlist_artists
+                           SET {_WATCHLIST_PROVIDER_COLUMNS[service]}=NULL,
+                               updated_at=CURRENT_TIMESTAMP
+                         WHERE id=?""",
+                    (watchlist_row_id,),
+                )
+            conn.commit()
 
         # Re-fetch fresh data
         artist_id = data.get('artist_id', entity_id)
@@ -40911,9 +41035,13 @@ def _library_v2_live_artist_stats(spotify_id):
         return None
     if not artist_data:
         return None
+    images = artist_data.get('images') or []
     return {
+        'name': artist_data.get('name') or None,
+        'image_url': images[0].get('url') if images and isinstance(images[0], dict) else None,
         'followers': artist_data.get('followers', {}).get('total', 0),
         'popularity': artist_data.get('popularity', 0),
+        'genres': artist_data.get('genres') or [],
     }
 
 

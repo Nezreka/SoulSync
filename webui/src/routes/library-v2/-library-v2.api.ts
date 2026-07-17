@@ -251,6 +251,7 @@ export async function manualMatchLibraryV2Entity(input: {
   service: string;
   service_id: string;
   artist_legacy_id?: number;
+  watchlist_row_id?: number;
 }): Promise<void> {
   const payload = await readJson<{ success: boolean; error?: string }>(
     apiClient.put('library/manual-match', {
@@ -260,10 +261,32 @@ export async function manualMatchLibraryV2Entity(input: {
         service: input.service,
         service_id: input.service_id,
         ...(input.artist_legacy_id ? { artist_id: input.artist_legacy_id } : {}),
+        ...(input.watchlist_row_id ? { watchlist_row_id: input.watchlist_row_id } : {}),
       },
     }),
   );
   if (!payload.success) throw new Error(payload.error || 'Manual match failed');
+}
+
+/** Clear a wrong provider identity, optionally keeping the linked Watchlist
+ * row in the same transaction as the legacy library row. */
+export async function clearLibraryV2EntityMatch(input: {
+  entity_type: 'artist' | 'album' | 'track';
+  legacy_entity_id: number;
+  service: string;
+  watchlist_row_id?: number;
+}): Promise<void> {
+  const payload = await readJson<{ success: boolean; error?: string }>(
+    apiClient.put('library/clear-match', {
+      json: {
+        entity_type: input.entity_type,
+        entity_id: input.legacy_entity_id,
+        service: input.service,
+        ...(input.watchlist_row_id ? { watchlist_row_id: input.watchlist_row_id } : {}),
+      },
+    }),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Clear match failed');
 }
 
 export interface LibraryV2MatchSearchResult {
@@ -276,6 +299,20 @@ export interface LibraryV2MatchSearchResult {
    *  0/undefined means "not provided by this provider", not a real zero. */
   followers?: number;
   popularity?: number;
+}
+
+export interface LibraryV2MatchRelease {
+  id: string;
+  title: string;
+  image?: string | null;
+  release_date?: string | null;
+  album_type?: string | null;
+  total_tracks?: number | null;
+}
+
+export interface LibraryV2MatchReleasePreview {
+  supported: boolean;
+  albums: LibraryV2MatchRelease[];
 }
 
 /** Search a provider for candidate matches (reuses the app-wide endpoint). */
@@ -291,6 +328,23 @@ export async function searchLibraryV2MatchService(input: {
   }>(apiClient.post('library/search-service', { json: input }));
   if (!payload.success) throw new Error(payload.error || 'Provider search failed');
   return payload.results ?? [];
+}
+
+/** Exact-provider album context for disambiguating an artist candidate. */
+export async function fetchLibraryV2MatchArtistReleases(input: {
+  service: string;
+  artist_id: string;
+  artist_name: string;
+  limit?: number;
+}): Promise<LibraryV2MatchReleasePreview> {
+  const payload = await readJson<{
+    success: boolean;
+    supported?: boolean;
+    albums?: LibraryV2MatchRelease[];
+    error?: string;
+  }>(apiClient.post('library/match-artist-releases', { json: input }));
+  if (!payload.success) throw new Error(payload.error || 'Release preview failed');
+  return { supported: payload.supported !== false, albums: payload.albums ?? [] };
 }
 
 interface SourceInfoResponse {
@@ -379,6 +433,9 @@ export async function editLibraryV2Artist(
 export interface LibraryV2ArtistStats {
   followers: number;
   popularity: number;
+  name?: string | null;
+  image_url?: string | null;
+  genres?: string[];
 }
 
 export interface LibraryV2ArtistSettingsResponse {
