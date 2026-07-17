@@ -798,16 +798,17 @@
                     '" target="_blank" rel="noopener" title="Play on ' + sv + '">' +
                     sicon + '<span class="vd-prov-name">Play on ' + sv + '</span></a>';
             }
-            // Streaming providers. TMDB's watch data comes from JustWatch and it
-            // gives ONE deep link per title+region (not per provider), so every
-            // icon points at that JustWatch page, which lists the per-service
+            // Streaming providers. TMDB gives ONE aggregate watch link per
+            // title+region (its own /watch page, not a per-provider deep link),
+            // so every icon points at that page, which lists the per-service
             // links (#1042: make every icon interactive instead of dead badges).
-            // Falls back to a JustWatch search when the aggregate link is absent.
+            // Falls back to a JustWatch search when TMDB has no aggregate link.
             // (Drop a provider matching your server tile, e.g. Plex.)
             var link = ex.providers_link || '';
             var jwSearch = 'https://www.justwatch.com/us/search?q=' +
                 encodeURIComponent(String(data && data.title || '').trim());
             var provHref = link || jwSearch;
+            var provVia = link ? 'TMDB' : 'JustWatch';   // tooltip must match the href
             var srvName = (ex.server && ex.server.server || '').toLowerCase();
             var provs = (ex.providers || []).filter(function (p) {
                 return (p.name || '').toLowerCase() !== srvName;
@@ -817,7 +818,7 @@
                     var img = p.logo ? '<img src="' + esc(p.logo) + '" alt="' + esc(p.name) + '" loading="lazy">'
                         : '<span class="vd-prov-ph">' + esc((p.name || '?').charAt(0)) + '</span>';
                     return '<a class="vd-prov vd-prov--badge" href="' + esc(provHref) +
-                        '" target="_blank" rel="noopener" title="Watch on ' + esc(p.name) + ' (via JustWatch)">' + img +
+                        '" target="_blank" rel="noopener" title="Watch on ' + esc(p.name) + ' (via ' + provVia + ')">' + img +
                         '<span class="vd-prov-name">' + esc(p.name) + '</span></a>';
                 }).join('');
             }
