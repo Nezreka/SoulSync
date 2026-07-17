@@ -401,20 +401,45 @@ def smart_split_combined_artist(
 
 
 def _pending_unmapped_artists(conn, limit: Optional[int]) -> List[Dict[str, Any]]:
-    """Artists (both native and legacy) that still carry no provider id."""
+    """Artists (both native and legacy) that still carry no catalog provider id."""
     sql = (
-        "SELECT id, legacy_artist_id FROM lib2_artists "
+        "SELECT id, legacy_artist_id, external_ids FROM lib2_artists "
         "WHERE (spotify_id IS NULL OR spotify_id='') "
         "  AND (musicbrainz_id IS NULL OR musicbrainz_id='') "
-        "  AND (external_ids IS NULL OR external_ids='' OR external_ids='{}') "
         "ORDER BY id"
     )
+    rows = conn.execute(sql).fetchall()
+
+    catalog_providers = {
+        "spotify",
+        "musicbrainz",
+        "deezer",
+        "itunes",
+        "tidal",
+        "qobuz",
+        "amazon",
+        "jiosaavn",
+        "bandcamp",
+    }
+
+    pending = []
+    for r in rows:
+        row_dict = dict(r)
+        ext_ids = {}
+        if row_dict.get("external_ids"):
+            try:
+                ext_ids = json.loads(row_dict["external_ids"])
+            except (json.JSONDecodeError, TypeError):
+                ext_ids = {}
+
+        # If they are matched on any catalog provider, they are not pending.
+        has_catalog_id = any(p in ext_ids for p in catalog_providers)
+        if not has_catalog_id:
+            pending.append(row_dict)
+
     if limit is not None:
-        sql += " LIMIT ?"
-        rows = conn.execute(sql, (int(limit),)).fetchall()
-    else:
-        rows = conn.execute(sql).fetchall()
-    return [dict(r) for r in rows]
+        pending = pending[:limit]
+    return pending
 
 
 def reconcile_unmapped_native_artists(

@@ -348,3 +348,28 @@ def test_smart_split_legacy_backed_artist_becomes_alias(imported_conn):
     ).fetchone()
     assert alb["primary_artist_id"] == a_id
 
+
+def test_lastfm_only_artist_is_considered_pending(imported_conn):
+    # Insert an artist who only has lastfm in external_ids
+    aid = _insert_native_artist(imported_conn, "LastFM Artist")
+    imported_conn.execute(
+        "UPDATE lib2_artists SET external_ids='{\"lastfm\":\"https://last.fm/music/x\"}' WHERE id=?",
+        (aid,),
+    )
+    
+    # Run _pending_unmapped_artists
+    pending = NE._pending_unmapped_artists(imported_conn, limit=None)
+    pending_ids = [p["id"] for p in pending]
+    
+    assert aid in pending_ids
+
+    # If they get a catalog ID (e.g. deezer), they should no longer be pending
+    imported_conn.execute(
+        "UPDATE lib2_artists SET external_ids='{\"lastfm\":\"https://last.fm/music/x\",\"deezer\":\"123\"}' WHERE id=?",
+        (aid,),
+    )
+    pending = NE._pending_unmapped_artists(imported_conn, limit=None)
+    pending_ids = [p["id"] for p in pending]
+    assert aid not in pending_ids
+
+
