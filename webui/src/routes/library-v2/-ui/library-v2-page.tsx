@@ -5744,7 +5744,7 @@ export function BulkEditTracksModal({
   );
 }
 
-function AlbumTrackTable({
+export function AlbumTrackTable({
   albumId,
   resolve,
   onAction,
@@ -5761,15 +5761,6 @@ function AlbumTrackTable({
   const album = albumQuery.data;
   const [sort, setSort] = useState<TrackSort | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
-  if (albumQuery.isLoading || !album) {
-    return <div className={styles.inlineLoading}>Loading tracks…</div>;
-  }
-  const albumMatch = matchQuery.data?.album ?? [];
-  const trackMatch = matchQuery.data?.tracks ?? {};
-  const profileNameById = new Map((profilesQuery.data ?? []).map((p) => [p.id, p.name]));
-  const columns = prefsQuery.data?.track_table.columns ?? DEFAULT_TRACK_TABLE_COLUMNS;
-  const showAllProviders = prefsQuery.data?.track_table.show_all_match_providers ?? false;
-
   const availableProviders = useMemo(() => {
     if (!matchQuery.data) return null;
     const set = new Set<string>();
@@ -5783,6 +5774,14 @@ function AlbumTrackTable({
     }
     return set;
   }, [matchQuery.data]);
+  if (albumQuery.isLoading || !album) {
+    return <div className={styles.inlineLoading}>Loading tracks…</div>;
+  }
+  const albumMatch = matchQuery.data?.album ?? [];
+  const trackMatch = matchQuery.data?.tracks ?? {};
+  const profileNameById = new Map((profilesQuery.data ?? []).map((p) => [p.id, p.name]));
+  const columns = prefsQuery.data?.track_table.columns ?? DEFAULT_TRACK_TABLE_COLUMNS;
+  const showAllProviders = prefsQuery.data?.track_table.show_all_match_providers ?? false;
 
   const defaultOrder: (keyof LibraryV2TrackTableColumns)[] = [
     'play',
