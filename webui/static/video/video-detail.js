@@ -119,6 +119,31 @@
         return '<button type="button" class="vd-kw" data-vd-kw="' + esc(name) + '">' + esc(name) + '</button>';
     }
 
+    // Per-provider "where to watch" links (#1042). TMDB only hands us ONE aggregate
+    // /watch link per title, so every provider icon would otherwise share it. We map
+    // the known services to a search on their OWN site for the title instead — not an
+    // exact deep link (that needs a per-provider content id we don't have), but each
+    // icon lands you on the right service. Unknown providers return '' and the caller
+    // falls back to the TMDB aggregate page. Substring match so "Amazon Prime Video",
+    // "Amazon Video", "Apple TV", "Apple TV Store", etc. all resolve.
+    function providerSearchUrl(name, title) {
+        var t = String(title || '').trim();
+        if (!t) return '';
+        var q = encodeURIComponent(t);
+        var n = String(name || '').toLowerCase();
+        if (n.indexOf('amazon') >= 0)      return 'https://www.amazon.com/s?k=' + q + '&i=instant-video';
+        if (n.indexOf('apple') >= 0)       return 'https://tv.apple.com/search?term=' + q;
+        if (n.indexOf('google play') >= 0) return 'https://play.google.com/store/search?q=' + q + '&c=movies';
+        if (n.indexOf('youtube') >= 0)     return 'https://www.youtube.com/results?search_query=' + q;
+        if (n.indexOf('netflix') >= 0)     return 'https://www.netflix.com/search?q=' + q;
+        if (n.indexOf('disney') >= 0)      return 'https://www.disneyplus.com/search?q=' + q;
+        if (n.indexOf('hulu') >= 0)        return 'https://www.hulu.com/search?q=' + q;
+        if (n === 'max' || n.indexOf('hbo') >= 0) return 'https://play.max.com/search?q=' + q;
+        if (n.indexOf('paramount') >= 0)   return 'https://www.paramountplus.com/search/?query=' + q;
+        if (n.indexOf('peacock') >= 0)     return 'https://www.peacocktv.com/search?q=' + q;
+        return '';
+    }
+
     function badge(logo, fallback, title, url) {
         var inner = logo
             ? '<img src="' + logo + '" alt="' + fallback + '" onerror="this.parentNode.textContent=\'' + fallback + '\'">'
@@ -798,17 +823,17 @@
                     '" target="_blank" rel="noopener" title="Play on ' + sv + '">' +
                     sicon + '<span class="vd-prov-name">Play on ' + sv + '</span></a>';
             }
-            // Streaming providers. TMDB gives ONE aggregate watch link per
-            // title+region (its own /watch page, not a per-provider deep link),
-            // so every icon points at that page, which lists the per-service
-            // links (#1042: make every icon interactive instead of dead badges).
-            // Falls back to a JustWatch search when TMDB has no aggregate link.
+            // Streaming providers (#1042: make every icon interactive, not a dead
+            // badge). Each icon links to a SEARCH on that provider's own site for
+            // this title (providerSearchUrl). TMDB only gives ONE aggregate /watch
+            // link per title, so any provider we don't have a search URL for falls
+            // back to that page, or a JustWatch search when TMDB has no link either.
             // (Drop a provider matching your server tile, e.g. Plex.)
             var link = ex.providers_link || '';
             var jwSearch = 'https://www.justwatch.com/us/search?q=' +
                 encodeURIComponent(String(data && data.title || '').trim());
-            var provHref = link || jwSearch;
-            var provVia = link ? 'TMDB' : 'JustWatch';   // tooltip must match the href
+            var aggHref = link || jwSearch;
+            var aggVia = link ? 'TMDB' : 'JustWatch';   // fallback tooltip must match the href
             var srvName = (ex.server && ex.server.server || '').toLowerCase();
             var provs = (ex.providers || []).filter(function (p) {
                 return (p.name || '').toLowerCase() !== srvName;
@@ -817,8 +842,12 @@
                 html += provs.map(function (p) {
                     var img = p.logo ? '<img src="' + esc(p.logo) + '" alt="' + esc(p.name) + '" loading="lazy">'
                         : '<span class="vd-prov-ph">' + esc((p.name || '?').charAt(0)) + '</span>';
-                    return '<a class="vd-prov vd-prov--badge" href="' + esc(provHref) +
-                        '" target="_blank" rel="noopener" title="Watch on ' + esc(p.name) + ' (via ' + provVia + ')">' + img +
+                    var direct = providerSearchUrl(p.name, data && data.title);
+                    var href = direct || aggHref;   // per-service search, else TMDB/JustWatch aggregate
+                    var tip = direct ? 'Search ' + esc(p.name) + ' for this title'
+                                     : 'Watch on ' + esc(p.name) + ' (via ' + aggVia + ')';
+                    return '<a class="vd-prov vd-prov--badge" href="' + esc(href) +
+                        '" target="_blank" rel="noopener" title="' + tip + '">' + img +
                         '<span class="vd-prov-name">' + esc(p.name) + '</span></a>';
                 }).join('');
             }
