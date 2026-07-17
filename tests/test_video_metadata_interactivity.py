@@ -66,15 +66,25 @@ def test_search_listens_for_query_event():
 def test_provider_badges_are_anchors_not_dead_divs():
     # the whole point of #1042: no dead badge divs, every provider is an <a href>
     assert 'class="vd-prov vd-prov--badge"' in _DETAIL
-    # anchored via provHref, which is the aggregate link or a JustWatch search
-    assert "provHref" in _DETAIL
-    assert "justwatch.com/us/search" in _DETAIL
 
 
-def test_provider_href_falls_back_to_justwatch_search():
-    # link OR search — never an empty href
+def test_provider_links_are_per_service_searches():
+    # each icon links to a search on THAT service, not one shared aggregate url
+    assert "function providerSearchUrl" in _DETAIL
+    assert "amazon.com/s?k=" in _DETAIL
+    assert "tv.apple.com/search" in _DETAIL
+    assert "play.google.com/store/search" in _DETAIL
+    assert "youtube.com/results" in _DETAIL
+    # wired per provider, chosen over the aggregate fallback
+    assert "providerSearchUrl(p.name, data && data.title)" in _DETAIL
+    assert "direct || aggHref" in _DETAIL
+
+
+def test_provider_href_falls_back_to_tmdb_then_justwatch():
+    # unknown provider → TMDB aggregate page; no TMDB link → JustWatch search
     assert "ex.providers_link || ''" in _DETAIL
-    assert "provHref = link || jwSearch" in _DETAIL
+    assert "aggHref = link || jwSearch" in _DETAIL
+    assert "justwatch.com/us/search" in _DETAIL
 
 
 # ── CSS affordance: the chips/badges must look clickable ──────────────────────
