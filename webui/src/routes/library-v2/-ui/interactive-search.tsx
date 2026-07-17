@@ -420,6 +420,22 @@ export function InteractiveSearchModal({
   }, []);
 
   async function grab(r: SourceSearchResult) {
+    // §52.12.4: candidates outside the quality profile are shown (ProfileBadge)
+    // but only downloadable via a separate, explicitly confirmed Force action
+    // when the user has turned the Quality check off — the pipeline audits the
+    // override (core/library2/manual_skips.py) once dispatched.
+    if (!qualityCheck && effectiveProfile && effectiveProfile.ranked_targets.length > 0) {
+      const rank = profileTargetRank(r, effectiveProfile.ranked_targets);
+      const belowProfile = rank === effectiveProfile.ranked_targets.length;
+      if (belowProfile) {
+        const confirmed = window.confirm(
+          `"${resultTitle(r)}" is below "${effectiveProfile.name}"'s quality profile. ` +
+            'Quality check is off, so this will force-download it anyway. This override ' +
+            'is recorded. Continue?',
+        );
+        if (!confirmed) return;
+      }
+    }
     // Must match the key the row renders with (resultKey) — album results
     // have no filename, so a filename-based key would never update the button.
     const key = resultKey(r);

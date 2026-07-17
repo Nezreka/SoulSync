@@ -797,6 +797,10 @@ def test_fix_handler_adds_matched_track_to_wishlist():
     assert captured['source_info']['album_title'] == 'Album X'
     assert captured['source_info']['quality_profile_id'] == 7
     assert captured['source_info']['quality_profile_name'] == 'Strict FLAC'
+    # §52.12.5: reuse the Enhance mechanism so the old low-quality file is
+    # auto-deleted once the replacement actually imports (never before).
+    assert captured['source_info']['enhance'] is True
+    assert captured['source_info']['original_file_path'] == '/music/a.mp3'
 
 
 def test_fix_handler_resolves_own_track_identity_when_no_prematched_data():
@@ -852,6 +856,8 @@ def test_fix_handler_resolves_own_track_identity_when_no_prematched_data():
     assert captured['spotify_track_data']['artists'] == [{'name': 'Artist A'}]
     assert captured['spotify_track_data']['album']['name'] == 'Album X'
     assert captured['source_info']['job'] == 'quality_upgrade'
+    assert captured['source_info']['enhance'] is True
+    assert captured['source_info']['original_file_path'] == '/music/c.flac'
 
 
 def test_fix_handler_fails_cleanly_when_track_gone_and_no_prematched_data():

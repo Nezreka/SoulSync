@@ -207,4 +207,78 @@ describe('library v2 interactive grab', () => {
     await waitFor(() => expect(screen.queryByText('Bad')).not.toBeInTheDocument());
     expect(screen.getByText('Good')).toBeInTheDocument();
   });
+
+  it('§52.12.4: requires an explicit Force confirmation before grabbing a below-profile candidate with Quality check off', async () => {
+    let downloadCalls = 0;
+    server.use(
+      http.get('/api/search/sources', () =>
+        HttpResponse.json({
+          mode: 'hybrid',
+          sources: [{ name: 'soulseek', display_name: 'Soulseek' }],
+        }),
+      ),
+      http.get('/api/library/v2/quality-profiles', () =>
+        HttpResponse.json({
+          success: true,
+          profiles: [
+            {
+              id: 1,
+              name: 'Lossless',
+              description: null,
+              upgrade_policy: 'until_cutoff',
+              upgrade_cutoff_index: 0,
+              ranked_targets: [{ label: 'FLAC', format: 'flac' }],
+              repair_job_id: 'x',
+            },
+          ],
+        }),
+      ),
+      http.post('/api/search', () =>
+        HttpResponse.json({
+          results: [
+            {
+              result_type: 'track',
+              username: 'peer',
+              filename: 'Bad.mp3',
+              title: 'Bad',
+              quality: 'mp3',
+              bitrate: 128,
+              size: 5,
+            },
+          ],
+        }),
+      ),
+      http.post('/api/download', () => {
+        downloadCalls += 1;
+        return HttpResponse.json({ success: true });
+      }),
+    );
+
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const queryClient = createTestQueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <InteractiveSearchModal
+          initialQuery="Artist Selected"
+          entity={{ qualityProfileId: 1 }}
+          onClose={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByText('Bad');
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Quality check' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Download' }));
+
+    // Declined the Force confirmation — nothing dispatched.
+    await waitFor(() => expect(confirmSpy).toHaveBeenCalled());
+    expect(confirmSpy.mock.calls[0]?.[0]).toMatch(/below.*profile/i);
+    expect(downloadCalls).toBe(0);
+
+    confirmSpy.mockReturnValue(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Download' }));
+
+    await waitFor(() => expect(downloadCalls).toBe(1));
+    confirmSpy.mockRestore();
+  });
 });

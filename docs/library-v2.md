@@ -6579,3 +6579,102 @@ Damit bleibt aus §52 offen: Match-Provenienz (§56.2, größerer Blast-Radius
 Manual-Grab-Policy, das granulare
 `quality_checked`/`acoustic_id_checked`-Eventvokabular sowie die legacy
 Search-/Download-Routen aus §55.2.
+
+---
+
+## 60. §52.12 Entscheidungen bestätigt — Replacement-Retention, Manual-Grab-Force, Track-Watch-Scope (2026-07-17)
+
+Der Nutzer hat 4 der 5 offenen §52.12-Punkte entschieden. Dieser Slice setzt
+die drei um, die tatsächlich Code-Impact haben.
+
+### 60.1 §52.12.5 Replacement-Retention: sofortiges Löschen nach erfolgreichem Import
+
+Entscheidung: die alte Datei wird sofort permanent gelöscht, sobald die
+bessere Version erfolgreich importiert ist (Lidarrs Default-Verhalten ohne
+konfigurierten Recycle-Bin-Pfad). Klarstellung: das betrifft ausschließlich
+dieselbe Track-Entität — legitime Mehrfachversionen (Remix/Live/Remaster)
+sind bereits eigene Track-Zeilen (siehe `dedup_title_key`, §12/#39) und
+bleiben unberührt.
+
+Der sichere „erst löschen, wenn der Import wirklich fertig ist"-Mechanismus
+existierte bereits für den Artist-Quality-Enhance-Bulk-Flow
+(`core/artists/quality.py` → `source_context={'enhance': True,
+'original_file_path': ...}` → `core/imports/paths.py:486-493` platziert die
+neue Datei am alten Pfad → `core/imports/pipeline.py:1089-1102` löscht die
+alte Datei erst NACH `safe_move_file`). Der Quality-Upgrade-Finder
+(`core/repair_worker.py::_fix_quality_upgrade`, `redownload`-Zweig) fügte
+bisher nur mit `source_type='repair'` zur Wishlist hinzu, ohne diesen
+Mechanismus zu triggern — die alte Datei blieb für immer liegen
+([[quality-upgrade-auto-replace]]). Fix: ein zusätzliches `'enhance': True`
+im `source_info`-Dict reicht, da Pipeline und Pfad-Resolver nur auf
+`source_info` prüfen, nie auf `source_type` (verifiziert: `source_type`
+wird nirgendwo sonst auf `'repair'`/`'quality_upgrade'` verglichen). Kein
+neuer Code-Pfad, reine Wiederverwendung. Tests:
+`tests/repair_jobs/test_quality_upgrade.py` (2 Tests erweitert um
+`source_info['enhance'] is True` + `original_file_path`-Assertion).
+
+### 60.2 §52.12.4 Manual Grab außerhalb des Profils: Force-Bestätigung
+
+Entscheidung: außerhalb des Profils liegende Kandidaten werden mit rotem
+Fail-Grund gezeigt; ein Download nur über eine separate, explizit
+bestätigte und auditierte Force-Aktion.
+
+Der Audit-Teil existierte bereits vollständig, nur unauffällig verkabelt:
+`web_server.py::_audit_manual_skip` (aufgerufen aus beiden `/api/download`-
+Zweigen, Album L7170-7174 + Single-Track L7300-7303) schreibt bei jedem
+`skip_acoustid`/`quality_check=false`-Grab einen Audit-Row über
+`core/library2/manual_skips.py::record_manual_skip` (Actor = `profile_id`,
+Zeitpunkt = `created_at`, Grund = `skipped_checks`); der Import-Pipeline-Teil
+(`core/imports/pipeline.py::_attach_manual_skip_path`, 2 Aufrufstellen)
+bindet den Row nachträglich an den finalen Dateipfad. Was fehlte: eine
+**separate, pro Kandidat bestätigte** Force-Aktion — bisher galten die
+„Quality check"/„AcoustID check"-Checkboxen still für die ganze
+Such-Session, ohne Rückfrage.
+
+Fix (`webui/src/routes/library-v2/-ui/interactive-search.tsx::grab`): wenn
+„Quality check" aus ist UND der angeklickte Kandidat laut
+`profileTargetRank` unterhalb aller Profil-Targets liegt, zeigt ein
+`window.confirm` den Fail-Grund und verlangt eine explizite Bestätigung,
+bevor der Grab dispatcht wird — Ablehnen bricht ohne jeden Server-Call ab.
+Bewusst clientseitig (kein neuer Server-Enforcement-Pfad): passt zum
+bestehenden Trust-Modell dieser App (admin-only lib2, „trust local
+network", siehe `admin_only`-Docstring) und der Audit-Trail greift ohnehin
+serverseitig unabhängig von der UI-Bestätigung. Test:
+`interactive-search.test.tsx` — Ablehnen dispatcht keinen Request, Bestätigen
+dispatcht genau einen.
+
+### 60.3 §52.12.3 Track-Suche watcht nicht automatisch den ganzen Artist — bereits korrekt
+
+Entscheidung: nur den Track monitoren, Artist nur als Parent anlegen; die
+volle Watchlist-Aufnahme bleibt ein separater Bookmark-Klick. Verifiziert
+gegen den aktuellen Code (kein Fix nötig): `core/library2/materialize.py`
+ruft ausschließlich `find_or_create_artist/album/track` +
+`recompute_wanted_for_entity` auf; der einzige Schreibpfad in
+`watchlist_artists` läuft über `database/music_database.py::add_artist_to_watchlist`,
+erreichbar nur von den expliziten Artist-Monitor-Toggle-Endpoints
+(`api/library_v2.py`) und dem `watchlist_add`-Mirror-Outbox — keiner davon
+ist von `materialize_track_intent`/`materialize_wishlist_intent` aus
+erreichbar. Verhalten entspricht der Entscheidung bereits 1:1.
+
+### 60.4 §52.12.1 Playlist-Profil-Konflikt: Entscheidung notiert, Feature existiert noch nicht
+
+Entscheidung: bei zwei Playlists mit unterschiedlichem Quality Profile auf
+demselben Track immer eine Konflikt-UI zeigen, nie automatisch auflösen.
+Nicht umgesetzt in diesem Slice: ein **Playlist-Quality-Profile-Konzept
+existiert aktuell in keiner Form** — weder Schema-Spalte noch API noch UI,
+weder in lib2 noch in den Legacy-Playlist-Tabellen
+(`mirrored_playlists`/`personalized_playlists`; `mirrored_playlists.profile_id`
+referenziert das Wishlist-**User**-Profil, nicht `quality_profiles` — ein
+anderes Konzept). Die Konflikt-Policy ist damit vgl. entschieden, aber ohne
+zugrundeliegendes Feature nichts, worauf sie angewendet werden könnte — das
+Anlegen von Playlist-Quality-Profiles selbst ist ein eigenständiges,
+bislang undesigntes Feature und wird nicht ungefragt neu gebaut (Scope- und
+Blast-Radius-Vorsicht). Bleibt offen für eine eigene Anfrage/Session.
+
+### 60.5 Verifikation
+
+- Backend: `pytest tests/repair_jobs/` → 66 passed; `tests/imports/test_import_pipeline.py`
+  + `tests/imports/test_single_to_album.py` + `tests/artists/test_quality.py` → 63 passed.
+  `ruff check core/repair_worker.py` clean.
+- Frontend: `vitest run src/routes/library-v2/` → 21 Dateien, 120 Tests grün
+  (+1 neu); `tsc --noEmit` clean; `npm run check` (oxfmt+oxlint) clean.

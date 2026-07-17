@@ -1185,7 +1185,9 @@ class RepairWorker:
                wishlist (with album context) for a profile-gated re-download.
                The low-quality file stays in place — it's replaced only after the
                better version actually imports (safe pattern; auto-delete-on-
-               import is handled separately). Findings from the flag-only
+               import reuses the Artist Quality Enhance mechanism via the
+               `enhance`/`original_file_path` source_info markers). Findings from
+               the flag-only
                Quality Check scanner never carry a pre-searched match
                (`matched_track_data`) — for those, the track's own identity is
                resolved from the DB and re-queued so the normal search
@@ -1231,6 +1233,10 @@ class RepairWorker:
                 source_type='repair',
                 source_info={
                     'job': 'quality_upgrade',
+                    # Reuses the Artist Quality Enhance mechanism (core/imports/paths.py,
+                    # core/imports/pipeline.py) so the old low-quality file is only
+                    # deleted AFTER the replacement successfully imports — never before.
+                    'enhance': True,
                     'original_file_path': file_path,
                     'original_format': details.get('current_format'),
                     'original_bitrate': details.get('current_bitrate'),
