@@ -447,6 +447,10 @@ def reconcile_unmapped_native_artists(
                 result = resolve_and_enrich_native_artist(conn, artist_id, resolver=resolver)
                 if result.get("success"):
                     stats["matched"] += 1
+                    if progress is not None:
+                        progress(index + 1, total)
+                    else:
+                        conn.commit()
                     continue
             
             # Legacy-backed (or native single-entity match failed): try to split
@@ -454,11 +458,23 @@ def reconcile_unmapped_native_artists(
                 stats["split"] += 1
             else:
                 stats["unmatched"] += 1
+
+            if progress is not None:
+                progress(index + 1, total)
+            else:
+                conn.commit()
         except Exception as exc:  # noqa: BLE001 — one bad row must not abort the pass
             stats["errors"] += 1
             logger.debug("reconcile failed for artist %s: %s", artist_id, exc)
-        if progress is not None:
-            progress(index + 1, total)
+            try:
+                conn.rollback()
+            except Exception as rollback_err:
+                logger.debug("reconcile rollback failed: %s", rollback_err)
+            if progress is not None:
+                try:
+                    progress(index + 1, total)
+                except Exception:
+                    pass
     return stats
 
 
