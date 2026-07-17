@@ -55,6 +55,7 @@ def test_verification_wrapper_handles_simple_download(tmp_path, monkeypatch):
         "is_album_download": False,
         "task_id": task_id,
         "batch_id": batch_id,
+        "_skip_quarantine_check": "acoustid",
     }
 
     mark_calls = []
@@ -101,6 +102,12 @@ def test_verification_wrapper_handles_simple_download(tmp_path, monkeypatch):
     monkeypatch.setattr(import_pipeline, "check_and_remove_from_wishlist", lambda context: wishlist_calls.append(dict(context)))
     monkeypatch.setattr(import_pipeline, "_mark_task_completed", lambda task, track_info: mark_calls.append((task, track_info)))
     monkeypatch.setattr(import_pipeline.threading, "Thread", _ImmediateThread)
+    check_events = []
+    monkeypatch.setattr(
+        import_pipeline,
+        "_journal_pipeline_check",
+        lambda _context, **event: check_events.append(event) or True,
+    )
 
     runtime_state.matched_downloads_context[context_key] = context
     runtime_state.download_tasks[task_id] = {"track_info": {}, "status": "running"}
@@ -126,6 +133,14 @@ def test_verification_wrapper_handles_simple_download(tmp_path, monkeypatch):
         assert scan_calls == ["Simple download completed"]
         assert wishlist_calls and wishlist_calls[0]["search_result"]["is_simple_download"] is True
         assert activity_calls
+        acoustic = [
+            event for event in check_events if event["check"] == "acoustic_id"
+        ]
+        assert len(acoustic) == 1
+        assert acoustic[0]["status"] == "skipped"
+        assert acoustic[0]["reason_code"] == "user_override"
+        assert acoustic[0]["actor"] == "user"
+        assert context["_acoustid_result"] == "skip"
     finally:
         runtime_state.matched_downloads_context.clear()
         runtime_state.matched_downloads_context.update(original_matched_context)
@@ -259,6 +274,12 @@ def test_quality_gate_runs_before_acoustid(tmp_path, monkeypatch):
                         lambda fp, ctx, reason, eng, trigger=None: triggers.append(trigger) or "/q/x.flac.quarantined")
     monkeypatch.setattr(import_pipeline, "_mark_task_quarantined", lambda *a, **k: None)
     monkeypatch.setattr(import_pipeline, "_requeue_quarantined_task_for_retry", lambda *a, **k: False)
+    journal = []
+    monkeypatch.setattr(
+        import_pipeline,
+        "_journal_pipeline_check",
+        lambda _context, **event: journal.append(event) or True,
+    )
 
     # Spy: AcoustID must NOT be constructed when quality already rejected.
     acoustid_constructed = []
@@ -277,6 +298,11 @@ def test_quality_gate_runs_before_acoustid(tmp_path, monkeypatch):
     assert triggers == ["quality"]            # quarantined for quality
     assert acoustid_constructed == []         # AcoustID never ran
     assert context.get("_audio_quality") == "FLAC 16bit/44.1kHz"  # recorded for the sidecar
+    assert [(event["check"], event["status"], event["reason_code"])
+            for event in journal] == [
+        ("quality", "failed", "quality_not_allowed"),
+        ("acoustic_id", "not_run", "blocked_by_quality"),
+    ]
 
 
 def test_mark_task_quarantined_stashes_entry_id_when_task_id_absent():

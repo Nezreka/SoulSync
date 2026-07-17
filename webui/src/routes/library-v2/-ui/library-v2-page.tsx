@@ -7101,6 +7101,11 @@ export function TrackPipelineTimeline({ trackId }: { trackId: number }) {
               <span className={styles.sourceBadge} data-tone={h.category}>
                 {h.title ?? h.event_type}
               </span>
+              {h.status ? (
+                <span className={styles.pipelineStatus} data-status={h.status}>
+                  {h.status.replace('_', ' ')}
+                </span>
+              ) : null}
               <span className={styles.pipelineTimelineDate}>
                 {h.date ? h.date.slice(0, 16).replace('T', ' ') : '—'}
               </span>

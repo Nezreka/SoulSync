@@ -19,6 +19,8 @@ from core.acquisition.manual_grab import (
 from core.acquisition.pipeline_callback import (
     notify_manual_grab_import_success,
     notify_manual_grab_quarantined,
+    notify_pipeline_check_result,
+    notify_pipeline_import_started,
 )
 from core.acquisition.requests import get_request
 from core.library2.importer import import_legacy_library
@@ -344,6 +346,52 @@ def test_success_callback_completes_grab_and_request(legacy_db):
         events = [event.event_type for event in list_history_events(
             conn, request_id=request.id)]
         assert "grab_completed" in events
+        assert "import_completed" in events
+        # Duplicate completion callbacks are idempotent across both events.
+        assert notify_manual_grab_import_success(
+            context, connection_factory=legacy_db._get_connection) is True
+        events = [event.event_type for event in list_history_events(
+            conn, request_id=request.id)]
+        assert events.count("grab_completed") == 1
+        assert events.count("import_completed") == 1
+    finally:
+        conn.close()
+
+
+def test_manual_pipeline_checks_share_the_grab_correlation(legacy_db):
+    conn = _prepared_conn(legacy_db)
+    try:
+        markers = correlate_manual_grab(
+            conn,
+            lib2_context=_track_context(conn),
+            search_result=_search_result(),
+            source="soulseek",
+            config_get=_CONFIG_GET,
+        )
+        conn.commit()
+        context = {GRAB_MARKER: markers["download_id"]}
+
+        assert notify_pipeline_import_started(
+            context, connection_factory=legacy_db._get_connection
+        )
+        assert notify_pipeline_check_result(
+            context,
+            check="quality",
+            status="skipped",
+            reason_code="user_override",
+            actor="user",
+            payload={"decision": "user_override"},
+            connection_factory=legacy_db._get_connection,
+        )
+
+        events = list_history_events(conn, request_id=markers["request_id"])
+        assert [event.event_type for event in events][-2:] == [
+            "import_started",
+            "quality_checked",
+        ]
+        assert events[-1].download_id == markers["download_id"]
+        assert events[-1].payload["actor"] == "user"
+        assert events[-1].payload["status"] == "skipped"
     finally:
         conn.close()
 

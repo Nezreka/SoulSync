@@ -10,7 +10,9 @@ from core.acquisition.imports import (
     record_pipeline_file_quarantined,
 )
 from core.acquisition.pipeline_callback import (
+    notify_pipeline_check_result,
     notify_pipeline_import_quarantined,
+    notify_pipeline_import_started,
     notify_pipeline_retry_exhausted,
 )
 from core.acquisition.requests import get_request
@@ -177,6 +179,89 @@ def test_quarantine_callback_ignores_legacy_imports_and_uses_markers(tmp_path):
     record = get_import(conn, importing.id)
     assert record.result["quarantined"][0]["track_id"] == 102
     conn.close()
+
+
+def test_pipeline_checks_keep_native_import_correlation_and_structured_status(tmp_path):
+    database_path = tmp_path / "checks.sqlite"
+
+    def factory():
+        conn = sqlite3.connect(database_path)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys=ON")
+        return conn
+
+    conn = factory()
+    ensure_acquisition_schema(conn)
+    importing, request = _importing_record(conn)
+    conn.commit()
+    conn.close()
+    context = {
+        "_acquisition_import_id": importing.id,
+        "_acquisition_relative_path": "01.flac",
+        "_acquisition_track_id": 101,
+    }
+
+    # Native bundle setup already recorded import_started; the pipeline bridge
+    # recognizes it and does not create a duplicate.
+    assert notify_pipeline_import_started(
+        context, connection_factory=factory
+    ) is True
+    assert notify_pipeline_check_result(
+        context,
+        check="quality",
+        status="passed",
+        reason_code="quality_allowed",
+        payload={
+            "quality_profile_id": 1,
+            "before_quality": "MP3",
+            "after_quality": "FLAC 24-bit/96kHz",
+            "decision": "allowed",
+        },
+        connection_factory=factory,
+    ) is True
+    assert notify_pipeline_check_result(
+        context,
+        check="acoustid",
+        status="not_run",
+        reason_code="verification_unavailable",
+        message="API key unavailable",
+        connection_factory=factory,
+    ) is True
+
+    conn = factory()
+    events = list_history_events(conn, request_id=request.id)
+    assert [event.event_type for event in events].count("import_started") == 1
+    quality = next(event for event in events if event.event_type == "quality_checked")
+    assert quality.download_id == importing.download_id
+    assert quality.candidate_id == importing.candidate_id
+    assert quality.payload == {
+        "actor": "system",
+        "after_quality": "FLAC 24-bit/96kHz",
+        "before_quality": "MP3",
+        "check": "quality",
+        "decision": "allowed",
+        "import_id": importing.id,
+        "pipeline": "main",
+        "quality_profile_id": 1,
+        "status": "passed",
+        "track_id": 101,
+    }
+    acoustic = next(
+        event for event in events if event.event_type == "acoustic_id_checked"
+    )
+    assert acoustic.reason_code == "verification_unavailable"
+    assert acoustic.payload["status"] == "not_run"
+    conn.close()
+
+
+def test_pipeline_check_callback_rejects_invalid_or_uncorrelated_input():
+    assert notify_pipeline_check_result({}, check="quality", status="passed") is False
+    assert notify_pipeline_check_result(
+        {"_acquisition_import_id": "x"}, check="integrity", status="passed"
+    ) is False
+    assert notify_pipeline_check_result(
+        {"_acquisition_import_id": "x"}, check="quality", status="unknown"
+    ) is False
 
 
 def test_retry_exhaustion_fails_import_and_blocklists_release(tmp_path):

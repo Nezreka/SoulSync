@@ -34,6 +34,8 @@ EVENT_TYPES = frozenset({
     "retry_started",
     "cancelled",
     "import_started",
+    "quality_checked",
+    "acoustic_id_checked",
     "import_needs_review",
     "import_resolved_manually",
     "import_file_quarantined",

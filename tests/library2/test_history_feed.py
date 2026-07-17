@@ -97,6 +97,64 @@ def test_recording_grab_rolls_up_to_album_and_artist_scope(imported_conn):
     assert any(e["event_type"] == "grab_submitted" for e in artist_history)
 
 
+def test_structured_pipeline_checks_surface_status_quality_and_reason(imported_conn):
+    from core.acquisition.history import record_history_event
+
+    drake = _drake_ids(imported_conn)
+    request_id = _acquisition_grab(
+        imported_conn, scope="recording", entity_id=drake["recording_id"]
+    )
+    record_history_event(
+        imported_conn,
+        "quality_checked",
+        request_id=request_id,
+        reason_code="quality_not_allowed",
+        message="Below selected target",
+        payload={
+            "status": "failed",
+            "actor": "system",
+            "before_quality": "MP3 320kbps",
+            "after_quality": "FLAC 16-bit/44.1kHz",
+            "quality_profile_id": 2,
+        },
+    )
+    record_history_event(
+        imported_conn,
+        "acoustic_id_checked",
+        request_id=request_id,
+        reason_code="user_override",
+        message="AcoustID skipped by user approval",
+        payload={"status": "skipped", "actor": "user"},
+    )
+    imported_conn.commit()
+
+    history = scoped_history(
+        imported_conn, scope="track", entity_id=drake["track_id"]
+    )
+
+    quality = next(e for e in history if e["event_type"] == "quality_checked")
+    assert quality["title"] == "Quality checked"
+    assert quality["category"] == "failed"
+    assert quality["status"] == "failed"
+    assert quality["payload"]["actor"] == "system"
+    assert quality["detail"] == (
+        "failed · Below selected target · "
+        "MP3 320kbps → FLAC 16-bit/44.1kHz · profile 2"
+    )
+    acoustic = next(
+        e for e in history if e["event_type"] == "acoustic_id_checked"
+    )
+    assert acoustic["title"] == "Acoustic ID checked"
+    assert acoustic["category"] == "override"
+    assert acoustic["status"] == "skipped"
+    assert acoustic["detail"] == "skipped · AcoustID skipped by user approval"
+    assert [
+        event["event_type"]
+        for event in history
+        if event["event_type"] in {"quality_checked", "acoustic_id_checked"}
+    ] == ["acoustic_id_checked", "quality_checked"]
+
+
 def test_artist_missing_scope_does_not_leak_into_a_different_artist(imported_conn):
     drake = _drake_ids(imported_conn)
     rihanna = _second_artist(imported_conn)

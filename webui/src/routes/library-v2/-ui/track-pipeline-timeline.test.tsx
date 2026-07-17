@@ -62,4 +62,42 @@ describe('library v2 track pipeline timeline (§52.9)', () => {
     expect(items.map((el) => el.textContent)).toEqual(['Grabbed', 'Quarantined']);
     expect(screen.getByText('AcoustID mismatch')).toBeInTheDocument();
   });
+
+  it('distinguishes passed, skipped and not-run checks', async () => {
+    server.use(
+      http.get('/api/library/v2/tracks/9/history', () =>
+        HttpResponse.json({
+          success: true,
+          history: [
+            {
+              date: '2026-07-17 10:02:00',
+              event_type: 'acoustic_id_checked',
+              category: 'info',
+              title: 'Acoustic ID checked',
+              detail: 'not run · API key unavailable',
+              source: 'acquisition',
+              status: 'not_run',
+            },
+            {
+              date: '2026-07-17 10:01:00',
+              event_type: 'quality_checked',
+              category: 'imported',
+              title: 'Quality checked',
+              detail: 'passed · FLAC 24-bit/96kHz · profile 2',
+              source: 'acquisition',
+              status: 'passed',
+            },
+          ],
+        }),
+      ),
+    );
+
+    renderWithClient(<TrackPipelineTimeline trackId={9} />);
+
+    await waitFor(() => expect(screen.getByText('Pipeline — 2 events')).toBeInTheDocument());
+    expect(screen.getByText('passed')).toHaveAttribute('data-status', 'passed');
+    expect(screen.getByText('not run')).toHaveAttribute('data-status', 'not_run');
+    expect(screen.getByText(/FLAC 24-bit\/96kHz/)).toBeInTheDocument();
+    expect(screen.getByText(/API key unavailable/)).toBeInTheDocument();
+  });
 });

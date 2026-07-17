@@ -2,7 +2,7 @@
 
 The artist History modal used to read only ``track_downloads`` (by a fuzzy
 artist-name match). Three richer journals already exist but were never
-surfaced there: ``acquisition_history`` (26 event types — grabs, retries,
+surfaced there: ``acquisition_history`` (grabs, checks, retries,
 quarantine, import outcomes), ``lib2_entity_history`` (canonical link/relink,
 file moves) and ``lib2_file_delete_operations`` (ADR-05 physical deletes).
 This module merges all four into one ``{date, event_type, category, title,
@@ -48,6 +48,8 @@ EVENT_CATEGORY = {
     "retry_started": ("grabbed", "Retry started"),
     "cancelled": ("failed", "Cancelled"),
     "import_started": ("info", "Import started"),
+    "quality_checked": ("info", "Quality checked"),
+    "acoustic_id_checked": ("info", "Acoustic ID checked"),
     "import_needs_review": ("quarantined", "Needs review"),
     "import_resolved_manually": ("imported", "Resolved manually"),
     "import_file_quarantined": ("quarantined", "Quarantined"),
@@ -67,6 +69,7 @@ ENTITY_EVENT_LABEL = {
 }
 
 SCOPES = ("artist", "album", "track")
+PIPELINE_CHECK_EVENTS = frozenset({"quality_checked", "acoustic_id_checked"})
 
 
 def _rows(conn, sql: str, params: Sequence[Any]) -> List[Any]:
@@ -173,7 +176,7 @@ def _acquisition_events(conn, request_ids: Sequence[str], limit: int) -> List[Di
             conn,
             f"""SELECT event_type, reason_code, message, payload_json, created_at
                   FROM acquisition_history WHERE request_id IN ({_in_clause(request_ids)})
-                 ORDER BY id DESC LIMIT ?""",
+                 ORDER BY created_at DESC, rowid DESC LIMIT ?""",
             (*request_ids, limit),
         )
     except Exception:  # noqa: BLE001
@@ -185,10 +188,33 @@ def _acquisition_events(conn, request_ids: Sequence[str], limit: int) -> List[Di
             payload = json.loads(r["payload_json"] or "{}")
         except (TypeError, ValueError):
             payload = {}
-        detail = None
-        if isinstance(payload, dict):
+        if not isinstance(payload, dict):
+            payload = {}
+        status = payload.get("status")
+        if r["event_type"] in PIPELINE_CHECK_EVENTS:
+            if status in {"failed", "error"}:
+                category = "failed"
+            elif status == "skipped":
+                category = "override"
+            parts = [str(status).replace("_", " ") if status else None]
+            reason = r["message"] or payload.get("reason")
+            if reason:
+                parts.append(str(reason))
+            before_quality = payload.get("before_quality")
+            after_quality = payload.get("after_quality")
+            if before_quality and after_quality:
+                parts.append(f"{before_quality} → {after_quality}")
+            elif after_quality:
+                parts.append(str(after_quality))
+            elif before_quality:
+                parts.append(f"from {before_quality}")
+            if payload.get("quality_profile_id"):
+                parts.append(f"profile {payload['quality_profile_id']}")
+            detail = " · ".join(part for part in parts if part)
+        else:
+            detail = None
             detail = payload.get("reason") or payload.get("source")
-        detail = detail or r["message"] or r["reason_code"]
+            detail = detail or r["message"] or r["reason_code"]
         events.append({
             "date": r["created_at"],
             "event_type": r["event_type"],
@@ -196,6 +222,8 @@ def _acquisition_events(conn, request_ids: Sequence[str], limit: int) -> List[Di
             "title": label,
             "detail": detail,
             "source": "acquisition",
+            "status": status,
+            "payload": payload,
         })
     return events
 
@@ -494,4 +522,10 @@ def scoped_history(
     return events[:limit]
 
 
-__all__ = ["EVENT_CATEGORY", "ENTITY_EVENT_LABEL", "SCOPES", "scoped_history"]
+__all__ = [
+    "EVENT_CATEGORY",
+    "ENTITY_EVENT_LABEL",
+    "PIPELINE_CHECK_EVENTS",
+    "SCOPES",
+    "scoped_history",
+]

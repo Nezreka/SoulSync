@@ -2943,6 +2943,34 @@ button.featureTag:disabled {
   color: rgba(255, 255, 255, 0.4);
 }
 
+.pipelineStatus {
+  padding: 1px 6px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 999px;
+  color: rgb(203, 213, 225);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.pipelineStatus[data-status='passed'] {
+  border-color: rgba(52, 211, 153, 0.4);
+  color: rgb(110, 231, 183);
+}
+
+.pipelineStatus[data-status='failed'],
+.pipelineStatus[data-status='error'] {
+  border-color: rgba(248, 113, 113, 0.4);
+  color: rgb(252, 165, 165);
+}
+
+.pipelineStatus[data-status='skipped'],
+.pipelineStatus[data-status='not_run'] {
+  border-color: rgba(251, 191, 36, 0.35);
+  color: rgb(253, 224, 71);
+}
+
 .pipelineTimelineDetail {
   margin-top: 3px;
   font-size: 12.5px;

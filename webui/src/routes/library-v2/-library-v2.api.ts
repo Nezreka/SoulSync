@@ -762,6 +762,8 @@ export interface LibraryV2HistoryEntry {
   title: string | null;
   detail: string | null;
   source: string | null;
+  status?: 'passed' | 'failed' | 'skipped' | 'not_run' | 'error' | null;
+  payload?: Record<string, unknown>;
 }
 
 export async function fetchLibraryV2ArtistHistory(
