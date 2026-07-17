@@ -1164,11 +1164,28 @@
             var pv = e.target.closest('[data-vrn-preview]');
             if (pv) {
                 pv.disabled = true;
+                // Immediate feedback — preview walks the whole library resolving
+                // each stored path to a real file, which is not instant on a big
+                // one. Without this the button just greys and looks dead.
+                listEl.innerHTML = '<div class="vbk-empty">Scanning your library…</div>';
+                applyBtn.style.display = 'none';
                 fetch('/api/video/organization/rename/preview', { headers: { 'Accept': 'application/json' } })
-                    .then(function (r) { return r.json(); })
+                    // A 403/500 may return HTML, not JSON — don't let r.json() reject
+                    // into a silent catch; turn it into a visible error instead.
+                    .then(function (r) {
+                        return r.json().catch(function () {
+                            return { success: false, error: 'HTTP ' + r.status };
+                        });
+                    })
                     .then(function (d) {
                         pv.disabled = false;
-                        if (!d || !d.success) throw new Error();
+                        if (!d || !d.success) {
+                            listEl.innerHTML = '<div class="vbk-empty">Preview failed' +
+                                (d && d.error ? ' — ' + esc(String(d.error)) : '') +
+                                '. Check the app log for details.</div>';
+                            toast('Rename preview failed', 'error');
+                            return;
+                        }
                         var n = (d.entries || []).length;
                         listEl.innerHTML = n
                             ? '<div class="vbk-row"><span class="vbk-name"><strong>' + n + ' file(s)</strong> differ from your templates' +
@@ -1178,11 +1195,20 @@
                                       esc(en.current + ' → ' + en.proposed) + '">' +
                                       esc(en.title) + '</span></div>';
                               }).join('') + (n > 8 ? '<div class="vbk-empty">…and ' + (n - 8) + ' more</div>' : '')
-                            : '<div class="vbk-empty">Everything already matches your templates' +
-                              (d.unresolved ? ' (' + d.unresolved + ' unresolved path(s) skipped)' : '') + '.</div>';
+                            // Empty can mean "already tidy" OR "we couldn't resolve any
+                            // path" — call the second case out so it isn't mistaken for
+                            // a no-op.
+                            : (d.unresolved
+                                ? '<div class="vbk-empty">No renames — none of your ' + d.unresolved +
+                                  ' file path(s) could be resolved to a file on disk (check Settings → Organization library paths).</div>'
+                                : '<div class="vbk-empty">Everything already matches your naming templates.</div>');
                         applyBtn.style.display = n ? '' : 'none';
                     })
-                    .catch(function () { pv.disabled = false; if (typeof showToast === 'function') showToast('Preview failed', 'error'); });
+                    .catch(function () {
+                        pv.disabled = false;
+                        listEl.innerHTML = '<div class="vbk-empty">Preview failed — could not reach the server.</div>';
+                        toast('Rename preview failed', 'error');
+                    });
                 return;
             }
             var ap = e.target.closest('[data-vrn-apply]');
