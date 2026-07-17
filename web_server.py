@@ -17638,6 +17638,9 @@ def _db_update_finished_callback(total_artists, total_albums, total_tracks, succ
     # incremental, full refresh) converges on this callback, so writing here keeps it current.
     # Destination = the configured M3U output folder if set, else the Transfer folder. Fully
     # guarded — a playlist write must never disturb scan completion.
+    # The outcome is surfaced in the scan summary (m3u_note) so "did it trigger?"
+    # is answerable from the UI, not just app.log (#1041).
+    m3u_note = ""
     try:
         if config_manager.get('m3u_export.library_enabled', False):
             from core.library.m3u_export import write_library_m3u
@@ -17649,8 +17652,15 @@ def _db_update_finished_callback(total_artists, total_albums, total_tracks, succ
             _written = write_library_m3u(_entries, _dest, entry_base_path=_base)
             if _written:
                 logger.info("[library-m3u] auto-synced %d tracks -> %s", len(_entries), _written)
+                m3u_note = f" | Library M3U: {len(_entries)} tracks → {_written}"
+            else:
+                m3u_note = " | Library M3U write failed (see app.log)"
+        else:
+            # One line per scan so a "never triggers" report diagnoses itself.
+            logger.info("[library-m3u] skipped — Library M3U auto-sync is disabled in Settings")
     except Exception as _m3u_err:
         logger.warning("[library-m3u] auto-sync failed: %s", _m3u_err)
+        m3u_note = " | Library M3U write failed (see app.log)"
     # Check for removal results from the worker
     removed_artists = 0
     removed_albums = 0
@@ -17680,11 +17690,11 @@ def _db_update_finished_callback(total_artists, total_albums, total_tracks, succ
                 skipped_tracks = getattr(db_update_worker, 'processed_albums', 0)
 
     if total_tracks > 0:
-        phase_msg = f"Completed: {total_artists} artists, {total_albums} albums, {total_tracks} new tracks{removal_msg}."
+        phase_msg = f"Completed: {total_artists} artists, {total_albums} albums, {total_tracks} new tracks{removal_msg}{m3u_note}."
     elif successful > 0:
-        phase_msg = f"Completed: {successful} artists scanned, library up to date{removal_msg}."
+        phase_msg = f"Completed: {successful} artists scanned, library up to date{removal_msg}{m3u_note}."
     else:
-        phase_msg = f"Completed: {successful} successful, {failed} failed{removal_msg}."
+        phase_msg = f"Completed: {successful} successful, {failed} failed{removal_msg}{m3u_note}."
 
     with db_update_lock:
         db_update_state["status"] = "finished"
@@ -17699,6 +17709,7 @@ def _db_update_finished_callback(total_artists, total_albums, total_tracks, succ
     auto_summary = f"{total_tracks} tracks, {total_albums} albums from {total_artists} artists"
     if removed_artists > 0 or removed_albums > 0:
         auto_summary += f" | Removed {removed_artists} artists, {removed_albums} albums"
+    auto_summary += m3u_note
     _update_automation_progress(_db_update_automation_id,
         status='finished', progress=100, phase='Complete',
         log_line=auto_summary, log_type='success')
