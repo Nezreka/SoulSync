@@ -3482,18 +3482,19 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Convention: keep only the CURRENT release here, plus a single brief
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '3.0.5': [
-        { date: 'July 2026 — 3.0.5' },
-        { title: 'Import: identify albums by exact IDs', desc: 'files from spotify-derived tools carry an ISRC tag and the track\'s spotify link in the comment field — import now uses them FIRST. the link resolves 1:1 to the album; ISRCs resolve by folder consensus, so a compilation can\'t hijack the import. fixes text-search failures on japanese releases. folders without IDs behave exactly as before.' },
-        { title: 'Import: lyrics travel with tracks', desc: 'a track\'s .lrc sidecar now moves with it (renamed to match), on imports and downloads both — they used to get stranded in the source folder.' },
-        { title: 'Movies get a real Get button', desc: 'movie detail pages show two buttons like shows do: Get is always visible (opens the download modal — per-source manual search + grab), and a separate wishlist toggle adds/removes in place. one button used to wear three states and could hide the download path entirely.' },
-        { title: 'Change a wrong artist photo everywhere', desc: 'hover the artist image on the library page, pick from every connected source, and it updates soulsync, your media server, and artist.jpg on disk (what navidrome reads) in one go. built for the mis-matched-artist-photo case.' },
-        { title: 'Tidal playlists over ~20 all load now (#1035)', desc: 'tidal pages its playlist api roughly 20 at a time and soulsync only read the first page — deleting playlists just rotated different ones into view. every page loads now.' },
-        { title: 'MusicBrainz search picks the right same-name artist (#1036)', desc: 'searching "korn" surfaced a thai pop duo instead of the band — every same-name artist ties on search score and the cleanup kept whichever musicbrainz listed first. ties now break on community tag weight, and artist card photos resolve through musicbrainz\'s own links to the artist\'s exact deezer/spotify/apple pages so a namesake can\'t hijack the picture either.' },
-        { title: 'Huge artist images behave (#1036)', desc: 'the artist page image was sized against the window instead of its container, so a giant source image could crush the name and buttons into the top tracks column.' },
-        { title: 'Paste cookies.txt works on the video side', desc: 'headless/docker users\' pasted youtube cookies now apply to channels and video downloads too, not just music downloads.' },
-        { title: 'Spotify free metadata as a cover art source', desc: 'the preferred-album-art list only offered spotify to connected accounts; the free source works now — spotify has the best JP covers.' },
-        { title: 'Earlier versions', desc: '3.0.4 rebuilt video Discover (billboard hero, endless feed), added per-profile side access, fixed the tidal restart loss, split-container torrent grabs, and amazon music. 3.0.3 added whole-show wishlisting and the match editor. 3.0.1 shipped the entire video side.' },
+    '3.1.0': [
+        { date: 'July 2026 · 3.1.0' },
+        { title: 'Video acquisition: full Sonarr/Radarr parity', desc: 'the video side now has RSS instant grabs (a wanted release lands minutes after it hits your indexers), per-title quality profiles, custom formats, an in-app requests system, torrent seeding lifecycle, import lists (Trakt/TMDB/IMDb/Plex watchlist), mass rename, daily/anime series types, per-title history, video backups, and event notifications.', page: 'video-downloads' },
+        { title: 'Every video page got a best-in-class pass', desc: 'calendar gets a movie release lane + agenda view + iCal subscribe (and moved up to Find). wishlist gets Search Now + honest status + far snappier art. downloads show live speed/ETA. library gets size-on-disk + filters + a Largest sort. search gets recent chips. discover gets a filter collapse toggle.', page: 'video-library' },
+        { title: 'Version glow', desc: 'the version number glows when an update is out: green for routine, yellow for major, red for critical. it checks real GitHub releases and tells you the version instead of a commit hash. thanks Kazimir.' },
+        { title: 'Notification history', desc: 'every notification is saved server-side now, so a reflexive Clear All loses nothing. filter the bell panel by type, and a searchable History page. thanks Kazimir.' },
+        { title: 'Config migration', desc: 'export every setting for both sides as one JSON file to move to a new install, or import one. secrets are redacted by default; the credentials export is gated behind login mode. thanks Kazimir.' },
+        { title: 'Downloads folder no longer bleeds storage', desc: 'failed youtube matches were being cancelled while still landing, piling up recordless files (a 10GB leak for one user). fixed at the source, plus a reaper for what\'s already orphaned. thanks Kazimir.' },
+        { title: 'Torrents move to your client folder', desc: 'qBittorrent reports its own container path (/downloads); soulsync now verifies the release is actually there and falls back to your configured folder. thanks TheHomeGuy.' },
+        { title: 'YouTube stops grabbing the wrong song', desc: '"We\'re Shameless" was matching "We Were Shameless" by a different artist. youtube results now need real artist evidence or a title made only of the wanted words. thanks Kazimir.' },
+        { title: 'HiFi 30-second clips can\'t replace real files', desc: 'preview clips were overwriting full tracks on quality-upgrade. the import gate decodes them now, an upgrade can never replace a good file with a shorter one, and Preview Clip Cleanup finds and re-fetches ones already in a library. thanks sella.' },
+        { title: 'Guided tours rebuilt', desc: 'the tours pointed at UI that had moved; re-anchored against the current app, the spotlight actually reveals what it highlights now, and the never-clearing red dot is fixed. thanks Kazimir.' },
+        { title: 'Earlier versions', desc: '3.0.5 added exact-ID album import + lyrics-travel + a stack of music fixes. 3.0.4 rebuilt video Discover and added per-profile side access. 3.0.1 shipped the entire video side.' },
     ],
 };
 
@@ -3524,16 +3525,26 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "3.0.5 — the community-reports release",
+        title: "3.1.0: the video side grows up",
+        description: "the video side gets a full Sonarr/Radarr-class acquisition stack, a best-in-class pass over every page, and a wave of reported bugs (storage bleeding, torrents not moving, the wrong song downloading) all die.",
+        features: [
+            "video acquisition, Sonarr/Radarr parity in eleven pieces: RSS instant grabs (a wanted release lands minutes after it hits your indexers, not at the next hourly sweep), per-title quality profiles + monitor policies, custom formats (scored release-name matchers), an in-app requests system, torrent seeding lifecycle, import lists (Trakt/TMDB/IMDb/Plex watchlist), mass rename with preview, daily/anime series types + multi-episode files, per-title history, video backups + staged restore, and Discord/Telegram/webhook notifications",
+            "every video page rebuilt best-in-class: calendar (movie lane, agenda view, iCal subscribe, moved to Find), wishlist (Search Now, honest status, far snappier poster art), downloads (live speed + ETA), library (size-on-disk, missing/quality filters, Largest sort), search (recent chips), discover (filter collapse toggle), and Letterboxd + per-episode external links on detail pages (#1039)",
+            "version glow (Kazimir): the version number glows green for a routine update, yellow for a major release, red for critical, checking real GitHub releases and naming the version, not a commit hash",
+            "notification history (Kazimir): every toast is journaled server-side so a Clear All loses nothing, with a type filter on the bell panel and a searchable History page",
+            "config migration (Kazimir): export every setting for both sides as one JSON bundle to move to a new install, or import one; secrets redacted by default, credentials export gated behind login mode",
+            "the downloads folder no longer bleeds storage (Kazimir's 10GB leak): failed youtube matches were cancelled while still landing recordless files, fixed at the source plus a reaper for the orphans",
+            "torrents move to your configured folder (TheHomeGuy): qBittorrent reports its own container path and soulsync now verifies the release is actually there before trusting it; youtube stops grabbing the wrong song (Kazimir's 'We're Shameless'); HiFi 30-second preview clips can no longer replace real library files on upgrade (sella), with a cleanup tool for ones already in a library",
+            "guided tours rebuilt against the current UI, the #1038 Library crashes fixed, and the #1040 layout bugs (sidebar bleed, artist-column clipping, orb overflow) dead",
+        ],
+    },
+    {
+        title: "Earlier in 3.0.5: the community-reports release",
         description: "eight user requests and bug reports, all shipped: imports learn exact-ID identification, lyrics travel with tracks, and a stack of 'why is this wrong' reports turned out to be real bugs.",
         features: [
-            "import identifies albums by exact IDs: the spotify link in a file's comment tag resolves 1:1, and ISRC tags resolve by folder consensus (the album containing most of the folder's codes wins, so a compilation can't hijack the import) — fixes text-search failures on japanese releases, costs nothing for files without IDs",
-            "a track's .lrc lyrics sidecar moves with it on imports and downloads, renamed to match — no more stranded lyrics in the source folder",
-            "fix a wrong artist photo everywhere at once: hover the artist image on the library page, pick from every connected source, and it updates soulsync, your media server, and artist.jpg on disk (what navidrome reads)",
-            "tidal playlists over ~20 all load (#1035): tidal pages its playlist api and only the first page was read — deleting playlists just rotated different ones into view",
-            "musicbrainz same-name artists resolve correctly (#1036): 'korn' surfaced a thai pop duo because ties broke on api order; they break on community tag weight now, and card photos resolve through MB's own links to the exact deezer/spotify/apple artist so a namesake can't hijack the picture",
-            "layout: a huge artist image can't crush the artist page into the top-tracks column anymore (#1036)",
-            "paste-cookies.txt applies to the video side too (headless/docker youtube), and the spotify FREE metadata source now works as a cover-art source (best JP covers)",
+            "import identifies albums by exact IDs: the spotify link in a file's comment tag resolves 1:1, and ISRC tags resolve by folder consensus (the album containing most of the folder's codes wins, so a compilation can't hijack the import), fixing text-search failures on japanese releases",
+            "a track's .lrc lyrics sidecar moves with it on imports and downloads, renamed to match",
+            "fix a wrong artist photo everywhere at once from the library page, tidal playlists over ~20 all load (#1035), musicbrainz same-name artists resolve correctly (#1036), and paste-cookies.txt applies to the video side too",
         ],
     },
     {
