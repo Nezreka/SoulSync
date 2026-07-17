@@ -151,16 +151,60 @@ def _rss_pass_inner(*, fetch, log) -> Dict[str, Any]:
             if not cands:
                 continue
             matched += 1
-            best = vpw.pick_best(cands, int(item.get("_min_rank") or 0))
+            min_rank = int(item.get("_min_rank") or 0)
+            best = vpw.pick_best(cands, min_rank)
             if not best:
+                # A namesake was in the feed but nothing qualified. Say WHY so a
+                # quiet '0 grabbed' is provable, not a mystery (Boulder).
+                log("RSS skip: %s — %s" % (_item_label(item, media_type),
+                                           _skip_reason(cands, min_rank, item)))
                 continue
             if vpw._default_enqueue(item, best, cands, media_type, target):
                 grabbed += 1
                 active.add(vpw.item_key(item, media_type))
                 log("RSS grab: %s (%s)" % (best.get("title"), media_type))
+            else:
+                log("RSS skip: %s — a release qualified but the grab was refused "
+                    "(disk guard or client error)" % _item_label(item, media_type))
 
     return {"status": "completed", "grabbed": grabbed,
             "matched_items": matched, "releases": len(hits)}
+
+
+def _item_label(item: Dict[str, Any], media_type: str) -> str:
+    if media_type == "movie":
+        y = item.get("year")
+        return "%s%s" % (item.get("title") or "?", " (%s)" % y if y else "")
+    return "%s S%02dE%02d" % (item.get("show_title") or "?",
+                              int(item.get("season_number") or 0),
+                              int(item.get("episode_number") or 0))
+
+
+def _reason_text(rej: Any) -> str:
+    """A candidate's ``rejected`` field is a string or a list of reasons —
+    normalize to a short phrase."""
+    if isinstance(rej, (list, tuple)):
+        rej = "; ".join(str(r) for r in rej if r)
+    return str(rej or "").strip()
+
+
+def _skip_reason(cands: List[Dict[str, Any]], min_rank: int, item: Dict[str, Any]) -> str:
+    """Explain why a matched item grabbed nothing. Two cases: an accepted
+    release existed but wasn't a strict-enough UPGRADE for an owned copy, or
+    nothing was accepted at all (surface the ranker's own reject reason)."""
+    accepted = [c for c in cands if c.get("accepted")]
+    if accepted and min_rank:
+        best_res = (accepted[0].get("resolution") or "?")
+        have = item.get("owned_resolutions") or "current copy"
+        return ("best new release is %s — not better than your %s (upgrade-only)"
+                % (best_res, have))
+    if not accepted:
+        # the top-ranked (best) rejected candidate carries the most relevant why
+        why = _reason_text(cands[0].get("rejected")) if cands else ""
+        n = len(cands)
+        base = why or "didn't pass the quality/scope filter"
+        return "%d release(s) matched by name but none accepted (%s)" % (n, base)
+    return "no release qualified"
 
 
 def _rank(pool: List[Dict[str, Any]], item: Dict[str, Any], media_type: str) -> List[Dict[str, Any]]:

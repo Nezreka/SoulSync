@@ -161,3 +161,47 @@ def test_handler_block_and_seed_are_registered():
     import core.automation.handlers.registration as reg
     src_reg = open(reg.__file__, encoding="utf-8").read()
     assert "'video_rss_sync'" in src_reg
+
+
+# ── skip-reason logging (Boulder: prove a quiet "0 grabbed") ──────────────────
+
+def test_skip_reason_reports_scope_or_quality_rejection(db, seams):
+    _enable_torrent(db)
+    db.add_movie_to_wishlist(1, "Heat", year=1995)
+    # a namesake with a mismatched YEAR — passes the loose prescreen, fails the ranker
+    logs = []
+    out = rss.rss_pass(fetch=lambda: [_feed_hit("Heat 2049 1080p BluRay x264-GRP")],
+                       log=logs.append)
+    assert out["grabbed"] == 0
+    assert any(l.startswith("RSS skip: Heat") and "none accepted" in l for l in logs), logs
+
+
+def test_skip_reason_reports_upgrade_only_for_owned(db, seams, monkeypatch):
+    _enable_torrent(db)
+    db.add_movie_to_wishlist(1, "Heat", year=1995)
+    orig = db.movie_wishlist_to_download
+
+    def owned_1080():
+        items = orig()
+        for it in items:
+            it["owned"] = 1
+            it["owned_resolutions"] = "1080p"
+        return items
+
+    monkeypatch.setattr(db, "movie_wishlist_to_download", owned_1080)
+    monkeypatch.setattr(vpw, "_default_cutoff_rank", lambda: 999)
+    logs = []
+    out = rss.rss_pass(fetch=lambda: [_feed_hit("Heat 1995 1080p BluRay x264-GRP")],
+                       log=logs.append)
+    assert out["grabbed"] == 0
+    assert any("upgrade-only" in l and "1080p" in l for l in logs), logs
+
+
+def test_grab_still_logs_the_grab_line(db, seams):
+    _enable_torrent(db)
+    db.add_movie_to_wishlist(1, "Heat", year=1995)
+    logs = []
+    out = rss.rss_pass(fetch=lambda: [_feed_hit("Heat 1995 1080p BluRay x264-GRP")],
+                       log=logs.append)
+    assert out["grabbed"] == 1
+    assert any(l.startswith("RSS grab: Heat") for l in logs), logs

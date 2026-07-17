@@ -39,9 +39,15 @@ def auto_video_rss_sync(config: Dict[str, Any], deps: AutomationDeps) -> Dict[st
                 "_manages_own_progress": True}
 
     grabbed = res.get("grabbed", 0)
+    matched = res.get("matched_items", 0)
+    # 'match' here = a wishlist title had a namesake in the feed; the per-item
+    # 'RSS skip:' lines above say why any matched-but-not-grabbed one didn't
+    # qualify (wrong quality/scope, or already-owned upgrade-only).
+    summary = "%d release(s) in the feed, %d name-match(es), %d grabbed" % (
+        res.get("releases", 0), matched, grabbed)
+    if matched and not grabbed:
+        summary += " — see the per-title reasons above"
     deps.update_progress(
         automation_id, status="finished", progress=100, phase="Complete",
-        log_line="%d release(s) in the feed, %d wishlist match(es), %d grabbed"
-                 % (res.get("releases", 0), res.get("matched_items", 0), grabbed),
-        log_type="success" if grabbed else "info")
+        log_line=summary, log_type="success" if grabbed else "info")
     return {"status": "completed", "grabbed": grabbed, "_manages_own_progress": True}
