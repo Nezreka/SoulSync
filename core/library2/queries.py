@@ -788,8 +788,9 @@ def _serialize_track(
                     )
                 )
                 has_lyrics = bool(tags_data.get("lyrics") or tags_data.get("unsyncedlyrics"))
-            except Exception:
-                pass
+            except (AttributeError, TypeError, ValueError):
+                has_rg = False
+                has_lyrics = False
         pipeline_result = {}
         if file_row.get("pipeline_result_json"):
             try:
