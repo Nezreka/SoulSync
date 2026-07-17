@@ -707,6 +707,20 @@ export async function fetchLibraryV2ArtistHistory(
   return payload.history ?? [];
 }
 
+/** §52.9: the merged search→grab→quality→quarantine→import pipeline for one
+ * track, including attempts that never produced a `lib2_track_files` row. */
+export async function fetchLibraryV2TrackHistory(
+  trackId: number,
+): Promise<LibraryV2HistoryEntry[]> {
+  const payload = await readJson<{
+    success: boolean;
+    history?: LibraryV2HistoryEntry[];
+    error?: string;
+  }>(apiClient.get(`library/v2/tracks/${trackId}/history`));
+  if (!payload.success) throw new Error(payload.error || 'History failed');
+  return payload.history ?? [];
+}
+
 export interface LibraryV2TagDiffField {
   field: string;
   file_value: unknown;

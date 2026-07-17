@@ -42,6 +42,7 @@ import {
   fetchLibraryV2Duplicates,
   fetchLibraryV2FileDeletePreview,
   fetchLibraryV2JobStatus,
+  fetchLibraryV2TrackHistory,
   fetchLibraryV2TrackLyrics,
   LIBRARY_V2_ALBUM_TYPES,
   LIBRARY_V2_QUERY_KEY,
@@ -6704,6 +6705,48 @@ function TrackLifecycleSection({
   );
 }
 
+/** §52.9: chronological search→grab→quality→quarantine→import timeline for
+ *  one track (`core.library2.history_feed.scoped_history`, scope='track').
+ *  Unlike the download-source list above, this also surfaces attempts that
+ *  were quarantined or failed before ever producing a `lib2_track_files`
+ *  row — the gap the Info tab left open per §52.9/§52.10. */
+export function TrackPipelineTimeline({ trackId }: { trackId: number }) {
+  const query = useQuery({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'track-history', trackId],
+    queryFn: () => fetchLibraryV2TrackHistory(trackId),
+  });
+  const rows = query.data ?? [];
+  if (query.isLoading) {
+    return <div className={styles.inlineLoading}>Loading pipeline history…</div>;
+  }
+  if (rows.length === 0) return null;
+  // Oldest first — a pipeline reads top-to-bottom like the journey it is;
+  // the backend returns newest-first for the flat artist History table.
+  const chronological = [...rows].reverse();
+  return (
+    <div className={styles.trackHistoryWrap}>
+      <p className={styles.sourceInfoHistory}>
+        Pipeline — {chronological.length} event{chronological.length === 1 ? '' : 's'}
+      </p>
+      <ul className={styles.pipelineTimeline}>
+        {chronological.map((h, i) => (
+          <li key={i} className={styles.pipelineTimelineItem}>
+            <div className={styles.pipelineTimelineHead}>
+              <span className={styles.sourceBadge} data-tone={h.category}>
+                {h.title ?? h.event_type}
+              </span>
+              <span className={styles.pipelineTimelineDate}>
+                {h.date ? h.date.slice(0, 16).replace('T', ' ') : '—'}
+              </span>
+            </div>
+            {h.detail ? <div className={styles.pipelineTimelineDetail}>{h.detail}</div> : null}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 /** Info tab: verification/lifecycle summary + current source (with blacklist)
  *  + the full download history — every past provenance record for this
  *  track, not just the latest. */
@@ -6732,7 +6775,12 @@ function TrackInfoPanel({
       }),
   });
 
-  const lifecycle = <TrackLifecycleSection file={file} manualSkips={manualSkips} />;
+  const lifecycle = (
+    <>
+      <TrackLifecycleSection file={file} manualSkips={manualSkips} />
+      <TrackPipelineTimeline trackId={trackId} />
+    </>
+  );
 
   if (query.isLoading) {
     return (

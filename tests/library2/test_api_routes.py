@@ -1885,6 +1885,42 @@ def test_artist_history_rejects_invalid_limits(api, limit):
     assert response.status_code == 400
 
 
+def test_track_history_surfaces_manual_skip(api):
+    client, db, ids = api
+    with _conn(db) as conn:
+        conn.execute(
+            """INSERT INTO lib2_manual_skips(file_path, skipped_checks, profile_id)
+               VALUES('/m/one-dance.flac', '["acoustid"]', 1)"""
+        )
+        conn.commit()
+
+    response = client.get(
+        f"/api/library/v2/tracks/{ids['album_track']}/history"
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["success"] is True
+    assert any(e["event_type"] == "manual_skip" for e in payload["history"])
+
+
+def test_track_history_404_for_unknown_track(api):
+    client, _db, _ids = api
+    response = client.get("/api/library/v2/tracks/999999/history")
+
+    assert response.status_code == 404
+
+
+@pytest.mark.parametrize("limit", ["abc", "0", "-1", "501"])
+def test_track_history_rejects_invalid_limits(api, limit):
+    client, _db, ids = api
+    response = client.get(
+        f"/api/library/v2/tracks/{ids['album_track']}/history?limit={limit}"
+    )
+
+    assert response.status_code == 400
+
+
 @pytest.mark.parametrize(
     "track_ids",
     [None, "1", [True], ["1"], [0], [-1], [1] * 501],

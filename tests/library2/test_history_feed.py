@@ -205,6 +205,40 @@ def test_manual_skip_surfaces_at_track_scope_by_primary_file_path(imported_conn)
     assert any(e["event_type"] == "manual_skip" for e in history)
 
 
+def test_track_download_surfaces_via_path_fallback_when_legacy_id_stale(imported_conn):
+    """Real-DB finding: ``track_downloads.track_id`` is frequently never
+    backfilled (NULL) even on a track whose ``lib2_tracks.legacy_track_id``
+    IS set — a stale/never-populated legacy id, not a "no legacy id at all"
+    case. ``source_info.py`` already falls through to the exact-path match
+    when the legacy-id query returns nothing (see its docstring); this must
+    do the same or the track-scoped Pipeline timeline silently drops every
+    download whose ``track_downloads`` row predates/skipped that backfill."""
+    drake = _drake_ids(imported_conn)
+    path = imported_conn.execute(
+        "SELECT path FROM lib2_track_files WHERE track_id=? AND is_primary=1",
+        (drake["track_id"],),
+    ).fetchone()[0]
+    imported_conn.execute(
+        "UPDATE lib2_tracks SET legacy_track_id=999999 WHERE id=?", (drake["track_id"],)
+    )
+    imported_conn.execute(
+        """CREATE TABLE IF NOT EXISTS track_downloads(
+               id INTEGER PRIMARY KEY AUTOINCREMENT, track_id TEXT, file_path TEXT,
+               source_service TEXT, track_title TEXT, track_album TEXT,
+               status TEXT DEFAULT 'completed', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"""
+    )
+    imported_conn.execute(
+        "INSERT INTO track_downloads(track_id, file_path, source_service, track_title, status) "
+        "VALUES(NULL, ?, 'soulseek', 'One Dance', 'completed')",
+        (path,),
+    )
+    imported_conn.commit()
+
+    history = scoped_history(imported_conn, scope="track", entity_id=drake["track_id"])
+
+    assert any(e["event_type"] == "downloaded" for e in history)
+
+
 def test_unsupported_scope_raises(imported_conn):
     with pytest.raises(ValueError):
         scoped_history(imported_conn, scope="playlist", entity_id=1)

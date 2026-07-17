@@ -6377,3 +6377,93 @@ Weiterhin offen aus §52: die aktuelle-Match-Karte (§56.2), Match-Provenienz
 (§56.2), §52.6-Replacement-Teil, §52.7 Manual-Grab-Policy, §52.9
 Correlation-History/Stepper, sowie die legacy Search-/Download-Routen aus
 §55.2.
+
+---
+
+## 57. §52.9/§52.10 Track-Pipeline-Timeline im Info-Tab — ✅ teilweise umgesetzt (2026-07-17)
+
+Dieser Slice schließt den in §52.10 konkret benannten Rest-Punkt „vom Track
+aus müssen auch fehlgeschlagene Versuche sichtbar sein, die nie eine neue
+`lib2_track_files`-Zeile erreicht haben" — die einzige Teilmenge von §52.9
+Correlation-History/Stepper, die ohne eine neue §52.12-Entscheidung
+umsetzbar war.
+
+### 57.1 Vorhandener Resolver, fehlender Einstiegspunkt
+
+`core/library2/history_feed.py::scoped_history` unterstützt `scope='track'`
+bereits seit §35/A6-C3 vollständig (per `recording_id`
+korrelierte `acquisition_history`-Events, `lib2_entity_history`,
+`lib2_manual_skips`, `track_downloads`) und war dafür in
+`tests/library2/test_history_feed.py` bereits getestet — nur exponierte
+kein API-Endpoint und keine UI diesen Scope. Der Info-Tab zeigte bis dahin
+ausschließlich die aktuelle Quelle plus rohe `track_downloads`-Historie, nie
+Quarantäne-/Grab-Versuche, die vor einem finalen Autolink scheiterten.
+
+- Neuer Endpoint `GET /api/library/v2/tracks/<id>/history` (analog zum
+  bestehenden Artist-Endpoint, reiner Reuse von `scoped_history`).
+- Frontend: `fetchLibraryV2TrackHistory` + neue, exportierte
+  `TrackPipelineTimeline`-Komponente rendert die Events chronologisch
+  (älteste zuerst — ein Pipeline-Verlauf liest sich wie eine Geschichte,
+  anders als die flache, neueste-zuerst-sortierte Artist-History-Tabelle)
+  als vertikale Timeline im Info-Tab, direkt oberhalb der bestehenden
+  Verification-/Source-Info-Sektion. Wiederverwendet dieselben
+  Kategorie-Farben (`sourceBadge[data-tone=…]`) wie das Artist-History-Modal.
+
+### 57.2 Real-DB-Fund: `_track_download_events` verlor die meisten Downloads
+
+Beim Live-Verifizieren gegen die echte Dev-DB (nicht die Unit-Tests) zeigte
+sich, dass der neue Track-Scope für reale Tracks fast immer leer blieb,
+obwohl der Artist-Scope „Downloaded"-Events zeigte. Root Cause: in dieser DB
+haben **165 von 173** `track_downloads`-Zeilen ein `NULL` `track_id` (nie
+zurückgeschrieben) — auch für Tracks, deren `lib2_tracks.legacy_track_id`
+korrekt gesetzt ist. `_track_download_events` versuchte den
+Pfad-Fallback bisher nur, wenn ein Track **gar keine** `legacy_track_id`
+hatte, nicht wenn die Legacy-ID-Abfrage schlicht nichts fand.
+`core/library2/source_info.py::track_source_info` (dieselbe fachliche
+Aufgabe, pro-Track statt gebatcht) hatte dieses Fallthrough-Verhalten
+bereits korrekt — `_track_download_events` gebatched jetzt beide Abfragen
+(Legacy-ID-Treffer zuerst, dann Pfad-Fallback nur für die *nicht getroffenen*
+Tracks) und spiegelt damit dasselbe Verhalten ohne N+1-Query. Regressionstest
+`test_track_download_surfaces_via_path_fallback_when_legacy_id_stale`
+reproduziert exakt diesen Fall (Legacy-ID gesetzt, aber keine passende
+`track_downloads`-Zeile — nur eine über den Pfad).
+
+### 57.3 Bewusst nicht in diesem Slice
+
+- Kein neues `quality_checked`/`acoustic_id_checked`-Eventvokabular in
+  `acquisition_history` — die von §52.9 verlangte granulare Schrittstruktur
+  (Actor, Vorher-/Nachher-Qualität, `not_run`/`skipped` explizit markiert)
+  bräuchte Schreibpfad-Änderungen in `pipeline_callback.py`/`workflow.py`/
+  `manual_grab.py`/`imports.py` und damit eine eigene Design-Runde, keine
+  reine Wiederverwendung wie dieser Slice.
+- Kein horizontaler Node-Stepper wie das Legacy-„Download Audit Trail"-Modal
+  (`webui/static/wishlist-tools.js::openDownloadAuditModal`) — dessen
+  Schritte werden aus einer einzelnen `track_downloads`/`library_history`-
+  Zeile abgeleitet, nicht aus der korrelierten `acquisition_history`-Kette,
+  und sind für lib2-Tracks ohne Legacy-ID/exakten Pfadmatch gar nicht
+  erreichbar. Die neue Timeline verwendet bewusst die reichere,
+  bereits-korrelierte `scoped_history`-Quelle statt dieses älteren Musters.
+- Album-Scope-Timeline im Album-Detail: `scoped_history(scope='album', …)`
+  ist bereits vom Resolver abgedeckt, aber ohne konkrete Nutzeranfrage für
+  diesen Slice nicht verdrahtet.
+
+### 57.4 Verifikation
+
+- Backend: neuer Endpoint + Regressionstest — `pytest tests/library2` →
+  **664 passed** (+7 neue Tests: 3 API-Route-Tests, 1
+  Fallback-Regressionstest, 3 parametrisierte Limit-Validierungsfälle).
+  `ruff check` clean.
+- Frontend: neue `track-pipeline-timeline.test.tsx` (leere vs. gefüllte
+  Timeline, chronologische Reihenfolge) + 2 neue API-Layer-Tests — `vitest
+  run` → **212 passed**; `npm run check` (oxfmt + oxlint --type-check) und
+  `tsc --noEmit` beide grün.
+- Live gegen die echte Dev-DB verifiziert (Playwright, `dev.py`): Track-Detail
+  → Info-Tab zeigt „Pipeline — 2 events" mit beiden historischen
+  Soulseek-/HiFi-Downloads für „DAISIES" (Justin Bieber, SWAG), chronologisch
+  aufsteigend, korrekt eingefärbt.
+
+Weiterhin offen aus §52: die aktuelle-Match-Karte (§56.2), Match-Provenienz
+(§56.2), §52.6-Replacement-Teil, §52.7 Manual-Grab-Policy, das granulare
+`quality_checked`/`acoustic_id_checked`-Eventvokabular sowie der
+Album-/Artist-Zweig von §52.9, sowie die legacy Search-/Download-Routen aus
+§55.2.

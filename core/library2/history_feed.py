@@ -338,9 +338,15 @@ def _track_download_events(
 ) -> "tuple[List[Dict[str, Any]], set]":
     """``track_downloads`` rows for these tracks — resolved by legacy id first
     (rename-proof, see ``source_info.py``), falling back to the primary file
-    path only for tracks an autolink created without ever migrating a legacy
-    row. Also returns the matched row ids so callers can dedupe a broader
-    fallback query against them."""
+    path whenever the legacy-id lookup itself finds nothing for that track —
+    not only when the track has no legacy id at all. Real-DB finding:
+    ``track_downloads.track_id`` is frequently left NULL/never backfilled even
+    on a track whose own ``legacy_track_id`` IS set, so "has a legacy id"
+    can't be trusted to mean "the legacy-id query will find it" —
+    ``source_info.py`` already falls through on an empty legacy-id result for
+    exactly this reason; this mirrors that per-track fallthrough instead of
+    only checking presence/absence of the id. Also returns the matched row
+    ids so callers can dedupe a broader fallback query against them."""
     if not track_ids:
         return [], set()
     ph = _in_clause(track_ids)
@@ -356,32 +362,51 @@ def _track_download_events(
         )
     except Exception:  # noqa: BLE001
         return [], set()
+
     legacy_ids = sorted({str(int(r["legacy_id"])) for r in link_rows if r["legacy_id"] is not None})
-    fallback_paths = sorted({
-        r["file_path"] for r in link_rows if r["legacy_id"] is None and r["file_path"]
-    })
+    rows: List[Any] = []
+    matched_legacy_ids: set = set()
     try:
-        clauses = []
-        params: List[Any] = []
         if legacy_ids:
-            clauses.append(f"track_id IN ({_in_clause(legacy_ids)})")
-            params.extend(legacy_ids)
-        if fallback_paths:
-            clauses.append(f"file_path IN ({_in_clause(fallback_paths)})")
-            params.extend(fallback_paths)
-        if not clauses:
-            return [], set()
-        rows = _rows(
-            conn,
-            f"""SELECT id, track_title, track_album, source_service, status, created_at
-                  FROM track_downloads WHERE {' OR '.join(clauses)}
-                 ORDER BY id DESC LIMIT ?""",
-            (*params, limit),
-        )
+            legacy_rows = _rows(
+                conn,
+                f"""SELECT id, track_id, track_title, track_album, source_service,
+                           status, created_at
+                      FROM track_downloads WHERE track_id IN ({_in_clause(legacy_ids)})
+                     ORDER BY id DESC LIMIT ?""",
+                (*legacy_ids, limit),
+            )
+            rows.extend(legacy_rows)
+            matched_legacy_ids = {r["track_id"] for r in legacy_rows}
     except Exception:  # noqa: BLE001 — legacy table may be absent
         return [], set()
-    matched_ids = {r["id"] for r in rows}
-    return _track_downloads_to_events(rows), matched_ids
+
+    fallback_paths = sorted({
+        r["file_path"] for r in link_rows
+        if r["file_path"]
+        and (r["legacy_id"] is None or str(r["legacy_id"]) not in matched_legacy_ids)
+    })
+    if fallback_paths:
+        try:
+            path_rows = _rows(
+                conn,
+                f"""SELECT id, track_title, track_album, source_service, status, created_at
+                      FROM track_downloads WHERE file_path IN ({_in_clause(fallback_paths)})
+                     ORDER BY id DESC LIMIT ?""",
+                (*fallback_paths, limit),
+            )
+            rows.extend(path_rows)
+        except Exception:  # noqa: BLE001, S110 — the legacy-id pass above already succeeded
+            pass
+
+    if not rows:
+        return [], set()
+    deduped: Dict[Any, Any] = {}
+    for r in rows:
+        deduped.setdefault(r["id"], r)
+    ordered = sorted(deduped.values(), key=lambda r: r["id"], reverse=True)[:limit]
+    matched_ids = {r["id"] for r in ordered}
+    return _track_downloads_to_events(ordered), matched_ids
 
 
 def _artist_name_fallback_events(

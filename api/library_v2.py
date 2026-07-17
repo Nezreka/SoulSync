@@ -3270,6 +3270,40 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             conn.close()
         return jsonify({"success": True, "history": history})
 
+    @app.route("/api/library/v2/tracks/<int:track_id>/history")
+    def lib2_track_history(track_id):
+        """Merged pipeline history for this track (§52.9): search/grab/quality/
+        quarantine/import events correlated via ``acquisition_history``, plus
+        catalog moves and manual overrides — not just the latest download row.
+        Surfaces failed attempts that never reached a ``lib2_track_files`` row
+        (see ``core.library2.history_feed``)."""
+        guard = _guard()
+        if guard:
+            return guard
+        try:
+            limit = int(request.args.get("limit", 50))
+        except (TypeError, ValueError):
+            return jsonify({
+                "success": False,
+                "error": "limit must be an integer between 1 and 500",
+            }), 400
+        if not 1 <= limit <= 500:
+            return jsonify({
+                "success": False,
+                "error": "limit must be an integer between 1 and 500",
+            }), 400
+        from core.library2.history_feed import scoped_history
+        conn = _conn()
+        try:
+            track = conn.execute(
+                "SELECT id FROM lib2_tracks WHERE id=?", (track_id,)).fetchone()
+            if not track:
+                return jsonify({"success": False, "error": "Track not found"}), 404
+            history = scoped_history(conn, scope="track", entity_id=track_id, limit=limit)
+        finally:
+            conn.close()
+        return jsonify({"success": True, "history": history})
+
     # -- upgrade scan (lib2-aware quality upgrade pass) ------------------------
 
     @app.route("/api/library/v2/upgrade-scan", methods=["POST"])

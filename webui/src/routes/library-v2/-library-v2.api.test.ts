@@ -22,6 +22,7 @@ import {
   fetchLibraryV2Playlist,
   fetchLibraryV2Playlists,
   fetchLibraryV2ReorganizeSourcesGlobal,
+  fetchLibraryV2TrackHistory,
   fetchLibraryV2TrackSourceInfo,
   fetchLibraryV2UiPreferences,
   manualMatchLibraryV2Entity,
@@ -210,6 +211,42 @@ describe('library v2 source info api', () => {
         blocked_username: 'user',
       }),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe('library v2 track history api (§52.9)', () => {
+  it('returns the merged pipeline events for a track', async () => {
+    server.use(
+      http.get('/api/library/v2/tracks/55/history', () =>
+        HttpResponse.json({
+          success: true,
+          history: [
+            {
+              date: '2026-07-17 10:00:00',
+              event_type: 'import_file_quarantined',
+              category: 'quarantined',
+              title: 'Quarantined',
+              detail: 'acoustid mismatch',
+              source: 'acquisition',
+            },
+          ],
+        }),
+      ),
+    );
+
+    const history = await fetchLibraryV2TrackHistory(55);
+    expect(history).toHaveLength(1);
+    expect(history[0].event_type).toBe('import_file_quarantined');
+  });
+
+  it('throws when the backend reports failure', async () => {
+    server.use(
+      http.get('/api/library/v2/tracks/55/history', () =>
+        HttpResponse.json({ success: false, error: 'Track not found' }, { status: 404 }),
+      ),
+    );
+
+    await expect(fetchLibraryV2TrackHistory(55)).rejects.toThrow('Track not found');
   });
 });
 
