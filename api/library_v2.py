@@ -56,11 +56,15 @@ _NOT_CONSOLIDATED_SQL = """
     NOT (
         NOT EXISTS(SELECT 1 FROM lib2_track_files tf
                    WHERE tf.track_id = lib2_tracks.id
-                     AND tf.path IS NOT NULL AND tf.path <> '')
+                     AND tf.path IS NOT NULL AND tf.path <> ''
+                     AND COALESCE(tf.file_state,'active')
+                         NOT IN ('missing_confirmed','deleted'))
         AND EXISTS(
             SELECT 1 FROM lib2_tracks o
             JOIN lib2_track_files otf ON otf.track_id = o.id
                  AND otf.path IS NOT NULL AND otf.path <> ''
+                 AND COALESCE(otf.file_state,'active')
+                     NOT IN ('missing_confirmed','deleted')
             WHERE o.id = lib2_tracks.canonical_track_id
                OR o.canonical_track_id = lib2_tracks.id
         )
@@ -2339,7 +2343,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                          (SELECT COUNT(*) FROM lib2_tracks t2 WHERE t2.album_id = al.id)) >
                 (SELECT COUNT(DISTINCT t3.id) FROM lib2_tracks t3
                    JOIN lib2_track_files tf3 ON tf3.track_id = t3.id
-                  WHERE t3.album_id = al.id)
+                  WHERE t3.album_id = al.id
+                    AND COALESCE(tf3.file_state,'active')
+                        NOT IN ('missing_confirmed','deleted'))
             )""",
         }.get(scope)
         if not type_filter:
@@ -2501,6 +2507,74 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         return jsonify({"success": True, **state, "jobs": _job_registry.list()})
 
     # -- edit / delete / history (Lidarr artist-page actions) ------------------
+
+    def _watchlist_metadata_sources() -> List[str]:
+        """Mirror the source allow-list used by the legacy Watchlist settings."""
+        sources = ["spotify", "deezer", "itunes", "discogs", "musicbrainz"]
+        try:
+            from core.metadata.registry import EXPERIMENTAL_SOURCES, is_source_enabled
+            sources.extend(
+                source for source in EXPERIMENTAL_SOURCES
+                if is_source_enabled(source)
+            )
+        except Exception as exc:  # noqa: BLE001 - base sources remain usable
+            logger.debug("optional Watchlist metadata sources unavailable: %s", exc)
+        return list(dict.fromkeys(sources))
+
+    @app.route(
+        "/api/library/v2/artists/<int:artist_id>/settings",
+        methods=["GET", "PUT"],
+    )
+    def lib2_artist_settings(artist_id):
+        """Read/write the existing Watchlist Artist Settings through lib2.
+
+        Release filters, lookback, preferred provider and automatic download
+        stay on ``watchlist_artists``.  Only ``monitor_new_items`` remains a
+        lib2 field because it controls lib2 discography re-expansion.  The
+        combined response lets the React page present one coherent settings
+        surface without creating another configuration model (§52.3/§52.4).
+        """
+        guard = _guard()
+        if guard:
+            return guard
+        from core.library2.artist_settings import (
+            ArtistSettingsError,
+            get_artist_settings,
+            update_artist_settings,
+        )
+        conn = _conn()
+        sources = _watchlist_metadata_sources()
+        try:
+            if request.method == "PUT":
+                body = request.get_json(silent=True)
+                settings = update_artist_settings(
+                    conn,
+                    artist_id,
+                    body,
+                    profile_id=ADMIN_PROFILE_ID,
+                    allowed_metadata_sources=sources,
+                )
+                conn.commit()
+            else:
+                settings = get_artist_settings(
+                    conn, artist_id, profile_id=ADMIN_PROFILE_ID
+                )
+            try:
+                from core.metadata.registry import get_primary_source
+                global_source = get_primary_source()
+            except Exception:  # noqa: BLE001
+                global_source = None
+            return jsonify({
+                "success": True,
+                "settings": settings,
+                "metadata_sources": sources,
+                "global_metadata_source": global_source,
+            })
+        except ArtistSettingsError as exc:
+            conn.rollback()
+            return jsonify({"success": False, "error": str(exc)}), exc.status
+        finally:
+            conn.close()
 
     @app.route("/api/library/v2/artists/<int:artist_id>/edit", methods=["POST"])
     def lib2_edit_artist(artist_id):
@@ -2844,7 +2918,68 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 entity_id=eid,
                 preview_token=body.get("preview_token"),
                 file_ids=file_ids,
+                actor="user",
+                actor_profile_id=_profile(),
             )
+            _reproject_after_file_removal(operation.get("track_ids") or [])
+            return jsonify({"success": True, "operation": operation})
+        except FileDeleteError as exc:
+            return jsonify({"success": False, "error": str(exc)}), exc.status
+
+    def _reproject_after_file_removal(track_ids: List[int]) -> None:
+        """A removed file can turn a monitored track into Wanted again."""
+        ids = sorted({int(track_id) for track_id in track_ids})
+        if not ids:
+            return
+        db = get_database()
+        conn = db._get_connection()
+        try:
+            from core.library2.wanted import recompute_wanted_for_entity
+            for track_id in ids:
+                recompute_wanted_for_entity(
+                    conn, "tracks", track_id, profile_id=_profile()
+                )
+            from core.library2.mirror_outbox import enqueue_projected_tracks
+            enqueue_projected_tracks(conn, ids, profile_id=_profile())
+            conn.commit()
+        finally:
+            conn.close()
+        from core.library2.mirror_outbox import drain as drain_mirror_outbox
+        drain_mirror_outbox(db)
+
+    @app.route(
+        "/api/library/v2/<entity>/<int:eid>/file-remove",
+        methods=["POST"],
+    )
+    def lib2_file_remove(entity, eid):
+        """Remove selected file records from Library v2, keeping disk files."""
+        guard = _guard()
+        if guard:
+            return guard
+        from core.library2.file_delete import (
+            FileDeleteError,
+            remove_entity_file_records,
+        )
+        try:
+            body = request.get_json(silent=True)
+            if not isinstance(body, dict):
+                raise FileDeleteError("JSON body is required")
+            file_ids = body.get("file_ids")
+            if file_ids is not None and (
+                not isinstance(file_ids, list)
+                or not file_ids
+                or not all(isinstance(v, int) for v in file_ids)
+            ):
+                raise FileDeleteError("file_ids must be a non-empty list of integers")
+            operation = remove_entity_file_records(
+                get_database(),
+                entity=entity,
+                entity_id=eid,
+                file_ids=file_ids,
+                actor="user",
+                actor_profile_id=_profile(),
+            )
+            _reproject_after_file_removal(operation.get("track_ids") or [])
             return jsonify({"success": True, "operation": operation})
         except FileDeleteError as exc:
             return jsonify({"success": False, "error": str(exc)}), exc.status

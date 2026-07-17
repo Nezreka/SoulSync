@@ -39,13 +39,15 @@ def _file_rows_in_scope(conn, *, album_ids: Optional[List[int]] = None) -> List[
         return conn.execute(
             f"""SELECT tf.id, tf.path, tf.file_state, tf.missing_scan_count
                   FROM lib2_track_files tf
-                JOIN lib2_tracks t ON t.id = tf.track_id
-               WHERE t.album_id IN ({marks}) AND tf.path IS NOT NULL AND tf.path <> ''""",
+               JOIN lib2_tracks t ON t.id = tf.track_id
+               WHERE t.album_id IN ({marks}) AND tf.path IS NOT NULL AND tf.path <> ''
+                 AND COALESCE(tf.file_state,'active')<>'deleted'""",
             album_ids,
         ).fetchall()
     return conn.execute(
         """SELECT id, path, file_state, missing_scan_count
-             FROM lib2_track_files WHERE path IS NOT NULL AND path <> ''"""
+             FROM lib2_track_files WHERE path IS NOT NULL AND path <> ''
+              AND COALESCE(file_state,'active')<>'deleted'"""
     ).fetchall()
 
 

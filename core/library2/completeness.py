@@ -134,7 +134,9 @@ def _trim_excess_fileless_tracks(conn, album_id: int, expected: int,
     protect_ids = protect_ids or set()
     rows = conn.execute(
         """SELECT t.id, t.legacy_track_id, t.monitored,
-                  EXISTS(SELECT 1 FROM lib2_track_files f WHERE f.track_id = t.id) AS has_file,
+                  EXISTS(SELECT 1 FROM lib2_track_files f
+                          WHERE f.track_id = t.id
+                            AND COALESCE(f.file_state,'active')<>'deleted') AS has_file,
                   EXISTS(
                       SELECT 1 FROM lib2_monitor_rules r
                        WHERE r.entity_type='track' AND r.entity_id=t.id
@@ -207,7 +209,9 @@ def _unique_untouched_title_match(conn, album_id: int, title: str,
     rows = [
         r for r in conn.execute(
             """SELECT t.id, t.title, t.legacy_track_id, t.monitored,
-                      EXISTS(SELECT 1 FROM lib2_track_files f WHERE f.track_id=t.id) AS has_file,
+                      EXISTS(SELECT 1 FROM lib2_track_files f
+                              WHERE f.track_id=t.id
+                                AND COALESCE(f.file_state,'active')<>'deleted') AS has_file,
                       EXISTS(
                           SELECT 1 FROM lib2_monitor_rules r
                            WHERE r.entity_type='track' AND r.entity_id=t.id

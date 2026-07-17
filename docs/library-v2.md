@@ -32,7 +32,9 @@
 > Search→Library-v2-Materialisierung, Pipeline-History und Delete-UX); am
 > 2026-07-17 Abschnitt 53 ergänzt (§52.2 Profilherkunft für Track/Album/Artist/
 > Global, §52.5 Artist-Providerfoto zuerst, §52.6 direkte Track-Suche trotz
-> unmonitored und §52.10 Edit-Icon/Herkunftsanzeige umgesetzt).
+> unmonitored und §52.10 Edit-Icon/Herkunftsanzeige umgesetzt); am 2026-07-17
+> Abschnitt 54 ergänzt (§52.3/§52.4 gemeinsame Artist-/Watchlist-Settings und
+> §52.11 einheitlicher DB-only/permanenter Datei-Entfernungsflow umgesetzt).
 
 Opt-in, Lidarr-style Library-Manager auf SoulSyncs eigener
 Such-/Download-/Processing-/Tagging-Pipeline. Gated hinter
@@ -5576,8 +5578,8 @@ Lauf dieser drei Dateien (**25 failed, 4 passed**).
 
 ## 52. Nutzer-Review 2026-07-17 — Profile, Monitoring, Search, History und Delete-UX
 
-**Status: verbindliche Produktanforderung und Code-Audit; erster vertikaler
-Slice umgesetzt, siehe §53.** Dieser Abschnitt dokumentiert das Nutzerfeedback vom 2026-07-17
+**Status: verbindliche Produktanforderung und Code-Audit; zwei vertikale
+Slices umgesetzt, siehe §53/§54.** Dieser Abschnitt dokumentiert das Nutzerfeedback vom 2026-07-17
 und ersetzt widersprechende ältere Annahmen, besonders die frühere
 dreistufige Profilregel in §11 sowie die reine Gap-Enumeration in der
 Deep-Dive-Doku. Ziel ist möglichst viel Wiederverwendung: Watchlist,
@@ -5727,6 +5729,14 @@ sie markieren; die Watchlist-Einstellungen erklären getrennt, was bei
 zukünftigen Releases passiert. Das Bookmark braucht einen Tooltip, der seine
 Watchlist-Wirkung explizit nennt.
 
+**Umsetzungsstand 2026-07-17:** Diese Konsolidierung ist umgesetzt (§54).
+Ein Gear neben gebookmarkten Artists öffnet die bestehende administrative
+Watchlist-Konfiguration zusammen mit dem app-weiten Quality-Profile-Picker
+und dem bestehenden Provider-Match-UI. Die getrennten Artist-Toolbar-Aktionen
+„Monitoring" und „Profile" sind entfernt. Aktionen auf vorhandene Releases
+bleiben im selben Dialog sichtbar, aber sprachlich und technisch von Regeln
+für zukünftige Releases getrennt.
+
 ### 52.4 „Metadata Profile" nicht als drittes Profilsystem nachbauen
 
 In Lidarr beschreibt ein Metadata Profile vor allem, welche Release-Gruppen
@@ -5745,6 +5755,12 @@ Nur wenn wiederverwendbare benannte Presets später einen klaren Mehrwert
 haben, ist ein eigenes Metadata-Profile-Konzept erneut zu entscheiden. Es
 darf nicht neben Watchlist-Regeln und `monitor_new_items` eine dritte,
 widersprüchliche Wahrheit erzeugen.
+
+**Umsetzungsstand 2026-07-17:** Die vorhandenen `watchlist_artists.include_*`-
+Felder, Lookback-, Auto-Download- und Provider-Werte werden direkt gelesen und
+geschrieben; `monitor_new_items` bleibt die einzige lib2-spezifische
+Discography-Regel. Es wurde weder eine parallele Settings-Tabelle noch ein
+Metadata-Profile-Modell eingeführt (§54).
 
 Referenz zur Begriffsklärung: [Lidarr Library / Metadata
 Profile](https://wiki.servarr.com/lidarr/library).
@@ -5978,6 +5994,13 @@ einheitliche Entscheidung dient der offizielle Lidarr-Flow „Remove from
 Lidarr only" vs. „Remove from Lidarr and delete files": [Lidarr Tips and
 Tricks](https://wiki.servarr.com/en/lidarr/tips-and-tricks).
 
+**Umsetzungsstand 2026-07-17:** Der gemeinsame Dialog und Backend-Vertrag sind
+umgesetzt (§54). Album-/Artist-Delete und „Manage Tracks → Delete Selected"
+verwenden dieselbe Komponente. DB-only bleibt auch bei unsicheren Pfaden
+möglich; Permanent Delete bleibt fail-closed, erfordert die destruktive
+Bestätigung und löscht die Entity erst nach vollständig erfolgreichem
+Dateikommando. Beide Modi werden samt Actor/Profil getrennt historisiert.
+
 ### 52.12 Entscheidungen, die vor der Umsetzung noch bestätigt werden müssen
 
 Die Grundrichtung ist entschieden. Offen bleiben nur Punkte, bei denen eine
@@ -6079,9 +6102,91 @@ folgen erst nach §52.12.1.
 - Frontend Format + OXLint-Typecheck → **0 Warnungen / 0 Fehler**; TypeScript
   `--noEmit` ebenfalls grün.
 
-Weiterhin offen und nicht als erledigt dargestellt: §52.3/§52.4 gemeinsame
-Artist-/Watchlist-Settings, die reichere Provider-Match-Karte aus §52.5,
-Replacement-Teil von §52.6, §52.7 Manual-Grab-Policy, §52.8 Early
-Materialization, §52.9 Correlation-History/Stepper und §52.11 gemeinsamer
-Delete-Files-Dialog. Die fünf sichtbaren Entscheidungen aus §52.12 bleiben
-unverändert Voraussetzung für ihre jeweiligen Teilstücke.
+§52.3/§52.4 und §52.11 wurden im anschließenden Slice §54 geschlossen.
+Weiterhin offen und nicht als erledigt dargestellt: die reichere Provider-
+Match-Karte aus §52.5 (Follower/Popularität/Match-Provenienz), Replacement-
+Teil von §52.6, §52.7 Manual-Grab-Policy, §52.8 Early Materialization und
+§52.9 Correlation-History/Stepper. Die fünf sichtbaren Entscheidungen aus
+§52.12 bleiben unverändert Voraussetzung für ihre jeweiligen Teilstücke.
+
+---
+
+## 54. §52 zweiter vertikaler Slice — gemeinsame Artist Settings und Datei-Entfernung — ✅ umgesetzt (2026-07-17)
+
+Dieser Slice schließt die zwei größten verbleibenden entscheidungsfreien
+UI-/Vertragspakete aus §52: eine fachliche Artist-/Watchlist-Konfiguration
+ohne paralleles Settings-Modell sowie einen gemeinsamen, auditierbaren
+DB-only/permanenten File-Removal-Flow.
+
+### 54.1 Artist Settings: eine Oberfläche, vorhandene Wahrheiten
+
+- `GET/PUT /api/library/v2/artists/<id>/settings` löst den lib2-Artist über
+  Provider-IDs und als konservativen Fallback über den Namen auf die
+  **bestehende administrative** `watchlist_artists`-Zeile auf. Der Vertrag ist
+  bewusst admin-authoritativ und erzeugt keine zweite Settings-Zeile.
+- Release-Filter (`include_albums`, `include_eps`, `include_singles`, Live,
+  Remixes, Acoustic, Compilations, Instrumentals), `auto_download`, Lookback
+  und bevorzugte Metadata-Source bleiben auf `watchlist_artists`.
+  `monitor_new_items` bleibt auf `lib2_artists`, weil es die lib2-Discography-
+  Re-Expansion steuert. Ein geänderter Lookback setzt den vorhandenen
+  Scan-Marker zurück; Eingaben und mindestens ein Kern-Release-Typ werden
+  serverseitig validiert.
+- `ArtistSettingsModal` zeigt Watchlist-Identität, Provider-IDs und den
+  vorhandenen manuellen Re-Match-Flow, verwendet den app-weiten
+  `QualityProfilePicker` und trennt klar zwischen Regeln für **zukünftige**
+  Releases und Monitor-/Wanted-Aktionen für **bereits bekannte** Releases.
+- Das Gear erscheint nur bei gebookmarkten/monitored Artists. Die bisherigen
+  separaten Toolbar-Aktionen „Monitoring" und „Profile" sind dort entfernt;
+  der Bookmark-Tooltip benennt die Watchlist-Wirkung explizit. Bei einem
+  **nicht** gebookmarkten Artist bleibt der eigenständige Profile-Button
+  erreichbar, weil Quality laut §52.3 orthogonal zum Monitoring ist und noch
+  keine Watchlist-Zeile für die übrigen Settings existiert.
+- Die reichere Kandidatenkarte aus §52.5 ist nur teilweise abgedeckt:
+  Foto/Name/Genres/Provider-IDs und bestehendes Re-Matching sind integriert;
+  Follower, Popularität und automatische-vs.-manuelle Match-Provenienz bleiben
+  offen, bis der jeweilige Provider diese Daten zuverlässig liefert.
+
+### 54.2 Einheitlicher File-Removal-Flow
+
+- `UnifiedFileRemovalDialog` wird sowohl vom Artist-/Album-Delete-Shortcut als
+  auch von „Manage Tracks → Delete Selected" verwendet. Er zeigt Track-/File-
+  Anzahl und Gesamtgröße kompakt; Pfade liegen gekürzt in einer aufklappbaren,
+  scrollbaren Liste mit Vollpfad-Tooltip und Copy-Aktion.
+- Die Wahl ist explizit: **Library database only** behält Dateien auf Disk,
+  **Permanently delete files** verwendet weiterhin Preview-Token und Root-
+  Safety aus ADR-05. Unsichere Pfade deaktivieren nur den permanenten Modus,
+  nicht die DB-only-Alternative. Permanent Delete verlangt eine zweite
+  destruktive Bestätigung.
+- `POST /api/library/v2/<entity>/<id>/file-remove` markiert ausgewählte
+  `lib2_track_files` als gelöscht, ohne den Datenträger anzufassen. Der
+  bestehende `file-delete`-Endpoint bleibt das physische Kommando. Beide
+  liefern betroffene Track-IDs; danach wird Wanted neu projiziert und der
+  bestehende Wishlist-Mirror synchronisiert.
+- Der `deleted`-Lifecycle-State gilt nun durchgängig als nicht vorhandene
+  Library-Datei: Wishlist-/Upgrade-Entscheidung, Missing-Zählung,
+  Discography-Completeness, Scan, Retag und Artwork ignorieren solche Zeilen.
+  Ein später neu importiertes aktives File übernimmt zuverlässig das Primary-
+  Flag; die Schema-Reparatur heilt auch ältere Deleted-Primary-Konstellationen.
+- Das additive ADR-05-Journal trägt jetzt `mode`, `actor` und
+  `actor_profile_id`. DB-only und permanent erscheinen als unterschiedliche
+  History-Events. Dabei wurde zugleich die bestehende Singular-/Plural-Lücke
+  im History-Read (`artist`/`release_group` vs. tatsächlich gespeichertes
+  `artists`/`albums`) rückwärtskompatibel geschlossen.
+- Beim kombinierten Artist-/Album-Delete läuft das Dateikommando zuerst. Die
+  Entity wird bei Permanent Delete nur nach Status `completed` entfernt; ein
+  partieller oder fehlgeschlagener Disk-Delete lässt sie für Retry/Audit
+  bestehen.
+
+### 54.3 Verifikation und Rest-Scope
+
+- Backend: `python -m pytest tests/library2` → **642 passed**.
+- Frontend: Vitest → **36 Dateien / 206 Tests passed**.
+- Frontend: `npm run check` → **0 Warnungen / 0 Fehler**; TypeScript
+  `--noEmit` ebenfalls grün.
+
+Neu bzw. erweitert getestet sind Watchlist-Auflösung/Validierung und
+Profil-Scope, beide File-Removal-Modi samt Wanted-Reprojektion und History,
+die Artist-Settings-UI sowie derselbe Delete-Dialog aus beiden
+Einstiegspunkten. Offen bleibt ausschließlich der schon in §53.3 und §52.12
+benannte Scope; insbesondere wurden keine H-/I-Gaps außerhalb der durch §52
+verbindlich angenommenen Funktionen stillschweigend umgesetzt.

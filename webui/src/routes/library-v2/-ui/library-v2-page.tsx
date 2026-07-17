@@ -9,6 +9,7 @@ import type {
   LibraryV2AlbumDetail,
   LibraryV2AlbumSummary,
   LibraryV2ArtistDetail,
+  LibraryV2ArtistSettings,
   LibraryV2ArtistSummary,
   LibraryV2ArtistTableColumns,
   LibraryV2FileTags,
@@ -35,6 +36,7 @@ import {
   enrichLibraryV2Entity,
   fetchLibraryV2ArtistDeletePreview,
   fetchLibraryV2ArtistHistory,
+  fetchLibraryV2ArtistSettings,
   fetchLibraryV2Artists,
   fetchLibraryV2ArtistTrackFiles,
   fetchLibraryV2Duplicates,
@@ -63,6 +65,7 @@ import {
   manualMatchLibraryV2Entity,
   materializeLibraryV2MissingTrack,
   moveLibraryV2TrackFile,
+  removeLibraryV2FileRecords,
   searchLibraryV2MatchService,
   refreshLibraryV2,
   refreshLibraryV2Discography,
@@ -77,6 +80,7 @@ import {
   unlinkLibraryV2ArtistAlias,
   unlinkLibraryV2Duplicate,
   updateLibraryV2MetadataOverrides,
+  updateLibraryV2ArtistSettings,
   updateLibraryV2UiPreferences,
   writeLibraryV2Tags,
   type Lib2EntityRef,
@@ -92,18 +96,6 @@ import styles from './library-v2-page.module.css';
 import { QualityProfileModal, QualityProfilePicker } from './quality-profile-modal';
 import { AlbumReorganizeModal, ArtistReorganizeAllModal } from './reorganize-modal';
 import { RetagModal } from './retag-modal';
-
-/** Artist-level quality-profile target only — albums/EPs/singles use the
- *  self-contained, consolidated AlbumDetailModal instead (per user request:
- *  merge Quality+Edit at album level, but keep artist-level actions separate). */
-interface QpTarget {
-  entity: 'artists';
-  id: number;
-  currentProfileId: number;
-  currentProfileSource?: LibraryV2QualityProfileSource;
-  currentProfileExplicit?: boolean;
-  title: string;
-}
 
 /** Row/toolbar action dispatch: the label drives the behaviour, the optional
  *  entity ref carries WHICH lib2 track/album the action is for so grabs keep
@@ -401,9 +393,13 @@ export function MonitorToggle({
         title={
           mutation.isError
             ? 'Monitoring update failed — click to retry'
-            : monitored
-              ? 'Monitored — click to stop'
-              : 'Not monitored — click to monitor'
+            : entity === 'artists' && monitored
+              ? 'On the Watchlist — click to remove this artist (files and explicitly monitored tracks stay untouched)'
+              : entity === 'artists'
+                ? 'Not on the Watchlist — click to monitor this artist and enable Artist Settings'
+                : monitored
+                  ? 'Monitored — click to stop'
+                  : 'Not monitored — click to monitor'
         }
         disabled={mutation.isPending}
         onClick={() =>
@@ -1234,6 +1230,320 @@ export function MonitoringModal({
   );
 }
 
+/** §52.3/§52.4: one Artist Settings surface over the existing Watchlist row.
+ * Quality remains the app-wide profile system; release filters, lookback,
+ * preferred provider and auto-download are written to `watchlist_artists`;
+ * existing release monitoring stays a separate, clearly-labelled action. */
+export function ArtistSettingsModal({
+  artist,
+  onClose,
+}: {
+  artist: LibraryV2ArtistDetail;
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const settingsQuery = useQuery({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'artist-settings', artist.id],
+    queryFn: () => fetchLibraryV2ArtistSettings(artist.id),
+  });
+  const [draft, setDraft] = useState<LibraryV2ArtistSettings | null>(null);
+  const [bulkBusy, setBulkBusy] = useState<string | null>(null);
+  const [bulkMessage, setBulkMessage] = useState<{
+    tone: 'ok' | 'error';
+    text: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (settingsQuery.data?.settings) setDraft(settingsQuery.data.settings);
+  }, [settingsQuery.data?.settings]);
+
+  const save = useMutation({
+    mutationFn: (value: LibraryV2ArtistSettings) => updateLibraryV2ArtistSettings(artist.id, value),
+    onSuccess: async (response) => {
+      setDraft(response.settings);
+      await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+    },
+  });
+
+  async function applyExistingReleaseStrategy(
+    scope: 'all' | 'missing',
+    monitored: boolean,
+    label: string,
+  ) {
+    setBulkBusy(label);
+    setBulkMessage(null);
+    try {
+      const jobId = await bulkMonitorLibraryV2Releases(artist.id, scope, monitored);
+      const error = await awaitBulkJob(queryClient, jobId);
+      if (error) throw new Error(error);
+      setBulkMessage({ tone: 'ok', text: `${label} applied.` });
+    } catch (caught) {
+      setBulkMessage({
+        tone: 'error',
+        text: mutationErrorMessage(caught, 'Existing-release monitoring failed'),
+      });
+    } finally {
+      setBulkBusy(null);
+    }
+  }
+
+  function setBoolean(field: keyof LibraryV2ArtistSettings, checked: boolean) {
+    setDraft((current) => (current ? { ...current, [field]: checked } : current));
+  }
+
+  const sourceOptions = settingsQuery.data?.metadata_sources ?? [];
+  const providerIds = draft
+    ? Object.entries(draft.provider_ids).filter((entry): entry is [string, string] =>
+        Boolean(entry[1]),
+      )
+    : [];
+
+  return (
+    <ModalShell title="Artist Settings" wide onClose={onClose}>
+      {settingsQuery.isError ? (
+        <div className={styles.mutationError} role="alert">
+          {mutationErrorMessage(settingsQuery.error, 'Artist settings could not be loaded')}
+        </div>
+      ) : settingsQuery.isLoading || !draft ? (
+        <div className={styles.inlineLoading}>Loading Watchlist Artist Settings…</div>
+      ) : (
+        <>
+          <section className={styles.artistSettingsSection}>
+            <h4>Watchlist identity</h4>
+            <div className={styles.artistSettingsIdentity}>
+              <Artwork
+                src={draft.watchlist_image_url || artist.image_url || ''}
+                alt={draft.watchlist_name || artist.name}
+                className={styles.artistSettingsPhoto}
+                thumb
+              />
+              <div className={styles.artistSettingsIdentityBody}>
+                <strong>{draft.watchlist_name || artist.name}</strong>
+                <span className={styles.muted}>
+                  This is the artist currently linked to the admin Watchlist.
+                </span>
+                {artist.genres.length > 0 ? (
+                  <span className={styles.muted}>{artist.genres.join(', ')}</span>
+                ) : null}
+                {providerIds.length > 0 ? (
+                  <div className={styles.artistSettingsProviderIds}>
+                    {providerIds.map(([provider, id]) => (
+                      <span key={provider} title={id}>
+                        {provider}: {id}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+                <ArtistMatchChips artistId={artist.id} artistName={artist.name} />
+              </div>
+            </div>
+          </section>
+
+          <section className={styles.artistSettingsSection}>
+            <h4>Quality profile</h4>
+            <p className={styles.muted}>
+              Quality controls allowed downloads and upgrades. It does not enable monitoring.
+            </p>
+            <QualityProfilePicker
+              entity="artists"
+              id={artist.id}
+              currentProfileId={artist.quality_profile?.id ?? 1}
+              currentProfileSource={artist.quality_profile_source}
+              currentProfileExplicit={artist.quality_profile_explicit}
+            />
+          </section>
+
+          <section className={styles.artistSettingsSection}>
+            <h4>Future releases</h4>
+            <p className={styles.muted}>
+              These are the existing Watchlist scanner settings. They decide what is discovered and
+              whether newly discovered releases enter the download pipeline.
+            </p>
+            <label className={styles.artistSettingsToggle}>
+              <input
+                type="checkbox"
+                checked={draft.auto_download}
+                onChange={(event) => setBoolean('auto_download', event.target.checked)}
+              />
+              <span>
+                <strong>Auto-download new releases</strong>
+                <small>Off means follow/discover only; releases are not added to Wanted.</small>
+              </span>
+            </label>
+            <fieldset className={styles.artistSettingsFieldset}>
+              <legend>Release types</legend>
+              {(
+                [
+                  ['include_albums', 'Albums'],
+                  ['include_eps', 'EPs'],
+                  ['include_singles', 'Singles'],
+                  ['include_live', 'Live'],
+                  ['include_remixes', 'Remixes'],
+                  ['include_acoustic', 'Acoustic'],
+                  ['include_compilations', 'Compilations'],
+                  ['include_instrumentals', 'Instrumentals'],
+                ] as const
+              ).map(([field, label]) => (
+                <label key={field} className={styles.checkOption}>
+                  <input
+                    type="checkbox"
+                    checked={draft[field]}
+                    onChange={(event) => setBoolean(field, event.target.checked)}
+                  />
+                  {label}
+                </label>
+              ))}
+            </fieldset>
+            <div className={styles.artistSettingsGrid}>
+              <label>
+                <span>Discovery lookback</span>
+                <select
+                  className={styles.select}
+                  value={draft.lookback_days == null ? '' : String(draft.lookback_days)}
+                  onChange={(event) =>
+                    setDraft((current) =>
+                      current
+                        ? {
+                            ...current,
+                            lookback_days:
+                              event.target.value === '' ? null : Number(event.target.value),
+                          }
+                        : current,
+                    )
+                  }
+                >
+                  <option value="">Use global setting</option>
+                  <option value="0">From now on</option>
+                  <option value="7">Last 7 days</option>
+                  <option value="30">Last 30 days</option>
+                  <option value="90">Last 90 days</option>
+                  <option value="365">Last year</option>
+                </select>
+              </label>
+              <label>
+                <span>Preferred metadata provider</span>
+                <select
+                  className={styles.select}
+                  value={draft.preferred_metadata_source ?? ''}
+                  onChange={(event) =>
+                    setDraft((current) =>
+                      current
+                        ? { ...current, preferred_metadata_source: event.target.value || null }
+                        : current,
+                    )
+                  }
+                >
+                  <option value="">
+                    App default
+                    {settingsQuery.data?.global_metadata_source
+                      ? ` (${settingsQuery.data.global_metadata_source})`
+                      : ''}
+                  </option>
+                  {sourceOptions.map((source) => (
+                    <option key={source} value={source}>
+                      {source.charAt(0).toUpperCase() + source.slice(1)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Library-v2 discography rule</span>
+                <select
+                  className={styles.select}
+                  value={draft.monitor_new_items}
+                  onChange={(event) =>
+                    setDraft((current) =>
+                      current
+                        ? {
+                            ...current,
+                            monitor_new_items: event.target.value as 'all' | 'new' | 'none',
+                          }
+                        : current,
+                    )
+                  }
+                >
+                  <option value="all">Monitor newly discovered releases</option>
+                  <option value="new">Only releases newer than the last sync</option>
+                  <option value="none">Do not monitor newly discovered releases</option>
+                </select>
+              </label>
+            </div>
+            {save.isError ? (
+              <div className={styles.mutationError} role="alert">
+                {mutationErrorMessage(save.error, 'Artist settings could not be saved')}
+              </div>
+            ) : save.isSuccess ? (
+              <div className={styles.mutationSuccess} role="status">
+                Watchlist Artist Settings saved.
+              </div>
+            ) : null}
+            <div className={styles.modalActions}>
+              <button
+                type="button"
+                className={styles.btnPrimary}
+                disabled={save.isPending}
+                onClick={() => save.mutate(draft)}
+              >
+                {save.isPending ? 'Saving…' : 'Save future-release settings'}
+              </button>
+            </div>
+          </section>
+
+          <section className={styles.artistSettingsSection}>
+            <h4>Existing releases and tracks</h4>
+            <p className={styles.muted}>
+              These actions change Wanted state for items already shown in Library v2. They do not
+              change the Watchlist bookmark or quality profile.
+            </p>
+            <div className={styles.artistSettingsActions}>
+              <button
+                type="button"
+                className={styles.toolButton}
+                disabled={bulkBusy !== null}
+                onClick={() =>
+                  void applyExistingReleaseStrategy('all', true, 'Monitor all existing releases')
+                }
+              >
+                {bulkBusy === 'Monitor all existing releases' ? 'Applying…' : 'Monitor all'}
+              </button>
+              <button
+                type="button"
+                className={styles.toolButton}
+                disabled={bulkBusy !== null}
+                onClick={() =>
+                  void applyExistingReleaseStrategy('missing', true, 'Monitor missing releases')
+                }
+              >
+                {bulkBusy === 'Monitor missing releases' ? 'Applying…' : 'Monitor missing only'}
+              </button>
+              <button
+                type="button"
+                className={styles.btnDanger}
+                disabled={bulkBusy !== null}
+                onClick={() =>
+                  void applyExistingReleaseStrategy('all', false, 'Unmonitor existing releases')
+                }
+              >
+                {bulkBusy === 'Unmonitor existing releases' ? 'Applying…' : 'Unmonitor all'}
+              </button>
+            </div>
+            {bulkMessage ? (
+              <div
+                className={
+                  bulkMessage.tone === 'ok' ? styles.mutationSuccess : styles.mutationError
+                }
+                role={bulkMessage.tone === 'ok' ? 'status' : 'alert'}
+              >
+                {bulkMessage.text}
+              </div>
+            ) : null}
+          </section>
+        </>
+      )}
+    </ModalShell>
+  );
+}
+
 const HISTORY_CATEGORY_LABELS: Record<LibraryV2HistoryCategory, string> = {
   grabbed: 'Grabbed',
   imported: 'Imported',
@@ -1317,7 +1627,9 @@ function HistoryModal({ artistId, onClose }: { artistId: number; onClose: () => 
   );
 }
 
-/** Keep catalog removal and ADR-05 physical deletion visibly separate. */
+/** Artist/album delete shortcuts use the same two-mode file-removal dialog
+ * as Manage Tracks. Whole-entity removal happens only after the selected
+ * file command succeeds, so a partial disk failure never orphans live files. */
 function DeleteConfirmModal({
   entity,
   id,
@@ -1331,175 +1643,17 @@ function DeleteConfirmModal({
   onDone: () => void;
   onClose: () => void;
 }) {
-  const queryClient = useQueryClient();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [fileBusy, setFileBusy] = useState(false);
-  const [fileError, setFileError] = useState<string | null>(null);
-  const [fileResult, setFileResult] = useState<string | null>(null);
-  const [confirmFileDelete, setConfirmFileDelete] = useState(false);
-  // Show the real blast radius before the user commits: only releases the
-  // artist OWNS are removed; featured appearances on other artists' releases
-  // survive (they are merely detached).
-  const preview = useQuery({
-    queryKey: [...LIBRARY_V2_QUERY_KEY, 'delete-preview', entity, id],
-    queryFn: () => fetchLibraryV2ArtistDeletePreview(id),
-    enabled: entity === 'artists',
-  });
-  const filePreview = useQuery({
-    queryKey: [...LIBRARY_V2_QUERY_KEY, 'file-delete-preview', entity, id],
-    queryFn: () => fetchLibraryV2FileDeletePreview(entity, id),
-  });
-  const physical = filePreview.data;
-  const physicalReady = Boolean(physical && physical.file_count > 0 && physical.unsafe_count === 0);
   return (
-    <ModalShell title={`Delete ${entity === 'artists' ? 'Artist' : 'Album'}`} onClose={onClose}>
-      <p>
-        Remove <strong>{title}</strong> from the library? Monitoring stops and wishlist entries are
-        withdrawn. <strong>Files on disk are not deleted.</strong>
-      </p>
-      {entity === 'artists' && preview.data ? (
-        <p className={styles.muted}>
-          Removes {preview.data.albums} release{preview.data.albums === 1 ? '' : 's'} /{' '}
-          {preview.data.tracks} track{preview.data.tracks === 1 ? '' : 's'} owned by this artist.
-          {preview.data.detached_albums > 0
-            ? ` Appears on ${preview.data.detached_albums} other ${
-                preview.data.detached_albums === 1 ? 'release' : 'releases'
-              } — those stay in the library.`
-            : ''}
-        </p>
-      ) : null}
-      {error ? <div className={styles.searchError}>{error}</div> : null}
-      <div className={styles.modalActions}>
-        <button
-          type="button"
-          className={styles.btnGhost}
-          disabled={busy || fileBusy}
-          onClick={onClose}
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          className={styles.btnDanger}
-          disabled={busy || fileBusy}
-          onClick={() => {
-            setBusy(true);
-            void deleteLibraryV2Entity(entity, id)
-              .then(async () => {
-                await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
-                onDone();
-              })
-              .catch((e) => {
-                setError(e instanceof Error ? e.message : 'Delete failed');
-                setBusy(false);
-              });
-          }}
-        >
-          {busy ? 'Removing…' : 'Remove from library'}
-        </button>
-      </div>
-
-      <section className={styles.fileDeletePanel}>
-        <h4>Delete physical files</h4>
-        <p>
-          This is a separate, irreversible command. It keeps the artist, release, and tracks in
-          Library v2 and marks their file records as deleted.
-        </p>
-        {filePreview.isLoading ? <p className={styles.muted}>Checking file roots…</p> : null}
-        {filePreview.error ? (
-          <div className={styles.searchError}>{filePreview.error.message}</div>
-        ) : null}
-        {physical ? (
-          <>
-            <p>
-              {physical.file_count} physical file{physical.file_count === 1 ? '' : 's'} ·{' '}
-              {formatFileSize(physical.total_size)}
-              {physical.configured_roots.length > 0
-                ? ` · ${physical.configured_roots.length} configured library root${
-                    physical.configured_roots.length === 1 ? '' : 's'
-                  }`
-                : ' · no configured library root'}
-            </p>
-            {physical.files.length > 0 ? (
-              <ul className={styles.fileDeleteList}>
-                {physical.files.map((file) => (
-                  <li key={file.path ?? file.file_ids.join('-')}>
-                    <span>{file.path ?? file.stored_paths[0] ?? 'Unresolved file'}</span>
-                    <small>
-                      {file.deletable
-                        ? `${formatFileSize(file.size ?? 0)} · ${file.root}`
-                        : `Blocked: ${file.reason ?? 'unsafe path'}`}
-                    </small>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className={styles.muted}>No linked physical files remain.</p>
-            )}
-            {physical.unsafe_count > 0 ? (
-              <div className={styles.searchError}>
-                Physical deletion is blocked because {physical.unsafe_count} file
-                {physical.unsafe_count === 1 ? ' is' : 's are'} unresolved or outside a configured
-                library root.
-              </div>
-            ) : null}
-          </>
-        ) : null}
-        {fileError ? <div className={styles.searchError}>{fileError}</div> : null}
-        {fileResult ? <p>{fileResult}</p> : null}
-        <label className={styles.fileDeleteConfirm}>
-          <input
-            type="checkbox"
-            checked={confirmFileDelete}
-            disabled={!physicalReady || fileBusy}
-            onChange={(event) => setConfirmFileDelete(event.target.checked)}
-          />
-          I understand these files will be permanently deleted from disk.
-        </label>
-        <div className={styles.modalActions}>
-          <button
-            type="button"
-            className={styles.btnDanger}
-            disabled={!physicalReady || !confirmFileDelete || fileBusy || busy}
-            onClick={() => {
-              if (!physical) return;
-              setFileBusy(true);
-              setFileError(null);
-              setFileResult(null);
-              void deleteLibraryV2Files(entity, id, physical.preview_token)
-                .then(async (operation) => {
-                  const deleted = operation.items.filter(
-                    (item) => item.status === 'deleted',
-                  ).length;
-                  const failed = operation.items.filter((item) => item.status === 'failed').length;
-                  setFileResult(
-                    failed > 0
-                      ? `Deleted ${deleted} file${deleted === 1 ? '' : 's'}; ${failed} failed. Journal ${operation.id}.`
-                      : `Deleted ${deleted} physical file${deleted === 1 ? '' : 's'}. Journal ${operation.id}.`,
-                  );
-                  setConfirmFileDelete(false);
-                  await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
-                  await filePreview.refetch();
-                })
-                .catch((e) => {
-                  setFileError(e instanceof Error ? e.message : 'Physical file deletion failed');
-                })
-                .finally(() => setFileBusy(false));
-            }}
-          >
-            {fileBusy
-              ? 'Deleting files…'
-              : `Permanently delete ${physical?.deletable_count ?? 0} file${
-                  physical?.deletable_count === 1 ? '' : 's'
-                }`}
-          </button>
-        </div>
-      </section>
-    </ModalShell>
+    <UnifiedFileRemovalDialog
+      entity={entity}
+      eid={id}
+      title={title}
+      removeWholeEntity
+      onDone={onDone}
+      onCancel={onClose}
+    />
   );
 }
-
 /** Correct effective release metadata without rewriting provider baselines. */
 type EditableAlbumMetadata = Pick<
   LibraryV2AlbumSummary | LibraryV2AlbumDetail,
@@ -2517,10 +2671,7 @@ function ArtistFilesTab({ artistId }: { artistId: number }) {
   );
 }
 
-/** Scoped ADR-05 preview/execute for a caller-selected file-id subset — same
- *  contract and UX as `DeleteConfirmModal`'s physical-file section, just
- *  bounded to `fileIds` instead of the whole entity. Entity-generic (C2's
- *  artist Files tab, B6's album-scoped track-table bulk delete). */
+/** Shared §52.11 dialog used by Manage Tracks and artist/album shortcuts. */
 function FilesDeleteConfirm({
   entity,
   eid,
@@ -2534,88 +2685,273 @@ function FilesDeleteConfirm({
   onDone: () => void;
   onCancel: () => void;
 }) {
+  return (
+    <UnifiedFileRemovalDialog
+      entity={entity}
+      eid={eid}
+      fileIds={fileIds}
+      onDone={onDone}
+      onCancel={onCancel}
+    />
+  );
+}
+
+function middleEllipsis(path: string, max = 76): string {
+  if (path.length <= max) return path;
+  const side = Math.floor((max - 1) / 2);
+  return `${path.slice(0, side)}…${path.slice(-side)}`;
+}
+
+export function UnifiedFileRemovalDialog({
+  entity,
+  eid,
+  fileIds,
+  title,
+  removeWholeEntity = false,
+  onDone,
+  onCancel,
+}: {
+  entity: 'artists' | 'albums';
+  eid: number;
+  fileIds?: number[];
+  title?: string;
+  removeWholeEntity?: boolean;
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [mode, setMode] = useState<'database_only' | 'permanent'>('database_only');
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [revealedPaths, setRevealedPaths] = useState<Set<string>>(() => new Set());
+  const entityImpact = useQuery({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'delete-preview', entity, eid],
+    queryFn: () => fetchLibraryV2ArtistDeletePreview(eid),
+    enabled: removeWholeEntity && entity === 'artists',
+  });
   const preview = useQuery({
     queryKey: [...LIBRARY_V2_QUERY_KEY, 'file-delete-preview', entity, eid, fileIds],
     queryFn: () => fetchLibraryV2FileDeletePreview(entity, eid, fileIds),
   });
   const physical = preview.data;
+  const trackCount = new Set((physical?.files ?? []).flatMap((file) => file.track_ids ?? [])).size;
   const physicalReady = Boolean(physical && physical.file_count > 0 && physical.unsafe_count === 0);
+  const canExecute = Boolean(
+    physical && !busy && (mode === 'database_only' || (physicalReady && confirmed)),
+  );
+
+  async function execute() {
+    if (!physical) return;
+    setBusy(true);
+    setError(null);
+    try {
+      if (mode === 'database_only') {
+        if (physical.file_count > 0) {
+          await removeLibraryV2FileRecords(entity, eid, fileIds);
+        }
+        if (removeWholeEntity) {
+          await deleteLibraryV2Entity(entity, eid);
+        }
+      } else {
+        const operation = await deleteLibraryV2Files(entity, eid, physical.preview_token, fileIds);
+        if (operation.status !== 'completed') {
+          throw new Error(
+            `Permanent deletion was ${operation.status}; the library entry was kept for review.`,
+          );
+        }
+        if (removeWholeEntity) {
+          await deleteLibraryV2Entity(entity, eid);
+        }
+      }
+      await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+      onDone();
+    } catch (caught) {
+      setError(mutationErrorMessage(caught, 'File removal failed'));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const heading = removeWholeEntity
+    ? `Remove ${entity === 'artists' ? 'artist' : 'album'}`
+    : 'Remove selected files';
+  const subject = title || physical?.title || `${fileIds?.length ?? 0} selected files`;
 
   return (
-    <section className={styles.fileDeletePanel}>
-      <h4>
-        Delete {fileIds.length} selected file{fileIds.length === 1 ? '' : 's'}
-      </h4>
-      {preview.isLoading ? <p className={styles.muted}>Checking file roots…</p> : null}
-      {preview.error ? <div className={styles.searchError}>{preview.error.message}</div> : null}
+    <ModalShell title={heading} wide onClose={onCancel}>
+      <p>
+        Choose what should happen to <strong>{subject}</strong>. Monitoring and Wanted state are
+        recalculated after the file records change.
+      </p>
+      {preview.isLoading ? <p className={styles.muted}>Building file summary…</p> : null}
+      {preview.isError ? (
+        <div className={styles.mutationError} role="alert">
+          {mutationErrorMessage(preview.error, 'File summary could not be loaded')}
+        </div>
+      ) : null}
       {physical ? (
         <>
-          <p>
-            {physical.file_count} file{physical.file_count === 1 ? '' : 's'} ·{' '}
-            {formatFileSize(physical.total_size)}
-          </p>
-          <ul className={styles.fileDeleteList}>
-            {physical.files.map((file) => (
-              <li key={file.path ?? file.file_ids.join('-')}>
-                <span>{file.path ?? file.stored_paths[0] ?? 'Unresolved file'}</span>
-                <small>
-                  {file.deletable
-                    ? `${formatFileSize(file.size ?? 0)} · ${file.root}`
-                    : `Blocked: ${file.reason ?? 'unsafe path'}`}
-                </small>
-              </li>
-            ))}
-          </ul>
-          {physical.unsafe_count > 0 ? (
-            <div className={styles.searchError}>
-              Physical deletion is blocked because {physical.unsafe_count} file
-              {physical.unsafe_count === 1 ? ' is' : 's are'} unresolved or outside a configured
-              library root.
-            </div>
-          ) : null}
+          <div className={styles.fileRemovalSummary}>
+            <span>
+              <strong>{trackCount}</strong>
+              {removeWholeEntity ? ' file-linked tracks' : ' tracks'}
+            </span>
+            <span>
+              <strong>{physical.file_count}</strong> files
+            </span>
+            <span>
+              <strong>{formatFileSize(physical.total_size)}</strong> total
+            </span>
+          </div>
+          {physical.files.length > 0 ? (
+            <details className={styles.fileRemovalPaths}>
+              <summary>Review paths ({physical.files.length})</summary>
+              <ul className={styles.fileDeleteList}>
+                {physical.files.map((file) => {
+                  const path = file.path ?? file.stored_paths[0] ?? 'Unresolved file';
+                  const pathRevealed = revealedPaths.has(path);
+                  return (
+                    <li key={path || file.file_ids.join('-')}>
+                      <span className={styles.fileRemovalPathRow}>
+                        <span
+                          className={pathRevealed ? styles.fileRemovalPathRevealed : undefined}
+                          title={path}
+                        >
+                          {pathRevealed ? path : middleEllipsis(path)}
+                        </span>
+                        <button
+                          type="button"
+                          className={styles.pathCopyButton}
+                          title={pathRevealed ? 'Collapse full path' : 'Reveal full path'}
+                          aria-label={pathRevealed ? 'Collapse full path' : 'Reveal full path'}
+                          onClick={() =>
+                            setRevealedPaths((current) => {
+                              const next = new Set(current);
+                              if (next.has(path)) next.delete(path);
+                              else next.add(path);
+                              return next;
+                            })
+                          }
+                        >
+                          {pathRevealed ? 'Hide' : 'Reveal'}
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.pathCopyButton}
+                          title="Copy full path"
+                          aria-label="Copy full path"
+                          onClick={() => void navigator.clipboard?.writeText(path)}
+                        >
+                          Copy
+                        </button>
+                      </span>
+                      <small>
+                        {file.album_title ? `${file.album_title} · ` : ''}
+                        {formatFileSize(file.size ?? 0)}
+                        {!file.deletable ? ` · permanent delete blocked: ${file.reason}` : ''}
+                      </small>
+                    </li>
+                  );
+                })}
+              </ul>
+            </details>
+          ) : (
+            <p className={styles.muted}>No linked files remain. Database removal is still safe.</p>
+          )}
         </>
       ) : null}
-      {error ? <div className={styles.searchError}>{error}</div> : null}
-      <label className={styles.fileDeleteConfirm}>
-        <input
-          type="checkbox"
-          checked={confirmed}
-          disabled={!physicalReady || busy}
-          onChange={(e) => setConfirmed(e.target.checked)}
-        />
-        I understand these files will be permanently deleted from disk.
-      </label>
+      {entityImpact.data ? (
+        <p className={styles.muted}>
+          Removing the artist also removes {entityImpact.data.albums} owned release
+          {entityImpact.data.albums === 1 ? '' : 's'} and {entityImpact.data.tracks} catalog track
+          {entityImpact.data.tracks === 1 ? '' : 's'}.
+          {entityImpact.data.detached_albums > 0
+            ? ` ${entityImpact.data.detached_albums} featured ${
+                entityImpact.data.detached_albums === 1 ? 'appearance stays' : 'appearances stay'
+              } in the library.`
+            : ''}
+        </p>
+      ) : null}
+
+      <div className={styles.fileRemovalChoices}>
+        <label
+          className={`${styles.fileRemovalChoice} ${
+            mode === 'database_only' ? styles.fileRemovalChoiceActive : ''
+          }`}
+        >
+          <input
+            type="radio"
+            name="file-removal-mode"
+            checked={mode === 'database_only'}
+            onChange={() => {
+              setMode('database_only');
+              setConfirmed(false);
+            }}
+          />
+          <span>
+            <strong>Remove from library database only</strong>
+            <small>Keep every physical file on disk.</small>
+          </span>
+        </label>
+        <label
+          className={`${styles.fileRemovalChoice} ${
+            mode === 'permanent' ? styles.fileRemovalChoiceDanger : ''
+          }`}
+        >
+          <input
+            type="radio"
+            name="file-removal-mode"
+            checked={mode === 'permanent'}
+            disabled={!physicalReady}
+            onChange={() => setMode('permanent')}
+          />
+          <span>
+            <strong>Permanently delete files</strong>
+            <small>Remove the library records and delete the corresponding disk files.</small>
+          </span>
+        </label>
+      </div>
+      {physical && physical.unsafe_count > 0 ? (
+        <div className={styles.mutationError} role="alert">
+          Permanent deletion is blocked for {physical.unsafe_count} unsafe or unresolved file
+          {physical.unsafe_count === 1 ? '' : 's'}. Database-only removal remains available.
+        </div>
+      ) : null}
+      {mode === 'permanent' ? (
+        <label className={styles.fileDeleteConfirm}>
+          <input
+            type="checkbox"
+            checked={confirmed}
+            disabled={!physicalReady || busy}
+            onChange={(event) => setConfirmed(event.target.checked)}
+          />
+          I understand this permanently deletes the selected files from disk.
+        </label>
+      ) : null}
+      {error ? (
+        <div className={styles.mutationError} role="alert">
+          {error}
+        </div>
+      ) : null}
       <div className={styles.modalActions}>
         <button type="button" className={styles.btnGhost} disabled={busy} onClick={onCancel}>
           Cancel
         </button>
         <button
           type="button"
-          className={styles.btnDanger}
-          disabled={!physicalReady || !confirmed || busy}
-          onClick={() => {
-            if (!physical) return;
-            setBusy(true);
-            setError(null);
-            void deleteLibraryV2Files(entity, eid, physical.preview_token, fileIds)
-              .then(() => onDone())
-              .catch((e) =>
-                setError(e instanceof Error ? e.message : 'Physical file deletion failed'),
-              )
-              .finally(() => setBusy(false));
-          }}
+          className={mode === 'permanent' ? styles.btnDanger : styles.btnPrimary}
+          disabled={!canExecute}
+          onClick={() => void execute()}
         >
           {busy
-            ? 'Deleting…'
-            : `Permanently delete ${physical?.deletable_count ?? 0} file${
-                physical?.deletable_count === 1 ? '' : 's'
-              }`}
+            ? 'Working…'
+            : mode === 'permanent'
+              ? 'Permanently delete'
+              : 'Remove from library database'}
         </button>
       </div>
-    </section>
+    </ModalShell>
   );
 }
 
@@ -3669,13 +4005,14 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
     action: string;
     entity?: Lib2EntityRef;
   } | null>(null);
-  const [showMonitoring, setShowMonitoring] = useState(false);
+  const [showArtistSettings, setShowArtistSettings] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showMaintenance, setShowMaintenance] = useState(false);
   const [showManageTracks, setShowManageTracks] = useState(false);
   const [showReorganizeAll, setShowReorganizeAll] = useState(false);
   const [showEditArtist, setShowEditArtist] = useState(false);
   const [showArtPicker, setShowArtPicker] = useState(false);
+  const [showUnmonitoredProfile, setShowUnmonitoredProfile] = useState(false);
   // Album-scoped retag/delete now live inside each album's own
   // AlbumOverflowMenu (B1/B2) — this state is only for the artist-level
   // toolbar's own Preview Retag / Delete buttons.
@@ -3693,7 +4030,6 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
     tone: 'busy' | 'ok' | 'err';
     text: string;
   } | null>(null);
-  const [qpTarget, setQpTarget] = useState<QpTarget | null>(null);
   const queryClient = useQueryClient();
   const artistName = artist?.name ?? '';
   const attemptedDiscographyFetchRef = useRef(false);
@@ -3748,17 +4084,6 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
    *  server-side search (deep-dive C1) — the entity ref decides whether it
    *  searches this one track, this one album, or the whole artist. */
   function handleAction(action: string, entity?: Lib2EntityRef) {
-    if (action === 'Quality Profile' && artist) {
-      setQpTarget({
-        entity: 'artists',
-        id: artistId,
-        currentProfileId: artist.quality_profile?.id ?? 1,
-        currentProfileSource: artist.quality_profile_source,
-        currentProfileExplicit: artist.quality_profile_explicit,
-        title: artist.name,
-      });
-      return;
-    }
     if (INTERACTIVE_RE.test(action)) {
       setModalAction({ action, entity });
       return;
@@ -3839,27 +4164,23 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 title="Pick from alternate artist photos"
                 onClick={() => setShowArtPicker(true)}
               />
-              <ActionButton
-                icon="monitor"
-                label="Monitoring"
-                title="Apply a monitoring strategy across this artist's releases"
-                onClick={() => setShowMonitoring(true)}
-              />
-              <ActionButton
-                icon="star"
-                label={`Profile: ${
-                  artist.quality_profile
-                    ? profileLabel(artist.quality_profile.name, artist.quality_profile_source)
-                    : 'None'
-                }`}
-                title="Change default quality profile for this artist"
-                onClick={() => handleAction('Quality Profile')}
-              />
+              {!artist.monitored ? (
+                <ActionButton
+                  icon="star"
+                  label={`Profile: ${
+                    artist.quality_profile
+                      ? profileLabel(artist.quality_profile.name, artist.quality_profile_source)
+                      : 'None'
+                  }`}
+                  title="Set quality independently; bookmark the artist to unlock Watchlist settings"
+                  onClick={() => setShowUnmonitoredProfile(true)}
+                />
+              ) : null}
               <ActionButton
                 icon="delete"
                 label="Delete"
                 tone="danger"
-                title="Remove this artist from the library (files stay on disk)"
+                title="Remove this artist and choose whether linked files stay on disk"
                 onClick={() =>
                   setDeleteTarget({ entity: 'artists', id: artistId, title: artist.name })
                 }
@@ -3890,6 +4211,13 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               <div className={styles.detailTitleRow}>
                 <MonitorToggle entity="artists" id={artist.id} monitored={artist.monitored} />
                 <h1 className={styles.title}>{artist.name}</h1>
+                {artist.monitored ? (
+                  <IconActionButton
+                    icon="settings"
+                    title="Artist Settings — Watchlist, future releases, quality and provider match"
+                    onClick={() => setShowArtistSettings(true)}
+                  />
+                ) : null}
               </div>
               <p className={styles.subtitle}>
                 {artist.album_count} albums · {artist.single_count} singles
@@ -3978,12 +4306,8 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               onClose={() => setModalAction(null)}
             />
           ) : null}
-          {showMonitoring ? (
-            <MonitoringModal
-              artistId={artistId}
-              monitorNewItems={artist.monitor_new_items}
-              onClose={() => setShowMonitoring(false)}
-            />
+          {showArtistSettings ? (
+            <ArtistSettingsModal artist={artist} onClose={() => setShowArtistSettings(false)} />
           ) : null}
           {showHistory ? (
             <HistoryModal artistId={artistId} onClose={() => setShowHistory(false)} />
@@ -4016,6 +4340,17 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               onClose={() => setShowArtPicker(false)}
             />
           ) : null}
+          {showUnmonitoredProfile ? (
+            <QualityProfileModal
+              entity="artists"
+              id={artist.id}
+              currentProfileId={artist.quality_profile?.id ?? 1}
+              currentProfileSource={artist.quality_profile_source}
+              currentProfileExplicit={artist.quality_profile_explicit}
+              title={artist.name}
+              onClose={() => setShowUnmonitoredProfile(false)}
+            />
+          ) : null}
           {retagTarget ? (
             <RetagModal
               entity={retagTarget.entity}
@@ -4034,17 +4369,6 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 void navigate({ search: (p) => ({ ...p, artist: undefined }) });
               }}
               onClose={() => setDeleteTarget(null)}
-            />
-          ) : null}
-          {qpTarget ? (
-            <QualityProfileModal
-              entity={qpTarget.entity}
-              id={qpTarget.id}
-              currentProfileId={qpTarget.currentProfileId}
-              currentProfileSource={qpTarget.currentProfileSource}
-              currentProfileExplicit={qpTarget.currentProfileExplicit}
-              title={qpTarget.title}
-              onClose={() => setQpTarget(null)}
             />
           ) : null}
         </>

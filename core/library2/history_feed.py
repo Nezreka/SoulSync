@@ -247,17 +247,22 @@ def _file_delete_events(
     clauses: List[str] = []
     params: List[Any] = []
     if artist_id is not None:
-        clauses.append("(entity_type='artist' AND entity_id=?)")
+        clauses.append("(entity_type IN ('artist','artists') AND entity_id=?)")
         params.append(artist_id)
     if album_ids:
-        clauses.append(f"(entity_type='release_group' AND entity_id IN ({_in_clause(album_ids)}))")
+        clauses.append(
+            f"(entity_type IN ('release_group','albums') "
+            f"AND entity_id IN ({_in_clause(album_ids)}))"
+        )
         params.extend(album_ids)
     if not clauses:
         return []
     try:
         rows = _rows(
             conn,
-            f"""SELECT status, file_count, created_at, completed_at
+            f"""SELECT status, file_count, created_at, completed_at,
+                       COALESCE(mode, 'permanent') AS mode,
+                       COALESCE(actor, 'user') AS actor
                   FROM lib2_file_delete_operations WHERE {' OR '.join(clauses)}
                  ORDER BY COALESCE(completed_at, created_at) DESC LIMIT ?""",
             (*params, limit),
@@ -267,13 +272,20 @@ def _file_delete_events(
     events = []
     for r in rows:
         completed = r["status"] == "completed"
+        database_only = r["mode"] == "database_only"
         events.append({
             "date": r["completed_at"] or r["created_at"],
-            "event_type": "files_deleted",
+            "event_type": "file_records_removed" if database_only else "files_deleted",
             "category": "deleted",
-            "title": "Files deleted" if completed else f"File delete {r['status']}",
-            "detail": f"{r['file_count']} file(s)",
-            "source": "filesystem",
+            "title": (
+                "Removed from library database"
+                if database_only and completed
+                else "Files permanently deleted"
+                if completed
+                else f"File removal {r['status']}"
+            ),
+            "detail": f"{r['file_count']} file(s) · actor {r['actor']}",
+            "source": "library" if database_only else "filesystem",
         })
     return events
 

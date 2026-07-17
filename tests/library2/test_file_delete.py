@@ -11,6 +11,7 @@ from core.library2.file_delete import (
     delete_entity_files,
     preview_entity_files,
     reconcile_incomplete_deletes,
+    remove_entity_file_records,
 )
 
 
@@ -173,6 +174,51 @@ def test_preview_missing_entity_is_controlled(imported_conn, legacy_db):
     with pytest.raises(FileDeleteError) as exc:
         preview_entity_files(legacy_db, entity="albums", entity_id=999999)
     assert exc.value.status == 404
+
+
+def test_database_only_removal_keeps_disk_file_and_journals_mode(
+        imported_conn, legacy_db, tmp_path):
+    path = tmp_path / "keep-on-disk.flac"
+    path.write_bytes(b"audio")
+    track = imported_conn.execute(
+        "SELECT id, album_id FROM lib2_tracks LIMIT 1"
+    ).fetchone()
+    file_id = _set_track_path(imported_conn, track["id"], path)
+
+    operation = remove_entity_file_records(
+        legacy_db,
+        entity="albums",
+        entity_id=track["album_id"],
+        file_ids=[file_id],
+        actor="user",
+        actor_profile_id=1,
+    )
+
+    assert path.exists()
+    assert operation["status"] == "completed"
+    assert operation["mode"] == "database_only"
+    assert operation["actor"] == "user"
+    assert operation["actor_profile_id"] == 1
+    assert operation["track_ids"] == [track["id"]]
+    assert operation["items"][0]["status"] == "removed"
+    assert imported_conn.execute(
+        "SELECT file_state FROM lib2_track_files WHERE id=?", (file_id,)
+    ).fetchone()[0] == "deleted"
+    from core.library2.wishlist_mirror import track_wishlist_payload
+
+    payload = track_wishlist_payload(imported_conn, track["id"])
+    assert payload["_has_file"] is False
+    assert payload["_should_queue"] is True
+
+
+def test_schema_migrates_file_removal_mode_columns(imported_conn):
+    columns = {
+        row[1]
+        for row in imported_conn.execute(
+            "PRAGMA table_info(lib2_file_delete_operations)"
+        )
+    }
+    assert {"mode", "actor", "actor_profile_id"} <= columns
 
 
 def test_execute_journals_before_unlink_and_preserves_entity(

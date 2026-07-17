@@ -111,6 +111,8 @@ def _embedded_art_for_album(conn, config_manager, album_id: int) -> Optional[byt
         SELECT tf.path FROM lib2_track_files tf
         JOIN lib2_tracks t ON t.id = tf.track_id
         WHERE t.album_id = ? AND tf.path IS NOT NULL
+          AND COALESCE(tf.file_state,'active')
+              NOT IN ('missing_confirmed','deleted')
         ORDER BY t.track_number, t.id, {primary_order('tf')} LIMIT 5
         """,
         (album_id,),

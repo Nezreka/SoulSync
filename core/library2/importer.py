@@ -1587,6 +1587,7 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
                      FROM lib2_tracks t
                      JOIN lib2_track_files tf ON tf.track_id = t.id
                     WHERE t.album_id = ?
+                      AND COALESCE(tf.file_state,'active')<>'deleted'
                )
             """,
             (album_id, album_id, album_id, album_id),

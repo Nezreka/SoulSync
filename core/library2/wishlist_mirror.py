@@ -28,7 +28,10 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
                   al.id AS album_id, al.title album_title, al.spotify_id album_spotify,
                   al.track_count, al.expected_track_count, al.album_type,
                   EXISTS(SELECT 1 FROM lib2_track_files tf
-                         WHERE tf.track_id = t.id AND tf.path IS NOT NULL AND tf.path <> '') has_file
+                         WHERE tf.track_id = t.id
+                           AND tf.path IS NOT NULL AND tf.path <> ''
+                           AND COALESCE(tf.file_state,'active')
+                               NOT IN ('missing_confirmed','deleted')) has_file
            FROM lib2_tracks t JOIN lib2_albums al ON al.id = t.album_id
            WHERE t.id = ?""",
         (track_id,),
@@ -204,6 +207,8 @@ def upgrade_candidate_track_ids(conn, *, profile_id: int = 1) -> List[int]:
         f"""SELECT t.id,
                   (SELECT tf.path FROM lib2_track_files tf
                     WHERE tf.track_id=t.id AND tf.path IS NOT NULL AND tf.path<>''
+                      AND COALESCE(tf.file_state,'active')
+                          NOT IN ('missing_confirmed','deleted')
                     ORDER BY {primary_order('tf')} LIMIT 1) AS path
              FROM lib2_tracks t
            JOIN lib2_wanted_tracks wt ON wt.track_id=t.id
@@ -212,7 +217,9 @@ def upgrade_candidate_track_ids(conn, *, profile_id: int = 1) -> List[int]:
           WHERE wt.projection_version=?
             AND qp.upgrade_policy IN ('until_top', 'until_cutoff')
             AND EXISTS (SELECT 1 FROM lib2_track_files f
-                         WHERE f.track_id=t.id AND f.path IS NOT NULL AND f.path<>'')""",
+                         WHERE f.track_id=t.id AND f.path IS NOT NULL AND f.path<>''
+                           AND COALESCE(f.file_state,'active')
+                               NOT IN ('missing_confirmed','deleted'))""",
         (int(profile_id), PROJECTION_VERSION),
     ).fetchall()
     from core.library2.manual_skips import active_skip_paths

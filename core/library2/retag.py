@@ -45,9 +45,13 @@ def _track_rows(conn, track_ids: List[int]) -> List[Any]:
                    ar.name AS album_artist_name,
                    (SELECT tf.id FROM lib2_track_files tf
                      WHERE tf.track_id = t.id AND tf.path IS NOT NULL AND tf.path <> ''
+                       AND COALESCE(tf.file_state,'active')
+                           NOT IN ('missing_confirmed','deleted')
                      ORDER BY {primary_order('tf')} LIMIT 1) AS file_id,
                    (SELECT tf.path FROM lib2_track_files tf
                      WHERE tf.track_id = t.id AND tf.path IS NOT NULL AND tf.path <> ''
+                       AND COALESCE(tf.file_state,'active')
+                           NOT IN ('missing_confirmed','deleted')
                      ORDER BY {primary_order('tf')} LIMIT 1) AS file_path
             FROM lib2_tracks t
             JOIN lib2_albums al ON al.id = t.album_id
@@ -235,10 +239,12 @@ def write_tags(database, track_ids: List[int], *, embed_cover: bool = True,
             file_tags = read_file_tags(abs_path)
             db_data = row["db_data"]
 
-            def _cover() -> Optional[Tuple[bytes, str]]:
-                if row["album_id"] not in covers:
-                    covers[row["album_id"]] = _album_cover_data(database, row["album_id"])
-                return covers[row["album_id"]]
+            album_id = row["album_id"]
+
+            def _cover(album_id=album_id) -> Optional[Tuple[bytes, str]]:
+                if album_id not in covers:
+                    covers[album_id] = _album_cover_data(database, album_id)
+                return covers[album_id]
 
             if not file_tags.get("error"):
                 diff = build_tag_diff(file_tags, db_data)

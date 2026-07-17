@@ -6,6 +6,7 @@ import type {
   LibraryV2AlbumDetail,
   LibraryV2ArtistAliasMember,
   LibraryV2ArtistDetail,
+  LibraryV2ArtistSettings,
   LibraryV2ArtistSummary,
   LibraryV2DiscographyStats,
   LibraryV2FileTags,
@@ -368,6 +369,84 @@ export async function editLibraryV2Artist(
   if (!payload.success) throw new Error(payload.error || 'Edit failed');
 }
 
+export interface LibraryV2ArtistSettingsResponse {
+  settings: LibraryV2ArtistSettings;
+  metadata_sources: string[];
+  global_metadata_source: string | null;
+}
+
+export async function fetchLibraryV2ArtistSettings(
+  artistId: number,
+): Promise<LibraryV2ArtistSettingsResponse> {
+  const payload = await readJson<{
+    success: boolean;
+    error?: string;
+    settings?: LibraryV2ArtistSettings;
+    metadata_sources?: string[];
+    global_metadata_source?: string | null;
+  }>(apiClient.get(`library/v2/artists/${artistId}/settings`));
+  if (!payload.success || !payload.settings) {
+    throw new Error(payload.error || 'Artist settings could not be loaded');
+  }
+  return {
+    settings: payload.settings,
+    metadata_sources: payload.metadata_sources ?? [],
+    global_metadata_source: payload.global_metadata_source ?? null,
+  };
+}
+
+export async function updateLibraryV2ArtistSettings(
+  artistId: number,
+  settings: Pick<
+    LibraryV2ArtistSettings,
+    | 'monitor_new_items'
+    | 'include_albums'
+    | 'include_eps'
+    | 'include_singles'
+    | 'include_live'
+    | 'include_remixes'
+    | 'include_acoustic'
+    | 'include_compilations'
+    | 'include_instrumentals'
+    | 'auto_download'
+    | 'lookback_days'
+    | 'preferred_metadata_source'
+  >,
+): Promise<LibraryV2ArtistSettingsResponse> {
+  const payload = await readJson<{
+    success: boolean;
+    error?: string;
+    settings?: LibraryV2ArtistSettings;
+    metadata_sources?: string[];
+    global_metadata_source?: string | null;
+  }>(
+    apiClient.put(`library/v2/artists/${artistId}/settings`, {
+      json: {
+        monitor_new_items: settings.monitor_new_items,
+        include_albums: settings.include_albums,
+        include_eps: settings.include_eps,
+        include_singles: settings.include_singles,
+        include_live: settings.include_live,
+        include_remixes: settings.include_remixes,
+        include_acoustic: settings.include_acoustic,
+        include_compilations: settings.include_compilations,
+        include_instrumentals: settings.include_instrumentals,
+        auto_download: settings.auto_download,
+        lookback_days: settings.lookback_days,
+        preferred_metadata_source: settings.preferred_metadata_source,
+      },
+    }),
+  );
+  if (!payload.success || !payload.settings) {
+    throw new Error(payload.error || 'Artist settings could not be saved');
+  }
+  return {
+    settings: payload.settings,
+    metadata_sources: payload.metadata_sources ?? [],
+    global_metadata_source: payload.global_metadata_source ?? null,
+  };
+}
+
 export const LIBRARY_V2_ALBUM_TYPES = ['album', 'ep', 'single', 'compilation', 'live'] as const;
 export type LibraryV2AlbumType = (typeof LIBRARY_V2_ALBUM_TYPES)[number];
 
@@ -468,15 +547,38 @@ export interface LibraryV2FileDeletePreview {
 export interface LibraryV2FileDeleteOperation {
   id: string;
   status: 'planned' | 'executing' | 'completed' | 'partial';
+  mode: 'database_only' | 'permanent';
+  actor: string;
+  actor_profile_id: number | null;
   file_count: number;
   total_size: number;
   items: Array<{
     id: number;
-    status: 'planned' | 'deleting' | 'deleted' | 'failed';
+    status: 'planned' | 'deleting' | 'deleted' | 'removed' | 'failed';
     error: string | null;
     resolved_path: string;
     file_ids: number[];
   }>;
+}
+
+export async function removeLibraryV2FileRecords(
+  entity: 'artists' | 'albums',
+  id: number,
+  fileIds?: number[],
+): Promise<LibraryV2FileDeleteOperation> {
+  const payload = await readJson<{
+    success: boolean;
+    error?: string;
+    operation?: LibraryV2FileDeleteOperation;
+  }>(
+    apiClient.post(`library/v2/${entity}/${id}/file-remove`, {
+      json: fileIds?.length ? { file_ids: fileIds } : {},
+    }),
+  );
+  if (!payload.success || !payload.operation) {
+    throw new Error(payload.error || 'File records could not be removed');
+  }
+  return payload.operation;
 }
 
 export async function fetchLibraryV2FileDeletePreview(

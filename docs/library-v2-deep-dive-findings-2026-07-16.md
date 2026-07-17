@@ -271,7 +271,7 @@ Nutzer-Wunsch + Button-Ersparnis:
 - Gleiches Muster perspektivisch für Album-Scope (Album-RG-Button → Badge im
   Album-Kopf), dann verschwindet noch ein Zeilen-Button.
 
-### B4. Artist-Toolbar: 16 Aktionen → gruppieren, globale Aktionen raus aus dem Artist-Kontext — ✅ behoben (siehe library-v2.md §30; Punkt 4's optionale Edit/Monitoring/Profile-Tab-Zusammenlegung bewusst nicht gemacht, siehe dort)
+### B4. Artist-Toolbar: 16 Aktionen → gruppieren, globale Aktionen raus aus dem Artist-Kontext — ✅ behoben (siehe library-v2.md §30/§54; optionale Monitoring-/Profile-Konsolidierung nach späterem Nutzerreview umgesetzt)
 
 Aktuell (`:2888–3003`): Refresh & Scan, Automatic Search (global!),
 Interactive Search, Update Discography, Search Upgrades (global!), Preview
@@ -291,6 +291,16 @@ Enrich, Edit Metadata, Monitoring, Profile, Delete. Vorschlag:
    Edit, Delete — Edit/Monitoring/Profile ggf. in EIN „Edit"-Modal mit Tabs
    (Metadata / Monitoring / Quality Profile), wie das Track-Detail-Modal es
    bereits vormacht.
+
+**Update 2026-07-17:** Das spätere verbindliche Nutzerreview in §52.3/§52.4
+hat die optionale Zusammenlegung konkretisiert. §54 ersetzt die getrennten
+Artist-Aktionen „Monitoring" und „Profile" durch ein Settings-Gear neben dem
+gebookmarkten Artist. Die gemeinsame Oberfläche verwendet die bestehende
+Watchlist-Zeile, den app-weiten Quality-Profile-Picker und das vorhandene
+Provider-Re-Matching; vorhandene und zukünftige Releases bleiben darin klar
+getrennte Aktionsbereiche. Nur bei nicht gebookmarkten Artists bleibt der
+Profile-Button separat erreichbar: Quality ist orthogonal zum Monitoring,
+während ohne Bookmark noch keine Watchlist-Zeile für Artist Settings besteht.
 
 ### B5. Nutzer-konfigurierbare Anzeige (Spalten + Match-Provider + Features) — „richtig modal" — ✅ behoben (siehe library-v2.md §31)
 
@@ -498,9 +508,10 @@ A7 für nicht-acquisition-korrelierte Downloads (der Normalfall heute) leer.
 8. ~~**B1 + B2 + B4 (Entrümpelung Zeile/Toolbar/Detail-Ansicht)**~~ behoben
    2026-07-16 (§30) — neues generisches Overflow-Menü-Muster, Albumtitel als
    Detail-Link, `AlbumOverflowMenu` jetzt auch im Detail-Header (B2), Artist-
-   Toolbar in Primär-/Tools-Dropdown-/Entity-Gruppen (B4). Die im Deep-Dive
-   als „ggf." markierte Edit/Monitoring/Profile-Tab-Zusammenlegung wurde
-   bewusst NICHT gemacht (optional, keine belastbare Notwendigkeit).
+   Toolbar in Primär-/Tools-Dropdown-/Entity-Gruppen (B4). Die damals nur als
+   „ggf." markierte Monitoring-/Profile-Zusammenlegung wurde nach dem späteren
+   verbindlichen Nutzerreview in §52.3/§52.4 umgesetzt (§54), ohne die
+   Metadatenbearbeitung künstlich in dasselbe Formular zu zwingen.
 9. ~~**A6/C3 (History)**~~ behoben 2026-07-16 (§35): die befürchtete
    Fehlzuordnungsgefahr entfiel, weil `core/acquisition/catalog.py` die
    scope→lib2-Entity-Auflösung für den Search-Pfad bereits korrekt besitzt —
@@ -518,8 +529,9 @@ A7 für nicht-acquisition-korrelierte Downloads (der Normalfall heute) leer.
     Bulk-Leiste deckt den funktionalen Kern von H8 bereits ab, ohne dass H8
     selbst als Punkt geschlossen wäre.
 11. ~~**C2 (Manage Track Files)**~~ behoben 2026-07-16 (§30, inkl. optionalem
-    `file_ids`-Scope auf den bestehenden ADR-05-Endpoints) + **H5**
-    (Track-Delete in der Tabelle) bleibt offen (H-Punkt) + ~~A8/A9~~.
+    `file_ids`-Scope auf den bestehenden ADR-05-Endpoints) + **H5** nach dem
+    verbindlichen §52.11-Redesign ebenfalls umgesetzt (§54: gemeinsamer
+    DB-only/permanenter Dialog und Journalvertrag) + ~~A8/A9~~.
 12. **Strategisch klären, dann bauen:** I1 (Add Artist), I2 (Wanted-Views),
     I4 (Metadata Profile), H1 (Playback), H3 (Discography-Batch-Download),
     H9 (Multi-User-Frage von lib2).
@@ -659,7 +671,7 @@ den V2-Stand. Neu identifiziert, bisher NIRGENDS getrackt:
 | H2 | **Artist Top Tracks** (Hero-Sektion, Last.fm-Fallback, „Download one/all") | `_loadArtistTopTracks`, `/api/artist/<id>/top-tracks` | ❌ vom User am 2026-07-17 ausdrücklich nicht gewollt |
 | H3 | **Discography-Download-Modal** (Releases multi-selektieren → Batch-Download, Filter, Select-All) | `openDiscographyModal`, `startDiscographyDownload` | fehlt — lib2 kann nur monitor→wishlist pro Release |
 | H4 | **Track-Redownload-Modal** (Quellen streamen, gezielt neu laden) | `showTrackRedownloadModal` | ⏸️ zurückgestellt/nicht nötig; falls später: neu suchen und erst nach verifiziertem Import atomar ersetzen (§52.1/§52.6) |
-| H5 | **Track-/Album-Delete in der Tabelle** (inkl. Smart-Delete-Dialog) | `deleteLibraryTrack`, `_showSmartDeleteDialog`, `col-delete` | 🟡 Delete Selected/Album-Delete existieren, aber Dialog und gemeinsame Semantik sind nach Nutzerreview unzureichend; angenommener Redesign-Scope §52.11 |
+| H5 | **Track-/Album-Delete in der Tabelle** (inkl. Smart-Delete-Dialog) | `deleteLibraryTrack`, `_showSmartDeleteDialog`, `col-delete` | ✅ umgesetzt nach verbindlichem Nutzerreview §52.11: gemeinsamer Dialog für Manage Tracks und Album-/Artist-Shortcut, DB-only vs. permanent, sichere Pfade und gemeinsames Journal (library-v2.md §54) |
 | H6 | **A-Z-Alphabet-Selector + Source-/Watchlist-Filter + Stats-Header** der Artist-Liste | `initializeAlphabetSelector`, `initializeSourceFilter`, `updateLibraryStats` | V2 hat nur Suche/Sort/Monitor-Filter/Paging |
 | H7 | **Inline-Edit in der Tabelle** (Klick auf BPM-Zelle etc.) | `startInlineEdit` | fehlt (V2: Modal-only) |
 | H8 | **Bulk-Selektion + Bulk-Bar** (Batch-Write-Tags, Batch-ReplayGain, Bulk-Edit-Modal) | `batchWriteTagsSelected`, `showBulkEditModal` | fehlt (deckt sich mit B6) |
@@ -712,8 +724,9 @@ oben — diese Tabelle ist eine Enumeration, kein Spec.
   Hint-Datei), keine dünnen Wrapper wie ursprünglich angenommen. §48
   Rich-Metadata-Edit-Rest (BPM/Style/Mood/Label/Bulk) ist jetzt vollständig
   umgesetzt (library-v2.md §34).
-- Manage-Tracks-Delete-Wünsche: ui-requirements §3.1/§3.2/§5.1 (durch C2
-  konkretisiert).
+- ~~Manage-Tracks-Delete-Wünsche: ui-requirements §3.1/§3.2/§5.1~~ durch C2
+  konkretisiert und mit dem gemeinsamen §52.11-Flow in library-v2.md §54
+  abgeschlossen.
 - ~~Import-Progress/Timeout: P2-25~~ umgesetzt in library-v2.md §40;
   ~~Artist-Credit-Splitting-Restrisiko P2-24 + Download-Engine-Verantwortung
   P2-23~~ umgesetzt in library-v2.md §41.

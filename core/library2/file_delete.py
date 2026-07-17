@@ -1,4 +1,4 @@
-"""ADR-05 physical-file delete preview and root-safety boundary.
+"""ADR-05 file-removal journal and physical-delete safety boundary.
 
 Physical deletion is deliberately separate from removing a Library-v2 entity.
 This module first materializes the DB scope, closes SQLite, then resolves and
@@ -25,6 +25,9 @@ CREATE TABLE IF NOT EXISTS lib2_file_delete_operations (
     status TEXT NOT NULL,
     file_count INTEGER NOT NULL,
     total_size INTEGER NOT NULL DEFAULT 0,
+    mode TEXT NOT NULL DEFAULT 'permanent',
+    actor TEXT NOT NULL DEFAULT 'user',
+    actor_profile_id INTEGER,
     error TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     completed_at TIMESTAMP
@@ -58,6 +61,20 @@ def ensure_file_delete_schema(cursor) -> None:
     """Create the durable ADR-05 operation/item journal."""
     cursor.execute(FILE_DELETE_OPERATIONS_DDL)
     cursor.execute(FILE_DELETE_ITEMS_DDL)
+    operation_columns = {
+        str(row[1]) for row in cursor.execute(
+            "PRAGMA table_info(lib2_file_delete_operations)"
+        ).fetchall()
+    }
+    for column, ddl in (
+        ("mode", "TEXT NOT NULL DEFAULT 'permanent'"),
+        ("actor", "TEXT NOT NULL DEFAULT 'user'"),
+        ("actor_profile_id", "INTEGER"),
+    ):
+        if column not in operation_columns:
+            cursor.execute(
+                f"ALTER TABLE lib2_file_delete_operations ADD COLUMN {column} {ddl}"
+            )
     cursor.execute(
         "CREATE INDEX IF NOT EXISTS idx_lib2_file_delete_items_operation "
         "ON lib2_file_delete_items(operation_id, status)"
@@ -196,7 +213,7 @@ def preview_entity_files(
                 "stored_paths": [],
                 "path": real_path,
                 "root": None,
-                "size": None,
+                "size": int(row["db_size"] or 0) or None,
                 "mtime_ns": None,
                 "deletable": False,
                 "reason": "path_unresolved",
@@ -209,6 +226,8 @@ def preview_entity_files(
         item["track_ids"].append(int(row["track_id"]))
         item["stored_paths"].append(row["stored_path"])
         item["track_titles"].append(row["track_title"])
+        if row["db_size"]:
+            item["size"] = max(int(item["size"] or 0), int(row["db_size"]))
         if real_path:
             root = _containing_root(real_path, roots)
             item["root"] = root
@@ -254,7 +273,7 @@ def preview_entity_files(
         "file_count": len(files),
         "deletable_count": sum(1 for item in files if item["deletable"]),
         "unsafe_count": sum(1 for item in files if not item["deletable"]),
-        "total_size": sum(int(item["size"] or 0) for item in files if item["deletable"]),
+        "total_size": sum(int(item["size"] or 0) for item in files),
         "preview_token": preview_token,
     }
 
@@ -295,6 +314,103 @@ def _mark_file_rows_deleted(conn, file_ids: List[int]) -> None:
 
     for file_id in file_ids:
         set_file_state(conn, int(file_id), "deleted")
+
+
+def remove_entity_file_records(
+    database,
+    *,
+    entity: str,
+    entity_id: int,
+    file_ids: Optional[List[int]] = None,
+    actor: str = "user",
+    actor_profile_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Remove file links from Library v2 while keeping files on disk.
+
+    Rows are retained with ``file_state='deleted'`` so the operation remains
+    auditable and primary-file promotion still runs through the shared file
+    lifecycle helper.  This is the database-only half of §52.11's unified
+    choice; it performs no path resolution and never touches the filesystem.
+    """
+    title, rows = _scope_snapshot(database, entity, entity_id, file_ids)
+    if not rows:
+        raise FileDeleteError("No library file records to remove", 409)
+
+    grouped: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        key = str(row["stored_path"] or f"file:{row['file_id']}")
+        item = grouped.setdefault(
+            key,
+            {
+                "file_ids": [],
+                "track_ids": [],
+                "stored_paths": [],
+                "path": str(row["stored_path"] or ""),
+                "size": int(row["db_size"] or 0),
+            },
+        )
+        item["file_ids"].append(int(row["file_id"]))
+        item["track_ids"].append(int(row["track_id"]))
+        item["stored_paths"].append(str(row["stored_path"] or ""))
+        item["size"] = max(item["size"], int(row["db_size"] or 0))
+
+    operation_id = uuid.uuid4().hex
+    token_payload = {
+        "entity": entity,
+        "entity_id": int(entity_id),
+        "file_ids": sorted(int(row["file_id"]) for row in rows),
+        "mode": "database_only",
+    }
+    token = hashlib.sha256(
+        json.dumps(token_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    conn = database._get_connection()
+    try:
+        ensure_file_delete_schema(conn.cursor())
+        conn.execute(
+            """INSERT INTO lib2_file_delete_operations(
+                   id, entity_type, entity_id, preview_token, status,
+                   file_count, total_size, mode, actor, actor_profile_id,
+                   completed_at)
+               VALUES(?,?,?,?, 'completed', ?,?, 'database_only', ?,?,
+                      CURRENT_TIMESTAMP)""",
+            (
+                operation_id,
+                entity,
+                int(entity_id),
+                token,
+                len(grouped),
+                sum(item["size"] for item in grouped.values()),
+                str(actor or "user"),
+                actor_profile_id,
+            ),
+        )
+        for item in grouped.values():
+            conn.execute(
+                """INSERT INTO lib2_file_delete_items(
+                       operation_id, file_ids_json, stored_paths_json,
+                       resolved_path, root_path, size, mtime_ns, status,
+                       deleted_at)
+                   VALUES(?,?,?,?,?,?,NULL, 'removed', CURRENT_TIMESTAMP)""",
+                (
+                    operation_id,
+                    json.dumps(item["file_ids"]),
+                    json.dumps(item["stored_paths"]),
+                    item["path"],
+                    "",
+                    item["size"],
+                ),
+            )
+            _mark_file_rows_deleted(conn, item["file_ids"])
+        conn.commit()
+        result = _operation_snapshot(conn, operation_id)
+        result["title"] = title
+        result["track_ids"] = sorted({
+            track_id for item in grouped.values() for track_id in item["track_ids"]
+        })
+        return result
+    finally:
+        conn.close()
 
 
 def _finish_operation(conn, operation_id: str) -> None:
@@ -375,6 +491,8 @@ def delete_entity_files(
     file_ids: Optional[List[int]] = None,
     config_manager: Any = None,
     unlink: Callable[[str], None] = os.unlink,
+    actor: str = "user",
+    actor_profile_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Execute an ADR-05 delete after revalidating the exact preview.
 
@@ -409,8 +527,8 @@ def delete_entity_files(
         conn.execute(
             """INSERT INTO lib2_file_delete_operations(
                    id, entity_type, entity_id, preview_token, status,
-                   file_count, total_size)
-               VALUES(?,?,?,?, 'planned', ?,?)""",
+                   file_count, total_size, mode, actor, actor_profile_id)
+               VALUES(?,?,?,?, 'planned', ?,?, 'permanent', ?,?)""",
             (
                 operation_id,
                 entity,
@@ -418,6 +536,8 @@ def delete_entity_files(
                 preview_token,
                 preview["file_count"],
                 preview["total_size"],
+                str(actor or "user"),
+                actor_profile_id,
             ),
         )
         for item in preview["files"]:
@@ -511,7 +631,13 @@ def delete_entity_files(
     try:
         _finish_operation(conn, operation_id)
         conn.commit()
-        return _operation_snapshot(conn, operation_id)
+        result = _operation_snapshot(conn, operation_id)
+        result["track_ids"] = sorted({
+            int(track_id)
+            for item in preview["files"]
+            for track_id in item["track_ids"]
+        })
+        return result
     finally:
         conn.close()
 
@@ -523,4 +649,5 @@ __all__ = [
     "get_delete_operation",
     "preview_entity_files",
     "reconcile_incomplete_deletes",
+    "remove_entity_file_records",
 ]

@@ -86,6 +86,23 @@ def test_backfill_demotes_extra_primaries(imported_conn):
     assert not _is_primary(conn, mp3)
 
 
+def test_backfill_repairs_deleted_primary_over_active_file(imported_conn):
+    conn = imported_conn
+    track = _seed_track(conn)
+    deleted = _add_file(conn, track, "/m/stale.flac", fmt="flac")
+    active = _add_file(conn, track, "/m/fresh.mp3", fmt="mp3")
+    conn.execute(
+        "UPDATE lib2_track_files SET file_state='deleted', is_primary=1 WHERE id=?",
+        (deleted,),
+    )
+    conn.execute("UPDATE lib2_track_files SET is_primary=0 WHERE id=?", (active,))
+
+    backfill_primary_flags(conn.cursor())
+
+    assert not _is_primary(conn, deleted)
+    assert _is_primary(conn, active)
+
+
 def test_deleting_primary_promotes_best_sibling(imported_conn):
     conn = imported_conn
     track = _seed_track(conn)
@@ -137,6 +154,20 @@ def test_primary_leaving_active_hands_flag_to_active_sibling(imported_conn):
         "SELECT file_state FROM lib2_track_files WHERE id=?", (flac,)
     ).fetchone()[0]
     assert state == "missing_confirmed"
+
+
+def test_deleted_file_is_not_primary_and_new_import_replaces_its_flag(imported_conn):
+    conn = imported_conn
+    track = _seed_track(conn)
+    deleted = _add_file(conn, track, "/m/deleted.flac", fmt="flac")
+
+    assert set_file_state(conn, deleted, "deleted")
+    assert primary_file_row(conn, track) is None
+
+    replacement = _add_file(conn, track, "/m/replacement.flac", fmt="flac")
+    assert _is_primary(conn, replacement)
+    assert not _is_primary(conn, deleted)
+    assert primary_file_row(conn, track)["id"] == replacement
 
 
 def test_set_file_state_rejects_unknown_state(imported_conn):

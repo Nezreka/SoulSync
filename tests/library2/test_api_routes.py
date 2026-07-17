@@ -437,6 +437,47 @@ def test_eps_get_local_artwork_urls(api):
             assert entry["image_url"] == f"/api/library/v2/artwork/album/{entry['id']}"
 
 
+def test_artist_settings_route_updates_the_existing_watchlist_contract(api):
+    client, db, ids = api
+    conn = _conn(db)
+    from tests.library2.test_artist_settings import WATCHLIST_DDL
+    conn.execute(WATCHLIST_DDL)
+    conn.execute(
+        """INSERT INTO watchlist_artists(
+               spotify_artist_id, artist_name, include_albums, include_eps,
+               include_singles, auto_download, profile_id)
+           VALUES('sp-drake', 'Drake', 1, 1, 1, 1, 1)"""
+    )
+    conn.commit()
+    conn.close()
+
+    response = client.put(
+        f"/api/library/v2/artists/{ids['artist']}/settings",
+        json={
+            "include_albums": True,
+            "include_eps": True,
+            "include_singles": False,
+            "auto_download": False,
+            "lookback_days": 14,
+            "preferred_metadata_source": "deezer",
+            "monitor_new_items": "new",
+        },
+    )
+
+    assert response.status_code == 200
+    settings = response.get_json()["settings"]
+    assert settings["include_singles"] is False
+    assert settings["auto_download"] is False
+    assert settings["lookback_days"] == 14
+    assert settings["monitor_new_items"] == "new"
+    conn = _conn(db)
+    row = conn.execute(
+        "SELECT include_singles, auto_download FROM watchlist_artists"
+    ).fetchone()
+    assert (row["include_singles"], row["auto_download"]) == (0, 0)
+    conn.close()
+
+
 def test_acquisition_request_resolves_server_owned_profiles_and_is_idempotent(api):
     client, _db, ids = api
     payload = {
@@ -1593,6 +1634,43 @@ def test_physical_file_delete_preview_is_separate_and_root_safe(api, tmp_path, m
         assert conn.execute(
             "SELECT 1 FROM lib2_albums WHERE id=?", (ids["views"],)
         ).fetchone()
+
+
+def test_database_only_file_remove_keeps_disk_file_and_reprojects_wanted(api, tmp_path):
+    client, db, ids = api
+    path = tmp_path / "keep.flac"
+    path.write_bytes(b"audio")
+    with _conn(db) as conn:
+        file_id = conn.execute(
+            "UPDATE lib2_track_files SET path=? WHERE track_id=? RETURNING id",
+            (str(path), ids["album_track"]),
+        ).fetchone()[0]
+        conn.commit()
+
+    monitored = client.post(
+        f"/api/library/v2/tracks/{ids['album_track']}/monitor",
+        json={"monitored": True},
+    )
+    assert monitored.status_code == 200
+
+    response = client.post(
+        f"/api/library/v2/albums/{ids['views']}/file-remove",
+        json={"file_ids": [file_id]},
+    )
+
+    assert response.status_code == 200
+    operation = response.get_json()["operation"]
+    assert operation["mode"] == "database_only"
+    assert operation["actor_profile_id"] == 1
+    assert path.exists()
+    with _conn(db) as conn:
+        assert conn.execute(
+            "SELECT file_state FROM lib2_track_files WHERE id=?", (file_id,)
+        ).fetchone()[0] == "deleted"
+        assert conn.execute(
+            "SELECT wanted FROM lib2_wanted_tracks WHERE track_id=? AND profile_id=1",
+            (ids["album_track"],),
+        ).fetchone()[0] == 1
 
 
 def test_track_files_endpoint_lists_every_owned_file_paginated(api):

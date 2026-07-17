@@ -69,6 +69,7 @@ def primary_file_row(conn, track_id: int) -> Optional[Dict[str, Any]]:
     """The track's primary file row (dict), or None when it has no file."""
     row = conn.execute(
         f"SELECT * FROM lib2_track_files WHERE track_id=? "
+        f"AND COALESCE(file_state,'active')<>'deleted' "
         f"ORDER BY {primary_order()} LIMIT 1",
         (int(track_id),),
     ).fetchone()
@@ -90,6 +91,7 @@ def primary_file_rows(conn, track_ids: Iterable[int]) -> Dict[int, Dict[str, Any
                        ) AS lib2_primary_rank
                   FROM lib2_track_files tf
                  WHERE tf.track_id IN ({marks})
+                   AND COALESCE(tf.file_state,'active')<>'deleted'
             ) ranked
             WHERE lib2_primary_rank=1""",
         ids,
@@ -162,6 +164,19 @@ def backfill_primary_flags(cursor) -> int:
         "UPDATE lib2_track_files SET is_primary=0 "
         "WHERE track_id IS NULL AND is_primary=1")
     changed += cursor.rowcount
+    # Older triggers could leave a deleted/missing row primary after a fresh
+    # active import arrived.  Active files always own the operative flag.
+    cursor.execute("""
+        UPDATE lib2_track_files AS stale SET is_primary=0
+         WHERE stale.is_primary=1
+           AND COALESCE(stale.file_state,'active')<>'active'
+           AND EXISTS (
+               SELECT 1 FROM lib2_track_files active
+                WHERE active.track_id=stale.track_id
+                  AND COALESCE(active.file_state,'active')='active'
+           )
+    """)
+    changed += cursor.rowcount
     # Keep only the best primary where several are flagged.
     cursor.execute(f"""
         UPDATE lib2_track_files SET is_primary=0
@@ -209,8 +224,11 @@ def install_primary_triggers(cursor) -> None:
         WHEN NEW.track_id IS NOT NULL AND NEW.is_primary=0
          AND NOT EXISTS (SELECT 1 FROM lib2_track_files
                           WHERE track_id=NEW.track_id AND is_primary=1
+                            AND COALESCE(file_state,'active')='active'
                             AND id<>NEW.id)
         BEGIN
+            UPDATE lib2_track_files SET is_primary=0
+             WHERE track_id=NEW.track_id AND id<>NEW.id;
             UPDATE lib2_track_files SET is_primary=1 WHERE id=NEW.id;
         END
     """)

@@ -124,6 +124,29 @@ export interface LibraryV2ArtistDetail {
   user_overrides: Record<string, unknown>;
 }
 
+/** §52.3: one settings surface backed by the existing admin Watchlist row. */
+export interface LibraryV2ArtistSettings {
+  artist_id: number;
+  watchlist_row_id: number;
+  watchlist_name: string;
+  watchlist_image_url: string | null;
+  provider_ids: Partial<
+    Record<'spotify' | 'itunes' | 'deezer' | 'discogs' | 'amazon' | 'musicbrainz', string | null>
+  >;
+  monitor_new_items: 'all' | 'new' | 'none';
+  include_albums: boolean;
+  include_eps: boolean;
+  include_singles: boolean;
+  include_live: boolean;
+  include_remixes: boolean;
+  include_acoustic: boolean;
+  include_compilations: boolean;
+  include_instrumentals: boolean;
+  auto_download: boolean;
+  lookback_days: number | null;
+  preferred_metadata_source: string | null;
+}
+
 /** One member of an artist's §40 alias group (docs/library-v2.md §24) — the
  *  same real artist under a different, unlinked provider identity. */
 export interface LibraryV2ArtistAliasMember {

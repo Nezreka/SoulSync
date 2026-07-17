@@ -163,6 +163,30 @@ def test_file_delete_operation_surfaces_at_album_and_artist_not_sibling(imported
     assert not any(e["event_type"] == "files_deleted" for e in rihanna_history)
 
 
+def test_database_only_file_removal_has_distinct_history_label(imported_conn):
+    from core.library2.file_delete import ensure_file_delete_schema
+
+    drake = _drake_ids(imported_conn)
+    ensure_file_delete_schema(imported_conn.cursor())
+    imported_conn.execute(
+        """INSERT INTO lib2_file_delete_operations(
+               id, entity_type, entity_id, preview_token, status, file_count,
+               total_size, mode, actor, completed_at)
+           VALUES('op-db', 'albums', ?, 'tok', 'completed', 1, 123,
+                  'database_only', 'user', CURRENT_TIMESTAMP)""",
+        (drake["album_id"],),
+    )
+    imported_conn.commit()
+
+    history = scoped_history(
+        imported_conn, scope="album", entity_id=drake["album_id"]
+    )
+
+    event = next(e for e in history if e["event_type"] == "file_records_removed")
+    assert event["title"] == "Removed from library database"
+    assert event["source"] == "library"
+
+
 def test_manual_skip_surfaces_at_track_scope_by_primary_file_path(imported_conn):
     drake = _drake_ids(imported_conn)
     path = imported_conn.execute(

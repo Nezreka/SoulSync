@@ -15,6 +15,7 @@ import {
   fetchLibraryV2AlbumMatchStatus,
   fetchLibraryV2AlbumReorganizeSources,
   fetchLibraryV2ArtistArtOptions,
+  fetchLibraryV2ArtistSettings,
   fetchLibraryV2ArtistMatchStatus,
   fetchLibraryV2ArtistTrackFiles,
   fetchLibraryV2FileDeletePreview,
@@ -26,12 +27,14 @@ import {
   manualMatchLibraryV2Entity,
   materializeLibraryV2MissingTrack,
   previewLibraryV2AlbumReorganize,
+  removeLibraryV2FileRecords,
   runLibraryV2PlaylistPipeline,
   runRepairJob,
   searchLibraryV2MatchService,
   startLibraryV2AlbumReplayGain,
   startLibraryV2ScopedSearch,
   updateLibraryV2MetadataOverrides,
+  updateLibraryV2ArtistSettings,
   updateLibraryV2UiPreferences,
 } from './-library-v2.api';
 
@@ -99,6 +102,64 @@ describe('library v2 metadata api', () => {
     await expect(
       runRepairJob('library_reorganize', { id: 17, name: 'Corrected Artist' }),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe('library v2 artist settings api', () => {
+  it('reads and writes the shared Watchlist Artist Settings contract', async () => {
+    const settings = {
+      artist_id: 7,
+      watchlist_row_id: 11,
+      watchlist_name: 'Drake',
+      watchlist_image_url: null,
+      provider_ids: { spotify: 'sp-drake' },
+      monitor_new_items: 'all' as const,
+      include_albums: true,
+      include_eps: true,
+      include_singles: true,
+      include_live: false,
+      include_remixes: false,
+      include_acoustic: false,
+      include_compilations: false,
+      include_instrumentals: false,
+      auto_download: true,
+      lookback_days: null,
+      preferred_metadata_source: null,
+    };
+    server.use(
+      http.get('/api/library/v2/artists/7/settings', () =>
+        HttpResponse.json({
+          success: true,
+          settings,
+          metadata_sources: ['spotify', 'deezer'],
+          global_metadata_source: 'spotify',
+        }),
+      ),
+      http.put('/api/library/v2/artists/7/settings', async ({ request }) => {
+        expect(await request.json()).toMatchObject({
+          auto_download: false,
+          preferred_metadata_source: 'deezer',
+        });
+        return HttpResponse.json({
+          success: true,
+          settings: { ...settings, auto_download: false, preferred_metadata_source: 'deezer' },
+          metadata_sources: ['spotify', 'deezer'],
+          global_metadata_source: 'spotify',
+        });
+      }),
+    );
+
+    const loaded = await fetchLibraryV2ArtistSettings(7);
+    expect(loaded.settings.watchlist_row_id).toBe(11);
+    await expect(
+      updateLibraryV2ArtistSettings(7, {
+        ...loaded.settings,
+        auto_download: false,
+        preferred_metadata_source: 'deezer',
+      }),
+    ).resolves.toMatchObject({
+      settings: { auto_download: false, preferred_metadata_source: 'deezer' },
+    });
   });
 });
 
@@ -542,6 +603,32 @@ describe('library v2 artist image picker api (deep-dive A9)', () => {
 });
 
 describe('library v2 physical file delete api', () => {
+  it('removes selected file records without calling the physical delete route', async () => {
+    server.use(
+      http.post('/api/library/v2/albums/42/file-remove', async ({ request }) => {
+        expect(await request.json()).toEqual({ file_ids: [101] });
+        return HttpResponse.json({
+          success: true,
+          operation: {
+            id: 'db-only-1',
+            status: 'completed',
+            mode: 'database_only',
+            actor: 'user',
+            actor_profile_id: 1,
+            file_count: 1,
+            total_size: 4096,
+            items: [],
+          },
+        });
+      }),
+    );
+
+    await expect(removeLibraryV2FileRecords('albums', 42, [101])).resolves.toMatchObject({
+      id: 'db-only-1',
+      mode: 'database_only',
+    });
+  });
+
   it('previews and executes with the exact server token', async () => {
     server.use(
       http.get('/api/library/v2/albums/42/file-delete-preview', () =>

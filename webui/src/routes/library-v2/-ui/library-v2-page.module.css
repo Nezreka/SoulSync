@@ -1352,6 +1352,124 @@ button.featureTag:disabled {
   color: rgb(52, 211, 153);
 }
 
+.artistSettingsSection {
+  padding: 16px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.artistSettingsSection:first-of-type {
+  padding-top: 0;
+}
+
+.artistSettingsSection:last-child {
+  border-bottom: 0;
+}
+
+.artistSettingsSection h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.artistSettingsIdentity {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.artistSettingsPhoto {
+  width: 72px;
+  height: 72px;
+  flex: 0 0 72px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.artistSettingsIdentityBody {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.artistSettingsProviderIds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 3px;
+}
+
+.artistSettingsProviderIds span {
+  max-width: 220px;
+  overflow: hidden;
+  border-radius: 6px;
+  padding: 2px 7px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.55);
+  font-family: monospace;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artistSettingsToggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.artistSettingsToggle span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.artistSettingsToggle small {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.artistSettingsFieldset {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(135px, 1fr));
+  gap: 9px 14px;
+  margin: 14px 0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.artistSettingsFieldset legend {
+  padding: 0 5px;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 12px;
+}
+
+.artistSettingsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.artistSettingsGrid label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 12px;
+}
+
+.artistSettingsActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
 .inlineRetry {
   border: 1px solid rgba(239, 68, 68, 0.45);
   border-radius: 6px;
@@ -1568,6 +1686,119 @@ button.featureTag:disabled {
   margin-top: 12px;
   color: rgba(255, 255, 255, 0.75);
   font-size: 13px;
+}
+
+.fileRemovalSummary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 14px 0;
+}
+
+.fileRemovalSummary span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 9px;
+  padding: 9px 11px;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 11px;
+}
+
+.fileRemovalSummary strong {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 16px;
+}
+
+.fileRemovalPaths {
+  margin: 10px 0 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 9px;
+  padding: 9px 11px;
+}
+
+.fileRemovalPaths summary {
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 12px;
+}
+
+.fileRemovalPathRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.fileRemovalPathRow > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-family: monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileRemovalPathRow > .fileRemovalPathRevealed {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.pathCopyButton {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: rgb(var(--accent-rgb));
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.fileRemovalChoices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 16px 0 8px;
+}
+
+.fileRemovalChoice {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  padding: 12px;
+  cursor: pointer;
+}
+
+.fileRemovalChoice > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fileRemovalChoice small {
+  color: rgba(255, 255, 255, 0.45);
+  line-height: 1.35;
+}
+
+.fileRemovalChoiceActive {
+  border-color: rgba(var(--accent-rgb), 0.55);
+  background: rgba(var(--accent-rgb), 0.08);
+}
+
+.fileRemovalChoiceDanger {
+  border-color: rgba(239, 68, 68, 0.55);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+@media (max-width: 650px) {
+  .fileRemovalChoices {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* --- interactive search modal --- */
