@@ -108,6 +108,16 @@
             ? '/api/video/img?u=' + encodeURIComponent(url) : (url || '');
     }
     function pct(s) { return s.episode_total ? Math.round(s.episode_owned / s.episode_total * 100) : 0; }
+    // Interactive metadata chips (#1042): a genre opens Discover pre-filtered to
+    // that genre + this title's kind; a keyword opens a video search for it.
+    // tmdb preview items stay in-app all the same. Non-clickable for a bare
+    // fallback (no data hook) so nothing breaks if the router is absent.
+    function genreChip(name) {
+        return '<button type="button" class="vd-genre" data-vd-genre="' + esc(name) + '">' + esc(name) + '</button>';
+    }
+    function kwChip(name) {
+        return '<button type="button" class="vd-kw" data-vd-kw="' + esc(name) + '">' + esc(name) + '</button>';
+    }
 
     function badge(logo, fallback, title, url) {
         var inner = logo
@@ -194,7 +204,7 @@
             renderActions(d);
             var ll = q('[data-vd-links]'); if (ll) ll.innerHTML = '';
             var gg = q('[data-vd-genres]');
-            if (gg) gg.innerHTML = (d.genres || []).slice(0, 8).map(function (gn) { return '<span class="vd-genre">' + esc(gn) + '</span>'; }).join('');
+            if (gg) gg.innerHTML = (d.genres || []).slice(0, 8).map(genreChip).join('');
             renderRatings(d); renderCrewLine(d); renderNextEpisode(d); renderCast(d);
             return;
         }
@@ -243,7 +253,7 @@
         var g = q('[data-vd-genres]');
         if (g) {
             g.innerHTML = (d.genres || []).slice(0, 6).map(function (gn) {
-                return '<span class="vd-genre">' + esc(gn) + '</span>';
+                return genreChip(gn);
             }).join('');
         }
         renderSubtitles(d);
@@ -788,11 +798,16 @@
                     '" target="_blank" rel="noopener" title="Play on ' + sv + '">' +
                     sicon + '<span class="vd-prov-name">Play on ' + sv + '</span></a>';
             }
-            // Streaming providers: TMDB only gives ONE aggregate 'where to watch'
-            // link (not per-provider), so showing N identical links is misleading.
-            // Render the logos as availability BADGES, then a single link to the
-            // watch page. (Drop a provider matching your server tile, e.g. Plex.)
+            // Streaming providers. TMDB's watch data comes from JustWatch and it
+            // gives ONE deep link per title+region (not per provider), so every
+            // icon points at that JustWatch page, which lists the per-service
+            // links (#1042: make every icon interactive instead of dead badges).
+            // Falls back to a JustWatch search when the aggregate link is absent.
+            // (Drop a provider matching your server tile, e.g. Plex.)
             var link = ex.providers_link || '';
+            var jwSearch = 'https://www.justwatch.com/us/search?q=' +
+                encodeURIComponent(String(data && data.title || '').trim());
+            var provHref = link || jwSearch;
             var srvName = (ex.server && ex.server.server || '').toLowerCase();
             var provs = (ex.providers || []).filter(function (p) {
                 return (p.name || '').toLowerCase() !== srvName;
@@ -801,15 +816,10 @@
                 html += provs.map(function (p) {
                     var img = p.logo ? '<img src="' + esc(p.logo) + '" alt="' + esc(p.name) + '" loading="lazy">'
                         : '<span class="vd-prov-ph">' + esc((p.name || '?').charAt(0)) + '</span>';
-                    return '<div class="vd-prov vd-prov--badge" title="' + esc(p.name) + '">' + img +
-                        '<span class="vd-prov-name">' + esc(p.name) + '</span></div>';
+                    return '<a class="vd-prov vd-prov--badge" href="' + esc(provHref) +
+                        '" target="_blank" rel="noopener" title="Watch on ' + esc(p.name) + ' (via JustWatch)">' + img +
+                        '<span class="vd-prov-name">' + esc(p.name) + '</span></a>';
                 }).join('');
-                if (link) {
-                    html += '<a class="vd-prov vd-prov--more" href="' + esc(link) +
-                        '" target="_blank" rel="noopener" title="See where to watch (JustWatch)">' +
-                        '<span class="vd-prov-ph vd-prov-more-ic">↗</span>' +
-                        '<span class="vd-prov-name">Where to watch</span></a>';
-                }
             }
             ps.hidden = !html;
             ph.innerHTML = html;
@@ -899,7 +909,7 @@
             }).join('');
         }
         if (kwh) {
-            kwh.innerHTML = keywords.map(function (k) { return '<span class="vd-kw">' + esc(k) + '</span>'; }).join('');
+            kwh.innerHTML = keywords.map(kwChip).join('');
         }
         if (sec) sec.hidden = !(rows.length || keywords.length || studios.length);
     }
@@ -2266,6 +2276,23 @@
             var stid = parseInt(studio.getAttribute('data-vd-studio'), 10);
             if (!isNaN(stid)) document.dispatchEvent(new CustomEvent('soulsync:video-open-detail',
                 { detail: { kind: 'studio', id: stid, source: 'tmdb' } }));
+            return;
+        }
+        var gchip = e.target.closest('[data-vd-genre]');
+        if (gchip && r.contains(gchip)) {   // genre → Discover filtered to it (#1042)
+            e.preventDefault();
+            var gkind = (data && data.kind === 'show') ? 'show' : 'movie';
+            document.dispatchEvent(new CustomEvent('soulsync:video-navigate', { detail: 'video-discover' }));
+            document.dispatchEvent(new CustomEvent('soulsync:video-discover-browse',
+                { detail: { genre: gchip.getAttribute('data-vd-genre'), kind: gkind } }));
+            return;
+        }
+        var kchip = e.target.closest('[data-vd-kw]');
+        if (kchip && r.contains(kchip)) {   // keyword → video search for it (#1042)
+            e.preventDefault();
+            document.dispatchEvent(new CustomEvent('soulsync:video-navigate', { detail: 'video-search' }));
+            document.dispatchEvent(new CustomEvent('soulsync:video-search-query',
+                { detail: { q: kchip.getAttribute('data-vd-kw') } }));
             return;
         }
         var shot = e.target.closest('[data-vd-shot]');

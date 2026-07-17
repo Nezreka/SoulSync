@@ -1128,6 +1128,7 @@
                 if (!state.genres.movie.length && !state.genres.show.length) { showEmpty(); return; }
                 renderGenreChips();
                 renderBrowseStrip();   // gradient genre tiles + Browse all
+                _applyPendingBrowse();  // a detail-page genre click that arrived before genres loaded (#1042)
                 renderShelves();
                 loadMoreLike();   // prepend personalized 'More like…' rails when ready
                 loadGaps();       // prepend 'what am I missing' (franchise + person) gap rails
@@ -1152,9 +1153,33 @@
 
     function onShown(e) {
         if (!e) return;
-        if (e.detail === PAGE_ID) { wire(); load(); startHeroTimer(); }
+        if (e.detail === PAGE_ID) { wire(); load(); startHeroTimer(); _applyPendingBrowse(); }
         else stopHeroTimer();   // left the page → stop the slideshow
     }
+
+    // Cross-page browse-by-genre (#1042): a genre chip on a detail page navigates
+    // here and asks to browse it. Genres may still be loading when we arrive, so
+    // stash the intent and apply it once the genre list is in.
+    var _pendingBrowse = null;
+    function _applyPendingBrowse() {
+        if (!_pendingBrowse) return;
+        var kind = _pendingBrowse.kind === 'show' ? 'show' : 'movie';
+        var list = state.genres[kind] || [];
+        if (!list.length) return;   // genres not loaded yet; loadMeta's .then retries
+        var id = idMap(list)[String(_pendingBrowse.genre || '').toLowerCase()];
+        _pendingBrowse = null;
+        state.sel.kind = kind;
+        state.sel.genre = (id != null) ? String(id) : '';
+        state.sel.decade = ''; state.sel.providers = ''; state.sel.lang = '';
+        applyFilter();
+        try { syncFilterBar(); } catch (e) { /* bar may not be built yet */ }
+    }
+    document.addEventListener('soulsync:video-discover-browse', function (e) {
+        if (!e || !e.detail) return;
+        _pendingBrowse = { genre: e.detail.genre, kind: e.detail.kind };
+        _applyPendingBrowse();   // apply now if genres are already loaded
+    });
+
     function init() { document.addEventListener('soulsync:video-page-shown', onShown); }
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

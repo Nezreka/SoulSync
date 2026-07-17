@@ -593,7 +593,11 @@ body[data-side="video"] .dashboard-header-sweep {
 .vd-genres { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 .vd-genre { padding: 5px 13px; border-radius: 999px; font-size: 12.5px; font-weight: 600;
     color: rgba(255,255,255,0.85); background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.14);
-    backdrop-filter: blur(6px); }
+    backdrop-filter: blur(6px);
+    /* clickable (#1042): opens Discover filtered to this genre */
+    font-family: inherit; cursor: pointer; transition: color .15s, background .15s, border-color .15s; }
+.vd-genre:hover { color: #fff; background: rgba(var(--vd-accent-rgb), 0.16);
+    border-color: rgba(var(--vd-accent-rgb), 0.55); }
 .vd-meta-rating { padding: 1px 7px; border: 1px solid rgba(255,255,255,0.35); border-radius: 4px; font-size: 12px; }
 
 /* Subtitle availability (OpenSubtitles backfill) — a labeled chip row of the
@@ -947,8 +951,8 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
     border: 0; border-radius: 0; box-shadow: none;
 }
 .vd-prov--server .vd-prov-name { color: #6ee7a0; font-weight: 700; }
-/* streaming providers are informational badges (no per-provider link exists) */
-.vd-prov--badge { cursor: default; }
+/* streaming providers link out to the JustWatch aggregate page (#1042) */
+.vd-prov--badge { cursor: pointer; }
 /* the single real "where to watch" link (JustWatch/TMDB aggregate page) */
 .vd-prov--more .vd-prov-more-ic {
     display: flex; align-items: center; justify-content: center; font-size: 24px; font-weight: 800;
@@ -1653,7 +1657,10 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 .vd-kw {
     padding: 5px 12px; border-radius: 999px; font-size: 12px; color: rgba(255, 255, 255, 0.7);
     background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.12);
+    /* clickable (#1042): runs a search for this keyword */
+    font-family: inherit; cursor: pointer; transition: color .15s, background .15s, border-color .15s;
 }
+.vd-kw:hover { color: #fff; background: rgba(var(--vd-accent-rgb), 0.16); border-color: rgba(var(--vd-accent-rgb), 0.45); }
 /* Studio chips → each opens its Studio page. A logo chip gets a bright ground so
    dark studio logos read; a name-only chip looks like a keyword pill. */
 .vd-studios { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
